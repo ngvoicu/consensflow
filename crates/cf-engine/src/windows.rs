@@ -24,6 +24,7 @@ use crate::record::Record;
 use crate::runtime::{begin, caught, returning};
 use crate::seams::{EngineError, SavedAgent};
 use crate::shown::Shown;
+use crate::specs::ChiefSpecs;
 use crate::stops::{Interrupted, Unstopped};
 
 /// The key that interrupts a harness's current turn, and the gap of a double press.
@@ -605,10 +606,14 @@ impl Dispatcher {
             .as_ref()
             .map(|begun| self.launch_text(project, participant, begun, resume))
             .transpose()?;
+        // A chief whose project has specs on is told where its Specmint skill
+        // is, and its window is given the skill there.
+        let specs = self.chief_specs(project, participant, &*adapter, launch_id)?;
+        let told = specs.as_ref().map(ChiefSpecs::text);
         let instructions = self
             .seams
             .roles
-            .instructions(participant, project)
+            .instructions(participant, project, told.as_ref())
             .map_err(|cause| EngineError::said("no-role-text", cause))?;
         let launch = Launch {
             id: launch_id,
@@ -620,6 +625,7 @@ impl Dispatcher {
             message: text.as_deref(),
             agent: saved.as_ref().map(SavedAgent::agent),
             instructions: &instructions,
+            specs: specs.as_ref().map(ChiefSpecs::launch),
             first_message_ms: self.seams.limits.launch_ms,
         };
         // An `async` function: its answer, or its failure, reaches this

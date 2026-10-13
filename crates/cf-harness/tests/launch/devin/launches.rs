@@ -5,8 +5,9 @@ use std::fs;
 use std::path::Path;
 
 use cf_base::path;
-use cf_harness::contract::{Agent, Prepared};
+use cf_harness::contract::{Adapter, Agent, LaunchId, Prepared, Skill};
 use cf_harness::testing::called;
+use cf_proto::specs::Variant;
 use serde_json::{json, Value};
 
 use super::fixtures::*;
@@ -259,4 +260,120 @@ fn refuses_a_window_without_its_role_text_and_writes_it_in_a_private_file() {
     }
     #[cfg(not(unix))]
     let _ = file;
+}
+
+/// Where the skills of a launch's role are, for the launch `id`.
+fn role_skills(home: &Home, id: &str) -> String {
+    path::join(&[
+        &home.root,
+        "consensflow",
+        "integrations",
+        "devin",
+        id,
+        "role",
+        ".claude",
+        "skills",
+    ])
+}
+
+#[test]
+fn a_chief_given_specs_has_the_skill_written_beside_its_role_and_devin_is_given_nothing_more_than_its_role_text_which_names_it(
+) {
+    const OFF: &str = "3d4e5f60-7182-4394-8dbe-2f3a4b5c6d70";
+    const ON: &str = "3d4e5f60-7182-4394-8dbe-2f3a4b5c6d71";
+    for variant in Variant::ALL {
+        let home = Home::new();
+        let adapter = home.adapter();
+        let off = prepare_as(&adapter, &Request::chief(), OFF).unwrap();
+        let chief = Request {
+            specs: Some(variant),
+            ..Request::chief()
+        };
+        let on = prepare_as(&adapter, &chief, ON).unwrap();
+        let moved = |text: &str| text.replace(ON, OFF);
+        assert_eq!(
+            on.argv.iter().map(|arg| moved(arg)).collect::<Vec<_>>(),
+            off.argv,
+            "{variant:?}"
+        );
+        assert_eq!(
+            on.env
+                .iter()
+                .map(|(name, value)| (name.clone(), moved(value)))
+                .collect::<Vec<_>>(),
+            off.env
+        );
+        assert_eq!(
+            fs::read_dir(role_skills(&home, OFF)).unwrap().count(),
+            1,
+            "specs off: the role alone"
+        );
+        let skill = path::join(&[&role_skills(&home, ON), variant.skill_name(), "SKILL.md"]);
+        assert_eq!(
+            adapter
+                .specmint(variant, &LaunchId::new(ON).unwrap())
+                .unwrap(),
+            Skill::Own(skill.clone()),
+            "{variant:?}: the place the role text names is the place written"
+        );
+        assert!(fs::read_to_string(&skill)
+            .unwrap()
+            .starts_with(&format!("---\nname: {}\n", variant.skill_name())));
+        assert_eq!(
+            fs::read_dir(role_skills(&home, ON)).unwrap().count(),
+            2,
+            "the role's skill and this one"
+        );
+    }
+}
+
+#[test]
+#[cfg(unix)]
+fn a_devin_that_has_the_variant_installed_in_its_config_or_the_agents_skills_is_given_nothing_of_ours_and_another_variant_installed_is_left_alone(
+) {
+    let home = Home::new();
+    let adapter = home.adapter();
+    let install = |folder: &str, name: &str| {
+        let dir = path::join(&[&home.root, folder, name]);
+        fs::create_dir_all(&dir).unwrap();
+        let file = path::join(&[&dir, "SKILL.md"]);
+        fs::write(&file, format!("---\nname: {name}\n---\nthe human's own\n")).unwrap();
+        file
+    };
+    let own = install("config/devin/skills", "specmint-core-html");
+    let shared = install("home/.agents/skills", "specmint-tdd");
+    for (n, (variant, file)) in [(Variant::CoreHtml, &own), (Variant::Tdd, &shared)]
+        .into_iter()
+        .enumerate()
+    {
+        let id = format!("3d4e5f60-7182-4394-8dbe-2f3a4b5c6d8{n}");
+        assert_eq!(
+            adapter
+                .specmint(variant, &LaunchId::new(&id).unwrap())
+                .unwrap(),
+            Skill::Global(file.clone())
+        );
+        let chief = Request {
+            specs: Some(variant),
+            ..Request::chief()
+        };
+        prepare_as(&adapter, &chief, &id).unwrap();
+        assert_eq!(
+            fs::read_dir(role_skills(&home, &id)).unwrap().count(),
+            1,
+            "{variant:?}: nothing is written"
+        );
+    }
+    let before = (fs::read(&own).unwrap(), fs::read(&shared).unwrap());
+    let id = "3d4e5f60-7182-4394-8dbe-2f3a4b5c6d90";
+    let chief = Request {
+        specs: Some(Variant::Core),
+        ..Request::chief()
+    };
+    prepare_as(&adapter, &chief, id).unwrap();
+    assert_eq!(fs::read_dir(role_skills(&home, id)).unwrap().count(), 2);
+    assert_eq!(
+        (fs::read(&own).unwrap(), fs::read(&shared).unwrap()),
+        before
+    );
 }

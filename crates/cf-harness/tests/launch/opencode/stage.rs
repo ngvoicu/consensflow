@@ -13,7 +13,9 @@ use std::sync::Arc;
 
 use cf_base::env::Env;
 use cf_base::path;
-use cf_harness::contract::{Adapter, Agent, Launch, LaunchId, Pane, Prepared, Records, Work};
+use cf_harness::contract::{
+    Adapter, Agent, Launch, LaunchId, Pane, Prepared, Records, Specs, Work,
+};
 use cf_harness::opencode::OpenCodeAdapter;
 use cf_harness::records::{Item, Options, Reading, Record, Role, Settlement};
 use cf_harness::seams::processes::{Child, Ending, Failed, Limits, Processes, Program, Streams};
@@ -23,6 +25,7 @@ use cf_harness::testing::{
     FIRST_MESSAGE_MS,
 };
 use cf_proto::agents::Harness;
+use cf_proto::specs::Variant;
 use serde_json::{json, Value};
 use tempfile::TempDir;
 
@@ -136,6 +139,8 @@ pub(super) struct Wanted {
     pub(super) effort: Option<String>,
     /// The folder it works in, the home's own where none is said.
     pub(super) directory: Option<String>,
+    /// The Specmint variant a chief is given, where its project has specs on.
+    pub(super) specs: Option<Variant>,
 }
 
 impl Default for Wanted {
@@ -148,6 +153,7 @@ impl Default for Wanted {
             model: Some(MODEL.to_owned()),
             effort: Some("high".to_owned()),
             directory: None,
+            specs: None,
         }
     }
 }
@@ -288,6 +294,9 @@ impl Stage {
                 thinking: None,
                 designer: false,
             };
+            let skill = wanted
+                .specs
+                .map(|variant| adapter.specmint(variant, &id).unwrap());
             let launch = Launch {
                 id: &id,
                 project: 1,
@@ -298,6 +307,10 @@ impl Stage {
                 message: wanted.message.as_deref(),
                 agent: Some(agent),
                 instructions: &wanted.instructions,
+                specs: wanted
+                    .specs
+                    .zip(skill.as_ref())
+                    .map(|(variant, skill)| Specs { variant, skill }),
                 first_message_ms: FIRST_MESSAGE_MS,
             };
             adapter.prepare(&launch).await

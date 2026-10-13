@@ -24,7 +24,7 @@ fn zeus() -> StaffRow {
 
 /// A role's text with no environment and no word of where its cf is.
 fn instructions(role: &str, staff: &[StaffRow]) -> String {
-    role_instructions(&Env::default(), role, staff, None).unwrap()
+    role_instructions(&Env::default(), role, staff, None, None).unwrap()
 }
 
 /// Whether `pattern` (a JavaScript pattern written as a Rust one) matches `text`.
@@ -228,7 +228,7 @@ fn gives_every_member_one_shared_text_with_its_role_s_own_parts() {
         r"cf task get T-3 {15}a task and its whole thread: the work under test, or this one\n",
         &instructions("tester", &[])
     ));
-    let refused = role_instructions(&Env::default(), "pm", &[], None).unwrap_err();
+    let refused = role_instructions(&Env::default(), "pm", &[], None, None).unwrap_err();
     assert_eq!(refused.to_string(), "no role instructions for pm");
 }
 
@@ -349,8 +349,14 @@ fn names_this_window_s_cf_by_its_full_path_for_a_shell_that_finds_another_cf_fir
     for role in [
         "chief", "worker", "advisor", "reviewer", "tester", "designer",
     ] {
-        let text =
-            role_instructions(&Env::default(), role, &[], Some("/opt/consensflow/bin/cf")).unwrap();
+        let text = role_instructions(
+            &Env::default(),
+            role,
+            &[],
+            Some("/opt/consensflow/bin/cf"),
+            None,
+        )
+        .unwrap();
         assert!(
             found(
                 r"## This window's cf\n\nHere `cf` is /opt/consensflow/bin/cf\. If `cf` says a command is unknown, or answers as another program, another `cf` comes first on this shell's PATH: run /opt/consensflow/bin/cf instead\.\n$",
@@ -375,7 +381,7 @@ fn gives_the_chief_s_subagents_if_its_harness_has_them_nothing_beyond_searching_
 
 #[test]
 fn refuses_an_unknown_role() {
-    let refused = role_instructions(&Env::default(), "king", &[], None).unwrap_err();
+    let refused = role_instructions(&Env::default(), "king", &[], None, None).unwrap_err();
     assert_eq!(refused.to_string(), "no role instructions for king");
 }
 
@@ -428,9 +434,12 @@ fn keeps_the_authorization_boundary_in_the_chief_text_ships_no_harness_payload_a
     // extensions, the role texts, the page, and what each crate is built from
     // (its `src` and its `data`, the unit tests among them; the tests in its
     // `tests` folder are not built into anything, and say what they like).
+    // The Specmint skills (`skill/specmint`) ship as their author wrote them,
+    // under the author's licence, which names the author: they are not ours to
+    // rewrite.
     let mut shipped = vec![
         root.join("hosts"),
-        root.join("skill"),
+        root.join("skill").join("core"),
         root.join("app").join("ui"),
     ];
     for entry in fs::read_dir(root.join("crates")).unwrap() {
@@ -459,12 +468,12 @@ fn gives_the_chief_only_the_named_card_nothing_of_the_board_and_leaves_the_other
     let staff = [staff_row("zeus", &["worker"], WorkTier::Standard)];
     let env = Env::from_vars([("CONSENSFLOW_EVAL_CHIEF_CARD", card.as_os_str())]);
     assert_eq!(
-        role_instructions(&env, "chief", &staff, Some("/app/bin/cf")).unwrap(),
+        role_instructions(&env, "chief", &staff, Some("/app/bin/cf"), None).unwrap(),
         "You work in this project for its owner.\n",
         "no tiers, no staff, no cf"
     );
     assert!(
-        role_instructions(&env, "worker", &staff, Some("/app/bin/cf"))
+        role_instructions(&env, "worker", &staff, Some("/app/bin/cf"), None)
             .unwrap()
             .contains("/app/bin/cf")
     );

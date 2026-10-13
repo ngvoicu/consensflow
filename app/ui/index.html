@@ -182,6 +182,30 @@
         <p class="staff-hint" id="staff-hint" hidden></p>
       </fieldset>
       <label class="check"><input type="checkbox" id="staff-gate" name="gate">Human approval required: every message between the chief and its staff waits until you pass it on</label>
+      <fieldset class="project-specs" id="staff-specs">
+        <legend>Specs</legend>
+        <p class="specs-help">With specs on, the chief plans big work as a spec, with Specmint, and puts each phase on the board as tasks; a small ask still goes straight on the board. The app's setting is under Settings, on the Agents screen. A change reaches the chief when it next starts: after Resume, or when you switch the chief.</p>
+        <label>Specs
+          <select name="specs">
+            <option value="follow">Follow the app's setting</option>
+            <option value="on">On</option>
+            <option value="off">Off</option>
+          </select>
+        </label>
+        <label>Specs folder, inside the project
+          <input name="specsFolder" placeholder=".specs" autocomplete="off" spellcheck="false">
+        </label>
+        <label>Specmint variant
+          <select name="specsVariant">
+            <option value="core">core</option>
+            <option value="core-html">core-html</option>
+            <option value="tdd">tdd</option>
+            <option value="tdd-html">tdd-html</option>
+          </select>
+        </label>
+        <p class="staff-hint" id="staff-specs-note" role="status" hidden></p>
+        <button class="quiet-button" type="button" id="staff-specs-save">Save specs</button>
+      </fieldset>
       <div class="dialog-actions">
         <button class="quiet-button" type="button" value="cancel">Close</button>
       </div>

@@ -31,7 +31,9 @@
 //! `pending_agents`: what it does with the agents a turn left running, which no
 //! program of the window's tree is. So is `start_suspended`: a start opens
 //! nothing, and the human's Resume brings back the chief and the windows at
-//! work, the one whose turn the quit cut told so.)
+//! work, the one whose turn the quit cut told so. So is `specs`: the Specmint
+//! skill a chief of a project with specs on is given beside its role, and no
+//! worker, and no chief of a project with them off.)
 //!
 //! The cases take turns ([`cf_e2e::serial`]): each starts a daemon and a pane
 //! host of its own, with windows in real terminals, and the waits are timed.
@@ -72,6 +74,8 @@ mod live_members;
 mod live_support;
 #[path = "rig/pending_agents.rs"]
 mod pending_agents;
+#[path = "rig/specs.rs"]
+mod specs;
 #[path = "rig/stand_in_codex.rs"]
 mod stand_in_codex;
 #[path = "rig/stand_ins.rs"]

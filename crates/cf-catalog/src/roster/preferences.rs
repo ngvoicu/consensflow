@@ -14,21 +14,27 @@ use super::save::save_document;
 /// The choices the file records. One it does not record is off, and so is
 /// one that is anything but `true`.
 pub(crate) fn preferences_of(document: &Document) -> Preferences {
-    let own_harness_only = document
-        .get("preferences")
-        .and_then(|preferences| preferences.get("ownHarnessOnly"))
-        == Some(&Value::Bool(true));
-    Preferences { own_harness_only }
+    let chosen = |key: &str| {
+        document
+            .get("preferences")
+            .and_then(|preferences| preferences.get(key))
+            == Some(&Value::Bool(true))
+    };
+    Preferences {
+        own_harness_only: chosen("ownHarnessOnly"),
+        specs: chosen("specs"),
+    }
 }
 
 /// What the human may choose: each by its name in the file.
-const PREFERENCE_KEYS: [&str; 1] = ["ownHarnessOnly"];
+const PREFERENCE_KEYS: [&str; 2] = ["ownHarnessOnly", "specs"];
 
 /// `setPreferences`: the choices `patch` names set, each refused in the
 /// order JavaScript enumerates the request's keys, then the whole set kept
 /// in the file: a write even when nothing changes, and a file made when
 /// there is none. A key the file kept that this build does not know is
-/// dropped from it.
+/// dropped from it. Specs are kept only when on: a file that never knew of
+/// them reads, and is written, as it always was.
 pub(crate) fn set_preferences(path: &Path, patch: Option<&Value>) -> Result<Preferences, Refusal> {
     let mut document = load_document(path)?;
     let mut next = preferences_of(&document);
@@ -45,15 +51,19 @@ pub(crate) fn set_preferences(path: &Path, patch: Option<&Value>) -> Result<Pref
                 format!("{key} is on or off"),
             ));
         };
-        next.own_harness_only = on;
+        match key.as_str() {
+            "specs" => next.specs = on,
+            _ => next.own_harness_only = on,
+        }
     }
-    document.set(
-        "preferences",
-        Value::Object(Map::from_iter([(
-            "ownHarnessOnly".to_owned(),
-            Value::Bool(next.own_harness_only),
-        )])),
-    );
+    let mut kept = Map::from_iter([(
+        "ownHarnessOnly".to_owned(),
+        Value::Bool(next.own_harness_only),
+    )]);
+    if next.specs {
+        kept.insert("specs".to_owned(), Value::Bool(true));
+    }
+    document.set("preferences", Value::Object(kept));
     save_document(path, &mut document)?;
     Ok(next)
 }

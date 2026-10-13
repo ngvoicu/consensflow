@@ -557,6 +557,7 @@ fn begin_prepare(played: &mut Played, id: usize, given: &Value) {
             message: message.as_deref(),
             agent,
             instructions: &instructions,
+            specs: None,
             // Node's adapters waited a fixed minute for a thread to be named: the
             // daemon's wait for a first message is three, so the minute holds.
             first_message_ms: FIRST_MESSAGE_MS,

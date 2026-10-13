@@ -53,6 +53,38 @@ fn the_config_folder_is_claude_config_dir_even_when_empty_else_claude_in_the_hom
 }
 
 #[test]
+fn the_specmint_variant_the_human_installed_is_found_in_the_skills_folder_of_the_config_folder_and_nowhere_else(
+) {
+    use crate::shared::specmint::testing::is_held_to;
+    // Under the home, or under the folder `CLAUDE_CONFIG_DIR` names, which then
+    // is all that is read (an empty one is the working folder's, and kept).
+    is_held_to(
+        &|env, variant| global_specmint(env, variant),
+        &[],
+        &[".claude/skills"],
+        &[
+            ".codex/skills",
+            ".agents/skills",
+            ".config/opencode/skills",
+            ".pi/agent/skills",
+            ".claude/skill",
+            ".claude/plugins/skills",
+        ],
+    );
+    is_held_to(
+        &|env, variant| global_specmint(env, variant),
+        &[("CLAUDE_CONFIG_DIR", "elsewhere")],
+        &["elsewhere/skills"],
+        &[".claude/skills", ".agents/skills"],
+    );
+    assert_eq!(
+        global_specmint(&Env::default(), Variant::Core),
+        None,
+        "no home, no config folder: nowhere to look"
+    );
+}
+
+#[test]
 fn with_neither_a_config_folder_nor_a_home_there_is_nowhere_to_look() {
     assert_eq!(
         transcript(SESSION, &Env::default()).unwrap_err(),

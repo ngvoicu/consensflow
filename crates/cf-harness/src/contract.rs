@@ -15,6 +15,7 @@ use std::time::Duration;
 
 use cf_proto::agents::Harness;
 use cf_proto::panes::Servers;
+use cf_proto::specs::Variant;
 use serde_json::Value;
 
 use crate::records::{Item, Options, Quota, Reading, Record, Role, Settlement};
@@ -58,6 +59,45 @@ pub trait Adapter {
     fn servers(&self) -> Servers {
         Servers::Unknown
     }
+
+    /// Where the window of a chief given specs finds the Specmint skill of
+    /// `variant`, asked before the window is prepared, as its role text names
+    /// the file. The copy the human installed where this harness looks for
+    /// skills, if it is the chosen variant: used where it is. Otherwise the
+    /// copy ConsensFlow writes for this launch, at the place [`Adapter::prepare`]
+    /// will write it. An installed copy of any other variant is no copy of this
+    /// one, and is left alone.
+    fn specmint(&self, variant: Variant, launch: &LaunchId) -> Result<Skill, String>;
+}
+
+/// Where a window finds the Specmint skill of its chief's variant: the file
+/// that is its `SKILL.md`, which every harness can be told to read, and which
+/// is next to the `references` (and `assets`) it names.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Skill {
+    /// The human's own, installed where the harness looks for skills itself:
+    /// the harness has it, so nothing is registered and nothing is written.
+    Global(String),
+    /// ConsensFlow's, written beside the role's skill in the launch's folder
+    /// when the window is prepared, and gone with the launch.
+    Own(String),
+}
+
+impl Skill {
+    /// The path of the skill's `SKILL.md`.
+    pub fn path(&self) -> &str {
+        match self {
+            Skill::Global(path) | Skill::Own(path) => path,
+        }
+    }
+}
+
+/// What a chief's launch is given of specs: the variant it plans with, and
+/// where the skill of it is ([`Adapter::specmint`]).
+#[derive(Debug, Clone, Copy)]
+pub struct Specs<'a> {
+    pub variant: Variant,
+    pub skill: &'a Skill,
 }
 
 /// A harness's interrupt as keys into its window: Escape `presses` times in a
@@ -88,6 +128,9 @@ pub struct Launch<'a> {
     pub agent: Option<Agent<'a>>,
     /// The role's text.
     pub instructions: &'a str,
+    /// The specs a chief plans with, when its project has them on: only a
+    /// chief's launch is given any, and with none the launch is as it always was.
+    pub specs: Option<Specs<'a>>,
     /// How long the window has to show its first message, in milliseconds: the
     /// engine's limit for a launch (`CONSENSFLOW_LAUNCH_TIMEOUT_MS`). What a
     /// window waits for before that message can show, such as the conversation

@@ -22,13 +22,15 @@ use cf_base::env::Env;
 use cf_base::text::window_text;
 use cf_proto::agents::Harness;
 use cf_proto::panes::Servers;
+use cf_proto::specs::Variant;
 
 use super::channel::{hex, launch_configuration, send, Channel};
 use super::install::prepare_extension;
+use super::paths;
 use super::record::evidence::working;
 use crate::contract::{
-    Adapter, Admission, Held, Launch, Observed, Pane, PaneHost, Prepared, Readiness, Records,
-    Window, Work,
+    Adapter, Admission, Held, Launch, LaunchId, Observed, Pane, PaneHost, Prepared, Readiness,
+    Records, Skill, Window, Work,
 };
 use crate::detect::executable;
 use crate::records::{Options, PiSettlement};
@@ -37,7 +39,7 @@ use crate::shared::admission::admission;
 use crate::shared::left_open::LeftOpen;
 use crate::shared::record_state::{record_state, switched_to, unnamed};
 use crate::shared::role::write_role;
-use crate::shared::window_args;
+use crate::shared::{specmint, window_args};
 
 /// Why a window that has not named its conversation waits.
 const HOLD: &str = "Pi has not said yet which conversation its window shows";
@@ -110,9 +112,18 @@ impl Adapter for PiAdapter {
             } else {
                 None
             };
+            // A chief given specs has ConsensFlow's own copy of its Specmint
+            // skill written beside the role's, and Pi is given it as a second
+            // skill; where Pi has the variant installed itself it finds it.
+            let specmint = specmint::write_own(Harness::Pi, &self.env, launch)?;
             let mut argv = vec![executable];
             argv.extend(configuration.args);
             argv.extend(["--skill".to_owned(), role.file]);
+            argv.extend(
+                specmint
+                    .into_iter()
+                    .flat_map(|file| ["--skill".to_owned(), file]),
+            );
             argv.extend([
                 "--append-system-prompt".to_owned(),
                 launch.instructions.to_owned(),
@@ -150,6 +161,16 @@ impl Adapter for PiAdapter {
         } else {
             Servers::InGroup
         }
+    }
+
+    fn specmint(&self, variant: Variant, launch: &LaunchId) -> Result<Skill, String> {
+        specmint::place(
+            Harness::Pi,
+            &self.env,
+            launch,
+            variant,
+            paths::global_specmint(&self.env, variant),
+        )
     }
 }
 

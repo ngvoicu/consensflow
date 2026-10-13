@@ -159,6 +159,7 @@ impl Context {
             designers: RefCell::new(HashSet::new()),
             broken: Cell::new(false),
             model: RefCell::new(None),
+            specs_by_default: Cell::new(false),
         });
         let trace = Rc::new(FakeTrace {
             recorder: recorder.clone(),

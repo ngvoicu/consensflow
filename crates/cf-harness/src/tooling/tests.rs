@@ -438,3 +438,50 @@ fn the_newest_session_of_a_folder_is_asked_of_the_store_the_environment_names() 
         .unwrap_err()
         .contains("names no since"));
 }
+
+#[test]
+fn the_specmint_variant_a_harness_has_installed_is_asked_of_its_adapter_in_the_home_the_environment_names(
+) {
+    let home = tempfile::tempdir().unwrap();
+    let skills = home
+        .path()
+        .join(".agents")
+        .join("skills")
+        .join("specmint-tdd");
+    fs::create_dir_all(&skills).unwrap();
+    fs::write(skills.join("SKILL.md"), "---\nname: specmint-tdd\n---\n").unwrap();
+    let env = json!({ "HOME": home.path().to_str().unwrap(), "CONSENSFLOW_HOME": home.path().join("cf").to_str().unwrap() });
+    let asked = |kind: &str, variant: &str| {
+        answer(&ask(
+            "specmint",
+            json!({ "kind": kind, "variant": variant, "env": env }),
+        ))
+    };
+    // Codex, OpenCode, Pi and Devin read the agents' folder: it has the variant there.
+    for kind in ["codex", "opencode", "pi", "devin"] {
+        assert_eq!(
+            asked(kind, "tdd").unwrap(),
+            json!({ "installed": true, "skill": skills.join("SKILL.md").to_str().unwrap() }),
+            "{kind}"
+        );
+        // Another variant is no copy of it: ConsensFlow would write its own.
+        let other = asked(kind, "core").unwrap();
+        assert_eq!(other["installed"], false, "{kind}");
+        assert!(
+            other["skill"].as_str().unwrap().ends_with("SKILL.md"),
+            "{kind}"
+        );
+        assert!(
+            other["skill"].as_str().unwrap().contains("specmint-core"),
+            "{kind}"
+        );
+    }
+    // Claude Code does not read it: it has none of its own installed.
+    assert_eq!(asked("claude-code", "tdd").unwrap()["installed"], false);
+    assert!(asked("claude-code", "full")
+        .unwrap_err()
+        .contains("variant is none of"));
+    assert!(asked("kimi", "core")
+        .unwrap_err()
+        .contains("no harness runs as kimi"));
+}

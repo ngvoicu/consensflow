@@ -17,11 +17,13 @@
 //! | `interrupt` | `kind`: the keys that interrupt a turn in the harness's window | `{presses, closeAfterMs}`: Escape that many times in a row and, where `closeAfterMs` is not null, once more that long after |
 //! | `program` | `argv`, `env`: a program and its arguments to open a window on (the program's absolute path first) | the argv the pane host is asked to open: an npm shim (a `.cmd` on Windows) as the node and the script it runs, anything else as it is; an error for a script of another shape, or a shim that has no node |
 //! | `newest_session` | `kind`, `workspace`, `since`, `env`: the newest top-level conversation a harness of that kind (OpenCode, Devin or Codex) opened in `workspace` at or after `since` (milliseconds), from its own store | the session's id, or null while there is none |
+//! | `specmint` | `kind`, `variant`, `env`: where the harness has the Specmint variant installed for its user (the adapter's own look, in the places the harness reads), with a home that is the one `env` names | `{installed, skill}`: whether the harness has it, and the file of its `SKILL.md` (where ConsensFlow's own copy would be written, for a launch of a made-up id, where it has none) |
 //!
-//! The last two are the evals' and the live tests' own: the program a window
-//! opens on, which the daemon asks `cf_process::pane_argv` for, and the
+//! The last three are the evals' and the live tests' own: the program a window
+//! opens on, which the daemon asks `cf_process::pane_argv` for, the
 //! conversation a window of a harness that names its own opened, which only
-//! its store says.
+//! its store says, and the Specmint skill a chief's window is given, which the
+//! live test of specs names the copy it was given by.
 
 mod session;
 
@@ -31,10 +33,11 @@ use cf_base::env::Env;
 use cf_base::text::{console_text, window_text};
 use cf_base::time::{Clock, SystemClock};
 use cf_proto::agents::Harness;
+use cf_proto::specs::Variant;
 use serde_json::{json, Value};
 
 use crate::claude::install;
-use crate::contract::{Agent, Interrupt, LaunchId};
+use crate::contract::{Agent, Interrupt, LaunchId, Skill};
 use crate::launch::adapter;
 use crate::records::{self, Options};
 use crate::shared::record_state::record_state;
@@ -52,8 +55,9 @@ pub fn answer(question: &Value) -> Result<Value, String> {
         "interrupt" => interrupt(question),
         "program" => program(question),
         "newest_session" => newest_session(question),
+        "specmint" => specmint(question),
         other => Err(format!(
-            "the question asks for {other}, which is none of records, start, window_text, console_text, claude_settings, interrupt, program and newest_session"
+            "the question asks for {other}, which is none of records, start, window_text, console_text, claude_settings, interrupt, program, newest_session and specmint"
         )),
     }
 }
@@ -178,6 +182,24 @@ fn newest_session(question: &Value) -> Result<Value, String> {
         &env(question)?,
     )?;
     Ok(found.map_or(Value::Null, Value::from))
+}
+
+/// Where the harness has the Specmint variant installed for its user: the
+/// adapter's own answer (`Adapter::specmint`) with the home `env` names, which
+/// is the one the daemon would ask it in. A made-up launch stands for the one a
+/// chief's window would have, whose copy of ConsensFlow's own it names.
+fn specmint(question: &Value) -> Result<Value, String> {
+    let variant = Variant::from_name(text(question, "variant")?)
+        .ok_or("the question's variant is none of core, core-html, tdd and tdd-html")?;
+    let launch = LaunchId::new("00000000-0000-4000-8000-000000000000")
+        .ok_or("a made-up launch id is none")?;
+    let env = env(question)?;
+    let services = Fakes::new(&env).services(&env, Path::new(""));
+    let skill = adapter(harness(text(question, "kind")?)?, &services).specmint(variant, &launch)?;
+    Ok(json!({
+        "installed": matches!(skill, Skill::Global(_)),
+        "skill": skill.path(),
+    }))
 }
 
 /// The keys that interrupt a turn in the harness's window, as its adapter

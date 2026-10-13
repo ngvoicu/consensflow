@@ -45,7 +45,7 @@ is for) moved two things that Node's recordings hold. Every `final` says
 are not rewritten, and the replay holds the database this ledger left to them
 as Node's schema had it (`cf_ledger::testing::hold_apart_what_node_never_had_in_its_schema`).
 And `ledger-008`, a ledger one version past what the build knows, which it refuses,
-says 14 and 13 where Node's said 12 and 11: it was changed by hand, in those two
+says 15 and 14 where Node's said 12 and 11: it was changed by hand, in those two
 numbers, to stay the probe it was (each migration moves it again). And the four traces
 whose refusals list the roles a member may hold or the pools a task may be for
 (`ledger-projects-005`, `-008`, `ledger-staff-001` and `ledger-tiered-003`) list the
@@ -63,3 +63,15 @@ and `hold_apart_the_resume_mark_in_a_dump`). The one call that cannot be held so
 `forgetResume` of a project that is not there, which Node refused as an unknown
 project and this ledger has no mark to refuse for: `ledger-projects-011` is in
 `DEPARTED` at that call.
+
+Migration 0015 (a project says whether its chief plans big work as specs, in which
+folder and with which variant of Specmint: three columns of `project`, none given
+until the human says it) added what Node's projects never had. Every `final` has the
+columns `specs`, `specs_folder` and `specs_variant` and their lines in the schema of
+`project`, as SQLite writes them into the table's text when a column is added to it:
+none of them is rewritten, and the replay takes them out of what this ledger left,
+where Node's has none (`cf_ledger::testing::hold_apart_what_node_never_writes` for the
+rows, and `hold_apart_what_node_never_had_in_its_schema` for the text of the table).
+No answer of Node's says anything of specs: a project's view holds `specs` only once
+the human has said something of them, and the ledger's `project.specs` event is its
+own.

@@ -192,3 +192,37 @@ fn a_session_is_the_first_file_whose_name_holds_it_and_none_when_there_is_none()
     // A name that holds the session is enough: part of one is a match.
     assert_eq!(transcript("lake", &env), Ok(Some(calm)));
 }
+
+#[test]
+fn the_specmint_variant_the_human_installed_is_found_in_pis_own_skills_then_the_agents_and_nowhere_else(
+) {
+    use crate::shared::specmint::testing::{is_held_to, Fake};
+    is_held_to(
+        &|env, variant| global_specmint(env, variant),
+        &[],
+        &[".pi/agent/skills", ".agents/skills"],
+        &[
+            ".claude/skills",
+            ".codex/skills",
+            ".config/opencode/skills",
+            ".config/devin/skills",
+            ".pi/skills",
+            ".pi/agent/sessions",
+        ],
+    );
+    // `PI_CODING_AGENT_DIR` moves Pi's own folder, and the agents' stays where it is.
+    is_held_to(
+        &|env, variant| global_specmint(env, variant),
+        &[("PI_CODING_AGENT_DIR", "agent")],
+        &["agent/skills", ".agents/skills"],
+        &[".pi/agent/skills"],
+    );
+    // A `~` in it is the home, as it is for Pi.
+    let fake = Fake::new();
+    let found = fake.install("mine/skills", "specmint-core", "specmint-core");
+    let env = Env::from_vars([
+        ("HOME", fake.at("")),
+        ("PI_CODING_AGENT_DIR", "~/mine".to_owned()),
+    ]);
+    assert_eq!(global_specmint(&env, Variant::Core), Some(found));
+}

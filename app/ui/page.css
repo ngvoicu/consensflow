@@ -594,6 +594,12 @@ tr[data-session] .row-name { font-weight: 600; letter-spacing: .08em; text-trans
 .staff-pick .staff-add { border: 0; padding: 4px 0 0; margin-bottom: 0; }
 .board-empty td { padding: 14px 12px; font: 12px var(--mono); color: var(--muted); }
 .staff-hint { flex-basis: 100%; margin: 0; font-size: 12px; color: var(--muted); }
+/* The project's specs: its own group of the staff dialog, the controls one under another. */
+.project-specs { display: grid; gap: 10px; border: 1px solid var(--line-soft); border-radius: 8px; padding: 10px 12px; margin: 0; }
+.project-specs legend { padding: 0 6px; font: 700 10px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+.project-specs .specs-help { margin: 0; font-size: 12px; color: var(--muted); }
+.project-specs button { justify-self: start; }
+.project-specs :disabled { opacity: .5; }
 .member-confirm { color: var(--buoy); font-size: 12px; margin-right: 8px; }
 /* Each part of a task is a panel of its own, headed by what it is. */
 .drawer-section {

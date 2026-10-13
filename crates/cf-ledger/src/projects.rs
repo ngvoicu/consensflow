@@ -5,6 +5,7 @@
 
 use cf_base::json::from_slice_lossy;
 use cf_proto::ledger::{DeletedProject, EventView, ProjectView};
+use cf_proto::specs::SpecsView;
 use rusqlite::{params, OptionalExtension, Row};
 use serde_json::{json, Value};
 
@@ -22,6 +23,10 @@ pub(crate) struct ProjectRow {
     pub(crate) gate: i64,
     pub(crate) created_at: String,
     pub(crate) updated_at: String,
+    /// What the project says of specs, each part null where it says none.
+    pub(crate) specs: Option<i64>,
+    pub(crate) specs_folder: Option<String>,
+    pub(crate) specs_variant: Option<String>,
 }
 
 impl ProjectRow {
@@ -34,7 +39,20 @@ impl ProjectRow {
             gate: row.get("gate")?,
             created_at: row.get("created_at")?,
             updated_at: row.get("updated_at")?,
+            specs: row.get("specs")?,
+            specs_folder: row.get("specs_folder")?,
+            specs_variant: row.get("specs_variant")?,
         })
+    }
+
+    /// What the project says of specs: none where it says nothing.
+    pub(crate) fn specs_view(&self) -> Option<SpecsView> {
+        SpecsView {
+            on: self.specs.map(|on| on == 1),
+            folder: self.specs_folder.clone(),
+            variant: self.specs_variant.clone(),
+        }
+        .said()
     }
 }
 
@@ -241,6 +259,7 @@ pub(crate) fn project(store: &Store, id: i64) -> Result<Option<ProjectView>, Led
         .iter()
         .map(participant_view)
         .collect::<Result<Vec<_>, _>>()?;
+    let specs = row.specs_view();
     Ok(Some(ProjectView {
         id: row.id,
         directory: row.directory,
@@ -250,6 +269,7 @@ pub(crate) fn project(store: &Store, id: i64) -> Result<Option<ProjectView>, Led
         created_at: row.created_at,
         updated_at: row.updated_at,
         participants,
+        specs,
     }))
 }
 

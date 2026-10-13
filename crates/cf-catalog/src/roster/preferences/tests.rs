@@ -3,6 +3,7 @@ use crate::roster::agent_row::AgentRow;
 use crate::roster::document::load_document;
 use crate::roster::testing::file_with;
 use crate::Catalog;
+use serde_json::json;
 use tempfile::tempdir;
 
 fn document(text: &str) -> Document {
@@ -23,10 +24,16 @@ fn view(kind: &str, model: &str) -> AgentView {
 
 const ON: Preferences = Preferences {
     own_harness_only: true,
+    specs: false,
 };
 const OFF: Preferences = Preferences {
     own_harness_only: false,
+    specs: false,
 };
+
+fn specs_chosen(text: &str) -> bool {
+    preferences_of(&document(text)).specs
+}
 
 #[test]
 fn a_roster_with_no_file_keeps_the_choice_off() {
@@ -75,6 +82,85 @@ fn preferences_that_are_no_object_say_nothing() {
     for other in ["null", "true", r#""ownHarnessOnly""#, "[]", "[true]", "5"] {
         assert!(!chosen(&format!(r#"{{"preferences":{other}}}"#)), "{other}");
     }
+}
+
+#[test]
+fn specs_are_off_unless_the_file_says_true_and_are_a_choice_apart_from_the_other() {
+    assert!(!specs_chosen("{}"));
+    assert!(!specs_chosen(r#"{"preferences":{"ownHarnessOnly":true}}"#));
+    assert!(specs_chosen(r#"{"preferences":{"specs":true}}"#));
+    assert!(!chosen(r#"{"preferences":{"specs":true}}"#));
+    for other in ["false", r#""true""#, "1", "[true]", "null", "{}"] {
+        assert!(
+            !specs_chosen(&format!(r#"{{"preferences":{{"specs":{other}}}}}"#)),
+            "{other}"
+        );
+    }
+}
+
+/// The preferences a file keeps after `patch` was set on `text`, and the file's own words.
+fn kept_after(text: &str, patch: Value) -> (Result<Preferences, String>, Value) {
+    let (_home, path) = file_with(text.as_bytes());
+    let set = set_preferences(&path, Some(&patch)).map_err(|refusal| refusal.message);
+    let kept: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    (set, kept["preferences"].clone())
+}
+
+#[test]
+fn specs_are_kept_only_when_on_and_a_choice_set_leaves_the_other_as_it_was() {
+    let (set, kept) = kept_after("{}", json!({ "specs": true }));
+    assert_eq!(
+        set,
+        Ok(Preferences {
+            own_harness_only: false,
+            specs: true
+        })
+    );
+    assert_eq!(kept, json!({ "ownHarnessOnly": false, "specs": true }));
+    // The other choice set leaves specs on.
+    let on = r#"{"preferences":{"ownHarnessOnly":false,"specs":true}}"#;
+    let (set, kept) = kept_after(on, json!({ "ownHarnessOnly": true }));
+    assert_eq!(
+        set,
+        Ok(Preferences {
+            own_harness_only: true,
+            specs: true
+        })
+    );
+    assert_eq!(kept, json!({ "ownHarnessOnly": true, "specs": true }));
+    // Specs set off are not kept at all, as a file that never knew of them reads.
+    let (set, kept) = kept_after(on, json!({ "specs": false }));
+    assert_eq!(set, Ok(OFF));
+    assert_eq!(kept, json!({ "ownHarnessOnly": false }));
+    // A patch that names none changes nothing, and still writes the whole set.
+    let (set, kept) = kept_after(on, json!({}));
+    assert_eq!(
+        set,
+        Ok(Preferences {
+            own_harness_only: false,
+            specs: true
+        })
+    );
+    assert_eq!(kept, json!({ "ownHarnessOnly": false, "specs": true }));
+}
+
+#[test]
+fn a_switch_that_is_none_and_a_choice_that_is_unknown_are_refused_as_before_and_leave_the_file() {
+    for patch in [
+        json!({ "specs": "yes" }),
+        json!({ "specs": null }),
+        json!({ "specs": 1 }),
+    ] {
+        let (set, kept) = kept_after(r#"{"preferences":{"specs":true}}"#, patch.clone());
+        assert_eq!(set, Err("specs is on or off".to_owned()), "{patch}");
+        assert_eq!(
+            kept,
+            json!({ "specs": true }),
+            "{patch}: the file is as it was"
+        );
+    }
+    let (set, _) = kept_after("{}", json!({ "specs": true, "colour": true }));
+    assert_eq!(set, Err("no preference named colour".to_owned()));
 }
 
 #[test]

@@ -27,7 +27,8 @@
     "tasks.delete",
     "message.read",
     "message.approve",
-    "message.decline"
+    "message.decline",
+    "project.specs"
   ],
   "ping": "{\"ok\":true}"
 }

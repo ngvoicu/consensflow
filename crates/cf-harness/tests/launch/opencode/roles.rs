@@ -6,10 +6,12 @@
 use std::fs;
 use std::path::Path;
 
-use cf_harness::contract::Prepared;
+use cf_harness::contract::{Adapter, LaunchId, Prepared, Skill};
+use cf_harness::testing::unrooted;
+use cf_proto::specs::Variant;
 use serde_json::{json, Value};
 
-use super::stage::{planned, Home, Stage, Wanted};
+use super::stage::{planned, Home, Stage, Wanted, LAUNCH};
 
 /// The `OPENCODE_CONFIG_CONTENT` a plan gives the window, as JSON.
 fn configuration(plan: &Prepared) -> Value {
@@ -153,4 +155,112 @@ fn a_window_without_its_role_text_is_refused_and_a_role_text_is_private_to_its_l
         let mode = fs::metadata(file).unwrap().permissions().mode();
         assert_eq!(mode & 0o777, 0o600);
     }
+}
+
+/// The names in the skills folder OpenCode is told to read, in a plan's configuration.
+fn skills_of(plan: &Prepared) -> Vec<String> {
+    let merged = configuration(plan);
+    let folder = merged["skills"]["paths"]
+        .as_array()
+        .unwrap()
+        .last()
+        .unwrap()
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let mut names: Vec<String> = fs::read_dir(folder)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    names
+}
+
+#[test]
+fn a_chief_given_specs_has_the_skill_written_where_the_role_s_is_which_opencode_is_told_to_read_and_its_configuration_is_as_it_was(
+) {
+    for variant in Variant::ALL {
+        // Two stages of one make: what differs between the launches is the specs.
+        let (off_stage, stage) = (Stage::new(), Stage::new());
+        off_stage.serves_creation("ses_abc123");
+        stage.serves_creation("ses_abc123");
+        let chief = Wanted {
+            role: "chief",
+            message: None,
+            ..Wanted::default()
+        };
+        let off = off_stage.prepare(&chief).unwrap();
+        assert_eq!(
+            skills_of(&off),
+            ["consensflow-chief"],
+            "with specs off the role is alone"
+        );
+        let on = stage
+            .prepare(&Wanted {
+                specs: Some(variant),
+                ..chief
+            })
+            .unwrap();
+        assert_eq!(
+            unrooted(&on, &stage.home.root),
+            unrooted(&off, &off_stage.home.root),
+            "{variant:?}: OpenCode reads the same folder, and is told nothing more"
+        );
+        assert_eq!(
+            skills_of(&on),
+            ["consensflow-chief", variant.skill_name()],
+            "{variant:?}"
+        );
+    }
+}
+
+#[test]
+fn an_opencode_that_has_the_variant_installed_in_any_place_it_reads_is_given_nothing_of_ours_and_another_variant_installed_is_left_alone(
+) {
+    let stage = Stage::new();
+    let install = |folder: &str, name: &str| {
+        let dir = format!("{}/home/{folder}/{name}", stage.home.root);
+        fs::create_dir_all(&dir).unwrap();
+        let file = format!("{dir}/SKILL.md");
+        fs::write(&file, format!("---\nname: {name}\n---\nthe human's own\n")).unwrap();
+        file
+    };
+    let places = [
+        (
+            Variant::Core,
+            install(".config/opencode/skills", "specmint-core"),
+        ),
+        (
+            Variant::CoreHtml,
+            install(".config/opencode/skill", "specmint-core-html"),
+        ),
+        (Variant::Tdd, install(".claude/skills", "specmint-tdd")),
+        (
+            Variant::TddHtml,
+            install(".agents/skills", "specmint-tdd-html"),
+        ),
+    ];
+    let id = LaunchId::new(LAUNCH).unwrap();
+    for (variant, file) in &places {
+        assert_eq!(
+            stage.adapter.specmint(*variant, &id).unwrap(),
+            Skill::Global(file.clone())
+        );
+        stage.serves_creation("ses_abc123");
+        let chief = Wanted {
+            role: "chief",
+            message: None,
+            specs: Some(*variant),
+            ..Wanted::default()
+        };
+        let plan = stage.prepare(&chief).unwrap();
+        assert_eq!(
+            skills_of(&plan),
+            ["consensflow-chief"],
+            "{variant:?}: nothing is written"
+        );
+    }
+    assert!(places.iter().all(|(_, file)| fs::read_to_string(file)
+        .unwrap()
+        .ends_with("the human's own\n")));
 }

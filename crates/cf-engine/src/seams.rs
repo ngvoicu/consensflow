@@ -17,6 +17,7 @@ use cf_proto::panes::{Background, Servers};
 use cf_proto::trace::TraceLine;
 
 use crate::host::EngineHost;
+use crate::roles::ProjectSpecs;
 use crate::runtime::Spawn;
 
 /// Why one of the engine's operations did not happen: a refusal in the
@@ -112,15 +113,27 @@ impl SavedAgent {
 /// the human deleted, or why the agents file could not be read.
 pub trait Roster {
     fn agent(&self, name: &str) -> Result<Option<SavedAgent>, Refusal>;
+
+    /// Whether the human turned specs on for every project, as the agents file
+    /// keeps the choice (the app's setting a project may say otherwise of):
+    /// asked at a chief's launch whose project says nothing of its own. Off
+    /// where the file says nothing, or cannot be read: the launch asked for a
+    /// saved agent from the same file already.
+    fn specs_by_default(&self) -> bool {
+        false
+    }
 }
 
 /// The text each role's window starts with (`roles`), or why it has none,
-/// which fails its launch.
+/// which fails its launch. A chief whose project has specs on is given them
+/// ([`ProjectSpecs`]), and with them the section its text has of them; every
+/// other window is given none.
 pub trait Roles {
     fn instructions(
         &self,
         participant: &ParticipantView,
         project: &ProjectView,
+        specs: Option<&ProjectSpecs<'_>>,
     ) -> Result<String, String>;
 }
 

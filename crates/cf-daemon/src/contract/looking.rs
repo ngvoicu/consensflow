@@ -10,10 +10,11 @@ use std::rc::Rc;
 
 use cf_engine::seams::Adapters;
 use cf_harness::contract::{
-    Adapter, Admission, Interrupt, Launch, Observed, Pane, PaneHost, Prepared, Readiness, Window,
-    Work,
+    Adapter, Admission, Interrupt, Launch, LaunchId, Observed, Pane, PaneHost, Prepared, Readiness,
+    Skill, Window, Work,
 };
 use cf_proto::panes::Servers;
+use cf_proto::specs::Variant;
 
 /// What a look waits for, given the handle of the window looked at.
 type Wait = dyn Fn(&str) -> Work<'static, ()>;
@@ -99,6 +100,10 @@ impl Adapter for LookingAdapter {
 
     fn servers(&self) -> Servers {
         self.adapter.servers()
+    }
+
+    fn specmint(&self, variant: Variant, launch: &LaunchId) -> Result<Skill, String> {
+        self.adapter.specmint(variant, launch)
     }
 }
 

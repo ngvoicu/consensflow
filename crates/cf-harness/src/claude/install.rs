@@ -12,6 +12,7 @@ use serde_json::json;
 use crate::contract::{Launch, LaunchId};
 use crate::shared::launch_files::launch_folder;
 use crate::shared::role::write_role;
+use crate::shared::specmint;
 
 /// How long a member's question waits for the board's answer.
 const QUESTION_HOOK_SECONDS: u32 = 3600;
@@ -63,7 +64,9 @@ pub(crate) fn settings(
 /// Writes the window's role and says how Claude loads it: the role's folder
 /// added to what it reads, its text appended to the system prompt, and no
 /// snapshot of that prompt, which a resumed conversation otherwise keeps
-/// from its first turn.
+/// from its first turn. A chief given specs has ConsensFlow's own copy of its
+/// Specmint skill written beside the role's skill, in the folder Claude is
+/// given, so it loads with it: nothing more is told of it.
 pub(super) fn role(env: &Env, launch: &Launch) -> Result<Vec<String>, String> {
     let written = write_role(
         Harness::Claude,
@@ -72,6 +75,7 @@ pub(super) fn role(env: &Env, launch: &Launch) -> Result<Vec<String>, String> {
         launch.id,
         launch.instructions,
     )?;
+    specmint::write_own(Harness::Claude, env, launch)?;
     Ok(vec![
         "--add-dir".to_owned(),
         written.root,

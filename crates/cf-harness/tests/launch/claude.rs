@@ -17,18 +17,20 @@ use cf_base::env::Env;
 use cf_base::path;
 use cf_harness::claude::ClaudeAdapter;
 use cf_harness::contract::{
-    Adapter, Admission, Agent, Held, HostError, Launch, LaunchId, Pane, Prepared, Readiness,
+    Adapter, Admission, Agent, Held, HostError, Launch, LaunchId, Pane, Prepared, Readiness, Specs,
     Waiting, Window,
 };
 use cf_harness::records::Role;
 use cf_harness::testing::{
     fake_executable, finished, AnsweringHost, Fakes, OtherProcess, FIRST_MESSAGE_MS,
 };
+use cf_proto::specs::Variant;
 use serde_json::{json, Map, Value};
 use tempfile::TempDir;
 
 mod agents;
 mod resumed;
+mod specs;
 mod stops;
 
 /// The launch's id: a uuid, as the engine mints one (Node's tests took any
@@ -132,6 +134,8 @@ struct Request {
     resume: Option<String>,
     message: Option<String>,
     agent: Option<Agent<'static>>,
+    /// The Specmint variant a chief is given, where its project has specs on.
+    specs: Option<Variant>,
 }
 
 impl Default for Request {
@@ -148,6 +152,7 @@ impl Default for Request {
                 thinking: None,
                 designer: false,
             }),
+            specs: None,
         }
     }
 }
@@ -176,6 +181,9 @@ impl Request {
 
 fn prepare(adapter: &ClaudeAdapter, request: &Request) -> Result<Prepared, String> {
     let id = LaunchId::new(LAUNCH).unwrap();
+    let skill = request
+        .specs
+        .map(|variant| adapter.specmint(variant, &id).unwrap());
     let launch = Launch {
         id: &id,
         project: 1,
@@ -186,6 +194,10 @@ fn prepare(adapter: &ClaudeAdapter, request: &Request) -> Result<Prepared, Strin
         message: request.message.as_deref(),
         agent: request.agent,
         instructions: request.instructions,
+        specs: request
+            .specs
+            .zip(skill.as_ref())
+            .map(|(variant, skill)| Specs { variant, skill }),
         first_message_ms: FIRST_MESSAGE_MS,
     };
     finished(adapter.prepare(&launch))

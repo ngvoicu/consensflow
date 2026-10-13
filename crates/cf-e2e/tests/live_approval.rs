@@ -23,8 +23,9 @@
 //!
 //! The human is the page's calls (`message.approve` and `message.decline`, what
 //! the board's buttons make) and the keys typed into the chief's window, which
-//! the pane host takes as it takes the app's ([`human`]); the chief is a real
-//! harness that runs `cf` itself. Each project runs the steps of [`steps`]:
+//! the pane host takes as it takes the app's ([`cf_e2e::live::human`]); the
+//! chief is a real harness that runs `cf` itself. Each project runs the steps of
+//! [`steps`]:
 //!
 //! 1. a task for the worker, its brief and its result each held at the gate; the
 //!    result is passed on while the chief is at work on a command of
@@ -53,12 +54,8 @@
 // root file beside it, where each would be a suite of its own.
 #[path = "live_approval/agents.rs"]
 mod agents;
-#[path = "live_approval/cleanup.rs"]
-mod cleanup;
 #[path = "live_approval/flow.rs"]
 mod flow;
-#[path = "live_approval/human.rs"]
-mod human;
 #[path = "live_approval/minute.rs"]
 mod minute;
 #[path = "live_approval/plan.rs"]

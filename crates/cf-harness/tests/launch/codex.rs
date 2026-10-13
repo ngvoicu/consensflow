@@ -2,8 +2,9 @@
 //! suite and the Codex cases of its role-skills suite held them (TEST-BDC-05,
 //! IMPL-BDC-07), each case under its sentence: how a Codex window is launched
 //! under the supervisor (here), how it is followed (`windows`), how a message
-//! reaches it through the supervisor's broker (`channel`), and the role it is
-//! given (`roles`). Each test gets a throwaway home and a stand-in `codex` on
+//! reaches it through the supervisor's broker (`channel`), the role it is
+//! given (`roles`), and the Specmint skill a chief is given (`specs`). Each test
+//! gets a throwaway home and a stand-in `codex` on
 //! PATH, whose answers (its native queue, its version) and whose app-server are
 //! scripted. Asked anything else, the stand-in is not there: a launch that asks
 //! it more fails. The channel's cases against a broker on real sockets and the
@@ -21,6 +22,7 @@
 
 mod channel;
 mod roles;
+mod specs;
 mod windows;
 
 use std::fs;
@@ -30,10 +32,11 @@ use std::rc::Rc;
 use cf_base::env::Env;
 use cf_base::path;
 use cf_harness::codex::CodexAdapter;
-use cf_harness::contract::{Adapter, Agent, Launch, LaunchId, Pane, Prepared, Records};
+use cf_harness::contract::{Adapter, Agent, Launch, LaunchId, Pane, Prepared, Records, Specs};
 use cf_harness::testing::{
     fake_executable, finished, named, ChildScript, Ends, Fakes, Sent, Served, FIRST_MESSAGE_MS,
 };
+use cf_proto::specs::Variant;
 use serde_json::{json, Value};
 use tempfile::TempDir;
 
@@ -100,6 +103,8 @@ struct Request {
     agent: Option<Agent<'static>>,
     instructions: String,
     first_message_ms: i64,
+    /// The Specmint variant a chief is given, where its project has specs on.
+    specs: Option<Variant>,
 }
 
 impl Default for Request {
@@ -111,6 +116,7 @@ impl Default for Request {
             agent: Some(LUNA),
             instructions: ROLE.to_owned(),
             first_message_ms: FIRST_MESSAGE_MS,
+            specs: None,
         }
     }
 }
@@ -137,6 +143,9 @@ impl Request {
 
 fn prepare(adapter: &CodexAdapter, request: &Request) -> Result<Prepared, String> {
     let id = LaunchId::new(LAUNCH).unwrap();
+    let skill = request
+        .specs
+        .map(|variant| adapter.specmint(variant, &id).unwrap());
     let launch = Launch {
         id: &id,
         project: 1,
@@ -147,6 +156,10 @@ fn prepare(adapter: &CodexAdapter, request: &Request) -> Result<Prepared, String
         message: request.message.as_deref(),
         agent: request.agent,
         instructions: &request.instructions,
+        specs: request
+            .specs
+            .zip(skill.as_ref())
+            .map(|(variant, skill)| Specs { variant, skill }),
         first_message_ms: request.first_message_ms,
     };
     finished(adapter.prepare(&launch))

@@ -15,6 +15,12 @@ use cf_proto::agents::Harness;
 use crate::contract::LaunchId;
 use crate::shared::launch_files::{harness_folder, launch_folder};
 
+/// Where a launch's skills are written, under its folder: the layout Claude
+/// loads a skill from (`.claude/skills/<name>/SKILL.md`), in a folder of the
+/// role's own. The role's skill is written there, and so is the Specmint skill
+/// of a chief given specs ([`super::specmint`]).
+pub(crate) const SKILLS: [&str; 3] = ["role", ".claude", "skills"];
+
 /// Where a role was written.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct RoleFile {
@@ -39,8 +45,8 @@ pub(crate) fn write_role(
     }
     let folder = harness_folder(harness)
         .ok_or_else(|| format!("No {role} role is available for {}", harness.kind()))?;
-    let root = path::join(&[&launch_folder(folder, env, launch)?, "role"]);
-    let skills = path::join(&[&root, ".claude", "skills"]);
+    let root = path::join(&[&launch_folder(folder, env, launch)?, SKILLS[0]]);
+    let skills = path::join(&[&root, SKILLS[1], SKILLS[2]]);
     let skill = path::join(&[&skills, &format!("consensflow-{role}")]);
     let file = path::join(&[&skill, "SKILL.md"]);
     let said = |error: cf_base::file::FileError| error.to_string();

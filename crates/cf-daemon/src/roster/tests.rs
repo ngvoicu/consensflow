@@ -179,3 +179,24 @@ fn a_member_whose_agent_is_gone_keeps_the_tier_it_has() {
         .unwrap();
     assert_eq!(ghost.tier.as_deref(), Some("light"));
 }
+
+#[test]
+fn the_human_s_choice_of_specs_for_every_project_is_read_from_the_file_at_each_launch() {
+    let home = tempfile::tempdir().unwrap();
+    let file = home.path().join("agents.json");
+    let agents = agents_in(home.path(), &mine());
+    let by_default = || cf_engine::seams::Roster::specs_by_default(&agents);
+    // A file that says nothing of it is off.
+    assert!(!by_default());
+    // The human turns it on, and the next launch reads it as it is then.
+    let mut document = mine();
+    document["preferences"] = json!({ "ownHarnessOnly": false, "specs": true });
+    std::fs::write(&file, document.to_string()).unwrap();
+    assert!(by_default());
+    // Anything but true is off, and so is a file that cannot be read.
+    document["preferences"] = json!({ "specs": "yes" });
+    std::fs::write(&file, document.to_string()).unwrap();
+    assert!(!by_default());
+    std::fs::write(&file, "{ not json").unwrap();
+    assert!(!by_default());
+}

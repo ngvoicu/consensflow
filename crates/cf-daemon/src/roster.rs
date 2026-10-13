@@ -74,6 +74,15 @@ impl cf_engine::seams::Roster for Agents {
             designer: row.is_designer(),
         }))
     }
+
+    /// The choice the file keeps, read as it is now: off where it says nothing,
+    /// and where it cannot be read (a launch reads the saved agent from the same
+    /// file, and is refused first).
+    fn specs_by_default(&self) -> bool {
+        self.roster()
+            .preferences()
+            .is_ok_and(|preferences| preferences.specs)
+    }
 }
 
 #[cfg(test)]

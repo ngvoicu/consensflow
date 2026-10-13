@@ -18,16 +18,18 @@ use cf_base::env::Env;
 use cf_base::js;
 use cf_base::text::{console_text, window_text};
 use cf_proto::agents::Harness;
+use cf_proto::specs::Variant;
 use futures_util::future::join;
 use serde_json::Value;
 
 use super::channel;
 use super::install;
+use super::paths;
 use super::wire::selected_session;
 use super::wire_log::WireLog;
 use crate::contract::{
-    Adapter, Admission, Held, Interrupt, Launch, Observed, Pane, PaneHost, Prepared, Readiness,
-    Records, Window, Work,
+    Adapter, Admission, Held, Interrupt, Launch, LaunchId, Observed, Pane, PaneHost, Prepared,
+    Readiness, Records, Skill, Window, Work,
 };
 use crate::detect::executable;
 use crate::records::Options;
@@ -35,7 +37,7 @@ use crate::seams::{Services, Time};
 use crate::shared::admission::admission;
 use crate::shared::record_state::{dialog_waiting, record_state, switched_to, unnamed};
 use crate::shared::role::write_role;
-use crate::shared::{pane, window_args};
+use crate::shared::{pane, specmint, window_args};
 
 /// What a window that has not said yet which conversation it shows is held for.
 const HOLD: &str = "Devin has not said yet which conversation its window shows";
@@ -94,6 +96,10 @@ impl Adapter for DevinAdapter {
                 launch.id,
                 &role_text(launch.instructions, env),
             )?;
+            // A chief given specs reads its Specmint skill by the path its role
+            // text names, which the session-start hook gives it: where Devin
+            // has none of its own, ConsensFlow's is written beside the role's.
+            specmint::write_own(Harness::Devin, env, launch)?;
             let agent = launch.agent.unwrap_or_default();
             let message = launch.message.map(window_text);
             let open = if launch.resume.is_none() {
@@ -141,6 +147,17 @@ impl Adapter for DevinAdapter {
             presses: 2,
             close_after: Some(Duration::from_secs(1)),
         }
+    }
+
+    fn specmint(&self, variant: Variant, launch: &LaunchId) -> Result<Skill, String> {
+        let env = &self.services.env;
+        specmint::place(
+            Harness::Devin,
+            env,
+            launch,
+            variant,
+            paths::global_specmint(env, variant),
+        )
     }
 }
 

@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+
 import { chromium, expect, test } from '@playwright/test'
 
 import { tempEnv } from '../../tests/helpers.mjs'
@@ -271,6 +274,19 @@ async function open(page, data = model()) {
       'project.gate': ({ project, gate }) => {
         data.boards[project].project.gate = gate
         return answer({ project: data.boards[project].project })
+      },
+      // What a project says of specs: kept as it was said, each part left out when
+      // it says none, and the daemon's own refusal where a test has it refuse.
+      'project.specs': ({ project, on, folder, variant }) => {
+        if (data.specsRefusal) return { ok: false, error: data.specsRefusal }
+        const said = {}
+        if (on !== null) said.on = on
+        if (folder !== null) said.folder = folder
+        if (variant !== null) said.variant = variant
+        const shown = data.boards[project].project
+        if (Object.keys(said).length === 0) delete shown.specs
+        else shown.specs = said
+        return answer({ project: shown })
       },
       // The newest messages one frame holds (all of them, unless a test says
       // how many fit) and how many there are; asked for what For you lists,
@@ -2924,6 +2940,125 @@ test('shows and sets human approval from the staff dialog, which has no review p
   await expect(gate).toBeChecked()
 })
 
+/** The project's Specs group of the staff dialog, opened. */
+async function openSpecs(page) {
+  await page.getByRole('button', { name: 'Staff' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project staff' })
+  const group = dialog.getByRole('group', { name: 'Specs' })
+  return {
+    dialog,
+    group,
+    mode: group.locator('[name="specs"]'),
+    folder: group.locator('[name="specsFolder"]'),
+    variant: group.locator('[name="specsVariant"]'),
+    save: group.getByRole('button', { name: 'Save specs' }),
+    note: group.locator('#staff-specs-note'),
+  }
+}
+
+test('a project follows the app’s setting for specs until it says on or off, and the dialog says when a change takes hold', async ({
+  page,
+}) => {
+  await open(page)
+  const specs = await openSpecs(page)
+  await expect(specs.group).toContainText('A change reaches the chief when it next starts')
+  // It says nothing: it follows what the human set for every project (Settings, Agents).
+  await expect(specs.mode).toHaveValue('follow')
+  await expect(specs.mode.locator('option:checked')).toHaveText(/^Follow the app's setting/)
+  await expect(specs.folder).toHaveValue('')
+  await expect(specs.folder).toHaveAttribute('placeholder', '.specs')
+  await expect(specs.variant).toHaveValue('core')
+  await expect(specs.variant.locator('option')).toHaveText(['core', 'core-html', 'tdd', 'tdd-html'])
+  await expect(specs.note).toBeHidden()
+
+  // On, with its own folder and the variant it plans with.
+  await specs.mode.selectOption('on')
+  await specs.folder.fill('  docs/specs ')
+  await specs.variant.selectOption('tdd')
+  await specs.save.click()
+  await expect
+    .poll(() => calls(page, 'project.specs'))
+    .toEqual([{ project: 1, on: true, folder: 'docs/specs', variant: 'tdd' }])
+  await expect(specs.note).toHaveText('Saved: the specs reach the chief when it next starts.')
+  await expect(page.locator('#status')).toHaveText(
+    'Saved: the specs reach the chief when it next starts.',
+  )
+  // The board is drawn again and the dialog shows what the daemon keeps.
+  await expect(specs.mode).toHaveValue('on')
+  await expect(specs.folder).toHaveValue('docs/specs')
+  await expect(specs.variant).toHaveValue('tdd')
+
+  // Off needs no folder and no variant.
+  await specs.mode.selectOption('off')
+  await expect(specs.folder).toBeDisabled()
+  await expect(specs.variant).toBeDisabled()
+  await specs.save.click()
+  await expect.poll(async () => (await calls(page, 'project.specs')).length).toBe(2)
+  expect((await calls(page, 'project.specs'))[1]).toMatchObject({ project: 1, on: false })
+  await expect(specs.note).toHaveText(
+    'Specs are off in this project: the chief is told so when it next starts.',
+  )
+  await expect(specs.mode).toHaveValue('off')
+
+  // Back to following the app's setting: it says none of the three.
+  await specs.mode.selectOption('follow')
+  await expect(specs.folder).toBeEnabled()
+  await specs.folder.fill('')
+  await specs.save.click()
+  await expect.poll(async () => (await calls(page, 'project.specs')).length).toBe(3)
+  expect((await calls(page, 'project.specs'))[2]).toEqual({
+    project: 1,
+    on: null,
+    folder: null,
+    variant: 'tdd',
+  })
+})
+
+test('a folder the daemon refuses is said in the dialog, where it was typed, and what was typed stays', async ({
+  page,
+}) => {
+  const data = model()
+  data.specsRefusal =
+    'the specs folder is a folder inside the project: it stays inside it, with no `..`'
+  await open(page, data)
+  const specs = await openSpecs(page)
+  await specs.mode.selectOption('on')
+  await specs.folder.fill('../elsewhere')
+  await specs.save.click()
+  await expect(specs.note).toHaveText(data.specsRefusal)
+  await expect(specs.folder).toHaveValue('../elsewhere')
+  await expect(specs.mode).toHaveValue('on')
+  // The refusal is no note on the status line, and the next save clears it.
+  await expect(page.locator('#status')).not.toHaveText(/Saved/)
+})
+
+test('a board drawn again while the dialog is open leaves what the human is typing, and a project that says otherwise sets it', async ({
+  page,
+}) => {
+  const data = model()
+  // A closed project has no staff to settle; this one is open, and says its own word.
+  data.projects[1].state = 'open'
+  data.boards[2].project.state = 'open'
+  data.boards[2].project.specs = { on: false, folder: 'plans', variant: 'core-html' }
+  await open(page, data)
+  const specs = await openSpecs(page)
+  await specs.folder.fill('half-typed')
+  // The page reads the board again as it is told something changed.
+  const reads = async () => (await calls(page, 'board.get')).length
+  const before = await reads()
+  await page.evaluate(() => window.__listeners.get('state-changed')())
+  await expect.poll(reads).toBeGreaterThan(before)
+  await expect(specs.folder).toHaveValue('half-typed')
+  // Another project is another's: each shows its own.
+  await specs.dialog.getByRole('button', { name: 'Close' }).click()
+  await chooseProject(page, 'foundry')
+  await page.getByRole('button', { name: 'Staff' }).click()
+  await expect(specs.mode).toHaveValue('off')
+  await expect(specs.folder).toHaveValue('plans')
+  await expect(specs.folder).toBeDisabled()
+  await expect(specs.variant).toHaveValue('core-html')
+})
+
 test('lists what waits for approval in For you, and approves or declines it, writing to no agent', async ({
   page,
 }) => {
@@ -3143,6 +3278,46 @@ test('a screen opened again keeps what the human left on it, and lists the agent
     screen = agents.frameLocator('iframe')
     await expect(screen.locator('#agents .member .callsign')).toHaveText(['newbie'])
     await expect(screen.getByLabel('Show', { exact: true })).toHaveValue('mine')
+  } finally {
+    await daemon.close()
+  }
+})
+
+/** The preferences the daemon keeps in the agents file of the home `env` names. */
+const preferencesIn = (env) =>
+  JSON.parse(readFileSync(join(env.CONSENSFLOW_HOME, 'agents.json'), 'utf8')).preferences
+
+test('the app’s setting for specs is a box of the Agents screen, kept in the agents file beside the other choice, and shown again when the screen opens', async ({
+  page,
+}) => {
+  const daemon = await agentsScreens()
+  try {
+    await open(page, { ...model(), screens: daemon.screens })
+    let agents = await openScreen(page, 'Agents')
+    let screen = agents.frameLocator('iframe')
+    await expect(screen.locator('#agents-count')).toHaveText(/^(\d+) of \1 shown$/)
+    const box = (screen) => screen.getByLabel('Plan big work as specs', { exact: false })
+    // Off until the human turns it on.
+    await expect(box(screen)).not.toBeChecked()
+    await box(screen).check()
+    await expect(screen.locator('#roster-note')).toHaveText('')
+    await expect
+      .poll(() => preferencesIn(daemon.env))
+      .toEqual({ ownHarnessOnly: false, specs: true })
+    // The other choice goes on beside it, and neither moves the other.
+    await screen.getByLabel('Claude and OpenAI models only', { exact: false }).check()
+    await expect
+      .poll(() => preferencesIn(daemon.env))
+      .toEqual({ ownHarnessOnly: true, specs: true })
+    await agents.getByRole('button', { name: 'Close' }).click()
+
+    // Opened again, it shows what is kept; turned off, it is kept no more.
+    agents = await openScreen(page, 'Agents')
+    screen = agents.frameLocator('iframe')
+    await expect(box(screen)).toBeChecked()
+    await box(screen).uncheck()
+    await expect.poll(() => preferencesIn(daemon.env)).toEqual({ ownHarnessOnly: true })
+    await expect(box(screen)).not.toBeChecked()
   } finally {
     await daemon.close()
   }

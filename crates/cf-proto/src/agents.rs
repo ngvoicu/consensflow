@@ -194,6 +194,12 @@ pub struct AgentView {
 pub struct Preferences {
     /// Claude and OpenAI models reached through Pi or OpenCode are hidden.
     pub own_harness_only: bool,
+    /// Every project's chief plans big work as specs, unless the project says
+    /// otherwise (`specs` of a project's own settings). Off unless chosen, and
+    /// said only when on, so a file and an answer that never knew of it read as
+    /// they always did.
+    #[serde(skip_serializing_if = "is_false")]
+    pub specs: bool,
 }
 
 fn is_false(value: &bool) -> bool {
@@ -427,9 +433,10 @@ mod tests {
     }
 
     #[test]
-    fn preferences_write_the_one_choice_the_roster_keeps() {
+    fn preferences_write_the_choices_the_roster_keeps_and_specs_only_when_on() {
         let on = Preferences {
             own_harness_only: true,
+            specs: false,
         };
         assert_eq!(
             serde_json::to_string(&on).unwrap(),
@@ -437,10 +444,19 @@ mod tests {
         );
         let off = Preferences {
             own_harness_only: false,
+            specs: false,
         };
         assert_eq!(
             serde_json::to_string(&off).unwrap(),
             r#"{"ownHarnessOnly":false}"#
+        );
+        let planning = Preferences {
+            own_harness_only: false,
+            specs: true,
+        };
+        assert_eq!(
+            serde_json::to_string(&planning).unwrap(),
+            r#"{"ownHarnessOnly":false,"specs":true}"#
         );
     }
 }

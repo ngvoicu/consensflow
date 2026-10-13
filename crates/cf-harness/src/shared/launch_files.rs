@@ -16,12 +16,17 @@ use cf_proto::agents::Harness;
 use crate::contract::LaunchId;
 use crate::shared::record::find::entries;
 
+/// The folder Codex keeps a launch's files in: only the Specmint skill of a
+/// chief given specs ([`super::specmint`]), which it reads by its path.
+pub(crate) const CODEX_FOLDER: &str = "codex";
+
 /// The harness folders a launch's files are in, in the order Node goes through
-/// them: a removal that fails stops there, leaving the folders after it.
-const FOLDERS: [&str; 4] = ["claude", "pi", "devin", "opencode"];
+/// them: a removal that fails stops there, leaving the folders after it. Codex's,
+/// which Node had no files for, comes last.
+const FOLDERS: [&str; 5] = ["claude", "pi", "devin", "opencode", CODEX_FOLDER];
 
 /// The folder under `integrations` a harness keeps its launches' files in:
-/// Codex is given what it runs with and keeps none.
+/// Codex is given what it runs with, and keeps no role there ([`CODEX_FOLDER`]).
 pub(crate) fn harness_folder(harness: Harness) -> Option<&'static str> {
     match harness {
         Harness::Claude => Some("claude"),
@@ -108,6 +113,7 @@ mod tests {
             format!("integrations/claude/{A}"),
             format!("integrations/pi/{A}"),
             format!("integrations/opencode/{A}"),
+            format!("integrations/codex/{A}"),
             format!("integrations/claude/{B}"),
             "integrations/claude/not-a-launch".to_owned(),
             "extensions/pi".to_owned(),
@@ -118,7 +124,7 @@ mod tests {
         forget_launch(&home, &LaunchId::new(A).unwrap()).unwrap();
         // An id that is not a launch id names nothing: no launch is made of it.
         assert!(LaunchId::new("..").is_none());
-        for harness in ["claude", "pi", "opencode"] {
+        for harness in ["claude", "pi", "opencode", "codex"] {
             assert!(
                 !at(&format!("integrations/{harness}/{A}")).exists(),
                 "{harness}"

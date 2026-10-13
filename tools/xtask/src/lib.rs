@@ -29,6 +29,8 @@
 //!   and the matrix of the chief evals, run there over ssh), with `stops`, what
 //!   ends a run early, which it shares with `plants`;
 //! - `scrub_transcript`: the fixtures that are made of a Claude transcript;
+//! - `specmint`: the Specmint skills vendored in `skill/specmint`, refreshed from
+//!   checkouts of their repositories;
 //! - what every command shares: `dispatch` (the command line), `context` (where
 //!   it works) and `process` (the one place a program starts).
 
@@ -50,6 +52,7 @@ pub mod process;
 mod scrub_transcript;
 mod sidecar;
 mod smoke;
+mod specmint;
 mod stops;
 mod suites;
 mod updater_smoke;

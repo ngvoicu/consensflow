@@ -51,7 +51,7 @@ fn every_role_is_given_the_text_node_gave_it_or_refused_as_node_refused_it() {
             .collect();
         let folder = tempfile::tempdir().unwrap();
         let env = environment(&row["card"], folder.path());
-        let answer = role_instructions(&env, role, &staff, row["cf"].as_str());
+        let answer = role_instructions(&env, role, &staff, row["cf"].as_str(), None);
         let what = format!(
             "the {role}'s text for {} (cf {}, card {})",
             row["staff"], row["cf"], row["card"]

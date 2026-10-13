@@ -51,14 +51,15 @@ use cf_base::js;
 use cf_base::text::window_text;
 use cf_proto::agents::Harness;
 use cf_proto::panes::Servers;
+use cf_proto::specs::Variant;
 use serde_json::Value;
 
-use super::install;
 use super::status::{self, State, Status};
 use super::stopped::{self, Pressed};
+use super::{install, paths};
 use crate::contract::{
-    Adapter, Admission, Held, Launch, Observed, Pane, PaneHost, Prepared, Readiness, Records,
-    Waiting, Window, Work,
+    Adapter, Admission, Held, Launch, LaunchId, Observed, Pane, PaneHost, Prepared, Readiness,
+    Records, Skill, Waiting, Window, Work,
 };
 use crate::detect::executable;
 use crate::records::{Options, Reading, Settlement};
@@ -66,7 +67,7 @@ use crate::seams::{self, Entropy, Services, Time};
 use crate::shared::admission::admission;
 use crate::shared::left_open::LeftOpen;
 use crate::shared::record_state::switched_to;
-use crate::shared::{pane, window_args};
+use crate::shared::{pane, specmint, window_args};
 
 /// Claude Code, as the engine launches its windows.
 pub struct ClaudeAdapter {
@@ -182,6 +183,16 @@ impl Adapter for ClaudeAdapter {
         } else {
             Servers::InGroup
         }
+    }
+
+    fn specmint(&self, variant: Variant, launch: &LaunchId) -> Result<Skill, String> {
+        specmint::place(
+            Harness::Claude,
+            &self.env,
+            launch,
+            variant,
+            paths::global_specmint(&self.env, variant),
+        )
     }
 }
 

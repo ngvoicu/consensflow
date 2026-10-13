@@ -59,8 +59,10 @@
 //! drawing an image, `live_approval` real harnesses in every seat of five
 //! projects sending what the human approves, behind the approval gate, and
 //! `live_mcp` a real Claude Code worker that has an MCP server finishing its
-//! task, and `live_finish` a real worker of any harness running a shell
-//! command and finishing its task with nothing held back). Run them with `cargo xtask test clis`, `daemons`, `integration`,
+//! task, `live_finish` a real worker of any harness running a shell
+//! command and finishing its task with nothing held back, and `live_specs` a
+//! real chief of each harness told of specs where its project has them on,
+//! planning one and carrying it to the board). Run them with `cargo xtask test clis`, `daemons`, `integration`,
 //! `regressions`, `agents` and `load`, and `cargo xtask smoke` (the `npm run`
 //! names are the same), a live one with `cargo xtask live <name>`, or one with
 //! `cargo test -p cf-e2e --test cli`.

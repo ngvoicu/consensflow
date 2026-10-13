@@ -16,19 +16,20 @@ use std::time::Duration;
 use cf_base::text::window_text;
 use cf_proto::agents::Harness;
 use cf_proto::panes::Servers;
+use cf_proto::specs::Variant;
 
 use super::channel::{send, Channel, Session, Shown, Target};
-use super::{launch, role};
+use super::{launch, paths, role};
 use crate::contract::{
-    Adapter, Admission, Agent, Held, Launch, Observed, Pane, PaneHost, Prepared, Readiness,
-    Records, Window, Work,
+    Adapter, Admission, Agent, Held, Launch, LaunchId, Observed, Pane, PaneHost, Prepared,
+    Readiness, Records, Skill, Window, Work,
 };
 use crate::detect::executable;
 use crate::records::Options;
 use crate::seams::{Loopback, Services, Time};
 use crate::shared::admission::admission;
 use crate::shared::record_state::{record_state, switched_to, unnamed};
-use crate::shared::window_args;
+use crate::shared::{specmint, window_args};
 
 /// Codex's question tool (`request_user_input`) is behind a feature still
 /// marked under development; the broker answers a member's from the board.
@@ -97,6 +98,10 @@ impl Adapter for CodexAdapter {
                 launch.instructions,
             )
             .await?;
+            // A chief given specs reads its Specmint skill by the path its role
+            // text names: where Codex has none of its own, ConsensFlow's is
+            // written for it, beside nothing else of Codex's.
+            specmint::write_own(Harness::Codex, &services.env, launch)?;
             // An image agent's window is Codex on its own default model, whose
             // image tool draws: it names no model or effort of its own.
             let agent = match launch.agent {
@@ -152,6 +157,17 @@ impl Adapter for CodexAdapter {
         } else {
             Servers::AtLaunch
         }
+    }
+
+    fn specmint(&self, variant: Variant, launch: &LaunchId) -> Result<Skill, String> {
+        let env = &self.services.env;
+        specmint::place(
+            Harness::Codex,
+            env,
+            launch,
+            variant,
+            paths::global_specmint(env, variant),
+        )
     }
 }
 

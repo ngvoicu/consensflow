@@ -19,6 +19,21 @@ pub(crate) fn home(env: &Env) -> Result<String, String> {
         .ok_or_else(|| "missing home in env".to_owned())
 }
 
+/// The folder the agents' common standard keeps a user's skills in,
+/// `.agents/skills` in the home: Codex, OpenCode, Pi and Devin read it too.
+pub(crate) fn agents_skills(env: &Env) -> Result<String, String> {
+    Ok(path::join(&[&home(env)?, ".agents", "skills"]))
+}
+
+/// Where the XDG places keep configuration: `XDG_CONFIG_HOME`, an empty one
+/// too, as `??` kept it, else `.config` in the home.
+pub(crate) fn config_home(env: &Env) -> Result<String, String> {
+    match env.os("XDG_CONFIG_HOME") {
+        Some(config) => Ok(config.to_string_lossy().into_owned()),
+        None => Ok(path::join(&[&home(env)?, ".config"])),
+    }
+}
+
 /// Where the XDG places keep data: `XDG_DATA_HOME`, an empty one too, as
 /// `??` kept it, else `.local/share` in the home.
 pub(crate) fn data_home(env: &Env) -> Result<String, String> {

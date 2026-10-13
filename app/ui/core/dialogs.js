@@ -1,5 +1,6 @@
 import { button, element, redraw } from '../dom.js'
 import { isMember } from './board.js'
+import { SpecsGroup } from './specs.js'
 
 /**
  * The dialogs that say who works on a project: New project (its folder, the
@@ -397,6 +398,8 @@ export class StaffDialog {
   #gate
   #hint
   #page
+  /** What the project says of specs: its own group of the dialog. */
+  #specs
   /** The member whose removal waits for the human's yes, kept across redraws. */
   #removing = null
 
@@ -412,6 +415,7 @@ export class StaffDialog {
     this.#gate = dialog.querySelector('#staff-gate')
     this.#hint = dialog.querySelector('#staff-hint')
     this.#page = page
+    this.#specs = new SpecsGroup(dialog.querySelector('#staff-specs'), page)
     // The dialog's staff is the shown board's, and so is what it changes.
     this.#gate.addEventListener('change', () =>
       page.act(async () => {
@@ -457,6 +461,7 @@ export class StaffDialog {
   open() {
     this.#removing = null
     this.#draw()
+    this.#specs.draw(this.#page.board()?.project, true)
     this.#dialog.showModal()
   }
 
@@ -483,6 +488,7 @@ export class StaffDialog {
     if (rows.length === 0) rows.push(nobodyRow('Nobody yet: add the agents this project may use.'))
     redraw(this.#members, rows)
     this.#gate.checked = this.#page.board()?.project.gate ?? false
+    this.#specs.draw(this.#page.board()?.project)
     rolePicker(
       this.#page.agents,
       this.#form.elements.role,

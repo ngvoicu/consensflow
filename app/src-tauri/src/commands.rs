@@ -227,6 +227,7 @@ const DAEMON_OPERATIONS: &[&str] = &[
     "message.decline",
     "agents.list",
     "staff.last",
+    "project.specs",
 ];
 
 #[tauri::command]

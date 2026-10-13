@@ -21,10 +21,12 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use cf_harness::contract::{
-    Adapter, Admission, Interrupt, Launch, Prepared, Readiness, Waiting, Window, Work,
+    Adapter, Admission, Interrupt, Launch, LaunchId, Prepared, Readiness, Skill, Waiting, Window,
+    Work,
 };
 use cf_harness::records::{Item, Quota, Role};
 use cf_proto::panes::Servers;
+use cf_proto::specs::Variant;
 use serde_json::{json, Value};
 
 use super::holds::{Holds, Wrapped};
@@ -144,6 +146,13 @@ pub struct FakeAdapter {
     pub ready_holds: Holds,
     /// Deliveries the test holds.
     pub deliver_holds: Holds,
+    /// Where its harness has the Specmint variant installed, when the test says
+    /// it has: the `SKILL.md` it answers. Without, the copy ConsensFlow would
+    /// write beside the role.
+    pub specmint_installed: RefCell<Option<String>>,
+    /// The variants it was asked where its harness has them, with the launch
+    /// each was asked for, in order: a launch that is given no specs asks none.
+    pub specmint_asked: RefCell<Vec<(Variant, String)>>,
 }
 
 impl FakeAdapter {
@@ -179,6 +188,8 @@ impl FakeAdapter {
             start_holds: Holds::default(),
             ready_holds: Holds::default(),
             deliver_holds: Holds::default(),
+            specmint_installed: RefCell::new(None),
+            specmint_asked: RefCell::new(Vec::new()),
         })
     }
 
@@ -493,7 +504,7 @@ impl Asked {
 impl Adapter for Asked {
     fn prepare<'a>(&'a self, launch: &'a Launch<'a>) -> Work<'a, Result<Prepared, String>> {
         let seam = format!("adapter:{}", self.harness);
-        let asked = json!({
+        let mut asked = json!({
             "launchId": launch.id.as_str(),
             "participant": { "handle": launch.handle },
             "role": launch.role,
@@ -509,6 +520,14 @@ impl Adapter for Asked {
             })),
             "instructions": launch.instructions,
         });
+        // Said only where specs were given, which no trace of Node's has.
+        if let Some(specs) = launch.specs {
+            asked["specs"] = json!({
+                "variant": specs.variant.as_str(),
+                "skill": specs.skill.path(),
+                "installed": matches!(specs.skill, Skill::Global(_)),
+            });
+        }
         let args = json!([asked.clone()]);
         let at = self
             .fake
@@ -541,5 +560,23 @@ impl Adapter for Asked {
 
     fn servers(&self) -> Servers {
         self.fake.servers.get()
+    }
+
+    /// Not a call of Node's adapter: nothing is written down of it in the
+    /// traces. What the fake says is where the test says its harness has the
+    /// variant installed, else the copy ConsensFlow would write beside the role.
+    fn specmint(&self, variant: Variant, launch: &LaunchId) -> Result<Skill, String> {
+        self.fake
+            .specmint_asked
+            .borrow_mut()
+            .push((variant, launch.as_str().to_owned()));
+        Ok(match self.fake.specmint_installed.borrow().clone() {
+            Some(file) => Skill::Global(file),
+            None => Skill::Own(format!(
+                "/consensflow/integrations/fake/{}/role/.claude/skills/{}/SKILL.md",
+                launch.as_str(),
+                variant.skill_name()
+            )),
+        })
     }
 }

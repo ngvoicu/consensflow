@@ -35,6 +35,7 @@ use std::sync::Arc;
 use cf_base::env::Env;
 use cf_base::text::window_text;
 use cf_proto::agents::Harness;
+use cf_proto::specs::Variant;
 use serde_json::Value;
 
 use super::channel::{
@@ -43,18 +44,19 @@ use super::channel::{
 };
 use super::child_env::{child_env, Declared};
 use super::install::prepare_extension;
+use super::paths;
 use super::quota::retry_quota;
 use super::role::configure;
 use crate::contract::{
-    Adapter, Admission, Held, Launch, Observed, Pane, PaneHost, Prepared, Readiness, Records,
-    Window, Work,
+    Adapter, Admission, Held, Launch, LaunchId, Observed, Pane, PaneHost, Prepared, Readiness,
+    Records, Skill, Window, Work,
 };
 use crate::detect::executable;
 use crate::records::Options;
 use crate::seams::{Entropy, Loopback, Ports, Processes, Services, Time};
 use crate::shared::admission::admission;
 use crate::shared::record_state::{dialog_waiting, record_state, switched_to, unnamed};
-use crate::shared::window_args;
+use crate::shared::{specmint, window_args};
 
 /// Why a window whose plugin does not answer waits.
 const STARTING: &str = "the OpenCode window is starting: its plugin does not answer yet";
@@ -103,6 +105,10 @@ impl Adapter for OpenCodeAdapter {
             let executable = executable(Harness::Opencode, &self.env)?;
             let settings = prepare_extension(&self.env).into_config()?;
             let role = configure(&self.env, launch.id, launch.role, launch.instructions)?;
+            // A chief given specs has ConsensFlow's own copy of its Specmint
+            // skill written where the role's is: the folder `configure` told
+            // OpenCode to read its skills from, so nothing more is told of it.
+            specmint::write_own(Harness::Opencode, &self.env, launch)?;
             let launched = launch_configuration(
                 &self.env,
                 &*self.ports,
@@ -174,6 +180,16 @@ impl Adapter for OpenCodeAdapter {
                 }),
             })
         })
+    }
+
+    fn specmint(&self, variant: Variant, launch: &LaunchId) -> Result<Skill, String> {
+        specmint::place(
+            Harness::Opencode,
+            &self.env,
+            launch,
+            variant,
+            paths::global_specmint(&self.env, variant),
+        )
     }
 }
 

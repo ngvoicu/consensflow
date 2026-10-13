@@ -57,6 +57,7 @@ mod servers;
 mod session_windows;
 mod sessions;
 mod several_roles;
+mod specs;
 mod stops;
 mod switched_conversation;
 mod switching;

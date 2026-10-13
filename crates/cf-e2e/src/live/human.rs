@@ -2,17 +2,19 @@
 //! board and the buttons ask of the daemon) and the keys typed into the
 //! chief's window, which the pane host takes as it takes the app's. The human
 //! never types into a staff window, and never plays the chief with its token:
-//! the chief is a real harness that runs `cf` itself.
+//! the chief is a real harness that runs `cf` itself. The approval suite and
+//! the specs suite both play the human so.
 
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
-use cf_e2e::live::trace::Trace;
-use cf_e2e::live::tree;
-use cf_e2e::live::{cut, text, wait, Log};
-use cf_e2e::rig::{Project, Rig};
-use cf_e2e::{Error, Result};
 use serde_json::{json, Value};
+
+use super::trace::Trace;
+use super::tree;
+use super::{cut, text, wait, Log};
+use crate::rig::{Project, Rig};
+use crate::{Error, Result};
 
 /// How long a chief has to read idle: its window is started with the project,
 /// on a harness that may take its time to come up.

@@ -77,17 +77,50 @@ fn the_chief_is_given_its_staff_and_every_role_the_cf_of_its_window() {
     let scene = scene();
     let texts = RoleTexts::new(Env::default(), "/bundle/bin/cf".to_owned());
     let chief = texts
-        .instructions(participant(&scene.project, "chief"), &scene.project)
+        .instructions(participant(&scene.project, "chief"), &scene.project, None)
         .unwrap();
     assert!(
         chief.contains("| zeus | worker | Standard work |"),
         "{chief}"
     );
     assert!(chief.contains("Here `cf` is /bundle/bin/cf."), "{chief}");
+    assert!(!chief.contains("specs"), "specs off: told nothing of them");
     let worker = texts
-        .instructions(participant(&scene.project, "zeus"), &scene.project)
+        .instructions(participant(&scene.project, "zeus"), &scene.project, None)
         .unwrap();
     assert!(worker.contains("Here `cf` is /bundle/bin/cf."), "{worker}");
+}
+
+#[test]
+fn a_chief_given_specs_is_given_the_section_of_them_and_a_member_given_them_is_not() {
+    let scene = scene();
+    let texts = RoleTexts::new(Env::default(), "/bundle/bin/cf".to_owned());
+    let specs = ProjectSpecs {
+        variant: cf_proto::specs::Variant::CoreHtml,
+        folder: "plans",
+        skill: "/skills/specmint-core-html/SKILL.md",
+    };
+    let chief = texts
+        .instructions(
+            participant(&scene.project, "chief"),
+            &scene.project,
+            Some(&specs),
+        )
+        .unwrap();
+    assert!(chief.contains("## This project's specs"), "{chief}");
+    assert!(
+        chief.contains("/skills/specmint-core-html/SKILL.md"),
+        "{chief}"
+    );
+    assert!(chief.contains("`plans`"), "{chief}");
+    let worker = texts
+        .instructions(
+            participant(&scene.project, "zeus"),
+            &scene.project,
+            Some(&specs),
+        )
+        .unwrap();
+    assert!(!worker.contains("specs"), "{worker}");
 }
 
 #[test]
@@ -96,7 +129,9 @@ fn a_role_that_has_no_text_fails_its_launch_in_the_words_of_why() {
     let texts = RoleTexts::new(Env::default(), "/bundle/bin/cf".to_owned());
     let mut human = participant(&scene.project, "zeus").clone();
     human.role = "human".to_owned();
-    let failed = texts.instructions(&human, &scene.project).unwrap_err();
+    let failed = texts
+        .instructions(&human, &scene.project, None)
+        .unwrap_err();
     assert_eq!(failed, "no role instructions for human");
 }
 

@@ -4,10 +4,13 @@
 //! `skill/core/staff.md` with the role's own parts, so a rule all members keep
 //! is written once.
 //!
-//! Both files are in the program, where Node read them at each launch.
+//! Both files are in the program, where Node read them at each launch. A chief
+//! whose project has specs on has a section more ([`ProjectSpecs`]); no other
+//! text has one.
 
 mod member;
 mod skill;
+mod specs;
 
 use std::path::PathBuf;
 
@@ -17,6 +20,7 @@ use cf_catalog::{WorkTier, WORK_TIERS};
 use cf_proto::ledger::ProjectView;
 
 pub use skill::{team_table, work_tier_list};
+pub use specs::ProjectSpecs;
 
 /// `skill/core/chief.md`.
 const CHIEF: &str = include_str!("../../../skill/core/chief.md");
@@ -77,6 +81,10 @@ pub fn staff_of(project: &ProjectView) -> Vec<StaffRow> {
 /// Devin worker's `cf` was the live app's older one, 2026-09-26), and the full
 /// path always works. Without it the text says nothing of the kind.
 ///
+/// A chief whose project has specs on is given `specs`, and its text has the
+/// section of them before the one of its `cf`; a member's never does, whatever
+/// is given, and a chief given none reads what it always did.
+///
 /// Kept from Node: the chief's text is `chief.md` with the staff table put in
 /// where JavaScript's `replace` would also read `$&` and the like in it. A
 /// member's name is an agent id, and holds none.
@@ -85,6 +93,7 @@ pub fn role_instructions(
     role: &str,
     staff: &[StaffRow],
     cf: Option<&str>,
+    specs: Option<&ProjectSpecs<'_>>,
 ) -> Result<String, RoleError> {
     if role != "chief" && !MEMBERS.contains(&role) {
         return Err(RoleError::Unknown(role.to_owned()));
@@ -107,7 +116,8 @@ pub fn role_instructions(
         &team_table(staff)?,
         1,
     );
-    Ok(chief + &here)
+    let specs = specs.map_or_else(String::new, ProjectSpecs::section);
+    Ok(chief + &specs + &here)
 }
 
 /// The work tier a ledger's word names.

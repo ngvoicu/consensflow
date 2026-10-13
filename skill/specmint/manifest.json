@@ -1,0 +1,58 @@
+{
+  "core": {
+    "commit": "c1c89498aa05c2586c82fb94f82d619a8a50e62d",
+    "files": {
+      "LICENSE": "e27ed64c5f68f71a9f2a6c22b7db664c55a343411f3b984e498381c65c8710b2",
+      "SKILL.md": "db5cd1e966033a5d9b9efb442d9d99cf0555f1cd32ab997cc5d31957a105dd17",
+      "references/command-contracts.md": "7443fa8abaf10b7e9e84915577201e77358a2e42bb59267894ba46b2740cddf3",
+      "references/researcher.md": "9b7ae4f40c8bccaec335bf3a85e4024035658a04396fb209b7994451998bfd61",
+      "references/spec-format.md": "2aa606d871353576f8e46761f4fb2d4ad2cb22947f871af913c2faec5c6e17bf"
+    }
+  },
+  "core-html": {
+    "commit": "e1762ab5918c8e4558ea9f8ecc1a04b779c2f423",
+    "files": {
+      "LICENSE": "e27ed64c5f68f71a9f2a6c22b7db664c55a343411f3b984e498381c65c8710b2",
+      "SKILL.md": "bfccbe0a8a43ceafb064adb2206a76d81327888b93c729e7ac86aa22a6d3f616",
+      "assets/spec-runtime.js": "c350df269cfca0ea95660a59e195d3ccb16487acd5937527ae111b20e5b9c07c",
+      "assets/spec-styles.css": "3701bf72392b069a7185abc141bec7bf9624424b6921b42635cfdc34886f4af0",
+      "references/command-contracts.md": "d9ffd4b61ad59dd72babbac26e6b1ad649753a29dae4718520e31512714f0c5c",
+      "references/edit-recipes.md": "ab402cc46ea6612c014b65013e8113b389383f01550e4f6bb1ef573376838b11",
+      "references/html-template.html": "a778e52f65f9cc44b1adcbc11430c49ee97e8a1f05405cc79c7530fc0c7b8297",
+      "references/mockup-library.md": "4545108162912f37e8f67f034a4f09a0582f032075b5be8d76670b4d86c32f62",
+      "references/researcher.md": "ff3a642182ffe1e6401f588b7560b45a324571a7df5e4d6b60f484c1c3e691ea",
+      "references/spec-format.md": "83d817cc16c2adaac9122ddefb2cffa1a47b6a23f345a121a520720975a41a55",
+      "references/validate.md": "a8c9ee97a2024012fc39875f9fc8dc063df5b157bbfb5b44f3dcde3519b52a86",
+      "references/wireframe-library.md": "499a95f19322e246f9b488c472b72c97b1dbe9f06e26d5e454694f4946740660"
+    }
+  },
+  "tdd": {
+    "commit": "0fede124cd62f141a19aed73de0b073a71836e7e",
+    "files": {
+      "LICENSE": "e27ed64c5f68f71a9f2a6c22b7db664c55a343411f3b984e498381c65c8710b2",
+      "SKILL.md": "de6d9d280c701d7483572915a974458d6a2f1514e3b84bcdac85ccfc97888f74",
+      "references/command-contracts.md": "cf72ce3f634a2480705253f3cf9b3d0e10b31df4c3b19ad87e30f4d8bf767261",
+      "references/researcher.md": "1b4c9743bd859ac6b5c8db511c63965ff36bfff1df4f76fb3f2daca97710451b",
+      "references/spec-format.md": "bd4bdb662c6b06e384c65b3425ba8e3837bbf96bf33b304c6fd2ff4cc71082a7",
+      "references/testing-knowledge.md": "c38bf591c6b86265caa6c7fa2bba28fded3cfb2d928dc1179d591312efec3b86"
+    }
+  },
+  "tdd-html": {
+    "commit": "c2eb970900e853f96f0443891f76883417eae3f3",
+    "files": {
+      "LICENSE": "e27ed64c5f68f71a9f2a6c22b7db664c55a343411f3b984e498381c65c8710b2",
+      "SKILL.md": "97367de770fba8a9ebfcaa3b6e7f16ed3bc32dac1171c221ecd25e4f7b36f12b",
+      "assets/spec-runtime.js": "c350df269cfca0ea95660a59e195d3ccb16487acd5937527ae111b20e5b9c07c",
+      "assets/spec-styles.css": "3701bf72392b069a7185abc141bec7bf9624424b6921b42635cfdc34886f4af0",
+      "references/command-contracts.md": "f86a371ae78e08f8f636678e8bc47511527900e8623324b7097a44c278670f94",
+      "references/edit-recipes.md": "01c115f80402b446f8f1bd9a98ed6b2b5c91a4e62b411717a4c88d523e00b078",
+      "references/html-template.html": "379062e4ca0774c89ebfa41687532ce46f6dabfedf9e3b754cc2e8836b70511f",
+      "references/mockup-library.md": "4545108162912f37e8f67f034a4f09a0582f032075b5be8d76670b4d86c32f62",
+      "references/researcher.md": "bf8178827144191620bd40493727da12fc843b32327efec263ac40db569ad732",
+      "references/spec-format.md": "9c10d03df4ce29841346a84f8628d9c2fa3c2e561c885d758c3575535f95fa96",
+      "references/testing-knowledge.md": "8d41c3844f0cbc925f427d8e746cd8b66ab9f50076d5a92e1776475bc5da1078",
+      "references/validate.md": "e4860db8b2d60f14a3924ec21bbf65895b1fff118b52234fada9baf524787015",
+      "references/wireframe-library.md": "499a95f19322e246f9b488c472b72c97b1dbe9f06e26d5e454694f4946740660"
+    }
+  }
+}

@@ -10,7 +10,9 @@
 //! that conversation resumed. The extension's part in a window is the
 //! test's: it reads each record from the inbox and writes its verdict.
 //! Where Node's test stood in the records of a conversation, a stand-in
-//! `Records` does here.
+//! `Records` does here. The Specmint skill a chief is given is `specs`'s.
+
+mod specs;
 
 use std::cell::RefCell;
 use std::fs;
@@ -21,7 +23,8 @@ use std::sync::Arc;
 use cf_base::env::Env;
 use cf_base::path;
 use cf_harness::contract::{
-    Adapter, Admission, Agent, Held, Launch, LaunchId, Pane, Prepared, Readiness, Records, Work,
+    Adapter, Admission, Agent, Held, Launch, LaunchId, Pane, Prepared, Readiness, Records, Specs,
+    Work,
 };
 use cf_harness::pi::{prepare_extension, Extension, PiAdapter};
 use cf_harness::records::{Item, Options, PiSettlement, Quota, Reading, Record, Role, Settlement};
@@ -30,6 +33,7 @@ use cf_harness::testing::{
     fake_executable, finished, AnsweringHost, Driver, Fakes, FIRST_MESSAGE_MS,
 };
 use cf_proto::agents::Harness;
+use cf_proto::specs::Variant;
 use serde_json::{json, Value};
 use tempfile::TempDir;
 
@@ -108,6 +112,8 @@ struct Request {
     message: Option<String>,
     instructions: String,
     role: &'static str,
+    /// The Specmint variant a chief is given, where its project has specs on.
+    specs: Option<Variant>,
 }
 
 impl Default for Request {
@@ -117,12 +123,16 @@ impl Default for Request {
             message: Some(TASK.to_owned()),
             instructions: ROLE.to_owned(),
             role: "worker",
+            specs: None,
         }
     }
 }
 
 fn prepare(adapter: &PiAdapter, request: &Request) -> Result<Prepared, String> {
     let id = LaunchId::new(LAUNCH).unwrap();
+    let skill = request
+        .specs
+        .map(|variant| adapter.specmint(variant, &id).unwrap());
     let launch = Launch {
         id: &id,
         project: 1,
@@ -138,6 +148,10 @@ fn prepare(adapter: &PiAdapter, request: &Request) -> Result<Prepared, String> {
             designer: false,
         }),
         instructions: &request.instructions,
+        specs: request
+            .specs
+            .zip(skill.as_ref())
+            .map(|(variant, skill)| Specs { variant, skill }),
         first_message_ms: FIRST_MESSAGE_MS,
     };
     finished(adapter.prepare(&launch))

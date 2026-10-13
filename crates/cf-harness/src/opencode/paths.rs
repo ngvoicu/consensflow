@@ -2,8 +2,10 @@
 
 use cf_base::env::Env;
 use cf_base::path;
+use cf_proto::specs::Variant;
 
-use crate::shared::paths::{data_home, set};
+use crate::shared::paths::{agents_skills, config_home, data_home, home, set};
+use crate::shared::specmint;
 
 /// Where OpenCode's store may be, likeliest first: `OPENCODE_DB`, or
 /// `opencode.db` in `OPENCODE_DATA`, when set (OpenCode honours both
@@ -27,9 +29,61 @@ pub(crate) fn stores(env: &Env) -> Result<Vec<String>, String> {
     Ok(std::iter::once(xdg).chain(windows).collect())
 }
 
+/// The `SKILL.md` of the Specmint variant the human installed for OpenCode, in
+/// the places it reads the skills of the user's: `skills` and `skill` in its
+/// own folder of the XDG config (`.config/opencode`), then the standards it
+/// shares with Claude Code and the agents (`.claude/skills`, `.agents/skills`
+/// in the home). None where it is in none of them.
+pub(crate) fn global_specmint(env: &Env, variant: Variant) -> Option<String> {
+    let mut roots = Vec::new();
+    if let Ok(config) = config_home(env) {
+        roots.extend(["skills", "skill"].map(|folder| path::join(&[&config, "opencode", folder])));
+    }
+    if let Ok(home) = home(env) {
+        roots.push(path::join(&[&home, ".claude", "skills"]));
+    }
+    roots.extend(agents_skills(env).ok());
+    specmint::installed(&roots, variant)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_specmint_variant_the_human_installed_is_found_in_the_places_opencode_reads_in_its_order_and_nowhere_else(
+    ) {
+        use crate::shared::specmint::testing::is_held_to;
+        is_held_to(
+            &|env, variant| global_specmint(env, variant),
+            &[],
+            &[
+                ".config/opencode/skills",
+                ".config/opencode/skill",
+                ".claude/skills",
+                ".agents/skills",
+            ],
+            &[
+                ".codex/skills",
+                ".pi/agent/skills",
+                ".config/devin/skills",
+                ".config/opencode/plugins",
+                ".local/share/opencode/skills",
+            ],
+        );
+        // `XDG_CONFIG_HOME` moves OpenCode's own folder only.
+        is_held_to(
+            &|env, variant| global_specmint(env, variant),
+            &[("XDG_CONFIG_HOME", "xdg")],
+            &[
+                "xdg/opencode/skills",
+                "xdg/opencode/skill",
+                ".claude/skills",
+                ".agents/skills",
+            ],
+            &[".config/opencode/skills", ".config/opencode/skill"],
+        );
+    }
 
     fn stores_of(vars: &[(&str, &str)]) -> Result<Vec<String>, String> {
         stores(&Env::from_vars(vars.iter().copied()))

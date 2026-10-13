@@ -24,7 +24,7 @@ the folder) were written from the recording, and the recording is fixed.
 |---|---|---|
 | `<suite>-<NNN>.json.gz` | one trace per test that reached a surface, numbered from 001 in the order the suite's tests ran | the players |
 | `pages/agents.html`, `pages/harnesses.html` | the two pages the screens serve, `$TOKEN` and `$VERSION` where the token and the version go | screens |
-| `operations.json` | the 28 page operations in the order the page offers them, and the reply to `ping` | page |
+| `operations.json` | the 29 page operations in the order the page offers them, and the reply to `ping` | page |
 | `daemon.json` | the handle line the daemon prints, and the lines it logs when it starts and stops | the skeleton |
 | `files.json` | the formats of the daemon's log and trace lines, each case once as Node writes it with its clock fixed at 2026-10-05T10:00:00.123Z, their rotation past a limit, and what `forget` leaves of a trace | `crates/cf-daemon/tests/files.rs` |
 
@@ -788,7 +788,8 @@ The handle line is the first line the daemon prints for the app: JSON, key order
     "tasks.delete",
     "message.read",
     "message.approve",
-    "message.decline"
+    "message.decline",
+    "project.specs"
   ],
   "ping": "{\"ok\":true}"
 }

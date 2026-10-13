@@ -29,6 +29,9 @@
 //! - [`held`] and [`tree`] say what a worker's task is held back for: what the
 //!   board says of its window ([`held`]), and the processes its window's tree
 //!   started in the turn, as the pane host lists them ([`tree`]).
+//! - [`human`] plays the human at a project whose chief is a real harness (the
+//!   page's calls, and the keys typed into the chief's window), and [`cleanup`]
+//!   has the harnesses forget what they kept of a run's folder.
 //! - [`report`] says what each check of a run came to, and ends the run with
 //!   them ([`report::conclude`]).
 //!
@@ -44,8 +47,10 @@
 pub mod agents;
 pub mod ask;
 pub mod claude;
+pub mod cleanup;
 pub mod codex;
 pub mod held;
+pub mod human;
 pub mod machine;
 pub mod members;
 pub mod report;

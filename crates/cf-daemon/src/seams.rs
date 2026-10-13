@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use std::rc::Rc;
 
 use cf_base::env::Env;
-use cf_engine::roles::{role_instructions, staff_of};
+use cf_engine::roles::{role_instructions, staff_of, ProjectSpecs};
 use cf_engine::runtime::{Executor, LocalWork, Spawn};
 use cf_engine::seams::{Adapters, LaunchFiles, LaunchIds, PaneEnv, Roles};
 use cf_harness::contract::{Adapter, LaunchId};
@@ -85,12 +85,14 @@ impl Roles for RoleTexts {
         &self,
         participant: &ParticipantView,
         project: &ProjectView,
+        specs: Option<&ProjectSpecs<'_>>,
     ) -> Result<String, String> {
         role_instructions(
             &self.env,
             &participant.role,
             &staff_of(project),
             Some(&self.pane_cf),
+            specs,
         )
         .map_err(|failed| failed.to_string())
     }

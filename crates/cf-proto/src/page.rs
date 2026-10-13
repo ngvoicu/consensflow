@@ -1,15 +1,15 @@
 //! What the board page asks of the daemon, and what the daemon says first.
 //!
-//! The page names an operation and its body; the app forwards the 28 names
+//! The page names an operation and its body; the app forwards the 29 names
 //! below and nothing else (`DAEMON_OPERATIONS` in `commands.rs`), and the
 //! daemon answers each over the bridge. The daemon's first line on its standard
 //! output is the [`HandleLine`] the app reads to find it.
 
 use serde::{Deserialize, Serialize};
 
-/// One of the page's operations, in the order Node's page listed them. `ping`,
-/// which the daemon also answers, is no operation of the page's: the app's
-/// check that the bridge is up.
+/// One of the page's operations, in the order Node's page listed them, and
+/// after them the ones this build added. `ping`, which the daemon also answers,
+/// is no operation of the page's: the app's check that the bridge is up.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PageOperation {
     ProjectsList,
@@ -40,11 +40,15 @@ pub enum PageOperation {
     MessageRead,
     MessageApprove,
     MessageDecline,
+    /// What a project says of specs: whether they are on, the folder and the
+    /// Specmint variant its chief plans with.
+    ProjectSpecs,
 }
 
 impl PageOperation {
-    /// Every operation, in the order Node's page listed them.
-    pub const ALL: [PageOperation; 28] = [
+    /// Every operation, in the order Node's page listed them, then those this
+    /// build added.
+    pub const ALL: [PageOperation; 29] = [
         Self::ProjectsList,
         Self::ProjectOpen,
         Self::ProjectResume,
@@ -73,6 +77,7 @@ impl PageOperation {
         Self::MessageRead,
         Self::MessageApprove,
         Self::MessageDecline,
+        Self::ProjectSpecs,
     ];
 
     /// The name the page, the app and the bridge say it by (`project.open`).
@@ -106,6 +111,7 @@ impl PageOperation {
             Self::MessageRead => "message.read",
             Self::MessageApprove => "message.approve",
             Self::MessageDecline => "message.decline",
+            Self::ProjectSpecs => "project.specs",
         }
     }
 
@@ -149,7 +155,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_operations_are_the_twenty_eight_the_app_forwards() {
+    fn the_operations_are_the_twenty_nine_the_app_forwards() {
         let source = include_str!("../../../app/src-tauri/src/commands.rs");
         let list = source
             .split("const DAEMON_OPERATIONS: &[&str] = &[")
@@ -158,7 +164,7 @@ mod tests {
             .unwrap();
         let mut forwarded: Vec<&str> = list.split('"').skip(1).step_by(2).collect();
         let mut named: Vec<&str> = PageOperation::ALL.map(PageOperation::as_str).to_vec();
-        assert_eq!(named.len(), 28);
+        assert_eq!(named.len(), 29);
         forwarded.sort_unstable();
         named.sort_unstable();
         assert_eq!(named, forwarded);
@@ -179,9 +185,10 @@ mod tests {
 
     /// The order Node's `pageOperations` listed them in, frozen when Node was
     /// the daemon: the page and the traces name the operations in it. A change
-    /// to the list is a change to this one, made on purpose.
+    /// to the list is a change to this one, made on purpose; what this build
+    /// added follows, in the order it was added.
     #[test]
-    fn the_list_is_the_order_node_listed_them_in_and_holds_each_operation_once() {
+    fn the_list_is_the_order_node_listed_them_in_then_what_was_added_and_holds_each_once() {
         const RECORDED: [&str; 28] = [
             "projects.list",
             "project.open",
@@ -212,8 +219,10 @@ mod tests {
             "message.approve",
             "message.decline",
         ];
+        const ADDED: [&str; 1] = ["project.specs"];
         let listed: Vec<&str> = PageOperation::ALL.map(PageOperation::as_str).to_vec();
-        assert_eq!(listed, RECORDED);
+        assert_eq!(listed[..RECORDED.len()], RECORDED);
+        assert_eq!(listed[RECORDED.len()..], ADDED);
     }
 
     #[test]

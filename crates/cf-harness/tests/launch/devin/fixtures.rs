@@ -11,7 +11,7 @@ use std::sync::Arc;
 use cf_base::env::Env;
 use cf_base::path;
 use cf_harness::contract::{
-    Adapter, Agent, HostError, Launch, LaunchId, Pane, Prepared, Records, Window, Work,
+    Adapter, Agent, HostError, Launch, LaunchId, Pane, Prepared, Records, Specs, Window, Work,
 };
 use cf_harness::devin::DevinAdapter;
 use cf_harness::records::{Item, Options, Reading, Record, Role, Settlement};
@@ -19,6 +19,7 @@ use cf_harness::testing::{
     called, fake_executable, finished, named, AnsweringHost, Fakes, FIRST_MESSAGE_MS,
 };
 use cf_proto::agents::Harness;
+use cf_proto::specs::Variant;
 use serde_json::{json, Value};
 use tempfile::TempDir;
 
@@ -161,6 +162,8 @@ pub(super) struct Request {
     pub(super) message: Option<String>,
     pub(super) agent: Option<Agent<'static>>,
     pub(super) first_message_ms: i64,
+    /// The Specmint variant a chief is given, where its project has specs on.
+    pub(super) specs: Option<Variant>,
 }
 
 impl Default for Request {
@@ -176,6 +179,7 @@ impl Default for Request {
                 ..Agent::default()
             }),
             first_message_ms: FIRST_MESSAGE_MS,
+            specs: None,
         }
     }
 }
@@ -208,6 +212,9 @@ pub(super) fn prepare_as(
     id: &str,
 ) -> Result<Prepared, String> {
     let id = LaunchId::new(id).unwrap();
+    let skill = request
+        .specs
+        .map(|variant| adapter.specmint(variant, &id).unwrap());
     let launch = Launch {
         id: &id,
         project: 1,
@@ -218,6 +225,10 @@ pub(super) fn prepare_as(
         message: request.message.as_deref(),
         agent: request.agent,
         instructions: &request.instructions,
+        specs: request
+            .specs
+            .zip(skill.as_ref())
+            .map(|(variant, skill)| Specs { variant, skill }),
         first_message_ms: request.first_message_ms,
     };
     finished(adapter.prepare(&launch))

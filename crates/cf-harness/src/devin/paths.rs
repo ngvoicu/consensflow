@@ -4,8 +4,10 @@
 
 use cf_base::env::Env;
 use cf_base::path;
+use cf_proto::specs::Variant;
 
-use crate::shared::paths::{data_home, home};
+use crate::shared::paths::{agents_skills, data_home, home};
+use crate::shared::specmint;
 
 /// Devin's store of its sessions: `cli/sessions.db` in its data folder.
 pub(crate) fn store(env: &Env) -> Result<String, String> {
@@ -24,6 +26,20 @@ pub(crate) fn config(env: &Env) -> Result<String, String> {
         path::join(&[&home(env)?, ".config"])
     };
     Ok(path::join(&[&base, "devin"]))
+}
+
+/// The `SKILL.md` of the Specmint variant the human installed for Devin, in the
+/// places it reads the skills of the user's: the `skills` folder of its config
+/// folder, then `.agents/skills` in the home. None where it is in neither.
+pub(crate) fn global_specmint(env: &Env, variant: Variant) -> Option<String> {
+    let mut roots = Vec::new();
+    roots.extend(
+        config(env)
+            .ok()
+            .map(|config| path::join(&[&config, "skills"])),
+    );
+    roots.extend(agents_skills(env).ok());
+    specmint::installed(&roots, variant)
 }
 
 /// Devin's data folder: `devin` in `%APPDATA%` on Windows (`AppData/Roaming`
@@ -51,6 +67,48 @@ fn roaming(env: &Env) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[cfg(unix)]
+    fn the_specmint_variant_the_human_installed_is_found_in_devins_skills_then_the_agents_and_nowhere_else(
+    ) {
+        use crate::shared::specmint::testing::is_held_to;
+        is_held_to(
+            &|env, variant| global_specmint(env, variant),
+            &[],
+            &[".config/devin/skills", ".agents/skills"],
+            &[
+                ".claude/skills",
+                ".codex/skills",
+                ".config/opencode/skills",
+                ".pi/agent/skills",
+                ".local/share/devin/skills",
+                ".config/devin/skill",
+            ],
+        );
+        // `XDG_CONFIG_HOME` moves Devin's own folder, and the agents' stays where it is.
+        is_held_to(
+            &|env, variant| global_specmint(env, variant),
+            &[("XDG_CONFIG_HOME", "xdg")],
+            &["xdg/devin/skills", ".agents/skills"],
+            &[".config/devin/skills"],
+        );
+    }
+
+    #[test]
+    fn on_windows_devins_own_skills_are_in_its_config_folder_under_appdata() {
+        use crate::shared::specmint::testing::Fake;
+        let fake = Fake::new();
+        let found = fake.install(
+            "AppData/Roaming/devin/skills",
+            "specmint-tdd",
+            "specmint-tdd",
+        );
+        let env = Env::from_vars([("OS", "Windows_NT".to_owned()), ("HOME", fake.at(""))]);
+        assert_eq!(global_specmint(&env, Variant::Tdd), Some(found));
+        let none = Env::from_vars([("OS", "Windows_NT")]);
+        assert_eq!(global_specmint(&none, Variant::Tdd), None);
+    }
 
     fn store_of(vars: &[(&str, &str)]) -> Result<String, String> {
         store(&Env::from_vars(vars.iter().copied()))
