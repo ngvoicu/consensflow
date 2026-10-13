@@ -159,14 +159,19 @@ pub fn drive(chief: Harness, mut members: Members, log: &Log) -> Result<Account>
         return Ok(case);
     };
     case.say(format!("the notes: {}", named(&notes)));
-    case.check(
-        "the chief is in a turn when the notes are sent",
-        chief_state(&members)? == "working",
-        format!(
-            "the chief's lane reads {}: a chief at rest is handed them at once, and proves nothing",
-            members.lane("chief")?["activity"]
-        ),
+    // Only a Devin chief has a queue the run is about. A Claude chief may run its
+    // command in the background and be at rest by now, which its run only says: a
+    // note handed to it once is the verdict there (2026-10-14).
+    let busy = chief_state(&members)? == "working";
+    let lane = format!(
+        "the chief's lane reads {}: a chief at rest is handed them at once, and proves nothing",
+        members.lane("chief")?["activity"]
     );
+    if chief == Harness::Devin {
+        case.check("the chief is in a turn when the notes are sent", busy, lane);
+    } else if !busy {
+        case.say(lane);
+    }
 
     // The first command ends by itself, and the notes go in one after the other, each
     // turn on them held open by the command the folder tells the chief to run.
