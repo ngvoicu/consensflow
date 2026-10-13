@@ -23,14 +23,29 @@ use crate::records::{Item, Options, Quota, Reading, Record, Role, Settlement};
 /// What waits, on the engine's one thread.
 pub type Work<'a, T> = Pin<Box<dyn Future<Output = T> + 'a>>;
 
-/// A harness's side of the engine: how its windows are launched, and how
-/// one is interrupted. A conversation's record with no window open is the
-/// engine's own look through [`Records`], the same for every harness.
+/// A harness's side of the engine: how its windows are launched, whether a
+/// conversation of its can be gone on with, and how one is interrupted. A
+/// conversation's record with no window open is the engine's own look through
+/// [`Records`], the same for every harness.
 pub trait Adapter {
     /// Prepares a window on `launch`: writes the files it runs with and
     /// says how it opens, or why it cannot (the launch then fails with that
     /// sentence).
     fn prepare<'a>(&'a self, launch: &'a Launch<'a>) -> Work<'a, Result<Prepared, String>>;
+
+    /// Whether a window can be opened again on its conversation `session`, as
+    /// the harness's own record of it says: yes where it holds the conversation,
+    /// no where it holds nothing a resume could find (Codex writes a thread's
+    /// record at its first turn, and a window resumed on a thread with none ends
+    /// at once, which closes a chief's project), and none where it cannot tell
+    /// (its record cannot be read, or says nothing of whether there is anything
+    /// to go on with). Only no opens the window afresh; the engine goes on with
+    /// the conversation on a yes and on a none, as it did before it asked. So a
+    /// no is for a harness that is sure of it: a conversation wrongly said to be
+    /// empty is left behind.
+    fn resumable<'a>(&'a self, _session: &'a str) -> Work<'a, Option<bool>> {
+        Box::pin(async { None })
+    }
 
     /// The keys that interrupt a turn in this harness's window
     /// (`adapter.interrupt`): Escape once, unless the harness says more.

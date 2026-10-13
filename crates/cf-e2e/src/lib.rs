@@ -54,7 +54,9 @@
 //! question received once at the door of its harness, `live_stops` the stops
 //! the daemon presses, `live_codex_resume` and `live_codex_interrupt` Codex's
 //! thread and its interrupted question, `live_resume_cut` and
-//! `live_restart_cut` a window and a chief that a quit cut, `live_bench` the
+//! `live_restart_cut` a window and a chief that a quit cut, `live_resume_fresh`
+//! a chief closed and resumed, whether it never had a turn or the human's typed
+//! turn was closed on at once, `live_bench` the
 //! board between a real chief and real workers, `live_designer` a real Codex
 //! drawing an image, `live_approval` real harnesses in every seat of five
 //! projects sending what the human approves, behind the approval gate, and

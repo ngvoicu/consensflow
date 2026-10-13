@@ -370,6 +370,15 @@ impl Members {
         )
     }
 
+    /// Presses `keys` in the window `pane` as the human does (`pane.input`: the
+    /// bytes the keys send).
+    pub fn press(&self, pane: &Value, keys: &[u8]) -> Result<Value> {
+        self.rig.host(
+            "pane.input",
+            json!({ "id": pane["id"], "generation": pane["generation"], "bytes": keys }),
+        )
+    }
+
     /// The human's Pause of the task, and when it was made.
     pub fn pause(&self, task: i64) -> Result<Paused> {
         let made_ms = jiff::Timestamp::now().as_millisecond();

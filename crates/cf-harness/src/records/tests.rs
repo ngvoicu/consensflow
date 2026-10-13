@@ -158,9 +158,9 @@ fn a_transcript_is_had_where_its_harness_keeps_it_and_never_in_a_store() {
     for harness in [Harness::Opencode, Harness::Devin] {
         assert!(!had(harness, "s"), "{harness:?}");
     }
-    // Claude's file is named by the session whole; the others' hold it.
+    // Claude's file and Codex's are named by the session whole; Pi's holds it.
     assert!(!had(Harness::Claude, "S"));
-    assert!(had(Harness::Codex, "05T01"));
+    assert!(!had(Harness::Codex, "05T01"));
     assert!(had(Harness::Pi, "000Z_"));
 }
 

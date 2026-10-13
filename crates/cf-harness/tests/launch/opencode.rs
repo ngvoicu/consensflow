@@ -18,8 +18,8 @@
 use std::path::Path;
 use std::rc::Rc;
 
-use cf_harness::contract::Admission;
-use cf_harness::testing::{Answer, ScriptedHost};
+use cf_harness::contract::{Adapter, Admission};
+use cf_harness::testing::{finished, Answer, ScriptedHost};
 use serde_json::{json, Value};
 
 mod creates;
@@ -101,6 +101,14 @@ fn resumes_the_conversation_it_has_without_creating_another() {
     assert!(stage.fakes.loopback.take_asked().is_empty());
     assert_eq!(plan.native_session.as_deref(), Some("ses_old"));
     assert_eq!(plan.argv[5..], words(&["--session", "ses_old", "--auto"]));
+}
+
+#[test]
+fn can_go_on_with_any_conversation_of_its_own_though_nothing_was_said_in_it() {
+    let stage = Stage::new();
+    // The conversation is made first, before its window opens, and is there whether or
+    // not a turn is ever had in it: nothing of the home says otherwise.
+    assert_eq!(finished(stage.adapter.resumable("ses_old")), Some(true));
 }
 
 #[test]

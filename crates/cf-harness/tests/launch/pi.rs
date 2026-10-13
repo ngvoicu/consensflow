@@ -334,6 +334,42 @@ fn resumes_the_session_it_has() {
 }
 
 #[test]
+fn can_go_on_with_any_session_of_its_own_whether_or_not_a_file_of_it_is_where_a_look_would_find_one(
+) {
+    // `--session-id` makes the session it has none of and resumes the one it has, so a
+    // window opened on any session ends at none; and Pi's `sessionDir` setting and the
+    // launch's working directory choose where its files are, which a look from here
+    // does not know.
+    let home = Home::new();
+    let (pi, _fakes) = adapter(&home);
+    let session = "cf-1-zeus-0000abcd";
+    assert_eq!(finished(pi.resumable(session)), Some(true), "no file of it");
+    let folder = Path::new(&home.root)
+        .join("home")
+        .join(".pi")
+        .join("agent")
+        .join("sessions")
+        .join("--work--");
+    fs::create_dir_all(&folder).unwrap();
+    fs::write(
+        folder.join(format!("2026-10-13T10-00-00-000Z_{session}.jsonl")),
+        "",
+    )
+    .unwrap();
+    assert_eq!(finished(pi.resumable(session)), Some(true), "its file");
+    assert_eq!(
+        finished(pi.resumable("cf-1-zeus-0000ffff")),
+        Some(true),
+        "another session's file is none of its own"
+    );
+    // Where its folder cannot be looked for, it is the same.
+    let env = Env::default();
+    let services = Fakes::new(&env).services(&env, Path::new(&home.root));
+    let nowhere = PiAdapter::new(&services);
+    assert_eq!(finished(nowhere.resumable(session)), Some(true));
+}
+
+#[test]
 fn delivers_through_the_real_channel_a_claim_then_the_extension_inbox() {
     let home = Home::new();
     let (adapter, fakes) = adapter(&home);

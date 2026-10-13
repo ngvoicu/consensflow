@@ -411,6 +411,28 @@ fn starts_afresh_under_the_same_id_a_conversation_claude_never_kept_instead_of_r
 }
 
 #[test]
+fn can_go_on_with_a_conversation_whose_transcript_claude_kept_and_not_with_one_it_kept_none_of() {
+    let home = Home::new();
+    let session = "0f8fad5b-d9cb-469f-a165-70867728950e";
+    let claude = home.adapter();
+    assert_eq!(
+        finished(claude.resumable(session)),
+        Some(false),
+        "nothing was said in it: Claude kept no transcript"
+    );
+    home.transcript(session, &[user_line(session, 1, "Write the parser")]);
+    assert_eq!(finished(claude.resumable(session)), Some(true));
+    assert_eq!(
+        finished(claude.resumable("6a2f41ac-8c1d-4c55-9b4e-2f1e8a3d9c70")),
+        Some(false),
+        "another conversation's"
+    );
+    // Where its folder cannot be looked for, Claude cannot tell.
+    let nowhere = adapter(&Env::default(), Path::new(&home.root));
+    assert_eq!(finished(nowhere.resumable(session)), None);
+}
+
+#[test]
 fn gives_a_chief_its_role_instructions_and_no_model_of_its_own() {
     let home = Home::new();
     let request = Request {

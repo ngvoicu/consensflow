@@ -15,7 +15,9 @@
 //! and what a
 //! window is given while the words that were for it wait at the human's gate
 //! (`approval`), and the tester, which Node's staff never had (`testers`), and
-//! the human's Resume of what a start suspended (`resume`).
+//! the human's Resume of what a start suspended (`resume`), and the
+//! conversation its harness holds nothing of, which a window opened again does
+//! not resume (`resumable`).
 
 // The tests' own scaffolding: a failure in it is the test's.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
@@ -50,6 +52,7 @@ mod pending_agents;
 mod quota;
 mod receipts;
 mod restart;
+mod resumable;
 mod resume;
 mod review;
 mod separate_callbacks;

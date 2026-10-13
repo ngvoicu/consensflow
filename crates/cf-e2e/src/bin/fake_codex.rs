@@ -2,8 +2,12 @@
 //! on a window: given `app-server --listen …` it is Codex's server, starting
 //! thread A when asked; given `--remote …` it is the TUI, which starts a thread
 //! through the broker, reads the broker's `/session` with its token, and exits 7
-//! (or waits to be ended). Each run writes what it was given, and what it saw,
-//! to `CF_TEST_CODEX_LOG`. `CF_TEST_CODEX_BACKEND` says how the server goes:
+//! (or waits to be ended, and starts a turn with each line the human types into
+//! its terminal). Given `resume <thread>` it resumes that one instead,
+//! and ends with 1 where the server has no rollout of it, as Codex's does: a
+//! thread has one only once it has had a turn. Each run writes what it was given,
+//! and what it saw, to `CF_TEST_CODEX_LOG`. `CF_TEST_CODEX_BACKEND` says how the
+//! server goes:
 //! `fail` at once, `die` once a thread starts; with `CF_TEST_CODEX_QUESTION` it
 //! asks its client a question when a thread starts. `CF_TEST_CODEX_TUI=wait`
 //! has the TUI wait for its window to end it.
@@ -23,10 +27,14 @@
 // root file beside it, where each would be a binary of its own.
 #[path = "fake_codex/agent.rs"]
 mod agent;
+#[path = "fake_codex/arguments.rs"]
+mod arguments;
 #[path = "fake_codex/probes.rs"]
 mod probes;
 #[path = "fake_codex/servers.rs"]
 mod servers;
+#[path = "fake_codex/typed.rs"]
+mod typed;
 
 use std::fs::OpenOptions;
 use std::io::{Read, Write};
@@ -34,6 +42,7 @@ use std::net::TcpListener;
 use std::process::ExitCode;
 use std::sync::Arc;
 use std::thread;
+use std::time::Duration;
 
 use cf_e2e::http::Http;
 use cf_e2e::process::own_var;
@@ -42,9 +51,11 @@ use sha2::{Digest, Sha256};
 use tungstenite::client::IntoClientRequest;
 use tungstenite::handshake::server::{ErrorResponse, Request, Response};
 use tungstenite::http::{HeaderValue, StatusCode};
+use tungstenite::stream::MaybeTlsStream;
 use tungstenite::{Message, WebSocket};
 
 use agent::Agent;
+use arguments::launched;
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -211,8 +222,10 @@ fn sha256_hex(text: &str) -> String {
 }
 
 /// Answers a connection's requests: every request with a result, the start of a
-/// thread with a thread, and a message handed over (as the start of a turn, or
-/// queued behind one) with what Codex answers, which the agent then takes.
+/// thread with a thread, the resume of one with it where its rollout is (a thread
+/// that never had a turn has none, and is answered with an error that names it),
+/// and a message handed over (as the start of a turn, or queued behind one) with
+/// what Codex answers, which the agent then takes.
 fn serve<S: Read + Write>(mut socket: WebSocket<S>, behavior: Behavior, agent: &Arc<Agent>) {
     while let Ok(message) = socket.read() {
         let Message::Text(text) = message else {
@@ -228,28 +241,27 @@ fn serve<S: Read + Write>(mut socket: WebSocket<S>, behavior: Behavior, agent: &
         let start = request["method"] == "thread/start";
         if start {
             record(json!({ "run": "server", "started": request["params"] }));
-            agent.thread_started();
         }
-        let result = match request["method"].as_str() {
-            Some("thread/start") => {
-                json!({ "thread": { "id": agent.thread(), "turns": [], "status": { "type": "idle" } } })
-            }
+        let answer = match request["method"].as_str() {
+            Some("thread/start") => Ok(
+                json!({ "thread": { "id": agent.thread(), "turns": [], "status": { "type": "idle" } } }),
+            ),
+            Some("thread/resume") => resumed(agent, &request),
             Some("turn/start") => {
                 hand_over(agent, &request);
-                json!({ "turn": { "id": "turn-1" } })
+                Ok(json!({ "turn": { "id": "turn-1" } }))
             }
             Some("thread/queue/add") => {
                 hand_over(agent, &request);
-                json!({ "queuedMessage": { "id": "queue-1" } })
+                Ok(json!({ "queuedMessage": { "id": "queue-1" } }))
             }
-            _ => json!({}),
+            _ => Ok(json!({})),
         };
-        if socket
-            .send(Message::text(
-                json!({ "id": id, "result": result }).to_string(),
-            ))
-            .is_err()
-        {
+        let answered = match answer {
+            Ok(result) => json!({ "id": id, "result": result }),
+            Err(why) => json!({ "id": id, "error": { "code": -32600, "message": why } }),
+        };
+        if socket.send(Message::text(answered.to_string())).is_err() {
             return;
         }
         if start && behavior.die {
@@ -286,21 +298,16 @@ fn hand_over(agent: &Arc<Agent>, request: &Value) {
     }
 }
 
-/// The message a TUI was given to start with: the word that is no flag and no
-/// value of one, after those the broker adds (`--remote <url>
-/// --remote-auth-token-env <name>`). None where it was given none.
-fn first_message(args: &[String]) -> Option<&str> {
-    let mut words = args.get(4..)?.iter();
-    while let Some(word) = words.next() {
-        match word.as_str() {
-            "-c" | "--config" | "--enable" | "--disable" | "--model" | "-m" => {
-                words.next();
-            }
-            flag if flag.starts_with('-') => {}
-            message => return Some(message),
-        }
+/// The thread a request resumes, where the agent has its rollout, and the error
+/// that names it where it has none.
+fn resumed(agent: &Arc<Agent>, request: &Value) -> Result<Value, String> {
+    let thread = request["params"]["threadId"].as_str().unwrap_or_default();
+    record(json!({ "run": "server", "resumed": thread }));
+    if agent.resume(thread) {
+        Ok(json!({ "thread": { "id": thread, "turns": [], "status": { "type": "idle" } } }))
+    } else {
+        Err(format!("no rollout found for thread id {thread}"))
     }
-    None
 }
 
 /// Codex's TUI: it reaches the server through the broker, its token in its
@@ -339,21 +346,35 @@ fn tui(args: &[String]) -> ExitCode {
         }
         None
     };
+    let launched = launched(args);
     let started = call(
         1,
         "initialize",
         json!({ "clientInfo": { "name": "codex-tui", "version": "test" } }),
     )
-    .and_then(|_| {
-        call(
+    .and_then(|_| match launched.resume {
+        // Its workspace roots are null, as Codex's TUI says them since 0.159.
+        Some(thread) => call(
+            2,
+            "thread/resume",
+            json!({ "threadId": thread, "runtimeWorkspaceRoots": null }),
+        ),
+        None => call(
             2,
             "thread/start",
             json!({ "ephemeral": false, "threadSource": "user" }),
-        )
+        ),
     });
     let Some(started) = started else {
         return ExitCode::SUCCESS;
     };
+    // A window resumed on a thread the server has no rollout of ends at once, as
+    // Codex's does: there is nothing to show of it.
+    if let Some(refused) = started["error"]["message"].as_str() {
+        record(json!({ "run": "tui", "refused": refused }));
+        let _ = writeln!(std::io::stderr(), "fake-codex: {refused}");
+        return ExitCode::FAILURE;
+    }
     let session = Http::new().get(
         &format!("{}/session", remote.replacen("ws:", "http:", 1)),
         Some(&bearer["Bearer ".len()..]),
@@ -362,10 +383,22 @@ fn tui(args: &[String]) -> ExitCode {
         Ok(session) => record(json!({ "run": "tui", "session": session })),
         Err(failed) => fail(&failed.to_string()),
     }
+    // What it draws once it shows a thread, which a window with nothing in its
+    // record reads as drawn when it has held still.
+    let thread = started["result"]["thread"]["id"].clone();
+    let shows = if launched.resume.is_some() {
+        "resumed"
+    } else {
+        "started"
+    };
+    let _ = writeln!(
+        std::io::stdout(),
+        "fake codex {shows} on {}",
+        thread.as_str().unwrap_or_default()
+    );
     // A window opened with a message begins its first turn with it.
-    if let Some(message) = first_message(args) {
+    if let Some(message) = launched.message {
         let input = json!([{ "type": "text", "text": message, "text_elements": [] }]);
-        let thread = started["result"]["thread"]["id"].clone();
         call(
             3,
             "turn/start",
@@ -375,7 +408,39 @@ fn tui(args: &[String]) -> ExitCode {
     if own_var("CF_TEST_CODEX_TUI").as_deref() != Some("wait") {
         return ExitCode::from(7);
     }
-    // Waits for its window to end it, or for the connection to go.
-    while socket.read().is_ok() {}
-    ExitCode::SUCCESS
+    // Waits for its window to end it, or for the connection to go, and starts a turn
+    // with each line the human types into its terminal as it waits.
+    if let MaybeTlsStream::Plain(stream) = socket.get_mut() {
+        let _ = stream.set_read_timeout(Some(Duration::from_millis(100)));
+    }
+    let typed = typed::typed();
+    let mut asked = 3;
+    loop {
+        match socket.read() {
+            Ok(_) => {}
+            Err(tungstenite::Error::Io(failed)) if is_a_wait(&failed) => {}
+            Err(_) => return ExitCode::SUCCESS,
+        }
+        while let Ok(text) = typed.try_recv() {
+            asked += 1;
+            let input = json!([{ "type": "text", "text": text, "text_elements": [] }]);
+            let turn = json!({
+                "id": asked,
+                "method": "turn/start",
+                "params": { "threadId": thread, "input": input },
+            });
+            if socket.send(Message::text(turn.to_string())).is_err() {
+                return ExitCode::SUCCESS;
+            }
+        }
+    }
+}
+
+/// Whether a read failed for want of anything to read in the time it was given,
+/// which is no end of the connection.
+fn is_a_wait(failed: &std::io::Error) -> bool {
+    matches!(
+        failed.kind(),
+        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+    )
 }

@@ -25,6 +25,7 @@ use serde_json::Value;
 use super::channel;
 use super::install;
 use super::paths;
+use super::record;
 use super::wire::selected_session;
 use super::wire_log::WireLog;
 use crate::contract::{
@@ -32,7 +33,7 @@ use crate::contract::{
     Readiness, Records, Skill, Window, Work,
 };
 use crate::detect::executable;
-use crate::records::Options;
+use crate::records::{Options, Reading, Role};
 use crate::seams::{Services, Time};
 use crate::shared::admission::admission;
 use crate::shared::record_state::{dialog_waiting, record_state, switched_to, unnamed};
@@ -134,6 +135,33 @@ impl Adapter for DevinAdapter {
                     discover_for_ms: DISCOVER_FOR_MS.min(launch.first_message_ms),
                 }),
             })
+        })
+    }
+
+    /// Devin keeps a session's messages in its store, which is read with no window
+    /// open as with one: a session with a message of the user's in it had a turn
+    /// and is gone on with, and one the store holds with none, or holds no row of
+    /// (Devin writes the row with the first message), has nothing to go on with. A
+    /// store that cannot be read tells nothing, and the engine goes on with the
+    /// session as it did before it asked. Devin resumed on a session it has no
+    /// row of opens idle and drops what is typed to it (live, 3000.11.3,
+    /// 2026-10-14).
+    fn resumable<'a>(&'a self, session: &'a str) -> Work<'a, Option<bool>> {
+        Box::pin(async move {
+            let looked = self
+                .services
+                .records
+                .look(Harness::Devin, session, &Options::default())
+                .await;
+            match &*looked {
+                Reading::Known(record) => {
+                    Some(record.items.iter().any(|item| item.role == Role::User))
+                }
+                Reading::Unknown(reason) if reason.ends_with(record::MISSING_SESSION) => {
+                    Some(false)
+                }
+                Reading::Unknown(_) => None,
+            }
         })
     }
 

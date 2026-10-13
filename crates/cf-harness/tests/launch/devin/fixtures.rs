@@ -85,6 +85,26 @@ impl Home {
         home
     }
 
+    /// Devin's store of sessions, made in this home as Devin makes it: `sessions.db` in
+    /// its data folder, a table of sessions and a table of the messages of each.
+    pub(super) fn store(&self) -> Store {
+        let folder = Path::new(&self.root)
+            .join("home")
+            .join(".local")
+            .join("share")
+            .join("devin")
+            .join("cli");
+        fs::create_dir_all(&folder).unwrap();
+        let db = rusqlite::Connection::open(folder.join("sessions.db")).unwrap();
+        db.execute_batch(
+            "CREATE TABLE sessions (id TEXT PRIMARY KEY, main_chain_id TEXT);
+             CREATE TABLE message_nodes (row_id INTEGER PRIMARY KEY, session_id TEXT,
+               node_id TEXT, parent_node_id TEXT, chat_message TEXT, created_at TEXT)",
+        )
+        .unwrap();
+        Store(db)
+    }
+
     /// What the stand-in `devin` says to `--version`, its line end with it.
     pub(super) fn says(&self, version: &str) {
         let line_end = if cfg!(windows) { "\r\n" } else { "\n" };
@@ -141,6 +161,42 @@ impl Home {
         let mut log = fs::read(self.wire()).unwrap();
         log.extend_from_slice(text.as_bytes());
         fs::write(self.wire(), log).unwrap();
+    }
+}
+
+/// Devin's store of sessions, as a test writes it.
+pub(super) struct Store(rusqlite::Connection);
+
+impl Store {
+    /// A session with nothing said in it.
+    pub(super) fn begins(&self, session: &str) {
+        self.0
+            .execute("INSERT INTO sessions VALUES (?, NULL)", [session])
+            .unwrap();
+    }
+
+    /// A message of `role` on the session's main chain, the first of it.
+    pub(super) fn says(&self, session: &str, role: &str, text: &str) {
+        let node = format!("{session}-node-1");
+        let message = json!({
+            "role": role,
+            "content": text,
+            "message_id": format!("{session}-message-1"),
+            "metadata": { "created_at": "2026-10-13T10:00:00Z" },
+        });
+        self.0
+            .execute(
+                "INSERT INTO message_nodes (session_id, node_id, parent_node_id, chat_message, created_at)
+                 VALUES (?, ?, NULL, ?, '2026-10-13T10:00:00Z')",
+                (session, &node, message.to_string()),
+            )
+            .unwrap();
+        self.0
+            .execute(
+                "UPDATE sessions SET main_chain_id = ? WHERE id = ?",
+                (&node, session),
+            )
+            .unwrap();
     }
 }
 

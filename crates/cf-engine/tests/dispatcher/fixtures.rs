@@ -12,6 +12,7 @@ use cf_harness::records::{Level, Quota, Role};
 use cf_harness::seams::Time;
 use cf_ledger::{LedgerError, NewTask, ParticipantView, ProjectView, TaskThread, TaskView};
 use regex::Regex;
+use serde_json::Value;
 
 /// Asserts `text` matches `pattern` (`assert.match`).
 #[track_caller]
@@ -238,6 +239,16 @@ pub fn last_launch(context: &Context) -> (String, Option<String>) {
         launch["participant"]["handle"].as_str().unwrap().to_owned(),
         launch["resume"].as_str().map(str::to_owned),
     )
+}
+
+/// The launches the adapter was asked for `handle`, oldest first.
+pub fn launches_of(context: &Context, handle: &str) -> Vec<Value> {
+    context
+        .adapter
+        .prepared()
+        .into_iter()
+        .filter(|launch| launch["participant"]["handle"] == handle)
+        .collect()
 }
 
 /// The message the adapter's last launch opened with.

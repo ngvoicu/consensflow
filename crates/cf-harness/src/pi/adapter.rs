@@ -151,6 +151,16 @@ impl Adapter for PiAdapter {
         })
     }
 
+    /// Pi's `--session-id` makes the session where there is none and resumes it
+    /// where there is, so a window opened on any session of its does not end,
+    /// whatever was said in it. Its file of a session is not asked after: Pi's
+    /// `sessionDir` setting and the working directory of the launch choose the
+    /// folder it is in, which a look from here does not know, and a file not found
+    /// there would say Pi holds nothing where it holds the session.
+    fn resumable<'a>(&'a self, _session: &'a str) -> Work<'a, Option<bool>> {
+        Box::pin(async { Some(true) })
+    }
+
     /// Pi's bash tool starts each command `detached` wherever there are process
     /// groups to detach in (`process.platform !== "win32"`, in
     /// `@earendil-works/pi-coding-agent/dist/core/tools/bash.js`): a session of

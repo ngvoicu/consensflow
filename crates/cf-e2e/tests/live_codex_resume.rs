@@ -31,9 +31,10 @@ use std::time::{Duration, Instant};
 
 use cf_e2e::live::members::{find, is_over, last_result, member, stand_in_chief, Members, Plan};
 use cf_e2e::live::report::{self, Check};
+use cf_e2e::live::trace::Trace;
 use cf_e2e::live::{agents, seconds, Harness, Log};
 use cf_e2e::Result;
-use serde_json::{json, Value};
+use serde_json::Value;
 
 /// The stand-in for the chief's window.
 const FAKE_AGENT: &str = env!("CARGO_BIN_EXE_fake-agent");
@@ -69,16 +70,6 @@ struct Seen {
 fn thread_of(argv: &[String]) -> Option<&str> {
     let at = argv.iter().position(|word| word == "resume")?;
     argv.get(at + 1).map(String::as_str)
-}
-
-/// The threads the daemon named, from its events (`conversation.bound`: the
-/// broker saw the TUI's own request and knows the thread the window shows).
-fn named_threads(events: &[Value]) -> Vec<String> {
-    events
-        .iter()
-        .filter(|event| event["kind"] == "conversation.bound")
-        .filter_map(|event| event["data"]["nativeSession"].as_str().map(str::to_owned))
-        .collect()
 }
 
 /// What came of it: whether the window opened again took its message, and the
@@ -174,7 +165,8 @@ fn check(log: &Log) -> Result<Check> {
                 )?;
             }
             std::thread::sleep(Duration::from_secs(2));
-            let named = named_threads(&members.events());
+            // The broker saw the TUI's own request and knows the thread the window shows.
+            let named = Trace::read(members.rig()).threads_bound();
             // As the daemon opens it for a reopened task: on the thread, with the message.
             let started = Instant::now();
             let before = members.rig().open_frames().len();
@@ -285,18 +277,6 @@ mod tests {
         assert_eq!(thread_of(&["codex".to_owned()]), None);
         assert_eq!(thread_of(&["codex".to_owned(), "resume".to_owned()]), None);
         assert_eq!(thread_of(&[]), None);
-    }
-
-    #[test]
-    fn the_threads_the_daemon_named_are_the_native_sessions_of_the_conversations_it_bound() {
-        let events = [
-            json!({ "kind": "conversation.bound", "data": { "nativeSession": "t-1" } }),
-            json!({ "kind": "message.sent", "data": { "nativeSession": "no" } }),
-            json!({ "kind": "conversation.bound", "data": { "nativeSession": "t-2" } }),
-            json!({ "kind": "conversation.bound", "data": {} }),
-        ];
-        assert_eq!(named_threads(&events), ["t-1", "t-2"]);
-        assert!(named_threads(&[]).is_empty());
     }
 
     #[test]

@@ -19,6 +19,12 @@ use tempfile::TempDir;
 
 use crate::{secs, Outcome};
 
+// The cases of a window resumed on a thread are in `tests/rig/codex_session/`:
+// the modules of a file that was loaded by its path are looked for beside it, so
+// this one is named.
+#[path = "codex_session/resume.rs"]
+mod resume;
+
 /// The thread the stand-in Codex's server starts.
 const A: &str = "01a09094-938f-7fd1-a2d3-315cf92b4559";
 

@@ -67,6 +67,7 @@ use crate::seams::{self, Entropy, Services, Time};
 use crate::shared::admission::admission;
 use crate::shared::left_open::LeftOpen;
 use crate::shared::record_state::switched_to;
+use crate::shared::resumable::transcript_kept;
 use crate::shared::{pane, specmint, window_args};
 
 /// Claude Code, as the engine launches its windows.
@@ -101,10 +102,10 @@ impl Adapter for ClaudeAdapter {
             let settings = install::settings(&self.env, launch.id, launch.role != "chief")?;
             let role = install::role(&self.env, launch)?;
             // Claude keeps a conversation only once something was said in
-            // it: a window that closed before that (opened by hand, then
-            // lost to a restart) has nothing to resume, and `--resume` would
-            // exit at once. It starts afresh under the same id, so the
-            // conversation stays bound.
+            // it, and what it kept can be gone since: the engine asks
+            // `resumable` first, but a transcript that is not there has
+            // nothing to resume, and `--resume` would exit at once. It starts
+            // afresh under the same id, so the conversation stays bound.
             let session = match launch.resume {
                 Some(resume) => resume.to_owned(),
                 None => seams::uuid(&*self.entropy)?,
@@ -167,6 +168,11 @@ impl Adapter for ClaudeAdapter {
                 }),
             })
         })
+    }
+
+    /// Claude keeps a conversation's transcript once something was said in it.
+    fn resumable<'a>(&'a self, session: &'a str) -> Work<'a, Option<bool>> {
+        transcript_kept(&*self.records, Harness::Claude, session)
     }
 
     /// Claude Code runs each command of its Bash tool, in the foreground and in

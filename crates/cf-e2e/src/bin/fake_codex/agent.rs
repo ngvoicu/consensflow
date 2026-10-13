@@ -3,11 +3,13 @@
 //!
 //! The rollout is a JSONL file in `sessions/YYYY/MM/DD/` of `CODEX_HOME`, where the
 //! daemon reads a thread's record (none is written where `CODEX_HOME` is not set,
-//! so a case that is not the daemon's leaves nothing in anyone's home). A message is
-//! a turn: the server is handed it as `turn/start`, or as `thread/queue/add` while
-//! another runs, and answers at once; the turn goes on beside the connections, one
-//! at a time, and writes what Codex writes of one: it started, the message, the
-//! answer, it is complete.
+//! so a case that is not the daemon's leaves nothing in anyone's home). As Codex's
+//! is, it is begun by the thread's first turn and not by the thread: a thread that
+//! has had none has no rollout, and a window resumed on it finds nothing
+//! ([`Agent::resume`]). A message is a turn: the server is handed it as
+//! `turn/start`, or as `thread/queue/add` while another runs, and answers at once;
+//! the turn goes on beside the connections, one at a time, and writes what Codex
+//! writes of one: it started, the message, the answer, it is complete.
 //!
 //! What a turn does is what the stand-in agent's does: the `SLEEP <seconds>` line of
 //! its message is how long it works, `Reply with exactly: X` is its answer, and
@@ -22,12 +24,12 @@ use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, OnceLock, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use cf_e2e::pattern;
 use cf_e2e::process::own_var;
+use cf_e2e::{files, pattern};
 use regex::Regex;
 use serde_json::{json, Value};
 
@@ -42,8 +44,12 @@ const THINKING: Duration = Duration::from_secs(4);
 
 /// The agent of one window: its thread, its rollout and the servers it opened.
 pub struct Agent {
-    thread: String,
-    rollout: Option<PathBuf>,
+    /// The thread it is on: the one it starts, or the one a window resumed.
+    thread: Mutex<String>,
+    /// The Codex home its rollouts are in; none where `CODEX_HOME` is not set.
+    home: Option<PathBuf>,
+    /// The rollout of its thread, once it has one: its first turn begins it.
+    rollout: Mutex<Option<PathBuf>>,
     plugins: Plugins,
     /// One turn at a time, in the order the messages came: what is queued waits.
     turns: Mutex<()>,
@@ -51,6 +57,11 @@ pub struct Agent {
     begun: AtomicBool,
     /// The records the rollout holds, to number the next.
     records: AtomicU64,
+}
+
+/// What `lock` holds, whether or not a thread that held it panicked.
+fn held<T>(lock: &Mutex<T>) -> MutexGuard<'_, T> {
+    lock.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 impl Agent {
@@ -67,37 +78,43 @@ impl Agent {
         } else {
             THREAD.to_owned()
         };
-        let rollout = own_var("CODEX_HOME").map(|home| rollout_of(Path::new(&home), &thread));
         Ok(Arc::new(Self {
             plugins: Plugins::open(
                 number("CF_TEST_CODEX_SERVERS"),
                 number("CF_TEST_CODEX_WORKERS"),
             )?,
-            thread,
-            rollout,
+            thread: Mutex::new(thread),
+            home: own_var("CODEX_HOME").map(PathBuf::from),
+            rollout: Mutex::new(None),
             turns: Mutex::new(()),
             begun: AtomicBool::new(false),
             records: AtomicU64::new(0),
         }))
     }
 
-    /// The thread the server starts.
-    pub fn thread(&self) -> &str {
-        &self.thread
+    /// The thread the server is on.
+    pub fn thread(&self) -> String {
+        held(&self.thread).clone()
     }
 
-    /// The server starts the thread: its rollout begins, as Codex's does with what
-    /// it ran in.
-    pub fn thread_started(&self) {
-        if let Some(path) = &self.rollout {
-            if let Some(folder) = path.parent() {
-                let _ = fs::create_dir_all(folder);
-            }
-        }
-        self.write(
-            "session_meta",
-            json!({ "session_id": self.thread, "id": self.thread, "originator": "codex-tui" }),
-        );
+    /// The server is asked to resume `thread`: it goes on with it where the Codex
+    /// home holds its rollout, which only a thread that had a turn has. Whether it
+    /// does.
+    pub fn resume(&self, thread: &str) -> bool {
+        let ends = format!("-{thread}.jsonl");
+        let sessions = self.home.as_ref().map(|home| home.join("sessions"));
+        let Some(found) =
+            sessions.and_then(|sessions| files::find(&sessions, &|name| name.ends_with(&ends)))
+        else {
+            return false;
+        };
+        // What the rollout holds is what its next record is numbered after.
+        let holds = fs::read_to_string(&found).map_or(0, |text| text.lines().count());
+        self.records
+            .store(u64::try_from(holds).unwrap_or_default(), Ordering::Relaxed);
+        thread.clone_into(&mut held(&self.thread));
+        *held(&self.rollout) = Some(found);
+        true
     }
 
     /// The server takes `text` as a turn, which goes on beside it.
@@ -106,10 +123,33 @@ impl Agent {
         thread::spawn(move || agent.turn(&text));
     }
 
+    /// The thread's first turn begins its rollout, as Codex's does with what it ran
+    /// in: a thread that has had none has no rollout to resume.
+    fn begin_rollout(&self) {
+        let thread = self.thread();
+        {
+            let mut rollout = held(&self.rollout);
+            let Some(home) = self.home.as_ref().filter(|_| rollout.is_none()) else {
+                return;
+            };
+            let path = rollout_of(home, &thread);
+            if let Some(folder) = path.parent() {
+                let _ = fs::create_dir_all(folder);
+            }
+            *rollout = Some(path);
+        }
+        self.write(
+            "session_meta",
+            json!({ "session_id": thread, "id": thread, "originator": "codex-tui" }),
+        );
+    }
+
     /// A turn: it began with the message, works as long as the message says and ends
     /// with its answer.
     fn turn(&self, text: &str) {
-        let _one_at_a_time = self.turns.lock().unwrap_or_else(PoisonError::into_inner);
+        let _one_at_a_time = held(&self.turns);
+        self.begin_rollout();
+        let thread = self.thread();
         let began = Instant::now();
         let turn = uuid::Uuid::new_v4().to_string();
         let (message, answer) = (item_id(), item_id());
@@ -137,7 +177,7 @@ impl Agent {
             "event_msg",
             json!({
                 "type": "item_completed",
-                "thread_id": self.thread,
+                "thread_id": thread,
                 "turn_id": turn,
                 "item": {
                     "type": "UserMessage",
@@ -159,7 +199,7 @@ impl Agent {
             "event_msg",
             json!({
                 "type": "item_completed",
-                "thread_id": self.thread,
+                "thread_id": thread,
                 "turn_id": turn,
                 "item": {
                     "type": "AgentMessage",
@@ -194,7 +234,7 @@ impl Agent {
     /// A record of `kind` to the rollout, whole in one write, so that a reader that
     /// follows the file never sees half of one.
     fn write(&self, kind: &str, payload: Value) {
-        let Some(path) = &self.rollout else {
+        let Some(path) = held(&self.rollout).clone() else {
             return;
         };
         let record = json!({
@@ -207,7 +247,7 @@ impl Agent {
         let _ = OpenOptions::new()
             .create(true)
             .append(true)
-            .open(path)
+            .open(&path)
             .and_then(|mut file| file.write_all(line.as_bytes()));
     }
 }

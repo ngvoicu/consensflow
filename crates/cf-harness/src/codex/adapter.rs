@@ -8,6 +8,16 @@
 //! starts with the MCP servers Codex has, the chief's and a member's alike (the
 //! owner's choice, 2026-10-06): a launch never lists them, and its command line
 //! switches none off.
+//!
+//! A thread is resumed by its id (`codex resume <id>`) and has a record to be
+//! resumed from only once it has had a turn: a window resumed on one that never
+//! had any ends at once (2026-10-13). The adapter says whether a thread has its
+//! record ([`Adapter::resumable`]): a file under Codex's `sessions` named as Codex
+//! names the rollout of that thread (`rollout-<timestamp>-<thread>.jsonl`). The
+//! file is found and not read, so an empty or corrupt rollout counts as the
+//! record, and a window resumed on it ends as it did before. The engine opens the
+//! window afresh on a thread that has none; the launch itself resumes whatever
+//! thread it is given.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -29,6 +39,7 @@ use crate::records::Options;
 use crate::seams::{Loopback, Services, Time};
 use crate::shared::admission::admission;
 use crate::shared::record_state::{record_state, switched_to, unnamed};
+use crate::shared::resumable::transcript_kept;
 use crate::shared::{specmint, window_args};
 
 /// Codex's question tool (`request_user_input`) is behind a feature still
@@ -142,6 +153,11 @@ impl Adapter for CodexAdapter {
                 }),
             })
         })
+    }
+
+    /// Codex keeps a thread's rollout once the thread has a turn.
+    fn resumable<'a>(&'a self, session: &'a str) -> Work<'a, Option<bool>> {
+        transcript_kept(&*self.services.records, Harness::Codex, session)
     }
 
     /// Codex opens the window's servers (its plugins': computer use, a REPL) as

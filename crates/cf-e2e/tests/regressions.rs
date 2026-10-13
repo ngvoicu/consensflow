@@ -31,6 +31,10 @@ mod devin_pause;
 #[cfg(unix)]
 #[path = "regressions/mcp_servers_held_a_workers_result.rs"]
 mod mcp_servers_held_a_workers_result;
+#[path = "regressions/resume_of_a_chief_with_no_turn.rs"]
+mod resume_of_a_chief_with_no_turn;
+#[path = "regressions/resume_of_a_turn_the_daemon_never_copied.rs"]
+mod resume_of_a_turn_the_daemon_never_copied;
 
 use std::time::Duration;
 
