@@ -22,7 +22,10 @@
 //! chief's window opened again, that the project stayed open, and that a message
 //! the human typed into the window then was answered. What is said besides, and
 //! judged of no harness, is what the harness's record held before the Close and
-//! whether the window opened on a conversation of its own. In the second a turn
+//! whether the window opened on a conversation of its own. What is typed is a
+//! line the window's input box shows whole, pasted as the daemon pastes, and Enter
+//! is pressed again while the window keeps it (Devin's prompt box waited for an
+//! Enter of its own, as the evals' owner finds too). In the second a turn
 //! is typed into the window that gives it a key, and the project is closed as soon
 //! as the harness's record has the turn and its answer: what is judged
 //! ([`continued`]) is that the window opened again on the conversation the turn was
@@ -58,7 +61,7 @@ use cf_e2e::live::{self, ask, Harness, Log};
 use cf_e2e::Result;
 use serde_json::{json, Value};
 
-use typed::{key_of, remembers, saved_turn, the_key, ASKED};
+use typed::{key_of, remembers, saved_turn, the_key, took, ASKED};
 use verdict::{continued, verdict, Continued, Seen};
 
 /// The stand-in for the window of the project's members: the project has none, and
@@ -78,6 +81,12 @@ const WATCH: Duration = Duration::from_secs(5);
 
 /// How often the board is looked at.
 const LOOK: Duration = Duration::from_millis(500);
+
+/// How long a window is given to take what was typed to it before Enter is pressed
+/// again, and how many times at most, and the key Enter sends.
+const TAKES: Duration = Duration::from_secs(5);
+const ENTERS: usize = 3;
+const ENTER: u8 = 13;
 
 /// What the check opens: a project whose chief is the real `chief`, on its harness's
 /// cheap model, and whose staff is empty.
@@ -129,6 +138,43 @@ fn answered(members: &Members, harness: Harness, thread: &str, token: &str) -> O
         .into_iter()
         .find(|item| item.role == "assistant" && item.text.contains(token))
         .map(|item| item.text)
+}
+
+/// Types `text` into the chief's window as the human does (a bracketed paste, and
+/// Enter once the window has drawn it, [`Members::paste`]), and presses Enter again,
+/// three times at most, while the window keeps it: Devin takes a pasted prompt into
+/// its box and waits for an Enter of its own, as the eval runner's owner finds too.
+/// The window took it once the harness's record holds a message of the human's with
+/// `mark` in it, or the chief reads at work.
+fn types(
+    members: &Members,
+    harness: Harness,
+    thread: &str,
+    text: &str,
+    mark: &str,
+    log: &Log,
+) -> Result<()> {
+    let pane = members.lane("chief")?["pane"].clone();
+    members.paste(&pane, &ask::window_text(text)?)?;
+    for _ in 0..ENTERS {
+        let taken = find(
+            log,
+            "the window to take what was typed",
+            TAKES,
+            LOOK,
+            || {
+                let held =
+                    record_of(members, harness, thread).is_some_and(|record| took(&record, mark));
+                Ok((held || state_of(members)? != "idle").then_some(()))
+            },
+        )?;
+        if taken.is_some() {
+            return Ok(());
+        }
+        log.say("Enter pressed again: the window had not taken what was typed");
+        members.press(&pane, &[ENTER])?;
+    }
+    Ok(())
 }
 
 /// What came of the human's Close of the project and the Resume that followed, the
@@ -236,11 +282,13 @@ fn drive(members: Members, harness: Harness, log: &Log) -> Result<Account> {
     let token = token_of(harness);
     let mut answer = None;
     if came.is_there() {
-        members.paste(&came.lane["pane"], &ask::window_text(&the_ask(&token))?)?;
         answer = match came.threads.last() {
-            Some(thread) => find(log, "the chief to answer", ANSWERED, LOOK, || {
-                Ok(answered(&members, harness, thread, &token))
-            })?,
+            Some(thread) => {
+                types(&members, harness, thread, &the_ask(&token), &token, log)?;
+                find(log, "the chief to answer", ANSWERED, LOOK, || {
+                    Ok(answered(&members, harness, thread, &token))
+                })?
+            }
             None => None,
         };
     }
@@ -280,7 +328,7 @@ fn drive_typed(members: Members, harness: Harness, log: &Log) -> Result<Account>
 
     // What the human types into the window, and the harness saves of it.
     let lane = members.lane("chief")?;
-    members.paste(&lane["pane"], &ask::window_text(&the_key(&key))?)?;
+    types(&members, harness, &thread, &the_key(&key), &key, log)?;
     let saved = find(log, "the harness to save the turn", ANSWERED, LOOK, || {
         Ok(record_of(&members, harness, &thread)
             .is_some_and(|record| saved_turn(&record, &key))
@@ -305,7 +353,7 @@ fn drive_typed(members: Members, harness: Harness, log: &Log) -> Result<Account>
     // What the human asks the window that came back: what the turn told it.
     let mut remembered = None;
     if came.is_there() {
-        members.paste(&came.lane["pane"], &ask::window_text(ASKED)?)?;
+        types(&members, harness, &thread, ASKED, ASKED, log)?;
         remembered = find(
             log,
             "the chief to give the key back",

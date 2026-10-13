@@ -12,8 +12,12 @@
 //! A thread is resumed by its id (`codex resume <id>`) and has a record to be
 //! resumed from only once it has had a turn: a window resumed on one that never
 //! had any ends at once (2026-10-13). The adapter says whether a thread has its
-//! record ([`Adapter::resumable`]), and the engine opens the window afresh on one
-//! that has none; the launch itself resumes whatever thread it is given.
+//! record ([`Adapter::resumable`]): a file under Codex's `sessions` named as Codex
+//! names the rollout of that thread (`rollout-<timestamp>-<thread>.jsonl`). The
+//! file is found and not read, so an empty or corrupt rollout counts as the
+//! record, and a window resumed on it ends as it did before. The engine opens the
+//! window afresh on a thread that has none; the launch itself resumes whatever
+//! thread it is given.
 
 use std::cell::RefCell;
 use std::rc::Rc;

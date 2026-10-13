@@ -135,8 +135,9 @@ impl Adapter for DevinAdapter {
     /// open as with one: a session with a message of the user's in it had a turn
     /// and is gone on with, and one the store holds with none has nothing to go on
     /// with. A store that cannot be read, or has no row of the session, tells
-    /// nothing. What Devin does with `--resume` of a session with no messages has
-    /// not been probed, and the engine does not ask it to.
+    /// nothing, and the engine goes on with the session as it did before it asked.
+    /// What Devin does with `--resume` of a session with no messages has not been
+    /// probed, and the engine does not ask it to.
     fn resumable<'a>(&'a self, session: &'a str) -> Work<'a, Option<bool>> {
         Box::pin(async move {
             let looked = self

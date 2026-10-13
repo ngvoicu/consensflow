@@ -125,24 +125,6 @@ pub(crate) fn current_conversation(
         .optional()?)
 }
 
-/// Whether a conversation had a turn, as ConsensFlow has seen it: its copy holds
-/// a message of the user's, whoever wrote it (the human's own typing, or one
-/// ConsensFlow delivered, which a harness records as the user's). The copy is of
-/// the conversation it was made of and no other: what a window delivered into the
-/// conversation before it holds is no turn of the one that began after it, however
-/// near in time. It is made a look at a time, so a turn the window began since the
-/// last look is not in it yet, and where the harness's own record can say whether
-/// there is anything to go on with, it, and not the copy, is asked
-/// (`Adapter::resumable`).
-pub(crate) fn had_a_turn(store: &Store, conversation_id: i64) -> Result<bool, LedgerError> {
-    known_conversation(store, conversation_id)?;
-    Ok(store.db.query_row(
-        "SELECT EXISTS (SELECT 1 FROM transcript WHERE conversation_id = ? AND role = 'user')",
-        [conversation_id],
-        |row| row.get(0),
-    )?)
-}
-
 /// A window the human switched to another conversation (/clear, /new,
 /// /resume): the participant's conversation is the one on `native_session`
 /// from now on, its own earlier one when it had it, else a new one bound to

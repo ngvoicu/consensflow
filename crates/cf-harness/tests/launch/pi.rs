@@ -320,12 +320,16 @@ fn resumes_the_session_it_has() {
 }
 
 #[test]
-fn can_go_on_with_a_session_whose_file_pi_kept_and_not_with_one_it_kept_none_of() {
+fn can_go_on_with_any_session_of_its_own_whether_or_not_a_file_of_it_is_where_a_look_would_find_one(
+) {
+    // `--session-id` makes the session it has none of and resumes the one it has, so a
+    // window opened on any session ends at none; and Pi's `sessionDir` setting and the
+    // launch's working directory choose where its files are, which a look from here
+    // does not know.
     let home = Home::new();
     let (pi, _fakes) = adapter(&home);
     let session = "cf-1-zeus-0000abcd";
-    assert_eq!(finished(pi.resumable(session)), Some(false));
-    // Pi keeps a session in a file under its sessions folder, whose name holds the session.
+    assert_eq!(finished(pi.resumable(session)), Some(true), "no file of it");
     let folder = Path::new(&home.root)
         .join("home")
         .join(".pi")
@@ -338,17 +342,17 @@ fn can_go_on_with_a_session_whose_file_pi_kept_and_not_with_one_it_kept_none_of(
         "",
     )
     .unwrap();
-    assert_eq!(finished(pi.resumable(session)), Some(true));
+    assert_eq!(finished(pi.resumable(session)), Some(true), "its file");
     assert_eq!(
         finished(pi.resumable("cf-1-zeus-0000ffff")),
-        Some(false),
-        "another session's"
+        Some(true),
+        "another session's file is none of its own"
     );
-    // Where its folder cannot be looked for, Pi cannot tell.
+    // Where its folder cannot be looked for, it is the same.
     let env = Env::default();
     let services = Fakes::new(&env).services(&env, Path::new(&home.root));
     let nowhere = PiAdapter::new(&services);
-    assert_eq!(finished(nowhere.resumable(session)), None);
+    assert_eq!(finished(nowhere.resumable(session)), Some(true));
 }
 
 #[test]

@@ -339,7 +339,8 @@ fn can_go_on_with_a_thread_whose_rollout_codex_kept_and_not_with_one_it_kept_non
         "a thread that has had no turn has no rollout"
     );
     // Codex begins a thread's rollout with its first turn, in the folder of the day,
-    // and its name ends with the thread.
+    // and names it by when it began and the thread. Only that name counts: a copy
+    // kept beside it, and a file that holds the thread's id and no more, are none.
     let day = Path::new(&home.root)
         .join("home")
         .join(".codex")
@@ -348,6 +349,19 @@ fn can_go_on_with_a_thread_whose_rollout_codex_kept_and_not_with_one_it_kept_non
         .join("10")
         .join("13");
     fs::create_dir_all(&day).unwrap();
+    for name in [
+        format!("rollout-2026-10-13T10-00-00-{THREAD}.jsonl.bak"),
+        format!("rollout-2026-10-13T10-00-00-{THREAD}-copy.jsonl"),
+        format!("{THREAD}.jsonl"),
+    ] {
+        fs::write(day.join(name), "").unwrap();
+    }
+    assert_eq!(
+        finished(codex.resumable(THREAD)),
+        Some(false),
+        "a copy of a rollout is no rollout"
+    );
+    // The file is found and not read: an empty one is the record all the same.
     fs::write(
         day.join(format!("rollout-2026-10-13T10-00-00-{THREAD}.jsonl")),
         "",

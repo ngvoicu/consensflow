@@ -1,5 +1,5 @@
-//! Whether a harness that keeps a transcript can go on with a conversation of its
-//! own: where the transcript is, it can.
+//! Whether a harness that keeps a transcript (Claude Code, Codex) can go on with a
+//! conversation of its own: where the transcript is, it can.
 //!
 //! Such a harness keeps one only once something was said in the conversation:
 //! Claude Code writes none before the first message, and Codex writes a thread's
@@ -7,7 +7,8 @@
 //! finds nothing and ends at once (Codex's did, and a chief's own exit closed its
 //! project: 2026-10-13). The file is there as soon as the harness has saved a turn,
 //! and ConsensFlow's copy of the conversation is made a look at a time, so the
-//! file, and not the copy, says whether there is anything to go on with.
+//! file, and not the copy, says whether there is anything to go on with. Only
+//! where it is not there does the harness say no.
 
 use cf_proto::agents::Harness;
 

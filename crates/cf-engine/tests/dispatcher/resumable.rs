@@ -1,14 +1,16 @@
 //! Whether a window is opened again on its conversation or afresh is what the
 //! window's harness says of the conversation, from its own record
-//! ([`Adapter::resumable`]); only where the record cannot tell is it what
-//! ConsensFlow's copy of the conversation holds. Found live on 2026-10-13: a
-//! Codex chief opened and idle, closed with Close and brought back with Resume,
-//! was given `codex resume <thread>`, which found no thread (Codex keeps one once
-//! it has had a turn) and ended the window at once, and a chief's own exit closes
-//! its project. And the other way round: a turn the human typed into a window is
-//! in its harness's record at once, and in the copy at the next look, a second on,
-//! so a copy that holds nothing is no proof that there is nothing to go on with.
-//! None of these is held to a Node trace: Node resumed every conversation it had.
+//! ([`Adapter::resumable`]): only its no opens a window afresh, and where it
+//! cannot tell the window is resumed, as it was before the harness was asked.
+//! Found live on 2026-10-13: a Codex chief opened and idle, closed with Close and
+//! brought back with Resume, was given `codex resume <thread>`, which found no
+//! thread (Codex keeps one once it has had a turn) and ended the window at once,
+//! and a chief's own exit closes its project. And the other way round: a turn the
+//! human typed into a window is in its harness's record at once, and in
+//! ConsensFlow's copy of the conversation at the next look, a second on, and a
+//! conversation that holds things is not left behind for a record that says
+//! nothing: the copy plays no part in the decision. None of these is held to a
+//! Node trace: Node resumed every conversation it had.
 //!
 //! The fake's harness holds every conversation unless a test says it holds
 //! nothing of one (`holds_nothing`) or cannot tell (`cannot_tell_a_resume`).
@@ -21,7 +23,7 @@ use cf_harness::records::Role;
 use serde_json::{json, Value};
 
 use crate::chiefs::{handoffs_of, to, with_codex};
-use crate::fixtures::{assert_match, given, last_launch, native_of};
+use crate::fixtures::{assert_match, given, last_launch, launches_of, native_of};
 
 /// A project whose chief is on `harness`, its window up, on an engine whose fake
 /// answers for that harness.
@@ -52,17 +54,6 @@ fn saves_a_turn(context: &Context) {
     });
 }
 
-/// Whether the ledger's copy of the chief's conversation holds a turn.
-fn copied(context: &Context, chief: i64) -> bool {
-    let conversation = context
-        .ledger
-        .borrow()
-        .current_conversation(chief)
-        .unwrap()
-        .unwrap();
-    context.ledger.borrow().had_a_turn(conversation.id).unwrap()
-}
-
 /// The conversations the chief had before its current one, oldest first: each
 /// with its native session, whether it ended, and how many items its copy holds.
 fn earlier(context: &Context, project: i64) -> Vec<(Option<String>, bool, usize)> {
@@ -88,8 +79,8 @@ fn a_chief_whose_harness_holds_its_conversation_is_resumed_on_it_though_no_look_
     for harness in ["claude-code", "codex", "pi"] {
         let (context, project) = chief_on(harness);
         let chief = context.id(project, "chief");
+        // No look came between: the copy holds nothing of the turn.
         saves_a_turn(&context);
-        assert!(!copied(&context, chief), "{harness}: no look came between");
         let before = native_of(&context, chief);
 
         // The human closes the project, or the app quits, right after the turn.
@@ -119,7 +110,6 @@ fn a_conversation_the_human_switched_the_window_to_is_resumed_on_what_its_harnes
     context.adapter.switch_to("chief", "native-older");
     context.pass().unwrap();
     assert_eq!(native_of(&context, chief).as_deref(), Some("native-older"));
-    assert!(!copied(&context, chief));
 
     context.close_project(project.id).unwrap();
     context.resume_project(project.id).unwrap();
@@ -137,7 +127,6 @@ fn a_chief_whose_harness_makes_its_sessions_before_any_turn_is_resumed_though_no
     let (context, project) = chief_on("opencode");
     let chief = context.id(project, "chief");
     let before = native_of(&context, chief);
-    assert!(!copied(&context, chief));
 
     context.close_project(project).unwrap();
     context.resume_project(project).unwrap();
@@ -154,7 +143,6 @@ fn a_chief_whose_harness_holds_nothing_of_its_conversation_is_opened_afresh_thou
     context.pass().unwrap();
     saves_a_turn(&context);
     context.pass().unwrap();
-    assert!(copied(&context, chief), "the copy holds the turn");
     context.adapter.holds_nothing("chief");
     let before = native_of(&context, chief).unwrap();
 
@@ -212,81 +200,58 @@ fn a_chief_that_never_had_a_turn_is_opened_afresh_by_the_resume_after_a_close_an
 }
 
 #[test]
-fn where_the_record_cannot_tell_a_conversation_whose_copy_holds_a_message_of_the_users_is_resumed()
-{
-    let context = Context::new();
-    let project = context.with_staff(&["zeus"]);
-    let chief = context.id(project.id, "chief");
-    context.pass().unwrap();
-    saves_a_turn(&context);
-    context.pass().unwrap();
-    context.adapter.cannot_tell_a_resume("chief");
-    let before = native_of(&context, chief);
+fn where_the_record_cannot_tell_a_conversation_is_resumed_whatever_its_copy_holds() {
+    // Only the harness's no opens a window afresh: a conversation whose copy
+    // holds nothing, and one whose copy holds a turn, are gone on with alike.
+    for turn in [false, true] {
+        let context = Context::new();
+        let project = context.with_staff(&["zeus"]);
+        let chief = context.id(project.id, "chief");
+        context.pass().unwrap();
+        if turn {
+            saves_a_turn(&context);
+            context.pass().unwrap();
+        }
+        context.adapter.cannot_tell_a_resume("chief");
+        let before = native_of(&context, chief);
 
-    context.close_project(project.id).unwrap();
-    context.resume_project(project.id).unwrap();
+        context.close_project(project.id).unwrap();
+        context.resume_project(project.id).unwrap();
 
-    assert_eq!(last_launch(&context), ("chief".to_owned(), before.clone()));
-    assert_eq!(native_of(&context, chief), before);
+        assert_eq!(
+            last_launch(&context),
+            ("chief".to_owned(), before.clone()),
+            "its copy holds a turn: {turn}"
+        );
+        assert_eq!(native_of(&context, chief), before, "{turn}");
+        assert_eq!(context.project(project.id).state, "open", "{turn}");
+    }
 }
 
 #[test]
-fn where_the_record_cannot_tell_a_conversation_whose_copy_holds_nothing_is_opened_afresh() {
+fn a_member_whose_harness_holds_nothing_of_its_conversation_is_opened_afresh_and_given_its_brief() {
     let context = Context::new();
     let project = context.with_staff(&["zeus"]);
-    let chief = context.id(project.id, "chief");
+    let zeus = context.id(project.id, "zeus");
+    context.give(project.id, "zeus", "Parser");
     context.pass().unwrap();
-    context.adapter.cannot_tell_a_resume("chief");
-    let before = native_of(&context, chief);
+    context.pass().unwrap();
+    let before = native_of(&context, zeus).unwrap();
+    // The quit cut zeus's turn, and its harness kept nothing of the conversation.
+    context.adapter.holds_nothing("zeus");
+    context.ledger.borrow_mut().suspend_for_restart().unwrap();
+    let after = context.make();
+    after.settle_after_restart().unwrap();
 
-    context.close_project(project.id).unwrap();
-    context.resume_project(project.id).unwrap();
+    after.resume_project(project.id).unwrap();
 
-    assert_eq!(last_launch(&context), ("chief".to_owned(), None));
-    assert_ne!(native_of(&context, chief), before);
-    assert_eq!(context.project(project.id).state, "open");
-}
-
-#[test]
-fn what_was_delivered_into_the_conversation_before_is_no_turn_of_the_one_a_switch_began_in_the_same_millisecond(
-) {
-    let context = Context::new();
-    let project = context.with_staff(&["zeus"]);
-    let chief = context.id(project.id, "chief");
-    context.pass().unwrap();
-    // A message is delivered into the first conversation, and the human types /new
-    // in the very millisecond its delivery was confirmed: the clock does not move.
-    let one = context.note(project.id, "zeus", "chief", "One");
-    context.pass().unwrap();
-    context.pass().unwrap();
-    let delivered = context.message(one.id);
-    assert_eq!(delivered.state, "delivered");
-    context.adapter.switch_to("chief", "native-new");
-    context.pass().unwrap();
-    let new = context
-        .ledger
-        .borrow()
-        .current_conversation(chief)
-        .unwrap()
-        .unwrap();
-    assert_eq!(new.native_session.as_deref(), Some("native-new"));
-    assert_eq!(
-        Some(new.started_at),
-        delivered.delivered_at,
-        "the delivery and the new conversation are in the same millisecond"
+    let launch = launches_of(&context, "zeus").pop().unwrap();
+    assert_eq!(launch["resume"], Value::Null, "nothing for it to resume");
+    assert_match(
+        launch["message"].as_str().unwrap(),
+        r"(?s)Parser.*ConsensFlow quit while you were working on T-1",
     );
-    // Nothing was said in the new one, and its harness's record cannot tell.
-    context.adapter.cannot_tell_a_resume("chief");
-
-    context.close_project(project.id).unwrap();
-    context.resume_project(project.id).unwrap();
-
-    assert_eq!(
-        last_launch(&context),
-        ("chief".to_owned(), None),
-        "what was delivered into the one before it is no turn of this one"
-    );
-    assert_ne!(native_of(&context, chief).as_deref(), Some("native-new"));
+    assert_ne!(native_of(&context, zeus).unwrap(), before);
 }
 
 #[test]

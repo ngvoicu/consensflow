@@ -1,7 +1,8 @@
 //! A pause that comes while a window is being made, or made ready for a
-//! message: the stop a launch pays is the one asked before it began, so a
-//! pause that comes in between is not forgiven and is not delivered through.
-//! None of these tests is held to a Node recording: Node's launch forgave it.
+//! message, or while its harness is asked about the conversation it opens on:
+//! the stop a launch pays is the one asked before it began, so a pause that
+//! comes in between is not forgiven and is not delivered through. None of
+//! these tests is held to a Node recording: Node's launch forgave it.
 
 use std::rc::Rc;
 
@@ -11,7 +12,7 @@ use cf_harness::contract::Readiness;
 use cf_ledger::NewNote;
 use serde_json::json;
 
-use crate::fixtures::assert_match;
+use crate::fixtures::{assert_match, launches_of, native_of};
 
 #[test]
 fn a_pause_during_a_launchs_preparation_opens_no_pane_and_the_message_is_given_back_and_carried() {
@@ -56,6 +57,58 @@ fn a_pause_during_a_launchs_preparation_opens_no_pane_and_the_message_is_given_b
         Vec::<serde_json::Value>::new(),
         "the window opened after the pause owes nothing for it"
     );
+}
+
+#[test]
+fn a_pause_while_the_harness_is_asked_about_the_conversation_opens_no_pane_and_the_note_is_given_back(
+) {
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    let zeus = context.id(project.id, "zeus");
+    context.give(project.id, "zeus", "Parser");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(context.task(project.id, 1).task.state, "working");
+    // The app quits in the middle of zeus's turn and starts again.
+    context.ledger.borrow_mut().suspend_for_restart().unwrap();
+    let after = context.make();
+    after.settle_after_restart().unwrap();
+    let conversation = native_of(&context, zeus).unwrap();
+    let asking = context
+        .adapter
+        .resumable_holds
+        .hold(move |asked| asked[0] == conversation.as_str());
+
+    // The Resume brings its window back on its conversation, once its harness
+    // says it holds it.
+    after.resume_project(project.id).unwrap();
+    let note = context
+        .inbox(zeus)
+        .into_iter()
+        .find(|message| message.kind == "note")
+        .unwrap();
+    assert_eq!(note.state, "delivering", "its launch has begun");
+
+    // The pause comes while the harness is asked.
+    context.human_pause(project.id, 1);
+    asking.open();
+    context.settle();
+    assert_eq!(
+        launches_of(&context, "zeus").len(),
+        1,
+        "no window is prepared for it again"
+    );
+    assert_eq!(
+        context.message(note.id).state,
+        "queued",
+        "given back, with its attempt"
+    );
+
+    // Nothing opens it while the task is paused.
+    after.pass().unwrap();
+    assert_eq!(launches_of(&context, "zeus").len(), 1);
+    assert_eq!(context.message(note.id).state, "queued");
+    assert_eq!(context.task(project.id, 1).task.state, "paused");
 }
 
 #[test]

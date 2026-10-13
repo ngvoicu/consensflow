@@ -1,13 +1,15 @@
 //! What the human types into a chief's window to have it hold a key, and asks it
 //! for once its window is back, and what the harness's own record says of both:
-//! when the turn that gave the key is saved, and when the chief gives it back.
+//! whether the window took what was typed, when the turn that gave the key is
+//! saved, and when the chief gives it back. Each is a line short enough for the
+//! window's input box to show whole, as a line that wraps is not what the other
+//! checks that drive a real Devin type.
 
 use cf_e2e::live::{ask, Harness};
 
 /// What the human asks the chief once its window is back: for the key, which the
 /// question does not say.
-pub const ASKED: &str =
-    "What was the key I gave you before? Reply with exactly the key, and nothing else.";
+pub const ASKED: &str = "What was the key? Reply with exactly the key, nothing else.";
 
 /// The key the human gives `harness`'s chief to remember: one word, which no
 /// harness's own screen holds.
@@ -17,17 +19,22 @@ pub fn key_of(harness: Harness) -> String {
 
 /// What the human types into the chief's window to have it hold `key`.
 pub fn the_key(key: &str) -> String {
-    format!("Remember this key, and reply with exactly one line: noted. The key is {key}")
+    format!("Remember this key and reply noted: {key}")
+}
+
+/// Whether `record` holds a message of the human's with `mark` in it: the window
+/// took what was typed, and the harness has it.
+pub fn took(record: &ask::Record, mark: &str) -> bool {
+    record
+        .items
+        .iter()
+        .any(|item| item.role == "user" && item.text.contains(mark))
 }
 
 /// Whether `record` holds the turn that gave `key`: the human's message, and the
 /// turn over, so that what the harness saved is the whole of it.
 pub fn saved_turn(record: &ask::Record, key: &str) -> bool {
-    record.settled
-        && record
-            .items
-            .iter()
-            .any(|item| item.role == "user" && item.text.contains(key))
+    record.settled && took(record, key)
 }
 
 /// The line of `record` in which the chief gives `key` back, after the question that
@@ -85,11 +92,31 @@ mod tests {
         );
         assert_eq!(
             the_key("KEY_PI"),
-            "Remember this key, and reply with exactly one line: noted. The key is KEY_PI"
+            "Remember this key and reply noted: KEY_PI"
         );
         for key in keys {
             assert!(!ASKED.contains(&key), "{key}");
         }
+    }
+
+    #[test]
+    fn what_is_typed_is_a_line_the_input_box_of_an_eighty_column_window_shows_whole() {
+        // The prompt mark and a space come before it.
+        for typed in [the_key("KEY_OPENCODE"), ASKED.to_owned()] {
+            assert!(!typed.contains('\n'), "{typed}");
+            assert!(typed.chars().count() + 2 < 80, "{typed}");
+        }
+    }
+
+    #[test]
+    fn the_window_took_what_was_typed_once_the_record_holds_a_message_of_the_humans_with_it() {
+        let typed = said("user", &the_key("KEY_PI"));
+        assert!(took(&record(vec![typed], false), "KEY_PI"));
+        assert!(
+            !took(&record(vec![said("assistant", "KEY_PI")], true), "KEY_PI"),
+            "what the chief says is not what the human typed"
+        );
+        assert!(!took(&record(vec![], true), "KEY_PI"), "nothing yet");
     }
 
     #[test]

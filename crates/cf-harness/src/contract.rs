@@ -36,11 +36,12 @@ pub trait Adapter {
     /// the harness's own record of it says: yes where it holds the conversation,
     /// no where it holds nothing a resume could find (Codex writes a thread's
     /// record at its first turn, and a window resumed on a thread with none ends
-    /// at once, which closes a chief's project), and none where its record cannot
-    /// be read to tell, which the engine goes on from by what ConsensFlow's own
-    /// copy of the conversation holds. A harness whose record can tell says so
-    /// whatever the copy holds: the copy is made a look at a time, and the record
-    /// has a turn before the next look copies it.
+    /// at once, which closes a chief's project), and none where it cannot tell
+    /// (its record cannot be read, or says nothing of whether there is anything
+    /// to go on with). Only no opens the window afresh; the engine goes on with
+    /// the conversation on a yes and on a none, as it did before it asked. So a
+    /// no is for a harness that is sure of it: a conversation wrongly said to be
+    /// empty is left behind.
     fn resumable<'a>(&'a self, _session: &'a str) -> Work<'a, Option<bool>> {
         Box::pin(async { None })
     }

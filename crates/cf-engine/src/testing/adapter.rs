@@ -13,7 +13,8 @@
 //! [`FakeAdapter::interrupt`]); one that held calls until it let them go
 //! (`hold`) says which, and when ([`FakeAdapter::prepare_holds`],
 //! [`FakeAdapter::observe_holds`], [`FakeAdapter::start_holds`],
-//! [`FakeAdapter::ready_holds`], [`FakeAdapter::deliver_holds`]).
+//! [`FakeAdapter::ready_holds`], [`FakeAdapter::deliver_holds`],
+//! [`FakeAdapter::resumable_holds`]).
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -149,6 +150,10 @@ pub struct FakeAdapter {
     pub ready_holds: Holds,
     /// Deliveries the test holds.
     pub deliver_holds: Holds,
+    /// Asks of whether a conversation can be gone on with that the test holds,
+    /// told the conversation as `[session]`: what the harness says is its own
+    /// when the ask is let go. Node's dispatcher asked nothing of the kind.
+    pub resumable_holds: Holds,
 }
 
 impl FakeAdapter {
@@ -184,6 +189,7 @@ impl FakeAdapter {
             start_holds: Holds::default(),
             ready_holds: Holds::default(),
             deliver_holds: Holds::default(),
+            resumable_holds: Holds::default(),
         })
     }
 
@@ -283,7 +289,7 @@ impl FakeAdapter {
     }
 
     /// Its record cannot tell whether its harness holds the window's
-    /// conversation: the copy of it decides.
+    /// conversation: the engine goes on with it, as it did before it asked.
     pub fn cannot_tell_a_resume(&self, handle: &str) {
         self.with(handle, |agent| agent.resumable = None);
     }
@@ -568,8 +574,13 @@ impl Adapter for Asked {
     /// Asked where Node's dispatcher asked nothing, so it is no call of the adapter
     /// in a trace.
     fn resumable<'a>(&'a self, session: &'a str) -> Work<'a, Option<bool>> {
-        let answer = self.fake.resumable_of(session);
-        Box::pin(async move { answer })
+        let wrapped = self.fake.resumable_holds.wrap(&json!([session]));
+        Box::pin(async move {
+            wrapped.before().await;
+            let answer = self.fake.resumable_of(session);
+            wrapped.after().await;
+            answer
+        })
     }
 
     fn interrupt(&self) -> Interrupt {

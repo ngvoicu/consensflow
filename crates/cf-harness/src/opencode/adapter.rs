@@ -178,7 +178,9 @@ impl Adapter for OpenCodeAdapter {
 
     /// OpenCode makes a session before its window opens, on a server of its own,
     /// so every conversation of its is there to be gone on with, whatever was said
-    /// in it.
+    /// in it. A limit: its store is not asked, so a session deleted from OpenCode
+    /// since is said to be there all the same; what `--session` does with one has
+    /// not been probed.
     fn resumable<'a>(&'a self, _session: &'a str) -> Work<'a, Option<bool>> {
         Box::pin(async { Some(true) })
     }

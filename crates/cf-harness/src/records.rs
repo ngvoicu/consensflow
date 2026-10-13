@@ -91,17 +91,17 @@ pub fn answers(
 }
 
 /// Whether `harness` has kept a transcript of `session` at all
-/// (`hasTranscript`): a file of it where the harness keeps them. OpenCode
-/// and Devin keep a store, not a transcript: never. A home the places are
-/// under, needed and missing, is the failure.
+/// (`hasTranscript`): a file of it where the harness keeps them, Codex's
+/// named as Codex names it. OpenCode and Devin keep a store, not a
+/// transcript: never. A home the places are under, needed and missing, is the
+/// failure.
 pub fn has_transcript(harness: Harness, session: &str, env: &Env) -> Result<bool, String> {
-    let found = match harness {
-        Harness::Claude => claude::paths::transcript(session, env)?,
-        Harness::Codex => codex::paths::transcript(session, env)?,
-        Harness::Pi => pi::paths::transcript(session, env)?,
-        Harness::Opencode | Harness::Devin => None,
-    };
-    Ok(found.is_some())
+    match harness {
+        Harness::Claude => Ok(claude::paths::transcript(session, env)?.is_some()),
+        Harness::Codex => codex::paths::rollout_kept(session, env),
+        Harness::Pi => Ok(pi::paths::transcript(session, env)?.is_some()),
+        Harness::Opencode | Harness::Devin => Ok(false),
+    }
 }
 
 #[cfg(test)]

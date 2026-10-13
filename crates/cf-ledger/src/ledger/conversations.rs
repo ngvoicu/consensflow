@@ -100,12 +100,6 @@ impl Ledger {
         conversations::current_conversation(&self.store, participant_id)
     }
 
-    /// Whether a conversation had a turn as ConsensFlow has seen it: its copy
-    /// holds a message of the user's.
-    pub fn had_a_turn(&self, conversation_id: i64) -> Result<bool, LedgerError> {
-        conversations::had_a_turn(&self.store, conversation_id)
-    }
-
     /// The first item of the participant's current conversation it was given that contains `text`.
     pub fn copied_item_with(
         &self,

@@ -5,9 +5,9 @@
 //! process ended ([`Dispatcher::settle_after_restart`]). The human's Resume
 //! brings the project back ([`Dispatcher::resume_project`]): its chief, and each
 //! window that had work in hand, at work or waiting for an answer, each on its
-//! own conversation, if its harness can go on with it: one it holds nothing of
-//! (Codex keeps a thread only once it has had a turn) has nothing to resume, and
-//! its window opens afresh ([`Dispatcher::conversation_to_go_on_with`]). What
+//! own conversation, unless its harness says it holds nothing of it (Codex keeps
+//! a thread only once it has had a turn): a conversation with nothing to resume
+//! opens its window afresh ([`Dispatcher::conversation_to_go_on_with`]). What
 //! waits is delivered by the usual rules as they come up: a member with no task
 //! in hand opens when it is next given work, and a task that is paused, by the
 //! human or by the system, stays so until it is resumed.
@@ -107,18 +107,17 @@ impl Dispatcher {
         self.project_now(project)
     }
 
-    /// The conversation a launch goes on with: the participant's current one, when
-    /// its harness can go on with it
-    /// ([`resumable`](cf_harness::contract::Adapter::resumable)). The harness's own
-    /// record decides where it can tell, whatever ConsensFlow's copy of the
-    /// conversation holds: a turn the human typed into the window is in the
-    /// harness's record at once, and in the copy at the next look, a second on. A
-    /// conversation the harness holds nothing of is not resumed, since a window
-    /// opened on one ends at once (Codex's on a thread that never had a turn closed
-    /// a chief's project, 2026-10-13): the window opens afresh, as a first launch
-    /// does, and what waits for it is given as on any first launch. Where the
-    /// record cannot tell, the copy decides: the conversation is gone on with if it
-    /// holds an item.
+    /// The conversation a launch goes on with: the participant's current one,
+    /// unless its harness says it holds nothing of it
+    /// ([`resumable`](cf_harness::contract::Adapter::resumable)). A conversation
+    /// the harness holds nothing of is not resumed, since a window opened on one
+    /// ends at once (Codex's on a thread that never had a turn closed a chief's
+    /// project, 2026-10-13): the window opens afresh, as a first launch does, and
+    /// what waits for it is given as on any first launch. Only the harness's no
+    /// does that. Where it cannot tell the window is resumed, as it was before it
+    /// was asked: ConsensFlow's copy of the conversation is a look at a time
+    /// behind, and a window opened afresh on a conversation that holds things
+    /// leaves them behind.
     pub(crate) async fn conversation_to_go_on_with(
         &self,
         participant: &ParticipantView,
@@ -139,11 +138,7 @@ impl Dispatcher {
             (Some(adapter), Some(session)) => adapter.resumable(session).await,
             _ => None,
         };
-        let holds = match told {
-            Some(holds) => holds,
-            None => self.seams.ledger.borrow().had_a_turn(current.id)?,
-        };
-        Ok(holds.then_some(current))
+        Ok((told != Some(false)).then_some(current))
     }
 
     /// The participants other than the chief and the human that hold a task at

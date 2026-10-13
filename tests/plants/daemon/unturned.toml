@@ -1,52 +1,56 @@
-# A conversation is resumed if its harness can go on with it (2026-10-13: a Codex chief that was
-# opened, idle, closed and resumed could not be: Codex writes a thread's record only once it has a
-# turn, so `codex resume <thread>` found none, the window ended at once, and a chief's own exit
+# A conversation is resumed unless its harness says it holds nothing of it (2026-10-13: a Codex chief
+# that was opened, idle, closed and resumed could not be: Codex writes a thread's record only once it
+# has a turn, so `codex resume <thread>` found none, the window ended at once, and a chief's own exit
 # closes its project; and the other way round, a turn the human typed into a window is in its
-# harness's record at once and in ConsensFlow's copy a look later, a second on, so a copy that holds
-# nothing is no proof that there is nothing to go on with). A launch asks the adapter of the
-# conversation's harness (`Adapter::resumable`): yes where its own record holds the conversation, no
-# where it holds nothing a resume could find, and none where it cannot tell, which the ledger's copy
-# decides (`Ledger::had_a_turn`: a message of the user's in it, of that conversation and no other's).
-# The cases are `crates/cf-engine/tests/dispatcher/resumable.rs`, the ledger's `receipt/turns.rs`,
-# each harness's own `can_go_on…` in `crates/cf-harness/tests/launch/`, and the rig's
-# `resume_of_a_chief_with_no_turn` and `resume_of_a_turn_the_daemon_never_copied` (a real daemon and
-# pane host, on stand-ins that keep what their harnesses keep and end a window resumed on what they
-# keep nothing of), and the rig's two restarts that quit as soon as the chief has answered. One plant
-# takes one rule out, or puts one wrong; a test of it fails.
+# harness's record at once and in ConsensFlow's copy a look later, so the copy is no judge of what
+# there is to go on with, and a conversation that holds things is not left behind for a record that
+# cannot tell). A launch asks the adapter of the conversation's harness (`Adapter::resumable`): yes
+# where its own record holds the conversation, no where it holds nothing a resume could find, and none
+# where it cannot tell. Only no opens the window afresh; the copy plays no part. The cases are
+# `crates/cf-engine/tests/dispatcher/resumable.rs` and `launch_stops.rs`, each harness's own
+# `can_go_on…` in `crates/cf-harness/tests/launch/` and the unit cases of the name Codex gives a
+# rollout, and the rig's `resume_of_a_chief_with_no_turn` and `resume_of_a_turn_the_daemon_never_copied`
+# (a real daemon and pane host, on stand-ins that keep what their harnesses keep and end a window
+# resumed on what they keep nothing of), and the rig's two restarts that quit as soon as the chief has
+# answered. One plant takes one rule out, or puts one wrong; a test of it fails.
 #
-# - the launch asks the harness, and obeys it: not asking it (the copy decides), resuming what it
-#   holds nothing of, opening afresh what it holds, and never resuming at all;
-# - where the harness cannot tell, the copy decides: it resumes, or it goes afresh, whatever the copy
-#   holds; and a chief that starts afresh is handed over to only for what it left behind;
-# - what makes a turn in the copy: a message of the user's, in the conversation's own copy, and not a
-#   delivery of a participant at a time (the one before it ended in the same millisecond);
-# - each harness's own answer: where Claude's, Codex's and Pi's file is kept, that their record
-#   unread tells nothing, that OpenCode has its session before any turn, and that Devin's store has a
+# - the launch asks the harness, and obeys its no and only its no: not asking it, resuming what it
+#   holds nothing of, opening afresh what it cannot tell, and never resuming at all; and a chief that
+#   starts afresh is handed over to only for what it left behind;
+# - a member's message is begun, and the stop its window owes read, before its harness is asked, and
+#   the launch is given up on if a pause came while it was: a pause that comes during the ask is not
+#   forgiven;
+# - each harness's own answer: where Claude's and Codex's file is kept, and that Codex's is named as
+#   Codex names it (a timestamp and the thread, no copy of it), that their record unread tells
+#   nothing, that OpenCode and Pi have their session before any turn, and that Devin's store has a
 #   turn only where it holds a message of the user's.
 #
 # Every name holds `resume unturned`, so `npm run plants:daemon -- "resume unturned"` runs them all.
 
 [run]
-# The engine's cases of it, on the fake windows; the ledger's own; the harnesses'.
+# The engine's cases of it, on the fake windows: whether a conversation is resumed, the launches a
+# pause comes during, and a member's window that comes back on its conversation; the harnesses'.
 engine-resumable = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "resumable::"]
-ledger-turns = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "turns::"]
+engine-launch-stops = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "launch_stops::"]
+engine-resume = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "resume::"]
 harness-resumable = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "can_go_on"]
+harness-codex-paths = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "codex::paths::"]
 # The rig's cases of the report and of its review: the real daemon and pane host on the stand-in
 # Codex, Claude and Devin; and the two restarts of the rig that quit as soon as the chief answered.
 rig-regression-resume = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "resume_of_a_"]
 rig-restart = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "--", "a_restart_leaves_the_project_suspended_and_the_humans_resume_brings_the_chief_back_on_its_own_conversation", "the_app_started_again_on_the_same_home_leaves_the_project_suspended_and_its_resume_opens_the_chief_a_window_of_its_own"]
 
-# --- the engine: the harness is asked, and obeyed ---
+# --- the engine: the harness is asked, and its no is obeyed ---
 
 [[plant]]
-name = "resume unturned: the harness is not asked, and the copy decides"
-meant = "a_chief_whose_harness_holds_its_conversation_is_resumed_on_it_though_no_look_has_copied_a_turn_of_it"
+name = "resume unturned: the harness is not asked"
+meant = "a_chief_whose_harness_holds_nothing_of_its_conversation_is_opened_afresh_though_the_copy_of_it_holds_a_turn"
 runs = ["engine-resumable"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/resume.rs"
-find = '''            Some(holds) => holds,'''
-replace = '''            Some(_) => self.seams.ledger.borrow().had_a_turn(current.id)?,'''
+find = '''            (Some(adapter), Some(session)) => adapter.resumable(session).await,'''
+replace = '''            (Some(_), Some(_)) => None,'''
 
 [[plant]]
 name = "resume unturned: a harness that holds nothing of a conversation is resumed on it all the same"
@@ -55,8 +59,18 @@ runs = ["engine-resumable"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/resume.rs"
-find = '''            Some(holds) => holds,'''
-replace = '''            Some(_) => true,'''
+find = '''        Ok((told != Some(false)).then_some(current))'''
+replace = '''        Ok((told != Some(false) || told == Some(false)).then_some(current))'''
+
+[[plant]]
+name = "resume unturned: where the record cannot tell a conversation is opened afresh"
+meant = "where_the_record_cannot_tell_a_conversation_is_resumed_whatever_its_copy_holds"
+runs = ["engine-resumable"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/resume.rs"
+find = '''        Ok((told != Some(false)).then_some(current))'''
+replace = '''        Ok((told == Some(true)).then_some(current))'''
 
 [[plant]]
 name = "resume unturned: a launch never resumes"
@@ -65,30 +79,8 @@ runs = ["engine-dispatcher"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/resume.rs"
-find = '''        Ok(holds.then_some(current))'''
-replace = '''        Ok(holds.then_some(current).filter(|_| false))'''
-
-# --- the engine: where the record cannot tell, the copy decides ---
-
-[[plant]]
-name = "resume unturned: where the record cannot tell a conversation is resumed"
-meant = "where_the_record_cannot_tell_a_conversation_whose_copy_holds_nothing_is_opened_afresh"
-runs = ["engine-resumable"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/resume.rs"
-find = '''            None => self.seams.ledger.borrow().had_a_turn(current.id)?,'''
-replace = '''            None => true,'''
-
-[[plant]]
-name = "resume unturned: where the record cannot tell a conversation is opened afresh"
-meant = "where_the_record_cannot_tell_a_conversation_whose_copy_holds_a_message_of_the_users_is_resumed"
-runs = ["engine-resumable"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/resume.rs"
-find = '''            None => self.seams.ledger.borrow().had_a_turn(current.id)?,'''
-replace = '''            None => false,'''
+find = '''        Ok((told != Some(false)).then_some(current))'''
+replace = '''        Ok((told != Some(false)).then_some(current).filter(|_| false))'''
 
 [[plant]]
 name = "resume unturned: a chief that starts afresh is not handed over to because of a conversation that held nothing"
@@ -97,79 +89,82 @@ runs = ["engine-resumable"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
-find = '''            self.chief_first(project, participant, conversation.as_ref(), message)?'''
+find = '''            first = self.chief_first(project, participant, conversation.as_ref(), first)?;'''
 replace = '''            let current = self.seams.ledger.borrow().current_conversation(participant.id)?;
-            self.chief_first(project, participant, current.as_ref(), message)?'''
+            first = self.chief_first(project, participant, current.as_ref(), first)?;'''
 
-# --- the ledger's rule of a turn, as the engine's cases hold it ---
-
-[[plant]]
-name = "resume unturned: the copy of a conversation is no turn"
-meant = "where_the_record_cannot_tell_a_conversation_whose_copy_holds_a_message_of_the_users_is_resumed"
-runs = ["engine-resumable"]
-
-[[plant.edit]]
-file = "crates/cf-ledger/src/conversations.rs"
-find = '''AND role = 'user')",'''
-replace = '''AND role = 'user' AND 0)",'''
+# --- the engine: a pause that comes while a member's harness is asked ---
 
 [[plant]]
-name = "resume unturned: a delivery of the participant at a time is a turn of a conversation that began in it"
-meant = "what_was_delivered_into_the_conversation_before_is_no_turn_of_the_one_a_switch_began_in_the_same_millisecond"
-runs = ["engine-resumable"]
+name = "resume unturned: a member's message is begun after its harness is asked, so a pause during the ask is forgiven"
+meant = "a_pause_while_the_harness_is_asked_about_the_conversation_opens_no_pane_and_the_note_is_given_back"
+runs = ["engine-launch-stops"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/conversations.rs"
-find = '''        "SELECT EXISTS (SELECT 1 FROM transcript WHERE conversation_id = ? AND role = 'user')",'''
-replace = '''        "SELECT EXISTS (SELECT 1 FROM transcript WHERE conversation_id = ?1 AND role = 'user')
-             OR EXISTS (SELECT 1 FROM message
-                        WHERE recipient_id = (SELECT participant_id FROM conversation WHERE id = ?1)
-                          AND delivered_at >= (SELECT started_at FROM conversation WHERE id = ?1))",'''
+file = "crates/cf-engine/src/windows.rs"
+find = '''        let begun = first
+            .map(|first| self.seams.ledger.borrow_mut().begin_delivery(first.id))
+            .transpose()?;'''
+replace = '''        let conversation = if participant.role == "chief" {
+            conversation
+        } else {
+            self.conversation_to_go_on_with(participant).await?
+        };
+        let begun = first
+            .map(|first| self.seams.ledger.borrow_mut().begin_delivery(first.id))
+            .transpose()?;'''
 
-# --- the ledger's own cases of it ---
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '''        let conversation = if participant.role == "chief" {
+            conversation
+        } else {
+            let found = self.conversation_to_go_on_with(participant).await?;
+            if self.launch_over(
+                record,
+                participant,
+                delivering,
+                stop,
+                "a pause came while its harness was asked about its conversation",
+            )? {
+                return Ok(None);
+            }
+            found
+        };'''
+replace = ''''''
 
 [[plant]]
-name = "resume unturned ledger: the copy of a conversation is no turn"
-meant = "a_message_of_the_users_in_the_copy_is_a_turn_whoever_wrote_it_and_what_else_a_harness_writes_is_none"
-runs = ["ledger-turns"]
+name = "resume unturned: a launch whose pause came while the harness was asked goes on to prepare its window"
+meant = "a_pause_while_the_harness_is_asked_about_the_conversation_opens_no_pane_and_the_note_is_given_back"
+runs = ["engine-launch-stops"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/conversations.rs"
-find = '''AND role = 'user')",'''
-replace = '''AND role = 'user' AND 0)",'''
+file = "crates/cf-engine/src/windows.rs"
+find = '''            if self.launch_over(
+                record,
+                participant,
+                delivering,
+                stop,
+                "a pause came while its harness was asked about its conversation",
+            )? {
+                return Ok(None);
+            }
+            found'''
+replace = '''            found'''
 
 [[plant]]
-name = "resume unturned ledger: what a harness writes of itself is a turn"
-meant = "a_message_of_the_users_in_the_copy_is_a_turn_whoever_wrote_it_and_what_else_a_harness_writes_is_none"
-runs = ["ledger-turns"]
+name = "resume unturned: the conversation a member's launch looked into is not the one its window goes on with"
+meant = "a_window_the_quit_cut_mid_turn_is_told_so_once_and_one_at_rest_is_told_nothing"
+runs = ["engine-resume"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/conversations.rs"
-find = '''WHERE conversation_id = ? AND role = 'user')",'''
-replace = '''WHERE conversation_id = ?)",'''
-
-[[plant]]
-name = "resume unturned ledger: the copy of another conversation is a turn of this one"
-meant = "the_copy_of_another_conversation_is_no_turn_of_this_one"
-runs = ["ledger-turns"]
-
-[[plant.edit]]
-file = "crates/cf-ledger/src/conversations.rs"
-find = '''WHERE conversation_id = ? AND role = 'user')",'''
-replace = '''WHERE ? IS NOT NULL AND role = 'user')",'''
-
-[[plant]]
-name = "resume unturned ledger: a delivery of the participant at a time is a turn of a conversation that began in it"
-meant = "what_was_delivered_into_the_conversation_before_is_no_turn_of_the_one_that_began_in_the_same_millisecond"
-runs = ["ledger-turns"]
-
-[[plant.edit]]
-file = "crates/cf-ledger/src/conversations.rs"
-find = '''        "SELECT EXISTS (SELECT 1 FROM transcript WHERE conversation_id = ? AND role = 'user')",'''
-replace = '''        "SELECT EXISTS (SELECT 1 FROM transcript WHERE conversation_id = ?1 AND role = 'user')
-             OR EXISTS (SELECT 1 FROM message
-                        WHERE recipient_id = (SELECT participant_id FROM conversation WHERE id = ?1)
-                          AND delivered_at >= (SELECT started_at FROM conversation WHERE id = ?1))",'''
+file = "crates/cf-engine/src/windows.rs"
+find = '''                return Ok(None);
+            }
+            found'''
+replace = '''                return Ok(None);
+            }
+            found.filter(|_| false)'''
 
 # --- each harness's own answer ---
 
@@ -194,12 +189,64 @@ find = '''records.has_transcript(harness, session).await.ok()'''
 replace = '''Some(records.has_transcript(harness, session).await.unwrap_or(false))'''
 
 [[plant]]
+name = "resume unturned harness: a file that holds the thread's id is its rollout"
+meant = "can_go_on_with_a_thread_whose_rollout_codex_kept_and_not_with_one_it_kept_none_of"
+runs = ["harness-resumable"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/paths.rs"
+find = '''&|name| is_rollout_of(name, session)'''
+replace = '''&|name| name.contains(session)'''
+
+[[plant]]
+name = "resume unturned harness: a thread is kept where any file holds its id"
+meant = "can_go_on_with_a_thread_whose_rollout_codex_kept_and_not_with_one_it_kept_none_of"
+runs = ["harness-resumable"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/records.rs"
+find = '''        Harness::Codex => codex::paths::rollout_kept(session, env),'''
+replace = '''        Harness::Codex => Ok(codex::paths::transcript(session, env)?.is_some()),'''
+
+[[plant]]
+name = "resume unturned harness: a name that is no timestamp and thread is a rollout"
+meant = "a_file_that_holds_the_threads_id_in_its_name_and_is_not_its_rollout_is_none"
+runs = ["harness-codex-paths"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/paths.rs"
+find = '''        .is_some_and(is_timestamp)'''
+replace = '''        .is_some()'''
+
+[[plant]]
+name = "resume unturned harness: a copy of a rollout is its rollout"
+meant = "a_file_that_holds_the_threads_id_in_its_name_and_is_not_its_rollout_is_none"
+runs = ["harness-codex-paths"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/paths.rs"
+find = '''        .and_then(|rest| rest.strip_suffix(".jsonl"))
+        .and_then(|rest| rest.strip_suffix(session))'''
+replace = '''        .and_then(|rest| rest.split(".jsonl").next())
+        .and_then(|rest| rest.strip_suffix(session))'''
+
+[[plant]]
 name = "resume unturned harness: OpenCode has no conversation before its first turn"
 meant = "can_go_on_with_any_conversation_of_its_own_though_nothing_was_said_in_it"
 runs = ["harness-resumable"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/opencode/adapter.rs"
+find = '''        Box::pin(async { Some(true) })'''
+replace = '''        Box::pin(async { Some(false) })'''
+
+[[plant]]
+name = "resume unturned harness: Pi holds nothing of a session it kept no file of where a look would find one"
+meant = "can_go_on_with_any_session_of_its_own_whether_or_not_a_file_of_it_is_where_a_look_would_find_one"
+runs = ["harness-resumable"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/adapter.rs"
 find = '''        Box::pin(async { Some(true) })'''
 replace = '''        Box::pin(async { Some(false) })'''
 
@@ -226,15 +273,15 @@ replace = '''                Reading::Unknown(_) => Some(false),'''
 # --- end to end: through the real daemon and pane host ---
 
 [[plant]]
-name = "resume unturned rig: the harness is not asked, and the copy decides"
+name = "resume unturned rig: a launch never resumes"
 meant = "a_claude_chief_whose_window_saved_a_turn_the_daemon_never_copied_is_resumed_on_its_conversation"
 runs = ["rig-regression-resume"]
 builds = true
 
 [[plant.edit]]
 file = "crates/cf-engine/src/resume.rs"
-find = '''            Some(holds) => holds,'''
-replace = '''            Some(_) => self.seams.ledger.borrow().had_a_turn(current.id)?,'''
+find = '''        Ok((told != Some(false)).then_some(current))'''
+replace = '''        Ok((told != Some(false)).then_some(current).filter(|_| false))'''
 
 [[plant]]
 name = "resume unturned rig: a harness that holds nothing of a conversation is resumed on it all the same"
@@ -244,8 +291,8 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-engine/src/resume.rs"
-find = '''            Some(holds) => holds,'''
-replace = '''            Some(_) => true,'''
+find = '''        Ok((told != Some(false)).then_some(current))'''
+replace = '''        Ok((told != Some(false) || told == Some(false)).then_some(current))'''
 
 [[plant]]
 name = "resume unturned rig: a quit as soon as the chief has answered is opened afresh"
@@ -255,5 +302,5 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-engine/src/resume.rs"
-find = '''            Some(holds) => holds,'''
-replace = '''            Some(_) => self.seams.ledger.borrow().had_a_turn(current.id)?,'''
+find = '''        Ok((told != Some(false)).then_some(current))'''
+replace = '''        Ok((told != Some(false)).then_some(current).filter(|_| false))'''
