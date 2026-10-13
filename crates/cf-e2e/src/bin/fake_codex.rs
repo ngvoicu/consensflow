@@ -2,7 +2,8 @@
 //! on a window: given `app-server --listen …` it is Codex's server, starting
 //! thread A when asked; given `--remote …` it is the TUI, which starts a thread
 //! through the broker, reads the broker's `/session` with its token, and exits 7
-//! (or waits to be ended). Given `resume <thread>` it resumes that one instead,
+//! (or waits to be ended, and starts a turn with each line the human types into
+//! its terminal). Given `resume <thread>` it resumes that one instead,
 //! and ends with 1 where the server has no rollout of it, as Codex's does: a
 //! thread has one only once it has had a turn. Each run writes what it was given,
 //! and what it saw, to `CF_TEST_CODEX_LOG`. `CF_TEST_CODEX_BACKEND` says how the
@@ -26,10 +27,14 @@
 // root file beside it, where each would be a binary of its own.
 #[path = "fake_codex/agent.rs"]
 mod agent;
+#[path = "fake_codex/arguments.rs"]
+mod arguments;
 #[path = "fake_codex/probes.rs"]
 mod probes;
 #[path = "fake_codex/servers.rs"]
 mod servers;
+#[path = "fake_codex/typed.rs"]
+mod typed;
 
 use std::fs::OpenOptions;
 use std::io::{Read, Write};
@@ -37,6 +42,7 @@ use std::net::TcpListener;
 use std::process::ExitCode;
 use std::sync::Arc;
 use std::thread;
+use std::time::Duration;
 
 use cf_e2e::http::Http;
 use cf_e2e::process::own_var;
@@ -45,9 +51,11 @@ use sha2::{Digest, Sha256};
 use tungstenite::client::IntoClientRequest;
 use tungstenite::handshake::server::{ErrorResponse, Request, Response};
 use tungstenite::http::{HeaderValue, StatusCode};
+use tungstenite::stream::MaybeTlsStream;
 use tungstenite::{Message, WebSocket};
 
 use agent::Agent;
+use arguments::launched;
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -302,38 +310,6 @@ fn resumed(agent: &Arc<Agent>, request: &Value) -> Result<Value, String> {
     }
 }
 
-/// What a TUI was given to start with, after the options the broker adds
-/// (`--remote <url> --remote-auth-token-env <name>`).
-#[derive(Debug, Default, PartialEq, Eq)]
-struct Launched<'a> {
-    /// The thread it is to resume (`resume <thread>`).
-    resume: Option<&'a str>,
-    /// The message it starts with: the word that is no flag and no value of one.
-    message: Option<&'a str>,
-}
-
-/// What the TUI's arguments `args` say of the thread and the message it starts with.
-fn launched(args: &[String]) -> Launched<'_> {
-    let mut launched = Launched::default();
-    let mut words = args.get(4..).unwrap_or_default().iter();
-    while let Some(word) = words.next() {
-        match word.as_str() {
-            "-c" | "--config" | "--enable" | "--disable" | "--model" | "-m" => {
-                words.next();
-            }
-            flag if flag.starts_with('-') => {}
-            "resume" if launched.resume.is_none() => {
-                launched.resume = words.next().map(String::as_str);
-            }
-            message => {
-                launched.message = Some(message);
-                break;
-            }
-        }
-    }
-    launched
-}
-
 /// Codex's TUI: it reaches the server through the broker, its token in its
 /// environment.
 fn tui(args: &[String]) -> ExitCode {
@@ -432,60 +408,39 @@ fn tui(args: &[String]) -> ExitCode {
     if own_var("CF_TEST_CODEX_TUI").as_deref() != Some("wait") {
         return ExitCode::from(7);
     }
-    // Waits for its window to end it, or for the connection to go.
-    while socket.read().is_ok() {}
-    ExitCode::SUCCESS
+    // Waits for its window to end it, or for the connection to go, and starts a turn
+    // with each line the human types into its terminal as it waits.
+    if let MaybeTlsStream::Plain(stream) = socket.get_mut() {
+        let _ = stream.set_read_timeout(Some(Duration::from_millis(100)));
+    }
+    let typed = typed::typed();
+    let mut asked = 3;
+    loop {
+        match socket.read() {
+            Ok(_) => {}
+            Err(tungstenite::Error::Io(failed)) if is_a_wait(&failed) => {}
+            Err(_) => return ExitCode::SUCCESS,
+        }
+        while let Ok(text) = typed.try_recv() {
+            asked += 1;
+            let input = json!([{ "type": "text", "text": text, "text_elements": [] }]);
+            let turn = json!({
+                "id": asked,
+                "method": "turn/start",
+                "params": { "threadId": thread, "input": input },
+            });
+            if socket.send(Message::text(turn.to_string())).is_err() {
+                return ExitCode::SUCCESS;
+            }
+        }
+    }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// The arguments of a TUI the broker added its own options to.
-    fn tui_args(rest: &str) -> Vec<String> {
-        format!("--remote ws://127.0.0.1:1 --remote-auth-token-env TOKEN {rest}")
-            .split(' ')
-            .filter(|word| !word.is_empty())
-            .map(str::to_owned)
-            .collect()
-    }
-
-    #[test]
-    fn a_tui_starts_with_the_message_it_is_given_and_with_none_where_it_is_given_none() {
-        let args = tui_args("-c a=b --model fake --enable x HELLO");
-        assert_eq!(
-            launched(&args),
-            Launched {
-                resume: None,
-                message: Some("HELLO")
-            }
-        );
-        assert_eq!(
-            launched(&tui_args("-c a=b --model fake")),
-            Launched::default()
-        );
-        assert_eq!(launched(&[]), Launched::default());
-    }
-
-    #[test]
-    fn a_tui_told_to_resume_names_the_thread_and_may_have_a_message_after_it() {
-        let args = tui_args("-c a=b resume 01a0 --model fake");
-        assert_eq!(
-            launched(&args),
-            Launched {
-                resume: Some("01a0"),
-                message: None
-            }
-        );
-        let args = tui_args("resume 01a0 --model fake Go on");
-        assert_eq!(
-            launched(&args),
-            Launched {
-                resume: Some("01a0"),
-                message: Some("Go")
-            }
-        );
-        // A resume that names no thread resumes none.
-        assert_eq!(launched(&tui_args("resume")).resume, None);
-    }
+/// Whether a read failed for want of anything to read in the time it was given,
+/// which is no end of the connection.
+fn is_a_wait(failed: &std::io::Error) -> bool {
+    matches!(
+        failed.kind(),
+        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+    )
 }

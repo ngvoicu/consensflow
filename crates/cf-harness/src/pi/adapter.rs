@@ -36,6 +36,7 @@ use crate::seams::{Entropy, Services, Time};
 use crate::shared::admission::admission;
 use crate::shared::left_open::LeftOpen;
 use crate::shared::record_state::{record_state, switched_to, unnamed};
+use crate::shared::resumable::transcript_kept;
 use crate::shared::role::write_role;
 use crate::shared::window_args;
 
@@ -138,6 +139,13 @@ impl Adapter for PiAdapter {
                 }),
             })
         })
+    }
+
+    /// Pi's `--session-id` makes the session where there is none and resumes it
+    /// where there is, so a window opened on a session with no file does not end.
+    /// The file all the same says whether there is anything to go on with.
+    fn resumable<'a>(&'a self, session: &'a str) -> Work<'a, Option<bool>> {
+        transcript_kept(&*self.records, Harness::Pi, session)
     }
 
     /// Pi's bash tool starts each command `detached` wherever there are process

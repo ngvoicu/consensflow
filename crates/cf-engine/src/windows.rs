@@ -11,9 +11,7 @@ use std::time::Duration;
 
 use cf_harness::contract::{Interrupt, Launch, LaunchId, Observed, Pane, Window};
 use cf_harness::seams::Time;
-use cf_ledger::{
-    Begun, ConversationView, MessageView, NewNote, ParticipantView, ProjectView, Stop,
-};
+use cf_ledger::{Begun, MessageView, NewNote, ParticipantView, ProjectView, Stop};
 use cf_proto::panes::Servers;
 use cf_proto::trace::WindowEvent;
 use serde_json::{json, Value};
@@ -329,26 +327,6 @@ impl Dispatcher {
         Ok(())
     }
 
-    /// The conversation a launch goes on with: the participant's current one, if
-    /// it had a turn. A harness keeps what it can resume only once something was
-    /// said in a conversation (Codex writes a thread's record at its first turn,
-    /// and a window resumed on a thread that has none ends at once, which closes
-    /// a chief's project), so one that never had a turn is not resumed: the
-    /// window opens afresh, as a first launch does, and what waits for it is
-    /// given as on any first launch. A turn is what the ledger has seen of the
-    /// window, and the daemon looks once a second: a window whose first turn
-    /// began after the last look, when a Close or a quit came, opens afresh.
-    fn conversation_to_go_on_with(
-        &self,
-        participant: &ParticipantView,
-    ) -> Result<Option<ConversationView>, EngineError> {
-        let ledger = self.seams.ledger.borrow();
-        Ok(match ledger.current_conversation(participant.id)? {
-            Some(current) if ledger.had_a_turn(current.id)? => Some(current),
-            _ => None,
-        })
-    }
-
     /// Launches `participant`'s window on its harness, `message` its first if
     /// there is one (a chief's is its handoff, most often). One that does not
     /// come up says why ([`Dispatcher::launch_failed`]); a participant
@@ -361,7 +339,7 @@ impl Dispatcher {
         message: Option<MessageView>,
     ) -> Result<(), EngineError> {
         let harness = participant.harness.clone().unwrap_or_default();
-        let conversation = self.conversation_to_go_on_with(participant)?;
+        let conversation = self.conversation_to_go_on_with(participant).await?;
         let resume = conversation
             .as_ref()
             .and_then(|conversation| conversation.native_session.clone());

@@ -330,6 +330,43 @@ fn resumes_its_thread() {
 }
 
 #[test]
+fn can_go_on_with_a_thread_whose_rollout_codex_kept_and_not_with_one_it_kept_none_of() {
+    let home = Home::new();
+    let (codex, _fakes) = adapter(&home);
+    assert_eq!(
+        finished(codex.resumable(THREAD)),
+        Some(false),
+        "a thread that has had no turn has no rollout"
+    );
+    // Codex begins a thread's rollout with its first turn, in the folder of the day,
+    // and its name ends with the thread.
+    let day = Path::new(&home.root)
+        .join("home")
+        .join(".codex")
+        .join("sessions")
+        .join("2026")
+        .join("10")
+        .join("13");
+    fs::create_dir_all(&day).unwrap();
+    fs::write(
+        day.join(format!("rollout-2026-10-13T10-00-00-{THREAD}.jsonl")),
+        "",
+    )
+    .unwrap();
+    assert_eq!(finished(codex.resumable(THREAD)), Some(true));
+    assert_eq!(
+        finished(codex.resumable(NEXT)),
+        Some(false),
+        "another thread's"
+    );
+    // Where its folder cannot be looked for, Codex cannot tell.
+    let env = Env::default();
+    let services = Fakes::new(&env).services(&env, Path::new(&home.root));
+    let nowhere = CodexAdapter::new(&services);
+    assert_eq!(finished(nowhere.resumable(THREAD)), None);
+}
+
+#[test]
 fn opens_an_image_agent_s_window_on_codex_s_own_model_whose_image_tool_draws_no_model_or_effort_of_its_agent(
 ) {
     let home = Home::new();

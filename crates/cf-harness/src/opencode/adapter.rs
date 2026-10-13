@@ -175,6 +175,13 @@ impl Adapter for OpenCodeAdapter {
             })
         })
     }
+
+    /// OpenCode makes a session before its window opens, on a server of its own,
+    /// so every conversation of its is there to be gone on with, whatever was said
+    /// in it.
+    fn resumable<'a>(&'a self, _session: &'a str) -> Work<'a, Option<bool>> {
+        Box::pin(async { Some(true) })
+    }
 }
 
 /// An OpenCode window, and the channel to its server and its plugin.

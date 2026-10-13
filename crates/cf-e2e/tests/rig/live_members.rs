@@ -406,9 +406,6 @@ fn the_app_started_again_on_the_same_home_leaves_the_project_suspended_and_its_r
                 .transcript(&session)
                 .contains("\"text\":\"BEFORE-RESTART\""))
         })?;
-    // The daemon looks at a window once a second, and a Resume goes on with a conversation once the
-    // daemon has seen a turn in it: it is given the pass.
-    std::thread::sleep(secs(3));
 
     let members = members.restart(&log)?;
     assert_eq!(members.project_id(), project);

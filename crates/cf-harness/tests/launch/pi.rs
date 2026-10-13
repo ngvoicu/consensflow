@@ -320,6 +320,38 @@ fn resumes_the_session_it_has() {
 }
 
 #[test]
+fn can_go_on_with_a_session_whose_file_pi_kept_and_not_with_one_it_kept_none_of() {
+    let home = Home::new();
+    let (pi, _fakes) = adapter(&home);
+    let session = "cf-1-zeus-0000abcd";
+    assert_eq!(finished(pi.resumable(session)), Some(false));
+    // Pi keeps a session in a file under its sessions folder, whose name holds the session.
+    let folder = Path::new(&home.root)
+        .join("home")
+        .join(".pi")
+        .join("agent")
+        .join("sessions")
+        .join("--work--");
+    fs::create_dir_all(&folder).unwrap();
+    fs::write(
+        folder.join(format!("2026-10-13T10-00-00-000Z_{session}.jsonl")),
+        "",
+    )
+    .unwrap();
+    assert_eq!(finished(pi.resumable(session)), Some(true));
+    assert_eq!(
+        finished(pi.resumable("cf-1-zeus-0000ffff")),
+        Some(false),
+        "another session's"
+    );
+    // Where its folder cannot be looked for, Pi cannot tell.
+    let env = Env::default();
+    let services = Fakes::new(&env).services(&env, Path::new(&home.root));
+    let nowhere = PiAdapter::new(&services);
+    assert_eq!(finished(nowhere.resumable(session)), None);
+}
+
+#[test]
 fn delivers_through_the_real_channel_a_claim_then_the_extension_inbox() {
     let home = Home::new();
     let (adapter, fakes) = adapter(&home);

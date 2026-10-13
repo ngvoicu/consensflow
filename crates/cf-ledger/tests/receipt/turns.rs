@@ -1,13 +1,15 @@
-//! Whether a conversation had a turn (`Ledger::had_a_turn`), which is what
-//! decides if a window is opened on it again or afresh: ConsensFlow's copy of
-//! it holds an item, or a message was delivered to its participant since it
-//! began. A message that was queued, on its way, given up or withdrawn is no
-//! turn, nor is one delivered to anyone else, or before the conversation began.
+//! Whether a conversation had a turn as ConsensFlow has seen it
+//! (`Ledger::had_a_turn`), which decides if a window is opened on it again or
+//! afresh where its harness's own record cannot say: its copy holds a message of
+//! the user's. The copy is of the conversation it was made of and no other's, and
+//! what was delivered is no turn of it until a look has copied it: a delivery
+//! carries no conversation, only a participant and a time, and the time of one
+//! conversation's end and the next one's beginning can be the same.
 
-use cf_ledger::{NewNote, Read};
+use cf_ledger::{Ledger, NewNote};
 use serde_json::json;
 
-use crate::fixture::{world, World};
+use crate::fixture::{frozen_world, world, World};
 
 /// A conversation of `handle`'s, begun now.
 fn conversation(w: &mut World, handle: &str) -> i64 {
@@ -18,30 +20,24 @@ fn conversation(w: &mut World, handle: &str) -> i64 {
         .id
 }
 
+/// What the window wrote of `role`, copied.
+fn copy(ledger: &mut Ledger, conversation: i64, role: &str) {
+    ledger
+        .copy_transcript(
+            conversation,
+            &[json!({ "id": format!("i-{role}"), "role": role, "text": "words" })],
+            0,
+        )
+        .expect("copied");
+}
+
 /// Whether the ledger says the conversation had a turn.
 fn had_a_turn(w: &World, conversation: i64) -> bool {
     w.ledger.had_a_turn(conversation).expect("asked")
 }
 
-/// A note from ConsensFlow to `to`, queued: its id.
-fn note_to(w: &mut World, to: &str) -> i64 {
-    w.ledger
-        .note(
-            w.project,
-            &NewNote {
-                from: None,
-                to: to.into(),
-                body: "Any news?".into(),
-                task: None,
-            },
-        )
-        .expect("a note")
-        .id
-}
-
 #[test]
-fn a_conversation_with_nothing_copied_and_nothing_delivered_had_no_turn_and_an_unknown_one_is_refused(
-) {
+fn a_conversation_with_nothing_copied_had_no_turn_and_an_unknown_one_is_refused() {
     let mut w = world();
     let chief = conversation(&mut w, "chief");
     assert!(!had_a_turn(&w, chief));
@@ -50,120 +46,58 @@ fn a_conversation_with_nothing_copied_and_nothing_delivered_had_no_turn_and_an_u
 }
 
 #[test]
-fn an_item_in_the_copy_is_a_turn_whoever_wrote_it() {
+fn a_message_of_the_users_in_the_copy_is_a_turn_whoever_wrote_it_and_what_else_a_harness_writes_is_none(
+) {
     let mut w = world();
     let chief = conversation(&mut w, "chief");
-    // What the human typed into the window: no message of ConsensFlow's, and the copy holds it.
-    w.ledger
-        .copy_transcript(
-            chief,
-            &[json!({ "id": "i-1", "role": "user", "text": "Hello" })],
-            0,
-        )
-        .expect("copied");
+    // What a harness writes of itself, and what its tools and its agent say, with no
+    // message of the user's before it: no turn.
+    for role in ["custom", "tool", "assistant"] {
+        copy(&mut w.ledger, chief, role);
+        assert!(!had_a_turn(&w, chief), "{role}");
+    }
+    // What the human typed into the window, or ConsensFlow delivered into it.
+    copy(&mut w.ledger, chief, "user");
     assert!(had_a_turn(&w, chief));
-    let other = conversation(&mut w, "diana");
-    assert!(
-        !had_a_turn(&w, other),
-        "the copy of another is no turn of this"
-    );
-    // Whatever its role: the harness wrote a record of it, which is what a window resumes.
-    w.ledger
-        .copy_transcript(
-            other,
-            &[json!({ "id": "i-2", "role": "custom", "text": "" })],
-            0,
-        )
-        .expect("copied");
-    assert!(had_a_turn(&w, other));
 }
 
 #[test]
-fn a_message_delivered_to_its_participant_since_the_conversation_began_is_a_turn() {
-    let mut w = world();
-    let chief = conversation(&mut w, "chief");
-    let note = note_to(&mut w, "chief");
-    assert!(!had_a_turn(&w, chief), "queued");
-    w.begin(note);
-    assert!(!had_a_turn(&w, chief), "on its way");
-    w.confirm(note);
-    assert!(
-        had_a_turn(&w, chief),
-        "its record showed it: with no item in the copy"
-    );
-}
-
-#[test]
-fn an_answer_cf_served_whole_is_a_turn_too() {
-    let mut w = world();
-    let created = w.give("zeus", "Parser");
-    let (number, brief) = (created.task.number, created.message.expect("a brief").id);
-    w.deliver(brief);
-    let question = w.ask("zeus", number, "Which dialect?").id;
-    let answer = w.answer(question, "ANSI").id;
-    // The window comes back on a conversation begun after the brief was delivered.
-    let zeus = conversation(&mut w, "zeus");
-    assert!(!had_a_turn(&w, zeus));
-
-    let participant = w.id("zeus");
-    w.ledger
-        .receive_read(participant, &[answer], Read::Inbox)
-        .expect("read");
-    assert_eq!(w.message(answer).state, "read");
-    assert!(had_a_turn(&w, zeus), "it ran `cf inbox read`");
-}
-
-#[test]
-fn a_message_that_was_given_up_or_withdrawn_is_no_turn() {
-    let mut w = world();
-    let chief = conversation(&mut w, "chief");
-    let failed = note_to(&mut w, "chief");
-    w.begin(failed);
-    w.ledger
-        .fail_delivery(failed, "the window never showed it")
-        .expect("given up");
-    let cancelled = note_to(&mut w, "chief");
-    w.ledger
-        .cancel_message(cancelled, "it no longer applies")
-        .expect("withdrawn");
-    let back = note_to(&mut w, "chief");
-    w.begin(back);
-    w.ledger
-        .retry_delivery(back, "its window went", true)
-        .expect("queued again");
-    assert_eq!(
-        w.states(&[failed, cancelled, back]),
-        ["failed", "cancelled", "queued"]
-    );
-    assert!(!had_a_turn(&w, chief));
-}
-
-#[test]
-fn a_message_delivered_to_another_participant_is_none_of_its_turns() {
-    let mut w = world();
-    let chief = conversation(&mut w, "chief");
-    let diana = conversation(&mut w, "diana");
-    let note = note_to(&mut w, "diana");
-    w.deliver(note);
-    assert!(had_a_turn(&w, diana));
-    assert!(!had_a_turn(&w, chief));
-}
-
-#[test]
-fn what_was_delivered_before_a_conversation_began_is_a_turn_of_the_one_before() {
+fn the_copy_of_another_conversation_is_no_turn_of_this_one() {
     let mut w = world();
     let first = conversation(&mut w, "chief");
-    let note = note_to(&mut w, "chief");
-    w.deliver(note);
+    let diana = conversation(&mut w, "diana");
+    copy(&mut w.ledger, first, "user");
     assert!(had_a_turn(&w, first));
-    // The window is opened afresh (or the human typed /new): a conversation of its own.
+    assert!(!had_a_turn(&w, diana), "another participant's");
+    // The window is opened afresh, or the human typed /new: a conversation of its own.
     let second = conversation(&mut w, "chief");
-    assert!(
-        !had_a_turn(&w, second),
-        "a delivery to the one before it is no turn of this one"
-    );
+    assert!(!had_a_turn(&w, second), "the one before it");
     assert!(had_a_turn(&w, first), "and it stays one of that one's");
-    let later = note_to(&mut w, "chief");
-    w.deliver(later);
-    assert!(had_a_turn(&w, second));
+}
+
+#[test]
+fn what_was_delivered_into_the_conversation_before_is_no_turn_of_the_one_that_began_in_the_same_millisecond(
+) {
+    // On a clock that never moves, the delivery is confirmed in the very millisecond
+    // the next conversation begins: a time cannot say which of them it was for.
+    let mut w = frozen_world();
+    let first = conversation(&mut w, "chief");
+    let note = w
+        .ledger
+        .note(
+            w.project,
+            &NewNote {
+                from: None,
+                to: "chief".into(),
+                body: "Any news?".into(),
+                task: None,
+            },
+        )
+        .expect("a note")
+        .id;
+    w.deliver(note);
+    copy(&mut w.ledger, first, "user");
+    let second = conversation(&mut w, "chief");
+    assert!(had_a_turn(&w, first));
+    assert!(!had_a_turn(&w, second));
 }

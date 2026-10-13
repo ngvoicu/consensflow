@@ -282,9 +282,6 @@ fn a_restart_leaves_the_project_suspended_and_the_humans_resume_brings_the_chief
             .transcript(&session)
             .contains("\"text\":\"BEFORE-RESTART\""))
     })?;
-    // The daemon looks at a window once a second, and a Resume goes on with a
-    // conversation once the daemon has seen a turn in it: it is given the pass.
-    std::thread::sleep(secs(3));
 
     // The app's quit order: the daemon dies first, then the pane host.
     rig.kill_daemon();

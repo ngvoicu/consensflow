@@ -30,7 +30,7 @@ use crate::contract::{
     Records, Window, Work,
 };
 use crate::detect::executable;
-use crate::records::Options;
+use crate::records::{Options, Reading, Role};
 use crate::seams::{Services, Time};
 use crate::shared::admission::admission;
 use crate::shared::record_state::{dialog_waiting, record_state, switched_to, unnamed};
@@ -128,6 +128,28 @@ impl Adapter for DevinAdapter {
                     discover_for_ms: DISCOVER_FOR_MS.min(launch.first_message_ms),
                 }),
             })
+        })
+    }
+
+    /// Devin keeps a session's messages in its store, which is read with no window
+    /// open as with one: a session with a message of the user's in it had a turn
+    /// and is gone on with, and one the store holds with none has nothing to go on
+    /// with. A store that cannot be read, or has no row of the session, tells
+    /// nothing. What Devin does with `--resume` of a session with no messages has
+    /// not been probed, and the engine does not ask it to.
+    fn resumable<'a>(&'a self, session: &'a str) -> Work<'a, Option<bool>> {
+        Box::pin(async move {
+            let looked = self
+                .services
+                .records
+                .look(Harness::Devin, session, &Options::default())
+                .await;
+            match &*looked {
+                Reading::Known(record) => {
+                    Some(record.items.iter().any(|item| item.role == Role::User))
+                }
+                Reading::Unknown(_) => None,
+            }
         })
     }
 

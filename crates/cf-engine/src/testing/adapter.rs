@@ -72,6 +72,11 @@ pub struct FakeAgent {
     /// Its record, read with no window open, cannot tell whether its turn was
     /// cut: Devin's, which reads a turn as going on only while its window shows it.
     pub cannot_tell_a_cut: bool,
+    /// What its harness says of going on with the conversation, as its own record
+    /// tells it: it holds it (`Some(true)`, as every harness did before it was
+    /// asked), it holds nothing (`Some(false)`: Codex's thread before its first
+    /// turn), or the record cannot tell (none).
+    pub resumable: Option<bool>,
 }
 
 /// What a test makes `ready` answer, where it gives the adapter one.
@@ -271,6 +276,18 @@ impl FakeAdapter {
         self.with(handle, |agent| agent.cannot_tell_a_cut = true);
     }
 
+    /// Its harness holds nothing of the window's conversation, as Codex holds
+    /// nothing of a thread before its first turn.
+    pub fn holds_nothing(&self, handle: &str) {
+        self.with(handle, |agent| agent.resumable = Some(false));
+    }
+
+    /// Its record cannot tell whether its harness holds the window's
+    /// conversation: the copy of it decides.
+    pub fn cannot_tell_a_resume(&self, handle: &str) {
+        self.with(handle, |agent| agent.resumable = None);
+    }
+
     /// The same, and what it stops it takes back: Claude, stopped before a
     /// word of its answer, has the message of its turn in its input box again
     /// and out of its conversation.
@@ -341,6 +358,18 @@ impl FakeAdapter {
             .find(|agent| agent.native == session)
             .filter(|agent| !agent.cannot_tell_a_cut)
             .map(|agent| !agent.settled)
+    }
+
+    /// What the harness says of going on with `session`: what the latest window
+    /// that opened on it, or shows it now, is set to say, and that it holds it where
+    /// no window had it, as every harness did before it was asked.
+    pub(super) fn resumable_of(&self, session: &str) -> Option<bool> {
+        let agents = self.agents.borrow();
+        agents
+            .iter()
+            .rev()
+            .find(|agent| agent.native == session || agent.shows.as_deref() == Some(session))
+            .map_or(Some(true), |agent| agent.resumable)
     }
 
     /// What the record of `session` holds (`adapter.record`): the latest
@@ -444,6 +473,7 @@ impl Asked {
             takes_back: false,
             took_back: false,
             cannot_tell_a_cut: false,
+            resumable: Some(true),
         };
         if let Some(message) = launch.message {
             agent.items.push(fake.item(Role::User, message));
@@ -533,6 +563,13 @@ impl Adapter for Asked {
             wrapped.after().await;
             prepared
         })
+    }
+
+    /// Asked where Node's dispatcher asked nothing, so it is no call of the adapter
+    /// in a trace.
+    fn resumable<'a>(&'a self, session: &'a str) -> Work<'a, Option<bool>> {
+        let answer = self.fake.resumable_of(session);
+        Box::pin(async move { answer })
     }
 
     fn interrupt(&self) -> Interrupt {

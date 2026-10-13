@@ -22,14 +22,28 @@ use crate::records::{Item, Options, Quota, Reading, Record, Role, Settlement};
 /// What waits, on the engine's one thread.
 pub type Work<'a, T> = Pin<Box<dyn Future<Output = T> + 'a>>;
 
-/// A harness's side of the engine: how its windows are launched, and how
-/// one is interrupted. A conversation's record with no window open is the
-/// engine's own look through [`Records`], the same for every harness.
+/// A harness's side of the engine: how its windows are launched, whether a
+/// conversation of its can be gone on with, and how one is interrupted. A
+/// conversation's record with no window open is the engine's own look through
+/// [`Records`], the same for every harness.
 pub trait Adapter {
     /// Prepares a window on `launch`: writes the files it runs with and
     /// says how it opens, or why it cannot (the launch then fails with that
     /// sentence).
     fn prepare<'a>(&'a self, launch: &'a Launch<'a>) -> Work<'a, Result<Prepared, String>>;
+
+    /// Whether a window can be opened again on its conversation `session`, as
+    /// the harness's own record of it says: yes where it holds the conversation,
+    /// no where it holds nothing a resume could find (Codex writes a thread's
+    /// record at its first turn, and a window resumed on a thread with none ends
+    /// at once, which closes a chief's project), and none where its record cannot
+    /// be read to tell, which the engine goes on from by what ConsensFlow's own
+    /// copy of the conversation holds. A harness whose record can tell says so
+    /// whatever the copy holds: the copy is made a look at a time, and the record
+    /// has a turn before the next look copies it.
+    fn resumable<'a>(&'a self, _session: &'a str) -> Work<'a, Option<bool>> {
+        Box::pin(async { None })
+    }
 
     /// The keys that interrupt a turn in this harness's window
     /// (`adapter.interrupt`): Escape once, unless the harness says more.

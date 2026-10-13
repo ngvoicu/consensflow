@@ -11,9 +11,9 @@
 //!
 //! A thread is resumed by its id (`codex resume <id>`) and has a record to be
 //! resumed from only once it has had a turn: a window resumed on one that never
-//! had any ends at once (2026-10-13). The adapter does not look for the record
-//! itself: the engine resumes only a conversation that had a turn, and opens the
-//! window afresh on any other.
+//! had any ends at once (2026-10-13). The adapter says whether a thread has its
+//! record ([`Adapter::resumable`]), and the engine opens the window afresh on one
+//! that has none; the launch itself resumes whatever thread it is given.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -34,6 +34,7 @@ use crate::records::Options;
 use crate::seams::{Loopback, Services, Time};
 use crate::shared::admission::admission;
 use crate::shared::record_state::{record_state, switched_to, unnamed};
+use crate::shared::resumable::transcript_kept;
 use crate::shared::window_args;
 
 /// Codex's question tool (`request_user_input`) is behind a feature still
@@ -143,6 +144,11 @@ impl Adapter for CodexAdapter {
                 }),
             })
         })
+    }
+
+    /// Codex keeps a thread's rollout once the thread has a turn.
+    fn resumable<'a>(&'a self, session: &'a str) -> Work<'a, Option<bool>> {
+        transcript_kept(&*self.services.records, Harness::Codex, session)
     }
 
     /// Codex opens the window's servers (its plugins': computer use, a REPL) as

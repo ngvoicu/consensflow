@@ -125,28 +125,20 @@ pub(crate) fn current_conversation(
         .optional()?)
 }
 
-/// Whether a conversation had a turn, which is what a harness needs of it to go
-/// on with it: Codex writes a thread's record only once the thread has a turn,
-/// and a resume of one with none finds nothing. It had one if ConsensFlow's
-/// copy of it holds an item (whatever its window wrote, the human's own typing
-/// included), or a message was delivered to its participant since it began, at
-/// the moment it began or after. A message has the time it was delivered only
-/// once its window had it (its record showed it, a door or `cf` handed it over,
-/// or the window gave it itself), and loses it when it is taken back, so one
-/// that waits, was given up or was withdrawn has none; and a delivery a start
-/// confirmed from the record alone leaves no item in the copy. What a window
-/// wrote since the last look is the one thing neither tells.
+/// Whether a conversation had a turn, as ConsensFlow has seen it: its copy holds
+/// a message of the user's, whoever wrote it (the human's own typing, or one
+/// ConsensFlow delivered, which a harness records as the user's). The copy is of
+/// the conversation it was made of and no other: what a window delivered into the
+/// conversation before it holds is no turn of the one that began after it, however
+/// near in time. It is made a look at a time, so a turn the window began since the
+/// last look is not in it yet, and where the harness's own record can say whether
+/// there is anything to go on with, it, and not the copy, is asked
+/// (`Adapter::resumable`).
 pub(crate) fn had_a_turn(store: &Store, conversation_id: i64) -> Result<bool, LedgerError> {
-    let conversation = known_conversation(store, conversation_id)?;
+    known_conversation(store, conversation_id)?;
     Ok(store.db.query_row(
-        "SELECT EXISTS (SELECT 1 FROM transcript WHERE conversation_id = ?1)
-             OR EXISTS (SELECT 1 FROM message
-                        WHERE recipient_id = ?2 AND delivered_at >= ?3)",
-        params![
-            conversation.id,
-            conversation.participant_id,
-            conversation.started_at
-        ],
+        "SELECT EXISTS (SELECT 1 FROM transcript WHERE conversation_id = ? AND role = 'user')",
+        [conversation_id],
         |row| row.get(0),
     )?)
 }

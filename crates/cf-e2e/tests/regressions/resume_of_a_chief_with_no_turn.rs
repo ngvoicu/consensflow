@@ -18,9 +18,11 @@
 //! only once it has had a turn, and a window resumed on one that has none ends at
 //! once, with what the server said. So the case is the report's own: a Codex chief
 //! that was opened, idle, closed and resumed, through the real daemon and pane host.
-//! The Claude cases beside it say the same of a harness whose adapter looks for the
-//! transcript itself, from what the daemon says of the chief's conversation alone:
-//! one that never had a turn is opened afresh, one that did is resumed.
+//! The Claude cases beside it say the same of a harness that keeps its transcript
+//! once something was said in the conversation: a chief that never had a turn is
+//! opened afresh, and one that did is resumed on its conversation, right after
+//! the turn, before the daemon's next look has copied it
+//! (`resume_of_a_turn_the_daemon_never_copied`).
 
 use std::error::Error;
 use std::thread::sleep;
@@ -37,7 +39,7 @@ use crate::config_with_codex;
 use crate::{config, secs, Outcome};
 
 /// The chief's windows the daemon opened so far, oldest first.
-fn windows_of(rig: &Rig, project: &Project) -> Vec<Value> {
+pub(crate) fn windows_of(rig: &Rig, project: &Project) -> Vec<Value> {
     let id = format!("p{}-chief", project.id());
     rig.open_frames()
         .into_iter()
@@ -46,16 +48,16 @@ fn windows_of(rig: &Rig, project: &Project) -> Vec<Value> {
 }
 
 /// The word after `flag` in a window's command line.
-fn after<'a>(window: &'a Value, flag: &str) -> Option<&'a str> {
+pub(crate) fn after<'a>(window: &'a Value, flag: &str) -> Option<&'a str> {
     let argv = window["argv"].as_array()?;
     let at = argv.iter().position(|word| word == flag)?;
     argv.get(at + 1)?.as_str()
 }
 
 /// The conversation a window was opened on that already was: the word after
-/// `resume` (Codex's) or `--resume` (Claude's); none for a window that opened on
-/// a conversation of its own.
-fn resumed_on(window: &Value) -> Option<&str> {
+/// `resume` (Codex's) or `--resume` (Claude's, Devin's); none for a window that
+/// opened on a conversation of its own.
+pub(crate) fn resumed_on(window: &Value) -> Option<&str> {
     after(window, "resume").or_else(|| after(window, "--resume"))
 }
 
@@ -69,7 +71,7 @@ fn state(project: &Project) -> cf_e2e::Result<String> {
 
 /// The chief's window to be idle, with nothing said in it yet: the project as the
 /// owner had it before Close.
-fn wait_for_the_chief(rig: &Rig, project: &Project) -> cf_e2e::Result<()> {
+pub(crate) fn wait_for_the_chief(rig: &Rig, project: &Project) -> cf_e2e::Result<()> {
     rig.wait_for("the chief's window to be idle", secs(60), || {
         Ok(project.lane("chief")?["activity"]["state"] == "idle")
     })
@@ -101,7 +103,7 @@ fn closed_and_resumed(rig: &Rig, project: &Project) -> Result<(Value, Value), Bo
 
 /// The project open, with the chief's window still there, well after the moment
 /// the owner's chief went (0.6 s after the Resume).
-fn stays_open(rig: &Rig, project: &Project, window: &Value) -> Outcome {
+pub(crate) fn stays_open(rig: &Rig, project: &Project, window: &Value) -> Outcome {
     sleep(secs(3));
     assert_eq!(
         state(project)?,
@@ -198,9 +200,6 @@ fn a_claude_chief_that_had_a_turn_is_resumed_on_its_conversation_and_the_project
     rig.wait_for("the chief to answer", secs(60), || {
         Ok(rig.transcript(&session).contains("HELLO"))
     })?;
-    // The daemon looks at a window once a second, and what it copies is what a
-    // resume goes on with.
-    sleep(secs(3));
 
     let (_, again) = closed_and_resumed(&rig, &project)?;
 

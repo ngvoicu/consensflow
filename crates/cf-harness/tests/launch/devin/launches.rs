@@ -5,8 +5,8 @@ use std::fs;
 use std::path::Path;
 
 use cf_base::path;
-use cf_harness::contract::{Agent, Prepared};
-use cf_harness::testing::called;
+use cf_harness::contract::{Adapter, Agent, Prepared};
+use cf_harness::testing::{called, finished};
 use serde_json::{json, Value};
 
 use super::fixtures::*;
@@ -125,6 +125,39 @@ fn resumes_the_session_it_has() {
             "false",
         ])
     );
+}
+
+#[test]
+fn can_go_on_with_a_session_whose_store_holds_a_message_of_the_users_and_not_with_one_it_holds_none_of(
+) {
+    let home = Home::new();
+    let devin = home.adapter();
+    assert_eq!(
+        finished(devin.resumable("calm-river")),
+        None,
+        "Devin's store is not there: its record cannot be read"
+    );
+    let store = home.store();
+    assert_eq!(
+        finished(devin.resumable("calm-river")),
+        None,
+        "the store has no row of the session"
+    );
+    store.begins("calm-river");
+    assert_eq!(
+        finished(devin.resumable("calm-river")),
+        Some(false),
+        "nothing was said in it"
+    );
+    store.says("calm-river", "system", "You are Devin.");
+    assert_eq!(
+        finished(devin.resumable("calm-river")),
+        Some(false),
+        "what Devin writes of itself is no turn"
+    );
+    store.begins("brisk-ember");
+    store.says("brisk-ember", "user", "Write the parser");
+    assert_eq!(finished(devin.resumable("brisk-ember")), Some(true));
 }
 
 #[test]

@@ -5,12 +5,12 @@
 //! process ended ([`Dispatcher::settle_after_restart`]). The human's Resume
 //! brings the project back ([`Dispatcher::resume_project`]): its chief, and each
 //! window that had work in hand, at work or waiting for an answer, each on its
-//! own conversation, if it had a turn: a conversation that never had one has
-//! nothing for a harness to resume, and its window opens afresh
-//! ([`Dispatcher::conversation_to_go_on_with`]). What waits is delivered by the
-//! usual rules as they come up: a member with no task in hand opens when it is
-//! next given work, and a task that is paused, by the human or by the system,
-//! stays so until it is resumed.
+//! own conversation, if its harness can go on with it: one it holds nothing of
+//! (Codex keeps a thread only once it has had a turn) has nothing to resume, and
+//! its window opens afresh ([`Dispatcher::conversation_to_go_on_with`]). What
+//! waits is delivered by the usual rules as they come up: a member with no task
+//! in hand opens when it is next given work, and a task that is paused, by the
+//! human or by the system, stays so until it is resumed.
 //!
 //! A window whose turn the quit cut is told so, once: the harness's record of
 //! its conversation, read before its window opens, has a turn with no end, and
@@ -23,7 +23,9 @@
 
 use std::rc::Rc;
 
-use cf_ledger::{MessageView, NewNote, ParticipantView, ProjectView, RESUME_WORDS};
+use cf_ledger::{
+    ConversationView, MessageView, NewNote, ParticipantView, ProjectView, RESUME_WORDS,
+};
 
 use crate::dispatcher::Dispatcher;
 use crate::handoff::is_handoff;
@@ -103,6 +105,45 @@ impl Dispatcher {
         }
         self.changed();
         self.project_now(project)
+    }
+
+    /// The conversation a launch goes on with: the participant's current one, when
+    /// its harness can go on with it
+    /// ([`resumable`](cf_harness::contract::Adapter::resumable)). The harness's own
+    /// record decides where it can tell, whatever ConsensFlow's copy of the
+    /// conversation holds: a turn the human typed into the window is in the
+    /// harness's record at once, and in the copy at the next look, a second on. A
+    /// conversation the harness holds nothing of is not resumed, since a window
+    /// opened on one ends at once (Codex's on a thread that never had a turn closed
+    /// a chief's project, 2026-10-13): the window opens afresh, as a first launch
+    /// does, and what waits for it is given as on any first launch. Where the
+    /// record cannot tell, the copy decides: the conversation is gone on with if it
+    /// holds an item.
+    pub(crate) async fn conversation_to_go_on_with(
+        &self,
+        participant: &ParticipantView,
+    ) -> Result<Option<ConversationView>, EngineError> {
+        let current = self
+            .seams
+            .ledger
+            .borrow()
+            .current_conversation(participant.id)?;
+        let Some(current) = current else {
+            return Ok(None);
+        };
+        let session = current
+            .native_session
+            .as_deref()
+            .filter(|session| !session.is_empty());
+        let told = match (self.seams.adapters.adapter(&current.harness), session) {
+            (Some(adapter), Some(session)) => adapter.resumable(session).await,
+            _ => None,
+        };
+        let holds = match told {
+            Some(holds) => holds,
+            None => self.seams.ledger.borrow().had_a_turn(current.id)?,
+        };
+        Ok(holds.then_some(current))
     }
 
     /// The participants other than the chief and the human that hold a task at
