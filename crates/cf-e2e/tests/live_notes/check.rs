@@ -6,30 +6,27 @@
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-use cf_e2e::live::ask::{self, Record};
+use cf_e2e::live::ask;
 use cf_e2e::live::members::{
-    find, member_as, quiet_command, session_of, stand_in_worker, Account, Members, Plan,
-    STAND_IN_WORKER,
+    find, member_as, quiet_command, stand_in_worker, Account, Members, Plan, STAND_IN_WORKER,
 };
 use cf_e2e::live::{seconds, Harness, Log};
 use cf_e2e::Result;
-use serde_json::{json, Value};
+use serde_json::json;
 
+use crate::board::{chief_state, delivered, named, record_of, retried, told};
 use crate::turns::{held, worked_since, Quiet, HELD_S};
-use crate::verdict::{enter_again, first_paste, lateness, seen, Note};
+use crate::verdict::{enter_again, first_paste, lateness, pasted_first, proofs, seen, Note, Proof};
+use crate::wire::Watch;
 
 /// The stand-in for the member's window.
 const FAKE_AGENT: &str = env!("CARGO_BIN_EXE_fake-agent");
 
-/// How long the daemon of the run gives a window at rest to show a message pasted
-/// into it, in milliseconds (`CONSENSFLOW_ARRIVAL_TIMEOUT_MS`): well under the time
-/// the chief's command on a note takes ([`HELD_S`]), and over what a model takes to
-/// its first word.
-pub const ARRIVAL_MS: u64 = 30_000;
-
-// A command takes twice the daemon's arrival window at least: a note whose record
-// waits for the turn before it is later than the window.
-const _: () = assert!(HELD_S * 1_000 >= 2 * ARRIVAL_MS);
+/// The daemon's own arrival window, in milliseconds (`Limits::default`): how long a
+/// window at rest has to show a message pasted into it before the paste is taken for
+/// lost. A note's command takes twenty seconds more.
+const ARRIVAL_MS: u64 = 60_000;
+const _: () = assert!(HELD_S * 1_000 >= ARRIVAL_MS + 20_000);
 
 /// How many seconds the command the human has the chief run first takes: it holds
 /// the chief in a turn while the member's window starts, leaves its job and is
@@ -38,9 +35,9 @@ const _: () = assert!(HELD_S * 1_000 >= 2 * ARRIVAL_MS);
 const FIRST_S: u64 = 100;
 
 /// How long the chief has to go into its first turn, the member's window to leave its
-/// job, both notes to be sent once the task is cancelled, and the notes to be given
-/// with the chief quiet after them (two turns held open, and what a model takes
-/// between them).
+/// job, both notes to be sent to the chief once the task is cancelled, and the notes to
+/// be given with the chief quiet after them (two turns held open, and what a model
+/// takes between them).
 const WORK: Duration = Duration::from_secs(120);
 const JOB: Duration = Duration::from_secs(120);
 const NOTES: Duration = Duration::from_secs(120);
@@ -48,6 +45,11 @@ const GIVEN: Duration = Duration::from_secs(900);
 
 /// How often the board is looked at.
 const LOOK: Duration = Duration::from_millis(500);
+
+/// A number of milliseconds as the events count them.
+fn ms(value: u64) -> i64 {
+    i64::try_from(value).unwrap_or(i64::MAX)
+}
 
 /// The command the chief runs on each note, and waits for.
 pub fn note_command() -> String {
@@ -72,115 +74,14 @@ pub fn first_ask() -> String {
 }
 
 /// What a real chief of `chief`'s harness is opened with: its cheap model, the
-/// stand-in as its one member, the folder told what to do on a note (it is written
-/// over the plan's own brief, which a text made at run time cannot be), and the
-/// arrival window of the run.
+/// stand-in as its one member, and the folder told what to do on a note (written over
+/// the plan's own brief, which a text made at run time cannot be).
 pub fn plan(chief: Harness) -> Plan {
     let told = brief();
     Plan::new("notes", member_as(chief, "chief"))
         .with(stand_in_worker())
         .with_file("AGENTS.md", told.clone())
         .with_file("CLAUDE.md", told)
-        .with_var("CONSENSFLOW_ARRIVAL_TIMEOUT_MS", ARRIVAL_MS.to_string())
-}
-
-/// The notes ConsensFlow sent the chief of the cancel of T-`number`, oldest first:
-/// its own, and the closing of the member's window with its job running.
-fn told(members: &Members, number: i64) -> Result<Vec<Note>> {
-    Ok(notes_among(&members.inbox(Some("chief"))?, number))
-}
-
-/// The notes of the cancel of T-`number` among the messages of `inbox`: those
-/// ConsensFlow wrote itself (no window did), by their words.
-fn notes_among(inbox: &[Value], number: i64) -> Vec<Note> {
-    let cancelled = format!("cancelled T-{number} ");
-    let closed = format!("T-{number}'s window closed with background work");
-    let mut found: Vec<Note> = inbox
-        .iter()
-        .filter(|message| message["kind"] == "note" && message["sender"].is_null())
-        .filter_map(|message| {
-            let body = message["body"].as_str()?;
-            let what = if body.contains(&cancelled) {
-                "the cancel's note"
-            } else if body.starts_with(&closed) {
-                "the closed window's note"
-            } else {
-                return None;
-            };
-            Some(Note {
-                id: message["id"].as_i64()?,
-                what,
-            })
-        })
-        .collect();
-    found.sort_by_key(|note| note.id);
-    found
-}
-
-/// Whether the message `id` of the chief's inbox was confirmed by its record.
-fn delivered(members: &Members, id: i64) -> Result<bool> {
-    Ok(members
-        .inbox(Some("chief"))?
-        .iter()
-        .any(|message| message["id"] == id && message["state"] == "delivered"))
-}
-
-/// What the state of the chief's window is, as the board says it.
-fn chief_state(members: &Members) -> Result<String> {
-    Ok(members.lane("chief")?["activity"]["state"]
-        .as_str()
-        .unwrap_or_default()
-        .to_owned())
-}
-
-/// What the chief's own harness recorded of its conversation, as the daemon reads
-/// it: Claude Code's conversation is named by its window's launch, Devin names its
-/// own, and its store says which is the newest of the run's folder.
-fn record_of(chief: Harness, members: &Members) -> Result<Option<Record>> {
-    let env = members.rig().environment();
-    let session = if chief == Harness::Devin {
-        ask::newest_session(chief.kind(), members.folder(), 0, env)?
-    } else {
-        let pane = format!("p{}-chief", members.project().id());
-        members
-            .rig()
-            .open_frames()
-            .into_iter()
-            .rev()
-            .find(|frame| frame["id"] == pane.as_str())
-            .and_then(|frame| session_of(&frame))
-    };
-    match session {
-        Some(session) => ask::records(chief.kind(), &session, env),
-        None => Ok(None),
-    }
-}
-
-/// The notes the daemon pasted again, from what it wrote: a `delivery.retried` of
-/// each, and why.
-fn retried(events: &[Value], notes: &[Note]) -> Vec<String> {
-    events
-        .iter()
-        .filter(|event| event["kind"] == "delivery.retried")
-        .filter_map(|event| {
-            let id = event["data"]["message"].as_i64()?;
-            notes.iter().any(|note| note.id == id).then(|| {
-                format!(
-                    "m-{id}: {}",
-                    event["data"]["reason"].as_str().unwrap_or("no reason")
-                )
-            })
-        })
-        .collect()
-}
-
-/// The notes in words, as the case says them.
-fn named(notes: &[Note]) -> String {
-    notes
-        .iter()
-        .map(|note| format!("m-{} ({})", note.id, note.what))
-        .collect::<Vec<_>>()
-        .join(", ")
 }
 
 /// The chief's run: its first command, the cancel and its notes, the notes given,
@@ -271,12 +172,17 @@ pub fn drive(chief: Harness, mut members: Members, log: &Log) -> Result<Account>
     // turn on them held open by the command the folder tells the chief to run.
     let gone = Instant::now();
     let mut quiet = Quiet::default();
+    let mut wire = Watch::default();
     let over = find(
         log,
         "both notes to be given and the chief quiet",
         GIVEN,
         LOOK,
         || {
+            if chief == Harness::Devin {
+                let now = jiff::Timestamp::now().as_millisecond();
+                wire.look(&members.rig().home(), &notes, now);
+            }
             let mut at_rest = chief_state(&members)? == "idle";
             for note in &notes {
                 at_rest &= delivered(&members, note.id)?;
@@ -294,10 +200,26 @@ pub fn drive(chief: Harness, mut members: Members, log: &Log) -> Result<Account>
             members.lane("chief")?["activity"]
         ),
     );
-    // The turns on the notes begin with the first paste of one: what the chief did
-    // before it was the first command's.
+    conclude(&mut case, chief, &members, &notes, &wire)?;
+    case.closed(members.close());
+    Ok(case)
+}
+
+/// What the run came to, once the notes were given: what the chief's own record
+/// says of each, what the daemon's events prove of its way with a record that is late
+/// or a turn that is begun, and what was said besides.
+fn conclude(
+    case: &mut Account,
+    chief: Harness,
+    members: &Members,
+    notes: &[Note],
+    wire: &Watch,
+) -> Result<()> {
     let events = members.events();
-    let worked = first_paste(&events, &notes).map_or(0, |pasted| {
+    // The turns on the notes begin with the first paste of one: what the chief did
+    // before it was the first command's. A chief may run its command in the
+    // background, which holds no turn: it is told, and no check.
+    let worked = first_paste(&events, notes).map_or(0, |pasted| {
         worked_since(
             &events,
             "chief",
@@ -305,20 +227,21 @@ pub fn drive(chief: Harness, mut members: Members, log: &Log) -> Result<Account>
             jiff::Timestamp::now().as_millisecond(),
         )
     });
-    case.check(
-        "a turn was held open on each note",
-        held(worked, notes.len()),
-        format!(
-            "the chief worked {} s from the first paste of a note, and each note's command takes {HELD_S} s: a chief that did not run its command left no turn to hold, and proves nothing",
-            seconds(worked)
-        ),
-    );
+    case.say(format!(
+        "the chief worked {} s from the first paste of a note, and each note's command takes {HELD_S} s{}",
+        seconds(worked),
+        if held(worked, notes.len()) {
+            ""
+        } else {
+            ": it did not wait for each, or ran it in the background"
+        }
+    ));
 
     // What the chief's own record says: each note once.
-    match record_of(chief, &members)? {
+    match record_of(chief, members)? {
         None => case.fail("the chief's own record could not be read"),
         Some(record) => {
-            for found in seen(&notes, &record.items) {
+            for found in seen(notes, &record.items) {
                 case.check(
                     &format!("{} went into the chief's window once", found.note.what),
                     found.held(),
@@ -327,16 +250,47 @@ pub fn drive(chief: Harness, mut members: Members, log: &Log) -> Result<Account>
             }
         }
     }
-    for late in lateness(&events, &notes) {
+
+    // What it proves: a Devin chief queues what it is handed in a turn, and a run in
+    // which neither note was late nor was held has not met what the daemon is for. A
+    // chief that queues nothing has no such run to meet: each note is in its record once.
+    let found = proofs(&events, notes, ms(ARRIVAL_MS), ms(HELD_S * 500));
+    let proved = found.iter().map(Proof::said).collect::<Vec<_>>().join("; ");
+    if chief == Harness::Devin {
+        case.check(
+            "the run met a record that was late or a turn that had begun",
+            !found.is_empty(),
+            if found.is_empty() {
+                format!(
+                    "neither note went unconfirmed longer than the daemon's {} s, and none was handed over after the turn on the note before it began: both were confirmed promptly, which proves nothing",
+                    ARRIVAL_MS / 1_000
+                )
+            } else {
+                proved
+            },
+        );
+    } else {
+        case.say(if found.is_empty() {
+            "neither note met a record that was late or a turn that had begun: a chief of this harness queues nothing the daemon waits on".to_owned()
+        } else {
+            proved
+        });
+    }
+    for late in lateness(&events, notes) {
         case.say(late);
     }
-    let again = retried(&events, &notes);
+    if chief == Harness::Devin {
+        for named in wire.said(notes, |id| pasted_first(&events, id)) {
+            case.say(named);
+        }
+    }
+    let again = retried(&events, notes);
     case.say(if again.is_empty() {
         "the daemon pasted neither note again".to_owned()
     } else {
         format!("the daemon pasted again: {}", again.join("; "))
     });
-    let entered = enter_again(&events, &notes);
+    let entered = enter_again(&events, notes);
     case.say(if entered.is_empty() {
         "the daemon pressed Enter again for neither note".to_owned()
     } else {
@@ -347,8 +301,7 @@ pub fn drive(chief: Harness, mut members: Members, log: &Log) -> Result<Account>
         "the chief's screen: {}",
         members.tail(lane["pane"]["id"].as_str().unwrap_or_default())
     ));
-    case.closed(members.close());
-    Ok(case)
+    Ok(())
 }
 
 /// Opens `plan` and `drive`s its case: what the case saw, which holds when every
@@ -388,7 +341,7 @@ mod tests {
     }
 
     #[test]
-    fn the_chief_is_a_real_harness_on_its_cheap_model_the_member_the_stand_in_and_the_arrival_window_the_runs(
+    fn the_chief_is_a_real_harness_on_its_cheap_model_the_member_the_stand_in_and_no_variable_the_daemons(
     ) {
         for chief in [Harness::Claude, Harness::Devin] {
             let plan = plan(chief);
@@ -405,88 +358,10 @@ mod tests {
                 .collect();
             let told = brief();
             assert_eq!(files, [("AGENTS.md", &*told), ("CLAUDE.md", &*told)]);
-            assert_eq!(
-                plan.vars,
-                [(
-                    "CONSENSFLOW_ARRIVAL_TIMEOUT_MS".to_owned(),
-                    ARRIVAL_MS.to_string()
-                )]
+            assert!(
+                plan.vars.is_empty(),
+                "the daemon runs on the limits it ships with"
             );
         }
-    }
-
-    #[test]
-    fn the_notes_the_check_looks_for_are_those_of_the_cancel_and_of_the_closed_window_by_their_words(
-    ) {
-        let note = |id: i64, body: &str, sender: Value| json!({ "id": id, "kind": "note", "sender": sender, "body": body, "state": "queued" });
-        let inbox = vec![
-            note(
-                9,
-                "T-3's window closed with background work still running: node job",
-                Value::Null,
-            ),
-            note(
-                7,
-                "@human cancelled T-3 (the parser): @worker's window was stopped.",
-                Value::Null,
-            ),
-            // Another task's, one a window wrote, and what is no note.
-            note(
-                5,
-                "@human cancelled T-4 (the lexer): @worker's window was stopped.",
-                Value::Null,
-            ),
-            note(6, "@human cancelled T-3 (copied)", json!("zeus")),
-            json!({ "id": 8, "kind": "result", "sender": null, "body": "cancelled T-3 (x)" }),
-        ];
-        let ids = |number: i64| -> Vec<(i64, &'static str)> {
-            notes_among(&inbox, number)
-                .into_iter()
-                .map(|note| (note.id, note.what))
-                .collect()
-        };
-        assert_eq!(
-            ids(3),
-            [(7, "the cancel's note"), (9, "the closed window's note")]
-        );
-        assert_eq!(ids(4), [(5, "the cancel's note")]);
-        assert!(ids(5).is_empty());
-    }
-
-    #[test]
-    fn the_notes_pasted_again_are_those_the_daemon_retried_and_say_why() {
-        let events = vec![
-            json!({ "kind": "delivery.retried", "data": { "message": 186, "reason": "the harness record never showed it" } }),
-            json!({ "kind": "delivery.retried", "data": { "message": 99, "reason": "other" } }),
-            json!({ "kind": "delivery.begun", "data": { "message": 187 } }),
-        ];
-        let notes = [Note {
-            id: 186,
-            what: "the cancel's note",
-        }];
-        assert_eq!(
-            retried(&events, &notes),
-            ["m-186: the harness record never showed it"]
-        );
-        assert!(retried(&events, &[]).is_empty());
-    }
-
-    #[test]
-    fn the_notes_are_named_by_id_and_what_they_are() {
-        let notes = [
-            Note {
-                id: 186,
-                what: "the cancel's note",
-            },
-            Note {
-                id: 187,
-                what: "the closed window's note",
-            },
-        ];
-        assert_eq!(
-            named(&notes),
-            "m-186 (the cancel's note), m-187 (the closed window's note)"
-        );
-        assert_eq!(named(&[]), "");
     }
 }

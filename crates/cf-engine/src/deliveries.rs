@@ -28,17 +28,17 @@ pub(crate) struct Delivering {
     pub(crate) marker: String,
     /// When it was handed over, on the engine's clock.
     pub(crate) since: i64,
-    /// A look since the hand-over found the window in a turn: it took the
-    /// message into it, or holds it, and its record shows it when it gets to
-    /// it, however long that is (`arrival`).
-    pub(crate) turned: bool,
+    /// Since when the window has been at rest without the record showing it:
+    /// from the hand-over, but for the turns the window was in since. None
+    /// while it is in one (`arrival`).
+    pub(crate) rested_since: Option<i64>,
     /// It is a launch's first message.
     pub(crate) launch: bool,
     /// It is the chief's first message: a handoff, most often.
     pub(crate) chief: bool,
     /// The harness's own queue took it.
     pub(crate) queued: bool,
-    /// Enter was pressed once more for it, since the window's last turn.
+    /// Enter was pressed once more for it.
     pub(crate) entered_again: bool,
 }
 
@@ -131,7 +131,8 @@ impl Dispatcher {
             message: message.id,
             marker: marker_of(message.id),
             since,
-            turned: false,
+            // The window was at rest when it was handed over.
+            rested_since: Some(since),
             launch: false,
             chief: false,
             // The harness's own queue took it (a peer inbox, a broker, a

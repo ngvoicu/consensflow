@@ -358,7 +358,8 @@ impl Dispatcher {
             message: first.id,
             marker: marker_of(first.id),
             since: self.now(),
-            turned: false,
+            // A launch's first message is waited for by the launch's own time.
+            rested_since: None,
             launch: true,
             chief: participant.role == "chief",
             queued: false,

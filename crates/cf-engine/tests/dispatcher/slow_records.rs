@@ -1,16 +1,23 @@
-//! A message handed over to a window that went into a turn after it (what a
-//! harness is given while its agent is in a turn it may hold, and write to its
-//! record when it gets to it) is waited for, however long its record takes,
-//! and never pasted again. A paste into a window that stayed at rest and that
-//! the record never shows is still tried again (`deliveries`).
+//! A message handed over to a window whose harness holds what it is given while
+//! its agent is in a turn (what comes in waits, and the harness's record shows it
+//! when the agent runs it, a step or a turn on) is waited for, never pasted again
+//! for a record that is late: only the window's rest counts towards the arrival
+//! window, so the turns the window goes through are no time the record had to show
+//! the message. And a harness that says its own queue holds the message
+//! (`Window::took`) is waited for as one that queued it itself is. A paste into a
+//! window that stayed at rest and that the record never shows is still tried
+//! again (`deliveries`), whatever turns the window went through since: the wait is
+//! bounded by the window's rest, and nothing a window does stops the queue behind it.
+//! The one more Enter a paste is given (`deliveries`) is pressed in the first arrival
+//! window only, whatever the wait after it.
 //!
 //! The report: 2026-10-13, ConsensFlow 3.0.3, a Devin chief on Windows. The
 //! human cancelled T-17, the chief was sent two notes one right after the
 //! other, and each reached its window twice in a row (m-186, m-186, m-187,
-//! m-187): the record showed none of them within the minute, though the window
-//! had been in a turn since and was at rest again, and the daemon took each
-//! paste for lost. None of these is held to a Node trace: Node's dispatcher
-//! counted the arrival window from the hand-over, turns or none.
+//! m-187): the record showed none of them within the minute, since the chief
+//! was in a turn that kept them, and the daemon took each paste for lost. None of
+//! these is held to a Node trace: Node's dispatcher counted the arrival window
+//! from the hand-over, turns or none.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -20,7 +27,7 @@ use cf_engine::testing::Context;
 use cf_harness::contract::Waiting;
 use cf_harness::records::Role;
 use cf_proto::ledger::MessageView;
-use serde_json::{json, Value};
+use serde_json::json;
 
 use crate::background::LOCK;
 use crate::deliveries::enters;
@@ -41,8 +48,7 @@ fn counting(context: &Context) -> Rc<Cell<usize>> {
     made
 }
 
-/// `message` shows in the record of `handle`'s window: the harness took it
-/// into a turn.
+/// `message` shows in the record of `handle`'s window: the harness ran it.
 fn shows(context: &Context, handle: &str, message: &MessageView) {
     let item = context
         .adapter
@@ -59,8 +65,18 @@ fn holding(context: &Context) -> i64 {
     project.id
 }
 
+/// The reason of the last `delivery.retried` of `project`.
+fn why_retried(context: &Context, project: i64) -> String {
+    let events = context.ledger.borrow().events(project, 0, 500).unwrap();
+    events
+        .iter()
+        .rfind(|event| event.kind == "delivery.retried")
+        .and_then(|event| event.data["reason"].as_str().map(str::to_owned))
+        .unwrap_or_default()
+}
+
 #[test]
-fn waits_for_the_record_of_a_message_whose_window_went_into_a_turn_however_long_it_takes() {
+fn waits_for_the_record_of_a_message_while_its_window_is_in_a_turn_and_pastes_it_once() {
     let context = Context::new();
     let project = holding(&context);
     let pasted = counting(&context);
@@ -76,15 +92,6 @@ fn waits_for_the_record_of_a_message_whose_window_went_into_a_turn_however_long_
         context.advance(ARRIVAL_MS);
         context.pass().unwrap();
     }
-    assert_eq!(context.message(note.id).attempts, 1, "not tried again");
-
-    // The turn ends and the record still shows nothing, for ten windows more:
-    // it is late, not lacking, and the window has the message.
-    context.adapter.with("chief", |agent| agent.settled = true);
-    for _ in 0..10 {
-        context.advance(ARRIVAL_MS);
-        context.pass().unwrap();
-    }
     let waiting = context.message(note.id);
     assert_eq!(
         (waiting.state.as_str(), waiting.attempts),
@@ -93,8 +100,9 @@ fn waits_for_the_record_of_a_message_whose_window_went_into_a_turn_however_long_
     );
     assert_eq!(pasted.get(), 1, "not pasted again");
 
-    // The record shows it at last.
+    // The turn ends and takes the note: the record shows it.
     shows(&context, "chief", &waiting);
+    context.adapter.answer("chief", "noted");
     context.pass().unwrap();
     let delivered = context.message(note.id);
     assert_eq!(
@@ -105,39 +113,49 @@ fn waits_for_the_record_of_a_message_whose_window_went_into_a_turn_however_long_
 }
 
 #[test]
-fn pastes_again_a_message_whose_window_stayed_at_rest_and_not_one_whose_window_went_into_a_turn() {
+fn counts_the_arrival_window_in_the_time_its_window_is_at_rest_and_begins_it_again_after_a_turn() {
     let context = Context::new();
     let project = holding(&context);
     let pasted = counting(&context);
-    let first = context.note(project, "zeus", "chief", "hello");
+    let note = context.note(project, "zeus", "chief", "hello");
     context.pass().unwrap();
 
-    // At rest all the arrival window, nothing shown: the paste did nothing, and
-    // is sent again.
-    context.advance(ARRIVAL_MS + 1_000);
+    // Twenty seconds at rest, then a turn of twenty: the count is begun again
+    // by the turn, so the forty seconds are no arrival window.
+    context.advance(20_000);
     context.pass().unwrap();
-    assert_eq!(context.message(first.id).attempts, 2);
-    assert_eq!(pasted.get(), 2, "pasted again once");
-
-    // A turn of a single look, and at rest again: the window had the second
-    // paste, and the minutes after it change nothing.
     context.adapter.busy("chief");
+    context.advance(20_000);
     context.pass().unwrap();
+    assert_eq!(context.message(note.id).attempts, 1);
+
+    // At rest again, with nothing shown: the window is given its whole length.
     context.adapter.with("chief", |agent| agent.settled = true);
-    for _ in 0..10 {
-        context.advance(ARRIVAL_MS);
-        context.pass().unwrap();
-    }
-    let waiting = context.message(first.id);
+    context.pass().unwrap();
+    context.advance(ARRIVAL_MS - 1_000);
+    context.pass().unwrap();
+    let waiting = context.message(note.id);
     assert_eq!(
         (waiting.state.as_str(), waiting.attempts),
-        ("delivering", 2)
+        ("delivering", 1)
     );
-    assert_eq!(pasted.get(), 2, "not pasted a third time");
+    assert_eq!(pasted.get(), 1);
+
+    // Past it at rest, the paste is taken for lost and sent again, and the board
+    // says it was after the turn.
+    context.advance(2_000);
+    context.pass().unwrap();
+    let again = context.message(note.id);
+    assert_eq!((again.state.as_str(), again.attempts), ("delivering", 2));
+    assert_eq!(pasted.get(), 2, "pasted again once");
+    assert_eq!(
+        why_retried(&context, project),
+        "the harness record never showed it in the 30 s its window was at rest since its last turn"
+    );
 }
 
 #[test]
-fn takes_a_window_waiting_on_a_dialog_of_its_own_for_a_window_in_a_turn() {
+fn counts_no_rest_while_its_window_waits_on_a_dialog_of_its_own() {
     let context = Context::new();
     let project = holding(&context);
     let pasted = counting(&context);
@@ -158,81 +176,128 @@ fn takes_a_window_waiting_on_a_dialog_of_its_own_for_a_window_in_a_turn() {
     assert_eq!(context.message(note.id).attempts, 1);
     assert_eq!(pasted.get(), 1, "not pasted again");
 
-    // The human answers: the window is at rest, and went through a turn.
+    // The human answers: the window is at rest, and the window is counted from there.
     context.adapter.with("chief", |agent| agent.waiting = None);
-    for _ in 0..4 {
+    context.pass().unwrap();
+    context.advance(ARRIVAL_MS - 1_000);
+    context.pass().unwrap();
+    assert_eq!(pasted.get(), 1);
+    context.advance(2_000);
+    context.pass().unwrap();
+    assert_eq!(context.message(note.id).attempts, 2);
+    assert_eq!(pasted.get(), 2);
+}
+
+#[test]
+fn presses_no_enter_again_after_the_arrival_window_for_a_message_its_window_goes_on_waiting_for() {
+    let context = Context::new();
+    let project = holding(&context);
+    let note = context.note(project, "zeus", "chief", "hello");
+    context.pass().unwrap();
+
+    // The chief is in a turn and printing when the paste has been waited for the
+    // arrival window: the one Enter the paste is given is not pressed into it.
+    context.adapter.busy("chief");
+    context.host.set_snapshot(json!({ "outputQuietMs": 500 }));
+    context.advance(ARRIVAL_MS);
+    context.pass().unwrap();
+    assert_eq!(enters(&context), 0, "not into a window that just printed");
+
+    // Quiet at last, minutes on, and the record is still waited for: that window
+    // is past, and no Enter is pressed into a turn for the paste it holds.
+    context.host.set_snapshot(json!({ "outputQuietMs": 5_000 }));
+    for _ in 0..6 {
         context.advance(ARRIVAL_MS);
         context.pass().unwrap();
     }
+    assert_eq!(enters(&context), 0, "none once the arrival window is past");
     assert_eq!(context.message(note.id).attempts, 1);
-    assert_eq!(pasted.get(), 1, "not pasted again");
 }
 
 #[test]
-fn presses_enter_again_for_a_message_only_into_a_window_at_rest_and_once_for_each_rest_after_a_turn(
-) {
-    let context = Context::new();
-    let project = holding(&context);
-    context.host.set_snapshot(json!({ "outputQuietMs": 5_000 }));
-    context.note(project, "zeus", "chief", "hello");
-    context.pass().unwrap();
-
-    // A turn is no paste left unsent: its window has the message, or holds it.
-    context.adapter.busy("chief");
-    context.advance(15_000);
-    context.pass().unwrap();
-    assert_eq!(enters(&context), 0, "not into a window in a turn");
-
-    // At rest again, nothing shown: the paste may be sitting in the input, as a
-    // turn that ignored its Enter left it.
-    context.adapter.with("chief", |agent| agent.settled = true);
-    context.pass().unwrap();
-    assert_eq!(enters(&context), 1, "pressed once, at rest");
-    context.advance(2_000);
-    context.pass().unwrap();
-    assert_eq!(enters(&context), 1, "not again for the same rest");
-
-    // Another turn, and another rest: another Enter, and no paste.
-    context.adapter.busy("chief");
-    context.advance(2_000);
-    context.pass().unwrap();
-    context.adapter.with("chief", |agent| agent.settled = true);
-    context.pass().unwrap();
-    assert_eq!(enters(&context), 2, "once for each rest after a turn");
-}
-
-#[test]
-fn sends_the_enter_that_a_turn_ignored_and_the_record_shows_the_message_once() {
+fn pastes_a_lost_paste_again_after_a_turn_of_its_windows_own_and_the_queue_behind_it_goes_on() {
     let context = Context::new();
     let project = holding(&context);
     let pasted = counting(&context);
-    context.host.set_snapshot(json!({ "outputQuietMs": 5_000 }));
-    let note = context.note(project, "zeus", "chief", "hello");
+    let first = context.note(project, "zeus", "chief", "first");
+    let second = context.note(project, "zeus", "chief", "second");
     context.pass().unwrap();
-    context.adapter.busy("chief");
-    context.pass().unwrap();
+    assert_eq!(context.message(first.id).state, "delivering");
+    assert_eq!(pasted.get(), 1, "the second waits behind the first");
 
-    // The turn ends with the paste still in the input: Enter sends it, and the
-    // record shows it, which no second paste was needed for.
-    let (adapter, header) = (Rc::downgrade(&context.adapter), delivery_text(&note, &[]));
-    *context.host.on_request.borrow_mut() = Some(Rc::new(move |op: &str, body: &Value| {
-        let enter = op == "pane.input" && body["bytes"][0] == 13;
-        if let (true, Some(adapter)) = (enter, adapter.upgrade()) {
-            let item = adapter.item(Role::User, &header);
-            adapter.with("chief", |agent| agent.items.push(item));
-        }
-    }));
+    // The paste was lost. The window goes into a turn that is none of its own
+    // (the human typed to it, or it began one by itself) and that goes on for
+    // five minutes: it is no sign the paste landed.
+    context.adapter.busy("chief");
+    for _ in 0..10 {
+        context.advance(ARRIVAL_MS);
+        context.pass().unwrap();
+    }
+    assert_eq!(context.message(first.id).attempts, 1);
+    assert_eq!(context.message(second.id).state, "queued");
+
+    // The turn ends, and the record gets a whole window of rest from there: not
+    // a moment less, and then the paste is sent again, which lands this time.
     context.adapter.with("chief", |agent| agent.settled = true);
-    context.advance(11_000);
     context.pass().unwrap();
+    context.advance(ARRIVAL_MS - 1_000);
     context.pass().unwrap();
-    let delivered = context.message(note.id);
+    assert_eq!(context.message(first.id).attempts, 1);
+    context.adapter.with("chief", |agent| agent.arrive = true);
+    context.advance(2_000);
+    context.pass().unwrap();
+    assert_eq!(pasted.get(), 2, "pasted again once");
+    context.pass().unwrap();
+    let delivered = context.message(first.id);
     assert_eq!(
         (delivered.state.as_str(), delivered.attempts),
-        ("delivered", 1)
+        ("delivered", 2)
     );
-    assert_eq!(enters(&context), 1);
-    assert_eq!(pasted.get(), 1, "pasted once");
+
+    // Nothing stalled: the next message goes in as soon as the window is free.
+    context.adapter.answer("chief", "noted");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(context.message(second.id).state, "delivered");
+    let items = given(&context, "chief");
+    assert_eq!(items.len(), 2, "{items:?}");
+    for (text, note) in items.iter().zip([&first, &second]) {
+        assert_eq!(text.matches(&marker_of(note.id)).count(), 1, "{text}");
+    }
+}
+
+#[test]
+fn waits_on_a_message_the_harness_says_its_queue_holds_whatever_its_window_does_and_its_record_shows(
+) {
+    let context = Context::new();
+    let project = holding(&context);
+    let pasted = counting(&context);
+    let note = context.note(project, "zeus", "chief", "hello");
+    context.pass().unwrap();
+    assert_eq!(pasted.get(), 1);
+
+    // The harness has said nothing of it, and the window is at rest: a paste to
+    // be tried again. Then its queue says it has it (Devin's wire log shows its TUI
+    // put the message to its agent), and the window stays at rest, for minutes.
+    context.adapter.with("chief", |agent| agent.took = true);
+    context.pass().unwrap();
+    for _ in 0..10 {
+        context.advance(ARRIVAL_MS);
+        context.pass().unwrap();
+    }
+    let waiting = context.message(note.id);
+    assert_eq!(
+        (waiting.state.as_str(), waiting.attempts),
+        ("delivering", 1),
+        "still on its way, not tried again"
+    );
+    assert_eq!(pasted.get(), 1, "not pasted again");
+
+    // The harness runs it, and its record shows it.
+    shows(&context, "chief", &waiting);
+    context.pass().unwrap();
+    assert_eq!(context.message(note.id).state, "delivered");
+    assert_eq!(pasted.get(), 1);
 }
 
 #[test]

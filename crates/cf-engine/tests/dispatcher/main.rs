@@ -17,7 +17,8 @@
 //! (`approval`), and the tester, which Node's staff never had (`testers`), and
 //! the human's Resume of what a start suspended (`resume`), and the arrival
 //! window counted in the time a window is at rest, so that a record that is
-//! late while its window is in a turn is waited for (`slow_records`).
+//! late while its window is in a turn is waited for, as a message its harness
+//! says its own queue holds is (`slow_records`).
 
 // The tests' own scaffolding: a failure in it is the test's.
 #![allow(clippy::unwrap_used, clippy::expect_used)]

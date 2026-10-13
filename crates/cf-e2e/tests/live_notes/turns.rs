@@ -1,20 +1,22 @@
 //! What the check sees of the chief's turns. The chief is told by its folder to run a
 //! command on each note and to wait for it ([`crate::check::note_command`]), which
-//! ends by itself after [`HELD_S`] seconds: twice the daemon's arrival window of the
-//! run, so that a harness that keeps what it is given in a turn shows it later than
-//! the window, and the daemon is to wait for it. The turns are read from what the
-//! daemon wrote of the chief's window (each change of what it was doing), which no
-//! look of the check's can miss; and the run is over once the notes are given and the
-//! chief has been at rest for a while, which a chief that was pasted a note twice
-//! would not have: it would be in a turn on the second still.
+//! ends by itself after [`HELD_S`] seconds: well over the daemon's arrival window (a
+//! minute, its own), so that a harness that keeps what it is given in a turn shows it
+//! later than the window, and the daemon is to wait for it. The turns are read from
+//! what the daemon wrote of the chief's window (each change of what it was doing),
+//! which no look of the check's can miss; and the run is over once the notes are given
+//! and the chief has been at rest for a while, which a chief that was pasted a note
+//! twice would not have: it would be in a turn on the second still.
 
 use std::time::{Duration, Instant};
 
 use cf_e2e::live::trace::at_ms;
 use serde_json::Value;
 
-/// How many seconds the command of a note's turn takes.
-pub const HELD_S: u64 = 60;
+/// How many seconds the command of a note's turn takes: twenty more than the
+/// daemon's arrival window, and under the two minutes a Claude Code shell command is
+/// given unless it asks for more.
+pub const HELD_S: u64 = 80;
 
 /// How long the chief has to be at rest, the notes all given, for them to be taken for
 /// all it will be given: longer than a turn takes to begin once the one before it is
@@ -159,13 +161,13 @@ mod tests {
 
     #[test]
     fn a_turn_is_held_for_each_note_when_the_window_worked_the_time_of_the_command_for_each() {
-        assert!(held(122_500, 2));
-        assert!(!held(64_500, 2), "the second note was not waited on");
+        assert!(held(162_500, 2));
+        assert!(!held(84_500, 2), "the second note was not waited on");
         assert!(
             !held(0, 1),
             "a chief that ran no command left no turn to hold"
         );
-        assert!(held(60_000, 1));
-        assert!(!held(59_999, 1));
+        assert!(held(80_000, 1));
+        assert!(!held(79_999, 1));
     }
 }

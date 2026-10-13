@@ -51,6 +51,9 @@ pub struct FakeAgent {
     pub arrive: bool,
     /// Whether the harness's own queue takes a delivery.
     pub queued: bool,
+    /// The harness says, after a delivery, that its own queue holds it
+    /// (`Window::took`): its record shows nothing of it yet.
+    pub took: bool,
     pub failed: bool,
     /// The conversation the window shows, when the human switched it.
     pub shows: Option<String>,
@@ -435,6 +438,7 @@ impl Asked {
             admit: true,
             arrive: true,
             queued: false,
+            took: false,
             failed: false,
             shows: None,
             records: HashMap::new(),

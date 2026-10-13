@@ -5,6 +5,13 @@
 //! own error. The log only grows, so each look reads what was appended since
 //! the last.
 //!
+//! The TUI's own words to its agent are in it too, a request with its method, and
+//! two things are read from them. A prompt the TUI puts to its agent begins a turn
+//! (`session/prompt`, with the conversation in its params) before the agent has
+//! said a word of it: it is asked until the agent ends a turn (`cause`) or answers
+//! its request. And the message last pasted is the agent's to run once a request
+//! of the TUI holds its text, which the log is told to expect ([`WireLog::expect`]).
+//!
 //! Kept from Node on purpose:
 //! - where V8 threw (a line that is JSON `null`, or a configuration that is
 //!   no list), the look fails in a sentence of this module's own, its lines
@@ -41,12 +48,32 @@ static REFUSAL: LazyLock<Regex> = LazyLock::new(|| {
 const UNREADABLE: &str =
     "Devin's wire log holds a line that cannot be read for the conversation it shows";
 
+/// How long after a prompt of the TUI a window is read as in the turn it begins,
+/// when its agent has said nothing of that turn: what an agent takes to its first
+/// word, and well past it. A turn that says nothing for longer is read as the
+/// record reads it.
+pub(super) const PROMPT_GAP_MS: i64 = 30_000;
+
 /// What the log says so far.
 pub(super) struct Said {
     /// The conversation the window shows, once it said.
     pub(super) shown: Option<String>,
     /// Devin's word on its quota, shared with every look that finds it.
     pub(super) quota: Option<Arc<Quota>>,
+    /// The TUI put its agent a message that holds the text the log was told to
+    /// expect: the agent's own queue has it, whatever its record shows yet.
+    pub(super) sent: bool,
+    /// When a look first read the last prompt of the shown conversation that
+    /// nothing has answered or ended since: its turn is begun, though its agent has
+    /// said nothing of it. None where no prompt waits so.
+    pub(super) asked_at: Option<i64>,
+}
+
+/// A prompt the TUI put to its agent: the id of its request, and when a look first
+/// read it.
+struct Asked {
+    id: Value,
+    at_ms: i64,
 }
 
 /// What the lookers have read of a log.
@@ -58,6 +85,11 @@ struct State {
     carry: String,
     shown: Option<String>,
     quota: Option<Arc<Quota>>,
+    /// The text of the message last pasted, which the TUI's words are read for.
+    expected: Option<String>,
+    sent: bool,
+    /// The prompts of the shown conversation that no turn's end or answer closed.
+    asked: Vec<Asked>,
 }
 
 /// One launch's wire log, and what a look at it has read.
@@ -81,6 +113,15 @@ impl WireLog {
         &self.file
     }
 
+    /// The message about to be pasted begins with `text` (its first line, which
+    /// holds its id): a request of the TUI that holds it, read from now on, says
+    /// the agent's own queue has the message.
+    pub(super) fn expect(&self, text: &str) {
+        let mut state = self.state.borrow_mut();
+        state.expected = Some(text.to_owned()).filter(|text| !text.is_empty());
+        state.sent = false;
+    }
+
     /// What the log says now, read from where the last look stopped: a log
     /// that cannot be opened says what it said before, and one that shrank
     /// was replaced, and is read from its start. `at_ms` is when it is.
@@ -97,6 +138,7 @@ impl WireLog {
         if size < from {
             from = 0;
             state.carry.clear();
+            state.asked.clear();
         }
         if size > from {
             let appended = read_from(&mut file, from, size)?;
@@ -137,6 +179,8 @@ impl State {
         Said {
             shown: self.shown.clone(),
             quota: self.quota.clone(),
+            sent: self.sent,
+            asked_at: self.asked.last().map(|asked| asked.at_ms),
         }
     }
 
@@ -148,8 +192,14 @@ impl State {
         if let Some(shown) = shown_in(&event).map_err(|_| UNREADABLE.to_owned())? {
             self.shown = Some(shown.to_owned());
         }
-        if event.get("method").and_then(Value::as_str) == Some("session/prompt") {
-            self.quota = None;
+        match event.get("method").and_then(Value::as_str) {
+            Some(method) => {
+                self.put_to_the_agent(method, &event, at_ms);
+                if method == "session/prompt" {
+                    self.quota = None;
+                }
+            }
+            None => self.ended(&event),
         }
         let text = event
             .get("update")
@@ -172,6 +222,53 @@ impl State {
             self.quota = Some(exhausted(&words(event.get("errorMessage"))?, at_ms, zone)?);
         }
         Ok(())
+    }
+
+    /// A request of the TUI to its agent, read at `at_ms`: one that holds the text
+    /// expected is the message the agent's queue took, and a prompt of the shown
+    /// conversation is a turn begun.
+    fn put_to_the_agent(&mut self, method: &str, request: &Value, at_ms: i64) {
+        if self
+            .expected
+            .as_deref()
+            .is_some_and(|text| mentions(request, text))
+        {
+            self.sent = true;
+        }
+        let session = request
+            .get("params")
+            .and_then(|params| params.get("sessionId"))
+            .and_then(Value::as_str);
+        if method == "session/prompt" && session.is_some() && session == self.shown.as_deref() {
+            self.asked.push(Asked {
+                id: request.get("id").cloned().unwrap_or(Value::Null),
+                at_ms,
+            });
+        }
+    }
+
+    /// A record that is no request: a turn's end names its conversation and
+    /// closes every prompt asked of it, and an answer to a request names its id.
+    fn ended(&mut self, record: &Value) {
+        if record.get("cause").is_some() {
+            if record.get("sessionId").and_then(Value::as_str) == self.shown.as_deref() {
+                self.asked.clear();
+            }
+        } else if record.get("result").is_some() || record.get("error").is_some() {
+            if let Some(id) = record.get("id") {
+                self.asked.retain(|asked| asked.id != *id);
+            }
+        }
+    }
+}
+
+/// Whether any text in `value` holds `text`.
+fn mentions(value: &Value, text: &str) -> bool {
+    match value {
+        Value::String(words) => words.contains(text),
+        Value::Array(items) => items.iter().any(|item| mentions(item, text)),
+        Value::Object(fields) => fields.values().any(|field| mentions(field, text)),
+        _ => false,
     }
 }
 

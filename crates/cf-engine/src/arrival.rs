@@ -1,14 +1,16 @@
 //! Whether a message handed over to a window arrived: its harness's record is
 //! watched for the message's header, which confirms it. A paste the window may
 //! not have sent is given one more Enter, and one the record never showed is
-//! pasted again, unless its window went into a turn since: a window in a turn
-//! took what it was given into it, or holds it (a harness may keep what comes in
-//! meanwhile and write it to its record when it gets to it), so its record is
-//! late, not lacking, and a message pasted again would be a second copy of one
-//! the window has (a Devin chief, 2026-10-13: each of two notes twice). Such a
-//! message is waited for as one the harness queued itself is. What a hand-over
-//! is and how it fails are `deliveries`'; the wait is the part of the record's
-//! delivery part this owns.
+//! pasted again. Two things keep a record that is late from being taken for
+//! lacking, and the paste from being a second copy of one the window has (a
+//! Devin chief, 2026-10-13: each of two notes twice). A harness may say its own
+//! queue holds the message (`Window::took`), and it is then waited for as one the
+//! harness queued itself is. And a window in a turn may hold what it is given and
+//! write it to its record when it gets to it, so only the window's rest counts
+//! towards the record's time: a record gets a whole arrival window of rest, from
+//! the hand-over or from the end of the last turn the window went into since.
+//! What a hand-over is and how it fails are `deliveries`'; the wait is the part of
+//! the record's delivery part this owns.
 
 use std::rc::Rc;
 
@@ -25,8 +27,7 @@ use crate::seams::EngineError;
 
 /// An Enter, pressed once more for a paste its window did not send.
 const ENTER: u8 = 13;
-/// How long a paste may go unshown in the record before its window, if it is at
-/// rest, gets that Enter.
+/// How long a paste may go unshown in the record before its window gets that Enter.
 const ENTER_AGAIN_MS: i64 = 10_000;
 /// How long the window must have printed nothing first: one being typed into,
 /// or drawing, is left be.
@@ -122,35 +123,70 @@ impl Dispatcher {
         if delivering.queued {
             return Ok(());
         }
-        // A window in a turn took the message into it, or holds it, whatever its
-        // record shows; one waiting on a dialog of its own is in its turn still.
-        if !(observed.settled && observed.waiting.is_none()) {
-            self.took_a_turn(record);
+        // The harness's own word, once it has one: its queue holds the message.
+        if self.took(record) {
+            self.queued(record);
             return Ok(());
         }
         let waited = self.now() - delivering.since;
-        if delivering.turned || waited <= self.seams.limits.arrival_ms {
-            if waited > ENTER_AGAIN_MS && !delivering.entered_again {
+        let (rested, turned) = self.rested(record, observed);
+        if rested <= self.seams.limits.arrival_ms {
+            if waited > ENTER_AGAIN_MS
+                && waited <= self.seams.limits.arrival_ms
+                && !delivering.entered_again
+            {
                 self.enter_again(record, delivering.message).await?;
             }
             return Ok(());
         }
         record.delivery.borrow_mut().delivering = None;
-        // A paste the harness record never showed after the whole window, its
+        // A paste the harness record never showed after the whole window, the
         // window at rest all of it, did not land: sending it again is how it
         // reaches the reader. (A message the harness queued itself waits for
-        // the record, or for the window to close; so does one the window went
-        // into a turn after.)
-        self.settle_failure(delivering, "the harness record never showed it", true)
+        // the record, or for the window to close.)
+        let because = if turned {
+            format!(
+                "the harness record never showed it in the {} s its window was at rest since its last turn",
+                self.seams.limits.arrival_ms / 1000
+            )
+        } else {
+            "the harness record never showed it".to_owned()
+        };
+        self.settle_failure(delivering, &because, true)
     }
 
-    /// A look found the window in a turn: the message on its way is waited for
-    /// from now on, however long its record is, and an Enter pressed for it
-    /// before (which a turn may have ignored) is spent no longer.
-    fn took_a_turn(&self, record: &Record) {
+    /// Whether the window's harness says its own queue holds the message on its
+    /// way.
+    fn took(&self, record: &Record) -> bool {
+        self.window_of(record).0.is_some_and(|window| window.took())
+    }
+
+    /// The message on its way is the harness's own queue's from now on.
+    fn queued(&self, record: &Record) {
         if let Some(delivering) = record.delivery.borrow_mut().delivering.as_mut() {
-            delivering.turned = true;
-            delivering.entered_again = false;
+            delivering.queued = true;
+        }
+    }
+
+    /// How long the window has been at rest since the message on its way was
+    /// handed over, or since its last turn ended: the time its record has had
+    /// to show it. A look that finds the window in a turn starts the count
+    /// again, whatever the harness does with what came in meanwhile: it may
+    /// hold it until it runs it, which is the record's wait, not its failure. A
+    /// window waiting on a dialog is in its turn still. And whether a turn was
+    /// found since the hand-over.
+    fn rested(&self, record: &Record, observed: &Observed) -> (i64, bool) {
+        let now = self.now();
+        let mut part = record.delivery.borrow_mut();
+        let Some(delivering) = part.delivering.as_mut() else {
+            return (0, false);
+        };
+        if observed.settled && observed.waiting.is_none() {
+            let since = *delivering.rested_since.get_or_insert(now);
+            (now - since, since != delivering.since)
+        } else {
+            delivering.rested_since = None;
+            (0, true)
         }
     }
 

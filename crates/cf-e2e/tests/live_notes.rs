@@ -9,21 +9,22 @@
 //! closed with background work still running: …"), and the chief reported that each
 //! went into its window twice in a row. A paste is confirmed when the harness's record
 //! shows its header, and one the record had not shown in a minute was taken for lost
-//! and pasted again; a harness that holds what it is given in a turn, and writes it to
-//! its record when the turn takes it, shows it later than that. What the rig's
-//! stand-in Devin shows of the daemon's side (`regressions/devin_notes_twice.rs`) this
-//! shows of a real one: whether its record is late, and whether the daemon waits.
+//! and pasted again. Devin takes what is typed in a turn into its agent's queue and
+//! writes it to its store when it runs it, and a turn reads at rest before its agent's
+//! first word: a note pasted then was shown 63 s late on a run of the Mac (Devin
+//! 3000.11.3), and pasted again. What the rig's stand-in Devin shows of the daemon's
+//! side (`regressions/devin_notes_twice.rs`) this shows of a real one.
 //!
-//! A real harness is the chief of a project on the native daemon, and its one member
-//! is the stand-in (no model). The human asks the chief to run a command that takes
-//! 100 s, and while it is in it the chief gives the member a task whose window
-//! leaves a job running and the human cancels it: ConsensFlow has two notes for the
-//! chief, and cannot give them yet. The command ends by itself, the chief is at rest,
-//! and the notes go in one after the other. The folder tells the chief to run a command
-//! on each note and to wait for it, and that command takes 60 s, twice the daemon's
-//! arrival window of the run (30 s, from `CONSENSFLOW_ARRIVAL_TIMEOUT_MS`): a harness
-//! that keeps the second note until the first turn ends shows it later than the
-//! window, and a daemon that took that for a paste lost would paste it again.
+//! A real harness is the chief of a project on the native daemon, as it ships (its
+//! arrival window is its minute), and its one member is the stand-in (no model). The
+//! human asks the chief to run a command that takes 100 s, and while it is in it the
+//! chief gives the member a task whose window leaves a job running and the human
+//! cancels it: ConsensFlow has two notes for the chief, and cannot give them yet. The
+//! command ends by itself, the chief is at rest, and the notes go in one after the
+//! other. The folder tells the chief to run a command on each note and to wait for it,
+//! and that command takes 80 s, more than the arrival window: a note that waits for
+//! the turn before it shows later than the window, and a daemon that took that for a
+//! paste lost would paste it again.
 //!
 //! The commands are `sleep`, and a ping of the machine's own address on Windows
 //! (`quiet_command`): they end by themselves, so the check finds none and ends none
@@ -32,10 +33,17 @@
 //! chief has been at rest for 20 s, the check reads the chief's own record, as the
 //! daemon reads it (Claude Code's conversation, Devin's store), and holds it to this:
 //! the start of each note's header is in the messages the chief was given exactly once
-//! ([`verdict`]). Said beside it, and judged by nothing: how often the daemon pasted
-//! each note, and how long after the first paste the record showed it (a harness that
-//! holds a note in its turn shows it as late as the turn is long), and whether the
-//! daemon pasted a note again and why.
+//! ([`verdict`]). A Devin chief is held to one thing more: the run met what the daemon
+//! is for, a note pasted once whose record showed it after more than the daemon's
+//! window, or a note handed over only after the turn on the one before it had begun;
+//! two notes confirmed at once prove nothing, and the run says so and fails. Said
+//! beside them, and judged by nothing: how often the daemon pasted each note, how long
+//! after the first paste the record showed it, and (for Devin) the record of its wire
+//! that first names each note and when a look first read it ([`wire`]), which says
+//! whether Devin's TUI puts a message typed in a turn to its agent at once, whether
+//! the daemon pasted a note again and why, and whether it pressed Enter again. The
+//! chief's turn on a note held open as long as its command is said too, and no check:
+//! a harness may run a command in the background (Claude Code did, on the Mac).
 //!
 //! ```text
 //! cargo xtask live notes                      Devin and Claude, each as the chief
@@ -53,12 +61,16 @@
 
 // The parts are in `live_notes/`: cargo looks for the modules of a test's root file
 // beside it, where each would be a suite of its own.
+#[path = "live_notes/board.rs"]
+mod board;
 #[path = "live_notes/check.rs"]
 mod check;
 #[path = "live_notes/turns.rs"]
 mod turns;
 #[path = "live_notes/verdict.rs"]
 mod verdict;
+#[path = "live_notes/wire.rs"]
+mod wire;
 
 use cf_e2e::live::report::{self, Check};
 use cf_e2e::live::{self, ask, Harness, Log};

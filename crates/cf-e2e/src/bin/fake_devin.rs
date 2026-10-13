@@ -14,13 +14,16 @@
 //!
 //! A turn takes no time unless the window is told how long a model takes
 //! (`FAKE_DEVIN_FIRST_WORD_MS`, `FAKE_DEVIN_WORK_MS`: [`turn::Pace`]). A message
-//! the window is handed while a turn is at work waits for it, one turn at a time
-//! in the order the messages came, and is written to the store when its turn
-//! begins and not before: a record that shows a message late, the shape the
-//! report of 2026-10-13 needs (a Devin chief read each of two notes twice that the
-//! ledger holds once). No recording of a real Devin shows how it holds a message:
-//! the fixtures of its store (`tests/engine/fixtures/completion/devin/`) are turns
-//! that took no model's time, and `cargo xtask live notes devin` is what shows it.
+//! the window is handed while a turn is at work goes into its agent's queue, and
+//! is run when the turn ends, one at a time in the order the messages came: its
+//! row is written to the store then, and not before, as Devin's are (the user
+//! rows between the replies of `tests/engine/fixtures/completion/devin/
+//! native-tui.json`, each named on the wire by the step that runs it; a live run
+//! of 2026-10-13, Devin 3000.11.3: a note pasted a second after another showed
+//! in the record 63 s later, when the turn before it ended). A turn's prompt is
+//! on the wire as a request of the TUI when the message is run. Whether a real
+//! Devin's TUI puts a message typed in a turn to its agent at once is not
+//! recorded: `cargo xtask live notes devin` shows it.
 //!
 //! The terminal and the signals are the other stand-in's own (`fake_agent/`).
 

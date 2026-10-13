@@ -127,7 +127,7 @@ impl<W: Write> Window<W> {
         let stream = format!("stream-{}", self.turns);
         let plan = plan_of(text, self.pace);
         self.store.user(text, &client)?;
-        self.wire.prompt(&client).map_err(said)?;
+        self.wire.prompt(self.turns + 1, text).map_err(said)?;
         self.say("working (esc twice to interrupt)\n")
             .map_err(said)?;
         // The turn is begun, and its agent has not said a word: a model's time,

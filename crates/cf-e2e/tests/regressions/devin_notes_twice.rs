@@ -18,46 +18,37 @@
 //! What should have happened: each note goes into the window once, and the chief
 //! reads it once, whatever its record takes to show it.
 //!
-//! What the daemon did. A paste is confirmed by the harness's record showing its
-//! header, and one the record had not shown a minute on was taken for lost and
-//! pasted again: with nothing failing, it is the one way left for a message the
-//! ledger holds once to be pasted twice. A Devin chief in a turn reads at rest in
-//! the first seconds of it (its message is in the store, and its agent has not said
-//! a word, which the wire shows as none of its work), so the daemon pastes into it,
-//! and the record of that paste was late for a minute. The paste went again, and the
-//! chief had both.
+//! What the daemon did, and what Devin does. A paste is confirmed by the harness's
+//! record showing its header, and one the record had not shown a minute on was taken
+//! for lost and pasted again: with nothing failing, it is the one way left for a
+//! message the ledger holds once to be pasted twice. A Devin chief in a turn reads at
+//! rest in the first seconds of it (the wire shows none of its work until its agent's
+//! first word), so the daemon pasted into it; and what Devin is handed in a turn goes
+//! into its agent's queue and is written to its store when the agent runs it (a live
+//! run of the same day on the Mac, Devin 3000.11.3: a note pasted a second after
+//! another showed in the record 63 s later, when the 60 s command of the turn before it
+//! ended). The record was late, not lacking, and the paste went again.
 //!
 //! The stand-in Devin (`fake-devin`) has what that needs: a turn takes the time a
-//! model takes, from the message to the agent's first word (`ttftMs` of the wire's
-//! own `stats`) and then as long as the work (`FAKE_DEVIN_FIRST_WORD_MS`,
-//! `FAKE_DEVIN_WORK_MS`), and a message it is given in a turn waits and is written to
-//! its store when its turn begins, so its record is late. The daemon runs on it
-//! whole: the Devin adapter reads its store and its wire as it reads Devin's. What
-//! this proves is the daemon's side (a message handed over to a window that went into
-//! a turn after it is waited for, and only a paste into a window that stayed at rest
-//! and that the record never shows is pasted again). Why a real Devin's record shows
-//! a paste late (it holds the message in its turn, writes its row where the store's
-//! main chain has not reached, or keeps the paste unsent in its input) no recording
-//! shows: `cargo xtask live notes devin` shows it with a real one, and the rule holds
-//! for each.
+//! model takes, from the message to its agent's first word (`ttftMs` of the wire's own
+//! `stats`) and then as long as the work (`FAKE_DEVIN_FIRST_WORD_MS`,
+//! `FAKE_DEVIN_WORK_MS`), and a message it is handed in a turn is run when the turn
+//! ends, its row written then. The prompt of a turn is on its wire as a request of the
+//! TUI, as it is run. The daemon runs on it whole: the Devin adapter reads its store
+//! and its wire as it reads Devin's.
 //!
-//! The case is the shape of the report: the chief is in a turn (the human has just
-//! typed to it) when the cancel comes, and the two notes are those of a cancel: the
-//! cancel's own, and the closing of the worker's window with a job still running.
-//! The daemon's arrival window is 12 s here (`CONSENSFLOW_ARRIVAL_TIMEOUT_MS`) and a
-//! turn 20 s, so that what a minute and a model's turns bring takes a case, not
-//! several. The daemon pastes in the first 3 s of a turn (the window reads at rest);
-//! on the old rule the paste is taken for lost 12 s after the hand-over, some 7 s
-//! before the turn that holds it ends, and on the rule never, for the window is in
-//! that turn at the next look.
-//!
-//! On the old rule the chief read both notes twice (m-2, m-2, m-3, m-3). The first
-//! word's time is what makes the second note go in twice: without it (tried, with
-//! the rule put back) the cancel's note is read twice all the same, for it goes
-//! into the turn the human's prompt has just begun, and the second once, for the
-//! window reads busy from the first's header on and the second waits for its rest.
-//! With the time, the second is pasted as the first's header shows, into a turn that
-//! has said nothing yet and so reads at rest.
+//! The case is the shape of the report: the human types to the chief and cancels at
+//! once, and the two notes are those of a cancel: the cancel's own, and the closing of
+//! the worker's window with a job still running. The daemon's arrival window is its
+//! own minute, so the notes' turns are 73 s: a note whose record waits for the turn
+//! before it shows later than the window. Without the fix the second note is pasted
+//! into the first's turn, which has said nothing yet, and its record is some 70 s late:
+//! the paste goes again, a minute on. With it, the window reads busy from the TUI's
+//! prompt, and the second note is pasted once the first's turn has ended; and were one
+//! pasted into a turn, only the window's rest counts towards the minute. What proves
+//! it is the daemon's own word for its pastes (`delivery.begun`, `delivery.retried`):
+//! the chief reads a second copy only after the turns before it, minutes on, and its
+//! store is read as it stands by the time both notes are in.
 
 use std::path::{Path, PathBuf};
 use std::thread::sleep;
@@ -71,18 +62,15 @@ use serde_json::{json, Value};
 
 use crate::{config, secs, Outcome, FAKE_DEVIN};
 
-/// How long the daemon gives a window at rest to show a message pasted into it.
-const ARRIVAL_MS: &str = "12000";
-
 /// How long the stand-in's agent takes to its first word, and how long it works on
-/// a turn after it, in milliseconds: a turn of 20 s, which is longer than the
-/// arrival window by more than a slow machine's passes take.
+/// a turn after it, in milliseconds: a turn of 73 s, longer than the daemon's minute
+/// by more than a slow machine's passes take.
 const FIRST_WORD_MS: &str = "3000";
-const WORK_MS: &str = "17000";
+const WORK_MS: &str = "70000";
 
-/// How long the chief's store is to hold still before its turns are taken for over:
-/// longer than a turn (a message given twice would be another one).
-const STILL: Duration = Duration::from_secs(30);
+/// How long the chief's store is to hold still before its messages are taken for all
+/// it was given: the daemon's passes are a second apart.
+const STILL: Duration = Duration::from_secs(15);
 
 /// The roster of the case: a Devin (the stand-in) is the chief, and the stand-in
 /// Claude is the worker.
@@ -129,9 +117,9 @@ fn delivered(project: &Project, id: i64) -> cf_e2e::Result<bool> {
         .any(|message| message["id"] == id && message["state"] == "delivered"))
 }
 
-/// Waits until the store has held as many messages for `still` as it holds now
-/// (the turns the chief was handed are all taken), for up to three minutes. A look
-/// the store does not answer (its writer has it a moment) is no change.
+/// Waits until the store has held as many messages for `still` as it holds now,
+/// for up to three minutes. A look the store does not answer (its writer has it a
+/// moment) is no change.
 fn until_still(store: &Path, still: Duration) -> cf_e2e::Result<()> {
     let (mut held, mut since) = (0, Instant::now());
     let begun = Instant::now();
@@ -145,7 +133,7 @@ fn until_still(store: &Path, still: Duration) -> cf_e2e::Result<()> {
         }
         if begun.elapsed() >= secs(180) {
             return Err(Error::Timeout(format!(
-                "the chief's turns went on for three minutes, holding {held} messages"
+                "the chief's messages went on for three minutes, holding {held}"
             )));
         }
         sleep(Duration::from_millis(500));
@@ -158,7 +146,6 @@ fn two_notes_that_come_together_after_a_cancel_go_into_a_devin_chief_s_window_on
     let rig = Rig::start(
         config()
             .devin(FAKE_DEVIN)
-            .var("CONSENSFLOW_ARRIVAL_TIMEOUT_MS", ARRIVAL_MS)
             .var("FAKE_DEVIN_FIRST_WORD_MS", FIRST_WORD_MS)
             .var("FAKE_DEVIN_WORK_MS", WORK_MS),
     )?;
@@ -191,8 +178,9 @@ fn two_notes_that_come_together_after_a_cancel_go_into_a_devin_chief_s_window_on
         Ok(project.lane("worker")?["activity"]["reason"].is_string())
     })?;
 
-    // The human types to the chief, which begins a turn, and cancels T-1 in its first seconds.
-    rig.tell(project.id(), "Reply with exactly: BUSY")?;
+    // The human types to the chief, a turn of a few seconds, and cancels T-1 in its
+    // first: the notes of the cancel are the chief's, and it is in a turn.
+    rig.tell(project.id(), "SLEEP 2 Reply with exactly: BUSY")?;
     let cancelled = rig.page("task.cancel", json!({ "project": project.id(), "task": 1 }))?;
     assert_eq!(cancelled["ok"], true, "{cancelled}");
 
@@ -213,13 +201,34 @@ fn two_notes_that_come_together_after_a_cancel_go_into_a_devin_chief_s_window_on
             "the closed window's note",
         ),
     ];
-    rig.wait_for("the chief to be given both notes", secs(180), || {
+    rig.wait_for("the chief to be given both notes", secs(300), || {
         Ok(delivered(&project, notes[0].0)? && delivered(&project, notes[1].0)?)
     })?;
     let store = store_of(&rig);
     until_still(&store, STILL)?;
 
-    // What the chief read: each note once.
+    // What the daemon did: it pasted each note once, and never took a paste of either
+    // for lost, though a note's turn took longer than its minute. Its own word is the
+    // proof: the stand-in runs a message it is handed in a turn when that turn ends, so
+    // a second copy of a note is read by the chief only after the turns before it,
+    // later than this looks.
+    let events = rig.events();
+    for (id, what) in notes {
+        let of_note = |kind: &str| -> Vec<&Value> {
+            events
+                .iter()
+                .filter(|event| event["kind"] == kind && event["data"]["message"] == id)
+                .collect()
+        };
+        let (pasted, retried) = (of_note("delivery.begun"), of_note("delivery.retried"));
+        assert!(
+            pasted.len() == 1 && retried.is_empty(),
+            "{what} (m-{id}) was pasted {} times; the daemon took it for lost: {retried:?}",
+            pasted.len()
+        );
+    }
+
+    // What the chief had read by then: each note once.
     let given = devin_store::messages(&store)?;
     for (id, what) in notes {
         let marker = format!("[ConsensFlow m-{id} ");
@@ -239,19 +248,6 @@ fn two_notes_that_come_together_after_a_cancel_go_into_a_devin_chief_s_window_on
                 .collect::<Vec<_>>()
         );
     }
-    // And the daemon never took a paste of either for lost: its window was in a turn.
-    let retried: Vec<Value> = rig
-        .events()
-        .into_iter()
-        .filter(|event| {
-            event["kind"] == "delivery.retried"
-                && notes.iter().any(|(id, _)| event["data"]["message"] == *id)
-        })
-        .collect();
-    assert!(
-        retried.is_empty(),
-        "the daemon pasted a note again: {retried:?}"
-    );
     rig.close()?;
     Ok(())
 }
