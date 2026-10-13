@@ -8,6 +8,12 @@
 //! starts with the MCP servers Codex has, the chief's and a member's alike (the
 //! owner's choice, 2026-10-06): a launch never lists them, and its command line
 //! switches none off.
+//!
+//! A thread is resumed by its id (`codex resume <id>`) and has a record to be
+//! resumed from only once it has had a turn: a window resumed on one that never
+//! had any ends at once (2026-10-13). The adapter does not look for the record
+//! itself: the engine resumes only a conversation that had a turn, and opens the
+//! window afresh on any other.
 
 use std::cell::RefCell;
 use std::rc::Rc;

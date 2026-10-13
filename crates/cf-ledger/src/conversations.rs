@@ -125,6 +125,32 @@ pub(crate) fn current_conversation(
         .optional()?)
 }
 
+/// Whether a conversation had a turn, which is what a harness needs of it to go
+/// on with it: Codex writes a thread's record only once the thread has a turn,
+/// and a resume of one with none finds nothing. It had one if ConsensFlow's
+/// copy of it holds an item (whatever its window wrote, the human's own typing
+/// included), or a message was delivered to its participant since it began, at
+/// the moment it began or after. A message has the time it was delivered only
+/// once its window had it (its record showed it, a door or `cf` handed it over,
+/// or the window gave it itself), and loses it when it is taken back, so one
+/// that waits, was given up or was withdrawn has none; and a delivery a start
+/// confirmed from the record alone leaves no item in the copy. What a window
+/// wrote since the last look is the one thing neither tells.
+pub(crate) fn had_a_turn(store: &Store, conversation_id: i64) -> Result<bool, LedgerError> {
+    let conversation = known_conversation(store, conversation_id)?;
+    Ok(store.db.query_row(
+        "SELECT EXISTS (SELECT 1 FROM transcript WHERE conversation_id = ?1)
+             OR EXISTS (SELECT 1 FROM message
+                        WHERE recipient_id = ?2 AND delivered_at >= ?3)",
+        params![
+            conversation.id,
+            conversation.participant_id,
+            conversation.started_at
+        ],
+        |row| row.get(0),
+    )?)
+}
+
 /// A window the human switched to another conversation (/clear, /new,
 /// /resume): the participant's conversation is the one on `native_session`
 /// from now on, its own earlier one when it had it, else a new one bound to

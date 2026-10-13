@@ -393,8 +393,8 @@ fn the_app_started_again_on_the_same_home_leaves_the_project_suspended_and_its_r
     assert!(!session.is_empty(), "{:?}", first["argv"]);
     let project = members.project_id();
     // A chief that has a conversation: the human's Resume of the project, after the app started
-    // again, opens it on that conversation, and a chief that never said a word is opened afresh on
-    // the id it had.
+    // again, opens it on that conversation, and a chief that never had a turn is opened afresh, on
+    // a conversation of its own.
     members
         .rig()
         .tell(project, "Reply with exactly: BEFORE-RESTART")?;
@@ -406,6 +406,9 @@ fn the_app_started_again_on_the_same_home_leaves_the_project_suspended_and_its_r
                 .transcript(&session)
                 .contains("\"text\":\"BEFORE-RESTART\""))
         })?;
+    // The daemon looks at a window once a second, and a Resume goes on with a conversation once the
+    // daemon has seen a turn in it: it is given the pass.
+    std::thread::sleep(secs(3));
 
     let members = members.restart(&log)?;
     assert_eq!(members.project_id(), project);

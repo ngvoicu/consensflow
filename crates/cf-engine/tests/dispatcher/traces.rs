@@ -48,11 +48,12 @@
 //! member may be back before its reset, and the requester is told when the
 //! task goes on; a result the chief decides on before it is given it is
 //! withdrawn, not pasted after the decision; a window that did not come up is
-//! asked what it shows before it is closed), is named in [`DEPARTED`], with
-//! what it does that Node does not. It is held to a trace of its own, recorded
-//! from the engine (`tests/departures/`, `npm run departures`), and fails when
-//! Node's trace is the engine's again, so the departure is taken off once Node
-//! does it too.
+//! asked what it shows before it is closed; a window opened again on a
+//! conversation that never had a turn opens afresh), is named in [`DEPARTED`],
+//! with what it does that Node does not, once for each way it departs. It is
+//! held to a trace of its own, recorded from the engine (`tests/departures/`,
+//! `npm run departures`), and fails when Node's trace is the engine's again, so
+//! the departure is taken off once Node does it too.
 
 use std::collections::HashMap;
 use std::ffi::OsString;
@@ -158,6 +159,10 @@ const SUSPENDED_AT_START: &str = "the restart settles what was on its way into a
 /// What the engine does when the human resumes a project whose chief's turn
 /// was cut (its record has a turn with no end): it is told so first.
 const CUT_CHIEF: &str = "the human resumes the project and the chief's turn was cut (the harness took the paste and the window closed before it answered): the chief is given a note from ConsensFlow that says so as its first message, and the paste after it, where Node opens it with the paste alone";
+
+/// What the engine does when a window is opened again on a conversation that
+/// never had a turn: nothing was delivered into it, and its copy holds nothing.
+const UNTURNED_AFRESH: &str = "the window is opened again on a conversation that never had a turn (nothing was delivered into it since it began, and ConsensFlow's copy of it holds nothing): it opens afresh, in a conversation of its own, with what waited for it, where Node resumes the conversation, which Codex keeps only once it has a turn: a window resumed on one that has none ends at once";
 
 /// What the engine says in a hold note, where Node's said the task goes on at
 /// the reset.
@@ -306,6 +311,59 @@ const DEPARTED: &[(&str, &str)] = &[
         "a note written 3 turns after a restart that finds a message in its harness's record",
         SUSPENDED_AT_START,
     ),
+    // A window opened again on a conversation that never had a turn: the chief a
+    // switch or a Close left before its first message showed, or the first chief
+    // of a project whose window never took a turn, and a session whose record
+    // never showed its brief. Some of these depart in another way as well, and
+    // are named above too.
+    (
+        "gives the new chief its handoff again when its first window closes before showing it",
+        UNTURNED_AFRESH,
+    ),
+    (
+        "keeps what was queued for a first chief whose window does not open",
+        UNTURNED_AFRESH,
+    ),
+    (
+        "notices a chief window that exits before its open is answered",
+        UNTURNED_AFRESH,
+    ),
+    (
+        "fails the Close that made its exit, which nothing logs: the exit it settles is its own",
+        UNTURNED_AFRESH,
+    ),
+    (
+        "replaces a handoff still on its way, and Resume of a closed project brings the chief back with the handoff it had not shown",
+        UNTURNED_AFRESH,
+    ),
+    (
+        "answers New project, Switch chief, Resume and a session’s Open once the ledger has the change; the window opens after",
+        UNTURNED_AFRESH,
+    ),
+    (
+        "opens the chief again when the human resumes a project that is still closing",
+        UNTURNED_AFRESH,
+    ),
+    (
+        "after a release drops the agent of a working member, a restart sends its task back to the board",
+        UNTURNED_AFRESH,
+    ),
+    (
+        "keeps the project open when the new chief cannot take its handoff, and opens it again with it",
+        UNTURNED_AFRESH,
+    ),
+    (
+        "gives a message its window never showed back to the queue with its attempt, and the chief comes back to it and to what follows",
+        UNTURNED_AFRESH,
+    ),
+    (
+        "gives a paste back to the queue when its window closes while the harness takes it",
+        UNTURNED_AFRESH,
+    ),
+    (
+        "opens a member's session again on its own conversation with the brief it was opened for",
+        UNTURNED_AFRESH,
+    ),
 ];
 
 /// The variable that asks for the departures to be recorded again, which `npm
@@ -322,12 +380,18 @@ pub fn held_to(closed: Closed, suites: &[&str], name: &str) {
     let node = TRACES.get(&key).unwrap_or_else(|| {
         panic!("no Node trace of {suites:?} › {name}: the traces are fixed recordings (tests/traces/README.md)")
     });
-    let Some((_, departure)) = DEPARTED.iter().find(|(departed, _)| *departed == name) else {
+    // A test is named once for each way it departs.
+    let departures: Vec<&str> = DEPARTED
+        .iter()
+        .filter(|(departed, _)| *departed == name)
+        .map(|(_, departure)| *departure)
+        .collect();
+    if departures.is_empty() {
         if let Some(difference) = first_difference(&closed, &node.trace, name) {
             panic!("{difference}");
         }
         return;
-    };
+    }
     if Env::from_process().text(RERECORD).is_some() {
         return rerecord(&closed, node);
     }
@@ -339,8 +403,9 @@ pub fn held_to(closed: Closed, suites: &[&str], name: &str) {
     }
     assert!(
         first_difference(&closed, &node.trace, name).is_some(),
-        "{name}: the engine does what Node's trace has again (it departed: {departure}): \
-         take it off DEPARTED and delete its departure"
+        "{name}: the engine does what Node's trace has again (it departed: {}): \
+         take it off DEPARTED and delete its departure",
+        departures.join("; and ")
     );
 }
 

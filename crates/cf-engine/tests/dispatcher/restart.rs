@@ -8,9 +8,9 @@ use std::rc::Rc;
 use cf_engine::delivery_text::delivery_text;
 use cf_engine::testing::Context;
 use cf_harness::records::Role;
-use serde_json::json;
+use serde_json::{json, Value};
 
-use crate::fixtures::{assert_match, last_message};
+use crate::fixtures::{assert_match, last_message, native_of};
 use crate::traces::held_to;
 
 const SUITES: &[&str] = &["a restart while a message is on its way"];
@@ -159,14 +159,7 @@ fn opens_a_members_session_again_on_its_own_conversation_with_the_brief_it_was_o
     context.pool_task(project.id, "worker", "Write the parser");
     context.pass().unwrap();
     let session = context.id(project.id, "zeus-amber-pine");
-    let native = context
-        .ledger
-        .borrow()
-        .current_conversation(session)
-        .unwrap()
-        .unwrap()
-        .native_session
-        .unwrap();
+    let native = native_of(&context, session).unwrap();
     // The window opened, but its record never showed the brief before the stop.
     context.adapter.with("zeus", |agent| agent.items.clear());
 
@@ -176,16 +169,23 @@ fn opens_a_members_session_again_on_its_own_conversation_with_the_brief_it_was_o
     after.resume_project(project.id).unwrap();
     after.pass().unwrap();
     let launch = context.adapter.prepared().pop().unwrap();
+    // The conversation never had a turn, so the window is not resumed on it: it
+    // opens afresh, with the brief it was opened for.
     assert_eq!(
         (
             launch["participant"]["handle"].clone(),
             launch["resume"].clone()
         ),
-        (json!("zeus-amber-pine"), json!(native))
+        (json!("zeus-amber-pine"), Value::Null)
     );
     assert_match(
         launch["message"].as_str().unwrap(),
         r"^\[ConsensFlow m-\d+ · T-1 · task from @chief\]\nWrite the parser$",
+    );
+    assert_ne!(
+        native_of(&context, session),
+        Some(native),
+        "a conversation of its own"
     );
     after.pass().unwrap();
     assert_eq!(context.task(project.id, 1).task.state, "working");

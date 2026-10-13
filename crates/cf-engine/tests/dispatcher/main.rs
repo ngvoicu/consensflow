@@ -15,7 +15,9 @@
 //! and what a
 //! window is given while the words that were for it wait at the human's gate
 //! (`approval`), and the tester, which Node's staff never had (`testers`), and
-//! the human's Resume of what a start suspended (`resume`).
+//! the human's Resume of what a start suspended (`resume`), and the
+//! conversation that never had a turn, which a window opened again does not
+//! resume (`unturned`).
 
 // The tests' own scaffolding: a failure in it is the test's.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
@@ -76,6 +78,7 @@ mod undeliverable;
 mod unreadable_agents;
 mod unsent;
 mod unstarted;
+mod unturned;
 mod waiting_notes;
 mod window_closes;
 mod window_takes_long;

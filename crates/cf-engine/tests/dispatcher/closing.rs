@@ -159,6 +159,10 @@ fn waits_for_a_window_still_opening_before_closing_it_for_a_member_who_leaves() 
 fn closes_a_project() {
     let context = Context::new();
     let project = context.with_staff(&["zeus"]);
+    // The chief has said something: its conversation has a turn, which the Resume goes on with.
+    context.pass().unwrap();
+    context.adapter.answer("chief", "Hello");
+    context.pass().unwrap();
     context.pool_task(project.id, "worker", "Parser");
     context.pass().unwrap();
     context.pass().unwrap();
@@ -337,6 +341,10 @@ fn brings_back_the_projects_that_were_open_before_a_restart_on_their_own_convers
         let conversation = context.ledger.borrow().current_conversation(chief);
         conversation.unwrap().unwrap().native_session.unwrap()
     };
+    // The chief has said something: its conversation has a turn, which the Resume goes on with.
+    context.pass().unwrap();
+    context.adapter.answer("chief", "Hello");
+    context.pass().unwrap();
     let before = native();
     let opened = context.adapter.prepared().len();
     context.ledger.borrow_mut().suspend_for_restart().unwrap();

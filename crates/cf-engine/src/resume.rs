@@ -5,9 +5,12 @@
 //! process ended ([`Dispatcher::settle_after_restart`]). The human's Resume
 //! brings the project back ([`Dispatcher::resume_project`]): its chief, and each
 //! window that had work in hand, at work or waiting for an answer, each on its
-//! own conversation. What waits is delivered by the usual rules as they come up:
-//! a member with no task in hand opens when it is next given work, and a task
-//! that is paused, by the human or by the system, stays so until it is resumed.
+//! own conversation, if it had a turn: a conversation that never had one has
+//! nothing for a harness to resume, and its window opens afresh
+//! ([`Dispatcher::conversation_to_go_on_with`]). What waits is delivered by the
+//! usual rules as they come up: a member with no task in hand opens when it is
+//! next given work, and a task that is paused, by the human or by the system,
+//! stays so until it is resumed.
 //!
 //! A window whose turn the quit cut is told so, once: the harness's record of
 //! its conversation, read before its window opens, has a turn with no end, and

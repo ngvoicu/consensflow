@@ -4,8 +4,9 @@
 //! stops a window owes, the result a decision withdraws before it is pasted
 //! (`queue.rs`), what each kind of word does at the human's gate
 //! (`messages/gate.rs`), the notes of a task's wait that go when it moves on
-//! (`messages/pauses.rs`, `messages/holds.rs`), and what a ledger Node wrote
-//! means to this one (the
+//! (`messages/pauses.rs`, `messages/holds.rs`), when a conversation had a turn,
+//! which the receipts it holds are the evidence of (`conversations.rs`), and
+//! what a ledger Node wrote means to this one (the
 //! rules are the docs of `messages/carrying.rs`, `messages/receipt.rs` and
 //! `tasks/pausing.rs`). Each test is a sequence of what the callers do, on a
 //! ticking clock, and asserts what the ledger then says.
@@ -26,4 +27,5 @@ mod questions;
 mod sessions;
 mod taken_back;
 mod transfers;
+mod turns;
 mod waiting_notes;
