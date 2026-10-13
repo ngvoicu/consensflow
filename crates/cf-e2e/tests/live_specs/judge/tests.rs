@@ -80,6 +80,17 @@ fn a_markdown_spec_is_its_id_its_phases_and_the_tasks_under_each_with_what_is_ch
 }
 
 #[test]
+fn phases_written_a_level_down_under_a_heading_of_their_own_are_the_spec_s_phases() {
+    let nested = MARKDOWN
+        .replace("## Phase 1", "## Phases\n\n### Phase 1")
+        .replace("## Phase 2", "### Phase 2");
+    assert_eq!(markdown(&nested).unwrap(), hello());
+    // Deeper than that is no phase.
+    let deeper = MARKDOWN.replace("## Phase", "#### Phase");
+    assert!(markdown(&deeper).unwrap().phases.is_empty());
+}
+
+#[test]
 fn the_tdd_variants_tasks_are_tests_and_implementations_whose_codes_name_the_pair() {
     let tdd = "---\nid: rate-limit\n---\n\n## Phase 1: Limit [in-progress]\n\n- [ ] [TEST-RL-01] Test the limit <- current\n- [x] [IMPL-RL-02] Implement it -> satisfies [TEST-RL-01]\n\n## Phase 2: Report [pending]\n\n- [ ] [TEST-RL-03] Test the report\n";
     let spec = markdown(tdd).unwrap();
@@ -271,6 +282,18 @@ fn tasks_that_name_the_spec_s_tasks_and_need_the_phase_before_follow_its_phases(
     assert_eq!(
         follow_the_phases(&hello(), &tasks()).unwrap(),
         "phase 1: T-2 needs [1]; phase 1: T-3 needs [2]; phase 2: T-4 needs [3]"
+    );
+}
+
+#[test]
+fn a_spec_with_no_phases_is_followed_by_nothing() {
+    let none = Spec {
+        id: "hello-files".to_owned(),
+        phases: Vec::new(),
+    };
+    assert_eq!(
+        follow_the_phases(&none, &tasks()).unwrap_err(),
+        "the spec has no phases to follow"
     );
 }
 
