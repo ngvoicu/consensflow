@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use cf_e2e::live::report::Check;
 use cf_e2e::live::trace::Trace;
-use cf_e2e::live::{cut, until};
+use cf_e2e::live::{cut, until, Harness};
 use cf_e2e::{Error, Result};
 
 use crate::ctx::Ctx;
@@ -142,7 +142,9 @@ fn off(ctx: &Ctx, checks: &mut Vec<Check>) -> Result {
 /// Specs on, which takes effect at the chief's next launch: the daemon says so in
 /// its events, and the window is launched with the section of specs that names the
 /// folder and the skill of the variant, which is the harness's own copy where it has
-/// the variant installed and ConsensFlow's where it has not.
+/// the variant installed and ConsensFlow's where it has not. A Codex chief's own
+/// record then holds the section too, which its launch cannot say: its thread keeps
+/// the instructions it began with.
 fn source(ctx: &Ctx, checks: &mut Vec<Check>) -> Result {
     let frame = ctx.with_specs_on()?;
     let logged = Trace::read(ctx.rig)
@@ -184,6 +186,18 @@ fn source(ctx: &Ctx, checks: &mut Vec<Check>) -> Result {
         "the skill is the harness's own copy where the harness has the variant, and ConsensFlow's where it has not",
         which_skill(ctx, &text),
     ));
+    // A Codex thread keeps the instructions it began with, so what its launch says
+    // is not what the chief was told: its own record, after the Resume, must hold
+    // the section.
+    if ctx.planned.chief == Harness::Codex {
+        checks.push(
+            ctx.judged(
+                "the chief's own record holds the section of specs after the Resume",
+                ctx.chief_record(&frame)
+                    .and_then(|record| launched::told_in_the_record(&record)),
+            ),
+        );
+    }
     Ok(())
 }
 

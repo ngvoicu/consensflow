@@ -145,7 +145,7 @@ fn prepare(adapter: &CodexAdapter, request: &Request) -> Result<Prepared, String
     let id = LaunchId::new(LAUNCH).unwrap();
     let skill = request
         .specs
-        .map(|variant| adapter.specmint(variant, &id).unwrap());
+        .map(|variant| adapter.specmint(variant).unwrap());
     let launch = Launch {
         id: &id,
         project: 1,

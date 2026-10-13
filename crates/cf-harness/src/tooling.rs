@@ -186,16 +186,14 @@ fn newest_session(question: &Value) -> Result<Value, String> {
 
 /// Where the harness has the Specmint variant installed for its user: the
 /// adapter's own answer (`Adapter::specmint`) with the home `env` names, which
-/// is the one the daemon would ask it in. A made-up launch stands for the one a
-/// chief's window would have, whose copy of ConsensFlow's own it names.
+/// is the one the daemon would ask it in. Where it has none, the answer is where
+/// ConsensFlow's own copy is kept for it, which is the same for every launch.
 fn specmint(question: &Value) -> Result<Value, String> {
     let variant = Variant::from_name(text(question, "variant")?)
         .ok_or("the question's variant is none of core, core-html, tdd and tdd-html")?;
-    let launch = LaunchId::new("00000000-0000-4000-8000-000000000000")
-        .ok_or("a made-up launch id is none")?;
     let env = env(question)?;
     let services = Fakes::new(&env).services(&env, Path::new(""));
-    let skill = adapter(harness(text(question, "kind")?)?, &services).specmint(variant, &launch)?;
+    let skill = adapter(harness(text(question, "kind")?)?, &services).specmint(variant)?;
     Ok(json!({
         "installed": matches!(skill, Skill::Global(_)),
         "skill": skill.path(),

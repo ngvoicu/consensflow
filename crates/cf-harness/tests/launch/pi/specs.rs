@@ -1,16 +1,17 @@
-//! The Specmint skill a Pi chief is given where its project has specs on: written
-//! beside the role's skill in the launch's folder and loaded as a second `--skill`,
-//! or the human's own, where Pi has the variant installed, and then none is
-//! written and none is given.
+//! The Specmint skill a Pi chief is given where its project has specs on:
+//! ConsensFlow's own copy, kept where it is the same for every launch and loaded
+//! as a second `--skill`, or the human's own, where Pi has the variant installed,
+//! and then none is written and none is given.
 
 use std::fs;
 
 use cf_base::path;
-use cf_harness::contract::{Adapter, LaunchId, Prepared, Skill};
+use cf_harness::contract::{Adapter, Prepared, Skill};
 use cf_harness::testing::unrooted;
 use cf_proto::specs::Variant;
 
-use super::{adapter, prepare, Home, Request, LAUNCH};
+use super::{adapter, prepare, Home, Request};
+use crate::kept;
 
 /// A chief's launch: the role of its own, no first message.
 fn chief() -> Request {
@@ -36,11 +37,7 @@ fn a_chief_given_specs_is_given_the_skill_as_a_second_one_after_its_role_s_and_t
         };
         let on = prepare(&adapter, &request).unwrap();
         let skill = path::join(&[
-            &home.launch_folder(),
-            "role",
-            ".claude",
-            "skills",
-            variant.skill_name(),
+            &kept::skill(home.var("CONSENSFLOW_HOME"), "pi", variant),
             "SKILL.md",
         ]);
         let (mut expected, env, drop_env) = unrooted(&off, &off_home.root);
@@ -61,11 +58,19 @@ fn a_chief_given_specs_is_given_the_skill_as_a_second_one_after_its_role_s_and_t
             "{variant:?}"
         );
         assert_eq!(
-            adapter
-                .specmint(variant, &LaunchId::new(LAUNCH).unwrap())
-                .unwrap(),
+            adapter.specmint(variant).unwrap(),
             Skill::Own(skill),
             "the place the role text names is the place written"
+        );
+        assert_eq!(
+            kept::names_in(&path::join(&[
+                &home.launch_folder(),
+                "role",
+                ".claude",
+                "skills"
+            ])),
+            ["consensflow-chief"],
+            "the role's folder is the role's alone"
         );
     }
 }
@@ -84,13 +89,12 @@ fn a_pi_that_has_the_variant_installed_is_given_no_skill_of_ours_and_an_installe
     let own = install(".pi/agent/skills", "specmint-core-html");
     let shared = install(".agents/skills", "specmint-tdd-html");
     let (adapter, _fakes) = adapter(&home);
-    let id = LaunchId::new(LAUNCH).unwrap();
     let skills_given = |plan: &Prepared| plan.argv.iter().filter(|arg| *arg == "--skill").count();
     let off = prepare(&adapter, &chief()).unwrap();
     assert_eq!(skills_given(&off), 1, "the role's");
     for (variant, file) in [(Variant::CoreHtml, &own), (Variant::TddHtml, &shared)] {
         assert_eq!(
-            adapter.specmint(variant, &id).unwrap(),
+            adapter.specmint(variant).unwrap(),
             Skill::Global(file.clone())
         );
         let request = Request {
@@ -105,19 +109,25 @@ fn a_pi_that_has_the_variant_installed_is_given_no_skill_of_ours_and_an_installe
         );
         assert!(!on.argv.iter().any(|arg| arg.contains("specmint")));
     }
-    let skills = path::join(&[&home.launch_folder(), "role", ".claude", "skills"]);
-    assert_eq!(
-        fs::read_dir(&skills).unwrap().count(),
-        1,
-        "the role's alone"
+    let consensflow = home.var("CONSENSFLOW_HOME");
+    assert!(
+        !std::path::Path::new(consensflow)
+            .join("integrations")
+            .join("specmint")
+            .exists(),
+        "nothing of ConsensFlow's is kept for an installed variant"
     );
     let before = (fs::read(&own).unwrap(), fs::read(&shared).unwrap());
     let request = Request {
         specs: Some(Variant::Core),
         ..chief()
     };
-    prepare(&adapter, &request).unwrap();
-    assert_eq!(fs::read_dir(&skills).unwrap().count(), 2);
+    let on = prepare(&adapter, &request).unwrap();
+    assert_eq!(skills_given(&on), 2, "ConsensFlow's own is given besides");
+    assert_eq!(
+        kept::names_in(&kept::skills(consensflow, "pi", Variant::Core)),
+        ["specmint-core"]
+    );
     assert_eq!(
         (fs::read(&own).unwrap(), fs::read(&shared).unwrap()),
         before

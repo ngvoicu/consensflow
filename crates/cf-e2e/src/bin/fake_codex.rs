@@ -2,10 +2,13 @@
 //! on a window: given `app-server --listen …` it is Codex's server, starting
 //! thread A when asked; given `--remote …` it is the TUI, which starts a thread
 //! through the broker, reads the broker's `/session` with its token, and exits 7
-//! (or waits to be ended). Each run writes what it was given, and what it saw,
-//! to `CF_TEST_CODEX_LOG`. `CF_TEST_CODEX_BACKEND` says how the server goes:
-//! `fail` at once, `die` once a thread starts; with `CF_TEST_CODEX_QUESTION` it
-//! asks its client a question when a thread starts. `CF_TEST_CODEX_TUI=wait`
+//! (or waits to be ended). Given `resume <thread>` the TUI resumes that thread
+//! instead, as the real one asks (`thread/resume`, in the shape Codex 0.159.2 sent
+//! it): the server goes on in the thread's rollout, which keeps the developer
+//! instructions the thread began with. Each run writes what it was given, and what
+//! it saw, to `CF_TEST_CODEX_LOG`. `CF_TEST_CODEX_BACKEND` says how the server
+//! goes: `fail` at once, `die` once a thread starts; with `CF_TEST_CODEX_QUESTION`
+//! it asks its client a question when a thread starts. `CF_TEST_CODEX_TUI=wait`
 //! has the TUI wait for its window to end it.
 //!
 //! The server listens where it is told, as Codex's does: on a Unix socket
@@ -17,12 +20,15 @@
 //! message starts the first turn with it, the server takes the turns it is handed
 //! and writes their rollout where the daemon reads it, and the servers Codex opens
 //! with its window run in groups of their own (`servers`). What the daemon asks
-//! of the CLI before it opens a window is answered too (`probes`).
+//! of the CLI before it opens a window is answered too (`probes`), and what its
+//! two halves read of the arguments they were started with is `arguments`.
 
 // The parts are in `fake_codex/`: cargo looks for the modules of a binary's
 // root file beside it, where each would be a binary of its own.
 #[path = "fake_codex/agent.rs"]
 mod agent;
+#[path = "fake_codex/arguments.rs"]
+mod arguments;
 #[path = "fake_codex/probes.rs"]
 mod probes;
 #[path = "fake_codex/servers.rs"]
@@ -45,6 +51,7 @@ use tungstenite::http::{HeaderValue, StatusCode};
 use tungstenite::{Message, WebSocket};
 
 use agent::Agent;
+use arguments::{developer_instructions, opening, resume_request};
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -116,7 +123,7 @@ fn server(args: &[String]) -> ExitCode {
         die: how == "die",
         asks: own_var("CF_TEST_CODEX_QUESTION").is_some_and(|asks| !asks.is_empty()),
     };
-    let agent = match Agent::start() {
+    let agent = match Agent::start(developer_instructions(args)) {
         Ok(agent) => agent,
         Err(failed) => fail(&failed),
     };
@@ -211,8 +218,9 @@ fn sha256_hex(text: &str) -> String {
 }
 
 /// Answers a connection's requests: every request with a result, the start of a
-/// thread with a thread, and a message handed over (as the start of a turn, or
-/// queued behind one) with what Codex answers, which the agent then takes.
+/// thread with a thread, the resume of one with the thread (or Codex's refusal of
+/// a thread that has no rollout), and a message handed over (as the start of a
+/// turn, or queued behind one) with what Codex answers, which the agent then takes.
 fn serve<S: Read + Write>(mut socket: WebSocket<S>, behavior: Behavior, agent: &Arc<Agent>) {
     while let Ok(message) = socket.read() {
         let Message::Text(text) = message else {
@@ -230,26 +238,23 @@ fn serve<S: Read + Write>(mut socket: WebSocket<S>, behavior: Behavior, agent: &
             record(json!({ "run": "server", "started": request["params"] }));
             agent.thread_started();
         }
-        let result = match request["method"].as_str() {
-            Some("thread/start") => {
-                json!({ "thread": { "id": agent.thread(), "turns": [], "status": { "type": "idle" } } })
-            }
+        let answer = match request["method"].as_str() {
+            Some("thread/start") => result(
+                id,
+                json!({ "thread": { "id": agent.thread(), "turns": [], "status": { "type": "idle" } } }),
+            ),
+            Some("thread/resume") => resumed(id, &request["params"], agent),
             Some("turn/start") => {
                 hand_over(agent, &request);
-                json!({ "turn": { "id": "turn-1" } })
+                result(id, json!({ "turn": { "id": "turn-1" } }))
             }
             Some("thread/queue/add") => {
                 hand_over(agent, &request);
-                json!({ "queuedMessage": { "id": "queue-1" } })
+                result(id, json!({ "queuedMessage": { "id": "queue-1" } }))
             }
-            _ => json!({}),
+            _ => result(id, json!({})),
         };
-        if socket
-            .send(Message::text(
-                json!({ "id": id, "result": result }).to_string(),
-            ))
-            .is_err()
-        {
+        if socket.send(Message::text(answer.to_string())).is_err() {
             return;
         }
         if start && behavior.die {
@@ -277,6 +282,30 @@ fn serve<S: Read + Write>(mut socket: WebSocket<S>, behavior: Behavior, agent: &
     }
 }
 
+/// The answer to the request `id`: `result`.
+fn result(id: &Value, result: Value) -> Value {
+    json!({ "id": id, "result": result })
+}
+
+/// The answer to a request to resume the thread `params` name. The server goes on in
+/// the thread's rollout, with the developer instructions the thread began with; and
+/// says so, as Codex does, where no rollout holds it (a thread that never had a turn).
+fn resumed(id: &Value, params: &Value, agent: &Arc<Agent>) -> Value {
+    record(json!({ "run": "server", "resumed": params }));
+    let thread = params["threadId"].as_str().unwrap_or_default();
+    if agent.thread_resumed(thread) {
+        result(
+            id,
+            json!({ "thread": { "id": thread, "status": { "type": "idle" } } }),
+        )
+    } else {
+        json!({
+            "id": id,
+            "error": { "code": -32600, "message": format!("no rollout found for thread id {thread}") },
+        })
+    }
+}
+
 /// The agent takes the text of the message a request hands over, the first of its
 /// input.
 fn hand_over(agent: &Arc<Agent>, request: &Value) {
@@ -284,23 +313,6 @@ fn hand_over(agent: &Arc<Agent>, request: &Value) {
         record(json!({ "run": "server", "handedOver": text }));
         agent.take(text);
     }
-}
-
-/// The message a TUI was given to start with: the word that is no flag and no
-/// value of one, after those the broker adds (`--remote <url>
-/// --remote-auth-token-env <name>`). None where it was given none.
-fn first_message(args: &[String]) -> Option<&str> {
-    let mut words = args.get(4..)?.iter();
-    while let Some(word) = words.next() {
-        match word.as_str() {
-            "-c" | "--config" | "--enable" | "--disable" | "--model" | "-m" => {
-                words.next();
-            }
-            flag if flag.starts_with('-') => {}
-            message => return Some(message),
-        }
-    }
-    None
 }
 
 /// Codex's TUI: it reaches the server through the broker, its token in its
@@ -311,6 +323,10 @@ fn tui(args: &[String]) -> ExitCode {
     };
     let token = own_var(token_name);
     record(json!({ "run": "tui", "args": args, "token": token, "apiKey": api_key() }));
+    // It draws its screen, as the real one does: a window that printed nothing is
+    // still being drawn to the daemon, which delivers nothing to it until it has
+    // held still (a chief's, which has no first message to show it by).
+    let _ = writeln!(std::io::stdout(), "fake-codex: the TUI of a window");
     let bearer = format!("Bearer {}", token.as_deref().unwrap_or("undefined"));
     let Ok(mut request) = remote.as_str().into_client_request() else {
         fail(&format!("{remote} is no address to connect to"));
@@ -339,21 +355,28 @@ fn tui(args: &[String]) -> ExitCode {
         }
         None
     };
+    let opening = opening(args);
     let started = call(
         1,
         "initialize",
         json!({ "clientInfo": { "name": "codex-tui", "version": "test" } }),
     )
-    .and_then(|_| {
-        call(
+    .and_then(|_| match opening.resume {
+        Some(thread) => call(2, "thread/resume", resume_request(thread)),
+        None => call(
             2,
             "thread/start",
             json!({ "ephemeral": false, "threadSource": "user" }),
-        )
+        ),
     });
     let Some(started) = started else {
         return ExitCode::SUCCESS;
     };
+    // A thread Codex has no rollout of is no thread to open: the window ends.
+    if let Some(refused) = started["error"]["message"].as_str() {
+        let _ = writeln!(std::io::stderr(), "{refused}");
+        return ExitCode::FAILURE;
+    }
     let session = Http::new().get(
         &format!("{}/session", remote.replacen("ws:", "http:", 1)),
         Some(&bearer["Bearer ".len()..]),
@@ -363,7 +386,7 @@ fn tui(args: &[String]) -> ExitCode {
         Err(failed) => fail(&failed.to_string()),
     }
     // A window opened with a message begins its first turn with it.
-    if let Some(message) = first_message(args) {
+    if let Some(message) = opening.message {
         let input = json!([{ "type": "text", "text": message, "text_elements": [] }]);
         let thread = started["result"]["thread"]["id"].clone();
         call(

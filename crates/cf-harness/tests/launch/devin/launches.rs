@@ -5,12 +5,13 @@ use std::fs;
 use std::path::Path;
 
 use cf_base::path;
-use cf_harness::contract::{Adapter, Agent, LaunchId, Prepared, Skill};
+use cf_harness::contract::{Adapter, Agent, Prepared, Skill};
 use cf_harness::testing::called;
 use cf_proto::specs::Variant;
 use serde_json::{json, Value};
 
 use super::fixtures::*;
+use crate::kept;
 
 #[test]
 fn launches_devin_on_its_own_config_in_full_permission_mode_with_the_task_in_a_prompt_file() {
@@ -277,7 +278,7 @@ fn role_skills(home: &Home, id: &str) -> String {
 }
 
 #[test]
-fn a_chief_given_specs_has_the_skill_written_beside_its_role_and_devin_is_given_nothing_more_than_its_role_text_which_names_it(
+fn a_chief_given_specs_has_the_skill_kept_for_every_launch_and_devin_is_given_nothing_more_than_its_role_text_which_names_it(
 ) {
     const OFF: &str = "3d4e5f60-7182-4394-8dbe-2f3a4b5c6d70";
     const ON: &str = "3d4e5f60-7182-4394-8dbe-2f3a4b5c6d71";
@@ -308,11 +309,10 @@ fn a_chief_given_specs_has_the_skill_written_beside_its_role_and_devin_is_given_
             1,
             "specs off: the role alone"
         );
-        let skill = path::join(&[&role_skills(&home, ON), variant.skill_name(), "SKILL.md"]);
+        let consensflow = path::join(&[&home.root, "consensflow"]);
+        let skill = path::join(&[&kept::skill(&consensflow, "devin", variant), "SKILL.md"]);
         assert_eq!(
-            adapter
-                .specmint(variant, &LaunchId::new(ON).unwrap())
-                .unwrap(),
+            adapter.specmint(variant).unwrap(),
             Skill::Own(skill.clone()),
             "{variant:?}: the place the role text names is the place written"
         );
@@ -321,8 +321,15 @@ fn a_chief_given_specs_has_the_skill_written_beside_its_role_and_devin_is_given_
             .starts_with(&format!("---\nname: {}\n", variant.skill_name())));
         assert_eq!(
             fs::read_dir(role_skills(&home, ON)).unwrap().count(),
-            2,
-            "the role's skill and this one"
+            1,
+            "the role's skill alone: this one is kept beside no launch's"
+        );
+        // Devin reads the launches' folders for their wire logs, and a folder
+        // that holds a copy of a skill is none of them.
+        assert_eq!(
+            kept::names_in(&path::join(&[&consensflow, "integrations", "devin"])),
+            [OFF, ON],
+            "{variant:?}: the folder of Devin's launches holds launches"
         );
     }
 }
@@ -348,9 +355,7 @@ fn a_devin_that_has_the_variant_installed_in_its_config_or_the_agents_skills_is_
     {
         let id = format!("3d4e5f60-7182-4394-8dbe-2f3a4b5c6d8{n}");
         assert_eq!(
-            adapter
-                .specmint(variant, &LaunchId::new(&id).unwrap())
-                .unwrap(),
+            adapter.specmint(variant).unwrap(),
             Skill::Global(file.clone())
         );
         let chief = Request {
@@ -371,7 +376,14 @@ fn a_devin_that_has_the_variant_installed_in_its_config_or_the_agents_skills_is_
         ..Request::chief()
     };
     prepare_as(&adapter, &chief, id).unwrap();
-    assert_eq!(fs::read_dir(role_skills(&home, id)).unwrap().count(), 2);
+    assert_eq!(
+        kept::names_in(&kept::skills(
+            &path::join(&[&home.root, "consensflow"]),
+            "devin",
+            Variant::Core
+        )),
+        ["specmint-core"]
+    );
     assert_eq!(
         (fs::read(&own).unwrap(), fs::read(&shared).unwrap()),
         before

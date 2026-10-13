@@ -1,6 +1,22 @@
 //! A Codex window's role. Codex is given the role's text itself, appended to
 //! the instructions it would have read anyway: the native resolver is asked for
 //! them, so the profile and project layering is kept, and no version is read.
+//!
+//! It is read once for a thread: the developer message a thread's first turn
+//! wrote is the one it keeps, and a resumed thread is given the arguments below
+//! and does not use them ([`crate::contract::Adapter::keeps_first_instructions`],
+//! which the Codex adapter answers yes to). A role that changed since the thread
+//! began reaches it as a message the engine says.
+//!
+//! The arguments are on the window's command line whether the thread is new or
+//! resumed, and so is a first message, which the engine makes the whole role again
+//! where it says a changed one. Windows' `CreateProcess` takes 32,767 UTF-16 units
+//! of command line, and the role is in it twice then: this word, JSON and quoted
+//! as Windows quotes it, is 15,306 units for a chief with specs on and a staff of
+//! 25 (each row two roles), and the message 15,142; a staff of 44 comes to 32,729
+//! with the rest of the line (about 400), and the limit is passed at 64, or at 92
+//! without specs. The arithmetic is in the engine's `role_change`. Nothing handles
+//! it: past it the window does not open (`the window did not open: …`).
 
 use std::path::PathBuf;
 

@@ -32,8 +32,12 @@
 //! program of the window's tree is. So is `start_suspended`: a start opens
 //! nothing, and the human's Resume brings back the chief and the windows at
 //! work, the one whose turn the quit cut told so. So is `specs`: the Specmint
-//! skill a chief of a project with specs on is given beside its role, and no
-//! worker, and no chief of a project with them off. So is `wake_ups`: the human's
+//! skill a chief of a project with specs on is given, ConsensFlow's copy kept at
+//! one place for every launch and read besides its role, and no worker, and no
+//! chief of a project with them off; and `specs_codex`, a chief on the stand-in
+//! Codex, whose resumed thread keeps the instructions it began with, told of them
+//! by a message once the project is resumed, and of nothing at the Resume after.
+//! So is `wake_ups`: the human's
 //! wake-up calls, which nudge a chief at rest; its two cases wait out a real
 //! minute each, the least a wake-up may wait.)
 //!
@@ -78,6 +82,9 @@ mod live_support;
 mod pending_agents;
 #[path = "rig/specs.rs"]
 mod specs;
+#[cfg(unix)]
+#[path = "rig/specs_codex.rs"]
+mod specs_codex;
 #[path = "rig/stand_in_codex.rs"]
 mod stand_in_codex;
 #[path = "rig/stand_ins.rs"]

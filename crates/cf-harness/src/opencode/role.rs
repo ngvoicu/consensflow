@@ -3,7 +3,8 @@
 //! `OPENCODE_CONFIG_CONTENT`, the JSON configuration it reads from its
 //! environment: merged into the one the human may have set, the role's skills
 //! folder added to the paths its skills are looked for in and the file to its
-//! instructions, each once.
+//! instructions, each once. The skills folder of ConsensFlow's own copy of
+//! Specmint, where the chief is given one, goes after the role's.
 //!
 //! Kept from Node on purpose:
 //! - a configuration that is no JSON, or is nested past 127 levels, is
@@ -25,24 +26,28 @@ use crate::shared::paths::set;
 use crate::shared::role::write_role;
 
 /// The `OPENCODE_CONFIG_CONTENT` a window of `role` runs with: what the
-/// environment names (nothing, `{}`) with the role added. The role's text is
-/// written first, so a configuration that is refused leaves it in its
-/// launch's folder, as it did in Node.
+/// environment names (nothing, `{}`) with the role added, and the skills
+/// folder `specmint` of a copy of Specmint that is kept for the window. The
+/// role's text is written first, so a configuration that is refused leaves it
+/// in its launch's folder, as it did in Node.
 pub(super) fn configure(
     env: &Env,
     launch: &LaunchId,
     role: &str,
     content: &str,
+    specmint: Option<String>,
 ) -> Result<String, String> {
     let written = write_role(Harness::Opencode, role, env, launch, content)?;
     let skills = path::join(&[&written.root, ".claude", "skills"]);
     let current = set(env, "OPENCODE_CONFIG_CONTENT");
-    merged(current.as_deref().unwrap_or("{}"), &skills, &written.file)
+    let mut folders = vec![skills.as_str()];
+    folders.extend(specmint.as_deref());
+    merged(current.as_deref().unwrap_or("{}"), &folders, &written.file)
 }
 
-/// `current`, a configuration, with `skills` among the paths its skills are
-/// looked for in and `file` among its instructions.
-fn merged(current: &str, skills: &str, file: &str) -> Result<String, String> {
+/// `current`, a configuration, with the `skills` folders among the paths its
+/// skills are looked for in and `file` among its instructions.
+fn merged(current: &str, skills: &[&str], file: &str) -> Result<String, String> {
     let parsed = from_slice_lossy(current.as_bytes())
         .map_err(|_| "OpenCode process configuration must be JSON".to_owned())?;
     let Value::Object(mut configuration) = parsed else {
@@ -63,7 +68,7 @@ fn merged(current: &str, skills: &str, file: &str) -> Result<String, String> {
         configuration.get("instructions"),
         "OpenCode instructions must be an array of paths",
     )?;
-    configuration.insert("instructions".to_owned(), once(instructions, file));
+    configuration.insert("instructions".to_owned(), once(instructions, &[file]));
     Ok(js::stringify(&Value::Object(configuration)))
 }
 
@@ -81,9 +86,9 @@ fn paths(list: Option<&Value>, refused: &str) -> Result<Vec<String>, String> {
     }
 }
 
-/// `[...new Set([...paths, path])]`: each path once, where it first is.
-fn once(mut paths: Vec<String>, path: &str) -> Value {
-    paths.push(path.to_owned());
+/// `[...new Set([...paths, ...added])]`: each path once, where it first is.
+fn once(mut paths: Vec<String>, added: &[&str]) -> Value {
+    paths.extend(added.iter().map(|path| (*path).to_owned()));
     let mut kept: Vec<String> = Vec::new();
     for each in paths {
         if !kept.contains(&each) {

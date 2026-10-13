@@ -23,6 +23,7 @@ pub mod handoff;
 pub mod host;
 mod record;
 mod resume;
+mod role_change;
 pub mod roles;
 pub mod runtime;
 mod scheduler;

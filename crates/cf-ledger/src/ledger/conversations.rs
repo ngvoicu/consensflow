@@ -92,6 +92,23 @@ impl Ledger {
         conversations::end_conversation(&mut self.store, conversation_id)
     }
 
+    /// The role text a conversation was last given, none where it is not known.
+    pub fn conversation_role_text(
+        &self,
+        conversation_id: i64,
+    ) -> Result<Option<String>, LedgerError> {
+        conversations::conversation_role_text(&self.store, conversation_id)
+    }
+
+    /// A conversation is given `text` as its role, which logs no event.
+    pub fn set_conversation_role_text(
+        &mut self,
+        conversation_id: i64,
+        text: &str,
+    ) -> Result<(), LedgerError> {
+        conversations::set_conversation_role_text(&mut self.store, conversation_id, text)
+    }
+
     /// A participant's conversation now, if one has not ended.
     pub fn current_conversation(
         &self,

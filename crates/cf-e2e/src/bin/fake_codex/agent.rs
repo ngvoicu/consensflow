@@ -9,6 +9,13 @@
 //! at a time, and writes what Codex writes of one: it started, the message, the
 //! answer, it is complete.
 //!
+//! A thread keeps the instructions it began with. The server is given the role's
+//! text as Codex is (`-c developer_instructions=…`), and the first turn of a thread
+//! it starts writes it into the rollout as the developer's message. A thread it
+//! resumes goes on in the rollout it has, which already holds that message, and is
+//! given no other: what the server is configured with now is read and unused, as the
+//! live Codex 0.162.1 did with a chief resumed after its role changed (2026-10-13).
+//!
 //! What a turn does is what the stand-in agent's does: the `SLEEP <seconds>` line of
 //! its message is how long it works, `Reply with exactly: X` is its answer, and
 //! anything else is acknowledged. The thread is the same in every run unless
@@ -22,7 +29,7 @@ use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, OnceLock, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -42,8 +49,17 @@ const THINKING: Duration = Duration::from_secs(4);
 
 /// The agent of one window: its thread, its rollout and the servers it opened.
 pub struct Agent {
-    thread: String,
-    rollout: Option<PathBuf>,
+    /// The thread the server is on: the one it starts, or the one it resumes.
+    thread: Mutex<String>,
+    /// The `CODEX_HOME` the rollouts are in, none where a case leaves none.
+    home: Option<PathBuf>,
+    rollout: Mutex<Option<PathBuf>>,
+    /// The developer instructions the server is configured with, which a thread it
+    /// starts begins with.
+    developer: Option<String>,
+    /// Whether the thread has its developer message in the rollout already: a thread
+    /// writes it once, with its first turn, and a resumed one has it from before.
+    instructed: AtomicBool,
     plugins: Plugins,
     /// One turn at a time, in the order the messages came: what is queued waits.
     turns: Mutex<()>,
@@ -54,9 +70,10 @@ pub struct Agent {
 }
 
 impl Agent {
-    /// The agent a run is told to be by its environment. The servers its Codex
-    /// opens with the window start now.
-    pub fn start() -> Result<Arc<Self>, String> {
+    /// The agent a run is told to be by its environment, and `developer`, the
+    /// developer instructions its server was given (none where it was given none).
+    /// The servers its Codex opens with the window start now.
+    pub fn start(developer: Option<String>) -> Result<Arc<Self>, String> {
         let number = |name: &str| {
             own_var(name)
                 .and_then(|text| text.parse::<usize>().ok())
@@ -67,37 +84,80 @@ impl Agent {
         } else {
             THREAD.to_owned()
         };
-        let rollout = own_var("CODEX_HOME").map(|home| rollout_of(Path::new(&home), &thread));
-        Ok(Arc::new(Self {
-            plugins: Plugins::open(
-                number("CF_TEST_CODEX_SERVERS"),
-                number("CF_TEST_CODEX_WORKERS"),
-            )?,
+        let plugins = Plugins::open(
+            number("CF_TEST_CODEX_SERVERS"),
+            number("CF_TEST_CODEX_WORKERS"),
+        )?;
+        Ok(Arc::new(Self::on(
             thread,
-            rollout,
+            own_var("CODEX_HOME").map(PathBuf::from),
+            developer,
+            plugins,
+        )))
+    }
+
+    /// The agent of a server on `thread`, its rollouts in `home` where there is one.
+    fn on(
+        thread: String,
+        home: Option<PathBuf>,
+        developer: Option<String>,
+        plugins: Plugins,
+    ) -> Self {
+        let rollout = home.as_deref().map(|home| rollout_of(home, &thread));
+        Self {
+            thread: Mutex::new(thread),
+            home,
+            rollout: Mutex::new(rollout),
+            developer,
+            instructed: AtomicBool::new(false),
+            plugins,
             turns: Mutex::new(()),
             begun: AtomicBool::new(false),
             records: AtomicU64::new(0),
-        }))
+        }
     }
 
-    /// The thread the server starts.
-    pub fn thread(&self) -> &str {
-        &self.thread
+    /// The thread the server is on.
+    pub fn thread(&self) -> String {
+        held(&self.thread).clone()
     }
 
     /// The server starts the thread: its rollout begins, as Codex's does with what
     /// it ran in.
     pub fn thread_started(&self) {
-        if let Some(path) = &self.rollout {
+        if let Some(path) = held(&self.rollout).as_ref() {
             if let Some(folder) = path.parent() {
                 let _ = fs::create_dir_all(folder);
             }
         }
+        let thread = self.thread();
         self.write(
             "session_meta",
-            json!({ "session_id": self.thread, "id": self.thread, "originator": "codex-tui" }),
+            json!({ "session_id": thread, "id": thread, "originator": "codex-tui" }),
         );
+    }
+
+    /// The server resumes `thread`: it goes on in the rollout the thread has, which
+    /// keeps the developer message of its first turn whatever the server is
+    /// configured with now. False where no rollout holds the thread, as Codex says
+    /// of one that never had a turn.
+    pub fn thread_resumed(&self, thread: &str) -> bool {
+        let rollout = match &self.home {
+            Some(home) => match find_rollout(&home.join("sessions"), thread) {
+                Some(found) => Some(found),
+                None => return false,
+            },
+            None => None,
+        };
+        let (records, instructed) = rollout.as_deref().map_or((0, false), |path| {
+            let text = fs::read_to_string(path).unwrap_or_default();
+            (text.lines().count() as u64, has_developer_message(&text))
+        });
+        *held(&self.thread) = thread.to_owned();
+        *held(&self.rollout) = rollout;
+        self.records.store(records, Ordering::Relaxed);
+        self.instructed.store(instructed, Ordering::Relaxed);
+        true
     }
 
     /// The server takes `text` as a turn, which goes on beside it.
@@ -109,8 +169,9 @@ impl Agent {
     /// A turn: it began with the message, works as long as the message says and ends
     /// with its answer.
     fn turn(&self, text: &str) {
-        let _one_at_a_time = self.turns.lock().unwrap_or_else(PoisonError::into_inner);
+        let _one_at_a_time = held(&self.turns);
         let began = Instant::now();
+        let thread = self.thread();
         let turn = uuid::Uuid::new_v4().to_string();
         let (message, answer) = (item_id(), item_id());
         self.write(
@@ -123,6 +184,21 @@ impl Agent {
                 "collaboration_mode_kind": "default",
             }),
         );
+        // The first turn of a thread writes what the thread begins with: the
+        // developer's instructions, which no later turn, and no resume, writes again.
+        if !self.instructed.swap(true, Ordering::Relaxed) {
+            if let Some(instructions) = &self.developer {
+                self.write(
+                    "response_item",
+                    json!({
+                        "type": "message",
+                        "id": item_id(),
+                        "role": "developer",
+                        "content": [{ "type": "input_text", "text": instructions }],
+                    }),
+                );
+            }
+        }
         self.write(
             "response_item",
             json!({
@@ -137,7 +213,7 @@ impl Agent {
             "event_msg",
             json!({
                 "type": "item_completed",
-                "thread_id": self.thread,
+                "thread_id": thread,
                 "turn_id": turn,
                 "item": {
                     "type": "UserMessage",
@@ -159,7 +235,7 @@ impl Agent {
             "event_msg",
             json!({
                 "type": "item_completed",
-                "thread_id": self.thread,
+                "thread_id": thread,
                 "turn_id": turn,
                 "item": {
                     "type": "AgentMessage",
@@ -194,7 +270,7 @@ impl Agent {
     /// A record of `kind` to the rollout, whole in one write, so that a reader that
     /// follows the file never sees half of one.
     fn write(&self, kind: &str, payload: Value) {
-        let Some(path) = &self.rollout else {
+        let Some(path) = held(&self.rollout).clone() else {
             return;
         };
         let record = json!({
@@ -215,6 +291,42 @@ impl Agent {
 /// The id of an item of the model's, as Codex numbers them.
 fn item_id() -> String {
     format!("msg_{}", uuid::Uuid::new_v4())
+}
+
+/// What `lock` holds, one that a panic poisoned too: a thread that ended in one
+/// has left the state it was in.
+fn held<T>(lock: &Mutex<T>) -> MutexGuard<'_, T> {
+    lock.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// The rollout of `thread` below `folder`, Codex's `sessions`: the first file whose
+/// name holds it, as the daemon finds one.
+fn find_rollout(folder: &Path, thread: &str) -> Option<PathBuf> {
+    for entry in fs::read_dir(folder).ok()?.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            if let Some(found) = find_rollout(&path, thread) {
+                return Some(found);
+            }
+        } else if path
+            .file_name()
+            .is_some_and(|name| name.to_string_lossy().contains(thread))
+        {
+            return Some(path);
+        }
+    }
+    None
+}
+
+/// Whether the rollout `text` has a developer's message: what a thread begins with.
+fn has_developer_message(text: &str) -> bool {
+    text.lines()
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .any(|record| {
+            record["type"] == "response_item"
+                && record["payload"]["type"] == "message"
+                && record["payload"]["role"] == "developer"
+        })
 }
 
 /// Where Codex keeps the rollout of `thread`, begun now, in the Codex home `home`.
@@ -278,5 +390,118 @@ mod tests {
         assert_eq!(parts.len(), 4, "{parts:?}");
         assert!(parts[3].starts_with("rollout-"), "{parts:?}");
         assert!(parts[3].ends_with(&format!("-{THREAD}.jsonl")), "{parts:?}");
+    }
+
+    /// The server of a window, on `thread`, in the Codex home `home`, configured
+    /// with `developer` as its developer instructions.
+    fn server(home: &Path, thread: &str, developer: &str) -> Agent {
+        Agent::on(
+            thread.to_owned(),
+            Some(home.to_path_buf()),
+            Some(developer.to_owned()),
+            Plugins::open(0, 0).unwrap(),
+        )
+    }
+
+    /// The records of the rollout of `thread`, in order.
+    fn records(home: &Path, thread: &str) -> Vec<Value> {
+        let rollout = find_rollout(&home.join("sessions"), thread).expect("a rollout");
+        fs::read_to_string(rollout)
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect()
+    }
+
+    /// What the developer's messages of `records` say.
+    fn developers(records: &[Value]) -> Vec<&str> {
+        records
+            .iter()
+            .filter(|record| record["payload"]["role"] == "developer")
+            .filter_map(|record| record["payload"]["content"][0]["text"].as_str())
+            .collect()
+    }
+
+    #[test]
+    fn a_thread_begins_with_the_developer_instructions_its_server_has_and_writes_them_once() {
+        let home = tempfile::tempdir().unwrap();
+        let agent = server(home.path(), "thread-1", "the role as it was");
+        agent.thread_started();
+        agent.turn("first");
+        agent.turn("second");
+        let written = records(home.path(), "thread-1");
+        assert_eq!(developers(&written), ["the role as it was"]);
+        // Before the first message of the thread, and none between its turns.
+        let kinds: Vec<(&str, &str)> = written
+            .iter()
+            .map(|record| {
+                (
+                    record["type"].as_str().unwrap(),
+                    record["payload"]["role"].as_str().unwrap_or("-"),
+                )
+            })
+            .collect();
+        assert_eq!(kinds[0], ("session_meta", "-"));
+        assert_eq!(kinds[2], ("response_item", "developer"));
+        assert_eq!(kinds[3], ("response_item", "user"));
+    }
+
+    #[test]
+    fn a_resumed_thread_goes_on_in_its_rollout_with_the_instructions_it_began_with_whatever_its_server_has_now(
+    ) {
+        let home = tempfile::tempdir().unwrap();
+        let before = server(home.path(), "thread-1", "the role as it was");
+        before.thread_started();
+        before.turn("first");
+        let began = records(home.path(), "thread-1").len();
+
+        // A window later: a server of its own, configured with the role as it is
+        // now, resumes the thread.
+        let after = server(home.path(), "thread-2", "the role as it is now");
+        assert!(after.thread_resumed("thread-1"));
+        assert_eq!(after.thread(), "thread-1");
+        after.turn("again");
+        let written = records(home.path(), "thread-1");
+        assert_eq!(
+            developers(&written),
+            ["the role as it was"],
+            "the thread keeps what it began with, and is given no other"
+        );
+        assert!(written.len() > began, "it went on in the rollout it had");
+        let ordinals: Vec<u64> = written
+            .iter()
+            .map(|record| record["ordinal"].as_u64().unwrap())
+            .collect();
+        assert!(
+            ordinals.windows(2).all(|pair| pair[0] < pair[1]),
+            "the records go on being numbered: {ordinals:?}"
+        );
+        assert!(
+            find_rollout(&home.path().join("sessions"), "thread-2").is_none(),
+            "no rollout of the id the server began with"
+        );
+    }
+
+    #[test]
+    fn a_thread_that_had_no_turn_has_no_instructions_yet_and_a_thread_with_no_rollout_cannot_be_resumed(
+    ) {
+        let home = tempfile::tempdir().unwrap();
+        let before = server(home.path(), "thread-1", "the role as it was");
+        before.thread_started();
+        // Its rollout is begun, and holds no developer message: no turn has been.
+        let after = server(home.path(), "thread-2", "the role as it is now");
+        assert!(after.thread_resumed("thread-1"));
+        after.turn("first");
+        assert_eq!(
+            developers(&records(home.path(), "thread-1")),
+            ["the role as it is now"],
+            "its first turn is the one that writes them"
+        );
+        assert!(!after.thread_resumed("thread-9"), "no rollout holds it");
+        assert_eq!(
+            after.thread(),
+            "thread-1",
+            "and the server stays where it was"
+        );
     }
 }

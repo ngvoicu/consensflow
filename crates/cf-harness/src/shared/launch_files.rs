@@ -2,7 +2,11 @@
 //! settings and integration files written for it, in
 //! `integrations/<harness>/<launch>`. A launch id lives as long as its window,
 //! and nothing else reads these folders, so they go when it does, and every one
-//! at a start.
+//! at a start. What is kept from one launch to the next is in no harness's
+//! folder: ConsensFlow's own copy of Specmint is in `integrations/specmint`
+//! ([`super::specmint`]), which neither a window's end nor a start touches, and
+//! a harness's folder holds launches' folders and nothing else (Devin's wire
+//! logs are read by listing it).
 
 use std::fs;
 use std::io;
@@ -16,8 +20,10 @@ use cf_proto::agents::Harness;
 use crate::contract::LaunchId;
 use crate::shared::record::find::entries;
 
-/// The folder Codex keeps a launch's files in: only the Specmint skill of a
-/// chief given specs ([`super::specmint`]), which it reads by its path.
+/// The name Codex goes by under `integrations`. It keeps no files of a launch's
+/// own (no role, and the Specmint skill of a chief given specs is kept for every
+/// launch, [`super::specmint`]): its folder holds only what a build that kept the
+/// skill per launch left, which a start's sweep clears.
 pub(crate) const CODEX_FOLDER: &str = "codex";
 
 /// The harness folders a launch's files are in, in the order Node goes through
@@ -45,12 +51,17 @@ pub(crate) fn launch_folder(
     env: &Env,
     launch: &LaunchId,
 ) -> Result<String, String> {
+    integrations_path(env, &[harness_folder, launch.as_str()])
+}
+
+/// `parts` under ConsensFlow's `integrations`, joined as `path.join` joins
+/// them, or the failure of an environment that names no ConsensFlow folder.
+pub(crate) fn integrations_path(env: &Env, parts: &[&str]) -> Result<String, String> {
     let home = config_root(env).ok_or_else(|| "missing home in env".to_owned())?;
-    Ok(folder(
-        &home.to_string_lossy(),
-        harness_folder,
-        launch.as_str(),
-    ))
+    let home = home.to_string_lossy();
+    let mut all = vec![&*home, "integrations"];
+    all.extend(parts);
+    Ok(path::join(&all))
 }
 
 fn folder(home: &str, harness_folder: &str, launch: &str) -> String {

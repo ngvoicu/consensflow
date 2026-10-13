@@ -12,6 +12,7 @@ use cf_e2e::live::human::Human;
 use cf_e2e::live::report::Check;
 use cf_e2e::live::{wait, Log};
 use cf_e2e::rig::{Project, Rig};
+use cf_e2e::rollout;
 use cf_e2e::{Error, Result};
 use serde_json::{json, Value};
 
@@ -189,6 +190,26 @@ impl<'a> Ctx<'a> {
             }
         };
         Ok(launched::ours(&text).to_owned())
+    }
+
+    /// What the chief's own record holds, where its harness keeps one the run reads:
+    /// the rollout of the Codex thread the window of `frame` was opened on again,
+    /// in the home the window reads its login from, whole records only. A window
+    /// that began a thread has none to read here, and nor has another harness.
+    pub fn chief_record(&self, frame: &Value) -> std::result::Result<String, String> {
+        let thread = launched::thread_resumed(frame).ok_or_else(|| {
+            format!(
+                "the window {} was not opened on a thread again: {}",
+                frame["id"], frame["argv"]
+            )
+        })?;
+        let home = self
+            .rig
+            .var("CODEX_HOME")
+            .ok_or("the windows are given no Codex home")?;
+        let rollout = rollout::of_thread(Path::new(home), &thread)
+            .ok_or_else(|| format!("no rollout of the thread {thread} in {home}"))?;
+        rollout::read(&rollout).map_err(|failed| failed.to_string())
     }
 
     /// What the project's folder holds of specs, the specs folder being `folder`.

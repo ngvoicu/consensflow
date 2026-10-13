@@ -6,12 +6,13 @@
 use std::fs;
 use std::path::Path;
 
-use cf_harness::contract::{Adapter, LaunchId, Prepared, Skill};
+use cf_harness::contract::{Adapter, Prepared, Skill};
 use cf_harness::testing::unrooted;
 use cf_proto::specs::Variant;
 use serde_json::{json, Value};
 
-use super::stage::{planned, Home, Stage, Wanted, LAUNCH};
+use super::stage::{planned, Home, Stage, Wanted};
+use crate::kept;
 
 /// The `OPENCODE_CONFIG_CONTENT` a plan gives the window, as JSON.
 fn configuration(plan: &Prepared) -> Value {
@@ -157,27 +158,40 @@ fn a_window_without_its_role_text_is_refused_and_a_role_text_is_private_to_its_l
     }
 }
 
-/// The names in the skills folder OpenCode is told to read, in a plan's configuration.
-fn skills_of(plan: &Prepared) -> Vec<String> {
-    let merged = configuration(plan);
-    let folder = merged["skills"]["paths"]
+/// The skills folders OpenCode is told to read, in a plan's configuration, and
+/// the names in each: what the role's folder and the copy's hold.
+fn skills_of(plan: &Prepared) -> Vec<(String, Vec<String>)> {
+    configuration(plan)["skills"]["paths"]
         .as_array()
         .unwrap()
-        .last()
-        .unwrap()
-        .as_str()
-        .unwrap()
-        .to_owned();
-    let mut names: Vec<String> = fs::read_dir(folder)
-        .unwrap()
-        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
-        .collect();
-    names.sort();
-    names
+        .iter()
+        .map(|folder| {
+            let folder = folder.as_str().unwrap().to_owned();
+            let names = kept::names_in(&folder);
+            (folder, names)
+        })
+        .collect()
+}
+
+/// What a window is launched with: its arguments, the variables it adds and the
+/// ones it drops.
+type Launched = (Vec<String>, Vec<(String, String)>, Vec<String>);
+
+/// A plan as the comparison of two launches of one make sees it (`unrooted`),
+/// but for its configuration, which is apart as JSON, its folders written as
+/// `<home>`.
+fn unrooted_apart(plan: &Prepared, root: &str) -> (Launched, Value) {
+    let (argv, mut env, drop_env) = unrooted(plan, root);
+    let at = env
+        .iter()
+        .position(|(name, _)| name == "OPENCODE_CONFIG_CONTENT")
+        .unwrap();
+    let (_, text) = env.remove(at);
+    ((argv, env, drop_env), serde_json::from_str(&text).unwrap())
 }
 
 #[test]
-fn a_chief_given_specs_has_the_skill_written_where_the_role_s_is_which_opencode_is_told_to_read_and_its_configuration_is_as_it_was(
+fn a_chief_given_specs_has_the_skill_kept_for_every_launch_which_opencode_is_told_to_read_besides_the_role_s_and_its_configuration_is_as_it_was(
 ) {
     for variant in Variant::ALL {
         // Two stages of one make: what differs between the launches is the specs.
@@ -190,9 +204,12 @@ fn a_chief_given_specs_has_the_skill_written_where_the_role_s_is_which_opencode_
             ..Wanted::default()
         };
         let off = off_stage.prepare(&chief).unwrap();
+        let [(role, names)] = &skills_of(&off)[..] else {
+            panic!("the role's folder alone: {:?}", skills_of(&off));
+        };
         assert_eq!(
-            skills_of(&off),
-            ["consensflow-chief"],
+            names,
+            &["consensflow-chief"],
             "with specs off the role is alone"
         );
         let on = stage
@@ -201,16 +218,29 @@ fn a_chief_given_specs_has_the_skill_written_where_the_role_s_is_which_opencode_
                 ..chief
             })
             .unwrap();
-        assert_eq!(
-            unrooted(&on, &stage.home.root),
-            unrooted(&off, &off_stage.home.root),
-            "{variant:?}: OpenCode reads the same folder, and is told nothing more"
-        );
+        let kept = kept::skills(stage.home.var("CONSENSFLOW_HOME"), "opencode", variant);
         assert_eq!(
             skills_of(&on),
-            ["consensflow-chief", variant.skill_name()],
-            "{variant:?}"
+            [
+                (
+                    role.replace(&off_stage.home.root, &stage.home.root),
+                    vec!["consensflow-chief".to_owned()]
+                ),
+                (kept.clone(), vec![variant.skill_name().to_owned()])
+            ],
+            "{variant:?}: the role's folder, then the folder the copy is kept in"
         );
+        // Everything else of the launch is as it was: the configuration holds the
+        // one folder more.
+        let (launched, mut configured) = unrooted_apart(&on, &stage.home.root);
+        let (off_launched, expected) = unrooted_apart(&off, &off_stage.home.root);
+        assert_eq!(launched, off_launched, "{variant:?}");
+        let paths = configured["skills"]["paths"].as_array_mut().unwrap();
+        assert_eq!(
+            paths.pop(),
+            Some(json!(kept.replace(&stage.home.root, "<home>")))
+        );
+        assert_eq!(configured, expected, "{variant:?}");
     }
 }
 
@@ -240,10 +270,9 @@ fn an_opencode_that_has_the_variant_installed_in_any_place_it_reads_is_given_not
             install(".agents/skills", "specmint-tdd-html"),
         ),
     ];
-    let id = LaunchId::new(LAUNCH).unwrap();
     for (variant, file) in &places {
         assert_eq!(
-            stage.adapter.specmint(*variant, &id).unwrap(),
+            stage.adapter.specmint(*variant).unwrap(),
             Skill::Global(file.clone())
         );
         stage.serves_creation("ses_abc123");
@@ -254,12 +283,20 @@ fn an_opencode_that_has_the_variant_installed_in_any_place_it_reads_is_given_not
             ..Wanted::default()
         };
         let plan = stage.prepare(&chief).unwrap();
+        let folders = skills_of(&plan);
         assert_eq!(
-            skills_of(&plan),
-            ["consensflow-chief"],
-            "{variant:?}: nothing is written"
+            folders.iter().map(|(_, names)| names).collect::<Vec<_>>(),
+            [&["consensflow-chief".to_owned()]],
+            "{variant:?}: nothing is written, and none is told"
         );
     }
+    assert!(
+        !Path::new(stage.home.var("CONSENSFLOW_HOME"))
+            .join("integrations")
+            .join("specmint")
+            .exists(),
+        "an installed copy is the harness's own: nothing of ConsensFlow's is kept"
+    );
     assert!(places.iter().all(|(_, file)| fs::read_to_string(file)
         .unwrap()
         .ends_with("the human's own\n")));

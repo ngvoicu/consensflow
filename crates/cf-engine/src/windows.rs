@@ -21,10 +21,11 @@ use crate::delivery_text::{delivery_text, marker_of};
 use crate::dispatcher::Dispatcher;
 use crate::host::{EngineHost, Killed, OpenPane, Opened};
 use crate::record::Record;
+use crate::role_change::Compared;
 use crate::runtime::{begin, caught, returning};
 use crate::seams::{EngineError, SavedAgent};
 use crate::shown::Shown;
-use crate::specs::ChiefSpecs;
+use crate::specs::{ChiefSpecs, RoleText};
 use crate::stops::{Interrupted, Unstopped};
 
 /// The key that interrupts a harness's current turn, and the gap of a double press.
@@ -246,6 +247,10 @@ struct Planned {
     drop_env: Vec<String>,
     native_session: Option<String>,
     stop: Option<Stop>,
+    /// The text the window starts with, for a harness that keeps the first
+    /// instructions of its conversations: what a conversation this launch starts
+    /// is recorded as begun with.
+    first_instructions: Option<String>,
 }
 
 impl Dispatcher {
@@ -355,6 +360,10 @@ impl Dispatcher {
         };
         let launch_id = self.seams.launch_ids.draw();
         let generation = self.next_generation();
+        // A resumed conversation whose harness keeps its first instructions is
+        // told a role that changed since it began, ahead of anything else.
+        let resumed = conversation.as_ref().filter(|_| resume.is_some());
+        let Compared { first, role } = self.compare_role(project, participant, resumed, first)?;
         let delivering = first.as_ref().map(|first| Delivering {
             message: first.id,
             marker: marker_of(first.id),
@@ -373,6 +382,7 @@ impl Dispatcher {
                 resume.as_deref(),
                 &launch_id,
                 delivering.as_ref(),
+                role,
             )
             .await
         {
@@ -497,6 +507,12 @@ impl Dispatcher {
                     .borrow_mut()
                     .bind_conversation(started.id, native)?;
             }
+            if let Some(instructions) = planned.first_instructions.as_deref() {
+                self.seams
+                    .ledger
+                    .borrow_mut()
+                    .set_conversation_role_text(started.id, instructions)?;
+            }
         }
         {
             let mut part = record.window.borrow_mut();
@@ -562,7 +578,8 @@ impl Dispatcher {
 
     /// The launch's plan, from its adapter, with its first message begun:
     /// none where the participant's saved agent is gone (the human hears
-    /// it), or why the launch failed.
+    /// it), or why the launch failed. `role` is the text the window starts
+    /// with where it was asked for already ([`Dispatcher::compare_role`]).
     #[allow(clippy::too_many_arguments)]
     async fn plan(
         self: &Rc<Self>,
@@ -573,6 +590,7 @@ impl Dispatcher {
         resume: Option<&str>,
         launch_id: &LaunchId,
         delivering: Option<&Delivering>,
+        role: Option<RoleText>,
     ) -> Result<Option<Planned>, EngineError> {
         let begun = first
             .map(|first| self.seams.ledger.borrow_mut().begin_delivery(first.id))
@@ -608,13 +626,13 @@ impl Dispatcher {
             .transpose()?;
         // A chief whose project has specs on is told where its Specmint skill
         // is, and its window is given the skill there.
-        let specs = self.chief_specs(project, participant, &*adapter, launch_id)?;
-        let told = specs.as_ref().map(ChiefSpecs::text);
-        let instructions = self
-            .seams
-            .roles
-            .instructions(participant, project, told.as_ref())
-            .map_err(|cause| EngineError::said("no-role-text", cause))?;
+        let RoleText {
+            specs,
+            instructions,
+        } = match role {
+            Some(role) => role,
+            None => self.role_text(project, participant, &*adapter)?,
+        };
         let launch = Launch {
             id: launch_id,
             project: project.id,
@@ -642,6 +660,7 @@ impl Dispatcher {
             drop_env: prepared.drop_env,
             native_session: prepared.native_session,
             stop,
+            first_instructions: adapter.keeps_first_instructions().then_some(instructions),
         }))
     }
 

@@ -21,8 +21,8 @@ use cf_proto::specs::Variant;
 use super::channel::{send, Channel, Session, Shown, Target};
 use super::{launch, paths, role};
 use crate::contract::{
-    Adapter, Admission, Agent, Held, Launch, LaunchId, Observed, Pane, PaneHost, Prepared,
-    Readiness, Records, Skill, Window, Work,
+    Adapter, Admission, Agent, Held, Launch, Observed, Pane, PaneHost, Prepared, Readiness,
+    Records, Skill, Window, Work,
 };
 use crate::detect::executable;
 use crate::records::Options;
@@ -100,7 +100,8 @@ impl Adapter for CodexAdapter {
             .await?;
             // A chief given specs reads its Specmint skill by the path its role
             // text names: where Codex has none of its own, ConsensFlow's is
-            // written for it, beside nothing else of Codex's.
+            // written where it is kept for every launch, which Codex is told of
+            // by that path alone.
             specmint::write_own(Harness::Codex, &services.env, launch)?;
             // An image agent's window is Codex on its own default model, whose
             // image tool draws: it names no model or effort of its own.
@@ -159,12 +160,26 @@ impl Adapter for CodexAdapter {
         }
     }
 
-    fn specmint(&self, variant: Variant, launch: &LaunchId) -> Result<Skill, String> {
+    /// A resumed thread keeps the developer message its first turn began with:
+    /// the role text a launch gives it (`developer_instructions`, see the
+    /// module `role`) is read at a resume and not used. Found live on Codex 0.162.1,
+    /// 2026-10-13: a chief's rollout held the one developer message of its start,
+    /// with no section of the specs turned on before its Resume. And probed through
+    /// `codex app-server` the same day: a thread started with the developer
+    /// instructions "Your code word is ROLEONE." answered ROLEONE, and the same
+    /// thread resumed by a second app-server (`thread/resume`) with "Your code
+    /// word is now ROLETWO; this replaces any earlier code word." answered ROLEONE
+    /// to the same question, so the field of the resume request replaces nothing
+    /// either.
+    fn keeps_first_instructions(&self) -> bool {
+        true
+    }
+
+    fn specmint(&self, variant: Variant) -> Result<Skill, String> {
         let env = &self.services.env;
         specmint::place(
             Harness::Codex,
             env,
-            launch,
             variant,
             paths::global_specmint(env, variant),
         )

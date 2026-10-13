@@ -2,9 +2,11 @@
 //! through the real daemon and pane host, the windows the stand-in `claude`:
 //! the human says it on the page (`project.specs`) or for every project (the
 //! agents file's preference), and the chief's next launch carries the Specmint
-//! skill, written beside its role in the launch's folder (which Claude is given)
-//! and named in its role text; a project that has them off, and every worker,
-//! are given nothing, and a skill Claude has installed itself is the one used.
+//! skill, ConsensFlow's copy kept for every launch in a folder of its own
+//! (which Claude is given besides its role's) and named in its role text; a
+//! project that has them off, and every worker, are given nothing, and a skill
+//! Claude has installed itself is the one used. (A chief on the stand-in Codex,
+//! whose thread keeps what it began with, is in `specs_codex`.)
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -29,7 +31,11 @@ fn chief_windows(rig: &Rig, project: &Project) -> Vec<Value> {
 
 /// The human closes the project and resumes it, and the chief's next window is
 /// waited for: `windows` of them by then.
-fn relaunch(rig: &Rig, project: &Project, windows: usize) -> Result<Value, cf_e2e::Error> {
+pub(crate) fn relaunch(
+    rig: &Rig,
+    project: &Project,
+    windows: usize,
+) -> Result<Value, cf_e2e::Error> {
     let id = project.id();
     let closed = rig.page("project.close", json!({ "project": id }))?;
     assert_eq!(closed["ok"], true, "{closed}");
@@ -41,17 +47,28 @@ fn relaunch(rig: &Rig, project: &Project, windows: usize) -> Result<Value, cf_e2
     Ok(chief_windows(rig, project).remove(windows - 1))
 }
 
-/// The folder Claude is given for a window's role (`--add-dir`): its skills are
-/// under `.claude/skills`.
-fn skills_of(frame: &Value) -> PathBuf {
-    Path::new(&after(frame, "--add-dir"))
-        .join(".claude")
-        .join("skills")
+/// The folders Claude is given to read skills from (`--add-dir`), in the order of
+/// its command line: its role's first, and where its chief is given a copy of
+/// Specmint of ConsensFlow's, the folder that copy is kept in after it. Their
+/// skills are under `.claude/skills`.
+fn add_dirs(frame: &Value) -> Vec<PathBuf> {
+    let argv = frame["argv"]
+        .as_array()
+        .map(Vec::as_slice)
+        .unwrap_or_default();
+    argv.windows(2)
+        .filter(|pair| pair[0] == "--add-dir")
+        .filter_map(|pair| pair[1].as_str().map(PathBuf::from))
+        .collect()
 }
 
-/// The names of the skills a window's role folder holds.
-fn skills_named(frame: &Value) -> Vec<String> {
-    let mut names: Vec<String> = fs::read_dir(skills_of(frame))
+/// The names of the skills the `at`th folder Claude is given holds.
+fn skills_in(frame: &Value, at: usize) -> Vec<String> {
+    let folder = add_dirs(frame)
+        .get(at)
+        .map(|root| root.join(".claude").join("skills"));
+    let mut names: Vec<String> = folder
+        .and_then(|folder| fs::read_dir(folder).ok())
         .map(|entries| {
             entries
                 .filter_map(|entry| Some(entry.ok()?.file_name().to_string_lossy().into_owned()))
@@ -60,6 +77,37 @@ fn skills_named(frame: &Value) -> Vec<String> {
         .unwrap_or_default();
     names.sort();
     names
+}
+
+/// The names of the skills a window's role folder holds: the role's own.
+fn skills_named(frame: &Value) -> Vec<String> {
+    skills_in(frame, 0)
+}
+
+/// The names of the skills in the folder a copy of Specmint of ConsensFlow's is
+/// kept in, which a window is given besides its role's where its chief has one.
+fn specmint_named(frame: &Value) -> Vec<String> {
+    skills_in(frame, 1)
+}
+
+/// Whether `root` is where ConsensFlow keeps its copy of `variant` for `harness`
+/// (`claude`, `codex`) in the rig's home: `integrations/specmint/<harness>`, in a
+/// folder named by the variant and the commit it is vendored at, and in no
+/// launch's folder.
+pub(crate) fn is_kept(rig: &Rig, root: &Path, harness: &str, variant: &str) -> bool {
+    let beside = rig
+        .home()
+        .join("integrations")
+        .join("specmint")
+        .join(harness);
+    let commit = root
+        .file_name()
+        .and_then(|name| name.to_str())
+        .and_then(|name| name.strip_prefix(&format!("{variant}-")));
+    root.parent() == Some(beside.as_path())
+        && commit.is_some_and(|commit| {
+            commit.len() == 40 && commit.bytes().all(|byte| byte.is_ascii_hexdigit())
+        })
 }
 
 /// The role text a window was given: the file Claude's system prompt appends.
@@ -105,15 +153,29 @@ fn a_chief_of_a_project_with_specs_on_is_given_the_skill_beside_its_role_at_its_
     );
     assert_eq!(chief_windows(&rig, &project).len(), 1);
 
-    // Its next launch has the skill, beside its role, and names it.
+    // Its next launch has the skill, in the folder it is kept in, which Claude is
+    // given after its role's, and names it.
     let next = relaunch(&rig, &project, 2)?;
     assert_eq!(
         skills_named(&next),
-        ["consensflow-chief", "specmint-tdd"],
+        ["consensflow-chief"],
         "{:?}",
         next["argv"]
     );
-    let skill = skills_of(&next).join("specmint-tdd");
+    assert_eq!(
+        specmint_named(&next),
+        ["specmint-tdd"],
+        "{:?}",
+        next["argv"]
+    );
+    let kept = add_dirs(&next).remove(1);
+    assert!(
+        is_kept(&rig, &kept, "claude", "tdd"),
+        "{} is no folder of the copy: {:?}",
+        kept.display(),
+        next["argv"]
+    );
+    let skill = kept.join(".claude").join("skills").join("specmint-tdd");
     let installed = fs::read_to_string(skill.join("SKILL.md"))?;
     assert!(
         installed.starts_with("---\nname: specmint-tdd\n"),
@@ -162,6 +224,12 @@ fn a_chief_of_a_project_with_specs_on_is_given_the_skill_beside_its_role_at_its_
         "{:?}",
         worker["argv"]
     );
+    assert_eq!(
+        add_dirs(&worker).len(),
+        1,
+        "no folder of the copy: {:?}",
+        worker["argv"]
+    );
     assert!(
         !told_of_specs(&role_of(&worker)),
         "a member is told nothing of them"
@@ -186,7 +254,8 @@ fn with_specs_on_for_every_project_a_project_that_says_nothing_follows_and_one_t
     let project = Project::open(&rig, "chief", json!({}))?;
     let first = rig.open_frame(&format!("p{}-chief", project.id()), OPEN)?;
     // It says nothing of its own: it follows the human's choice for every project.
-    assert_eq!(skills_named(&first), ["consensflow-chief", "specmint-core"]);
+    assert_eq!(skills_named(&first), ["consensflow-chief"]);
+    assert_eq!(specmint_named(&first), ["specmint-core"]);
     assert!(
         role_of(&first).contains("it means `.specs`"),
         "the documented folder"
@@ -205,6 +274,7 @@ fn with_specs_on_for_every_project_a_project_that_says_nothing_follows_and_one_t
         "{:?}",
         next["argv"]
     );
+    assert_eq!(add_dirs(&next).len(), 1, "{:?}", next["argv"]);
     assert!(!told_of_specs(&role_of(&next)), "told nothing of them");
     rig.close()?;
     Ok(())
@@ -234,6 +304,12 @@ fn a_variant_claude_has_installed_itself_is_the_one_the_chief_is_told_of_and_not
         ["consensflow-chief"],
         "nothing is copied"
     );
+    assert_eq!(
+        add_dirs(&next).len(),
+        1,
+        "nor is a folder of it given: {:?}",
+        next["argv"]
+    );
     let role = role_of(&next);
     assert!(
         role.contains(
@@ -256,10 +332,8 @@ fn a_variant_claude_has_installed_itself_is_the_one_the_chief_is_told_of_and_not
     )?;
     assert_eq!(said["ok"], true, "{said}");
     let third = relaunch(&rig, &project, 3)?;
-    assert_eq!(
-        skills_named(&third),
-        ["consensflow-chief", "specmint-tdd-html"]
-    );
+    assert_eq!(skills_named(&third), ["consensflow-chief"]);
+    assert_eq!(specmint_named(&third), ["specmint-tdd-html"]);
     assert!(installed.join("SKILL.md").is_file());
     rig.close()?;
     Ok(())

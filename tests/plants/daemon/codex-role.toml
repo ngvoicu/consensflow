@@ -1,0 +1,624 @@
+# A role that changed under a resumed Codex thread (the owner's report of 2026-10-13, ConsensFlow
+# 3.0.3 on Codex 0.162.1: a chief given specs, closed and resumed, never learned of them, for a
+# resumed thread keeps the developer instructions it began with and ConsensFlow gave the new text
+# in the setting that thread does not read). The harness says it keeps them (`Adapter::
+# keeps_first_instructions`, Codex alone); the ledger records the text each conversation was
+# last told (migration 0016); the engine compares it with the text a resumed window would be
+# given and, where it differs, puts a note from ConsensFlow first, the new text in full and said
+# to replace the one the thread began with, and records the new text once the note is delivered,
+# so that it is given once. The text names ConsensFlow's copy of Specmint where the harness has
+# none, and the harness crate keeps that copy at one place for every launch (one for each harness
+# and variant, named by the commit it is vendored at, in no launch's folder), or the role text
+# would differ at every launch and be said again at every Resume. One plant takes one rule out,
+# or puts one wrong; a test of it fails. The ledger's plants run its own tests
+# (`tests/conversation_role.rs` and the unit tests of `testing::role_text`), the harness's the
+# launch suite's (`tests/launch/first_instructions.rs`, and its tests of a chief given specs) and
+# the unit tests of the copy (`shared::specmint`), the engine's the dispatcher's
+# (`tests/dispatcher/role_change.rs`) and its unit tests (`role_change::`), the stand-in Codex's
+# its own (`agent::tests`); the `codex role rig:` plants run the cases of the rig and the
+# regression (a real daemon, the real pane host, a chief on the stand-in Codex or Claude:
+# `crates/cf-e2e/tests/rig/specs.rs` and `tests/regressions/codex_role_on_resume.rs`), and the
+# ones that plant the product say `builds`: the family builds the native `cf` again once each
+# is put back. Every name holds `codex role`, so `npm run plants:daemon -- "codex role"` runs
+# them all, `"codex role:"` the ones that do not run the rig and `"codex role rig:"` the ones
+# that do.
+
+[run]
+# The ledger's tests of the column: the migration, writing and reading it, what it never logs.
+ledger-conversation-role = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "conversation_role"]
+# What the ledger's tests of Node's recordings hold apart, and the migrations as they shipped.
+# (The ledger's replay of Node's recordings, which holds the column apart, is the kit's
+# `ledger-replay`.)
+ledger-lib = ["cargo", "test", "--offline", "-p", "cf-ledger", "--lib"]
+# Which harness keeps the first instructions of a resumed conversation.
+harness-first-instructions = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "first_instructions::"]
+# The harness's tests of ConsensFlow's copy of Specmint: where it is kept, what is written and
+# when, and what each harness is told of it.
+harness-specmint = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "specmint"]
+harness-launch-specs = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "--", "given_specs", "second_launch", "has_the_variant_installed"]
+# The engine's tests of a role that changed, on the fake windows, and of how the text reads.
+engine-role-change = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "role_change::"]
+engine-role-change-lib = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "role_change::"]
+# The stand-in Codex's own tests: what a thread begins with, and keeps.
+fake-codex = ["cargo", "test", "--offline", "-p", "cf-e2e", "--bin", "fake-codex"]
+# The case of the rig and the regression: a chief on the stand-in Codex, resumed.
+rig-codex-role = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "specs_codex::"]
+# The rig's cases of a chief given specs, on the stand-in Claude: the folders it is given.
+rig-claude-specs = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "specs::a_chief_of_a_project"]
+rig-regression-codex-role = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "codex_role_on_resume::"]
+# What the live specs run judges of a Codex chief's own record (no harness is run).
+live-specs-judge = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_specs", "launched::"]
+
+# --- the ledger ---
+
+[[plant]]
+name = "codex role: a conversation's role text is read as none"
+meant = "a_conversation_reads_back_the_role_text_it_was_given_the_latest_one_and_none_before"
+runs = ["ledger-conversation-role"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations.rs"
+find = '''            "SELECT role_text FROM conversation WHERE id = ?",'''
+replace = '''            "SELECT NULL FROM conversation WHERE id = ?",'''
+
+[[plant]]
+name = "codex role: a role text is written to every conversation but the one given it"
+meant = "a_conversation_reads_back_the_role_text_it_was_given_the_latest_one_and_none_before"
+runs = ["ledger-conversation-role"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations.rs"
+find = '''            "UPDATE conversation SET role_text = ? WHERE id = ?",'''
+replace = '''            "UPDATE conversation SET role_text = ? WHERE id != ?",'''
+
+[[plant]]
+name = "codex role: the migration gives every conversation an empty text where it should be unknown"
+meant = "a_populated_version_15_ledger_gains_the_role_text_column_in_migration_16_and_every_row_stays"
+runs = ["ledger-conversation-role"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0016.sql"
+find = '''  ALTER TABLE conversation ADD COLUMN role_text TEXT;'''
+replace = '''  ALTER TABLE conversation ADD COLUMN role_text TEXT NOT NULL DEFAULT '';'''
+
+[[plant]]
+name = "codex role: the migration is changed after it shipped"
+meant = "keeps_each_migration_byte_for_byte_as_it_shipped"
+runs = ["ledger-lib"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0016.sql"
+find = '''-- The role text a conversation was last given:'''
+replace = '''-- The role text a conversation was given last:'''
+
+[[plant]]
+name = "codex role: the column is not held apart from Node's recordings"
+meant = "takes_the_role_text_column_and_its_values_out_of_the_conversation_table_and_nothing_else"
+runs = ["ledger-lib", "ledger-replay"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/testing.rs"
+find = '''        .chain(role_text::COLUMNS)
+'''
+replace = '''
+'''
+
+[[plant]]
+name = "codex role: the column's text is not held apart from the schema of Node's recordings"
+meant = "takes_the_column_out_of_the_text_sqlite_wrote_for_the_conversation_table_and_of_no_other"
+runs = ["ledger-lib", "ledger-replay"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/testing.rs"
+find = '''                *sql = sql.replace(role_text::COLUMN_LINES, "");'''
+replace = '''                *sql = sql.replace(role_text::COLUMN_LINES, " ");'''
+
+# --- the harness ---
+
+[[plant]]
+name = "codex role: Codex says its resumed thread takes its role at every launch"
+meant = "codex_keeps_the_instructions_a_resumed_thread_began_with_on_every_platform"
+runs = ["harness-first-instructions"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/adapter.rs"
+find = '''    fn keeps_first_instructions(&self) -> bool {
+        true
+    }'''
+replace = '''    fn keeps_first_instructions(&self) -> bool {
+        false
+    }'''
+
+[[plant]]
+name = "codex role: every harness says its resumed conversation keeps the first instructions"
+meant = "no_other_harness_does_for_each_takes_its_role_again_at_every_launch"
+runs = ["harness-first-instructions"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/contract.rs"
+find = '''    fn keeps_first_instructions(&self) -> bool {
+        false
+    }'''
+replace = '''    fn keeps_first_instructions(&self) -> bool {
+        true
+    }'''
+
+# ConsensFlow's copy of Specmint: kept once for each harness and variant, at one place for every
+# launch, so that the role text that names it is the same from launch to launch.
+
+[[plant]]
+name = "codex role: the copy is kept in the harness's folder of launches"
+meant = "a_harness_s_folder_holds_launches_and_nothing_else_the_copy_is_kept_beside_them"
+runs = ["harness-specmint"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/specmint.rs"
+find = '''                KEPT,
+                harness_folder(harness).unwrap_or(CODEX_FOLDER),'''
+replace = '''                harness_folder(harness).unwrap_or(CODEX_FOLDER),'''
+
+[[plant]]
+name = "codex role: the copy's folder is named by the variant and not by the commit it is vendored at"
+meant = "a_variant_not_found_installed_is_placed_in_the_folder_kept_for_its_harness_and_the_variant_at_its_commit"
+runs = ["harness-specmint"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/specmint.rs"
+find = '''                &format!("{}-{commit}", variant.as_str()),'''
+replace = '''                &format!("{}-{}", variant.as_str(), &commit[..0]),'''
+
+[[plant]]
+name = "codex role: a copy's file that is what the build ships is written again at every launch"
+meant = "the_copy_is_the_same_for_every_launch_and_a_file_that_is_what_the_build_ships_is_not_written_again"
+runs = ["harness-specmint"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/specmint.rs"
+find = '''        if fs::read(file).is_ok_and(|held| held == *bytes) {'''
+replace = '''        if false && fs::read(file).is_ok_and(|held| held == *bytes) {'''
+
+[[plant]]
+name = "codex role: a copy's file that differs from what the build ships is left as it is"
+meant = "a_file_that_is_missing_or_differs_is_written_again_and_what_else_is_there_is_left"
+runs = ["harness-specmint"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/specmint.rs"
+find = '''        if fs::read(file).is_ok_and(|held| held == *bytes) {'''
+replace = '''        if fs::read(file).is_ok() {'''
+
+[[plant]]
+name = "codex role: a start's sweep takes the copy with the launches' folders"
+meant = "neither_a_launch_s_end_nor_a_start_s_sweep_removes_the_copy_and_each_variant_has_its_own"
+runs = ["harness-specmint"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/launch_files.rs"
+find = '''const FOLDERS: [&str; 5] = ["claude", "pi", "devin", "opencode", CODEX_FOLDER];'''
+replace = '''const FOLDERS: [&str; 6] = ["claude", "pi", "devin", "opencode", CODEX_FOLDER, "specmint"];'''
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/launch_files.rs"
+find = '''            if LaunchId::new(&entry.file_name().to_string_lossy()).is_some() {'''
+replace = '''            if LaunchId::new(&entry.file_name().to_string_lossy()).is_some() || true {'''
+
+[[plant]]
+name = "codex role: a manifest's commit that is no hexadecimal name of one is made the name of a folder"
+meant = "a_manifest_that_pins_no_commit_a_path_could_be_made_of_says_so"
+runs = ["harness-specmint"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/specmint/files.rs"
+find = '''        .filter(|commit| !commit.is_empty() && commit.bytes().all(|byte| byte.is_ascii_hexdigit()))'''
+replace = '''        .filter(|commit| !commit.is_empty())'''
+
+[[plant]]
+name = "codex role: Claude is not given the folder the copy is kept in"
+meant = "a_chief_given_specs_has_the_skill_kept_for_every_launch_and_claude_is_given_that_folder_as_one_more_and_nothing_else_of_its_launch_moves"
+runs = ["harness-launch-specs"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/install.rs"
+find = '''        args.extend(["--add-dir".to_owned(), copy.root]);'''
+replace = '''        let _ = copy;'''
+
+[[plant]]
+name = "codex role: OpenCode is not told the skills folder of the copy"
+meant = "a_chief_given_specs_has_the_skill_kept_for_every_launch_which_opencode_is_told_to_read_besides_the_role_s_and_its_configuration_is_as_it_was"
+runs = ["harness-launch-specs"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/opencode/role.rs"
+find = '''    folders.extend(specmint.as_deref());'''
+replace = '''    let _ = specmint;'''
+
+[[plant]]
+name = "codex role: Pi is given the role's skill twice and not the copy"
+meant = "a_chief_given_specs_is_given_the_skill_as_a_second_one_after_its_role_s_and_the_rest_of_its_launch_is_as_it_was"
+runs = ["harness-launch-specs"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/adapter.rs"
+find = '''                    .flat_map(|copy| ["--skill".to_owned(), copy.file()]),'''
+replace = '''                    .flat_map(|_| ["--skill".to_owned(), String::new()]),'''
+
+# --- the engine ---
+
+[[plant]]
+name = "codex role: a changed role is never said again to a resumed conversation"
+meant = "a_resumed_conversation_whose_harness_keeps_its_first_instructions_is_given_a_changed_role_first_and_once"
+runs = ["engine-role-change"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_change.rs"
+find = '''        if told.as_deref() == Some(role.instructions.as_str()) {'''
+replace = '''        if told.as_deref() == Some(role.instructions.as_str()) || true {'''
+
+[[plant]]
+name = "codex role: the role is said at every resume, changed or not"
+meant = "a_resumed_conversation_whose_role_did_not_change_is_given_nothing_extra"
+runs = ["engine-role-change"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_change.rs"
+find = '''        if told.as_deref() == Some(role.instructions.as_str()) {'''
+replace = '''        if false && told.as_deref() == Some(role.instructions.as_str()) {'''
+
+[[plant]]
+name = "codex role: the text said is not recorded, so it is said again"
+meant = "a_resumed_conversation_whose_harness_keeps_its_first_instructions_is_given_a_changed_role_first_and_once"
+runs = ["engine-role-change"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_change.rs"
+find = '''            ledger.set_conversation_role_text(conversation.id, instructions)?;
+'''
+replace = '''            let _ = (conversation.id, instructions);
+'''
+
+[[plant]]
+name = "codex role: a role is recorded as told when its note is delivered, not before (the text is recorded when it is written)"
+meant = "a_resumed_conversation_whose_harness_keeps_its_first_instructions_is_given_a_changed_role_first_and_once"
+runs = ["engine-role-change"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_change.rs"
+find = '''        Ok(self.seams.ledger.borrow_mut().note(
+            project.id,
+            &NewNote {
+                from: None,
+                to: participant.handle.clone(),
+                task: None,
+                body: body_of(&role.instructions),
+            },
+        )?)'''
+replace = '''        let note = self.seams.ledger.borrow_mut().note(
+            project.id,
+            &NewNote {
+                from: None,
+                to: participant.handle.clone(),
+                task: None,
+                body: body_of(&role.instructions),
+            },
+        )?;
+        self.role_delivered(&note)?;
+        Ok(note)'''
+
+[[plant]]
+name = "codex role: a delivery the harness's record shows is not taken for the role told"
+meant = "a_resumed_conversation_whose_harness_keeps_its_first_instructions_is_given_a_changed_role_first_and_once"
+runs = ["engine-role-change"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''        self.role_delivered(&message)?;
+        record.delivery.borrow_mut().delivering = None;'''
+replace = '''        record.delivery.borrow_mut().delivering = None;'''
+
+[[plant]]
+name = "codex role: a delivery a restart settles is not taken for the role told"
+meant = "a_replacement_in_flight_when_the_daemon_stopped_is_recorded_as_told_once_the_restart_finds_it_in_the_copy_of_its_window"
+runs = ["engine-role-change"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''                    self.role_delivered(&message)?;
+'''
+replace = ''
+
+[[plant]]
+name = "codex role: every message that comes into the window is taken for a role told"
+meant = "a_replacement_goes_ahead_of_the_words_that_waited_for_the_window_and_those_follow_it"
+runs = ["engine-role-change"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_change.rs"
+find = '''        let Some(instructions) = instructions_of(message) else {'''
+replace = '''        let Some(instructions) = Some(message.body.as_str()) else {'''
+
+[[plant]]
+name = "codex role: a replacement that waited for a conversation is left to be told to the one a switch begins"
+meant = "a_replacement_that_waited_for_a_conversation_is_withdrawn_when_the_chief_begins_another_and_is_never_told_to_it"
+runs = ["engine-role-change"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_change.rs"
+find = '''        let withdrawn = self.withdraw_replacements(participant)?;'''
+replace = '''        let withdrawn = if resumed.is_some() {
+            self.withdraw_replacements(participant)?
+        } else {
+            Vec::new()
+        };'''
+
+[[plant]]
+name = "codex role: a member's replacement that failed to land leaves its brief to have the launch tried again at every pass"
+meant = "a_members_replacement_that_failed_to_land_leaves_the_record_as_it_was_and_its_next_launch_says_the_role_again"
+runs = ["engine-role-change"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''        self.fail_behind(message, because)?;
+'''
+replace = ''
+
+[[plant]]
+name = "codex role: a replacement the window never took is left to be delivered when the role is again the one told"
+meant = "a_replacement_the_window_never_took_is_withdrawn_and_nothing_is_said_where_the_role_is_again_what_the_conversation_was_told"
+runs = ["engine-role-change"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_change.rs"
+find = '''        let first = first.filter(|message| !withdrawn.contains(&message.id));'''
+replace = '''        let _ = &withdrawn;'''
+
+[[plant]]
+name = "codex role: a fresh conversation's text is not recorded, so it counts as unknown and is told"
+meant = "a_resumed_conversation_whose_role_did_not_change_is_given_nothing_extra"
+runs = ["engine-role-change"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '''            first_instructions: adapter.keeps_first_instructions().then_some(instructions),'''
+replace = '''            first_instructions: None,'''
+
+[[plant]]
+name = "codex role: a harness that takes its role at every launch is asked, and told"
+meant = "a_harness_that_takes_its_role_at_every_launch_is_given_nothing_extra_whether_the_role_changed_or_not"
+runs = ["engine-role-change"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_change.rs"
+find = '''            .filter(|adapter| adapter.keeps_first_instructions());'''
+replace = '''            .filter(|_| true);'''
+
+[[plant]]
+name = "codex role: the replacement is made and left in the queue, behind what waited, and is not the launch's first message"
+meant = "a_replacement_goes_ahead_of_the_words_that_waited_for_the_window_and_those_follow_it"
+runs = ["engine-role-change"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_change.rs"
+find = '''            first: Some(replacement),'''
+replace = '''            first,'''
+
+[[plant]]
+name = "codex role: the replacement does not go ahead of the message the launch already had first"
+meant = "a_replacement_goes_ahead_of_the_note_that_tells_the_chief_its_turn_was_cut_and_that_one_follows_it"
+runs = ["engine-role-change"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_change.rs"
+find = '''            first: Some(replacement),'''
+replace = '''            first: first.or(Some(replacement)),'''
+
+[[plant]]
+name = "codex role: a replacement that waited is not withdrawn when the role changes again"
+meant = "a_replacement_the_window_never_took_leaves_the_record_as_it_was_and_the_next_launch_withdraws_it_and_says_the_role_it_has_then"
+runs = ["engine-role-change"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_change.rs"
+find = '''            if waiting.state == "queued" && is_replacement(&waiting) {'''
+replace = '''            if false && waiting.state == "queued" && is_replacement(&waiting) {'''
+
+[[plant]]
+name = "codex role: a conversation whose text is not known is taken as unchanged"
+meant = "a_conversation_whose_text_is_not_known_counts_as_changed_and_is_told_once"
+runs = ["engine-role-change"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_change.rs"
+find = '''        if told.as_deref() == Some(role.instructions.as_str()) {'''
+replace = '''        if told.is_none() || told.as_deref() == Some(role.instructions.as_str()) {'''
+
+[[plant]]
+name = "codex role: a replacement does not say it replaces the instructions the thread began with"
+meant = "a_replacement_says_plainly_that_it_replaces_the_instructions_the_conversation_began_with_and_holds_the_text_whole_after_it"
+runs = ["engine-role-change-lib"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_change.rs"
+find = '''The instructions below replace the ones you were given then: follow these from now on'''
+replace = '''The instructions below are these: follow them from now on'''
+
+[[plant]]
+name = "codex role: a replacement is longer than a message goes in whole, with the text at its start"
+meant = "the_real_text_of_a_chief_with_specs_and_a_large_staff_goes_in_whole_as_a_replacement"
+runs = ["engine-role-change-lib"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_change.rs"
+find = '''    format!("{OPENING}\n\n{instructions}")'''
+replace = '''    format!("{OPENING}\n\n{instructions}{}", "\n".repeat(2_000))'''
+
+# --- the stand-in Codex ---
+
+[[plant]]
+name = "codex role: a resumed thread of the stand-in Codex is given the instructions its server has now"
+meant = "a_resumed_thread_goes_on_in_its_rollout_with_the_instructions_it_began_with_whatever_its_server_has_now"
+runs = ["fake-codex"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_codex/agent.rs"
+find = '''        self.instructed.store(instructed, Ordering::Relaxed);'''
+replace = '''        self.instructed.store(instructed && false, Ordering::Relaxed);'''
+
+# --- the rig, and the regression ---
+
+# The old code is the engine that never says a changed role again (or the harness that says its
+# thread takes its role at every launch): the chief's thread is told nothing after the Resume.
+# The case of the rig and the regression each fail on it, and each has a plant of its own, since
+# the runs of a plant are tried until one fails.
+
+[[plant]]
+name = "codex role rig: a changed role is never said again to the resumed chief (the old code, for the rig)"
+meant = "a_codex_chief_resumed_after_its_specs_were_turned_on_is_told_the_section_by_a_message_and_once_for_its_thread_keeps_what_it_began_with"
+runs = ["rig-codex-role"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_change.rs"
+find = '''        if told.as_deref() == Some(role.instructions.as_str()) {'''
+replace = '''        if told.as_deref() == Some(role.instructions.as_str()) || true {'''
+
+[[plant]]
+name = "codex role rig: a changed role is never said again to the resumed chief (the old code, for the regression)"
+meant = "a_codex_chief_resumed_with_its_specs_turned_on_has_the_section_in_its_own_record_and_the_skill_it_names_is_there"
+runs = ["rig-regression-codex-role"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_change.rs"
+find = '''        if told.as_deref() == Some(role.instructions.as_str()) {'''
+replace = '''        if told.as_deref() == Some(role.instructions.as_str()) || true {'''
+
+[[plant]]
+name = "codex role rig: Codex says it takes its role at every launch (the old code, for the rig)"
+meant = "a_codex_chief_resumed_after_its_specs_were_turned_on_is_told_the_section_by_a_message_and_once_for_its_thread_keeps_what_it_began_with"
+runs = ["rig-codex-role"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/adapter.rs"
+find = '''    fn keeps_first_instructions(&self) -> bool {
+        true
+    }'''
+replace = '''    fn keeps_first_instructions(&self) -> bool {
+        false
+    }'''
+
+[[plant]]
+name = "codex role rig: Codex says it takes its role at every launch (the old code, for the regression)"
+meant = "a_codex_chief_resumed_with_its_specs_turned_on_has_the_section_in_its_own_record_and_the_skill_it_names_is_there"
+runs = ["rig-regression-codex-role"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/adapter.rs"
+find = '''    fn keeps_first_instructions(&self) -> bool {
+        true
+    }'''
+replace = '''    fn keeps_first_instructions(&self) -> bool {
+        false
+    }'''
+
+[[plant]]
+name = "codex role rig: the role is said at every resume, changed or not (the regression)"
+meant = "a_codex_chief_resumed_with_its_specs_off_is_told_nothing_more"
+runs = ["rig-regression-codex-role"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_change.rs"
+find = '''        if told.as_deref() == Some(role.instructions.as_str()) {'''
+replace = '''        if false && told.as_deref() == Some(role.instructions.as_str()) {'''
+
+[[plant]]
+name = "codex role rig: the text said is not recorded, so the next Resume says it again (the rig)"
+meant = "a_codex_chief_resumed_after_its_specs_were_turned_on_is_told_the_section_by_a_message_and_once_for_its_thread_keeps_what_it_began_with"
+runs = ["rig-codex-role"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_change.rs"
+find = '''            ledger.set_conversation_role_text(conversation.id, instructions)?;
+'''
+replace = '''            let _ = (conversation.id, instructions);
+'''
+
+[[plant]]
+name = "codex role rig: the copy of the skill is kept in the harness's folder of launches (the Claude rig)"
+meant = "a_chief_of_a_project_with_specs_on_is_given_the_skill_beside_its_role_at_its_next_launch_and_a_worker_never_is"
+runs = ["rig-claude-specs"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/specmint.rs"
+find = '''                KEPT,
+                harness_folder(harness).unwrap_or(CODEX_FOLDER),'''
+replace = '''                harness_folder(harness).unwrap_or(CODEX_FOLDER),'''
+
+[[plant]]
+name = "codex role rig: Claude is not given the folder the copy is kept in (the Claude rig)"
+meant = "a_chief_of_a_project_with_specs_on_is_given_the_skill_beside_its_role_at_its_next_launch_and_a_worker_never_is"
+runs = ["rig-claude-specs"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/install.rs"
+find = '''        args.extend(["--add-dir".to_owned(), copy.root]);'''
+replace = '''        let _ = copy;'''
+
+[[plant]]
+name = "codex role rig: the copy's place differs at every launch, as it did in a launch's own folder (the rig)"
+meant = "a_codex_chief_resumed_after_its_specs_were_turned_on_is_told_the_section_by_a_message_and_once_for_its_thread_keeps_what_it_began_with"
+runs = ["rig-codex-role"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/specmint.rs"
+find = '''                &format!("{}-{commit}", variant.as_str()),'''
+replace = '''                &format!("{}-{commit}{}", variant.as_str(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |since| since.subsec_nanos())),'''
+
+[[plant]]
+name = "codex role rig: the copy's place differs at every launch, as it did in a launch's own folder (the regression)"
+meant = "a_codex_chief_resumed_with_its_specs_turned_on_has_the_section_in_its_own_record_and_the_skill_it_names_is_there"
+runs = ["rig-regression-codex-role"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/specmint.rs"
+find = '''                &format!("{}-{commit}", variant.as_str()),'''
+replace = '''                &format!("{}-{commit}{}", variant.as_str(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |since| since.subsec_nanos())),'''
+
+[[plant]]
+name = "codex role rig: the stand-in Codex gives a resumed thread the instructions its server has now (the rig)"
+meant = "a_codex_chief_resumed_after_its_specs_were_turned_on_is_told_the_section_by_a_message_and_once_for_its_thread_keeps_what_it_began_with"
+runs = ["rig-codex-role"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_codex/agent.rs"
+find = '''        self.instructed.store(instructed, Ordering::Relaxed);'''
+replace = '''        self.instructed.store(instructed && false, Ordering::Relaxed);'''
+
+[[plant]]
+name = "codex role rig: the stand-in Codex gives a resumed thread the instructions its server has now (the regression)"
+meant = "a_codex_chief_resumed_with_its_specs_turned_on_has_the_section_in_its_own_record_and_the_skill_it_names_is_there"
+runs = ["rig-regression-codex-role"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_codex/agent.rs"
+find = '''        self.instructed.store(instructed, Ordering::Relaxed);'''
+replace = '''        self.instructed.store(instructed && false, Ordering::Relaxed);'''
+
+# --- the live run's judge ---
+
+[[plant]]
+name = "codex role: the live run takes any message that holds the section for a way of telling the chief"
+meant = "a_chief_whose_thread_kept_what_it_began_with_and_was_told_nothing_was_not_told_and_the_report_says_what_its_record_has"
+runs = ["live-specs-judge"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_specs/launched.rs"
+find = '''        Some(said) if said.contains(REPLACES) => Ok('''
+replace = '''        Some(said) if said.contains(REPLACES) || said.contains(SECTION) => Ok('''

@@ -58,8 +58,8 @@ use super::status::{self, State, Status};
 use super::stopped::{self, Pressed};
 use super::{install, paths};
 use crate::contract::{
-    Adapter, Admission, Held, Launch, LaunchId, Observed, Pane, PaneHost, Prepared, Readiness,
-    Records, Skill, Waiting, Window, Work,
+    Adapter, Admission, Held, Launch, Observed, Pane, PaneHost, Prepared, Readiness, Records,
+    Skill, Waiting, Window, Work,
 };
 use crate::detect::executable;
 use crate::records::{Options, Reading, Settlement};
@@ -185,11 +185,10 @@ impl Adapter for ClaudeAdapter {
         }
     }
 
-    fn specmint(&self, variant: Variant, launch: &LaunchId) -> Result<Skill, String> {
+    fn specmint(&self, variant: Variant) -> Result<Skill, String> {
         specmint::place(
             Harness::Claude,
             &self.env,
-            launch,
             variant,
             paths::global_specmint(&self.env, variant),
         )

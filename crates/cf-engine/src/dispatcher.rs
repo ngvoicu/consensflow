@@ -13,8 +13,10 @@
 //! the copy of each window's conversation (`transcripts`), the task whose
 //! window went away, its requester told once for the tasks of a pass (`stalls`),
 //! the human's Resume of a project a start suspended, and what a start
-//! leaves for it (`resume`), and the human's wake-up calls, which nudge a chief
-//! at rest (`wake_ups`).
+//! leaves for it (`resume`), the human's wake-up calls, which nudge a chief
+//! at rest (`wake_ups`), and a role that changed under a conversation whose
+//! harness keeps its first instructions, which its resumed window is told in a
+//! message (`role_change`).
 //!
 //! Work runs as Node's did ([`crate::runtime`]): a piece of work is begun
 //! where JavaScript called it, and what JavaScript did not await goes on

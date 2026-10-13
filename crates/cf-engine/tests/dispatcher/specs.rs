@@ -102,10 +102,8 @@ fn a_chief_of_a_project_with_specs_on_is_told_where_the_skill_is_and_given_it_at
     // Its next launch has it.
     relaunch(&context, project.id);
     let launch = chief_launch(&context, project.id);
-    let skill = format!(
-        "/consensflow/integrations/fake/{}/role/.claude/skills/specmint-tdd-html/SKILL.md",
-        launch["launchId"].as_str().unwrap()
-    );
+    let skill =
+        "/consensflow/integrations/specmint/fake/tdd-html/.claude/skills/specmint-tdd-html/SKILL.md";
     assert_eq!(
         launch["specs"],
         json!({ "variant": "tdd-html", "skill": skill, "installed": false })
@@ -114,13 +112,7 @@ fn a_chief_of_a_project_with_specs_on_is_told_where_the_skill_is_and_given_it_at
         launch["instructions"],
         format!("instructions for chief with specs: tdd-html in docs/specs at {skill}")
     );
-    assert_eq!(
-        *context.adapter.specmint_asked.borrow(),
-        [(
-            Variant::TddHtml,
-            launch["launchId"].as_str().unwrap().to_owned()
-        )]
-    );
+    assert_eq!(*context.adapter.specmint_asked.borrow(), [Variant::TddHtml]);
 }
 
 #[test]

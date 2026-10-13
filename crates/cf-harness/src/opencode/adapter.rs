@@ -48,14 +48,15 @@ use super::paths;
 use super::quota::retry_quota;
 use super::role::configure;
 use crate::contract::{
-    Adapter, Admission, Held, Launch, LaunchId, Observed, Pane, PaneHost, Prepared, Readiness,
-    Records, Skill, Window, Work,
+    Adapter, Admission, Held, Launch, Observed, Pane, PaneHost, Prepared, Readiness, Records,
+    Skill, Window, Work,
 };
 use crate::detect::executable;
 use crate::records::Options;
 use crate::seams::{Entropy, Loopback, Ports, Processes, Services, Time};
 use crate::shared::admission::admission;
 use crate::shared::record_state::{dialog_waiting, record_state, switched_to, unnamed};
+use crate::shared::specmint::OwnCopy;
 use crate::shared::{specmint, window_args};
 
 /// Why a window whose plugin does not answer waits.
@@ -104,11 +105,17 @@ impl Adapter for OpenCodeAdapter {
         Box::pin(async move {
             let executable = executable(Harness::Opencode, &self.env)?;
             let settings = prepare_extension(&self.env).into_config()?;
-            let role = configure(&self.env, launch.id, launch.role, launch.instructions)?;
             // A chief given specs has ConsensFlow's own copy of its Specmint
-            // skill written where the role's is: the folder `configure` told
-            // OpenCode to read its skills from, so nothing more is told of it.
-            specmint::write_own(Harness::Opencode, &self.env, launch)?;
+            // skill written where it is kept for every launch, and the skills
+            // folder of that copy is one more of those OpenCode is told to read.
+            let copy = specmint::write_own(Harness::Opencode, &self.env, launch)?;
+            let role = configure(
+                &self.env,
+                launch.id,
+                launch.role,
+                launch.instructions,
+                copy.as_ref().map(OwnCopy::skills),
+            )?;
             let launched = launch_configuration(
                 &self.env,
                 &*self.ports,
@@ -182,11 +189,10 @@ impl Adapter for OpenCodeAdapter {
         })
     }
 
-    fn specmint(&self, variant: Variant, launch: &LaunchId) -> Result<Skill, String> {
+    fn specmint(&self, variant: Variant) -> Result<Skill, String> {
         specmint::place(
             Harness::Opencode,
             &self.env,
-            launch,
             variant,
             paths::global_specmint(&self.env, variant),
         )

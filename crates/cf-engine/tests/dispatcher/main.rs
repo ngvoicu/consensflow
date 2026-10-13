@@ -52,6 +52,7 @@ mod receipts;
 mod restart;
 mod resume;
 mod review;
+mod role_change;
 mod separate_callbacks;
 mod servers;
 mod session_windows;

@@ -174,10 +174,10 @@ impl Dispatcher {
             return Ok(true);
         };
         let message = self.seams.ledger.borrow().message(delivering.message)?;
-        if message.is_none_or(|found| found.state != "delivering") {
+        let Some(message) = message.filter(|found| found.state == "delivering") else {
             record.delivery.borrow_mut().delivering = None;
             return Ok(true);
-        }
+        };
         let arrived = observed
             .items()
             .iter()
@@ -190,6 +190,7 @@ impl Dispatcher {
             .ledger
             .borrow_mut()
             .confirm_delivery(delivering.message, Some(&receipt))?;
+        self.role_delivered(&message)?;
         record.delivery.borrow_mut().delivering = None;
         self.changed();
         Ok(true)
@@ -439,6 +440,7 @@ impl Dispatcher {
             .ledger
             .borrow_mut()
             .fail_delivery(message.id, because)?;
+        self.fail_behind(message, because)?;
         let project = self.known_project(message.project_id)?;
         if let Some(number) = message.task_number.filter(|_| message.kind == "task") {
             let task = self.seams.ledger.borrow().task(project.id, number)?;
@@ -547,6 +549,7 @@ impl Dispatcher {
                         .ledger
                         .borrow_mut()
                         .confirm_delivery(message.id, Some(&receipt))?;
+                    self.role_delivered(&message)?;
                 }
             }
         }
