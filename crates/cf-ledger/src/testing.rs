@@ -13,7 +13,9 @@
 //!
 //! And migration 0015's three columns of the `project` table (what a project
 //! says of specs), which Node's projects never had: in the rows of that table
-//! and, as SQLite writes them into the table's text, in its schema.
+//! and, as SQLite writes them into the table's text, in its schema. And
+//! migration 0017's one (the line a human writes under a project's name),
+//! held apart as the wake-up columns are.
 //!
 //! What only Node's ledger had is held apart the other way round, on both
 //! sides: the mark that a project comes back by itself after a restart
@@ -21,6 +23,7 @@
 //! its database), which migration 0013 took away, is taken out of what Node
 //! recorded, where this ledger's has none to take out.
 
+mod described;
 mod specs;
 
 use serde_json::{Map, Value};
@@ -53,31 +56,36 @@ const NODE_NEVER_WRITES: [(&str, &str); 4] = [
     ("message", "door_closed_at"),
 ];
 
-/// The columns migration 0014 added to the `project` table, each as the
-/// migration says it (`wake_up_on INTEGER NOT NULL DEFAULT 0 CONSTRAINT …`,
-/// one to a line there): what Node's schema never had.
-fn wake_up_columns() -> impl Iterator<Item = &'static str> {
-    include_str!("../migrations/0014.sql")
-        .lines()
-        .filter_map(|line| {
-            line.trim()
-                .strip_prefix("ALTER TABLE project ADD COLUMN ")?
-                .strip_suffix(';')
-        })
+/// The columns migrations 0014 and 0017 added to the `project` table, each as
+/// the migration says it (`wake_up_on INTEGER NOT NULL DEFAULT 0 CONSTRAINT …`,
+/// `description TEXT`, one to a line there): what Node's schema never had.
+fn added_columns() -> impl Iterator<Item = &'static str> {
+    [
+        include_str!("../migrations/0014.sql"),
+        include_str!("../migrations/0017.sql"),
+    ]
+    .into_iter()
+    .flat_map(str::lines)
+    .filter_map(|line| {
+        line.trim()
+            .strip_prefix("ALTER TABLE project ADD COLUMN ")?
+            .strip_suffix(';')
+    })
 }
 
 /// `tables`, a database as the recorder dumps it (each table's `columns`
 /// and its `rows`), without what Node's ledger never writes: the four
-/// columns of migration 0011, the three wake-up columns of migration 0014 and
-/// the three of migration 0015 (their name and, in every row, the value at its
-/// place), and the stop in the event rows that paused a task. A dump from
-/// before the migrations has none of them, and is left as it is.
+/// columns of migration 0011, the three wake-up columns of migration 0014, the
+/// three of migration 0015 and the description of migration 0017 (their name
+/// and, in every row, the value at its place), and the stop in the event rows
+/// that paused a task. A dump from before the migrations has none of them, and
+/// is left as it is.
 pub fn hold_apart_what_node_never_writes(tables: &mut Map<String, Value>) {
     hold_apart_the_stop_of_logged_pauses(tables);
     for (table, column) in NODE_NEVER_WRITES.into_iter().chain(specs::COLUMNS) {
         take_column_out(tables, table, column);
     }
-    for column in wake_up_columns().filter_map(|definition| definition.split_whitespace().next()) {
+    for column in added_columns().filter_map(|definition| definition.split_whitespace().next()) {
         take_column_out(tables, "project", column);
     }
 }
@@ -112,8 +120,8 @@ fn take_column_out(tables: &mut Map<String, Value>, table: &str, column: &str) {
 /// `tables`), with the schema as Node's ledger had it: no version past the
 /// last Node's ledger had, no tester in the checks of the two tables that
 /// name the roles and the pools, and none of the columns of a project's wake-up
-/// calls or of what it says of specs in the table of the projects. A dump of
-/// Node's is left as it is.
+/// calls, of what it says of specs or of its description in the table of the
+/// projects. A dump of Node's is left as it is.
 pub fn hold_apart_what_node_never_had_in_its_schema(dump: &mut Value) {
     if let Some(version) = dump.get_mut("userVersion") {
         if version.as_i64().is_some_and(|at| at > NODE_LAST_VERSION) {
@@ -134,9 +142,10 @@ pub fn hold_apart_what_node_never_had_in_its_schema(dump: &mut Value) {
             }
             Some("project") => {
                 // SQLite wrote each column after the last one, as a comma and the
-                // column's text: the wake-up calls' columns one by one, then the
-                // three of specs, which `specs` holds as the one piece they are.
-                for column in wake_up_columns() {
+                // column's text: the wake-up calls' columns and the description
+                // one by one, and the three of specs, which `specs` holds as the
+                // one piece they are.
+                for column in added_columns() {
                     *sql = sql.replace(&format!(", {column}"), "");
                 }
                 *sql = sql.replace(specs::COLUMN_LINES, "");

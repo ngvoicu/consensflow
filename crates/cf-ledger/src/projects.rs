@@ -1,7 +1,10 @@
 //! Projects: each with its human, its chief and its staff, open or suspended,
 //! gated or not; every open one suspended when the daemon starts, for the human
 //! to resume, logged event by event, and deleted with everything in it once
-//! closed.
+//! closed. The human may rename one and write a line under its name
+//! ([`describing`]).
+
+mod describing;
 
 use cf_base::json::from_slice_lossy;
 use cf_proto::ledger::{DeletedProject, EventView, ProjectView};
@@ -9,11 +12,28 @@ use cf_proto::specs::SpecsView;
 use rusqlite::{params, OptionalExtension, Row};
 use serde_json::{json, Value};
 
+pub use describing::parse_description;
+pub(crate) use describing::{describe_project, rename_project};
+
 use crate::model::{self, LedgerError, COORDINATOR_HANDLES};
 use crate::staff::{add_participant, NewParticipant};
 use crate::store::Store;
 use crate::views::{participant_view, ParticipantRow, PARTICIPANT_SELECT};
 use crate::wake_ups::withdraw_queued;
+
+/// The most characters a project's name may have, when it is given and when
+/// the human changes it.
+const NAME_MAX: usize = 100;
+
+/// `value` read as a project's name: text that says something and fits.
+pub fn parse_name(value: Option<&Value>) -> Result<String, LedgerError> {
+    model::parse_text(value, "name", NAME_MAX)
+}
+
+/// A name a project is given or changed to: text that says something and fits.
+fn require_name(name: &str) -> Result<(), LedgerError> {
+    model::require_text(name, "name", NAME_MAX)
+}
 
 /// A project's row.
 pub(crate) struct ProjectRow {
@@ -28,6 +48,8 @@ pub(crate) struct ProjectRow {
     pub(crate) specs: Option<i64>,
     pub(crate) specs_folder: Option<String>,
     pub(crate) specs_variant: Option<String>,
+    /// The line the human wrote under the name; null where there is none.
+    pub(crate) description: Option<String>,
 }
 
 impl ProjectRow {
@@ -43,6 +65,7 @@ impl ProjectRow {
             specs: row.get("specs")?,
             specs_folder: row.get("specs_folder")?,
             specs_variant: row.get("specs_variant")?,
+            description: row.get("description")?,
         })
     }
 
@@ -92,7 +115,7 @@ impl NewProject {
     /// The request as JSON gives it, read in the order the Node ledger checked it.
     pub fn from_json(value: &Value) -> Result<Self, LedgerError> {
         let directory = model::parse_text(value.get("directory"), "directory", 4096)?;
-        let name = model::parse_text(value.get("name"), "name", 100)?;
+        let name = parse_name(value.get("name"))?;
         let chief = value.get("chief");
         let harness = model::parse_harness(chief.and_then(|chief| chief.get("harness")))?;
         let agent = match chief.and_then(|chief| chief.get("agent")) {
@@ -184,7 +207,7 @@ pub(crate) fn create_project(
     request: &NewProject,
 ) -> Result<ProjectView, LedgerError> {
     model::require_text(&request.directory, "directory", 4096)?;
-    model::require_text(&request.name, "name", 100)?;
+    require_name(&request.name)?;
     let chief_harness = model::require_harness(&request.chief.harness)?;
     if let Some(agent) = &request.chief.agent {
         model::require_agent_id(agent, &[])?;
@@ -271,6 +294,7 @@ pub(crate) fn project(store: &Store, id: i64) -> Result<Option<ProjectView>, Led
         updated_at: row.updated_at,
         participants,
         specs,
+        description: row.description,
     }))
 }
 

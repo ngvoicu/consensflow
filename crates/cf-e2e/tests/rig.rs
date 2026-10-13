@@ -35,7 +35,9 @@
 //! skill a chief of a project with specs on is given beside its role, and no
 //! worker, and no chief of a project with them off. So is `wake_ups`: the human's
 //! wake-up calls, which nudge a chief at rest; its two cases wait out a real
-//! minute each, the least a wake-up may wait.)
+//! minute each, the least a wake-up may wait. So is `described`: a project the
+//! human renames and writes a line under, which are in the event file and which no
+//! window is told of.)
 //!
 //! The cases take turns ([`cf_e2e::serial`]): each starts a daemon and a pane
 //! host of its own, with windows in real terminals, and the waits are timed.
@@ -66,6 +68,8 @@ mod core_tiered;
 mod daemon_seam;
 #[path = "rig/decided_result.rs"]
 mod decided_result;
+#[path = "rig/described.rs"]
+mod described;
 #[path = "rig/help.rs"]
 mod help;
 #[path = "rig/live_base.rs"]

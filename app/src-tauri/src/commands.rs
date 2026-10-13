@@ -230,6 +230,8 @@ const DAEMON_OPERATIONS: &[&str] = &[
     "wakeup.get",
     "wakeup.set",
     "project.specs",
+    "project.rename",
+    "project.describe",
 ];
 
 #[tauri::command]

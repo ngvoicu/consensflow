@@ -52,7 +52,7 @@ pub use ledger::{open_ledger, Event, Ledger, Options};
 pub use messages::{NewNote, NewQuestion, Read};
 pub use model::LedgerError;
 pub use page_reads::PAGE_BYTES;
-pub use projects::{NewChief, NewMember, NewProject};
+pub use projects::{parse_description, parse_name, NewChief, NewMember, NewProject};
 pub use schema::{migrate, MIGRATIONS, SCHEMA_VERSION};
 pub use specs::SpecsChange;
 pub use tasks::{NewTask, RESUME_WORDS};

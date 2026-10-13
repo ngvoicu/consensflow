@@ -177,6 +177,36 @@ button:disabled { opacity: .45; cursor: default; }
   cursor: pointer;
 }
 .project-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* What the human wrote under a project's name: one line, quieter than the name, cut with an
+   ellipsis where it is too long (its whole text is the title). */
+.project-description { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--muted); }
+.project-name + .project-description { margin-top: -3px; }
+/* A project's menu, opened where it was asked for and over whatever the page draws: it sits
+   outside the list, which would clip it. */
+.project-menu {
+  position: fixed;
+  z-index: 30;
+  min-width: 168px;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-raised);
+  box-shadow: 0 8px 24px var(--shadow);
+}
+.project-menu button {
+  display: block;
+  width: 100%;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.project-menu button:hover, .project-menu button:focus-visible { background: var(--panel); }
+.project-menu button:focus-visible { outline-offset: -2px; }
 .project-tools {
   display: flex;
   justify-content: flex-end;
@@ -831,6 +861,8 @@ dialog::backdrop { background: rgba(4, 12, 15, .6); }
   color: var(--foam);
 }
 .dialog-actions { display: flex; gap: 8px; justify-content: flex-end; }
+/* What the daemon refused, said under the field the human typed in. */
+.dialog-refusal { margin: 0; font-size: 12px; color: var(--buoy); }
 /* What a delete keeps on the board, and why. */
 .dialog-kept { margin: 0; padding-left: 18px; display: grid; gap: 4px; font-size: 12px; color: var(--amber); }
 .icon-button { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; padding: 0; border-radius: 8px; border: 1px solid var(--line); background: transparent; color: var(--muted); cursor: pointer; }

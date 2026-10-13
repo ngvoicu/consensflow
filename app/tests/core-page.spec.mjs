@@ -278,6 +278,9 @@ async function open(page, data = model()) {
         defaultText: saved.text === null,
       }
     }
+    // A project as the list has it and as its board has it: the daemon says one and the same.
+    const shownProject = (id) =>
+      [data.projects.find((project) => project.id === id), data.boards[id]?.project].filter(Boolean)
     const operations = {
       'projects.list': () => answer({ projects: data.projects }),
       'agents.list': () => answer({ agents: data.agents, missing: data.missing ?? [] }),
@@ -291,6 +294,28 @@ async function open(page, data = model()) {
       'project.gate': ({ project, gate }) => {
         data.boards[project].project.gate = gate
         return answer({ project: data.boards[project].project })
+      },
+      // A project renamed, and a line written under its name, as the daemon does it: checked,
+      // kept on the project of the list and on the one of its board, and refused in its words.
+      'project.rename': ({ project, name }) => {
+        if (typeof name !== 'string' || name.trim() === '' || name.length > 100) {
+          return { ok: false, error: 'name must be text, not empty, at most 100 characters' }
+        }
+        for (const shown of shownProject(project)) shown.name = name
+        return answer({ project: shownProject(project)[0] })
+      },
+      'project.describe': ({ project, description }) => {
+        const line = (description ?? '').trim()
+        if (line.length > 200) {
+          const error =
+            "a project's description is one line of plain text: it is at most 200 characters"
+          return { ok: false, error }
+        }
+        for (const shown of shownProject(project)) {
+          if (line === '') delete shown.description
+          else shown.description = line
+        }
+        return answer({ project: shownProject(project)[0] })
       },
       'wakeup.get': ({ project }) => answer({ wakeUp: wakeUpOf(project) }),
       'wakeup.set': ({ project, on, every, unit, text }) => {
@@ -3787,6 +3812,443 @@ test('resumes a suspended project from the list', async ({ page }) => {
   await open(page)
   await page.getByRole('button', { name: 'Resume foundry' }).click()
   await expect.poll(() => calls(page, 'project.resume')).toEqual([{ project: 2 }])
+})
+
+// --- The project menu: a right-click, or the keyboard, on a project in the list. ---
+
+/** A project's card in the list, by id, the button that chooses it, and its menu. */
+const projectCard = (page, id) => page.locator(`li.project[data-project="${id}"]`)
+const projectButton = (page, id) => projectCard(page, id).locator('.project-select')
+const projectMenu = (page) => page.getByRole('menu')
+const itemNamed = (page, name) => projectMenu(page).getByRole('menuitem', { name })
+
+/** The menu, opened on project `id` by a right-click on its button. */
+async function menuOn(page, id, position) {
+  await projectButton(page, id).click({ button: 'right', position })
+  await expect(projectMenu(page)).toBeVisible()
+}
+
+/**
+ * The page's timers set so far have run: one set now, with the same delay, runs after them. The
+ * menu gives the keyboard back to a project once a click has had its way with the focus, in a
+ * timer a few milliseconds after it, so what a test says of the focus after a click waits for it.
+ */
+const settled = (page) => page.evaluate(() => new Promise((done) => setTimeout(done)))
+
+/** The dialog an item of the menu opens, for project `id`. */
+async function dialogFrom(page, id, item, title) {
+  await menuOn(page, id)
+  await itemNamed(page, item).click()
+  const dialog = page.getByRole('dialog', { name: title })
+  await expect(dialog).toBeVisible()
+  return dialog
+}
+
+test('project menu: a right-click on a project opens its menu beside the pointer, Rename and Description, and selects nothing', async ({
+  page,
+}) => {
+  await open(page)
+  // foundry is not the project shown: the menu is for the one right-clicked.
+  const button = await projectButton(page, 2).boundingBox()
+  await menuOn(page, 2, { x: 40, y: 10 })
+  await expect(projectMenu(page).getByRole('menuitem')).toHaveText(['Rename…', 'Description…'])
+  await expect(projectMenu(page)).toHaveAccessibleName('foundry')
+  await expect(itemNamed(page, 'Rename…')).toBeFocused()
+  const opened = await projectMenu(page).boundingBox()
+  expect(Math.abs(opened.x - (button.x + 40))).toBeLessThan(2)
+  expect(Math.abs(opened.y - (button.y + 10))).toBeLessThan(2)
+  await expect(page.locator('#project-title')).toHaveText('harbour')
+  await expect(projectButton(page, 1)).toHaveAttribute('aria-current', 'true')
+  await expect(projectButton(page, 2)).toHaveAttribute('aria-current', 'false')
+  // The tools of a card are part of the project: a right-click there is the same.
+  await page.keyboard.press('Escape')
+  await page.getByRole('button', { name: 'Close harbour' }).click({ button: 'right' })
+  await expect(projectMenu(page)).toHaveAccessibleName('harbour')
+  // The menu is the page's: the browser's own is taken away on a project, and left where the
+  // list has none of one.
+  await page.keyboard.press('Escape')
+  const taken = (locator) =>
+    locator.evaluate((node) => {
+      const asked = new MouseEvent('contextmenu', { bubbles: true, cancelable: true })
+      node.dispatchEvent(asked)
+      return asked.defaultPrevented
+    })
+  expect(await taken(projectButton(page, 1))).toBe(true)
+  await page.keyboard.press('Escape')
+  expect(await taken(page.locator('#project-title'))).toBe(false)
+  await expect(projectMenu(page)).toBeHidden()
+})
+
+test('project menu: a menu that would run off the window is kept inside it', async ({ page }) => {
+  await page.setViewportSize({ width: 900, height: 250 })
+  await open(page)
+  await menuOn(page, 2, { x: 190, y: 20 })
+  const box = await projectMenu(page).boundingBox()
+  expect(box.y + box.height).toBeLessThanOrEqual(250)
+  expect(box.x + box.width).toBeLessThanOrEqual(900)
+  expect(box.y).toBeGreaterThanOrEqual(0)
+})
+
+test('project menu: Shift+F10 and the context-menu key open it on the project the keyboard is on, and the arrow keys choose', async ({
+  page,
+}) => {
+  await open(page)
+  await projectButton(page, 2).focus()
+  await page.keyboard.press('Shift+F10')
+  await expect(projectMenu(page)).toBeVisible()
+  await expect(projectMenu(page)).toHaveAccessibleName('foundry')
+  await expect(itemNamed(page, 'Rename…')).toBeFocused()
+  // Where there is no pointer it opens at the project's button: its left edge, just under it.
+  // (The browser has its own place for the context-menu key, at the control the keyboard is on.)
+  const anchored = async (id) => {
+    const [menu, button] = await Promise.all([
+      projectMenu(page).boundingBox(),
+      projectButton(page, id).boundingBox(),
+    ])
+    expect(Math.abs(menu.x - button.x)).toBeLessThan(2)
+    expect(Math.abs(menu.y - (button.y + button.height))).toBeLessThan(2)
+  }
+  await anchored(2)
+  await page.keyboard.press('Escape')
+  await expect(projectMenu(page)).toBeHidden()
+  await expect(projectButton(page, 2)).toBeFocused()
+
+  // The context-menu key, from any control of a card: it is the card's project.
+  await page.getByRole('button', { name: 'Close harbour' }).focus()
+  await page.keyboard.press('ContextMenu')
+  await expect(projectMenu(page)).toBeVisible()
+  await expect(projectMenu(page)).toHaveAccessibleName('harbour')
+  await anchored(1)
+  // The arrow keys go round the items, Home and End to either end.
+  await expect(itemNamed(page, 'Rename…')).toBeFocused()
+  await page.keyboard.press('ArrowDown')
+  await expect(itemNamed(page, 'Description…')).toBeFocused()
+  await page.keyboard.press('ArrowDown')
+  await expect(itemNamed(page, 'Rename…')).toBeFocused()
+  await page.keyboard.press('ArrowUp')
+  await expect(itemNamed(page, 'Description…')).toBeFocused()
+  await page.keyboard.press('Home')
+  await expect(itemNamed(page, 'Rename…')).toBeFocused()
+  await page.keyboard.press('End')
+  await expect(itemNamed(page, 'Description…')).toBeFocused()
+  // Enter chooses the item the keyboard is on.
+  await page.keyboard.press('Enter')
+  await expect(projectMenu(page)).toBeHidden()
+  await expect(page.getByRole('dialog', { name: 'Project description' })).toBeVisible()
+  await page.keyboard.press('Escape')
+  // The dialog gives the keyboard back to the project as it closes: after that, not before.
+  await expect(page.getByRole('dialog', { name: 'Project description' })).toBeHidden()
+  await expect(projectButton(page, 1)).toBeFocused()
+
+  // Anywhere but on a project the keys open nothing.
+  await page.locator('#inbox-button').focus()
+  await page.keyboard.press('Shift+F10')
+  await page.keyboard.press('ContextMenu')
+  await expect(projectMenu(page)).toBeHidden()
+})
+
+test('project menu: Escape closes it, and so does a click elsewhere, the keyboard going back to the project', async ({
+  page,
+}) => {
+  await open(page)
+  await menuOn(page, 1)
+  await page.keyboard.press('Escape')
+  await expect(projectMenu(page)).toBeHidden()
+  await expect(projectButton(page, 1)).toBeFocused()
+  // A click on nothing in particular.
+  await menuOn(page, 2)
+  await page.locator('#project-title').click()
+  await expect(projectMenu(page)).toBeHidden()
+  await expect(projectButton(page, 2)).toBeFocused()
+  // A click on a control is that control's: the menu is shut, and the control keeps the keyboard.
+  await menuOn(page, 2)
+  await page.locator('#inbox-button').click()
+  await settled(page)
+  await expect(projectMenu(page)).toBeHidden()
+  await expect(page.locator('#inbox-button')).toBeFocused()
+  // Tab leaves the menu, back to the project.
+  await menuOn(page, 1)
+  await page.keyboard.press('Tab')
+  await expect(projectMenu(page)).toBeHidden()
+  await expect(projectButton(page, 1)).toBeFocused()
+  // A right-click on another project moves the menu there, and the keyboard is the new menu's.
+  await menuOn(page, 1, { x: 190, y: 5 })
+  await menuOn(page, 2, { x: 30, y: 10 })
+  await settled(page)
+  await expect(projectMenu(page)).toHaveAccessibleName('foundry')
+  await expect(itemNamed(page, 'Rename…')).toBeFocused()
+  // None of it asked the daemon for a change.
+  expect(await calls(page, 'project.rename')).toEqual([])
+  expect(await calls(page, 'project.describe')).toEqual([])
+})
+
+test('project menu: a board drawn again leaves the menu open, and Escape then goes back to the project as it is drawn now', async ({
+  page,
+}) => {
+  await open(page)
+  await menuOn(page, 1)
+  await changed(page, () => {
+    for (const shown of [window.__model.projects[0], window.__model.boards[1].project]) {
+      shown.name = 'harbour two'
+    }
+  })
+  await expect(projectButton(page, 1).locator('.project-name')).toHaveText('harbour two')
+  await expect(projectMenu(page)).toBeVisible()
+  await expect(itemNamed(page, 'Rename…')).toBeFocused()
+  await page.keyboard.press('Escape')
+  await expect(projectMenu(page)).toBeHidden()
+  await expect(projectButton(page, 1)).toBeFocused()
+})
+
+test('project menu: Rename… saves with Enter, and the new name is in the list, over the board and in the buttons named after it', async ({
+  page,
+}) => {
+  await open(page)
+  const dialog = await dialogFrom(page, 1, 'Rename…', 'Rename project')
+  const name = dialog.getByLabel('Name')
+  await expect(name).toHaveValue('harbour')
+  await expect(name).toBeFocused()
+  // What is there is selected, to be typed over.
+  expect(
+    await name.evaluate((input) => input.value.slice(input.selectionStart, input.selectionEnd)),
+  ).toBe('harbour')
+  await name.fill('  Quay  ')
+  await name.press('Enter')
+  await expect.poll(() => calls(page, 'project.rename')).toEqual([{ project: 1, name: 'Quay' }])
+  await expect(dialog).toBeHidden()
+  await expect(projectButton(page, 1).locator('.project-name')).toHaveText('Quay')
+  await expect(page.locator('#project-title')).toHaveText('Quay')
+  await expect(page.getByRole('button', { name: 'Close Quay' })).toBeVisible()
+  await expect(page.locator('#status')).toHaveText('harbour is now Quay.')
+  // The keyboard is on the project, drawn again under its new name.
+  await expect(projectButton(page, 1)).toBeFocused()
+  // The folder is the one the project was opened in, and another project is as it was.
+  await expect(page.locator('#project-directory')).toHaveText('/work/harbour')
+  await expect(projectButton(page, 2).locator('.project-name')).toHaveText('foundry')
+  // Opened again, it shows what was saved.
+  await dialogFrom(page, 1, 'Rename…', 'Rename project')
+  await expect(name).toHaveValue('Quay')
+})
+
+test('project menu: Enter pressed twice while the daemon answers asks it once', async ({
+  page,
+}) => {
+  await open(page)
+  await page.evaluate(() => {
+    window.__delay['project.rename'] = 300
+  })
+  const dialog = await dialogFrom(page, 1, 'Rename…', 'Rename project')
+  const name = dialog.getByLabel('Name')
+  await name.fill('Quay')
+  await name.press('Enter')
+  await name.press('Enter')
+  await expect(dialog).toBeHidden()
+  expect(await calls(page, 'project.rename')).toEqual([{ project: 1, name: 'Quay' }])
+  await expect(projectButton(page, 1).locator('.project-name')).toHaveText('Quay')
+})
+
+test('project menu: Escape in the rename dialog, and Cancel, leave the name and ask the daemon nothing', async ({
+  page,
+}) => {
+  await open(page)
+  const dialog = await dialogFrom(page, 1, 'Rename…', 'Rename project')
+  const name = dialog.getByLabel('Name')
+  await name.fill('Quay')
+  await page.keyboard.press('Escape')
+  await expect(dialog).toBeHidden()
+  await expect(projectButton(page, 1)).toBeFocused()
+  await dialogFrom(page, 1, 'Rename…', 'Rename project')
+  // What was typed is not kept: it opens on the name as it is.
+  await expect(name).toHaveValue('harbour')
+  await name.fill('Quay')
+  await dialog.getByRole('button', { name: 'Cancel' }).click()
+  await expect(dialog).toBeHidden()
+  await expect(projectButton(page, 1)).toBeFocused()
+  expect(await calls(page, 'project.rename')).toEqual([])
+  await expect(projectButton(page, 1).locator('.project-name')).toHaveText('harbour')
+  await expect(page.locator('#project-title')).toHaveText('harbour')
+})
+
+test('project menu: what the daemon refuses is said in the dialog, which stays open on what was typed', async ({
+  page,
+}) => {
+  await open(page)
+  const dialog = await dialogFrom(page, 1, 'Rename…', 'Rename project')
+  const name = dialog.getByLabel('Name')
+  const refusal = dialog.getByRole('alert')
+  await expect(refusal).toBeHidden()
+  // A field left empty is the browser's to stop: nothing is asked of the daemon.
+  await name.fill('')
+  await name.press('Enter')
+  await expect(dialog).toBeVisible()
+  expect(await calls(page, 'project.rename')).toEqual([])
+  // Nothing but spaces gets past the field, and is the daemon's to refuse.
+  await name.fill('   ')
+  await name.press('Enter')
+  await expect(refusal).toHaveText('name must be text, not empty, at most 100 characters')
+  await expect(dialog).toBeVisible()
+  await expect(name).toHaveValue('   ')
+  expect(await calls(page, 'project.rename')).toEqual([{ project: 1, name: '' }])
+  // The field stops at the most a name may have; one that gets past it (a field that does not
+  // stop it) is refused all the same.
+  await name.fill('x'.repeat(150))
+  expect((await name.inputValue()).length).toBe(100)
+  await name.evaluate((input) => input.removeAttribute('maxlength'))
+  await name.fill('x'.repeat(101))
+  await name.press('Enter')
+  await expect.poll(async () => (await calls(page, 'project.rename')).length).toBe(2)
+  await expect(refusal).toHaveText('name must be text, not empty, at most 100 characters')
+  await expect(name).toHaveValue('x'.repeat(101))
+  await expect(projectButton(page, 1).locator('.project-name')).toHaveText('harbour')
+  // Mended and saved, the refusal goes with the dialog, and is not there when it opens again.
+  await name.fill('Quay')
+  await name.press('Enter')
+  await expect(dialog).toBeHidden()
+  await expect(projectButton(page, 1).locator('.project-name')).toHaveText('Quay')
+  await dialogFrom(page, 1, 'Rename…', 'Rename project')
+  await expect(refusal).toBeHidden()
+})
+
+test('project menu: Description… writes a line under the name, smaller and quieter, cut with an ellipsis and whole on hover', async ({
+  page,
+}) => {
+  await open(page)
+  const dialog = await dialogFrom(page, 1, 'Description…', 'Project description')
+  const line = dialog.getByLabel('Description')
+  await expect(line).toHaveValue('')
+  await expect(line).toHaveAttribute('maxlength', '200')
+  const whole =
+    'Ships the cargo to the quay and back again, every tide, with not a day off in the whole year'
+  await line.fill(`  ${whole}  `)
+  await line.press('Enter')
+  await expect
+    .poll(() => calls(page, 'project.describe'))
+    .toEqual([{ project: 1, description: whole }])
+  await expect(dialog).toBeHidden()
+  await expect(page.locator('#status')).toHaveText('The description of harbour is saved.')
+  await expect(projectButton(page, 1)).toBeFocused()
+  const name = projectButton(page, 1).locator('.project-name')
+  const shown = projectButton(page, 1).locator('.project-description')
+  await expect(shown).toHaveText(whole)
+  // Under the name, smaller and quieter than it.
+  const [nameBox, shownBox] = await Promise.all([name.boundingBox(), shown.boundingBox()])
+  expect(shownBox.y).toBeGreaterThanOrEqual(nameBox.y + nameBox.height - 1)
+  const looks = (locator) =>
+    locator.evaluate((node) => {
+      const style = getComputedStyle(node)
+      return { size: Number.parseFloat(style.fontSize), color: style.color }
+    })
+  const [nameLooks, shownLooks] = await Promise.all([looks(name), looks(shown)])
+  expect(shownLooks.size).toBeLessThan(nameLooks.size)
+  expect(shownLooks.color).not.toBe(nameLooks.color)
+  // Cut with an ellipsis where it is too long for the list, and whole on hover.
+  expect(
+    await shown.evaluate(
+      (node) =>
+        node.scrollWidth > node.clientWidth && getComputedStyle(node).textOverflow === 'ellipsis',
+    ),
+  ).toBe(true)
+  await expect(shown).toHaveAttribute('title', whole)
+  await shown.hover()
+  // The line is the human's alone: the board and the other project show nothing of it.
+  await expect(page.locator('.board')).not.toContainText('Ships the cargo')
+  await expect(projectButton(page, 2).locator('.project-description')).toHaveCount(0)
+  // Written again, it is a line of the daemon's too: a short one is not cut.
+  await dialogFrom(page, 1, 'Description…', 'Project description')
+  await expect(line).toHaveValue(whole)
+  await line.fill('Moves the cargo')
+  await line.press('Enter')
+  await expect(shown).toHaveText('Moves the cargo')
+  expect(await shown.evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true)
+  await expect(shown).toHaveAttribute('title', 'Moves the cargo')
+})
+
+test('project menu: saving an empty description takes the line away, and the dialog shows what was saved when it opens again', async ({
+  page,
+}) => {
+  const data = model()
+  for (const shown of [data.projects[0], data.boards[1].project]) {
+    shown.description = 'Moves the cargo'
+  }
+  await open(page, data)
+  const shown = projectButton(page, 1).locator('.project-description')
+  await expect(shown).toHaveText('Moves the cargo')
+  const dialog = await dialogFrom(page, 1, 'Description…', 'Project description')
+  const line = dialog.getByLabel('Description')
+  // It opens on the line the project has.
+  await expect(line).toHaveValue('Moves the cargo')
+  await line.fill('')
+  await line.press('Enter')
+  await expect
+    .poll(() => calls(page, 'project.describe'))
+    .toEqual([{ project: 1, description: '' }])
+  await expect(dialog).toBeHidden()
+  await expect(shown).toHaveCount(0)
+  await expect(page.locator('#status')).toHaveText('harbour has no description.')
+  await expect(projectButton(page, 1)).toBeFocused()
+  // Opened again, it is empty; spaces alone are no line either.
+  await dialogFrom(page, 1, 'Description…', 'Project description')
+  await expect(line).toHaveValue('')
+  await line.fill('   ')
+  await line.press('Enter')
+  await expect(dialog).toBeHidden()
+  expect(await calls(page, 'project.describe')).toEqual([
+    { project: 1, description: '' },
+    { project: 1, description: '' },
+  ])
+  await expect(shown).toHaveCount(0)
+})
+
+test('project menu: a line the daemon refuses is said in the dialog, and a dialog opens on the project as it is now', async ({
+  page,
+}) => {
+  await open(page)
+  const dialog = await dialogFrom(page, 1, 'Description…', 'Project description')
+  const line = dialog.getByLabel('Description')
+  const refusal = dialog.getByRole('alert')
+  // The field stops at two hundred; one that gets past it is refused in the daemon's words.
+  await line.evaluate((input) => input.removeAttribute('maxlength'))
+  await line.fill('a'.repeat(201))
+  await line.press('Enter')
+  await expect(refusal).toHaveText(
+    "a project's description is one line of plain text: it is at most 200 characters",
+  )
+  await expect(dialog).toBeVisible()
+  await expect(line).toHaveValue('a'.repeat(201))
+  await line.fill('First')
+  await line.press('Enter')
+  await expect(dialog).toBeHidden()
+  await expect(projectButton(page, 1).locator('.project-description')).toHaveText('First')
+  // The daemon has another line by the time it opens again: it shows that one, not the last drawn.
+  await changed(page, () => {
+    for (const shown of [window.__model.projects[0], window.__model.boards[1].project]) {
+      shown.description = 'Elsewhere'
+    }
+  })
+  await dialogFrom(page, 1, 'Description…', 'Project description')
+  await expect(line).toHaveValue('Elsewhere')
+  await expect(refusal).toBeHidden()
+})
+
+test('project menu: a closed project is renamed and described from its menu as an open one is', async ({
+  page,
+}) => {
+  await open(page)
+  const rename = await dialogFrom(page, 2, 'Rename…', 'Rename project')
+  await rename.getByLabel('Name').fill('forge')
+  await rename.getByLabel('Name').press('Enter')
+  await expect.poll(() => calls(page, 'project.rename')).toEqual([{ project: 2, name: 'forge' }])
+  await expect(projectButton(page, 2).locator('.project-name')).toHaveText('forge')
+  await expect(page.getByRole('button', { name: 'Resume forge' })).toBeVisible()
+  const describe = await dialogFrom(page, 2, 'Description…', 'Project description')
+  await describe.getByLabel('Description').fill('Where the iron goes')
+  await describe.getByLabel('Description').press('Enter')
+  await expect(projectButton(page, 2).locator('.project-description')).toHaveText(
+    'Where the iron goes',
+  )
+  // The project shown is the one it was, whatever was done to the other.
+  await expect(page.locator('#project-title')).toHaveText('harbour')
+  await expect(projectButton(page, 1).locator('.project-name')).toHaveText('harbour')
 })
 
 test("counts the human's unread notes on Inbox, and opens For you with it, from a folded board too", async ({

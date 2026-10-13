@@ -83,3 +83,14 @@ rows, and `hold_apart_what_node_never_had_in_its_schema` for the text of the tab
 No answer of Node's says anything of specs: a project's view holds `specs` only once
 the human has said something of them, and the ledger's `project.specs` event is its
 own.
+
+Migration 0017 (the line a human writes under a project's name, which no agent is told:
+one nullable column of `project`, numbered to leave 0016 to another landing, whose place
+a file that changes nothing holds until it is merged) added what Node's projects never had. Every `final`
+lacks the column `description` and its text in the schema of `project`, and the replay
+takes them out of what this ledger left as it does the wake-up columns, which it reads
+from the migration's own line (`cf_ledger::testing::hold_apart_what_node_never_writes`
+for the rows, and `hold_apart_what_node_never_had_in_its_schema` for the text of the
+table). No answer of Node's says anything of it: a project's view holds `description`
+only while there is a line, and the ledger's `project.renamed` and `project.described`
+events are its own. Nothing a recording holds is rewritten.
