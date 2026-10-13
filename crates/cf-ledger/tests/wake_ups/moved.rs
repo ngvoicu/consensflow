@@ -100,6 +100,37 @@ fn the_human_typing_to_the_chief_in_its_window_counts_and_what_a_delivery_made_d
 }
 
 #[test]
+fn what_a_harness_put_in_its_record_before_the_wake_up_is_no_typing_though_copied_with_it() {
+    // Codex writes its `# AGENTS.md instructions` as a user item when its first
+    // turn begins: the wake-up's own turn, so it is first copied with it.
+    let mut w = world();
+    w.turn_on(1, WakeUpUnit::Minutes);
+    let conversation = w.ledger.start_conversation(w.id("chief"), "codex").unwrap();
+    w.advance(MINUTE);
+    let wake_up = w.wake_and_deliver();
+    let preamble = item("i-1", "user", "# AGENTS.md instructions for /project");
+    let header = item(
+        "i-2",
+        "user",
+        &format!(
+            "[ConsensFlow m-{} · note from @human]\nDo you still have work to do?",
+            wake_up.id
+        ),
+    );
+    let reply = item("i-3", "assistant", "Nothing left.");
+    // The window's record is read a moment after the delivery, as a live one is.
+    w.advance(1000);
+    w.ledger
+        .copy_transcript(conversation.id, &[preamble, header, reply], 0)
+        .unwrap();
+    w.advance(DAY);
+    assert!(
+        w.due().is_none(),
+        "what the record held before the wake-up came is no news after it"
+    );
+}
+
+#[test]
 fn an_item_copied_again_as_it_was_is_not_new_and_one_a_tool_wrote_is_no_typing() {
     let mut w = world();
     w.turn_on(1, WakeUpUnit::Minutes);

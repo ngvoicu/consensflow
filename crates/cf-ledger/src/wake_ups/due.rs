@@ -146,7 +146,7 @@ fn changed_since(store: &Store, project_id: i64, last: &Last) -> Result<bool, Le
         return Ok(true);
     }
     let chief = store.participant_by_handle(project_id, "chief")?;
-    typed_since(store, chief.id, &last.at)
+    typed_since(store, chief.id, &last.at, last.message)
 }
 
 /// Queues the project's wake-up if it is due at `now_ms`, and logs it: the
