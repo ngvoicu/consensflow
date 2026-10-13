@@ -132,7 +132,7 @@ fn a_harness_is_asked_to_start_the_command_in_the_background_and_answer_and_the_
     assert!(!asked.contains('\n'), "a brief is one line");
     assert_eq!(
         brief(Who::StandIn),
-        format!("BACKGROUND {SECONDS} left a job running")
+        format!("BACKGROUND --detach {SECONDS} left a job running")
     );
     // The command is the platform's own.
     assert!(

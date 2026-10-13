@@ -34,7 +34,7 @@ use cf_ledger::{
 use cf_proto::panes::PaneExit;
 use cf_proto::trace::{TraceLine, Traced, WindowEvent};
 
-use crate::background::{agent_processes, quote};
+use crate::background::quote;
 use crate::chief_switch::SwitchTo;
 use crate::record::Record;
 use crate::resume::Coming;
@@ -731,7 +731,9 @@ impl Dispatcher {
             }
         } else {
             let task = self.seams.ledger.borrow().active_task(record.id, false)?;
-            let left = agent_processes(participant.harness.as_deref(), shown.left_running());
+            // What the host lists is the turn's work, by its own proof, as it was when the
+            // window closed.
+            let left = shown.left_running();
             if let Some(thread) = task {
                 // The pause note says what the close ended, where there was any.
                 let because = if left.is_empty() {
@@ -740,12 +742,12 @@ impl Dispatcher {
                     format!(
                         "@{}'s window closed with background work still running: {}",
                         participant.handle,
-                        quote(&left)
+                        quote(left)
                     )
                 };
                 self.stall(&project, &thread.task, &because)?;
             } else {
-                self.tell_left_running(&project, &participant, &left)?;
+                self.tell_left_running(&project, &participant, left)?;
             }
         }
         self.changed();
@@ -903,19 +905,12 @@ impl Dispatcher {
                 self.go_on(project, participant)?;
             } else if let Some(task) = self.collect(project, participant, &observed)? {
                 // Its answer is its result at once, whatever the turn left running.
-                self.end_turn_work(
-                    project,
-                    participant,
-                    record,
-                    &task,
-                    observed.agents_pending(),
-                )
-                .await?;
-                // The participant may have been forgotten, or the window closed,
-                // while the host answered.
-                if self.forgotten(record) || record.window.borrow().pane.is_none() {
-                    return Ok(());
-                }
+                // What it left is ended, whoever gave the task told and the window
+                // closed if it is free, as work of the window's own apart from this
+                // pass: the grace the host gives what it ends is no other window's wait.
+                self.end_work_apart(project, record, task, observed.agents_pending())
+                    .await;
+                return Ok(());
             }
             if self.close_if_free(record).await? {
                 return Ok(());

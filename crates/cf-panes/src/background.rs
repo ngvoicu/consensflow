@@ -2,53 +2,54 @@
 //! that outlives its turn (a job in the background, a monitor it armed) and
 //! end the turn. The turn's end is the task's result all the same (the owner's
 //! decision of 2026-10-13), and the daemon asks for what the turn left to be
-//! ended once it has taken the result ([`Baseline::ending`], below), the window
+//! ended once it has taken the result (`pane.end_background`), the window
 //! staying open; closing the window ends all of it, on Unix once it was asked to
 //! end and given time to release what it holds, on Windows at once with no chance
 //! to (`pty::close` says why).
 //!
+//! The host looks at the window's **tree**: every process the window's program
+//! started, wherever it went ([`Member`]). On macOS that is its children and what
+//! descends from them, what is in the window's session (a job the agent detached
+//! with `nohup … &` from a shell that then ended is left to the system's init,
+//! and keeps the session it was started in), what the host saw the window's
+//! program and its children start as they started it (a harness that gives each
+//! command a shell in a session of its own leaves the job in that one, which the
+//! window's does not hold), and whatever carries the pane's marker in its
+//! environment (a process that left its session). On Windows it is
+//! the pane's job object: a process joins it when it is started and leaves it only
+//! by breaking away (`CREATE_BREAKAWAY_FROM_JOB`), which the job does not allow, so
+//! a job whose shell has gone is in it still.
+//!
 //! The host cannot tell a program from the work it started by anything the
 //! program is: an MCP server and a recording run are both children of the
-//! harness. It tells them by when they began. The daemon says a turn is about
-//! to begin (`pane.mark`), and the host keeps the processes its tree has then:
-//! the harness, its servers, its language servers. What the tree has later that
-//! is not among them is what the turn started ([`Baseline::left_running`]).
-//! A process is known by its number and by when it began, so a process that
-//! took the number of one that ended is not mistaken for it.
+//! harness. The daemon says a turn is about to begin (`pane.mark`), and the host
+//! keeps the processes its tree has then: the harness, its servers, its language
+//! servers. What the tree has later that is not among them began after the turn
+//! did ([`Baseline::turn_work`] looks only at that). A process is known by its
+//! number and by when it began, so a process that took the number of one that ended
+//! is not mistaken for it; everything the host does to a process it does to the one
+//! it chose, by that, never to the number a later look finds.
 //!
-//! Time alone is wrong for a server that begins after the mark, and for what a
-//! server starts. Claude Code starts its MCP servers as it takes its first
-//! message, which the daemon marks once it shows in the record, so they began
-//! after the mark and were taken for the turn's work (found on 3.0.1: a worker's
-//! task was never done); and what a server starts (a watchdog, the browser a tool
-//! launches, each in a group of its own) is the same wherever it began, as is
-//! what Codex's plugins started with the window start later. Where the daemon
-//! says how the window's harness keeps its servers (`pane.mark`'s `servers`) the
-//! host also goes by process group and by which process started which
-//! ([`harness`] says how); a process of a harness that is not known to keep them
-//! in a way is told by time alone, as it always was.
-//!
-//! Ending what a turn left is the daemon's to ask, once it has taken the turn's
-//! answer for the task's result (`pane.end_background`), and the window stays
-//! open. The host ends only what it tells for the turn's with no doubt
-//! ([`Baseline::ending`]): where the daemon said how the harness keeps its servers
-//! that is all of what [`Baseline::left_running`] lists, and where it did not (a
-//! harness not known to keep them in a way, and every harness on Windows) it is
-//! the commands the agent's shells run ([`shells`] says why), because by time
-//! alone a server the harness starts late cannot be told from a job. What it
-//! cannot tell is left running, and said so.
+//! Of what began after the mark the host calls only what it can prove the turn's
+//! the turn's ([`work`] says how): a shell, what it started, and what has no parent
+//! left. A server the harness starts late is none of these, and it is not told
+//! apart from a job by when it began: the host leaves it alone, and says nothing of
+//! it. And nothing the host can tell the harness's own is ever the turn's, by where
+//! the harness keeps its servers or by the programs it is named for ([`harness`]
+//! says how). So what is listed, ended and named is the turn's work and nothing of
+//! the rest, and a process that cannot be told is left as it is.
 //!
 //! Only looking at the tree is the platform's: the macOS process tree and the
-//! Windows job object each list their members ([`Member`]), with the program each
-//! runs, the group each is in (macOS; a job object has none) and the process that
-//! started it where the platform says (macOS, and Windows by the parent each
-//! process names, which is the process that started it only while that one is
-//! there); the rest is here.
+//! Windows job object each list their members, with the program each runs and the
+//! path it runs from, the group each is in (macOS; a job object has none) and the
+//! process that started it where the platform says (macOS, and Windows by the
+//! parent each process names, which is the process that started it only while that
+//! one is there); the rest is here.
 
 mod harness;
-mod shells;
+mod work;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use cf_proto::panes::{Background, BackgroundProcess, Ending, BACKGROUND_PROCESSES, COMMAND_CHARS};
 
@@ -62,31 +63,47 @@ pub(crate) struct ProcessKey {
     pub began: u64,
 }
 
-/// A process of a pane's tree and the command line it was started with, as far
-/// as the platform let it be read.
+/// Which process of the tree started a member, as far as the platform says.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Parent {
+    /// The platform did not say. Nothing is told of the member by it.
+    Unknown,
+    /// It names a process that is no member of the tree: the process that started
+    /// it has gone (the system keeps naming a parent that went, which is no member
+    /// either), or it is the window's program, which the tree starts at.
+    Gone,
+    /// The process of the tree that started it.
+    Of(ProcessKey),
+}
+
+impl Parent {
+    /// The process that started it, where it is one of the tree.
+    pub fn of(self) -> Option<ProcessKey> {
+        match self {
+            Self::Of(parent) => Some(parent),
+            Self::Unknown | Self::Gone => None,
+        }
+    }
+}
+
+/// A process of a pane's tree: the command line it was started with, and what the
+/// platform could read of the rest.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Member {
     pub key: ProcessKey,
+    /// The command line, as far as the platform let it be read; the program alone
+    /// where it could read no more.
     pub command: String,
     /// The name of the program it runs, as the system keeps it (`zsh`, `bash.exe`):
     /// empty where it could not be read.
     pub program: String,
+    /// The whole path the program runs from, as the system keeps it, with no word of
+    /// a command line in it: empty where it could not be read.
+    pub exe: String,
     /// The process group it is in; none where the platform says none (a Windows
     /// job object has no groups).
     pub group: Option<i32>,
-    /// The process that started it, where that is another process of the tree:
-    /// none for the window's program, and for a process whose parent has gone
-    /// (the system keeps naming the parent it was started by, which is no process
-    /// of the tree).
-    pub parent: Option<ProcessKey>,
-}
-
-/// What an ending is to do ([`Baseline::ending`]): the processes to end, and those
-/// it was asked to end and leaves.
-#[derive(Debug, Default, PartialEq, Eq)]
-pub(crate) struct Plan {
-    pub end: Vec<Member>,
-    pub left: Vec<Member>,
+    pub parent: Parent,
 }
 
 /// The processes of a pane's tree when its turn began; none until the daemon
@@ -102,18 +119,23 @@ pub(crate) struct Baseline {
     /// How the window's harness keeps its servers, as the daemon said at the
     /// latest mark: none where it did not say, or the platform has no groups.
     kept: Option<Kept>,
+    /// Which harness it is, as the daemon said at the latest mark: the name its own
+    /// programs are told by.
+    harness: Option<String>,
 }
 
 impl Baseline {
-    /// A turn begins: every process of the tree now came before it, and `kept`
-    /// says how the window's harness keeps its servers ([`Kept::of`]).
-    pub fn mark(&mut self, tree: &[Member], kept: Option<Kept>) {
+    /// A turn begins: every process of the tree now came before it, `kept` says how
+    /// the window's harness keeps its servers ([`Kept::of`]) and `harness` which
+    /// harness it is.
+    pub fn mark(&mut self, tree: &[Member], kept: Option<Kept>, harness: Option<String>) {
         let now: HashSet<ProcessKey> = tree.iter().map(|member| member.key).collect();
         if self.before.is_none() {
             self.launch.clone_from(&now);
         }
         self.before = Some(now);
         self.kept = kept;
+        self.harness = harness;
     }
 
     /// Whether a turn was ever said to begin: where it was not, the tree is
@@ -122,107 +144,65 @@ impl Baseline {
         self.before.is_some()
     }
 
-    /// What `tree`, the pane's tree now, has that its turn started: the
-    /// processes not in the baseline and not the harness's own, the first of them
-    /// by when they began.
-    pub fn left_running(&self, tree: Vec<Member>) -> Background {
-        listed(self.started(&tree))
+    /// What `tree`, the pane's tree now, has that its turn started, as the daemon is
+    /// told of it.
+    pub fn left_running(&self, tree: &[Member]) -> Background {
+        listed(self.turn_work(tree))
     }
 
-    /// The members of `tree` that its turn started, oldest first.
-    fn started(&self, tree: &[Member]) -> Vec<Member> {
+    /// The members of `tree` that are the turn's work, all of them, oldest first:
+    /// what began after the mark and is proved the turn's ([`work`]), less what is
+    /// proved the harness's ([`harness`]). Whatever `tree` holds is looked at, and
+    /// what the daemon is told of it is for [`listed`] to bound.
+    pub fn turn_work(&self, tree: &[Member]) -> Vec<Member> {
         let Some(before) = &self.before else {
             return Vec::new();
         };
-        let harness = self
+        let started: Vec<&Member> = tree
+            .iter()
+            .filter(|member| !before.contains(&member.key))
+            .collect();
+        if started.is_empty() {
+            return Vec::new();
+        }
+        let mut protected = self
             .kept
             .map(|kept| harness::own(kept, &self.launch, tree))
             .unwrap_or_default();
-        let mut started: Vec<Member> = tree
-            .iter()
-            .filter(|member| !before.contains(&member.key) && !harness.contains(&member.key))
+        if let Some(harness) = &self.harness {
+            protected.extend(harness::programs(harness, tree));
+        }
+        let turns = work::turns(&started, &protected);
+        let mut work: Vec<Member> = started
+            .into_iter()
+            .filter(|member| turns.contains(&member.key))
             .cloned()
             .collect();
-        started.sort_by_key(|member| (member.key.began, member.key.pid));
-        started
-    }
-
-    /// What to do about the processes `asked` names, among what `tree` has that
-    /// the turn started. Where the daemon said how the harness keeps its servers
-    /// all of that is the turn's; where it did not, only what an agent's shell
-    /// started is ([`shells`]). The ones asked for that are the turn's are ended,
-    /// and so is whatever descends from them; the ones asked for that are not are
-    /// left, and a process that is not what the turn started, or that is gone, is
-    /// no one's business.
-    pub fn ending(&self, tree: &[Member], asked: &[u32]) -> Plan {
-        let started = self.started(tree);
-        let turns = match self.kept {
-            Some(_) => started.iter().map(|member| member.key).collect(),
-            None => shells::turns(&started),
-        };
-        let by_key: HashMap<ProcessKey, &Member> =
-            started.iter().map(|member| (member.key, member)).collect();
-        let roots: HashSet<ProcessKey> = started
-            .iter()
-            .filter(|member| asked.contains(&member.key.pid) && turns.contains(&member.key))
-            .map(|member| member.key)
-            .collect();
-        let mut plan = Plan::default();
-        for member in &started {
-            if descends_from(member, &roots, &by_key) {
-                plan.end.push(member.clone());
-            } else if asked.contains(&member.key.pid) {
-                plan.left.push(member.clone());
-            }
-        }
-        plan
+        work.sort_by_key(|member| (member.key.began, member.key.pid));
+        work
     }
 }
 
-/// Whether `member`, or a process it descends from that began after the mark, is
-/// among `roots`.
-fn descends_from(
-    member: &Member,
-    roots: &HashSet<ProcessKey>,
-    started: &HashMap<ProcessKey, &Member>,
-) -> bool {
-    let mut at = member;
-    // A tree names no process twice among a process's ancestors: the bound is
-    // only for a list that is no tree.
-    for _ in 0..=started.len() {
-        if roots.contains(&at.key) {
-            return true;
-        }
-        match at.parent.and_then(|parent| started.get(&parent)) {
-            Some(parent) => at = parent,
-            None => return false,
-        }
-    }
-    false
-}
-
-/// What an ending came to, once it was made: the processes of `plan` that are not
-/// among `alive`, the processes of the tree now, were ended; those that are, and the
-/// ones the plan left, were not, and are said so.
-pub(crate) fn report(plan: Plan, alive: &HashSet<ProcessKey>) -> Ending {
-    let (survivors, ended): (Vec<Member>, Vec<Member>) = plan
-        .end
+/// What an ending came to, once it was made: the processes it chose that are not
+/// among `alive`, the processes of the tree now, were ended; those that are were
+/// not, and are said so.
+pub(crate) fn report(chosen: Vec<Member>, alive: &HashSet<ProcessKey>) -> Ending {
+    let (left, ended): (Vec<Member>, Vec<Member>) = chosen
         .into_iter()
         .partition(|member| alive.contains(&member.key));
-    let mut left = plan.left;
-    left.extend(survivors);
-    left.sort_by_key(|member| (member.key.began, member.key.pid));
     Ending {
         ended: listed(ended),
         left: listed(left),
     }
 }
 
-/// `started`, the first of it as the daemon is told of it.
-pub(crate) fn listed(started: Vec<Member>) -> Background {
+/// `chosen`, the first of it as the daemon is told of it: how many, and the first
+/// [`BACKGROUND_PROCESSES`] by when they began.
+pub(crate) fn listed(mut chosen: Vec<Member>) -> Background {
+    chosen.sort_by_key(|member| (member.key.began, member.key.pid));
     Background {
-        total: started.len(),
-        processes: started
+        total: chosen.len(),
+        processes: chosen
             .iter()
             .take(BACKGROUND_PROCESSES)
             .map(|member| BackgroundProcess {
@@ -245,144 +225,4 @@ fn bounded(command: &str) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// A process whose program, group and parent the platform does not say.
-    fn member(pid: u32, began: u64, command: &str) -> Member {
-        Member {
-            key: ProcessKey { pid, began },
-            command: command.to_owned(),
-            program: String::new(),
-            group: None,
-            parent: None,
-        }
-    }
-
-    #[test]
-    fn a_pane_never_marked_has_no_background_work() {
-        let mut baseline = Baseline::default();
-        assert!(!baseline.is_marked());
-        assert_eq!(
-            baseline.left_running(vec![member(10, 1, "claude")]),
-            Background::default()
-        );
-        baseline.mark(&[], None);
-        assert!(baseline.is_marked());
-    }
-
-    #[test]
-    fn what_the_tree_had_when_the_turn_began_is_not_the_turns() {
-        let mut baseline = Baseline::default();
-        baseline.mark(
-            &[member(10, 1, "claude"), member(11, 2, "npx mcp-server")],
-            None,
-        );
-        let now = vec![
-            member(10, 1, "claude"),
-            member(11, 2, "npx mcp-server"),
-            member(42, 9, "python3 lock.py record"),
-        ];
-        let left = baseline.left_running(now);
-        assert_eq!(left.total, 1);
-        assert_eq!(
-            left.processes,
-            vec![BackgroundProcess {
-                pid: 42,
-                command: "python3 lock.py record".to_owned()
-            }]
-        );
-    }
-
-    #[test]
-    fn a_process_that_took_the_number_of_one_that_ended_is_a_new_process() {
-        let mut baseline = Baseline::default();
-        baseline.mark(&[member(11, 2, "npx mcp-server")], None);
-        let left = baseline.left_running(vec![member(11, 7, "sleep 600")]);
-        assert_eq!(left.total, 1, "the number is the same and the start is not");
-    }
-
-    #[test]
-    fn a_new_mark_moves_what_came_before_to_where_the_tree_is() {
-        let mut baseline = Baseline::default();
-        baseline.mark(&[member(10, 1, "claude")], None);
-        let tree = vec![member(10, 1, "claude"), member(42, 9, "sleep 600")];
-        assert_eq!(baseline.left_running(tree.clone()).total, 1);
-        baseline.mark(&tree, None);
-        assert_eq!(baseline.left_running(tree).total, 0);
-    }
-
-    #[test]
-    fn the_oldest_processes_come_first_and_only_so_many_are_named_of_a_longer_list() {
-        let mut baseline = Baseline::default();
-        baseline.mark(&[], None);
-        let tree: Vec<Member> = (0..(BACKGROUND_PROCESSES as u32 + 4))
-            .rev()
-            .map(|n| member(100 + n, u64::from(n), &format!("job {n}")))
-            .collect();
-        let left = baseline.left_running(tree);
-        assert_eq!(left.total, BACKGROUND_PROCESSES + 4);
-        assert_eq!(left.processes.len(), BACKGROUND_PROCESSES);
-        assert_eq!(left.processes[0].command, "job 0");
-        assert_eq!(
-            left.processes
-                .last()
-                .map(|process| process.command.as_str()),
-            Some(format!("job {}", BACKGROUND_PROCESSES - 1).as_str())
-        );
-    }
-
-    #[test]
-    fn what_an_ending_could_not_end_is_left_and_said_so() {
-        let plan = Plan {
-            end: vec![member(1, 1, "sleep 1"), member(2, 2, "sleep 2")],
-            left: vec![member(3, 3, "node server.js")],
-        };
-        // The second is still there once the first is gone: it could not be ended.
-        let alive: HashSet<ProcessKey> = [ProcessKey { pid: 2, began: 2 }].into_iter().collect();
-
-        let ending = report(plan, &alive);
-
-        assert_eq!((ending.ended.total, ending.ended.processes[0].pid), (1, 1));
-        let left: Vec<u32> = ending.left.processes.iter().map(|p| p.pid).collect();
-        assert_eq!((ending.left.total, left), (2, vec![2, 3]));
-    }
-
-    #[test]
-    fn where_the_harness_keeps_its_servers_in_a_known_way_an_ending_ends_all_that_it_lists_and_asked_for(
-    ) {
-        let mut baseline = Baseline::default();
-        baseline.mark(
-            &[member(10, 1, "claude")],
-            Kept::of(cf_proto::panes::Servers::InGroup, Some(10)),
-        );
-        let tree = vec![
-            member(10, 1, "claude"),
-            member(42, 9, "python3 lock.py record"),
-            member(43, 10, "tail -f run.log"),
-        ];
-        // A tree whose members say no group or parent is all by itself: the harness's
-        // program leads the group, whatever started after is the turn's.
-        let plan = baseline.ending(&tree, &[42, 43, 10, 99]);
-        let ended: Vec<u32> = plan.end.iter().map(|m| m.key.pid).collect();
-        assert_eq!(ended, [42, 43]);
-        assert!(plan.left.is_empty(), "{plan:?}");
-    }
-
-    #[test]
-    fn a_pane_never_marked_has_nothing_to_end() {
-        let baseline = Baseline::default();
-        let plan = baseline.ending(&[member(42, 9, "sleep 600")], &[42]);
-        assert_eq!(plan, Plan::default());
-    }
-
-    #[test]
-    fn a_command_line_is_held_to_one_line_and_to_the_bound() {
-        assert_eq!(bounded("sh  -c\n  'sleep 5'"), "sh -c 'sleep 5'");
-        let long = format!("python3 {}", "x".repeat(COMMAND_CHARS * 2));
-        let cut = bounded(&long);
-        assert_eq!(cut.chars().count(), COMMAND_CHARS);
-        assert!(cut.ends_with('…'));
-        assert!(cut.starts_with("python3 xxx"));
-    }
-}
+mod tests;

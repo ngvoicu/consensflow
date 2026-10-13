@@ -2,27 +2,54 @@
 //! executable names, working directories, or arbitrary command-line substrings
 //! to say what is the pane's: the tree has no process that those add. A tree is
 //! looked at ([`ProcessTree::members`]), asked to end
-//! ([`ProcessTree::ask_to_exit`]) and, last, ended ([`ProcessTree::terminate`]),
-//! the whole of it when a window closes and some of it, and what descends from
-//! it, when only what a turn left is ended ([`Subject`]).
-use std::collections::HashMap;
-use std::io;
+//! ([`ProcessTree::ask_to_exit`]) and, last, ended ([`ProcessTree::terminate`], and
+//! [`ProcessTree::finish`] for what a turn left), the whole of it when a window
+//! closes and the turn's work, which the baseline proves ([`Subject`]), when only
+//! that is.
+//!
+//! The pane's program is a session leader (the pty makes it one), and every process
+//! it starts is in its session unless it leaves it with `setsid`, whoever started it
+//! and whether or not the process that started it is still there: a job an agent
+//! detached with `nohup … &` from a shell that ended is left to launchd, and the
+//! system names no parent for it that the tree has, but it is in the session still.
+//! A harness that gives each command a shell of its own with `setsid` (Pi's Bash
+//! tool does) leaves the job in the session of that shell, which the pane's does not
+//! hold: the system is asked to say what the pane's program starts as it starts it
+//! ([`tracker`]), and the tree keeps what it names. So the tree finds a process by the
+//! parent it was started by where that is still named, by its session, by having
+//! been tracked, and by the marker its environment carries where one shows it. What
+//! the system says of a process is read in [`native`].
+mod native;
+mod tracker;
 
-use crate::background::{Member, ProcessKey};
+use std::collections::{HashMap, HashSet};
+use std::io;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+use crate::background::{report, Baseline, Member, Parent, ProcessKey};
+use cf_proto::panes::Ending;
+use native::{command_line, exe_of, has_marker, procargs, process, processes, signal};
+use tracker::Tracker;
 
 pub(crate) const OWNER_ENV: &str = "CF_PANE_PROCESS_OWNER";
+
+/// How long a process that was sent SIGKILL is given to be gone: the signal is
+/// delivered at once, and the process is gone when its system call returns.
+const AFTER_KILL: Duration = Duration::from_secs(2);
 
 /// What a tree is asked to end, or ended.
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum Subject<'a> {
     /// All of it: a window closes. The pane's own process is part of it.
     Whole,
-    /// The processes these name and whatever descends from them: what a turn
-    /// left. The pane's own process is never part of it.
-    Under(&'a [ProcessKey]),
+    /// What `baseline` proves the turn's work, found again at each step so that what
+    /// the processes asked to end started while they were given the grace is in it:
+    /// what a turn left. The pane's own process is never part of it.
+    Turn(&'a Baseline),
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Identity {
     pid: i32,
     born: (u64, u64),
@@ -34,40 +61,61 @@ struct Process {
     parent: u64,
     /// The process group it is in.
     group: i32,
+    /// The session it is in, where the system says it.
+    session: Option<i32>,
     /// What the system calls it, for a process whose command line cannot be read.
     name: String,
 }
 
-/// The processes of a tree that a close asked to end, and is waiting for.
-pub(crate) struct Asked(Vec<Identity>);
+/// The processes of a tree that were asked to end, and are waited for.
+pub(crate) struct Asked {
+    identities: Vec<Identity>,
+    /// What was chosen to be asked, for a turn's work: the members themselves,
+    /// which is what an ending tells of.
+    members: Vec<Member>,
+    /// Whether any of the signals could not be sent: a process that is ending, or
+    /// that is not ours to signal.
+    failed: bool,
+}
 
 impl Asked {
     /// Whether any of them is still there: the process itself, not one that
     /// took its number.
     pub fn any_alive(&self) -> bool {
-        self.0
+        self.identities
             .iter()
             .any(|asked| process(asked.pid).map(|p| p.identity) == Some(*asked))
     }
+
+    /// Whether some process could not be asked.
+    pub fn failed(&self) -> bool {
+        self.failed
+    }
 }
 
-// XNU proc_info_private.h declares this 56-byte structure as an API. The
-// original parent's unique ID survives reparenting; a reused PID cannot match.
-#[repr(C)]
-#[derive(Default)]
-struct NativeIdentity {
-    uuid: [u8; 16],
-    unique: u64,
-    parent: u64,
-    version: i32,
-    parent_version: i32,
-    reserved: [u64; 2],
+/// What a step of an ending chose: the processes, and for a turn's work the members
+/// it told them by.
+struct Chosen {
+    identities: HashMap<i32, Identity>,
+    members: Vec<Member>,
+}
+
+/// What forcing an ending made of the tree: the members it told the processes it
+/// stopped by, and the failure that last stopped it from doing all it was asked.
+struct Forced {
+    members: Vec<Member>,
+    failure: Option<io::Error>,
 }
 
 #[derive(Clone)]
 pub(crate) struct ProcessTree {
     pub marker: String,
     root: Option<Identity>,
+    /// The session the pane's program leads.
+    session: Option<i32>,
+    /// What the pane's program has started, as it started it, where the system could
+    /// be asked to say it.
+    tracker: Option<Arc<Tracker>>,
 }
 
 impl ProcessTree {
@@ -78,63 +126,107 @@ impl ProcessTree {
         Self {
             marker: random.iter().map(|byte| format!("{byte:02x}")).collect(),
             root: None,
+            session: None,
+            tracker: None,
         }
     }
 
     pub fn attach(&mut self, pid: i32) {
-        self.root = process(pid).map(|p| p.identity);
+        let root = process(pid);
+        self.root = root.as_ref().map(|p| p.identity);
+        self.session = root.and_then(|p| p.session);
+        self.tracker = Tracker::follow(pid).ok().map(Arc::new);
     }
 
-    /// The processes of `snapshot` that are the pane's: the root, its children,
-    /// whatever carries the pane's marker in its environment (a process that
-    /// outlived its parent, or left its session), `owned` ones found before, and
-    /// every descendant of those, by the parent each was started by. A system
-    /// binary (`sleep`, `bash`, `tail`) shows no environment to anyone, so it
-    /// carries no marker to be found by, and one whose parent has gone is found
-    /// by the parent it was started by only where the system still names it. An
-    /// earlier look found it naming launchd once launchd had taken the job (a
-    /// `sleep` that `sh` left behind), and nothing then finds it; a later one, on
-    /// Darwin 25.5 (macOS 26.5), found it naming the process that started it for as
-    /// long as it was watched (twelve seconds), which `members` says.
+    /// The processes of `snapshot` that are the pane's: the root, its children, what
+    /// is in its session, what the tracking has seen it start, whatever carries the
+    /// pane's marker in its environment (a process that left its session), `owned`
+    /// ones found before, and every descendant of those, by the parent each was
+    /// started by. A system binary (`sleep`, `bash`, `tail`) shows no environment to
+    /// anyone, so it carries no marker to be found by, and one whose parent has gone
+    /// is found by the parent it was started by only where the system still names it
+    /// (an earlier look found it naming launchd once launchd had taken the job, a
+    /// `sleep` that `sh` left behind; a later one, on Darwin 25.5 (macOS 26.5), found
+    /// it naming the process that started it for as long as it was watched, which
+    /// `members` says). What the session holds is found whichever the system does: a
+    /// process stays in the session its parent started it in, and a parent that goes
+    /// changes nothing of it. What left the session too, with its shell gone, is what
+    /// the tracking has kept.
     fn select(
         &self,
         snapshot: &[Process],
         owned: &HashMap<i32, Identity>,
     ) -> HashMap<i32, Identity> {
+        let tracked = self.tracked(snapshot);
         let mut selected = HashMap::new();
         for p in snapshot {
             if self.root == Some(p.identity)
                 || self.root.is_some_and(|root| p.parent == root.unique)
+                || self
+                    .session
+                    .is_some_and(|session| p.session == Some(session))
+                || tracked.get(&p.identity.unique) == Some(&p.identity)
                 || owned.get(&p.identity.pid) == Some(&p.identity)
                 || self.carries_marker(p)
             {
                 selected.insert(p.identity.pid, p.identity);
             }
         }
-        descendants(snapshot, selected, owned)
+        // A process that has gone is still the parent of what it started: the ones
+        // found before and the ones the tracking saw start.
+        let parents: HashSet<u64> = owned
+            .values()
+            .chain(tracked.values())
+            .map(|identity| identity.unique)
+            .collect();
+        descendants(snapshot, selected, &parents)
     }
 
-    /// The processes of `snapshot` that `subject` names: the pane's tree, or what
-    /// descends from the processes an ending was asked for, those processes
-    /// themselves among them. A process is the one asked for only if it began when
-    /// it did: a number is not enough.
+    /// What the tracking has seen the pane's program start, told by unique
+    /// identifier: the ones that run and the ones that have gone. What has gone and is
+    /// the parent of nothing that runs is let go of here, for it will never be again.
+    fn tracked(&self, snapshot: &[Process]) -> HashMap<u64, Identity> {
+        let Some(tracker) = &self.tracker else {
+            return HashMap::new();
+        };
+        let seen = tracker.seen();
+        let running: HashSet<u64> = snapshot.iter().map(|p| p.identity.unique).collect();
+        let named: HashSet<u64> = snapshot.iter().map(|p| p.parent).collect();
+        tracker.forget(|identity| {
+            running.contains(&identity.unique) || named.contains(&identity.unique)
+        });
+        seen
+    }
+
+    /// What `subject` names of `snapshot`: the pane's tree, or the processes of it
+    /// that its baseline proves the turn's work, each told by when it began and not
+    /// by its number alone.
     fn subject(
         &self,
         subject: Subject<'_>,
         snapshot: &[Process],
         owned: &HashMap<i32, Identity>,
-    ) -> HashMap<i32, Identity> {
+    ) -> Chosen {
+        let tree = self.select(snapshot, owned);
         match subject {
-            Subject::Whole => self.select(snapshot, owned),
-            Subject::Under(keys) => {
-                let named = snapshot
+            Subject::Whole => Chosen {
+                identities: tree,
+                members: Vec::new(),
+            },
+            Subject::Turn(baseline) => {
+                let members = self.members_in(snapshot, &tree);
+                let work = baseline.turn_work(&members);
+                let keys: HashSet<ProcessKey> = work.iter().map(|member| member.key).collect();
+                let identities = snapshot
                     .iter()
-                    .filter(|p| {
-                        keys.contains(&key_of(p)) || owned.get(&p.identity.pid) == Some(&p.identity)
-                    })
+                    .filter(|p| tree.get(&p.identity.pid) == Some(&p.identity))
+                    .filter(|p| keys.contains(&key_of(p)))
                     .map(|p| (p.identity.pid, p.identity))
                     .collect();
-                descendants(snapshot, named, owned)
+                Chosen {
+                    identities,
+                    members: work,
+                }
             }
         }
     }
@@ -147,71 +239,127 @@ impl ProcessTree {
     }
 
     /// The processes of the tree now, each with the command line it was
-    /// started with, the process group it is in and the process of the tree that
-    /// started it: a look, nothing is signalled or stopped.
+    /// started with, the program and the path it runs from, the process group it is
+    /// in and the process of the tree that started it: a look, nothing is signalled
+    /// or stopped.
+    pub fn members(&self) -> io::Result<Vec<Member>> {
+        let snapshot = processes()?;
+        let tree = self.select(&snapshot, &HashMap::new());
+        Ok(self.members_in(&snapshot, &tree))
+    }
+
+    /// The members of `snapshot` that `tree` holds.
     ///
     /// The system names the parent a process was started by with a number that
     /// is the parent's alone, and keeps naming it after the parent has gone (seen
     /// on macOS 26.x with a `sleep` and a Python that `sh` left running: their
     /// ordinary parent number becomes launchd's, and this one does not). Such a
     /// process names a parent that is no process of the tree (as one that named
-    /// launchd would), and has none here: it is told by its own place.
-    pub fn members(&self) -> io::Result<Vec<Member>> {
-        let snapshot = processes()?;
-        let selected = self.select(&snapshot, &HashMap::new());
-        let tree: Vec<&Process> = snapshot
+    /// launchd would), and has none here: its parent is gone.
+    fn members_in(&self, snapshot: &[Process], tree: &HashMap<i32, Identity>) -> Vec<Member> {
+        let held: Vec<&Process> = snapshot
             .iter()
-            .filter(|p| selected.get(&p.identity.pid) == Some(&p.identity))
+            .filter(|p| tree.get(&p.identity.pid) == Some(&p.identity))
             .collect();
-        let keys: HashMap<u64, ProcessKey> = tree
+        let keys: HashMap<u64, ProcessKey> = held
             .iter()
             .map(|p| (p.identity.unique, key_of(p)))
             .collect();
-        Ok(tree
-            .iter()
+        held.iter()
             .map(|p| Member {
                 key: key_of(p),
                 command: procargs(p.identity.pid)
                     .and_then(|bytes| command_line(&bytes))
                     .unwrap_or_else(|| p.name.clone()),
                 program: p.name.clone(),
+                exe: exe_of(p.identity.pid),
                 group: Some(p.group),
-                parent: keys.get(&p.parent).copied(),
+                // The system names no parent by a number that is nobody's.
+                parent: match p.parent {
+                    0 => Parent::Unknown,
+                    number => keys.get(&number).copied().map_or(Parent::Gone, Parent::Of),
+                },
             })
-            .collect())
+            .collect()
     }
 
     /// Asks `subject` to end as a closing terminal does: TERM, then HUP, to
     /// every process of it outside `group`, the pane's own process group, which
     /// a close signals whole (an ending has none). Nothing is stopped first: a
-    /// stopped process cannot answer a signal. The processes asked.
+    /// stopped process cannot answer a signal. The processes asked, which are kept
+    /// for the ending's end, and whether some could not be.
     pub fn ask_to_exit(&self, subject: Subject<'_>, group: Option<i32>) -> io::Result<Asked> {
         let snapshot = processes()?;
-        let selected = self.subject(subject, &snapshot, &HashMap::new());
+        let chosen = self.subject(subject, &snapshot, &HashMap::new());
         let outside: Vec<Identity> = snapshot
             .iter()
-            .filter(|p| selected.get(&p.identity.pid) == Some(&p.identity))
+            .filter(|p| chosen.identities.get(&p.identity.pid) == Some(&p.identity))
             .filter(|p| Some(p.group) != group)
             .map(|p| p.identity)
             .collect();
-        let mut failure = None;
+        let mut failed = false;
         for asking in [libc::SIGTERM, libc::SIGHUP] {
             for identity in &outside {
-                if let Err(error) = signal(*identity, asking) {
-                    failure = Some(error);
-                }
+                failed |= signal(*identity, asking).is_err();
             }
         }
-        match failure {
-            Some(error) => Err(error),
-            None => Ok(Asked(outside)),
-        }
+        Ok(Asked {
+            identities: outside,
+            members: chosen.members,
+            failed,
+        })
     }
 
     /// Ends `subject` by force. The pane's own process is ended with a `Whole`
     /// tree and never with what an ending was asked for.
     pub fn terminate(&self, subject: Subject<'_>) -> io::Result<()> {
-        let mut owned = HashMap::new();
+        match self.force(subject, &[]).failure {
+            Some(error) => Err(error),
+            None => Ok(()),
+        }
+    }
+
+    /// Ends what a turn left, by force, once `asked` has had the grace: the
+    /// processes it chooses now and what is in the tree beyond what it chose then (a
+    /// handler asked to end may have started a process before it ended, and that
+    /// process's parent is gone, but it is in the session and it is told from the
+    /// harness's as any is), then waits for every process it ended to be gone. What
+    /// it chose, told by whether it is: ended, or not ended.
+    pub fn finish(&self, subject: Subject<'_>, asked: Asked) -> Ending {
+        let seeds: Vec<Identity> = asked.identities.clone();
+        let forced = self.force(subject, &seeds);
+        let mut chosen = asked.members;
+        for member in forced.members {
+            if !chosen.iter().any(|known| known.key == member.key) {
+                chosen.push(member);
+            }
+        }
+        let deadline = Instant::now() + AFTER_KILL;
+        let alive = loop {
+            let alive: HashSet<ProcessKey> = chosen
+                .iter()
+                .filter(|member| {
+                    process(i32::try_from(member.key.pid).unwrap_or(0))
+                        .is_some_and(|p| key_of(&p) == member.key)
+                })
+                .map(|member| member.key)
+                .collect();
+            if alive.is_empty() || Instant::now() >= deadline {
+                break alive;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        };
+        report(chosen, &alive)
+    }
+
+    /// Stops what `subject` names, over and over until a look finds nothing of it
+    /// that is not stopped, and kills what it stopped: `seeds`, the processes already
+    /// asked, are parents of what it finds though they are gone.
+    fn force(&self, subject: Subject<'_>, seeds: &[Identity]) -> Forced {
+        let mut known: HashMap<i32, Identity> =
+            seeds.iter().map(|seed| (seed.pid, *seed)).collect();
+        let mut frozen: HashMap<i32, Identity> = HashMap::new();
+        let mut members: Vec<Member> = Vec::new();
         let mut failure = None;
         // Freeze proven parents before rescanning, so they cannot keep forking
         // through shutdown. Always kill already frozen processes on an error.
@@ -223,12 +371,14 @@ impl ProcessTree {
                     break;
                 }
             };
-            let selected = self.subject(subject, &snapshot, &owned);
-            let fresh: Vec<_> = selected
+            let chosen = self.subject(subject, &snapshot, &known);
+            let fresh: Vec<_> = chosen
+                .identities
                 .values()
-                .filter(|p| owned.get(&p.pid) != Some(p))
+                .filter(|p| frozen.get(&p.pid) != Some(p))
                 .copied()
                 .collect();
+            members.extend(chosen.members);
             if fresh.is_empty() {
                 break;
             }
@@ -236,13 +386,14 @@ impl ProcessTree {
                 if let Err(error) = signal(identity, libc::SIGSTOP) {
                     failure = Some(error);
                 }
-                owned.insert(identity.pid, identity);
+                frozen.insert(identity.pid, identity);
+                known.insert(identity.pid, identity);
             }
             if pass == 15 {
                 failure = Some(io::Error::other("pane process tree did not stabilize"));
             }
         }
-        for identity in owned.values() {
+        for identity in frozen.values() {
             if let Err(error) = signal(*identity, libc::SIGKILL) {
                 failure = Some(error);
             }
@@ -253,27 +404,22 @@ impl ProcessTree {
                 failure = Some(error);
             }
         }
-        match failure {
-            Some(error) => Err(error),
-            None => Ok(()),
-        }
+        Forced { members, failure }
     }
 }
 
-/// `selected` and whatever of `snapshot` descends from it or from `owned`, by the
-/// process each was started by.
+/// `selected` and whatever of `snapshot` descends from it or from the processes
+/// `parents` are the unique identifiers of, by the process each was started by.
 fn descendants(
     snapshot: &[Process],
     mut selected: HashMap<i32, Identity>,
-    owned: &HashMap<i32, Identity>,
+    parents: &HashSet<u64>,
 ) -> HashMap<i32, Identity> {
     loop {
         let before = selected.len();
         for p in snapshot {
-            if selected
-                .values()
-                .chain(owned.values())
-                .any(|parent| parent.unique == p.parent)
+            if parents.contains(&p.parent)
+                || selected.values().any(|parent| parent.unique == p.parent)
             {
                 selected.insert(p.identity.pid, p.identity);
             }
@@ -284,204 +430,12 @@ fn descendants(
     }
 }
 
-fn process(pid: i32) -> Option<Process> {
-    if pid <= 1 || pid == std::process::id() as i32 {
-        return None;
-    }
-    // SAFETY: proc_pidinfo writes a fixed-size native struct into this buffer.
-    let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
-    let size = std::mem::size_of_val(&info);
-    // SAFETY: the buffer is `info`, writable for the `size` bytes passed with
-    // it, and proc_pidinfo writes no more than that.
-    let read = unsafe {
-        libc::proc_pidinfo(
-            pid,
-            libc::PROC_PIDTBSDINFO,
-            0,
-            (&mut info as *mut libc::proc_bsdinfo).cast(),
-            size as i32,
-        )
-    };
-    if read != size as i32
-        || info.pbi_pid != pid as u32
-        // SAFETY: getuid takes no arguments, reads no memory of ours and
-        // cannot fail.
-        || info.pbi_uid != unsafe { libc::getuid() }
-        || info.pbi_status == libc::SZOMB
-    {
-        return None;
-    }
-    let mut native = NativeIdentity::default();
-    let size = std::mem::size_of_val(&native);
-    // SAFETY: flavor 17 returns the exact native 56-byte identity structure.
-    let read = unsafe {
-        libc::proc_pidinfo(
-            pid,
-            17,
-            0,
-            (&mut native as *mut NativeIdentity).cast(),
-            size as i32,
-        )
-    };
-    if read != size as i32 || native.unique == 0 {
-        return None;
-    }
-    Some(Process {
-        identity: Identity {
-            pid,
-            born: (info.pbi_start_tvsec, info.pbi_start_tvusec),
-            unique: native.unique,
-        },
-        parent: native.parent,
-        group: info.pbi_pgid as i32,
-        name: name_of(&info),
-    })
-}
-
 /// A process as the baseline knows it: its number and when it began.
 fn key_of(p: &Process) -> ProcessKey {
     ProcessKey {
         pid: p.identity.pid.unsigned_abs(),
         began: p.identity.born.0 * 1_000_000 + p.identity.born.1,
     }
-}
-
-/// What the system calls a process: its long name, or the short one.
-fn name_of(info: &libc::proc_bsdinfo) -> String {
-    let long = info.pbi_name.map(|byte| byte as u8);
-    let short = info.pbi_comm.map(|byte| byte as u8);
-    let chosen = if long[0] == 0 { &short[..] } else { &long[..] };
-    let end = chosen
-        .iter()
-        .position(|byte| *byte == 0)
-        .unwrap_or(chosen.len());
-    String::from_utf8_lossy(&chosen[..end]).into_owned()
-}
-
-fn signal(identity: Identity, signal: i32) -> io::Result<()> {
-    // Do not act on a PID reused since discovery, including the original root.
-    if process(identity.pid).map(|p| p.identity) != Some(identity) {
-        return Ok(());
-    }
-    // SAFETY: kill takes two integers and touches no memory of ours; the pid
-    // was checked above to still be the process this tree discovered.
-    if unsafe { libc::kill(identity.pid, signal) } == 0 {
-        return Ok(());
-    }
-    let error = io::Error::last_os_error();
-    if error.raw_os_error() == Some(libc::ESRCH) {
-        Ok(())
-    } else {
-        Err(error)
-    }
-}
-
-fn processes() -> io::Result<Vec<Process>> {
-    for _ in 0..3 {
-        // SAFETY: a null buffer of size 0 only asks how many processes there
-        // are; nothing is written.
-        let count = unsafe { libc::proc_listallpids(std::ptr::null_mut(), 0) };
-        if count <= 0 {
-            return Err(io::Error::last_os_error());
-        }
-        let mut pids = vec![0i32; count as usize + 256];
-        let size = (pids.len() * std::mem::size_of::<i32>()) as i32;
-        // SAFETY: the buffer is `pids`, writable for the `size` bytes passed
-        // with it, and proc_listallpids writes no more than that.
-        let read = unsafe { libc::proc_listallpids(pids.as_mut_ptr().cast(), size) };
-        if read <= 0 {
-            return Err(io::Error::last_os_error());
-        }
-        if read as usize >= pids.len() {
-            continue;
-        }
-        return Ok(pids[..read as usize]
-            .iter()
-            .filter_map(|pid| process(*pid))
-            .collect());
-    }
-    Err(io::Error::other("could not snapshot pane processes"))
-}
-
-fn has_marker(pid: i32, marker: &str) -> bool {
-    // No arguments or environment values are logged, retained, or returned to
-    // the app: the environment is only read for the marker.
-    procargs(pid).is_some_and(|bytes| environment_has_marker(&bytes, marker))
-}
-
-/// What the system keeps of a process's arguments and environment
-/// (`KERN_PROCARGS2`): the argument count, the program's path, and the
-/// arguments and the environment, each ended by a NUL. None for a process that
-/// cannot be read (it ended, or it is not ours to read).
-fn procargs(pid: i32) -> Option<Vec<u8>> {
-    let mut mib = [libc::CTL_KERN, libc::KERN_PROCARGS2, pid];
-    // macOS bounds argv + environment by ARG_MAX.
-    let mut bytes = vec![0u8; 1024 * 1024];
-    let mut size = bytes.len();
-    // SAFETY: `mib` holds the `mib.len()` name entries passed with it, and
-    // `bytes` is writable for the `size` bytes passed with it, which sysctl
-    // lowers to what it wrote. Nothing is set: the new value is null, of length 0.
-    let result = unsafe {
-        libc::sysctl(
-            mib.as_mut_ptr(),
-            mib.len() as u32,
-            bytes.as_mut_ptr().cast(),
-            &mut size,
-            std::ptr::null_mut(),
-            0,
-        )
-    };
-    if result != 0 {
-        return None;
-    }
-    bytes.truncate(size);
-    Some(bytes)
-}
-
-/// The fields after the program's path and its padding: the arguments, as many
-/// as the count says, and then the environment, as far as the first empty field.
-fn fields_of(bytes: &[u8]) -> Option<(usize, impl Iterator<Item = &[u8]> + '_)> {
-    let count = bytes
-        .get(..4)
-        .and_then(|b| b.try_into().ok())
-        .map(i32::from_ne_bytes)?;
-    if count <= 0 || count as usize > bytes.len() {
-        return None;
-    }
-    let tail = &bytes[4..];
-    let executable_end = tail.iter().position(|b| *b == 0)?;
-    let tail = &tail[executable_end..];
-    let arguments_start = tail.iter().position(|b| *b != 0)?;
-    Some((
-        count as usize,
-        tail[arguments_start..].split(|b: &u8| *b == 0),
-    ))
-}
-
-fn environment_has_marker(bytes: &[u8], marker: &str) -> bool {
-    let Some((count, mut fields)) = fields_of(bytes) else {
-        return false;
-    };
-    for _ in 0..count {
-        if fields.next().is_none() {
-            return false;
-        }
-    }
-    let expected = format!("{OWNER_ENV}={marker}");
-    fields
-        .take_while(|field| !field.is_empty())
-        .any(|field| field == expected.as_bytes())
-}
-
-/// The command line a process was started with: its arguments, one blank
-/// apart. None where the arguments cannot be read or there are none.
-fn command_line(bytes: &[u8]) -> Option<String> {
-    let (count, fields) = fields_of(bytes)?;
-    let arguments: Vec<String> = fields
-        .take(count)
-        .map(|argument| String::from_utf8_lossy(argument).into_owned())
-        .collect();
-    (!arguments.is_empty()).then(|| arguments.join(" "))
 }
 
 #[cfg(test)]

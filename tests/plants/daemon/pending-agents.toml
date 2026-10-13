@@ -268,8 +268,7 @@ replace = '''
         if participant.role == "chief" && observed.settled {
             let pane = record.window.borrow().pane.clone();
             if let Some(pane) = pane {
-                let work = self.seams.background.running(&pane).await;
-                self.seams.background.end(&pane, &work.processes).await;
+                self.seams.background.end(&pane).await;
             }
         }
         let idle = record.delivery.borrow().delivering.is_none()

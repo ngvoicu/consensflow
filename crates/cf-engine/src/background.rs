@@ -19,31 +19,38 @@
 //! - The pane host keeps the processes a window's tree had when a turn began
 //!   ([`BackgroundWork::mark`]: just before a message goes into the window, and for
 //!   a launch's first message once its header shows in the window's record, which
-//!   is the harness's own start of the turn) and says which others it has now
-//!   ([`BackgroundWork::running`]). What the window had before the turn (the
-//!   harness, its servers) is not the turn's.
+//!   is the harness's own start of the turn), and is told which harness the window
+//!   is and how that harness keeps its servers (`Adapter::servers`). What the window
+//!   had before the turn (the harness, its servers) is not the turn's.
 //! - A worker's settled turn that did not fail, on a working task, is its result by
 //!   the usual rules ([`Dispatcher::collect`]). Once it is recorded the engine asks
-//!   the host what the turn left, leaves out the harness's own programs by their
-//!   names (below), and asks the host to end the rest ([`BackgroundWork::end`]):
-//!   the work, and what descends from it. The window stays open and its harness is
-//!   untouched. On Unix the host asks the work to end first (TERM, then HUP) and
-//!   gives it a grace to release what it holds, as a close does, so a job that
-//!   handles the request ends cleanly; on Windows each process is ended at once.
-//!   A turn that failed is its task's failure whatever it left running, and a
-//!   window with no work left says nothing.
-//! - What the host cannot tell for the turn's with no doubt it does not end, and
-//!   says so. A process taken for the turn's work used to only delay a result; now
-//!   it would be killed, and one that is the harness's own would break the worker's
-//!   servers. Where the daemon said how the harness keeps its servers (below) the
-//!   host ends all it lists; where it did not (OpenCode, Devin, and every harness
-//!   on Windows) it ends only what a shell the harness started after the mark
-//!   started (`cf-panes`' `background::shells` says why, and what that leaves).
+//!   the host to end what the turn left ([`BackgroundWork::end`]), the window staying
+//!   open and its harness untouched, and tells whoever gave the task, and then closes
+//!   the window as any finished worker's closes. All of that is work of the window's
+//!   own, begun apart from the pass ([`Dispatcher::act`]) as a launch or a delivery
+//!   is: it holds the window, so that nothing goes into it and no pass looks at it
+//!   meanwhile, and what it waits for (on Unix the host asks the work to end first,
+//!   TERM and then HUP, and gives it up to ten seconds to release what it holds, as
+//!   a close does; on Windows each process is ended at once and waited for) keeps no
+//!   other window's look waiting. A turn that failed is its task's failure whatever
+//!   it left running, and a window with nothing left says nothing.
+//! - What is the turn's is for the host to say, and the engine tells it no process:
+//!   it takes its word, from all of what the host can tell (`cf-panes`' `background`
+//!   says how). Of what began after the mark the host calls the turn's what a shell
+//!   the harness started ran, and what has lost the process that started it (a job
+//!   an agent detached with `nohup … &` from a shell that then ended, which the host
+//!   finds by the window's session, or by having seen the shell start), and nothing
+//!   the harness's own, by where its harness keeps its servers or by the programs it
+//!   is named for. What it can tell neither (a server a harness starts late: Claude
+//!   Code's MCP servers begin as it takes its first message, Codex's when a tool first
+//!   needs one) it leaves alone, and says nothing of. So the engine ends nothing the
+//!   host did not choose, and a harness's own process is not at its mercy.
 //! - Whoever gave the task is told in a note right after the result, one line in the
 //!   voice of the notes beside it ([`left_note`]): what was ended (a command is
-//!   quoted as a close's note quotes it, with its keys and tokens masked), what
-//!   could not be ended and still runs, and that the turn left background agents.
-//!   Nothing is said of a turn that left nothing.
+//!   quoted as a close's note quotes it, with its keys and tokens masked), what of
+//!   the turn's work could not be ended and still runs, and that the turn left
+//!   background agents. Nothing is said of a turn that left nothing, nor of a
+//!   process the host left alone.
 //! - The agents and workflows a turn started in its harness are work the turn left
 //!   running too, which the pane host cannot see (they are no process of the
 //!   window's tree): the harness says so on its record, on the reading of a turn
@@ -57,77 +64,41 @@
 //!   and that turn is no result (the task is no longer working) and fails nothing:
 //!   it is what the window shows, as any turn of a worker whose task is done.
 //! - A window that closes with work still running says so to whoever gave the task:
-//!   the host lists what it ended in `pane.exit`. On Unix the host asks the work to
-//!   end first and gives it a grace, as above. What an ending ended is not on that
-//!   list, and what it could not end, and a close then ends, is.
-//!
-//! What the harness itself starts in the turn is no work the agent left. Codex
-//! starts `codex-code-mode-host` the first time its agent runs a command, and
-//! keeps it for the session: a program of Codex's own, beside its binary, which
-//! the host sees begin after the mark like any job. A process named for the
-//! window's harness (`<harness>-…`) is the harness's, and is not ended.
-//!
-//! So are the servers a harness runs, and what they start, whenever each begins
-//! (found on 3.0.1: Claude Code's MCP servers, which it starts as it takes its
-//! first message, held a worker's task for ever; so did the children of a Codex
-//! designer's plugin servers). The host cannot tell them by when they began, and
-//! tells them by where the window's harness is known to keep them
-//! (`Adapter::servers`, told to the host with each mark), in one of two shapes:
-//!
-//! - Claude Code and Pi keep their servers in the process group of the window's
-//!   program, and run each command their agents start in a group of its own, under
-//!   the program. A process in the window's group is the harness's, and so is
-//!   whatever descends from one, in whatever group: the browser an MCP server
-//!   launches and detaches.
-//! - Codex opens its servers with the window, each in a group of its own, under
-//!   its own process, which is in the window's group and starts what its agent
-//!   runs. A process outside the window's group that the window had when its first
-//!   turn began is a server, and so is whatever descends from one.
-//!
-//! The window's program is no ancestor that counts: it is in the window's group,
-//! and would make everything the harness's. A harness not known to keep its
-//! servers in either way (OpenCode, Devin, and all on Windows) is told by time
-//! alone, as far as what its turn left is listed, and the host ends none of that
-//! but what a shell the harness started after the mark started.
+//!   the host lists what the close ended in `pane.exit`, the turn's work as above. On
+//!   Unix the host asks the work to end first and gives it a grace, as above. What an
+//!   ending ended is not on that list, and what it could not end, and a close then
+//!   ends, is.
 //!
 //! Limits.
 //!
-//! **On Windows a job object has no process groups**, so no harness says how it
-//! keeps its servers there, and the first mark of a window cannot tell a server
-//! that begins after it from a job (Claude Code starts its MCP servers as it takes
-//! its first message). The host ends there only what descends from a shell: a
-//! `bash` or a `powershell` that the harness started, as it starts each command its
-//! agent runs, after the mark, with the parent each process of the job names
-//! (Toolhelp32, held for the process that started it only if that one began first).
-//! What does not (a job whose shell has gone, a process the harness started itself,
-//! whatever a `cmd.exe` runs: npm installs every server behind a `cmd /c npx`) is left
-//! running, and the note says so; the close that follows a done task ends it, as a
-//! job object ends its whole tree, and says so in the note of the close.
+//! A job an agent detaches from a shell in a session of its own (Pi's Bash tool starts
+//! every command so, with Node's `detached`; the other harnesses' shells have not been
+//! looked at for it) is in the window's tree because the host saw the window's program
+//! start the shell. A shell that began and ended before the host looked (one that ends
+//! at once, on a machine with every core busy: one to five in a hundred, measured; none
+//! in two hundred on a machine that is not) leaves a job that is in no tree the host
+//! has, unless a process of it shows the window's marker in its environment (a system
+//! binary shows none), and is neither ended nor said. On Windows a job object holds what
+//! a process starts wherever it goes, unless the process is made by a service for it
+//! (`schtasks`, a WMI call): a job whose shell has gone is in it, and is the turn's.
 //!
-//! On Unix the host looks at who started each process, and a process whose parent
-//! has gone has no one to look at: it is told by its own place alone, so a browser
-//! that outlives the server that launched it, or a daemon a server's child
-//! double-forks, is the turn's work unless it stayed in the window's group, and is
-//! ended. A Codex server that begins after the window's first turn began (a plugin
-//! it starts only when a tool is called) is no server of its launch, and what it
-//! starts is the turn's, and is ended. Nor can a program of Codex's own that
-//! begins with the window, outside its group, be told from a server
-//! (`codex-code-mode-host` begins with the first command): what it started would
-//! be ended, though it is the harness's.
+//! What the host takes for a job it cannot tell from a server is ended: a server the
+//! user wraps in `bash` or `powershell` and the harness starts after the mark, where
+//! the harness is not known to keep its servers in a way (OpenCode, Devin, and
+//! every harness on Windows), and a server that lost its parent and is not the
+//! harness's by its program. The servers the harnesses document are started as
+//! programs, and none of them was seen started by a shell.
 //!
 //! A launch's first message is marked when it shows in the window's record, which
 //! the engine sees on a pass (a second apart): work an agent starts before that is
 //! in the window's mark, and is not the turn's. A turn that began and ended between
 //! two passes is marked after what it left began: the host lists none of it, so
 //! none is ended and nothing is said, and the close that follows ends it unsaid.
-//! And a long-lived helper the harness starts in the turn itself (a language
-//! server, a dev server) is work the turn started, and is ended with it.
 
 use std::rc::Rc;
 
 use cf_harness::contract::Pane;
 use cf_ledger::{NewNote, ParticipantView, ProjectView, TaskView};
-use cf_proto::agents::Harness;
 use cf_proto::panes::{BackgroundProcess, Ending};
 
 use crate::dispatcher::Dispatcher;
@@ -143,28 +114,55 @@ const COMMAND_CHARS: usize = 160;
 impl Dispatcher {
     /// A turn is about to begin in the window: what its tree runs now came
     /// before it, and, where its harness is known to keep its own processes (its
-    /// servers), so do they and what they start later.
+    /// servers), so do they and what they start later, and the programs the harness is
+    /// named for.
     pub(crate) async fn mark_turn(&self, record: &Record, pane: &Pane) {
-        let servers = record.window.borrow().servers;
-        self.seams.background.mark(pane, servers).await;
+        let (servers, harness) = {
+            let window = record.window.borrow();
+            (window.servers, window.harness.clone())
+        };
+        self.seams.background.mark(pane, servers, &harness).await;
     }
 
-    /// The result of a worker's turn was just recorded: what the turn left
-    /// running is ended, the window staying open, and whoever gave the task is
-    /// told what was ended, what could not be and still runs, and that its agents
-    /// were left (`agents`, the reading's word). A window that left nothing says
-    /// nothing, and one the host cannot be asked of has left nothing to say.
-    pub(crate) async fn end_turn_work(
+    /// The result of a worker's turn was just recorded: what follows it is the
+    /// window's own work, begun apart from the pass and holding the window
+    /// ([`Dispatcher::end_turn_work`], then the close of a window that is free).
+    /// `agents` is the reading's word that the turn left background agents.
+    pub(crate) async fn end_work_apart(
+        self: &Rc<Self>,
+        project: &ProjectView,
+        record: &Rc<Record>,
+        task: TaskView,
+        agents: bool,
+    ) {
+        let (this, held, project) = (Rc::clone(self), Rc::clone(record), project.clone());
+        self.act(record, async move {
+            this.end_turn_work(&project, &held, &task, agents).await?;
+            // The participant may have been forgotten, or the window closed, while the
+            // host answered.
+            if this.forgotten(&held) || held.window.borrow().pane.is_none() {
+                return Ok(());
+            }
+            this.close_if_free(&held).await?;
+            Ok(())
+        })
+        .await;
+    }
+
+    /// What the turn left is ended, the window staying open, and whoever gave the task
+    /// is told what was ended, what of the turn's work could not be and still runs,
+    /// and that its agents were left. A window that left nothing says nothing, and one
+    /// the host cannot be asked of has left nothing to say.
+    async fn end_turn_work(
         &self,
         project: &ProjectView,
-        participant: &ParticipantView,
         record: &Rc<Record>,
         task: &TaskView,
         agents: bool,
     ) -> Result<(), EngineError> {
         let pane = record.window.borrow().pane.clone();
         let ending = match pane {
-            Some(pane) => self.end_left_running(participant, &pane).await,
+            Some(pane) => self.seams.background.end(&pane).await,
             None => Ending::default(),
         };
         // The participant may have been forgotten while the host answered.
@@ -185,17 +183,6 @@ impl Dispatcher {
         )?;
         self.changed();
         Ok(())
-    }
-
-    /// What the host did about what `pane`'s turn left, less the harness's own
-    /// programs, which are never asked for.
-    async fn end_left_running(&self, participant: &ParticipantView, pane: &Pane) -> Ending {
-        let work = self.seams.background.running(pane).await;
-        let left = agent_processes(participant.harness.as_deref(), &work.processes);
-        if left.is_empty() {
-            return Ending::default();
-        }
-        self.seams.background.end(pane, &left).await
     }
 
     /// What a window that closed with work its turn started still running says
@@ -234,8 +221,8 @@ impl Dispatcher {
 }
 
 /// What whoever gave T-`number` is told of what its worker's turn left, as the
-/// result is taken: what was ended, what could not be and still runs, and that
-/// agents were left. None for a turn that left nothing.
+/// result is taken: what was ended, what of the turn's work could not be and still
+/// runs, and that agents were left. None for a turn that left nothing.
 pub(crate) fn left_note(number: i64, ending: &Ending, agents: bool) -> Option<String> {
     let (ended, left) = (&ending.ended, &ending.left);
     let work = ended.total > 0 || left.total > 0;
@@ -260,32 +247,6 @@ pub(crate) fn left_note(number: i64, ending: &Ending, agents: bool) -> Option<St
         said.push_str(" Its background agents were left running too.");
     }
     Some(said)
-}
-
-/// The processes of `listed`, which a window's tree started in the turn, that
-/// are the agent's work: all but the harness's own (`kind` is the harness of
-/// the window, as the roster says it).
-pub(crate) fn agent_processes(
-    kind: Option<&str>,
-    listed: &[BackgroundProcess],
-) -> Vec<BackgroundProcess> {
-    let harness = kind.and_then(Harness::from_kind);
-    listed
-        .iter()
-        .filter(|process| harness.is_none_or(|harness| !harness_own(harness, &process.command)))
-        .cloned()
-        .collect()
-}
-
-/// Whether the process a command line starts is a program of the harness's
-/// own: the program is named for the harness, then a dash (`codex-code-mode-host`
-/// for Codex), on Windows with its extension. The program is the line's first
-/// word.
-fn harness_own(harness: Harness, command: &str) -> bool {
-    let program = command.split_whitespace().next().unwrap_or_default();
-    let name = program.rsplit(['/', '\\']).next().unwrap_or_default();
-    name.strip_prefix(harness.as_str())
-        .is_some_and(|rest| rest.starts_with('-'))
 }
 
 /// The command of `process` as a note says it: held to one line and to

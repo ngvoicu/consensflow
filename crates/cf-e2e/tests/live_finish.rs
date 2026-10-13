@@ -4,15 +4,17 @@
 //! Devin 3000.10.21 as the worker, and T-15, 2026-10-13: Claude Code, a headless Edge check
 //! its harness moved to the background, which never exits): a worker finished its task, and
 //! the board kept it working with `background work running`, for processes the pane host
-//! took for the turn's work. On Windows the pane host has no process groups to look at, so
-//! what a turn left running is told by when each process began, and by what descends from
-//! a shell the harness started; the owner decided on 2026-10-13 that a worker's answer is its
-//! task's result at once and that what its turn left running is ended, and these are the
-//! runs that show, on a machine, what a real harness leaves, what the host ends of it and
-//! whether it ends anything of the harness's own. They are opt-in (`cargo xtask live
-//! finish`, `npm run live:finish`): each spends the machine's quota on one short task of
-//! each harness named, and needs each installed and logged in, so they are ignored unless
-//! asked for and are no part of `check` or of CI.
+//! took for the turn's work. The owner decided on 2026-10-13 that a worker's answer is its
+//! task's result at once and that what its turn left running is ended. The pane host tells
+//! the turn's work by proof: what a shell the harness started ran, and what has lost the
+//! process that started it (a job the agent detached with `nohup … &`, which it finds by the
+//! window's session on a Mac and by the pane's job object on Windows); a server the harness
+//! starts late it leaves alone, and says nothing of. These are the runs that show, on a
+//! machine, what a real harness leaves, what the host ends of it and whether it ends
+//! anything of the harness's own. They are opt-in (`cargo xtask live finish`, `npm run
+//! live:finish`): each spends the machine's quota on one short task of each harness named,
+//! and needs each installed and logged in, so they are ignored unless asked for and are no
+//! part of `check` or of CI.
 //!
 //! The native daemon and the real pane host run in a home of the run's own (never
 //! `~/.consensflow`). The chief is a stand-in that only notes what it is sent, and the
@@ -34,16 +36,21 @@
 //!   reply with a line that holds what it printed. The turn leaves nothing running, so the
 //!   task is done, its result is in the chief's inbox and holds the command's output, and the
 //!   chief is told nothing of work: a note that says the turn left some, and what was ended
-//!   of it, is what the daemon did with a process it took for the turn's work, which the
-//!   harness's own may have been. A worker that fails says every process the host listed at
-//!   the turn's end and what the window recorded and last drew;
+//!   of it, is what the daemon did with a process the host proved the turn's, which the
+//!   harness's own may have been (its servers it leaves alone, and does not name). A worker
+//!   that fails says every process the host listed at the turn's end and what the window
+//!   recorded and last drew;
 //! - **`a_worker_that_leaves_a_long_command_running…`** asks the worker to start a long
 //!   command in the background (`sleep 4711`, or the platform's own), not to wait for it
 //!   and to answer. The task is done at once, its result is in the chief's inbox, the host
-//!   listed the command as running (a worker that left none proves nothing, and fails), the
-//!   command is gone after, and the chief was told that it was ended in a note beside the
-//!   result; a note that says part of it still runs and was not ended fails the run, with
-//!   what the host listed.
+//!   listed the command as running (a worker that left none proves nothing, and fails: one
+//!   that took it out of the window's session with `setsid` is none the host can find),
+//!   the command is gone after, and the chief was told that it was ended in a note beside
+//!   the result; a note that says part of it still runs and was not ended fails the run,
+//!   with what the host listed. Claude Code runs the command by its own option for one in
+//!   the background, its shell waiting for it; the other harnesses' agents detach it from
+//!   a shell that then ends (`nohup … &`), which leaves it with no parent, and the host
+//!   finds it by the window's session all the same.
 //!
 //! Whatever the verdict, a run prints the processes the host listed as the turn's work at
 //! the turn's end (at the first look that found the window at rest, and before one has, at

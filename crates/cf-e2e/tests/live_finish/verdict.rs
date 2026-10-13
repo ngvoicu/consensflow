@@ -10,10 +10,11 @@
 //!
 //! The worker runs one short command that ends with its turn, so its turn left nothing
 //! running, and the chief is to be told nothing of work: a note that says the turn left
-//! some, and what was ended of it, is what the daemon did with a process it took for the
-//! turn's work, which the harness's own may have been (a harness's servers and helpers
-//! are told from the turn's work by the pane host, and by when each began alone on
-//! Windows, where the host ends only what a shell the harness started started).
+//! some, and what was ended of it, is what the daemon did with a process the host proved
+//! the turn's (what a shell the harness started ran, and what has lost the process that
+//! started it), which the harness's own may have been. A server the harness starts late
+//! is none of these, and the host leaves it alone and says nothing of it, on every
+//! platform.
 
 use std::time::Duration;
 
@@ -174,9 +175,7 @@ pub fn summary(seen: &Seen, verdict: &Result<(), Vec<String>>) -> String {
 }
 
 /// What the pane host listed as the turn's work at the turn's end, whichever way the
-/// run came out: none is the answer of a worker that left nothing, and on Windows,
-/// where the host tells a turn's work by when each process began, what it lists is the
-/// tree a pass shows too.
+/// run came out: none is the answer of a worker that left nothing.
 pub fn at_the_turns_end(seen: &Seen) -> String {
     match (&seen.end, &seen.unlisted) {
         (Some(end), _) => format!(

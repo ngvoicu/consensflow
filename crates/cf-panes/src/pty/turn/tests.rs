@@ -1,5 +1,5 @@
-//! Where a pane's turn began and what its program started after it
-//! (`super`). The tree is looked at on macOS (the process tree of
+//! Where a pane's turn began and what its program started after it that is the
+//! turn's work (`super`). The tree is looked at on macOS (the process tree of
 //! `process_tree`) and on Windows (the job); elsewhere a pane has none, and the
 //! tests that need one are macOS's and Windows'.
 
@@ -50,8 +50,10 @@ mod unix {
     }
 
     /// A program that has a server running before its turn, is told to go, and
-    /// then starts a job and says so.
-    const SCRIPT: &str = "sleep 33 & printf ready; read go; sleep 31 & printf started; wait";
+    /// then runs a command of its agent's (a shell that waits for its job), and says
+    /// so.
+    const SCRIPT: &str =
+        "sleep 33 & printf ready; read go; /bin/sh -c 'sleep 31 & wait' & printf started; wait";
 
     /// What the pane's tree has running that its turn started, once `command`
     /// is among it: the program says it started a job as it forks it, and until
@@ -80,223 +82,177 @@ mod unix {
         }
     }
 
-    /// A pane running the Python program `code`, streamed.
     #[cfg(target_os = "macos")]
-    fn open_python(table: &Arc<PaneTable>, code: &str) -> StreamedPane {
-        let (overlay, nothing) = (HashMap::new(), Vec::new());
-        table
-            .open_streamed(
-                Path::new("/tmp"),
-                &["/usr/bin/python3".into(), "-c".into(), code.into()],
-                PaneEnvironment::new(&overlay, &nothing),
-                PtySize {
-                    rows: 24,
-                    cols: 80,
-                    pixel_width: 0,
-                    pixel_height: 0,
-                },
-                1024 * 1024,
-            )
-            .expect("open a Python program in a pane")
-    }
+    mod harnesses {
+        use std::collections::HashMap;
 
-    /// The window of a harness that keeps its servers in the program's group, the
-    /// way Claude Code does, once its turn is told to go: a server it had before
-    /// the turn; then, after the mark, another that stays in the group and
-    /// launches a browser, which leaves it (an MCP server and the browser a tool
-    /// of its opens); and two jobs the agent runs, each of which leaves the group,
-    /// one by a session of its own with a process of its own, one by a group of
-    /// its own (a command a tool runs). A process that has left says so, and the
-    /// program says it has started once each has.
-    #[cfg(target_os = "macos")]
-    const CLAUDE: &str = r#"
-import subprocess, sys, time
+        use cf_proto::panes::Servers;
 
-def start(code):
-    return subprocess.Popen([sys.executable, "-c", code], stdout=subprocess.PIPE, text=True)
+        use crate::pty::turn::support::{listed, numbers, started, DETACHED};
 
-BROWSER = "import os, time; os.setsid(); print(1, flush=True); time.sleep(35)"
+        use super::{serial_pty_test, Arc, PaneTable};
+
+        /// The window of a harness that keeps its servers in the program's group, the
+        /// way Claude Code does, once its turn is told to go: a server it had before
+        /// the turn; then, after the mark, another that stays in the group and
+        /// launches a browser, which leaves it (an MCP server and the browser a tool
+        /// of its opens), and one a user wrapped in a shell, which stays in the group
+        /// as well; and a command of the agent's, a shell in a group of its own with a
+        /// job. A program that has started says so, and the numbers.
+        const CLAUDE: &str = r#"
+import json, os, subprocess, sys, time
+
+BROWSER = "import os, time; os.setsid(); print(os.getpid(), flush=True); time.sleep(35)"
 SERVER = (
     "import subprocess, sys, time; "
     "browser = subprocess.Popen([sys.executable, '-c', " + repr(BROWSER) + "], stdout=subprocess.PIPE, text=True); "
-    "browser.stdout.readline(); print(1, flush=True); time.sleep(36)"
+    "print(browser.stdout.readline().strip(), flush=True); time.sleep(36)"
 )
-TOOL = "import os, subprocess, time; os.setsid(); subprocess.Popen(['sleep', '32']); print(1, flush=True); time.sleep(34)"
-TOOL_GROUP = "import os, time; os.setpgid(0, 0); print(1, flush=True); time.sleep(37)"
 
-subprocess.Popen(["sleep", "33"])
+before = subprocess.Popen(["sleep", "33"])
 print("ready", flush=True)
 input()
-started = [start(code) for code in (SERVER, TOOL, TOOL_GROUP)]
-for process in started:
-    process.stdout.readline()
-print("started", flush=True)
+server = subprocess.Popen([sys.executable, "-c", SERVER], stdout=subprocess.PIPE, text=True)
+browser = int(server.stdout.readline())
+wrapper = subprocess.Popen(["/bin/sh", "-c", "sleep 34 & echo $!; wait"], stdout=subprocess.PIPE, text=True)
+wrapped = int(wrapper.stdout.readline())
+tool = subprocess.Popen(["/bin/sh", "-c", "sleep 32 & echo $!; wait"],
+                        stdout=subprocess.PIPE, text=True, preexec_fn=os.setpgrp)
+tool_job = int(tool.stdout.readline())
+print("started " + json.dumps({
+    "program": os.getpid(), "before": before.pid, "server": server.pid, "browser": browser,
+    "wrapper": wrapper.pid, "wrapped": wrapped, "tool": tool.pid, "tool_job": tool_job,
+}), flush=True)
 time.sleep(60)
 "#;
 
-    /// The window of a harness that opens its servers with the window, each in a
-    /// group of its own, the way Codex does (its supervisor is the program; its own
-    /// process, which starts the agent's commands, and its servers are its
-    /// children), once its turn is told to go: a server starts two processes (a
-    /// plugin's REPL starting the workers of a tool call), and the harness's own
-    /// process starts a command that leaves the group by a session of its own.
-    #[cfg(target_os = "macos")]
-    const CODEX: &str = r#"
-import os, signal, subprocess, sys, time
+        /// The window of a harness that opens its servers with the window, each in a
+        /// group of its own, the way Codex does (its supervisor is the program; its
+        /// own process, which starts the agent's commands, and its servers are its
+        /// children), once its turn is told to go: a server it started with the
+        /// window; and, after the mark, a server it starts late (a plugin that needs
+        /// none until a tool is called), and a command of the agent's, a shell in a
+        /// group of its own with a job.
+        const CODEX: &str = r#"
+import json, os, subprocess, sys, time
 
-up_r, up_w = os.pipe()
-told_r, told_w = os.pipe()
-done_r, done_w = os.pipe()
-
-harness = os.fork()
-if harness == 0:
-    server = os.fork()
-    if server == 0:
-        os.setsid()
-        def children(*_):
-            for _ in range(2):
-                subprocess.Popen(["sleep", "31"])
-            os.write(done_w, b"s")
-        signal.signal(signal.SIGUSR1, children)
-        os.write(up_w, b"u")
-        while True:
-            time.sleep(0.1)
-    def command(*_):
-        subprocess.Popen([sys.executable, "-c", "import os, time; os.setsid(); time.sleep(32)"])
-        os.write(done_w, b"c")
-    signal.signal(signal.SIGUSR2, command)
-    os.read(up_r, 1)
-    os.write(told_w, ("%d %d\n" % (os.getpid(), server)).encode())
-    while True:
-        time.sleep(0.1)
-
-told = os.read(told_r, 64).split()
-harness_pid, server_pid = int(told[0]), int(told[1])
+HARNESS = """
+import os, subprocess, sys, time
+server = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(36)'], preexec_fn=os.setpgrp)
+print(server.pid, flush=True)
+input()
+late = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(37)'], preexec_fn=os.setpgrp)
+tool = subprocess.Popen(['/bin/sh', '-c', 'sleep 32 & echo $!; wait'],
+                        stdout=subprocess.PIPE, text=True, preexec_fn=os.setpgrp)
+job = tool.stdout.readline().strip()
+print(late.pid, tool.pid, job, flush=True)
+time.sleep(60)
+"""
+harness = subprocess.Popen([sys.executable, "-c", HARNESS],
+                           stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+server = int(harness.stdout.readline())
 print("ready", flush=True)
 input()
-os.kill(server_pid, signal.SIGUSR1)
-os.read(done_r, 1)
-os.kill(harness_pid, signal.SIGUSR2)
-os.read(done_r, 1)
-print("started", flush=True)
+harness.stdin.write("go\n")
+harness.stdin.flush()
+late, tool, job = (int(word) for word in harness.stdout.readline().split())
+print("started " + json.dumps({
+    "program": os.getpid(), "harness": harness.pid, "server": server,
+    "late": late, "tool": tool, "tool_job": job,
+}), flush=True)
 time.sleep(60)
 "#;
 
-    /// The window of `code` after its turn began as the program was told, `servers`
-    /// being what the daemon said of how its harness keeps them: what its tree
-    /// has that the turn started.
-    #[cfg(target_os = "macos")]
-    fn started_in(
-        code: &str,
-        servers: Servers,
-    ) -> (Arc<PaneTable>, StreamedPane, cf_proto::panes::Background) {
-        let table = Arc::new(PaneTable::new());
-        let pane = open_python(&table, code);
-        until_shown(&pane.output, "ready");
-        table.mark(&pane.key, servers).expect("mark the turn");
-        table.write(&pane.key, b"go\n").expect("tell it to go");
-        until_shown(&pane.output, "started");
-        let left = table.background(&pane.key).expect("what it left running");
-        (table, pane, left)
-    }
+        #[test]
+        fn a_job_detached_from_the_shell_that_started_it_is_found_by_the_windows_session_and_is_the_turns(
+        ) {
+            let _serial = serial_pty_test();
+            for servers in [Servers::InGroup, Servers::Unknown] {
+                let table = Arc::new(PaneTable::new());
+                let (pane, pid) = started(&table, DETACHED, servers, None, &HashMap::new());
 
-    /// The commands of what a window left, for a message.
-    #[cfg(target_os = "macos")]
-    fn commands(left: &cf_proto::panes::Background) -> Vec<&str> {
-        left.processes.iter().map(|p| p.command.as_str()).collect()
-    }
-
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn where_it_is_not_said_how_the_harness_keeps_its_servers_what_they_start_is_the_turns() {
-        let _serial = serial_pty_test();
-        let (table, pane, claude) = started_in(CLAUDE, Servers::Unknown);
-        // The server, its browser, the two jobs and the first one's process.
-        assert_eq!(
-            claude.total,
-            5,
-            "told by time alone: {:?}",
-            commands(&claude)
-        );
-        table.kill(&pane.key).expect("close the pane");
-
-        let (table, pane, codex) = started_in(CODEX, Servers::Unknown);
-        // The two processes of a server, and the command.
-        assert_eq!(codex.total, 3, "told by time alone: {:?}", commands(&codex));
-        table.kill(&pane.key).expect("close the pane");
-    }
-
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn where_the_servers_are_in_the_group_what_they_start_is_not_the_turns_though_it_leaves_it() {
-        let _serial = serial_pty_test();
-        let (table, pane, left) = started_in(CLAUDE, Servers::InGroup);
-
-        // The server is in the program's group, and so is the browser it started,
-        // whatever group the browser went to. The jobs the program started left it:
-        // they are the turn's, and so is what the first started.
-        assert_eq!(left.total, 3, "{:?}", commands(&left));
-        let commands_left = commands(&left);
-        for turn in ["time.sleep(34)", "time.sleep(37)"] {
-            assert!(
-                commands_left.iter().any(|command| command.contains(turn)),
-                "{turn}: {commands_left:?}"
-            );
-        }
-        assert!(commands_left.contains(&"sleep 32"), "{commands_left:?}");
-        for harness in ["time.sleep(35)", "time.sleep(36)"] {
-            assert!(
-                !commands_left
-                    .iter()
-                    .any(|command| command.contains(harness)),
-                "{harness}: {commands_left:?}"
-            );
+                // The job's shell is gone, and the system names no parent of its that
+                // the tree has: it is in the window's session, and nothing else says
+                // it is the window's.
+                assert_eq!(
+                    listed(&table, &pane.key),
+                    numbers(&pid, &["job"]),
+                    "{servers:?}"
+                );
+                table.kill(&pane.key).expect("close the pane");
+            }
         }
 
-        // What the close ends and lists in its exit is the same.
-        table.kill(&pane.key).expect("close the pane");
-        let kept = pane.ended.background().expect("the close kept its list");
-        assert_eq!(kept.len(), 3, "{kept:?}");
-        assert_eq!(table.left_running_at_exit(&pane.key, &pane.ended), kept);
+        #[test]
+        fn a_server_the_harness_starts_late_is_no_work_of_the_turn_and_is_not_listed() {
+            let _serial = serial_pty_test();
+            let table = Arc::new(PaneTable::new());
+            let (pane, pid) = started(&table, CLAUDE, Servers::Unknown, None, &HashMap::new());
+
+            // The server and its browser began after the mark and no shell started
+            // them: nothing says whose they are, and they are not named. The shell a
+            // user wrapped a server in, and what it started, are taken for a command's
+            // where the harness says nothing of how it keeps its servers.
+            assert_eq!(
+                listed(&table, &pane.key),
+                numbers(&pid, &["wrapper", "wrapped", "tool", "tool_job"])
+            );
+            table.kill(&pane.key).expect("close the pane");
+        }
+
+        #[test]
+        fn where_the_servers_are_in_the_group_a_server_wrapped_in_a_shell_is_still_the_harnesss() {
+            let _serial = serial_pty_test();
+            let table = Arc::new(PaneTable::new());
+            let (pane, pid) = started(&table, CLAUDE, Servers::InGroup, None, &HashMap::new());
+
+            // The wrapper and what it started are in the program's group, as the
+            // servers are: the harness's. A command is in a group of its own.
+            assert_eq!(
+                listed(&table, &pane.key),
+                numbers(&pid, &["tool", "tool_job"])
+            );
+
+            // What the close ends and lists in its exit is the same.
+            table.kill(&pane.key).expect("close the pane");
+            let kept = pane.ended.background().expect("the close kept its list");
+            assert_eq!(kept.len(), 2, "{kept:?}");
+        }
+
+        #[test]
+        fn where_the_servers_open_with_the_window_what_the_harness_starts_late_is_not_the_turns_either(
+        ) {
+            let _serial = serial_pty_test();
+            let table = Arc::new(PaneTable::new());
+            let (pane, pid) = started(&table, CODEX, Servers::AtLaunch, None, &HashMap::new());
+
+            // The server the window opened with is the harness's; one it starts when a
+            // tool first needs it is no server of the launch, and no shell started it:
+            // it is left alone and not named. The command is the agent's.
+            assert_eq!(
+                listed(&table, &pane.key),
+                numbers(&pid, &["tool", "tool_job"])
+            );
+            table.kill(&pane.key).expect("close the pane");
+        }
     }
 
     #[cfg(target_os = "macos")]
     #[test]
-    fn where_the_servers_open_with_the_window_what_they_start_is_not_the_turns_and_a_command_is() {
-        let _serial = serial_pty_test();
-        let (table, pane, left) = started_in(CODEX, Servers::AtLaunch);
-
-        // The server was there when the first turn began, outside the group, and
-        // the two processes it started since are its own. The harness's process
-        // was there too, in the group: the command it started is the agent's.
-        assert_eq!(left.total, 1, "{:?}", commands(&left));
-        assert!(
-            left.processes[0].command.contains("time.sleep(32)"),
-            "{left:?}"
-        );
-
-        table.kill(&pane.key).expect("close the pane");
-        let kept = pane.ended.background().expect("the close kept its list");
-        assert_eq!(kept.len(), 1, "{kept:?}");
-        assert_eq!(table.left_running_at_exit(&pane.key, &pane.ended), kept);
-    }
-
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn what_the_tree_had_before_the_turn_is_not_the_turns_and_what_it_started_after_is() {
+    fn what_the_tree_had_before_the_turn_is_not_the_turns_and_what_a_shell_started_after_is() {
         let _serial = serial_pty_test();
         let table = Arc::new(PaneTable::new());
         let pane = open(&table, SCRIPT);
         until_shown(&pane.output, "ready");
 
         table
-            .mark(&pane.key, Servers::Unknown)
+            .mark(&pane.key, Servers::Unknown, None)
             .expect("mark the turn");
         table.write(&pane.key, b"go\n").expect("tell it to go");
         until_shown(&pane.output, "started");
 
         let left = until_listed(&table, &pane.key, "sleep 31");
-        assert_eq!(left.total, 1, "{left:?}");
+        assert_eq!(left.total, 2, "the shell and its job: {left:?}");
         table.kill(&pane.key).expect("close the pane");
     }
 
@@ -322,14 +278,15 @@ time.sleep(60)
         let pane = open(&table, SCRIPT);
         until_shown(&pane.output, "ready");
         table
-            .mark(&pane.key, Servers::Unknown)
+            .mark(&pane.key, Servers::Unknown, None)
             .expect("mark the first turn");
         table.write(&pane.key, b"go\n").expect("tell it to go");
         until_shown(&pane.output, "started");
-        assert_eq!(table.background(&pane.key).expect("look").total, 1);
+        until_listed(&table, &pane.key, "sleep 31");
+        assert_eq!(table.background(&pane.key).expect("look").total, 2);
 
         table
-            .mark(&pane.key, Servers::Unknown)
+            .mark(&pane.key, Servers::Unknown, None)
             .expect("mark the next turn");
 
         assert_eq!(table.background(&pane.key).expect("look").total, 0);
@@ -344,7 +301,7 @@ time.sleep(60)
         let pane = open(&table, SCRIPT);
         until_shown(&pane.output, "ready");
         table
-            .mark(&pane.key, Servers::Unknown)
+            .mark(&pane.key, Servers::Unknown, None)
             .expect("mark the turn");
         table.write(&pane.key, b"go\n").expect("tell it to go");
         until_shown(&pane.output, "started");
@@ -354,16 +311,17 @@ time.sleep(60)
 
         // The close has ended what it listed: the exit says what it was.
         let kept = pane.ended.background().expect("the close kept its list");
-        assert_eq!(kept.len(), 1, "{kept:?}");
-        assert_eq!(kept[0].command, "sleep 31");
+        assert_eq!(kept.len(), 2, "{kept:?}");
+        assert!(kept.iter().any(|process| process.command == "sleep 31"));
         assert_eq!(table.left_running_at_exit(&pane.key, &pane.ended), kept);
     }
 
     /// A program that ends on its own with a job still running: reparented, the
-    /// job is found by the marker its environment carries (a system binary such as
-    /// `sleep` shows no environment, so the job is a Python's), and the exit lists
-    /// it before the retirement that follows ends it. The job ignores the hangup
-    /// the terminal sends the program's group as its leader goes.
+    /// job is found by the window's session (and by the marker its environment
+    /// carries, which a system binary such as `sleep` does not show, so the job is a
+    /// Python's), and the exit lists it before the retirement that follows ends it. The
+    /// job ignores the hangup the terminal sends the program's group as its leader
+    /// goes.
     #[cfg(target_os = "macos")]
     #[test]
     fn a_program_that_exits_leaving_a_job_running_lists_it_in_its_exit() {
@@ -379,7 +337,7 @@ time.sleep(60)
         );
         until_shown(&pane.output, "ready");
         table
-            .mark(&pane.key, Servers::Unknown)
+            .mark(&pane.key, Servers::Unknown, None)
             .expect("mark the turn");
         table.write(&pane.key, b"go\n").expect("tell it to go");
         until_shown(&pane.output, "started");
@@ -402,7 +360,7 @@ time.sleep(60)
         let table = PaneTable::new();
         let missing = PaneKey::new("nobody", 1);
         assert!(matches!(
-            table.mark(&missing, Servers::Unknown),
+            table.mark(&missing, Servers::Unknown, None),
             Err(PaneError::NotFound(key)) if key == missing
         ));
         assert!(matches!(
@@ -425,15 +383,17 @@ mod windows {
     use crate::pty::{serial_pty_test, PaneTable};
 
     #[test]
-    fn what_the_job_had_before_the_turn_is_not_the_turns_and_what_it_started_after_is() {
+    fn what_the_job_had_before_the_turn_is_not_the_turns_and_what_a_shell_started_after_is() {
         let _pty_guard = serial_pty_test();
         let table = Arc::new(PaneTable::new());
         let ping = system("PING.EXE");
+        let shell = system(r"WindowsPowerShell\v1.0\powershell.exe");
         let (key, output) = open(
             &table,
             &powershell(&format!(
                 "Write-Output 'READY#'; [Console]::In.ReadLine() | Out-Null; \
-                 Start-Process -WindowStyle Hidden -FilePath '{ping}' -ArgumentList '-n','1000','127.0.0.1'; \
+                 Start-Process -WindowStyle Hidden -FilePath '{shell}' -ArgumentList '-NoProfile','-Command','ping -n 1000 127.0.0.1'; \
+                 Start-Process -WindowStyle Hidden -FilePath '{ping}' -ArgumentList '-n','1001','127.0.0.1'; \
                  Write-Output 'STARTED#'; Start-Sleep 1000"
             )),
             &HashMap::new(),
@@ -442,21 +402,35 @@ mod windows {
         read_until(&table, &key, &output, "READY#");
         assert_eq!(table.background(&key).expect("never marked").total, 0);
 
-        table.mark(&key, Servers::Unknown).expect("mark the turn");
+        table
+            .mark(&key, Servers::Unknown, None)
+            .expect("mark the turn");
         table.write(&key, b"\r").expect("go on");
         read_until(&table, &key, &output, "STARTED#");
 
-        let left = table.background(&key).expect("what it left running");
-        assert!(
+        // The shell the program started after the mark is the turn's, and so is what
+        // it ran. A ping the program itself started was begun by a process that
+        // came before the turn, which is no shell's work, and is nobody's to tell.
+        let found = |left: &cf_proto::panes::Background, word: &str| {
             left.processes
                 .iter()
-                .any(|process| process.command.to_lowercase().contains("ping")),
-            "{left:?}"
-        );
+                .any(|process| process.command.to_lowercase().contains(word))
+        };
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        let left = loop {
+            let left = table.background(&key).expect("what it left running");
+            if found(&left, "-n 1000") {
+                break left;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the shell's ping was never listed: {left:?}"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        };
+        assert!(!found(&left, "-n 1001"), "{left:?}");
         assert!(
-            left.processes
-                .iter()
-                .all(|process| !process.command.to_lowercase().contains("powershell")),
+            !found(&left, "ready#"),
             "the program itself came before the turn: {left:?}"
         );
         table.kill(&key).expect("close the pane");

@@ -19,14 +19,21 @@
 //! it, offers no tool and writes its process id, so that the run can tell a task
 //! that was not held from a window that had no server at all.
 //!
-//! The task is a sum the worker does in its head, with no tool. The run waits for
-//! the task to be done, up to five minutes, looking once a second at the task and
-//! the server, and then holds what it saw to the brief ([`verdict`]): the task is
-//! done, its result is in the chief's inbox and says the sum, the chief was told
-//! nothing of work the turn left (a note that says some was ended is the daemon
+//! The task is a sum the worker does in its head, with no tool. The worker's window
+//! is kept open, as the human keeps one (Show): a window that closes with its task
+//! takes the server with it whatever the daemon does, and a server that is gone with
+//! its window has lived through nothing. The run waits for the task to be done, up to
+//! five minutes, looking once a second at the task and the server, and for the result
+//! to reach the chief; then it gives the daemon the time it takes to end what a turn
+//! left (the pane host gives what it ends ten seconds, and the daemon does it as work
+//! of the window's own after it has recorded the result and tells the chief after it),
+//! and holds what it saw to the brief ([`verdict`]): the task is done, its result is in
+//! the chief's inbox and says the sum, the chief was told nothing of work the turn
+//! left once the daemon was done (a note that says some was ended is the daemon
 //! ending a process it took for the turn's work, which the server may be), and the
-//! server was started while the worker worked. A run that fails says what the pane
-//! host lists as the turn's work, naming the processes.
+//! server, which was started while the worker worked, is the same process, by its
+//! number and when it began, as it was. A run that fails says what the pane host lists
+//! as the turn's work, naming the processes.
 //!
 //! The folder the worker runs in is the live tests' own
 //! (`~/.consensflow-candidate/live/mcp`), where Claude Code is asked once to trust
@@ -40,6 +47,7 @@ mod server;
 mod verdict;
 
 use std::path::{Path, PathBuf};
+use std::thread;
 use std::time::Duration;
 
 use cf_e2e::live::agents as live_agents;
@@ -71,9 +79,16 @@ asks and nothing more, and run no tools.\n";
 const TIER: &str = "standard";
 
 /// How long the worker has to do the task and have it done on the board, and its
-/// result to be delivered to the chief once it is.
+/// result to be delivered to the chief once it is, and how long its window has to
+/// open for the run to keep it open.
 const WORK: Duration = Duration::from_secs(300);
 const DELIVERS: Duration = Duration::from_secs(60);
+const OPENS: Duration = Duration::from_secs(120);
+
+/// How long the daemon is given to end what a turn left once it has taken the result:
+/// the pane host gives what it asks to end ten seconds, and the daemon tells the chief
+/// when it has ended it.
+const ENDING: Duration = Duration::from_secs(15);
 
 /// The roster of the run: the chief, which is the stand-in's (its model says so
 /// to the shim), and the real Claude Code on its cheap model.
@@ -94,12 +109,14 @@ fn worker_pane(rig: &Rig, project: i64) -> Option<Value> {
     })
 }
 
-/// One look at the worker: the task's state, and whether its Claude has started
-/// the server (it writes its process id as it does). A task that failed or was
-/// called off is no use to wait for.
+/// One look at the worker: the task's state, and the server once its Claude has
+/// started it (it writes its process id as it does), as the process it is. A task that
+/// failed or was called off is no use to wait for.
 fn look(project: &Project, server: &Server, seen: &mut Seen) -> Result {
     seen.state = text(&project.task(1)?["state"]);
-    seen.server_started |= server.pid().is_some();
+    if seen.server.is_none() {
+        seen.server = server.identity();
+    }
     if seen.state == "failed" || seen.state == "cancelled" {
         return Err(Error::Daemon(format!("T-1 is {}", seen.state)));
     }
@@ -122,6 +139,27 @@ fn failure(rig: &Rig, project: &Project, log: &Log) {
     log.block("the daemon's log", &live::warnings(&rig.log()).join("\n"));
 }
 
+/// Keeps the worker's window open as the human does (Show), once the daemon has opened
+/// it: it closes with its task otherwise, and takes the server with it.
+fn keep_the_workers_window_open(rig: &Rig, project: &Project, log: &Log) -> Result {
+    let agent = live_agents::id(Harness::Claude);
+    wait(rig, log, "the worker's window to open", OPENS, || {
+        Ok(project.lane(&agent)?["pane"].is_object())
+    })?;
+    let handle = text(&project.lane(&agent)?["participant"]["handle"]);
+    let opened = rig.page(
+        "session.open",
+        json!({ "project": project.id(), "handle": handle }),
+    )?;
+    if opened["ok"] != true {
+        return Err(Error::Daemon(format!(
+            "the worker's window was not kept open: {opened}"
+        )));
+    }
+    log.say(format!("the worker's window ({handle}) is kept open"));
+    Ok(())
+}
+
 /// The whole run: the task from the chief, the wait, and the judgement.
 fn attempt(rig: &Rig, project: &Project, server: &Server, seen: &mut Seen, log: &Log) -> Result {
     let chief = rig.open_frame(&format!("p{}-chief", project.id()), OPEN)?;
@@ -130,6 +168,7 @@ fn attempt(rig: &Rig, project: &Project, server: &Server, seen: &mut Seen, log: 
         return Err(Error::Daemon(format!("cf task add was refused: {ran}")));
     }
     log.say("the chief gave the worker its task: the sum of 1234 and 4321");
+    keep_the_workers_window_open(rig, project, log)?;
     wait(rig, log, "the worker's task to be done", WORK, || {
         look(project, server, seen)?;
         Ok(seen.state == "done")
@@ -149,14 +188,27 @@ fn attempt(rig: &Rig, project: &Project, server: &Server, seen: &mut Seen, log: 
         "the result to be delivered to the chief",
         DELIVERS,
         || {
-            let inbox = project.inbox("chief")?;
-            seen.result = delivered_result(&inbox);
-            // The daemon tells the chief what the turn left in a note it writes as it
-            // records the result: it is there once the result is.
-            seen.notes = notes_of_work(&inbox, 1);
+            seen.result = delivered_result(&project.inbox("chief")?);
             Ok(seen.result.is_some())
         },
     )?;
+    // The daemon tells the chief what the turn left in a note it writes once it has
+    // ended it, which comes after the result: what was seen when the result arrived
+    // proves nothing of it. Its ending of a window the human keeps is the one end the
+    // server could meet; what is read now is what it did.
+    log.say(format!(
+        "the result is the chief's; waiting {} s for the daemon to be done with what the turn left",
+        ENDING.as_secs()
+    ));
+    thread::sleep(ENDING);
+    seen.server_after = server.identity();
+    seen.notes = notes_of_work(&project.inbox("chief")?, 1);
+    log.say(format!(
+        "the server was {:?} and is {:?}; the chief was told {} note(s) of work",
+        seen.server,
+        seen.server_after,
+        seen.notes.len()
+    ));
     judge(seen).map_err(|problems| {
         Error::Daemon(format!(
             "the worker's task is not what it should be:\n  - {}",

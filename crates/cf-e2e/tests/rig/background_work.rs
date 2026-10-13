@@ -26,21 +26,23 @@
 //!   in whatever group: the browser of `@playwright/mcp` and `chrome-devtools-mcp`,
 //!   which the stand-in's server launches in a session of its own
 //!   (`CF_TEST_MCP_BROWSER`).
-//! - A window that closes with a job running (a cancel, mid-turn) asks it to end
-//!   first, and whoever gave the task is told the job was running. A pause closes
-//!   nothing.
+//! - A job the agent detaches from its shell (`nohup … &`) is ended too, though the
+//!   shell is gone.
 //! - A job that ignores the request is killed once the grace is over, and the
 //!   result did not wait for it.
+//!
+//! A window that closes with a job running, a cancel or a pause, is `background_close`'s.
 //!
 //! The asking and the grace are Unix's. On Windows a window is ended at once and
 //! nothing is asked of its programs (`pty::close` of the pane host says why): its
 //! job is gone with it, having written nothing, and what a turn left is ended by
-//! itself, at once, where a shell the harness started after the mark started it:
-//! the stand-in starts the commands of its agent in a PowerShell there, as the
-//! harnesses do.
+//! itself, at once, where a shell the harness started after the mark started it or
+//! where it has lost the process that started it: the stand-in starts the commands
+//! of its agent in a PowerShell there, as the harnesses do.
 
 use std::sync::OnceLock;
 use std::thread;
+#[cfg(unix)]
 use std::time::Instant;
 
 use cf_e2e::pattern;
@@ -60,7 +62,7 @@ fn tier(added: &Value) -> &str {
 }
 
 /// A project with one worker, given `words` through the chief.
-fn a_worker_given<'a>(rig: &'a Rig, words: &str) -> cf_e2e::Result<Project<'a>> {
+pub(crate) fn a_worker_given<'a>(rig: &'a Rig, words: &str) -> cf_e2e::Result<Project<'a>> {
     let project = Project::open(rig, "chief", json!({}))?;
     let added = project.add_member("worker")?;
     rig.tell(
@@ -71,7 +73,7 @@ fn a_worker_given<'a>(rig: &'a Rig, words: &str) -> cf_e2e::Result<Project<'a>> 
 }
 
 /// Waits until the worker's job runs: the job.
-fn until_the_job_runs(rig: &Rig) -> cf_e2e::Result<Job> {
+pub(crate) fn until_the_job_runs(rig: &Rig) -> cf_e2e::Result<Job> {
     rig.wait_for("the worker's job to run", secs(60), || {
         Ok(rig.jobs("job").len() == 1)
     })?;
@@ -109,7 +111,7 @@ fn results(project: &Project) -> cf_e2e::Result<Vec<Value>> {
 }
 
 /// The notes of the chief's inbox that say `told`.
-fn notes(project: &Project, told: &Regex) -> cf_e2e::Result<Vec<Value>> {
+pub(crate) fn notes(project: &Project, told: &Regex) -> cf_e2e::Result<Vec<Value>> {
     Ok(project
         .inbox("chief")?
         .into_iter()
@@ -376,110 +378,35 @@ fn a_job_the_agent_leaves_is_ended_beside_the_harnesss_server_which_runs_on() ->
     Ok(())
 }
 
-/// A job the agent's turn leaves while it is still at work, as a tool runs a command:
-/// the turn works on, and the task with it.
-fn a_worker_whose_turn_works_with_a_job_running(rig: &Rig) -> cf_e2e::Result<(Project<'_>, Job)> {
-    let project = a_worker_given(rig, "JOB 120 SLEEP 120 Reply with exactly: WORKER_OK")?;
-    let job = until_the_job_runs(rig)?;
-    assert_eq!(project.task(1)?["state"], "working");
-    Ok((project, job))
-}
-
-/// Waits until the chief has been told, once, that T-1's window closed with the
-/// job still running, and the note names the job.
-fn until_the_chief_is_told(rig: &Rig, project: &Project) -> Outcome {
-    let closed = Regex::new(r"^T-1's window closed with background work still running: ")?;
-    rig.wait_for("the chief to be told", secs(30), || {
-        Ok(notes(project, &closed)?.len() == 1)
-    })?;
-    let told = notes(project, &closed)?;
-    let body = told[0]["body"].as_str().unwrap_or_default();
-    assert!(
-        body.contains("--background-job"),
-        "the note names the work: {body}"
-    );
-    Ok(())
-}
-
-#[cfg(unix)]
+/// What the agents of four harnesses did on the Mac (Codex, OpenCode, Pi and Devin, in
+/// the live run of 2026-10-13): they detached the job from a shell that then ended
+/// (`nohup … &`), which left it to the system's init, with no parent in the window's
+/// tree. It is in the window's session still (on Windows, in the pane's job), and
+/// ended with the result all the same, and the chief is told.
 #[test]
-fn cancelling_a_task_whose_job_still_runs_asks_the_job_to_end_first_and_tells_whoever_gave_the_task(
+fn a_job_the_agent_detached_from_its_shell_is_ended_with_the_result_and_the_chief_is_told(
 ) -> Outcome {
     let rig = Rig::start(config())?;
-    let (project, job) = a_worker_whose_turn_works_with_a_job_running(&rig)?;
+    let project = a_worker_given(&rig, "BACKGROUND --detach 600 started the job")?;
+    let job = until_the_job_runs(&rig)?;
 
-    let stopped = rig.page("task.cancel", json!({ "project": project.id(), "task": 1 }))?;
-    assert_eq!(stopped["ok"], true, "{stopped}");
-
-    // The window closed with the job asked to end, not killed: it wrote RELEASED.
-    rig.wait_for("the job to say it was asked to end", secs(30), || {
-        Ok(job.released())
+    rig.wait_for("T-1 to be done", secs(60), || {
+        Ok(project.task(1)?["state"] == "done")
     })?;
-    assert!(!job.finished());
-    rig.wait_for("the job to be gone", secs(30), || Ok(!is_alive(job.pid())))?;
-
-    until_the_chief_is_told(&rig, &project)?;
-    rig.close()?;
-    Ok(())
-}
-
-/// What the same cancel comes to on Windows: nothing is asked of the window's
-/// programs, and the pane's job object ends the tree at once. The job is gone
-/// with its window and had no chance to say anything, and whoever gave the task
-/// is told all the same.
-#[cfg(windows)]
-#[test]
-fn cancelling_a_task_whose_job_still_runs_ends_the_job_with_its_window_at_once_and_tells_whoever_gave_the_task(
-) -> Outcome {
-    let rig = Rig::start(config())?;
-    let (project, job) = a_worker_whose_turn_works_with_a_job_running(&rig)?;
-
-    let closing = Instant::now();
-    let stopped = rig.page("task.cancel", json!({ "project": project.id(), "task": 1 }))?;
-    assert_eq!(stopped["ok"], true, "{stopped}");
-
-    rig.wait_for("the job to be gone", secs(30), || Ok(!is_alive(job.pid())))?;
-    assert!(
-        closing.elapsed() < secs(9),
-        "no grace was given: the tree was ended at once ({:?})",
-        closing.elapsed()
-    );
-    assert!(
-        !job.released(),
-        "it was asked nothing, and could not release"
-    );
-    assert!(!job.finished());
-
-    until_the_chief_is_told(&rig, &project)?;
-    rig.close()?;
-    Ok(())
-}
-
-#[test]
-fn pausing_a_task_whose_job_still_runs_leaves_its_window_and_the_job_as_they_are() -> Outcome {
-    let rig = Rig::start(config())?;
-    let (project, job) = a_worker_whose_turn_works_with_a_job_running(&rig)?;
-
-    let paused = rig.page("task.pause", json!({ "project": project.id(), "task": 1 }))?;
-    assert_eq!(paused["ok"], true, "{paused}");
-    rig.wait_for("T-1 to be paused", secs(30), || {
-        Ok(project.task(1)?["state"] == "paused")
+    rig.wait_for("the job to be ended", secs(30), || Ok(!is_alive(job.pid())))?;
+    assert!(!job.finished(), "it did not run to its end");
+    #[cfg(unix)]
+    assert!(job.released(), "it was asked to end, not killed");
+    rig.wait_for("the chief to be told what was ended", secs(30), || {
+        Ok(!notes(&project, ended_note())?.is_empty())
     })?;
-
-    // A paused task goes on in its window: nothing was closed, nothing asked to end.
-    thread::sleep(secs(3));
-    assert!(
-        project.lane("worker")?["pane"].is_object(),
-        "the window is open"
-    );
-    assert!(is_alive(job.pid()), "the job runs on");
-    assert!(!job.released(), "and was not asked to end");
+    assert_eq!(results(&project)?[0]["body"], "started the job");
     rig.close()?;
     Ok(())
 }
 
 /// The signals and the grace are Unix's: on Windows nothing is asked and a job is
-/// ended at once, which the cancel case above holds.
+/// ended at once, which the cancel case (`background_close`) holds.
 #[cfg(unix)]
 #[test]
 fn a_job_that_ignores_the_signals_that_ask_it_to_end_is_killed_once_the_grace_of_ten_seconds_is_over_and_the_result_did_not_wait_for_it(

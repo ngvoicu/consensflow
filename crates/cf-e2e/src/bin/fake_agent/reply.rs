@@ -25,7 +25,9 @@
 //!   in the background and ends its turn. With `--wake` before the seconds the
 //!   window begins a turn of its own when the job ends, as a harness does that
 //!   its job's notification wakes (`WOKEN <words>`, which answers `woken:
-//!   <words>`); with `--deaf` the job ignores the requests to end.
+//!   <words>`); with `--deaf` the job ignores the requests to end; with `--detach`
+//!   the shell that runs it detaches it (`nohup … &`) and ends, which leaves the job
+//!   with no parent, as the agents of four harnesses left theirs.
 //! - A line `JOB [--deaf] <seconds> <rest>` starts such a job and goes on with
 //!   `rest` as the line it was given, as an agent does whose tool runs a command
 //!   while its turn is at work (`JOB 120 SLEEP 60 words` leaves a job running for
@@ -60,7 +62,7 @@ use regex::Regex;
 use serde_json::{json, Value};
 
 use crate::agents::Agents;
-use crate::background::{Group, Jobs, Server, THINKING};
+use crate::background::{Jobs, Server, THINKING};
 use crate::stop::Stop;
 
 /// What a window knows of itself that decides how it answers.
@@ -223,12 +225,12 @@ pub fn reply_to(text: &str, window: &Window) -> Result<Reply, String> {
         thread::sleep(THINKING);
         window
             .jobs
-            .start("job", seconds, !job[1].is_empty(), Group::Own, || {})?;
+            .start("job", seconds, !job[1].is_empty(), false, || {})?;
         return reply_to(&job[3], window);
     }
     if let Some(job) = pattern::once(
         &BACKGROUND,
-        r"(?m)^BACKGROUND ((?:--(?:wake|deaf) )*)(\d+) (.+)$",
+        r"(?m)^BACKGROUND ((?:--(?:wake|deaf|detach) )*)(\d+) (.+)$",
     )
     .captures(text)
     {
@@ -236,21 +238,30 @@ pub fn reply_to(text: &str, window: &Window) -> Result<Reply, String> {
             .parse()
             .map_err(|_| format!("BACKGROUND {}", &job[2]))?;
         let words = job[3].to_owned();
-        let (wakes, deaf) = (job[1].contains("--wake"), job[1].contains("--deaf"));
+        let (wakes, deaf, detached) = (
+            job[1].contains("--wake"),
+            job[1].contains("--deaf"),
+            job[1].contains("--detach"),
+        );
+        if wakes && detached {
+            return Err(
+                "BACKGROUND --wake --detach: a job detached from its shell is no child to wait for"
+                    .to_owned(),
+            );
+        }
         // An agent thinks before it runs a tool: the daemon marks where a launch's
         // turn begins when its message shows in the record, up to a pass after the
         // agent began.
         thread::sleep(THINKING);
         let (wake, woken) = (window.wake.clone(), format!("WOKEN {words}"));
-        // A command the agent's tool runs is in a group of its own, as a harness
-        // runs it.
-        window
-            .jobs
-            .start("job", seconds, deaf, Group::Own, move || {
-                if wakes {
-                    let _ = wake.send(woken);
-                }
-            })?;
+        // A command the agent's tool runs is run by a shell in a group of its own, as a
+        // harness runs it, which waits for it or, as the agents of the harnesses do
+        // when they leave a job, detaches it and ends.
+        window.jobs.start("job", seconds, deaf, detached, move || {
+            if wakes {
+                let _ = wake.send(woken);
+            }
+        })?;
         return Ok(Reply::Text(words));
     }
     if let Some(agents) = pattern::once(&AGENTS, r"(?m)^AGENTS (\d+) (\d+) (.+)$").captures(text) {
@@ -466,6 +477,17 @@ mod tests {
             assert_eq!(text(reply_to(line, &window())), format!("noted: {line}"));
             assert!(started.elapsed() < Duration::from_secs(1), "{line}");
         }
+    }
+
+    #[test]
+    fn a_job_that_is_detached_from_its_shell_is_no_child_to_wake_the_window_when_it_ends() {
+        let started = std::time::Instant::now();
+        let failed = reply_to("BACKGROUND --wake --detach 5 words", &window()).unwrap_err();
+        assert!(failed.starts_with("BACKGROUND --wake --detach"), "{failed}");
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "it started nothing"
+        );
     }
 
     #[test]

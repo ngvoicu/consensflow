@@ -13,7 +13,7 @@ use cf_base::refusal::Refusal;
 use cf_harness::contract::{Adapter, Agent, LaunchId, Pane, Records, Work};
 use cf_harness::seams::Time;
 use cf_ledger::{Ledger, LedgerError, ParticipantView, ProjectView};
-use cf_proto::panes::{Background, BackgroundProcess, Ending, Servers};
+use cf_proto::panes::{Ending, Servers};
 use cf_proto::trace::TraceLine;
 
 use crate::host::EngineHost;
@@ -195,17 +195,16 @@ impl Limits {
 pub trait BackgroundWork {
     /// A turn is about to begin in `pane`: whatever its tree runs now came
     /// before it, and is no turn's work. `servers` says how the window's harness
-    /// keeps its own processes (`Adapter::servers`): they, and what they start,
-    /// are no turn's work either, however late each began.
-    fn mark<'a>(&'a self, pane: &'a Pane, servers: Servers) -> Work<'a, ()>;
-    /// What `pane`'s tree runs that began after its last mark.
-    fn running<'a>(&'a self, pane: &'a Pane) -> Work<'a, Background>;
-    /// Ends what `pane`'s turn left running, the window staying open: of the
-    /// processes `work` names (what [`BackgroundWork::running`] listed, less what
-    /// is the harness's own by its name), those the host tells for the turn's, and
-    /// what descends from them. It says what it ended and what it left running,
-    /// which is all of `work` where it does not answer.
-    fn end<'a>(&'a self, pane: &'a Pane, work: &'a [BackgroundProcess]) -> Work<'a, Ending>;
+    /// keeps its own processes (`Adapter::servers`) and `harness` which harness it
+    /// is: what the host can tell is its own, and what that starts, is no turn's
+    /// work either, however late it began.
+    fn mark<'a>(&'a self, pane: &'a Pane, servers: Servers, harness: &'a str) -> Work<'a, ()>;
+    /// Ends what `pane`'s turn left running, the window staying open: the host
+    /// chooses what, from all of what it can prove the turn's, and what that started.
+    /// It says what it ended and what of it it could not end, and nothing of what it
+    /// cannot tell the turn's from the harness's, which it leaves alone; nothing at
+    /// all where it does not answer.
+    fn end<'a>(&'a self, pane: &'a Pane) -> Work<'a, Ending>;
 }
 
 /// Everything the engine is made with: each seam shared, so a second

@@ -370,11 +370,13 @@ fn a_project_that_does_not_end_in_time_says_which_of_the_processes_it_started_we
         .split("the processes it started, left or last looked at: ")
         .nth(1)
         .ok_or(failed.as_str())?;
-    // The pane host, waiting for the window to leave, and the job that would not
-    // (its parent gone, it is the machine's: `(1)`; a command is cut to a line).
+    // The pane host, waiting for the window to leave, the shell that runs the worker's
+    // job (its parent gone, it is the machine's: `(1)`; a command is cut to a line) and
+    // the job that would not, under it.
     assert!(left.contains("consensflow-bridge"), "{failed}");
+    assert!(left.contains("(1) ") && left.contains("sh -c"), "{failed}");
     assert!(
-        left.contains(&format!("{} (1) ", job.pid())),
+        left.contains(&format!("{} (", job.pid())),
         "the job {} is left: {failed}",
         job.pid()
     );

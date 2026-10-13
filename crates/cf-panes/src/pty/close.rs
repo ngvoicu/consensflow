@@ -24,11 +24,12 @@
 //!
 //! What a turn left running is ended the same way, with the window staying open
 //! (`turn`'s `end_background`): on macOS the same asking and the same ending of
-//! what is left, by the same [`crate::process_tree`] of the pane, of the processes
-//! it names and what descends from them instead of the whole tree and the group
+//! what is left, by the same [`crate::process_tree`] of the pane, of the turn's work
+//! the baseline proves instead of the whole tree and the group
 //! ([`wait_until_gone`] is the wait they share). On Windows they cannot share the
 //! ending: a job object ends all of its tree or none of it, which is what a close
-//! wants, and an ending of some of it ends each process by itself, at once.
+//! wants, and an ending of some of it ends each process by itself, at once, and
+//! waits for it.
 
 #[cfg(unix)]
 use std::io;
@@ -71,10 +72,13 @@ impl Pane {
         }
         #[cfg(target_os = "macos")]
         {
+            // A process that could not be asked is one that is ending, or not ours
+            // to signal: none of them is waited for.
             asked.tree = self
                 .process_tree
                 .ask_to_exit(Subject::Whole, self.process_group_id)
-                .ok();
+                .ok()
+                .filter(|asked| !asked.failed());
         }
         asked
     }

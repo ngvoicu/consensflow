@@ -301,6 +301,25 @@ mod shell {
     }
 
     #[test]
+    fn a_process_began_when_the_system_says_and_a_process_that_is_gone_began_never() {
+        let mut program = sh("exec sleep 30").spawn().unwrap();
+        let id = program.id();
+        let began = started(id).expect("the system says when it began");
+        assert_eq!(
+            started(id),
+            Some(began.clone()),
+            "the same one, the same word"
+        );
+        // Another process is another word, whatever its number is, and none is none.
+        let mut other = sh("exec sleep 31").spawn().unwrap();
+        assert_ne!(started(other.id()), None);
+        assert_eq!(started(u32::MAX), None);
+        program.kill();
+        other.kill();
+        assert_eq!(started(id), None, "it is gone: it began no more");
+    }
+
+    #[test]
     fn the_group_of_a_process_is_the_one_it_was_started_in_and_one_that_is_gone_has_none() {
         use std::os::unix::process::CommandExt;
 

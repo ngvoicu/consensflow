@@ -12,6 +12,7 @@ use std::time::Duration;
 use cf_harness::contract::{Interrupt, Launch, LaunchId, Observed, Pane, Window};
 use cf_harness::seams::Time;
 use cf_ledger::{Begun, MessageView, NewNote, ParticipantView, ProjectView, Stop};
+use cf_proto::agents::Harness;
 use cf_proto::panes::Servers;
 use cf_proto::trace::WindowEvent;
 use serde_json::{json, Value};
@@ -111,9 +112,10 @@ pub(crate) struct WindowPart {
     pub(crate) window: Option<Rc<dyn Window>>,
     /// The keys that interrupt a turn in it (its adapter's `interrupt`).
     pub(crate) keys: Option<Interrupt>,
-    /// How its harness keeps its own processes (its adapter's `servers`), which
-    /// the pane host is told where a turn begins.
+    /// How its harness keeps its own processes (its adapter's `servers`), and
+    /// which harness it is, which the pane host is told where a turn begins.
     pub(crate) servers: Servers,
+    pub(crate) harness: String,
     pub(crate) pane: Option<Pane>,
     pub(crate) opening: Option<Opening>,
     pub(crate) launch_id: Option<LaunchId>,
@@ -159,6 +161,7 @@ impl Default for WindowPart {
             window: None,
             keys: None,
             servers: Servers::Unknown,
+            harness: String::new(),
             pane: None,
             opening: None,
             launch_id: None,
@@ -233,13 +236,14 @@ fn assign(env: &mut Vec<(String, String)>, key: &str, value: &str) {
 }
 
 /// What a launch was prepared with: the window, the keys that interrupt it,
-/// how its harness keeps its own processes, how its pane opens, and the stop its
-/// task had asked when the first message was begun, which the new window owes
-/// nothing for.
+/// how its harness keeps its own processes and which harness it is, how its pane
+/// opens, and the stop its task had asked when the first message was begun, which
+/// the new window owes nothing for.
 struct Planned {
     window: Rc<dyn Window>,
     keys: Interrupt,
     servers: Servers,
+    harness: String,
     argv: Vec<String>,
     env: Vec<(String, String)>,
     drop_env: Vec<String>,
@@ -500,6 +504,7 @@ impl Dispatcher {
             part.window = Some(Rc::clone(&planned.window));
             part.keys = Some(planned.keys);
             part.servers = planned.servers;
+            part.harness.clone_from(&planned.harness);
             part.pane = Some(pane.clone());
             part.launch_id = Some(launch_id);
             part.token = Some(token);
@@ -629,6 +634,12 @@ impl Dispatcher {
             window: prepared.window,
             keys: adapter.interrupt(),
             servers: adapter.servers(),
+            // The name the harness's own programs go by (`codex-…`): the roster's kind
+            // is `claude-code` for the harness whose binary is `claude`.
+            harness: Harness::from_kind(harness)
+                .map(Harness::as_str)
+                .unwrap_or_default()
+                .to_owned(),
             argv: prepared.argv,
             env: prepared.env,
             drop_env: prepared.drop_env,

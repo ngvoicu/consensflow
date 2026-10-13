@@ -42,6 +42,8 @@
 // file beside it, where each would be a suite of its own.
 #[path = "rig/approval.rs"]
 mod approval;
+#[path = "rig/background_close.rs"]
+mod background_close;
 #[path = "rig/background_work.rs"]
 mod background_work;
 #[path = "rig/cf_native.rs"]

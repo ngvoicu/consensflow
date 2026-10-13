@@ -474,99 +474,60 @@ async fn an_exit_that_names_no_pane_exits_nothing() {
 }
 
 #[tokio::test]
-async fn a_turn_is_marked_and_the_work_it_left_asked_for_by_the_pane_the_engine_names() {
+async fn a_turn_is_marked_with_how_the_harness_keeps_its_servers_and_which_harness_it_is_by_the_pane_the_engine_names(
+) {
     LocalSet::new()
         .run_until(async {
             let (daemon, app) = bridge_pair();
             let seen = Rc::new(RefCell::new(Vec::new()));
-            let (marked, asked) = (Rc::clone(&seen), Rc::clone(&seen));
+            let marked = Rc::clone(&seen);
             app.on("pane.mark", move |_, body| {
-                marked.borrow_mut().push(("pane.mark", body));
+                marked.borrow_mut().push(body);
                 async { Ok(json!({ "ok": true })) }
-            });
-            app.on("pane.background", move |_, body| {
-                asked.borrow_mut().push(("pane.background", body));
-                async {
-                    Ok(json!({
-                        "ok": true,
-                        "total": 3,
-                        "processes": [{ "pid": 4242, "command": "python3 lock.py record" }],
-                    }))
-                }
             });
             let host = host_over(&daemon);
 
-            let said = [Servers::Unknown, Servers::InGroup, Servers::AtLaunch];
-            for servers in said {
-                host.mark(&pane("p1-zeus-amber-pine", 7), servers).await;
+            let said = [
+                (Servers::Unknown, ""),
+                (Servers::InGroup, "claude"),
+                (Servers::AtLaunch, "codex"),
+                (Servers::Unknown, "pi"),
+            ];
+            for (servers, harness) in said {
+                host.mark(&pane("p1-zeus-amber-pine", 7), servers, harness)
+                    .await;
             }
-            let left = host.running(&pane("p1-zeus-amber-pine", 7)).await;
 
             assert_eq!(
                 *seen.borrow(),
                 [
-                    (
-                        "pane.mark",
-                        json!({ "id": "p1-zeus-amber-pine", "generation": 7 })
-                    ),
-                    (
-                        "pane.mark",
-                        json!({
-                            "id": "p1-zeus-amber-pine",
-                            "generation": 7,
-                            "servers": "inGroup",
-                        })
-                    ),
-                    (
-                        "pane.mark",
-                        json!({
-                            "id": "p1-zeus-amber-pine",
-                            "generation": 7,
-                            "servers": "atLaunch",
-                        })
-                    ),
-                    (
-                        "pane.background",
-                        json!({ "id": "p1-zeus-amber-pine", "generation": 7 })
-                    ),
+                    json!({ "id": "p1-zeus-amber-pine", "generation": 7 }),
+                    json!({
+                        "id": "p1-zeus-amber-pine",
+                        "generation": 7,
+                        "servers": "inGroup",
+                        "harness": "claude",
+                    }),
+                    json!({
+                        "id": "p1-zeus-amber-pine",
+                        "generation": 7,
+                        "servers": "atLaunch",
+                        "harness": "codex",
+                    }),
+                    json!({
+                        "id": "p1-zeus-amber-pine",
+                        "generation": 7,
+                        "harness": "pi",
+                    }),
                 ]
-            );
-            assert_eq!(left.total, 3, "more than it names");
-            assert_eq!(
-                left.processes,
-                [cf_proto::panes::BackgroundProcess {
-                    pid: 4242,
-                    command: "python3 lock.py record".to_owned()
-                }]
             );
         })
         .await;
 }
 
-#[test]
-fn a_host_that_refuses_or_does_not_say_has_no_background_work_to_tell_of() {
-    assert_eq!(running(None), Background::default());
-    assert_eq!(
-        running(Some(
-            json!({ "ok": false, "error": "pane p1 generation 1 is not open" })
-        )),
-        Background::default()
-    );
-    assert_eq!(running(Some(json!({}))), Background::default());
-    assert_eq!(
-        running(Some(json!({ "ok": true, "total": "many" }))),
-        Background::default(),
-        "an answer that is not one is no answer"
-    );
-    assert_eq!(
-        running(Some(json!({ "ok": true }))),
-        Background::default(),
-        "an answer with nothing in it says none"
-    );
-}
-
 #[tokio::test]
-async fn an_ending_asks_the_pane_to_end_the_processes_the_engine_names_and_says_what_it_answered() {
+async fn an_ending_asks_the_pane_to_end_what_its_turn_left_and_names_no_process_and_says_what_it_answered(
+) {
     LocalSet::new()
         .run_until(async {
             let (daemon, app) = bridge_pair();
@@ -586,22 +547,13 @@ async fn an_ending_asks_the_pane_to_end_the_processes_the_engine_names_and_says_
                 }
             });
             let host = host_over(&daemon);
-            let work = [
-                cf_proto::panes::BackgroundProcess {
-                    pid: 4242,
-                    command: "python3 lock.py record".to_owned(),
-                },
-                cf_proto::panes::BackgroundProcess {
-                    pid: 4243,
-                    command: "tail -f run.log".to_owned(),
-                },
-            ];
 
-            let ending = host.end(&pane("p1-zeus-amber-pine", 7), &work).await;
+            let ending = host.end(&pane("p1-zeus-amber-pine", 7)).await;
 
+            // No process crosses from one look to the next: the host chooses.
             assert_eq!(
                 *seen.borrow(),
-                [json!({ "id": "p1-zeus-amber-pine", "generation": 7, "pids": [4242, 4243] })]
+                [json!({ "id": "p1-zeus-amber-pine", "generation": 7 })]
             );
             assert_eq!(ending.ended.total, 2);
             assert_eq!(ending.ended.processes[1].command, "tail -f run.log");
@@ -612,38 +564,28 @@ async fn an_ending_asks_the_pane_to_end_the_processes_the_engine_names_and_says_
 }
 
 #[test]
-fn a_host_that_refuses_or_does_not_answer_an_ending_has_left_all_of_it_running() {
-    let work = [cf_proto::panes::BackgroundProcess {
-        pid: 4242,
-        command: "python3 lock.py record".to_owned(),
-    }];
-    // Nothing was ended, and the requester is not to be told that it was.
-    let left = Ending {
-        left: Background {
-            total: 1,
-            processes: work.to_vec(),
-        },
-        ..Ending::default()
-    };
-    assert_eq!(ending(None, &work), left);
+fn a_host_that_refuses_or_does_not_answer_an_ending_has_said_nothing_and_none_is_made_up() {
+    assert_eq!(ending(None), Ending::default());
     assert_eq!(
-        ending(
-            Some(json!({ "ok": false, "error": "pane p1 generation 1 is not open" })),
-            &work
-        ),
-        left
+        ending(Some(
+            json!({ "ok": false, "error": "pane p1 generation 1 is not open" })
+        )),
+        Ending::default()
     );
-    assert_eq!(ending(Some(json!({})), &work), left);
+    assert_eq!(ending(Some(json!({}))), Ending::default());
     assert_eq!(
-        ending(Some(json!({ "ok": true, "ended": "all of it" })), &work),
-        left,
+        ending(Some(json!({ "ok": true, "ended": "all of it" }))),
+        Ending::default(),
         "an answer that is not one is no answer"
     );
     // One that says nothing was ended and nothing is left.
-    assert_eq!(
-        ending(Some(json!({ "ok": true })), &work),
-        Ending::default()
-    );
+    assert_eq!(ending(Some(json!({ "ok": true }))), Ending::default());
+    let said = ending(Some(json!({
+        "ok": true,
+        "ended": { "total": 1, "processes": [{ "pid": 1, "command": "sleep 600" }] },
+    })));
+    assert_eq!(said.ended.total, 1);
+    assert_eq!(said.left, cf_proto::panes::Background::default());
 }
 
 #[tokio::test]

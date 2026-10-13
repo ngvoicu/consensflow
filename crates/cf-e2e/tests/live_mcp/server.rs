@@ -7,7 +7,7 @@
 
 use std::path::{Path, PathBuf};
 
-use cf_e2e::process::is_alive;
+use cf_e2e::process::{is_alive, started};
 use cf_e2e::{files, Result};
 use serde_json::json;
 
@@ -97,6 +97,15 @@ impl Server {
     /// Whether its process is there now.
     pub fn runs(&self) -> bool {
         self.pid().is_some_and(is_alive)
+    }
+
+    /// The server as one process: its number and when that process began, as the
+    /// system says it. None until it has written its process id and while it is not
+    /// there; the same process gives the same words, and one that took its number,
+    /// others.
+    pub fn identity(&self) -> Option<String> {
+        let pid = self.pid()?;
+        Some(format!("{pid} {}", started(pid)?))
     }
 }
 

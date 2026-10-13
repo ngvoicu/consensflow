@@ -44,9 +44,12 @@ pub trait Adapter {
     /// which the pane host tells a turn's work from them by (`pane.mark`'s
     /// `servers`): what a server is, and so what it starts, is the harness's and
     /// no work a turn left, to be listed or ended. Where it is not known the host
-    /// lists by when each process began alone, and a server that begins after the
-    /// first turn's mark is listed with the turn's; it ends only what a shell the
-    /// harness started after the mark began.
+    /// still leaves alone what it can prove the harness's (a program named for the
+    /// harness that runs beside its own binary, and what descends from one), and
+    /// takes for the turn's only what it can prove: a shell the harness started after
+    /// the mark and what the shell started, and what has lost the process that
+    /// started it (a job detached with `nohup … &`). A server that begins after the
+    /// mark and is none of these is left alone, and is not named.
     ///
     /// Only what someone has looked at is said: what a window's tree holds with a
     /// command of its agent running (`ps -axo pid,pgid,ppid,command`). Claude Code

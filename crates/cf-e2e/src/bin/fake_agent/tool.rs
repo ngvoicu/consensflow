@@ -1,17 +1,20 @@
 //! The command a turn runs, as an agent's shell tool runs one. A message with a line
-//! `RUN <program> <arguments…>` is a turn that starts the program (a process of the
-//! window's tree, with the command line it is given, which the pane host lists as
-//! work the turn started) and works until it ends, then answers `ran: <the line>`.
-//! An Escape stops the turn, as it stops Claude's, and the program ends with it: a
-//! harness that kills the tool it cancels. With `--survive` after the word the
+//! `RUN <program> <arguments…>` is a turn that starts the program, by a shell as a
+//! harness starts each command its agent runs (the shell and the program are processes
+//! of the window's tree, with the command line they are given, which the pane host
+//! lists as work the turn started) and works until it ends, then answers `ran: <the
+//! line>`. An Escape stops the turn, as it stops Claude's, and the program ends with
+//! it: a harness that kills the tool it cancels. With `--survive` after the word the
 //! program is left running: a harness that cancels its turn and lets go of the tool.
 
+use std::ffi::OsString;
+use std::path::Path;
 use std::thread;
 use std::time::Duration;
 
-use cf_e2e::process::{Run, Spawned};
+use cf_e2e::process::Spawned;
 
-use crate::background::THINKING;
+use crate::background::{in_a_shell, THINKING};
 use crate::reply::{Reply, Window};
 
 /// How often the program is looked at for its end while the turn works.
@@ -57,11 +60,10 @@ pub fn reply(text: &str, window: &Window) -> Option<Result<Reply, String>> {
 /// and the turn works until the program ends or the turn is stopped.
 fn run(command: &Command, window: &Window) -> Result<Reply, String> {
     thread::sleep(THINKING);
-    // In a group of its own, as Claude Code runs a command: the window's own
-    // group is its harness's and its servers'.
-    let mut program = Run::new(command.program)
-        .args(&command.arguments)
-        .own_group()
+    // By a shell in a group of its own, as Claude Code runs a command: the window's
+    // own group is its harness's and its servers'.
+    let words = command.arguments.iter().map(OsString::from).collect();
+    let mut program = in_a_shell(Path::new(command.program), words, false)?
         .inheriting_env()
         .closed_input()
         .spawn()
@@ -71,7 +73,7 @@ fn run(command: &Command, window: &Window) -> Result<Reply, String> {
             if command.survives {
                 leave_running(program);
             } else {
-                program.kill();
+                end(&mut program);
             }
             return Ok(Reply::Stopped);
         }
@@ -81,6 +83,32 @@ fn run(command: &Command, window: &Window) -> Result<Reply, String> {
         command.program,
         command.arguments.join(" ")
     )))
+}
+
+/// Ends the shell and the program it runs, as a harness that kills the tool it cancels
+/// does: on Unix the group the shell leads, which holds both; on Windows the shell's
+/// tree.
+fn end(shell: &mut Spawned) {
+    #[cfg(unix)]
+    {
+        use nix::sys::signal::{killpg, Signal};
+        use nix::unistd::Pid;
+
+        if let Ok(leader) = i32::try_from(shell.id()) {
+            let _ = killpg(Pid::from_raw(leader), Signal::SIGKILL);
+        }
+    }
+    #[cfg(windows)]
+    {
+        use cf_e2e::process::{own_var, Run};
+
+        let root = own_var("SystemRoot").unwrap_or_else(|| r"C:\Windows".to_owned());
+        let _ = Run::new(format!(r"{root}\System32\taskkill.exe"))
+            .args(["/T", "/F", "/PID"])
+            .arg(shell.id().to_string())
+            .run();
+    }
+    shell.kill();
 }
 
 /// Lets the program run on past the turn: the handle ends the program it is dropped

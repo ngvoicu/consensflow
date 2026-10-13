@@ -11,12 +11,14 @@
 //!
 //! - the task is done, and its result reached the chief;
 //! - the host listed the command as running: a worker that left none (its harness may
-//!   end what a tool started when the tool call ends) proves nothing, and fails;
+//!   end what a tool started when the tool call ends, or the agent took it out of the
+//!   window's session with `setsid` and every process that started it was gone before
+//!   the host saw one of them start, which no tree the host has holds) proves nothing,
+//!   and fails;
 //! - the command is gone once the task is done;
 //! - and the chief was told, in the note beside the result, that the turn left work
-//!   and that it was ended: a note that says part of it still runs, and was not ended,
-//!   is what a harness whose servers the host cannot tell from the turn's work gets
-//!   (the host ends there only what a shell the harness started started), and fails.
+//!   and that it was ended: a note that says part of what the host proved the turn's still
+//!   runs, and was not ended, fails.
 //!
 //! Whatever the verdict, the run says what the host listed at the turn's end, what it
 //! said the window left when it closed, and what the chief was told.
@@ -65,10 +67,11 @@ fn detach() -> String {
 
 /// What the chief gives the worker: for a harness, to start the command in the background
 /// and answer; for the rig's stand-in, which has no shell tool, to start a job of the
-/// same number of seconds (its command line holds it) and answer.
+/// same number of seconds (its command line holds it), detached from the shell that runs
+/// it as the agents of four harnesses detached theirs, and answer.
 pub fn brief(who: Who) -> String {
     match who {
-        Who::StandIn => format!("BACKGROUND {SECONDS} left a job running"),
+        Who::StandIn => format!("BACKGROUND --detach {SECONDS} left a job running"),
         Who::Harness(_) => format!(
             "Start the command `{}` in the background, so that it is still running when you have answered: use your shell tool's option to run a command in the background if it has one, or detach it yourself ({}). Do not wait for it, do not look at it and do not stop it. When it has started, reply with one line that says so, and nothing more.",
             command(),
@@ -125,7 +128,7 @@ pub fn judge(left: &Left) -> Result<(), Vec<String>> {
     }
     if left.listed.is_empty() {
         problems.push(format!(
-            "the pane host never listed the command ({SECONDS}) as running: the worker left none, so there is nothing to end (its harness may end what a tool started when the tool call ends)"
+            "the pane host never listed the command ({SECONDS}) as running: the worker left none, so there is nothing to end (its harness may end what a tool started when the tool call ends), or the host never found it (the agent started it in a session of its own, and the shell that started it was gone before the host saw it start)"
         ));
     } else {
         if !left.alive.is_empty() {

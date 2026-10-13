@@ -111,7 +111,6 @@ fn a_chiefs_turn_that_ends_with_agents_pending_is_asked_nothing_of_the_host() {
     context.pass().unwrap();
     context.pass().unwrap();
 
-    assert_eq!(context.background.asked("chief"), 0);
     assert_eq!(context.background.endings_asked("chief"), 0);
 }
 
@@ -133,9 +132,9 @@ fn a_workers_turn_that_ends_with_agents_pending_is_its_result_at_once_and_the_re
         ["T-1's turn left background agents running."]
     );
     assert_eq!(
-        context.background.endings_asked("zeus"),
-        0,
-        "no process of its tree is among them"
+        context.background.ended("zeus"),
+        Vec::<String>::new(),
+        "the host was asked, as for any turn, and no process of its tree is among them"
     );
 }
 
