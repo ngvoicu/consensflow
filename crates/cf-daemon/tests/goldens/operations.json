@@ -27,7 +27,9 @@
     "tasks.delete",
     "message.read",
     "message.approve",
-    "message.decline"
+    "message.decline",
+    "wakeup.get",
+    "wakeup.set"
   ],
   "ping": "{\"ok\":true}"
 }

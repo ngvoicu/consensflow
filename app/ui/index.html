@@ -182,6 +182,18 @@
         <p class="staff-hint" id="staff-hint" hidden></p>
       </fieldset>
       <label class="check"><input type="checkbox" id="staff-gate" name="gate">Human approval required: every message between the chief and its staff waits until you pass it on</label>
+      <fieldset class="staff-wakeup" id="staff-wakeup">
+        <legend>Wake-up calls</legend>
+        <label class="check"><input type="checkbox" name="wakeup-on">Wake the chief now and then</label>
+        <p class="wakeup-help">A chief that stopped while work is left carries on: it is asked whether it still has work to do. Nothing is sent while the project is closed, or while you have typed to the chief and not sent it; its answer stays in its terminal.</p>
+        <div class="wakeup-when">
+          <label>Every<input type="number" name="wakeup-every" min="1" step="1" required></label>
+          <label>Unit<select name="wakeup-unit"><option value="minutes">minutes</option><option value="hours">hours</option><option value="days">days</option></select></label>
+        </div>
+        <label>What it says<textarea name="wakeup-text" rows="3"></textarea></label>
+        <p class="staff-hint wakeup-hint" role="alert" hidden></p>
+        <div class="dialog-actions"><button class="primary-button" type="button" name="wakeup-save">Save wake-up calls</button></div>
+      </fieldset>
       <div class="dialog-actions">
         <button class="quiet-button" type="button" value="cancel">Close</button>
       </div>

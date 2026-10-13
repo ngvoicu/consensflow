@@ -12,6 +12,7 @@ use crate::model::{self, LedgerError, COORDINATOR_HANDLES};
 use crate::staff::{add_participant, NewParticipant};
 use crate::store::Store;
 use crate::views::{participant_view, ParticipantRow, PARTICIPANT_SELECT};
+use crate::wake_ups::withdraw_queued;
 
 /// A project's row.
 pub(crate) struct ProjectRow {
@@ -290,6 +291,14 @@ pub(crate) fn set_project_state(
         )?;
         if from != state {
             store.log(id, "project.state", json!({ "from": from, "to": state }))?;
+            // A wake-up that waited through a Close is stale when the project
+            // comes back: its clock starts again at the Resume.
+            let why = if state == "open" {
+                "the project was resumed"
+            } else {
+                "the project was closed"
+            };
+            withdraw_queued(store, id, why)?;
         }
         known_project(store, id)
     })
@@ -365,6 +374,7 @@ pub(crate) fn suspend_for_restart(store: &mut Store) -> Result<Vec<ProjectView>,
                 "project.state",
                 json!({ "from": "open", "to": "suspended" }),
             )?;
+            withdraw_queued(store, *id, "ConsensFlow stopped")?;
         }
         open.into_iter()
             .map(|id| known_project(store, id))

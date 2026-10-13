@@ -1,0 +1,554 @@
+# A project's wake-up calls (2026-10-13: the human turns them on for a project, and its
+# chief at rest is asked now and then whether it still has work to do, so that a chief
+# that stopped while work is left carries on). A wake-up is a note from the human to the
+# chief, queued when the interval has passed since the latest of the last wake-up, the last
+# Resume and the last change of the setting; never while one is on its way, never to a
+# chief in a turn, waiting, out of quota or held for words the human typed; a quiet board
+# is not asked twice, and the first after an enable or a Resume always goes. One plant takes
+# one rule out; a test of it fails. The ledger's plants run its own tests
+# (`crates/cf-ledger/tests/wake_ups/` and the unit tests of `wake_ups`), the engine's the
+# dispatcher's (`tests/dispatcher/wake_ups.rs` and `wake_ups/ending.rs`), the page's the operations'
+# (`crates/cf-daemon/src/page/tests/wake_up.rs`) and the dialog's the browser's; the
+# `wake-up rig:` plants say `builds`, run the cases of the rig (a real daemon, the real pane
+# host, a stand-in chief: a real minute each, `crates/cf-e2e/tests/rig/wake_ups.rs`), and the
+# family builds the native `cf` again once each is put back. Every name holds `wake-up`, so
+# `npm run plants:daemon -- wake-up` runs them all, and `npm run plants:daemon -- "wake-up rig:"`
+# the end to end ones.
+
+[run]
+# The ledger's tests of the setting, the migration, when a wake-up is due and what is withdrawn.
+ledger-wake-ups = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "wake_ups"]
+# The words of the setting and what it makes of a request.
+ledger-wake-ups-lib = ["cargo", "test", "--offline", "-p", "cf-ledger", "--lib", "wake_ups::"]
+# The dispatcher's tests of when a chief is nudged.
+engine-wake-ups = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "wake_ups::"]
+# The page's operations, over the bridge.
+daemon-wake-up-page = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "page::tests::wake_up"]
+# The names of the page's operations, which the app forwards, and which of them wake the dispatcher.
+proto-page = ["cargo", "test", "--offline", "-p", "cf-proto", "--lib", "page::"]
+# The cases of the rig, a real minute each.
+rig-wake-ups-turn = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "wake_ups::a_chief_in_a_long_turn"]
+rig-wake-ups-first = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "wake_ups::a_wake_up_set_for_a_minute"]
+# What the live run judges the evidence by (no harness, no quota).
+live-wake-ups = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_wake_ups"]
+# The dialog's group, in the browser Playwright keeps (each plant's `prepare` bundles the page's
+# xterm first, as `npm run test:ui` does).
+page-wake-up = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "wake-up"]
+
+# --- the ledger: the setting ---
+
+[[plant]]
+name = "wake-up: a setting saved as it was is logged and restarts the clock"
+meant = "a_save_that_changes_nothing_logs_nothing_and_leaves_the_clock_where_it_was"
+runs = ["ledger-wake-ups"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups.rs"
+find = '        if from == to {'
+replace = '        if false {'
+
+[[plant]]
+name = "wake-up: the calls turned off leave a wake-up that waits to be delivered"
+meant = "turning_the_calls_off_withdraws_a_wake_up_not_yet_admitted_and_leaves_one_delivered"
+runs = ["ledger-wake-ups"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups.rs"
+find = '        if from.on && !to.on {'
+replace = '        if false {'
+
+[[plant]]
+name = "wake-up: the words the human left as the default are kept as their own"
+meant = "the_default_words_are_kept_as_none_so_they_follow_the_default_and_a_blank_is_refused"
+runs = ["ledger-wake-ups"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups.rs"
+find = '                .filter(|text| text != DEFAULT_WAKE_UP_TEXT),'
+replace = '                .filter(|_| true),'
+
+[[plant]]
+name = "wake-up: the default words are not the owner's"
+meant = "the_default_words_are_the_ones_the_owner_decided_on"
+runs = ["ledger-wake-ups-lib"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups.rs"
+find = '    "Do you still have work to do? If tasks are left on the board or in your plan, carry on.";'
+replace = '    "Do you still have work to do?";'
+
+[[plant]]
+name = "wake-up: an interval under a minute is allowed"
+meant = "an_interval_under_a_minute_or_too_long_to_count_is_refused_and_a_minute_is_the_least_there_is"
+runs = ["ledger-wake-ups-lib"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups.rs"
+find = 'pub const WAKE_UP_FLOOR_MS: i64 = 60_000;'
+replace = 'pub const WAKE_UP_FLOOR_MS: i64 = 0;'
+
+[[plant]]
+name = "wake-up: an interval is said in minutes when hours would hold it whole"
+meant = "an_interval_is_said_in_the_largest_unit_that_holds_it_whole"
+runs = ["ledger-wake-ups-lib"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups.rs"
+find = '    const ALL: [Self; 3] = [Self::Days, Self::Hours, Self::Minutes];'
+replace = '    const ALL: [Self; 3] = [Self::Minutes, Self::Hours, Self::Days];'
+
+[[plant]]
+name = "wake-up: any word is a unit"
+meant = "a_request_that_is_no_on_or_off_no_whole_number_or_no_unit_of_the_three_is_refused_in_words"
+runs = ["ledger-wake-ups-lib"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups.rs"
+find = '            .and_then(WakeUpUnit::from_name);'
+replace = '            .map(|_| WakeUpUnit::Minutes);'
+
+[[plant]]
+name = "wake-up: the project is looked for before the request is checked"
+meant = "an_interval_under_a_minute_is_refused_before_the_project_is_looked_for_and_a_project_that_is_not_there_is_refused"
+runs = ["ledger-wake-ups"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups.rs"
+find = '''    let to = request.setting()?;
+    store.write(|store| {
+        let from = setting(store, project_id)?;'''
+replace = '''    store.write(|store| {
+        let from = setting(store, project_id)?;
+        let to = request.setting()?;'''
+
+[[plant]]
+name = "wake-up: a new project's calls are on, a minute apart"
+meant = "a_project_has_its_wake_up_calls_off_an_hour_apart_with_the_default_words"
+runs = ["ledger-wake-ups"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0014.sql"
+find = 'wake_up_every_ms INTEGER NOT NULL DEFAULT 3600000 CONSTRAINT'
+replace = 'wake_up_every_ms INTEGER NOT NULL DEFAULT 60000 CONSTRAINT'
+
+# --- the ledger: when a wake-up is due ---
+
+[[plant]]
+name = "wake-up: a wake-up is due before the interval has passed"
+meant = "a_wake_up_is_due_once_the_interval_has_passed_and_is_a_note_from_the_human_to_the_chief"
+runs = ["ledger-wake-ups"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups/due.rs"
+find = '    if now_ms < origin.saturating_add(wake_up.every_ms) {'
+replace = '    if false {'
+
+[[plant]]
+name = "wake-up: a wake-up is not from the human"
+meant = "a_wake_up_is_due_once_the_interval_has_passed_and_is_a_note_from_the_human_to_the_chief"
+runs = ["ledger-wake-ups"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups/due.rs"
+find = '                    from: Some("human"),'
+replace = '                    from: None,'
+
+[[plant]]
+name = "wake-up: a wake-up still on its way is followed by another"
+meant = "a_wake_up_on_its_way_is_never_followed_by_another_however_many_intervals_pass"
+runs = ["ledger-wake-ups"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups/due.rs"
+find = '        if on_its_way(store, last)? {'
+replace = '        if false && on_its_way(store, last)? {'
+
+[[plant]]
+name = "wake-up: the calls that are off still send"
+meant = "nothing_is_due_while_the_calls_are_off_and_none_comes_of_a_project_that_is_closed"
+runs = ["ledger-wake-ups"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups/due.rs"
+find = '    if project.state != "open" || !wake_up.on {'
+replace = '    if project.state != "open" {'
+
+[[plant]]
+name = "wake-up: a closed project is sent wake-ups"
+meant = "nothing_is_due_while_the_calls_are_off_and_none_comes_of_a_project_that_is_closed"
+runs = ["ledger-wake-ups"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups/due.rs"
+find = '    if project.state != "open" || !wake_up.on {'
+replace = '    if !wake_up.on {'
+
+[[plant]]
+name = "wake-up: a quiet board is asked again"
+meant = "a_wake_up_that_changed_nothing_is_not_repeated_whatever_the_clock_says"
+runs = ["ledger-wake-ups"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups/due.rs"
+find = '        if !begun_since(store, project_id, last)? && !changed_since(store, project_id, last)? {'
+replace = '        if false {'
+
+[[plant]]
+name = "wake-up: the first after the calls are turned on again waits for the board to move"
+meant = "the_first_wake_up_after_the_calls_are_turned_on_again_goes_though_the_board_is_quiet"
+runs = ["ledger-wake-ups"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups/due.rs"
+find = '        .exists(params![project_id, last.event])?)'
+replace = '        .exists(params![project_id, i64::MAX])?)'
+
+[[plant]]
+name = "wake-up: the wake-up's own note is news to the chief"
+meant = "a_message_that_is_sent_brings_the_next_wake_up_and_the_wake_ups_own_note_never_does"
+runs = ["ledger-wake-ups"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups/due.rs"
+find = '        .exists(params![project_id, last.event])?;'
+replace = '        .exists(params![project_id, last.event - 2])?;'
+
+[[plant]]
+name = "wake-up: words the human typed to the chief are no news"
+meant = "the_human_typing_to_the_chief_in_its_window_counts_and_what_a_delivery_made_does_not"
+runs = ["ledger-wake-ups"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups/due.rs"
+find = '    typed_since(store, chief.id, &last.at)'
+replace = '    Ok(false)'
+
+[[plant]]
+name = "wake-up: what a delivery made is taken for the human typing"
+meant = "the_human_typing_to_the_chief_in_its_window_counts_and_what_a_delivery_made_does_not"
+runs = ["ledger-wake-ups"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/transcripts.rs"
+find = '    Ok(items.iter().any(|text| header_of(text).is_none()))'
+replace = '    Ok(!items.is_empty())'
+
+[[plant]]
+name = "wake-up: an item copied again as it was is new each time"
+meant = "an_item_copied_again_as_it_was_is_not_new_and_one_a_tool_wrote_is_no_typing"
+runs = ["ledger-wake-ups"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/transcripts.rs"
+find = '         WHERE transcript.text != excluded.text OR transcript.complete != excluded.complete",'
+replace = '         WHERE 1",'
+
+[[plant]]
+name = "wake-up: the count does not restart at the Resume"
+meant = "the_count_restarts_at_the_resume_whatever_had_passed_before_it"
+runs = ["ledger-wake-ups"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups/due.rs"
+find = '''                OR (kind = 'project.state' AND json_extract(data, '$.to') = 'open'))",
+        [project_id],'''
+replace = '''                )",
+        [project_id],'''
+
+[[plant]]
+name = "wake-up: the interval counts from when a wake-up was queued, not from when it was delivered"
+meant = "the_interval_counts_from_the_latest_of_the_calls_turned_on_the_last_wake_up_its_delivery_the_resume_and_a_change_of_the_setting"
+runs = ["ledger-wake-ups"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups/due.rs"
+find = '    Ok([logged, delivered]'
+replace = '    Ok([logged, None::<String>]'
+
+# --- the ledger: what is withdrawn, and the migration ---
+
+[[plant]]
+name = "wake-up: a Close leaves the wake-up that waits"
+meant = "a_close_withdraws_a_wake_up_that_waits_and_it_is_never_delivered"
+runs = ["ledger-wake-ups"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects.rs"
+find = '            withdraw_queued(store, id, why)?;'
+replace = ''
+
+[[plant]]
+name = "wake-up: a start leaves the wake-up that waits"
+meant = "a_restart_withdraws_a_wake_up_that_waits_as_a_close_does"
+runs = ["ledger-wake-ups"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects.rs"
+find = '            withdraw_queued(store, *id, "ConsensFlow stopped")?;'
+replace = ''
+
+[[plant]]
+name = "wake-up: the replay of Node's recordings holds the three columns of the project against Node's rows"
+meant = "every_ledger_the_node_suite_opened_answers_here_as_it_answered_there"
+runs = ["ledger-replay"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/testing.rs"
+find = '        take_column_out(tables, "project", column);'
+replace = '        let _ = column;'
+
+[[plant]]
+name = "wake-up: the replay of Node's recordings holds the three columns against Node's schema"
+meant = "every_ledger_the_node_suite_opened_answers_here_as_it_answered_there"
+runs = ["ledger-replay"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/testing.rs"
+find = '                    *sql = sql.replace(&format!(", {column}"), "");'
+replace = '                    let _ = column;'
+
+# --- the engine ---
+
+[[plant]]
+name = "wake-up: a chief in a turn is queued a wake-up"
+meant = "a_chief_in_a_turn_holds_the_wake_up_and_it_goes_once_the_turn_is_over_but_once"
+runs = ["engine-wake-ups"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''        if idle {
+            // A chief at rest may be due a wake-up: queued here, it is the next
+            // message of its queue, delivered by the rules of every message.
+            if participant.role == "chief" {
+                self.queue_wake_up_if_due(project, participant)?;
+            }
+            let next = self.seams.ledger.borrow().next_delivery(participant.id)?;'''
+replace = '''        if participant.role == "chief" {
+            self.queue_wake_up_if_due(project, participant)?;
+        }
+        if idle {
+            let next = self.seams.ledger.borrow().next_delivery(participant.id)?;'''
+
+[[plant]]
+name = "wake-up: a message held for the human's unsent text leaves the chief a wake-up behind it"
+meant = "a_message_that_waits_for_the_humans_unsent_text_holds_the_wake_up_too_and_it_goes_after"
+runs = ["engine-wake-ups"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/wake_ups.rs"
+find = '''        if self.holding(chief.id)? {
+            return Ok(());
+        }
+'''
+replace = ''
+
+[[plant]]
+name = "wake-up: a Close leaves the wake-up that was being handed over when the window went"
+meant = "a_close_withdraws_a_wake_up_that_waits_and_one_that_was_being_handed_over_when_the_window_went"
+runs = ["engine-wake-ups"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '        self.withdraw_wake_up(project)?;'
+replace = ''
+
+# --- the page ---
+
+[[plant]]
+name = "wake-up page: a save does not wake the dispatcher"
+meant = "a_save_is_in_the_ledger_at_once_and_each_one_wakes_the_dispatcher_so_nothing_waits_for_a_relaunch"
+runs = ["daemon-wake-up-page", "proto-page"]
+
+[[plant.edit]]
+file = "crates/cf-proto/src/page.rs"
+find = '''                | Self::WakeUpGet
+        )'''
+replace = '''                | Self::WakeUpGet
+                | Self::WakeUpSet
+        )'''
+
+[[plant]]
+name = "wake-up page: a read wakes the dispatcher"
+meant = "the_operations_that_only_read_wake_nothing"
+runs = ["proto-page"]
+
+[[plant.edit]]
+file = "crates/cf-proto/src/page.rs"
+find = '''                | Self::TaskTranscript
+                | Self::WakeUpGet
+'''
+replace = '''                | Self::TaskTranscript
+'''
+
+[[plant]]
+name = "wake-up page: the app does not forward the save"
+meant = "the_operations_are_the_thirty_the_app_forwards"
+runs = ["proto-page"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/commands.rs"
+find = '''    "wakeup.set",
+];'''
+replace = '''];'''
+
+[[plant]]
+name = "wake-up page: the view says the interval in minutes, whatever unit holds it whole"
+meant = "the_human_saves_a_number_and_a_unit_and_the_words_and_reads_them_back_as_saved"
+runs = ["daemon-wake-up-page"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups.rs"
+find = '    const ALL: [Self; 3] = [Self::Days, Self::Hours, Self::Minutes];'
+replace = '    const ALL: [Self; 3] = [Self::Minutes, Self::Hours, Self::Days];'
+
+[[plant]]
+name = "wake-up page: a save of the words the human left out is refused as empty"
+meant = "words_the_human_left_out_or_never_changed_are_the_default"
+runs = ["daemon-wake-up-page"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/wake_ups.rs"
+find = '    let request = NewWakeUp::from_json(body.json())?;'
+replace = '''    let mut request = NewWakeUp::from_json(body.json())?;
+    request.text = request.text.or_else(|| Some(String::new()));'''
+
+# --- the dialog ---
+
+[[plant]]
+name = "wake-up dialog: the unit the human picks is not the one sent"
+meant = "converts the wake-up interval the human picks in minutes, hours and days as the daemon counts it, and says it in the largest unit that holds it whole"
+runs = ["page-wake-up"]
+prepare = [["node", "app/scripts/bundle-ui.mjs"]]
+
+[[plant.edit]]
+file = "app/ui/core/wake-up.js"
+find = '      unit: this.#unit.value,'
+replace = "      unit: 'minutes',"
+
+[[plant]]
+name = "wake-up dialog: the words are not sent"
+meant = "saves the wake-up calls as a number, a unit and the words, shows them as the daemon says them, and shows what was saved when the dialog opens again"
+runs = ["page-wake-up"]
+prepare = [["node", "app/scripts/bundle-ui.mjs"]]
+
+[[plant.edit]]
+file = "app/ui/core/wake-up.js"
+find = '      text: this.#text.value,'
+replace = '      text: undefined,'
+
+[[plant]]
+name = "wake-up dialog: opened, it shows what it last drew and not what the daemon has"
+meant = "saves the wake-up calls as a number, a unit and the words, shows them as the daemon says them, and shows what was saved when the dialog opens again"
+runs = ["page-wake-up"]
+prepare = [["node", "app/scripts/bundle-ui.mjs"]]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = '''    await this.#wakeUp.load(this.#page.board().project.id)
+'''
+replace = ''
+
+[[plant]]
+name = "wake-up dialog: Enter in the number also adds to the staff"
+meant = "saves the wake-up calls on Enter in the number and adds nobody to the staff"
+runs = ["page-wake-up"]
+prepare = [["node", "app/scripts/bundle-ui.mjs"]]
+
+[[plant.edit]]
+file = "app/ui/core/wake-up.js"
+find = '''      event.preventDefault()
+      void this.#save()'''
+replace = '''      void this.#save()'''
+
+[[plant]]
+name = "wake-up dialog: a number the browser holds back is sent"
+meant = "turns the wake-up calls off with the same Save, and sends no save for a number that is no whole number of at least one"
+runs = ["page-wake-up"]
+prepare = [["node", "app/scripts/bundle-ui.mjs"]]
+
+[[plant.edit]]
+file = "app/ui/core/wake-up.js"
+find = '    if (!this.#every.reportValidity()) return Promise.resolve()'
+replace = ''
+
+[[plant]]
+name = "wake-up dialog: a refusal is kept out of the dialog"
+meant = "says the daemon refusal of a wake-up in the dialog and keeps what the human typed"
+runs = ["page-wake-up"]
+prepare = [["node", "app/scripts/bundle-ui.mjs"]]
+
+[[plant.edit]]
+file = "app/ui/core/wake-up.js"
+find = '        this.#say(cause instanceof Error ? cause.message : String(cause))'
+replace = '        throw cause'
+
+# --- the live run's judgment ---
+
+[[plant]]
+name = "wake-up live: a wake-up queued before the minute passes is the first"
+meant = "the_first_wake_up_is_one_queued_a_minute_after_the_calls_were_turned_on_and_not_long_after"
+runs = ["live-wake-ups"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_wake_ups/verdict.rs"
+find = '''            let after = only.at_ms - setting_ms;
+            (
+                (EVERY_MS - 5_000..=FIRST_BY_MS).contains(&after),'''
+replace = '''            let after = only.at_ms - setting_ms;
+            (
+                (0..=FIRST_BY_MS).contains(&after),'''
+
+[[plant]]
+name = "wake-up live: the wake-up's own note is a move of the board"
+meant = "what_moved_is_the_tasks_and_the_messages_between_two_events_and_never_a_wake_ups_own_note"
+runs = ["live-wake-ups"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_wake_ups/evidence.rs"
+find = '            (kind.starts_with("task.") || kind == "message.sent") && !own_note'
+replace = '            (kind.starts_with("task.") || kind == "message.sent") && (!own_note || true)'
+
+[[plant]]
+name = "wake-up live: an answer is anything after the wake-up, whoever spoke"
+meant = "the_chief_answered_when_an_assistant_item_with_words_follows_before_the_user_speaks_again"
+runs = ["live-wake-ups"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_wake_ups/evidence.rs"
+find = '''        .take_while(|item| item.role != "user")
+'''
+replace = ''
+
+# --- the rig: a real daemon and pane host, a stand-in chief ---
+
+[[plant]]
+name = "wake-up rig: a chief in the middle of a turn is queued a wake-up"
+meant = "a_chief_in_a_long_turn_is_not_woken_until_the_turn_is_over_and_then_once"
+runs = ["rig-wake-ups-turn"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''        if idle {
+            // A chief at rest may be due a wake-up: queued here, it is the next
+            // message of its queue, delivered by the rules of every message.
+            if participant.role == "chief" {
+                self.queue_wake_up_if_due(project, participant)?;
+            }
+            let next = self.seams.ledger.borrow().next_delivery(participant.id)?;'''
+replace = '''        if participant.role == "chief" {
+            self.queue_wake_up_if_due(project, participant)?;
+        }
+        if idle {
+            let next = self.seams.ledger.borrow().next_delivery(participant.id)?;'''
+
+[[plant]]
+name = "wake-up rig: the wake-up goes before its minute"
+meant = "a_wake_up_set_for_a_minute_reaches_the_idle_chief_once_and_its_reply_puts_nothing_on_the_board"
+runs = ["rig-wake-ups-first"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups/due.rs"
+find = '    if now_ms < origin.saturating_add(wake_up.every_ms) {'
+replace = '    if false {'

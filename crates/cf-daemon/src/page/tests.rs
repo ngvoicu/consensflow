@@ -371,3 +371,4 @@ mod reading;
 mod scripted;
 mod stopping;
 mod turns;
+mod wake_up;

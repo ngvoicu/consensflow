@@ -77,6 +77,7 @@ mod unreadable_agents;
 mod unsent;
 mod unstarted;
 mod waiting_notes;
+mod wake_ups;
 mod window_closes;
 mod window_takes_long;
 mod window_traces;

@@ -42,8 +42,13 @@ const DEPARTED: &[Departed] = &[(
     "a release cancels the old window's kept rows with the reason `carried into T-n's brief for its next window`; Node gave none",
 )];
 
-/// Every operation of the page is asked by some trace: what the traces hold is
-/// the whole of what the page can ask.
+/// The operations the page has that Node's page never had, which no recording
+/// asks: each has tests of its own (`src/page/tests/`).
+const ADDED_AFTER_NODE: [&str; 2] = ["wakeup.get", "wakeup.set"];
+
+/// Every operation of Node's page is asked by some trace: what the traces hold
+/// is the whole of what Node's page could ask, and the page has these and the
+/// ones added since.
 #[test]
 fn the_traces_ask_every_operation_of_the_page() {
     let mut asked = std::collections::BTreeSet::new();
@@ -58,9 +63,12 @@ fn the_traces_ask_every_operation_of_the_page() {
             }
         }
     }
-    let every: std::collections::BTreeSet<String> = PageOperation::ALL
+    let mut every: std::collections::BTreeSet<String> = PageOperation::ALL
         .map(|operation| operation.as_str().to_owned())
         .into();
+    for added in ADDED_AFTER_NODE {
+        assert!(every.remove(added), "{added} is an operation of the page");
+    }
     assert_eq!(asked, every);
     println!("{operations} operations and {calls} calls on the stand-ins in the traces");
 }

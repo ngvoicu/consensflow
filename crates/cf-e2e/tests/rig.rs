@@ -31,7 +31,9 @@
 //! `pending_agents`: what it does with the agents a turn left running, which no
 //! program of the window's tree is. So is `start_suspended`: a start opens
 //! nothing, and the human's Resume brings back the chief and the windows at
-//! work, the one whose turn the quit cut told so.)
+//! work, the one whose turn the quit cut told so. So is `wake_ups`: the human's
+//! wake-up calls, which nudge a chief at rest; its two cases wait out a real
+//! minute each, the least a wake-up may wait.)
 //!
 //! The cases take turns ([`cf_e2e::serial`]): each starts a daemon and a pane
 //! host of its own, with windows in real terminals, and the waits are timed.
@@ -80,6 +82,8 @@ mod stand_ins;
 mod start_suspended;
 #[path = "rig/waiting_notes.rs"]
 mod waiting_notes;
+#[path = "rig/wake_ups.rs"]
+mod wake_ups;
 #[path = "rig/window_says_why.rs"]
 mod window_says_why;
 

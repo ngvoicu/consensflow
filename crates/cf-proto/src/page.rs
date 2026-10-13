@@ -1,6 +1,6 @@
 //! What the board page asks of the daemon, and what the daemon says first.
 //!
-//! The page names an operation and its body; the app forwards the 28 names
+//! The page names an operation and its body; the app forwards the names
 //! below and nothing else (`DAEMON_OPERATIONS` in `commands.rs`), and the
 //! daemon answers each over the bridge. The daemon's first line on its standard
 //! output is the [`HandleLine`] the app reads to find it.
@@ -40,11 +40,14 @@ pub enum PageOperation {
     MessageRead,
     MessageApprove,
     MessageDecline,
+    WakeUpGet,
+    WakeUpSet,
 }
 
 impl PageOperation {
-    /// Every operation, in the order Node's page listed them.
-    pub const ALL: [PageOperation; 28] = [
+    /// Every operation, in the order Node's page listed them, then the ones
+    /// that came after Node.
+    pub const ALL: [PageOperation; 30] = [
         Self::ProjectsList,
         Self::ProjectOpen,
         Self::ProjectResume,
@@ -73,6 +76,8 @@ impl PageOperation {
         Self::MessageRead,
         Self::MessageApprove,
         Self::MessageDecline,
+        Self::WakeUpGet,
+        Self::WakeUpSet,
     ];
 
     /// The name the page, the app and the bridge say it by (`project.open`).
@@ -106,6 +111,8 @@ impl PageOperation {
             Self::MessageRead => "message.read",
             Self::MessageApprove => "message.approve",
             Self::MessageDecline => "message.decline",
+            Self::WakeUpGet => "wakeup.get",
+            Self::WakeUpSet => "wakeup.set",
         }
     }
 
@@ -130,6 +137,7 @@ impl PageOperation {
                 | Self::InboxGet
                 | Self::TaskGet
                 | Self::TaskTranscript
+                | Self::WakeUpGet
         )
     }
 }
@@ -149,7 +157,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_operations_are_the_twenty_eight_the_app_forwards() {
+    fn the_operations_are_the_thirty_the_app_forwards() {
         let source = include_str!("../../../app/src-tauri/src/commands.rs");
         let list = source
             .split("const DAEMON_OPERATIONS: &[&str] = &[")
@@ -158,7 +166,7 @@ mod tests {
             .unwrap();
         let mut forwarded: Vec<&str> = list.split('"').skip(1).step_by(2).collect();
         let mut named: Vec<&str> = PageOperation::ALL.map(PageOperation::as_str).to_vec();
-        assert_eq!(named.len(), 28);
+        assert_eq!(named.len(), 30);
         forwarded.sort_unstable();
         named.sort_unstable();
         assert_eq!(named, forwarded);
@@ -178,11 +186,12 @@ mod tests {
     }
 
     /// The order Node's `pageOperations` listed them in, frozen when Node was
-    /// the daemon: the page and the traces name the operations in it. A change
-    /// to the list is a change to this one, made on purpose.
+    /// the daemon, and then the operations added since, in the order they were:
+    /// the page and the traces name the operations in it. A change to the list
+    /// is a change to this one, made on purpose.
     #[test]
     fn the_list_is_the_order_node_listed_them_in_and_holds_each_operation_once() {
-        const RECORDED: [&str; 28] = [
+        const RECORDED: [&str; 30] = [
             "projects.list",
             "project.open",
             "project.resume",
@@ -211,6 +220,8 @@ mod tests {
             "message.read",
             "message.approve",
             "message.decline",
+            "wakeup.get",
+            "wakeup.set",
         ];
         let listed: Vec<&str> = PageOperation::ALL.map(PageOperation::as_str).to_vec();
         assert_eq!(listed, RECORDED);
@@ -233,6 +244,7 @@ mod tests {
                 "inbox.get",
                 "task.get",
                 "task.transcript",
+                "wakeup.get",
             ]
         );
     }

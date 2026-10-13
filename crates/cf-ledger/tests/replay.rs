@@ -38,7 +38,7 @@ use cf_ledger::testing::{
 };
 use cf_ledger::{
     open_ledger, ChiefSwitch, Event, Ledger, LedgerError, NewMember, NewNote, NewProject,
-    NewQuestion, NewTask, Options,
+    NewQuestion, NewTask, Options, SCHEMA_VERSION,
 };
 use rusqlite::{Connection, OpenFlags};
 use serde::Serialize;
@@ -383,6 +383,21 @@ fn every_departed_trace_is_there_and_still_departs() {
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
+/// The trace that opens a ledger one version past what the build knows, which
+/// it refuses (`ledger-008`), says Node's numbers: a database at 12, a build that
+/// knows 11. Each migration since moves them, so the replay puts this build's
+/// own in: the probe stays what it was, and no migration edits the recording.
+fn at_this_schema(mut trace: Value) -> Value {
+    if trace["openError"]["code"] == "ledger-newer" {
+        let (newer, known) = (SCHEMA_VERSION + 1, SCHEMA_VERSION);
+        trace["initial"]["database"]["userVersion"] = json!(newer);
+        trace["openError"]["message"] = json!(format!(
+            "this home was written by a newer ConsensFlow (schema {newer}; this build knows {known})"
+        ));
+    }
+    trace
+}
+
 fn replay(text: &str) -> Outcome {
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("consensflow.db");
@@ -390,6 +405,7 @@ fn replay(text: &str) -> Outcome {
     let path = serde_json::to_string(&file.display().to_string()).unwrap();
     let trace: Value =
         serde_json::from_str(&text.replace("«ledger»", &path[1..path.len() - 1])).unwrap();
+    let trace = at_this_schema(trace);
     let calls = trace["calls"].as_array().cloned().unwrap_or_default();
     // A trace is replayed only whole: a call this replay does not know fails it.
     if let Some(unknown) = calls
