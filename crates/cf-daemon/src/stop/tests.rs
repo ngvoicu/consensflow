@@ -252,11 +252,9 @@ async fn with_only_doors_and_idle_connections_open_the_stop_is_prompt() {
             tokio::time::sleep(Duration::from_millis(100)).await;
             let started = Instant::now();
             rig.stopping.run("stdin ended").await;
-            assert!(
-                started.elapsed() < Duration::from_millis(400),
-                "{:?}",
-                started.elapsed()
-            );
+            // It waited for neither: a stop that did waits out the whole deadline.
+            // How far under it is the machine's (CI's Windows took 409 ms).
+            assert!(started.elapsed() < DEADLINE, "{:?}", started.elapsed());
             let mut answered = Vec::new();
             door.read_to_end(&mut answered).await.unwrap();
             assert!(String::from_utf8_lossy(&answered).contains(r#"{"answer":null}"#));
