@@ -11,9 +11,11 @@
 //! Enter once the window has drawn it): one line, a few lines shaped like a
 //! ConsensFlow message, and one of about 3,800 characters, which Devin and Claude
 //! fold into a placeholder. Each asks for a sum the message does not hold, so
-//! its answer on the screen means the window sent it, and the harness's own
-//! record must then hold the message whole, its marks included (— “” → € …), as
-//! the app reads it there. Each goes in as the app gives it to that window: Devin
+//! its answer on the screen means the window sent it; and the harness's own
+//! record must hold the message whole, its marks included (— “” → € …), as the
+//! app reads it there. A message the record holds whole was sent even where the
+//! model answered it otherwise than with the sum (Claude on Sonnet may ask what
+//! to do with a result instead). Each goes in as the app gives it to that window: Devin
 //! on Windows gets its marks in ASCII. Nothing presses Enter a second time: a
 //! message left waiting in the input is a failure, the one Devin showed on
 //! Windows.
@@ -159,6 +161,39 @@ fn users(window: &window::Window) -> Vec<Item> {
         .collect()
 }
 
+/// What a message pasted into a window came to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Came {
+    /// Its answer showed and its record holds it whole.
+    Answered,
+    /// Its record holds it whole, but the model answered it otherwise than with
+    /// the sum: it was sent all the same.
+    Recorded,
+    /// Its answer showed, but its record holds it otherwise than it was pasted.
+    Otherwise,
+    /// No answer showed and no record holds it: it was not sent, or it waits in
+    /// the input.
+    NotSent,
+}
+
+impl Came {
+    /// What a message came to, given whether its answer `shown` and whether its
+    /// record `kept` it whole.
+    fn to(shown: bool, kept: bool) -> Self {
+        match (shown, kept) {
+            (true, true) => Self::Answered,
+            (false, true) => Self::Recorded,
+            (true, false) => Self::Otherwise,
+            (false, false) => Self::NotSent,
+        }
+    }
+
+    /// Whether the window sent the message and the app can read it whole.
+    fn holds(self) -> bool {
+        matches!(self, Self::Answered | Self::Recorded)
+    }
+}
+
 /// Sends each message to the window of `install`, one after another, and says what
 /// each came to: it was sent (its answer is on the screen or in the record) and
 /// the record holds it whole.
@@ -175,32 +210,37 @@ fn checks_of(rig: &Rig, install: &Installed, cases: &[Case], log: &Log) -> Resul
         let body = window.given(&(case.body)(&ask(case.sum)))?;
         log.say(format!("{name}: sends {}", case.name));
         let sent = window.send(&body, &answer)?;
-        // Its record holds what was pasted, whole: where the app looks for it.
+        // Its record holds what was pasted, whole: where the app looks for it. It
+        // is looked for even when no answer showed: a model may answer otherwise.
         let whole = body.replace("\r\n", "\n").trim().to_owned();
         let mut seen = Vec::new();
-        let kept = sent.shown
-            && live::until(Duration::from_secs(10), Duration::from_millis(500), || {
-                seen = users(&window);
-                seen.iter()
-                    .any(|item| item.text.replace("\r\n", "\n").contains(&whole))
-                    .then_some(())
-            })
-            .is_some();
-        let detail = if !sent.shown {
-            format!("NOT SENT ({}): {}", sent.written, window.tail())
-        } else if kept {
-            format!("sent and recorded whole, answered in {} s", sent.seconds)
-        } else {
-            let last = seen.last().map_or("(no record found)", |item| &item.text);
-            format!("sent, but recorded otherwise: {}", escaped(last))
+        let kept = live::until(Duration::from_secs(10), Duration::from_millis(500), || {
+            seen = users(&window);
+            seen.iter()
+                .any(|item| item.text.replace("\r\n", "\n").contains(&whole))
+                .then_some(())
+        })
+        .is_some();
+        let came = Came::to(sent.shown, kept);
+        let detail = match came {
+            Came::Answered => format!("sent and recorded whole, answered in {} s", sent.seconds),
+            Came::Recorded => format!(
+                "sent and recorded whole; answered with no sum: {}",
+                window.tail()
+            ),
+            Came::Otherwise => {
+                let last = seen.last().map_or("(no record found)", |item| &item.text);
+                format!("sent, but recorded otherwise: {}", escaped(last))
+            }
+            Came::NotSent => format!("NOT SENT ({}): {}", sent.written, window.tail()),
         };
         checks.push(Check::new(
             name,
             &case.name,
-            sent.written["ok"] == true && sent.shown && kept,
+            sent.written["ok"] == true && came.holds(),
             detail,
         ));
-        if !sent.shown {
+        if came == Came::NotSent {
             break;
         }
         window.still(ANSWER);
@@ -235,6 +275,24 @@ fn a_window_sends_every_message_the_daemon_pastes_into_it() -> Result {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_message_the_record_holds_whole_was_sent_whether_the_model_answered_the_sum_or_not() {
+        assert_eq!(Came::to(true, true), Came::Answered);
+        assert_eq!(Came::to(false, true), Came::Recorded);
+        assert_eq!(Came::to(true, false), Came::Otherwise);
+        assert_eq!(Came::to(false, false), Came::NotSent);
+        let holding: Vec<bool> = [
+            Came::Answered,
+            Came::Recorded,
+            Came::Otherwise,
+            Came::NotSent,
+        ]
+        .into_iter()
+        .map(Came::holds)
+        .collect();
+        assert_eq!(holding, [true, true, false, false]);
+    }
 
     #[test]
     fn each_message_asks_for_a_sum_it_does_not_hold() {
