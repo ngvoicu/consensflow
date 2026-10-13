@@ -171,6 +171,12 @@ impl Default for Limits {
     }
 }
 
+/// The variable that sets how long a window at rest is given to show a message
+/// pasted into it, in milliseconds. A test that waits for a record to be late
+/// while its window is in a turn would otherwise wait a minute for each paste;
+/// nothing in a person's environment sets it.
+pub const ARRIVAL_MS_VARIABLE: &str = "CONSENSFLOW_ARRIVAL_TIMEOUT_MS";
+
 /// The variable that sets how long a window may take to show its first
 /// message, in milliseconds. A test that waits for a window that never does
 /// would otherwise wait three minutes; nothing in a person's environment sets it.
@@ -183,10 +189,10 @@ pub const LAUNCH_MS_VARIABLE: &str = "CONSENSFLOW_LAUNCH_TIMEOUT_MS";
 pub const BACKGROUND_SETTLE_MS_VARIABLE: &str = "CONSENSFLOW_BACKGROUND_SETTLE_MS";
 
 impl Limits {
-    /// The daemon's limits, with the launch's wait and the settle time what
-    /// `env` says they are ([`LAUNCH_MS_VARIABLE`],
-    /// [`BACKGROUND_SETTLE_MS_VARIABLE`]) where it names a number of
-    /// milliseconds above zero; any other value is no value.
+    /// The daemon's limits, with the arrival window, the launch's wait and the
+    /// settle time what `env` says they are ([`ARRIVAL_MS_VARIABLE`],
+    /// [`LAUNCH_MS_VARIABLE`], [`BACKGROUND_SETTLE_MS_VARIABLE`]) where it names
+    /// a number of milliseconds above zero; any other value is no value.
     pub fn of(env: &Env) -> Self {
         let named = |variable: &str| {
             env.text(variable)
@@ -195,6 +201,7 @@ impl Limits {
         };
         let default = Self::default();
         Self {
+            arrival_ms: named(ARRIVAL_MS_VARIABLE).unwrap_or(default.arrival_ms),
             launch_ms: named(LAUNCH_MS_VARIABLE).unwrap_or(default.launch_ms),
             background_settle_ms: named(BACKGROUND_SETTLE_MS_VARIABLE)
                 .unwrap_or(default.background_settle_ms),
@@ -258,6 +265,28 @@ mod tests {
         assert_eq!(
             (named.arrival_ms, named.max_attempts),
             (60_000, 3),
+            "the rest is as it was"
+        );
+    }
+
+    #[test]
+    fn a_window_at_rest_is_given_a_minute_to_show_a_message_unless_the_environment_names_a_number_of_milliseconds(
+    ) {
+        let wait =
+            |value: &str| Limits::of(&Env::from_vars([(ARRIVAL_MS_VARIABLE, value)])).arrival_ms;
+        assert_eq!(Limits::of(&Env::default()).arrival_ms, 60_000);
+        assert_eq!(wait("8000"), 8_000);
+        for refused in ["", "0", "-5", "soon", "1.5", "2s"] {
+            assert_eq!(wait(refused), 60_000, "{refused:?}");
+        }
+        let named = Limits::of(&Env::from_vars([(ARRIVAL_MS_VARIABLE, "8000")]));
+        assert_eq!(
+            (
+                named.launch_ms,
+                named.max_attempts,
+                named.background_settle_ms
+            ),
+            (180_000, 3, 10_000),
             "the rest is as it was"
         );
     }

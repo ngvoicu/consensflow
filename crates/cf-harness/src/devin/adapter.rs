@@ -6,6 +6,18 @@
 //! is pasted, behind whatever the input box holds, and only while Devin still
 //! shows the conversation we know.
 //!
+//! A message pasted while Devin's agent is in a turn may show in its record late.
+//! A turn reads at rest in its first seconds: its message is the record's last, and
+//! the wire shows none of its work until the agent's first word (`ttftMs` of the
+//! wire's own `stats`), so a message can be pasted into a turn that has begun. Its
+//! record then shows it when the turn takes it or the store's main chain reaches it,
+//! which moves its head only once a step is over (`record`): the report of
+//! 2026-10-13 is a Devin chief that read each of two notes twice, the ledger holding
+//! each once, so its record had not shown a paste in the minute the engine allowed.
+//! The engine waits for a record that is late: a paste its window went into a turn
+//! after is never pasted again (`cf-engine`'s `arrival`), whatever the harness does
+//! with what it is handed in a turn.
+//!
 //! Kept from Node on purpose: a conversation of an empty id, which no
 //! ledger holds, is refused in a sentence of this module's own, where V8
 //! threw its `TypeError` for the window it made none of.

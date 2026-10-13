@@ -12,6 +12,16 @@
 //! it said is kept in the store without the end of its turn, as Devin keeps it.
 //! The stand-in has no rewind, which two Escapes at a Devin at rest open.
 //!
+//! A turn takes no time unless the window is told how long a model takes
+//! (`FAKE_DEVIN_FIRST_WORD_MS`, `FAKE_DEVIN_WORK_MS`: [`turn::Pace`]). A message
+//! the window is handed while a turn is at work waits for it, one turn at a time
+//! in the order the messages came, and is written to the store when its turn
+//! begins and not before: a record that shows a message late, the shape the
+//! report of 2026-10-13 needs (a Devin chief read each of two notes twice that the
+//! ledger holds once). No recording of a real Devin shows how it holds a message:
+//! the fixtures of its store (`tests/engine/fixtures/completion/devin/`) are turns
+//! that took no model's time, and `cargo xtask live notes devin` is what shows it.
+//!
 //! The terminal and the signals are the other stand-in's own (`fake_agent/`).
 
 // The parts are in `fake_devin/` and `fake_agent/`: cargo looks for the modules
@@ -42,6 +52,7 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Instant;
 
+use cf_e2e::devin_store;
 use cf_e2e::process::own_var;
 
 use args::{Asked, Launch};
@@ -49,7 +60,7 @@ use escapes::Escapes;
 use stop::Stop;
 use store::Store;
 use terminal::{Event, Keys};
-use turn::Window;
+use turn::{Pace, Window};
 use wire::Wire;
 
 /// What Devin says to `--version`: a version the daemon takes for one that records
@@ -102,7 +113,7 @@ fn run(launch: &Launch, signals: signals::Signals) -> Result<Infallible, String>
     let home = own_var("HOME")
         .or_else(|| own_var("USERPROFILE"))
         .ok_or("the window has no home")?;
-    let file = store::location(
+    let file = devin_store::location(
         cfg!(windows),
         &home,
         own_var("APPDATA").as_deref(),
@@ -119,11 +130,15 @@ fn run(launch: &Launch, signals: signals::Signals) -> Result<Infallible, String>
     say(&format!("fake devin started on {session}\n")).map_err(said)?;
 
     let stop = Arc::new(Stop::default());
+    let pace = Pace::of(
+        own_var(turn::FIRST_WORD_VARIABLE).as_deref(),
+        own_var(turn::WORK_VARIABLE).as_deref(),
+    );
     let (turns, queued) = mpsc::channel::<String>();
     {
         let stop = Arc::clone(&stop);
         thread::spawn(move || {
-            let mut window = Window::new(store, wire, stop, io::stdout());
+            let mut window = Window::new(store, wire, stop, io::stdout(), pace);
             // One turn at a time, in the order the messages came.
             for text in queued {
                 if let Err(failed) = window.take(&text) {

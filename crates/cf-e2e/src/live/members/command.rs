@@ -2,7 +2,10 @@
 //! and ended by a mark that is in its command line and nowhere else of the
 //! machine's. The checks that cut a window in the middle of its turn (a stop, a
 //! quit) need a window that is inside a command, and need to know when the
-//! command is gone, which a window that was cut does not take with it.
+//! command is gone, which a window that was cut does not take with it. A check
+//! that only needs a window to be inside a command for a while, on any machine,
+//! asks for one that ends by itself ([`quiet_command`]): it has nothing to find
+//! and nothing to end.
 
 use std::sync::OnceLock;
 
@@ -49,6 +52,19 @@ impl LongCommand {
         for process in processes_with(self.mark).unwrap_or_default() {
             let _ = signal(process.pid, Signal::Kill);
         }
+    }
+}
+
+/// A command that says nothing and ends by itself after `seconds` seconds, as a
+/// member of a machine that is `windows` (or is not) is told to run it: `sleep`
+/// where there is one, and a ping of the machine's own address on Windows, which
+/// has none that every shell knows (a reply a second, the first at once, so one
+/// more than the seconds).
+pub fn quiet_command(seconds: u64, windows: bool) -> String {
+    if windows {
+        format!("ping -n {} 127.0.0.1", seconds + 1)
+    } else {
+        format!("sleep {seconds}")
     }
 }
 
@@ -118,6 +134,13 @@ mod tests {
             command.text(),
             "node -e \"setTimeout(() => {}, 300000)\" cf-stops-live-long-command"
         );
+    }
+
+    #[test]
+    fn a_quiet_command_is_a_sleep_and_on_windows_a_ping_of_the_machines_own_address_a_reply_more_than_the_seconds(
+    ) {
+        assert_eq!(quiet_command(45, false), "sleep 45");
+        assert_eq!(quiet_command(45, true), "ping -n 46 127.0.0.1");
     }
 
     #[test]

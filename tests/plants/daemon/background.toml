@@ -89,7 +89,7 @@ meant = "marks_the_window_where_a_turn_begins_and_not_while_its_task_is_held"
 runs = ["engine-dispatcher-background"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/deliveries.rs"
+file = "crates/cf-engine/src/arrival.rs"
 find = '            if let Some(pane) = pane.filter(|_| launching) {'
 replace = '            if let Some(pane) = pane.filter(|_| launching && false) {'
 
@@ -264,7 +264,7 @@ runs = ["rig-background-hold"]
 builds = true
 
 [[plant.edit]]
-file = "crates/cf-engine/src/deliveries.rs"
+file = "crates/cf-engine/src/arrival.rs"
 find = '            if let Some(pane) = pane.filter(|_| launching) {'
 replace = '            if let Some(pane) = pane.filter(|_| launching && false) {'
 

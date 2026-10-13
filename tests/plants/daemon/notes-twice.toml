@@ -1,0 +1,96 @@
+# The notes a chief is handed after a cancel (the owner's report of 2026-10-13, ConsensFlow 3.0.3:
+# a Devin chief on Windows read each of two notes twice, m-186, m-186, m-187, m-187). The case is
+# `crates/cf-e2e/tests/regressions/devin_notes_twice.rs`: the real daemon and pane host on a stand-in
+# Devin that takes a model's time to its first word, keeps what it is handed in a turn and writes
+# it to its store when the turn takes it, with the human's prompt and a cancel in its first seconds;
+# and the engine's own tests of the rule, `crates/cf-engine/tests/dispatcher/slow_records.rs`. The
+# rule: a paste its window went into a turn after is waited for (its record is late, not lacking)
+# and never pasted again; one its window stayed at rest after, with nothing shown, is tried again;
+# an Enter, for a paste left unsent, goes into a window at rest, once for each rest after a turn.
+# The case builds the native `cf` from the sources as they are planted, so the plant of it says
+# `builds`: the family builds the `cf` again once it is put back. One plant takes one rule out, or
+# puts one wrong; a test fails.
+#
+# - a paste is tried again once the arrival window passes, its window's turns or none, as it was
+#   (the case, and the engine's tests of it);
+# - a window that waits on a dialog of its own is at rest;
+# - a paste is never tried again, its window at rest all the arrival window or not;
+# - a turn does not spend the Enter pressed before it;
+# - the Enter for a paste left unsent goes into a window in a turn too.
+#
+# Every name holds `notes twice`, so `npm run plants:daemon -- "notes twice"` runs them all.
+
+[run]
+engine-slow-records = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "slow_records"]
+rig-regression-devin-notes = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "devin_notes_twice::"]
+
+[[plant]]
+name = "notes twice: a paste is tried again once the arrival window passes, its window's turns or none, and the chief reads each note twice"
+meant = "two_notes_that_come_together_after_a_cancel_go_into_a_devin_chief_s_window_once_each"
+runs = ["rig-regression-devin-notes"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = '''        if !(observed.settled && observed.waiting.is_none()) {
+            self.took_a_turn(record);
+            return Ok(());
+        }
+'''
+replace = ""
+
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = "        if delivering.turned || waited <= self.seams.limits.arrival_ms {"
+replace = "        if waited <= self.seams.limits.arrival_ms {"
+
+[[plant]]
+name = "notes twice: the engine tries a paste again once the arrival window passes, its window's turns or none"
+meant = "waits_for_the_record_of_a_message_whose_window_went_into_a_turn_however_long_it_takes"
+runs = ["engine-slow-records"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = "        if delivering.turned || waited <= self.seams.limits.arrival_ms {"
+replace = "        if waited <= self.seams.limits.arrival_ms {"
+
+[[plant]]
+name = "notes twice: a window that waits on a dialog of its own is at rest"
+meant = "takes_a_window_waiting_on_a_dialog_of_its_own_for_a_window_in_a_turn"
+runs = ["engine-slow-records"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = "        if !(observed.settled && observed.waiting.is_none()) {"
+replace = "        if !observed.settled {"
+
+[[plant]]
+name = "notes twice: a paste is never tried again, its window at rest all the arrival window or not"
+meant = "pastes_again_a_message_whose_window_stayed_at_rest_and_not_one_whose_window_went_into_a_turn"
+runs = ["engine-slow-records"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = "        if delivering.turned || waited <= self.seams.limits.arrival_ms {"
+replace = "        if true {"
+
+[[plant]]
+name = "notes twice: a turn does not spend the Enter pressed before it"
+meant = "presses_enter_again_for_a_message_only_into_a_window_at_rest_and_once_for_each_rest_after_a_turn"
+runs = ["engine-slow-records"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = "            delivering.entered_again = false;"
+replace = ""
+
+[[plant]]
+name = "notes twice: the Enter for a paste left unsent goes into a window in a turn too"
+meant = "presses_enter_again_for_a_message_only_into_a_window_at_rest_and_once_for_each_rest_after_a_turn"
+runs = ["engine-slow-records"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = '''            self.took_a_turn(record);
+            return Ok(());'''
+replace = '''            self.took_a_turn(record);'''

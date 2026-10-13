@@ -358,6 +358,7 @@ impl Dispatcher {
             message: first.id,
             marker: marker_of(first.id),
             since: self.now(),
+            turned: false,
             launch: true,
             chief: participant.role == "chief",
             queued: false,

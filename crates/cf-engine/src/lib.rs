@@ -14,6 +14,7 @@
 
 #![forbid(unsafe_code)]
 
+mod arrival;
 mod background;
 mod chief_switch;
 mod deliveries;
