@@ -1760,6 +1760,122 @@ fn a_mark_that_says_the_servers_are_in_the_group_leaves_what_stays_in_it_out_of_
     helper.close_input_and_wait();
 }
 
+/// The daemon asks the host to end what the turn left running, once it has taken
+/// the turn's answer for its result: the host ends what it tells for the turn's,
+/// says what it ended, and the window stays open, its program and its servers as
+/// they were, and with nothing left for its exit to list.
+#[cfg(target_os = "macos")]
+#[test]
+fn an_ending_asked_over_the_wire_ends_what_the_turn_left_and_the_window_stays_open() {
+    let _pty_guard = serial_headless_test();
+    let mut helper = Headless::spawn();
+    let mut events = Vec::new();
+    let opened = helper.request(
+        "pane.open",
+        open_body(
+            "printf ready; read go; sleep 31 & \
+             /usr/bin/python3 -c 'import os,time; os.setsid(); time.sleep(32)' & \
+             printf started; wait",
+            4096,
+        ),
+        &mut events,
+    );
+    assert_eq!(opened["ok"], true, "{opened}");
+    let pane_id = opened["id"].as_str().expect("opened pane id").to_string();
+    let generation = opened["generation"].as_u64().expect("opened generation");
+    let pane = json!({"id":pane_id,"generation":generation});
+    output_until(&helper, &mut events, &pane_id, generation, b"ready");
+    let mut mark = pane.clone();
+    mark["servers"] = json!("inGroup");
+    helper.request("pane.mark", mark, &mut events);
+    helper.request(
+        "pane.input",
+        json!({"id":pane_id,"generation":generation,"bytes":[103,111,10]}),
+        &mut events,
+    );
+    output_until(&helper, &mut events, &pane_id, generation, b"started");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let left = loop {
+        let left = helper.request("pane.background", pane.clone(), &mut events);
+        if left["total"].as_u64().is_some_and(|total| total > 0) {
+            break left;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the job was never listed: {left}"
+        );
+        thread::sleep(Duration::from_millis(10));
+    };
+    let job = left["processes"][0]["pid"]
+        .as_u64()
+        .expect("the job's number");
+
+    let mut ending = pane.clone();
+    ending["pids"] = json!([job]);
+    let ended = helper.request("pane.end_background", ending, &mut events);
+
+    assert_eq!(ended["ok"], true, "{ended}");
+    assert_eq!(ended["ended"]["total"], 1, "{ended}");
+    assert_eq!(ended["ended"]["processes"][0]["pid"], job, "{ended}");
+    assert_eq!(ended["left"]["total"], 0, "{ended}");
+    assert_eq!(
+        helper.request("pane.background", pane.clone(), &mut events)["total"],
+        0,
+        "what was ended is not listed after"
+    );
+    let panes = helper.request("pane.list", json!({}), &mut events);
+    assert_eq!(
+        panes["panes"][0]["alive"], true,
+        "the window stays open: {panes}"
+    );
+
+    assert_eq!(
+        helper.request("pane.kill", pane, &mut events),
+        json!({"ok":true})
+    );
+    let exit = exit_of(&helper, &mut events, &opened);
+    assert!(
+        exit.get("background").is_none(),
+        "the close has nothing left to list: {exit}"
+    );
+    helper.close_input_and_wait();
+}
+
+/// An ending names its pane and the processes it asks to end, and nothing else;
+/// one that does otherwise is refused as a request that is not one, and a window
+/// that is not open has nothing to end.
+#[test]
+fn an_ending_that_says_more_or_otherwise_than_what_it_asks_to_end_is_refused() {
+    let _pty_guard = serial_headless_test();
+    let mut helper = Headless::spawn();
+    let mut events = Vec::new();
+    for body in [
+        json!({"id":"nobody","generation":1}),
+        json!({"id":"nobody","generation":1,"pids":["1"]}),
+        json!({"id":"nobody","generation":1,"pids":[1],"all":true}),
+        json!({"generation":1,"pids":[1]}),
+    ] {
+        let refused = helper.request("pane.end_background", body.clone(), &mut events);
+        assert_eq!(refused["ok"], false, "{body}: {refused}");
+        assert!(
+            refused["error"]
+                .as_str()
+                .is_some_and(|error| error.contains("invalid")),
+            "it is the request that is refused: {refused}"
+        );
+    }
+    let nobody = json!({"id":"nobody","generation":1,"pids":[1]});
+    let refused = helper.request("pane.end_background", nobody, &mut events);
+    assert_eq!(refused["ok"], false, "{refused}");
+    assert!(
+        refused["error"]
+            .as_str()
+            .is_some_and(|error| !error.contains("invalid")),
+        "it is the pane that is not there: {refused}"
+    );
+    helper.close_input_and_wait();
+}
+
 /// A mark names its pane and says no more than how its harness keeps its servers,
 /// in a word; one that says more, or says it otherwise, is refused as a request
 /// that is not one. A word this host does not know is not a refusal: the mark

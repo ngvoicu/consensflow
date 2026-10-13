@@ -202,7 +202,6 @@ impl Context {
                 arrival_ms: 30_000,
                 launch_ms: 120_000,
                 max_attempts: 3,
-                background_settle_ms: 10_000,
             },
         };
         let dispatcher = Dispatcher::new(seams.clone());

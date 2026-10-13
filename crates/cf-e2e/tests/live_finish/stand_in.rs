@@ -1,10 +1,10 @@
-//! The check against the rig's stand-in agent, which the real daemon and the real pane
-//! host take for a harness: a worker that runs a command as a process of its window
-//! and replies, and a worker that leaves a job running past its turn. No harness and no
+//! The checks against the rig's stand-in agent, which the real daemon and pane host take
+//! for a harness: a worker that runs a command as a process of its window and replies,
+//! and a worker that leaves a job running past its turn and answers. No harness and no
 //! quota, and the daemon and the host are the real ones, so what this proves is that the
-//! check reads what they say (the task, the lane's activity and its reason, the host's
-//! listing of the tree, the chief's inbox) and says what it saw as it does of a real
-//! harness, whose own behaviour is what the live run is for.
+//! checks read what they say (the task, the host's listing of the tree, the chief's
+//! inbox, what became of the process) and say what they saw as they do of a real harness,
+//! whose own behaviour is what the live run is for.
 
 use std::path::Path;
 
@@ -13,17 +13,9 @@ use cf_e2e::live::{Log, Who};
 use cf_e2e::Result;
 
 use crate::check::{self, Finished};
+use crate::leaving;
 use crate::task::Task;
 use crate::FAKE_AGENT;
-
-/// How long the daemon waits, once a job has ended, for the agent to go on
-/// (`CONSENSFLOW_BACKGROUND_SETTLE_MS`): its default is ten seconds, which these tests
-/// have no use for.
-const SETTLE_MS: &str = "1500";
-
-/// How long the stand-in's job runs: past the passes the daemon takes it in, so that the
-/// check looks at the held window many times.
-const JOB_SECONDS: u64 = 10;
 
 /// The stand-in worker run on `task` in a project of the plan `plan`.
 fn run(plan: &Plan, task: &Task) -> Result<Finished> {
@@ -32,35 +24,34 @@ fn run(plan: &Plan, task: &Task) -> Result<Finished> {
 }
 
 #[test]
-fn a_stand_in_that_runs_the_command_and_replies_finishes_its_task_with_nothing_held_back() -> Result
-{
+fn a_stand_in_that_runs_the_command_and_replies_finishes_its_task_and_nothing_is_ended() -> Result {
     let finished = run(&check::plan(Who::StandIn), &Task::stand_in())?;
     let text = finished.case.text();
     assert!(finished.case.held(), "{text}");
     assert!(
-        text.contains("ok   the result reached the chief, nothing held back: T-1 done "),
+        text.contains("ok   the result reached the chief, nothing of its own ended: T-1 done "),
         "{text}"
     );
     assert!(
-        finished.summary.starts_with("T-1 done ") && finished.summary.contains("nothing held back"),
+        finished.summary.starts_with("T-1 done ") && finished.summary.contains("nothing ended"),
         "{}",
         finished.summary
     );
-    // The turn's end is said whichever way the run came out, with what the board said of
-    // the window, and what the host said the window left when it closed: the command it
-    // ran ended with its turn, and left nothing.
+    // The turn's end is said whichever way the run came out, with what the host said the
+    // window left when it closed and what the chief was told: the command it ran ended
+    // with its turn, and left nothing.
     assert!(
         text.contains("what the pane host listed as the turn's work at "),
-        "{text}"
-    );
-    assert!(
-        text.contains("what the board said of the worker's window: "),
         "{text}"
     );
     assert!(
         text.contains(
             "what the pane host said the window left running when it closed (its pane.exit): none"
         ),
+        "{text}"
+    );
+    assert!(
+        text.contains("what the chief was told of work the turn left: nothing"),
         "{text}"
     );
     assert!(!text.contains("FAIL"), "{text}");
@@ -68,64 +59,40 @@ fn a_stand_in_that_runs_the_command_and_replies_finishes_its_task_with_nothing_h
 }
 
 #[test]
-fn a_stand_in_that_leaves_a_job_running_past_its_turn_fails_and_says_what_held_it_and_for_how_long(
+fn a_stand_in_that_leaves_a_job_running_and_answers_has_its_task_done_the_job_ended_and_the_chief_told(
 ) -> Result {
-    let plan = check::plan(Who::StandIn).with_var("CONSENSFLOW_BACKGROUND_SETTLE_MS", SETTLE_MS);
-    let finished = run(&plan, &Task::stand_in_leaving(JOB_SECONDS))?;
+    let log = Log::new("live finish test");
+    let plan = leaving::plan(Who::StandIn);
+    let finished = leaving::run(Who::StandIn, &plan, Path::new(FAKE_AGENT), &log)?;
     let text = finished.case.text();
-    assert!(!finished.case.held(), "{text}");
-    // What the daemon held the window for, in the board's words, and from when to when.
+    assert!(finished.case.held(), "{text}");
+    assert!(
+        text.contains("ok   the command was ended with the result, and the chief told: T-1 done "),
+        "{text}"
+    );
+    // The host listed the job as running while the turn was watched, with the command line
+    // it was started with, which holds the number of seconds the check looks for.
+    assert!(
+        text.contains(&format!("--background-job {} ", leaving::SECONDS)),
+        "{text}"
+    );
+    // The chief was told what was ended, in the note beside the result.
     assert!(
         text.contains(
-            "FAIL the board said the worker's window was held for work its turn left, from "
+            "what the chief was told of work the turn left:\n    T-1's turn left background work running. Ended: "
         ),
         "{text}"
     );
+    // The window's close found nothing left: the ending was first.
     assert!(
-        text.contains("\"background work running ("),
-        "the board's own words: {text}"
+        text.contains("(its pane.exit): none"),
+        "what the close ended is not what the exit lists: {text}"
     );
-    assert!(text.contains(" of the run, which is "), "{text}");
-    // The process the host listed while it did, with the command line it was started with.
+    assert!(!text.contains("FAIL"), "{text}");
     assert!(
-        text.contains(
-            "FAIL what the pane host listed as the turn's work while the window was held"
-        ),
-        "{text}"
-    );
-    assert!(
-        text.contains(&format!("--background-job {JOB_SECONDS} ")),
-        "{text}"
-    );
-    // The turn's end is the window held, with the job the host listed then, a line to each
-    // process; the job ended by itself before the window closed, which the host says.
-    assert!(
-        text.contains("at the turn's end (at ") && text.contains(", the window held):\n    "),
-        "{text}"
-    );
-    assert!(
-        text.contains(
-            "what the pane host said the window left running when it closed (its pane.exit): none"
-        ),
-        "{text}"
-    );
-    // The task ended and its result reached the chief with what the job's turn said: that
-    // is what held, and what did not is only that the window was held.
-    assert!(!text.contains("not done"), "{text}");
-    assert!(!text.contains("the chief was given no result"), "{text}");
-    assert!(!text.contains("the result does not hold"), "{text}");
-    // The table says the first of what was wrong, which is the hold.
-    assert!(
-        finished
-            .summary
-            .starts_with("the board said the worker's window was held for work its turn left"),
+        finished.summary.starts_with("T-1 done after "),
         "{}",
         finished.summary
-    );
-    // And the worker's lane, its window and the log are said beside it.
-    assert!(
-        text.contains("     the worker's lane of the board:\n"),
-        "{text}"
     );
     Ok(())
 }

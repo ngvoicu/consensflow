@@ -5,9 +5,10 @@
 # some pending is settled and that they are (`agents_pending` of the reading, from
 # the counts of the `turn_duration` that ends it); the Claude adapter reads a
 # window at rest by it, though its status is busy; no delivery looks at them
-# (a chief's, a worker's); the hold a worker's task has for the work its turn
-# left (`background`) holds it for them, so the result is the end of the turn
-# that leaves none; and a switch of the chief after its turn, which closes the
+# (a chief's, a worker's); a worker's turn that ends with some is its task's
+# result all the same, which the owner decided on 2026-10-13 (it held the task before),
+# and the requester is told in a note beside it that the turn left them (`background`);
+# and a switch of the chief after its turn, which closes the
 # window and ends them with it, waits for a turn that leaves none (`chief_switch`).
 # One plant takes one rule out; a test of it fails. The first
 # plants run the tests of the crates, which hold each rule apart; the `pending
@@ -31,11 +32,11 @@ harness-lib-reading = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib"
 harness-records = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "records"]
 # A Claude window on the records and the status files of a turn that left agents running.
 harness-launch-claude-agents = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "claude::agents"]
-# The engine's tests of the hold, on the fake windows: what the agents leave and what they do not.
+# The engine's tests of the result and the note, on the fake windows: what the agents leave and what they do not.
 engine-dispatcher-pending-agents = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "pending_agents"]
 # The engine's tests of the switch after the chief's turn, on the fake windows.
 engine-dispatcher-switching-agents = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "switching_agents"]
-# The hold's own small rules.
+# The note's own small rules.
 engine-lib-background = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "background"]
 # The cases of the rig (`pending_agents` of crates/cf-e2e): the daemon and the pane
 # host in real terminals, a case for each rule, found by the start of its name.
@@ -212,47 +213,67 @@ replace = '''
             && !drawing;'''
 
 [[plant]]
-name = "pending agents: a worker’s turn that ends with agents pending is its task’s result"
-meant = "a_workers_turn_that_ends_with_agents_pending_is_not_its_result_and_the_next_that_ends_with_none_is"
+name = "pending agents: a worker’s turn that ends with agents pending is no task’s result"
+meant = "a_workers_turn_that_ends_with_agents_pending_is_its_result_at_once_and_the_requester_is_told"
 runs = ["engine-dispatcher-pending-agents"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''
+    ) -> Result<Option<TaskView>, EngineError> {
+        let task = self'''
+replace = '''
+    ) -> Result<Option<TaskView>, EngineError> {
+        if observed.agents_pending() {
+            return Ok(None);
+        }
+        let task = self'''
+
+[[plant]]
+name = "pending agents: the requester is not told that the turn left its agents"
+meant = "a_workers_turn_that_ends_with_agents_pending_is_its_result_at_once_and_the_requester_is_told"
+runs = ["engine-dispatcher-pending-agents", "engine-lib-background"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/background.rs"
 find = '''
-        if agents {
-            return Ok(Left::Agents);
-        }'''
+        (false, true) => return Some(format!("T-{number}'s turn left background agents running.")),'''
+replace = '''
+        (false, true) => return None,'''
+
+[[plant]]
+name = "pending agents: the agents a turn left are ended with the job, and the note leaves them out"
+meant = "a_turn_that_left_a_job_and_agents_has_its_job_ended_and_says_the_agents_were_left"
+runs = ["engine-dispatcher-pending-agents", "engine-lib-background"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/background.rs"
+find = '''
+    if agents {
+        said.push_str(" Its background agents were left running too.");
+    }'''
 replace = ""
 
 [[plant]]
-name = "pending agents: the settle time ends a wait for agents after a job"
-meant = "a_turn_that_left_a_job_and_agents_is_held_for_the_job_and_then_for_the_agents"
+name = "pending agents: a chief’s turn that ends with agents pending has its window asked what it left"
+meant = "a_chiefs_turn_that_ends_with_agents_pending_is_asked_nothing_of_the_host"
 runs = ["engine-dispatcher-pending-agents"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/background.rs"
-find = '        if agents {'
-replace = '        if agents && part.held.is_none() {'
-
-[[plant]]
-name = "pending agents: the board does not say why a worker whose turn left agents works"
-meant = "a_workers_turn_that_ends_with_agents_pending_is_not_its_result_and_the_next_that_ends_with_none_is"
-runs = ["engine-dispatcher-pending-agents"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/background.rs"
-find = '            Left::Agents => Some("background agents running".to_owned()),'
-replace = '            Left::Agents => None,'
-
-[[plant]]
-name = "pending agents: a window whose look is kept forgets its agents"
-meant = "a_look_that_keeps_what_it_found_keeps_the_work_it_was_held_for_before_the_agents"
-runs = ["engine-lib-background"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/background.rs"
-find = '        (None, true) => Left::Agents,'
-replace = '        (None, true) => Left::Nothing,'
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''
+        let idle = record.delivery.borrow().delivering.is_none()
+            && observed.settled'''
+replace = '''
+        if participant.role == "chief" && observed.settled {
+            let pane = record.window.borrow().pane.clone();
+            if let Some(pane) = pane {
+                let work = self.seams.background.running(&pane).await;
+                self.seams.background.end(&pane, &work.processes).await;
+            }
+        }
+        let idle = record.delivery.borrow().delivering.is_none()
+            && observed.settled'''
 
 [[plant]]
 name = "pending agents: a switch after the chief’s turn goes with its agents still running"
@@ -328,18 +349,35 @@ replace = '''
             && !drawing;'''
 
 [[plant]]
-name = "pending agents rig: a worker’s turn that ends with agents pending is its task’s result"
-meant = "a_workers_turn_that_ends_with_agents_pending_is_not_its_result_the_agents_end_and_the_turn_they_wake_is"
+name = "pending agents rig: a worker’s turn that ends with agents pending is no task’s result"
+meant = "a_workers_turn_that_ends_with_agents_pending_is_its_result_at_once_and_the_chief_is_told_it_left_them"
+runs = ["rig-pending-worker"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''
+    ) -> Result<Option<TaskView>, EngineError> {
+        let task = self'''
+replace = '''
+    ) -> Result<Option<TaskView>, EngineError> {
+        if observed.agents_pending() {
+            return Ok(None);
+        }
+        let task = self'''
+
+[[plant]]
+name = "pending agents rig: the chief is not told that a worker’s turn left its agents"
+meant = "a_workers_turn_that_ends_with_agents_pending_is_its_result_at_once_and_the_chief_is_told_it_left_them"
 runs = ["rig-pending-worker"]
 builds = true
 
 [[plant.edit]]
 file = "crates/cf-engine/src/background.rs"
 find = '''
-        if agents {
-            return Ok(Left::Agents);
-        }'''
-replace = ""
+        (false, true) => return Some(format!("T-{number}'s turn left background agents running.")),'''
+replace = '''
+        (false, true) => return None,'''
 
 [[plant]]
 name = "pending agents rig: a switch after the chief’s turn ends its agents with its window"

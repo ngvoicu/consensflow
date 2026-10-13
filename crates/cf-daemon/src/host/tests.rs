@@ -566,6 +566,87 @@ fn a_host_that_refuses_or_does_not_say_has_no_background_work_to_tell_of() {
 }
 
 #[tokio::test]
+async fn an_ending_asks_the_pane_to_end_the_processes_the_engine_names_and_says_what_it_answered() {
+    LocalSet::new()
+        .run_until(async {
+            let (daemon, app) = bridge_pair();
+            let seen = Rc::new(RefCell::new(Vec::new()));
+            let asked = Rc::clone(&seen);
+            app.on("pane.end_background", move |_, body| {
+                asked.borrow_mut().push(body);
+                async {
+                    Ok(json!({
+                        "ok": true,
+                        "ended": { "total": 2, "processes": [
+                            { "pid": 4242, "command": "python3 lock.py record" },
+                            { "pid": 4243, "command": "tail -f run.log" },
+                        ] },
+                        "left": { "total": 1, "processes": [{ "pid": 4300, "command": "node server.js" }] },
+                    }))
+                }
+            });
+            let host = host_over(&daemon);
+            let work = [
+                cf_proto::panes::BackgroundProcess {
+                    pid: 4242,
+                    command: "python3 lock.py record".to_owned(),
+                },
+                cf_proto::panes::BackgroundProcess {
+                    pid: 4243,
+                    command: "tail -f run.log".to_owned(),
+                },
+            ];
+
+            let ending = host.end(&pane("p1-zeus-amber-pine", 7), &work).await;
+
+            assert_eq!(
+                *seen.borrow(),
+                [json!({ "id": "p1-zeus-amber-pine", "generation": 7, "pids": [4242, 4243] })]
+            );
+            assert_eq!(ending.ended.total, 2);
+            assert_eq!(ending.ended.processes[1].command, "tail -f run.log");
+            assert_eq!(ending.left.total, 1);
+            assert_eq!(ending.left.processes[0].pid, 4300);
+        })
+        .await;
+}
+
+#[test]
+fn a_host_that_refuses_or_does_not_answer_an_ending_has_left_all_of_it_running() {
+    let work = [cf_proto::panes::BackgroundProcess {
+        pid: 4242,
+        command: "python3 lock.py record".to_owned(),
+    }];
+    // Nothing was ended, and the requester is not to be told that it was.
+    let left = Ending {
+        left: Background {
+            total: 1,
+            processes: work.to_vec(),
+        },
+        ..Ending::default()
+    };
+    assert_eq!(ending(None, &work), left);
+    assert_eq!(
+        ending(
+            Some(json!({ "ok": false, "error": "pane p1 generation 1 is not open" })),
+            &work
+        ),
+        left
+    );
+    assert_eq!(ending(Some(json!({})), &work), left);
+    assert_eq!(
+        ending(Some(json!({ "ok": true, "ended": "all of it" })), &work),
+        left,
+        "an answer that is not one is no answer"
+    );
+    // One that says nothing was ended and nothing is left.
+    assert_eq!(
+        ending(Some(json!({ "ok": true })), &work),
+        Ending::default()
+    );
+}
+
+#[tokio::test]
 async fn an_exit_that_panics_is_written_down_and_the_bridge_goes_on() {
     LocalSet::new()
         .run_until(async {

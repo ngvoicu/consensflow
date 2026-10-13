@@ -26,9 +26,8 @@
 //!   takes), through the test binary `harness-ask`.
 //! - [`members`] is the rig of the checks that play the chief with its token and
 //!   run real members.
-//! - [`held`] and [`tree`] say what a worker's task is held back for: what the
-//!   board says of its window ([`held`]), and the processes its window's tree
-//!   started in the turn, as the pane host lists them ([`tree`]).
+//! - [`tree`] says what a worker's turn left running: the processes its window's
+//!   tree started in it, as the pane host lists them.
 //! - [`report`] says what each check of a run came to, and ends the run with
 //!   them ([`report::conclude`]).
 //!
@@ -45,7 +44,6 @@ pub mod agents;
 pub mod ask;
 pub mod claude;
 pub mod codex;
-pub mod held;
 pub mod machine;
 pub mod members;
 pub mod report;

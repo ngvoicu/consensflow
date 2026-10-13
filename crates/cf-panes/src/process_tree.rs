@@ -1,13 +1,26 @@
 //! macOS pane ownership survives setsid and ordinary parent exit. Never match
-//! executable names, working directories, or arbitrary command-line substrings.
-//! A tree is looked at ([`ProcessTree::members`]), asked to end
-//! ([`ProcessTree::ask_to_exit`]) and, last, ended ([`ProcessTree::terminate`]).
+//! executable names, working directories, or arbitrary command-line substrings
+//! to say what is the pane's: the tree has no process that those add. A tree is
+//! looked at ([`ProcessTree::members`]), asked to end
+//! ([`ProcessTree::ask_to_exit`]) and, last, ended ([`ProcessTree::terminate`]),
+//! the whole of it when a window closes and some of it, and what descends from
+//! it, when only what a turn left is ended ([`Subject`]).
 use std::collections::HashMap;
 use std::io;
 
 use crate::background::{Member, ProcessKey};
 
 pub(crate) const OWNER_ENV: &str = "CF_PANE_PROCESS_OWNER";
+
+/// What a tree is asked to end, or ended.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum Subject<'a> {
+    /// All of it: a window closes. The pane's own process is part of it.
+    Whole,
+    /// The processes these name and whatever descends from them: what a turn
+    /// left. The pane's own process is never part of it.
+    Under(&'a [ProcessKey]),
+}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 struct Identity {
@@ -98,19 +111,30 @@ impl ProcessTree {
                 selected.insert(p.identity.pid, p.identity);
             }
         }
-        loop {
-            let before = selected.len();
-            for p in snapshot {
-                if selected
-                    .values()
-                    .chain(owned.values())
-                    .any(|parent| parent.unique == p.parent)
-                {
-                    selected.insert(p.identity.pid, p.identity);
-                }
-            }
-            if selected.len() == before {
-                return selected;
+        descendants(snapshot, selected, owned)
+    }
+
+    /// The processes of `snapshot` that `subject` names: the pane's tree, or what
+    /// descends from the processes an ending was asked for, those processes
+    /// themselves among them. A process is the one asked for only if it began when
+    /// it did: a number is not enough.
+    fn subject(
+        &self,
+        subject: Subject<'_>,
+        snapshot: &[Process],
+        owned: &HashMap<i32, Identity>,
+    ) -> HashMap<i32, Identity> {
+        match subject {
+            Subject::Whole => self.select(snapshot, owned),
+            Subject::Under(keys) => {
+                let named = snapshot
+                    .iter()
+                    .filter(|p| {
+                        keys.contains(&key_of(p)) || owned.get(&p.identity.pid) == Some(&p.identity)
+                    })
+                    .map(|p| (p.identity.pid, p.identity))
+                    .collect();
+                descendants(snapshot, named, owned)
             }
         }
     }
@@ -150,19 +174,20 @@ impl ProcessTree {
                 command: procargs(p.identity.pid)
                     .and_then(|bytes| command_line(&bytes))
                     .unwrap_or_else(|| p.name.clone()),
+                program: p.name.clone(),
                 group: Some(p.group),
                 parent: keys.get(&p.parent).copied(),
             })
             .collect())
     }
 
-    /// Asks the tree to end as a closing terminal does: TERM, then HUP, to
-    /// every process of it outside `group`, the pane's own process group,
-    /// which the caller signals whole. Nothing is stopped first: a stopped
-    /// process cannot answer a signal. The processes asked.
-    pub fn ask_to_exit(&self, group: Option<i32>) -> io::Result<Asked> {
+    /// Asks `subject` to end as a closing terminal does: TERM, then HUP, to
+    /// every process of it outside `group`, the pane's own process group, which
+    /// a close signals whole (an ending has none). Nothing is stopped first: a
+    /// stopped process cannot answer a signal. The processes asked.
+    pub fn ask_to_exit(&self, subject: Subject<'_>, group: Option<i32>) -> io::Result<Asked> {
         let snapshot = processes()?;
-        let selected = self.select(&snapshot, &HashMap::new());
+        let selected = self.subject(subject, &snapshot, &HashMap::new());
         let outside: Vec<Identity> = snapshot
             .iter()
             .filter(|p| selected.get(&p.identity.pid) == Some(&p.identity))
@@ -183,7 +208,9 @@ impl ProcessTree {
         }
     }
 
-    pub fn terminate(&self) -> io::Result<()> {
+    /// Ends `subject` by force. The pane's own process is ended with a `Whole`
+    /// tree and never with what an ending was asked for.
+    pub fn terminate(&self, subject: Subject<'_>) -> io::Result<()> {
         let mut owned = HashMap::new();
         let mut failure = None;
         // Freeze proven parents before rescanning, so they cannot keep forking
@@ -196,7 +223,7 @@ impl ProcessTree {
                     break;
                 }
             };
-            let selected = self.select(&snapshot, &owned);
+            let selected = self.subject(subject, &snapshot, &owned);
             let fresh: Vec<_> = selected
                 .values()
                 .filter(|p| owned.get(&p.pid) != Some(p))
@@ -221,7 +248,7 @@ impl ProcessTree {
             }
         }
         // A failed process enumeration must still stop the exact root we own.
-        if let Some(root) = self.root {
+        if let (Subject::Whole, Some(root)) = (subject, self.root) {
             if let Err(error) = signal(root, libc::SIGKILL) {
                 failure = Some(error);
             }
@@ -229,6 +256,30 @@ impl ProcessTree {
         match failure {
             Some(error) => Err(error),
             None => Ok(()),
+        }
+    }
+}
+
+/// `selected` and whatever of `snapshot` descends from it or from `owned`, by the
+/// process each was started by.
+fn descendants(
+    snapshot: &[Process],
+    mut selected: HashMap<i32, Identity>,
+    owned: &HashMap<i32, Identity>,
+) -> HashMap<i32, Identity> {
+    loop {
+        let before = selected.len();
+        for p in snapshot {
+            if selected
+                .values()
+                .chain(owned.values())
+                .any(|parent| parent.unique == p.parent)
+            {
+                selected.insert(p.identity.pid, p.identity);
+            }
+        }
+        if selected.len() == before {
+            return selected;
         }
     }
 }

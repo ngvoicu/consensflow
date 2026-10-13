@@ -1,3 +1,5 @@
+use cf_proto::panes::Background;
+
 use super::*;
 
 fn process(pid: u32, command: &str) -> BackgroundProcess {
@@ -7,77 +9,69 @@ fn process(pid: u32, command: &str) -> BackgroundProcess {
     }
 }
 
-fn running(count: usize, named: &str) -> Left {
-    Left::Running {
-        count,
-        named: named.to_owned(),
+/// What a host lists: all of `processes`.
+fn all_of(processes: Vec<BackgroundProcess>) -> Background {
+    Background {
+        total: processes.len(),
+        processes,
+    }
+}
+
+fn ending(ended: Vec<BackgroundProcess>, left: Vec<BackgroundProcess>) -> Ending {
+    Ending {
+        ended: all_of(ended),
+        left: all_of(left),
     }
 }
 
 #[test]
-fn the_board_says_how_many_processes_the_window_waits_for_and_which() {
-    assert_eq!(Left::Nothing.reason(), None);
-    assert_eq!(
-        running(1, "python3 lock.py record").reason().as_deref(),
-        Some("background work running (1 process): python3 lock.py record")
+fn the_requester_is_told_what_was_ended_in_one_line() {
+    let ended = ending(
+        vec![
+            process(1, "python3 lock.py record --run 7"),
+            process(2, "tail -f run.log"),
+        ],
+        Vec::new(),
     );
     assert_eq!(
-        running(3, "npm exec @playwright/mcp; node server.js")
-            .reason()
-            .as_deref(),
-        Some("background work running (3 processes): npm exec @playwright/mcp; node server.js")
-    );
-    // Of a list the host left empty there is a count and nothing to name.
-    assert_eq!(
-        running(2, "").reason().as_deref(),
-        Some("background work running (2 processes)")
-    );
-    assert!(Left::Ended.reason().is_some());
-    assert_eq!(
-        Left::Agents.reason().as_deref(),
-        Some("background agents running")
+        left_note(3, &ended, false).as_deref(),
+        Some("T-3's turn left background work running. Ended: python3 lock.py record --run 7; tail -f run.log.")
     );
 }
 
 #[test]
-fn a_look_that_keeps_what_it_found_keeps_the_work_it_was_held_for_before_the_agents() {
-    let held = |ended_at| Held {
-        running: 2,
-        named: "tail -f run.log".to_owned(),
-        ended_at,
-    };
-    let (running_held, ended_held) = (held(None), held(Some(5)));
-    let work = running(2, "tail -f run.log");
-    assert_eq!(remembered(Some(&running_held), false), work);
-    assert_eq!(remembered(Some(&running_held), true), work);
-    assert_eq!(remembered(Some(&ended_held), true), Left::Ended);
-    // Held for no work, a window whose turn left agents is held for them.
-    assert_eq!(remembered(None, true), Left::Agents);
-    assert_eq!(remembered(None, false), Left::Nothing);
+fn what_could_not_be_ended_is_said_to_still_run_beside_what_was() {
+    let both = ending(
+        vec![process(1, "msedge --headless --dump-dom")],
+        vec![process(2, "node server.js")],
+    );
+    assert_eq!(
+        left_note(15, &both, false).as_deref(),
+        Some("T-15's turn left background work running. Ended: msedge --headless --dump-dom. Still running, not ended: node server.js.")
+    );
+    let left = ending(Vec::new(), vec![process(2, "node server.js")]);
+    assert_eq!(
+        left_note(15, &left, false).as_deref(),
+        Some("T-15's turn left background work running. Still running, not ended: node server.js.")
+    );
 }
 
 #[test]
-fn the_board_names_the_first_two_commands_held_to_a_short_line_with_a_secret_hidden() {
-    let left: Vec<_> = (1..=4)
-        .map(|n| process(n, &format!("python3 job.py {n}")))
-        .collect();
-    assert_eq!(first_named(&left), "python3 job.py 1; python3 job.py 2");
-    assert_eq!(first_named(&left[..1]), "python3 job.py 1");
-    assert_eq!(first_named(&[]), "");
+fn background_agents_are_said_to_have_been_left_with_the_work_or_alone() {
+    let ended = ending(vec![process(1, "sleep 600")], Vec::new());
+    assert_eq!(
+        left_note(4, &ended, true).as_deref(),
+        Some("T-4's turn left background work running. Ended: sleep 600. Its background agents were left running too.")
+    );
+    assert_eq!(
+        left_note(4, &Ending::default(), true).as_deref(),
+        Some("T-4's turn left background agents running.")
+    );
+}
 
-    let long = format!("tool {}", "x".repeat(400));
-    let named = first_named(&[process(1, &long)]);
-    assert_eq!(named.chars().count(), NAMED_CHARS);
-    assert!(named.ends_with('…'));
-
-    let named = first_named(&[process(
-        2,
-        "curl -H 'Authorization: Bearer abcdef0123456789abcdef' --data  a\nb",
-    )]);
-    assert!(!named.contains("abcdef0123456789abcdef"), "{named}");
-    assert!(named.contains("[masked]"), "{named}");
-    assert!(!named.contains('\n'));
-    assert_eq!(first_named(&[process(42, "")]), "process 42");
+#[test]
+fn a_turn_that_left_nothing_says_nothing() {
+    assert_eq!(left_note(1, &Ending::default(), false), None);
 }
 
 #[test]
@@ -89,6 +83,29 @@ fn a_note_quotes_the_first_commands_and_says_how_many_it_leaves_out() {
         quote(&left),
         "python3 job.py 1; python3 job.py 2; python3 job.py 3; python3 job.py 4; python3 job.py 5; and 2 more"
     );
+    // A host that lists the first sixteen of twenty counts the other four too.
+    let listed: Vec<_> = (1..=16)
+        .map(|n| process(n, &format!("python3 job.py {n}")))
+        .collect();
+    let said = left_note(
+        2,
+        &Ending {
+            ended: Background {
+                total: 20,
+                processes: listed,
+            },
+            left: Background::default(),
+        },
+        false,
+    )
+    .unwrap();
+    assert!(said.ends_with("python3 job.py 5; and 15 more."), "{said}");
+    // A host that lists none of the processes it names still says how many.
+    let counted = Background {
+        total: 2,
+        processes: Vec::new(),
+    };
+    assert_eq!(quote_of(&counted.processes, counted.total), "2 processes");
 }
 
 #[test]
@@ -109,6 +126,24 @@ fn a_command_is_one_line_and_bounded_and_a_secret_in_it_is_hidden() {
         "{quoted}"
     );
     assert!(!quoted.contains('\n'));
+    // In the line the requester reads the mark of what was masked is inside it.
+    let note = left_note(
+        5,
+        &ending(
+            vec![process(
+                2,
+                "curl -H 'Authorization: Bearer abcdef0123456789abcdef' --data  a\nb",
+            )],
+            Vec::new(),
+        ),
+        false,
+    )
+    .unwrap();
+    assert!(!note.contains("abcdef0123456789abcdef"), "{note}");
+    assert!(
+        note.ends_with("(1 key- or token-like string masked)."),
+        "{note}"
+    );
 }
 
 #[test]
@@ -145,13 +180,13 @@ fn a_program_named_for_the_harness_and_a_dash_is_the_harnesss_own() {
 }
 
 #[test]
-fn only_the_agents_work_is_counted_and_a_list_the_host_cut_short_counts_what_it_left_out() {
+fn only_the_agents_work_is_asked_to_end() {
     let helper = process(
         1,
         "/opt/homebrew/Caskroom/codex/0.162.1/bin/codex-code-mode-host",
     );
     let job = process(2, "python3 lock.py record --run 7");
-    let listed = [helper.clone(), job.clone()];
+    let listed = [helper, job.clone()];
     assert_eq!(
         agent_processes(Some("codex"), &listed),
         std::slice::from_ref(&job)
@@ -160,18 +195,4 @@ fn only_the_agents_work_is_counted_and_a_list_the_host_cut_short_counts_what_it_
     assert_eq!(agent_processes(Some("claude-code"), &listed).len(), 2);
     assert_eq!(agent_processes(Some("image"), &listed).len(), 2);
     assert_eq!(agent_processes(None, &listed).len(), 2);
-
-    let work = |total, processes: Vec<BackgroundProcess>| Background { total, processes };
-    let counted =
-        |work: Background| agent_work(&work, &agent_processes(Some("codex"), &work.processes));
-    assert_eq!(counted(work(2, listed.to_vec())), 1);
-    assert_eq!(counted(work(1, vec![helper])), 0);
-    // Twenty processes and sixteen listed, one of them the harness's: the
-    // four the host left out are the agent's.
-    let mut cut_short = vec![job; 15];
-    cut_short.push(process(
-        3,
-        "/opt/homebrew/Caskroom/codex/0.162.1/bin/codex-code-mode-host",
-    ));
-    assert_eq!(counted(work(20, cut_short)), 19);
 }

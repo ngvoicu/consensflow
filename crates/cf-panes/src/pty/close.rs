@@ -21,11 +21,22 @@
 //! Every close of a window goes through here: a kill, the retirement of a
 //! window whose program ended, a table dropped ([`terminate`],
 //! [`terminate_detached`], and [`ask_all_to_exit`] for the many a table holds).
+//!
+//! What a turn left running is ended the same way, with the window staying open
+//! (`turn`'s `end_background`): on macOS the same asking and the same ending of
+//! what is left, by the same [`crate::process_tree`] of the pane, of the processes
+//! it names and what descends from them instead of the whole tree and the group
+//! ([`wait_until_gone`] is the wait they share). On Windows they cannot share the
+//! ending: a job object ends all of its tree or none of it, which is what a close
+//! wants, and an ending of some of it ends each process by itself, at once.
 
 #[cfg(unix)]
 use std::io;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+
+#[cfg(target_os = "macos")]
+use crate::process_tree::Subject;
 
 use super::{has_exited, wait_for_exit, Pane, PaneError, Teardown};
 
@@ -60,7 +71,10 @@ impl Pane {
         }
         #[cfg(target_os = "macos")]
         {
-            asked.tree = self.process_tree.ask_to_exit(self.process_group_id).ok();
+            asked.tree = self
+                .process_tree
+                .ask_to_exit(Subject::Whole, self.process_group_id)
+                .ok();
         }
         asked
     }
@@ -88,8 +102,14 @@ impl Pane {
 
 /// Waits until everything asked to end has, or `deadline` passes.
 fn wait_until(pane: &mut Pane, asked: &Asked, deadline: Instant) {
+    wait_until_gone(deadline, || pane.is_gone(asked));
+}
+
+/// Waits until `gone` says everything asked to end has, or `deadline` passes: what
+/// a close waits with, and an ending of what a turn left.
+pub(super) fn wait_until_gone(deadline: Instant, mut gone: impl FnMut() -> bool) {
     loop {
-        if pane.is_gone(asked) {
+        if gone() {
             return;
         }
         let left = deadline.saturating_duration_since(Instant::now());
@@ -179,7 +199,7 @@ fn signal_for_termination(pane: &mut Pane, detached: bool) -> Result<bool, PaneE
     #[cfg(not(target_os = "macos"))]
     let _ = detached;
     #[cfg(target_os = "macos")]
-    pane.process_tree.terminate()?;
+    pane.process_tree.terminate(Subject::Whole)?;
 
     #[cfg_attr(not(unix), allow(unused_mut))]
     let mut child_exited = has_exited(pane)?;

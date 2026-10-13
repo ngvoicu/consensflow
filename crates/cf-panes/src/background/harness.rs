@@ -135,6 +135,7 @@ mod tests {
         Member {
             key: key(pid),
             command: command.to_owned(),
+            program: String::new(),
             group: Some(group),
             parent: Some(key(parent)),
         }
@@ -145,6 +146,7 @@ mod tests {
         Member {
             key: key(10),
             command: "claude".to_owned(),
+            program: "claude".to_owned(),
             group: Some(PANE),
             parent: None,
         }

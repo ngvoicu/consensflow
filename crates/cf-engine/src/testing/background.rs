@@ -13,13 +13,20 @@
 //! ([`FakeBackground::serve_from_launch`]). Where the last mark said how the
 //! harness keeps its servers, those of that kind are not the turn's and are not
 //! listed.
+//!
+//! Asked to end what it listed, it ends what it tells for the turn's with no doubt,
+//! as the real host does: where the mark said how the harness keeps its servers,
+//! all it lists; where it did not, the jobs its agent's shells ran, and none of the
+//! servers, which it cannot tell from them by when each began, and leaves those
+//! running ([`FakeBackground::ended`] says what it ended).
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use cf_harness::contract::{Pane, Work};
-use cf_proto::panes::{Background, BackgroundProcess, Servers};
+use cf_proto::panes::{Background, BackgroundProcess, Ending, Servers};
 
+use super::executor::Gate;
 use super::host::window_of;
 use crate::seams::BackgroundWork;
 
@@ -42,6 +49,13 @@ pub struct FakeBackground {
     /// window's harness keeps its servers.
     marked: RefCell<Vec<(Pane, Servers)>>,
     asked: RefCell<Vec<Pane>>,
+    /// What the engine asked to end, by the pane it asked it of, and what the
+    /// host ended of it, in order.
+    endings: RefCell<Vec<(Pane, Vec<BackgroundProcess>)>>,
+    /// The host answers no ending: one that cannot, or that did not answer.
+    refusing: Cell<bool>,
+    /// An ending waits for this gate before it ends anything.
+    hold: RefCell<Option<Gate>>,
 }
 
 /// `commands` as the processes a host lists, numbered from `first`.
@@ -91,10 +105,44 @@ impl FakeBackground {
         set(&self.launch_children, handle, listed(commands, 3001));
     }
 
-    /// What the window of `handle` ran has ended: its jobs. Its servers live as
-    /// long as the window.
-    pub fn end(&self, handle: &str) {
+    /// What the window of `handle` ran has ended by itself: its jobs. Its servers
+    /// live as long as the window.
+    pub fn finish(&self, handle: &str) {
         self.jobs.borrow_mut().retain(|(named, _)| named != handle);
+    }
+
+    /// The host ends nothing it is asked to, and answers all of it left running:
+    /// one that cannot (an older one, which does not know the operation) or that
+    /// did not answer.
+    pub fn end_nothing(&self) {
+        self.refusing.set(true);
+    }
+
+    /// The host takes its time over an ending, as it does over the grace it gives
+    /// the work: it ends nothing until the gate is opened.
+    pub fn hold_endings(&self) -> Gate {
+        let gate = Gate::default();
+        *self.hold.borrow_mut() = Some(gate.clone());
+        gate
+    }
+
+    /// The commands the host ended of the window of `handle`'s work, in order.
+    pub fn ended(&self, handle: &str) -> Vec<String> {
+        self.endings
+            .borrow()
+            .iter()
+            .filter(|(pane, _)| window_of(&pane.id, handle))
+            .flat_map(|(_, ended)| ended.iter().map(|process| process.command.clone()))
+            .collect()
+    }
+
+    /// How many times the engine asked the host to end the window of `handle`'s work.
+    pub fn endings_asked(&self, handle: &str) -> usize {
+        self.endings
+            .borrow()
+            .iter()
+            .filter(|(pane, _)| window_of(&pane.id, handle))
+            .count()
     }
 
     /// The panes the engine said a turn begins in, in order.
@@ -130,6 +178,47 @@ impl FakeBackground {
             .map(|(_, processes)| processes.clone())
             .unwrap_or_default()
     }
+
+    /// What the last mark of `pane` said of how its harness keeps its servers.
+    fn said(&self, pane: &Pane) -> Servers {
+        self.marked
+            .borrow()
+            .iter()
+            .rev()
+            .find(|(marked, _)| marked == pane)
+            .map_or(Servers::Unknown, |(_, said)| *said)
+    }
+
+    /// What the host lists of `pane`'s tree, by kind: what it tells for the turn's
+    /// with no doubt (the jobs, and where the mark said how the harness keeps its
+    /// servers, whatever of the servers it lists) and what it cannot tell from the
+    /// harness's own (the servers it lists by time alone), the oldest first within
+    /// each.
+    fn listing(&self, pane: &Pane) -> (Vec<BackgroundProcess>, Vec<BackgroundProcess>) {
+        let said = self.said(pane);
+        // The harness's servers began first.
+        let mut servers = Vec::new();
+        if said != Servers::InGroup {
+            servers.extend(Self::of(&self.servers, pane));
+        }
+        if said != Servers::AtLaunch {
+            servers.extend(Self::of(&self.launch_children, pane));
+        }
+        let jobs = Self::of(&self.jobs, pane);
+        if said == Servers::Unknown {
+            (jobs, servers)
+        } else {
+            (servers.into_iter().chain(jobs).collect(), Vec::new())
+        }
+    }
+
+    /// `processes` as the host lists them.
+    fn background_of(processes: Vec<BackgroundProcess>) -> Background {
+        Background {
+            total: processes.len(),
+            processes,
+        }
+    }
 }
 
 impl BackgroundWork for FakeBackground {
@@ -140,26 +229,51 @@ impl BackgroundWork for FakeBackground {
 
     fn running<'a>(&'a self, pane: &'a Pane) -> Work<'a, Background> {
         self.asked.borrow_mut().push(pane.clone());
-        let said = self
-            .marked
-            .borrow()
-            .iter()
-            .rev()
-            .find(|(marked, _)| marked == pane)
-            .map_or(Servers::Unknown, |(_, said)| *said);
+        let (turns, unsure) = self.listing(pane);
         // The harness's servers began first: the host lists the oldest first.
-        let mut processes = Vec::new();
-        if said != Servers::InGroup {
-            processes.extend(Self::of(&self.servers, pane));
-        }
-        if said != Servers::AtLaunch {
-            processes.extend(Self::of(&self.launch_children, pane));
-        }
-        processes.extend(Self::of(&self.jobs, pane));
+        let processes: Vec<_> = unsure.into_iter().chain(turns).collect();
         Box::pin(async move {
             Background {
                 total: processes.len(),
                 processes,
+            }
+        })
+    }
+
+    fn end<'a>(&'a self, pane: &'a Pane, work: &'a [BackgroundProcess]) -> Work<'a, Ending> {
+        // What is asked is written down when it is asked; what is ended, when the
+        // host does it.
+        self.endings.borrow_mut().push((pane.clone(), Vec::new()));
+        let at = self.endings.borrow().len() - 1;
+        let held = self.hold.borrow().clone();
+        Box::pin(async move {
+            if let Some(gate) = held {
+                gate.wait().await;
+            }
+            let asked =
+                |process: &BackgroundProcess| work.iter().any(|named| named.pid == process.pid);
+            let (turns, unsure) = if self.refusing.get() {
+                (Vec::new(), work.to_vec())
+            } else {
+                self.listing(pane)
+            };
+            let (ended, left): (Vec<_>, Vec<_>) = (
+                turns.into_iter().filter(asked).collect(),
+                unsure.into_iter().filter(asked).collect(),
+            );
+            // A process that is ended is no more among what the window's tree runs.
+            for list in [&self.jobs, &self.servers, &self.launch_children] {
+                for (handle, processes) in list.borrow_mut().iter_mut() {
+                    if window_of(&pane.id, handle) {
+                        processes
+                            .retain(|process| !ended.iter().any(|gone| gone.pid == process.pid));
+                    }
+                }
+            }
+            self.endings.borrow_mut()[at].1.clone_from(&ended);
+            Ending {
+                ended: Self::background_of(ended),
+                left: Self::background_of(left),
             }
         })
     }

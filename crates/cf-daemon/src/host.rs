@@ -1,8 +1,8 @@
 //! The pane host as the engine uses it, over the bridge: a window's pane is
 //! opened and killed by a request to the host, an adapter's own requests
 //! (`pane.snapshot`, `pane.input`, `pane.write_paste`, `pane.claim`) go
-//! straight through, what a window's turn left running is asked of it
-//! (`pane.mark`, `pane.background`: [`BackgroundWork`]), and the host's
+//! straight through, what a window's turn left running is asked of it and ended
+//! (`pane.mark`, `pane.background`, `pane.end_background`: [`BackgroundWork`]), and the host's
 //! `pane.exit` events are told to the engine where they are read.
 //!
 //! The protocol is the app's (`crates/cf-panes/src/pane_handlers.rs`); this
@@ -21,7 +21,9 @@ use cf_engine::runtime::LocalWork;
 use cf_engine::seams::BackgroundWork;
 use cf_harness::contract::{HostError, Pane, PaneHost, Work};
 use cf_proto::bridge::Role;
-use cf_proto::panes::{Background, MarkRequest, PaneExit, Servers};
+use cf_proto::panes::{
+    Background, BackgroundProcess, EndRequest, Ending, MarkRequest, PaneExit, Servers,
+};
 use serde_json::{json, Map, Value};
 
 use crate::errors::contain_now;
@@ -119,6 +121,24 @@ impl BackgroundWork for BridgeHost {
         let sent = self.bridge.request("pane.background", body, None);
         Box::pin(async move { running(sent.await.ok()) })
     }
+
+    fn end<'a>(&'a self, pane: &'a Pane, work: &'a [BackgroundProcess]) -> Work<'a, Ending> {
+        let request = EndRequest {
+            id: pane.id.clone(),
+            generation: pane.generation,
+            pids: work.iter().map(|process| process.pid).collect(),
+        };
+        let sent = serde_json::to_value(&request)
+            .ok()
+            .map(|body| self.bridge.request("pane.end_background", body, None));
+        Box::pin(async move {
+            let answer = match sent {
+                Some(sent) => sent.await.ok(),
+                None => None,
+            };
+            ending(answer, work)
+        })
+    }
 }
 
 /// What a host answered to what a window's tree has running that began after
@@ -128,6 +148,22 @@ fn running(answer: Option<Value>) -> Background {
         .filter(|answer| answer.get("ok") == Some(&Value::Bool(true)))
         .and_then(|answer| serde_json::from_value(answer).ok())
         .unwrap_or_default()
+}
+
+/// What a host answered to an ending of `work`: its word, or, for an answer that
+/// was a refusal or none (a host that does not know the operation, or that went),
+/// that all of it is left running: nothing is said to be ended that was not.
+fn ending(answer: Option<Value>, work: &[BackgroundProcess]) -> Ending {
+    answer
+        .filter(|answer| answer.get("ok") == Some(&Value::Bool(true)))
+        .and_then(|answer| serde_json::from_value(answer).ok())
+        .unwrap_or_else(|| Ending {
+            left: Background {
+                total: work.len(),
+                processes: work.to_vec(),
+            },
+            ..Ending::default()
+        })
 }
 
 /// What a request that never came back says: `eof` where the bridge ended, as

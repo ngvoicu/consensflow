@@ -12,7 +12,8 @@
 //! processes of the window's tree that began after the turn did, which
 //! `pane.mark` fixes the start of ([`MarkRequest`]) and `pane.background`
 //! answers ([`BackgroundProcess`]), and which `pane.exit` lists for a window
-//! that closed with some of it running.
+//! that closed with some of it running. It ends them without closing the window
+//! when asked (`pane.end_background`: [`EndRequest`], answered by [`Ending`]).
 
 use serde::{Deserialize, Serialize};
 
@@ -51,10 +52,12 @@ pub enum Servers {
     /// process, which is in the window's group. What any of them starts later is
     /// the harness's.
     AtLaunch,
-    /// Not known: the host tells the harness's processes from the turn's by when
-    /// they began alone. What a harness is until someone has looked at what a
-    /// window's tree holds with a command of its agent running; and what a word
-    /// this host does not know reads as.
+    /// Not known: the host lists what the tree has that the mark did not, a server
+    /// that began after it among them, and ends no more of that than a shell the
+    /// harness started after the mark began, and what descends from it. What a
+    /// harness is until someone has looked at what a window's tree holds with a
+    /// command of its agent running; and what a word this host does not know reads
+    /// as.
     #[default]
     #[serde(other)]
     Unknown,
@@ -98,6 +101,32 @@ pub struct BackgroundProcess {
 pub struct Background {
     pub total: usize,
     pub processes: Vec<BackgroundProcess>,
+}
+
+/// A `pane.end_background` request: the pane's turn is over and the daemon has
+/// taken its answer for the task's result, so what the turn left running is
+/// to end, the window staying open. `pids` names which of what `pane.background`
+/// listed it asks to end (the daemon leaves out what is the harness's own by its
+/// name); the host looks at the tree again and ends only those of them it still
+/// tells for the turn's, and what descends from them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct EndRequest {
+    pub id: String,
+    pub generation: u64,
+    pub pids: Vec<u32>,
+}
+
+/// `pane.end_background`'s answer: what the host ended, and what it was asked to
+/// end and left running because it could not tell it from the harness's own (a
+/// window whose harness is not known to keep its servers in a way is told by time
+/// alone, and no process of it is ended on that) or because it did not end. Each
+/// is listed as `pane.background` lists its answer: how many, and the first.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Ending {
+    pub ended: Background,
+    pub left: Background,
 }
 
 /// `pane.exit`'s body: the pane that ended, and what the host kept of its end.
@@ -313,6 +342,56 @@ mod tests {
                 "{refused}"
             );
         }
+    }
+
+    #[test]
+    fn an_end_names_its_pane_and_the_processes_it_asks_to_end_and_refuses_what_it_does_not_know() {
+        let body = json!({ "id": "p1-zeus", "generation": 4, "pids": [4242, 4243] });
+        let asked: EndRequest = serde_json::from_value(body.clone()).unwrap();
+        assert_eq!(
+            asked,
+            EndRequest {
+                id: "p1-zeus".to_owned(),
+                generation: 4,
+                pids: vec![4242, 4243],
+            }
+        );
+        assert_eq!(serde_json::to_value(&asked).unwrap(), body);
+
+        for refused in [
+            json!({ "generation": 4, "pids": [] }),
+            json!({ "id": "p", "pids": [] }),
+            json!({ "id": "p", "generation": 4 }),
+            json!({ "id": "p", "generation": 4, "pids": ["4242"] }),
+            json!({ "id": "p", "generation": 4, "pids": [-1] }),
+            json!({ "id": "p", "generation": 4, "pids": [], "all": true }),
+        ] {
+            assert!(
+                serde_json::from_value::<EndRequest>(refused.clone()).is_err(),
+                "{refused}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_ending_says_what_was_ended_and_what_was_left_and_a_word_that_is_missing_says_none() {
+        let answer = json!({
+            "ok": true,
+            "ended": { "total": 2, "processes": [
+                { "pid": 4242, "command": "python3 lock.py record --run 7" },
+                { "pid": 4243, "command": "tail -f run.log" },
+            ] },
+            "left": { "total": 1, "processes": [{ "pid": 4300, "command": "node server.js" }] },
+        });
+        let ending: Ending = serde_json::from_value(answer).unwrap();
+        assert_eq!(ending.ended.total, 2);
+        assert_eq!(ending.ended.processes[1].command, "tail -f run.log");
+        assert_eq!(ending.left.processes[0].pid, 4300);
+
+        // A host that says no more than that it answered ended nothing and left nothing.
+        let said: Ending = serde_json::from_value(json!({ "ok": true })).unwrap();
+        assert_eq!(said, Ending::default());
+        assert_eq!(said.ended.total, 0);
     }
 
     #[test]

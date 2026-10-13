@@ -26,6 +26,10 @@
 //!   window begins a turn of its own when the job ends, as a harness does that
 //!   its job's notification wakes (`WOKEN <words>`, which answers `woken:
 //!   <words>`); with `--deaf` the job ignores the requests to end.
+//! - A line `JOB [--deaf] <seconds> <rest>` starts such a job and goes on with
+//!   `rest` as the line it was given, as an agent does whose tool runs a command
+//!   while its turn is at work (`JOB 120 SLEEP 60 words` leaves a job running for
+//!   the whole of a minute's turn, which then answers `words`).
 //! - A line `AGENTS <count> <seconds> <words>` starts that many background agents
 //!   (`agents`: no program, as Claude Code's run in its own process) that end
 //!   together after that long, and answers the words at once, as an agent does
@@ -194,6 +198,7 @@ fn shell(command: &str) -> Run {
 /// The answer to `text`.
 pub fn reply_to(text: &str, window: &Window) -> Result<Reply, String> {
     static SLEEP: OnceLock<Regex> = OnceLock::new();
+    static JOB: OnceLock<Regex> = OnceLock::new();
     static BACKGROUND: OnceLock<Regex> = OnceLock::new();
     static AGENTS: OnceLock<Regex> = OnceLock::new();
     static WOKEN: OnceLock<Regex> = OnceLock::new();
@@ -211,6 +216,15 @@ pub fn reply_to(text: &str, window: &Window) -> Result<Reply, String> {
             return Ok(Reply::Stopped);
         }
         return reply_to(&slow[2], window);
+    }
+    if let Some(job) = pattern::once(&JOB, r"(?m)^JOB ((?:--deaf )?)(\d+) (.+)$").captures(text) {
+        let seconds: u64 = job[2].parse().map_err(|_| format!("JOB {}", &job[2]))?;
+        // An agent thinks before it runs a tool (see `BACKGROUND`).
+        thread::sleep(THINKING);
+        window
+            .jobs
+            .start("job", seconds, !job[1].is_empty(), Group::Own, || {})?;
+        return reply_to(&job[3], window);
     }
     if let Some(job) = pattern::once(
         &BACKGROUND,
@@ -442,7 +456,12 @@ mod tests {
     #[test]
     fn a_background_line_that_is_no_job_is_only_acknowledged() {
         // No seconds, or none a number: nothing is started, and nothing waited for.
-        for line in ["BACKGROUND started the job", "BACKGROUND --wake soon words"] {
+        for line in [
+            "BACKGROUND started the job",
+            "BACKGROUND --wake soon words",
+            "JOB soon SLEEP 3 words",
+            "JOB 5",
+        ] {
             let started = std::time::Instant::now();
             assert_eq!(text(reply_to(line, &window())), format!("noted: {line}"));
             assert!(started.elapsed() < Duration::from_secs(1), "{line}");

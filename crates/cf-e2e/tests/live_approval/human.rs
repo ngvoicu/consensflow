@@ -195,7 +195,7 @@ impl<'a> Human<'a> {
     }
 
     /// What a window's tree runs that began after its turn did, as the pane host
-    /// says it (the work the daemon holds a task's result back for): a line to
+    /// says it (the work the daemon ends as a task's result is taken): a line to
     /// each process, after a mark.
     pub fn background(&self, pane: &Value) -> String {
         let Ok(tree) = tree::read(self.rig, pane) else {

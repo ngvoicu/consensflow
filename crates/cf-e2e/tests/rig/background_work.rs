@@ -1,107 +1,102 @@
-//! A worker's background work outlives its turn (the report of 2026-10-09):
-//! T-183's worker started a recording run under a lock tool in the background,
-//! armed its harness's monitor and ended its turn. ConsensFlow took the turn's
-//! end for the result, marked the task done and closed the window, and the job
-//! died with it, killed outright (no RELEASED), and the monitor never woke the
-//! worker. End to end through the real pane host (`npm run test:integration`):
-//! fake agents in real PTYs, and a job of the fake agent's (its `background`
-//! part) that writes RELEASED when it is asked to end and FINISHED when it ends
-//! by itself.
+//! A worker's background work outlives its turn, and its answer is its result at
+//! once: the owner's decision of 2026-10-13, which reverses the one of 2026-10-09
+//! (T-183's worker started a recording run under a lock tool in the background,
+//! armed its harness's monitor and ended its turn; ConsensFlow took the turn's end for
+//! the result and closed the window, and the job died with it, killed outright, with
+//! no RELEASED) after T-7 and T-15 on Windows (a headless Edge check the harness
+//! moved to the background, which never exits, kept a finished worker's task
+//! working, and the chief had no result). End to end through the real pane host
+//! (`npm run test:integration`): fake agents in real PTYs, and a job of the fake
+//! agent's (its `background` part) that writes RELEASED when it is asked to end and
+//! FINISHED when it ends by itself.
 //!
-//! - A turn that ends while the job it started runs is not the task's result:
-//!   the board says the window works, and the job runs on until it ends; the
-//!   turn the job's end wakes is the one whose end is.
+//! - A turn that ends while the job it started runs is the task's result at once;
+//!   the job is ended as the result is taken, the chief is told so in a note beside
+//!   the result, and the window closes as any finished worker's does. A window the
+//!   human keeps open stays open, with its job ended and its harness untouched.
 //! - Work that was there before the turn (a server the harness started with its
 //!   window) is not the turn's.
-//! - Nor is a server the harness starts after the first message was marked, which
-//!   is where Claude Code starts its MCP servers (found on 3.0.1, where a worker's
-//!   task was never done): it stays in the group of the window's program, and a
-//!   command the agent's tool runs is in a group of its own. The stand-in starts
-//!   its server so (`CF_TEST_MCP_SERVER=late`), well past the pass that marks the
-//!   turn, and a Claude worker's turn still ends with its result; with a job of the
-//!   agent's beside the server, the window is held for the job alone. Nor is what
-//!   the server starts, in whatever group: the browser of `@playwright/mcp` and
-//!   `chrome-devtools-mcp`, which the stand-in's server launches in a session of
-//!   its own (`CF_TEST_MCP_BROWSER`).
-//! - A window that closes with the job running (a cancel) asks it to end first,
-//!   and whoever gave the task is told the job was running. A pause closes
+//! - Nor is a server the harness starts after the first message was marked, which is
+//!   where Claude Code starts its MCP servers (found on 3.0.1): it stays in the group
+//!   of the window's program, and a command the agent's tool runs is in a group of
+//!   its own. The stand-in starts its server so (`CF_TEST_MCP_SERVER=late`), well
+//!   past the pass that marks the turn, and a Claude worker's turn still ends with
+//!   its result and nothing is said of work; with a job of the agent's beside the
+//!   server, the job is ended and the server is not. Nor is what the server starts,
+//!   in whatever group: the browser of `@playwright/mcp` and `chrome-devtools-mcp`,
+//!   which the stand-in's server launches in a session of its own
+//!   (`CF_TEST_MCP_BROWSER`).
+//! - A window that closes with a job running (a cancel, mid-turn) asks it to end
+//!   first, and whoever gave the task is told the job was running. A pause closes
 //!   nothing.
-//! - A job that ignores the request is killed once the grace is over.
+//! - A job that ignores the request is killed once the grace is over, and the
+//!   result did not wait for it.
 //!
 //! The asking and the grace are Unix's. On Windows a window is ended at once and
 //! nothing is asked of its programs (`pty::close` of the pane host says why): its
-//! job is gone with it, having written nothing, and whoever gave the task is told
-//! all the same.
+//! job is gone with it, having written nothing, and what a turn left is ended by
+//! itself, at once, where a shell the harness started after the mark started it:
+//! the stand-in starts the commands of its agent in a PowerShell there, as the
+//! harnesses do.
 
+use std::sync::OnceLock;
 use std::thread;
 use std::time::Instant;
 
+use cf_e2e::pattern;
 #[cfg(unix)]
 use cf_e2e::process::group_of;
 use cf_e2e::process::is_alive;
-use cf_e2e::rig::{Config, Job, Project, Rig};
+use cf_e2e::rig::{Job, Project, Rig};
 use cf_e2e::Error;
 use regex::Regex;
 use serde_json::{json, Value};
 
 use crate::{config, secs, Outcome};
 
-/// How long the daemon waits, once the job has ended, for the agent to go on
-/// (`CONSENSFLOW_BACKGROUND_SETTLE_MS`): its default is ten seconds.
-const SETTLE_MS: &str = "1500";
-
-/// The rig's configuration with the daemon's settle time of the cases.
-fn settling() -> Config {
-    config().var("CONSENSFLOW_BACKGROUND_SETTLE_MS", SETTLE_MS)
-}
-
 /// The tier the worker was given, as a word the chief's brief names.
 fn tier(added: &Value) -> &str {
     added["member"]["tier"].as_str().unwrap_or_default()
 }
 
-/// A project with one worker, given `words` through the chief, once its window
-/// has started the job: the project and the job.
-fn a_worker_with_a_job<'a>(rig: &'a Rig, words: &str) -> cf_e2e::Result<(Project<'a>, Job)> {
+/// A project with one worker, given `words` through the chief.
+fn a_worker_given<'a>(rig: &'a Rig, words: &str) -> cf_e2e::Result<Project<'a>> {
     let project = Project::open(rig, "chief", json!({}))?;
     let added = project.add_member("worker")?;
     rig.tell(
         project.id(),
         &format!("DISPATCH --tier {} {words}", tier(&added)),
     )?;
+    Ok(project)
+}
+
+/// Waits until the worker's job runs: the job.
+fn until_the_job_runs(rig: &Rig) -> cf_e2e::Result<Job> {
     rig.wait_for("the worker's job to run", secs(60), || {
         Ok(rig.jobs("job").len() == 1)
     })?;
-    let job = rig
-        .jobs("job")
+    rig.jobs("job")
         .into_iter()
         .next()
-        .ok_or_else(|| Error::Daemon("the worker's job is gone".to_owned()))?;
-    Ok((project, job))
+        .ok_or_else(|| Error::Daemon("the worker's job is gone".to_owned()))
 }
 
-/// Waits until the worker's turn is over with its job started: the task has its
-/// result, or the window says why it has not.
-fn until_the_turn_ended(rig: &Rig, project: &Project) -> cf_e2e::Result<()> {
-    rig.wait_for("the worker's turn to end", secs(60), || {
-        let state = project.task(1)?["state"].clone();
-        let over = ["done", "failed", "cancelled"]
-            .iter()
-            .any(|ended| state == *ended);
-        Ok(over || project.lane("worker")?["activity"]["reason"].is_string())
-    })
-}
-
-/// What the board says a window held for one process is doing: the count, and
-/// the command it names after it (what the line holds of a long path is no more
-/// than the first of it).
-fn assert_held_for_one_process(activity: &Value) {
-    let reason = activity["reason"].as_str().unwrap_or_default();
-    let named = reason.strip_prefix("background work running (1 process): ");
-    assert!(
-        named.is_some_and(|command| !command.is_empty()),
-        "the board says it waits for one process, and which: {activity}"
-    );
+/// The human opens the worker's window as soon as it is there: it stays open once
+/// its task is done, as a window they hold open does.
+fn keep_the_workers_window_open(rig: &Rig, project: &Project) -> Outcome {
+    rig.wait_for("the worker's window to open", secs(60), || {
+        Ok(project.lane("worker")?["pane"].is_object())
+    })?;
+    let session = project.lane("worker")?["participant"]["handle"]
+        .as_str()
+        .unwrap_or_default()
+        .to_owned();
+    let opened = rig.page(
+        "session.open",
+        json!({ "project": project.id(), "handle": session }),
+    )?;
+    assert_eq!(opened["ok"], true, "{opened}");
+    Ok(())
 }
 
 /// The results the chief has been given, oldest first.
@@ -127,66 +122,78 @@ fn notes(project: &Project, told: &Regex) -> cf_e2e::Result<Vec<Value>> {
         .collect())
 }
 
+/// What the chief is told of the job its worker's turn left, once it is ended.
+fn ended_note() -> &'static Regex {
+    static ENDED: OnceLock<Regex> = OnceLock::new();
+    pattern::once(
+        &ENDED,
+        r"^T-1's turn left background work running\. Ended: .*--background-job .*\.$",
+    )
+}
+
+/// Whatever the chief was told of work: of an ending or of a close.
+fn any_note_of_work() -> &'static Regex {
+    static WORK: OnceLock<Regex> = OnceLock::new();
+    pattern::once(&WORK, r"background work")
+}
+
 #[test]
-fn a_turn_that_ends_with_the_job_it_started_running_is_not_the_result_the_job_ends_and_the_turn_it_wakes_is(
-) -> Outcome {
-    let rig = Rig::start(settling())?;
-    let (project, job) = a_worker_with_a_job(&rig, "BACKGROUND --wake 12 started the job")?;
-    until_the_turn_ended(&rig, &project)?;
+fn a_workers_answer_is_its_result_at_once_the_job_it_left_is_ended_and_the_chief_is_told() -> Outcome
+{
+    let rig = Rig::start(config())?;
+    let project = a_worker_given(&rig, "BACKGROUND 600 started the job")?;
+    let job = until_the_job_runs(&rig)?;
 
-    assert_eq!(
-        project.task(1)?["state"],
-        "working",
-        "the turn ended with the job running: the task has no result yet"
-    );
-    let activity = project.lane("worker")?["activity"].clone();
-    assert_eq!(activity["state"], "working");
-    assert_held_for_one_process(&activity);
-    assert!(is_alive(job.pid()), "the job runs on");
-    assert_eq!(
-        results(&project)?,
-        Vec::<Value>::new(),
-        "the chief is given no result"
-    );
-
-    // The job ends by itself, the agent is woken, and its turn's end is the result.
+    // Six hundred seconds of job: the task does not wait for them.
     rig.wait_for("T-1 to be done", secs(60), || {
         Ok(project.task(1)?["state"] == "done")
     })?;
-    assert!(job.finished(), "the job ran to its end");
-    assert!(!job.released(), "and was never asked to end");
+    rig.wait_for("the job to be ended", secs(30), || Ok(!is_alive(job.pid())))?;
+    assert!(!job.finished(), "it did not run to its end");
+    #[cfg(unix)]
+    assert!(job.released(), "it was asked to end, not killed");
     rig.wait_for("the result to reach the chief", secs(30), || {
         Ok(!results(&project)?.is_empty())
     })?;
+    assert_eq!(results(&project)?[0]["body"], "started the job");
+    rig.wait_for("the chief to be told what was ended", secs(30), || {
+        Ok(!notes(&project, ended_note())?.is_empty())
+    })?;
+    // The window's close found nothing left to say: the ending was first.
+    thread::sleep(secs(2));
     assert_eq!(
-        results(&project)?[0]["body"],
-        "started the job\n\nwoken: started the job"
+        notes(&project, any_note_of_work())?.len(),
+        1,
+        "{:?}",
+        notes(&project, any_note_of_work())?
     );
     rig.close()?;
     Ok(())
 }
 
 #[test]
-fn a_job_that_ends_with_no_turn_to_wake_leaves_the_last_turns_end_as_the_result_once_the_agent_has_had_a_moment(
-) -> Outcome {
-    let rig = Rig::start(settling())?;
-    let (project, job) = a_worker_with_a_job(&rig, "BACKGROUND 6 started the job")?;
-    until_the_turn_ended(&rig, &project)?;
-    assert_eq!(
-        project.task(1)?["state"],
-        "working",
-        "the job runs, and the task has no result yet"
-    );
+fn a_window_the_human_keeps_open_stays_open_with_its_job_ended_and_its_program_untouched() -> Outcome
+{
+    let rig = Rig::start(config())?;
+    let project = a_worker_given(&rig, "BACKGROUND 600 started the job")?;
+    keep_the_workers_window_open(&rig, &project)?;
+    let job = until_the_job_runs(&rig)?;
 
     rig.wait_for("T-1 to be done", secs(60), || {
         Ok(project.task(1)?["state"] == "done")
     })?;
-    assert!(job.finished(), "the job ran to its end");
-    assert!(!job.released());
-    rig.wait_for("the result to reach the chief", secs(30), || {
-        Ok(!results(&project)?.is_empty())
+    rig.wait_for("the job to be ended", secs(30), || Ok(!is_alive(job.pid())))?;
+    rig.wait_for("the chief to be told what was ended", secs(30), || {
+        Ok(!notes(&project, ended_note())?.is_empty())
     })?;
-    assert_eq!(results(&project)?[0]["body"], "started the job");
+
+    // It is theirs: the window is open, and what a window's close would say is not said.
+    thread::sleep(secs(3));
+    assert!(
+        project.lane("worker")?["pane"].is_object(),
+        "the window is open"
+    );
+    assert_eq!(project.task(1)?["state"], "done");
     rig.close()?;
     Ok(())
 }
@@ -196,7 +203,7 @@ fn work_the_window_had_before_its_turn_is_not_the_turns_a_server_the_harness_sta
 ) -> Outcome {
     // In a group of its own, as Codex starts its helpers: no group tells it from the
     // turn's work, only that the window had it before its turn.
-    let rig = Rig::start(settling().var("CF_TEST_MCP_SERVER", "apart"))?;
+    let rig = Rig::start(config().var("CF_TEST_MCP_SERVER", "apart"))?;
     let project = Project::open(&rig, "chief", json!({}))?;
     let added = project.add_member("worker")?;
     // A turn of a few seconds: the daemon has marked where it began when it ends.
@@ -207,36 +214,45 @@ fn work_the_window_had_before_its_turn_is_not_the_turns_a_server_the_harness_sta
             tier(&added)
         ),
     )?;
+    // The human keeps the window open, so that its close does not end the server
+    // before this looks at it: only an ending could.
+    keep_the_workers_window_open(&rig, &project)?;
     rig.wait_for("T-1 to be done", secs(60), || {
         Ok(project.task(1)?["state"] == "done")
     })?;
-    assert!(
-        rig.jobs("server").len() >= 2,
-        "the chief and the worker each had a server"
-    );
     rig.wait_for("the result to reach the chief", secs(30), || {
         Ok(!results(&project)?.is_empty())
     })?;
     assert_eq!(results(&project)?[0]["body"], "WORKER_OK");
+    // What an ending would end and say is done within moments of the result.
+    thread::sleep(secs(3));
+    let servers = rig.jobs("server");
+    assert!(
+        servers.len() >= 2 && servers.iter().all(|server| is_alive(server.pid())),
+        "the chief and the worker each had a server, and have it still"
+    );
+    assert_eq!(notes(&project, any_note_of_work())?, Vec::<Value>::new());
     rig.close()?;
     Ok(())
 }
 
 /// What these cases cannot hold on Windows, where a job object has no process
 /// groups for the host to tell by: a server the harness starts after the first
-/// message was marked is the turn's work there, and holds the first task's result
-/// (written as a limit in the engine's `background` module). So they are Unix's:
-/// where the host looks at the tree at all, which is macOS.
+/// message was marked is told from a job there only by the shell that started the
+/// job, so it is left running and said so (written as a limit in the engine's
+/// `background` module). So they are Unix's: where the host looks at the tree at
+/// all, which is macOS.
 ///
 /// The server begins `THINKING` after the window's first message shows in its
 /// record, past the pass that marks where the turn began, and the turn outlasts it.
 #[cfg(unix)]
 #[test]
-fn a_server_the_harness_starts_after_the_first_message_was_marked_holds_nothing_the_workers_task_is_done(
+fn a_server_the_harness_starts_after_the_first_message_was_marked_is_no_work_of_the_turn_and_nothing_is_said(
 ) -> Outcome {
     // Found on 3.0.1: Claude Code starts its MCP servers as it takes its first
-    // message, and the user's own held a worker's task for ever.
-    let rig = Rig::start(settling().var("CF_TEST_MCP_SERVER", "late"))?;
+    // message, and the user's own held a worker's task for ever. Ending what a turn
+    // left must not end them.
+    let rig = Rig::start(config().var("CF_TEST_MCP_SERVER", "late"))?;
     let project = Project::open(&rig, "chief", json!({}))?;
     let added = project.add_member("worker")?;
     rig.tell(
@@ -263,6 +279,8 @@ fn a_server_the_harness_starts_after_the_first_message_was_marked_holds_nothing_
         Ok(!results(&project)?.is_empty())
     })?;
     assert_eq!(results(&project)?[0]["body"], "WORKER_OK");
+    thread::sleep(secs(2));
+    assert_eq!(notes(&project, any_note_of_work())?, Vec::<Value>::new());
     rig.close()?;
     Ok(())
 }
@@ -270,14 +288,13 @@ fn a_server_the_harness_starts_after_the_first_message_was_marked_holds_nothing_
 /// The owner's own setup: `@playwright/mcp` and `chrome-devtools-mcp` launch a
 /// browser when a tool is used, in a group of its own. The browser is a child of
 /// the server, and what a harness's server starts is the harness's whatever group it
-/// goes to: a task that touched a page is done with the browser running, not held
-/// for it as long as the server lives.
+/// goes to: a task that touched a page is done with the browser running, and the
+/// browser is not ended as the turn's.
 #[cfg(unix)]
 #[test]
-fn a_browser_the_server_launches_in_a_group_of_its_own_holds_nothing_either_the_workers_task_is_done(
-) -> Outcome {
+fn a_browser_the_server_launches_in_a_group_of_its_own_is_no_work_of_the_turn_either() -> Outcome {
     let rig = Rig::start(
-        settling()
+        config()
             .var("CF_TEST_MCP_SERVER", "late")
             .var("CF_TEST_MCP_BROWSER", "1"),
     )?;
@@ -312,11 +329,6 @@ fn a_browser_the_server_launches_in_a_group_of_its_own_holds_nothing_either_the_
             "it is in its window's"
         );
     }
-    assert_eq!(
-        project.task(1)?["state"],
-        "working",
-        "the browsers began while the turn was at work"
-    );
     rig.wait_for("T-1 to be done", secs(60), || {
         Ok(project.task(1)?["state"] == "done")
     })?;
@@ -324,50 +336,53 @@ fn a_browser_the_server_launches_in_a_group_of_its_own_holds_nothing_either_the_
         Ok(!results(&project)?.is_empty())
     })?;
     assert_eq!(results(&project)?[0]["body"], "WORKER_OK");
+    thread::sleep(secs(2));
+    assert_eq!(notes(&project, any_note_of_work())?, Vec::<Value>::new());
     rig.close()?;
     Ok(())
 }
 
-/// The same worker, whose agent leaves a job beside the harness's server: the job
-/// is in a group of its own and holds the result, the server is not counted, and
-/// when the job has ended the turn's end is the result.
+/// The same worker, whose agent leaves a job beside the harness's server, in a window
+/// the human keeps open: the job is ended, and the server, which the host does not
+/// list as the turn's, is not asked to end and runs on.
 #[cfg(unix)]
 #[test]
-fn a_job_the_agent_leaves_holds_the_result_beside_the_harnesss_server_which_is_not_counted_or_waited_for(
-) -> Outcome {
-    let rig = Rig::start(settling().var("CF_TEST_MCP_SERVER", "late"))?;
-    let (project, job) = a_worker_with_a_job(&rig, "BACKGROUND 20 started the job")?;
-    // The harness's servers have begun beside the job, and the daemon has looked since.
+fn a_job_the_agent_leaves_is_ended_beside_the_harnesss_server_which_runs_on() -> Outcome {
+    let rig = Rig::start(config().var("CF_TEST_MCP_SERVER", "late"))?;
+    let project = a_worker_given(&rig, "BACKGROUND 600 started the job")?;
+    keep_the_workers_window_open(&rig, &project)?;
+    let job = until_the_job_runs(&rig)?;
+    // The harness's servers have begun beside the job.
     rig.wait_for("the servers to run", secs(30), || {
         let servers = rig.jobs("server");
         Ok(servers.len() >= 2 && servers.iter().all(|server| is_alive(server.pid())))
     })?;
-    thread::sleep(secs(2));
-    until_the_turn_ended(&rig, &project)?;
-
-    assert_eq!(project.task(1)?["state"], "working", "held for the job");
-    let activity = project.lane("worker")?["activity"].clone();
-    assert_eq!(activity["state"], "working");
-    assert_held_for_one_process(&activity);
-    assert!(is_alive(job.pid()), "the job runs on");
-    assert!(
-        rig.jobs("server")
-            .iter()
-            .all(|server| is_alive(server.pid())),
-        "and so do the harness's servers, which the task does not wait for"
-    );
-    assert_eq!(results(&project)?, Vec::<Value>::new());
 
     rig.wait_for("T-1 to be done", secs(60), || {
         Ok(project.task(1)?["state"] == "done")
     })?;
-    assert!(job.finished(), "the job ran to its end");
-    rig.wait_for("the result to reach the chief", secs(30), || {
-        Ok(!results(&project)?.is_empty())
+    rig.wait_for("the job to be ended", secs(30), || Ok(!is_alive(job.pid())))?;
+    rig.wait_for("the chief to be told what was ended", secs(30), || {
+        Ok(!notes(&project, ended_note())?.is_empty())
     })?;
-    assert_eq!(results(&project)?[0]["body"], "started the job");
+    assert!(job.released(), "it was asked to end, not killed");
+    assert!(
+        rig.jobs("server")
+            .iter()
+            .all(|server| is_alive(server.pid())),
+        "the harness's servers are left as they were"
+    );
     rig.close()?;
     Ok(())
+}
+
+/// A job the agent's turn leaves while it is still at work, as a tool runs a command:
+/// the turn works on, and the task with it.
+fn a_worker_whose_turn_works_with_a_job_running(rig: &Rig) -> cf_e2e::Result<(Project<'_>, Job)> {
+    let project = a_worker_given(rig, "JOB 120 SLEEP 120 Reply with exactly: WORKER_OK")?;
+    let job = until_the_job_runs(rig)?;
+    assert_eq!(project.task(1)?["state"], "working");
+    Ok((project, job))
 }
 
 /// Waits until the chief has been told, once, that T-1's window closed with the
@@ -390,10 +405,8 @@ fn until_the_chief_is_told(rig: &Rig, project: &Project) -> Outcome {
 #[test]
 fn cancelling_a_task_whose_job_still_runs_asks_the_job_to_end_first_and_tells_whoever_gave_the_task(
 ) -> Outcome {
-    let rig = Rig::start(settling())?;
-    let (project, job) = a_worker_with_a_job(&rig, "BACKGROUND 120 started the job")?;
-    until_the_turn_ended(&rig, &project)?;
-    assert_eq!(project.task(1)?["state"], "working");
+    let rig = Rig::start(config())?;
+    let (project, job) = a_worker_whose_turn_works_with_a_job_running(&rig)?;
 
     let stopped = rig.page("task.cancel", json!({ "project": project.id(), "task": 1 }))?;
     assert_eq!(stopped["ok"], true, "{stopped}");
@@ -418,10 +431,8 @@ fn cancelling_a_task_whose_job_still_runs_asks_the_job_to_end_first_and_tells_wh
 #[test]
 fn cancelling_a_task_whose_job_still_runs_ends_the_job_with_its_window_at_once_and_tells_whoever_gave_the_task(
 ) -> Outcome {
-    let rig = Rig::start(settling())?;
-    let (project, job) = a_worker_with_a_job(&rig, "BACKGROUND 120 started the job")?;
-    until_the_turn_ended(&rig, &project)?;
-    assert_eq!(project.task(1)?["state"], "working");
+    let rig = Rig::start(config())?;
+    let (project, job) = a_worker_whose_turn_works_with_a_job_running(&rig)?;
 
     let closing = Instant::now();
     let stopped = rig.page("task.cancel", json!({ "project": project.id(), "task": 1 }))?;
@@ -446,9 +457,8 @@ fn cancelling_a_task_whose_job_still_runs_ends_the_job_with_its_window_at_once_a
 
 #[test]
 fn pausing_a_task_whose_job_still_runs_leaves_its_window_and_the_job_as_they_are() -> Outcome {
-    let rig = Rig::start(settling())?;
-    let (project, job) = a_worker_with_a_job(&rig, "BACKGROUND 120 started the job")?;
-    until_the_turn_ended(&rig, &project)?;
+    let rig = Rig::start(config())?;
+    let (project, job) = a_worker_whose_turn_works_with_a_job_running(&rig)?;
 
     let paused = rig.page("task.pause", json!({ "project": project.id(), "task": 1 }))?;
     assert_eq!(paused["ok"], true, "{paused}");
@@ -472,24 +482,33 @@ fn pausing_a_task_whose_job_still_runs_leaves_its_window_and_the_job_as_they_are
 /// ended at once, which the cancel case above holds.
 #[cfg(unix)]
 #[test]
-fn a_job_that_ignores_the_signals_that_ask_it_to_end_is_killed_once_the_grace_of_ten_seconds_is_over(
+fn a_job_that_ignores_the_signals_that_ask_it_to_end_is_killed_once_the_grace_of_ten_seconds_is_over_and_the_result_did_not_wait_for_it(
 ) -> Outcome {
-    let rig = Rig::start(settling())?;
-    let (project, job) = a_worker_with_a_job(&rig, "BACKGROUND --deaf 120 started the job")?;
-    until_the_turn_ended(&rig, &project)?;
+    let rig = Rig::start(config())?;
+    let project = a_worker_given(&rig, "BACKGROUND --deaf 600 started the job")?;
+    let job = until_the_job_runs(&rig)?;
 
-    let closing = Instant::now();
-    let stopped = rig.page("task.cancel", json!({ "project": project.id(), "task": 1 }))?;
-    assert_eq!(stopped["ok"], true, "{stopped}");
+    rig.wait_for("T-1 to be done", secs(60), || {
+        Ok(project.task(1)?["state"] == "done")
+    })?;
+    let done = Instant::now();
+    assert!(
+        is_alive(job.pid()),
+        "the task is done while the job is still being given its grace"
+    );
+
     rig.wait_for("the job to be killed", secs(30), || {
         Ok(!is_alive(job.pid()))
     })?;
     assert!(
-        closing.elapsed() >= secs(9),
+        done.elapsed() >= secs(8),
         "the job was given its grace: {:?}",
-        closing.elapsed()
+        done.elapsed()
     );
     assert!(!job.released(), "and was killed, not asked");
+    rig.wait_for("the chief to be told what was ended", secs(30), || {
+        Ok(!notes(&project, ended_note())?.is_empty())
+    })?;
     rig.close()?;
     Ok(())
 }

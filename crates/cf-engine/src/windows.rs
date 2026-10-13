@@ -2,8 +2,8 @@
 //! `started`), look (`observe`, `drawn`), and close (`retire`, `close_if_free`,
 //! `close_own`). It owns the record's window part, the generation of each pane,
 //! and the chief's relaunch backoff. What a window owes a stop of its task, and
-//! how it is interrupted, is `stops`; the work its turn left running, which
-//! holds its task's result back, is `background`.
+//! how it is interrupted, is `stops`; the work its turn left running, which is
+//! ended as its task's result is taken, is `background`.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -283,8 +283,6 @@ impl Dispatcher {
         if let Some(launch) = launch {
             self.seams.launch_files.forget(&launch);
         }
-        // What its turn left running went with it.
-        self.release_background(record);
     }
 
     /// The window of a record and its pane, as they are now.

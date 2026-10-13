@@ -43,9 +43,10 @@ pub trait Adapter {
     /// How the harness keeps its own processes (its MCP servers, its helpers),
     /// which the pane host tells a turn's work from them by (`pane.mark`'s
     /// `servers`): what a server is, and so what it starts, is the harness's and
-    /// no work a turn left. Where it is not known the host tells by when each
-    /// process began alone, and a server that begins after the first turn's mark
-    /// is the turn's.
+    /// no work a turn left, to be listed or ended. Where it is not known the host
+    /// lists by when each process began alone, and a server that begins after the
+    /// first turn's mark is listed with the turn's; it ends only what a shell the
+    /// harness started after the mark began.
     ///
     /// Only what someone has looked at is said: what a window's tree holds with a
     /// command of its agent running (`ps -axo pid,pgid,ppid,command`). Claude Code

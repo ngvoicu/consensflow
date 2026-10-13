@@ -23,8 +23,12 @@
 //! program, as a server the harness starts does (an MCP server). The windows tell
 //! which of them are the harness's by that group, and by what started them. On
 //! Windows nothing asks a job to end (a window is ended at once, its job object
-//! ending the tree), so the job has no handler there, no groups either, and
-//! `--deaf` changes nothing: it writes its process, runs its seconds and is killed.
+//! ending the tree, and what a turn left is ended by itself, process by process),
+//! so the job has no handler there, no groups either, and `--deaf` changes
+//! nothing: it writes its process, runs its seconds and is killed. A command the
+//! agent runs is started there by a PowerShell, as the harnesses start each
+//! command their agents run, and a server is started as it is: the host tells
+//! the one from the other by the shell (`cf-panes`' `background::shells`).
 //!
 //! With `--browser <file>` the job starts a job of its own once it is ready: a
 //! child of it, as the browser an MCP server launches (`@playwright/mcp`,
@@ -37,6 +41,7 @@
 //! own as the window opens, as Codex starts its helpers; with
 //! `CF_TEST_MCP_BROWSER` set it launches its browser as it starts.
 
+use std::ffi::OsString;
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -46,6 +51,8 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
+#[cfg(windows)]
+use cf_e2e::process::own_var;
 use cf_e2e::process::{Run, Spawned};
 
 #[cfg(unix)]
@@ -141,6 +148,16 @@ impl Server {
     }
 }
 
+/// What a job is started as, besides its group.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct How {
+    /// It launches a browser of its own once it is ready.
+    browser: bool,
+    /// A command of the agent's: on Windows a PowerShell starts it, as the
+    /// harnesses start the commands their agents run.
+    command: bool,
+}
+
 /// The jobs one window starts.
 pub struct Jobs {
     folder: PathBuf,
@@ -173,12 +190,17 @@ impl Jobs {
     /// Starts the server of the window's harness, which runs past any case, in
     /// `group`, and the browser it launches if it does.
     fn start_server(&self, group: Group) -> Result<(), String> {
-        self.begin(SERVER, SERVER_SECONDS, false, group, self.browser, || {})
+        let how = How {
+            browser: self.browser,
+            command: false,
+        };
+        self.begin(SERVER, SERVER_SECONDS, false, group, how, || {})
     }
 
-    /// Starts the job `label`, which runs `seconds` (and ignores the requests
-    /// to end if it is `deaf`), in `group`. Its files are `<label>-<window>-<n>.*`.
-    /// `then` runs once it has ended, however it ended.
+    /// Starts the job `label`, a command the agent's tool runs, which runs
+    /// `seconds` (and ignores the requests to end if it is `deaf`), in `group`. Its
+    /// files are `<label>-<window>-<n>.*`. `then` runs once it has ended, however
+    /// it ended.
     pub fn start(
         &self,
         label: &str,
@@ -187,18 +209,22 @@ impl Jobs {
         group: Group,
         then: impl FnOnce() + Send + 'static,
     ) -> Result<(), String> {
-        self.begin(label, seconds, deaf, group, false, then)
+        let how = How {
+            browser: false,
+            command: true,
+        };
+        self.begin(label, seconds, deaf, group, how, then)
     }
 
-    /// [`Jobs::start`], and the browser the job launches if it `launches` one: its
-    /// files are `browser-<window>-<n>.*`, of the job's number.
+    /// [`Jobs::start`], as `how` says: the browser the job launches, if it launches
+    /// one, has files `browser-<window>-<n>.*`, of the job's number.
     fn begin(
         &self,
         label: &str,
         seconds: u64,
         deaf: bool,
         group: Group,
-        launches: bool,
+        how: How,
         then: impl FnOnce() + Send + 'static,
     ) -> Result<(), String> {
         fs::create_dir_all(&self.folder)
@@ -208,24 +234,27 @@ impl Jobs {
             .folder
             .join(format!("{label}-{}-{number}", self.window));
         let program = std::env::current_exe().map_err(|failed| failed.to_string())?;
-        let mut run = Run::new(program)
-            .arg(JOB)
-            .arg(seconds.to_string())
-            .arg(&file);
+        let mut words: Vec<OsString> = vec![
+            JOB.into(),
+            seconds.to_string().into(),
+            file.clone().into_os_string(),
+        ];
         if deaf {
-            run = run.arg("--deaf");
+            words.push("--deaf".into());
         }
         if group == Group::Window {
-            run = run.arg(IN_GROUP);
+            words.push(IN_GROUP.into());
         }
-        if launches {
-            run = run.arg(BROWSER).arg(
+        if how.browser {
+            words.push(BROWSER.into());
+            words.push(
                 self.folder
-                    .join(format!("{BROWSER_LABEL}-{}-{number}", self.window)),
+                    .join(format!("{BROWSER_LABEL}-{}-{number}", self.window))
+                    .into_os_string(),
             );
         }
         // The window's environment, which every program of a window has.
-        let mut job = run
+        let mut job = Self::running(&program, words, how)
             .inheriting_env()
             .closed_input()
             .spawn()
@@ -241,6 +270,33 @@ impl Jobs {
         });
         Ok(())
     }
+
+    /// The program that runs the job `words` say: this one, as it is, or where `how`
+    /// says it is a command of the agent's and the platform is Windows, a PowerShell
+    /// that runs it, as a harness starts each command its agent runs.
+    #[cfg_attr(not(windows), allow(unused_variables))]
+    fn running(program: &Path, words: Vec<OsString>, how: How) -> Run {
+        #[cfg(windows)]
+        if how.command {
+            let root = own_var("SystemRoot").unwrap_or_else(|| r"C:\Windows".to_owned());
+            return Run::new(format!(
+                r"{root}\System32\WindowsPowerShell\v1.0\powershell.exe"
+            ))
+            .args(["-NoProfile", "-NonInteractive", "-Command"])
+            .arg(powershell_script(program, &words));
+        }
+        Run::new(program).args(words)
+    }
+}
+
+/// What PowerShell is told to run to start `program` with `words`: `& 'program'
+/// 'word' …`, each in single quotes, the quotes in it doubled.
+#[cfg(any(windows, test))]
+fn powershell_script(program: &Path, words: &[OsString]) -> String {
+    let quoted =
+        |word: &std::ffi::OsStr| format!("'{}'", word.to_string_lossy().replace('\'', "''"));
+    let words: Vec<String> = words.iter().map(|word| quoted(word)).collect();
+    format!("& {} {}", quoted(program.as_os_str()), words.join(" "))
 }
 
 /// The job: runs as `args` ask, and the exit code of the program.
@@ -503,6 +559,18 @@ mod tests {
         let jobs = Jobs::new(Path::new("/root/consensflow"), 4242);
         assert_eq!(jobs.folder, PathBuf::from("/root/jobs"));
         assert_eq!(jobs.window, 4242);
+    }
+
+    #[test]
+    fn a_command_of_the_agents_is_run_by_a_powershell_that_is_told_it_in_single_quotes() {
+        let words: Vec<OsString> = ["--background-job", "600", r"C:\jobs\it's a job-1-1"]
+            .into_iter()
+            .map(Into::into)
+            .collect();
+        assert_eq!(
+            powershell_script(Path::new(r"C:\Program Files\x\fake-agent.exe"), &words),
+            r"& 'C:\Program Files\x\fake-agent.exe' '--background-job' '600' 'C:\jobs\it''s a job-1-1'"
+        );
     }
 
     #[test]
