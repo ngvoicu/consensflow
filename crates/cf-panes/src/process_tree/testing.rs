@@ -24,20 +24,23 @@ pub(super) fn listed(pid: i32, unique: u64, parent: u64) -> Process {
     }
 }
 
-/// The window of the tables below: its program, a shell the program started, the job of
-/// the shell's, and a job of the job's. Their numbers are above any a Mac gives, so that
-/// no process there is has one.
+/// The window of the tables below: its program, which leads a session; a shell the program
+/// started in a session of its own (as Claude Code's tool shells are), the job of the
+/// shell's, and a job of the job's; and a job an agent detached from its shell, which is in
+/// the program's session and whose parent has gone. Their numbers are above any a Mac gives,
+/// so that no process there is has one.
 pub(super) const PROGRAM: i32 = 4_000_010;
 pub(super) const SHELL: i32 = 4_000_011;
 pub(super) const JOB: i32 = 4_000_012;
 pub(super) const DEEP: i32 = 4_000_013;
+pub(super) const DETACHED: i32 = 4_000_014;
 /// What is outside the window: a build, which the system's init started; a shell of the
-/// user's and what it started; and a job nothing saw under the window's program, which is
-/// in the window's session and whose parent has gone.
+/// user's and what it started; and a job that left the window's session (`setsid`), whose
+/// shell is gone and which no look saw under the window's program.
 pub(super) const BUILD: i32 = 4_000_020;
 pub(super) const USERS_SHELL: i32 = 4_000_021;
 pub(super) const USERS_JOB: i32 = 4_000_022;
-pub(super) const LOST: i32 = 4_000_023;
+pub(super) const LEFT: i32 = 4_000_023;
 
 /// The number of the process that started the process this test runs in: a process
 /// that is none of the window's, whatever selects it.
@@ -45,31 +48,44 @@ pub(super) fn the_tests_own_parent() -> i32 {
     i32::try_from(std::os::unix::process::parent_id()).expect("a process number")
 }
 
-/// The window's own processes, in the order of the table below.
-pub(super) fn the_windows() -> [i32; 4] {
-    [PROGRAM, SHELL, JOB, DEEP]
+/// The window's own processes, in the order of their numbers.
+pub(super) fn the_windows() -> [i32; 5] {
+    [PROGRAM, SHELL, JOB, DEEP, DETACHED]
 }
 
 /// What the system's table holds: the window, which the pane host (this process, which a
 /// table never holds) started, and around it the test's own parent, a child of the
 /// system's init that was never seen in the window, a user's shell with a job, and a job
-/// in the window's session that lost its parent.
+/// that left the window's session.
 pub(super) fn a_window_among_strangers() -> Vec<Process> {
     vec![
         Process {
             session: Some(PROGRAM),
             ..listed(PROGRAM, 1000, 700)
         },
-        listed(SHELL, 1100, 1000),
-        listed(JOB, 1200, 1100),
-        listed(DEEP, 1300, 1200),
+        Process {
+            session: Some(SHELL),
+            ..listed(SHELL, 1100, 1000)
+        },
+        Process {
+            session: Some(SHELL),
+            ..listed(JOB, 1200, 1100)
+        },
+        Process {
+            session: Some(SHELL),
+            ..listed(DEEP, 1300, 1200)
+        },
+        Process {
+            session: Some(PROGRAM),
+            ..listed(DETACHED, 1400, 1)
+        },
         listed(the_tests_own_parent(), 800, 1),
         listed(BUILD, 2000, 1),
         listed(USERS_SHELL, 2100, 1),
         listed(USERS_JOB, 2200, 2100),
         Process {
-            session: Some(PROGRAM),
-            ..listed(LOST, 2300, 1)
+            session: Some(LEFT),
+            ..listed(LEFT, 2300, 1)
         },
     ]
 }
@@ -83,10 +99,11 @@ pub(super) fn identity_of(table: &[Process], pid: i32) -> Identity {
         .expect("a process of the table")
 }
 
-/// A made-up machine: the processes it has, and the signals sent to them.
+/// A made-up machine: the processes it has, and the signals sent to them and to groups.
 pub(super) struct Machine {
     processes: Vec<Process>,
     sent: RefCell<Vec<(i32, i32)>>,
+    sent_to_groups: RefCell<Vec<(i32, i32)>>,
 }
 
 impl Machine {
@@ -94,7 +111,22 @@ impl Machine {
         Self {
             processes,
             sent: RefCell::default(),
+            sent_to_groups: RefCell::default(),
         }
+    }
+
+    /// The numbers of the groups sent `signal` whole, each once, in order of number.
+    pub fn sent_to_groups(&self, signal: i32) -> Vec<i32> {
+        let mut groups: Vec<i32> = self
+            .sent_to_groups
+            .borrow()
+            .iter()
+            .filter(|(_, said)| *said == signal)
+            .map(|(group, _)| *group)
+            .collect();
+        groups.sort_unstable();
+        groups.dedup();
+        groups
     }
 
     /// The numbers of the processes sent `signal`, each once, in order of number.
@@ -111,9 +143,9 @@ impl Machine {
         pids
     }
 
-    /// Whether no signal was sent at all.
+    /// Whether no signal was sent at all, to a process or to a group.
     pub fn signalled_none(&self) -> bool {
-        self.sent.borrow().is_empty()
+        self.sent.borrow().is_empty() && self.sent_to_groups.borrow().is_empty()
     }
 }
 
@@ -124,6 +156,11 @@ impl System for Machine {
 
     fn send(&self, to: Identity, signal: i32) -> io::Result<()> {
         self.sent.borrow_mut().push((to.pid, signal));
+        Ok(())
+    }
+
+    fn send_group(&self, group: i32, signal: i32) -> io::Result<()> {
+        self.sent_to_groups.borrow_mut().push((group, signal));
         Ok(())
     }
 }

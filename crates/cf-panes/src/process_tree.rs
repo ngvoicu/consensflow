@@ -25,20 +25,20 @@
 //!
 //! What is selected is not what is signalled. The selection reads the whole table of the
 //! machine's processes, and a wrong one (a bug, or a plant of one) would signal anyone's:
-//! every signal the tree sends is sent by [`bound`], after a check of its own that shares
-//! nothing with the selection. A process that is not the pane's program, nor under it by
-//! the process that started each, nor seen so at a look before, is not signalled and is
-//! not named as ended; so a close ends no job that no look saw under the window's program
-//! and that its session or its marker alone says is the window's, and leaves it running.
+//! every signal the tree sends, to a process or to the pane's group, is sent by [`bound`],
+//! after a check of its own that shares nothing with the selection. A process that is not
+//! the pane's program, nor under it by the process that started each, nor in the session
+//! the program leads while it runs, nor seen so at a look before, is not signalled and is
+//! not named as ended; so a close ends no job that only the marker its environment
+//! carries says is the window's, which no look saw under the window's program, and leaves
+//! it running.
 //!
 //! Limits. The last signal is not bound to the process it was meant for: `signal` (in
 //! [`native`]) looks at the process and then signals its number, and a process that
 //! ended in between, whose number another took, would be signalled. The system gives
 //! numbers out one after the other, and the window between the look and the signal is
 //! microseconds; the kernel can bind a signal to one process by its audit token (xnu's
-//! `proc_info`), which this does not use. The pane's process group, which a close signals
-//! whole (`pty::close`), is the pane's program's own, a number the system keeps from every
-//! other process while the group has a member; it is no part of this bound.
+//! `proc_info`), which this does not use.
 mod bound;
 mod native;
 mod selection;
@@ -278,6 +278,20 @@ impl ProcessTree {
             identities: asked,
             failed,
         })
+    }
+
+    /// Signals the pane's process group `group` with `signal`, as a close does: whole
+    /// while the pane's program runs and leads it, and else member by member, each through
+    /// the bound ([`Bound::signal_group`]).
+    pub fn signal_group(&self, group: i32, signal: i32) -> io::Result<()> {
+        self.signal_group_by(&Native, group, signal)
+    }
+
+    fn signal_group_by(&self, system: &impl System, group: i32, signal: i32) -> io::Result<()> {
+        let snapshot = system.processes()?;
+        let table = Table::of(&snapshot);
+        self.bound.observe(&table);
+        self.bound.signal_group(system, &table, group, signal)
     }
 
     /// Ends `subject` by force. The pane's own process is ended with a `Whole`

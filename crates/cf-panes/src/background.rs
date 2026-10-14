@@ -11,8 +11,9 @@
 //! started that the platform still names ([`Member`]). On macOS that is its children
 //! and what descends from them, what is in the window's session and whatever carries
 //! the pane's marker in its environment; a close ends of these only what is under the
-//! program by the process that started each, or was seen so at a look, whatever the
-//! selection says (`process_tree`'s bound), and leaves the rest running. On Windows
+//! program by the process that started each, or is in the session the program leads
+//! while it runs, or was seen so at a look, whatever the selection says (`process_tree`'s
+//! bound), and leaves the rest running. On Windows
 //! it is the pane's job object: a process joins it when it is started and leaves it
 //! only by breaking away (`CREATE_BREAKAWAY_FROM_JOB`), which the job does not allow,
 //! and it is the job that is ended, and nothing outside it can be.

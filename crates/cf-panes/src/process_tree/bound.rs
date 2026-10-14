@@ -6,20 +6,33 @@
 //! anyone's but the window's, so a signal is sent here, after a check of its own that
 //! shares nothing with the selection (not its roots, its parents nor its descendants).
 //!
-//! **The host only ever signals a process that is the pane's program, or runs under it
-//! by the process each was started by, in the table being acted on; or that was seen so
-//! at a look before, or runs under one that was.** A process the bound refuses is not
-//! signalled, and what asked for it does not name it as ended. When in doubt it ends
-//! less: a job an agent detached from its shell, which no look saw under it, is the
-//! window's by its session or by the marker its environment carries, and the bound
-//! leaves it running as an ending does. A stranger (the user's shell, a build, the
-//! process that started the pane's program) is under the program by no parent, and is
-//! never signalled.
+//! **The host only ever signals a process that is the pane's program, or that runs
+//! under it by the process each was started by, or that is in the session the program
+//! leads, in the table being acted on; or that was seen so at a look before, or runs
+//! under one that was.** A process the bound refuses is not signalled, and what asked for
+//! it does not name it as ended. When in doubt it ends less. A stranger (the user's shell,
+//! a build, the process that started the pane's program) is under the program by no
+//! parent, and in no session of its, and is never signalled.
 //!
-//! Each look at the tree ([`Bound::observe`]) records what is under the program,
-//! told by the identifier the system gives each process, which no later process takes,
-//! never by its number alone. What was seen stays the window's while it runs, whatever
-//! becomes of the process that started it; what has gone is let go of.
+//! The session is the kernel's own rule: a process is in a session only by being started
+//! by one that is, and a new session is named for the process that makes it, so while the
+//! pane's program leads its session (it is the pane's program, by its unique identifier
+//! and not its number, it runs, and it is its own session's leader) every process in that
+//! session is the window's, whoever started it and whether or not the process that
+//! started it is still there: a job an agent detached from its shell is one. A session
+//! whose leader has gone allows nothing, and nor does one whose number another process
+//! has now: a number is given again once its process is gone.
+//!
+//! Each look at the tree ([`Bound::observe`]) records what the window's is by these
+//! rules, told by the identifier the system gives each process, which no later process
+//! takes, never by its number alone. What was seen stays the window's while it runs,
+//! whatever becomes of the process that started it or of the session's leader; what has
+//! gone is let go of.
+//!
+//! The pane's process group, which a close signals whole, is the pane's program's own
+//! while the program runs ([`Bound::signal_group`]); once it has gone its number may have
+//! been given to another process that leads a group of its own, and the group's members
+//! are each signalled through the bound instead.
 
 use std::collections::{HashMap, HashSet};
 use std::io;
@@ -36,6 +49,10 @@ pub(super) trait System {
     /// Sends `signal` to the process `to` names, and to none that has taken its
     /// number: one that is gone is no error. Only [`Bound::signal`] calls it.
     fn send(&self, to: Identity, signal: i32) -> io::Result<()>;
+
+    /// Sends `signal` to every process of the group `group`: one that is gone is no
+    /// error. Only [`Bound::signal_group`] calls it.
+    fn send_group(&self, group: i32, signal: i32) -> io::Result<()>;
 }
 
 /// The system itself.
@@ -48,6 +65,10 @@ impl System for Native {
 
     fn send(&self, to: Identity, signal: i32) -> io::Result<()> {
         native::signal(to, signal)
+    }
+
+    fn send_group(&self, group: i32, signal: i32) -> io::Result<()> {
+        native::signal_group(group, signal)
     }
 }
 
@@ -77,7 +98,7 @@ impl<'a> Table<'a> {
 pub(super) struct Bound {
     /// The pane's program, which the tree starts at: none where it could not be read.
     program: Option<Identity>,
-    /// The identifiers of what the latest look saw under the program, and runs still.
+    /// The identifiers of what the latest look saw to be the window's, and runs still.
     seen: Arc<Mutex<HashSet<u64>>>,
 }
 
@@ -90,34 +111,37 @@ impl Bound {
         }
     }
 
-    /// A look at the tree: `table` is the system's processes now. What is under the
-    /// program, or under what was seen before, is seen, and what was seen and has gone is
-    /// no longer: a process under one that was seen and has gone is seen itself now.
+    /// A look at the tree: `table` is the system's processes now. What is the window's by
+    /// the rules above, or is under what was seen before, is seen, and what was seen and
+    /// has gone is no longer: a process under one that was seen and has gone is seen itself
+    /// now.
     pub fn observe(&self, table: &Table<'_>) {
+        let led = self.led_session(table);
         let mut seen = self.seen.lock().unwrap_or_else(PoisonError::into_inner);
         let now: HashSet<u64> = table
             .processes
             .iter()
-            .filter(|process| self.under(table, &seen, process))
+            .filter(|process| self.under(table, &seen, led, process))
             .map(|process| process.identity.unique)
             .collect();
         *seen = now;
     }
 
     /// Whether `target` may be signalled, `table` being the processes there are now: it
-    /// is the pane's program, or is under it or under what was seen, by the processes
-    /// that started each. A process the table does not hold (it has gone, or the system
-    /// will not say) is the window's only if it was seen, and the signal itself goes
-    /// to none that has taken its number.
+    /// is the pane's program, or is under it, or in the session it leads, or under what
+    /// was seen. A process the table does not hold (it has gone, or the system will not
+    /// say) is the window's only if it was seen, and the signal itself goes to none that
+    /// has taken its number.
     pub fn allows(&self, table: &Table<'_>, target: Identity) -> bool {
         if self.program == Some(target) {
             return true;
         }
+        let led = self.led_session(table);
         let seen = self.seen.lock().unwrap_or_else(PoisonError::into_inner);
         match table.by_identifier.get(&target.unique) {
             None => seen.contains(&target.unique),
             Some(process) if process.identity != target => false,
-            Some(process) => self.under(table, &seen, process),
+            Some(process) => self.under(table, &seen, led, process),
         }
     }
 
@@ -137,19 +161,88 @@ impl Bound {
         Ok(true)
     }
 
-    /// Whether `process` is the program or was seen, or the process that started it is,
-    /// or the one that started that, up as far as `table` names them. The system names
-    /// the process that started a process by its identifier, which it keeps naming after
-    /// that process has gone, so a process under one that was seen and has gone is found
-    /// by the identifier alone.
-    fn under(&self, table: &Table<'_>, seen: &HashSet<u64>, process: &Process) -> bool {
+    /// Signals the process group `group` with `signal` through `system`, as a close
+    /// signals the pane's own. While the pane's program runs, with the identity it was
+    /// attached with, and leads the group, the group is the pane's own whole: no other
+    /// process has its number, and none can join it from outside its session. Otherwise
+    /// the number may have been given again, to a process that leads a group of its own,
+    /// and the group's members are signalled one by one, through the bound, which
+    /// refuses the strangers among them. A number that names more than a group (0 is the
+    /// caller's own, 1 is none, and -1 is every process) is refused.
+    pub fn signal_group(
+        &self,
+        system: &impl System,
+        table: &Table<'_>,
+        group: i32,
+        signal: i32,
+    ) -> io::Result<()> {
+        if group <= 1 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("{group} names no process group of a pane"),
+            ));
+        }
+        if self.leads(table, group) {
+            return system.send_group(group, signal);
+        }
+        let mut failure = None;
+        for member in table
+            .processes
+            .iter()
+            .filter(|process| process.group == group)
+        {
+            if let Err(error) = self.signal(system, table, member.identity, signal) {
+                failure = Some(error);
+            }
+        }
+        failure.map_or(Ok(()), Err)
+    }
+
+    /// The session the pane's program leads, while it does: the program runs, with the
+    /// identity it was attached with, and its session is its own number. None where it
+    /// has gone, where another process has its number now (another identifier), and where
+    /// it is no session's leader.
+    fn led_session(&self, table: &Table<'_>) -> Option<i32> {
+        let program = self.program?;
+        let process = table.by_identifier.get(&program.unique)?;
+        (process.identity == program && process.session == Some(program.pid)).then_some(program.pid)
+    }
+
+    /// Whether the pane's program runs, with the identity it was attached with, and leads
+    /// the process group `group`.
+    fn leads(&self, table: &Table<'_>, group: i32) -> bool {
+        let Some(program) = self.program else {
+            return false;
+        };
+        program.pid == group
+            && table
+                .by_identifier
+                .get(&program.unique)
+                .is_some_and(|process| process.identity == program && process.group == group)
+    }
+
+    /// Whether `process` is the program or was seen, or is in the session `led`, or the
+    /// process that started it is one of these, or the one that started that, up as far
+    /// as `table` names them. The system names the process that started a process by its
+    /// identifier, which it keeps naming after that process has gone, so a process under
+    /// one that was seen and has gone is found by the identifier alone.
+    fn under(
+        &self,
+        table: &Table<'_>,
+        seen: &HashSet<u64>,
+        led: Option<i32>,
+        process: &Process,
+    ) -> bool {
         let program = self.program.map(|program| program.unique);
         let known = |identifier: u64| Some(identifier) == program || seen.contains(&identifier);
         let mut at = process;
         // A table names no process twice among a process's ancestors: the bound on the
         // walk is only for one that is no tree.
         for _ in 0..=table.by_identifier.len() {
-            if known(at.identity.unique) || known(at.parent) {
+            if known(at.identity.unique)
+                || known(at.parent)
+                || led.is_some_and(|session| at.session == Some(session))
+            {
                 return true;
             }
             match table.by_identifier.get(&at.parent) {

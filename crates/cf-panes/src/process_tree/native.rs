@@ -132,6 +132,29 @@ pub(super) fn signal(identity: Identity, signal: i32) -> io::Result<()> {
     }
 }
 
+/// Sends `signal` to every process of the group `group`: one that is gone is no error.
+/// A number that names more than a group is refused (0 is this process's own group, 1
+/// is none, and -1 is every process).
+pub(super) fn signal_group(group: i32, signal: i32) -> io::Result<()> {
+    if group <= 1 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("{group} names no process group of a pane"),
+        ));
+    }
+    // SAFETY: kill takes two integers and touches no memory of ours; the number was
+    // checked above to name a group alone.
+    if unsafe { libc::kill(-group, signal) } == 0 {
+        return Ok(());
+    }
+    let error = io::Error::last_os_error();
+    if error.raw_os_error() == Some(libc::ESRCH) {
+        Ok(())
+    } else {
+        Err(error)
+    }
+}
+
 /// Every process of ours there is now.
 pub(super) fn processes() -> io::Result<Vec<Process>> {
     for _ in 0..3 {

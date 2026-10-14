@@ -15,10 +15,14 @@ use crate::screen::PaneScreen;
 mod close;
 #[cfg(test)]
 mod keys;
+#[cfg(all(any(test, feature = "test-support"), unix))]
+mod sentinel;
 mod turn;
 
 pub use close::CLOSE_GRACE;
 use close::{ask_all_to_exit, terminate, terminate_asked, terminate_detached};
+#[cfg(all(any(test, feature = "test-support"), unix))]
+pub use sentinel::Sentinel;
 
 /// How long a pane whose output has ended waits for its program's exit to be
 /// readable: a program closes its terminal before it has finished exiting,
@@ -1280,6 +1284,7 @@ mod tests {
     #[cfg(unix)]
     use super::{
         process_exists, serial_pty_test, write_paste_via, OpenedPane, PaneEnvironment, PaneKey,
+        Sentinel,
     };
     use super::{PaneError, PaneTable};
 
@@ -1589,6 +1594,7 @@ mod tests {
     #[test]
     fn kill_closes_the_reader_and_reaps_the_process_group() {
         let _pty_guard = serial_pty_test();
+        let mut outsider = Sentinel::start();
         let table = PaneTable::new();
         let OpenedPane { key, reader } =
             open_shell(&table, "sleep 1000 & printf '%s\\n' \"$!\"; sleep 1000");
@@ -1617,6 +1623,7 @@ mod tests {
             "process group survived kill"
         );
         assert!(!process_exists(child_pid), "background child survived kill");
+        assert!(outsider.runs(), "a process outside the window");
     }
 
     #[cfg(unix)]
@@ -1828,6 +1835,7 @@ mod tests {
     #[test]
     fn close_stops_detached_children_but_preserves_other_panes() {
         let _pty_guard = serial_pty_test();
+        let mut outsider = Sentinel::start();
         let table = PaneTable::new();
         let (foreign, foreign_pid) = detached_child(&table, false, false);
         let (own, own_pid) = detached_child(&table, false, false);
@@ -1842,12 +1850,14 @@ mod tests {
             foreign_stopped,
             "second pane's child survived its own close"
         );
+        assert!(outsider.runs(), "a process outside the window");
     }
 
     #[cfg(target_os = "macos")]
     #[test]
     fn close_stops_reparented_children_after_the_root_exits() {
         let _pty_guard = serial_pty_test();
+        let mut outsider = Sentinel::start();
         let table = PaneTable::new();
         let (key, pid) = detached_child(&table, true, false);
         assert!(process_exists(pid), "fixture needs a live orphan");
@@ -1856,12 +1866,14 @@ mod tests {
             stopped_with_cleanup(pid),
             "reparented child survived pane close"
         );
+        assert!(outsider.runs(), "a process outside the window");
     }
 
     #[cfg(target_os = "macos")]
     #[test]
     fn close_stops_attached_descendants_even_with_a_cleared_environment() {
         let _pty_guard = serial_pty_test();
+        let mut outsider = Sentinel::start();
         let table = PaneTable::new();
         let (key, pid) = detached_child(&table, false, true);
         table.kill(&key).unwrap();
@@ -1869,12 +1881,14 @@ mod tests {
             stopped_with_cleanup(pid),
             "owned child with empty environment survived"
         );
+        assert!(outsider.runs(), "a process outside the window");
     }
 
     #[cfg(target_os = "macos")]
     #[test]
     fn drop_stops_detached_children() {
         let _pty_guard = serial_pty_test();
+        let mut outsider = Sentinel::start();
         let table = PaneTable::new();
         let (_, pid) = detached_child(&table, false, false);
         drop(table);
@@ -1882,12 +1896,14 @@ mod tests {
             stopped_with_cleanup(pid),
             "detached child survived table drop"
         );
+        assert!(outsider.runs(), "a process outside the window");
     }
 
     #[cfg(unix)]
     #[test]
     fn dropping_a_live_table_reaps_its_entire_process_group() {
         let _pty_guard = serial_pty_test();
+        let mut outsider = Sentinel::start();
         let table = PaneTable::new();
         let OpenedPane { key, reader } =
             open_shell(&table, "sleep 1000 & printf '%s\\n' \"$!\"; sleep 1000");
@@ -1916,6 +1932,7 @@ mod tests {
             "process group survived Drop"
         );
         assert!(!process_exists(child_pid), "background child survived Drop");
+        assert!(outsider.runs(), "a process outside the window");
     }
 
     #[cfg(unix)]
@@ -2055,8 +2072,9 @@ mod tests {
         let kill_result = kill_receiver.recv_timeout(Duration::from_millis(500));
         let completed_before_emergency_cleanup = responsive_result.is_ok() && kill_result.is_ok();
         if responsive_result.is_err() || kill_result.is_err() {
-            let _ =
-                super::close::signal_process_group(blocked_process_group, super::close::SIGKILL);
+            // SAFETY: kill takes two integers and touches no memory of ours; the pane's
+            // program leads its group, a test's own emergency cleanup of it.
+            let _ = unsafe { libc::kill(-blocked_process_group, libc::SIGKILL) };
         }
 
         let responsive_result = responsive_result

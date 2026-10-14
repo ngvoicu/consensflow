@@ -1,6 +1,6 @@
 use super::testing::{
     a_window_among_strangers, identity_of, listed, the_tests_own_parent, the_windows, Machine,
-    DEEP, JOB, LOST, PROGRAM, SHELL, USERS_SHELL,
+    DEEP, DETACHED, JOB, LEFT, PROGRAM, SHELL, USERS_SHELL,
 };
 use super::*;
 
@@ -170,17 +170,22 @@ fn a_selection_of_every_process_of_the_machine_stops_and_kills_only_the_windows_
 }
 
 #[test]
-fn a_close_signals_only_what_is_under_the_program_though_the_session_names_more() {
+fn a_close_signals_the_windows_by_its_parents_and_its_session_and_none_of_what_the_selection_adds()
+{
     let machine = Machine::new(a_window_among_strangers());
     let table = machine.processes().expect("the table");
     let tree = tree_of(&table);
-    // The job in the window's session whose parent has gone is the window's by the
-    // session, which the selection says: no look saw it under the program, and it is
-    // left running.
-    let chosen = tree.select(&table, &HashMap::new());
-    assert!(chosen.contains_key(&LOST), "the selection names it");
+    // The selection names the job a detached shell left in the window's session, which is
+    // the window's, and carries on a process an earlier pass found: one that left the
+    // session (`setsid`), whose shell is gone and which no look saw under the program.
+    let left = identity_of(&table, LEFT);
+    let chosen = tree.select(&table, &HashMap::from([(left.pid, left)]));
+    assert!(
+        chosen.contains_key(&DETACHED) && chosen.contains_key(&LEFT),
+        "the selection names both: {chosen:?}"
+    );
 
-    let forced = tree.force_by(&machine, Subject::Whole, &[]);
+    let forced = tree.force_by(&machine, Subject::Whole, &[left]);
 
     assert!(forced.failure.is_none(), "{:?}", forced.failure);
     assert_eq!(machine.sent(libc::SIGSTOP), the_windows());
@@ -195,17 +200,16 @@ fn a_job_seen_under_the_program_is_ended_by_a_close_though_its_parent_has_gone_s
     // A look while the shell runs.
     tree.members_by(&machine).expect("a look");
 
-    // The shell is gone and its job runs on, in the window's session.
+    // The shell is gone and its job runs on, in the shell's own session; the selection
+    // carries it on, with the job that left the window's session, which no look saw.
+    let (job, left) = (identity_of(&table, JOB), identity_of(&table, LEFT));
     let later = Machine::new(vec![
         table[0].clone(),
-        Process {
-            session: Some(PROGRAM),
-            ..table[2].clone()
-        },
-        table[4].clone(),
-        table[8].clone(),
+        table[2].clone(),
+        table[5].clone(),
+        table[9].clone(),
     ]);
-    let forced = tree.force_by(&later, Subject::Whole, &[]);
+    let forced = tree.force_by(&later, Subject::Whole, &[job, left]);
 
     assert!(forced.failure.is_none(), "{:?}", forced.failure);
     assert_eq!(later.sent(libc::SIGKILL), [PROGRAM, JOB]);
@@ -218,36 +222,67 @@ fn what_the_bound_refuses_is_no_part_of_the_turns_lineage_whoever_proves_it_the_
         session: Some(PROGRAM),
         ..listed(pid, unique, parent)
     };
-    // Before the turn: the window's program, and a process of its session that nothing
-    // saw under the program, and whose parent has gone.
-    let before = Machine::new(vec![
+    // Before the turn: the window's program, and a job in its session whose parent has
+    // gone.
+    let before = vec![
         Process {
             session: Some(PROGRAM),
             ..listed(PROGRAM, 1000, 700)
         },
         Process {
             session: Some(PROGRAM),
-            ..listed(LOST, 2300, 1)
+            ..listed(DETACHED, 1400, 1)
         },
-    ]);
-    let table = before.processes().expect("the table");
-    let tree = tree_of(&table);
+    ];
+    let tree = tree_of(&before);
+    // The mark is made of what the selection finds, which no look of the bound has seen.
     let mut baseline = Baseline::default();
-    baseline.mark(&tree.members_by(&before).expect("a look"), None, None);
+    baseline.mark(
+        &tree.members_in(&before, &tree.select(&before, &HashMap::new())),
+        None,
+        None,
+    );
 
-    // After it: a shell the program started, and one that process started: each is a
-    // shell with a parent from before the mark, which proves it the turn's.
-    let after = Machine::new(vec![
-        table[0].clone(),
-        table[1].clone(),
-        shell(SHELL, 1100, 1000),
-        shell(USERS_SHELL, 2100, 2300),
-    ]);
+    // After it the program has gone, and nothing holds its number: the session is the
+    // pane's to the selection still, and a shell the job started, a shell with a parent
+    // from before the mark, is proved the turn's. The leader is not there to say the
+    // session is the window's, and no look saw the job.
+    let after = Machine::new(vec![before[1].clone(), shell(USERS_SHELL, 2100, 1400)]);
     let lineage = tree.lineage_by(&after, &baseline).expect("the lineage");
 
-    let pids: Vec<i32> = lineage.identities.iter().map(|id| id.pid).collect();
-    assert_eq!(pids, [SHELL], "only what is under the program");
-    assert_eq!(lineage.members.len(), 1);
+    assert_eq!(lineage.identities, [], "nothing the bound refuses");
+    assert!(lineage.members.is_empty());
+}
+
+#[test]
+fn a_close_signals_the_panes_group_whole_while_its_program_leads_it_and_else_by_the_bound() {
+    let machine = Machine::new(a_window_among_strangers());
+    let table = machine.processes().expect("the table");
+    let tree = tree_of(&table);
+
+    tree.signal_group_by(&machine, PROGRAM, libc::SIGTERM)
+        .expect("signalled");
+
+    assert_eq!(machine.sent_to_groups(libc::SIGTERM), [PROGRAM]);
+    assert!(machine.sent(libc::SIGTERM).is_empty());
+
+    // The program has gone and a stranger has its number: it leads a group of that number,
+    // as what it started does, and the window's own member of it is the one signalled.
+    let later = Machine::new(vec![
+        Process {
+            group: PROGRAM,
+            ..table[1].clone()
+        },
+        Process {
+            group: PROGRAM,
+            ..listed(4_000_090, 9900, 1)
+        },
+    ]);
+    tree.signal_group_by(&later, PROGRAM, libc::SIGKILL)
+        .expect("signalled");
+
+    assert!(later.sent_to_groups(libc::SIGKILL).is_empty());
+    assert_eq!(later.sent(libc::SIGKILL), [SHELL]);
 }
 
 #[test]

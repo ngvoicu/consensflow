@@ -22,9 +22,9 @@ mod macos {
     use super::programs::{HELPERS, LEFT, MANY, NEW, SPAWNER, TURN};
     use crate::pty::turn::support::{
         gone, harness_programs, kill, listed, numbers, open_python, scratch, started, until_line,
-        Sentinel, DETACHED,
+        DETACHED,
     };
-    use crate::pty::{process_exists, serial_pty_test, PaneError, PaneKey, PaneTable};
+    use crate::pty::{process_exists, serial_pty_test, PaneError, PaneKey, PaneTable, Sentinel};
 
     /// What a test's table gives the programs it asks to end: long enough to tell
     /// from none, and short enough to wait for.
@@ -169,7 +169,7 @@ mod macos {
     }
 
     #[test]
-    fn a_job_the_agent_detached_from_a_shell_that_ended_is_left_running_unnamed_and_the_close_leaves_it_too(
+    fn a_job_the_agent_detached_from_a_shell_that_ended_is_left_running_unnamed_and_the_close_ends_it(
     ) {
         let _serial = serial_pty_test();
         let mut outsider = Sentinel::start();
@@ -185,15 +185,9 @@ mod macos {
 
             assert_eq!(ending, Ending::default(), "{servers:?}");
             assert!(process_exists(pid["job"]), "{servers:?}: it runs on");
-            // It is the window's by its session, but no look saw it under the window's
-            // program, and the bound leaves it running: the close ends what is under the
-            // program, and this was started by a shell that has gone.
+            // It is the window's all the same: the window's close ends it.
             table.kill(&pane.key).expect("close the pane");
-            assert!(
-                process_exists(pid["job"]),
-                "{servers:?}: the close does not end what nothing saw under the program"
-            );
-            kill(pid["job"]);
+            assert!(gone(pid["job"]), "{servers:?}: the close ended it");
             assert!(outsider.runs(), "{servers:?}: a process outside the window");
         }
     }
@@ -378,6 +372,7 @@ mod macos {
     #[test]
     fn a_pane_never_marked_has_nothing_to_end_and_a_pane_that_is_not_open_has_no_ending() {
         let _serial = serial_pty_test();
+        let mut outsider = Sentinel::start();
         let table = Arc::new(PaneTable::closing_within(GRACE));
         let pane = open_python(
             &table,
@@ -390,6 +385,7 @@ mod macos {
             Ending::default()
         );
         table.kill(&pane.key).expect("close the pane");
+        assert!(outsider.runs(), "a process outside the window");
 
         let missing = PaneKey::new("nobody", 1);
         assert!(matches!(

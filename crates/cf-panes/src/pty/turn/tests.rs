@@ -88,8 +88,8 @@ mod unix {
 
         use cf_proto::panes::Servers;
 
-        use crate::pty::process_exists;
-        use crate::pty::turn::support::{kill, listed, numbers, started, Sentinel, DETACHED};
+        use crate::pty::turn::support::{gone, listed, numbers, started, DETACHED};
+        use crate::pty::Sentinel;
 
         use super::{serial_pty_test, Arc, PaneTable};
 
@@ -165,7 +165,7 @@ time.sleep(60)
 "#;
 
         #[test]
-        fn a_job_detached_from_the_shell_that_started_it_is_no_work_of_the_turn_and_no_look_saw_it_under_the_program_so_the_close_leaves_it(
+        fn a_job_detached_from_the_shell_that_started_it_is_the_windows_by_its_session_and_no_work_of_the_turn(
         ) {
             let _serial = serial_pty_test();
             let mut outsider = Sentinel::start();
@@ -174,23 +174,19 @@ time.sleep(60)
                 let (pane, pid) = started(&table, DETACHED, servers, None, &HashMap::new());
 
                 // The job's shell is gone, and the system names no parent of its that
-                // the tree has: it is in the window's session, which is not listed as
-                // the turn's, and no look saw it under the window's program: the close
-                // ends what is under the program, and leaves it running.
+                // the tree has: it is in the window's session, which is the window's
+                // and nothing of the turn's: it is not listed, and the close ends it.
                 assert_eq!(listed(&table, &pane.key), Vec::<u32>::new(), "{servers:?}");
                 table.kill(&pane.key).expect("close the pane");
-                assert!(
-                    process_exists(pid["job"]),
-                    "{servers:?}: the close does not end what nothing saw under the program"
-                );
+                assert!(gone(pid["job"]), "{servers:?}: the close ended it");
                 assert!(outsider.runs(), "{servers:?}: a process outside the window");
-                kill(pid["job"]);
             }
         }
 
         #[test]
         fn a_server_the_harness_starts_late_is_no_work_of_the_turn_and_is_not_listed() {
             let _serial = serial_pty_test();
+            let mut outsider = Sentinel::start();
             let table = Arc::new(PaneTable::new());
             let (pane, pid) = started(&table, CLAUDE, Servers::Unknown, None, &HashMap::new());
 
@@ -203,6 +199,7 @@ time.sleep(60)
                 numbers(&pid, &["wrapper", "wrapped", "tool", "tool_job"])
             );
             table.kill(&pane.key).expect("close the pane");
+            assert!(outsider.runs(), "a process outside the window");
         }
 
         #[test]
@@ -230,6 +227,7 @@ time.sleep(60)
         fn where_the_servers_open_with_the_window_what_the_harness_starts_late_is_not_the_turns_either(
         ) {
             let _serial = serial_pty_test();
+            let mut outsider = Sentinel::start();
             let table = Arc::new(PaneTable::new());
             let (pane, pid) = started(&table, CODEX, Servers::AtLaunch, None, &HashMap::new());
 
@@ -241,6 +239,7 @@ time.sleep(60)
                 numbers(&pid, &["tool", "tool_job"])
             );
             table.kill(&pane.key).expect("close the pane");
+            assert!(outsider.runs(), "a process outside the window");
         }
     }
 
@@ -248,6 +247,7 @@ time.sleep(60)
     #[test]
     fn what_the_tree_had_before_the_turn_is_not_the_turns_and_what_a_shell_started_after_is() {
         let _serial = serial_pty_test();
+        let mut outsider = crate::pty::Sentinel::start();
         let table = Arc::new(PaneTable::new());
         let pane = open(&table, SCRIPT);
         until_shown(&pane.output, "ready");
@@ -261,11 +261,13 @@ time.sleep(60)
         let left = until_listed(&table, &pane.key, "sleep 31");
         assert_eq!(left.total, 2, "the shell and its job: {left:?}");
         table.kill(&pane.key).expect("close the pane");
+        assert!(outsider.runs(), "a process outside the window");
     }
 
     #[test]
     fn a_pane_never_marked_has_no_background_work() {
         let _serial = serial_pty_test();
+        let mut outsider = crate::pty::Sentinel::start();
         let table = Arc::new(PaneTable::new());
         let pane = open(&table, SCRIPT);
         until_shown(&pane.output, "ready");
@@ -275,12 +277,14 @@ time.sleep(60)
         let left = table.background(&pane.key).expect("what it left running");
         assert_eq!((left.total, left.processes), (0, Vec::new()));
         table.kill(&pane.key).expect("close the pane");
+        assert!(outsider.runs(), "a process outside the window");
     }
 
     #[cfg(target_os = "macos")]
     #[test]
     fn a_new_mark_makes_what_runs_by_then_what_came_before() {
         let _serial = serial_pty_test();
+        let mut outsider = crate::pty::Sentinel::start();
         let table = Arc::new(PaneTable::new());
         let pane = open(&table, SCRIPT);
         until_shown(&pane.output, "ready");
@@ -298,13 +302,14 @@ time.sleep(60)
 
         assert_eq!(table.background(&pane.key).expect("look").total, 0);
         table.kill(&pane.key).expect("close the pane");
+        assert!(outsider.runs(), "a process outside the window");
     }
 
     #[cfg(target_os = "macos")]
     #[test]
     fn a_close_keeps_what_the_window_left_running_for_the_exit_it_sends() {
         let _serial = serial_pty_test();
-        let mut outsider = crate::pty::turn::support::Sentinel::start();
+        let mut outsider = crate::pty::Sentinel::start();
         let table = Arc::new(PaneTable::new());
         let pane = open(&table, SCRIPT);
         until_shown(&pane.output, "ready");
@@ -337,7 +342,7 @@ time.sleep(60)
     fn a_program_that_exits_leaving_a_job_running_lists_none_of_it_in_its_exit_and_the_retirement_ends_it(
     ) {
         let _serial = serial_pty_test();
-        let mut outsider = crate::pty::turn::support::Sentinel::start();
+        let mut outsider = crate::pty::Sentinel::start();
         let table = Arc::new(PaneTable::new());
         let pane = open(
             &table,

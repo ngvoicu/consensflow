@@ -2,7 +2,8 @@
 //! asked to end: TERM and then HUP to the pane's process group and, on macOS,
 //! to every process of its tree wherever it went (a job the agent started in a
 //! session of its own is in no group of the pane's), which is what is under its
-//! program, or was seen so (`process_tree`'s bound). They are given
+//! program, or in the session it leads, or was seen so (`process_tree`'s bound, which
+//! signals the pane's group itself only while the program runs). They are given
 //! [`CLOSE_GRACE`] to do it in, and what is still there once they have ended or
 //! the grace is over is ended by force. A job that traps the signals gets to
 //! release what it holds; one that ignores them is killed after the grace, as
@@ -67,8 +68,8 @@ impl Pane {
         let mut asked = Asked::default();
         #[cfg(unix)]
         if let Some(group) = self.process_group_id {
-            let _ = signal_process_group(group, SIGTERM);
-            let _ = signal_process_group(group, SIGHUP);
+            let _ = signal_group(self, group, SIGTERM);
+            let _ = signal_group(self, group, SIGHUP);
             asked.group = Some(group);
         }
         #[cfg(target_os = "macos")]
@@ -211,7 +212,7 @@ fn signal_for_termination(pane: &mut Pane, detached: bool) -> Result<bool, PaneE
 
     #[cfg(unix)]
     if let Some(process_group_id) = pane.process_group_id {
-        if let Err(error) = signal_process_group(process_group_id, SIGKILL) {
+        if let Err(error) = signal_group(pane, process_group_id, SIGKILL) {
             // macOS answers EPERM when a member of the group cannot take the
             // signal: here one already killed with the tree above, whose exit
             // waits on the pane's blocked write. A caller that does not wait
@@ -251,13 +252,34 @@ fn is_permission_denied(error: &PaneError) -> bool {
 #[cfg(unix)]
 const SIGHUP: i32 = 1;
 #[cfg(unix)]
-pub(super) const SIGKILL: i32 = 9;
+const SIGKILL: i32 = 9;
 #[cfg(unix)]
 const SIGTERM: i32 = 15;
 
-/// Signals the pane's process group with `signal`.
+/// Signals the pane's process group with `signal`. On macOS it goes through the pane's
+/// tree and its bound, which sends it to the group whole while the pane's program runs
+/// and leads it, and else to each member of the group the bound lets through: the
+/// number of a program that has gone may be another process's now, which leads a group of
+/// its own. Elsewhere there is no table of processes to look at, and the group is
+/// signalled whole.
 #[cfg(unix)]
-pub(super) fn signal_process_group(process_group_id: i32, signal: i32) -> Result<(), PaneError> {
+fn signal_group(pane: &Pane, group: i32, signal: i32) -> Result<(), PaneError> {
+    #[cfg(target_os = "macos")]
+    {
+        pane.process_tree
+            .signal_group(group, signal)
+            .map_err(PaneError::Io)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = pane;
+        signal_process_group(group, signal)
+    }
+}
+
+/// Signals the pane's process group with `signal`, whole.
+#[cfg(all(unix, not(target_os = "macos")))]
+fn signal_process_group(process_group_id: i32, signal: i32) -> Result<(), PaneError> {
     unsafe extern "C" {
         fn kill(pid: i32, signal: i32) -> i32;
     }

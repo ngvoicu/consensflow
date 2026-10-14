@@ -207,7 +207,7 @@ mod tests {
 
     use crate::daemon::DAEMON_STOP_GRACE;
     use cf_panes::arbiter::EnterTiming;
-    use cf_panes::pty::{process_exists, PaneKey};
+    use cf_panes::pty::{process_exists, PaneKey, Sentinel};
 
     #[test]
     fn node_state_changed_event_is_forwarded_to_the_page_sink() {
@@ -371,6 +371,7 @@ mod tests {
         use std::io::Read;
 
         let _pty_guard = cf_panes::pty::serial_pty_test();
+        let mut outsider = Sentinel::start();
         // Longer than the drain, shorter than a real grace.
         let grace = SHUTDOWN_DRAIN + Duration::from_secs(1);
         let panes = Arc::new(PaneTable::closing_within(grace));
@@ -407,6 +408,7 @@ mod tests {
             started.elapsed()
         );
         assert!(panes.list().expect("pane list after shutdown").is_empty());
+        assert!(outsider.runs(), "a process outside the window");
     }
 
     /// Quitting waits for the drain no longer than installing an update does:

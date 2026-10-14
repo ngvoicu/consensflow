@@ -31,7 +31,9 @@
 //! `pending_agents`: what it does with the agents a turn left running, which no
 //! program of the window's tree is. So is `start_suspended`: a start opens
 //! nothing, and the human's Resume brings back the chief and the windows at
-//! work, the one whose turn the quit cut told so.)
+//! work, the one whose turn the quit cut told so. So is `stranger` (Unix's): the
+//! rig keeps a process that is none of any window's beside them, which every case
+//! that ends a window holds the pane host to leaving running.)
 //!
 //! The cases take turns ([`cf_e2e::serial`]): each starts a daemon and a pane
 //! host of its own, with windows in real terminals, and the waits are timed.
@@ -80,6 +82,9 @@ mod stand_in_codex;
 mod stand_ins;
 #[path = "rig/start_suspended.rs"]
 mod start_suspended;
+#[cfg(unix)]
+#[path = "rig/stranger.rs"]
+mod stranger;
 #[path = "rig/waiting_notes.rs"]
 mod waiting_notes;
 #[path = "rig/window_says_why.rs"]

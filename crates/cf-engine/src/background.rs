@@ -80,13 +80,17 @@
 //! named, whichever way the agent made it outlive the shell (`nohup … &`, `setsid`,
 //! `disown`, a double fork, `Start-Process`): no chain of processes that run leads
 //! from it to a shell the harness started, and it being a job without a parent proves
-//! nothing of whose it is. The window's close does not end it on a Mac either: the pane
-//! host signals only the pane's program, what runs under it by the process that started
-//! each, and what a look saw so, however the tree is selected, and a job that no look
-//! saw under its shell is the window's by its session or its marker alone, which is no
-//! such proof. On Windows the pane's job object holds what a process starts wherever it
-//! goes, and the close ends it, unless a service made it for it: `schtasks`, a WMI
-//! call. What the host ends
+//! nothing of whose it is. The window's close ends it where it can be told to be the
+//! window's, and not otherwise: the pane host signals only the pane's program, what runs
+//! under it by the process that started each, what is in the session the program leads
+//! while it runs, and what a look saw so, however the tree is selected. A job in the
+//! window's session is ended with the window; one that left it (`setsid`, and the shells
+//! of Claude Code and Pi, which lead sessions of their own) with its shell gone, which no
+//! look saw under the shell, is left running, and so is one that only the marker in its
+//! environment says is the window's. Which of a harness's shells are in the window's
+//! session is its own, and the live step shows it. On Windows the pane's job object holds
+//! what a process starts wherever it goes, and the close ends it, unless a service made
+//! it for it: `schtasks`, a WMI call. What the host ends
 //! is what a shell that still runs started: a command its shell tool is still waiting
 //! for when the turn ends, and one the harness runs in the background for its agent
 //! and keeps the shell of. Whether a harness's own tool call ends what its tool
@@ -101,15 +105,15 @@
 //!
 //! A window whose program ends by itself (it went, or crashed) leaves its commands
 //! without the process that started their shells: none is the turn's by a chain that
-//! runs, so its exit names none, and its close ends what is under the program, or was
-//! seen so, unsaid.
+//! runs, so its exit names none, and its close ends what is the window's, as above,
+//! unsaid.
 //!
 //! A launch's first message is marked when it shows in the window's record, which
 //! the engine sees on a pass (a second apart): work an agent starts before that is
 //! in the window's mark, and is not the turn's. A turn that began and ended between
 //! two passes is marked after what it left began: the host lists none of it, so
-//! none is ended and nothing is said, and the close that follows ends what is under
-//! the program unsaid.
+//! none is ended and nothing is said, and the close that follows ends what is the
+//! window's, as above, unsaid.
 
 use std::rc::Rc;
 use std::time::Duration;

@@ -8,10 +8,15 @@ publish = false
 
 # What the app's own tests need of the pane host that no program does: a pane
 # opened under a name of the table's own with its raw output, the lock that
-# keeps PTY tests one at a time, and whether a process is still there. The app
-# turns it on for its tests alone.
+# keeps PTY tests one at a time, whether a process is still there, and the
+# sentinel that shows a close or an ending reached no process that is none of
+# the window's. The app turns it on for its tests alone.
 [features]
 test-support = []
+
+# The helper's own tests (tests/headless.rs) start a sentinel too.
+[dev-dependencies]
+cf-panes = { path = ".", features = ["test-support"] }
 
 [dependencies]
 cf-bridge.workspace = true

@@ -581,6 +581,7 @@ name = "cf-panes"
 version = "3.0.3"
 dependencies = [
  "cf-bridge",
+ "cf-panes",
  "cf-proto",
  "futures-channel",
  "futures-executor",

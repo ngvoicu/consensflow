@@ -14,6 +14,9 @@ use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 
+#[cfg(target_os = "macos")]
+use cf_panes::pty::Sentinel;
+
 const FRAME_TIMEOUT: Duration = Duration::from_secs(3);
 
 fn serial_headless_test() -> MutexGuard<'static, ()> {
@@ -928,78 +931,6 @@ fn kill_process_group(process_group_id: i32) {
     let _ = unsafe { kill(-process_group_id, SIGKILL) };
 }
 
-/// A process that is none of the window's, as a stranger is: a shell the test starts in
-/// a session of its own (`setsid`), with a job of its own, both asleep. An ending or a
-/// close that is right never reaches them, and the test says so once it is over
-/// ([`Sentinel::runs`]).
-#[cfg(target_os = "macos")]
-struct Sentinel {
-    shell: Child,
-    job: i32,
-}
-
-#[cfg(target_os = "macos")]
-impl Sentinel {
-    fn start() -> Self {
-        use std::os::unix::process::CommandExt;
-
-        unsafe extern "C" {
-            fn setsid() -> i32;
-        }
-
-        let mut command = Command::new("/bin/sh");
-        command
-            .args([
-                "-c",
-                "trap 'kill $job 2>/dev/null; exit 0' TERM; sleep 120 & job=$!; echo $job; wait $job",
-            ])
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null());
-        // SAFETY: setsid is async-signal-safe and touches no memory of ours.
-        unsafe {
-            command.pre_exec(|| {
-                setsid();
-                Ok(())
-            });
-        }
-        let mut shell = command.spawn().expect("start the sentinel");
-        let mut line = String::new();
-        BufReader::new(shell.stdout.take().expect("its output"))
-            .read_line(&mut line)
-            .expect("its job's number");
-        let job = line.trim().parse().expect("a process number");
-        Self { shell, job }
-    }
-
-    /// Whether the shell and its job run still.
-    fn runs(&mut self) -> bool {
-        self.shell
-            .try_wait()
-            .expect("look at the sentinel")
-            .is_none()
-            && process_exists(self.job)
-    }
-}
-
-#[cfg(target_os = "macos")]
-impl Drop for Sentinel {
-    /// The shell is asked to end, which ends its job with it: it is the test's own child,
-    /// which nothing has reaped, so its number is still its own.
-    fn drop(&mut self) {
-        unsafe extern "C" {
-            fn kill(pid: i32, signal: i32) -> i32;
-        }
-
-        const SIGTERM: i32 = 15;
-        if let Ok(shell) = i32::try_from(self.shell.id()) {
-            // SAFETY: kill takes two integers and touches no memory of ours.
-            unsafe { kill(shell, SIGTERM) };
-        }
-        let _ = self.shell.wait();
-    }
-}
-
 /// A window opens at the identity the daemon reserved for it, and only there:
 /// the daemon names every pane it opens, once.
 #[test]
@@ -1892,8 +1823,8 @@ fn a_mark_that_says_the_servers_are_in_the_group_leaves_what_stays_in_it_out_of_
 /// the turn's answer for its result: the host ends what it proves the turn's (a
 /// command's shell and its job), says what it ended, and the window stays open, its
 /// program and what its harness keeps as they were, and with nothing left for its
-/// exit to list. A job detached from a shell that ended runs on, unnamed; the window's
-/// close ends only what is under the window's program, or was seen so by a look.
+/// exit to list. A job detached from a shell that ended runs on, unnamed, until the
+/// window closes with it: it is in the session the window's program leads.
 #[cfg(target_os = "macos")]
 #[test]
 fn an_ending_asked_over_the_wire_ends_what_the_turn_left_and_the_window_stays_open() {
@@ -1965,10 +1896,14 @@ fn an_ending_asked_over_the_wire_ends_what_the_turn_left_and_the_window_stays_op
         exit.get("background").is_none(),
         "the close has nothing left to list: {exit}"
     );
-    // The detached job is the window's by its session. Whether the close ends it depends
-    // on whether a look happened to catch it under the shell that started it, a few
-    // milliseconds: no look need have, and the close ends only what is under the window's
-    // program or was seen so. It ends by itself in half a minute either way.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while process_exists(detached) && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(10));
+    }
+    assert!(
+        !process_exists(detached),
+        "the window's close ended the job that was the window's"
+    );
     assert!(outsider.runs(), "nor a close's");
     helper.close_input_and_wait();
     let _ = std::fs::remove_file(&job);
@@ -2018,6 +1953,7 @@ fn codex_programs() -> std::path::PathBuf {
 #[test]
 fn a_mark_that_names_the_harness_leaves_its_programs_and_what_they_run_out_of_what_the_turn_left() {
     let _pty_guard = serial_headless_test();
+    let mut outsider = Sentinel::start();
     let bins = codex_programs();
     for named in [true, false] {
         let mut helper = Headless::spawn();
@@ -2073,6 +2009,7 @@ fn a_mark_that_names_the_harness_leaves_its_programs_and_what_they_run_out_of_wh
             json!({"ok":true})
         );
         helper.close_input_and_wait();
+        assert!(outsider.runs(), "a process outside the window");
     }
     let _ = std::fs::remove_dir_all(&bins);
 }
