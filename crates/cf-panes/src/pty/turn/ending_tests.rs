@@ -6,6 +6,7 @@
 //! cannot tell the turn's are never touched, and not named. The tree is looked at on
 //! macOS and on Windows; elsewhere a pane has none.
 
+mod job;
 #[cfg(target_os = "macos")]
 mod programs;
 
@@ -406,6 +407,8 @@ mod windows {
 
     use cf_proto::panes::{Ending, Servers};
 
+    use super::job::on_its_own;
+    use crate::background::Member;
     use crate::pty::conpty_test::{open, powershell, read_until, system};
     use crate::pty::{serial_pty_test, PaneKey, PaneTable};
 
@@ -496,16 +499,12 @@ mod windows {
         table.kill(&key).expect("close the pane");
     }
 
-    /// What the pane's job holds now, each process by its command line in lower case.
-    fn held(table: &PaneTable, key: &PaneKey) -> Vec<String> {
+    /// What the pane's job holds now: the window's own program, and what it started
+    /// that runs.
+    fn held(table: &PaneTable, key: &PaneKey) -> Vec<Member> {
         let panes = table.lock_panes().expect("the panes");
         let pane = panes.get(key).expect("the pane");
-        pane.tree()
-            .members()
-            .expect("what the job holds")
-            .into_iter()
-            .map(|member| member.command.to_lowercase())
-            .collect()
+        pane.tree().members().expect("what the job holds")
     }
 
     #[test]
@@ -536,13 +535,16 @@ mod windows {
 
         // The job object holds what a process starts wherever it goes: the ping is in
         // the job once the shell that started it has gone, which is when no process of
-        // the job has the shell's `-Command` among its arguments.
-        let deadline = Instant::now() + Duration::from_secs(60);
+        // the job started it. Not when no process has the shell's `-Command` among its
+        // arguments: the window's own program has, as long as it runs, and the wait
+        // never ended (the PTY tests' watchdog ended the run, 2026-10-14). The ping is
+        // told by `-n 1004`, which no other command line holds as it is written here.
+        // The wait is shorter than the watchdog, which would else end the run before
+        // this said what the job held.
+        let deadline = Instant::now() + Duration::from_secs(30);
         loop {
             let found = held(&table, &key);
-            let ping_runs = found.iter().any(|command| command.contains("-n 1004"));
-            let shell_runs = found.iter().any(|command| command.contains("-command"));
-            if ping_runs && !shell_runs {
+            if on_its_own(&found, "-n 1004") {
                 break;
             }
             assert!(
@@ -558,12 +560,7 @@ mod windows {
         assert_eq!(listed(&table, &key), Vec::new());
         let ending = table.end_background(&key).expect("end it");
         assert_eq!(ending, Ending::default());
-        assert!(
-            held(&table, &key)
-                .iter()
-                .any(|command| command.contains("-n 1004")),
-            "it runs on"
-        );
+        assert!(on_its_own(&held(&table, &key), "-n 1004"), "it runs on");
         // The pane's job is the window's: its close ends it with the rest.
         table.kill(&key).expect("close the pane");
     }

@@ -20,7 +20,10 @@
 //! group the host does not know, may be a server's child that outlived the server. A
 //! shell that has lost its parent, or that a late server started, is not proved the
 //! harness's own. The host leaves them all running, does not end them and does not
-//! name them (the window's close ends them with everything else the window started).
+//! name them. The window's close ends them where the tree finds them the window's: all
+//! of them on Windows, where the job holds them; on the Mac those in the session the
+//! window's program leads, but not a command left by a shell that leads a session of its
+//! own (Pi's), which runs on after the close too (the engine's `background` says so).
 //! What is the harness's by where it is, by its program or by having been seen the
 //! harness's ([`super::harness`]), is never the turn's either, whatever shell it seems
 //! to descend from.
