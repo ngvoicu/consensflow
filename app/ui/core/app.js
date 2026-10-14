@@ -3,6 +3,7 @@ import { initializeUpdates } from '../updates.js'
 import { BoardView, TaskDrawer } from './board.js'
 import { NewProjectDialog, StaffDialog, SwitchChiefDialog } from './dialogs.js'
 import { Layout } from './layout.js'
+import { ProjectMenu } from './project-menu.js'
 import { TerminalsView } from './terminals.js'
 
 /**
@@ -396,6 +397,7 @@ async function refresh() {
       )
       render()
       staff.render()
+      projectMenu.follow()
       await rereadTask()
     } catch (cause) {
       report(cause)
@@ -528,6 +530,12 @@ function renderProjects() {
     select.setAttribute('aria-current', String(project.id === shown))
     // A closed project says so by its buttons (Delete, Resume), not by a pill.
     select.append(element('span', 'project-name', project.name))
+    // The line the human wrote under the name: cut where it is long, whole on hover.
+    if (project.description) {
+      const line = element('span', 'project-description', project.description)
+      line.title = project.description
+      select.append(line)
+    }
     item.append(select)
     const open = project.state === 'open'
     const tools = element('div', 'project-tools')
@@ -552,6 +560,26 @@ function renderProjects() {
   if (items.length === 0) items.push(element('li', 'projects-empty', 'No projects yet.'))
   redraw(projectList, items)
 }
+
+// A right-click on a project (or the context-menu key, or Shift+F10, on the one the
+// keyboard is on) opens its menu: rename it, or write a line under its name. An open
+// menu follows each refresh; with its project gone and no other in the list, the
+// keyboard goes to New project.
+const projectMenu = new ProjectMenu(
+  {
+    list: projectList,
+    menu: $('#project-menu'),
+    rename: $('#rename-dialog'),
+    describe: $('#describe-dialog'),
+    fallback: $('#new-project'),
+  },
+  {
+    project: (id) => state.projects.find((project) => project.id === id),
+    daemon,
+    act,
+    note,
+  },
+)
 
 // The notes are in For you, at the top of the board: a folded board unfolds for them.
 inboxButton.addEventListener('click', () => {

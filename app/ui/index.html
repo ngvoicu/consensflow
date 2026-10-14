@@ -57,6 +57,38 @@
     </main>
   </div>
 
+  <ul class="project-menu" id="project-menu" role="menu" aria-label="Project" hidden>
+    <li role="none"><button type="button" role="menuitem" data-action="rename">Rename…</button></li>
+    <li role="none"><button type="button" role="menuitem" data-action="describe">Description…</button></li>
+  </ul>
+  <dialog id="rename-dialog" class="settings" aria-labelledby="rename-title">
+    <form class="dialog-form">
+      <h2 id="rename-title">Rename project</h2>
+      <p class="dialog-help">The name shows in the list and over the board. The project's folder stays where it is, and so does everything in it.</p>
+      <label>Name
+        <input name="name" required maxlength="100" autocomplete="off" spellcheck="false">
+      </label>
+      <p class="dialog-refusal" role="alert" hidden></p>
+      <div class="dialog-actions">
+        <button class="quiet-button" type="button" value="cancel">Cancel</button>
+        <button class="primary-button" type="submit">Rename</button>
+      </div>
+    </form>
+  </dialog>
+  <dialog id="describe-dialog" class="settings" aria-labelledby="describe-title">
+    <form class="dialog-form">
+      <h2 id="describe-title">Project description</h2>
+      <p class="dialog-help">One line under the project's name in the list, for you alone: no agent is told it. Leave it empty to take it away.</p>
+      <label>Description
+        <input name="description" maxlength="200" autocomplete="off">
+      </label>
+      <p class="dialog-refusal" role="alert" hidden></p>
+      <div class="dialog-actions">
+        <button class="quiet-button" type="button" value="cancel">Cancel</button>
+        <button class="primary-button" type="submit">Save</button>
+      </div>
+    </form>
+  </dialog>
 
   <dialog id="delete-dialog" class="settings" aria-labelledby="delete-title">
     <form class="dialog-form" method="dialog">

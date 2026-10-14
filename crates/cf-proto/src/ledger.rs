@@ -47,6 +47,10 @@ pub struct ProjectView {
     /// anything, so a project that never did reads as it always did.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub specs: Option<SpecsView>,
+    /// The line the human wrote under the project's name, for them alone: said
+    /// only when there is one, so a project that has none reads as it always did.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
 }
 
 impl ProjectView {

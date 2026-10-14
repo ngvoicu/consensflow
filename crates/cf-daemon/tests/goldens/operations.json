@@ -30,7 +30,9 @@
     "message.decline",
     "wakeup.get",
     "wakeup.set",
-    "project.specs"
+    "project.specs",
+    "project.rename",
+    "project.describe"
   ],
   "ping": "{\"ok\":true}"
 }

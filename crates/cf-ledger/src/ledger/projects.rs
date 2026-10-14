@@ -38,6 +38,22 @@ impl Ledger {
         projects::set_gate(&mut self.store, id, gate)
     }
 
+    /// Gives a project another name, with the rules a name has when the project
+    /// is opened. The folder it is in stays.
+    pub fn rename_project(&mut self, id: i64, name: &str) -> Result<ProjectView, LedgerError> {
+        projects::rename_project(&mut self.store, id, name)
+    }
+
+    /// Writes the line the human says of a project under its name (one line of
+    /// plain text, at most 200 characters), or takes it away: none, or blank text.
+    pub fn describe_project(
+        &mut self,
+        id: i64,
+        description: Option<&str>,
+    ) -> Result<ProjectView, LedgerError> {
+        projects::describe_project(&mut self.store, id, description)
+    }
+
     /// What the project says of specs: whether they are on, the folder and the
     /// Specmint variant, all three at once. It applies at the chief's next launch.
     pub fn set_specs(&mut self, id: i64, change: &SpecsChange) -> Result<ProjectView, LedgerError> {

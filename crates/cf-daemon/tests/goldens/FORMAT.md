@@ -791,7 +791,9 @@ The handle line is the first line the daemon prints for the app: JSON, key order
     "message.decline",
     "wakeup.get",
     "wakeup.set",
-    "project.specs"
+    "project.specs",
+    "project.rename",
+    "project.describe"
   ],
   "ping": "{\"ok\":true}"
 }

@@ -45,12 +45,16 @@ pub enum PageOperation {
     /// What a project says of specs: whether they are on, the folder and the
     /// Specmint variant its chief plans with.
     ProjectSpecs,
+    /// The name the human gives a project in place of the one it was opened with.
+    ProjectRename,
+    /// The line the human writes under a project's name, or takes away.
+    ProjectDescribe,
 }
 
 impl PageOperation {
     /// Every operation, in the order Node's page listed them, then those this
     /// build added, in the order it added them.
-    pub const ALL: [PageOperation; 31] = [
+    pub const ALL: [PageOperation; 33] = [
         Self::ProjectsList,
         Self::ProjectOpen,
         Self::ProjectResume,
@@ -82,6 +86,8 @@ impl PageOperation {
         Self::WakeUpGet,
         Self::WakeUpSet,
         Self::ProjectSpecs,
+        Self::ProjectRename,
+        Self::ProjectDescribe,
     ];
 
     /// The name the page, the app and the bridge say it by (`project.open`).
@@ -118,6 +124,8 @@ impl PageOperation {
             Self::WakeUpGet => "wakeup.get",
             Self::WakeUpSet => "wakeup.set",
             Self::ProjectSpecs => "project.specs",
+            Self::ProjectRename => "project.rename",
+            Self::ProjectDescribe => "project.describe",
         }
     }
 
@@ -171,7 +179,7 @@ mod tests {
             .unwrap();
         let mut forwarded: Vec<&str> = list.split('"').skip(1).step_by(2).collect();
         let mut named: Vec<&str> = PageOperation::ALL.map(PageOperation::as_str).to_vec();
-        assert_eq!(named.len(), 31);
+        assert_eq!(named.len(), 33);
         forwarded.sort_unstable();
         named.sort_unstable();
         assert_eq!(named, forwarded);
@@ -226,7 +234,13 @@ mod tests {
             "message.approve",
             "message.decline",
         ];
-        const ADDED: [&str; 3] = ["wakeup.get", "wakeup.set", "project.specs"];
+        const ADDED: [&str; 5] = [
+            "wakeup.get",
+            "wakeup.set",
+            "project.specs",
+            "project.rename",
+            "project.describe",
+        ];
         let listed: Vec<&str> = PageOperation::ALL.map(PageOperation::as_str).to_vec();
         assert_eq!(listed[..RECORDED.len()], RECORDED);
         assert_eq!(listed[RECORDED.len()..], ADDED);
