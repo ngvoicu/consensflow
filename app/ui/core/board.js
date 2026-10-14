@@ -349,8 +349,6 @@ export function laneStatus(lane, board, now) {
   }
   const state = activity?.state ?? 'closed'
   if (state === 'waiting' && activity.reason) return [state, `Waiting: ${activity.reason}`]
-  // A turn that ended with work it started still running: the window works on, and says what for.
-  if (state === 'working' && activity.reason) return [state, `Working — ${activity.reason}`]
   if (resting(participant, activity)) {
     const note = sessionsNote(lane, board)
     return note === null ? null : [state, note]

@@ -101,6 +101,21 @@ pub fn delivered_result(inbox: &[Value]) -> Option<String> {
         .map(|message| text(&message["body"]))
 }
 
+/// The notes of a chief's `inbox` that say T-`task`'s turn left work: what the daemon
+/// tells whoever gave a task, beside its result, when its worker's turn left background
+/// work or agents running (what was ended, what could not be, and that agents were left),
+/// oldest first. None where the turn left nothing.
+pub fn notes_of_work(inbox: &[Value], task: i64) -> Vec<String> {
+    let opening = format!("T-{task}'s turn left background ");
+    inbox
+        .iter()
+        .filter(|message| message["kind"] == "note")
+        .filter_map(|message| message["body"].as_str())
+        .filter(|body| body.starts_with(&opening))
+        .map(str::to_owned)
+        .collect()
+}
+
 /// The first answer given in `thread`, to whichever question.
 pub fn first_answer(thread: &Value) -> Option<Value> {
     messages_of(thread, "answer").next().cloned()

@@ -6,8 +6,8 @@ use serde_json::json;
 
 use super::*;
 
-const HELD: &str = "background work running (2 processes): msedge.exe; devin.exe";
 const NAME: &str = "ZEEWIN";
+const NOTE: &str = "T-1's turn left background work running. Ended: devin.exe; node.exe.";
 
 fn at(seconds: u64) -> Duration {
     Duration::from_secs(seconds)
@@ -37,7 +37,8 @@ fn tree(processes: &[(u64, &str)]) -> Read {
     })))
 }
 
-/// A worker that finished with nothing held back, the first look at 3 s and the last at 4.
+/// A worker that finished and told the chief nothing of work, the first look at 3 s and
+/// the last at 4.
 fn good() -> Seen {
     let mut seen = Seen::default();
     seen.look(at(3), "working", &lane("working", None), Some(tree(&[])));
@@ -47,9 +48,9 @@ fn good() -> Seen {
 }
 
 #[test]
-fn a_task_done_with_its_result_holding_the_output_and_nothing_held_passes() {
+fn a_task_done_with_its_result_holding_the_output_and_nothing_said_of_work_passes() {
     assert_eq!(judge(&good(), NAME), Ok(()));
-    // The board may say other things of a window; only a hold is wrong.
+    // The board may say other things of a window.
     let mut seen = good();
     seen.look(
         at(5),
@@ -79,88 +80,34 @@ fn the_output_may_be_in_any_case_and_between_marks_and_on_a_line_of_words() {
 }
 
 #[test]
-fn a_window_the_board_said_was_held_fails_with_its_words_how_long_and_each_process_listed() {
+fn a_worker_whose_chief_was_told_its_turn_left_work_fails_and_says_what_it_was_told() {
+    // A command that ended with its turn left nothing: what the daemon says it ended is
+    // a process it took for the turn's work, which may be the harness's own.
+    let mut seen = good();
+    seen.notes = vec![NOTE.to_owned()];
+    let problems = judge(&seen, NAME).unwrap_err();
+    assert_eq!(problems.len(), 1, "{problems:#?}");
+    assert!(problems[0].contains("the chief was told the worker's turn left work"));
+    assert!(problems[0].ends_with(NOTE), "{}", problems[0]);
+}
+
+#[test]
+fn every_way_the_task_fell_short_is_said_and_the_result_without_the_output_is_quoted() {
     let mut seen = Seen::default();
-    seen.look(at(3), "working", &lane("working", None), Some(tree(&[])));
-    for (second, other) in [(14, "devin.exe"), (15, "devin.exe"), (16, "node.exe")] {
-        seen.look(
-            at(second),
-            "working",
-            &lane("working", Some(HELD)),
-            Some(tree(&[(4101, "msedge.exe --headless"), (4102, other)])),
-        );
-    }
-    seen.look(at(17), "working", &lane("working", Some(HELD)), None);
-    seen.look(at(18), "done", &lane("idle", None), Some(tree(&[])));
-    seen.result = Some(NAME.to_owned());
+    seen.look(at(10), "working", &lane("working", None), Some(tree(&[])));
+    seen.look(at(300), "working", &lane("working", None), Some(tree(&[])));
     let problems = judge(&seen, NAME).unwrap_err();
     assert_eq!(problems.len(), 2, "{problems:#?}");
-    assert!(
-        problems[0].starts_with(
-            "the board said the worker's window was held for work its turn left, from 14.0 s to 17.0 s of the run, which is 3.0 s: \"background work running (2 processes): msedge.exe; devin.exe\" (said from 14.0 s to 17.0 s)"
-        ),
-        "{}",
-        problems[0]
-    );
-    // It was not held at the last look, which found the task done.
-    assert!(!problems[0].contains("still was"), "{}", problems[0]);
-    assert_eq!(
-        problems[1],
-        "what the pane host listed as the turn's work while the window was held (it counted 2 at the look it counted most):\n    \
-         4101 msedge.exe --headless (listed from 14.0 s to 16.0 s, at 3 looks)\n    \
-         4102 devin.exe (listed from 14.0 s to 15.0 s, at 2 looks)\n    \
-         4102 node.exe (listed from 16.0 s to 16.0 s, at 1 look)"
-    );
-}
-
-#[test]
-fn a_window_still_held_when_the_run_stopped_looking_says_so_and_the_task_that_never_ended() {
-    let mut seen = Seen::default();
-    for second in [10, 11, 300] {
-        seen.look(
-            at(second),
-            "working",
-            &lane("working", Some("background work running (10 processes)")),
-            Some(tree(&[(7, "powershell.exe -NoProfile")])),
-        );
-    }
-    let problems = judge(&seen, NAME).unwrap_err();
-    assert_eq!(problems.len(), 4, "{problems:#?}");
-    // The hold is the first of what was wrong, then the processes the host listed.
-    assert!(
-        problems[0].contains(
-            "from 10.0 s to 300.0 s of the run, which is 290.0 s, and it still was at the last look"
-        ),
-        "{}",
-        problems[0]
-    );
-    assert!(problems[0].contains("\"background work running (10 processes)\""));
-    assert!(problems[1]
-        .contains("7 powershell.exe -NoProfile (listed from 10.0 s to 300.0 s, at 3 looks)"));
     // The task took as long as it was watched, from the first look to the last.
-    assert_eq!(problems[2], "T-1 is working, not done after 290.0 s");
-    assert_eq!(problems[3], "the chief was given no result");
-}
+    assert_eq!(problems[0], "T-1 is working, not done after 290.0 s");
+    assert_eq!(problems[1], "the chief was given no result");
 
-#[test]
-fn a_hold_the_host_listed_no_process_for_says_so_and_a_result_without_the_output_is_quoted() {
-    let mut seen = Seen::default();
-    seen.look(
-        at(5),
-        "done",
-        &lane("working", Some("background agents running")),
-        Some(tree(&[])),
-    );
+    seen.state = "done".to_owned();
     seen.result = Some("I could not run it".to_owned());
     let problems = judge(&seen, NAME).unwrap_err();
-    assert_eq!(problems.len(), 3, "{problems:#?}");
     assert_eq!(
-        problems[1],
-        "the pane host listed no process of the window's tree at the looks the board said so"
-    );
-    assert_eq!(
-        problems[2],
-        "the result does not hold what the command printed (ZEEWIN): I could not run it"
+        problems,
+        ["the result does not hold what the command printed (ZEEWIN): I could not run it"]
     );
 }
 
@@ -177,35 +124,32 @@ fn a_task_is_watched_from_the_first_look_to_the_last_and_took_as_long() {
 }
 
 #[test]
-fn a_look_notes_what_the_board_says_of_the_window_and_what_the_host_listed() {
+fn a_look_notes_what_the_host_listed_and_why_it_could_not_be_read() {
     let mut seen = Seen::default();
     // A lane the board has none of yet says nothing of its window.
     seen.look(at(1), "queued", &Value::Null, None);
     assert_eq!((seen.state.as_str(), seen.until), ("queued", at(1)));
-    assert!(seen.reasons.said().is_empty() && seen.end.is_none());
+    assert!(seen.end.is_none());
     seen.look(
         at(2),
         "working",
-        &lane("working", Some(HELD)),
+        &lane("working", None),
         Some(Err("(the host said: no such pane)".to_owned())),
     );
     assert_eq!(
         seen.unlisted.as_deref(),
         Some("(the host said: no such pane)")
     );
-    assert_eq!(seen.reasons.said().len(), 1);
-    assert!(seen.held.is_empty(), "nothing was listed to be held");
+    assert!(seen.end.is_none(), "nothing was listed");
     seen.look(
         at(3),
         "working",
-        &lane("working", Some(HELD)),
+        &lane("working", None),
         Some(tree(&[(9, "x")])),
     );
-    // The window is said held where the board says so, and not by its state.
-    assert_eq!(seen.held.len(), 1);
-    assert_eq!(seen.held[0].window, "held");
-    assert!(seen.held[0].resting);
-    assert_eq!(seen.held[0].tree.processes[0].pid, 9);
+    let end = seen.end.as_ref().unwrap();
+    assert_eq!((end.window.as_str(), end.resting), ("working", false));
+    assert_eq!(end.tree.processes[0].pid, 9);
 }
 
 #[test]
@@ -237,53 +181,24 @@ fn the_turns_end_is_the_first_look_that_found_the_window_at_rest_and_before_one_
         (end.at, end.resting, end.window.as_str()),
         (at(3), true, "idle")
     );
-    // What the window is found doing afterwards (it works again, or is held, or rests
-    // once more) is not the turn's end.
+    // What the window is found doing afterwards (it works again, or rests once more) is
+    // not the turn's end.
     seen.look(
         at(4),
         "working",
         &lane("working", None),
         Some(tree(&[(4, "d")])),
     );
-    seen.look(
-        at(5),
-        "working",
-        &lane("working", Some(HELD)),
-        Some(tree(&[(5, "e")])),
-    );
     seen.look(at(6), "working", &lane("idle", None), Some(tree(&[])));
     assert_eq!(seen.end.as_ref().map(|end| end.at), Some(at(3)));
-    // A window held at its turn's end is held there, with what the host listed then.
-    let mut held = Seen::default();
-    held.look(
-        at(1),
-        "working",
-        &lane("working", None),
-        Some(tree(&[(1, "a")])),
-    );
-    held.look(
-        at(2),
-        "working",
-        &lane("working", Some(HELD)),
-        Some(tree(&[(2, "b")])),
-    );
-    held.look(
-        at(3),
-        "working",
-        &lane("working", Some(HELD)),
-        Some(tree(&[])),
-    );
-    let end = held.end.as_ref().unwrap();
-    assert_eq!((end.at, end.window.as_str()), (at(2), "held"));
-    assert_eq!(end.tree.processes[0].pid, 2);
 }
 
 #[test]
-fn a_run_is_a_line_that_says_what_held_or_the_first_thing_that_was_wrong() {
+fn a_run_is_a_line_that_says_it_ended_nothing_or_the_first_thing_that_was_wrong() {
     let seen = good();
     assert_eq!(
         summary(&seen, &judge(&seen, NAME)),
-        "T-1 done after 1.0 s with nothing held back; the host listed no process at the turn's end"
+        "T-1 done after 1.0 s with nothing ended; the host listed no process at the turn's end"
     );
     let mut busy = Seen::default();
     busy.look(at(1), "working", &lane("working", None), Some(tree(&[])));
@@ -296,7 +211,7 @@ fn a_run_is_a_line_that_says_what_held_or_the_first_thing_that_was_wrong() {
     busy.result = Some(NAME.to_owned());
     assert_eq!(
         summary(&busy, &judge(&busy, NAME)),
-        "T-1 done after 4.0 s with nothing held back; the host listed 2 processes at the turn's end"
+        "T-1 done after 4.0 s with nothing ended; the host listed 2 processes at the turn's end"
     );
     let mut one = Seen::default();
     one.look(
@@ -309,17 +224,12 @@ fn a_run_is_a_line_that_says_what_held_or_the_first_thing_that_was_wrong() {
     assert!(
         summary(&one, &judge(&one, NAME)).ends_with("the host listed 1 process at the turn's end")
     );
-    // A run that was held says so first, and not that the task did not end.
-    let mut held = Seen::default();
-    held.look(at(9), "working", &lane("working", Some(HELD)), None);
-    let said = summary(&held, &judge(&held, NAME));
-    assert!(
-        said.starts_with(
-            "the board said the worker's window was held for work its turn left, from 9.0 s to 9.0 s of the run, which is 0.0 s, and it still was at the last look: \"background work running (2 processes)"
-        ),
-        "{said}"
-    );
-    // One that was not held says that it did not end.
+    // A run whose chief was told of work says that first.
+    let mut told = good();
+    told.notes = vec![NOTE.to_owned()];
+    assert!(summary(&told, &judge(&told, NAME))
+        .starts_with("the chief was told the worker's turn left work"));
+    // One that did not end says so.
     let mut waiting = Seen::default();
     waiting.look(at(9), "working", &lane("working", None), None);
     assert_eq!(
@@ -338,7 +248,7 @@ fn a_run_is_a_line_that_says_what_held_or_the_first_thing_that_was_wrong() {
     unrested.result = Some(NAME.to_owned());
     assert_eq!(
         summary(&unrested, &judge(&unrested, NAME)),
-        "T-1 done after 2.0 s with nothing held back; the host listed 1 process at its last look"
+        "T-1 done after 2.0 s with nothing ended; the host listed 1 process at its last look"
     );
     // A run that never saw the host has not seen it list a thing.
     let mut unlisted = Seen::default();
@@ -347,7 +257,7 @@ fn a_run_is_a_line_that_says_what_held_or_the_first_thing_that_was_wrong() {
     unlisted.result = Some(NAME.to_owned());
     assert_eq!(
         summary(&unlisted, &judge(&unlisted, NAME)),
-        "T-1 done after 1.0 s with nothing held back; the host listed nothing"
+        "T-1 done after 1.0 s with nothing ended; the host listed nothing"
     );
 }
 
@@ -371,6 +281,20 @@ fn what_the_window_left_when_it_closed_is_said_with_its_processes_or_that_it_has
         at_the_close(&seen),
         "what the pane host said the window left running when it closed (its pane.exit):\n    \
          4101 msedge.exe --headless\n    4102 conhost.exe"
+    );
+}
+
+#[test]
+fn what_the_chief_was_told_of_work_is_its_notes_a_line_to_each_or_that_it_was_told_none() {
+    let mut seen = good();
+    assert_eq!(
+        at_the_chief(&seen),
+        "what the chief was told of work the turn left: nothing"
+    );
+    seen.notes = vec![NOTE.to_owned()];
+    assert_eq!(
+        at_the_chief(&seen),
+        format!("what the chief was told of work the turn left:\n    {NOTE}")
     );
 }
 
@@ -412,16 +336,7 @@ fn the_turns_end_is_said_whether_the_host_listed_nothing_a_tree_or_could_not_be_
         "what the pane host listed as the turn's work at the turn's end (at 5.0 s, the window idle):\n    \
          4101 msedge.exe --headless\n    4102 conhost.exe"
     );
-    // A window found held is held at its turn's end, and a task done before a look found
-    // the window at rest has its last look said as that.
-    let mut held = Seen::default();
-    held.look(
-        at(6),
-        "working",
-        &lane("working", Some(HELD)),
-        Some(tree(&[(1, "msedge.exe")])),
-    );
-    assert!(at_the_turns_end(&held).contains("(at 6.0 s, the window held):\n    1 msedge.exe"));
+    // A task done before a look found the window at rest has its last look said as that.
     let mut unrested = Seen::default();
     unrested.look(at(2), "working", &lane("working", None), Some(tree(&[])));
     assert_eq!(

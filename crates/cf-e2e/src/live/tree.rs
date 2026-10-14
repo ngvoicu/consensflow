@@ -3,7 +3,7 @@
 //! the turn did, each by its number and the command line it was started with. The host
 //! sees the tree whatever the platform, so this is where a check reads whether a command
 //! its member ran is still there, with no `ps` to ask (Windows has none), and what the
-//! daemon holds a worker's result back for.
+//! daemon ends as a worker's result is taken.
 
 use serde_json::{json, Value};
 

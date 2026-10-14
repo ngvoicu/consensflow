@@ -2,8 +2,8 @@
 //! `started`), look (`observe`, `drawn`), and close (`retire`, `close_if_free`,
 //! `close_own`). It owns the record's window part, the generation of each pane,
 //! and the chief's relaunch backoff. What a window owes a stop of its task, and
-//! how it is interrupted, is `stops`; the work its turn left running, which
-//! holds its task's result back, is `background`.
+//! how it is interrupted, is `stops`; the work its turn left running, which is
+//! ended as its task's result is taken, is `background`.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -14,6 +14,7 @@ use cf_harness::seams::Time;
 use cf_ledger::{
     Begun, ConversationView, MessageView, NewNote, ParticipantView, ProjectView, Stop,
 };
+use cf_proto::agents::Harness;
 use cf_proto::panes::Servers;
 use cf_proto::trace::WindowEvent;
 use serde_json::{json, Value};
@@ -115,9 +116,10 @@ pub(crate) struct WindowPart {
     pub(crate) window: Option<Rc<dyn Window>>,
     /// The keys that interrupt a turn in it (its adapter's `interrupt`).
     pub(crate) keys: Option<Interrupt>,
-    /// How its harness keeps its own processes (its adapter's `servers`), which
-    /// the pane host is told where a turn begins.
+    /// How its harness keeps its own processes (its adapter's `servers`), and
+    /// which harness it is, which the pane host is told where a turn begins.
     pub(crate) servers: Servers,
+    pub(crate) harness: String,
     pub(crate) pane: Option<Pane>,
     pub(crate) opening: Option<Opening>,
     pub(crate) launch_id: Option<LaunchId>,
@@ -163,6 +165,7 @@ impl Default for WindowPart {
             window: None,
             keys: None,
             servers: Servers::Unknown,
+            harness: String::new(),
             pane: None,
             opening: None,
             launch_id: None,
@@ -237,14 +240,15 @@ fn assign(env: &mut Vec<(String, String)>, key: &str, value: &str) {
 }
 
 /// What a launch was prepared with: the window, the keys that interrupt it,
-/// how its harness keeps its own processes, how its pane opens, the
-/// conversation it goes on with if there is one, and the stop its task had
-/// asked when the first message was begun, which the new window owes nothing
+/// how its harness keeps its own processes and which harness it is, how its pane
+/// opens, the conversation it goes on with if there is one, and the stop its task
+/// had asked when the first message was begun, which the new window owes nothing
 /// for.
 struct Planned {
     window: Rc<dyn Window>,
     keys: Interrupt,
     servers: Servers,
+    harness: String,
     argv: Vec<String>,
     env: Vec<(String, String)>,
     drop_env: Vec<String>,
@@ -296,8 +300,6 @@ impl Dispatcher {
         if let Some(launch) = launch {
             self.seams.launch_files.forget(&launch);
         }
-        // What its turn left running went with it.
-        self.release_background(record);
     }
 
     /// The window of a record and its pane, as they are now.
@@ -571,6 +573,7 @@ impl Dispatcher {
             part.window = Some(Rc::clone(&planned.window));
             part.keys = Some(planned.keys);
             part.servers = planned.servers;
+            part.harness.clone_from(&planned.harness);
             part.pane = Some(pane.clone());
             part.launch_id = Some(launch_id);
             part.token = Some(token);
@@ -768,6 +771,12 @@ impl Dispatcher {
             window: prepared.window,
             keys: adapter.interrupt(),
             servers: adapter.servers(),
+            // The name the harness's own programs go by (`codex-…`): the roster's kind
+            // is `claude-code` for the harness whose binary is `claude`.
+            harness: Harness::from_kind(harness)
+                .map(Harness::as_str)
+                .unwrap_or_default()
+                .to_owned(),
             argv: prepared.argv,
             env: prepared.env,
             drop_env: prepared.drop_env,

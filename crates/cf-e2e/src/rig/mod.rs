@@ -16,6 +16,10 @@
 //! frames themselves are there to look at: a window's screen as text
 //! ([`Rig::screen`]), what the daemon wrote as it went ([`Rig::events`]) and the
 //! keys it pressed, and when ([`Rig::presses`]).
+//!
+//! On Unix a process that is none of any window's runs beside them (`stranger`), and
+//! a rig that ends with it gone fails: the pane host ends a window's own and nothing of
+//! the machine's.
 
 mod forget;
 mod install;
@@ -25,6 +29,8 @@ mod observe;
 mod project;
 mod report;
 mod route;
+#[cfg(unix)]
+mod stranger;
 mod wait;
 
 use std::path::{Path, PathBuf};
@@ -46,6 +52,8 @@ pub(crate) use observe::events_of;
 
 use forget::Forget;
 use route::Shared;
+#[cfg(unix)]
+use stranger::Stranger;
 
 /// How long the daemon or the pane host has to answer a request of the case's.
 const REQUEST: Duration = Duration::from_secs(10);
@@ -189,6 +197,9 @@ pub struct Rig {
     shared: Arc<Shared>,
     daemon: Daemon,
     host: Spawned,
+    /// A process none of the windows' is, which has to run still when they are ended.
+    #[cfg(unix)]
+    stranger: Stranger,
     /// What the rig takes away of the machine's own Claude folder when it
     /// ends, where its stand-ins write there ([`Config::stand_ins_write_in`]).
     forget: Option<Forget>,
@@ -407,7 +418,8 @@ impl Rig {
     }
 
     /// Ends the rig: both programs' input is ended, both are waited for, and
-    /// every process a window started is checked to be gone. The home goes with
+    /// every process a window started is checked to be gone (and, on Unix, the
+    /// process that is none of any window's to run still). The home goes with
     /// it.
     pub fn close(mut self) -> Result<()> {
         self.shutdown(EXIT)
@@ -447,6 +459,15 @@ impl Rig {
         if daemon.is_none() || host.is_none() {
             return Err(Error::Timeout(format!(
                 "process did not exit{}",
+                self.what_they_said()
+            )));
+        }
+        // What the pane host ended, it ended as the windows' own: a process that is
+        // none of theirs, started beside it, runs on.
+        #[cfg(unix)]
+        if !self.stranger.runs() {
+            return Err(Error::Daemon(format!(
+                "a process that is none of any window's was ended with them{}",
                 self.what_they_said()
             )));
         }

@@ -2,7 +2,12 @@
 //! role goes in first and the follow-up after it; a launch that does not come up
 //! fails the brief the role went ahead of, as a launch always did; and a session
 //! resumed on a task it still holds is not read to answer that task by the word
-//! it gave the role.
+//! it gave the role. Where that meets the ending of what a turn left running (a
+//! worker's answer is its task's result at once, and the host is asked to end what
+//! its turn left with it), the word given the role is no result and the host is
+//! asked to end nothing for it, and the answer that is the result has the host
+//! asked, whichever word came after it. What the host then ends is its own choice,
+//! from the marks it was given; the stand-in host here names what it was told runs.
 
 use std::rc::Rc;
 
@@ -15,6 +20,10 @@ use super::{codex, recorded, replacements, REPLACES};
 
 /// The words the window gives the role when it has it.
 const UNDERSTOOD: &str = "Understood.";
+
+/// A command the window's turn left running, which the stand-in host names as
+/// ended when it is asked to end the window's work.
+const JOB: &str = "python3 lock.py record --run 7";
 
 /// A project whose chief is on Claude and whose one worker is a Codex member,
 /// with the session that did T-1, a task it finished: its window answered, and
@@ -382,4 +391,102 @@ fn a_session_that_had_answered_its_task_before_the_quit_gives_that_answer_as_its
         result.body, "Parser done",
         "the answer it gave the task, which the role's word comes after"
     );
+}
+
+/// What whoever gave T-1 was told that its turn left running, as notes.
+fn told_of_the_work(context: &Context, project: &ProjectView) -> Vec<String> {
+    let chief = context.id(project.id, "chief");
+    context
+        .inbox(chief)
+        .into_iter()
+        .filter(|message| message.kind == "note" && message.body.contains("background work"))
+        .map(|message| message.body)
+        .collect()
+}
+
+#[test]
+fn a_sessions_word_to_its_role_is_no_result_and_asks_the_host_to_end_nothing_and_its_answer_to_the_task_is_the_result_and_asks_it_to_end_what_its_turn_left(
+) {
+    let context = codex();
+    let project = working_session(&context);
+    let session = session_of(&context, &project);
+    quit_with_the_role_rewritten(&context, &session);
+    context.ledger.borrow_mut().suspend_for_restart().unwrap();
+    let after = context.make();
+    after.settle_after_restart().unwrap();
+    after.resume_project(project.id).unwrap();
+    // The host says what the window's turn left running.
+    context.background.run(&session, &[JOB]);
+
+    // The role goes in first, and the window gives it its word: a turn that settled
+    // with a complete answer, which is the role's and none of the task's.
+    after.pass().unwrap();
+    after.pass().unwrap();
+    context.codex.answer(&session, UNDERSTOOD);
+    for _ in 0..3 {
+        after.pass().unwrap();
+    }
+    assert_eq!(
+        context.task(project.id, 1).task.state,
+        "working",
+        "its word to the role is no result"
+    );
+    assert_eq!(
+        context.background.endings_asked(&session),
+        0,
+        "and the host is asked to end nothing for it"
+    );
+    assert_eq!(told_of_the_work(&context, &project), Vec::<String>::new());
+
+    // Its answer to the task is the result at once, and the host is asked to end what
+    // its turn left, which whoever gave the task is told it named.
+    context.codex.answer(&session, "Parser done");
+    for _ in 0..4 {
+        after.pass().unwrap();
+    }
+    assert_eq!(context.task(project.id, 1).task.state, "done");
+    assert_eq!(result_of(&context, &project).body, "Parser done");
+    assert_eq!(context.background.ended(&session), [JOB]);
+    assert_eq!(
+        told_of_the_work(&context, &project),
+        [format!(
+            "T-1's turn left background work running. Ended: {JOB}."
+        )]
+    );
+}
+
+#[test]
+fn the_answer_a_session_gave_its_task_before_its_role_was_said_is_the_result_and_asks_the_host_to_end_what_its_turn_left(
+) {
+    let context = codex();
+    let project = working_session(&context);
+    let session = session_of(&context, &project);
+    // Its turn ended with its answer and a job running, the daemon never saw it, and
+    // the app quit.
+    context.codex.answer(&session, "Parser done");
+    quit_with_the_role_rewritten(&context, &session);
+    context.ledger.borrow_mut().suspend_for_restart().unwrap();
+    let after = context.make();
+    after.settle_after_restart().unwrap();
+    after.resume_project(project.id).unwrap();
+    context.background.run(&session, &[JOB]);
+    after.pass().unwrap();
+    after.pass().unwrap();
+    context.codex.answer(&session, UNDERSTOOD);
+    for _ in 0..3 {
+        after.pass().unwrap();
+    }
+
+    assert_eq!(context.task(project.id, 1).task.state, "done");
+    assert_eq!(
+        result_of(&context, &project).body,
+        "Parser done",
+        "the answer it gave the task, which the role's word comes after"
+    );
+    assert_eq!(
+        context.background.ended(&session),
+        [JOB],
+        "and the host is asked to end what the turn left, as for any result"
+    );
+    assert_eq!(told_of_the_work(&context, &project).len(), 1);
 }

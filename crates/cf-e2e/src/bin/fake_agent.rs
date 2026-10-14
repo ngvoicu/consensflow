@@ -92,6 +92,11 @@ fn main() -> ExitCode {
     if args.first().map(String::as_str) == Some(background::JOB) {
         return background::run(&args[1..]);
     }
+    // The shell of a command a harness detaches, which a session of its own is made for.
+    #[cfg(unix)]
+    if args.first().map(String::as_str) == Some(background::SESSION) {
+        return background::run_in_session(&args[1..]);
+    }
     // Signals are waited for on a thread of their own, so they are blocked in
     // this one and in every thread started after it.
     let signals = signals::block();

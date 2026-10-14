@@ -818,6 +818,31 @@ replace = '''        let _ = &replacements;
             .filter(|item| item.role == Role::Assistant)
             .collect();'''
 
+# Where this meets the ending of what a turn left running (a worker's answer is its task's
+# result at once, and the host is asked to end what its turn left with it): a word given the
+# role is no result and has the host asked nothing, which the plant above breaks too (the test
+# of the meeting, in `role_change/members.rs`, fails with it), and an answer that is the result
+# has the host asked, whichever word came after it, which this plant holds: it is the edit of
+# `background rig: what the turn left running is not asked to end`, run on the tests of the
+# role's launch.
+
+[[plant]]
+name = "codex role: the result taken from the answer that came before the role's word ends nothing of what the turn left"
+meant = "the_answer_a_session_gave_its_task_before_its_role_was_said_is_the_result_and_asks_the_host_to_end_what_its_turn_left"
+runs = ["engine-role-change"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/background.rs"
+find = '''
+            if let Some(ending) = self.seams.background.end(&pane).await {
+                return ending;
+            }'''
+replace = '''
+            let _ = &pane;
+            if let Some(ending) = None::<Ending> {
+                return ending;
+            }'''
+
 [[plant]]
 name = "codex role: what a member answered its task before the role came is dropped with the word it gave the role"
 meant = "the_words_a_window_gives_a_replacement_of_its_role_are_no_answer_to_its_task"

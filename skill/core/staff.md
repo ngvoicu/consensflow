@@ -42,8 +42,9 @@ ConsensFlow's delivery, and acting on it is your role.
 
 This window is for one task: it opened with the task and closes when the task
 leaves your hands. Nothing from an earlier task is here, and nothing from this
-one carries over, so finish with a result that stands on its own. Keep this
-{{role}} role for the whole session.
+one carries over, so finish with a result that stands on its own. Your answer
+ends your turn's work: anything you left running is stopped then, so wait for
+what your result needs. Keep this {{role}} role for the whole session.
 
 <!-- worker: title -->
 worker

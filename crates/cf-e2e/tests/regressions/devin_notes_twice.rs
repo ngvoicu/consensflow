@@ -158,7 +158,9 @@ fn two_notes_that_come_together_after_a_cancel_go_into_a_devin_chief_s_window_on
         .to_owned();
 
     // The chief gives T-1 to the worker, as `cf` does in its window, and the worker
-    // starts a job and ends its turn: it is working still, with a job running.
+    // starts a job its turn goes on working beside: it is working still, with a job
+    // running, and the cancel closes its window in the turn. (A turn that ended with
+    // its answer is the task's result, and ends the job: nothing is left to cancel.)
     let chief = rig.open_frame(&format!("p{}-chief", project.id()), secs(30))?;
     let given = rig.cf_in_window(
         &chief,
@@ -167,16 +169,14 @@ fn two_notes_that_come_together_after_a_cancel_go_into_a_devin_chief_s_window_on
             "add",
             "--tier",
             tier.as_str(),
-            "BACKGROUND 120 started the job",
+            "JOB 120 SLEEP 120 Reply with exactly: WORKER_OK",
         ],
     )?;
     assert_eq!(given.code, Some(0), "{}", given.output());
     rig.wait_for("the worker's job to run", secs(60), || {
         Ok(rig.jobs("job").len() == 1)
     })?;
-    rig.wait_for("the worker's turn to end", secs(60), || {
-        Ok(project.lane("worker")?["activity"]["reason"].is_string())
-    })?;
+    assert_eq!(project.task(1)?["state"], "working");
 
     // The human types to the chief, a turn of a few seconds, and cancels T-1 in its
     // first: the notes of the cancel are the chief's, and it is in a turn.

@@ -42,7 +42,7 @@ use crate::{Error, Result};
 
 #[cfg(unix)]
 pub use pid::group_of;
-pub use pid::{is_alive, signal, Signal};
+pub use pid::{is_alive, signal, started, Signal};
 pub use spawned::{Sink, Spawned};
 
 /// How long a program may run before it is ended. A verb of `cf` answers at

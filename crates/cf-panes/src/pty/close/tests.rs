@@ -19,7 +19,7 @@ mod unix {
     use portable_pty::PtySize;
 
     use crate::headless::reap_all;
-    use crate::pty::{process_exists, serial_pty_test, OpenedPane, PaneTable};
+    use crate::pty::{process_exists, serial_pty_test, OpenedPane, PaneTable, Sentinel};
 
     /// What a test's table gives the programs of a window it closes: long enough
     /// to tell from none, and short enough to wait for.
@@ -75,6 +75,22 @@ mod unix {
         file.exists()
     }
 
+    /// The number a job writes in `file` once it runs, waited for up to ten seconds.
+    #[cfg(target_os = "macos")]
+    fn pid_in(file: &Path) -> i32 {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            if let Some(pid) = fs::read_to_string(file)
+                .ok()
+                .and_then(|text| text.trim().parse().ok())
+            {
+                return pid;
+            }
+            assert!(Instant::now() < deadline, "the job runs");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
     /// Waits until nothing of the process group is left, up to two seconds.
     fn gone(group: i32) -> bool {
         let deadline = Instant::now() + Duration::from_secs(2);
@@ -100,6 +116,7 @@ mod unix {
     fn a_program_that_traps_the_request_to_end_runs_its_handler_and_the_close_does_not_wait_out_the_grace(
     ) {
         let _serial = serial_pty_test();
+        let mut outsider = Sentinel::start();
         let table = PaneTable::closing_within(GRACE * 8);
         let (released, started) = (scratch("released"), scratch("started"));
         let OpenedPane { key, mut reader } = open(
@@ -129,6 +146,7 @@ mod unix {
                 .trim(),
             "released"
         );
+        assert!(outsider.runs(), "a process outside the window");
         let _ = fs::remove_file(&released);
         let _ = fs::remove_file(&started);
     }
@@ -136,6 +154,7 @@ mod unix {
     #[test]
     fn a_program_that_ignores_the_request_to_end_is_killed_once_the_grace_is_over() {
         let _serial = serial_pty_test();
+        let mut outsider = Sentinel::start();
         let table = PaneTable::closing_within(GRACE);
         let OpenedPane { key, mut reader } = open(
             &table,
@@ -158,11 +177,13 @@ mod unix {
             closing.elapsed()
         );
         assert!(gone(group), "what ignored the request is killed");
+        assert!(outsider.runs(), "a process outside the window");
     }
 
     #[test]
     fn closing_a_pane_that_already_ended_asks_nothing_and_waits_for_nothing() {
         let _serial = serial_pty_test();
+        let mut outsider = Sentinel::start();
         let table = PaneTable::closing_within(GRACE * 8);
         let OpenedPane { key, mut reader } = open(&table, "printf done");
         until_shown(&mut reader, "done");
@@ -173,6 +194,7 @@ mod unix {
         table.kill(&key).expect("close the pane");
 
         assert!(closing.elapsed() < GRACE * 4, "{:?}", closing.elapsed());
+        assert!(outsider.runs(), "a process outside the window");
     }
 
     /// A program that ignores the request to end and runs on.
@@ -181,6 +203,7 @@ mod unix {
     #[test]
     fn a_table_that_goes_asks_every_window_to_end_before_it_waits_on_any() {
         let _serial = serial_pty_test();
+        let mut outsider = Sentinel::start();
         let table = PaneTable::closing_within(GRACE);
         let mut readers = Vec::new();
         for _ in 0..2 {
@@ -197,11 +220,13 @@ mod unix {
             "one grace for both, not one after the other: {:?}",
             closing.elapsed()
         );
+        assert!(outsider.runs(), "a process outside the window");
     }
 
     #[test]
     fn every_window_of_a_table_a_shutdown_closes_gets_its_grace_at_once() {
         let _serial = serial_pty_test();
+        let mut outsider = Sentinel::start();
         let table = PaneTable::closing_within(GRACE);
         let mut readers = Vec::new();
         for _ in 0..2 {
@@ -219,6 +244,7 @@ mod unix {
             closing.elapsed()
         );
         assert!(table.list().expect("list the panes").is_empty());
+        assert!(outsider.runs(), "a process outside the window");
     }
 
     /// A job the agent left in a session of its own is in no process group of the
@@ -227,16 +253,17 @@ mod unix {
     #[test]
     fn a_job_in_a_session_of_its_own_is_asked_to_end_with_the_rest_of_the_tree() {
         let _serial = serial_pty_test();
+        let mut outsider = Sentinel::start();
         let table = PaneTable::closing_within(GRACE * 8);
         let (started, released) = (scratch("started"), scratch("released"));
         let job = format!(
-            "import signal,sys,time\n\
+            "import os,signal,sys,time\n\
          def release(*_):\n\
          \x20   open({released:?}, 'w').write('RELEASED')\n\
          \x20   sys.exit(0)\n\
          signal.signal(signal.SIGTERM, release)\n\
          signal.signal(signal.SIGHUP, release)\n\
-         open({started:?}, 'w').write('up')\n\
+         open({started:?}, 'w').write(str(os.getpid()))\n\
          time.sleep(60)\n"
         );
         let parent = format!(
@@ -260,10 +287,9 @@ mod unix {
             )
             .expect("open the job's parent");
         until_shown(&mut reader, "ready");
-        assert!(
-            until_there(&started, Duration::from_secs(10)),
-            "the job runs"
-        );
+        // The group's TERM ends the program first, and the job, in a session of its own, is
+        // then one the test started with no parent: the guard of the real signals is told.
+        crate::process_tree::guard::register(pid_in(&started));
 
         let closing = Instant::now();
         table.kill(&key).expect("close the pane");
@@ -275,6 +301,7 @@ mod unix {
             "RELEASED"
         );
         assert!(closing.elapsed() < GRACE * 4, "{:?}", closing.elapsed());
+        assert!(outsider.runs(), "a process outside the window");
         let _ = fs::remove_file(&started);
         let _ = fs::remove_file(&released);
     }

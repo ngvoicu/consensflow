@@ -115,22 +115,23 @@ pub fn drive(chief: Harness, mut members: Members, log: &Log) -> Result<Account>
         return Ok(case);
     }
 
-    // The chief gives the member a task whose window leaves a job running, and the
-    // human cancels it: the notes are the chief's, and it is in a turn.
-    let number = members.give(STAND_IN_WORKER, "BACKGROUND 300 started the job")?;
+    // The chief gives the member a task whose window starts a job its turn goes on
+    // working beside, and the human cancels it in the turn: the notes are the chief's,
+    // and it is in a turn. (A turn that ended with its answer is its task's result and
+    // ends the job with it: nothing would be left to cancel.)
+    let number = members.give(
+        STAND_IN_WORKER,
+        "JOB 300 SLEEP 300 Reply with exactly: WORKER_OK",
+    )?;
     let leaves = find(
         log,
-        "the member's window to leave its job",
+        "the member's window to start its job",
         JOB,
         LOOK,
-        || {
-            Ok(members.lane(STAND_IN_WORKER)?["activity"]["reason"]
-                .is_string()
-                .then_some(()))
-        },
+        || Ok((members.rig().jobs("job").len() == 1).then_some(())),
     )?;
     case.check(
-        "the member's window leaves a job running",
+        "the member's window has a job running",
         leaves.is_some(),
         format!("T-{number}: {}", members.lane(STAND_IN_WORKER)?["activity"]),
     );

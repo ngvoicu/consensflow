@@ -168,20 +168,25 @@ impl Dispatcher {
         Ok(())
     }
 
-    /// A worker's answer to its task's latest message finishes the task.
+    /// A worker's answer to its task's latest message finishes the task: the task
+    /// as it is once its result is recorded, where it was. Whatever the turn left
+    /// running is no part of it ([`Dispatcher::end_turn_work`]). An answer to the
+    /// note that says the worker its role is none of the task's
+    /// ([`answers_to_the_task`]): where nothing else answers, there is no result,
+    /// and nothing the turn left running is ended.
     pub(crate) fn collect(
         &self,
         project: &ProjectView,
         participant: &ParticipantView,
         observed: &Observed,
-    ) -> Result<(), EngineError> {
+    ) -> Result<Option<TaskView>, EngineError> {
         let task = self
             .seams
             .ledger
             .borrow()
             .active_task(participant.id, false)?;
         let Some(thread) = task.filter(|thread| thread.task.state == "working") else {
-            return Ok(());
+            return Ok(None);
         };
         // The last message pasted into the window (one that only rode in a
         // paste, or that it read elsewhere, has no marker of its own).
@@ -191,19 +196,20 @@ impl Dispatcher {
             .borrow()
             .last_pasted(participant.id, thread.task.id)?;
         let Some(latest) = latest else {
-            return Ok(());
+            return Ok(None);
         };
         let items = observed.items();
         let marker = marker_of(latest.id);
         let Some(start) = items.iter().position(|item| item.text.contains(&marker)) else {
-            return Ok(());
+            return Ok(None);
         };
         if observed.failed {
             let because = format!("@{}'s harness reported a failure", participant.handle);
-            return self.fail_task(project, &thread.task, &because);
+            self.fail_task(project, &thread.task, &because)?;
+            return Ok(None);
         }
         if !observed.settled {
-            return Ok(());
+            return Ok(None);
         }
         // The turn is over once its last message is complete (one that
         // ended in a tool call never is). The result is everything the
@@ -213,7 +219,7 @@ impl Dispatcher {
         let replacements = self.seams.ledger.borrow().role_notes_to(participant.id)?;
         let written = answers_to_the_task(&items[start + 1..], &replacements);
         if !written.last().is_some_and(|item| item.complete) {
-            return Ok(());
+            return Ok(None);
         }
         let words: Vec<&str> = written
             .iter()
@@ -226,12 +232,13 @@ impl Dispatcher {
         } else {
             words.join("\n\n")
         };
-        self.seams
-            .ledger
-            .borrow_mut()
-            .record_result(project.id, thread.task.number, &body)?;
+        let moved =
+            self.seams
+                .ledger
+                .borrow_mut()
+                .record_result(project.id, thread.task.number, &body)?;
         self.changed();
-        Ok(())
+        Ok(Some(moved.task))
     }
 
     /// What a window was to receive goes back to its queue with its attempt:

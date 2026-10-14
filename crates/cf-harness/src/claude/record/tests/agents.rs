@@ -9,9 +9,9 @@
 //! the turn: the turn stayed in flight until the last agent finished. Here that
 //! record ends the turn, as a `stop_hook_summary` does (a ConsensFlow window
 //! writes one before every `turn_duration`), and the reading says the agents are
-//! pending (`agents_pending`), for the engine to hold a task's result by. What
-//! Node refused for being no count at all (a string, a fraction, a number
-//! below 0) it still refuses.
+//! pending (`agents_pending`), for the engine to say in its note to the task's
+//! requester (it takes the result all the same). What Node refused for being no
+//! count at all (a string, a fraction, a number below 0) it still refuses.
 
 use super::*;
 

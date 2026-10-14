@@ -202,6 +202,8 @@ fn gives_every_member_one_shared_text_with_its_role_s_own_parts() {
         "Run each of these in your shell (your Bash or terminal tool).",
         "Do not hand out tasks, launch other agents or type into other windows, and\nnever read another agent's session files: the board is your only channel.",
         "This window is for one task: it opened with the task and closes when the task\nleaves your hands.",
+        // What the owner decided on 2026-10-13: its answer ends the work its turn left.
+        "Your answer\nends your turn's work: anything you left running is stopped then, so wait for\nwhat your result needs.",
     ];
     for (role, title) in [
         ("worker", "worker"),
@@ -216,7 +218,7 @@ fn gives_every_member_one_shared_text_with_its_role_s_own_parts() {
         }
         assert!(found(&format!(r"\n# ConsensFlow {title}\n"), &text));
         assert!(found(
-            &format!(r"Keep this\n{role} role for the whole session\.\n$"),
+            &format!(r"what your result needs\. Keep this {role} role for the whole session\.\n$"),
             &text
         ));
     }

@@ -24,6 +24,8 @@
 
 // The cases are in `tests/regressions/`: cargo looks for the modules of a test's
 // root file beside it, where each would be a suite of its own.
+#[path = "regressions/a_command_that_never_exits_held_a_workers_result.rs"]
+mod a_command_that_never_exits_held_a_workers_result;
 // The stand-in Codex is a script, so Unix's: Windows has no window of it to resume.
 #[cfg(unix)]
 #[path = "regressions/codex_role_on_resume.rs"]

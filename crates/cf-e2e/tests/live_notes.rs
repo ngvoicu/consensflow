@@ -18,8 +18,9 @@
 //! A real harness is the chief of a project on the native daemon, as it ships (its
 //! arrival window is its minute), and its one member is the stand-in (no model). The
 //! human asks the chief to run a command that takes 100 s, and while it is in it the
-//! chief gives the member a task whose window leaves a job running and the human
-//! cancels it: ConsensFlow has two notes for the chief, and cannot give them yet. The
+//! chief gives the member a task whose window has a job running, its turn at work
+//! beside it, and the human cancels it: ConsensFlow has two notes for the chief, and
+//! cannot give them yet. The
 //! command ends by itself, the chief is at rest, and the notes go in one after the
 //! other. The folder tells the chief to run a command on each note and to wait for it,
 //! and that command takes 80 s, more than the arrival window: a note that waits for

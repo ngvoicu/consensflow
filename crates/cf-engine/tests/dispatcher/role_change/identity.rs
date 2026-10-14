@@ -15,11 +15,10 @@ fn a_note_about_the_task_that_quotes_the_opening_of_a_replacement_does_not_suppr
     context.pass().unwrap();
     context.pass().unwrap();
     assert_eq!(context.task(project.id, 1).task.state, "working");
-    // Its turn ends with work it started still running: the window is at rest,
-    // and the task is not done.
-    context
-        .adapter
-        .answer_leaving_agents("zeus", "Reading the grammar first.");
+    // Its turn settles with nothing written: the window is at rest, and the task
+    // is open (a turn that answered would be its result at once, and no note
+    // would find the task working).
+    context.adapter.with("zeus", |agent| agent.settled = true);
     context.pass().unwrap();
     assert_eq!(context.task(project.id, 1).task.state, "working");
 
@@ -48,7 +47,7 @@ fn a_note_about_the_task_that_quotes_the_opening_of_a_replacement_does_not_suppr
         "the worker was given the quoted words"
     );
 
-    // Its answer after them is its task's result, with what it wrote before.
+    // Its answer after them is its task's result.
     context.adapter.answer("zeus", "Parser done");
     context.pass().unwrap();
     context.pass().unwrap();

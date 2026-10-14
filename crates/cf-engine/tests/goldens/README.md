@@ -24,3 +24,12 @@ The same twelve rows say "a crash" in the sentence about a window lost, where No
 said "a restart or a crash" (`skill/core/chief.md`): a restart pauses no task any
 more, for the project it suspends comes back by the human's Resume, which opens the
 windows that had work. Changed by hand, in those words alone.
+
+The members' text (worker, advisor, reviewer and image designer), in each of the 27
+`roleInstructions` rows that hold it, has one sentence Node's did not, the last but one of
+its paragraph about a window that is for one task: "Your answer ends your turn's work:
+anything you left running is stopped then, so wait for what your result needs"
+(`skill/core/staff.md`). It was changed by hand, in those words alone, on 2026-10-13, when
+a worker's answer became its task's result at once and what its turn left running began
+to be ended with it: an agent was seen leaving a check running and answering, which that
+rule now ends.

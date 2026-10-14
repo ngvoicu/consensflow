@@ -1,14 +1,16 @@
 //! The pane host as the engine uses it, over the bridge: a window's pane is
 //! opened and killed by a request to the host, an adapter's own requests
 //! (`pane.snapshot`, `pane.input`, `pane.write_paste`, `pane.claim`) go
-//! straight through, what a window's turn left running is asked of it
-//! (`pane.mark`, `pane.background`: [`BackgroundWork`]), and the host's
-//! `pane.exit` events are told to the engine where they are read.
+//! straight through, where a window's turn begins is told to it and what the turn
+//! left running is ended by it (`pane.mark`, `pane.end_background`:
+//! [`BackgroundWork`]), and the host's `pane.exit` events are told to the engine
+//! where they are read.
 //!
 //! The protocol is the app's (`crates/cf-panes/src/pane_handlers.rs`); this
 //! adds no rules of its own, only the Windows shim a window's program may be
 //! ([`cf_process::pane_argv`]) and the bound on the wait for an open.
 
+use std::future::Future;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -21,7 +23,7 @@ use cf_engine::runtime::LocalWork;
 use cf_engine::seams::BackgroundWork;
 use cf_harness::contract::{HostError, Pane, PaneHost, Work};
 use cf_proto::bridge::Role;
-use cf_proto::panes::{Background, MarkRequest, PaneExit, Servers};
+use cf_proto::panes::{EndRequest, Ending, MarkRequest, PaneExit, Servers, ENDING_BOUND};
 use serde_json::{json, Map, Value};
 
 use crate::errors::contain_now;
@@ -30,6 +32,11 @@ use crate::seams::DaemonSpawn;
 /// How long the host has to open a window: the pane's program is started and
 /// watched before it answers (`deadlineMs: 60_000`).
 pub const OPEN_DEADLINE: Duration = Duration::from_secs(60);
+
+/// How long the host has to end what a turn left running and to say so: the bound it
+/// keeps to ([`ENDING_BOUND`]: the grace it gives what it asks to end, and what it
+/// waits after it has killed what ignored it), and a margin for the bridge.
+pub const END_DEADLINE: Duration = Duration::from_secs(ENDING_BOUND.as_secs() + 20);
 
 /// What the engine says to the host of the app, through its bridge.
 pub struct BridgeHost {
@@ -93,14 +100,15 @@ impl EngineHost for BridgeHost {
 }
 
 impl BackgroundWork for BridgeHost {
-    fn mark<'a>(&'a self, pane: &'a Pane, servers: Servers) -> Work<'a, ()> {
-        // How the harness keeps its servers is said only where it is known: a
-        // window whose harness says nothing is marked with the request a host
-        // has always had.
+    fn mark<'a>(&'a self, pane: &'a Pane, servers: Servers, harness: &'a str) -> Work<'a, ()> {
+        // How the harness keeps its servers, and which harness it is, are said only
+        // where they are known: a window whose harness says nothing is marked with
+        // the request a host has always had.
         let request = MarkRequest {
             id: pane.id.clone(),
             generation: pane.generation,
             servers,
+            harness: (!harness.is_empty()).then(|| harness.to_owned()),
         };
         let sent = serde_json::to_value(&request)
             .ok()
@@ -114,20 +122,46 @@ impl BackgroundWork for BridgeHost {
         })
     }
 
-    fn running<'a>(&'a self, pane: &'a Pane) -> Work<'a, Background> {
-        let body = json!({ "id": pane.id, "generation": pane.generation });
-        let sent = self.bridge.request("pane.background", body, None);
-        Box::pin(async move { running(sent.await.ok()) })
+    fn end<'a>(&'a self, pane: &'a Pane) -> Work<'a, Option<Ending>> {
+        Box::pin(self.ending_within(pane, END_DEADLINE))
     }
 }
 
-/// What a host answered to what a window's tree has running that began after
-/// its turn did: its word, or nothing for an answer that was a refusal or none.
-fn running(answer: Option<Value>) -> Background {
-    answer
-        .filter(|answer| answer.get("ok") == Some(&Value::Bool(true)))
-        .and_then(|answer| serde_json::from_value(answer).ok())
-        .unwrap_or_default()
+impl BridgeHost {
+    /// The ending of what `pane`'s turn left, asked of the host and waited for up to
+    /// `deadline`: as long as the host takes to end it, which is the bound it keeps to
+    /// and a margin. The default deadline is for requests that answer at once.
+    fn ending_within(
+        &self,
+        pane: &Pane,
+        deadline: Duration,
+    ) -> impl Future<Output = Option<Ending>> + 'static {
+        let request = EndRequest {
+            id: pane.id.clone(),
+            generation: pane.generation,
+        };
+        let sent = serde_json::to_value(&request).ok().map(|body| {
+            self.bridge
+                .request("pane.end_background", body, Some(deadline))
+        });
+        async move { ending(sent?.await.ok()) }
+    }
+}
+
+/// What a host answered to an ending: its word, or that nothing was ended for an
+/// answer that was a refusal (a host that does not know the operation, or has no such
+/// window): nothing is said to be ended that was not, and nothing is known to be left.
+/// None where there was no answer (the deadline passed, or the bridge went), for the
+/// host may be ending still.
+fn ending(answer: Option<Value>) -> Option<Ending> {
+    let answer = answer?;
+    if answer.get("ok") == Some(&Value::Bool(true)) {
+        return Some(serde_json::from_value(answer).unwrap_or_default());
+    }
+    match answer.get("error") {
+        Some(Value::String(error)) if error == "deadline" => None,
+        _ => Some(Ending::default()),
+    }
 }
 
 /// What a request that never came back says: `eof` where the bridge ended, as

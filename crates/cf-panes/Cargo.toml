@@ -8,10 +8,18 @@ publish = false
 
 # What the app's own tests need of the pane host that no program does: a pane
 # opened under a name of the table's own with its raw output, the lock that
-# keeps PTY tests one at a time, and whether a process is still there. The app
-# turns it on for its tests alone.
+# keeps PTY tests one at a time, whether a process is still there, the
+# sentinel that shows a close or an ending reached no process that is none of
+# the window's, and the guard every real signal of the macOS process tree asks
+# first (src/process_tree/guard.rs: a signal to a process that is none of the
+# test's own panics and is not sent). The app turns it on for its tests alone:
+# it must stay off in what ships.
 [features]
 test-support = []
+
+# The helper's own tests (tests/headless.rs) start a sentinel too.
+[dev-dependencies]
+cf-panes = { path = ".", features = ["test-support"] }
 
 [dependencies]
 cf-bridge.workspace = true
@@ -33,6 +41,7 @@ windows-sys = { workspace = true, features = [
     "Win32_Foundation",
     "Win32_Security",
     "Win32_System_JobObjects",
+    "Win32_System_Kernel",
     "Win32_System_Threading",
 ] }
 
