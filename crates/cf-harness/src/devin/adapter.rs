@@ -45,8 +45,8 @@ use super::record;
 use super::wire::selected_session;
 use super::wire_log::{WireLog, PROMPT_GAP_MS};
 use crate::contract::{
-    Adapter, Admission, Held, Interrupt, Launch, LaunchId, Observed, Pane, PaneHost, Prepared,
-    Readiness, Records, Skill, Window, Work,
+    Adapter, Admission, Held, Interrupt, Launch, Observed, Pane, PaneHost, Prepared, Readiness,
+    Records, Skill, Window, Work,
 };
 use crate::detect::executable;
 use crate::records::{Options, Reading, Role};
@@ -115,7 +115,8 @@ impl Adapter for DevinAdapter {
             )?;
             // A chief given specs reads its Specmint skill by the path its role
             // text names, which the session-start hook gives it: where Devin
-            // has none of its own, ConsensFlow's is written beside the role's.
+            // has none of its own, ConsensFlow's is written where it is kept
+            // for every launch.
             specmint::write_own(Harness::Devin, env, launch)?;
             let agent = launch.agent.unwrap_or_default();
             let message = launch.message.map(window_text);
@@ -193,12 +194,11 @@ impl Adapter for DevinAdapter {
         }
     }
 
-    fn specmint(&self, variant: Variant, launch: &LaunchId) -> Result<Skill, String> {
+    fn specmint(&self, variant: Variant) -> Result<Skill, String> {
         let env = &self.services.env;
         specmint::place(
             Harness::Devin,
             env,
-            launch,
             variant,
             paths::global_specmint(env, variant),
         )

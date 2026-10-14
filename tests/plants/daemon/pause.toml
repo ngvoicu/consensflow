@@ -231,12 +231,12 @@ runs = ["engine-dispatcher"]
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
 find = '''
-        let next = self.seams.ledger.borrow().next_delivery(record.id)?;
+        let next = self.next_in_line(record)?;
         if next.is_none_or(|next| next.id != message.id) {
             return Ok(());
         }'''
 replace = '''
-        let next = self.seams.ledger.borrow().next_delivery(record.id)?;
+        let next = self.next_in_line(record)?;
         let _ = next;'''
 
 [[plant]]

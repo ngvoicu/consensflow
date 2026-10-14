@@ -13,8 +13,10 @@
 //! the copy of each window's conversation (`transcripts`), the task whose
 //! window went away, its requester told once for the tasks of a pass (`stalls`),
 //! the human's Resume of a project a start suspended, and what a start
-//! leaves for it (`resume`), and the human's wake-up calls, which nudge a chief
-//! at rest (`wake_ups`).
+//! leaves for it (`resume`), the human's wake-up calls, which nudge a chief
+//! at rest (`wake_ups`), and a role that changed under a conversation whose
+//! harness keeps its first instructions, which its resumed window is told in a
+//! message (`role_change`).
 //!
 //! Work runs as Node's did ([`crate::runtime`]): a piece of work is begun
 //! where JavaScript called it, and what JavaScript did not await goes on
@@ -942,7 +944,7 @@ impl Dispatcher {
             if participant.role == "chief" {
                 self.queue_wake_up_if_due(project, participant)?;
             }
-            let next = self.seams.ledger.borrow().next_delivery(participant.id)?;
+            let next = self.next_in_line(record)?;
             if let Some(next) = next {
                 let (this, held) = (Rc::clone(self), Rc::clone(record));
                 self.act(record, async move { this.deliver(&held, next).await })
@@ -1127,7 +1129,9 @@ impl Dispatcher {
     /// meanwhile, or a participant forgotten meanwhile opens nothing.
     ///
     /// `coming` is for a window the human's Resume brings back (`resume`): it is
-    /// told, as the first thing it is given, that its turn was cut, if it was.
+    /// told, as the first thing it is given, that its turn was cut, if it was
+    /// (after the note that says its role again, where it is to be told that:
+    /// `role_change`).
     pub(crate) async fn open_soon(self: &Rc<Self>, participant: i64, coming: Option<Coming>) {
         let record = self.record_of(participant);
         let (this, held) = (Rc::clone(self), Rc::clone(&record));

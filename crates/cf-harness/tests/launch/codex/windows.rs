@@ -233,9 +233,13 @@ fn passes_the_harness_s_word_on_its_quota_through() {
     let observed = finished(window.observe()).unwrap();
     assert_eq!((observed.settled, observed.quota), (true, Some(quota)));
     let asked = stand.asked.borrow();
-    let (harness, session, options) = &asked[0];
-    assert_eq!((*harness, session.as_str()), (Harness::Codex, THREAD));
-    assert_eq!(*options, Options::default());
+    // The launch looked at the thread, for a turn left open; then the window did.
+    assert_eq!(asked.len(), 2);
+    for (harness, session, options) in asked.iter() {
+        assert_eq!((*harness, session.as_str()), (Harness::Codex, THREAD));
+        assert_eq!(*options, Options::default());
+    }
+    drop(asked);
     // A window whose thread is not named yet has nothing to look at.
     let fresh = prepare(&adapter, &Request::default()).unwrap().window;
     let nothing = finished(fresh.observe()).unwrap();
@@ -243,5 +247,5 @@ fn passes_the_harness_s_word_on_its_quota_through() {
         (nothing.settled, nothing.quota, nothing.unnamed),
         (false, None, false)
     );
-    assert_eq!(stand.asked.borrow().len(), 1, "no record was read");
+    assert_eq!(stand.asked.borrow().len(), 2, "no record was read");
 }

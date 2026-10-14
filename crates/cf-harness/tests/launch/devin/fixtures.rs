@@ -270,7 +270,7 @@ pub(super) fn prepare_as(
     let id = LaunchId::new(id).unwrap();
     let skill = request
         .specs
-        .map(|variant| adapter.specmint(variant, &id).unwrap());
+        .map(|variant| adapter.specmint(variant).unwrap());
     let launch = Launch {
         id: &id,
         project: 1,

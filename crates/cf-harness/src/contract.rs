@@ -75,14 +75,26 @@ pub trait Adapter {
         Servers::Unknown
     }
 
+    /// Whether a resumed conversation keeps the instructions it began with. Every
+    /// launch gives a window its role text ([`Launch::instructions`]), and a
+    /// harness that takes it again at each launch (Claude Code, OpenCode, Pi,
+    /// Devin) needs nothing more to read a role that changed since its conversation
+    /// began. One that keeps the first instructions of the conversation it resumes
+    /// reads the new text and does not use it: a change never reaches it, and
+    /// whoever launches it must say the new text itself, as a message.
+    fn keeps_first_instructions(&self) -> bool {
+        false
+    }
+
     /// Where the window of a chief given specs finds the Specmint skill of
     /// `variant`, asked before the window is prepared, as its role text names
     /// the file. The copy the human installed where this harness looks for
     /// skills, if it is the chosen variant: used where it is. Otherwise the
-    /// copy ConsensFlow writes for this launch, at the place [`Adapter::prepare`]
-    /// will write it. An installed copy of any other variant is no copy of this
-    /// one, and is left alone.
-    fn specmint(&self, variant: Variant, launch: &LaunchId) -> Result<Skill, String>;
+    /// copy ConsensFlow keeps for this harness, at the place [`Adapter::prepare`]
+    /// will have it written: the same place for every launch, so that the role
+    /// text that names it is the same from one launch to the next. An installed
+    /// copy of any other variant is no copy of this one, and is left alone.
+    fn specmint(&self, variant: Variant) -> Result<Skill, String>;
 }
 
 /// Where a window finds the Specmint skill of its chief's variant: the file
@@ -93,8 +105,9 @@ pub enum Skill {
     /// The human's own, installed where the harness looks for skills itself:
     /// the harness has it, so nothing is registered and nothing is written.
     Global(String),
-    /// ConsensFlow's, written beside the role's skill in the launch's folder
-    /// when the window is prepared, and gone with the launch.
+    /// ConsensFlow's, written when the window is prepared where the harness has
+    /// none: in a folder of its own, outside every launch's, that lasts from one
+    /// launch to the next.
     Own(String),
 }
 

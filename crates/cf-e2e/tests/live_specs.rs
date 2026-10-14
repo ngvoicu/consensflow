@@ -30,7 +30,10 @@
 //! 2. `source`: the human turns specs on, which takes effect at the chief's next launch
 //!    (the project is closed and resumed); the daemon logged it, and the window is
 //!    launched with the section of specs that names the folder and the skill, which is
-//!    the harness's own copy or ConsensFlow's ([`launched`]);
+//!    the harness's own copy or ConsensFlow's ([`launched`]); and a Codex chief's own
+//!    record, its thread's rollout, holds the section after the Resume (the thread
+//!    keeps the instructions it began with, so it is a message of ConsensFlow's that
+//!    tells it);
 //! 3. `small`: a small ask still goes straight on the board, no spec is made, and the
 //!    worker's window is launched with nothing of specs;
 //! 4. `spec`: a tiny ask in two phases, which the human has the chief plan as a spec,

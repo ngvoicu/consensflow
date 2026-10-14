@@ -83,3 +83,12 @@ rows, and `hold_apart_what_node_never_had_in_its_schema` for the text of the tab
 No answer of Node's says anything of specs: a project's view holds `specs` only once
 the human has said something of them, and the ledger's `project.specs` event is its
 own.
+
+Migration 0016 (the role text a conversation was last given, which a harness that
+keeps a resumed thread's first instructions is compared against at each Resume) added
+a column to `conversation` that Node's conversations never had. Every `final` lacks
+`role_text` and its words in the schema of `conversation`: none of them is rewritten,
+and the replay takes them out of what this ledger left, in the rows and in the text of
+the table (`cf_ledger::testing::hold_apart_what_node_never_writes` and
+`hold_apart_what_node_never_had_in_its_schema`). No answer of Node's says anything of
+it, a conversation's view never holds it, and the ledger logs no event for it.

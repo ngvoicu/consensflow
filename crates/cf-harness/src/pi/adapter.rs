@@ -29,8 +29,8 @@ use super::install::prepare_extension;
 use super::paths;
 use super::record::evidence::working;
 use crate::contract::{
-    Adapter, Admission, Held, Launch, LaunchId, Observed, Pane, PaneHost, Prepared, Readiness,
-    Records, Skill, Window, Work,
+    Adapter, Admission, Held, Launch, Observed, Pane, PaneHost, Prepared, Readiness, Records,
+    Skill, Window, Work,
 };
 use crate::detect::executable;
 use crate::records::{Options, PiSettlement};
@@ -113,8 +113,9 @@ impl Adapter for PiAdapter {
                 None
             };
             // A chief given specs has ConsensFlow's own copy of its Specmint
-            // skill written beside the role's, and Pi is given it as a second
-            // skill; where Pi has the variant installed itself it finds it.
+            // skill written where it is kept for every launch, and Pi is given
+            // it as a second skill; where Pi has the variant installed itself
+            // it finds it.
             let specmint = specmint::write_own(Harness::Pi, &self.env, launch)?;
             let mut argv = vec![executable];
             argv.extend(configuration.args);
@@ -122,7 +123,7 @@ impl Adapter for PiAdapter {
             argv.extend(
                 specmint
                     .into_iter()
-                    .flat_map(|file| ["--skill".to_owned(), file]),
+                    .flat_map(|copy| ["--skill".to_owned(), copy.file()]),
             );
             argv.extend([
                 "--append-system-prompt".to_owned(),
@@ -173,11 +174,10 @@ impl Adapter for PiAdapter {
         }
     }
 
-    fn specmint(&self, variant: Variant, launch: &LaunchId) -> Result<Skill, String> {
+    fn specmint(&self, variant: Variant) -> Result<Skill, String> {
         specmint::place(
             Harness::Pi,
             &self.env,
-            launch,
             variant,
             paths::global_specmint(&self.env, variant),
         )

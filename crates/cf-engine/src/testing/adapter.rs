@@ -22,8 +22,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use cf_harness::contract::{
-    Adapter, Admission, Interrupt, Launch, LaunchId, Prepared, Readiness, Skill, Waiting, Window,
-    Work,
+    Adapter, Admission, Interrupt, Launch, Prepared, Readiness, Skill, Waiting, Window, Work,
 };
 use cf_harness::records::{Item, Quota, Role};
 use cf_proto::panes::Servers;
@@ -141,6 +140,10 @@ pub struct FakeAdapter {
     /// How its windows' harness keeps its servers (`adapter.servers`): not known,
     /// as an adapter that says no more.
     pub servers: Cell<Servers>,
+    /// Whether its windows' harness keeps the instructions a resumed
+    /// conversation began with (`adapter.keeps_first_instructions`, which no
+    /// trace of Node's has): not, as an adapter that says no more.
+    pub keeps_first_instructions: Cell<bool>,
     /// Launches the test holds (`hold(adapter, 'prepare', ...)`): one let go
     /// fails with the reason, where the test gave one.
     pub prepare_holds: Holds<String>,
@@ -157,11 +160,11 @@ pub struct FakeAdapter {
     pub deliver_holds: Holds,
     /// Where its harness has the Specmint variant installed, when the test says
     /// it has: the `SKILL.md` it answers. Without, the copy ConsensFlow would
-    /// write beside the role.
+    /// keep for it, which is the same for every launch.
     pub specmint_installed: RefCell<Option<String>>,
-    /// The variants it was asked where its harness has them, with the launch
-    /// each was asked for, in order: a launch that is given no specs asks none.
-    pub specmint_asked: RefCell<Vec<(Variant, String)>>,
+    /// The variants it was asked where its harness has them, in order: a launch
+    /// that is given no specs asks none.
+    pub specmint_asked: RefCell<Vec<Variant>>,
     /// Asks of whether a conversation can be gone on with that the test holds,
     /// told the conversation as `[session]`: what the harness says is its own
     /// when the ask is let go. Node's dispatcher asked nothing of the kind.
@@ -196,6 +199,7 @@ impl FakeAdapter {
                 close_after: None,
             }),
             servers: Cell::new(Servers::Unknown),
+            keeps_first_instructions: Cell::new(false),
             prepare_holds: Holds::default(),
             observe_holds: Holds::default(),
             start_holds: Holds::default(),
@@ -615,18 +619,22 @@ impl Adapter for Asked {
     }
 
     /// Not a call of Node's adapter: nothing is written down of it in the
+    /// traces.
+    fn keeps_first_instructions(&self) -> bool {
+        self.fake.keeps_first_instructions.get()
+    }
+
+    /// Not a call of Node's adapter: nothing is written down of it in the
     /// traces. What the fake says is where the test says its harness has the
-    /// variant installed, else the copy ConsensFlow would write beside the role.
-    fn specmint(&self, variant: Variant, launch: &LaunchId) -> Result<Skill, String> {
-        self.fake
-            .specmint_asked
-            .borrow_mut()
-            .push((variant, launch.as_str().to_owned()));
+    /// variant installed, else the copy ConsensFlow would keep for it: at a
+    /// place that no launch is in, as the adapters' is.
+    fn specmint(&self, variant: Variant) -> Result<Skill, String> {
+        self.fake.specmint_asked.borrow_mut().push(variant);
         Ok(match self.fake.specmint_installed.borrow().clone() {
             Some(file) => Skill::Global(file),
             None => Skill::Own(format!(
-                "/consensflow/integrations/fake/{}/role/.claude/skills/{}/SKILL.md",
-                launch.as_str(),
+                "/consensflow/integrations/specmint/fake/{}/.claude/skills/{}/SKILL.md",
+                variant.as_str(),
                 variant.skill_name()
             )),
         })

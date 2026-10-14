@@ -35,6 +35,8 @@
 //!   board and the pane host say a worker's task is held back for, what a run
 //!   says and how it waits, and the variables `cargo xtask live` sets from its
 //!   flags.
+//! - [`rollout`] reads a Codex thread's rollout, what it began with and was told,
+//!   in the rig's Codex home and the machine's.
 //! - [`serial`] has the cases that start a daemon take turns; [`pattern`] builds
 //!   the patterns the support reads text by; [`png`] reads the structure of a PNG
 //!   file, to say that an image a harness saved is a whole one.
@@ -94,6 +96,7 @@ pub mod pattern;
 pub mod png;
 pub mod process;
 pub mod rig;
+pub mod rollout;
 pub mod scratch_home;
 pub mod serial;
 mod stand_in;

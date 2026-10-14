@@ -7,7 +7,8 @@
 //! window that had work in hand, at work or waiting for an answer, each on its
 //! own conversation, unless its harness says it holds nothing of it (Codex keeps
 //! a thread only once it has had a turn): a conversation with nothing to resume
-//! opens its window afresh ([`Dispatcher::conversation_to_go_on_with`]). What
+//! opens its window afresh ([`Dispatcher::conversation_to_go_on_with`]), with the
+//! role it has now, and no note says a role that changed (`role_change`). What
 //! waits is delivered by the usual rules as they come up: a member with no task
 //! in hand opens when it is next given work, and a task that is paused, by the
 //! human or by the system, stays so until it is resumed.

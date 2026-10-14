@@ -6,7 +6,9 @@
 //!
 //! Both files are in the program, where Node read them at each launch. A chief
 //! whose project has specs on has a section more ([`ProjectSpecs`]); no other
-//! text has one.
+//! text has one. A harness that keeps the instructions a conversation began with
+//! is given a text that changed since in a message of its own, which says it in
+//! full (`role_change`).
 
 mod member;
 mod skill;

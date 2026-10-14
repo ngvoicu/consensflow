@@ -159,6 +159,67 @@ fn a_codex_chief_that_never_had_a_turn_comes_back_on_the_resume_and_the_project_
     Ok(())
 }
 
+/// What the section of a project's specs begins with in a chief's text, and what a
+/// note that says a role again opens with, which no other note does.
+#[cfg(unix)]
+const SECTION: &str = "## This project's specs";
+#[cfg(unix)]
+const REPLACES: &str = "replace the ones you were given then";
+
+/// The same chief, given specs by the human before its Close. A Codex thread keeps
+/// the instructions it began with, so a chief that is resumed is told a role that
+/// changed in a note (`codex_role_on_resume`): but this one has no thread to resume,
+/// its window is opened afresh, and it begins with the role as it is now, once, on
+/// its command line. No note is written to tell it a role it was never given
+/// another of. Unix's, the stand-in Codex being a script.
+#[cfg(unix)]
+#[test]
+fn a_codex_chief_that_never_had_a_turn_is_opened_afresh_with_the_role_it_has_now_and_is_told_no_other(
+) -> Outcome {
+    let rig = Rig::start(config_with_codex())?;
+    let roster = json!({
+        "schemaVersion": 1,
+        "agents": [{ "id": "codex-chief", "kind": "codex", "model": "fake" }],
+    });
+    files::write(&rig.home().join("agents.json"), format!("{roster}\n"))?;
+    let project = Project::open(&rig, "codex-chief", json!({}))?;
+    wait_for_the_chief(&rig, &project)?;
+    let said = rig.page(
+        "project.specs",
+        json!({ "project": project.id(), "on": true, "folder": "docs/specs", "variant": "tdd" }),
+    )?;
+    assert_eq!(said["ok"], true, "{said}");
+
+    let (before, again) = closed_and_resumed(&rig, &project)?;
+
+    assert_eq!(resumed_on(&again), None, "there was no thread to resume");
+    assert_eq!(
+        before["argv"].to_string().matches(SECTION).count(),
+        0,
+        "its first window began with specs off"
+    );
+    let line = again["argv"].to_string();
+    assert_eq!(
+        line.matches(SECTION).count(),
+        1,
+        "the role as it is now, once, on the command line: {line}"
+    );
+    assert!(!line.contains(REPLACES), "no message of a role: {line}");
+    stays_open(&rig, &project, &again)?;
+    wait_for_the_chief(&rig, &project)?;
+    let notes = project
+        .inbox("chief")?
+        .iter()
+        .filter(|message| message["body"].to_string().contains(REPLACES))
+        .count();
+    assert_eq!(
+        notes, 0,
+        "no note says a role to a window that begins with it"
+    );
+    rig.close()?;
+    Ok(())
+}
+
 /// A Claude chief the same way: with nothing said in it, the window is opened on
 /// a session of its own.
 #[test]

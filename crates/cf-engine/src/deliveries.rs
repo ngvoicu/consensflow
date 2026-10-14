@@ -17,6 +17,7 @@ use serde_json::json;
 use crate::delivery_text::{delivery_text, marker_of};
 use crate::dispatcher::Dispatcher;
 use crate::record::Record;
+use crate::role_change::answers_to_the_task;
 use crate::runtime::{caught, returning};
 use crate::seams::EngineError;
 
@@ -50,6 +51,12 @@ pub(crate) struct DeliveryPart {
     pub(crate) unsent: bool,
     /// The message a window not ready for a paste holds, told to the trace once.
     pub(crate) held: Option<i64>,
+    /// What goes into the window before anything else of its queue, in this
+    /// order and while it waits and may go: a launch that is to say a role
+    /// first puts the replacement here, and the message it displaced after it
+    /// ([`Dispatcher::next_in_line`]). Each launch says it anew, and none that
+    /// opened a window leaves it as it was.
+    pub(crate) due: Vec<i64>,
 }
 
 impl Dispatcher {
@@ -76,9 +83,9 @@ impl Dispatcher {
         }
         // Withdrawn, or overtaken, while the window got ready (its task cancelled
         // or paused meanwhile, words held for the human's approval, a door
-        // claiming it): the ledger's own head of this queue is asked again, and
-        // nothing is handed over unless it is this message. Nothing fails.
-        let next = self.seams.ledger.borrow().next_delivery(record.id)?;
+        // claiming it): what is next of this queue is asked again, and nothing is
+        // handed over unless it is this message. Nothing fails.
+        let next = self.next_in_line(record)?;
         if next.is_none_or(|next| next.id != message.id) {
             return Ok(());
         }
@@ -200,10 +207,7 @@ impl Dispatcher {
         // member wrote in it, in order; a tool's output is not the member's
         // words, and nor are the progress notes a harness marks as its
         // commentary: its final answer is the report.
-        let written: Vec<_> = items[start + 1..]
-            .iter()
-            .filter(|item| item.role == Role::Assistant)
-            .collect();
+        let written = answers_to_the_task(&items[start + 1..]);
         if !written.last().is_some_and(|item| item.complete) {
             return Ok(());
         }
@@ -379,11 +383,7 @@ impl Dispatcher {
                     )?;
                 }
                 Some(item) => {
-                    let receipt = json!({ "item": item });
-                    self.seams
-                        .ledger
-                        .borrow_mut()
-                        .confirm_delivery(message.id, Some(&receipt))?;
+                    self.confirm_delivered(&message, &json!({ "item": item }))?;
                 }
             }
         }
@@ -393,7 +393,7 @@ impl Dispatcher {
     /// The first item a participant's harness recorded it was given that
     /// holds `marker`, read with no window open: none when none does, or
     /// when its record cannot be read.
-    async fn recorded_item_with(
+    pub(crate) async fn recorded_item_with(
         &self,
         participant: i64,
         marker: &str,

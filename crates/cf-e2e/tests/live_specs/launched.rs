@@ -2,14 +2,22 @@
 //! files that request names: the role text it was given (where its harness is
 //! given it), the Specmint skill that text names, and which copy of the skill that
 //! is. The chief of a project with specs on is told of them, and every other
-//! window, a chief's with specs off and every member's, is told nothing.
+//! window, a chief's with specs off and every member's, is told nothing. And what a
+//! Codex chief's own record holds after its Resume, which a launch's command line
+//! cannot say: its thread keeps the instructions it began with, so the section of
+//! specs is there only as a message ConsensFlow gave it.
 
 use cf_e2e::live::cut;
+use cf_e2e::rollout;
 use regex::Regex;
 use serde_json::Value;
 
 /// What the section of specs in a chief's text begins with.
 const SECTION: &str = "## This project's specs";
+
+/// What the message that gives a role again says of it, which no other note does:
+/// the words that say it replaces the instructions the conversation began with.
+const REPLACES: &str = "replace the ones you were given then";
 
 /// How many characters of a launch a report shows before the word it found.
 const MARGIN: usize = 50;
@@ -39,6 +47,50 @@ pub fn told_nothing_of_specs(role: &str) -> Result<(), String> {
 /// Whether the text has the section of specs.
 pub fn has_the_section(role: &str) -> bool {
     role.contains(SECTION)
+}
+
+/// The thread a window was opened on again: the word after `resume` on its
+/// command line, in the `pane.open` of `frame`. None for a window that began one.
+pub fn thread_resumed(frame: &Value) -> Option<String> {
+    let argv: Vec<&str> = frame["argv"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .collect();
+    let at = argv.iter().position(|word| *word == "resume")?;
+    argv.get(at + 1).map(|thread| (*thread).to_owned())
+}
+
+/// Whether a chief's own record (the rollout of its Codex thread, `record`) holds
+/// the section of specs, and where, which the chief reads whatever its launch
+/// said. A thread that began with specs off keeps the developer instructions of
+/// that start, so the section is there as a message ConsensFlow gave it when the
+/// chief was resumed, one that says it replaces the instructions the thread began
+/// with; a thread that began with specs on has it in those.
+pub fn told_in_the_record(record: &str) -> Result<String, String> {
+    let developer = rollout::said_by(record, "developer");
+    if developer.iter().any(|said| said.contains(SECTION)) {
+        return Ok("in the developer instructions its thread began with".to_owned());
+    }
+    let user = rollout::said_by(record, "user");
+    match user.iter().find(|said| said.contains(SECTION)) {
+        Some(said) if said.contains(REPLACES) => Ok(
+            "in a message of ConsensFlow's that replaces the instructions its thread began with"
+                .to_owned(),
+        ),
+        Some(_) => Err(
+            "a message of the thread's has the section, and does not say it replaces the instructions the thread began with"
+                .to_owned(),
+        ),
+        None => Err(format!(
+            "its record has no section of specs: {} developer message{} and {} user message{}",
+            developer.len(),
+            if developer.len() == 1 { "" } else { "s" },
+            user.len(),
+            if user.len() == 1 { "" } else { "s" },
+        )),
+    }
 }
 
 /// The file of the skill the text names: the `SKILL.md` its section says it is at.
@@ -154,11 +206,22 @@ fn slashed(path: &str) -> String {
     path.replace('\\', "/")
 }
 
+/// Where ConsensFlow keeps its copies of Specmint, below its folder `home`: one
+/// for each harness and variant, in no launch's folder, so that a chief's text
+/// names the same file at every launch.
+fn kept_below(home: &str) -> String {
+    format!(
+        "{}/integrations/specmint/",
+        slashed(home).trim_end_matches('/')
+    )
+}
+
 /// Which copy of the skill the chief was given, judged: the file its text names is
 /// there and is the skill (`frontmatter`, the `name` of its `SKILL.md`, is
 /// `specmint-<variant>`), and it is the harness's own where the harness has the
 /// variant installed (`installed`, the file its adapter says) and ConsensFlow's
-/// own, under `home`, where it has not. What the run says of it, in a line.
+/// own where it has not: the one kept for every launch, below `home`, and not one
+/// in the folder of the launch. What the run says of it, in a line.
 pub fn which_copy(
     variant: &str,
     named: Option<&str>,
@@ -182,11 +245,12 @@ pub fn which_copy(
         Some(own) => Err(format!(
             "the harness has {skill} installed at {own}, and the chief's text names {file}"
         )),
-        None if slashed(file).starts_with(&slashed(home)) => {
+        None if slashed(file).starts_with(&kept_below(home)) => {
             Ok(format!("ConsensFlow's copy of {skill}, at {file}"))
         }
         None => Err(format!(
-            "the harness has no {skill} installed, and the chief's text names {file}, which is not under {home}"
+            "the harness has no {skill} installed, and the chief's text names {file}, which is not in the folder ConsensFlow keeps its copies in ({})",
+            kept_below(home)
         )),
     }
 }

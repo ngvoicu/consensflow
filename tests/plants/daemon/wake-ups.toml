@@ -322,12 +322,12 @@ find = '''        if idle {
             if participant.role == "chief" {
                 self.queue_wake_up_if_due(project, participant)?;
             }
-            let next = self.seams.ledger.borrow().next_delivery(participant.id)?;'''
+            let next = self.next_in_line(record)?;'''
 replace = '''        if participant.role == "chief" {
             self.queue_wake_up_if_due(project, participant)?;
         }
         if idle {
-            let next = self.seams.ledger.borrow().next_delivery(participant.id)?;'''
+            let next = self.next_in_line(record)?;'''
 
 [[plant]]
 name = "wake-up: a message held for the human's unsent text leaves the chief a wake-up behind it"
@@ -535,12 +535,12 @@ find = '''        if idle {
             if participant.role == "chief" {
                 self.queue_wake_up_if_due(project, participant)?;
             }
-            let next = self.seams.ledger.borrow().next_delivery(participant.id)?;'''
+            let next = self.next_in_line(record)?;'''
 replace = '''        if participant.role == "chief" {
             self.queue_wake_up_if_due(project, participant)?;
         }
         if idle {
-            let next = self.seams.ledger.borrow().next_delivery(participant.id)?;'''
+            let next = self.next_in_line(record)?;'''
 
 [[plant]]
 name = "wake-up rig: the wake-up goes before its minute"

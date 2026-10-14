@@ -93,6 +93,8 @@ pub struct Context {
     /// The fake of Codex's own, which answers for it when the test made it so.
     pub codex: Rc<FakeAdapter>,
     pub roster: Rc<FakeRoster>,
+    /// The role texts the engine is given, which a test may say were rewritten.
+    pub roles: Rc<FakeRoles>,
     pub trace: Rc<FakeTrace>,
     pub log: Rc<FakeLog>,
     pub launch_files: Rc<FakeLaunchFiles>,
@@ -161,6 +163,10 @@ impl Context {
             model: RefCell::new(None),
             specs_by_default: Cell::new(false),
         });
+        let roles = Rc::new(FakeRoles {
+            recorder: recorder.clone(),
+            rewritten: RefCell::new(String::new()),
+        });
         let trace = Rc::new(FakeTrace {
             recorder: recorder.clone(),
             lines: RefCell::new(Vec::new()),
@@ -192,9 +198,7 @@ impl Context {
                 recorder: recorder.clone(),
             }),
             roster: Rc::clone(&roster) as Rc<_>,
-            roles: Rc::new(FakeRoles {
-                recorder: recorder.clone(),
-            }),
+            roles: Rc::clone(&roles) as Rc<_>,
             trace: Rc::clone(&trace) as Rc<_>,
             log: Rc::clone(&log) as Rc<_>,
             launch_files: Rc::clone(&launch_files) as Rc<_>,
@@ -219,6 +223,7 @@ impl Context {
             adapter,
             codex,
             roster,
+            roles,
             trace,
             log,
             launch_files,

@@ -49,7 +49,8 @@ impl Spec {
 }
 
 /// The spec a markdown file holds (`SPEC.md`): the `id` of its frontmatter,
-/// the phases `## Phase N: … [status]` and the tasks `- [ ] [CODE-01]` or
+/// the phases `## Phase N: … [status]` (or `### Phase N`, as a Codex chief wrote
+/// them under a `## Phases` heading, 2026-10-14) and the tasks `- [ ] [CODE-01]` or
 /// `- [x] [CODE-01]` under each.
 pub fn markdown(text: &str) -> Result<Spec, String> {
     let id = Regex::new(r"(?m)^id:[ \t]*(\S+)[ \t]*$")
@@ -57,7 +58,7 @@ pub fn markdown(text: &str) -> Result<Spec, String> {
         .captures(text)
         .map(|found| found[1].trim_matches(['"', '\'']).to_owned())
         .ok_or("the spec has no id in its frontmatter")?;
-    let phase = Regex::new(r"^##\s+Phase\s+(\d+)\b").map_err(|cause| cause.to_string())?;
+    let phase = Regex::new(r"^#{2,3}\s+Phase\s+(\d+)\b").map_err(|cause| cause.to_string())?;
     let task = Regex::new(&format!(r"^\s*-\s*\[([ xX])\]\s*\[({CODE})\]"))
         .map_err(|cause| cause.to_string())?;
     let mut phases: Vec<Phase> = Vec::new();
@@ -301,6 +302,9 @@ fn upstream(number: i64, tasks: &[BoardTask]) -> BTreeSet<i64> {
 /// need on a task that is none of the spec's, a research task or the like, is
 /// neither. What the run saw, in a line, or each way it fell short.
 pub fn follow_the_phases(spec: &Spec, tasks: &[BoardTask]) -> Result<String, String> {
+    if spec.phases.is_empty() {
+        return Err("the spec has no phases to follow".to_owned());
+    }
     let made = from_the_spec(spec, tasks);
     let order: Vec<u32> = spec.phases.iter().map(|phase| phase.number).collect();
     let mut problems = Vec::new();

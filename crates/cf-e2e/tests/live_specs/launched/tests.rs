@@ -2,7 +2,7 @@ use serde_json::json;
 
 use super::*;
 
-const SECTION_TEXT: &str = "\n## This project's specs\n\nSpecs are on in this project. Plan work that is big enough for phases as a spec, with the Specmint skill `specmint-tdd`: its SKILL.md is at /home/me/.consensflow/integrations/claude/abc/role/.claude/skills/specmint-tdd/SKILL.md, and the files it names are beside it; read it before you plan. Where Specmint says `.specs`, it means `plans/specs`: your specs and their registry are there.\n";
+const SECTION_TEXT: &str = "\n## This project's specs\n\nSpecs are on in this project. Plan work that is big enough for phases as a spec, with the Specmint skill `specmint-tdd`: its SKILL.md is at /home/me/.consensflow/integrations/specmint/claude/tdd-0123abcd/.claude/skills/specmint-tdd/SKILL.md, and the files it names are beside it; read it before you plan. Where Specmint says `.specs`, it means `plans/specs`: your specs and their registry are there.\n";
 
 #[test]
 fn a_text_with_specs_off_says_nothing_of_them_and_one_that_says_a_word_of_them_is_refused() {
@@ -19,7 +19,7 @@ fn the_skill_and_the_folder_the_text_names_are_read_from_the_words_the_section_s
     assert_eq!(
         skill_named_in(SECTION_TEXT).as_deref(),
         Some(
-            "/home/me/.consensflow/integrations/claude/abc/role/.claude/skills/specmint-tdd/SKILL.md"
+            "/home/me/.consensflow/integrations/specmint/claude/tdd-0123abcd/.claude/skills/specmint-tdd/SKILL.md"
         )
     );
     assert_eq!(
@@ -188,11 +188,101 @@ fn what_codex_says_of_the_human_s_own_skills_is_no_skill_of_the_window_and_no_te
     assert!(told_nothing_of_specs(off).is_err());
 }
 
+/// A rollout of a Codex thread: its developer's message, and the user's messages.
+fn rollout_of(developer: &str, user: &[&str]) -> String {
+    let message = |role: &str, text: &str| {
+        json!({
+            "type": "response_item",
+            "payload": {
+                "type": "message",
+                "role": role,
+                "content": [{ "type": "input_text", "text": text }],
+            },
+        })
+        .to_string()
+    };
+    std::iter::once(message("developer", developer))
+        .chain(user.iter().map(|text| message("user", text)))
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n"
+}
+
+#[test]
+fn a_window_opened_on_a_thread_again_names_it_after_resume() {
+    let again = frame(
+        &json!([
+            "cf",
+            "codex-session",
+            "codex",
+            "-c",
+            "a=b",
+            "resume",
+            "01a09094-938f-7fd1-a2d3-315cf92b4559",
+            "--model",
+            "m"
+        ]),
+        &json!({}),
+    );
+    assert_eq!(
+        thread_resumed(&again).as_deref(),
+        Some("01a09094-938f-7fd1-a2d3-315cf92b4559")
+    );
+    let fresh = frame(
+        &json!(["cf", "codex-session", "codex", "-c", "a=b"]),
+        &json!({}),
+    );
+    assert_eq!(thread_resumed(&fresh), None);
+    assert_eq!(thread_resumed(&frame(&json!(["resume"]), &json!({}))), None);
+}
+
+#[test]
+fn a_chief_whose_record_has_the_section_in_what_its_thread_began_with_or_in_a_message_that_replaces_it_was_told(
+) {
+    // A thread that began with specs on has the section in its developer's message.
+    let began_on = rollout_of(&format!("Codex's.\n\nYour role.{SECTION_TEXT}"), &["Hello"]);
+    assert_eq!(
+        told_in_the_record(&began_on).unwrap(),
+        "in the developer instructions its thread began with"
+    );
+    // One that began with specs off keeps them, and is told by a message that says so.
+    let message = format!(
+        "[ConsensFlow m-9 · note from ConsensFlow]\nYour ConsensFlow role instructions have changed since this conversation began. The instructions below replace the ones you were given then: follow these from now on.\n\nThe role.{SECTION_TEXT}"
+    );
+    let told = rollout_of("Codex's.\n\nYour role.", &["Hello", &message]);
+    assert_eq!(
+        told_in_the_record(&told).unwrap(),
+        "in a message of ConsensFlow's that replaces the instructions its thread began with"
+    );
+}
+
+#[test]
+fn a_chief_whose_thread_kept_what_it_began_with_and_was_told_nothing_was_not_told_and_the_report_says_what_its_record_has(
+) {
+    // The bug: specs on, closed and resumed, and the record has the one developer's
+    // message of the start with specs off, and what the human typed.
+    let kept = rollout_of("Codex's.\n\nYour role.", &["Write a spec for it."]);
+    let failed = told_in_the_record(&kept).unwrap_err();
+    assert_eq!(
+        failed,
+        "its record has no section of specs: 1 developer message and 1 user message"
+    );
+    let empty = told_in_the_record("").unwrap_err();
+    assert_eq!(
+        empty,
+        "its record has no section of specs: 0 developer messages and 0 user messages"
+    );
+    // A message that has the section and does not say it replaces what the thread
+    // began with is no way of telling a chief its role changed.
+    let quoted = rollout_of("Codex's.", &[&format!("Look at this:{SECTION_TEXT}")]);
+    let failed = told_in_the_record(&quoted).unwrap_err();
+    assert!(failed.contains("does not say it replaces"), "{failed}");
+}
+
 #[test]
 fn the_copy_the_chief_was_given_is_the_harness_s_own_where_it_has_the_variant_and_consensflow_s_where_it_has_not(
 ) {
-    let own =
-        "/home/rig/consensflow/integrations/claude/abc/role/.claude/skills/specmint-tdd/SKILL.md";
+    let own = "/home/rig/consensflow/integrations/specmint/claude/tdd-0123abcd/.claude/skills/specmint-tdd/SKILL.md";
     let global = "/home/me/.claude/skills/specmint-tdd/SKILL.md";
     let home = "/home/rig/consensflow";
     assert_eq!(
@@ -238,7 +328,15 @@ fn the_copy_the_chief_was_given_is_the_harness_s_own_where_it_has_the_variant_an
             Some(global),
             Some("specmint-tdd"),
             None,
-            "is not under /home/rig/consensflow",
+            "is not in the folder ConsensFlow keeps its copies in (/home/rig/consensflow/integrations/specmint/)",
+        ),
+        // A copy in the launch's own folder is the bug this was found in: the text
+        // names another path at every launch.
+        (
+            Some("/home/rig/consensflow/integrations/codex/3d4e5f60-7182-4394-8dbe-2f3a4b5c6d70/role/.claude/skills/specmint-tdd/SKILL.md"),
+            Some("specmint-tdd"),
+            None,
+            "is not in the folder ConsensFlow keeps its copies in",
         ),
     ] {
         let failed = which_copy("tdd", named, frontmatter, installed, home).unwrap_err();

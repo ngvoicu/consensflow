@@ -65,8 +65,8 @@ pub(crate) fn settings(
 /// added to what it reads, its text appended to the system prompt, and no
 /// snapshot of that prompt, which a resumed conversation otherwise keeps
 /// from its first turn. A chief given specs has ConsensFlow's own copy of its
-/// Specmint skill written beside the role's skill, in the folder Claude is
-/// given, so it loads with it: nothing more is told of it.
+/// Specmint skill written where it is kept for every launch, and that folder
+/// is added to what Claude reads as well, so the skill loads with the role's.
 pub(super) fn role(env: &Env, launch: &Launch) -> Result<Vec<String>, String> {
     let written = write_role(
         Harness::Claude,
@@ -75,15 +75,17 @@ pub(super) fn role(env: &Env, launch: &Launch) -> Result<Vec<String>, String> {
         launch.id,
         launch.instructions,
     )?;
-    specmint::write_own(Harness::Claude, env, launch)?;
-    Ok(vec![
-        "--add-dir".to_owned(),
-        written.root,
+    let mut args = vec!["--add-dir".to_owned(), written.root];
+    if let Some(copy) = specmint::write_own(Harness::Claude, env, launch)? {
+        args.extend(["--add-dir".to_owned(), copy.root]);
+    }
+    args.extend([
         "--append-system-prompt-file".to_owned(),
         written.file,
         "--system-prompt-snapshot".to_owned(),
         "off".to_owned(),
-    ])
+    ]);
+    Ok(args)
 }
 
 #[cfg(test)]

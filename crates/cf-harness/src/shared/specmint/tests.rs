@@ -7,6 +7,9 @@ use sha2::{Digest, Sha256};
 
 use super::testing::{exists, Fake};
 use super::*;
+use crate::contract::LaunchId;
+
+mod kept;
 
 /// The folder the variants are vendored in, from the checkout.
 fn vendored() -> PathBuf {
@@ -226,11 +229,35 @@ fn home_env(fake: &Fake) -> Env {
     Env::from_vars([("CONSENSFLOW_HOME", fake.at("cf"))])
 }
 
+/// The upstream commit the vendored manifest pins `variant` at, read from the
+/// checkout and not by the code under test.
+fn pinned(variant: Variant) -> String {
+    let manifest: Value =
+        serde_json::from_slice(&fs::read(vendored().join("manifest.json")).expect("the manifest"))
+            .expect("the manifest is JSON");
+    manifest[variant.as_str()]["commit"]
+        .as_str()
+        .expect("a commit")
+        .to_owned()
+}
+
+/// The folder ConsensFlow keeps its copy of `variant` for the harness whose
+/// folder is `harness` in, under the home `fake` made.
+fn kept_for(fake: &Fake, harness: &str, variant: Variant) -> String {
+    path::join(&[
+        &fake.at("cf"),
+        "integrations",
+        "specmint",
+        harness,
+        &format!("{}-{}", variant.as_str(), pinned(variant)),
+    ])
+}
+
 #[test]
-fn a_variant_not_found_installed_is_placed_beside_the_role_in_the_launch_s_folder() {
+fn a_variant_not_found_installed_is_placed_in_the_folder_kept_for_its_harness_and_the_variant_at_its_commit(
+) {
     let fake = Fake::new();
     let env = home_env(&fake);
-    let id = id();
     for (harness, folder) in [
         (Harness::Claude, "claude"),
         (Harness::Pi, "pi"),
@@ -239,15 +266,11 @@ fn a_variant_not_found_installed_is_placed_beside_the_role_in_the_launch_s_folde
         (Harness::Codex, "codex"),
     ] {
         for variant in Variant::ALL {
-            let placed = place(harness, &env, &id, variant, None).expect("a place");
+            let placed = place(harness, &env, variant, None).expect("a place");
             assert_eq!(
                 placed,
                 Skill::Own(path::join(&[
-                    &fake.at("cf"),
-                    "integrations",
-                    folder,
-                    id.as_str(),
-                    "role",
+                    &kept_for(&fake, folder, variant),
                     ".claude",
                     "skills",
                     variant.skill_name(),
@@ -260,12 +283,48 @@ fn a_variant_not_found_installed_is_placed_beside_the_role_in_the_launch_s_folde
 }
 
 #[test]
+fn a_harness_s_folder_holds_launches_and_nothing_else_the_copy_is_kept_beside_them() {
+    let fake = Fake::new();
+    let env = home_env(&fake);
+    for harness in [Harness::Claude, Harness::Devin, Harness::Codex] {
+        let Skill::Own(file) = place(harness, &env, Variant::Tdd, None).expect("a place") else {
+            panic!("an own copy");
+        };
+        let launches = path::join(&[
+            &fake.at("cf"),
+            "integrations",
+            harness_folder(harness).unwrap_or(CODEX_FOLDER),
+        ]);
+        assert!(
+            !file.starts_with(&launches),
+            "{harness:?}: {file} is in the folder of launches {launches}"
+        );
+    }
+}
+
+#[test]
+fn a_variant_vendored_at_another_commit_is_another_folder() {
+    let fake = Fake::new();
+    let env = home_env(&fake);
+    let at = |commit: &str| {
+        OwnCopy::at(Harness::Pi, &env, Variant::Core, commit)
+            .expect("a copy")
+            .root
+    };
+    assert_ne!(at("aaaa"), at("bbbb"));
+    assert_eq!(at("aaaa"), at("aaaa"));
+    assert!(
+        at("aaaa").ends_with("specmint/pi/core-aaaa"),
+        "{}",
+        at("aaaa")
+    );
+}
+
+#[test]
 fn an_installed_variant_is_placed_where_it_is_and_its_place_needs_no_home() {
-    let id = id();
     let placed = place(
         Harness::Claude,
         &Env::default(),
-        &id,
         Variant::Tdd,
         Some("/home/me/.claude/skills/specmint-tdd/SKILL.md".to_owned()),
     );
@@ -275,34 +334,38 @@ fn an_installed_variant_is_placed_where_it_is_and_its_place_needs_no_home() {
             "/home/me/.claude/skills/specmint-tdd/SKILL.md".to_owned()
         ))
     );
-    let own = place(Harness::Claude, &Env::default(), &id, Variant::Tdd, None);
+    let own = place(Harness::Claude, &Env::default(), Variant::Tdd, None);
     assert_eq!(own, Err("missing home in env".to_owned()));
 }
 
 #[test]
-fn the_own_copy_is_written_whole_beside_the_role_s_skill_and_its_place_is_where_the_role_text_named_it(
+fn the_own_copy_is_written_whole_at_the_place_the_role_text_named_and_the_harness_is_told_where_it_is(
 ) {
     for variant in Variant::ALL {
         let fake = Fake::new();
         let env = home_env(&fake);
         let id = id();
-        let skill = place(Harness::Claude, &env, &id, variant, None).expect("a place");
+        let skill = place(Harness::Claude, &env, variant, None).expect("a place");
         let specs = Specs {
             variant,
             skill: &skill,
         };
         let launch = launch(&id, Some(specs));
-        let role =
-            crate::shared::role::write_role(Harness::Claude, "chief", &env, &id, "role text")
-                .expect("the role");
-        let written = write_own(Harness::Claude, &env, &launch).expect("written");
-        assert_eq!(written.as_deref(), Some(skill.path()), "{variant:?}");
-        let folder = Path::new(skill.path()).parent().expect("a folder");
+        let copy = write_own(Harness::Claude, &env, &launch)
+            .expect("written")
+            .expect("a copy");
+        assert_eq!(copy.file(), skill.path(), "{variant:?}");
         assert_eq!(
-            folder.parent(),
-            Path::new(&role.file).parent().and_then(Path::parent),
-            "beside the role's skill, in the same skills folder"
+            copy.root,
+            kept_for(&fake, "claude", variant),
+            "the folder Claude is given"
         );
+        assert_eq!(
+            copy.skills(),
+            path::join(&[&copy.root, ".claude", "skills"]),
+            "the folder OpenCode is given"
+        );
+        let folder = Path::new(skill.path()).parent().expect("a folder");
         assert_eq!(
             files_under(folder),
             files::of(variant)

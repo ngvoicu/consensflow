@@ -17,8 +17,9 @@ use crate::shared::launch_files::{harness_folder, launch_folder};
 
 /// Where a launch's skills are written, under its folder: the layout Claude
 /// loads a skill from (`.claude/skills/<name>/SKILL.md`), in a folder of the
-/// role's own. The role's skill is written there, and so is the Specmint skill
-/// of a chief given specs ([`super::specmint`]).
+/// role's own, where the role's skill is written. ConsensFlow's copy of the
+/// Specmint skill of a chief given specs is in the same layout
+/// ([`super::specmint`]), under a folder that is no launch's.
 pub(crate) const SKILLS: [&str; 3] = ["role", ".claude", "skills"];
 
 /// Where a role was written.

@@ -89,9 +89,11 @@ runs = ["engine-resumable"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
-find = '''            first = self.chief_first(project, participant, conversation.as_ref(), first)?;'''
+find = '''            let first =
+                self.chief_first(project, participant, conversation.as_ref(), compared.first)?;'''
 replace = '''            let current = self.seams.ledger.borrow().current_conversation(participant.id)?;
-            first = self.chief_first(project, participant, current.as_ref(), first)?;'''
+            let first =
+                self.chief_first(project, participant, current.as_ref(), compared.first)?;'''
 
 # --- the engine: a pause that comes while a member's harness is asked ---
 

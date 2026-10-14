@@ -63,10 +63,10 @@ impl Dispatcher {
             return Ok(true);
         };
         let message = self.seams.ledger.borrow().message(delivering.message)?;
-        if message.is_none_or(|found| found.state != "delivering") {
+        let Some(message) = message.filter(|found| found.state == "delivering") else {
             record.delivery.borrow_mut().delivering = None;
             return Ok(true);
-        }
+        };
         let arrived = observed
             .items()
             .iter()
@@ -75,10 +75,7 @@ impl Dispatcher {
             return Ok(false);
         };
         let receipt = json!({ "item": &*arrived.id });
-        self.seams
-            .ledger
-            .borrow_mut()
-            .confirm_delivery(delivering.message, Some(&receipt))?;
+        self.confirm_delivered(&message, &receipt)?;
         record.delivery.borrow_mut().delivering = None;
         self.changed();
         Ok(true)

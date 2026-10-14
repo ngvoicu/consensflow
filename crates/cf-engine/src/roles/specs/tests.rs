@@ -18,7 +18,7 @@ fn given(variant: Variant) -> ProjectSpecs<'static> {
     ProjectSpecs {
         variant,
         folder: "docs/specs",
-        skill: "/home/me/.consensflow/integrations/claude/launch/role/.claude/skills/specmint-tdd/SKILL.md",
+        skill: "/home/me/.consensflow/integrations/specmint/claude/tdd-0123abcd/.claude/skills/specmint-tdd/SKILL.md",
     }
 }
 
@@ -70,7 +70,7 @@ fn the_section_names_the_skill_where_its_file_is_the_folder_and_where_specmint_s
         );
         assert!(
             section.contains(
-                "its SKILL.md is at /home/me/.consensflow/integrations/claude/launch/role/.claude/skills/specmint-tdd/SKILL.md"
+                "its SKILL.md is at /home/me/.consensflow/integrations/specmint/claude/tdd-0123abcd/.claude/skills/specmint-tdd/SKILL.md"
             ),
             "{section}"
         );

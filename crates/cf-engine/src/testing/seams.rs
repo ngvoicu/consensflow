@@ -87,6 +87,9 @@ impl PaneEnv for FakePaneEnv {
 /// A role text per role: `instructions for <role>`.
 pub struct FakeRoles {
     pub(crate) recorder: Recorder,
+    /// What a test adds to every text to say the roles were rewritten (a release
+    /// of ConsensFlow that changed them): nothing, as no trace of Node's has any.
+    pub rewritten: RefCell<String>,
 }
 
 impl Roles for FakeRoles {
@@ -99,7 +102,11 @@ impl Roles for FakeRoles {
         _project: &ProjectView,
         specs: Option<&ProjectSpecs<'_>>,
     ) -> Result<String, String> {
-        let mut text = format!("instructions for {}", participant.role);
+        let mut text = format!(
+            "instructions for {}{}",
+            participant.role,
+            self.rewritten.borrow()
+        );
         self.recorder.called(
             "roles",
             None,

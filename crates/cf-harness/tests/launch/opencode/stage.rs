@@ -296,7 +296,7 @@ impl Stage {
             };
             let skill = wanted
                 .specs
-                .map(|variant| adapter.specmint(variant, &id).unwrap());
+                .map(|variant| adapter.specmint(variant).unwrap());
             let launch = Launch {
                 id: &id,
                 project: 1,

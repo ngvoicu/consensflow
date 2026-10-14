@@ -92,6 +92,27 @@ impl Ledger {
         conversations::end_conversation(&mut self.store, conversation_id)
     }
 
+    /// The role text a conversation was last given, none where it is not known.
+    pub fn conversation_role_text(
+        &self,
+        conversation_id: i64,
+    ) -> Result<Option<String>, LedgerError> {
+        conversations::conversation_role_text(&self.store, conversation_id)
+    }
+
+    /// A conversation is given `text` as its role, which logs no event. What a
+    /// conversation was told by a message is recorded with the message's own
+    /// confirmation ([`Ledger::confirm_delivery_telling`]), not by this.
+    pub fn set_conversation_role_text(
+        &mut self,
+        conversation_id: i64,
+        text: &str,
+    ) -> Result<(), LedgerError> {
+        #[cfg(feature = "test-support")]
+        self.watched("set_conversation_role_text", Some(conversation_id))?;
+        conversations::set_conversation_role_text(&mut self.store, conversation_id, text)
+    }
+
     /// A participant's conversation now, if one has not ended.
     pub fn current_conversation(
         &self,
