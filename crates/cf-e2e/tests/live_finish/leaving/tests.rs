@@ -24,6 +24,7 @@ fn good() -> Left {
         result: Some("I started it.".to_owned()),
         notes: vec![ENDED.to_owned()],
         alive: Vec::new(),
+        escaped: Vec::new(),
     }
 }
 
@@ -37,14 +38,28 @@ fn a_task_done_with_the_command_listed_gone_and_the_chief_told_it_was_ended_pass
 }
 
 #[test]
-fn a_worker_that_left_no_command_for_the_host_to_list_proves_nothing_and_fails() {
+fn a_command_the_harness_ended_with_its_tool_call_leaves_nothing_to_end_and_passes() {
     let mut left = good();
     left.listed.clear();
     left.notes.clear();
+    assert_eq!(judge(&left), Ok(()));
+    assert_eq!(
+        summary(&left, &judge(&left)),
+        "T-1 done after 20.0 s; the harness ended the command with its tool call: the host never listed it, and nothing of it runs on the machine"
+    );
+}
+
+#[test]
+fn a_command_the_host_never_listed_that_still_runs_on_the_machine_escaped_and_fails() {
+    let mut left = good();
+    left.listed.clear();
+    left.notes.clear();
+    left.escaped = vec!["4242 sleep 4711".to_owned()];
     let problems = judge(&left).unwrap_err();
     assert_eq!(problems.len(), 1, "{problems:#?}");
     assert!(
-        problems[0].starts_with("the pane host never listed the command (4711) as running"),
+        problems[0].starts_with("the command escaped the window")
+            && problems[0].ends_with("4242 sleep 4711"),
         "{}",
         problems[0]
     );

@@ -10,11 +10,12 @@
 //! and holds what it saw to the brief ([`judge`]):
 //!
 //! - the task is done, and its result reached the chief;
-//! - the host listed the command as running: a worker that left none (its harness may
-//!   end what a tool started when the tool call ends, or the agent took it out of the
-//!   window's session with `setsid` and every process that started it was gone before
-//!   the host saw one of them start, which no tree the host has holds) proves nothing,
-//!   and fails;
+//! - the host listed the command as running, or the command is nowhere on the machine
+//!   once the task is done: Codex and Devin end what a tool started when the tool call
+//!   ends (live, 2026-10-14), and their run says so; a command the host never listed
+//!   that still runs on the machine escaped the window (the agent took it out of the
+//!   window's session with `setsid`, and every process that started it was gone before
+//!   the host saw one of them start), and fails;
 //! - the command is gone once the task is done;
 //! - and the chief was told, in the note beside the result, that the turn left work
 //!   and that it was ended: a note that says part of what the host proved the turn's still
@@ -31,7 +32,7 @@ use cf_e2e::live::members::{
 };
 use cf_e2e::live::tree::{self, Proc, Tree};
 use cf_e2e::live::{cut, secs, text, Log, Who};
-use cf_e2e::process::is_alive;
+use cf_e2e::process::{is_alive, Run};
 use cf_e2e::Result as Fallible;
 
 use crate::check::{
@@ -96,6 +97,10 @@ pub struct Left {
     /// The processes of `listed` that were still there when the run last looked, once
     /// the task was done and the chief told.
     pub alive: Vec<u64>,
+    /// The command lines of the machine's processes that run the command, looked at once
+    /// the task was done and the chief told: what escaped the window, where the host
+    /// listed none.
+    pub escaped: Vec<String>,
 }
 
 impl Left {
@@ -127,9 +132,12 @@ pub fn judge(left: &Left) -> Result<(), Vec<String>> {
         Some(_) => {}
     }
     if left.listed.is_empty() {
-        problems.push(format!(
-            "the pane host never listed the command ({SECONDS}) as running: the worker left none, so there is nothing to end (its harness may end what a tool started when the tool call ends), or the host never found it (the agent started it in a session of its own, and the shell that started it was gone before the host saw it start)"
-        ));
+        if !left.escaped.is_empty() {
+            problems.push(format!(
+                "the command escaped the window: the pane host never listed it, and it still runs on the machine (the agent started it in a session of its own, and the shell that started it was gone before the host saw it start): {}",
+                left.escaped.join("; ")
+            ));
+        }
     } else {
         if !left.alive.is_empty() {
             let still: Vec<String> = left
@@ -170,6 +178,10 @@ pub fn judge(left: &Left) -> Result<(), Vec<String>> {
 /// chief told, and else the first thing that was wrong with it.
 pub fn summary(left: &Left, verdict: &Result<(), Vec<String>>) -> String {
     match verdict {
+        Ok(()) if left.listed.is_empty() => format!(
+            "T-1 done after {} s; the harness ended the command with its tool call: the host never listed it, and nothing of it runs on the machine",
+            secs(left.took)
+        ),
         Ok(()) => format!(
             "T-1 done after {} s; the command ({}) was ended and the chief told: {}",
             secs(left.took),
@@ -278,6 +290,7 @@ fn observe(members: &mut Members, agent: &str, brief: &str, log: &Log) -> Fallib
             left.alive = still_there(&left.listed);
             Ok(left.alive.is_empty().then_some(()))
         })?;
+        left.escaped = on_the_machine();
     }
     let mut exit: Option<Tree> = None;
     if let (true, Some(pane)) = (ended, pane.clone()) {
@@ -321,6 +334,38 @@ fn observe(members: &mut Members, agent: &str, brief: &str, log: &Log) -> Fallib
         case,
         summary: summary(&left, &verdict),
     })
+}
+
+/// The command lines of the machine's processes that run the command now: `ps` on Unix,
+/// the process table through PowerShell on Windows. None where neither answers.
+fn on_the_machine() -> Vec<String> {
+    let wanted = command();
+    let ran = if cfg!(windows) {
+        Run::new("powershell")
+            .args([
+                "-NoProfile",
+                "-Command",
+                "Get-CimInstance Win32_Process | ForEach-Object { \"$($_.ProcessId) $($_.CommandLine)\" }",
+            ])
+            .inheriting_env()
+            .run()
+    } else {
+        Run::new("ps")
+            .args(["-axo", "pid=,command="])
+            .inheriting_env()
+            .run()
+    };
+    ran.ok()
+        .filter(|ran| ran.code == Some(0))
+        .map(|ran| {
+            ran.stdout
+                .lines()
+                .map(str::trim)
+                .filter(|line| line.contains(&wanted))
+                .map(str::to_owned)
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// The processes of `listed` that are still running.
