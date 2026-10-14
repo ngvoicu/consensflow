@@ -18,7 +18,7 @@ use serde_json::{json, Value};
 use crate::delivery_text::{delivery_text, marker_of};
 use crate::dispatcher::Dispatcher;
 use crate::record::Record;
-use crate::role_change::answers_to_the_task;
+use crate::role_change::{answers_to_the_task, Prelude};
 use crate::runtime::{begin, caught, returning};
 use crate::seams::EngineError;
 
@@ -40,7 +40,8 @@ pub(crate) struct Delivering {
     pub(crate) since: i64,
     /// It is a launch's first message.
     pub(crate) launch: bool,
-    /// It is the chief's first message: a handoff, most often.
+    /// It is the chief's first message, a handoff most often, or what a launch put
+    /// ahead of it (the replacement of the role): never given up for being slow.
     pub(crate) chief: bool,
     /// The harness's own queue took it.
     pub(crate) queued: bool,
@@ -59,9 +60,10 @@ pub(crate) struct DeliveryPart {
     /// What goes into the window before anything else of its queue, in this
     /// order and while it waits and may go: a launch that is to say a role
     /// first puts the replacement here, and the message it displaced after it
-    /// ([`Dispatcher::next_in_line`]). Each launch says it anew, and none that
-    /// opened a window leaves it as it was.
-    pub(crate) due: Vec<i64>,
+    /// ([`Dispatcher::next_in_line`]), and owes it until it is told
+    /// ([`Dispatcher::owed`]). Each launch says it anew, and none that opened a
+    /// window leaves it as it was.
+    pub(crate) prelude: Option<Prelude>,
 }
 
 impl Dispatcher {
@@ -143,7 +145,8 @@ impl Dispatcher {
             marker: marker_of(message.id),
             since: self.now(),
             launch: false,
-            chief: false,
+            // What a chief's launch put ahead of its queue is its first messages.
+            chief: self.begins(record, message.id),
             // The harness's own queue took it (a peer inbox, a broker, a
             // plugin): it shows when the harness gets to it, and sending it
             // again would only make a duplicate.
@@ -259,6 +262,11 @@ impl Dispatcher {
             }
             return Ok(());
         }
+        // What went into the chief's window as its first messages (the role its
+        // launch said, the handoff after it) is waited for as a first message is.
+        if delivering.chief {
+            return Ok(());
+        }
         record.delivery.borrow_mut().delivering = None;
         // A paste the harness record never showed after the whole window did
         // not land: sending it again is how it reaches the reader. (A message
@@ -367,7 +375,8 @@ impl Dispatcher {
         // member wrote in it, in order; a tool's output is not the member's
         // words, and nor are the progress notes a harness marks as its
         // commentary: its final answer is the report.
-        let written = answers_to_the_task(&items[start + 1..]);
+        let replacements = self.seams.ledger.borrow().role_notes_to(participant.id)?;
+        let written = answers_to_the_task(&items[start + 1..], &replacements);
         if !written.last().is_some_and(|item| item.complete) {
             return Ok(());
         }

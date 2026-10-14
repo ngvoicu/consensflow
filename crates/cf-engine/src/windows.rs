@@ -375,8 +375,11 @@ impl Dispatcher {
         // told a role that changed since it began, ahead of anything else, once
         // its window is up: the window then opens with no first message.
         let resumed = conversation.as_ref().filter(|_| resume.is_some());
-        let Compared { first, due, role } =
-            self.compare_role(project, participant, resumed, first)?;
+        let Compared {
+            first,
+            prelude,
+            role,
+        } = self.compare_role(project, participant, resumed, first)?;
         let delivering = first.as_ref().map(|first| Delivering {
             message: first.id,
             marker: marker_of(first.id),
@@ -390,7 +393,8 @@ impl Dispatcher {
         // the one that would have been, which the role goes ahead of.
         let failing = delivering
             .clone()
-            .or_else(|| self.displaced(participant, &due));
+            .or_else(|| self.displaced(participant, prelude.as_ref()));
+        let says_the_role = prelude.is_some();
         let planned = match self
             .plan(
                 record,
@@ -548,7 +552,7 @@ impl Dispatcher {
         {
             let mut delivery = record.delivery.borrow_mut();
             delivery.delivering = delivering;
-            delivery.due = due;
+            delivery.prelude = prelude;
         }
         // A window that exited before its open was answered goes as any exit does.
         if let Some(shown) = exited {
@@ -585,7 +589,14 @@ impl Dispatcher {
         if self.forgotten(record) {
             return Ok(());
         }
-        record.window.borrow_mut().relaunch = None;
+        // A launch that is to say the role has not come up until it has: a chief
+        // whose window was given up for it, and is tried again, keeps its count of
+        // failures, so that its wait grows and the human is told once. The
+        // human's Resume and switch clear it, and so does a launch that has no
+        // role to say.
+        if !says_the_role {
+            record.window.borrow_mut().relaunch = None;
+        }
         if let (Ok(Some(native)), Some(conversation)) = (&started, conversation_id) {
             if !native.is_empty() && Some(native) != planned.native_session.as_ref() {
                 self.seams
@@ -805,7 +816,7 @@ impl Dispatcher {
     /// role is withdrawn with it; a chief's stays in its queue (`role_change`).
     /// A participant forgotten while it launched hears nothing and settles
     /// nothing.
-    fn launch_failed(
+    pub(crate) fn launch_failed(
         &self,
         record: &Rc<Record>,
         project: &ProjectView,

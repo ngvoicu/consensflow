@@ -17,7 +17,8 @@ use crate::views::TaskRow;
 /// task it is about, the question it answers, and what it says; whether it
 /// is an answer the asker's own window gave, which is received as it is
 /// written; whether a question's door is shut from the start; a question's
-/// options, an answer's choices, and whether a tell is urgent.
+/// options, an answer's choices, whether a tell is urgent, and the role text a
+/// replacement of a role says, which is what makes a message one.
 #[derive(Default)]
 pub(crate) struct Queued<'a> {
     pub(crate) to: i64,
@@ -31,6 +32,7 @@ pub(crate) struct Queued<'a> {
     pub(crate) questions: Option<&'a [Question]>,
     pub(crate) choices: Option<&'a [Vec<String>]>,
     pub(crate) urgent: bool,
+    pub(crate) role: Option<&'a str>,
 }
 
 /// Writes a message on its way: queued for its recipient, read at once when
@@ -56,8 +58,8 @@ pub(crate) fn queue(
     store.db.execute(
         "INSERT INTO message (project_id, recipient_id, sender_id, kind, task_id, reply_to, body,
                             state, questions, choices, urgent, created_at, delivered_at, receipt,
-                            door_closed_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                            door_closed_at, role_text)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         params![
             project_id,
             message.to,
@@ -74,6 +76,7 @@ pub(crate) fn queue(
             received.as_ref().map(|(at, _)| at),
             received.as_ref().map(|(_, receipt)| receipt),
             message.door_closed.then_some(&at),
+            message.role,
         ],
     )?;
     let id = store.db.last_insert_rowid();
@@ -103,7 +106,8 @@ fn gate_holds(
 
 /// A message to send by handle: from whom (ConsensFlow itself when no one),
 /// to whom, about which task, of what kind, and what it says; a question's
-/// options, and whether a tell is urgent.
+/// options, whether a tell is urgent, and the role text a replacement of a role
+/// says.
 #[derive(Default)]
 pub(crate) struct Sent<'a> {
     pub(crate) from: Option<&'a str>,
@@ -114,6 +118,7 @@ pub(crate) struct Sent<'a> {
     pub(crate) questions: Option<&'a [Question]>,
     pub(crate) urgent: bool,
     pub(crate) door_closed: bool,
+    pub(crate) role: Option<&'a str>,
 }
 
 /// Queues a message by handle, and logs it.
@@ -145,6 +150,7 @@ pub(crate) fn send(
                 questions: message.questions,
                 urgent: message.urgent,
                 door_closed: message.door_closed,
+                role: message.role,
                 ..Queued::default()
             },
         )?;

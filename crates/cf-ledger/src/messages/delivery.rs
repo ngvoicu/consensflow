@@ -13,7 +13,7 @@ use super::again::tell_failed_answer;
 use super::carrying::{adopt, carried, release_carried};
 use super::receipt::reconcile;
 use super::{known_message, message_task, messages, require_message};
-use crate::conversations::set_conversation_role_text;
+use crate::conversations::{current_conversation, set_conversation_role_text};
 use crate::model::{self, sql_list, LedgerError, HELD_TASK_STATES, MEMBER_ROLES};
 use crate::store::Store;
 use crate::tasks::release_ready;
@@ -280,21 +280,31 @@ pub(crate) fn confirm_delivery(
     })
 }
 
-/// The harness's own record proves that a message that says a conversation its
-/// role arrived: the message is confirmed and the conversation recorded as
-/// told `text`, in one write. Neither stands without the other: a note
-/// confirmed with the role not recorded would be said again at the next Resume,
-/// and a role recorded for a note not confirmed would never be.
+/// The harness's own record proves that a message that says its recipient's
+/// conversation a role (its `role_text`) arrived: the message is confirmed and
+/// the recipient's current conversation recorded as told that role, in one write.
+/// Neither stands without the other: a note confirmed with the role not recorded
+/// would be said again at the next Resume, and a role recorded for a note not
+/// confirmed would never be. A message that says no role is confirmed as any is,
+/// and so is one whose recipient has no current conversation (it ended while the
+/// note was on its way): there is none to have told.
 pub(crate) fn confirm_delivery_telling(
     store: &mut Store,
     message_id: i64,
     receipt: Option<&Value>,
-    conversation_id: i64,
-    text: &str,
 ) -> Result<MessageView, LedgerError> {
     store.write(|store| {
         let confirmed = confirm_delivery(store, message_id, receipt)?;
-        set_conversation_role_text(store, conversation_id, text)?;
+        let role: Option<String> = store.db.query_row(
+            "SELECT role_text FROM message WHERE id = ?",
+            [message_id],
+            |row| row.get(0),
+        )?;
+        if let Some(role) = role {
+            if let Some(conversation) = current_conversation(store, confirmed.recipient_id)? {
+                set_conversation_role_text(store, conversation.id, &role)?;
+            }
+        }
         Ok(confirmed)
     })
 }

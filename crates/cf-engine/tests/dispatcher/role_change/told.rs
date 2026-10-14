@@ -281,6 +281,35 @@ fn a_role_too_long_for_one_message_goes_cut_is_not_recorded_as_told_and_the_huma
     context.close();
 }
 
+#[test]
+fn a_long_message_that_says_no_role_goes_cut_as_any_is_and_is_no_role_told_in_part() {
+    let context = codex();
+    let project = project_of(&context, "codex");
+    let chief = context.id(project.id, "chief");
+    // The human's words are longer than a paste is given whole.
+    let long = context.note(project.id, "human", "chief", &"x".repeat(17_000));
+    context.pass().unwrap();
+    context.pass().unwrap();
+
+    assert_eq!(context.message(long.id).state, "delivered");
+    let said = said_to_the_chief(&context);
+    assert!(
+        said.last().is_some_and(
+            |text| text.contains(&format!("read all of it with: cf inbox read m-{}", long.id))
+        ),
+        "it went in cut, as any message that long does"
+    );
+    assert!(
+        told_in_part(&context, project.id).is_empty(),
+        "it said no role, in whole or in part: the human is told nothing of one"
+    );
+    assert_eq!(
+        recorded(&context, chief).as_deref(),
+        Some("instructions for chief")
+    );
+    context.close();
+}
+
 /// What the Resume of a chief whose texts a release rewrote by `extra`
 /// characters and a space comes to: the length in UTF-16 units of the note that
 /// says its role again, whether the role was recorded as told, and how many

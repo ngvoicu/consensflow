@@ -6,6 +6,7 @@ use cf_proto::specs::Variant;
 use serde_json::Value;
 
 use super::*;
+use crate::deliveries::Delivering;
 use crate::delivery_text::{delivery_text, goes_whole};
 use crate::roles::{role_instructions, ProjectSpecs, StaffRow};
 use crate::testing::Context;
@@ -48,53 +49,69 @@ fn a_replacement_says_plainly_that_it_replaces_the_instructions_the_conversation
 }
 
 #[test]
-fn the_role_a_replacement_says_is_what_follows_its_opening_and_no_other_note_says_one() {
-    for role in [
-        "a role",
-        "the role\nin full\n",
-        "",
-        "quotes \"and\" `ticks` \\ ✓",
-    ] {
-        let replacement = note(None, "note", body_of(role));
-        assert_eq!(instructions_of(&replacement), Some(role), "{role:?}");
-    }
-    let lookalike = format!("{OPENING} but no blank line and no role");
-    assert_eq!(instructions_of(&note(None, "note", lookalike)), None);
-    // Not from ConsensFlow, or not a note, or not opening as one does.
-    for other in [
-        note(Some("chief"), "note", body_of("a role")),
-        note(None, "question", body_of("a role")),
-        note(None, "note", format!("Quoted: {}", body_of("a role"))),
-        note(
-            None,
-            "note",
-            "ConsensFlow stopped in the middle of your turn".to_owned(),
-        ),
-    ] {
-        assert_eq!(instructions_of(&other), None, "{}", other.body);
-    }
+fn the_ledger_knows_a_replacement_by_the_role_it_was_written_to_say_and_no_note_by_its_opening() {
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    let chief = context.id(project.id, "chief");
+    let said = context
+        .ledger
+        .borrow_mut()
+        .note_role(project.id, "chief", &body_of("a role"), "a role")
+        .unwrap();
+    // The same words, from ConsensFlow itself and from a participant, and the
+    // opening quoted: none of them says a role.
+    let alike = context.note_from_consensflow(project.id, "chief", &body_of("a role"));
+    let by_zeus = context.note(project.id, "zeus", "chief", &body_of("a role"));
+    let quoting = context.note(project.id, "zeus", "chief", &format!("Quoted: {OPENING}"));
+    let hand_off = context.note_from_consensflow(
+        project.id,
+        "chief",
+        "ConsensFlow stopped in the middle of your turn, which was cut.",
+    );
+    assert_eq!(
+        context.ledger.borrow().role_notes_to(chief).unwrap(),
+        [said.id],
+        "{:?}",
+        [alike.id, by_zeus.id, quoting.id, hand_off.id]
+    );
+    // What it is, the replacement is for good, whatever became of it.
+    context
+        .ledger
+        .borrow_mut()
+        .cancel_message(said.id, "withdrawn")
+        .unwrap();
+    assert_eq!(
+        context.ledger.borrow().role_notes_to(chief).unwrap(),
+        [said.id]
+    );
+    context.close();
 }
 
 #[test]
-fn a_replacement_is_a_note_from_consensflow_that_opens_as_one_does_and_no_other_is() {
-    let replacement = body_of("a role");
-    assert!(is_replacement(&note(None, "note", replacement.clone())));
-    assert!(!is_replacement(&note(
-        Some("chief"),
-        "note",
-        replacement.clone()
-    )));
-    assert!(!is_replacement(&note(None, "question", replacement)));
-    assert!(!is_replacement(&note(
-        None,
-        "note",
-        "ConsensFlow stopped in the middle of your turn, which was cut.".to_owned()
-    )));
-    assert!(!is_replacement(&note(
-        None,
-        "note",
-        format!("Quoted: {OPENING}")
-    )));
+fn a_launch_writes_the_replacement_as_the_note_the_ledger_knows_and_whose_words_it_wrote() {
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    let chief = context.id(project.id, "chief");
+    let participant = context
+        .project(project.id)
+        .participants
+        .into_iter()
+        .find(|participant| participant.role == "chief")
+        .expect("a chief");
+    let role = RoleText {
+        specs: None,
+        instructions: "the role\nin full".to_owned(),
+    };
+    let written = context
+        .dispatcher
+        .replace_role(&context.project(project.id), &participant, &role)
+        .unwrap();
+    assert_eq!(written.body, body_of("the role\nin full"));
+    assert_eq!(
+        context.ledger.borrow().role_notes_to(chief).unwrap(),
+        [written.id]
+    );
+    context.close();
 }
 
 /// The real text of a chief with `rows` staff rows who each hold two roles, with
@@ -268,20 +285,6 @@ fn the_command_line_of_a_windows_launch_is_the_size_the_docs_say() {
     );
 }
 
-#[test]
-fn a_message_of_a_conversation_says_a_replacement_where_it_holds_the_opening_of_one() {
-    let said = delivery_text(&note(None, "note", body_of("a role")), &[]);
-    assert!(says_a_replacement(&said));
-    for other in [
-        "Write the parser",
-        "ConsensFlow stopped in the middle of your turn, which was cut.",
-        "Your ConsensFlow role instructions have changed",
-        "",
-    ] {
-        assert!(!says_a_replacement(other), "{other:?}");
-    }
-}
-
 /// An item of a conversation's record, from `role`, saying `text`.
 fn said_by(role: Role, text: &str, complete: bool) -> Item {
     Item {
@@ -294,12 +297,39 @@ fn said_by(role: Role, text: &str, complete: bool) -> Item {
     }
 }
 
-/// What the answers of a record, as `answers_to_the_task` says them, say.
+/// What the answers of a record, as `answers_to_the_task` says them with
+/// m-4242 the one replacement the ledger knows, say.
 fn answers(items: &[Item]) -> Vec<String> {
-    answers_to_the_task(items)
+    answers_to_the_task(items, &[4242])
         .into_iter()
         .map(|item| item.text.to_string())
         .collect()
+}
+
+#[test]
+fn a_turn_of_a_record_answers_a_replacement_by_the_id_in_its_header_and_no_words_it_quotes() {
+    let user = |text: &str| said_by(Role::User, text, true);
+    let assistant = |text: &str| said_by(Role::Assistant, text, true);
+    let replacement = delivery_text(&note(None, "note", body_of("a role")), &[]);
+    // The opening, and the whole text of the replacement, quoted in a note about
+    // the task (m-7), from someone: the worker's word answers the task.
+    let mut quoting = note(Some("chief"), "note", format!("Review this: {replacement}"));
+    quoting.id = 7;
+    quoting.task_number = Some(1);
+    let quoted = delivery_text(&quoting, &[]);
+    assert!(quoted.contains(OPENING), "{quoted}");
+    assert_eq!(
+        answers(&[user(&quoted), assistant("Parser done")]),
+        ["Parser done"]
+    );
+    // The same id, as the ledger says no replacement it knows: no turn of the role.
+    assert_eq!(
+        answers_to_the_task(&[user(&replacement), assistant("Understood.")], &[])
+            .into_iter()
+            .map(|item| item.text.to_string())
+            .collect::<Vec<_>>(),
+        ["Understood."]
+    );
 }
 
 #[test]
@@ -349,6 +379,53 @@ fn the_words_a_window_gives_a_replacement_of_its_role_are_no_answer_to_its_task(
 }
 
 #[test]
+fn a_displaced_message_that_rides_in_the_paste_of_another_is_not_begun_and_its_launch_is_not_refused(
+) {
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    let brief = context
+        .give(project.id, "zeus", "Write the parser")
+        .message
+        .expect("its brief");
+    // The task is paused and resumed before the brief went in: the words that
+    // resume it carry the brief in their paste.
+    context
+        .ledger
+        .borrow_mut()
+        .pause_task(project.id, 1, None, Some("a test pauses it"))
+        .unwrap();
+    context
+        .ledger
+        .borrow_mut()
+        .resume_task(project.id, 1, Some("chief"), "Go on")
+        .unwrap();
+    let displaced = Delivering {
+        message: brief.id,
+        marker: marker_of(brief.id),
+        since: 0,
+        launch: true,
+        chief: false,
+        queued: false,
+        entered_again: false,
+    };
+    assert!(
+        context
+            .ledger
+            .borrow_mut()
+            .begin_delivery(brief.id)
+            .is_err(),
+        "the brief rides in another message's paste now"
+    );
+    context.dispatcher.begin_displaced(&displaced).unwrap();
+    assert_eq!(
+        context.message(brief.id).state,
+        "queued",
+        "it goes with its carrier, and there is nothing of it to fail"
+    );
+    context.close();
+}
+
+#[test]
 fn a_replacement_whose_recipient_has_no_conversation_any_more_is_confirmed_and_records_nothing() {
     let context = Context::new();
     let project = context.with_staff(&["zeus"]);
@@ -365,7 +442,16 @@ fn a_replacement_whose_recipient_has_no_conversation_any_more_is_confirmed_and_r
         .borrow_mut()
         .set_conversation_role_text(conversation.id, "the role it began with")
         .unwrap();
-    let said = context.note_from_consensflow(project.id, "chief", &body_of("the role it is now"));
+    let said = context
+        .ledger
+        .borrow_mut()
+        .note_role(
+            project.id,
+            "chief",
+            &body_of("the role it is now"),
+            "the role it is now",
+        )
+        .unwrap();
     let begun = context.ledger.borrow_mut().begin_delivery(said.id).unwrap();
     // The conversation ended while the note was on its way.
     context

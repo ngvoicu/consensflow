@@ -19,7 +19,7 @@ const UNDERSTOOD: &str = "Understood.";
 /// A project whose chief is on Claude and whose one worker is a Codex member,
 /// with the session that did T-1, a task it finished: its window answered, and
 /// the task is done. Its handle, and its id.
-fn finished_session(context: &Context) -> (ProjectView, String, i64) {
+pub(super) fn finished_session(context: &Context) -> (ProjectView, String, i64) {
     let project = working_session(context);
     let session = session_of(context, &project);
     context.codex.answer(&session, "Parser done");
@@ -60,7 +60,7 @@ fn session_of(context: &Context, project: &ProjectView) -> String {
 }
 
 /// The chief gives the session that did T-1 a follow-up.
-fn follow_up(context: &Context, project: &ProjectView, body: &str) {
+pub(super) fn follow_up(context: &Context, project: &ProjectView, body: &str) {
     context.create_task(
         project.id,
         NewTask {
@@ -73,7 +73,7 @@ fn follow_up(context: &Context, project: &ProjectView, body: &str) {
 }
 
 /// What was said to the window of `session`, in order: what its record holds.
-fn said_to(context: &Context, session: &str) -> Vec<String> {
+pub(super) fn said_to(context: &Context, session: &str) -> Vec<String> {
     context
         .codex
         .agent(session)

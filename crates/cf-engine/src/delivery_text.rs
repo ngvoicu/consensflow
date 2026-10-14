@@ -112,12 +112,27 @@ fn label(row: &MessageView) -> String {
     }
 }
 
+/// Where every message's header begins, whatever the message is.
+const HEADER_START: &str = "[ConsensFlow m-";
+
 /// The start of a message's header, as a window's record shows it once the
 /// message arrived. The space after the id keeps m-1 from matching m-12; what
 /// follows it is not part of the marker, since a window may not keep the ·
 /// (Devin on Windows takes it as |, see `console_text`).
 pub fn marker_of(message_id: i64) -> String {
-    format!("[ConsensFlow m-{message_id} ")
+    format!("{HEADER_START}{message_id} ")
+}
+
+/// The message a window's record item, text of what it was given, is: the one
+/// whose header comes first in it. A paste begins with its own header, and
+/// carries the rows it keeps for the window under no header of their own, so
+/// what comes first is the message; a header that the words of a message quote
+/// comes after it, and is the message's no more than any other words are. None
+/// where the text holds no header.
+pub fn header_id(text: &str) -> Option<i64> {
+    let after = &text[text.find(HEADER_START)? + HEADER_START.len()..];
+    let digits = after.bytes().take_while(u8::is_ascii_digit).count();
+    after[..digits].parse().ok()
 }
 
 /// The first `OPENING` UTF-16 code units of `body`, and not the half of a
@@ -240,6 +255,24 @@ mod tests {
                 !whole
             );
         }
+    }
+
+    #[test]
+    fn an_item_is_the_message_whose_header_comes_first_in_it_and_no_other_it_quotes() {
+        let said = message(12, Some(3), "Look at what m-5 said".to_owned());
+        let text = delivery_text(&said, &[]);
+        assert_eq!(header_id(&text), Some(12));
+        // A window that frames what it was given still shows the header first.
+        assert_eq!(header_id(&format!("> {text}")), Some(12));
+        // The header another message has, quoted in the words of this one, is not this one's.
+        let quoting = message(13, Some(3), format!("As {} said: be brief", marker_of(5)));
+        assert_eq!(header_id(&delivery_text(&quoting, &[])), Some(13));
+        // No header, or one cut short of its id: no message.
+        assert_eq!(header_id("Understood."), None);
+        assert_eq!(header_id("see [ConsensFlow m-x"), None);
+        assert_eq!(header_id(&marker_of(7)), Some(7));
+        // What the marker proves arrived is the same header.
+        assert!(text.contains(&marker_of(12)));
     }
 
     #[test]

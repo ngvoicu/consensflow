@@ -37,3 +37,7 @@ pub use seams::{
     FakeRoster, FakeTrace, MODELS,
 };
 pub use time::TestTime;
+
+/// What a note that replaces a role says before the role text, which a test
+/// that quotes it to the window of a worker needs word for word.
+pub const REPLACEMENT_OPENING: &str = crate::role_change::OPENING;

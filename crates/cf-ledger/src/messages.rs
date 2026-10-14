@@ -6,8 +6,10 @@
 //! word to another until the human passes it on or declines it (`gate`); the
 //! one asked, told to answer again when an answer did not stand (`again`); and
 //! the note that tells a requester its tasks stalled, one for the tasks of a
-//! pass, which goes when they are resumed (`pauses`); and the note that tells
-//! it a task is held for its member's quota, and that it goes on (`holds`).
+//! pass, which goes when they are resumed (`pauses`); the note that tells
+//! it a task is held for its member's quota, and that it goes on (`holds`); and
+//! the note that says a conversation its role again, which the ledger knows for
+//! one (`roles`).
 
 mod again;
 mod carrying;
@@ -16,6 +18,7 @@ mod gate;
 mod holds;
 mod pauses;
 mod receipt;
+mod roles;
 
 use cf_proto::ledger::{MessageView, Question};
 use rusqlite::{params, OptionalExtension};
@@ -43,6 +46,7 @@ pub(crate) use receipt::{
     claim_answer, door_born_closed, receive_read, reconcile, release_all_claims, release_claims,
     settle_claim,
 };
+pub(crate) use roles::{note_role, role_notes_to};
 
 /// A note: from a participant (ConsensFlow itself when none) to another,
 /// about one of the project's tasks or none.
@@ -159,6 +163,7 @@ pub(crate) fn ask(
                 questions: options.as_deref(),
                 urgent: question.urgent,
                 door_closed: shut,
+                ..Sent::default()
             },
         )?;
         if let Some(row) = asking {
