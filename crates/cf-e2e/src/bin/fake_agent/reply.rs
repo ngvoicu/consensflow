@@ -66,6 +66,10 @@ use crate::agents::Agents;
 use crate::background::{Jobs, Server, THINKING};
 use crate::stop::Stop;
 
+/// How long the shell that detaches a job may take to end: a PowerShell's
+/// `Start-Process` takes a second or two, a `/bin/sh` a moment.
+const DETACHED_SHELL: Duration = Duration::from_secs(30);
+
 /// What a window knows of itself that decides how it answers.
 pub struct Window {
     /// The participant the daemon named this window for (`worker-amber-pine`).
@@ -257,12 +261,24 @@ pub fn reply_to(text: &str, window: &Window) -> Result<Reply, String> {
         let (wake, woken) = (window.wake.clone(), format!("WOKEN {words}"));
         // A command the agent's tool runs is run by a shell in a group of its own, as a
         // harness runs it, which waits for it or, as the agents of the harnesses do
-        // when they leave a job, detaches it and ends.
+        // when they leave a job, detaches it and ends. A tool that detached a job
+        // returns once its shell has ended, and only then does the agent answer: an
+        // answer while the shell still ran left the job under a running shell, the
+        // turn's work by the chain (a PowerShell's `Start-Process` takes a second or
+        // two: Windows CI and zeewin, 2026-10-14).
+        let (shell_ended, ended) = std::sync::mpsc::channel();
         window.jobs.start("job", seconds, deaf, detached, move || {
             if wakes {
                 let _ = wake.send(woken);
             }
+            let _ = shell_ended.send(());
         })?;
+        if detached && ended.recv_timeout(DETACHED_SHELL).is_err() {
+            return Err(format!(
+                "BACKGROUND --detach: the shell that detached the job did not end in {} s",
+                DETACHED_SHELL.as_secs()
+            ));
+        }
         return Ok(Reply::Text(words));
     }
     if let Some(agents) = pattern::once(&AGENTS, r"(?m)^AGENTS (\d+) (\d+) (.+)$").captures(text) {
