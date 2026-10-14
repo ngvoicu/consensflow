@@ -430,6 +430,45 @@ fn what_is_still_there_a_moment_later_is_what_both_looks_find_by_number_and_star
 }
 
 #[test]
+fn what_an_ending_ended_started_is_what_still_runs_of_it_and_a_process_that_ended_by_itself_is_no_part_of_it(
+) {
+    // What a look of the handles an ending holds lists, a moment after its first look: the
+    // two shells it ended (`40`, and `50`, which it could not end and runs), the ping the
+    // first of them started that ended by itself meanwhile (`41`), which is still the
+    // parent it names to what it started, and what the shells started while they were
+    // given the grace (`42`, `51`, and `43`, which the ping started).
+    let tree = [
+        program(),
+        member(40, "powershell -Command ping -n 2", "powershell", of(10)),
+        member(41, "PING.EXE -n 2 127.0.0.1", "ping", of(40)),
+        member(42, "PING.EXE -n 7 127.0.0.1", "ping", of(40)),
+        member(43, "sleep 600", "sleep", of(41)),
+        member(50, "powershell -Command ping -n 1006", "powershell", of(10)),
+        member(51, "PING.EXE -n 1006 127.0.0.1", "ping", of(50)),
+        // The window's own, which no shell of the roots started.
+        member(60, "node server.js", "node", of(10)),
+    ];
+    let keys = |pids: &[u32]| -> HashSet<ProcessKey> { pids.iter().map(|pid| key(*pid)).collect() };
+    let (roots, running) = (keys(&[40, 50]), keys(&[10, 42, 43, 50, 51, 60]));
+
+    let mut found: Vec<u32> = started_by(&roots, &tree, &running)
+        .iter()
+        .map(|key| key.pid)
+        .collect();
+    found.sort_unstable();
+
+    assert_eq!(
+        found,
+        [42, 43, 51],
+        "what runs, and none that ended or is a root"
+    );
+    assert!(
+        descending_from(&roots, &tree).contains(&key(41)),
+        "a look that asks only who started whom takes the ping that ended for theirs"
+    );
+}
+
+#[test]
 fn what_an_ending_could_not_end_is_left_and_said_so() {
     let chosen = vec![
         member(1, "sleep 1", "sleep", of(10)),

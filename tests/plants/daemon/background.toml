@@ -1976,6 +1976,26 @@ find = '''
 replace = ''
 
 [[plant]]
+name = "background second look: an ending takes for what its processes started one that ended by itself, which a handle held keeps"
+meant = "what_an_ending_ended_started_is_what_still_runs_of_it_and_a_process_that_ended_by_itself_is_no_part_of_it"
+runs = ["panes-lib-background"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/background.rs"
+find = '        .filter(|key| !roots.contains(key) && running.contains(key))'
+replace = '        .filter(|key| !roots.contains(key))'
+
+[[plant]]
+name = "background second look: an ending takes for what its processes started a process it ended and could not end"
+meant = "what_an_ending_ended_started_is_what_still_runs_of_it_and_a_process_that_ended_by_itself_is_no_part_of_it"
+runs = ["panes-lib-background"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/background.rs"
+find = '        .filter(|key| !roots.contains(key) && running.contains(key))'
+replace = '        .filter(|key| running.contains(key))'
+
+[[plant]]
 name = "background second look: a quit looks at what each window left, with no one to tell"
 meant = "a_quit_ends_a_window_without_looking_at_what_it_left_running"
 runs = ["panes-lib-turn"]
