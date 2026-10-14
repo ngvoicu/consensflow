@@ -61,6 +61,8 @@ panes-lib-tree = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "proc
 panes-lib-turn = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "turn"]
 # The pane host's tests of how a window closes.
 panes-lib-close = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "close"]
+# What the Windows tests of an ending read of a pane's job, held on a list of members.
+panes-lib-job = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "ending_tests::job"]
 # The sentinel its real-process tests keep outside the window, which must say when it was ended.
 panes-lib-sentinel = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "sentinel"]
 # The guard of a test build's real signals, whose tests send signal 0 or none.
@@ -1320,6 +1322,29 @@ runs = ["panes-lib-tree"]
 file = "crates/cf-panes/src/job_object.rs"
 find = 'TerminateProcess(self.0, 1)'
 replace = 'TerminateProcess(self.0, 2)'
+
+# What the Windows tests of an ending read of a pane's job, which is held here on a list of
+# members: a job left once its shell has ended is told by no process of the job having
+# started it, never by the command lines of the whole job, whose window's own program has
+# the shell's `-Command` while it runs (the PTY tests' watchdog ended the Windows run on
+# that, 2026-10-14).
+
+[[plant]]
+name = "background windows: a job's shell is told to have gone by the command lines of the whole job"
+meant = "a_job_is_on_its_own_once_its_shell_has_gone_whatever_the_windows_own_program_says"
+runs = ["panes-lib-job"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/turn/ending_tests/job.rs"
+find = '''
+        .any(|member| member.parent.is_none() && member.command.to_lowercase().contains(words))'''
+replace = '''
+        .any(|member| {
+            member.command.to_lowercase().contains(words)
+                && !job
+                    .iter()
+                    .any(|other| other.command.to_lowercase().contains("-command"))
+        })'''
 
 # The guard of a test build's real signals (see the head of this file): what the senders ask
 # of it, and the snapshot it guards against. None edits the guard.

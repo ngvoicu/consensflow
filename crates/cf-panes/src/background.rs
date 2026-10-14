@@ -34,12 +34,15 @@
 //! job an agent detached with `nohup … &` or `Start-Process` from a shell that then
 //! ended) has no chain to look at, and its being a shell, or having no parent, is no
 //! proof of whose it is: it is left running, not ended and not named, until its window
-//! closes. Nor is anything the host can tell the harness's own ever the turn's, by
-//! where the harness keeps its servers or by the programs it is named for
-//! ([`harness`] says how); and what it has seen to be the harness's it keeps for its
-//! own as long as it runs ([`Baseline::turn_work`] remembers it), whatever becomes of
-//! the process that started it. So what is listed, ended and named is the turn's work
-//! and nothing of the rest, and a process that cannot be told is left as it is.
+//! closes, which ends it where the tree finds it the window's (always on Windows; on
+//! the Mac not a command left by a shell that leads a session of its own, Pi's, which
+//! runs on after the close too). Nor is anything the host can tell the harness's own
+//! ever the turn's, by where the harness keeps its servers or by the programs it is
+//! named for ([`harness`] says how); and what it has seen to be the harness's it keeps
+//! for its own as long as it runs ([`Baseline::turn_work`] remembers it), whatever
+//! becomes of the process that started it. So what is listed, ended and named is the
+//! turn's work and nothing of the rest, and a process that cannot be told is left as
+//! it is.
 //!
 //! An ending is bound to the turn it ends. What it ends is chosen once, when it
 //! begins, and is those processes and what they start while they end
