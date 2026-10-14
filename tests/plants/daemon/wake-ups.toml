@@ -220,7 +220,7 @@ runs = ["ledger-wake-ups"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/wake_ups/due.rs"
-find = '    typed_since(store, chief.id, &last.at)'
+find = '    typed_since(store, chief.id, &last.at, last.message)'
 replace = '    Ok(false)'
 
 [[plant]]
@@ -230,8 +230,8 @@ runs = ["ledger-wake-ups"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/conversations/transcripts.rs"
-find = '    Ok(items.iter().any(|text| header_of(text).is_none()))'
-replace = '    Ok(!items.is_empty())'
+find = '        header_of(text).is_none() && delivered_at(*conversation).is_none_or(|at| *seq > at)'
+replace = '        !text.is_empty() || delivered_at(*conversation).is_none_or(|at| *seq > at)'
 
 [[plant]]
 name = "wake-up: an item copied again as it was is new each time"

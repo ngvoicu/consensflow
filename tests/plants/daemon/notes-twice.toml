@@ -82,8 +82,8 @@ runs = ["engine-slow-records"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/arrival.rs"
-find = "        if rested <= self.seams.limits.arrival_ms {"
-replace = "        if rested <= self.seams.limits.arrival_ms || turned {"
+find = "        if rested <= self.seams.limits.arrival_ms && !overdue {"
+replace = "        if (rested <= self.seams.limits.arrival_ms || turned) && !overdue {"
 
 [[plant]]
 name = "notes twice: the board does not say a paste was tried again after its window's turn"
