@@ -18,6 +18,8 @@
 // of a binary's root file beside it, where each would be a binary of its own.
 #[path = "fake_devin/args.rs"]
 mod args;
+#[path = "fake_devin/command.rs"]
+mod command;
 #[path = "fake_devin/escapes.rs"]
 mod escapes;
 #[path = "fake_agent/signals.rs"]
@@ -120,10 +122,16 @@ fn run(launch: &Launch, signals: signals::Signals) -> Result<Infallible, String>
 
     let stop = Arc::new(Stop::default());
     let (turns, queued) = mpsc::channel::<String>();
+    // The jobs of a window are in `jobs/` beside the daemon's home, where the rig looks.
+    let jobs = own_var("CONSENSFLOW_HOME")
+        .and_then(|home| Path::new(&home).parent().map(|folder| folder.join("jobs")));
     {
         let stop = Arc::clone(&stop);
         thread::spawn(move || {
             let mut window = Window::new(store, wire, stop, io::stdout());
+            if let Some(folder) = jobs {
+                window = window.leaving_jobs_in(folder, std::process::id(), command::THINKING);
+            }
             // One turn at a time, in the order the messages came.
             for text in queued {
                 if let Err(failed) = window.take(&text) {

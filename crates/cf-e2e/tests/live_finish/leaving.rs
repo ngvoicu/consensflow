@@ -149,7 +149,7 @@ pub struct Left {
     pub alive: Vec<u64>,
     /// The command lines of the machine's processes that run the command, looked at once
     /// the task was done and the chief told: what escaped the ending, where the host
-    /// listed none.
+    /// listed none, each with where it stands on a Unix machine ([`standing`]).
     pub escaped: Vec<String>,
     /// What of `escaped` still ran when the window had closed, which ends what its tree
     /// finds: none where the close ended it unsaid. None where nothing escaped, or the
@@ -189,9 +189,10 @@ pub fn judge(left: &Left) -> Result<(), Vec<String>> {
     if left.listed.is_empty() {
         if !left.escaped.is_empty() {
             problems.push(format!(
-                "the command escaped the ending: the pane host never listed it, and it still ran once the task was done and the chief told (the agent detached it from the shell that started it, which ended, so no chain of processes that run led from it to a shell the harness started): {}; {}",
+                "the command escaped the ending: the pane host never listed it, and it still ran once the task was done and the chief told (the agent detached it from the shell that started it, which ended, so no chain of processes that run led from it to a shell the harness started): {}; {}{}",
                 left.escaped.join("; "),
-                close.unwrap_or_default()
+                close.unwrap_or_default(),
+                without_a_terminal(&left.escaped)
             ));
         }
     } else {
@@ -232,6 +233,17 @@ pub fn judge(left: &Left) -> Result<(), Vec<String>> {
         Ok(())
     } else {
         Err(problems)
+    }
+}
+
+/// What to read of a command that escaped and has no terminal (`terminal ??`, [`standing`]):
+/// that it is in a session of its own, and the window's close ends only what runs in the
+/// session its program leads. Nothing where no line says it.
+fn without_a_terminal(escaped: &[String]) -> &'static str {
+    if escaped.iter().any(|line| line.ends_with(", terminal ??)")) {
+        " (terminal ??: it has none, so it is in a session of its own, and the window's close ends only what runs in the session its program leads)"
+    } else {
+        ""
     }
 }
 
@@ -466,8 +478,9 @@ fn pid_of(line: &str) -> Option<u32> {
 }
 
 /// The command lines of the machine's processes whose command holds `wanted` now, each
-/// after the process's number: `ps` on Unix, the process table through PowerShell on
-/// Windows. None where neither answers.
+/// after the process's number: `ps` on Unix, which says where each stands too
+/// ([`standing`]), the process table through PowerShell on Windows. None where neither
+/// answers.
 fn on_the_machine(wanted: &str) -> Vec<String> {
     let ran = if cfg!(windows) {
         Run::new("powershell")
@@ -480,7 +493,7 @@ fn on_the_machine(wanted: &str) -> Vec<String> {
             .run()
     } else {
         Run::new("ps")
-            .args(["-axo", "pid=,command="])
+            .args(["-axo", "pid=,ppid=,pgid=,tty=,command="])
             .inheriting_env()
             .run()
     };
@@ -490,11 +503,37 @@ fn on_the_machine(wanted: &str) -> Vec<String> {
             ran.stdout
                 .lines()
                 .map(str::trim)
+                .filter_map(|line| {
+                    if cfg!(windows) {
+                        Some(line.to_owned())
+                    } else {
+                        standing(line)
+                    }
+                })
                 .filter(|line| line.contains(wanted))
-                .map(str::to_owned)
                 .collect()
         })
         .unwrap_or_default()
+}
+
+/// A line of `ps -axo pid=,ppid=,pgid=,tty=,command=` as the run says a process: its number
+/// and command line, then where it stands: the process that started it (the system's init
+/// once that has gone), its process group, and its terminal. A command the window's close
+/// finds by the session its program leads has the window's terminal; one with none (`??`)
+/// is in a session of its own, which no pane has, and the close does not find it. None for
+/// a line that says no command.
+fn standing(line: &str) -> Option<String> {
+    let mut words = line.split_whitespace();
+    let (pid, parent, group, terminal) =
+        (words.next()?, words.next()?, words.next()?, words.next()?);
+    let command: Vec<&str> = words.collect();
+    if command.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "{pid} {} (parent {parent}, group {group}, terminal {terminal})",
+        command.join(" ")
+    ))
 }
 
 /// The processes of `listed` that are still running.

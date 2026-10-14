@@ -85,6 +85,34 @@ impl Wire {
     pub fn ended(&mut self, cause: &str, client: &str) -> io::Result<()> {
         self.record(json!({ "turnClientMessageId": client, "cause": cause }))
     }
+
+    /// The agent begins a call of its shell tool that runs `command`: its turn is at work.
+    pub fn called(&mut self, command: &str, client: &str) -> io::Result<()> {
+        self.record(json!({
+            "turnClientMessageId": client,
+            "update": {
+                "sessionUpdate": "tool_call",
+                "rawInput": { "command": command },
+            },
+        }))
+    }
+
+    /// The call goes on to say what its command printed, once its turn has ended as
+    /// well: what a command that reports (a ping says a line a second) leaves on the wire.
+    pub fn reported(&mut self, line: &str) -> io::Result<()> {
+        self.record(json!({
+            "update": { "sessionUpdate": "tool_call_update", "content": line },
+        }))
+    }
+
+    /// Another handle on the same log, for a thread of its own to write what a command
+    /// reports: a record is one write, so what two write is never cut in two.
+    pub fn another(&self) -> io::Result<Self> {
+        Ok(Self {
+            file: self.file.try_clone()?,
+            session: self.session.clone(),
+        })
+    }
 }
 
 #[cfg(test)]
@@ -148,6 +176,29 @@ mod tests {
         let records = records(&path);
         assert_eq!(records[0]["method"], "session/cancel");
         assert_eq!(records[1]["cause"], "cancelled");
+    }
+
+    #[test]
+    fn a_command_the_turn_left_goes_on_reporting_in_records_of_a_tool_after_the_turn_ended() {
+        let folder = tempfile::tempdir().unwrap();
+        let path = folder.path().join("wire.jsonl");
+        let mut wire = Wire::open(&path, "calm-river").unwrap();
+        wire.called("sleep 600", "client-1").unwrap();
+        wire.ended("complete", "client-1").unwrap();
+        // A thread of its own writes beside the turn's, to the same log.
+        let mut apart = wire.another().unwrap();
+        apart.reported("tick").unwrap();
+        wire.reported("tock").unwrap();
+        let records = records(&path);
+        assert_eq!(records.len(), 4);
+        assert_eq!(records[0]["update"]["sessionUpdate"], "tool_call");
+        assert_eq!(records[0]["update"]["rawInput"]["command"], "sleep 600");
+        assert_eq!(records[1]["cause"], "complete");
+        for (record, line) in records[2..].iter().zip(["tick", "tock"]) {
+            assert_eq!(record["sessionId"], "calm-river");
+            assert_eq!(record["update"]["sessionUpdate"], "tool_call_update");
+            assert_eq!(record["update"]["content"], line);
+        }
     }
 
     #[test]

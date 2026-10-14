@@ -8,6 +8,7 @@
 use std::path::{Path, PathBuf};
 
 use cf_e2e::live::members::{plural, squash};
+use cf_e2e::live::wire::{kind_of, newest, runs};
 use serde_json::Value;
 
 /// A wire log, and how many records it held at the pause.
@@ -20,17 +21,10 @@ impl Wire {
     /// The newest wire log of Devin's launches in the home, as it is now: none
     /// where there is no Devin launch.
     pub fn open(home: &Path) -> Option<Self> {
-        let launches = std::fs::read_dir(home.join("integrations").join("devin")).ok()?;
-        let file = launches
-            .filter_map(std::result::Result::ok)
-            .map(|launch| launch.path().join("wire.jsonl"))
-            .filter_map(|file| {
-                let modified = std::fs::metadata(&file).ok()?.modified().ok()?;
-                Some((modified, file))
-            })
-            .max_by_key(|(modified, _)| *modified)
-            .map(|(_, file)| file)?;
-        let mut wire = Self { file, before: 0 };
+        let mut wire = Self {
+            file: newest(home)?,
+            before: 0,
+        };
         wire.before = wire.records().len();
         Some(wire)
     }
@@ -120,57 +114,6 @@ pub fn missing(home: &Path) -> String {
     )
 }
 
-/// What a record of the wire is: the method a request makes, the cause that ends a
-/// turn, the kind of update it carries, or an error.
-fn kind_of(record: &str) -> String {
-    let Ok(record) = serde_json::from_str::<Value>(record) else {
-        return "unreadable".to_owned();
-    };
-    if let Some(method) = record["method"].as_str() {
-        return format!("method:{method}");
-    }
-    if let Some(cause) = record["cause"].as_str() {
-        return format!("cause:{cause}");
-    }
-    if let Some(update) = record["update"]["sessionUpdate"].as_str() {
-        return update.to_owned();
-    }
-    if record.get("error").is_some() {
-        return "error".to_owned();
-    }
-    "other".to_owned()
-}
-
-/// How many runs of records a line of the case quotes, the last.
-const RUNS: usize = 8;
-
-/// The records as runs of their kinds: `agent_message_chunk ×412, cause:cancelled`.
-pub fn runs(records: &[String]) -> String {
-    let mut found: Vec<(String, usize)> = Vec::new();
-    for record in records {
-        let kind = kind_of(record);
-        match found.last_mut() {
-            Some((last, count)) if *last == kind => *count += 1,
-            _ => found.push((kind, 1)),
-        }
-    }
-    if found.is_empty() {
-        return "nothing".to_owned();
-    }
-    let cut = found.len().saturating_sub(RUNS);
-    let said: Vec<String> = found[cut..]
-        .iter()
-        .map(|(kind, count)| {
-            if *count == 1 {
-                kind.clone()
-            } else {
-                format!("{kind} ×{count}")
-            }
-        })
-        .collect();
-    format!("{}{}", if cut > 0 { "… " } else { "" }, said.join(", "))
-}
-
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -179,39 +122,6 @@ mod tests {
 
     fn record(value: Value) -> String {
         value.to_string()
-    }
-
-    #[test]
-    fn the_wire_is_said_in_runs_of_its_records_and_a_cancel_shows_as_one() {
-        let chunk = record(json!({ "update": { "sessionUpdate": "agent_message_chunk" } }));
-        let cancel = record(json!({ "method": "session/cancel", "sessionId": "s" }));
-        let ended = record(json!({ "sessionId": "s", "cause": "cancelled" }));
-        let wire = [
-            chunk.clone(),
-            chunk.clone(),
-            chunk.clone(),
-            cancel,
-            chunk,
-            ended,
-            "not json".to_owned(),
-            record(json!({ "error": { "code": 1 } })),
-            record(json!({ "id": 3 })),
-        ];
-        assert_eq!(
-            runs(&wire),
-            "agent_message_chunk ×3, method:session/cancel, agent_message_chunk, cause:cancelled, unreadable, error, other"
-        );
-        assert_eq!(runs(&[]), "nothing");
-    }
-
-    #[test]
-    fn a_long_wire_is_said_by_its_last_runs() {
-        let kinds = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j"];
-        let wire: Vec<String> = kinds
-            .iter()
-            .map(|kind| record(json!({ "update": { "sessionUpdate": kind } })))
-            .collect();
-        assert_eq!(runs(&wire), "… c, d, e, f, g, h, i, j");
     }
 
     #[test]

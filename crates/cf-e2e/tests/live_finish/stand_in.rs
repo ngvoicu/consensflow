@@ -97,6 +97,9 @@ fn a_stand_in_that_detaches_its_job_from_its_shell_escapes_the_ending_and_the_ru
     );
     let said = "it still runs after the window closed, which found nothing of it: ";
     assert!(text.contains(said), "{text}");
+    // The run says where the job stands: in a session of its own, which has no terminal
+    // (`??`) and which no pane has, so that the window's close did not find it.
+    assert!(text.contains(", terminal ??)"), "{text}");
     // The run ended it: it is not left on the machine for what its seconds are.
     let job = process_after(&text, said).expect("the line names the job's process");
     let gone = (0..100).any(|_| {

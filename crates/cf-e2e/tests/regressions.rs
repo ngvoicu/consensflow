@@ -24,6 +24,10 @@
 
 // The cases are in `tests/regressions/`: cargo looks for the modules of a test's
 // root file beside it, where each would be a suite of its own.
+// The stand-in's command is a shell of a Unix machine.
+#[cfg(unix)]
+#[path = "regressions/a_command_that_goes_on_reporting_held_a_devin_workers_result.rs"]
+mod a_command_that_goes_on_reporting_held_a_devin_workers_result;
 #[path = "regressions/a_command_that_never_exits_held_a_workers_result.rs"]
 mod a_command_that_never_exits_held_a_workers_result;
 #[path = "regressions/devin_pause.rs"]

@@ -63,6 +63,8 @@ panes-lib-turn = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "turn
 panes-lib-close = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "close"]
 # What the Windows tests of an ending read of a pane's job, held on a list of members.
 panes-lib-job = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "ending_tests::job"]
+# What Devin's wire log says of a window that is on a turn, held on logs staged as it writes them.
+harness-lib-devin-wire = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "devin::record"]
 # The sentinel its real-process tests keep outside the window, which must say when it was ended.
 panes-lib-sentinel = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "sentinel"]
 # The guard of a test build's real signals, whose tests send signal 0 or none.
@@ -90,6 +92,8 @@ rig-background-grace = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", 
 rig-stranger = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "stranger::"]
 # T-15's shape: a command that never exits, and the final answer of the worker that left it.
 regression-never-exits = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_command_that_never_exits"]
+# The same of a Devin worker whose command goes on reporting on its wire after its turn ended (zeewin, 2026-10-14).
+regression-reporting-command = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_command_that_goes_on_reporting"]
 
 # The result is the turn's end, whatever the turn left running.
 
@@ -1322,6 +1326,44 @@ runs = ["panes-lib-tree"]
 file = "crates/cf-panes/src/job_object.rs"
 find = 'TerminateProcess(self.0, 1)'
 replace = 'TerminateProcess(self.0, 2)'
+
+# What a Devin window reads as working, which decides whether a worker's answer is its task's
+# result at once: a command the turn left running may go on reporting while it runs, and what a
+# tool says of a call it began after its turn ended is no new work (a ping the worker left, on
+# zeewin, 2026-10-14: the window read as working and the task was never done).
+
+[[plant]]
+name = "background: a command the turn left running that goes on reporting keeps its Devin window working"
+meant = "what_a_tool_goes_on_saying_once_its_turn_has_ended_is_no_new_work_whatever_its_status"
+runs = ["harness-lib-devin-wire"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/record/wires.rs"
+find = 'const WORK: [&str; 3] = ["agent_thought_chunk", "agent_message_chunk", "tool_call"];'
+replace = '''const WORK: [&str; 4] = [
+    "agent_thought_chunk",
+    "agent_message_chunk",
+    "tool_call",
+    "tool_call_update",
+];'''
+
+# The same through the daemon and the pane host: a Devin worker's command goes on reporting on
+# its wire after the turn ended, and its task is never done.
+[[plant]]
+name = "background regression: a command that goes on reporting holds the Devin worker’s task"
+meant = "a_devin_worker_that_leaves_a_command_that_goes_on_reporting_has_its_task_done_and_the_command_ended"
+runs = ["regression-reporting-command"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/record/wires.rs"
+find = 'const WORK: [&str; 3] = ["agent_thought_chunk", "agent_message_chunk", "tool_call"];'
+replace = '''const WORK: [&str; 4] = [
+    "agent_thought_chunk",
+    "agent_message_chunk",
+    "tool_call",
+    "tool_call_update",
+];'''
 
 # What the Windows tests of an ending read of a pane's job, which is held here on a list of
 # members: a job left once its shell has ended is told by no process of the job having

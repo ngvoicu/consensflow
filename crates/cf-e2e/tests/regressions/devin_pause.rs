@@ -42,7 +42,7 @@ const IGNORED: &str = "did not stop for T-";
 
 /// The roster of the case: the stand-in Claude is the chief, and a Devin (its
 /// stand-in) the worker.
-fn write_roster(rig: &Rig) -> cf_e2e::Result {
+pub(crate) fn write_roster(rig: &Rig) -> cf_e2e::Result {
     let roster = json!({
         "schemaVersion": 1,
         "agents": [

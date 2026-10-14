@@ -28,6 +28,7 @@
 //!   run real members.
 //! - [`tree`] says what a worker's turn left running: the processes its window's
 //!   tree started in it, as the pane host lists them.
+//! - [`wire`] says Devin's wire log in runs of what its records are, and how it ends.
 //! - [`report`] says what each check of a run came to, and ends the run with
 //!   them ([`report::conclude`]).
 //!
@@ -51,6 +52,7 @@ pub mod trace;
 pub mod tree;
 pub mod who;
 pub mod window;
+pub mod wire;
 
 #[cfg(test)]
 mod tests;
