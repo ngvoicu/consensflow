@@ -42,7 +42,9 @@ time.sleep(60)
 
 /// A command whose handler for the request to end starts a job of its own, and
 /// ends: the job is begun while the command is given its grace, and its parent
-/// is gone by the time it is found.
+/// is gone by the time it is found. The handler is for TERM, the first of the two requests
+/// (TERM and then HUP, which follow each other within a moment), and HUP is ignored: a
+/// handler for both runs once or twice by how close the two are, and starts a job each time.
 pub(super) const SPAWNER: &str = r#"
 import json, os, subprocess, time
 
@@ -50,7 +52,7 @@ before = subprocess.Popen(["sleep", "33"])
 print("ready", flush=True)
 input()
 shell = subprocess.Popen(
-    ["/bin/sh", "-c", "trap 'sleep 38 & echo $! > \"$CHILD\"; exit 0' TERM HUP; sleep 32 & echo $!; wait"],
+    ["/bin/sh", "-c", "trap 'sleep 38 & echo $! > \"$CHILD\"; exit 0' TERM; trap '' HUP; sleep 32 & echo $!; wait"],
     stdout=subprocess.PIPE, text=True, preexec_fn=os.setpgrp)
 job = int(shell.stdout.readline())
 print("started " + json.dumps({"program": os.getpid(), "before": before.pid, "shell": shell.pid, "job": job}), flush=True)
@@ -70,6 +72,31 @@ for n in range(20):
     numbers["shell%d" % n] = shell.pid
     numbers["job%d" % n] = int(shell.stdout.readline())
 print("started " + json.dumps(numbers), flush=True)
+time.sleep(60)
+"#;
+
+/// A command of the turn's whose shell ignores the request to end, with a job, so
+/// that an ending goes through the whole of its grace; and then, when the test types
+/// into the window while the ending waits, new work of the window's own: another
+/// command, a shell in a group of its own with a job, as a human's message or a new
+/// turn starts it, which the old turn's mark takes for the turn's work all the same.
+pub(super) const NEW: &str = r#"
+import json, os, subprocess, sys, time
+
+def command(script):
+    shell = subprocess.Popen(["/bin/sh", "-c", script], stdout=subprocess.PIPE, text=True,
+                             preexec_fn=os.setpgrp)
+    return shell, int(shell.stdout.readline())
+
+before = subprocess.Popen(["sleep", "33"])
+print("ready", flush=True)
+input()
+old, old_job = command("trap '' TERM HUP; sleep 37 & echo $!; wait")
+print("started " + json.dumps({"program": os.getpid(), "before": before.pid,
+                               "old": old.pid, "old_job": old_job}), flush=True)
+input()
+new, new_job = command("sleep 35 & echo $!; wait")
+print("more " + json.dumps({"new": new.pid, "new_job": new_job}), flush=True)
 time.sleep(60)
 "#;
 

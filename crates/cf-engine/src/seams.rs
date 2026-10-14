@@ -200,11 +200,13 @@ pub trait BackgroundWork {
     /// work either, however late it began.
     fn mark<'a>(&'a self, pane: &'a Pane, servers: Servers, harness: &'a str) -> Work<'a, ()>;
     /// Ends what `pane`'s turn left running, the window staying open: the host
-    /// chooses what, from all of what it can prove the turn's, and what that started.
-    /// It says what it ended and what of it it could not end, and nothing of what it
-    /// cannot tell the turn's from the harness's, which it leaves alone; nothing at
-    /// all where it does not answer.
-    fn end<'a>(&'a self, pane: &'a Pane) -> Work<'a, Ending>;
+    /// chooses what, once, from all of what it can prove the turn's, and ends it and
+    /// what it started meanwhile. It says what it ended and what of it it could not
+    /// end, and nothing of what it cannot tell the turn's from the harness's, which it
+    /// leaves alone; an older host, or one that has no such window, says nothing was
+    /// ended. None where it gave no answer: it may be ending still, which is no word
+    /// that it ended.
+    fn end<'a>(&'a self, pane: &'a Pane) -> Work<'a, Option<Ending>>;
 }
 
 /// Everything the engine is made with: each seam shared, so a second

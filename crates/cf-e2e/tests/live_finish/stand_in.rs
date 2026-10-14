@@ -58,6 +58,55 @@ fn a_stand_in_that_runs_the_command_and_replies_finishes_its_task_and_nothing_is
     Ok(())
 }
 
+/// The first number after `said` in `text`: the process a line of the run names.
+#[cfg(unix)]
+fn process_after(text: &str, said: &str) -> Option<u32> {
+    text.split_once(said)?
+        .1
+        .split_whitespace()
+        .next()?
+        .parse()
+        .ok()
+}
+
+#[cfg(unix)]
+#[test]
+fn a_stand_in_that_detaches_its_job_from_its_shell_escapes_the_ending_and_the_run_says_so_and_ends_it(
+) -> Result {
+    // What four harnesses' agents did (`nohup … &` in a shell that then ended): nothing
+    // proves whose the job is, so the host leaves it running, and the chief is told
+    // nothing. The run fails, honestly, and says that the window's close did not find it
+    // either (the job is in a session of its own, with no marker), and it ends it. A look
+    // of the run once a second may have caught the job while its shell still ran, which is
+    // a third of a second: the failure is said as of a command the host listed then, or as
+    // one it never listed.
+    let log = Log::new("live finish test");
+    let plan = leaving::plan(Who::StandIn);
+    let brief = leaving::stand_in_brief(true);
+    let finished = leaving::run_asked(Who::StandIn, &plan, Path::new(FAKE_AGENT), &brief, &log)?;
+    let text = finished.case.text();
+    assert!(!finished.case.held(), "{text}");
+    assert!(
+        text.contains("the command escaped the ending")
+            || text.contains("the command is still running after the task was done"),
+        "{text}"
+    );
+    assert!(
+        text.contains("what the chief was told of work the turn left: nothing"),
+        "{text}"
+    );
+    let said = "it still runs after the window closed, which found nothing of it: ";
+    assert!(text.contains(said), "{text}");
+    // The run ended it: it is not left on the machine for what its seconds are.
+    let job = process_after(&text, said).expect("the line names the job's process");
+    let gone = (0..100).any(|_| {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        !cf_e2e::process::is_alive(job)
+    });
+    assert!(gone, "the job {job} is left running: {text}");
+    Ok(())
+}
+
 #[test]
 fn a_stand_in_that_leaves_a_job_running_and_answers_has_its_task_done_the_job_ended_and_the_chief_told(
 ) -> Result {

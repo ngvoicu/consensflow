@@ -1,7 +1,8 @@
 //! Closing a window, on Unix, the way a terminal closes one. Its programs are
 //! asked to end: TERM and then HUP to the pane's process group and, on macOS,
 //! to every process of its tree wherever it went (a job the agent started in a
-//! session of its own is in no group of the pane's). They are given
+//! session of its own is in no group of the pane's), which is what is under its
+//! program, or was seen so (`process_tree`'s bound). They are given
 //! [`CLOSE_GRACE`] to do it in, and what is still there once they have ended or
 //! the grace is over is ended by force. A job that traps the signals gets to
 //! release what it holds; one that ignores them is killed after the grace, as

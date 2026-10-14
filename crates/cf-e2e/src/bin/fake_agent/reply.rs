@@ -27,7 +27,8 @@
 //!   its job's notification wakes (`WOKEN <words>`, which answers `woken:
 //!   <words>`); with `--deaf` the job ignores the requests to end; with `--detach`
 //!   the shell that runs it detaches it (`nohup … &`) and ends, which leaves the job
-//!   with no parent, as the agents of four harnesses left theirs.
+//!   with no parent, as the agents of four harnesses left theirs, and with no chain of
+//!   processes to a shell the harness started: the host leaves it running.
 //! - A line `JOB [--deaf] <seconds> <rest>` starts such a job and goes on with
 //!   `rest` as the line it was given, as an agent does whose tool runs a command
 //!   while its turn is at work (`JOB 120 SLEEP 60 words` leaves a job running for

@@ -10,7 +10,8 @@
 //! alone, and says nothing of, so a test gives the engine none of it. Asked to end
 //! what its window's turn left, it ends the commands the test said ran
 //! ([`FakeBackground::run`]), says those it could not end ([`FakeBackground::stubborn`])
-//! left, and answers nothing where it is made to ([`FakeBackground::end_nothing`]).
+//! left, says nothing was ended where it is made to ([`FakeBackground::refuse`]), and
+//! gives no answer where it is made to ([`FakeBackground::leave_unanswered`]).
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -45,8 +46,11 @@ pub struct FakeBackground {
     /// What the engine asked to end, by the pane it asked it of, and what the host
     /// ended of it, in order.
     endings: RefCell<Vec<(Pane, Vec<BackgroundProcess>)>>,
-    /// The host answers no ending: one that cannot, or that did not answer.
+    /// The host refuses an ending: it says nothing was ended, as one that does not
+    /// know the operation does.
     refusing: Cell<bool>,
+    /// How many of the next endings the host gives no answer to.
+    unanswered: Cell<usize>,
     /// An ending waits for this gate before it ends anything.
     hold: RefCell<Option<Gate>>,
 }
@@ -110,10 +114,16 @@ impl FakeBackground {
         self.jobs.borrow_mut().retain(|(named, _)| named != handle);
     }
 
-    /// The host says nothing of what it ends: one that cannot (an older one, which
-    /// does not know the operation) or that did not answer.
-    pub fn end_nothing(&self) {
+    /// The host refuses to end anything: an older one, which does not know the
+    /// operation, answers that it ended nothing.
+    pub fn refuse(&self) {
         self.refusing.set(true);
+    }
+
+    /// The host gives no answer to the next `times` endings it is asked: it may be
+    /// ending still, or it went.
+    pub fn leave_unanswered(&self, times: usize) {
+        self.unanswered.set(times);
     }
 
     /// The host takes its time over an ending, as it does over the grace it gives
@@ -182,7 +192,7 @@ impl BackgroundWork for FakeBackground {
         Box::pin(async {})
     }
 
-    fn end<'a>(&'a self, pane: &'a Pane) -> Work<'a, Ending> {
+    fn end<'a>(&'a self, pane: &'a Pane) -> Work<'a, Option<Ending>> {
         // What is asked is written down when it is asked; what is ended, when the
         // host does it.
         self.endings.borrow_mut().push((pane.clone(), Vec::new()));
@@ -192,8 +202,13 @@ impl BackgroundWork for FakeBackground {
             if let Some(gate) = held {
                 gate.wait().await;
             }
+            let unanswered = self.unanswered.get();
+            if unanswered > 0 {
+                self.unanswered.set(unanswered - 1);
+                return None;
+            }
             if self.refusing.get() {
-                return Ending::default();
+                return Some(Ending::default());
             }
             let ended = of(&self.jobs, pane);
             let left = of(&self.stubborn, pane);
@@ -204,10 +219,10 @@ impl BackgroundWork for FakeBackground {
                 }
             }
             self.endings.borrow_mut()[at].1.clone_from(&ended);
-            Ending {
+            Some(Ending {
                 ended: background_of(ended),
                 left: background_of(left),
-            }
+            })
         })
     }
 }

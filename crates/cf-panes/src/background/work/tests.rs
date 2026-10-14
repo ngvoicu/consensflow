@@ -8,12 +8,12 @@ fn key(pid: u32) -> ProcessKey {
 }
 
 /// The process `pid`, as a parent.
-fn of(pid: u32) -> Parent {
-    Parent::Of(key(pid))
+fn of(pid: u32) -> Option<ProcessKey> {
+    Some(key(pid))
 }
 
 /// A process of `program` started by `parent`.
-fn process(pid: u32, program: &str, parent: Parent) -> Member {
+fn process(pid: u32, program: &str, parent: Option<ProcessKey>) -> Member {
     Member {
         key: key(pid),
         command: format!("{program} {pid}"),
@@ -73,7 +73,7 @@ fn a_shell_is_told_by_the_file_it_runs_and_not_by_a_name_it_had() {
     // program may still have the name it had.
     let by = |program: &str, exe: &str| Member {
         exe: exe.to_owned(),
-        ..process(1, program, Parent::Gone)
+        ..process(1, program, None)
     };
     assert!(runs_a_shell(&by("deploy.sh", "/bin/bash")));
     assert!(runs_a_shell(&by(
@@ -88,7 +88,7 @@ fn a_shell_is_told_by_the_file_it_runs_and_not_by_a_name_it_had() {
 }
 
 #[test]
-fn a_shell_the_turn_started_and_what_it_started_are_the_turns_and_nothing_else_is() {
+fn a_shell_the_harness_started_and_what_it_started_are_the_turns_and_nothing_else_is() {
     let started = [
         // The agent's command: a shell, the browser it runs, and what the
         // browser starts.
@@ -106,34 +106,51 @@ fn a_shell_the_turn_started_and_what_it_started_are_the_turns_and_nothing_else_i
 }
 
 #[test]
-fn a_process_whose_parent_is_gone_is_a_job_someone_detached_and_so_is_what_it_started() {
+fn a_process_with_no_parent_left_is_no_job_whatever_it_is_and_nor_is_what_it_started() {
     let started = [
-        // `nohup sleep 600 &` from a shell that ended, and what the job started.
-        process(70, "sleep", Parent::Gone),
-        process(71, "python3", Parent::Gone),
+        // `nohup sleep 600 &` from a shell that ended, and what the job started: no
+        // chain of processes that run leads from them to a shell.
+        process(70, "sleep", None),
+        process(71, "python3", None),
         process(72, "ffmpeg", of(71)),
-        // A parent the platform did not say is no parent that is gone.
-        process(73, "sleep", Parent::Unknown),
-        // A parent that began before the mark is a process that is nobody's work to
-        // tell: the window's program, or a server.
-        process(74, "sleep", of(10)),
+        // A shell whose parent has gone is no more: it is not proved the harness's.
+        process(73, "bash", None),
+        process(74, "sleep", of(73)),
+        // A parent that began before the mark, which is nobody's work to tell: the
+        // window's program, or a server.
+        process(75, "sleep", of(10)),
     ];
-    assert_eq!(turned(&started, &[]), [70, 71, 72]);
+    assert_eq!(turned(&started, &[]), Vec::<u32>::new());
 }
 
 #[test]
-fn what_is_protected_is_never_the_turns_though_it_is_a_shell_or_has_no_parent() {
+fn a_shell_that_a_server_the_harness_started_late_started_is_not_proved_the_harnesss_own() {
+    let started = [
+        // A server, begun late, that runs a shell, and what the shell runs.
+        process(80, "node", of(10)),
+        process(81, "sh", of(80)),
+        process(82, "git", of(81)),
+        // The agent's command beside it.
+        process(83, "zsh", of(10)),
+        process(84, "git", of(83)),
+        // A shell the agent's shell started, and what that runs.
+        process(85, "bash", of(83)),
+        process(86, "sleep", of(85)),
+    ];
+    assert_eq!(turned(&started, &[]), [83, 84, 85, 86]);
+}
+
+#[test]
+fn what_is_protected_is_never_the_turns_though_it_is_a_shell() {
     let started = [
         // A shell a server was wrapped in, and what it started.
         process(80, "sh", of(10)),
         process(81, "node", of(80)),
-        // A helper of the harness's own that lost its parent.
-        process(82, "codex-helper", Parent::Gone),
         // A job beside them.
         process(83, "bash", of(10)),
     ];
-    assert_eq!(turned(&started, &[80, 81, 82]), [83]);
-    assert_eq!(turned(&started, &[]), [80, 81, 82, 83]);
+    assert_eq!(turned(&started, &[80, 81]), [83]);
+    assert_eq!(turned(&started, &[]), [80, 81, 83]);
 }
 
 #[test]

@@ -548,7 +548,10 @@ async fn an_ending_asks_the_pane_to_end_what_its_turn_left_and_names_no_process_
             });
             let host = host_over(&daemon);
 
-            let ending = host.end(&pane("p1-zeus-amber-pine", 7)).await;
+            let ending = host
+                .end(&pane("p1-zeus-amber-pine", 7))
+                .await
+                .expect("the host answered");
 
             // No process crosses from one look to the next: the host chooses.
             assert_eq!(
@@ -564,28 +567,82 @@ async fn an_ending_asks_the_pane_to_end_what_its_turn_left_and_names_no_process_
 }
 
 #[test]
-fn a_host_that_refuses_or_does_not_answer_an_ending_has_said_nothing_and_none_is_made_up() {
-    assert_eq!(ending(None), Ending::default());
+fn a_host_that_refuses_an_ending_has_ended_nothing_and_one_that_gives_no_answer_has_said_nothing() {
+    let nothing = Some(Ending::default());
     assert_eq!(
         ending(Some(
             json!({ "ok": false, "error": "pane p1 generation 1 is not open" })
         )),
-        Ending::default()
+        nothing,
+        "a refusal is the host's word that it ended nothing"
     );
-    assert_eq!(ending(Some(json!({}))), Ending::default());
+    assert_eq!(ending(Some(json!({}))), nothing);
     assert_eq!(
         ending(Some(json!({ "ok": true, "ended": "all of it" }))),
-        Ending::default(),
-        "an answer that is not one is no answer"
+        nothing,
+        "an answer that is not one says nothing was ended"
     );
     // One that says nothing was ended and nothing is left.
-    assert_eq!(ending(Some(json!({ "ok": true }))), Ending::default());
+    assert_eq!(ending(Some(json!({ "ok": true }))), nothing);
     let said = ending(Some(json!({
         "ok": true,
         "ended": { "total": 1, "processes": [{ "pid": 1, "command": "sleep 600" }] },
-    })));
+    })))
+    .expect("an answer");
     assert_eq!(said.ended.total, 1);
     assert_eq!(said.left, cf_proto::panes::Background::default());
+
+    // The host may be ending still, or it went: that is no word that it ended.
+    assert_eq!(ending(None), None, "the bridge went");
+    assert_eq!(
+        ending(Some(json!({ "ok": false, "error": "deadline" }))),
+        None,
+        "the bridge's answer when the host gave none in time"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_ending_is_waited_for_past_the_default_wait_and_one_the_host_never_answers_is_no_answer()
+{
+    LocalSet::new()
+        .run_until(async {
+            let (daemon, app) = bridge_pair();
+            let asked = Rc::new(Cell::new(0));
+            let counted = Rc::clone(&asked);
+            app.on("pane.end_background", move |_, _| {
+                counted.set(counted.get() + 1);
+                let first = counted.get() == 1;
+                async move {
+                    if !first {
+                        pending::<()>().await;
+                    }
+                    // Longer than a request that answers at once is given, and within
+                    // the bound the host keeps to.
+                    tokio::time::sleep(Duration::from_secs(35)).await;
+                    Ok(json!({
+                        "ok": true,
+                        "ended": { "total": 1, "processes": [{ "pid": 7, "command": "sleep 600" }] },
+                    }))
+                }
+            });
+            let host = host_over(&daemon);
+            let pane = pane("p1-zeus-amber-pine", 7);
+
+            let started = tokio::time::Instant::now();
+            let ending = host.end(&pane).await.expect("the host answered");
+            assert_eq!(ending.ended.total, 1);
+            assert_eq!(started.elapsed(), Duration::from_secs(35));
+
+            let started = tokio::time::Instant::now();
+            assert_eq!(host.end(&pane).await, None);
+            assert_eq!(
+                started.elapsed(),
+                END_DEADLINE,
+                "the bound the host keeps to, and a margin"
+            );
+            assert_eq!(asked.get(), 2);
+        })
+        .await;
 }
 
 #[tokio::test]

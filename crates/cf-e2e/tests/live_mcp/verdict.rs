@@ -3,8 +3,15 @@
 //! the chief was given and told. Every way the task fell short is said together, so
 //! that a run that fails says all that was wrong with it.
 
+use super::server::STEM as SERVER;
+
 /// The sum the task asks for, which the worker's answer says.
 pub const ANSWER: &str = "5555";
+
+/// How many seconds the command the worker is asked to leave running runs: more than a
+/// run lasts, and a number that is in no other command line of the machine, so that the
+/// note that names it is the note of this command.
+pub const SECONDS: u64 = 4711;
 
 /// What the run saw of the worker's task while it waited for it.
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -15,35 +22,57 @@ pub struct Seen {
     /// it wrote and when that began, as the system says it. None while it had not
     /// written its process id: the worker's Claude had not started it.
     pub server: Option<String>,
-    /// The server once the daemon had taken the result and had time to end what the
-    /// turn left, which the worker's window being kept open by the human leaves it to
-    /// live through: the same process, or none where it is gone or another took its
-    /// number.
+    /// The server once the chief was told what the turn left, which is the daemon's word
+    /// that it has ended what it ended, and which the worker's window being kept open by
+    /// the human leaves it to live through: the same process, or none where it is gone or
+    /// another took its number.
     pub server_after: Option<String>,
     /// The result the chief was given, if it was.
     pub result: Option<String>,
     /// What the chief was told of work the worker's turn left: the notes that say so,
-    /// read once the daemon had done with it, which a worker whose only other process
-    /// is its harness's server must never cause: the host ends what it proves the
-    /// turn's, and leaves alone and says nothing of what it cannot tell.
+    /// which the run waited for. The host ends what it proves the turn's (the command
+    /// the worker left) and leaves alone and says nothing of what it cannot tell (the
+    /// harness's server), so they name the command and never the server.
     pub notes: Vec<String>,
 }
 
 /// The task is done, its result reached the chief and says the answer, the chief was
-/// told nothing of work the turn left, and the server, which was started while the
-/// worker worked (a task that was never at risk of ending a server that was never there
-/// proves nothing), is the same process it was after the daemon took the result and
-/// ended what the turn left: the server is the harness's own, and ending it would
-/// break the worker's tools. Or every way it was not.
+/// told that the command the worker left running was ended and that nothing else was
+/// named, and the server, which was started while the worker worked (a task that was
+/// never at risk of ending a server that was never there proves nothing), is the same
+/// process it was once the chief was told: the server is the harness's own, and ending
+/// it would break the worker's tools. Or every way it was not.
 pub fn judge(seen: &Seen) -> Result<(), Vec<String>> {
     let mut problems = Vec::new();
     if seen.state != "done" {
         problems.push(format!("T-1 is {}, not done", seen.state));
     }
-    for note in &seen.notes {
+    let mark = SECONDS.to_string();
+    if !seen
+        .notes
+        .iter()
+        .any(|note| note.contains(" Ended: ") && note.contains(&mark))
+    {
         problems.push(format!(
-            "the chief was told the worker's turn left work, which a turn that ran no tool did not (what the daemon ended may be the harness's own MCP server): {note}"
+            "the chief was not told that the command the worker left running ({mark}) was ended, so the run cannot tell an ending that spared the server from one that never happened: {}",
+            if seen.notes.is_empty() {
+                "nothing was said".to_owned()
+            } else {
+                seen.notes.join(" | ")
+            }
         ));
+    }
+    for note in &seen.notes {
+        if note.contains(SERVER) {
+            problems.push(format!(
+                "the chief was told of the harness's own MCP server, which the host must leave alone and say nothing of: {note}"
+            ));
+        }
+        if note.contains(" Still running, not ended: ") {
+            problems.push(format!(
+                "the chief was told part of what the turn left was not ended, and still runs: {note}"
+            ));
+        }
     }
     match (&seen.server, &seen.server_after) {
         (None, _) => problems.push(
@@ -76,37 +105,65 @@ pub fn judge(seen: &Seen) -> Result<(), Vec<String>> {
 mod tests {
     use super::*;
 
-    const SERVER: &str = "4242 Tue Oct 13 22:24:16 2026";
+    const SERVER_PROCESS: &str = "4242 Tue Oct 13 22:24:16 2026";
+    const ENDED: &str = "T-1's turn left background work running. Ended: sleep 4711.";
 
     fn good() -> Seen {
         Seen {
             state: "done".to_owned(),
-            server: Some(SERVER.to_owned()),
-            server_after: Some(SERVER.to_owned()),
+            server: Some(SERVER_PROCESS.to_owned()),
+            server_after: Some(SERVER_PROCESS.to_owned()),
             result: Some("5555".to_owned()),
-            notes: Vec::new(),
+            notes: vec![ENDED.to_owned()],
         }
     }
 
     #[test]
-    fn a_task_done_with_its_result_at_the_chief_and_nothing_said_of_work_beside_a_server_that_lived_passes(
+    fn a_task_done_with_its_result_at_the_chief_and_its_command_ended_beside_a_server_that_lived_passes(
     ) {
         assert_eq!(judge(&good()), Ok(()));
+        // The command as the harness's shell runs it names more than the number.
+        let mut wrapped = good();
+        wrapped.notes = vec![
+            "T-1's turn left background work running. Ended: /bin/zsh -c eval 'sleep 4711'; sleep 4711.".to_owned(),
+        ];
+        assert_eq!(judge(&wrapped), Ok(()));
     }
 
     #[test]
-    fn a_chief_told_the_turn_left_work_fails_and_names_what_was_said() {
+    fn a_chief_told_nothing_of_the_command_fails_for_the_run_cannot_tell_what_the_host_spared() {
         let mut seen = good();
-        let note = "T-1's turn left background work running. Ended: npm exec @playwright/mcp; node server.js.";
-        seen.notes = vec![note.to_owned()];
+        seen.notes = Vec::new();
         let problems = judge(&seen).unwrap_err();
         assert_eq!(problems.len(), 1, "{problems:?}");
-        assert!(problems[0].ends_with(note), "{problems:?}");
-        assert!(problems[0].contains("MCP server"), "{problems:?}");
+        assert!(problems[0].contains("nothing was said"), "{problems:?}");
+
+        // A note of work that is not this command's is no word that it was ended.
+        seen.notes = vec!["T-1's turn left background work running. Ended: tail -f x.".to_owned()];
+        let problems = judge(&seen).unwrap_err();
+        assert_eq!(problems.len(), 1, "{problems:?}");
+        assert!(problems[0].ends_with("Ended: tail -f x."), "{problems:?}");
     }
 
     #[test]
-    fn a_server_that_was_ended_or_replaced_by_the_time_the_daemon_was_done_fails_whether_or_not_it_was_said(
+    fn a_chief_told_of_the_server_or_of_work_that_still_runs_fails_and_names_what_was_said() {
+        let mut seen = good();
+        let server = "T-1's turn left background work running. Ended: sleep 4711; python3 /run/quiet-server.py /run/quiet-server.pid.";
+        seen.notes = vec![server.to_owned()];
+        let problems = judge(&seen).unwrap_err();
+        assert_eq!(problems.len(), 1, "{problems:?}");
+        assert!(problems[0].ends_with(server), "{problems:?}");
+        assert!(problems[0].contains("MCP server"), "{problems:?}");
+
+        let still = "T-1's turn left background work running. Ended: sleep 4711. Still running, not ended: node worker.js.";
+        seen.notes = vec![still.to_owned()];
+        let problems = judge(&seen).unwrap_err();
+        assert_eq!(problems.len(), 1, "{problems:?}");
+        assert!(problems[0].ends_with(still), "{problems:?}");
+    }
+
+    #[test]
+    fn a_server_that_was_ended_or_replaced_by_the_time_the_chief_was_told_fails_whether_or_not_it_was_said(
     ) {
         // Ended, and nothing told: the harness's own server is gone all the same.
         let mut ended = good();
@@ -114,7 +171,7 @@ mod tests {
         let problems = judge(&ended).unwrap_err();
         assert_eq!(problems.len(), 1, "{problems:?}");
         assert!(
-            problems[0].contains(SERVER) && problems[0].ends_with("it is gone"),
+            problems[0].contains(SERVER_PROCESS) && problems[0].ends_with("it is gone"),
             "{problems:?}"
         );
         // Another process with its number, or the server started again: not the one.
@@ -135,10 +192,11 @@ mod tests {
             ..Seen::default()
         })
         .unwrap_err();
-        assert_eq!(problems.len(), 3, "{problems:?}");
+        assert_eq!(problems.len(), 4, "{problems:?}");
         assert!(problems[0].contains("working, not done"));
-        assert!(problems[1].contains("never wrote its process id"));
-        assert!(problems[2].contains("no result"));
+        assert!(problems[1].contains("was not told"));
+        assert!(problems[2].contains("never wrote its process id"));
+        assert!(problems[3].contains("no result"));
 
         let mut wrong = good();
         wrong.result = Some("six thousand".to_owned());

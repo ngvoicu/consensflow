@@ -207,11 +207,11 @@ fn what_of_the_turns_work_the_host_could_not_end_is_said_to_still_run_beside_wha
 }
 
 #[test]
-fn a_host_that_does_not_answer_an_ending_has_said_nothing_and_none_is_made_up() {
-    // A host that does not know the operation, or that did not answer: nothing was
-    // ended that anyone knows of, and nothing is said was.
+fn a_host_that_refuses_an_ending_has_ended_nothing_and_none_is_made_up() {
+    // A host that does not know the operation says nothing was ended: nothing is
+    // said was, and it is not asked again.
     let context = Context::new();
-    context.background.end_nothing();
+    context.background.refuse();
     let tiers = answered_leaving(&context, &[LOCK]);
 
     assert_eq!(
@@ -220,7 +220,68 @@ fn a_host_that_does_not_answer_an_ending_has_said_nothing_and_none_is_made_up() 
         "the result goes all the same"
     );
     assert_eq!(context.background.endings_asked("zeus"), 1);
+    assert!(!context.timers.fire_next(), "nothing waits to ask again");
     assert_eq!(tiers.notes("chief"), Vec::<String>::new());
+}
+
+#[test]
+fn a_host_that_gives_no_answer_to_an_ending_is_asked_again_with_the_window_held_until_it_does() {
+    // It may be ending still: its answer is the word that it is done, so the window
+    // stays held, and what is asked again ends what is left and answers.
+    let context = Context::new();
+    context.background.leave_unanswered(1);
+    let tiers = working(&context);
+    let pane = context.host.last("zeus").unwrap().pane;
+    context.background.run("zeus", &[LOCK]);
+    context.adapter.answer("zeus", "Started the recording run");
+    context.pass().unwrap();
+
+    assert_eq!(tiers.task(1).task.state, "done");
+    assert_eq!(context.background.endings_asked("zeus"), 1, "it was asked");
+    assert_eq!(
+        tiers.notes("chief"),
+        Vec::<String>::new(),
+        "and said nothing"
+    );
+    assert!(!closed(&context, &pane), "the window is held, not closed");
+
+    // A pass meanwhile finds the window held: it is not asked a second time by it.
+    context.pass().unwrap();
+    assert_eq!(context.background.endings_asked("zeus"), 1);
+    assert!(!closed(&context, &pane));
+
+    // A moment later it is asked again, and answers.
+    assert!(context.timers.fire_next());
+    context.settle();
+    assert_eq!(context.background.endings_asked("zeus"), 2);
+    assert_eq!(context.background.ended("zeus"), [LOCK]);
+    assert_eq!(tiers.notes("chief"), [LOCK_ENDED]);
+    assert!(closed(&context, &pane), "and then it closes");
+}
+
+#[test]
+fn a_host_that_gives_no_answer_to_three_asks_is_taken_to_have_gone_and_nothing_is_said_of_it() {
+    let context = Context::new();
+    context.background.leave_unanswered(3);
+    let tiers = working(&context);
+    let pane = context.host.last("zeus").unwrap().pane;
+    context.background.run("zeus", &[LOCK]);
+    context.adapter.answer("zeus", "Started the recording run");
+    context.pass().unwrap();
+
+    for asked in 2..=3 {
+        assert!(!closed(&context, &pane), "held while it may be ending");
+        assert!(context.timers.fire_next());
+        context.settle();
+        assert_eq!(context.background.endings_asked("zeus"), asked);
+    }
+    assert!(!context.timers.fire_next(), "it is asked no more");
+    assert_eq!(context.background.ended("zeus"), Vec::<String>::new());
+    assert_eq!(tiers.notes("chief"), Vec::<String>::new());
+    assert!(
+        closed(&context, &pane),
+        "the window closes as a free worker's does"
+    );
 }
 
 #[test]

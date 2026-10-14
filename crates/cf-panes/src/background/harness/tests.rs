@@ -1,5 +1,4 @@
 use super::*;
-use crate::background::Parent;
 
 /// The window's program, which leads the window's group.
 const PANE: i32 = 10;
@@ -11,8 +10,8 @@ fn key(pid: u32) -> ProcessKey {
     }
 }
 
-fn of(pid: u32) -> Parent {
-    Parent::Of(key(pid))
+fn of(pid: u32) -> Option<ProcessKey> {
+    Some(key(pid))
 }
 
 /// A process in the process group `group`, started by the process `parent`.
@@ -35,21 +34,17 @@ fn program() -> Member {
         program: "claude".to_owned(),
         exe: String::new(),
         group: Some(PANE),
-        parent: Parent::Gone,
+        parent: None,
     }
 }
 
-/// The numbers of the harness's own servers among `tree`, less the window's
-/// program, which is in its own group: where the window had `launch` when its first
-/// turn began, and the daemon said `servers`.
+/// The numbers of the harness's own servers among `tree`, where the window had `launch`
+/// when its first turn began and the daemon said `servers`. The window's program is none
+/// of them, though it is in its own group.
 fn own_of(servers: Servers, launch: &[Member], tree: &[Member]) -> Vec<u32> {
     let kept = Kept::of(servers, Some(PANE)).expect("a known way");
     let launch: HashSet<ProcessKey> = launch.iter().map(|member| member.key).collect();
-    let mut own: Vec<u32> = own(kept, &launch, tree)
-        .iter()
-        .map(|key| key.pid)
-        .filter(|pid| *pid != 10)
-        .collect();
+    let mut own: Vec<u32> = own(kept, &launch, tree).iter().map(|key| key.pid).collect();
     own.sort_unstable();
     own
 }
@@ -125,7 +120,7 @@ fn ancestry_reaches_through_as_many_processes_as_there_are() {
 #[test]
 fn a_process_whose_parent_has_gone_is_told_by_its_own_group_alone() {
     let orphan = |pid, group| Member {
-        parent: Parent::Gone,
+        parent: None,
         ..started(pid, "node browser", group, 20)
     };
     // Its group is its own: not told to be the harness's, though a server in the
@@ -147,7 +142,7 @@ fn a_process_whose_parent_has_gone_is_told_by_its_own_group_alone() {
 
 #[test]
 fn a_process_whose_group_cannot_be_read_is_told_by_its_ancestry_and_by_nothing_else() {
-    let unread = |pid, parent: Parent| Member {
+    let unread = |pid, parent: Option<ProcessKey>| Member {
         group: None,
         parent,
         ..started(pid, "node x", 0, 0)
@@ -156,7 +151,7 @@ fn a_process_whose_group_cannot_be_read_is_told_by_its_ancestry_and_by_nothing_e
         program(),
         started(20, "npm exec x", PANE, 10),
         unread(30, of(20)),
-        unread(31, Parent::Gone),
+        unread(31, None),
         unread(32, of(10)),
     ];
     assert_eq!(own_of(Servers::InGroup, &[program()], &tree), [20, 30]);
@@ -296,7 +291,7 @@ fn the_two_shapes_take_what_a_process_outside_the_group_that_was_there_from_the_
 // The programs a harness is named for.
 
 /// A program run from `exe`, whose parent is the process `parent`.
-fn run(pid: u32, exe: &str, parent: Parent) -> Member {
+fn run(pid: u32, exe: &str, parent: Option<ProcessKey>) -> Member {
     let program = exe.rsplit(['/', '\\']).next().unwrap_or_default();
     Member {
         exe: exe.to_owned(),
@@ -317,7 +312,7 @@ fn programs_of(harness: &str, tree: &[Member]) -> Vec<u32> {
 fn a_program_named_for_the_harness_that_runs_beside_its_binary_is_the_harnesss_and_so_is_what_descends_from_it(
 ) {
     let tree = vec![
-        run(10, "/usr/local/bin/cf", Parent::Gone),
+        run(10, "/usr/local/bin/cf", None),
         run(11, "/opt/codex/bin/codex", of(10)),
         // The helper Codex starts the first time its agent runs a command.
         run(50, "/opt/codex/bin/codex-code-mode-host", of(11)),
@@ -334,11 +329,7 @@ fn a_program_named_for_the_harness_that_runs_beside_its_binary_is_the_harnesss_a
 #[test]
 fn a_path_with_spaces_in_it_is_whole_and_no_matter() {
     let tree = vec![
-        run(
-            11,
-            "/Applications/Codex App/Contents/MacOS/codex",
-            Parent::Gone,
-        ),
+        run(11, "/Applications/Codex App/Contents/MacOS/codex", None),
         run(
             50,
             "/Applications/Codex App/Contents/MacOS/codex-code-mode-host",
@@ -356,11 +347,7 @@ fn a_path_with_spaces_in_it_is_whole_and_no_matter() {
 #[test]
 fn windows_names_have_an_extension_and_no_case() {
     let tree = vec![
-        run(
-            11,
-            r"C:\Program Files\Codex App\bin\CODEX.EXE",
-            Parent::Gone,
-        ),
+        run(11, r"C:\Program Files\Codex App\bin\CODEX.EXE", None),
         run(
             51,
             r"C:\Program Files\Codex App\bin\Codex-Code-Mode-Host.exe",
@@ -380,7 +367,7 @@ fn windows_names_have_an_extension_and_no_case() {
 #[test]
 fn a_program_named_for_the_harness_that_is_not_beside_its_binary_is_anybodys() {
     let tree = vec![
-        run(11, "/opt/codex/bin/codex", Parent::Gone),
+        run(11, "/opt/codex/bin/codex", None),
         run(50, "/tmp/work/codex-code-mode-host", of(11)),
         // Not named for it: beside the binary, and not a helper of it.
         run(51, "/opt/codex/bin/node", of(11)),
@@ -391,14 +378,14 @@ fn a_program_named_for_the_harness_that_is_not_beside_its_binary_is_anybodys() {
 
 #[test]
 fn where_the_harnesss_binary_is_not_among_what_the_tree_has_no_program_is_proved_its() {
-    let tree = vec![run(50, "/opt/codex/bin/codex-code-mode-host", Parent::Gone)];
+    let tree = vec![run(50, "/opt/codex/bin/codex-code-mode-host", None)];
     assert_eq!(programs_of("codex", &tree), Vec::<u32>::new());
 }
 
 #[test]
 fn a_program_named_for_another_harness_is_no_helper_of_this_one() {
     let tree = vec![
-        run(11, "/opt/codex/bin/codex", Parent::Gone),
+        run(11, "/opt/codex/bin/codex", None),
         run(50, "/opt/codex/bin/claude-code-mode-host", of(11)),
     ];
     assert_eq!(programs_of("codex", &tree), Vec::<u32>::new());
@@ -412,11 +399,7 @@ fn a_binary_run_under_the_harnesss_name_has_its_directory_for_the_programs_besid
     let tree = vec![
         Member {
             program: "claude".to_owned(),
-            ..run(
-                11,
-                "/home/me/.local/share/claude/versions/2.1.296",
-                Parent::Gone,
-            )
+            ..run(11, "/home/me/.local/share/claude/versions/2.1.296", None)
         },
         run(
             50,
@@ -430,7 +413,7 @@ fn a_binary_run_under_the_harnesss_name_has_its_directory_for_the_programs_besid
 #[test]
 fn the_name_of_the_harness_is_told_in_lower_case() {
     let tree = vec![
-        run(11, "/opt/Codex/bin/Codex", Parent::Gone),
+        run(11, "/opt/Codex/bin/Codex", None),
         run(50, "/opt/Codex/bin/Codex-Helper", of(11)),
     ];
     assert_eq!(programs_of("Codex", &tree), [50]);

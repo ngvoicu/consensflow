@@ -6,15 +6,15 @@
 //! the board kept it working with `background work running`, for processes the pane host
 //! took for the turn's work. The owner decided on 2026-10-13 that a worker's answer is its
 //! task's result at once and that what its turn left running is ended. The pane host tells
-//! the turn's work by proof: what a shell the harness started ran, and what has lost the
-//! process that started it (a job the agent detached with `nohup … &`, which it finds by the
-//! window's session on a Mac and by the pane's job object on Windows); a server the harness
-//! starts late it leaves alone, and says nothing of. These are the runs that show, on a
-//! machine, what a real harness leaves, what the host ends of it and whether it ends
-//! anything of the harness's own. They are opt-in (`cargo xtask live finish`, `npm run
-//! live:finish`): each spends the machine's quota on one short task of each harness named,
-//! and needs each installed and logged in, so they are ignored unless asked for and are no
-//! part of `check` or of CI.
+//! the turn's work by proof, and when in doubt ends less: what a shell the harness started
+//! ran, and what that started, by a chain of processes that run; what it cannot trace so (a
+//! job the agent detached with `nohup … &` from a shell that then ended) it leaves running
+//! and says nothing of, as it does a server the harness starts late. These are the runs that
+//! show, on a machine, what a real harness leaves, what the host ends of it, what escapes
+//! it, and whether it ends anything of the harness's own. They are opt-in (`cargo xtask live
+//! finish`, `npm run live:finish`): each spends the machine's quota on one short task of each
+//! harness named, and needs each installed and logged in, so they are ignored unless asked
+//! for and are no part of `check` or of CI.
 //!
 //! The native daemon and the real pane host run in a home of the run's own (never
 //! `~/.consensflow`). The chief is a stand-in that only notes what it is sent, and the
@@ -42,15 +42,19 @@
 //!   recorded and last drew;
 //! - **`a_worker_that_leaves_a_long_command_running…`** asks the worker to start a long
 //!   command in the background (`sleep 4711`, or the platform's own), not to wait for it
-//!   and to answer. The task is done at once, its result is in the chief's inbox, the host
-//!   listed the command as running (a worker that left none proves nothing, and fails: one
-//!   that took it out of the window's session with `setsid` is none the host can find),
-//!   the command is gone after, and the chief was told that it was ended in a note beside
-//!   the result; a note that says part of it still runs and was not ended fails the run,
-//!   with what the host listed. Claude Code runs the command by its own option for one in
-//!   the background, its shell waiting for it; the other harnesses' agents detach it from
-//!   a shell that then ends (`nohup … &`), which leaves it with no parent, and the host
-//!   finds it by the window's session all the same.
+//!   and to answer. The task is done at once, its result is in the chief's inbox, and the
+//!   command is gone after: ended by the host, which told the chief so in a note beside the
+//!   result (a note that says part of it still runs and was not ended fails the run, with
+//!   what the host listed), or ended by the harness itself with its tool call (Codex and
+//!   Devin, seen on 2026-10-14), which the run says. A command that still runs once the task
+//!   is done and the chief told escaped the ending, and fails the run: it says whether the
+//!   host ever listed it, and whether the window's close found it when the window closed, and
+//!   it ends what still runs, so that a run leaves nothing on the machine. Claude Code runs
+//!   the command by its own option for one in the background, its shell staying a parent of
+//!   it, which the host ends; an agent that detaches it from a shell that then ends (`nohup
+//!   … &`, `setsid`) leaves it with no chain of processes to a shell the harness started,
+//!   and the host leaves it running: that is the limit the engine's `background` module
+//!   writes down, and this step is where it shows, harness by harness.
 //!
 //! Whatever the verdict, a run prints the processes the host listed as the turn's work at
 //! the turn's end (at the first look that found the window at rest, and before one has, at
@@ -62,7 +66,8 @@
 //!
 //! The tests beside this one (`live_finish/stand_in.rs`) run the same checks against the
 //! rig's stand-in agent, which the real daemon and pane host take for a harness: a worker
-//! that runs a command and one that leaves a job running past its turn and answers. They
+//! that runs a command, one that leaves a job running past its turn and answers, and one
+//! that detaches its job from its shell, which escapes, and fails the run as it should. They
 //! spend no quota and are part of `check` and of CI.
 //!
 //! Every harness has a shell tool, and an agent that is asked to can detach a command from

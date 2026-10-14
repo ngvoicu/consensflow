@@ -47,9 +47,9 @@ pub trait Adapter {
     /// still leaves alone what it can prove the harness's (a program named for the
     /// harness that runs beside its own binary, and what descends from one), and
     /// takes for the turn's only what it can prove: a shell the harness started after
-    /// the mark and what the shell started, and what has lost the process that
-    /// started it (a job detached with `nohup … &`). A server that begins after the
-    /// mark and is none of these is left alone, and is not named.
+    /// the mark and what the shell started, by a chain of processes that run. What it
+    /// cannot trace so (a job detached with `nohup … &` from a shell that then ended)
+    /// and a server that begins after the mark are left alone, and are not named.
     ///
     /// Only what someone has looked at is said: what a window's tree holds with a
     /// command of its agent running (`ps -axo pid,pgid,ppid,command`). Claude Code

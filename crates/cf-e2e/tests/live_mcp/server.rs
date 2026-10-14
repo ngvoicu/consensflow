@@ -14,6 +14,10 @@ use serde_json::json;
 /// What the server's configuration calls it: the name Claude lists it by.
 pub const NAME: &str = "cf-quiet";
 
+/// What its program and the file its process id is written to are called, before their
+/// extensions: what its command line holds, which no other process of the machine's does.
+pub const STEM: &str = "quiet-server";
+
 /// The server, a Python program (a macOS and a Linux machine has `python3`). It
 /// writes its process id to the file it is given, answers each request with a
 /// line of JSON as MCP's stdio transport has it, says nothing to a notification
@@ -63,9 +67,9 @@ impl Server {
     /// Writes the server's program and its configuration in `folder`, run by the
     /// interpreter `python`.
     pub fn write(folder: &Path, python: &Path) -> Result<Self> {
-        let script = folder.join("quiet-server.py");
+        let script = folder.join(format!("{STEM}.py"));
         let config = folder.join("mcp.json");
-        let pid_file = folder.join("quiet-server.pid");
+        let pid_file = folder.join(format!("{STEM}.pid"));
         files::write(&script, SCRIPT)?;
         files::write(
             &config,

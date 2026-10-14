@@ -36,15 +36,17 @@
 //! is named for the harness and is not beside its binary is anybody's.
 //!
 //! A process whose parent has gone has no ancestry to look at: it is the harness's
-//! only where it is in the window's group (the first shape) or is a program of its
-//! own (the second). A browser that outlives the server that started it and left the
-//! group is the turn's.
+//! only where it is in the window's group (the first shape), is a program of its own
+//! (the second), or was seen the harness's before, while its parent lived
+//! ([`super::Baseline`] keeps what it has seen). It is never the turn's for being left
+//! without one ([`super::work`]): a browser that outlives the server that started it
+//! and left the group is left alone, as it is not proved the agent's.
 
 use std::collections::{HashMap, HashSet};
 
 use cf_proto::panes::Servers;
 
-use super::{Member, ProcessKey};
+use super::{descending_from, Member, ProcessKey};
 
 /// What the daemon said of the window's harness at a mark, with the process
 /// group of the window's program, which leads it: the window's group.
@@ -67,7 +69,9 @@ impl Kept {
 }
 
 /// The processes of `tree` that are the harness's own servers, and what they
-/// started. `launch` is the processes the window had when its first turn began.
+/// started. `launch` is the processes the window had when its first turn began. The
+/// window's program is none of them, though it is in its own group: what it starts is
+/// the agent's, its commands among it.
 pub(super) fn own(
     kept: Kept,
     launch: &HashSet<ProcessKey>,
@@ -76,7 +80,9 @@ pub(super) fn own(
     let by_key: HashMap<ProcessKey, &Member> =
         tree.iter().map(|member| (member.key, member)).collect();
     tree.iter()
-        .filter(|member| descends_from_a_server(kept, launch, &by_key, member))
+        .filter(|member| {
+            !leads(kept, member) && descends_from_a_server(kept, launch, &by_key, member)
+        })
         .map(|member| member.key)
         .collect()
 }
@@ -95,7 +101,7 @@ fn descends_from_a_server(
         if is_server(kept, launch, at) {
             return true;
         }
-        match at.parent.of().and_then(|parent| by_key.get(&parent)) {
+        match at.parent.and_then(|parent| by_key.get(&parent)) {
             Some(parent) if !leads(kept, parent) => at = parent,
             _ => return false,
         }
@@ -147,32 +153,6 @@ pub(super) fn programs(harness: &str, tree: &[Member]) -> HashSet<ProcessKey> {
         .map(|member| member.key)
         .collect();
     descending_from(&roots, tree)
-}
-
-/// What `tree` has that is in `roots` or descends from a process in it, by the
-/// parent each was started by.
-fn descending_from(roots: &HashSet<ProcessKey>, tree: &[Member]) -> HashSet<ProcessKey> {
-    if roots.is_empty() {
-        return HashSet::new();
-    }
-    let by_key: HashMap<ProcessKey, &Member> =
-        tree.iter().map(|member| (member.key, member)).collect();
-    tree.iter()
-        .filter(|member| {
-            let mut at = *member;
-            for _ in 0..=by_key.len() {
-                if roots.contains(&at.key) {
-                    return true;
-                }
-                match at.parent.of().and_then(|parent| by_key.get(&parent)) {
-                    Some(parent) => at = parent,
-                    None => return false,
-                }
-            }
-            false
-        })
-        .map(|member| member.key)
-        .collect()
 }
 
 /// The directory and the file of a program's path, split at its last separator,

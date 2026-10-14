@@ -1,80 +1,306 @@
+use super::testing::{
+    a_window_among_strangers, identity_of, listed, the_tests_own_parent, the_windows, Machine,
+    DEEP, JOB, LOST, PROGRAM, SHELL, USERS_SHELL,
+};
 use super::*;
 
-/// A process of a snapshot, started by the process whose unique identifier is `parent`.
-fn listed(pid: i32, unique: u64, parent: u64) -> Process {
-    Process {
-        identity: Identity {
-            pid,
-            born: (1, 0),
-            unique,
+/// The numbers of what `found` names, in order.
+fn pids(found: &HashMap<i32, Identity>) -> Vec<i32> {
+    let mut pids: Vec<i32> = found.keys().copied().collect();
+    pids.sort_unstable();
+    pids
+}
+
+#[test]
+fn a_lineage_is_its_processes_that_run_and_what_descends_from_them_or_from_one_that_has_gone() {
+    let lineage = Lineage {
+        identities: vec![
+            // A shell that runs, and one that has gone.
+            listed(40, 400, 1).identity,
+            listed(41, 410, 1).identity,
+        ],
+        members: Vec::new(),
+    };
+    let snapshot = [
+        listed(40, 400, 1),
+        // What the shell that runs started, and what that started.
+        listed(50, 500, 400),
+        listed(51, 510, 500),
+        // What the shell that has gone started, still parented by its identifier.
+        listed(52, 520, 410),
+        // The window's own new work: a shell its program started, and what that runs.
+        listed(60, 600, 1),
+        listed(61, 610, 600),
+        // A process that took the number of the one that has gone.
+        listed(41, 411, 1),
+    ];
+    assert_eq!(
+        pids(&lineage.found(&snapshot, &HashMap::new())),
+        [40, 50, 51, 52],
+        "the new work is no part of it, though a look of the tree would call it the turn's"
+    );
+}
+
+#[test]
+fn what_a_process_the_ending_found_started_is_found_whether_or_not_that_process_runs() {
+    let lineage = Lineage {
+        identities: vec![listed(40, 400, 1).identity],
+        members: Vec::new(),
+    };
+    // A handler of the shell's started a process and went; the ending knows it by
+    // the identity it found, and what that started is the lineage's too.
+    let found_before: HashMap<i32, Identity> = HashMap::from([(70, listed(70, 700, 400).identity)]);
+    let snapshot = [listed(71, 710, 700), listed(72, 720, 999)];
+    assert_eq!(pids(&lineage.found(&snapshot, &found_before)), [71]);
+}
+
+#[test]
+fn the_session_is_the_panes_while_its_number_is_nobody_elses() {
+    let leader = Process {
+        session: Some(500),
+        ..listed(500, 5000, 1)
+    };
+    let in_session = |pid, unique| Process {
+        session: Some(500),
+        ..listed(pid, unique, 1)
+    };
+    let mut tree = ProcessTree::new();
+    tree.root = Some(leader.identity);
+    tree.session = Some(500);
+    let elsewhere = Process {
+        session: Some(900),
+        ..listed(502, 5020, 1)
+    };
+
+    // The leader runs: what is in its session is the pane's.
+    let with_leader = [leader, in_session(501, 5010), elsewhere];
+    assert_eq!(
+        pids(&tree.select(&with_leader, &HashMap::new())),
+        [500, 501]
+    );
+
+    // The leader has gone and nothing holds its number: what is left in the session
+    // is still the pane's, which a close ends.
+    let gone = [in_session(501, 5010), in_session(503, 5030)];
+    assert_eq!(pids(&tree.select(&gone, &HashMap::new())), [501, 503]);
+
+    // Another process has the number, and leads a session of its own: what is in a
+    // session of that number is not the pane's to tell.
+    let taken = [
+        Process {
+            session: Some(500),
+            ..listed(500, 5001, 1)
         },
-        parent,
-        group: pid,
-        session: None,
-        name: format!("p{pid}"),
+        in_session(501, 5010),
+    ];
+    assert!(tree.select(&taken, &HashMap::new()).is_empty());
+}
+
+// What the tree signals, on a machine made up (`testing`): a table of the window among
+// strangers, and a record of the signals sent to it. No process there is is signalled.
+
+/// The tree of the window of [`a_window_among_strangers`]: its program leads its session.
+fn tree_of(table: &[Process]) -> ProcessTree {
+    let mut tree = ProcessTree::new();
+    tree.root = Some(identity_of(table, PROGRAM));
+    tree.session = Some(PROGRAM);
+    tree.bound = Bound::new(tree.root);
+    tree
+}
+
+/// A selection gone wrong: a lineage that names every process of the machine, as a
+/// plant of the selection once did, and the ending signalled them all.
+fn every_process(table: &[Process]) -> Lineage {
+    Lineage {
+        identities: table.iter().map(|process| process.identity).collect(),
+        members: Vec::new(),
     }
 }
 
+/// The numbers of `table`'s processes the test names `of`, as the members of a lineage.
+fn members_of(table: &[Process], of: &[i32]) -> Vec<Member> {
+    of.iter()
+        .map(|pid| Member {
+            key: key_of(identity_of(table, *pid)),
+            command: format!("sleep {pid}"),
+            program: "sleep".to_owned(),
+            exe: String::new(),
+            group: None,
+            parent: None,
+        })
+        .collect()
+}
+
 #[test]
-fn what_the_tracking_saw_start_is_in_the_tree_and_so_is_what_a_process_that_has_gone_started() {
-    let mut tree = ProcessTree::new();
-    tree.tracker = Some(Arc::new(Tracker::having_seen([
-        // A shell that began and ended, and one that runs, as the tracking saw them.
-        (listed(40, 400, 1).identity, Instant::now()),
-        (listed(41, 410, 1).identity, Instant::now()),
-    ])));
-    let snapshot = [
-        // The shell that runs.
-        listed(41, 410, 1),
-        // A job the shell that has gone started, and what the job started.
-        listed(50, 500, 400),
-        listed(51, 510, 500),
-        // A process nobody of the pane's started.
-        listed(60, 600, 1),
-        // One a process that is not the tracking's started, and that is gone.
-        listed(61, 610, 999),
-    ];
-    let mut found: Vec<i32> = tree
-        .select(&snapshot, &HashMap::new())
-        .keys()
-        .copied()
+fn a_selection_of_every_process_of_the_machine_asks_only_the_windows_own_to_end() {
+    let machine = Machine::new(a_window_among_strangers());
+    let table = machine.processes().expect("the table");
+    let tree = tree_of(&table);
+    let wrong = every_process(&table);
+
+    let asked = tree
+        .ask_by(&machine, Subject::Lineage(&wrong), None)
+        .expect("asked");
+
+    assert_eq!(machine.sent(libc::SIGTERM), the_windows());
+    assert_eq!(machine.sent(libc::SIGHUP), the_windows());
+    let waited_for: Vec<i32> = asked.identities.iter().map(|asked| asked.pid).collect();
+    assert_eq!(waited_for, the_windows(), "no stranger is waited for");
+    assert!(!asked.failed());
+}
+
+#[test]
+fn a_selection_of_every_process_of_the_machine_stops_and_kills_only_the_windows_own() {
+    let machine = Machine::new(a_window_among_strangers());
+    let table = machine.processes().expect("the table");
+    let tree = tree_of(&table);
+    let wrong = every_process(&table);
+
+    let forced = tree.force_by(&machine, Subject::Lineage(&wrong), &[]);
+
+    assert!(forced.failure.is_none(), "{:?}", forced.failure);
+    assert_eq!(machine.sent(libc::SIGSTOP), the_windows());
+    assert_eq!(machine.sent(libc::SIGKILL), the_windows());
+    let named: Vec<i32> = forced
+        .members
+        .iter()
+        .map(|member| i32::try_from(member.key.pid).expect("a number"))
         .collect();
-    found.sort_unstable();
-    assert_eq!(found, [41, 50, 51]);
+    assert_eq!(named, the_windows(), "the strangers are no member of it");
 }
 
 #[test]
-fn what_has_gone_and_is_the_parent_of_nothing_that_runs_is_let_go_of_when_the_tree_is_looked_at() {
-    let long_ago = Instant::now()
-        .checked_sub(Duration::from_secs(3600))
-        .expect("a moment that long ago");
-    let tracker = Arc::new(Tracker::having_seen([
-        // Gone, and nobody's parent.
-        (listed(80, 800, 1).identity, long_ago),
-        // Gone, but what it started runs.
-        (listed(81, 810, 1).identity, long_ago),
-        // Running.
-        (listed(82, 820, 1).identity, long_ago),
-    ]));
-    let mut tree = ProcessTree::new();
-    tree.tracker = Some(Arc::clone(&tracker));
-    let snapshot = [listed(82, 820, 1), listed(83, 830, 810)];
-    tree.select(&snapshot, &HashMap::new());
-    let mut kept: Vec<u64> = tracker.seen().keys().copied().collect();
-    kept.sort_unstable();
-    assert_eq!(kept, [810, 820]);
+fn a_close_signals_only_what_is_under_the_program_though_the_session_names_more() {
+    let machine = Machine::new(a_window_among_strangers());
+    let table = machine.processes().expect("the table");
+    let tree = tree_of(&table);
+    // The job in the window's session whose parent has gone is the window's by the
+    // session, which the selection says: no look saw it under the program, and it is
+    // left running.
+    let chosen = tree.select(&table, &HashMap::new());
+    assert!(chosen.contains_key(&LOST), "the selection names it");
+
+    let forced = tree.force_by(&machine, Subject::Whole, &[]);
+
+    assert!(forced.failure.is_none(), "{:?}", forced.failure);
+    assert_eq!(machine.sent(libc::SIGSTOP), the_windows());
+    assert_eq!(machine.sent(libc::SIGKILL), the_windows());
 }
 
 #[test]
-fn a_process_the_tracking_saw_start_is_told_by_when_it_began_and_not_by_its_number() {
-    let mut tree = ProcessTree::new();
-    tree.tracker = Some(Arc::new(Tracker::having_seen([(
-        listed(70, 700, 1).identity,
-        Instant::now(),
-    )])));
-    // Another process has the number the one it saw had.
-    let snapshot = [listed(70, 701, 1)];
-    assert!(tree.select(&snapshot, &HashMap::new()).is_empty());
+fn a_job_seen_under_the_program_is_ended_by_a_close_though_its_parent_has_gone_since() {
+    let machine = Machine::new(a_window_among_strangers());
+    let table = machine.processes().expect("the table");
+    let tree = tree_of(&table);
+    // A look while the shell runs.
+    tree.members_by(&machine).expect("a look");
+
+    // The shell is gone and its job runs on, in the window's session.
+    let later = Machine::new(vec![
+        table[0].clone(),
+        Process {
+            session: Some(PROGRAM),
+            ..table[2].clone()
+        },
+        table[4].clone(),
+        table[8].clone(),
+    ]);
+    let forced = tree.force_by(&later, Subject::Whole, &[]);
+
+    assert!(forced.failure.is_none(), "{:?}", forced.failure);
+    assert_eq!(later.sent(libc::SIGKILL), [PROGRAM, JOB]);
+}
+
+#[test]
+fn what_the_bound_refuses_is_no_part_of_the_turns_lineage_whoever_proves_it_the_turns() {
+    let shell = |pid, unique, parent| Process {
+        name: "sh".to_owned(),
+        session: Some(PROGRAM),
+        ..listed(pid, unique, parent)
+    };
+    // Before the turn: the window's program, and a process of its session that nothing
+    // saw under the program, and whose parent has gone.
+    let before = Machine::new(vec![
+        Process {
+            session: Some(PROGRAM),
+            ..listed(PROGRAM, 1000, 700)
+        },
+        Process {
+            session: Some(PROGRAM),
+            ..listed(LOST, 2300, 1)
+        },
+    ]);
+    let table = before.processes().expect("the table");
+    let tree = tree_of(&table);
+    let mut baseline = Baseline::default();
+    baseline.mark(&tree.members_by(&before).expect("a look"), None, None);
+
+    // After it: a shell the program started, and one that process started: each is a
+    // shell with a parent from before the mark, which proves it the turn's.
+    let after = Machine::new(vec![
+        table[0].clone(),
+        table[1].clone(),
+        shell(SHELL, 1100, 1000),
+        shell(USERS_SHELL, 2100, 2300),
+    ]);
+    let lineage = tree.lineage_by(&after, &baseline).expect("the lineage");
+
+    let pids: Vec<i32> = lineage.identities.iter().map(|id| id.pid).collect();
+    assert_eq!(pids, [SHELL], "only what is under the program");
+    assert_eq!(lineage.members.len(), 1);
+}
+
+#[test]
+fn an_ending_names_as_ended_only_what_it_signalled() {
+    let machine = Machine::new(a_window_among_strangers());
+    let table = machine.processes().expect("the table");
+    let tree = tree_of(&table);
+    // A lineage that names the window's shell and job, and the test's own parent, which
+    // is alive: whatever chose it.
+    let lineage = Lineage {
+        identities: vec![identity_of(&table, SHELL), identity_of(&table, JOB)],
+        members: members_of(&table, &[SHELL, JOB, the_tests_own_parent()]),
+    };
+    let asked = tree
+        .ask_by(&machine, Subject::Lineage(&lineage), None)
+        .expect("asked");
+
+    let ending = tree.finish_by(&machine, &lineage, asked);
+
+    let ended: Vec<i32> = ending
+        .ended
+        .processes
+        .iter()
+        .map(|ended| i32::try_from(ended.pid).expect("a number"))
+        .collect();
+    assert_eq!(
+        ended,
+        [SHELL, JOB, DEEP],
+        "what it signalled, and what that started"
+    );
+    assert!(
+        !ended.contains(&the_tests_own_parent()),
+        "the test's own parent was never signalled and is not named: {ending:?}"
+    );
+    assert_eq!(ending.left.total, 0, "{ending:?}");
+    assert_eq!(machine.sent(libc::SIGKILL), [SHELL, JOB, DEEP]);
+}
+
+#[test]
+fn a_tree_with_no_program_signals_nothing_whatever_is_selected() {
+    let machine = Machine::new(a_window_among_strangers());
+    let table = machine.processes().expect("the table");
+    // A pane whose program could not be read: nothing is under it, and nothing was seen.
+    let tree = ProcessTree::new();
+    let wrong = every_process(&table);
+
+    let asked = tree
+        .ask_by(&machine, Subject::Lineage(&wrong), None)
+        .expect("asked");
+    let forced = tree.force_by(&machine, Subject::Lineage(&wrong), &[]);
+
+    assert!(machine.signalled_none());
+    assert!(asked.identities.is_empty() && forced.members.is_empty());
 }
 
 /// A Python that starts a Python that sleeps, says its number, and waits to be
@@ -83,6 +309,70 @@ fn a_process_the_tracking_saw_start_is_told_by_when_it_began_and_not_by_its_numb
 const PARENT: &str = "import subprocess, sys; \
     child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(41)']); \
     print(child.pid, flush=True); input()";
+
+/// The incident, replayed on this machine's own table with the signals only recorded: a
+/// selection that names every process there is, and a window of two real processes
+/// among the hundreds that are not its own (the build this test runs in, the shell that
+/// started it, the user's programs). Only the window's two would be signalled.
+#[cfg(target_os = "macos")]
+#[allow(clippy::disallowed_methods)] // A test's own programs.
+#[test]
+fn a_selection_of_every_process_of_this_machine_would_signal_only_the_windows_own() {
+    use std::io::{BufRead, BufReader, Write};
+    use std::process::{Command, Stdio};
+
+    let mut tree = ProcessTree::new();
+    let mut program = Command::new("/usr/bin/python3")
+        .args(["-c", PARENT])
+        .env(OWNER_ENV, &tree.marker)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("start the window's program");
+    let program_pid = i32::try_from(program.id()).expect("a process number");
+    tree.attach(program_pid);
+    let mut line = String::new();
+    BufReader::new(program.stdout.take().expect("its output"))
+        .read_line(&mut line)
+        .expect("the child's number");
+    let child: i32 = line.trim().parse().expect("a process number");
+
+    let machine = Machine::new(native::processes().expect("this machine's processes"));
+    let table = machine.processes().expect("the table");
+    assert!(
+        table.len() > 10,
+        "the machine has strangers to be told from: {}",
+        table.len()
+    );
+    let wrong = every_process(&table);
+    let ours = {
+        let mut ours = vec![program_pid, child];
+        ours.sort_unstable();
+        ours
+    };
+
+    tree.ask_by(&machine, Subject::Lineage(&wrong), None)
+        .expect("asked");
+    let forced = tree.force_by(&machine, Subject::Lineage(&wrong), &[]);
+    tree.force_by(&machine, Subject::Whole, &[]);
+
+    assert!(forced.failure.is_none(), "{:?}", forced.failure);
+    for signal in [libc::SIGTERM, libc::SIGHUP, libc::SIGSTOP, libc::SIGKILL] {
+        assert_eq!(machine.sent(signal), ours, "signal {signal}");
+    }
+
+    // The window is this test's own, and it ends it, nothing having been sent.
+    program
+        .stdin
+        .take()
+        .expect("its input")
+        .write_all(b"\n")
+        .expect("tell it to go");
+    program.wait().expect("the program ends");
+    // SAFETY: kill takes two integers and touches no memory of ours; the child is this
+    // test's own, a Python that sleeps.
+    unsafe { libc::kill(child, libc::SIGKILL) };
+}
 
 #[cfg(target_os = "macos")]
 #[allow(clippy::disallowed_methods)] // A test's own programs.
@@ -111,7 +401,7 @@ fn a_process_has_the_process_that_started_it_as_its_parent_until_that_has_gone()
     let started = members.iter().find(|m| m.key.pid == child);
     assert_eq!(
         started.map(|member| member.parent),
-        root.map(|member| Parent::Of(member.key)),
+        root.map(|member| Some(member.key)),
         "its parent is the process that started it: {members:?}"
     );
 
@@ -131,7 +421,7 @@ fn a_process_has_the_process_that_started_it_as_its_parent_until_that_has_gone()
     let group = unsafe { libc::getpgid(i32::try_from(child).expect("a process number")) };
     assert_eq!(
         orphan.map(|member| (member.parent, member.group)),
-        Some((Parent::Gone, Some(group))),
+        Some((None, Some(group))),
         "{members:?}"
     );
     // SAFETY: kill takes two integers and touches no memory of ours.
@@ -176,9 +466,6 @@ fn a_job_whose_shell_has_gone_is_in_the_tree_by_the_session_it_kept_and_has_no_p
     }
     let mut leader = command.spawn().expect("start the session leader");
     tree.attach(i32::try_from(leader.id()).expect("a process number"));
-    // What the program started is told by the session alone here: the tracking is
-    // what the next test is for.
-    tree.tracker = None;
     let mut line = String::new();
     BufReader::new(leader.stdout.take().expect("its output"))
         .read_line(&mut line)
@@ -204,7 +491,7 @@ fn a_job_whose_shell_has_gone_is_in_the_tree_by_the_session_it_kept_and_has_no_p
         );
         std::thread::sleep(std::time::Duration::from_millis(10));
     };
-    assert_eq!(found.parent, Parent::Gone);
+    assert_eq!(found.parent, None);
 
     leader
         .stdin
@@ -212,164 +499,6 @@ fn a_job_whose_shell_has_gone_is_in_the_tree_by_the_session_it_kept_and_has_no_p
         .expect("its input")
         .write_all(b"\n")
         .expect("tell it to go");
-    leader.wait().expect("the leader ends");
-    // SAFETY: kill takes two integers and touches no memory of ours.
-    unsafe { libc::kill(i32::try_from(job).expect("a process number"), libc::SIGKILL) };
-}
-
-/// A session leader that says it is ready, and once told to go runs two hundred shells
-/// one after the other, each in a session of its own, each of which detaches a job
-/// (`nohup sleep 43 &`) and ends at once; it says the jobs' numbers and waits to be
-/// told to go.
-#[cfg(target_os = "macos")]
-const MANY_APART: &str = "import subprocess; print('ready', flush=True); input(); \
-    jobs = [subprocess.run(['/bin/sh', '-c', 'nohup sleep 43 >/dev/null 2>&1 & echo $!'], \
-        capture_output=True, text=True, start_new_session=True).stdout.strip() for _ in range(200)]; \
-    print(' '.join(jobs), flush=True); input()";
-
-/// How many of the jobs that shells detached the tracking finds when the shells end
-/// as soon as they have started them, and every core of the machine is busy: the
-/// measure of how fast it follows, which depends on how loaded the machine is, and so
-/// no test that passes or fails.
-#[cfg(target_os = "macos")]
-#[allow(clippy::disallowed_methods)] // A test's own programs.
-#[test]
-#[ignore = "measures how fast the tracking follows, with every core busy"]
-fn how_many_of_the_jobs_detached_by_shells_that_end_at_once_the_tracking_finds() {
-    use std::io::{BufRead, BufReader, Write};
-    use std::os::unix::process::CommandExt;
-    use std::process::{Command, Stdio};
-    use std::sync::atomic::{AtomicBool, Ordering};
-    use std::sync::Arc;
-
-    let busy = Arc::new(AtomicBool::new(true));
-    let spinning: Vec<_> = (0..std::thread::available_parallelism().map_or(8, usize::from))
-        .map(|_| {
-            let busy = Arc::clone(&busy);
-            std::thread::spawn(move || {
-                while busy.load(Ordering::Relaxed) {
-                    std::hint::spin_loop();
-                }
-            })
-        })
-        .collect();
-    let mut tree = ProcessTree::new();
-    let mut command = Command::new("/usr/bin/python3");
-    command
-        .args(["-c", MANY_APART])
-        .env(OWNER_ENV, &tree.marker)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped());
-    // SAFETY: setsid is async-signal-safe and touches no memory of ours.
-    unsafe {
-        command.pre_exec(|| {
-            libc::setsid();
-            Ok(())
-        });
-    }
-    let mut leader = command.spawn().expect("start the session leader");
-    tree.attach(i32::try_from(leader.id()).expect("a process number"));
-    let mut output = BufReader::new(leader.stdout.take().expect("its output"));
-    let mut input = leader.stdin.take().expect("its input");
-    let mut line = String::new();
-    output.read_line(&mut line).expect("it is ready");
-    input.write_all(b"\n").expect("tell it to go");
-    line.clear();
-    output.read_line(&mut line).expect("the jobs' numbers");
-    let jobs: Vec<u32> = line
-        .split_whitespace()
-        .map(|number| number.parse().expect("a process number"))
-        .collect();
-    std::thread::sleep(std::time::Duration::from_millis(500));
-    let members = tree.members().expect("look at the tree");
-    busy.store(false, Ordering::Relaxed);
-    for thread in spinning {
-        thread.join().expect("a busy thread ends");
-    }
-    let found = jobs
-        .iter()
-        .filter(|job| members.iter().any(|member| member.key.pid == **job))
-        .count();
-    eprintln!("the tracking found {found} of {} jobs", jobs.len());
-    input.write_all(b"\n").expect("tell it to end");
-    leader.wait().expect("the leader ends");
-    for job in jobs {
-        // SAFETY: kill takes two integers and touches no memory of ours.
-        unsafe { libc::kill(i32::try_from(job).expect("a process number"), libc::SIGKILL) };
-    }
-}
-
-/// A session leader that says it is ready, and once told to go runs a shell in a
-/// session of its own (as Pi's Bash tool starts each command), which detaches a job
-/// (`nohup sleep 43 &`) and ends a moment after; it says the job's number and waits to
-/// be told to go.
-#[cfg(target_os = "macos")]
-const APART: &str = "import subprocess; print('ready', flush=True); input(); \
-    job = subprocess.run(['/bin/sh', '-c', 'nohup sleep 43 >/dev/null 2>&1 & echo $!; sleep 0.2'], \
-        capture_output=True, text=True, start_new_session=True).stdout.strip(); \
-    print(job, flush=True); input()";
-
-#[cfg(target_os = "macos")]
-#[allow(clippy::disallowed_methods)] // A test's own programs.
-#[test]
-fn a_job_that_left_the_session_with_its_shell_gone_is_in_the_tree_by_what_the_program_started() {
-    use std::io::{BufRead, BufReader, Write};
-    use std::os::unix::process::CommandExt;
-    use std::process::{Command, Stdio};
-
-    let mut tree = ProcessTree::new();
-    let mut command = Command::new("/usr/bin/python3");
-    command
-        .args(["-c", APART])
-        .env(OWNER_ENV, &tree.marker)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped());
-    // SAFETY: setsid is async-signal-safe and touches no memory of ours; the pty makes
-    // a pane's program a session leader as this does.
-    unsafe {
-        command.pre_exec(|| {
-            libc::setsid();
-            Ok(())
-        });
-    }
-    let mut leader = command.spawn().expect("start the session leader");
-    let root = i32::try_from(leader.id()).expect("a process number");
-    tree.attach(root);
-    let mut output = BufReader::new(leader.stdout.take().expect("its output"));
-    let mut input = leader.stdin.take().expect("its input");
-    let mut line = String::new();
-    output.read_line(&mut line).expect("it is ready");
-    // The tracking is in place: what the program starts now is told as it starts.
-    input.write_all(b"\n").expect("tell it to go");
-    line.clear();
-    output.read_line(&mut line).expect("the job's number");
-    let job: u32 = line.trim().parse().expect("a process number");
-
-    // `sleep` is a system binary, which shows no environment: no marker finds it. It
-    // is in the session of a shell that has gone and not in the program's, and the
-    // system names no parent of it that the tree has. What the program started is
-    // what finds it, once it has become `sleep`.
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-    let found = loop {
-        let members = tree.members().expect("look at the tree");
-        if let Some(member) = members
-            .iter()
-            .find(|member| member.key.pid == job && member.exe.ends_with("/sleep"))
-        {
-            break member.clone();
-        }
-        assert!(
-            std::time::Instant::now() < deadline,
-            "the job was never found as `sleep`: {members:?}"
-        );
-        std::thread::sleep(std::time::Duration::from_millis(10));
-    };
-    assert_eq!(found.parent, Parent::Gone);
-    // SAFETY: getsid takes a process number and touches no memory of ours.
-    let (program, apart) = unsafe { (libc::getsid(root), libc::getsid(job as i32)) };
-    assert_ne!(apart, program, "the job is in a session of its own");
-
-    input.write_all(b"\n").expect("tell it to end");
     leader.wait().expect("the leader ends");
     // SAFETY: kill takes two integers and touches no memory of ours.
     unsafe { libc::kill(i32::try_from(job).expect("a process number"), libc::SIGKILL) };

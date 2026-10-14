@@ -13,9 +13,13 @@
 //! - the host listed the command as running, or the command is nowhere on the machine
 //!   once the task is done: Codex and Devin end what a tool started when the tool call
 //!   ends (live, 2026-10-14), and their run says so; a command the host never listed
-//!   that still runs on the machine escaped the window (the agent took it out of the
-//!   window's session with `setsid`, and every process that started it was gone before
-//!   the host saw one of them start), and fails;
+//!   that still runs on the machine escaped the ending, and fails: the agent detached it
+//!   from the shell that started it (`nohup … &`, `setsid`, `disown`, `Start-Process`)
+//!   and that shell ended, so no chain of processes that run leads from it to a shell the
+//!   harness started, and the host ends only what such a chain proves the turn's. The run
+//!   then looks again once the window has closed, and says whether the window's close
+//!   found it (it ends what its tree finds) or it runs on, and ends what still runs, so
+//!   that a run leaves nothing of its own on the machine;
 //! - the command is gone once the task is done;
 //! - and the chief was told, in the note beside the result, that the turn left work
 //!   and that it was ended: a note that says part of what the host proved the turn's still
@@ -32,7 +36,7 @@ use cf_e2e::live::members::{
 };
 use cf_e2e::live::tree::{self, Proc, Tree};
 use cf_e2e::live::{cut, secs, text, Log, Who};
-use cf_e2e::process::{is_alive, Run};
+use cf_e2e::process::{is_alive, signal, Run, Signal};
 use cf_e2e::Result as Fallible;
 
 use crate::check::{
@@ -42,6 +46,32 @@ use crate::check::{
 /// How many seconds the command the worker starts runs: more than a run lasts, and a
 /// number that is in no other command line of the machine.
 pub const SECONDS: u64 = 4711;
+
+/// How long the run waits, once the task is done, for the chief to be told what the turn
+/// left, for the command to be gone and for the window to close: a harness's window may
+/// take what the pane host gives it, and a run that finds none of it waits for all of it.
+/// The rig's stand-in ends at once, so that a run of it that finds nothing has waited long
+/// enough in a fraction.
+#[derive(Debug, Clone, Copy)]
+struct Waits {
+    told: Duration,
+    gone: Duration,
+}
+
+impl Waits {
+    fn of(who: Who) -> Self {
+        match who {
+            Who::StandIn => Self {
+                told: Duration::from_secs(15),
+                gone: Duration::from_secs(10),
+            },
+            Who::Harness(_) => Self {
+                told: DELIVERS,
+                gone: CLOSES,
+            },
+        }
+    }
+}
 
 /// The command the worker starts, as this machine's shells know it: Windows has no
 /// `sleep` in PowerShell or in `cmd`, and has `ping` in every one of them.
@@ -68,16 +98,36 @@ fn detach() -> String {
 
 /// What the chief gives the worker: for a harness, to start the command in the background
 /// and answer; for the rig's stand-in, which has no shell tool, to start a job of the
-/// same number of seconds (its command line holds it), detached from the shell that runs
-/// it as the agents of four harnesses detached theirs, and answer.
+/// same number of seconds (its command line holds it) in a shell that waits for it, as a
+/// harness's shell tool runs a command it is waited for or keeps running in the
+/// background, and answer.
 pub fn brief(who: Who) -> String {
     match who {
-        Who::StandIn => format!("BACKGROUND --detach {SECONDS} left a job running"),
+        Who::StandIn => stand_in_brief(false),
         Who::Harness(_) => format!(
             "Start the command `{}` in the background, so that it is still running when you have answered: use your shell tool's option to run a command in the background if it has one, or detach it yourself ({}). Do not wait for it, do not look at it and do not stop it. When it has started, reply with one line that says so, and nothing more.",
             command(),
             detach()
         ),
+    }
+}
+
+/// What the chief gives the rig's stand-in: to start a job of [`SECONDS`] seconds and
+/// answer; where `detached`, detached from the shell that runs it, as the agents of four
+/// harnesses detached theirs (`nohup … &`), which ends the shell and leaves the job with
+/// no parent.
+pub fn stand_in_brief(detached: bool) -> String {
+    let how = if detached { "--detach " } else { "" };
+    format!("BACKGROUND {how}{SECONDS} left a job running")
+}
+
+/// What the command line of the command the worker started holds, to find it on the
+/// machine: the command itself, or for the rig's stand-in, which starts a job of its own,
+/// the job's words.
+fn wanted(who: Who) -> String {
+    match who {
+        Who::StandIn => format!("--background-job {SECONDS}"),
+        Who::Harness(_) => command(),
     }
 }
 
@@ -98,9 +148,13 @@ pub struct Left {
     /// the task was done and the chief told.
     pub alive: Vec<u64>,
     /// The command lines of the machine's processes that run the command, looked at once
-    /// the task was done and the chief told: what escaped the window, where the host
+    /// the task was done and the chief told: what escaped the ending, where the host
     /// listed none.
     pub escaped: Vec<String>,
+    /// What of `escaped` still ran when the window had closed, which ends what its tree
+    /// finds: none where the close ended it unsaid. None where nothing escaped, or the
+    /// window had not closed when the run last looked.
+    pub after_close: Option<Vec<String>>,
 }
 
 impl Left {
@@ -131,11 +185,13 @@ pub fn judge(left: &Left) -> Result<(), Vec<String>> {
         }
         Some(_) => {}
     }
+    let close = after_the_close(left);
     if left.listed.is_empty() {
         if !left.escaped.is_empty() {
             problems.push(format!(
-                "the command escaped the window: the pane host never listed it, and it still runs on the machine (the agent started it in a session of its own, and the shell that started it was gone before the host saw it start): {}",
-                left.escaped.join("; ")
+                "the command escaped the ending: the pane host never listed it, and it still ran once the task was done and the chief told (the agent detached it from the shell that started it, which ended, so no chain of processes that run led from it to a shell the harness started): {}; {}",
+                left.escaped.join("; "),
+                close.unwrap_or_default()
             ));
         }
     } else {
@@ -146,10 +202,15 @@ pub fn judge(left: &Left) -> Result<(), Vec<String>> {
                 .filter(|process| left.alive.contains(&process.pid))
                 .map(|process| format!("{} {}", process.pid, process.command))
                 .collect();
-            problems.push(format!(
+            let mut said = format!(
                 "the command is still running after the task was done and the chief told: {}",
                 still.join("; ")
-            ));
+            );
+            if let Some(close) = close {
+                said.push_str("; ");
+                said.push_str(&close);
+            }
+            problems.push(said);
         }
         let (ended, not_ended) = left.told();
         if left.notes.is_empty() {
@@ -172,6 +233,23 @@ pub fn judge(left: &Left) -> Result<(), Vec<String>> {
     } else {
         Err(problems)
     }
+}
+
+/// What the window's close did to a command that ran on once the task was done, as a clause
+/// of a problem: whether the close, which ends what its tree finds, found it. None where
+/// nothing ran on.
+fn after_the_close(left: &Left) -> Option<String> {
+    if left.escaped.is_empty() {
+        return None;
+    }
+    Some(match &left.after_close {
+        None => "the window had not closed when the run last looked".to_owned(),
+        Some(rest) if rest.is_empty() => "the window's close ended it, unsaid".to_owned(),
+        Some(rest) => format!(
+            "it still runs after the window closed, which found nothing of it: {}",
+            rest.join("; ")
+        ),
+    })
 }
 
 /// The run in a line, for the table that ends it: that the command was ended and the
@@ -217,9 +295,22 @@ fn at_the_chief(left: &Left) -> String {
 /// what it came to, which holds when the task was done, the command left running was
 /// ended and the chief told so.
 pub fn run(who: Who, plan: &Plan, stand_in: &Path, log: &Log) -> Fallible<Finished> {
+    run_asked(who, plan, stand_in, &brief(who), log)
+}
+
+/// [`run`], the worker given `brief` as its task: the rig's stand-in is asked to leave a
+/// job as a harness's shell tool does, and as the agents that detach theirs do.
+pub fn run_asked(
+    who: Who,
+    plan: &Plan,
+    stand_in: &Path,
+    brief: &str,
+    log: &Log,
+) -> Fallible<Finished> {
     let log = log.scoped(who.name());
     let mut members = Members::open(plan, stand_in, &log)?;
-    let finished = observe(&mut members, &agent(who), &brief(who), &log);
+    let waits = Waits::of(who);
+    let finished = observe(&mut members, &agent(who), brief, &wanted(who), waits, &log);
     let closed = members.close();
     let mut finished = finished?;
     finished.case.closed(closed);
@@ -228,8 +319,16 @@ pub fn run(who: Who, plan: &Plan, stand_in: &Path, log: &Log) -> Fallible<Finish
 
 /// The worker given its task, and the board and the pane host looked at once a second until
 /// the task ends; then the result and the chief's note waited for, the command waited to be
-/// gone, and what was seen held to the brief.
-fn observe(members: &mut Members, agent: &str, brief: &str, log: &Log) -> Fallible<Finished> {
+/// gone, and what was seen held to the brief. `wanted` is what the command line of the
+/// command holds, to find it on the machine.
+fn observe(
+    members: &mut Members,
+    agent: &str,
+    brief: &str,
+    wanted: &str,
+    waits: Waits,
+    log: &Log,
+) -> Fallible<Finished> {
     let mut case = Account::new();
     if let Some(trust) = members.trust() {
         case.say(format!("trust: {trust}"));
@@ -279,26 +378,39 @@ fn observe(members: &mut Members, agent: &str, brief: &str, log: &Log) -> Fallib
         find(
             log,
             "the chief to be told what the turn left",
-            DELIVERS,
+            waits.told,
             LOOK,
             || {
                 left.notes = notes_of_work(&members.inbox(Some(members.chief()))?, number);
                 Ok((!left.notes.is_empty()).then_some(()))
             },
         )?;
-        find(log, "the command to be gone", CLOSES, LOOK, || {
+        find(log, "the command to be gone", waits.gone, LOOK, || {
             left.alive = still_there(&left.listed);
             Ok(left.alive.is_empty().then_some(()))
         })?;
-        left.escaped = on_the_machine();
+        left.escaped = on_the_machine(wanted);
     }
     let mut exit: Option<Tree> = None;
     if let (true, Some(pane)) = (ended, pane.clone()) {
-        find(log, "the worker's window to close", CLOSES, LOOK, || {
-            exit = tree::left_at_exit(members.rig(), &pane);
-            Ok(exit.is_some().then_some(()))
-        })?;
+        find(
+            log,
+            "the worker's window to close",
+            waits.gone,
+            LOOK,
+            || {
+                exit = tree::left_at_exit(members.rig(), &pane);
+                Ok(exit.is_some().then_some(()))
+            },
+        )?;
     }
+    // A command that escaped the ending is the window's close's to find, or nobody's: what
+    // still runs once the window has closed is said, and then ended, so that a run leaves
+    // nothing of its own on the machine.
+    if !left.escaped.is_empty() && exit.is_some() {
+        left.after_close = Some(on_the_machine(wanted));
+    }
+    end_what_runs_on(wanted);
 
     let verdict = judge(&left);
     case.say(format!(
@@ -336,10 +448,27 @@ fn observe(members: &mut Members, agent: &str, brief: &str, log: &Log) -> Fallib
     })
 }
 
-/// The command lines of the machine's processes that run the command now: `ps` on Unix,
-/// the process table through PowerShell on Windows. None where neither answers.
-fn on_the_machine() -> Vec<String> {
-    let wanted = command();
+/// Ends what runs the command now, so that a run leaves nothing of its own on the machine.
+/// What is ended is what the machine shows running it at this moment, by its command line:
+/// a number that an earlier look found, and another process took, is not ended.
+fn end_what_runs_on(wanted: &str) {
+    for pid in on_the_machine(wanted)
+        .iter()
+        .filter_map(|line| pid_of(line))
+    {
+        let _ = signal(pid, Signal::Kill);
+    }
+}
+
+/// The process a line of [`on_the_machine`] is of: the number it begins with.
+fn pid_of(line: &str) -> Option<u32> {
+    line.split_whitespace().next()?.parse().ok()
+}
+
+/// The command lines of the machine's processes whose command holds `wanted` now, each
+/// after the process's number: `ps` on Unix, the process table through PowerShell on
+/// Windows. None where neither answers.
+fn on_the_machine(wanted: &str) -> Vec<String> {
     let ran = if cfg!(windows) {
         Run::new("powershell")
             .args([
@@ -361,7 +490,7 @@ fn on_the_machine() -> Vec<String> {
             ran.stdout
                 .lines()
                 .map(str::trim)
-                .filter(|line| line.contains(&wanted))
+                .filter(|line| line.contains(wanted))
                 .map(str::to_owned)
                 .collect()
         })

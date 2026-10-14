@@ -19,10 +19,10 @@ mod macos {
 
     use cf_proto::panes::{Ending, Servers};
 
-    use super::programs::{HELPERS, LEFT, MANY, SPAWNER, TURN};
+    use super::programs::{HELPERS, LEFT, MANY, NEW, SPAWNER, TURN};
     use crate::pty::turn::support::{
-        gone, harness_programs, listed, numbers, open_python, scratch, started, until_line,
-        DETACHED,
+        gone, harness_programs, kill, listed, numbers, open_python, scratch, started, until_line,
+        Sentinel, DETACHED,
     };
     use crate::pty::{process_exists, serial_pty_test, PaneError, PaneKey, PaneTable};
 
@@ -55,6 +55,7 @@ mod macos {
     fn what_the_turn_started_is_asked_to_end_and_killed_once_the_grace_is_over_and_the_harness_is_left_as_it_was(
     ) {
         let _serial = serial_pty_test();
+        let mut outsider = Sentinel::start();
         let table = Arc::new(PaneTable::closing_within(GRACE));
         let released = scratch("released");
         let (pane, pid) = started(
@@ -104,12 +105,18 @@ mod macos {
             "the window is open"
         );
         assert_eq!(listed(&table, &pane.key), Vec::<u32>::new());
+        assert!(
+            outsider.runs(),
+            "a process outside the window is no ending's to end"
+        );
         table.kill(&pane.key).expect("close the pane");
+        assert!(outsider.runs(), "nor a close's");
     }
 
     #[test]
     fn an_ending_waits_for_no_longer_than_the_programs_take_to_end() {
         let _serial = serial_pty_test();
+        let mut outsider = Sentinel::start();
         let table = Arc::new(PaneTable::closing_within(Duration::from_secs(20)));
         let released = scratch("released");
         let (pane, pid) = started(
@@ -133,12 +140,15 @@ mod macos {
         for harness in ["program", "before", "server", "browser"] {
             assert!(process_exists(pid[harness]), "{harness} is left alone");
         }
+        assert!(outsider.runs(), "a process outside the window");
         table.kill(&pane.key).expect("close the pane");
+        assert!(outsider.runs(), "nor a close's");
     }
 
     #[test]
     fn what_a_close_lists_after_an_ending_is_none_of_what_it_ended() {
         let _serial = serial_pty_test();
+        let mut outsider = Sentinel::start();
         let table = Arc::new(PaneTable::closing_within(GRACE));
         let released = scratch("released");
         let (pane, _) = started(
@@ -149,57 +159,77 @@ mod macos {
             &env_with(&released, false),
         );
         table.end_background(&pane.key).expect("end it");
+        assert!(outsider.runs(), "a process outside the window");
 
         table.kill(&pane.key).expect("close the pane");
 
         let kept = pane.ended.background().expect("the close kept its list");
         assert!(kept.is_empty(), "{kept:?}");
+        assert!(outsider.runs(), "nor a close's");
     }
 
     #[test]
-    fn a_job_the_agent_detached_from_a_shell_that_ended_is_ended_though_only_the_session_holds_it()
-    {
+    fn a_job_the_agent_detached_from_a_shell_that_ended_is_left_running_unnamed_and_the_close_leaves_it_too(
+    ) {
         let _serial = serial_pty_test();
+        let mut outsider = Sentinel::start();
         for servers in [Servers::InGroup, Servers::Unknown] {
             let table = Arc::new(PaneTable::closing_within(GRACE));
             let (pane, pid) = started(&table, DETACHED, servers, None, &HashMap::new());
-            assert_eq!(listed(&table, &pane.key), numbers(&pid, &["job"]));
 
+            // The shell has gone and the job has no parent: no chain of processes that
+            // run leads from it to a shell the harness started, and its being in the
+            // window's session, which it is, is no proof of whose work it is.
+            assert_eq!(listed(&table, &pane.key), Vec::<u32>::new(), "{servers:?}");
             let ending = table.end_background(&pane.key).expect("end it");
 
-            assert_eq!(ended_pids(&ending), numbers(&pid, &["job"]), "{servers:?}");
-            assert_eq!(ending.left.total, 0, "{ending:?}");
-            assert!(gone(pid["job"]), "{servers:?}");
-            for harness in ["program", "before"] {
-                assert!(process_exists(pid[harness]), "{harness} is left alone");
-            }
+            assert_eq!(ending, Ending::default(), "{servers:?}");
+            assert!(process_exists(pid["job"]), "{servers:?}: it runs on");
+            // It is the window's by its session, but no look saw it under the window's
+            // program, and the bound leaves it running: the close ends what is under the
+            // program, and this was started by a shell that has gone.
             table.kill(&pane.key).expect("close the pane");
+            assert!(
+                process_exists(pid["job"]),
+                "{servers:?}: the close does not end what nothing saw under the program"
+            );
+            kill(pid["job"]);
+            assert!(outsider.runs(), "{servers:?}: a process outside the window");
         }
     }
 
     #[test]
-    fn a_job_that_left_the_session_with_the_shell_that_started_it_gone_is_found_by_what_the_program_started_and_ended(
+    fn a_job_that_left_the_session_with_the_shell_that_started_it_gone_is_left_running_and_not_named(
     ) {
         let _serial = serial_pty_test();
+        let mut outsider = Sentinel::start();
         let table = Arc::new(PaneTable::closing_within(GRACE));
         let (pane, pid) = started(&table, LEFT, Servers::Unknown, None, &HashMap::new());
 
         // `setsid` took it out of the window's session, what the system shows of a
         // system binary has no marker, and the processes that started it have gone:
-        // what is told of it is that the window's program started the shell that
-        // started it, as it began.
-        assert_eq!(listed(&table, &pane.key), numbers(&pid, &["job"]));
+        // nothing of it says it is the window's, let alone the turn's.
+        assert_eq!(listed(&table, &pane.key), Vec::<u32>::new());
         let ending = table.end_background(&pane.key).expect("end it");
 
-        assert_eq!(ended_pids(&ending), numbers(&pid, &["job"]));
-        assert_eq!(ending.left.total, 0, "{ending:?}");
-        assert!(gone(pid["job"]), "the job was ended");
+        assert_eq!(ending, Ending::default());
+        assert!(
+            process_exists(pid["job"]),
+            "nothing ended what it did not find"
+        );
         table.kill(&pane.key).expect("close the pane");
+        assert!(
+            process_exists(pid["job"]),
+            "the close does not find it either"
+        );
+        assert!(outsider.runs(), "a process outside the window");
+        kill(pid["job"]);
     }
 
     #[test]
     fn what_a_command_asked_to_end_started_before_it_ended_is_ended_with_it() {
         let _serial = serial_pty_test();
+        let mut outsider = Sentinel::start();
         let table = Arc::new(PaneTable::closing_within(GRACE));
         let child = scratch("child");
         let env = HashMap::from([("CHILD".to_owned(), child.display().to_string())]);
@@ -208,8 +238,9 @@ mod macos {
 
         let ending = table.end_background(&pane.key).expect("end it");
 
-        // The command's handler started a job of its own and ended: the job is the
-        // window's by its session, with no parent, and it is ended and said.
+        // The command's handler started a job of its own and ended: the job is what the
+        // ending's own started, found by the identifier of its parent, which has gone,
+        // and it is ended and said.
         let started_late: i32 = fs::read_to_string(&child)
             .expect("the handler wrote the job's number")
             .trim()
@@ -226,12 +257,62 @@ mod macos {
             assert!(gone(pid[job]), "{job} was ended");
         }
         assert!(process_exists(pid["before"]));
+        assert!(outsider.runs(), "a process outside the window");
         table.kill(&pane.key).expect("close the pane");
+        assert!(outsider.runs(), "nor a close's");
+    }
+
+    #[test]
+    fn new_work_the_window_starts_while_an_ending_gives_the_grace_is_no_part_of_the_ending() {
+        let _serial = serial_pty_test();
+        let mut outsider = Sentinel::start();
+        let table = Arc::new(PaneTable::closing_within(GRACE));
+        let (pane, pid) = started(&table, NEW, Servers::InGroup, None, &HashMap::new());
+        let old = numbers(&pid, &["old", "old_job"]);
+        assert_eq!(listed(&table, &pane.key), old);
+
+        // The command ignores the request to end, so the ending waits the grace out; a
+        // human types into the window meanwhile (the delivery of a message would be
+        // held), and the window's program starts new work, a shell in a group of its
+        // own with a job, which the old turn's mark takes for the turn's work as well.
+        let (ending, new) = std::thread::scope(|scope| {
+            let ending = scope.spawn(|| table.end_background(&pane.key).expect("end it"));
+            std::thread::sleep(Duration::from_millis(300));
+            table
+                .write(&pane.key, b"more\n")
+                .expect("type into the window");
+            let said = until_line(&pane.output, "more ");
+            let new: serde_json::Value = serde_json::from_str(&said).expect("the new work");
+            (ending.join().expect("the ending ends"), new)
+        });
+        let (shell, job) = (
+            new["new"].as_i64().expect("a number") as i32,
+            new["new_job"].as_i64().expect("a number") as i32,
+        );
+
+        assert_eq!(ended_pids(&ending), old, "{ending:?}");
+        assert_eq!(ending.left.total, 0, "{ending:?}");
+        for process in ["old", "old_job"] {
+            assert!(gone(pid[process]), "{process} was ended");
+        }
+        // The new work is untouched, though a look of the tree takes it for the old
+        // turn's.
+        assert!(process_exists(shell), "the new work's shell runs");
+        assert!(process_exists(job), "the new work's job runs");
+        let seen = listed(&table, &pane.key);
+        assert!(
+            seen.contains(&(shell as u32)) && seen.contains(&(job as u32)),
+            "{seen:?}"
+        );
+        assert!(outsider.runs(), "a process outside the window");
+        table.kill(&pane.key).expect("close the pane");
+        assert!(outsider.runs(), "nor a close's");
     }
 
     #[test]
     fn more_commands_than_a_frame_names_are_all_ended_and_only_so_many_are_named() {
         let _serial = serial_pty_test();
+        let mut outsider = Sentinel::start();
         let table = Arc::new(PaneTable::closing_within(GRACE));
         let (pane, pid) = started(&table, MANY, Servers::InGroup, None, &HashMap::new());
         assert_eq!(table.background(&pane.key).expect("look").total, 40);
@@ -249,13 +330,16 @@ mod macos {
             assert!(gone(pid[&format!("shell{n}")]), "shell{n}");
         }
         assert!(process_exists(pid["program"]));
+        assert!(outsider.runs(), "a process outside the window");
         table.kill(&pane.key).expect("close the pane");
+        assert!(outsider.runs(), "nor a close's");
     }
 
     #[test]
     fn a_program_of_the_harnesss_own_and_what_it_runs_are_never_ended_nor_is_a_server_it_starts_late(
     ) {
         let _serial = serial_pty_test();
+        let mut outsider = Sentinel::start();
         let table = Arc::new(PaneTable::closing_within(GRACE));
         // The binary of the harness and a program named for it, beside it, in a folder
         // with a space in its name.
@@ -285,7 +369,9 @@ mod macos {
         ] {
             assert!(process_exists(pid[alive]), "{alive} is left alone");
         }
+        assert!(outsider.runs(), "a process outside the window");
         table.kill(&pane.key).expect("close the pane");
+        assert!(outsider.runs(), "nor a close's");
         let _ = fs::remove_dir_all(&bins);
     }
 
@@ -314,15 +400,15 @@ mod macos {
 }
 
 /// The same on Windows, where the tree is the pane's job: what a shell started
-/// after the mark is the turn's and is ended, with what it started and what has no
-/// parent left, and the rest is left, and not named.
+/// after the mark is the turn's and is ended, with what it started, and the rest (a
+/// job with no parent left among it) is left, and not named.
 #[cfg(windows)]
 mod windows {
     use std::collections::HashMap;
     use std::sync::Arc;
     use std::time::{Duration, Instant};
 
-    use cf_proto::panes::Servers;
+    use cf_proto::panes::{Ending, Servers};
 
     use crate::pty::conpty_test::{open, powershell, read_until, system};
     use crate::pty::{serial_pty_test, PaneKey, PaneTable};
@@ -414,8 +500,21 @@ mod windows {
         table.kill(&key).expect("close the pane");
     }
 
+    /// What the pane's job holds now, each process by its command line in lower case.
+    fn held(table: &PaneTable, key: &PaneKey) -> Vec<String> {
+        let panes = table.lock_panes().expect("the panes");
+        let pane = panes.get(key).expect("the pane");
+        pane.tree()
+            .members()
+            .expect("what the job holds")
+            .into_iter()
+            .map(|member| member.command.to_lowercase())
+            .collect()
+    }
+
     #[test]
-    fn a_job_whose_shell_has_ended_is_in_the_pane_job_still_with_no_parent_and_is_ended() {
+    fn a_job_whose_shell_has_ended_is_in_the_pane_job_still_with_no_parent_and_is_left_running_unnamed(
+    ) {
         let _pty_guard = serial_pty_test();
         let table = Arc::new(PaneTable::new());
         let ping = system("PING.EXE");
@@ -439,36 +538,37 @@ mod windows {
         table.write(&key, b"\r").expect("go on");
         read_until(&table, &key, &output, "STARTED#");
 
-        // The job object holds what a process starts wherever it goes: the ping is
-        // listed once the shell that started it has gone, which is when no process
-        // of the turn's has the shell's `-Command` among its arguments.
+        // The job object holds what a process starts wherever it goes: the ping is in
+        // the job once the shell that started it has gone, which is when no process of
+        // the job has the shell's `-Command` among its arguments.
         let deadline = Instant::now() + Duration::from_secs(60);
         loop {
-            let found = listed(&table, &key);
-            let ping_runs = found.iter().any(|(_, command)| command.contains("-n 1004"));
-            let shell_runs = found
-                .iter()
-                .any(|(_, command)| command.contains("-command"));
+            let found = held(&table, &key);
+            let ping_runs = found.iter().any(|command| command.contains("-n 1004"));
+            let shell_runs = found.iter().any(|command| command.contains("-command"));
             if ping_runs && !shell_runs {
                 break;
             }
             assert!(
                 Instant::now() < deadline,
-                "the ping was never listed on its own: {found:?}"
+                "the ping was never in the job on its own: {found:?}"
             );
             std::thread::sleep(Duration::from_millis(100));
         }
 
+        // With no process of the job that started it, no chain of processes that run
+        // leads from the ping to a shell the harness started: nothing proves whose it
+        // is, so it is not listed, not ended and not named.
+        assert_eq!(listed(&table, &key), Vec::new());
         let ending = table.end_background(&key).expect("end it");
+        assert_eq!(ending, Ending::default());
         assert!(
-            ending
-                .ended
-                .processes
+            held(&table, &key)
                 .iter()
-                .any(|process| process.command.to_lowercase().contains("-n 1004")),
-            "{ending:?}"
+                .any(|command| command.contains("-n 1004")),
+            "it runs on"
         );
-        assert_eq!(ending.left.total, 0, "{ending:?}");
+        // The pane's job is the window's: its close ends it with the rest.
         table.kill(&key).expect("close the pane");
     }
 }

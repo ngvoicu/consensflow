@@ -88,7 +88,8 @@ mod unix {
 
         use cf_proto::panes::Servers;
 
-        use crate::pty::turn::support::{listed, numbers, started, DETACHED};
+        use crate::pty::process_exists;
+        use crate::pty::turn::support::{kill, listed, numbers, started, Sentinel, DETACHED};
 
         use super::{serial_pty_test, Arc, PaneTable};
 
@@ -164,22 +165,26 @@ time.sleep(60)
 "#;
 
         #[test]
-        fn a_job_detached_from_the_shell_that_started_it_is_found_by_the_windows_session_and_is_the_turns(
+        fn a_job_detached_from_the_shell_that_started_it_is_no_work_of_the_turn_and_no_look_saw_it_under_the_program_so_the_close_leaves_it(
         ) {
             let _serial = serial_pty_test();
+            let mut outsider = Sentinel::start();
             for servers in [Servers::InGroup, Servers::Unknown] {
                 let table = Arc::new(PaneTable::new());
                 let (pane, pid) = started(&table, DETACHED, servers, None, &HashMap::new());
 
                 // The job's shell is gone, and the system names no parent of its that
-                // the tree has: it is in the window's session, and nothing else says
-                // it is the window's.
-                assert_eq!(
-                    listed(&table, &pane.key),
-                    numbers(&pid, &["job"]),
-                    "{servers:?}"
-                );
+                // the tree has: it is in the window's session, which is not listed as
+                // the turn's, and no look saw it under the window's program: the close
+                // ends what is under the program, and leaves it running.
+                assert_eq!(listed(&table, &pane.key), Vec::<u32>::new(), "{servers:?}");
                 table.kill(&pane.key).expect("close the pane");
+                assert!(
+                    process_exists(pid["job"]),
+                    "{servers:?}: the close does not end what nothing saw under the program"
+                );
+                assert!(outsider.runs(), "{servers:?}: a process outside the window");
+                kill(pid["job"]);
             }
         }
 
@@ -203,6 +208,7 @@ time.sleep(60)
         #[test]
         fn where_the_servers_are_in_the_group_a_server_wrapped_in_a_shell_is_still_the_harnesss() {
             let _serial = serial_pty_test();
+            let mut outsider = Sentinel::start();
             let table = Arc::new(PaneTable::new());
             let (pane, pid) = started(&table, CLAUDE, Servers::InGroup, None, &HashMap::new());
 
@@ -217,6 +223,7 @@ time.sleep(60)
             table.kill(&pane.key).expect("close the pane");
             let kept = pane.ended.background().expect("the close kept its list");
             assert_eq!(kept.len(), 2, "{kept:?}");
+            assert!(outsider.runs(), "a process outside the window");
         }
 
         #[test]
@@ -297,6 +304,7 @@ time.sleep(60)
     #[test]
     fn a_close_keeps_what_the_window_left_running_for_the_exit_it_sends() {
         let _serial = serial_pty_test();
+        let mut outsider = crate::pty::turn::support::Sentinel::start();
         let table = Arc::new(PaneTable::new());
         let pane = open(&table, SCRIPT);
         until_shown(&pane.output, "ready");
@@ -314,18 +322,22 @@ time.sleep(60)
         assert_eq!(kept.len(), 2, "{kept:?}");
         assert!(kept.iter().any(|process| process.command == "sleep 31"));
         assert_eq!(table.left_running_at_exit(&pane.key, &pane.ended), kept);
+        assert!(outsider.runs(), "a process outside the window");
     }
 
-    /// A program that ends on its own with a job still running: reparented, the
-    /// job is found by the window's session (and by the marker its environment
-    /// carries, which a system binary such as `sleep` does not show, so the job is a
-    /// Python's), and the exit lists it before the retirement that follows ends it. The
-    /// job ignores the hangup the terminal sends the program's group as its leader
-    /// goes.
+    /// A program that ends on its own with a job still running: reparented, the job is
+    /// the window's (it carries the marker its environment has, which a system binary
+    /// such as `sleep` does not show, so the job is a Python's), but no work of the turn:
+    /// no chain of processes that run leads from it to a shell the harness started,
+    /// the program being gone. The exit lists none, and the retirement that follows
+    /// ends it. The job ignores the hangup the terminal sends the program's group as
+    /// its leader goes.
     #[cfg(target_os = "macos")]
     #[test]
-    fn a_program_that_exits_leaving_a_job_running_lists_it_in_its_exit() {
+    fn a_program_that_exits_leaving_a_job_running_lists_none_of_it_in_its_exit_and_the_retirement_ends_it(
+    ) {
         let _serial = serial_pty_test();
+        let mut outsider = crate::pty::turn::support::Sentinel::start();
         let table = Arc::new(PaneTable::new());
         let pane = open(
             &table,
@@ -347,12 +359,12 @@ time.sleep(60)
 
         let left = table.left_running_at_exit(&pane.key, &pane.ended);
 
-        assert_eq!(left.len(), 1, "{left:?}");
-        assert!(left[0].command.contains("time.sleep(31)"), "{left:?}");
+        assert_eq!(left, Vec::new(), "no chain proves it the turn's");
         assert!(
             table.retire_exited(&pane.key).expect("retire the pane"),
             "the retirement ends what the program left"
         );
+        assert!(outsider.runs(), "a process outside the window");
     }
 
     #[test]

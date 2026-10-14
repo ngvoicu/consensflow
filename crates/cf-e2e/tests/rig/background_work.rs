@@ -26,8 +26,10 @@
 //!   in whatever group: the browser of `@playwright/mcp` and `chrome-devtools-mcp`,
 //!   which the stand-in's server launches in a session of its own
 //!   (`CF_TEST_MCP_BROWSER`).
-//! - A job the agent detaches from its shell (`nohup … &`) is ended too, though the
-//!   shell is gone.
+//! - A job the agent detaches from its shell (`nohup … &`) is not: with the shell gone
+//!   no chain of processes that run leads from it to the shell the harness started, and
+//!   the host ends only what a chain proves the turn's. It is left running and nothing
+//!   is said of it.
 //! - A job that ignores the request is killed once the grace is over, and the
 //!   result did not wait for it.
 //!
@@ -36,9 +38,8 @@
 //! The asking and the grace are Unix's. On Windows a window is ended at once and
 //! nothing is asked of its programs (`pty::close` of the pane host says why): its
 //! job is gone with it, having written nothing, and what a turn left is ended by
-//! itself, at once, where a shell the harness started after the mark started it or
-//! where it has lost the process that started it: the stand-in starts the commands
-//! of its agent in a PowerShell there, as the harnesses do.
+//! itself, at once, where a shell the harness started after the mark started it: the
+//! stand-in starts the commands of its agent in a PowerShell there, as the harnesses do.
 
 use std::sync::OnceLock;
 use std::thread;
@@ -48,7 +49,7 @@ use std::time::Instant;
 use cf_e2e::pattern;
 #[cfg(unix)]
 use cf_e2e::process::group_of;
-use cf_e2e::process::is_alive;
+use cf_e2e::process::{is_alive, signal, started, Signal};
 use cf_e2e::rig::{Job, Project, Rig};
 use cf_e2e::Error;
 use regex::Regex;
@@ -381,26 +382,39 @@ fn a_job_the_agent_leaves_is_ended_beside_the_harnesss_server_which_runs_on() ->
 /// What the agents of four harnesses did on the Mac (Codex, OpenCode, Pi and Devin, in
 /// the live run of 2026-10-13): they detached the job from a shell that then ended
 /// (`nohup … &`), which left it to the system's init, with no parent in the window's
-/// tree. It is in the window's session still (on Windows, in the pane's job), and
-/// ended with the result all the same, and the chief is told.
+/// tree. Nothing proves whose it is, and the host ends only what a chain of processes
+/// that run proves the turn's: the job is left running, not ended and not named, and
+/// the result is the task's all the same. The window is the human's, open, so that its
+/// close does not end the job before this looks at it (a close ends what the tree finds,
+/// and on a Mac a job in a session of its own with no marker is not found).
 #[test]
-fn a_job_the_agent_detached_from_its_shell_is_ended_with_the_result_and_the_chief_is_told(
-) -> Outcome {
+fn a_job_the_agent_detached_from_its_shell_is_left_running_and_nothing_is_said_of_it() -> Outcome {
     let rig = Rig::start(config())?;
     let project = a_worker_given(&rig, "BACKGROUND --detach 600 started the job")?;
+    keep_the_workers_window_open(&rig, &project)?;
     let job = until_the_job_runs(&rig)?;
+    let began = started(job.pid());
+    assert!(began.is_some(), "the job is there");
 
     rig.wait_for("T-1 to be done", secs(60), || {
         Ok(project.task(1)?["state"] == "done")
     })?;
-    rig.wait_for("the job to be ended", secs(30), || Ok(!is_alive(job.pid())))?;
-    assert!(!job.finished(), "it did not run to its end");
-    #[cfg(unix)]
-    assert!(job.released(), "it was asked to end, not killed");
-    rig.wait_for("the chief to be told what was ended", secs(30), || {
-        Ok(!notes(&project, ended_note())?.is_empty())
+    rig.wait_for("the result to reach the chief", secs(30), || {
+        Ok(!results(&project)?.is_empty())
     })?;
     assert_eq!(results(&project)?[0]["body"], "started the job");
+    // What an ending would end and say is done within moments of the result.
+    thread::sleep(secs(3));
+    assert!(
+        is_alive(job.pid()) && started(job.pid()) == began,
+        "the job runs on"
+    );
+    assert!(!job.released() && !job.finished(), "and was never asked");
+    assert_eq!(notes(&project, any_note_of_work())?, Vec::<Value>::new());
+
+    // It is nobody's to end now: end it so that it does not outlive the case.
+    signal(job.pid(), Signal::Kill)?;
+    rig.wait_for("the job to be ended", secs(30), || Ok(!is_alive(job.pid())))?;
     rig.close()?;
     Ok(())
 }

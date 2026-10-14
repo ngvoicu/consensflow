@@ -19,21 +19,23 @@
 //! it, offers no tool and writes its process id, so that the run can tell a task
 //! that was not held from a window that had no server at all.
 //!
-//! The task is a sum the worker does in its head, with no tool. The worker's window
-//! is kept open, as the human keeps one (Show): a window that closes with its task
-//! takes the server with it whatever the daemon does, and a server that is gone with
-//! its window has lived through nothing. The run waits for the task to be done, up to
-//! five minutes, looking once a second at the task and the server, and for the result
-//! to reach the chief; then it gives the daemon the time it takes to end what a turn
-//! left (the pane host gives what it ends ten seconds, and the daemon does it as work
-//! of the window's own after it has recorded the result and tells the chief after it),
-//! and holds what it saw to the brief ([`verdict`]): the task is done, its result is in
-//! the chief's inbox and says the sum, the chief was told nothing of work the turn
-//! left once the daemon was done (a note that says some was ended is the daemon
-//! ending a process it took for the turn's work, which the server may be), and the
-//! server, which was started while the worker worked, is the same process, by its
-//! number and when it began, as it was. A run that fails says what the pane host lists
-//! as the turn's work, naming the processes.
+//! The task is a sum the worker does in its head, and a long command (`sleep 4711`) it
+//! starts in the background first, as its shell tool's option has it, and leaves
+//! running: it is the work the turn leaves, which the daemon ends, and the chief's note
+//! of it is the daemon's word that it is done, which the run waits for instead of a
+//! guess at how long that takes. The worker's window is kept open, as the human keeps
+//! one (Show): a window that closes with its task takes the server with it whatever the
+//! daemon does, and a server that is gone with its window has lived through nothing.
+//! The run waits for the task to be done, up to five minutes, looking once a second at
+//! the task and the server, for the result to reach the chief, and for the note (the
+//! pane host gives what it ends ten seconds, and the daemon does it as work of the
+//! window's own after it has recorded the result, and tells the chief after it); then it
+//! holds what it saw to the brief ([`verdict`]): the task is done, its result is in the
+//! chief's inbox and says the sum, the chief was told the command was ended and named
+//! nothing else (a note that names the server is the daemon ending a process it took
+//! for the turn's work), and the server, which was started while the worker worked, is
+//! the same process, by its number and when it began, as it was. A run that fails says
+//! what the pane host lists as the turn's work, naming the processes.
 //!
 //! The folder the worker runs in is the live tests' own
 //! (`~/.consensflow-candidate/live/mcp`), where Claude Code is asked once to trust
@@ -47,7 +49,6 @@ mod server;
 mod verdict;
 
 use std::path::{Path, PathBuf};
-use std::thread;
 use std::time::Duration;
 
 use cf_e2e::live::agents as live_agents;
@@ -60,35 +61,36 @@ use cf_e2e::{files, Error, Result};
 use serde_json::{json, Value};
 
 use server::Server;
-use verdict::{judge, Seen, ANSWER};
+use verdict::{judge, Seen, ANSWER, SECONDS};
 
 /// The stand-in for the chief's window, built for these tests: the program the
 /// shim runs for the agent whose model is `fake-chief`.
 const FAKE_AGENT: &str = env!("CARGO_BIN_EXE_fake-agent");
 
-/// What the chief gives the worker to do: a sum its answer is, which the task does
-/// not hold.
-const TASK: &str = "Reply with only the sum of 1234 and 4321, in digits, and run no tools.";
+/// What the chief gives the worker to do: a command to leave running in the background,
+/// which the daemon ends and tells the chief of, and a sum its answer is, which the task
+/// does not hold.
+fn task() -> String {
+    format!(
+        "Start the command `sleep {SECONDS}` in the background, so that it is still running when you have answered: use your shell tool's option to run a command in the background. Do not wait for it, do not look at it and do not stop it. Then reply with only the sum of 1234 and 4321, in digits."
+    )
+}
 
 /// What Claude Code reads in the folder (`CLAUDE.md`): the worker does what each
 /// message asks and nothing more.
 const BRIEF: &str = "This folder is an automated ConsensFlow check. Do exactly what each message \
-asks and nothing more, and run no tools.\n";
+asks and nothing more, and run no tool a message does not name.\n";
 
 /// The tier the worker is of, which the task asks for.
 const TIER: &str = "standard";
 
-/// How long the worker has to do the task and have it done on the board, and its
-/// result to be delivered to the chief once it is, and how long its window has to
-/// open for the run to keep it open.
+/// How long the worker has to do the task and have it done on the board, its result and
+/// the note of what its turn left to be delivered to the chief once they are (the pane
+/// host gives what it asks to end ten seconds), and how long its window has to open for
+/// the run to keep it open.
 const WORK: Duration = Duration::from_secs(300);
 const DELIVERS: Duration = Duration::from_secs(60);
 const OPENS: Duration = Duration::from_secs(120);
-
-/// How long the daemon is given to end what a turn left once it has taken the result:
-/// the pane host gives what it asks to end ten seconds, and the daemon tells the chief
-/// when it has ended it.
-const ENDING: Duration = Duration::from_secs(15);
 
 /// The roster of the run: the chief, which is the stand-in's (its model says so
 /// to the shim), and the real Claude Code on its cheap model.
@@ -163,11 +165,13 @@ fn keep_the_workers_window_open(rig: &Rig, project: &Project, log: &Log) -> Resu
 /// The whole run: the task from the chief, the wait, and the judgement.
 fn attempt(rig: &Rig, project: &Project, server: &Server, seen: &mut Seen, log: &Log) -> Result {
     let chief = rig.open_frame(&format!("p{}-chief", project.id()), OPEN)?;
-    let ran = rig.cf_in_window(&chief, ["task", "add", "--tier", TIER, TASK])?;
+    let ran = rig.cf_in_window(&chief, ["task", "add", "--tier", TIER, &task()])?;
     if ran.code != Some(0) {
         return Err(Error::Daemon(format!("cf task add was refused: {ran}")));
     }
-    log.say("the chief gave the worker its task: the sum of 1234 and 4321");
+    log.say(format!(
+        "the chief gave the worker its task: a `sleep {SECONDS}` in the background, and the sum of 1234 and 4321"
+    ));
     keep_the_workers_window_open(rig, project, log)?;
     wait(rig, log, "the worker's task to be done", WORK, || {
         look(project, server, seen)?;
@@ -194,20 +198,26 @@ fn attempt(rig: &Rig, project: &Project, server: &Server, seen: &mut Seen, log: 
     )?;
     // The daemon tells the chief what the turn left in a note it writes once it has
     // ended it, which comes after the result: what was seen when the result arrived
-    // proves nothing of it. Its ending of a window the human keeps is the one end the
-    // server could meet; what is read now is what it did.
-    log.say(format!(
-        "the result is the chief's; waiting {} s for the daemon to be done with what the turn left",
-        ENDING.as_secs()
-    ));
-    thread::sleep(ENDING);
+    // proves nothing of it, and the note is the daemon's word that it is done. Its ending
+    // of a window the human keeps is the one end the server could meet; what is read once
+    // the note is there is what it did.
+    log.say("the result is the chief's; waiting for the chief to be told what the turn left");
+    wait(
+        rig,
+        log,
+        "the chief to be told what the turn left",
+        DELIVERS,
+        || {
+            seen.notes = notes_of_work(&project.inbox("chief")?, 1);
+            Ok(!seen.notes.is_empty())
+        },
+    )?;
     seen.server_after = server.identity();
-    seen.notes = notes_of_work(&project.inbox("chief")?, 1);
     log.say(format!(
-        "the server was {:?} and is {:?}; the chief was told {} note(s) of work",
+        "the server was {:?} and is {:?}; the chief was told: {}",
         seen.server,
         seen.server_after,
-        seen.notes.len()
+        seen.notes.join(" | ")
     ));
     judge(seen).map_err(|problems| {
         Error::Daemon(format!(
@@ -301,8 +311,8 @@ fn a_real_claude_worker_with_an_mcp_server_finishes_its_task_and_the_chief_gets_
     rig.close()?;
     outcome?;
     log.say(format!(
-        "ok: T-1 is done and its result ({}) reached the chief; the chief was told nothing of work, \
-         though the server {} was started while the worker worked",
+        "ok: T-1 is done and its result ({}) reached the chief; the chief was told the command was ended \
+         and nothing of the server {}, which was started while the worker worked and runs on",
         ANSWER,
         server::NAME
     ));

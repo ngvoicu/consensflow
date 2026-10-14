@@ -5,8 +5,10 @@
 //! with no `JOB_OBJECT_LIMIT_BREAKAWAY_OK` refuses (this one has only kill-on-close),
 //! and a job object made inside it holds its processes in this one too: a job an
 //! agent detached from a shell that ended (`Start-Process`, `start`) is in the job
-//! still, with no parent. What the job does not hold is what a service starts for it
-//! (`schtasks`, a WMI `Win32_Process.Create`): that is no child of the pane's.
+//! still, with no parent, which the window's close ends and an ending of the turn does
+//! not: a job with no parent is no proof of whose work it is
+//! ([`crate::background`]). What the job does not hold is what a service starts for
+//! it (`schtasks`, a WMI `Win32_Process.Create`): that is no child of the pane's.
 //!
 //! The job is also the list of what the harness started: its processes are what a
 //! pane's tree has ([`JobObject::members`]). Each is held open as it is looked at,
@@ -19,7 +21,11 @@
 //! or not), so a parent named by number is the process held under it. What a job
 //! cannot do is end some of its tree: [`JobObject::end`] ends the processes the
 //! baseline proves the turn's, each by itself, by the handle it holds, and waits for
-//! each to be gone.
+//! each to be gone. It chooses them once, when it begins, and goes on to what they
+//! started, which the handles it holds name as their parent whether or not that
+//! process ran on: never to what a later look takes for the turn's work, which a new
+//! turn's is. The whole of it is held to [`BUDGET`], inside what the daemon waits for
+//! ([`cf_proto::panes::ENDING_BOUND`]).
 //!
 //! The harness joins right after it starts (the PTY library starts it
 //! unsuspended); a child it starts in that first instant would escape, which a
@@ -30,7 +36,7 @@ use std::mem::{offset_of, size_of, size_of_val};
 use std::ptr;
 use std::time::{Duration, Instant};
 
-use cf_proto::panes::Ending;
+use cf_proto::panes::{Ending, ENDING_BOUND};
 use windows_sys::Wdk::System::Threading::{
     NtQueryInformationProcess, ProcessBasicInformation, ProcessCommandLineInformation,
 };
@@ -49,16 +55,23 @@ use windows_sys::Win32::System::Threading::{
     PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SET_QUOTA, PROCESS_SYNCHRONIZE, PROCESS_TERMINATE,
 };
 
-use crate::background::{report, Baseline, Member, Parent, ProcessKey};
+use crate::background::{descending_from, report, Baseline, Member, ProcessKey};
 
 /// How many times an ending looks again for what the processes it ended had
 /// started: a process that is ended starts no more, and none of them is ended
 /// faster than the next can start one.
 const PASSES: usize = 16;
 
-/// How long a process that was terminated is waited for, in all: the system ends it
-/// at once, and says it has when its last thread is gone.
+/// How long the processes of one pass of an ending are waited for to be gone, in all:
+/// the system ends a process at once, and says it has when its last thread is gone.
 const EXIT_WAIT: Duration = Duration::from_secs(5);
+
+/// How long an ending lasts in all, whatever the passes it makes: what is not gone by
+/// then is said to be left. It is less than the bound the daemon waits for the
+/// answer by, which is the host's word that it answers in it.
+const BUDGET: Duration = Duration::from_secs(15);
+
+const _: () = assert!(BUDGET.as_secs() < ENDING_BOUND.as_secs());
 
 pub(crate) struct JobObject {
     handle: HANDLE,
@@ -134,39 +147,56 @@ impl JobObject {
     /// as this lasts: a number is one process while a handle to it is open, so what
     /// an earlier look learned of a process is learned of that one, a process that
     /// was ended and gone is still the parent it names to what it started, and a
-    /// process is not ended on what was said of another that had its number. Each
-    /// pass ends what it finds and waits for it to be gone, and looks again: a
-    /// process that is ended starts nothing, but another that is not yet may have
-    /// started one. What was chosen, told by whether it is gone: ended, or not.
+    /// process is not ended on what was said of another that had its number. What it
+    /// ends is chosen once, at the start, and then only what those processes started
+    /// (a process that is ended starts nothing, but another that is not yet may have
+    /// started one): each pass ends what is fresh, waits for it to be gone, and looks
+    /// again for what it started. Never what a look of the whole job takes for the
+    /// turn's work by the baseline once the ending has begun, which a human's or a
+    /// message's new work is. What was chosen, told by whether it is gone: ended, or
+    /// not.
     pub fn end(&self, baseline: &Baseline) -> io::Result<Ending> {
+        let deadline = Instant::now() + BUDGET;
         let mut held: HashMap<u32, Held> = HashMap::new();
+        self.hold_into(&mut held)?;
+        let mut fresh: Vec<ProcessKey> = baseline
+            .turn_work(&members_of(held.values()))
+            .into_iter()
+            .map(|member| member.key)
+            .collect();
         let mut chosen: Vec<ProcessKey> = Vec::new();
         for _ in 0..PASSES {
-            for now in self.hold()? {
-                held.entry(now.member.key.pid).or_insert(now);
-            }
-            let work = baseline.turn_work(&members_of(held.values()));
-            let fresh: Vec<ProcessKey> = work
-                .iter()
-                .map(|member| member.key)
-                .filter(|key| !chosen.contains(key))
-                .collect();
             if fresh.is_empty() {
                 break;
             }
-            for key in &fresh {
-                if let Some(held) = held.get(&key.pid) {
-                    held.process.end();
+            let in_time = Instant::now() < deadline;
+            if in_time {
+                for key in &fresh {
+                    if let Some(held) = held.get(&key.pid) {
+                        held.process.end();
+                    }
+                }
+                let until = deadline.min(Instant::now() + EXIT_WAIT);
+                for key in &fresh {
+                    if let Some(held) = held.get(&key.pid) {
+                        held.process.wait_until(until);
+                    }
                 }
             }
-            let until = Instant::now() + EXIT_WAIT;
-            for key in &fresh {
-                if let Some(held) = held.get(&key.pid) {
-                    held.process.wait_until(until);
-                }
+            chosen.append(&mut fresh);
+            if !in_time {
+                break;
             }
-            chosen.extend(fresh);
+            self.hold_into(&mut held)?;
+            let roots: HashSet<ProcessKey> = chosen.iter().copied().collect();
+            fresh = descending_from(&roots, &members_of(held.values()))
+                .into_iter()
+                .filter(|key| !roots.contains(key))
+                .collect();
         }
+        // What was found and not ended, for the passes or the time ran out, is said
+        // to be left.
+        chosen.append(&mut fresh);
         let alive: HashSet<ProcessKey> = chosen
             .iter()
             .filter(|key| held.get(&key.pid).is_some_and(|held| !held.process.gone()))
@@ -188,6 +218,15 @@ impl JobObject {
             .into_iter()
             .filter_map(|pid| self.hold_one(pid))
             .collect())
+    }
+
+    /// Holds what the job has now that `held` has not: a process that is held keeps
+    /// its number, so no number is held twice.
+    fn hold_into(&self, held: &mut HashMap<u32, Held>) -> io::Result<()> {
+        for now in self.hold()? {
+            held.entry(now.member.key.pid).or_insert(now);
+        }
+        Ok(())
     }
 
     fn hold_one(&self, pid: u32) -> Option<Held> {
@@ -226,7 +265,7 @@ impl JobObject {
                 exe,
                 // A job object has no process groups.
                 group: None,
-                parent: Parent::Unknown,
+                parent: None,
             },
             parent: parent_of(&process),
             process,
@@ -305,15 +344,13 @@ fn members_of<'a>(held: impl Iterator<Item = &'a Held> + Clone) -> Vec<Member> {
         .map(|held| (held.member.key.pid, held.member.key))
         .collect();
     held.map(|held| {
-        let parent = match held.parent {
-            None => Parent::Unknown,
-            Some(number) => keys
-                .get(&number)
+        let parent = held.parent.and_then(|number| {
+            keys.get(&number)
                 .filter(|parent| {
                     parent.pid != held.member.key.pid && parent.began <= held.member.key.began
                 })
-                .map_or(Parent::Gone, |parent| Parent::Of(*parent)),
-        };
+                .copied()
+        });
         Member {
             parent,
             ..held.member.clone()

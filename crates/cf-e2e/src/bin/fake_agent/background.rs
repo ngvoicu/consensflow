@@ -22,18 +22,19 @@
 //! Windows), and the job stays where the shell put it, which the signals sent to the
 //! pane's process group do not reach. With `--detach` the shell detaches it as the
 //! agents of the harnesses do when they leave a job (`nohup … &`, `Start-Process`)
-//! and ends a moment after, which leaves the job with no parent. On Unix that shell
-//! is in a session of its own, as Pi's Bash tool starts each command (the window's
+//! and ends a moment after, which leaves the job with no parent: no chain of processes
+//! that run leads from it to a shell the harness started, so the host does not take it
+//! for the turn's work and leaves it running (`cf-panes`' `background`). On Unix that
+//! shell is in a session of its own, as Pi's Bash tool starts each command (the window's
 //! does not hold it), and the job is started without the marker the pane host puts in
 //! the environment of what a window starts, as a job that is a system program shows
-//! none: nothing finds it but the host having seen the window's program start the
-//! shell. A server the harness starts is no command: it is started as it is, and with
-//! `--in-group` ([`Group::Window`]) it stays in the group of the window's program (an
-//! MCP server), or, as it is, makes a session of its own (a helper). The host tells
-//! the commands from the servers by the shell that started them, and what has lost
-//! the shell by the window's session or by having seen the shell start (`cf-panes`'
-//! `background`), and the harness's own by where it keeps them and by the programs it
-//! is named for. On Windows nothing
+//! none: nothing of the window's close finds it either. A server the harness starts is
+//! no command: it is started as it is, and with `--in-group` ([`Group::Window`]) it
+//! stays in the group of the window's program (an MCP server), or, as it is, makes a
+//! session of its own (a helper). The host tells the commands from the servers by the
+//! shell that started them (a command is what a shell the harness started started, and
+//! what that started), and the harness's own by where it keeps them, by the programs it
+//! is named for and by having seen them its own. On Windows nothing
 //! asks a job to end (a window is ended at once, its job object ending the tree, and
 //! what a turn left is ended by itself, process by process), so the job has no handler
 //! there, no groups either, and `--deaf` changes nothing: it writes its process, runs

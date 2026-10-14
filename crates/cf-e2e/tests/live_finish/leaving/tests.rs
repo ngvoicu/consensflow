@@ -25,6 +25,7 @@ fn good() -> Left {
         notes: vec![ENDED.to_owned()],
         alive: Vec::new(),
         escaped: Vec::new(),
+        after_close: None,
     }
 }
 
@@ -50,7 +51,8 @@ fn a_command_the_harness_ended_with_its_tool_call_leaves_nothing_to_end_and_pass
 }
 
 #[test]
-fn a_command_the_host_never_listed_that_still_runs_on_the_machine_escaped_and_fails() {
+fn a_command_the_host_never_listed_that_still_runs_on_the_machine_escaped_and_fails_and_says_what_the_close_did(
+) {
     let mut left = good();
     left.listed.clear();
     left.notes.clear();
@@ -58,11 +60,114 @@ fn a_command_the_host_never_listed_that_still_runs_on_the_machine_escaped_and_fa
     let problems = judge(&left).unwrap_err();
     assert_eq!(problems.len(), 1, "{problems:#?}");
     assert!(
-        problems[0].starts_with("the command escaped the window")
-            && problems[0].ends_with("4242 sleep 4711"),
+        problems[0].starts_with("the command escaped the ending")
+            && problems[0].contains("no chain of processes that run led from it")
+            && problems[0]
+                .ends_with("4242 sleep 4711; the window had not closed when the run last looked"),
         "{}",
         problems[0]
     );
+    // The window's close found it, and ended it unsaid: the chief was never told.
+    left.after_close = Some(Vec::new());
+    let problems = judge(&left).unwrap_err();
+    assert!(
+        problems[0].ends_with("4242 sleep 4711; the window's close ended it, unsaid"),
+        "{}",
+        problems[0]
+    );
+    // Or it found nothing of it, and it runs on.
+    left.after_close = Some(vec!["4242 sleep 4711".to_owned()]);
+    let problems = judge(&left).unwrap_err();
+    assert!(
+        problems[0].ends_with(
+            "it still runs after the window closed, which found nothing of it: 4242 sleep 4711"
+        ),
+        "{}",
+        problems[0]
+    );
+}
+
+#[test]
+fn what_escaped_is_found_by_its_command_and_ended_by_the_number_a_line_begins_with() {
+    assert_eq!(pid_of("4242 sleep 4711"), Some(4242));
+    assert_eq!(pid_of("  77 /bin/zsh -c sleep 4711"), Some(77));
+    assert_eq!(
+        pid_of("sleep 4711"),
+        None,
+        "a line with no number is no process"
+    );
+    assert_eq!(pid_of(""), None);
+    // The command of a harness is found by the command, and the rig's stand-in, which starts
+    // a job of its own, by the job's words.
+    assert!(wanted(Who::Harness(Harness::Pi)).ends_with(&SECONDS.to_string()));
+    assert_eq!(wanted(Who::StandIn), format!("--background-job {SECONDS}"));
+}
+
+#[test]
+fn a_command_that_ran_on_is_said_to_have_been_found_by_the_close_or_not_and_only_where_it_ran_on() {
+    let mut left = good();
+    assert_eq!(after_the_close(&left), None, "nothing ran on");
+    left.escaped = vec!["4242 sleep 4711".to_owned()];
+    assert_eq!(
+        after_the_close(&left).as_deref(),
+        Some("the window had not closed when the run last looked")
+    );
+    left.after_close = Some(Vec::new());
+    assert_eq!(
+        after_the_close(&left).as_deref(),
+        Some("the window's close ended it, unsaid")
+    );
+    left.after_close = Some(left.escaped.clone());
+    assert_eq!(
+        after_the_close(&left).as_deref(),
+        Some("it still runs after the window closed, which found nothing of it: 4242 sleep 4711")
+    );
+    // A command the host listed while its shell ran, which ran on, is said the same.
+    left.listed = vec![proc(4242, "sleep 4711")];
+    left.alive = vec![4242];
+    let problems = judge(&left).unwrap_err();
+    assert!(
+        problems[0].starts_with("the command is still running after the task was done and the chief told: 4242 sleep 4711; it still runs after the window closed"),
+        "{problems:#?}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn what_runs_the_command_is_ended_and_nothing_else_is() {
+    let (words, other) = ("leaving-test-4711-to-end", "leaving-test-4711-to-keep");
+    // bash's `exec -a` names a process by the words it is given, as a command line holds
+    // them (the `sh` of some systems has no such option).
+    let run = |name: &str| {
+        cf_e2e::process::Run::new("/bin/bash")
+            .args(["-c", &format!("exec -a {name} sleep 30")])
+            .inheriting_env()
+            .spawn()
+            .unwrap()
+    };
+    let (mut ended, mut kept) = (run(words), run(other));
+    let found = |name: &str| {
+        // The process may not have begun by the time it is looked for.
+        (0..50).any(|_| {
+            std::thread::sleep(Duration::from_millis(100));
+            !on_the_machine(name).is_empty()
+        })
+    };
+    assert!(found(words) && found(other), "both run");
+
+    end_what_runs_on(words);
+
+    let gone = (0..50).any(|_| {
+        std::thread::sleep(Duration::from_millis(100));
+        on_the_machine(words).is_empty()
+    });
+    assert!(gone, "what runs the command is ended");
+    assert!(
+        !on_the_machine(other).is_empty(),
+        "and what does not is not"
+    );
+    ended.kill();
+    kept.kill();
 }
 
 #[test]
@@ -145,8 +250,13 @@ fn a_harness_is_asked_to_start_the_command_in_the_background_and_answer_and_the_
         "{asked}"
     );
     assert!(!asked.contains('\n'), "a brief is one line");
+    // The stand-in leaves its job in a shell that waits for it, or detached from it.
     assert_eq!(
         brief(Who::StandIn),
+        format!("BACKGROUND {SECONDS} left a job running")
+    );
+    assert_eq!(
+        stand_in_brief(true),
         format!("BACKGROUND --detach {SECONDS} left a job running")
     );
     // The command is the platform's own.

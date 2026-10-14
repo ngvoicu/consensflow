@@ -64,16 +64,19 @@ impl Tree {
 
     /// Ends the turn's work that `baseline` proves, the rest of the tree staying as
     /// it is: where there is anyone to ask they are asked to end and given `grace`
-    /// to, and what is left after is ended by force. It says what it ended and what
-    /// it could not, told by looking at what it chose when it was done.
+    /// to, and what is left after is ended by force. What it ends is chosen once,
+    /// when it begins, and is those processes and what they start meanwhile: the
+    /// window's new work, which a human typed in or a message began while the grace
+    /// went, is none of it. It says what it ended and what it could not, told by
+    /// looking at what it chose when it was done.
     #[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
     fn end(&self, baseline: &Baseline, grace: Duration) -> io::Result<Ending> {
         #[cfg(target_os = "macos")]
         {
-            let subject = Subject::Turn(baseline);
-            let asked = self.tree.ask_to_exit(subject, None)?;
+            let lineage = self.tree.lineage(baseline)?;
+            let asked = self.tree.ask_to_exit(Subject::Lineage(&lineage), None)?;
             close::wait_until_gone(Instant::now() + grace, || !asked.any_alive());
-            Ok(self.tree.finish(subject, asked))
+            Ok(self.tree.finish(&lineage, asked))
         }
         #[cfg(windows)]
         {

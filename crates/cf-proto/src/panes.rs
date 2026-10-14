@@ -17,13 +17,25 @@
 //! [`EndRequest`], answered by [`Ending`]), and chooses what to end itself, from
 //! the whole of what it can tell: the daemon names no process, so no number crosses
 //! from one look to the next. A process it cannot tell the turn's from the
-//! harness's it leaves alone, and says nothing of.
+//! harness's it leaves alone, and says nothing of; nor does it end what it cannot
+//! prove the turn's by a chain of processes that run to a shell the harness started.
+//! What it ends it chooses once, when the ending begins, and answers within
+//! [`ENDING_BOUND`].
+
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
 /// The most lines of a screen the host sends as its tail, and so the most a
 /// request for it gets. Empty lines are not counted: they are not sent.
 pub const TAIL_LINES: usize = 12;
+
+/// The most the host takes to end what a turn left, and to answer that it has: the
+/// grace a close gives what it asks to end (ten seconds), what it waits after it
+/// has killed what ignored the request (two) and its looks between, with room; on
+/// Windows the whole of its passes is held to less than this. The daemon waits for the
+/// answer by this and a margin, and holds the window until it has it.
+pub const ENDING_BOUND: Duration = Duration::from_secs(20);
 
 /// The most processes the host names when it says what a window left running
 /// (it says how many there are besides): a note quotes a few, and a frame is
@@ -39,8 +51,8 @@ pub const COMMAND_CHARS: usize = 512;
 /// the harness. The harness's adapter says it of its windows and every
 /// `pane.mark` carries it. Each shape says what is the harness's, and so no turn's
 /// work, however late it began, and the host ends none of it: what it lists and
-/// ends as the turn's is what a shell started or what lost its parent, and these
-/// are told apart from it.
+/// ends as the turn's is what a shell the harness started started, and what that
+/// started, and these are told apart from it.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Servers {
@@ -61,11 +73,11 @@ pub enum Servers {
     /// the host can prove the harness's by its program (a program named for it
     /// that is beside its own binary, and what descends from one) is left alone, and
     /// only what it can prove the turn's (a shell the harness started after the
-    /// mark and what the shell started, and what has lost the process that started
-    /// it) is the turn's: what it can tell neither it leaves alone, and does not
-    /// name. What a harness is until someone has looked at what a window's tree
-    /// holds with a command of its agent running; and what a word this host does
-    /// not know reads as.
+    /// mark and what the shell started, by a chain of processes that run) is the
+    /// turn's: what it can tell neither it leaves alone, and does not name. What a
+    /// harness is until someone has looked at what a window's tree holds with a
+    /// command of its agent running; and what a word this host does not know reads
+    /// as.
     #[default]
     #[serde(other)]
     Unknown,

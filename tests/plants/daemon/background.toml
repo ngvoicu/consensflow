@@ -3,13 +3,15 @@
 # taken (the owner's decision of 2026-10-13, after T-7 and T-15 on Windows, which
 # reverses the hold of 2026-10-09: a recording run left in the background died, killed
 # outright, with the window its worker's turn had ended, so the result waited for it
-# for ever). The pane host chooses what it ends, from what it can prove the turn's (a
-# shell the harness started, what it started, what has lost the process that started
-# it: found by the window's session on a Mac), and never what it can prove the
-# harness's; what it cannot tell it leaves alone and does not name. One plant takes one
-# rule out; a test of it fails. The first plants run the tests of the crates, which hold
-# each rule apart; the `background rig:` plants after them hold that the rule reaches the
-# chief through the real daemon and pane host, and run only the case of the rig
+# for ever). When in doubt the pane host ends less: it chooses what it ends, from what
+# a chain of processes that run proves the turn's (a shell the harness started, and
+# what that started), never what it can prove the harness's, and what it cannot trace
+# it leaves running and does not name. What it ends it chooses once, when the ending
+# begins: a window's new work is none of it. The daemon waits for the host's answer and
+# holds the window until it has it. One plant takes one rule out; a test of it fails.
+# The first plants run the tests of the crates, which hold each rule apart; the
+# `background rig:` plants after them hold that the rule reaches the chief through the
+# real daemon and pane host, and run only the case of the rig
 # (`crates/cf-e2e/tests/rig/background_work.rs` and `background_close.rs`) or of the
 # regressions that holds it. The rig's cases build the `cf` and the pane host they run
 # from the sources as planted, in release, which makes these the slowest plants, and they
@@ -20,6 +22,13 @@
 # The closes and the grace are Unix's (the signals a window's programs are asked to end
 # with, and the time they are given): Windows asks nothing and ends the tree at once, so
 # on Windows these plants would find no test to fail. They are run on a Mac.
+#
+# A plant that takes the bound of the tree out, or widens what it lets through
+# (`background bound:`), runs only `panes-lib-tree`, whose tests signal on a machine made
+# up and send no signal to any process there is: never `panes-lib-turn`, `panes-lib-close`,
+# the headless tests nor the rig, where the processes are real and the user's own are among
+# them. A plant that widens what the tree selects is held by the bound, and its real runs
+# have a process outside the window that must still run after (`Sentinel`).
 
 [run]
 # The engine's tests of the ending, the requester's note, the marks and the close notes,
@@ -73,7 +82,12 @@ replace = '''
                 // Held for the work the turn left, as before 2026-10-13: no result while any runs.
                 let pane = record.window.borrow().pane.clone();
                 let left = match pane {
-                    Some(pane) => self.seams.background.end(&pane).await.left.total,
+                    Some(pane) => self
+                        .seams
+                        .background
+                        .end(&pane)
+                        .await
+                        .map_or(0, |ending| ending.left.total),
                     None => 0,
                 };
                 if left > 0 {
@@ -133,8 +147,15 @@ runs = ["engine-dispatcher-background"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/background.rs"
-find = '            Some(pane) => self.seams.background.end(&pane).await,'
-replace = '            Some(_) => Ending::default(),'
+find = '''
+            if let Some(ending) = self.seams.background.end(&pane).await {
+                return ending;
+            }'''
+replace = '''
+            let _ = &pane;
+            if let Some(ending) = None::<Ending> {
+                return ending;
+            }'''
 
 [[plant]]
 name = "background: the requester is told nothing of what was ended"
@@ -224,6 +245,56 @@ replace = '''
         count: 0,
     };'''
 
+# The window is held until the host has said it is done, and the host is asked again
+# where it gave no answer.
+
+[[plant]]
+name = "background: a host that gave no answer is asked again at once, the window not held for it"
+meant = "a_host_that_gives_no_answer_to_an_ending_is_asked_again_with_the_window_held_until_it_does"
+runs = ["engine-dispatcher-background"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/background.rs"
+find = '            if asked < ENDING_ASKS {'
+replace = '            if false && asked < ENDING_ASKS {'
+
+[[plant]]
+name = "background: a host that gave no answer is not asked again"
+meant = "a_host_that_gives_no_answer_to_an_ending_is_asked_again_with_the_window_held_until_it_does"
+runs = ["engine-dispatcher-background"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/background.rs"
+find = '        for asked in 1..=ENDING_ASKS {'
+replace = '        for asked in 1..=1 {'
+
+[[plant]]
+name = "background: a host that gave no answer is asked for ever"
+meant = "a_host_that_gives_no_answer_to_three_asks_is_taken_to_have_gone_and_nothing_is_said_of_it"
+runs = ["engine-dispatcher-background"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/background.rs"
+find = 'const ENDING_ASKS: usize = 3;'
+replace = 'const ENDING_ASKS: usize = 4;'
+
+[[plant]]
+name = "background: a host that refuses an ending is asked again"
+meant = "a_host_that_refuses_an_ending_has_ended_nothing_and_none_is_made_up"
+runs = ["engine-dispatcher-background"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/background.rs"
+find = '            if let Some(ending) = self.seams.background.end(&pane).await {'
+replace = '''
+            if let Some(ending) = self
+                .seams
+                .background
+                .end(&pane)
+                .await
+                .filter(|ending| ending.ended.total + ending.left.total > 0)
+            {'''
+
 # What the engine tells the pane host, and what it hears.
 
 [[plant]]
@@ -295,31 +366,47 @@ file = "crates/cf-engine/src/dispatcher.rs"
 find = '                let because = if left.is_empty() {'
 replace = '                let because = if true {'
 
+# What the daemon makes of the host's answer to an ending, and how long it waits for it.
+
 [[plant]]
-name = "background: a host that does not answer an ending is said to have left something"
-meant = "a_host_that_refuses_or_does_not_answer_an_ending_has_said_nothing_and_none_is_made_up"
+name = "background: a host that gave no answer to an ending is taken to have ended nothing"
+meant = "a_host_that_refuses_an_ending_has_ended_nothing_and_one_that_gives_no_answer_has_said_nothing"
 runs = ["daemon-lib-host"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/host.rs"
-find = '''
-        .and_then(|answer| serde_json::from_value(answer).ok())
-        .unwrap_or_default()
-}
+find = '    let answer = answer?;'
+replace = '    let answer = answer.unwrap_or_default();'
 
-/// What a request that never came back says'''
-replace = '''
-        .and_then(|answer| serde_json::from_value(answer).ok())
-        .unwrap_or_else(|| Ending {
-            left: cf_proto::panes::Background {
-                total: 1,
-                processes: Vec::new(),
-            },
-            ..Ending::default()
-        })
-}
+[[plant]]
+name = "background: the bridge’s deadline is taken for a host that refused"
+meant = "a_host_that_refuses_an_ending_has_ended_nothing_and_one_that_gives_no_answer_has_said_nothing"
+runs = ["daemon-lib-host"]
 
-/// What a request that never came back says'''
+[[plant.edit]]
+file = "crates/cf-daemon/src/host.rs"
+find = '        Some(Value::String(error)) if error == "deadline" => None,'
+replace = '        Some(Value::String(error)) if error == "deadline" && false => None,'
+
+[[plant]]
+name = "background: an ending is waited for no longer than a request that answers at once"
+meant = "an_ending_is_waited_for_past_the_default_wait_and_one_the_host_never_answers_is_no_answer"
+runs = ["daemon-lib-host"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/host.rs"
+find = '        Box::pin(self.ending_within(pane, END_DEADLINE))'
+replace = '        Box::pin(self.ending_within(pane, Duration::from_secs(30)))'
+
+[[plant]]
+name = "background: the wait for an ending has no margin on the bound the host keeps to"
+meant = "an_ending_is_waited_for_past_the_default_wait_and_one_the_host_never_answers_is_no_answer"
+runs = ["daemon-lib-host"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/host.rs"
+find = 'pub const END_DEADLINE: Duration = Duration::from_secs(ENDING_BOUND.as_secs() + 20);'
+replace = 'pub const END_DEADLINE: Duration = Duration::from_secs(ENDING_BOUND.as_secs());'
 
 [[plant]]
 name = "background: a mark never tells the host which harness the window is"
@@ -385,35 +472,47 @@ file = "crates/cf-panes/src/background.rs"
 find = '            .filter(|member| !before.contains(&member.key))'
 replace = '            .filter(|member| !before.contains(&member.key) || true)'
 
+# The chain: what is the turn's is a shell the harness started and what that started.
+
 [[plant]]
-name = "background: a server the harness starts late is taken for a job"
-meant = "a_server_the_harness_starts_late_is_no_work_of_the_turn_and_is_not_named"
+name = "background: a process that is no shell is the turn’s for being started by the harness"
+meant = "a_shell_the_harness_started_and_what_it_started_are_the_turns_and_nothing_else_is"
 runs = ["panes-lib-background"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/background/work.rs"
-find = '            None => return false,'
-replace = '            None => return true,'
+find = '            None => return at.parent.is_some() && runs_a_shell(at),'
+replace = '            None => return at.parent.is_some(),'
 
 [[plant]]
-name = "background: a process that has lost the process that started it is no job"
-meant = "a_process_whose_parent_is_gone_is_a_job_someone_detached_and_so_is_what_it_started"
+name = "background: a server the harness starts late has the shell it started in the turn’s work"
+meant = "a_shell_that_a_server_the_harness_started_late_started_is_not_proved_the_harnesss_own"
 runs = ["panes-lib-background"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/background/work.rs"
-find = '        if runs_a_shell(at) || at.parent == Parent::Gone {'
-replace = '        if runs_a_shell(at) {'
+find = '            None => return at.parent.is_some() && runs_a_shell(at),'
+replace = '            None => return at.parent.is_some(),'
 
 [[plant]]
-name = "background: a process whose parent is not said is taken for a job whose parent has gone"
-meant = "a_process_whose_parent_is_gone_is_a_job_someone_detached_and_so_is_what_it_started"
+name = "background: a shell that has no parent left is the turn’s"
+meant = "a_process_with_no_parent_left_is_no_job_whatever_it_is_and_nor_is_what_it_started"
 runs = ["panes-lib-background"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/background/work.rs"
-find = '        if runs_a_shell(at) || at.parent == Parent::Gone {'
-replace = '        if runs_a_shell(at) || at.parent != Parent::Of(at.key) {'
+find = '            None => return at.parent.is_some() && runs_a_shell(at),'
+replace = '            None => return runs_a_shell(at),'
+
+[[plant]]
+name = "background: a process that has lost the process that started it is a job"
+meant = "a_process_with_no_parent_left_is_no_job_whatever_it_is_and_nor_is_what_it_started"
+runs = ["panes-lib-background", "panes-lib-turn"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/background/work.rs"
+find = '            None => return at.parent.is_some() && runs_a_shell(at),'
+replace = '            None => return at.parent.is_none() || runs_a_shell(at),'
 
 [[plant]]
 name = "background: every program is a shell"
@@ -446,6 +545,18 @@ find = '        Some(file) if !file.is_empty() => is_shell(file),'
 replace = '        Some(file) if !file.is_empty() && false => is_shell(file),'
 
 [[plant]]
+name = "background: what is protected is the turn’s when a shell ran it"
+meant = "what_is_protected_is_never_the_turns_though_it_is_a_shell"
+runs = ["panes-lib-background"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/background/work.rs"
+find = '        .filter(|member| !protected.contains(&member.key) && descends_from_a_shell(member, &by_key))'
+replace = '        .filter(|member| descends_from_a_shell(member, &by_key))'
+
+# What is the harness's own: by where it is, by its program, and by having been seen so.
+
+[[plant]]
 name = "background: the harness’s own programs are the turn’s when a shell ran them"
 meant = "a_program_of_the_harnesss_own_and_what_it_started_are_never_the_turns_though_a_shell_ran_them"
 runs = ["panes-lib-background"]
@@ -474,6 +585,77 @@ runs = ["panes-lib-background"]
 file = "crates/cf-panes/src/background.rs"
 find = '            .map(|kept| harness::own(kept, &self.launch, tree))'
 replace = '            .map(|_| HashSet::new())'
+
+[[plant]]
+name = "background: the window’s own program is one of the harness’s servers"
+meant = "what_a_tools_shell_started_is_not_the_harnesss_and_the_windows_program_is_no_ancestor_that_counts"
+runs = ["panes-lib-background"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/background/harness.rs"
+find = '            !leads(kept, member) && descends_from_a_server(kept, launch, &by_key, member)'
+replace = '            descends_from_a_server(kept, launch, &by_key, member)'
+
+[[plant]]
+name = "background: what was seen the harness’s is forgotten when what protected it has gone"
+meant = "what_was_seen_the_harnesss_stays_so_when_what_protected_it_has_gone"
+runs = ["panes-lib-background"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/background.rs"
+find = '        protected.extend(descending_from(&own, tree));'
+replace = '        let _ = &own;'
+
+[[plant]]
+name = "background: what is remembered the harness’s is never let go of"
+meant = "what_ended_is_let_go_of_and_what_runs_is_kept_for_the_next_look"
+runs = ["panes-lib-background"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/background.rs"
+find = '        *own = kept;'
+replace = '        own.extend(kept);'
+
+[[plant]]
+name = "background: what the harness has when a turn begins is not remembered as its own"
+meant = "what_was_seen_the_harnesss_stays_so_when_what_protected_it_has_gone"
+runs = ["panes-lib-background"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/background.rs"
+find = '''
+        // What the harness has now is its own, whatever becomes of what started it.
+        self.protected(tree);'''
+replace = '''
+        // What the harness has now is its own, whatever becomes of what started it.'''
+
+[[plant]]
+name = "background: whatever was the harness’s by where it was is remembered for good"
+meant = "a_process_that_was_the_harnesss_by_where_it_was_and_has_left_is_the_turns_by_what_started_it"
+runs = ["panes-lib-background"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/background.rs"
+find = '''
+            .filter(|member| {
+                protected.contains(&member.key)
+                    && (own.contains(&member.key)
+                        || member
+                            .parent
+                            .is_some_and(|parent| protected.contains(&parent)))
+            })'''
+replace = '''
+            .filter(|member| protected.contains(&member.key))'''
+
+[[plant]]
+name = "background: what descends from a process of the harness’s is not told by the parents of the tree"
+meant = "what_descends_from_a_process_is_told_by_the_parents_that_are_of_the_tree"
+runs = ["panes-lib-background"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/background.rs"
+find = '                if roots.contains(&at.key) {'
+replace = '                if roots.contains(&at.key) && false {'
 
 [[plant]]
 name = "background: a program named for the harness that is not beside its binary is the harness’s"
@@ -533,109 +715,53 @@ meant = "a_job_whose_shell_has_gone_is_in_the_tree_by_the_session_it_kept_and_ha
 runs = ["panes-lib-tree", "panes-lib-turn"]
 
 [[plant.edit]]
-file = "crates/cf-panes/src/process_tree.rs"
-find = '''
-                || self
-                    .session
-                    .is_some_and(|session| p.session == Some(session))'''
+file = "crates/cf-panes/src/process_tree/selection.rs"
+find = '                || session.is_some_and(|session| p.session == Some(session))'
 replace = '                || false'
 
-# What the host saw the window's program start, as it started it: a job whose shell
-# was a session of its own is in no session of the pane's and shows no marker.
+[[plant]]
+name = "background: the session is the window’s whoever holds its number"
+meant = "the_session_is_the_panes_while_its_number_is_nobody_elses"
+runs = ["panes-lib-tree"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/process_tree/selection.rs"
+find = '                .is_none_or(|holder| Some(holder.identity) == self.root)'
+replace = '                .is_none_or(|_| true)'
 
 [[plant]]
-name = "background: the window’s program is not followed as it starts what it starts"
-meant = "a_job_that_left_the_session_with_its_shell_gone_is_in_the_tree_by_what_the_program_started"
+name = "background: the session is the window’s only while its leader runs"
+meant = "the_session_is_the_panes_while_its_number_is_nobody_elses"
 runs = ["panes-lib-tree", "panes-lib-turn"]
 
 [[plant.edit]]
-file = "crates/cf-panes/src/process_tree.rs"
-find = '        self.tracker = Tracker::follow(pid).ok().map(Arc::new);'
-replace = '        self.tracker = None;'
+file = "crates/cf-panes/src/process_tree/selection.rs"
+find = '                .is_none_or(|holder| Some(holder.identity) == self.root)'
+replace = '                .is_some_and(|holder| Some(holder.identity) == self.root)'
 
 [[plant]]
-name = "background: what the tracking saw start is not in the tree"
-meant = "what_the_tracking_saw_start_is_in_the_tree_and_so_is_what_a_process_that_has_gone_started"
-runs = ["panes-lib-tree"]
+name = "background: what a process of the tree started is of the tree only where the pane started it"
+meant = "a_lineage_is_its_processes_that_run_and_what_descends_from_them_or_from_one_that_has_gone"
+runs = ["panes-lib-tree", "panes-lib-turn"]
 
 [[plant.edit]]
-file = "crates/cf-panes/src/process_tree.rs"
-find = '                || tracked.get(&p.identity.unique) == Some(&p.identity)'
-replace = ""
-
-[[plant]]
-name = "background: a process the tracking saw start is told by its number and not by when it began"
-meant = "a_process_the_tracking_saw_start_is_told_by_when_it_began_and_not_by_its_number"
-runs = ["panes-lib-tree"]
-
-[[plant.edit]]
-file = "crates/cf-panes/src/process_tree.rs"
-find = '                || tracked.get(&p.identity.unique) == Some(&p.identity)'
-replace = '                || tracked.values().any(|seen| seen.pid == p.identity.pid)'
-
-[[plant]]
-name = "background: what a process that has gone started is no longer of the tree"
-meant = "what_the_tracking_saw_start_is_in_the_tree_and_so_is_what_a_process_that_has_gone_started"
-runs = ["panes-lib-tree"]
-
-[[plant.edit]]
-file = "crates/cf-panes/src/process_tree.rs"
-find = '            .chain(tracked.values())'
-replace = ""
-
-[[plant]]
-name = "background: the tracking is never told to let go of what has gone"
-meant = "what_has_gone_and_is_the_parent_of_nothing_that_runs_is_let_go_of_when_the_tree_is_looked_at"
-runs = ["panes-lib-tree"]
-
-[[plant.edit]]
-file = "crates/cf-panes/src/process_tree.rs"
+file = "crates/cf-panes/src/process_tree/selection.rs"
 find = '''
-        tracker.forget(|identity| {
-            running.contains(&identity.unique) || named.contains(&identity.unique)
-        });'''
+            if parents.contains(&p.parent)
+                || selected.values().any(|parent| parent.unique == p.parent)
+            {'''
 replace = '''
-        let _ = (&running, &named);'''
+            if parents.contains(&p.parent) {'''
 
 [[plant]]
-name = "background: what a child of the window’s program started is not watched for"
-meant = "what_a_program_starts_is_seen_and_what_that_starts_and_a_parent_that_has_gone_stays_seen"
-runs = ["panes-lib-tree"]
-
-[[plant.edit]]
-file = "crates/cf-panes/src/process_tree/tracker.rs"
-find = '                if self.register(child) {'
-replace = '                if false && self.register(child) {'
-
-[[plant]]
-name = "background: the tracking lets go of a process at once"
-meant = "a_process_that_started_nothing_that_runs_is_let_go_of_once_it_has_gone_and_been_kept_a_while"
-runs = ["panes-lib-tree"]
-
-[[plant.edit]]
-file = "crates/cf-panes/src/process_tree/tracker.rs"
-find = '        lock(&self.journal).retain(|_, (identity, seen)| seen.elapsed() < KEPT || keep(identity));'
-replace = '        lock(&self.journal).retain(|_, (identity, _)| keep(identity));'
-
-[[plant]]
-name = "background: the tracking never lets go"
-meant = "a_process_that_started_nothing_that_runs_is_let_go_of_once_it_has_gone_and_been_kept_a_while"
-runs = ["panes-lib-tree"]
-
-[[plant.edit]]
-file = "crates/cf-panes/src/process_tree/tracker.rs"
-find = '        lock(&self.journal).retain(|_, (identity, seen)| seen.elapsed() < KEPT || keep(identity));'
-replace = '        let _ = keep;'
-
-[[plant]]
-name = "background: a process whose parent the tree does not have is told to have none said"
-meant = "a_job_whose_shell_has_gone_is_in_the_tree_by_the_session_it_kept_and_has_no_parent"
+name = "background: a process whose parent the tree does not have is told another’s"
+meant = "a_process_has_the_process_that_started_it_as_its_parent_until_that_has_gone"
 runs = ["panes-lib-tree"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/process_tree.rs"
-find = '                    number => keys.get(&number).copied().map_or(Parent::Gone, Parent::Of),'
-replace = '                    number => keys.get(&number).copied().map_or(Parent::Unknown, Parent::Of),'
+find = '                parent: keys.get(&p.parent).copied(),'
+replace = '                parent: keys.get(&p.parent).copied().or_else(|| keys.values().next().copied()),'
 
 [[plant]]
 name = "background: the program a process runs is not read from its path"
@@ -647,15 +773,84 @@ file = "crates/cf-panes/src/process_tree.rs"
 find = '                exe: exe_of(p.identity.pid),'
 replace = '                exe: String::new(),'
 
+# An ending is bound to the turn it ends.
+
 [[plant]]
-name = "background: an ending ends the whole tree, the window’s program with it"
+name = "background: an ending asks the whole tree to end, the window’s program with it"
 meant = "what_the_turn_started_is_asked_to_end_and_killed_once_the_grace_is_over_and_the_harness_is_left_as_it_was"
 runs = ["panes-lib-turn"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/pty/turn.rs"
-find = '            let subject = Subject::Turn(baseline);'
-replace = '            let subject = Subject::Whole;'
+find = '            let asked = self.tree.ask_to_exit(Subject::Lineage(&lineage), None)?;'
+replace = '            let asked = self.tree.ask_to_exit(Subject::Whole, None)?;'
+
+[[plant]]
+name = "background: an ending kills the whole tree, the window’s program with it"
+meant = "what_the_turn_started_is_asked_to_end_and_killed_once_the_grace_is_over_and_the_harness_is_left_as_it_was"
+runs = ["panes-lib-turn"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/process_tree.rs"
+find = '        let forced = self.force_by(system, Subject::Lineage(lineage), &asked.identities);'
+replace = '        let forced = self.force_by(system, Subject::Whole, &asked.identities);'
+
+[[plant]]
+name = "background: the turn’s work an ending chooses is the whole tree"
+meant = "what_the_turn_started_is_asked_to_end_and_killed_once_the_grace_is_over_and_the_harness_is_left_as_it_was"
+runs = ["panes-lib-turn"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/process_tree.rs"
+find = '        let work = baseline.turn_work(&members);'
+replace = '        let work = members.clone();'
+
+[[plant]]
+name = "background: an ending takes what a later look of the tree takes for the turn’s work"
+meant = "a_lineage_is_its_processes_that_run_and_what_descends_from_them_or_from_one_that_has_gone"
+runs = ["panes-lib-tree"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/process_tree/selection.rs"
+find = '''
+        let parents: HashSet<u64> = self
+            .identities
+            .iter()
+            .chain(known.values())
+            .map(|identity| identity.unique)
+            .collect();'''
+replace = '''
+        let parents: HashSet<u64> = snapshot.iter().map(|p| p.identity.unique).collect();'''
+
+[[plant]]
+name = "background: what a process the ending found started is found only while that process runs"
+meant = "what_a_process_the_ending_found_started_is_found_whether_or_not_that_process_runs"
+runs = ["panes-lib-tree"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/process_tree/selection.rs"
+find = '''
+            .chain(known.values())
+            .map(|identity| identity.unique)'''
+replace = '''
+            .map(|identity| identity.unique)'''
+
+[[plant]]
+name = "background: what a command started while it was given the grace escapes the ending"
+meant = "what_a_command_asked_to_end_started_before_it_ended_is_ended_with_it"
+runs = ["panes-lib-turn"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/process_tree/selection.rs"
+find = '''
+        let parents: HashSet<u64> = self
+            .identities
+            .iter()
+            .chain(known.values())
+            .map(|identity| identity.unique)
+            .collect();'''
+replace = '''
+        let parents: HashSet<u64> = HashSet::new();'''
 
 [[plant]]
 name = "background: an ending kills what it ends without giving it the grace"
@@ -678,33 +873,19 @@ find = '            close::wait_until_gone(Instant::now() + grace, || !asked.any
 replace = '            close::wait_until_gone(Instant::now() + grace, || !asked.any_alive() && false);'
 
 [[plant]]
-name = "background: what a command started while it was given the grace escapes the ending"
-meant = "what_a_command_asked_to_end_started_before_it_ended_is_ended_with_it"
-runs = ["panes-lib-turn"]
-
-[[plant.edit]]
-file = "crates/cf-panes/src/process_tree.rs"
-find = '            let chosen = self.subject(subject, &snapshot, &known);'
-replace = '''
-            let mut chosen = self.subject(subject, &snapshot, &known);
-            chosen
-                .identities
-                .retain(|pid, identity| known.get(pid) == Some(identity));'''
-
-[[plant]]
 name = "background: the display limit of a frame is the limit of what an ending ends"
 meant = "more_commands_than_a_frame_names_are_all_ended_and_only_so_many_are_named"
 runs = ["panes-lib-turn"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/process_tree.rs"
-find = '                let work = baseline.turn_work(&members);'
+find = '        let work = baseline.turn_work(&members);'
 replace = '''
-                let work: Vec<Member> = baseline
-                    .turn_work(&members)
-                    .into_iter()
-                    .take(cf_proto::panes::BACKGROUND_PROCESSES)
-                    .collect();'''
+        let work: Vec<Member> = baseline
+            .turn_work(&members)
+            .into_iter()
+            .take(cf_proto::panes::BACKGROUND_PROCESSES)
+            .collect();'''
 
 [[plant]]
 name = "background: a window’s exit leaves out the work it left running"
@@ -744,6 +925,135 @@ runs = ["panes-headless-harness"]
 file = "crates/cf-panes/src/pane_handlers.rs"
 find = '            .mark(&key, request.servers, request.harness.as_deref())'
 replace = '            .mark(&key, request.servers, None)'
+
+# The bound every signal of the tree passes: a selection that is wrong (a bug, or a plant
+# above) must not reach what is not the window's. These run only the tests on a machine
+# made up (`panes-lib-tree`), which signal nobody.
+
+[[plant]]
+name = "background bound: a signal is sent to any process the selection names"
+meant = "a_selection_that_names_what_is_outside_the_window_signals_none_of_it"
+runs = ["panes-lib-tree"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/process_tree/bound.rs"
+find = '''
+        if !self.allows(table, target) {
+            return Ok(false);
+        }
+        system.send(target, signal)?;'''
+replace = '''
+        system.send(target, signal)?;'''
+
+[[plant]]
+name = "background bound: every process is under the program"
+meant = "a_selection_that_names_what_is_outside_the_window_signals_none_of_it"
+runs = ["panes-lib-tree"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/process_tree/bound.rs"
+find = '        let known = |identifier: u64| Some(identifier) == program || seen.contains(&identifier);'
+replace = '        let known = |identifier: u64| Some(identifier) == program || seen.contains(&identifier) || true;'
+
+[[plant]]
+name = "background bound: what the program started is the window’s only while the program runs"
+meant = "the_program_is_the_windows_when_it_has_gone_and_what_it_started_still_is"
+runs = ["panes-lib-tree"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/process_tree/bound.rs"
+find = '            if known(at.identity.unique) || known(at.parent) {'
+replace = '            if known(at.identity.unique) {'
+
+[[plant]]
+name = "background bound: what was seen under the program is forgotten at the next look"
+meant = "what_was_seen_under_the_program_stays_the_windows_when_what_started_it_has_gone"
+runs = ["panes-lib-tree"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/process_tree/bound.rs"
+find = '        *seen = now;'
+replace = '''
+        let _ = now;
+        *seen = HashSet::new();'''
+
+[[plant]]
+name = "background bound: what was seen is never let go of"
+meant = "a_look_lets_go_of_what_has_gone_and_keeps_what_runs"
+runs = ["panes-lib-tree"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/process_tree/bound.rs"
+find = '        *seen = now;'
+replace = '        seen.extend(now);'
+
+[[plant]]
+name = "background bound: a process the bound refuses is asked to end and waited for"
+meant = "a_selection_of_every_process_of_the_machine_asks_only_the_windows_own_to_end"
+runs = ["panes-lib-tree"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/process_tree.rs"
+find = '''
+                Ok(false) => {}
+                Ok(true) => asked.push(identity),'''
+replace = '''
+                Ok(false) => asked.push(identity),
+                Ok(true) => asked.push(identity),'''
+
+[[plant]]
+name = "background bound: a process the bound refuses is looked for again at every pass"
+meant = "a_selection_of_every_process_of_the_machine_stops_and_kills_only_the_windows_own"
+runs = ["panes-lib-tree"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/process_tree.rs"
+find = '''
+                .filter(|(pid, identity)| {
+                    frozen.get(pid) != Some(identity) && refused.get(pid) != Some(identity)
+                })'''
+replace = '''
+                .filter(|(pid, identity)| frozen.get(pid) != Some(identity))'''
+
+[[plant]]
+name = "background bound: an ending names what it never signalled"
+meant = "an_ending_names_as_ended_only_what_it_signalled"
+runs = ["panes-lib-tree"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/process_tree.rs"
+find = '''
+        let mut chosen: Vec<Member> = lineage
+            .members
+            .iter()
+            .filter(|member| signalled.contains(&member.key))
+            .cloned()
+            .collect();'''
+replace = '''
+        let _ = &signalled;
+        let mut chosen: Vec<Member> = lineage.members.clone();'''
+
+[[plant]]
+name = "background bound: a lineage keeps what the bound refuses"
+meant = "what_the_bound_refuses_is_no_part_of_the_turns_lineage_whoever_proves_it_the_turns"
+runs = ["panes-lib-tree"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/process_tree.rs"
+find = '            .filter(|identity| self.bound.allows(&table, *identity))'
+replace = '            .filter(|_| true)'
+
+[[plant]]
+name = "background bound: the tree sends a signal of its own, past the bound"
+meant = "nothing_but_the_bound_sends_a_signal"
+runs = ["panes-lib-tree"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/process_tree.rs"
+find = '                .signal(system, &table, *identity, libc::SIGHUP)'
+replace = '''
+                .signal(system, &table, *identity, libc::SIGHUP)
+                .and_then(|_| system.send(*identity, libc::SIGHUP).map(|()| true))'''
 
 # How a window closes: the asking and the grace an ending shares.
 
@@ -841,7 +1151,12 @@ replace = '''
                 // Held for the work the turn left, as before 2026-10-13: no result while any runs.
                 let pane = record.window.borrow().pane.clone();
                 let left = match pane {
-                    Some(pane) => self.seams.background.end(&pane).await.left.total,
+                    Some(pane) => self
+                        .seams
+                        .background
+                        .end(&pane)
+                        .await
+                        .map_or(0, |ending| ending.left.total),
                     None => 0,
                 };
                 if left > 0 {
@@ -869,8 +1184,15 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-engine/src/background.rs"
-find = '            Some(pane) => self.seams.background.end(&pane).await,'
-replace = '            Some(_) => Ending::default(),'
+find = '''
+            if let Some(ending) = self.seams.background.end(&pane).await {
+                return ending;
+            }'''
+replace = '''
+            let _ = &pane;
+            if let Some(ending) = None::<Ending> {
+                return ending;
+            }'''
 
 [[plant]]
 name = "background rig: the host ends nothing it is asked to end"
@@ -893,30 +1215,19 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-panes/src/pty/turn.rs"
-find = '            let subject = Subject::Turn(baseline);'
-replace = '            let subject = Subject::Whole;'
+find = '            let asked = self.tree.ask_to_exit(Subject::Lineage(&lineage), None)?;'
+replace = '            let asked = self.tree.ask_to_exit(Subject::Whole, None)?;'
 
 [[plant]]
-name = "background rig: a job detached from its shell is no work of the turn"
-meant = "a_job_the_agent_detached_from_its_shell_is_ended_with_the_result_and_the_chief_is_told"
+name = "background rig: a process that has lost the process that started it is taken for a job"
+meant = "a_job_the_agent_detached_from_its_shell_is_left_running_and_nothing_is_said_of_it"
 runs = ["rig-background-detached"]
 builds = true
 
 [[plant.edit]]
 file = "crates/cf-panes/src/background/work.rs"
-find = '        if runs_a_shell(at) || at.parent == Parent::Gone {'
-replace = '        if runs_a_shell(at) {'
-
-[[plant]]
-name = "background rig: the window’s program is not followed as it starts what it starts"
-meant = "a_job_the_agent_detached_from_its_shell_is_ended_with_the_result_and_the_chief_is_told"
-runs = ["rig-background-detached"]
-builds = true
-
-[[plant.edit]]
-file = "crates/cf-panes/src/process_tree.rs"
-find = '        self.tracker = Tracker::follow(pid).ok().map(Arc::new);'
-replace = '        self.tracker = None;'
+find = '            None => return at.parent.is_some() && runs_a_shell(at),'
+replace = '            None => return at.parent.is_none() || runs_a_shell(at),'
 
 [[plant]]
 name = "background rig: an ending kills a job that is not given its grace"
@@ -1013,7 +1324,12 @@ replace = '''
                 // Held for the work the turn left, as before 2026-10-13: no result while any runs.
                 let pane = record.window.borrow().pane.clone();
                 let left = match pane {
-                    Some(pane) => self.seams.background.end(&pane).await.left.total,
+                    Some(pane) => self
+                        .seams
+                        .background
+                        .end(&pane)
+                        .await
+                        .map_or(0, |ending| ending.left.total),
                     None => 0,
                 };
                 if left > 0 {
@@ -1041,5 +1357,12 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-engine/src/background.rs"
-find = '            Some(pane) => self.seams.background.end(&pane).await,'
-replace = '            Some(_) => Ending::default(),'
+find = '''
+            if let Some(ending) = self.seams.background.end(&pane).await {
+                return ending;
+            }'''
+replace = '''
+            let _ = &pane;
+            if let Some(ending) = None::<Ending> {
+                return ending;
+            }'''

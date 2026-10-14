@@ -11,10 +11,9 @@
 //! The worker runs one short command that ends with its turn, so its turn left nothing
 //! running, and the chief is to be told nothing of work: a note that says the turn left
 //! some, and what was ended of it, is what the daemon did with a process the host proved
-//! the turn's (what a shell the harness started ran, and what has lost the process that
-//! started it), which the harness's own may have been. A server the harness starts late
-//! is none of these, and the host leaves it alone and says nothing of it, on every
-//! platform.
+//! the turn's (what a shell the harness started ran, and what that started), which the
+//! harness's own may have been. A server the harness starts late is none of these, and
+//! the host leaves it alone and says nothing of it, on every platform.
 
 use std::time::Duration;
 
