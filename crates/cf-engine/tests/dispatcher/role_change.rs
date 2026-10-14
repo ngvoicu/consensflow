@@ -1,15 +1,19 @@
 //! A role that changed under a conversation whose harness keeps its first
-//! instructions (Codex): the launch that resumes the conversation puts a note
+//! instructions (Codex): the launch that resumes the conversation opens its
+//! window with no first message, and once the window is up it is given a note
 //! from ConsensFlow first, the new text in full and said to replace the earlier
-//! one, ahead of whatever else waits; the text recorded, once the note is
-//! delivered, is then the new one, so it is given once. A conversation that is
+//! one, then the message the launch would have begun with, then the rest of what
+//! waits; the text recorded, once the note is delivered, is then the new one, so
+//! it is given once. A conversation that is
 //! fresh, a role that did not change and a harness that takes its role at every
 //! launch are given nothing extra. What is less plain (a window that never took
-//! it, a text nobody recorded, a member's session, a skill copy of ConsensFlow's,
-//! a variant that changed) is in `unusual`. Node's dispatcher had no such
-//! harness, so no trace holds these.
+//! it, a text nobody recorded, a skill copy of ConsensFlow's, a variant that
+//! changed) is in `unusual`, and a member's session in `members`. Node's
+//! dispatcher had no such harness, so no trace holds these.
 
+mod members;
 mod skill;
+mod told;
 mod unusual;
 
 use cf_engine::testing::{Context, FakeAdapter};
@@ -152,12 +156,14 @@ fn a_resumed_conversation_whose_harness_keeps_its_first_instructions_is_given_a_
     assert_eq!(chief_launches(&context.codex).len(), 1);
     relaunch(&context, project.id);
 
-    // The window resumed its thread, and its first message is the role, whole.
+    // The window resumed its thread, with no first message: the role is on its
+    // command line once, as its instructions, and not again as a message.
     let launches = chief_launches(&context.codex);
     assert_eq!(launches.len(), 2);
     let native = format!("native-{}", began[0]["launchId"].as_str().unwrap());
     assert_eq!(launches[1]["resume"], native);
     assert_eq!(launches[1]["instructions"], WITH_SPECS);
+    assert_eq!(launches[1]["message"], Value::Null);
     let notes = replacements(&context, chief);
     assert_eq!(notes.len(), 1, "one replacement, written for this launch");
     let told = &notes[0];
@@ -171,20 +177,34 @@ fn a_resumed_conversation_whose_harness_keeps_its_first_instructions_is_given_a_
         "{}",
         told.body
     );
-    let message = launches[1]["message"].as_str().expect("a first message");
-    assert!(
-        message.starts_with(&format!(
-            "[ConsensFlow m-{} · note from ConsensFlow]\n",
-            told.id
-        )),
-        "the launch's first message is the replacement: {message}"
-    );
-    assert!(message.contains(WITH_SPECS));
     // The conversation has not been told yet: what is recorded is what it has.
+    assert_eq!(context.message(told.id).state, "queued");
     assert_eq!(
         recorded(&context, chief).as_deref(),
         Some("instructions for chief")
     );
+
+    // Once the window is up, the role is the first thing it is given, whole, as
+    // any message is, by paste; and it is recorded as told once the window's own
+    // record shows it, and not before.
+    context.pass().unwrap();
+    assert_eq!(context.message(told.id).state, "delivering");
+    assert_eq!(
+        recorded(&context, chief).as_deref(),
+        Some("instructions for chief"),
+        "handed over, not yet seen to have arrived"
+    );
+    let said = said_to_the_chief(&context);
+    assert_eq!(said.len(), 1, "{said:?}");
+    assert!(
+        said[0].starts_with(&format!(
+            "[ConsensFlow m-{} · note from ConsensFlow]\n",
+            told.id
+        )),
+        "the replacement, under its header: {}",
+        said[0]
+    );
+    assert!(said[0].contains(WITH_SPECS));
     context.pass().unwrap();
     assert_eq!(context.message(told.id).state, "delivered");
     assert_eq!(
@@ -313,40 +333,62 @@ fn a_fresh_conversation_is_given_the_role_it_has_now_and_nothing_extra() {
     context.close();
 }
 
+/// The window takes what it was handed, the engine sees it arrive, and the
+/// window answers: what a message goes through before the next one goes in.
+fn through_a_turn(context: &Context) {
+    context.pass().unwrap();
+    context.pass().unwrap();
+    context.codex.answer("chief", "Understood.");
+}
+
 #[test]
-fn a_replacement_goes_ahead_of_the_words_that_waited_for_the_window_and_those_follow_it() {
+fn a_replacement_goes_ahead_of_the_words_that_waited_for_the_window_and_ahead_of_the_rest_and_those_follow_it_in_their_order(
+) {
     let context = codex();
     let project = project_of(&context, "codex");
     let chief = context.id(project.id, "chief");
     context.close_project(project.id).unwrap();
     specs(&context, project.id, true);
-    let waiting = context.note(project.id, "human", "chief", "Any news?");
+    // Two sets of words wait; the first of them was to be the launch's first message.
+    let first = context.note(project.id, "human", "chief", "Any news?");
+    let second = context.note(project.id, "human", "chief", "And the tests?");
     context.resume_project(project.id).unwrap();
 
     let launches = chief_launches(&context.codex);
     let notes = replacements(&context, chief);
     assert_eq!(notes.len(), 1);
     assert!(
-        launches[1]["message"]
-            .as_str()
-            .is_some_and(|text| text.contains(&format!("m-{} ", notes[0].id))),
-        "the replacement is its first message"
+        notes[0].id > second.id,
+        "written after what waited, which is why the queue alone would say it last"
     );
     assert_eq!(
-        context.message(waiting.id).state,
-        "queued",
-        "what waited is still waiting"
+        launches[1]["message"],
+        Value::Null,
+        "the window opens with no first message"
     );
-    // Once the window answers, what waited is delivered, after the role.
-    context.pass().unwrap();
-    context.codex.answer("chief", "Understood.");
-    context.pass().unwrap();
-    context.pass().unwrap();
-    assert_eq!(context.message(waiting.id).state, "delivered");
+    for message in [&first, &second] {
+        assert_eq!(
+            context.message(message.id).state,
+            "queued",
+            "what waited is still waiting"
+        );
+    }
+
+    // The role goes in first, then the words that were to be first, then the rest.
+    through_a_turn(&context);
+    assert_eq!(context.message(notes[0].id).state, "delivered");
+    assert_eq!(context.message(first.id).state, "queued");
+    assert_eq!(said_to_the_chief(&context).len(), 1);
+    through_a_turn(&context);
+    assert_eq!(context.message(first.id).state, "delivered");
+    assert_eq!(context.message(second.id).state, "queued");
+    through_a_turn(&context);
+    assert_eq!(context.message(second.id).state, "delivered");
     let texts = said_to_the_chief(&context);
-    assert_eq!(texts.len(), 2, "{texts:?}");
+    assert_eq!(texts.len(), 3, "{texts:?}");
     assert!(texts[0].contains(REPLACES), "{}", texts[0]);
     assert!(texts[1].contains("Any news?"), "{}", texts[1]);
+    assert!(texts[2].contains("And the tests?"), "{}", texts[2]);
     assert_eq!(
         recorded(&context, chief).as_deref(),
         Some(WITH_SPECS),
@@ -356,7 +398,7 @@ fn a_replacement_goes_ahead_of_the_words_that_waited_for_the_window_and_those_fo
 }
 
 #[test]
-fn a_replacement_goes_ahead_of_the_note_that_tells_the_chief_its_turn_was_cut_and_that_one_follows_it(
+fn a_replacement_goes_ahead_of_the_note_that_tells_the_chief_its_turn_was_cut_and_that_one_follows_it_ahead_of_the_rest(
 ) {
     let context = codex();
     let project = project_of(&context, "codex");
@@ -367,21 +409,15 @@ fn a_replacement_goes_ahead_of_the_note_that_tells_the_chief_its_turn_was_cut_an
     context.pass().unwrap();
     context.close_project(project.id).unwrap();
     specs(&context, project.id, true);
+    let waiting = context.note(project.id, "human", "chief", "Any news?");
     context.resume_project(project.id).unwrap();
 
     // The chief is told its turn was cut, and its role is replaced: the role first.
     let launches = chief_launches(&context.codex);
     assert_eq!(launches.len(), 2);
+    assert_eq!(launches[1]["message"], Value::Null);
     let notes = replacements(&context, chief);
     assert_eq!(notes.len(), 1);
-    let first = launches[1]["message"].as_str().expect("a first message");
-    assert!(
-        first.starts_with(&format!(
-            "[ConsensFlow m-{} · note from ConsensFlow]\n",
-            notes[0].id
-        )) && first.contains(REPLACES),
-        "the replacement is the first message: {first}"
-    );
     let cut: Vec<MessageView> = context
         .inbox(chief)
         .into_iter()
@@ -390,19 +426,23 @@ fn a_replacement_goes_ahead_of_the_note_that_tells_the_chief_its_turn_was_cut_an
     assert_eq!(cut.len(), 1, "told its turn was cut, once");
     assert_eq!(cut[0].state, "queued", "and not yet: it follows the role");
 
-    // It goes in once the window has taken the role and answered.
-    context.pass().unwrap();
-    context.codex.answer("chief", "Understood.");
-    context.pass().unwrap();
-    context.pass().unwrap();
+    // The role, then the note that its turn was cut, then what waited.
+    through_a_turn(&context);
+    assert_eq!(context.message(notes[0].id).state, "delivered");
+    assert_eq!(context.message(cut[0].id).state, "queued");
+    through_a_turn(&context);
     assert_eq!(context.message(cut[0].id).state, "delivered");
+    assert_eq!(context.message(waiting.id).state, "queued");
+    through_a_turn(&context);
+    assert_eq!(context.message(waiting.id).state, "delivered");
     let texts = said_to_the_chief(&context);
-    assert_eq!(texts.len(), 2, "{texts:?}");
+    assert_eq!(texts.len(), 3, "{texts:?}");
     assert!(texts[0].contains(REPLACES), "{}", texts[0]);
     assert!(
         texts[1].contains("stopped in the middle of your turn"),
         "{}",
         texts[1]
     );
+    assert!(texts[2].contains("Any news?"), "{}", texts[2]);
     context.close();
 }

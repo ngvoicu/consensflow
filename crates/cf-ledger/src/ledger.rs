@@ -125,8 +125,9 @@ fn opening_refusal(file: &Path, cause: LedgerError) -> LedgerError {
 #[cfg(feature = "test-support")]
 impl Ledger {
     /// Tells `watcher` of each read of `projects` and `next_delivery`, and
-    /// each write of `pause_task` (by its task's number), before it is made:
-    /// the engine's tests count them, or fail one.
+    /// each write of `pause_task` (by its task's number), `take_back` (by the
+    /// message's id) and `set_conversation_role_text` (by the conversation's),
+    /// before it is made: the engine's tests count them, or fail one.
     pub fn watch(&mut self, watcher: Watcher) {
         *self.watcher.get_mut() = Some(watcher);
     }

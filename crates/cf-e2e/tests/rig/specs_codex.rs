@@ -1,7 +1,8 @@
 //! A chief on the stand-in Codex, whose resumed thread keeps the instructions it
 //! began with: told of the specs its project turned on by a message when it is
-//! resumed, once, and of nothing at the Resume after, for its role text names the
-//! same copy of Specmint at every launch, kept where no launch's folder holds it.
+//! resumed (by paste, once the window is up: its command line has the role once),
+//! once, and of nothing at the Resume after, for its role text names the same copy
+//! of Specmint at every launch, kept where no launch's folder holds it.
 //! (The windows run the stand-in `codex`, a script that runs it, so Unix's; the
 //! cases of the stand-in `claude` are in `specs`.)
 
@@ -44,19 +45,21 @@ fn skill_named_in(text: &str) -> Option<String> {
     Some(file.to_owned())
 }
 
-/// The last word of a window's command line: a Codex window's first message.
-fn last_word(frame: &Value) -> String {
-    frame["argv"]
-        .as_array()
-        .and_then(|argv| argv.last())
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_owned()
-}
-
 /// The chief's turn is over: its lane reads idle.
 fn chief_is_idle(project: &Project) -> Result<bool, cf_e2e::Error> {
     Ok(project.lane("chief")?["activity"]["state"] == "idle")
+}
+
+/// How many notes the daemon wrote to tell the chief its role again. A launch
+/// writes one before its window opens, so this says at once whether a Resume had
+/// anything to tell: the chief's own record would say it only once the window had
+/// been given the note, which is after the chief reads idle.
+fn notes_of_the_role(project: &Project) -> Result<usize, cf_e2e::Error> {
+    Ok(project
+        .inbox("chief")?
+        .iter()
+        .filter(|note| note["body"].to_string().contains(REPLACES))
+        .count())
 }
 
 #[test]
@@ -126,7 +129,9 @@ fn a_codex_chief_resumed_after_its_specs_were_turned_on_is_told_the_section_by_a
 
     // The human turns specs on, and Closes and Resumes: the window resumes the
     // thread, and carries the section on its command line as every launch does,
-    // which the thread reads and does not use.
+    // once, which the thread reads and does not use. It has no first message: the
+    // note that says the role again goes in by paste once the window is up, so the
+    // role is not on the command line twice.
     let said = rig.page(
         "project.specs",
         json!({ "project": project.id(), "on": true, "folder": "plans", "variant": "core" }),
@@ -135,29 +140,16 @@ fn a_codex_chief_resumed_after_its_specs_were_turned_on_is_told_the_section_by_a
     let next = relaunch(&rig, &project, 2)?;
     assert_eq!(after(&next, "resume"), thread, "{}", next["argv"]);
     assert!(codex_role_of(&next).contains(SECTION));
+    let line = next["argv"].to_string();
+    assert_eq!(
+        line.matches(SECTION).count(),
+        1,
+        "the command line has the role once: {line}"
+    );
+    assert!(!line.contains(REPLACES), "no message of a role: {line}");
 
-    // Its first message is the role, whole, said to replace the one it began with:
-    // the chief's window is told the section.
-    let message = last_word(&next);
-    assert!(message.contains(REPLACES), "{message}");
-    assert!(message.contains(SECTION), "{message}");
-    assert!(message.contains("it means `plans`"), "{message}");
-    // It names ConsensFlow's copy of the skill, in the folder that is kept for the
-    // harness and the variant, and that file is there.
-    let skill = skill_named_in(&message).expect("the section names the skill's file");
-    let skill = Path::new(&skill);
-    let kept = skill.ancestors().nth(4).expect("the copy's folder");
-    assert!(
-        is_kept(&rig, kept, "codex", "core"),
-        "{} is no folder of the copy",
-        kept.display()
-    );
-    assert!(
-        skill.is_file(),
-        "{} is where the role says",
-        skill.display()
-    );
-    assert!(skill.with_file_name("references").is_dir());
+    // The chief's thread is told the section, by the role, whole, said to replace the
+    // one it began with, and keeps the instructions it began with.
     rig.wait_for(
         "the chief's thread to be told of the specs",
         secs(60),
@@ -178,7 +170,38 @@ fn a_codex_chief_resumed_after_its_specs_were_turned_on_is_told_the_section_by_a
         .filter(|said| said.contains(SECTION))
         .collect();
     assert_eq!(told.len(), 1, "told once: {told:?}");
-    assert!(told[0].contains(REPLACES));
+    let message = &told[0];
+    assert!(message.contains(REPLACES), "{message}");
+    assert!(message.contains("it means `plans`"), "{message}");
+    // It names ConsensFlow's copy of the skill, in the folder that is kept for the
+    // harness and the variant, and that file is there: the one the command line's
+    // role names too.
+    let skill = skill_named_in(message).expect("the section names the skill's file");
+    assert_eq!(
+        skill_named_in(&codex_role_of(&next)).as_deref(),
+        Some(skill.as_str()),
+        "one copy, named alike by the window's role and by the message"
+    );
+    let skill = Path::new(&skill);
+    let kept = skill.ancestors().nth(4).expect("the copy's folder");
+    assert!(
+        is_kept(&rig, kept, "codex", "core"),
+        "{} is no folder of the copy",
+        kept.display()
+    );
+    assert!(
+        skill.is_file(),
+        "{} is where the role says",
+        skill.display()
+    );
+    assert!(skill.with_file_name("references").is_dir());
+    // The daemon has seen it arrive, and what it was told is recorded: the
+    // Resume after has nothing to say.
+    rig.wait_for("the note to be delivered", secs(60), || {
+        Ok(project.inbox("chief")?.iter().any(|note| {
+            note["state"] == "delivered" && note["body"].to_string().contains(REPLACES)
+        }))
+    })?;
 
     // The next Resume has nothing to tell: the role is what it was told, and names
     // the same copy of the skill, which the window before it left where it was.
@@ -194,6 +217,11 @@ fn a_codex_chief_resumed_after_its_specs_were_turned_on_is_told_the_section_by_a
         codex_role_of(&third),
         codex_role_of(&next),
         "the role is the same text at every launch"
+    );
+    assert_eq!(
+        notes_of_the_role(&project)?,
+        1,
+        "the Resume wrote nothing to tell it the role again"
     );
     assert!(
         skill.is_file(),

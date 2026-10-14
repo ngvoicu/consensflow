@@ -83,9 +83,11 @@ fn a_chief_whose_project_changed_the_variant_of_its_specs_is_told_the_role_again
     assert_eq!(context.message(notes[1].id).state, "delivered");
     let launches = chief_launches(&context.codex);
     assert_eq!(launches.len(), 4);
-    assert!(launches[2]["message"]
-        .as_str()
-        .is_some_and(|message| message.contains(&kept("tdd"))));
+    assert_eq!(
+        launches[2]["message"],
+        Value::Null,
+        "by paste, not on the command line"
+    );
     assert_eq!(launches[3]["message"], Value::Null, "and given once");
     assert!(recorded(&context, chief)
         .as_deref()

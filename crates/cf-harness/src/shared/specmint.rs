@@ -22,8 +22,10 @@
 //! every Resume. It outlasts its window, and neither a window's end nor a
 //! start's sweep removes it (`launch_files`). It is written as a window is
 //! prepared, a file at a time and only where the file is not there or is not
-//! what this build ships. A build that vendors another commit writes a folder
-//! of its own and leaves the old one to the windows that still read it.
+//! what this build ships, each to a name of the launch's own beside it and
+//! renamed into place, since windows of other launches read the same files: none
+//! of them finds a file half written. A build that vendors another commit writes
+//! a folder of its own and leaves the old one to the windows that still read it.
 //!
 //! Each harness loads it as it loads any skill: Claude is given its root as one
 //! more folder to read (`--add-dir`), OpenCode its skills folder as one more of
@@ -36,17 +38,18 @@ pub(crate) mod testing;
 #[cfg(test)]
 mod tests;
 
+use std::ffi::OsString;
 use std::fs::{self, File};
 use std::io::Read;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use cf_base::env::Env;
-use cf_base::file::{make_folder, write_file, Mkdir};
+use cf_base::file::{make_folder, rename, rm_force, write_file, FileError, Mkdir};
 use cf_base::path;
 use cf_proto::agents::Harness;
 use cf_proto::specs::Variant;
 
-use crate::contract::{Launch, Skill, Specs};
+use crate::contract::{Launch, LaunchId, Skill, Specs};
 use crate::shared::launch_files::{harness_folder, integrations_path, CODEX_FOLDER};
 use crate::shared::role::SKILLS;
 
@@ -169,9 +172,9 @@ pub(crate) fn place(
 /// Writes ConsensFlow's own copy of the skill where the launch's chief is given
 /// one, and says where it is: at the place the chief's text names. A file that is
 /// there and is what this build ships is left as it is, one that is missing or
-/// differs is written, and what else is in the folder is none of its business.
-/// None where there is nothing to write: no specs, or the harness has the
-/// variant installed.
+/// differs is written ([`put_in_place`]), and what else is in the folder is none
+/// of its business. None where there is nothing to write: no specs, or the
+/// harness has the variant installed.
 pub(crate) fn write_own(
     harness: Harness,
     env: &Env,
@@ -185,7 +188,7 @@ pub(crate) fn write_own(
         return Ok(None);
     };
     let copy = OwnCopy::of(harness, env, variant)?;
-    let said = |error: cf_base::file::FileError| error.to_string();
+    let said = |error: FileError| error.to_string();
     for (name, bytes) in files::of(variant) {
         let file = path::join(&[&copy.folder, name]);
         let file = Path::new(&file);
@@ -195,7 +198,27 @@ pub(crate) fn write_own(
         if let Some(above) = file.parent() {
             make_folder(above, 0o700, Mkdir::Promise).map_err(said)?;
         }
-        write_file(file, bytes, 0o600).map_err(said)?;
+        put_in_place(file, bytes, launch.id).map_err(said)?;
     }
     Ok(Some(copy))
+}
+
+/// Writes `bytes` as `file` whole or not at all: to a name beside it that is this
+/// launch's own (`<file>.<launch id>.tmp`, which no other launch's write is
+/// made to), then renamed over it. A window of another launch that reads the
+/// skill meanwhile, the copy being shared, finds the file as it was or as it is,
+/// never half of it, and a write cut short (a crash, a full disk) leaves what was
+/// there. The temporary is removed where the write or the rename fails. On
+/// Windows a rename over a file another process holds open, without sharing it
+/// for deleting, is refused: the launch says so, and the next one tries again.
+fn put_in_place(file: &Path, bytes: &[u8], launch: &LaunchId) -> Result<(), FileError> {
+    let mut beside = OsString::from(file.as_os_str());
+    beside.push(format!(".{}.tmp", launch.as_str()));
+    let beside = PathBuf::from(beside);
+    write_file(&beside, bytes, 0o600)
+        .and_then(|()| rename(&beside, file))
+        .inspect_err(|_| {
+            // What was written is no file of the skill's, whatever came of it.
+            let _ = rm_force(&beside);
+        })
 }

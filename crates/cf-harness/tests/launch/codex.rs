@@ -3,12 +3,13 @@
 //! IMPL-BDC-07), each case under its sentence: how a Codex window is launched
 //! under the supervisor (here), how it is followed (`windows`), how a message
 //! reaches it through the supervisor's broker (`channel`), the role it is
-//! given (`roles`), and the Specmint skill a chief is given (`specs`). Each test
-//! gets a throwaway home and a stand-in `codex` on
-//! PATH, whose answers (its native queue, its version) and whose app-server are
-//! scripted. Asked anything else, the stand-in is not there: a launch that asks
-//! it more fails. The channel's cases against a broker on real sockets and the
-//! machine's own clock are in `tests/channels/codex.rs`.
+//! given (`roles`), the Specmint skill a chief is given (`specs`), and a window
+//! opened again on a thread the app's quit cut in a turn (`resumed`). Each test
+//! gets a throwaway home and a stand-in `codex` on PATH, whose answers (its
+//! native queue, its version) and whose app-server are scripted. Asked anything
+//! else, the stand-in is not there: a launch that asks it more fails. The
+//! channel's cases against a broker on real sockets and the machine's own clock
+//! are in `tests/channels/codex.rs`.
 //!
 //! A window comes only from a prepare here, where Node's tests made up a
 //! launch bag: a test of a window on a known thread prepares it as that
@@ -21,6 +22,7 @@
 //! the cases left.
 
 mod channel;
+mod resumed;
 mod roles;
 mod specs;
 mod windows;

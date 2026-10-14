@@ -4,24 +4,31 @@
 # in the setting that thread does not read). The harness says it keeps them (`Adapter::
 # keeps_first_instructions`, Codex alone); the ledger records the text each conversation was
 # last told (migration 0016); the engine compares it with the text a resumed window would be
-# given and, where it differs, puts a note from ConsensFlow first, the new text in full and said
-# to replace the one the thread began with, and records the new text once the note is delivered,
-# so that it is given once. The text names ConsensFlow's copy of Specmint where the harness has
-# none, and the harness crate keeps that copy at one place for every launch (one for each harness
-# and variant, named by the commit it is vendored at, in no launch's folder), or the role text
-# would differ at every launch and be said again at every Resume. One plant takes one rule out,
-# or puts one wrong; a test of it fails. The ledger's plants run its own tests
-# (`tests/conversation_role.rs` and the unit tests of `testing::role_text`), the harness's the
-# launch suite's (`tests/launch/first_instructions.rs`, and its tests of a chief given specs) and
-# the unit tests of the copy (`shared::specmint`), the engine's the dispatcher's
-# (`tests/dispatcher/role_change.rs`) and its unit tests (`role_change::`), the stand-in Codex's
-# its own (`agent::tests`); the `codex role rig:` plants run the cases of the rig and the
-# regression (a real daemon, the real pane host, a chief on the stand-in Codex or Claude:
-# `crates/cf-e2e/tests/rig/specs.rs` and `tests/regressions/codex_role_on_resume.rs`), and the
-# ones that plant the product say `builds`: the family builds the native `cf` again once each
-# is put back. Every name holds `codex role`, so `npm run plants:daemon -- "codex role"` runs
-# them all, `"codex role:"` the ones that do not run the rig and `"codex role rig:"` the ones
-# that do.
+# given and, where it differs, opens the window with no first message and, once it is up, gives
+# it a note from ConsensFlow first (by paste, so the role is on the command line once): the new
+# text in full and said to replace the one the thread began with, then the message the launch
+# would have begun with, then the rest of its queue. The text is recorded in the very write that
+# confirms the note's delivery, so that it is given once; a role told in part (cut at what a paste
+# holds) is not recorded and the human is told so; a note whose window closed before it was seen
+# is looked for in the conversation's own record before it is withdrawn; and what a member's
+# window answers to the note is no answer to its task. The text names ConsensFlow's copy of
+# Specmint where the harness has none, and the harness crate keeps that copy at one place for
+# every launch (one for each harness and variant, named by the commit it is vendored at, in no
+# launch's folder, each file put in place whole), or the role text would differ at every launch
+# and be said again at every Resume. A Codex window opened on a thread the quit cut in a turn,
+# with no message, reads at rest. One plant takes one rule out, or puts one wrong; a test of it
+# fails. The ledger's plants run its own tests (`tests/conversation_role.rs`, the receipt suite's
+# `told::` and the unit tests of `testing::role_text`), the harness's the launch suite's
+# (`tests/launch/first_instructions.rs`, `codex::resumed::`, and its tests of a chief given specs)
+# and the unit tests of the copy (`shared::specmint`), the engine's the dispatcher's
+# (`tests/dispatcher/role_change.rs` and its modules) and its unit tests (`role_change::`,
+# `delivery_text::`), the stand-in Codex's its own (`agent::tests`); the `codex role rig:` plants
+# run the cases of the rig and the regression (a real daemon, the real pane host, a chief on the
+# stand-in Codex or Claude: `crates/cf-e2e/tests/rig/specs.rs` and
+# `tests/regressions/codex_role_on_resume.rs`), and the ones that plant the product say `builds`:
+# the family builds the native `cf` again once each is put back. Every name holds `codex role`,
+# so `npm run plants:daemon -- "codex role"` runs them all, `"codex role:"` the ones that do not
+# run the rig and `"codex role rig:"` the ones that do.
 
 [run]
 # The ledger's tests of the column: the migration, writing and reading it, what it never logs.
@@ -30,8 +37,13 @@ ledger-conversation-role = ["cargo", "test", "--offline", "-p", "cf-ledger", "--
 # (The ledger's replay of Node's recordings, which holds the column apart, is the kit's
 # `ledger-replay`.)
 ledger-lib = ["cargo", "test", "--offline", "-p", "cf-ledger", "--lib"]
+# What the ledger asks of the queue for a message put ahead of it, and the one write that confirms
+# a note that says a role and records what the conversation was told.
+ledger-receipt-told = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "told::"]
 # Which harness keeps the first instructions of a resumed conversation.
 harness-first-instructions = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "first_instructions::"]
+# A Codex window opened again on a thread the quit cut in a turn, with no message of its own.
+harness-codex-resumed = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "codex::resumed::"]
 # The harness's tests of ConsensFlow's copy of Specmint: where it is kept, what is written and
 # when, and what each harness is told of it.
 harness-specmint = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "specmint"]
@@ -39,6 +51,8 @@ harness-launch-specs = ["cargo", "test", "--offline", "-p", "cf-harness", "--tes
 # The engine's tests of a role that changed, on the fake windows, and of how the text reads.
 engine-role-change = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "role_change::"]
 engine-role-change-lib = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "role_change::"]
+# How a message reads in the pane, and whether it goes whole.
+engine-delivery-text = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "delivery_text::"]
 # The stand-in Codex's own tests: what a thread begins with, and keeps.
 fake-codex = ["cargo", "test", "--offline", "-p", "cf-e2e", "--bin", "fake-codex"]
 # The case of the rig and the regression: a chief on the stand-in Codex, resumed.
@@ -112,6 +126,47 @@ runs = ["ledger-lib", "ledger-replay"]
 file = "crates/cf-ledger/src/testing.rs"
 find = '''                *sql = sql.replace(role_text::COLUMN_LINES, "");'''
 replace = '''                *sql = sql.replace(role_text::COLUMN_LINES, " ");'''
+
+[[plant]]
+name = "codex role: a note is confirmed and the role recorded in two writes, and one that fails leaves the other made"
+meant = "a_note_is_not_confirmed_where_the_role_cannot_be_recorded_and_the_role_is_not_recorded_where_the_note_cannot_be_confirmed"
+runs = ["ledger-receipt-told"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = '''    store.write(|store| {
+        let confirmed = confirm_delivery(store, message_id, receipt)?;
+        set_conversation_role_text(store, conversation_id, text)?;
+        Ok(confirmed)
+    })'''
+replace = '''    let confirmed = confirm_delivery(store, message_id, receipt)?;
+    set_conversation_role_text(store, conversation_id, text)?;
+    Ok(confirmed)'''
+
+[[plant]]
+name = "codex role: the role is recorded first and the note confirmed after it, in two writes"
+meant = "a_note_is_not_confirmed_where_the_role_cannot_be_recorded_and_the_role_is_not_recorded_where_the_note_cannot_be_confirmed"
+runs = ["ledger-receipt-told"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = '''    store.write(|store| {
+        let confirmed = confirm_delivery(store, message_id, receipt)?;
+        set_conversation_role_text(store, conversation_id, text)?;
+        Ok(confirmed)
+    })'''
+replace = '''    set_conversation_role_text(store, conversation_id, text)?;
+    confirm_delivery(store, message_id, receipt)'''
+
+[[plant]]
+name = "codex role: a message asked of the queue by its id is the head of it whichever message it is"
+meant = "a_message_behind_others_in_a_chief_s_queue_may_go_ahead_of_them_by_the_rules_the_head_goes_by"
+runs = ["ledger-receipt-told"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = '''         AND (?3 IS NULL OR m.id = ?3)'''
+replace = '''         AND (?3 IS NULL OR ?3 IS NOT NULL)'''
 
 # --- the harness ---
 
@@ -242,6 +297,94 @@ file = "crates/cf-harness/src/pi/adapter.rs"
 find = '''                    .flat_map(|copy| ["--skill".to_owned(), copy.file()]),'''
 replace = '''                    .flat_map(|_| ["--skill".to_owned(), String::new()]),'''
 
+[[plant]]
+name = "codex role: a skill's file that differs is written in place, where a window reading it finds it half written"
+meant = "a_file_that_differs_is_replaced_and_not_written_in_place_so_a_reader_that_has_it_open_reads_the_file_it_opened_whole"
+runs = ["harness-specmint"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/specmint.rs"
+find = '''    write_file(&beside, bytes, 0o600)
+        .and_then(|()| rename(&beside, file))'''
+replace = '''    write_file(file, bytes, 0o600)
+        .and_then(|()| Ok(()))'''
+
+[[plant]]
+name = "codex role: a skill's file that could not be put in place leaves its temporary beside it"
+meant = "a_write_that_cannot_be_put_in_place_leaves_no_temporary_and_what_was_there"
+runs = ["harness-specmint"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/specmint.rs"
+find = '''            let _ = rm_force(&beside);
+'''
+replace = ''
+
+[[plant]]
+name = "codex role: every launch writes a skill's file to the same temporary name"
+meant = "a_write_is_made_to_a_name_of_the_launch_s_own_and_another_launch_s_is_left_alone"
+runs = ["harness-specmint"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/specmint.rs"
+find = '''    beside.push(format!(".{}.tmp", launch.as_str()));'''
+replace = '''    beside.push(".tmp");'''
+
+# A Codex window opened again on a thread the quit cut in a turn, with no message of its own
+# (where the role is said by a message once the window is up): no process is in that turn, so
+# the window is at rest, as Claude's and Pi's are.
+
+[[plant]]
+name = "codex role: a Codex window opened on a thread the quit cut in a turn is never read at rest"
+meant = "a_window_opened_again_on_a_turn_the_quit_cut_is_at_rest_once_its_broker_names_the_thread"
+runs = ["harness-codex-resumed"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/adapter.rs"
+find = '''                            observed.settled = true;
+'''
+replace = '''                            let _ = &observed;
+'''
+
+[[plant]]
+name = "codex role: a Codex window whose broker has named no thread is read at rest by the turn the quit cut"
+meant = "a_window_opened_again_on_a_turn_the_quit_cut_is_at_rest_once_its_broker_names_the_thread"
+runs = ["harness-codex-resumed"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/adapter.rs"
+find = '''            let mut observed = record_state(Arc::clone(&reading));'''
+replace = '''            let mut observed = record_state(Arc::clone(&reading));
+            if self
+                .left_open
+                .borrow()
+                .as_ref()
+                .is_some_and(|open| open.still(&reading))
+            {
+                observed.settled = true;
+            }'''
+
+[[plant]]
+name = "codex role: a Codex window that follows another thread keeps the turn the quit cut in the one it left"
+meant = "a_window_that_follows_another_thread_forgets_the_turn_it_was_opened_on"
+runs = ["harness-codex-resumed"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/adapter.rs"
+find = '''        *self.left_open.borrow_mut() = None;
+'''
+replace = ''
+
+[[plant]]
+name = "codex role: a Codex window opened with a message of its own is read at rest by the turn the quit cut"
+meant = "a_window_opened_with_a_message_of_its_own_is_not_read_at_rest_by_the_turn_the_quit_cut"
+runs = ["harness-codex-resumed"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/adapter.rs"
+find = '''                Some(thread) if launch.message.is_none() => {'''
+replace = '''                Some(thread) => {'''
+
 # --- the engine ---
 
 [[plant]]
@@ -270,10 +413,10 @@ meant = "a_resumed_conversation_whose_harness_keeps_its_first_instructions_is_gi
 runs = ["engine-role-change"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/role_change.rs"
-find = '''            ledger.set_conversation_role_text(conversation.id, instructions)?;
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = '''        set_conversation_role_text(store, conversation_id, text)?;
 '''
-replace = '''            let _ = (conversation.id, instructions);
+replace = '''        let _ = (conversation_id, text);
 '''
 
 [[plant]]
@@ -301,7 +444,17 @@ replace = '''        let note = self.seams.ledger.borrow_mut().note(
                 body: body_of(&role.instructions),
             },
         )?;
-        self.role_delivered(&note)?;
+        if let Some(conversation) = self
+            .seams
+            .ledger
+            .borrow()
+            .current_conversation(participant.id)?
+        {
+            self.seams
+                .ledger
+                .borrow_mut()
+                .set_conversation_role_text(conversation.id, &role.instructions)?;
+        }
         Ok(note)'''
 
 [[plant]]
@@ -311,9 +464,13 @@ runs = ["engine-role-change"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
-find = '''        self.role_delivered(&message)?;
+find = '''        self.confirm_delivered(&message, &receipt)?;
         record.delivery.borrow_mut().delivering = None;'''
-replace = '''        record.delivery.borrow_mut().delivering = None;'''
+replace = '''        self.seams
+            .ledger
+            .borrow_mut()
+            .confirm_delivery(message.id, Some(&receipt))?;
+        record.delivery.borrow_mut().delivering = None;'''
 
 [[plant]]
 name = "codex role: a delivery a restart settles is not taken for the role told"
@@ -322,13 +479,17 @@ runs = ["engine-role-change"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
-find = '''                    self.role_delivered(&message)?;
+find = '''                    self.confirm_delivered(&message, &json!({ "item": item }))?;
 '''
-replace = ''
+replace = '''                    self.seams
+                        .ledger
+                        .borrow_mut()
+                        .confirm_delivery(message.id, Some(&json!({ "item": item })))?;
+'''
 
 [[plant]]
 name = "codex role: every message that comes into the window is taken for a role told"
-meant = "a_replacement_goes_ahead_of_the_words_that_waited_for_the_window_and_those_follow_it"
+meant = "a_replacement_goes_ahead_of_the_words_that_waited_for_the_window_and_ahead_of_the_rest_and_those_follow_it_in_their_order"
 runs = ["engine-role-change"]
 
 [[plant.edit]]
@@ -351,15 +512,41 @@ replace = '''        let withdrawn = if resumed.is_some() {
         };'''
 
 [[plant]]
-name = "codex role: a member's replacement that failed to land leaves its brief to have the launch tried again at every pass"
+name = "codex role: a member's launch that fails leaves the brief the role went ahead of, to have the launch tried again at every pass"
 meant = "a_members_replacement_that_failed_to_land_leaves_the_record_as_it_was_and_its_next_launch_says_the_role_again"
 runs = ["engine-role-change"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/deliveries.rs"
-find = '''        self.fail_behind(message, because)?;
+file = "crates/cf-engine/src/windows.rs"
+find = '''                    self.begin_displaced(&delivering)?;
 '''
 replace = ''
+
+[[plant]]
+name = "codex role: a member's window that opens and cannot start is left with its brief, whose launch is tried again at every pass"
+meant = "a_members_window_that_opens_and_cannot_start_fails_the_brief_the_role_went_ahead_of_and_writes_no_other_replacement"
+runs = ["engine-role-change"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '''            delivery.delivering = delivering;'''
+replace = '''            delivery.delivering = delivering.clone();'''
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '''        if let (Err(error), Some(delivering)) = (&started, failing) {'''
+replace = '''        if let (Err(error), Some(delivering)) = (&started, delivering) {'''
+
+[[plant]]
+name = "codex role: a member's launch that fails leaves the replacement written for it waiting for ever"
+meant = "a_members_replacement_that_failed_to_land_leaves_the_record_as_it_was_and_its_next_launch_says_the_role_again"
+runs = ["engine-role-change"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '''            self.withdraw_replacements(participant)?;
+            match delivering {'''
+replace = '''            match delivering {'''
 
 [[plant]]
 name = "codex role: a replacement the window never took is left to be delivered when the role is again the one told"
@@ -392,24 +579,51 @@ find = '''            .filter(|adapter| adapter.keeps_first_instructions());'''
 replace = '''            .filter(|_| true);'''
 
 [[plant]]
-name = "codex role: the replacement is made and left in the queue, behind what waited, and is not the launch's first message"
-meant = "a_replacement_goes_ahead_of_the_words_that_waited_for_the_window_and_those_follow_it"
+name = "codex role: the replacement is the launch's first message, on the command line with the role twice (the old code)"
+meant = "a_resumed_conversation_whose_harness_keeps_its_first_instructions_is_given_a_changed_role_first_and_once"
 runs = ["engine-role-change"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/role_change.rs"
-find = '''            first: Some(replacement),'''
-replace = '''            first,'''
+find = '''            first: None,
+            due,'''
+replace = '''            first: Some(replacement),
+            due,'''
 
 [[plant]]
-name = "codex role: the replacement does not go ahead of the message the launch already had first"
-meant = "a_replacement_goes_ahead_of_the_note_that_tells_the_chief_its_turn_was_cut_and_that_one_follows_it"
+name = "codex role: what was queued goes before the replacement, which waits at the end of its queue"
+meant = "a_replacement_goes_ahead_of_the_words_that_waited_for_the_window_and_ahead_of_the_rest_and_those_follow_it_in_their_order"
 runs = ["engine-role-change"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/role_change.rs"
-find = '''            first: Some(replacement),'''
-replace = '''            first: first.or(Some(replacement)),'''
+find = '''            waiting.extend(
+                found.filter(|message| matches!(message.state.as_str(), "queued" | "delivering")),
+            );'''
+replace = '''            let _ = found;
+            waiting.extend(Option::<MessageView>::None);'''
+
+[[plant]]
+name = "codex role: the message the replacement displaced goes after the rest of the queue and not right after it"
+meant = "a_replacement_goes_ahead_of_the_note_that_tells_the_chief_its_turn_was_cut_and_that_one_follows_it_ahead_of_the_rest"
+runs = ["engine-role-change"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_change.rs"
+find = '''            .chain(first.as_ref().map(|message| message.id))'''
+replace = '''            .chain(None)'''
+
+[[plant]]
+name = "codex role: the message the replacement displaced goes in ahead of the rest whatever the rules of its queue say"
+meant = "a_follow_up_paused_after_the_launch_that_put_the_role_ahead_of_it_waits_when_its_turn_comes"
+runs = ["engine-role-change"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_change.rs"
+find = '''                let goes = message.state == "queued"
+                    && (is_replacement(&message)
+                        || ledger.next_delivery_of(record.id, message.id)?.is_some());'''
+replace = '''                let goes = message.state == "queued";'''
 
 [[plant]]
 name = "codex role: a replacement that waited is not withdrawn when the role changes again"
@@ -450,6 +664,198 @@ runs = ["engine-role-change-lib"]
 file = "crates/cf-engine/src/role_change.rs"
 find = '''    format!("{OPENING}\n\n{instructions}")'''
 replace = '''    format!("{OPENING}\n\n{instructions}{}", "\n".repeat(2_000))'''
+
+[[plant]]
+name = "codex role: the staff's rows grow, and the command line the docs measured is not the text's"
+meant = "the_command_line_of_a_windows_launch_is_the_size_the_docs_say"
+runs = ["engine-role-change-lib"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/roles/skill.rs"
+find = '''        table.push(format!("| {} |", cells.map(cell).join(" | ")));'''
+replace = '''        table.push(format!("| {} |{}", cells.map(cell).join(" | "), " ".repeat(40)));'''
+
+# What a window answers to the note that says its role is no answer to the task it holds.
+
+[[plant]]
+name = "codex role: a member's word of the role it was given is taken for its task's result"
+meant = "a_session_resumed_on_a_task_it_holds_is_not_read_to_answer_it_by_the_word_it_gave_the_role"
+runs = ["engine-role-change"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''        let written = answers_to_the_task(&items[start + 1..]);'''
+replace = '''        let written: Vec<_> = items[start + 1..]
+            .iter()
+            .filter(|item| item.role == Role::Assistant)
+            .collect();'''
+
+[[plant]]
+name = "codex role: what a member answered its task before the role came is dropped with the word it gave the role"
+meant = "the_words_a_window_gives_a_replacement_of_its_role_are_no_answer_to_its_task"
+runs = ["engine-role-change-lib"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_change.rs"
+find = '''            Role::User => of_the_role = says_a_replacement(&item.text),'''
+replace = '''            Role::User => {
+                of_the_role = says_a_replacement(&item.text);
+                if of_the_role {
+                    answers.clear();
+                }
+            }'''
+
+[[plant]]
+name = "codex role: a member's words after the role are no answer to its task however many messages come after it"
+meant = "the_words_a_window_gives_a_replacement_of_its_role_are_no_answer_to_its_task"
+runs = ["engine-role-change-lib"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_change.rs"
+find = '''            Role::User => of_the_role = says_a_replacement(&item.text),'''
+replace = '''            Role::User => of_the_role = of_the_role || says_a_replacement(&item.text),'''
+
+[[plant]]
+name = "codex role: a message that holds the opening of a role says a role, a member's turn on it or not"
+meant = "a_message_of_a_conversation_says_a_replacement_where_it_holds_the_opening_of_one"
+runs = ["engine-role-change-lib"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_change.rs"
+find = '''    text.contains(OPENING)
+}'''
+replace = '''    text.contains("ConsensFlow")
+}'''
+
+# A note whose window closed before it was seen: the conversation's own record says whether it
+# was told.
+
+[[plant]]
+name = "codex role: a replacement the record shows is withdrawn all the same, and the role the human went back to is never said"
+meant = "a_replacement_the_window_took_before_it_closed_is_what_the_conversation_was_told_whatever_the_ledger_says_and_the_role_the_human_went_back_to_is_said_again"
+runs = ["engine-role-change"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_change.rs"
+find = '''            if let Some(item) = shown {'''
+replace = '''            if let Some(item) = shown.filter(|_| false) {'''
+
+[[plant]]
+name = "codex role: a launch withdraws the replacements that wait without looking for them in the conversation's record"
+meant = "a_replacement_the_window_took_before_it_closed_is_what_the_conversation_was_told_whatever_the_ledger_says_and_the_role_the_human_went_back_to_is_said_again"
+runs = ["engine-role-change"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '''        let settled = self.settle_replacements(participant).await?;'''
+replace = '''        let settled: Vec<i64> = Vec::new();'''
+
+[[plant]]
+name = "codex role: a replacement the record shows is confirmed and the role it said is not recorded"
+meant = "a_replacement_the_window_took_before_it_closed_is_what_the_conversation_was_told_whatever_the_ledger_says_and_the_role_the_human_went_back_to_is_said_again"
+runs = ["engine-role-change"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_change.rs"
+find = '''                self.confirm_delivered(&begun.message, &json!({ "item": item }))?;
+                told.push(note.id);'''
+replace = '''                self.seams
+                    .ledger
+                    .borrow_mut()
+                    .confirm_delivery(begun.message.id, Some(&json!({ "item": item })))?;
+                told.push(note.id);'''
+
+[[plant]]
+name = "codex role: any header in the conversation's record is taken for the replacement's"
+meant = "a_replacement_the_window_never_took_is_still_withdrawn_when_the_record_does_not_show_it"
+runs = ["engine-role-change"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_change.rs"
+find = '''                .recorded_item_with(participant.id, &marker_of(note.id))'''
+replace = '''                .recorded_item_with(participant.id, "[ConsensFlow m-")'''
+
+[[plant]]
+name = "codex role: a replacement found in the record is not taken out of the launch's first message, which is told it again"
+meant = "a_replacement_the_record_shows_is_not_made_the_first_message_of_the_launch_that_finds_it_the_head_of_the_queue"
+runs = ["engine-role-change"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '''        let message = message.filter(|message| !settled.contains(&message.id));'''
+replace = '''        let _ = &settled;'''
+
+# What confirms a note that says a role records it in the same write; one too long to go whole
+# tells the conversation its role in part, which is not recorded.
+
+[[plant]]
+name = "codex role: the engine confirms a note and records its role in two calls of the ledger"
+meant = "a_replacement_is_confirmed_and_recorded_by_the_one_write_that_does_both_and_no_call_of_its_own_records_a_role"
+runs = ["engine-role-change"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_change.rs"
+find = '''                ledger.confirm_delivery_telling(
+                    message.id,
+                    Some(receipt),
+                    conversation.id,
+                    instructions,
+                )?;'''
+replace = '''                ledger.confirm_delivery(message.id, Some(receipt))?;
+                ledger.set_conversation_role_text(conversation.id, instructions)?;'''
+
+[[plant]]
+name = "codex role: a note that is not on its way into a window of a conversation is confirmed and says nothing of the role"
+meant = "a_replacement_whose_recipient_has_no_conversation_any_more_is_confirmed_and_records_nothing"
+runs = ["engine-role-change-lib"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_change.rs"
+find = '''            None => {
+                ledger.confirm_delivery(message.id, Some(receipt))?;
+'''
+replace = '''            None => {
+'''
+
+[[plant]]
+name = "codex role: a role told in part is recorded as told, and said no more"
+meant = "a_role_too_long_for_one_message_goes_cut_is_not_recorded_as_told_and_the_human_is_told_so_at_every_resume"
+runs = ["engine-role-change"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_change.rs"
+find = '''        match conversation.filter(|_| goes_whole(message, &[])) {'''
+replace = '''        match conversation {'''
+
+[[plant]]
+name = "codex role: the human is not told that a role went in part"
+meant = "a_role_too_long_for_one_message_goes_cut_is_not_recorded_as_told_and_the_human_is_told_so_at_every_resume"
+runs = ["engine-role-change"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_change.rs"
+find = '''                if !goes_whole(message, &[]) {'''
+replace = '''                if false {'''
+
+[[plant]]
+name = "codex role: a message is cut at sixteen thousand units and not past them"
+meant = "a_message_goes_whole_to_sixteen_thousand_units_and_is_cut_past_them"
+runs = ["engine-delivery-text"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/delivery_text.rs"
+find = '''    utf16_len(&words_of(message, carried).0) <= INLINE_LIMIT'''
+replace = '''    utf16_len(&words_of(message, carried).0) < INLINE_LIMIT'''
+
+[[plant]]
+name = "codex role: whether a message goes whole is told by its own words and not by the rows it carries with it"
+meant = "a_message_that_carries_others_goes_whole_by_the_words_of_all_of_them"
+runs = ["engine-delivery-text"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/delivery_text.rs"
+find = '''    utf16_len(&words_of(message, carried).0) <= INLINE_LIMIT'''
+replace = '''    utf16_len(&words_of(message, &[]).0) <= INLINE_LIMIT'''
 
 # --- the stand-in Codex ---
 
@@ -540,10 +946,10 @@ runs = ["rig-codex-role"]
 builds = true
 
 [[plant.edit]]
-file = "crates/cf-engine/src/role_change.rs"
-find = '''            ledger.set_conversation_role_text(conversation.id, instructions)?;
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = '''        set_conversation_role_text(store, conversation_id, text)?;
 '''
-replace = '''            let _ = (conversation.id, instructions);
+replace = '''        let _ = (conversation_id, text);
 '''
 
 [[plant]]

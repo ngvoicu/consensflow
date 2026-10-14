@@ -334,9 +334,13 @@ impl Dispatcher {
     }
 
     /// Launches `participant`'s window on its harness, `message` its first if
-    /// there is one (a chief's is its handoff, most often). One that does not
-    /// come up says why ([`Dispatcher::launch_failed`]); a participant
-    /// forgotten while its launch waits gets nothing more under its ids.
+    /// there is one (a chief's is its handoff, most often). A conversation that
+    /// is resumed and whose role changed, on a harness that keeps its first
+    /// instructions, has no first message on its command line: the note that says
+    /// the role goes in first once the window is up, and `message` after it
+    /// ([`Dispatcher::compare_role`]). One that does not come up says why
+    /// ([`Dispatcher::launch_failed`]); a participant forgotten while its launch
+    /// waits gets nothing more under its ids.
     pub(crate) async fn launch(
         self: &Rc<Self>,
         record: &Rc<Record>,
@@ -345,6 +349,13 @@ impl Dispatcher {
         message: Option<MessageView>,
     ) -> Result<(), EngineError> {
         let harness = participant.harness.clone().unwrap_or_default();
+        // A role the window took before it closed, though its arrival was never
+        // seen, is what the conversation was told: the ledger learns it first.
+        let settled = self.settle_replacements(participant).await?;
+        if self.forgotten(record) {
+            return Ok(());
+        }
+        let message = message.filter(|message| !settled.contains(&message.id));
         let conversation = self
             .seams
             .ledger
@@ -361,9 +372,11 @@ impl Dispatcher {
         let launch_id = self.seams.launch_ids.draw();
         let generation = self.next_generation();
         // A resumed conversation whose harness keeps its first instructions is
-        // told a role that changed since it began, ahead of anything else.
+        // told a role that changed since it began, ahead of anything else, once
+        // its window is up: the window then opens with no first message.
         let resumed = conversation.as_ref().filter(|_| resume.is_some());
-        let Compared { first, role } = self.compare_role(project, participant, resumed, first)?;
+        let Compared { first, due, role } =
+            self.compare_role(project, participant, resumed, first)?;
         let delivering = first.as_ref().map(|first| Delivering {
             message: first.id,
             marker: marker_of(first.id),
@@ -373,6 +386,11 @@ impl Dispatcher {
             queued: false,
             entered_again: false,
         });
+        // What fails with a launch that does not come up: its first message, or
+        // the one that would have been, which the role goes ahead of.
+        let failing = delivering
+            .clone()
+            .or_else(|| self.displaced(participant, &due));
         let planned = match self
             .plan(
                 record,
@@ -395,7 +413,7 @@ impl Dispatcher {
                     record,
                     project,
                     participant,
-                    delivering,
+                    failing,
                     &format!("the launch failed: {cause}"),
                 );
             }
@@ -458,7 +476,7 @@ impl Dispatcher {
                     record,
                     project,
                     participant,
-                    delivering,
+                    failing,
                     &token,
                     &launch_id,
                     &error,
@@ -469,7 +487,7 @@ impl Dispatcher {
                     record,
                     project,
                     participant,
-                    delivering,
+                    failing,
                     &token,
                     &launch_id,
                     &error.message,
@@ -527,7 +545,11 @@ impl Dispatcher {
             part.named = false;
             part.stopped = planned.stop.map(|stop| (stop.task_id, stop.seq));
         }
-        record.delivery.borrow_mut().delivering = delivering.clone();
+        {
+            let mut delivery = record.delivery.borrow_mut();
+            delivery.delivering = delivering;
+            delivery.due = due;
+        }
         // A window that exited before its open was answered goes as any exit does.
         if let Some(shown) = exited {
             Box::pin(self.exited(&pane, shown)).await?;
@@ -536,7 +558,7 @@ impl Dispatcher {
         // The adapter's `started` is an `async` function, and `.catch(...)`
         // made a promise of its own to wait on.
         let started = caught(planned.window.started()).await;
-        if let (Err(error), Some(delivering)) = (&started, delivering) {
+        if let (Err(error), Some(delivering)) = (&started, failing) {
             // What the window shows is asked before it closes: the screen goes with it.
             let (shown, settles) = self.look_before_giving_up(record, Some(&pane)).await;
             // The chief's window goes without taking its project with it: the chief is tried again.
@@ -778,8 +800,11 @@ impl Dispatcher {
     /// opened with nothing to deliver tells them why it did not come. The
     /// chief's first message goes back to its queue with its attempt, and
     /// the chief is tried again, ever more slowly while it keeps failing;
-    /// the human hears why once. A participant forgotten while it launched
-    /// hears nothing and settles nothing.
+    /// the human hears why once. Where a role was to be said first, a member's
+    /// failing message is the one it went ahead of, and the note that says the
+    /// role is withdrawn with it; a chief's stays in its queue (`role_change`).
+    /// A participant forgotten while it launched hears nothing and settles
+    /// nothing.
     fn launch_failed(
         &self,
         record: &Rc<Record>,
@@ -792,8 +817,16 @@ impl Dispatcher {
             return Ok(());
         }
         if participant.role != "chief" {
+            // What it was to say of the role first was written for a window that
+            // never came up, and no queue of a member's would give it to another.
+            self.withdraw_replacements(participant)?;
             match delivering {
-                Some(delivering) => self.settle_failure(delivering, because, false)?,
+                Some(delivering) => {
+                    // One the role went ahead of waits still: it fails now, or
+                    // the launch would be tried again at every pass.
+                    self.begin_displaced(&delivering)?;
+                    self.settle_failure(delivering, because, false)?;
+                }
                 None => {
                     self.seams.ledger.borrow_mut().note(
                         project.id,

@@ -130,6 +130,17 @@ impl Ledger {
         messages::next_delivery(&self.store, participant_id)
     }
 
+    /// `message_id`, if it may go by every rule the head of the participant's
+    /// queue goes by, whatever waits before it: for a message the engine puts
+    /// ahead of the queue.
+    pub fn next_delivery_of(
+        &self,
+        participant_id: i64,
+        message_id: i64,
+    ) -> Result<Option<MessageView>, LedgerError> {
+        messages::next_delivery_of(&self.store, participant_id, message_id)
+    }
+
     /// A message's delivery into its window begins: it, and the rows its paste carries.
     pub fn begin_delivery(&mut self, message_id: i64) -> Result<Begun, LedgerError> {
         messages::begin_delivery(&mut self.store, message_id)
@@ -161,6 +172,25 @@ impl Ledger {
         receipt: Option<&Value>,
     ) -> Result<MessageView, LedgerError> {
         messages::confirm_delivery(&mut self.store, message_id, receipt)
+    }
+
+    /// The harness's own record proves a message that says a conversation its
+    /// role arrived: it is confirmed and the conversation recorded as told
+    /// `text`, in one write.
+    pub fn confirm_delivery_telling(
+        &mut self,
+        message_id: i64,
+        receipt: Option<&Value>,
+        conversation_id: i64,
+        text: &str,
+    ) -> Result<MessageView, LedgerError> {
+        messages::confirm_delivery_telling(
+            &mut self.store,
+            message_id,
+            receipt,
+            conversation_id,
+            text,
+        )
     }
 
     /// A message not yet delivered that no longer applies.

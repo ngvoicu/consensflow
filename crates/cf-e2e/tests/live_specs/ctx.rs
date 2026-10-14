@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use cf_e2e::live::human::Human;
 use cf_e2e::live::report::Check;
-use cf_e2e::live::{wait, Log};
+use cf_e2e::live::{wait, Harness, Log};
 use cf_e2e::rig::{Project, Rig};
 use cf_e2e::rollout;
 use cf_e2e::{Error, Result};
@@ -26,6 +26,10 @@ use crate::project::Settings;
 /// the next one has to be opened once it is resumed.
 const ENDS: Duration = Duration::from_secs(90);
 const OPENS: Duration = Duration::from_secs(120);
+
+/// How long a Codex chief resumed has to be told its role again, once its window
+/// is up.
+const TOLD: Duration = Duration::from_secs(120);
 
 /// A project of the run.
 pub struct Ctx<'a> {
@@ -283,6 +287,18 @@ impl<'a> Ctx<'a> {
             Ok(self.human.chief()?["pane"]["generation"] == frame["generation"])
         })?;
         self.settles()?;
+        // A Codex chief resumed on its thread is told its role again by a message
+        // once its window is up, and reads idle before that: its own record says
+        // when it was, and then its turn on it is waited for. A record that never
+        // says is the verdict of a check, not the end of this wait.
+        if self.planned.chief == Harness::Codex {
+            let _ = self.wait("the chief's thread to be told of the specs", TOLD, || {
+                Ok(self
+                    .chief_record(&frame)
+                    .is_ok_and(|record| launched::told_in_the_record(&record).is_ok()))
+            });
+            self.settles()?;
+        }
         *self.on.borrow_mut() = Some(frame.clone());
         Ok(frame)
     }
