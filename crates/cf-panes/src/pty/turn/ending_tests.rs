@@ -455,11 +455,15 @@ mod windows {
         read_until(&table, &key, &output, "STARTED#");
 
         // Both pings run once the shell has started its own; the look finds the
-        // shell's.
-        let deadline = Instant::now() + Duration::from_secs(60);
+        // shell's ping itself. The shell's own command line says `-n 1002` too, and
+        // an ending that comes before the shell has started its ping ends the shell
+        // and leaves no ping to end (zeewin, 2026-10-14).
+        let deadline = Instant::now() + Duration::from_secs(30);
         loop {
             let found = listed(&table, &key);
-            if found.iter().any(|(_, command)| command.contains("-n 1002")) {
+            if found.iter().any(|(_, command)| {
+                command.to_lowercase().contains("ping.exe") && command.contains("-n 1002")
+            }) {
                 break;
             }
             assert!(
