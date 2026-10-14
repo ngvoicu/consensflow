@@ -5,34 +5,11 @@
 //! waits on a writer, so the stand-in writes in WAL mode, where a reader sees the
 //! last whole write and a write waits for no reader.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::Duration;
 
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::{json, Value};
-
-/// Where Devin keeps its store: `devin/cli/sessions.db` in its data folder, which on
-/// Windows is `%APPDATA%` (`AppData/Roaming` in the home when that is not set) and
-/// elsewhere `XDG_DATA_HOME` (`.local/share` in the home).
-pub fn location(
-    windows: bool,
-    home: &str,
-    app_data: Option<&str>,
-    xdg_data_home: Option<&str>,
-) -> PathBuf {
-    let data = if windows {
-        app_data.map_or_else(
-            || Path::new(home).join("AppData").join("Roaming"),
-            PathBuf::from,
-        )
-    } else {
-        xdg_data_home.map_or_else(
-            || Path::new(home).join(".local").join("share"),
-            PathBuf::from,
-        )
-    };
-    data.join("devin").join("cli").join("sessions.db")
-}
 
 /// A session of the store, and the messages it has written.
 pub struct Store {
@@ -146,26 +123,6 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn devins_store_is_in_the_data_folder_of_the_system_it_runs_on() {
-        assert_eq!(
-            location(false, "/h", None, None),
-            Path::new("/h/.local/share/devin/cli/sessions.db")
-        );
-        assert_eq!(
-            location(false, "/h", Some("/a"), Some("/x")),
-            Path::new("/x/devin/cli/sessions.db")
-        );
-        assert_eq!(
-            location(true, "/h", None, Some("/x")),
-            Path::new("/h/AppData/Roaming/devin/cli/sessions.db")
-        );
-        assert_eq!(
-            location(true, "/h", Some("/a"), Some("/x")),
-            Path::new("/a/devin/cli/sessions.db")
-        );
-    }
 
     /// A node as another connection reads it: its id, its parent and its message.
     type Node = (String, Option<String>, Value);

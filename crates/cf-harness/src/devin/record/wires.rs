@@ -3,9 +3,11 @@
 //! for one session.
 //!
 //! A turn Devin is still on shows only on the wire: thoughts, messages and
-//! tool calls after the last end; its store holds the finished steps. A
-//! tool's last word is not new work: a shell an Escape left running ends
-//! after its turn did, and its window would read as working for good. Nor is
+//! tool calls after the last end; its store holds the finished steps. What a
+//! tool says of a call it began is not new work, whatever its status: a shell
+//! an Escape left running ends after its turn did, and a command a turn left
+//! running may go on reporting while it runs (a ping says a line a second), and
+//! the window would read as working for good, its task never done. Nor is
 //! the history a window reopened on the conversation replays, which carries
 //! its timestamps and ends in no turn end (poker-lab's T-4 read as working
 //! for good after its window was opened again, 2026-10-03).
@@ -23,13 +25,12 @@ use crate::shared::record::home;
 use crate::shared::record::jsonl::{read_on, Looked, Seen, Stop};
 use crate::shared::record::key::Key;
 
-/// The wire updates that mean Devin is on a turn; settings and mode updates are not work.
-const WORK: [&str; 4] = [
-    "agent_thought_chunk",
-    "agent_message_chunk",
-    "tool_call",
-    "tool_call_update",
-];
+/// The wire updates that mean Devin is on a turn: its thoughts, its words and the calls
+/// it begins. Settings and mode updates are not work, and nor is an update of a call
+/// that began (`tool_call_update`): a turn that is on shows its calls and words first,
+/// and a call's later words (a shell's output, its end) come after its turn's end as
+/// well.
+const WORK: [&str; 3] = ["agent_thought_chunk", "agent_message_chunk", "tool_call"];
 
 /// What the launches' wire logs said of a session.
 #[derive(Default)]
@@ -194,13 +195,8 @@ impl Said {
         let update = |name: &str| event.get("update").and_then(|update| update.get(name));
         let meta = |name: &str| update("_meta").and_then(|meta| meta.get(name));
         let kind = update("sessionUpdate").and_then(Value::as_str);
-        let tool_ended = kind == Some("tool_call_update")
-            && matches!(
-                update("status").and_then(Value::as_str),
-                Some("completed" | "failed" | "cancelled")
-            );
         let replayed = meta("cognition.ai/timestamp").is_some();
-        if kind.is_some_and(|kind| WORK.contains(&kind)) && !tool_ended && !replayed {
+        if kind.is_some_and(|kind| WORK.contains(&kind)) && !replayed {
             self.busy = true;
         }
         if kind == Some("agent_message_chunk") {

@@ -10,7 +10,9 @@
 //! that conversation resumed. The extension's part in a window is the
 //! test's: it reads each record from the inbox and writes its verdict.
 //! Where Node's test stood in the records of a conversation, a stand-in
-//! `Records` does here.
+//! `Records` does here. The Specmint skill a chief is given is `specs`'s.
+
+mod specs;
 
 use std::cell::RefCell;
 use std::fs;
@@ -21,7 +23,8 @@ use std::sync::Arc;
 use cf_base::env::Env;
 use cf_base::path;
 use cf_harness::contract::{
-    Adapter, Admission, Agent, Held, Launch, LaunchId, Pane, Prepared, Readiness, Records, Work,
+    Adapter, Admission, Agent, Held, Launch, LaunchId, Pane, Prepared, Readiness, Records, Specs,
+    Work,
 };
 use cf_harness::pi::{prepare_extension, Extension, PiAdapter};
 use cf_harness::records::{Item, Options, PiSettlement, Quota, Reading, Record, Role, Settlement};
@@ -30,6 +33,7 @@ use cf_harness::testing::{
     fake_executable, finished, AnsweringHost, Driver, Fakes, FIRST_MESSAGE_MS,
 };
 use cf_proto::agents::Harness;
+use cf_proto::specs::Variant;
 use serde_json::{json, Value};
 use tempfile::TempDir;
 
@@ -108,6 +112,8 @@ struct Request {
     message: Option<String>,
     instructions: String,
     role: &'static str,
+    /// The Specmint variant a chief is given, where its project has specs on.
+    specs: Option<Variant>,
 }
 
 impl Default for Request {
@@ -117,12 +123,16 @@ impl Default for Request {
             message: Some(TASK.to_owned()),
             instructions: ROLE.to_owned(),
             role: "worker",
+            specs: None,
         }
     }
 }
 
 fn prepare(adapter: &PiAdapter, request: &Request) -> Result<Prepared, String> {
     let id = LaunchId::new(LAUNCH).unwrap();
+    let skill = request
+        .specs
+        .map(|variant| adapter.specmint(variant).unwrap());
     let launch = Launch {
         id: &id,
         project: 1,
@@ -138,6 +148,10 @@ fn prepare(adapter: &PiAdapter, request: &Request) -> Result<Prepared, String> {
             designer: false,
         }),
         instructions: &request.instructions,
+        specs: request
+            .specs
+            .zip(skill.as_ref())
+            .map(|(variant, skill)| Specs { variant, skill }),
         first_message_ms: FIRST_MESSAGE_MS,
     };
     finished(adapter.prepare(&launch))
@@ -317,6 +331,42 @@ fn resumes_the_session_it_has() {
             "--approve",
         ])
     );
+}
+
+#[test]
+fn can_go_on_with_any_session_of_its_own_whether_or_not_a_file_of_it_is_where_a_look_would_find_one(
+) {
+    // `--session-id` makes the session it has none of and resumes the one it has, so a
+    // window opened on any session ends at none; and Pi's `sessionDir` setting and the
+    // launch's working directory choose where its files are, which a look from here
+    // does not know.
+    let home = Home::new();
+    let (pi, _fakes) = adapter(&home);
+    let session = "cf-1-zeus-0000abcd";
+    assert_eq!(finished(pi.resumable(session)), Some(true), "no file of it");
+    let folder = Path::new(&home.root)
+        .join("home")
+        .join(".pi")
+        .join("agent")
+        .join("sessions")
+        .join("--work--");
+    fs::create_dir_all(&folder).unwrap();
+    fs::write(
+        folder.join(format!("2026-10-13T10-00-00-000Z_{session}.jsonl")),
+        "",
+    )
+    .unwrap();
+    assert_eq!(finished(pi.resumable(session)), Some(true), "its file");
+    assert_eq!(
+        finished(pi.resumable("cf-1-zeus-0000ffff")),
+        Some(true),
+        "another session's file is none of its own"
+    );
+    // Where its folder cannot be looked for, it is the same.
+    let env = Env::default();
+    let services = Fakes::new(&env).services(&env, Path::new(&home.root));
+    let nowhere = PiAdapter::new(&services);
+    assert_eq!(finished(nowhere.resumable(session)), Some(true));
 }
 
 #[test]

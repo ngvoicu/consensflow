@@ -15,7 +15,11 @@
 //! and what a
 //! window is given while the words that were for it wait at the human's gate
 //! (`approval`), and the tester, which Node's staff never had (`testers`), and
-//! the human's Resume of what a start suspended (`resume`).
+//! the human's Resume of what a start suspended (`resume`), the conversation its
+//! harness holds nothing of, which a window opened again does not resume
+//! (`resumable`), and the arrival window counted in the time a window is at
+//! rest, so that a record that is late while its window is in a turn is waited
+//! for, as a message its harness says its own queue holds is (`slow_records`).
 
 // The tests' own scaffolding: a failure in it is the test's.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
@@ -50,13 +54,17 @@ mod pending_agents;
 mod quota;
 mod receipts;
 mod restart;
+mod resumable;
 mod resume;
 mod review;
+mod role_change;
 mod separate_callbacks;
 mod servers;
 mod session_windows;
 mod sessions;
 mod several_roles;
+mod slow_records;
+mod specs;
 mod stops;
 mod switched_conversation;
 mod switching;
@@ -77,6 +85,7 @@ mod unreadable_agents;
 mod unsent;
 mod unstarted;
 mod waiting_notes;
+mod wake_ups;
 mod window_closes;
 mod window_takes_long;
 mod window_traces;

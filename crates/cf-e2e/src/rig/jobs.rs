@@ -61,7 +61,8 @@ impl Rig {
     /// when `CF_TEST_MCP_SERVER` is set, is `server`, and the browser that server
     /// launches (`CF_TEST_MCP_BROWSER`) is `browser`. A stand-in Codex's windows
     /// open `plugin` servers (`CF_TEST_CODEX_SERVERS`), the first of which starts
-    /// `worker` processes of its own (`CF_TEST_CODEX_WORKERS`).
+    /// `worker` processes of its own (`CF_TEST_CODEX_WORKERS`). The runs of a stand-in
+    /// Claude's status line (`CF_TEST_STATUS_LINE`) are `statusline`.
     pub fn jobs(&self, label: &str) -> Vec<Job> {
         listed(&self.root.join(FOLDER), label)
     }

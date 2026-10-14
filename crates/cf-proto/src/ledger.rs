@@ -5,6 +5,8 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::specs::{SpecsSetting, SpecsView};
+
 /// A participant of a project: the human, the chief, a member, or a member's session.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -41,6 +43,23 @@ pub struct ProjectView {
     pub created_at: String,
     pub updated_at: String,
     pub participants: Vec<ParticipantView>,
+    /// What the project says of specs on its own: said only when it says
+    /// anything, so a project that never did reads as it always did.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub specs: Option<SpecsView>,
+    /// The line the human wrote under the project's name, for them alone: said
+    /// only when there is one, so a project that has none reads as it always did.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+}
+
+impl ProjectView {
+    /// What its chief's launch is given of specs, where `app_default` is
+    /// whether the human turned them on for every project: none where they
+    /// are off for this one.
+    pub fn specs_setting(&self, app_default: bool) -> Option<SpecsSetting> {
+        SpecsView::resolve(self.specs.as_ref(), app_default)
+    }
 }
 
 /// What a deleted project took with it, for the one line the trace keeps.

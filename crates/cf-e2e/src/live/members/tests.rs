@@ -18,6 +18,27 @@ fn a_task_is_over_when_it_is_done_accepted_failed_or_cancelled_and_not_before() 
 }
 
 #[test]
+fn the_notes_of_work_are_the_chiefs_notes_that_say_the_turn_of_the_task_left_some_and_no_others() {
+    let ended = "T-1's turn left background work running. Ended: sleep 4711.";
+    let agents = "T-1's turn left background agents running.";
+    let inbox = vec![
+        json!({ "kind": "result", "body": "ZEEWIN", "state": "delivered" }),
+        json!({ "kind": "note", "body": ended }),
+        json!({ "kind": "note", "body": agents }),
+        json!({ "kind": "note", "body": "T-1's window closed with background work still running: sleep 9" }),
+        json!({ "kind": "note", "body": "T-2's turn left background work running. Ended: sleep 9." }),
+        json!({ "kind": "question", "body": "T-1's turn left background work" }),
+    ];
+    assert_eq!(notes_of_work(&inbox, 1), [ended, agents]);
+    assert_eq!(
+        notes_of_work(&inbox, 2),
+        ["T-2's turn left background work running. Ended: sleep 9."]
+    );
+    assert_eq!(notes_of_work(&inbox, 3), Vec::<String>::new());
+    assert_eq!(notes_of_work(&[], 1), Vec::<String>::new());
+}
+
+#[test]
 fn the_brief_of_a_task_has_reached_its_window_once_it_is_delivered_or_read() {
     let thread = |state: &str| {
         json!({ "messages": [

@@ -27,7 +27,12 @@
     "tasks.delete",
     "message.read",
     "message.approve",
-    "message.decline"
+    "message.decline",
+    "wakeup.get",
+    "wakeup.set",
+    "project.specs",
+    "project.rename",
+    "project.describe"
   ],
   "ping": "{\"ok\":true}"
 }

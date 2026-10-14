@@ -7,12 +7,16 @@
 
 use std::path::{Path, PathBuf};
 
-use cf_e2e::process::is_alive;
+use cf_e2e::process::{is_alive, started};
 use cf_e2e::{files, Result};
 use serde_json::json;
 
 /// What the server's configuration calls it: the name Claude lists it by.
 pub const NAME: &str = "cf-quiet";
+
+/// What its program and the file its process id is written to are called, before their
+/// extensions: what its command line holds, which no other process of the machine's does.
+pub const STEM: &str = "quiet-server";
 
 /// The server, a Python program (a macOS and a Linux machine has `python3`). It
 /// writes its process id to the file it is given, answers each request with a
@@ -63,9 +67,9 @@ impl Server {
     /// Writes the server's program and its configuration in `folder`, run by the
     /// interpreter `python`.
     pub fn write(folder: &Path, python: &Path) -> Result<Self> {
-        let script = folder.join("quiet-server.py");
+        let script = folder.join(format!("{STEM}.py"));
         let config = folder.join("mcp.json");
-        let pid_file = folder.join("quiet-server.pid");
+        let pid_file = folder.join(format!("{STEM}.pid"));
         files::write(&script, SCRIPT)?;
         files::write(
             &config,
@@ -97,6 +101,15 @@ impl Server {
     /// Whether its process is there now.
     pub fn runs(&self) -> bool {
         self.pid().is_some_and(is_alive)
+    }
+
+    /// The server as one process: its number and when that process began, as the
+    /// system says it. None until it has written its process id and while it is not
+    /// there; the same process gives the same words, and one that took its number,
+    /// others.
+    pub fn identity(&self) -> Option<String> {
+        let pid = self.pid()?;
+        Some(format!("{pid} {}", started(pid)?))
     }
 }
 

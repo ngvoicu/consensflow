@@ -1,7 +1,9 @@
 //! The ledger's projects, as its callers hold them.
 
 use super::Ledger;
-use crate::{projects, DeletedProject, EventView, LedgerError, NewProject, ProjectView};
+use crate::{
+    projects, specs, DeletedProject, EventView, LedgerError, NewProject, ProjectView, SpecsChange,
+};
 
 impl Ledger {
     /// A project with its human, its chief and its staff.
@@ -34,6 +36,28 @@ impl Ledger {
     /// Whether the human approves each message between two agents.
     pub fn set_gate(&mut self, id: i64, gate: bool) -> Result<ProjectView, LedgerError> {
         projects::set_gate(&mut self.store, id, gate)
+    }
+
+    /// Gives a project another name, with the rules a name has when the project
+    /// is opened. The folder it is in stays.
+    pub fn rename_project(&mut self, id: i64, name: &str) -> Result<ProjectView, LedgerError> {
+        projects::rename_project(&mut self.store, id, name)
+    }
+
+    /// Writes the line the human says of a project under its name (one line of
+    /// plain text, at most 200 characters), or takes it away: none, or blank text.
+    pub fn describe_project(
+        &mut self,
+        id: i64,
+        description: Option<&str>,
+    ) -> Result<ProjectView, LedgerError> {
+        projects::describe_project(&mut self.store, id, description)
+    }
+
+    /// What the project says of specs: whether they are on, the folder and the
+    /// Specmint variant, all three at once. It applies at the chief's next launch.
+    pub fn set_specs(&mut self, id: i64, change: &SpecsChange) -> Result<ProjectView, LedgerError> {
+        specs::set_specs(&mut self.store, id, change)
     }
 
     /// At daemon start: every open project is suspended, for the human to resume.

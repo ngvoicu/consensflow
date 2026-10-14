@@ -230,13 +230,10 @@ runs = ["daemon-approval-page"]
 
 [[plant.edit]]
 file = "crates/cf-proto/src/page.rs"
-find = '''
-                | Self::TaskTranscript
-        )'''
+find = "                | Self::TaskTranscript"
 replace = '''
                 | Self::TaskTranscript
-                | Self::ProjectGate
-        )'''
+                | Self::ProjectGate'''
 
 # --- the engine: what a window is given while words wait ---
 

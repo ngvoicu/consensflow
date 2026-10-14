@@ -6,6 +6,22 @@
 //! is pasted, behind whatever the input box holds, and only while Devin still
 //! shows the conversation we know.
 //!
+//! What Devin is handed while its agent is in a turn goes into the agent's own queue,
+//! and Devin writes it to its store when it runs it (a live run, Devin 3000.11.3,
+//! 2026-10-13: a note pasted a second after another showed in the record 63 s later,
+//! when the 60 s command of the turn before it ended; the input box says "Guide
+//! Devin while it works"). A turn reads at rest in its first seconds, though: the
+//! wire shows none of its work until the agent's first word (`ttftMs` of the wire's
+//! own `stats`), so a note was pasted into a turn that had begun, and the engine,
+//! which gave the record a minute from the hand-over, pasted it again (the report
+//! of the same day: a chief read each of two notes twice). Three things stand
+//! against that. The window reads busy from the TUI's prompt to its agent
+//! (`wire_log`), so nothing is pasted into a turn that has begun. A message the TUI
+//! has put to its agent is the agent's own, whatever its record shows (`took`), and
+//! is waited for as the queue of Codex, OpenCode or Pi is. And where neither is
+//! told, the engine waits out a window's turns before it takes the record for
+//! lacking (`cf-engine`'s `arrival`).
+//!
 //! Kept from Node on purpose: a conversation of an empty id, which no
 //! ledger holds, is refused in a sentence of this module's own, where V8
 //! threw its `TypeError` for the window it made none of.
@@ -18,24 +34,27 @@ use cf_base::env::Env;
 use cf_base::js;
 use cf_base::text::{console_text, window_text};
 use cf_proto::agents::Harness;
+use cf_proto::specs::Variant;
 use futures_util::future::join;
 use serde_json::Value;
 
 use super::channel;
 use super::install;
+use super::paths;
+use super::record;
 use super::wire::selected_session;
-use super::wire_log::WireLog;
+use super::wire_log::{WireLog, PROMPT_GAP_MS};
 use crate::contract::{
     Adapter, Admission, Held, Interrupt, Launch, Observed, Pane, PaneHost, Prepared, Readiness,
-    Records, Window, Work,
+    Records, Skill, Window, Work,
 };
 use crate::detect::executable;
-use crate::records::Options;
+use crate::records::{Options, Reading, Role};
 use crate::seams::{Services, Time};
 use crate::shared::admission::admission;
 use crate::shared::record_state::{dialog_waiting, record_state, switched_to, unnamed};
 use crate::shared::role::write_role;
-use crate::shared::{pane, window_args};
+use crate::shared::{pane, specmint, window_args};
 
 /// What a window that has not said yet which conversation it shows is held for.
 const HOLD: &str = "Devin has not said yet which conversation its window shows";
@@ -94,6 +113,11 @@ impl Adapter for DevinAdapter {
                 launch.id,
                 &role_text(launch.instructions, env),
             )?;
+            // A chief given specs reads its Specmint skill by the path its role
+            // text names, which the session-start hook gives it: where Devin
+            // has none of its own, ConsensFlow's is written where it is kept
+            // for every launch.
+            specmint::write_own(Harness::Devin, env, launch)?;
             let agent = launch.agent.unwrap_or_default();
             let message = launch.message.map(window_text);
             let open = if launch.resume.is_none() {
@@ -131,6 +155,33 @@ impl Adapter for DevinAdapter {
         })
     }
 
+    /// Devin keeps a session's messages in its store, which is read with no window
+    /// open as with one: a session with a message of the user's in it had a turn
+    /// and is gone on with, and one the store holds with none, or holds no row of
+    /// (Devin writes the row with the first message), has nothing to go on with. A
+    /// store that cannot be read tells nothing, and the engine goes on with the
+    /// session as it did before it asked. Devin resumed on a session it has no
+    /// row of opens idle and drops what is typed to it (live, 3000.11.3,
+    /// 2026-10-14).
+    fn resumable<'a>(&'a self, session: &'a str) -> Work<'a, Option<bool>> {
+        Box::pin(async move {
+            let looked = self
+                .services
+                .records
+                .look(Harness::Devin, session, &Options::default())
+                .await;
+            match &*looked {
+                Reading::Known(record) => {
+                    Some(record.items.iter().any(|item| item.role == Role::User))
+                }
+                Reading::Unknown(reason) if reason.ends_with(record::MISSING_SESSION) => {
+                    Some(false)
+                }
+                Reading::Unknown(_) => None,
+            }
+        })
+    }
+
     /// Devin's own status line says it: "esc twice to interrupt". The same
     /// two at a Devin already idle open its rewind ("Revert"), and the next
     /// Enter confirms it, cutting the conversation back: a third Escape a
@@ -141,6 +192,16 @@ impl Adapter for DevinAdapter {
             presses: 2,
             close_after: Some(Duration::from_secs(1)),
         }
+    }
+
+    fn specmint(&self, variant: Variant) -> Result<Skill, String> {
+        let env = &self.services.env;
+        specmint::place(
+            Harness::Devin,
+            env,
+            variant,
+            paths::global_specmint(env, variant),
+        )
     }
 }
 
@@ -163,6 +224,17 @@ impl DevinWindow {
     /// one the window is known to be on.
     fn known(&self, shown: &str) -> bool {
         self.session.borrow().as_deref() == Some(shown)
+    }
+
+    /// Whether a prompt the TUI put to its agent, first read at `asked_at`, has begun
+    /// a turn that the agent has said nothing of yet: nothing of its work is on the
+    /// wire before its first word, so a window read at rest then is a window a
+    /// message would be pasted into, which Devin keeps in its queue and writes to its
+    /// store when it runs it. A record with no message in it has no conversation for
+    /// the prompt to begin a turn of.
+    fn begun_by_a_prompt(&self, observed: &Observed, asked_at: Option<i64>) -> bool {
+        !observed.items().is_empty()
+            && asked_at.is_some_and(|at| self.time.wall_ms() - at < PROMPT_GAP_MS)
     }
 }
 
@@ -231,10 +303,20 @@ impl Window for DevinWindow {
             } else {
                 window_text(text)
             };
+            // Its first line holds the message's id: the TUI's request that holds it
+            // is the sign the agent's queue has the message (`took`).
+            let first = body.lines().find(|line| !js::trim(line).is_empty());
+            self.wire.expect(first.unwrap_or_default());
             let session = self.session.borrow().clone();
             let sent = channel::send(host, pane, self.wire.path(), session.as_deref(), &body).await;
             Ok(admission(&sent, "Devin refused the paste", false))
         })
+    }
+
+    fn took(&self) -> bool {
+        self.wire
+            .read(self.time.wall_ms())
+            .is_ok_and(|wire| wire.sent)
     }
 
     fn observe(&self) -> Work<'_, Result<Observed, String>> {
@@ -263,6 +345,9 @@ impl Window for DevinWindow {
             let mut observed = record_state(reading);
             observed.waiting = dialog_waiting(observed.reading.as_deref());
             observed.quota = wire.quota;
+            if self.begun_by_a_prompt(&observed, wire.asked_at) {
+                observed.settled = false;
+            }
             Ok(match wire.shown {
                 None => unnamed(observed, HOLD),
                 Some(shown) if !self.known(&shown) => switched_to(observed, shown),

@@ -13,6 +13,8 @@ use serde_json::Value;
 use super::forget::Forget;
 use super::install::{environment, var, write_fake_install, write_roster};
 use super::route::Shared;
+#[cfg(unix)]
+use super::stranger::Stranger;
 use super::{Config, Rig};
 use crate::daemon::Daemon;
 use crate::daemon_log::{self, errors_with_cause, lines_of, StartLine};
@@ -63,6 +65,9 @@ impl Rig {
             write_roster(&root)?;
         }
 
+        // Beside the pane host, before any window: none of theirs.
+        #[cfg(unix)]
+        let stranger = Stranger::start()?;
         let (mut daemon, start_line) = start_daemon(&config, &env)?;
         let (mut host, host_output) = start_host(&env)?;
         let shared = route(&mut daemon, &mut host, host_output)?;
@@ -79,6 +84,8 @@ impl Rig {
             shared,
             daemon,
             host,
+            #[cfg(unix)]
+            stranger,
             forget: config.stand_in_records.map(Forget::new),
             keep_root: false,
             closed: false,

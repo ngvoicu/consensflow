@@ -1,6 +1,6 @@
 {
   "name": "consensflow",
-  "version": "3.0.3",
+  "version": "3.0.4",
   "description": "Native terminal workspace where a Chief of Staff runs your project with a staff of coding agents.",
   "license": "MIT",
   "private": true,
@@ -43,6 +43,7 @@
     "live:stops": "cargo xtask live stops",
     "live:input-box": "cargo xtask live input-box",
     "live:resume-cut": "cargo xtask live resume-cut",
+    "live:resume-fresh": "cargo xtask live resume-fresh",
     "live:restart-cut": "cargo xtask live restart-cut",
     "live:door": "cargo xtask live door",
     "live:hook-status": "cargo xtask live door claude --hold 90",
@@ -54,6 +55,9 @@
     "live:approval": "cargo xtask live approval",
     "live:mcp": "cargo xtask live mcp",
     "live:finish": "cargo xtask live finish",
+    "live:notes": "cargo xtask live notes",
+    "live:wake-ups": "cargo xtask live wake-ups",
+    "live:specs": "cargo xtask live specs",
     "windows": "cargo xtask windows",
     "check:all": "cargo xtask check"
   },

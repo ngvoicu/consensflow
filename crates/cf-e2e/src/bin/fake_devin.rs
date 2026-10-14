@@ -12,12 +12,32 @@
 //! it said is kept in the store without the end of its turn, as Devin keeps it.
 //! The stand-in has no rewind, which two Escapes at a Devin at rest open.
 //!
+//! A turn takes no time unless the window is told how long a model takes
+//! (`FAKE_DEVIN_FIRST_WORD_MS`, `FAKE_DEVIN_WORK_MS`: [`turn::Pace`]). A message
+//! the window is handed while a turn is at work goes into its agent's queue, and
+//! is run when the turn ends, one at a time in the order the messages came: its
+//! row is written to the store then, and not before, as Devin's are (the user
+//! rows between the replies of `tests/engine/fixtures/completion/devin/
+//! native-tui.json`, each named on the wire by the step that runs it; a live run
+//! of 2026-10-13, Devin 3000.11.3: a note pasted a second after another showed
+//! in the record 63 s later, when the turn before it ended). A turn's prompt is
+//! on the wire as a request of the TUI when the message is run. Whether a real
+//! Devin's TUI puts a message typed in a turn to its agent at once is not
+//! recorded: `cargo xtask live notes devin` shows it.
+//!
+//! A turn can leave a command running (`BACKGROUND <seconds> <words>`: `command`):
+//! its agent runs it as a tool once it has thought, answers, and the turn ends; the
+//! command goes on saying what it prints on the wire for as long as it runs, as a
+//! tool does whose turn has ended.
+//!
 //! The terminal and the signals are the other stand-in's own (`fake_agent/`).
 
 // The parts are in `fake_devin/` and `fake_agent/`: cargo looks for the modules
 // of a binary's root file beside it, where each would be a binary of its own.
 #[path = "fake_devin/args.rs"]
 mod args;
+#[path = "fake_devin/command.rs"]
+mod command;
 #[path = "fake_devin/escapes.rs"]
 mod escapes;
 #[path = "fake_agent/signals.rs"]
@@ -42,6 +62,7 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Instant;
 
+use cf_e2e::devin_store;
 use cf_e2e::process::own_var;
 
 use args::{Asked, Launch};
@@ -49,7 +70,7 @@ use escapes::Escapes;
 use stop::Stop;
 use store::Store;
 use terminal::{Event, Keys};
-use turn::Window;
+use turn::{Pace, Window};
 use wire::Wire;
 
 /// What Devin says to `--version`: a version the daemon takes for one that records
@@ -102,7 +123,7 @@ fn run(launch: &Launch, signals: signals::Signals) -> Result<Infallible, String>
     let home = own_var("HOME")
         .or_else(|| own_var("USERPROFILE"))
         .ok_or("the window has no home")?;
-    let file = store::location(
+    let file = devin_store::location(
         cfg!(windows),
         &home,
         own_var("APPDATA").as_deref(),
@@ -119,11 +140,21 @@ fn run(launch: &Launch, signals: signals::Signals) -> Result<Infallible, String>
     say(&format!("fake devin started on {session}\n")).map_err(said)?;
 
     let stop = Arc::new(Stop::default());
+    let pace = Pace::of(
+        own_var(turn::FIRST_WORD_VARIABLE).as_deref(),
+        own_var(turn::WORK_VARIABLE).as_deref(),
+    );
     let (turns, queued) = mpsc::channel::<String>();
+    // The jobs of a window are in `jobs/` beside the daemon's home, where the rig looks.
+    let jobs = own_var("CONSENSFLOW_HOME")
+        .and_then(|home| Path::new(&home).parent().map(|folder| folder.join("jobs")));
     {
         let stop = Arc::clone(&stop);
         thread::spawn(move || {
-            let mut window = Window::new(store, wire, stop, io::stdout());
+            let mut window = Window::new(store, wire, stop, io::stdout(), pace);
+            if let Some(folder) = jobs {
+                window = window.leaving_jobs_in(folder, std::process::id(), command::THINKING);
+            }
             // One turn at a time, in the order the messages came.
             for text in queued {
                 if let Err(failed) = window.take(&text) {

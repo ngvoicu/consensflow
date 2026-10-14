@@ -6,9 +6,11 @@ use std::path::{Path, PathBuf};
 
 use cf_base::env::Env;
 use cf_base::path;
+use cf_proto::specs::Variant;
 
-use crate::shared::paths::{home, set};
+use crate::shared::paths::{agents_skills, home, set};
 use crate::shared::record::find::{find_file, DEPTH};
+use crate::shared::specmint;
 
 /// Where Pi keeps the file of the session `session`: the first file under
 /// its sessions folder whose name holds the session, or none.
@@ -39,6 +41,16 @@ fn agent_dir(env: &Env) -> Result<String, String> {
         None => path::join(&[&home(env)?, ".pi", "agent"]),
     };
     expand(&configured, env)
+}
+
+/// The `SKILL.md` of the Specmint variant the human installed for Pi, in the
+/// places it reads the skills of the user's: the `skills` folder of its own
+/// folder, then `.agents/skills` in the home. None where it is in neither.
+pub(crate) fn global_specmint(env: &Env, variant: Variant) -> Option<String> {
+    let mut roots = Vec::new();
+    roots.extend(agent_dir(env).ok().map(|dir| path::join(&[&dir, "skills"])));
+    roots.extend(agents_skills(env).ok());
+    specmint::installed(&roots, variant)
 }
 
 /// A configured path with its `~` expanded (`piPath`): `~` is the home, and

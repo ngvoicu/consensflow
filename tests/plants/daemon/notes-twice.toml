@@ -1,0 +1,196 @@
+# The notes a chief is handed after a cancel (the owner's report of 2026-10-13, ConsensFlow 3.0.3:
+# a Devin chief on Windows read each of two notes twice, m-186, m-186, m-187, m-187). The case is
+# `crates/cf-e2e/tests/regressions/devin_notes_twice.rs`: the real daemon and pane host on a stand-in
+# Devin that takes a model's time to its first word and runs a message it is handed in a turn when
+# the turn ends, with the human's prompt and a cancel in its first seconds; the engine's own tests of
+# the rule, `crates/cf-engine/tests/dispatcher/slow_records.rs`; and the Devin adapter's, in
+# `crates/cf-harness/src/devin/` (`wire_log/tests/prompts.rs`, `adapter/tests.rs`). Three rules stand
+# against a second paste of a message the window has:
+#
+# - the engine counts the arrival window in the time the window is at rest, its turns no part of it,
+#   and a harness that says its own queue holds the message (`Window::took`) is waited for as one that
+#   queued it itself is;
+# - Devin's window reads busy from the prompt its TUI puts to its agent, before the agent's first
+#   word, for a gap and no longer, until the turn ends or the request is answered;
+# - Devin's own queue holds a message once a request of its TUI holds the first line of what was pasted.
+#
+# The one more Enter a paste is given (`deliveries`) stays what it was: once, in the first arrival
+# window only, however long the record is waited for after it.
+#
+# The case builds the native `cf` from the sources as they are planted, so the plant of it says
+# `builds`: the family builds the `cf` again once it is put back. One plant takes one rule out, or
+# puts one wrong; a test fails (the plant of the case takes out the first two rules, the two that
+# stand against a second paste in the case's shape).
+#
+# Every name holds `notes twice`, so `npm run plants:daemon -- "notes twice"` runs them all.
+
+[run]
+engine-slow-records = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "slow_records"]
+harness-devin = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "devin::"]
+rig-regression-devin-notes = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "devin_notes_twice::"]
+
+[[plant]]
+name = "notes twice: the window reads at rest in the first seconds of a turn and a paste is tried again at the arrival window, its turns or none, and the chief reads the second note twice"
+meant = "two_notes_that_come_together_after_a_cancel_go_into_a_devin_chief_s_window_once_each"
+runs = ["rig-regression-devin-notes"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/adapter.rs"
+find = "                observed.settled = false;"
+replace = ""
+
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = "        let (rested, turned) = self.rested(record, observed);"
+replace = "        let (rested, turned) = (waited, false);"
+
+[[plant]]
+name = "notes twice: the engine counts the arrival window from the hand-over, its turns or none"
+meant = "waits_for_the_record_of_a_message_while_its_window_is_in_a_turn_and_pastes_it_once"
+runs = ["engine-slow-records"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = "        let (rested, turned) = self.rested(record, observed);"
+replace = "        let (rested, turned) = (waited, false);"
+
+[[plant]]
+name = "notes twice: a window that waits on a dialog of its own is at rest"
+meant = "counts_no_rest_while_its_window_waits_on_a_dialog_of_its_own"
+runs = ["engine-slow-records"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = "        if observed.settled && observed.waiting.is_none() {"
+replace = "        if observed.settled {"
+
+[[plant]]
+name = "notes twice: a message the harness says its own queue holds is tried again all the same"
+meant = "waits_on_a_message_the_harness_says_its_queue_holds_whatever_its_window_does_and_its_record_shows"
+runs = ["engine-slow-records"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = "        if self.took(record) {"
+replace = "        if false {"
+
+[[plant]]
+name = "notes twice: a turn of a window stops the paste being tried again for good, and the queue behind it with it"
+meant = "pastes_a_lost_paste_again_after_a_turn_of_its_windows_own_and_the_queue_behind_it_goes_on"
+runs = ["engine-slow-records"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = "        if rested <= self.seams.limits.arrival_ms && !overdue {"
+replace = "        if (rested <= self.seams.limits.arrival_ms || turned) && !overdue {"
+
+[[plant]]
+name = "notes twice: the board does not say a paste was tried again after its window's turn"
+meant = "counts_the_arrival_window_in_the_time_its_window_is_at_rest_and_begins_it_again_after_a_turn"
+runs = ["engine-slow-records"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = "            (now - since, since != delivering.since)"
+replace = "            (now - since, false)"
+
+[[plant]]
+name = "notes twice: one more Enter is pressed for a paste after its arrival window, into a turn whose record is waited for"
+meant = "presses_no_enter_again_after_the_arrival_window_for_a_message_its_window_goes_on_waiting_for"
+runs = ["engine-slow-records"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = "&& waited <= self.seams.limits.arrival_ms"
+replace = ""
+
+[[plant]]
+name = "notes twice: Devin's window is read at rest in the turn its TUI began by a prompt to its agent"
+meant = "a_window_its_record_reads_at_rest_is_read_in_the_turn_its_tui_begins_by_a_prompt_for_the_gap"
+runs = ["harness-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/adapter.rs"
+find = "                observed.settled = false;"
+replace = ""
+
+[[plant]]
+name = "notes twice: Devin's window is read in a turn its agent never says a word of, for good"
+meant = "a_window_its_record_reads_at_rest_is_read_in_the_turn_its_tui_begins_by_a_prompt_for_the_gap"
+runs = ["harness-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/adapter.rs"
+find = "            && asked_at.is_some_and(|at| self.time.wall_ms() - at < PROMPT_GAP_MS)"
+replace = "            && asked_at.is_some_and(|_| true)"
+
+[[plant]]
+name = "notes twice: a prompt begins a turn of a conversation whose record holds no message yet"
+meant = "a_prompt_begins_no_turn_of_a_conversation_whose_record_holds_no_message_yet"
+runs = ["harness-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/adapter.rs"
+find = "        !observed.items().is_empty()"
+replace = "        true"
+
+[[plant]]
+name = "notes twice: the end of a turn does not close the prompts asked of it"
+meant = "a_prompt_the_tui_puts_to_its_agent_is_asked_from_the_look_that_reads_it_until_a_turn_ends"
+runs = ["harness-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/wire_log.rs"
+find = "                self.asked.clear();"
+replace = ""
+
+[[plant]]
+name = "notes twice: the answer to a prompt's request does not close it"
+meant = "a_prompt_is_closed_by_the_answer_to_its_request_by_the_id_and_by_no_other"
+runs = ["harness-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/wire_log.rs"
+find = "                self.asked.retain(|asked| asked.id != *id);"
+replace = ""
+
+[[plant]]
+name = "notes twice: a prompt of another conversation than the one shown is asked"
+meant = "only_a_prompt_of_the_conversation_shown_is_asked_and_only_its_turns_end_closes_it"
+runs = ["harness-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/wire_log.rs"
+find = '        if method == "session/prompt" && session.is_some() && session == self.shown.as_deref() {'
+replace = '        if method == "session/prompt" {'
+
+[[plant]]
+name = "notes twice: the log is never told the message about to be pasted, so its queue is never told to hold it"
+meant = "a_message_pasted_is_the_agents_own_when_a_request_of_its_tui_holds_the_line_that_begins_it"
+runs = ["harness-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/adapter.rs"
+find = "            self.wire.expect(first.unwrap_or_default());"
+replace = ""
+
+[[plant]]
+name = "notes twice: Devin's queue is never said to hold a message"
+meant = "a_message_pasted_is_the_agents_own_when_a_request_of_its_tui_holds_the_line_that_begins_it"
+runs = ["harness-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/adapter.rs"
+find = "            .is_ok_and(|wire| wire.sent)"
+replace = "            .is_ok_and(|_| false)"
+
+[[plant]]
+name = "notes twice: a paste never shown waits for good while its window's rest is cut by short turns"
+meant = "pastes_again_at_its_next_rest_a_paste_never_shown_in_half_an_hour_of_short_turns"
+runs = ["engine-slow-records"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = "        let overdue = waited > RECONCILE_MS && at_rest;"
+replace = "        let overdue = false && waited > RECONCILE_MS && at_rest;"

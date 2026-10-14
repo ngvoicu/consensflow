@@ -9,24 +9,25 @@ use std::time::{Duration, Instant};
 
 use cf_e2e::live::agents;
 use cf_e2e::live::members::{
-    self, delivered_result, find, is_over, Account, Members, Plan, STAND_IN_WORKER,
+    self, delivered_result, find, is_over, notes_of_work, Account, Members, Plan, STAND_IN_WORKER,
 };
 use cf_e2e::live::tree::{self, Read};
+use cf_e2e::live::wire;
 use cf_e2e::live::{self, cut, last_lines, text, Harness, Log, Who};
 use cf_e2e::{Error, Result};
 use serde_json::Value;
 
 use crate::task::Task;
-use crate::verdict::{at_the_close, at_the_turns_end, judge, summary, Seen};
+use crate::verdict::{at_the_chief, at_the_close, at_the_turns_end, judge, summary, Seen};
 
 /// How long the worker has to do its task and have it end on the board, its result to
 /// be delivered to the chief once it has, and its window to close once the task is over.
 pub const WORK: Duration = Duration::from_secs(300);
 pub const DELIVERS: Duration = Duration::from_secs(60);
-const CLOSES: Duration = Duration::from_secs(30);
+pub const CLOSES: Duration = Duration::from_secs(30);
 
 /// How often the board and the pane host are looked at while the worker is waited for.
-const LOOK: Duration = Duration::from_secs(1);
+pub const LOOK: Duration = Duration::from_secs(1);
 
 /// How often the run says how the worker is getting on when nothing has changed.
 const HEARTBEAT: Duration = Duration::from_secs(30);
@@ -38,7 +39,7 @@ pub fn named(word: &str) -> Result<Who> {
 }
 
 /// The id of the agent that is `who` in the project: the worker.
-fn agent(who: Who) -> String {
+pub fn agent(who: Who) -> String {
     match who {
         Who::StandIn => STAND_IN_WORKER.to_owned(),
         Who::Harness(harness) => agents::id(harness),
@@ -97,12 +98,12 @@ pub fn run(who: Who, plan: &Plan, task: &Task, stand_in: &Path, log: &Log) -> Re
 /// What the run says of how the worker is getting on, when it changes and now and then
 /// when it does not.
 #[derive(Default)]
-struct Progress {
+pub struct Progress {
     said: Option<(String, Instant)>,
 }
 
 impl Progress {
-    fn say(&mut self, log: &Log, line: String) {
+    pub fn say(&mut self, log: &Log, line: String) {
         let due = self
             .said
             .as_ref()
@@ -116,7 +117,7 @@ impl Progress {
 
 /// How the worker is getting on at a look: its task's state, what its window is doing
 /// and why where the board says why, and what the pane host lists of its tree.
-fn progress_line(number: i64, thread: &Value, lane: &Value, listing: Option<&Read>) -> String {
+pub fn progress_line(number: i64, thread: &Value, lane: &Value, listing: Option<&Read>) -> String {
     let activity = &lane["activity"];
     let why = activity["reason"]
         .as_str()
@@ -163,7 +164,11 @@ fn observe(members: &mut Members, agent: &str, task: &Task, log: &Log) -> Result
             DELIVERS,
             LOOK,
             || {
-                seen.result = delivered_result(&members.inbox(Some(members.chief()))?);
+                let inbox = members.inbox(Some(members.chief()))?;
+                seen.result = delivered_result(&inbox);
+                // The daemon tells the chief what its turn left in a note it writes as it
+                // records the result: it is there once the result is.
+                seen.notes = notes_of_work(&inbox, number);
                 Ok(seen.result.is_some().then_some(()))
             },
         )?;
@@ -179,16 +184,16 @@ fn observe(members: &mut Members, agent: &str, task: &Task, log: &Log) -> Result
 
     let verdict = judge(&seen, &task.output);
     case.say(format!(
-        "T-{number} is {} after {} s; what the board said of the worker's window: {}",
+        "T-{number} is {} after {} s",
         seen.state,
-        live::secs(seen.took()),
-        seen.reasons.line()
+        live::secs(seen.took())
     ));
     case.say(at_the_turns_end(&seen));
     case.say(at_the_close(&seen));
+    case.say(at_the_chief(&seen));
     match &verdict {
         Ok(()) => case.check(
-            "the result reached the chief, nothing held back",
+            "the result reached the chief, nothing of its own ended",
             true,
             summary(&seen, &verdict),
         ),
@@ -214,9 +219,10 @@ fn block(title: &str, body: &str) -> String {
 }
 
 /// What the product showed of a task that did not end as it should have: the worker's
-/// lane of the board, what its window recorded and last drew, and what the daemon
-/// warned of.
-fn failure(members: &Members, agent: &str, number: i64) -> Vec<String> {
+/// lane of the board, what its window recorded and last drew, what the daemon warned of,
+/// and, of a Devin worker, how its wire log ends (a window that reads as working while
+/// its screen is at rest is read from the wire).
+pub fn failure(members: &Members, agent: &str, number: i64) -> Vec<String> {
     let rig = members.rig();
     let screen = members
         .window_of(agent)
@@ -224,7 +230,7 @@ fn failure(members: &Members, agent: &str, number: i64) -> Vec<String> {
         .flatten()
         .map(|window| last_lines(&rig.screen(window.id())))
         .unwrap_or_default();
-    vec![
+    let mut shown = vec![
         block(
             "the worker's lane of the board",
             &live::pretty(members.lane(agent)),
@@ -235,7 +241,11 @@ fn failure(members: &Members, agent: &str, number: i64) -> Vec<String> {
         ),
         block("what the worker's window last drew", &screen),
         block("the daemon's log", &live::warnings(&rig.log()).join("\n")),
-    ]
+    ];
+    if let Some(wire) = wire::tail(&rig.home()) {
+        shown.push(block("how Devin's wire log ends", &wire));
+    }
+    shown
 }
 
 #[cfg(test)]
@@ -282,8 +292,8 @@ mod tests {
     fn how_the_worker_is_getting_on_is_its_task_its_window_why_and_what_the_host_lists() {
         let thread = json!({ "state": "working" });
         let lane = json!({ "activity": {
-            "state": "working",
-            "reason": "background work running (1 process): hostname",
+            "state": "waiting",
+            "reason": "waiting for the human",
         } });
         let listed: Read = Ok(tree::Tree::of(&json!({
             "ok": true,
@@ -292,7 +302,7 @@ mod tests {
         })));
         assert_eq!(
             progress_line(1, &thread, &lane, Some(&listed)),
-            "T-1 is working; the worker's window is working (background work running (1 process): hostname); the host lists 41 hostname (1)"
+            "T-1 is working; the worker's window is waiting (waiting for the human); the host lists 41 hostname (1)"
         );
         // A window the board says nothing of, and a host that could not be asked.
         assert_eq!(

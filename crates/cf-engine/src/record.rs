@@ -2,16 +2,14 @@
 //! and forgotten when the participant leaves. Each part has one owner: the
 //! window itself (`windows`), what is on its way into it (`deliveries`), what
 //! its harness said of its quota (`scheduler`), what of its conversation is
-//! copied (`transcripts`), a Switch chief waiting for the chief's turn to
-//! end (`chief_switch`), and the work its turn left running that holds its
-//! task's result back (`background`); each module adds to its part as it is
-//! ported. Who holds the participant now is its [`Hold`]. A part is borrowed
-//! for one reading or one change, never across a wait.
+//! copied (`transcripts`) and a Switch chief waiting for the chief's turn to
+//! end (`chief_switch`); each module adds to its part as it is ported. Who holds
+//! the participant now is its [`Hold`]. A part is borrowed for one reading or one
+//! change, never across a wait.
 
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use crate::background::BackgroundPart;
 use crate::chief_switch::PendingSwitch;
 use crate::deliveries::DeliveryPart;
 use crate::runtime::Hold;
@@ -26,7 +24,6 @@ pub(crate) struct Record {
     pub(crate) hold: Rc<Hold>,
     pub(crate) window: RefCell<WindowPart>,
     pub(crate) delivery: RefCell<DeliveryPart>,
-    pub(crate) background: RefCell<BackgroundPart>,
     pub(crate) quota: RefCell<QuotaPart>,
     pub(crate) copied: RefCell<Option<Copied>>,
     pub(crate) pending_switch: RefCell<Option<PendingSwitch>>,
@@ -40,7 +37,6 @@ impl Record {
             hold: Rc::new(Hold::default()),
             window: RefCell::new(WindowPart::default()),
             delivery: RefCell::new(DeliveryPart::default()),
-            background: RefCell::new(BackgroundPart::default()),
             quota: RefCell::new(QuotaPart::default()),
             copied: RefCell::new(None),
             pending_switch: RefCell::new(None),

@@ -100,6 +100,16 @@ impl Trace {
         })
     }
 
+    /// The conversations the daemon bound to a native session, oldest first: the
+    /// one each window showed, as its harness named it (`conversation.bound`).
+    pub fn threads_bound(&self) -> Vec<String> {
+        self.events
+            .iter()
+            .filter(|event| event["kind"] == "conversation.bound")
+            .filter_map(|event| event["data"]["nativeSession"].as_str().map(str::to_owned))
+            .collect()
+    }
+
     /// The last `count` events, one to a line, for a report.
     pub fn tail(&self, count: usize) -> String {
         let skipped = self.events.len().saturating_sub(count);
@@ -200,6 +210,22 @@ mod tests {
         assert!(trace.worked_after("chief", 2));
         assert!(!trace.worked_after("chief", 3));
         assert!(!trace.worked_after("worker", 0));
+    }
+
+    #[test]
+    fn the_threads_bound_are_the_native_sessions_of_the_conversations_the_daemon_bound() {
+        let trace = Trace::of(concat!(
+            r#"{"kind":"conversation.bound","data":{"conversation":1,"nativeSession":"t-1"}}"#,
+            "\n",
+            r#"{"kind":"message.sent","data":{"nativeSession":"no"}}"#,
+            "\n",
+            r#"{"kind":"conversation.bound","data":{"conversation":2,"nativeSession":"t-2"}}"#,
+            "\n",
+            r#"{"kind":"conversation.bound","data":{}}"#,
+            "\n",
+        ));
+        assert_eq!(trace.threads_bound(), ["t-1", "t-2"]);
+        assert!(Trace::of("").threads_bound().is_empty());
     }
 
     #[test]

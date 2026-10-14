@@ -13,6 +13,8 @@ pub(crate) mod question_hook;
 pub(crate) mod quota;
 pub(crate) mod record;
 pub(crate) mod record_state;
+pub(crate) mod resumable;
 pub(crate) mod role;
+pub(crate) mod specmint;
 pub(crate) mod token;
 pub(crate) mod window_args;

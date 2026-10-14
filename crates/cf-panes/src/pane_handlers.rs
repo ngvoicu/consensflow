@@ -21,7 +21,9 @@ use crate::pty::{validate_drop_env, PaneEnvironment, PaneKey, PaneTable, Streame
 use crate::screen::PaneScreen;
 use crate::validation::{pane_key, validate_input, validate_seq, validate_size, INVALID_BODY};
 use cf_bridge::{Bridge, BridgeBuilder};
-use cf_proto::panes::{BackgroundProcess, MarkRequest, PaneExit, SnapshotRequest, TAIL_LINES};
+use cf_proto::panes::{
+    BackgroundProcess, EndRequest, MarkRequest, PaneExit, SnapshotRequest, TAIL_LINES,
+};
 
 const DEFAULT_BACKLOG_BYTES: usize = 1024 * 1024;
 
@@ -229,18 +231,19 @@ pub fn register_pane_handlers(
 
     // A turn is about to begin in a window: what its tree has now came before
     // it, and so does what its harness's servers start later, where the daemon
-    // says how the harness keeps them.
+    // says how the harness keeps them, and the programs the harness is named for.
     let mark_panes = Arc::clone(&panes);
     builder.on("pane.mark", move |_bridge, body| {
         let request: MarkRequest = parse_body(body)?;
         let key = pane_key(&request.id, request.generation)?;
         mark_panes
-            .mark(&key, request.servers)
+            .mark(&key, request.servers, request.harness.as_deref())
             .map_err(|error| error.to_string())?;
         Ok(json!({"ok":true}))
     });
 
-    // What the window's tree has running that began after its last mark.
+    // What the window's tree has running that is the turn's work: what began after
+    // its last mark and the host can prove its.
     let background_panes = Arc::clone(&panes);
     builder.on("pane.background", move |_bridge, body| {
         let request: PaneRequest = parse_body(body)?;
@@ -249,6 +252,19 @@ pub fn register_pane_handlers(
             .background(&key)
             .map_err(|error| error.to_string())?;
         Ok(json!({"ok":true,"total":background.total,"processes":background.processes}))
+    });
+
+    // What the window's turn left running ends, the window staying open: it is
+    // asked to end, and given the table's grace, as a close gives one. The host
+    // chooses what, from all it can prove the turn's.
+    let end_panes = Arc::clone(&panes);
+    builder.on("pane.end_background", move |_bridge, body| {
+        let request: EndRequest = parse_body(body)?;
+        let key = pane_key(&request.id, request.generation)?;
+        let ending = end_panes
+            .end_background(&key)
+            .map_err(|error| error.to_string())?;
+        Ok(json!({"ok":true,"ended":ending.ended,"left":ending.left}))
     });
 
     let list_panes = Arc::clone(&panes);

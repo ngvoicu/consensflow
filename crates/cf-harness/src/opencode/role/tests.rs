@@ -12,13 +12,28 @@ const FILE: &str = "/role/.claude/skills/consensflow-worker/SKILL.md";
 
 /// `current` with the role merged in, or why not.
 fn merge(current: &str) -> Result<String, String> {
-    merged(current, SKILLS, FILE)
+    merged(current, &[SKILLS], FILE)
 }
 
 #[test]
 fn a_configuration_of_nothing_gets_the_roles_skills_folder_and_file() {
     let expected = format!(r#"{{"skills":{{"paths":["{SKILLS}"]}},"instructions":["{FILE}"]}}"#);
     assert_eq!(merge("{}").unwrap(), expected);
+}
+
+#[test]
+fn a_skills_folder_of_the_copy_kept_for_specmint_comes_after_the_roles_and_once() {
+    const KEPT: &str = "/cf/integrations/specmint/opencode/tdd-0123abcd/.claude/skills";
+    let merged = |current: &str| merged(current, &[SKILLS, KEPT], FILE).unwrap();
+    assert_eq!(
+        merged(r#"{"skills":{"paths":["/p"]}}"#),
+        format!(r#"{{"skills":{{"paths":["/p","{SKILLS}","{KEPT}"]}},"instructions":["{FILE}"]}}"#)
+    );
+    // One the human listed already is where they put it.
+    assert_eq!(
+        merged(&format!(r#"{{"skills":{{"paths":["{KEPT}"]}}}}"#)),
+        format!(r#"{{"skills":{{"paths":["{KEPT}","{SKILLS}"]}},"instructions":["{FILE}"]}}"#)
+    );
 }
 
 #[test]
@@ -162,7 +177,7 @@ fn the_role_is_written_in_the_launchs_folder_before_the_configuration_is_looked_
         vars.extend(config.map(|config| ("OPENCODE_CONFIG_CONTENT".to_owned(), config.to_owned())));
         Env::from_vars(vars)
     };
-    let refused = configure(&env(Some("[]")), &launch, "worker", "role text");
+    let refused = configure(&env(Some("[]")), &launch, "worker", "role text", None);
     assert_eq!(
         refused.unwrap_err(),
         "OpenCode process configuration must be an object"
@@ -180,7 +195,7 @@ fn the_role_is_written_in_the_launchs_folder_before_the_configuration_is_looked_
     let file = path::join(&[&role, "consensflow-worker", "SKILL.md"]);
     assert_eq!(fs::read_to_string(&file).unwrap(), "role text");
     for config in [None, Some("")] {
-        let made = configure(&env(config), &launch, "worker", "role text").unwrap();
+        let made = configure(&env(config), &launch, "worker", "role text", None).unwrap();
         assert_eq!(
             made,
             js::stringify(&serde_json::json!({
@@ -204,7 +219,7 @@ fn a_window_without_its_role_text_is_refused_before_the_configuration_is_looked_
     ]);
     let launch = LaunchId::new("0a1b2c3d-4e5f-4061-8a7b-9c0d1e2f3a4b").unwrap();
     assert_eq!(
-        configure(&env, &launch, "worker", "").unwrap_err(),
+        configure(&env, &launch, "worker", "", None).unwrap_err(),
         "the worker window needs its role text"
     );
     assert!(!dir.path().join("integrations").exists());

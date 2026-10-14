@@ -11,7 +11,7 @@ use std::sync::Arc;
 use cf_base::env::Env;
 use cf_base::path;
 use cf_harness::contract::{
-    Adapter, Agent, HostError, Launch, LaunchId, Pane, Prepared, Records, Window, Work,
+    Adapter, Agent, HostError, Launch, LaunchId, Pane, Prepared, Records, Specs, Window, Work,
 };
 use cf_harness::devin::DevinAdapter;
 use cf_harness::records::{Item, Options, Reading, Record, Role, Settlement};
@@ -19,6 +19,7 @@ use cf_harness::testing::{
     called, fake_executable, finished, named, AnsweringHost, Fakes, FIRST_MESSAGE_MS,
 };
 use cf_proto::agents::Harness;
+use cf_proto::specs::Variant;
 use serde_json::{json, Value};
 use tempfile::TempDir;
 
@@ -84,6 +85,26 @@ impl Home {
         home
     }
 
+    /// Devin's store of sessions, made in this home as Devin makes it: `sessions.db` in
+    /// its data folder, a table of sessions and a table of the messages of each.
+    pub(super) fn store(&self) -> Store {
+        let folder = Path::new(&self.root)
+            .join("home")
+            .join(".local")
+            .join("share")
+            .join("devin")
+            .join("cli");
+        fs::create_dir_all(&folder).unwrap();
+        let db = rusqlite::Connection::open(folder.join("sessions.db")).unwrap();
+        db.execute_batch(
+            "CREATE TABLE sessions (id TEXT PRIMARY KEY, main_chain_id TEXT);
+             CREATE TABLE message_nodes (row_id INTEGER PRIMARY KEY, session_id TEXT,
+               node_id TEXT, parent_node_id TEXT, chat_message TEXT, created_at TEXT)",
+        )
+        .unwrap();
+        Store(db)
+    }
+
     /// What the stand-in `devin` says to `--version`, its line end with it.
     pub(super) fn says(&self, version: &str) {
         let line_end = if cfg!(windows) { "\r\n" } else { "\n" };
@@ -143,6 +164,42 @@ impl Home {
     }
 }
 
+/// Devin's store of sessions, as a test writes it.
+pub(super) struct Store(rusqlite::Connection);
+
+impl Store {
+    /// A session with nothing said in it.
+    pub(super) fn begins(&self, session: &str) {
+        self.0
+            .execute("INSERT INTO sessions VALUES (?, NULL)", [session])
+            .unwrap();
+    }
+
+    /// A message of `role` on the session's main chain, the first of it.
+    pub(super) fn says(&self, session: &str, role: &str, text: &str) {
+        let node = format!("{session}-node-1");
+        let message = json!({
+            "role": role,
+            "content": text,
+            "message_id": format!("{session}-message-1"),
+            "metadata": { "created_at": "2026-10-13T10:00:00Z" },
+        });
+        self.0
+            .execute(
+                "INSERT INTO message_nodes (session_id, node_id, parent_node_id, chat_message, created_at)
+                 VALUES (?, ?, NULL, ?, '2026-10-13T10:00:00Z')",
+                (session, &node, message.to_string()),
+            )
+            .unwrap();
+        self.0
+            .execute(
+                "UPDATE sessions SET main_chain_id = ? WHERE id = ?",
+                (&node, session),
+            )
+            .unwrap();
+    }
+}
+
 /// The line the log gains when its window configures a conversation it opens.
 pub(super) fn shows(session: &str) -> String {
     let record = json!({
@@ -161,6 +218,8 @@ pub(super) struct Request {
     pub(super) message: Option<String>,
     pub(super) agent: Option<Agent<'static>>,
     pub(super) first_message_ms: i64,
+    /// The Specmint variant a chief is given, where its project has specs on.
+    pub(super) specs: Option<Variant>,
 }
 
 impl Default for Request {
@@ -176,6 +235,7 @@ impl Default for Request {
                 ..Agent::default()
             }),
             first_message_ms: FIRST_MESSAGE_MS,
+            specs: None,
         }
     }
 }
@@ -208,6 +268,9 @@ pub(super) fn prepare_as(
     id: &str,
 ) -> Result<Prepared, String> {
     let id = LaunchId::new(id).unwrap();
+    let skill = request
+        .specs
+        .map(|variant| adapter.specmint(variant).unwrap());
     let launch = Launch {
         id: &id,
         project: 1,
@@ -218,6 +281,10 @@ pub(super) fn prepare_as(
         message: request.message.as_deref(),
         agent: request.agent,
         instructions: &request.instructions,
+        specs: request
+            .specs
+            .zip(skill.as_ref())
+            .map(|(variant, skill)| Specs { variant, skill }),
         first_message_ms: request.first_message_ms,
     };
     finished(adapter.prepare(&launch))

@@ -1,49 +1,91 @@
 //! What the run holds the worker's task to, once it has waited for it: judged
 //! from what it saw of the board and of the server while it waited, and from what
-//! the chief was given. Every way the task fell short is said together, so that a
-//! run that fails says all that was wrong with it.
+//! the chief was given and told. Every way the task fell short is said together, so
+//! that a run that fails says all that was wrong with it.
 
-use cf_e2e::live::held::Reasons;
+use super::server::STEM as SERVER;
 
 /// The sum the task asks for, which the worker's answer says.
 pub const ANSWER: &str = "5555";
+
+/// How many seconds the command the worker is asked to leave running runs: more than a
+/// run lasts, and a number that is in no other command line of the machine, so that the
+/// note that names it is the note of this command.
+pub const SECONDS: u64 = 4711;
 
 /// What the run saw of the worker's task while it waited for it.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct Seen {
     /// The state the task was last seen in.
     pub state: String,
-    /// What the board said the worker's window was doing besides working, each word
-    /// once with when: a window held for processes says which, which a worker whose
-    /// only other process is its harness's server must never be.
-    pub reasons: Reasons,
-    /// Whether the server wrote its process id while the task was at work: the
-    /// worker's Claude started it. (It is gone with the window once the task is
-    /// done, so a look may well never find it running.)
-    pub server_started: bool,
+    /// The server as the run first saw it, while the task was at work: the process
+    /// it wrote and when that began, as the system says it. None while it had not
+    /// written its process id: the worker's Claude had not started it.
+    pub server: Option<String>,
+    /// The server once the chief was told what the turn left, which is the daemon's word
+    /// that it has ended what it ended, and which the worker's window being kept open by
+    /// the human leaves it to live through: the same process, or none where it is gone or
+    /// another took its number.
+    pub server_after: Option<String>,
     /// The result the chief was given, if it was.
     pub result: Option<String>,
+    /// What the chief was told of work the worker's turn left: the notes that say so,
+    /// which the run waited for. The host ends what it proves the turn's (the command
+    /// the worker left) and leaves alone and says nothing of what it cannot tell (the
+    /// harness's server), so they name the command and never the server.
+    pub notes: Vec<String>,
 }
 
-/// The task is done, its result reached the chief and says the answer, the board
-/// never said the window was held for background work, and the server was started
-/// while the worker worked (a task that was never held for a server that was never
-/// there proves nothing): or every way it was not.
+/// The task is done, its result reached the chief and says the answer, the chief was
+/// told that the command the worker left running was ended and that nothing else was
+/// named, and the server, which was started while the worker worked (a task that was
+/// never at risk of ending a server that was never there proves nothing), is the same
+/// process it was once the chief was told: the server is the harness's own, and ending
+/// it would break the worker's tools. Or every way it was not.
 pub fn judge(seen: &Seen) -> Result<(), Vec<String>> {
     let mut problems = Vec::new();
     if seen.state != "done" {
         problems.push(format!("T-1 is {}, not done", seen.state));
     }
-    if let Some(held) = seen.reasons.held() {
+    let mark = SECONDS.to_string();
+    if !seen
+        .notes
+        .iter()
+        .any(|note| note.contains(" Ended: ") && note.contains(&mark))
+    {
         problems.push(format!(
-            "the board said the worker's window was held for work its turn left: {held}"
+            "the chief was not told that the command the worker left running ({mark}) was ended, so the run cannot tell an ending that spared the server from one that never happened: {}",
+            if seen.notes.is_empty() {
+                "nothing was said".to_owned()
+            } else {
+                seen.notes.join(" | ")
+            }
         ));
     }
-    if !seen.server_started {
-        problems.push(
-            "the MCP server never wrote its process id, so the run cannot tell a task that was not held from a window that had no server"
+    for note in &seen.notes {
+        if note.contains(SERVER) {
+            problems.push(format!(
+                "the chief was told of the harness's own MCP server, which the host must leave alone and say nothing of: {note}"
+            ));
+        }
+        if note.contains(" Still running, not ended: ") {
+            problems.push(format!(
+                "the chief was told part of what the turn left was not ended, and still runs: {note}"
+            ));
+        }
+    }
+    match (&seen.server, &seen.server_after) {
+        (None, _) => problems.push(
+            "the MCP server never wrote its process id, so the run cannot tell a worker whose server was left alone from a window that had no server"
                 .to_owned(),
-        );
+        ),
+        (Some(before), after) if after.as_ref() != Some(before) => {
+            problems.push(format!(
+                "the worker's MCP server was ended, or replaced, when the result was taken: it was {before}, and after the daemon had ended what the turn left it is {}",
+                after.as_deref().unwrap_or("gone")
+            ));
+        }
+        (Some(_), _) => {}
     }
     match &seen.result {
         None => problems.push("the chief was given no result".to_owned()),
@@ -61,60 +103,84 @@ pub fn judge(seen: &Seen) -> Result<(), Vec<String>> {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
-
     use super::*;
+
+    const SERVER_PROCESS: &str = "4242 Tue Oct 13 22:24:16 2026";
+    const ENDED: &str = "T-1's turn left background work running. Ended: sleep 4711.";
 
     fn good() -> Seen {
         Seen {
             state: "done".to_owned(),
-            reasons: Reasons::default(),
-            server_started: true,
+            server: Some(SERVER_PROCESS.to_owned()),
+            server_after: Some(SERVER_PROCESS.to_owned()),
             result: Some("5555".to_owned()),
+            notes: vec![ENDED.to_owned()],
         }
     }
 
     #[test]
-    fn a_task_done_with_its_result_at_the_chief_and_no_hold_beside_a_server_that_started_passes() {
+    fn a_task_done_with_its_result_at_the_chief_and_its_command_ended_beside_a_server_that_lived_passes(
+    ) {
         assert_eq!(judge(&good()), Ok(()));
-        // The board may say other things of a window; only a hold is wrong.
-        let mut seen = good();
-        seen.reasons
-            .note(Duration::from_secs(2), "waiting for the human");
-        assert_eq!(judge(&seen), Ok(()));
+        // The command as the harness's shell runs it names more than the number.
+        let mut wrapped = good();
+        wrapped.notes = vec![
+            "T-1's turn left background work running. Ended: /bin/zsh -c eval 'sleep 4711'; sleep 4711.".to_owned(),
+        ];
+        assert_eq!(judge(&wrapped), Ok(()));
     }
 
     #[test]
-    fn a_window_the_board_said_was_held_for_processes_fails_and_names_them() {
+    fn a_chief_told_nothing_of_the_command_fails_for_the_run_cannot_tell_what_the_host_spared() {
         let mut seen = good();
-        let held =
-            "background work running (2 processes): npm exec @playwright/mcp; node server.js";
-        seen.reasons.note(Duration::from_secs(3), held);
-        // What was said is kept once, whatever the number of looks.
-        seen.reasons.note(Duration::from_secs(4), held);
-        seen.reasons.note(Duration::from_secs(5), "");
+        seen.notes = Vec::new();
         let problems = judge(&seen).unwrap_err();
         assert_eq!(problems.len(), 1, "{problems:?}");
-        assert!(
-            problems[0].contains("npm exec @playwright/mcp"),
-            "{problems:?}"
-        );
-        assert!(
-            problems[0].contains("said from 3.0 s to 4.0 s"),
-            "{problems:?}"
-        );
-        assert_eq!(seen.reasons.said().len(), 1);
+        assert!(problems[0].contains("nothing was said"), "{problems:?}");
+
+        // A note of work that is not this command's is no word that it was ended.
+        seen.notes = vec!["T-1's turn left background work running. Ended: tail -f x.".to_owned()];
+        let problems = judge(&seen).unwrap_err();
+        assert_eq!(problems.len(), 1, "{problems:?}");
+        assert!(problems[0].ends_with("Ended: tail -f x."), "{problems:?}");
     }
 
     #[test]
-    fn a_window_held_for_agents_its_harness_says_are_pending_is_held_too() {
+    fn a_chief_told_of_the_server_or_of_work_that_still_runs_fails_and_names_what_was_said() {
         let mut seen = good();
-        seen.reasons
-            .note(Duration::from_secs(3), "background agents running");
+        let server = "T-1's turn left background work running. Ended: sleep 4711; python3 /run/quiet-server.py /run/quiet-server.pid.";
+        seen.notes = vec![server.to_owned()];
         let problems = judge(&seen).unwrap_err();
         assert_eq!(problems.len(), 1, "{problems:?}");
+        assert!(problems[0].ends_with(server), "{problems:?}");
+        assert!(problems[0].contains("MCP server"), "{problems:?}");
+
+        let still = "T-1's turn left background work running. Ended: sleep 4711. Still running, not ended: node worker.js.";
+        seen.notes = vec![still.to_owned()];
+        let problems = judge(&seen).unwrap_err();
+        assert_eq!(problems.len(), 1, "{problems:?}");
+        assert!(problems[0].ends_with(still), "{problems:?}");
+    }
+
+    #[test]
+    fn a_server_that_was_ended_or_replaced_by_the_time_the_chief_was_told_fails_whether_or_not_it_was_said(
+    ) {
+        // Ended, and nothing told: the harness's own server is gone all the same.
+        let mut ended = good();
+        ended.server_after = None;
+        let problems = judge(&ended).unwrap_err();
+        assert_eq!(problems.len(), 1, "{problems:?}");
         assert!(
-            problems[0].contains("background agents running"),
+            problems[0].contains(SERVER_PROCESS) && problems[0].ends_with("it is gone"),
+            "{problems:?}"
+        );
+        // Another process with its number, or the server started again: not the one.
+        let mut replaced = good();
+        replaced.server_after = Some("4242 Tue Oct 13 22:25:01 2026".to_owned());
+        let problems = judge(&replaced).unwrap_err();
+        assert_eq!(problems.len(), 1, "{problems:?}");
+        assert!(
+            problems[0].contains("Tue Oct 13 22:25:01 2026"),
             "{problems:?}"
         );
     }
@@ -126,10 +192,11 @@ mod tests {
             ..Seen::default()
         })
         .unwrap_err();
-        assert_eq!(problems.len(), 3, "{problems:?}");
+        assert_eq!(problems.len(), 4, "{problems:?}");
         assert!(problems[0].contains("working, not done"));
-        assert!(problems[1].contains("never wrote its process id"));
-        assert!(problems[2].contains("no result"));
+        assert!(problems[1].contains("was not told"));
+        assert!(problems[2].contains("never wrote its process id"));
+        assert!(problems[3].contains("no result"));
 
         let mut wrong = good();
         wrong.result = Some("six thousand".to_owned());

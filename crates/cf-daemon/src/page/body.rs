@@ -75,6 +75,11 @@ impl<'a> Body<'a> {
         self.0.get(name)
     }
 
+    /// The body as it was sent, for a request the ledger reads whole.
+    pub(super) fn json(self) -> &'a Value {
+        self.0
+    }
+
     /// The field as `${value}` writes it into a sentence.
     pub(super) fn text(self, name: &str) -> Cow<'a, str> {
         js::text(self.get(name))

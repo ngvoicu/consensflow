@@ -16,15 +16,29 @@
 //! written once the job can be asked to end. With `--deaf` it ignores the requests
 //! and is only ever killed. `cf_e2e::rig::Rig::jobs` reads what it wrote.
 //!
-//! On Unix a job runs in a session of its own by default ([`Group::Own`]), as a
-//! command a harness's tool runs for its agent does (Claude Code's Bash tool, Pi's
-//! bash tool), where the signals sent to the pane's process group do not reach it.
-//! With `--in-group` ([`Group::Window`]) it stays in the group of the window's
-//! program, as a server the harness starts does (an MCP server). The windows tell
-//! which of them are the harness's by that group, and by what started them. On
-//! Windows nothing asks a job to end (a window is ended at once, its job object
-//! ending the tree), so the job has no handler there, no groups either, and
-//! `--deaf` changes nothing: it writes its process, runs its seconds and is killed.
+//! A command the agent runs is started by a shell, in a group of its own, as a
+//! harness's tool runs a command for its agent (Claude Code's Bash tool, Pi's bash
+//! tool): a `/bin/sh` that waits for the job and ends with its code (a PowerShell on
+//! Windows), and the job stays where the shell put it, which the signals sent to the
+//! pane's process group do not reach. With `--detach` the shell detaches it as the
+//! agents of the harnesses do when they leave a job (`nohup … &`, `Start-Process`)
+//! and ends a moment after, which leaves the job with no parent: no chain of processes
+//! that run leads from it to a shell the harness started, so the host does not take it
+//! for the turn's work and leaves it running (`cf-panes`' `background`). On Unix that
+//! shell is in a session of its own, as Pi's Bash tool starts each command (the window's
+//! does not hold it), and the job is started without the marker the pane host puts in
+//! the environment of what a window starts, as a job that is a system program shows
+//! none: nothing of the window's close finds it either. A server the harness starts is
+//! no command: it is started as it is, and with `--in-group` ([`Group::Window`]) it
+//! stays in the group of the window's program (an MCP server), or, as it is, makes a
+//! session of its own (a helper). The host tells the commands from the servers by the
+//! shell that started them (a command is what a shell the harness started started, and
+//! what that started), and the harness's own by where it keeps them, by the programs it
+//! is named for and by having seen them its own. On Windows nothing
+//! asks a job to end (a window is ended at once, its job object ending the tree, and
+//! what a turn left is ended by itself, process by process), so the job has no handler
+//! there, no groups either, and `--deaf` changes nothing: it writes its process, runs
+//! its seconds and is killed.
 //!
 //! With `--browser <file>` the job starts a job of its own once it is ready: a
 //! child of it, as the browser an MCP server launches (`@playwright/mcp`,
@@ -37,6 +51,7 @@
 //! own as the window opens, as Codex starts its helpers; with
 //! `CF_TEST_MCP_BROWSER` set it launches its browser as it starts.
 
+use std::ffi::OsString;
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -46,6 +61,8 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
+#[cfg(windows)]
+use cf_e2e::process::own_var;
 use cf_e2e::process::{Run, Spawned};
 
 #[cfg(unix)]
@@ -53,6 +70,13 @@ use crate::signals;
 
 /// What the job is started with, first: no window is launched with it.
 pub const JOB: &str = "--background-job";
+
+/// What the shell of a command that is detached is started with, first, on Unix:
+/// `fake-agent --background-session <program> <words…>` makes a session of its own and
+/// becomes the program, as a shell is started by a harness whose Bash tool detaches its
+/// commands (Node's `detached` is a `setsid`: Pi's does).
+#[cfg(unix)]
+pub const SESSION: &str = "--background-session";
 
 /// What makes a job stay in the group of the window's program, after its file.
 const IN_GROUP: &str = "--in-group";
@@ -141,6 +165,20 @@ impl Server {
     }
 }
 
+/// What a job is started as, besides its group.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct How {
+    /// It launches a browser of its own once it is ready.
+    browser: bool,
+    /// A command of the agent's: a shell starts it (a PowerShell on Windows), as the
+    /// harnesses start the commands their agents run, and the shell is in a group of
+    /// its own.
+    command: bool,
+    /// The agent detaches it from that shell (`nohup … &`, `Start-Process`), which
+    /// ends at once and leaves it with no parent.
+    detached: bool,
+}
+
 /// The jobs one window starts.
 pub struct Jobs {
     folder: PathBuf,
@@ -170,35 +208,63 @@ impl Jobs {
         self
     }
 
+    /// Notes the process `pid` as one of the window's the rig looks for, named `label`: a
+    /// program the window started that is no job of this program (a command of the
+    /// harness's own that a script runs), in the file a job's would be
+    /// (`<label>-<window>-<n>.pid`), for a case to ask whether it ran.
+    #[cfg(unix)]
+    pub fn note(&self, label: &str, pid: u32) -> Result<(), String> {
+        fs::create_dir_all(&self.folder)
+            .map_err(|failed| format!("{}: {failed}", self.folder.display()))?;
+        let number = self.started.fetch_add(1, Ordering::Relaxed) + 1;
+        let file = self
+            .folder
+            .join(format!("{label}-{}-{number}.pid", self.window));
+        fs::write(&file, format!("{pid}\n"))
+            .map_err(|failed| format!("{}: {failed}", file.display()))
+    }
+
     /// Starts the server of the window's harness, which runs past any case, in
     /// `group`, and the browser it launches if it does.
     fn start_server(&self, group: Group) -> Result<(), String> {
-        self.begin(SERVER, SERVER_SECONDS, false, group, self.browser, || {})
+        let how = How {
+            browser: self.browser,
+            command: false,
+            detached: false,
+        };
+        self.begin(SERVER, SERVER_SECONDS, false, group, how, || {})
     }
 
-    /// Starts the job `label`, which runs `seconds` (and ignores the requests
-    /// to end if it is `deaf`), in `group`. Its files are `<label>-<window>-<n>.*`.
-    /// `then` runs once it has ended, however it ended.
+    /// Starts the job `label`, a command the agent's tool runs, which runs
+    /// `seconds` (and ignores the requests to end if it is `deaf`), in `group`. Its
+    /// files are `<label>-<window>-<n>.*`. `then` runs once it has ended, however
+    /// it ended; where the agent `detached` it, once the shell it was started by has,
+    /// which is at once.
     pub fn start(
         &self,
         label: &str,
         seconds: u64,
         deaf: bool,
-        group: Group,
+        detached: bool,
         then: impl FnOnce() + Send + 'static,
     ) -> Result<(), String> {
-        self.begin(label, seconds, deaf, group, false, then)
+        let how = How {
+            browser: false,
+            command: true,
+            detached,
+        };
+        self.begin(label, seconds, deaf, Group::Own, how, then)
     }
 
-    /// [`Jobs::start`], and the browser the job launches if it `launches` one: its
-    /// files are `browser-<window>-<n>.*`, of the job's number.
+    /// [`Jobs::start`], as `how` says: the browser the job launches, if it launches
+    /// one, has files `browser-<window>-<n>.*`, of the job's number.
     fn begin(
         &self,
         label: &str,
         seconds: u64,
         deaf: bool,
         group: Group,
-        launches: bool,
+        how: How,
         then: impl FnOnce() + Send + 'static,
     ) -> Result<(), String> {
         fs::create_dir_all(&self.folder)
@@ -208,24 +274,29 @@ impl Jobs {
             .folder
             .join(format!("{label}-{}-{number}", self.window));
         let program = std::env::current_exe().map_err(|failed| failed.to_string())?;
-        let mut run = Run::new(program)
-            .arg(JOB)
-            .arg(seconds.to_string())
-            .arg(&file);
+        let mut words: Vec<OsString> = vec![
+            JOB.into(),
+            seconds.to_string().into(),
+            file.clone().into_os_string(),
+        ];
         if deaf {
-            run = run.arg("--deaf");
+            words.push("--deaf".into());
         }
-        if group == Group::Window {
-            run = run.arg(IN_GROUP);
+        // A command stays where its shell put it: in the shell's group, in the window's
+        // session, as the command a harness's tool runs does.
+        if group == Group::Window || (how.command && cfg!(unix)) {
+            words.push(IN_GROUP.into());
         }
-        if launches {
-            run = run.arg(BROWSER).arg(
+        if how.browser {
+            words.push(BROWSER.into());
+            words.push(
                 self.folder
-                    .join(format!("{BROWSER_LABEL}-{}-{number}", self.window)),
+                    .join(format!("{BROWSER_LABEL}-{}-{number}", self.window))
+                    .into_os_string(),
             );
         }
         // The window's environment, which every program of a window has.
-        let mut job = run
+        let mut job = Self::running(&program, words, how)?
             .inheriting_env()
             .closed_input()
             .spawn()
@@ -241,6 +312,111 @@ impl Jobs {
         });
         Ok(())
     }
+
+    /// The program that runs the job `words` say: this one, as it is, or where `how`
+    /// says it is a command of the agent's, a shell that runs it ([`in_a_shell`]).
+    fn running(program: &Path, words: Vec<OsString>, how: How) -> Result<Run, String> {
+        if how.command {
+            in_a_shell(program, words, how.detached)
+        } else {
+            Ok(Run::new(program).args(words))
+        }
+    }
+}
+
+/// `program` with `words`, run as a harness's tool runs a command for its agent: by a
+/// shell (a PowerShell on Windows) that waits for it and ends with its code, in a group
+/// of its own on Unix. Where `detached` the shell detaches it as the agents do
+/// (`nohup … &`, `Start-Process`) and ends a moment after, which leaves the command with
+/// no parent; on Unix that shell is in a session of its own ([`SESSION`]).
+pub fn in_a_shell(program: &Path, words: Vec<OsString>, detached: bool) -> Result<Run, String> {
+    #[cfg(windows)]
+    {
+        let root = own_var("SystemRoot").unwrap_or_else(|| r"C:\Windows".to_owned());
+        Ok(Run::new(format!(
+            r"{root}\System32\WindowsPowerShell\v1.0\powershell.exe"
+        ))
+        .args(["-NoProfile", "-NonInteractive", "-Command"])
+        .arg(powershell_script(program, &words, detached)))
+    }
+    #[cfg(not(windows))]
+    {
+        if detached {
+            let itself = std::env::current_exe().map_err(|failed| failed.to_string())?;
+            Ok(Run::new(itself)
+                .args([SESSION, "/bin/sh", "-c", shell_script(true)])
+                .arg(program)
+                .args(words))
+        } else {
+            Ok(Run::new("/bin/sh")
+                .args(["-c", shell_script(false)])
+                .arg(program)
+                .args(words)
+                .own_group())
+        }
+    }
+}
+
+/// What the shell of a command is told to run, with the program as its `$0` and the
+/// job's words after it: the program, which the shell waits for and ends with the
+/// code of (it is no `exec`, so the shell stays a parent), or detached from the
+/// shell as `nohup … &` does, which ends the shell, a moment after, and leaves the job
+/// with no parent. A job that is a system program shows no environment, so the
+/// window's marker (`CF_PANE_PROCESS_OWNER`, which the pane host puts in the
+/// environment of everything a window starts) is not there to find it by: the
+/// detached job is started without it.
+#[cfg(any(unix, test))]
+fn shell_script(detached: bool) -> &'static str {
+    if detached {
+        "unset CF_PANE_PROCESS_OWNER; nohup \"$0\" \"$@\" >/dev/null 2>&1 & sleep 0.3"
+    } else {
+        "\"$0\" \"$@\"; exit $?"
+    }
+}
+
+/// Makes a session of its own and becomes the program `args` name, with its words:
+/// the shell of a detached command, as a harness starts it ([`SESSION`]).
+#[cfg(unix)]
+pub fn run_in_session(args: &[String]) -> ExitCode {
+    use std::os::unix::process::CommandExt;
+
+    let Some((program, words)) = args.split_first() else {
+        let _ = writeln!(io::stderr(), "fake-agent: {SESSION} <program> [words…]");
+        return ExitCode::FAILURE;
+    };
+    // Only a process group's leader cannot: this one was started to be none.
+    let _ = nix::unistd::setsid();
+    // The one place a program is run in place of this one, which no `Run` does.
+    #[allow(clippy::disallowed_methods)]
+    let failed = std::process::Command::new(program).args(words).exec();
+    let _ = writeln!(io::stderr(), "fake-agent: {program}: {failed}");
+    ExitCode::FAILURE
+}
+
+/// What PowerShell is told to run to start `program` with `words`: `& 'program'
+/// 'word' …`, each in single quotes, the quotes in it doubled; or, to detach it,
+/// `Start-Process`, which ends the shell and leaves the job with no parent.
+#[cfg(any(windows, test))]
+fn powershell_script(program: &Path, words: &[OsString], detached: bool) -> String {
+    let quoted =
+        |word: &std::ffi::OsStr| format!("'{}'", word.to_string_lossy().replace('\'', "''"));
+    if detached {
+        // Each word is quoted again for the command line `Start-Process` makes of them.
+        let words: Vec<String> = words
+            .iter()
+            .map(|word| {
+                let word = word.to_string_lossy().replace('\'', "''");
+                format!("'\"{word}\"'")
+            })
+            .collect();
+        return format!(
+            "Start-Process -WindowStyle Hidden -FilePath {} -ArgumentList {}",
+            quoted(program.as_os_str()),
+            words.join(",")
+        );
+    }
+    let words: Vec<String> = words.iter().map(|word| quoted(word)).collect();
+    format!("& {} {}", quoted(program.as_os_str()), words.join(" "))
 }
 
 /// The job: runs as `args` ask, and the exit code of the program.
@@ -389,131 +565,5 @@ fn release(file: &Path) -> ! {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn words(line: &str) -> Vec<String> {
-        line.split(' ')
-            .filter(|word| !word.is_empty())
-            .map(str::to_owned)
-            .collect()
-    }
-
-    #[test]
-    fn a_job_is_a_number_of_seconds_and_a_file_and_may_be_deaf() {
-        assert_eq!(
-            Job::parse(&words("12 /jobs/job-1-1")),
-            Some(Job {
-                seconds: 12,
-                file: PathBuf::from("/jobs/job-1-1"),
-                deaf: false,
-                group: Group::Own,
-                browser: None,
-            })
-        );
-        assert_eq!(
-            Job::parse(&words("120 /jobs/job-1-2 --deaf")),
-            Some(Job {
-                seconds: 120,
-                file: PathBuf::from("/jobs/job-1-2"),
-                deaf: true,
-                group: Group::Own,
-                browser: None,
-            })
-        );
-    }
-
-    #[test]
-    fn a_job_that_launches_a_browser_is_told_its_file_in_any_order_with_the_other_words() {
-        for line in [
-            "600 /jobs/server-1-1 --in-group --browser /jobs/browser-1-1",
-            "600 /jobs/server-1-1 --browser /jobs/browser-1-1 --in-group",
-        ] {
-            let job = Job::parse(&words(line)).unwrap();
-            assert_eq!(
-                job.browser,
-                Some(PathBuf::from("/jobs/browser-1-1")),
-                "{line}"
-            );
-            assert_eq!(job.group, Group::Window, "{line}");
-        }
-        assert_eq!(
-            Job::parse(&words("600 /jobs/job-1-1")).unwrap().browser,
-            None
-        );
-    }
-
-    #[test]
-    fn a_job_is_in_a_group_of_its_own_unless_it_is_told_to_stay_in_its_windows() {
-        for line in [
-            "600 /jobs/server-1-1 --in-group",
-            "600 /jobs/server-1-1 --in-group --deaf",
-            "600 /jobs/server-1-1 --deaf --in-group",
-        ] {
-            let job = Job::parse(&words(line)).unwrap();
-            assert_eq!(job.group, Group::Window, "{line}");
-            assert_eq!(job.deaf, line.contains("--deaf"), "{line}");
-        }
-        assert_eq!(
-            Job::parse(&words("600 /jobs/job-1-1")).unwrap().group,
-            Group::Own
-        );
-    }
-
-    #[test]
-    fn anything_else_is_no_job() {
-        for line in [
-            "",
-            "12",
-            "soon /jobs/a",
-            "12 /jobs/a --loud",
-            "12 /jobs/a --deaf more",
-            "12 /jobs/a --deaf --deaf",
-            "12 /jobs/a --in-group --in-group",
-            "12 /jobs/a --in-group --deaf more",
-            "12 /jobs/a --browser",
-            "12 /jobs/a --browser /jobs/b --browser /jobs/c",
-        ] {
-            assert_eq!(Job::parse(&words(line)), None, "{line:?}");
-        }
-    }
-
-    #[test]
-    fn a_harness_starts_a_server_with_its_window_after_its_first_message_or_not_at_all() {
-        assert_eq!(Server::of(None), Server::Never);
-        assert_eq!(Server::of(Some("")), Server::Never);
-        // Any other word is the server the window has before any turn.
-        assert_eq!(Server::of(Some("1")), Server::WithTheWindow);
-        assert_eq!(Server::of(Some("yes")), Server::WithTheWindow);
-        assert_eq!(Server::of(Some("late")), Server::AfterTheFirstMessage);
-        assert_eq!(Server::of(Some("apart")), Server::ApartWithTheWindow);
-    }
-
-    #[test]
-    fn what_a_job_writes_is_its_file_and_a_kind_after_a_dot() {
-        let job = Job::parse(&words("1 /jobs/job-1-1")).unwrap();
-        assert_eq!(job.beside("pid"), PathBuf::from("/jobs/job-1-1.pid"));
-        // A name with a dot of its own keeps it.
-        let job = Job::parse(&words("1 /jobs/a.b")).unwrap();
-        assert_eq!(job.beside("released"), PathBuf::from("/jobs/a.b.released"));
-    }
-
-    #[test]
-    fn the_jobs_of_a_window_are_in_a_folder_beside_its_home() {
-        let jobs = Jobs::new(Path::new("/root/consensflow"), 4242);
-        assert_eq!(jobs.folder, PathBuf::from("/root/jobs"));
-        assert_eq!(jobs.window, 4242);
-    }
-
-    #[test]
-    fn a_server_launches_a_browser_where_the_variable_says_any_word() {
-        let launches = |word| {
-            Jobs::new(Path::new("/root/consensflow"), 1)
-                .launching_a_browser(word)
-                .browser
-        };
-        assert!(!launches(None));
-        assert!(!launches(Some("")));
-        assert!(launches(Some("1")));
-    }
-}
+#[path = "background/tests.rs"]
+mod tests;

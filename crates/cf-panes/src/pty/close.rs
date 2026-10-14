@@ -1,7 +1,9 @@
 //! Closing a window, on Unix, the way a terminal closes one. Its programs are
 //! asked to end: TERM and then HUP to the pane's process group and, on macOS,
 //! to every process of its tree wherever it went (a job the agent started in a
-//! session of its own is in no group of the pane's). They are given
+//! session of its own is in no group of the pane's), which is what is under its
+//! program, or in the session it leads, or was seen so (`process_tree`'s bound, which
+//! signals the pane's group itself only while the program runs). They are given
 //! [`CLOSE_GRACE`] to do it in, and what is still there once they have ended or
 //! the grace is over is ended by force. A job that traps the signals gets to
 //! release what it holds; one that ignores them is killed after the grace, as
@@ -21,11 +23,23 @@
 //! Every close of a window goes through here: a kill, the retirement of a
 //! window whose program ended, a table dropped ([`terminate`],
 //! [`terminate_detached`], and [`ask_all_to_exit`] for the many a table holds).
+//!
+//! What a turn left running is ended the same way, with the window staying open
+//! (`turn`'s `end_background`): on macOS the same asking and the same ending of
+//! what is left, by the same [`crate::process_tree`] of the pane, of the turn's work
+//! the baseline proves instead of the whole tree and the group
+//! ([`wait_until_gone`] is the wait they share). On Windows they cannot share the
+//! ending: a job object ends all of its tree or none of it, which is what a close
+//! wants, and an ending of some of it ends each process by itself, at once, and
+//! waits for it.
 
 #[cfg(unix)]
 use std::io;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+
+#[cfg(target_os = "macos")]
+use crate::process_tree::Subject;
 
 use super::{has_exited, wait_for_exit, Pane, PaneError, Teardown};
 
@@ -54,13 +68,19 @@ impl Pane {
         let mut asked = Asked::default();
         #[cfg(unix)]
         if let Some(group) = self.process_group_id {
-            let _ = signal_process_group(group, SIGTERM);
-            let _ = signal_process_group(group, SIGHUP);
+            let _ = signal_group(self, group, SIGTERM);
+            let _ = signal_group(self, group, SIGHUP);
             asked.group = Some(group);
         }
         #[cfg(target_os = "macos")]
         {
-            asked.tree = self.process_tree.ask_to_exit(self.process_group_id).ok();
+            // A process that could not be asked is one that is ending, or not ours
+            // to signal: none of them is waited for.
+            asked.tree = self
+                .process_tree
+                .ask_to_exit(Subject::Whole, self.process_group_id)
+                .ok()
+                .filter(|asked| !asked.failed());
         }
         asked
     }
@@ -88,8 +108,14 @@ impl Pane {
 
 /// Waits until everything asked to end has, or `deadline` passes.
 fn wait_until(pane: &mut Pane, asked: &Asked, deadline: Instant) {
+    wait_until_gone(deadline, || pane.is_gone(asked));
+}
+
+/// Waits until `gone` says everything asked to end has, or `deadline` passes: what
+/// a close waits with, and an ending of what a turn left.
+pub(super) fn wait_until_gone(deadline: Instant, mut gone: impl FnMut() -> bool) {
     loop {
-        if pane.is_gone(asked) {
+        if gone() {
             return;
         }
         let left = deadline.saturating_duration_since(Instant::now());
@@ -179,14 +205,14 @@ fn signal_for_termination(pane: &mut Pane, detached: bool) -> Result<bool, PaneE
     #[cfg(not(target_os = "macos"))]
     let _ = detached;
     #[cfg(target_os = "macos")]
-    pane.process_tree.terminate()?;
+    pane.process_tree.terminate(Subject::Whole)?;
 
     #[cfg_attr(not(unix), allow(unused_mut))]
     let mut child_exited = has_exited(pane)?;
 
     #[cfg(unix)]
     if let Some(process_group_id) = pane.process_group_id {
-        if let Err(error) = signal_process_group(process_group_id, SIGKILL) {
+        if let Err(error) = signal_group(pane, process_group_id, SIGKILL) {
             // macOS answers EPERM when a member of the group cannot take the
             // signal: here one already killed with the tree above, whose exit
             // waits on the pane's blocked write. A caller that does not wait
@@ -226,13 +252,34 @@ fn is_permission_denied(error: &PaneError) -> bool {
 #[cfg(unix)]
 const SIGHUP: i32 = 1;
 #[cfg(unix)]
-pub(super) const SIGKILL: i32 = 9;
+const SIGKILL: i32 = 9;
 #[cfg(unix)]
 const SIGTERM: i32 = 15;
 
-/// Signals the pane's process group with `signal`.
+/// Signals the pane's process group with `signal`. On macOS it goes through the pane's
+/// tree and its bound, which sends it to the group whole while the pane's program runs
+/// and leads it, and else to each member of the group the bound lets through: the
+/// number of a program that has gone may be another process's now, which leads a group of
+/// its own. Elsewhere there is no table of processes to look at, and the group is
+/// signalled whole.
 #[cfg(unix)]
-pub(super) fn signal_process_group(process_group_id: i32, signal: i32) -> Result<(), PaneError> {
+fn signal_group(pane: &Pane, group: i32, signal: i32) -> Result<(), PaneError> {
+    #[cfg(target_os = "macos")]
+    {
+        pane.process_tree
+            .signal_group(group, signal)
+            .map_err(PaneError::Io)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = pane;
+        signal_process_group(group, signal)
+    }
+}
+
+/// Signals the pane's process group with `signal`, whole.
+#[cfg(all(unix, not(target_os = "macos")))]
+fn signal_process_group(process_group_id: i32, signal: i32) -> Result<(), PaneError> {
     unsafe extern "C" {
         fn kill(pid: i32, signal: i32) -> i32;
     }

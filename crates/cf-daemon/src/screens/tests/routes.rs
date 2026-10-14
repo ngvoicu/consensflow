@@ -259,6 +259,48 @@ async fn the_preferences_are_set_kept_and_told() {
 }
 
 #[tokio::test]
+async fn specs_for_every_project_are_set_kept_and_told_beside_the_other_choice_and_said_only_when_on(
+) {
+    let rig = Rig::new(&[]);
+    let set = |body: &'static str| the_app_asks(&rig, Method::POST, "/api/preferences", body);
+    assert_eq!(
+        set(r#"{"specs":true}"#).await,
+        (
+            200,
+            json!({ "preferences": { "ownHarnessOnly": false, "specs": true } })
+        )
+    );
+    // The list the Agents screen reads says it, and the other choice set goes on beside it.
+    let (_, listed) = the_app_asks(&rig, Method::GET, "/api/agents", "").await;
+    assert_eq!(
+        listed["preferences"],
+        json!({ "ownHarnessOnly": false, "specs": true })
+    );
+    assert_eq!(
+        set(r#"{"ownHarnessOnly":true}"#).await,
+        (
+            200,
+            json!({ "preferences": { "ownHarnessOnly": true, "specs": true } })
+        )
+    );
+    assert_eq!(
+        set(r#"{"specs":false}"#).await,
+        (200, json!({ "preferences": { "ownHarnessOnly": true } }))
+    );
+    assert_eq!(
+        set(r#"{"specs":"yes"}"#).await,
+        (400, error("specs is on or off"))
+    );
+    let (_, listed) = the_app_asks(&rig, Method::GET, "/api/agents", "").await;
+    assert_eq!(listed["preferences"], json!({ "ownHarnessOnly": true }));
+    assert_eq!(
+        rig.changes.get(),
+        3,
+        "each write is told, the refusal is not"
+    );
+}
+
+#[tokio::test]
 async fn a_body_that_is_no_object_is_read_as_javascript_read_it() {
     let rig = Rig::new(&[]);
     let null_read = |property: &str| {

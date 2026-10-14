@@ -1,49 +1,104 @@
 //! A turn of the window: what a message asks of it, and how it ends. It speaks
 //! the words the other stand-in does: a line `SLEEP <seconds> <words>` is a turn
-//! that works that long before it does what the words say, and `Reply with
-//! exactly: X` is answered with X, as anything else is acknowledged. What Devin
-//! writes of a turn is written in its order: the message in the store and on the
-//! wire, the agent's thought, and then the answer (the store first, so that a
-//! reader that sees the turn end on the wire finds the answer in the store) or,
-//! where an Escape stops the turn, the cancel and what was said so far.
+//! that works that long before it does what the words say, a line `BACKGROUND
+//! <seconds> <words>` is a turn that leaves a command running for that long
+//! (`command`) and does what the words say, and `Reply with exactly: X` is
+//! answered with X, as anything else is acknowledged. What Devin writes of a turn
+//! is written in its order: the message in the store and on the wire, the agent's
+//! thought, the tool it runs (the command a `BACKGROUND` leaves), and then the
+//! answer (the store first, so that a reader that sees the turn end on the wire
+//! finds the answer in the store) or, where an Escape stops the turn, the cancel
+//! and what was said so far. A command that was left goes on saying what it prints
+//! once the turn has ended.
+//!
+//! A turn takes the time a model takes ([`Pace`]): from the message put to the
+//! agent to its first word, in which the turn is begun and its work is not to be
+//! seen, and the work itself, which no words but a `SLEEP` set. What a message
+//! the window is handed while a turn is at work comes to is the window's
+//! (`fake_devin.rs`): it waits, and is written to the store when its turn begins.
 
 use std::io::{self, Write};
+use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use cf_e2e::pattern;
 use regex::Regex;
 
+use crate::command;
 use crate::said;
 use crate::stop::Stop;
 use crate::store::Store;
 use crate::wire::Wire;
+
+/// The variables that set a window's [`Pace`], in milliseconds: nothing in a
+/// person's environment sets them, and a window with neither takes no time at all.
+pub const FIRST_WORD_VARIABLE: &str = "FAKE_DEVIN_FIRST_WORD_MS";
+pub const WORK_VARIABLE: &str = "FAKE_DEVIN_WORK_MS";
+
+/// How long a turn takes where its message does not say.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Pace {
+    /// From the message put to the agent to the agent's first word (what Devin
+    /// measures as `ttftMs`): the turn is begun, its message is in the store and on
+    /// the wire, and nothing of its work is. A look at the window finds it at rest.
+    pub first_word: Duration,
+    /// How long a turn that asks for no `SLEEP` works before it answers.
+    pub work: Duration,
+}
+
+impl Pace {
+    /// The pace the two variables name: each a number of milliseconds, or none.
+    pub fn of(first_word: Option<&str>, work: Option<&str>) -> Self {
+        let named = |ms: Option<&str>| {
+            ms.and_then(|ms| ms.parse().ok())
+                .map_or(Duration::ZERO, Duration::from_millis)
+        };
+        Self {
+            first_word: named(first_word),
+            work: named(work),
+        }
+    }
+}
 
 /// What a turn is asked to do.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Plan {
     /// How long it works before it answers.
     pub work: Duration,
+    /// How many seconds of a command it leaves running as it answers, if it does.
+    pub background: Option<u64>,
     /// What it answers.
     pub answer: String,
 }
 
-/// What the message `text` asks of a turn.
-pub fn plan_of(text: &str) -> Plan {
+/// What the message `text` asks of a turn, which works as long as `pace` says
+/// where the message says nothing of it.
+pub fn plan_of(text: &str, pace: Pace) -> Plan {
     static SLEEP: OnceLock<Regex> = OnceLock::new();
+    static BACKGROUND: OnceLock<Regex> = OnceLock::new();
     static EXACT: OnceLock<Regex> = OnceLock::new();
     let (work, words) = match pattern::once(&SLEEP, r"(?m)^SLEEP (\d+) (.+)$").captures(text) {
         Some(slow) => (
             Duration::from_secs(slow[1].parse().unwrap_or(0)),
             slow[2].to_owned(),
         ),
-        None => (Duration::ZERO, text.to_owned()),
+        None => (pace.work, text.to_owned()),
     };
+    let (background, words) =
+        match pattern::once(&BACKGROUND, r"(?m)^BACKGROUND (\d+) (.+)$").captures(&words) {
+            Some(left) => (left[1].parse().ok(), left[2].to_owned()),
+            None => (None, words),
+        };
     let answer = match pattern::once(&EXACT, r"Reply with exactly: (\S+)").captures(&words) {
         Some(exact) => exact[1].to_owned(),
         None => format!("noted: {}", words.split('\n').next().unwrap_or_default()),
     };
-    Plan { work, answer }
+    Plan {
+        work,
+        background,
+        answer,
+    }
 }
 
 /// The window's turns, one at a time, in the order the messages came.
@@ -53,18 +108,43 @@ pub struct Window<W: Write> {
     stop: Arc<Stop>,
     /// What the window says on its screen.
     screen: W,
+    pace: Pace,
     turns: u64,
+    /// Where a command a turn leaves is written, where the window has any.
+    jobs: Option<Jobs>,
+}
+
+/// Where the rig looks for the jobs of a window, which window it is (its process), and
+/// how long the agent thinks before it runs its tool: a command a turn leaves is a job.
+struct Jobs {
+    folder: PathBuf,
+    window: u32,
+    thinking: Duration,
 }
 
 impl<W: Write> Window<W> {
-    pub fn new(store: Store, wire: Wire, stop: Arc<Stop>, screen: W) -> Self {
+    pub fn new(store: Store, wire: Wire, stop: Arc<Stop>, screen: W, pace: Pace) -> Self {
         Self {
             store,
             wire,
             stop,
             screen,
+            pace,
             turns: 0,
+            jobs: None,
         }
+    }
+
+    /// The window's jobs are written in `folder`, as those of the window `window`; its
+    /// agent thinks for `thinking` before it runs a tool.
+    #[must_use]
+    pub fn leaving_jobs_in(mut self, folder: PathBuf, window: u32, thinking: Duration) -> Self {
+        self.jobs = Some(Jobs {
+            folder,
+            window,
+            thinking,
+        });
+        self
     }
 
     /// Says `text` on the window's screen.
@@ -86,13 +166,31 @@ impl<W: Write> Window<W> {
         self.turns += 1;
         let client = format!("client-{}", self.turns);
         let stream = format!("stream-{}", self.turns);
-        let plan = plan_of(text);
+        let plan = plan_of(text, self.pace);
         self.store.user(text, &client)?;
-        self.wire.prompt(&client).map_err(said)?;
-        self.wire.thinking(&client).map_err(said)?;
+        self.wire.prompt(self.turns + 1, text).map_err(said)?;
         self.say("working (esc twice to interrupt)\n")
             .map_err(said)?;
-        if self.stop.work(plan.work) {
+        // The turn is begun, and its agent has not said a word: a model's time,
+        // in which the wire shows none of its work.
+        let mut stopped = self.stop.work(self.pace.first_word);
+        let mut left = None;
+        if !stopped {
+            self.wire.thinking(&client).map_err(said)?;
+            // The agent has thought, and then runs its tool: the command it leaves running.
+            if let (Some(seconds), Some(jobs)) = (plan.background, &self.jobs) {
+                std::thread::sleep(jobs.thinking);
+                left = Some(command::start(
+                    seconds,
+                    &jobs.folder,
+                    jobs.window,
+                    &mut self.wire,
+                    &client,
+                )?);
+            }
+            stopped = self.stop.work(plan.work);
+        }
+        if stopped {
             // The TUI asks its agent to cancel, which keeps what it said so far.
             self.wire.cancel().map_err(said)?;
             self.wire
@@ -107,6 +205,10 @@ impl<W: Write> Window<W> {
             .map_err(said)?;
         self.store.assistant(&plan.answer, true)?;
         self.wire.ended("complete", &client).map_err(said)?;
+        // The turn is over, and the command goes on saying what it prints.
+        if let Some(left) = left {
+            left.go_on_reporting(self.wire.another().map_err(said)?);
+        }
         self.say(&format!("{}\n", plan.answer)).map_err(said)
     }
 }
@@ -123,36 +225,86 @@ mod tests {
     #[test]
     fn a_message_is_answered_with_the_word_it_asks_for_and_otherwise_acknowledged_by_its_first_line(
     ) {
+        let quick = Pace::default();
         assert_eq!(
-            plan_of("Reply with exactly: WORKER_OK"),
+            plan_of("Reply with exactly: WORKER_OK", quick),
             Plan {
                 work: Duration::ZERO,
+                background: None,
                 answer: "WORKER_OK".to_owned()
             }
         );
         assert_eq!(
-            plan_of("[ConsensFlow m-4 · T-1 · task from @chief]\nReply with exactly: ONE_DONE")
-                .answer,
+            plan_of(
+                "[ConsensFlow m-4 · T-1 · task from @chief]\nReply with exactly: ONE_DONE",
+                quick
+            )
+            .answer,
             "ONE_DONE"
         );
-        assert_eq!(plan_of("hello\nsecond").answer, "noted: hello");
+        assert_eq!(plan_of("hello\nsecond", quick).answer, "noted: hello");
     }
 
     #[test]
     fn a_sleep_line_works_that_long_before_it_does_what_the_words_after_it_say() {
+        let quick = Pace::default();
         let plan = plan_of(
             "[ConsensFlow m-1 · T-5 · task from @chief]\nSLEEP 120 Reply with exactly: T5_DONE",
+            quick,
         );
         assert_eq!(
             plan,
             Plan {
                 work: Duration::from_secs(120),
+                background: None,
                 answer: "T5_DONE".to_owned()
             }
         );
         // A line that is no sleep is no wait.
-        assert_eq!(plan_of("say SLEEP 5 x").work, Duration::ZERO);
-        assert_eq!(plan_of("SLEEP soon x").work, Duration::ZERO);
+        assert_eq!(plan_of("say SLEEP 5 x", quick).work, Duration::ZERO);
+        assert_eq!(plan_of("SLEEP soon x", quick).work, Duration::ZERO);
+    }
+
+    #[test]
+    fn a_message_that_asks_for_no_time_works_as_long_as_the_pace_says_and_one_that_does_ask_as_it_says(
+    ) {
+        let slow = Pace::of(Some("3000"), Some("14000"));
+        assert_eq!(slow.first_word, Duration::from_secs(3));
+        assert_eq!(plan_of("hello", slow).work, Duration::from_secs(14));
+        assert_eq!(
+            plan_of("SLEEP 2 hello", slow).work,
+            Duration::from_secs(2),
+            "its own words come before the pace"
+        );
+        // What is no number of milliseconds is no time, as a window with no variable takes none.
+        assert_eq!(Pace::of(None, None), Pace::default());
+        assert_eq!(Pace::of(Some("soon"), Some("-4")), Pace::default());
+    }
+
+    #[test]
+    fn a_background_line_leaves_a_command_running_that_long_and_does_what_the_words_after_it_say() {
+        let quick = Pace::default();
+        let plan = plan_of(
+            "[ConsensFlow m-1 · T-1 · task from @chief]\nBACKGROUND 600 Reply with exactly: LEFT_IT",
+            quick,
+        );
+        assert_eq!(
+            plan,
+            Plan {
+                work: Duration::ZERO,
+                background: Some(600),
+                answer: "LEFT_IT".to_owned()
+            }
+        );
+        // A line that is no command left running is none.
+        assert_eq!(plan_of("say BACKGROUND 5 x", quick).background, None);
+        assert_eq!(plan_of("BACKGROUND soon x", quick).background, None);
+        // Its turn works as long as the pace says, as any that asks for no time of its own.
+        let slow = Pace::of(None, Some("14000"));
+        assert_eq!(
+            plan_of("BACKGROUND 600 hello", slow).work,
+            Duration::from_secs(14)
+        );
     }
 
     /// A window on a store and a wire of a folder of its own, and what it said on its screen.
@@ -162,10 +314,14 @@ mod tests {
     }
 
     fn case() -> Case {
+        case_at(Pace::default())
+    }
+
+    fn case_at(pace: Pace) -> Case {
         let folder = tempfile::tempdir().unwrap();
         let store = Store::open(&folder.path().join("sessions.db"), "calm-river").unwrap();
         let wire = Wire::open(&folder.path().join("wire.jsonl"), "calm-river").unwrap();
-        let window = Window::new(store, wire, Arc::new(Stop::default()), Vec::new());
+        let window = Window::new(store, wire, Arc::new(Stop::default()), Vec::new(), pace);
         Case { folder, window }
     }
 
@@ -216,6 +372,54 @@ mod tests {
         assert_eq!(screen, "working (esc twice to interrupt)\nDONE\n");
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn a_turn_that_leaves_a_command_running_ends_and_the_command_goes_on_reporting_on_the_wire() {
+        let mut case = case();
+        let jobs = case.folder.path().join("jobs");
+        case.window = case
+            .window
+            .leaving_jobs_in(jobs.clone(), 4242, Duration::ZERO);
+        case.window
+            .take("BACKGROUND 2 Reply with exactly: LEFT_IT")
+            .unwrap();
+        // The command's shell is a job of the window, as the rig finds one.
+        let pid: u32 = std::fs::read_to_string(jobs.join("job-4242-1.pid"))
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        assert!(cf_e2e::process::is_alive(pid), "its command runs");
+        let updates = |wire: &[Value]| {
+            wire.iter()
+                .filter(|record| record["update"]["sessionUpdate"] == "tool_call_update")
+                .count()
+        };
+        // The turn ended with the answer, and what the command says comes after it.
+        let wire = case.wire();
+        let ended = wire
+            .iter()
+            .position(|record| record["cause"] == "complete")
+            .unwrap();
+        assert!(wire[..ended]
+            .iter()
+            .any(|record| record["update"]["sessionUpdate"] == "tool_call"));
+        let gone = (0..100).any(|_| {
+            thread::sleep(Duration::from_millis(100));
+            !cf_e2e::process::is_alive(pid)
+        });
+        assert!(gone, "the command ran its two seconds");
+        // Nothing is said once it has ended, which the thread that says it sees within a
+        // look.
+        thread::sleep(Duration::from_millis(600));
+        let wire = case.wire();
+        let after = &wire[ended + 1..];
+        assert!(updates(after) > 3, "{after:?}");
+        assert_eq!(updates(&wire[..=ended]), 0);
+        thread::sleep(Duration::from_millis(600));
+        assert_eq!(case.wire().len(), wire.len());
+    }
+
     #[test]
     fn a_turn_that_is_stopped_is_cancelled_on_the_wire_and_leaves_what_was_said_with_no_end_to_its_turn(
     ) {
@@ -258,5 +462,154 @@ mod tests {
             .map(|at| &nodes[*at]["metadata"]["extensions"]["chisel/client-message-id"])
             .collect();
         assert_eq!(clients, ["client-1", "client-2"]);
+    }
+
+    /// Whether the wire of `folder` holds a record of the thought of an agent at work.
+    fn thinking(folder: &std::path::Path) -> bool {
+        std::fs::read_to_string(folder.join("wire.jsonl"))
+            .unwrap_or_default()
+            .lines()
+            .any(|line| line.contains("agent_thought_chunk"))
+    }
+
+    #[test]
+    fn a_turn_is_begun_for_a_model_s_time_before_the_agent_says_a_word_and_shows_no_work_in_it() {
+        let first_word = Duration::from_millis(800);
+        let mut case = case_at(Pace {
+            first_word,
+            work: Duration::ZERO,
+        });
+        let folder = case.folder.path().to_path_buf();
+        let taking = thread::spawn(move || {
+            let started = std::time::Instant::now();
+            case.window.take("Reply with exactly: DONE").unwrap();
+            (case, started.elapsed())
+        });
+        // The message is put to the agent first, and its store has it: the turn is begun.
+        let prompt = || {
+            std::fs::read_to_string(folder.join("wire.jsonl"))
+                .unwrap_or_default()
+                .contains("session/prompt")
+        };
+        let waited = std::time::Instant::now();
+        while !prompt() {
+            assert!(waited.elapsed() < Duration::from_secs(10), "no prompt");
+            thread::sleep(Duration::from_millis(5));
+        }
+        assert!(!thinking(&folder), "its work is not to be seen yet");
+        let (case, took) = taking.join().unwrap();
+        assert!(took >= first_word, "{took:?}");
+        let nodes = case.nodes();
+        assert_eq!(nodes[0]["role"], "user");
+        assert!(thinking(&folder), "and is, once the model has spoken");
+    }
+
+    #[test]
+    fn a_turn_that_is_stopped_before_the_agent_says_a_word_is_cancelled_with_no_work_on_the_wire() {
+        let mut case = case_at(Pace {
+            first_word: Duration::from_secs(30),
+            work: Duration::ZERO,
+        });
+        let stop = Arc::clone(&case.window.stop);
+        let presser = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(100));
+            stop.press();
+        });
+        let started = std::time::Instant::now();
+        case.window.take("Reply with exactly: LATE").unwrap();
+        presser.join().unwrap();
+        assert!(started.elapsed() < Duration::from_secs(20));
+        assert!(!thinking(case.folder.path()));
+        let wire = case.wire();
+        assert!(wire
+            .iter()
+            .any(|record| record["method"] == "session/cancel"));
+        assert_eq!(wire.last().unwrap()["cause"], "cancelled");
+        assert_eq!(case.nodes()[1]["content"], "Interrupted");
+    }
+
+    /// Where on `wire` the first record is that `holds`.
+    #[cfg(unix)]
+    fn first_that(wire: &[Value], holds: impl Fn(&Value) -> bool) -> Option<usize> {
+        wire.iter().position(holds)
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_turn_that_leaves_a_command_runs_it_once_the_model_has_spoken_and_the_agent_has_thought_and_the_command_reports_after_the_answer(
+    ) {
+        let first_word = Duration::from_millis(800);
+        let mut case = case_at(Pace {
+            first_word,
+            work: Duration::ZERO,
+        });
+        let folder = case.folder.path().to_path_buf();
+        let jobs = folder.join("jobs");
+        case.window = case
+            .window
+            .leaving_jobs_in(jobs.clone(), 4242, Duration::ZERO);
+        let taking = thread::spawn(move || {
+            case.window
+                .take("BACKGROUND 2 Reply with exactly: LEFT_IT")
+                .unwrap();
+            case
+        });
+        // The message is put to the agent first, and the model has not spoken: the wire
+        // shows no thought of the agent's, and the window has no command.
+        let prompt = || {
+            std::fs::read_to_string(folder.join("wire.jsonl"))
+                .unwrap_or_default()
+                .contains("session/prompt")
+        };
+        let waited = std::time::Instant::now();
+        while !prompt() {
+            assert!(waited.elapsed() < Duration::from_secs(10), "no prompt");
+            thread::sleep(Duration::from_millis(5));
+        }
+        assert!(!thinking(&folder), "its work is not to be seen yet");
+        assert!(!jobs.join("job-4242-1.pid").exists(), "nor its command");
+        let case = taking.join().unwrap();
+
+        // The command goes on saying what it prints, on the wire, once the turn has ended.
+        let reported = |record: &Value| record["update"]["sessionUpdate"] == "tool_call_update";
+        let waited = std::time::Instant::now();
+        let wire = loop {
+            let wire = case.wire();
+            if first_that(&wire, reported).is_some() {
+                break wire;
+            }
+            assert!(waited.elapsed() < Duration::from_secs(10), "{wire:?}");
+            thread::sleep(Duration::from_millis(50));
+        };
+        let order = [
+            first_that(&wire, |record| record["method"] == "session/prompt"),
+            first_that(&wire, |record| {
+                record["update"]["sessionUpdate"] == "agent_thought_chunk"
+            }),
+            first_that(&wire, |record| {
+                record["update"]["sessionUpdate"] == "tool_call"
+            }),
+            first_that(&wire, |record| {
+                record["update"]["sessionUpdate"] == "agent_message_chunk"
+            }),
+            first_that(&wire, |record| record["cause"] == "complete"),
+            first_that(&wire, reported),
+        ];
+        assert!(order.iter().all(Option::is_some), "{order:?}");
+        assert!(
+            order.windows(2).all(|pair| pair[0] < pair[1]),
+            "the prompt, the thought, the tool, the answer, its end and the command's words, in that order: {order:?}"
+        );
+        // Its command ran its two seconds, and is gone with them.
+        let pid: u32 = std::fs::read_to_string(jobs.join("job-4242-1.pid"))
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        let gone = (0..100).any(|_| {
+            thread::sleep(Duration::from_millis(100));
+            !cf_e2e::process::is_alive(pid)
+        });
+        assert!(gone, "the command ran its two seconds");
     }
 }

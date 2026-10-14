@@ -22,13 +22,15 @@ use cf_base::env::Env;
 use cf_base::text::window_text;
 use cf_proto::agents::Harness;
 use cf_proto::panes::Servers;
+use cf_proto::specs::Variant;
 
 use super::channel::{hex, launch_configuration, send, Channel};
 use super::install::prepare_extension;
+use super::paths;
 use super::record::evidence::working;
 use crate::contract::{
     Adapter, Admission, Held, Launch, Observed, Pane, PaneHost, Prepared, Readiness, Records,
-    Window, Work,
+    Skill, Window, Work,
 };
 use crate::detect::executable;
 use crate::records::{Options, PiSettlement};
@@ -37,7 +39,7 @@ use crate::shared::admission::admission;
 use crate::shared::left_open::LeftOpen;
 use crate::shared::record_state::{record_state, switched_to, unnamed};
 use crate::shared::role::write_role;
-use crate::shared::window_args;
+use crate::shared::{specmint, window_args};
 
 /// Why a window that has not named its conversation waits.
 const HOLD: &str = "Pi has not said yet which conversation its window shows";
@@ -110,9 +112,19 @@ impl Adapter for PiAdapter {
             } else {
                 None
             };
+            // A chief given specs has ConsensFlow's own copy of its Specmint
+            // skill written where it is kept for every launch, and Pi is given
+            // it as a second skill; where Pi has the variant installed itself
+            // it finds it.
+            let specmint = specmint::write_own(Harness::Pi, &self.env, launch)?;
             let mut argv = vec![executable];
             argv.extend(configuration.args);
             argv.extend(["--skill".to_owned(), role.file]);
+            argv.extend(
+                specmint
+                    .into_iter()
+                    .flat_map(|copy| ["--skill".to_owned(), copy.file()]),
+            );
             argv.extend([
                 "--append-system-prompt".to_owned(),
                 launch.instructions.to_owned(),
@@ -140,6 +152,16 @@ impl Adapter for PiAdapter {
         })
     }
 
+    /// Pi's `--session-id` makes the session where there is none and resumes it
+    /// where there is, so a window opened on any session of its does not end,
+    /// whatever was said in it. Its file of a session is not asked after: Pi's
+    /// `sessionDir` setting and the working directory of the launch choose the
+    /// folder it is in, which a look from here does not know, and a file not found
+    /// there would say Pi holds nothing where it holds the session.
+    fn resumable<'a>(&'a self, _session: &'a str) -> Work<'a, Option<bool>> {
+        Box::pin(async { Some(true) })
+    }
+
     /// Pi's bash tool starts each command `detached` wherever there are process
     /// groups to detach in (`process.platform !== "win32"`, in
     /// `@earendil-works/pi-coding-agent/dist/core/tools/bash.js`): a session of
@@ -150,6 +172,15 @@ impl Adapter for PiAdapter {
         } else {
             Servers::InGroup
         }
+    }
+
+    fn specmint(&self, variant: Variant) -> Result<Skill, String> {
+        specmint::place(
+            Harness::Pi,
+            &self.env,
+            variant,
+            paths::global_specmint(&self.env, variant),
+        )
     }
 }
 

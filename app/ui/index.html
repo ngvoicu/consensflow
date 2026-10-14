@@ -57,6 +57,38 @@
     </main>
   </div>
 
+  <ul class="project-menu" id="project-menu" role="menu" aria-label="Project" hidden>
+    <li role="none"><button type="button" role="menuitem" data-action="rename">Rename…</button></li>
+    <li role="none"><button type="button" role="menuitem" data-action="describe">Description…</button></li>
+  </ul>
+  <dialog id="rename-dialog" class="settings" aria-labelledby="rename-title">
+    <form class="dialog-form">
+      <h2 id="rename-title">Rename project</h2>
+      <p class="dialog-help">The name shows in the list and over the board. The project's folder stays where it is, and so does everything in it.</p>
+      <label>Name
+        <input name="name" required maxlength="100" autocomplete="off" spellcheck="false">
+      </label>
+      <p class="dialog-refusal" role="alert" hidden></p>
+      <div class="dialog-actions">
+        <button class="quiet-button" type="button" value="cancel">Cancel</button>
+        <button class="primary-button" type="submit">Rename</button>
+      </div>
+    </form>
+  </dialog>
+  <dialog id="describe-dialog" class="settings" aria-labelledby="describe-title">
+    <form class="dialog-form">
+      <h2 id="describe-title">Project description</h2>
+      <p class="dialog-help">One line under the project's name in the list, for you alone: no agent is told it. Leave it empty to take it away.</p>
+      <label>Description
+        <input name="description" maxlength="200" autocomplete="off">
+      </label>
+      <p class="dialog-refusal" role="alert" hidden></p>
+      <div class="dialog-actions">
+        <button class="quiet-button" type="button" value="cancel">Cancel</button>
+        <button class="primary-button" type="submit">Save</button>
+      </div>
+    </form>
+  </dialog>
 
   <dialog id="delete-dialog" class="settings" aria-labelledby="delete-title">
     <form class="dialog-form" method="dialog">
@@ -182,6 +214,42 @@
         <p class="staff-hint" id="staff-hint" hidden></p>
       </fieldset>
       <label class="check"><input type="checkbox" id="staff-gate" name="gate">Human approval required: every message between the chief and its staff waits until you pass it on</label>
+      <fieldset class="staff-wakeup" id="staff-wakeup">
+        <legend>Wake-up calls</legend>
+        <label class="check"><input type="checkbox" name="wakeup-on">Wake the chief now and then</label>
+        <p class="wakeup-help">A chief that stopped while work is left carries on: it is asked whether it still has work to do. Nothing is sent while the project is closed, or while you have typed to the chief and not sent it; its answer stays in its terminal.</p>
+        <div class="wakeup-when">
+          <label>Every<input type="number" name="wakeup-every" min="1" step="1" required></label>
+          <label>Unit<select name="wakeup-unit"><option value="minutes">minutes</option><option value="hours">hours</option><option value="days">days</option></select></label>
+        </div>
+        <label>What it says<textarea name="wakeup-text" rows="3"></textarea></label>
+        <p class="staff-hint wakeup-hint" role="alert" hidden></p>
+        <div class="dialog-actions"><button class="primary-button" type="button" name="wakeup-save">Save wake-up calls</button></div>
+      </fieldset>
+      <fieldset class="project-specs" id="staff-specs">
+        <legend>Specs</legend>
+        <p class="specs-help">With specs on, the chief plans big work as a spec, with Specmint, and puts each phase on the board as tasks; a small ask still goes straight on the board. The app's setting is under Settings, on the Agents screen. A change reaches the chief when it next starts: after Resume, or when you switch the chief.</p>
+        <label>Specs
+          <select name="specs">
+            <option value="follow">Follow the app's setting</option>
+            <option value="on">On</option>
+            <option value="off">Off</option>
+          </select>
+        </label>
+        <label>Specs folder, inside the project
+          <input name="specsFolder" placeholder=".specs" autocomplete="off" spellcheck="false">
+        </label>
+        <label>Specmint variant
+          <select name="specsVariant">
+            <option value="core">core</option>
+            <option value="core-html">core-html</option>
+            <option value="tdd">tdd</option>
+            <option value="tdd-html">tdd-html</option>
+          </select>
+        </label>
+        <p class="staff-hint" id="staff-specs-note" role="status" hidden></p>
+        <button class="quiet-button" type="button" id="staff-specs-save">Save specs</button>
+      </fieldset>
       <div class="dialog-actions">
         <button class="quiet-button" type="button" value="cancel">Close</button>
       </div>

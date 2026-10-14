@@ -7,12 +7,13 @@
 //! forget the folder (`claude purge`, which is how it deletes a project's
 //! state), and Pi's folder of it is taken away. The others (OpenCode's and
 //! Devin's databases, Codex's session files) are not taken apart: they belong
-//! to a database or to a day's folder that is the person's.
+//! to a database or to a day's folder that is the person's. The approval suite
+//! and the specs suite both clean up so.
 
 use std::path::{Path, PathBuf};
 
-use cf_e2e::process::{own_var, Run};
-use cf_e2e::rig::project_name as claude_name;
+use crate::process::{own_var, Run};
+use crate::rig::project_name as claude_name;
 
 /// The name Pi gives a folder under its `sessions`: the path without its first
 /// slash and with the others made dashes, between two dashes at each end.
@@ -159,7 +160,7 @@ mod tests {
         let asked = folder.path().join("asked");
         // A stand-in Claude that knows the project of the path `/known` only.
         let program = folder.path().join("claude");
-        cf_e2e::files::write_executable(
+        crate::files::write_executable(
             &program,
             format!(
                 "#!/bin/sh\necho \"$HOME $*\" >> '{}'\n[ \"$3\" = /known ]\n",

@@ -17,7 +17,7 @@ use crate::views::conversation_view;
 pub use chief::ChiefSwitch;
 pub(crate) use chief::{chief_history, chief_open_work, history_read, last_switch, switch_chief};
 pub use transcripts::TRANSCRIPT_ITEM_MAX;
-pub(crate) use transcripts::{copied_item_with, copy_transcript, transcript};
+pub(crate) use transcripts::{copied_item_with, copy_transcript, transcript, typed_since};
 
 /// A participant's new native conversation; the one before it ends.
 pub(crate) fn start_conversation(
@@ -82,6 +82,44 @@ pub(crate) fn bind_conversation(
             json!({ "conversation": conversation_id, "nativeSession": native_session }),
         )?;
         known_conversation(store, conversation_id)
+    })
+}
+
+/// The role text a conversation was last given (migration 0016): none where it
+/// is not known, as for a conversation from before the column or one the
+/// human's window was switched to. A conversation that is not there is refused.
+pub(crate) fn conversation_role_text(
+    store: &Store,
+    conversation_id: i64,
+) -> Result<Option<String>, LedgerError> {
+    store
+        .db
+        .query_row(
+            "SELECT role_text FROM conversation WHERE id = ?",
+            [conversation_id],
+            |row| row.get(0),
+        )
+        .optional()?
+        .ok_or_else(|| unknown_conversation(conversation_id))
+}
+
+/// A conversation is given `text` as its role. It logs no event: it is written
+/// at the start of every conversation of a harness that keeps its first
+/// instructions, and no trace of Node's has one.
+pub(crate) fn set_conversation_role_text(
+    store: &mut Store,
+    conversation_id: i64,
+    text: &str,
+) -> Result<(), LedgerError> {
+    store.write(|store| {
+        let written = store.db.execute(
+            "UPDATE conversation SET role_text = ? WHERE id = ?",
+            params![text, conversation_id],
+        )?;
+        if written == 0 {
+            return Err(unknown_conversation(conversation_id));
+        }
+        Ok(())
     })
 }
 
@@ -203,7 +241,10 @@ fn conversation_by_id(store: &Store, id: i64) -> Result<Option<ConversationView>
 
 /// A conversation by its id, or a refusal naming it.
 fn known_conversation(store: &Store, id: i64) -> Result<ConversationView, LedgerError> {
-    conversation_by_id(store, id)?.ok_or_else(|| {
-        LedgerError::refused_with("unknown-conversation", format!("no conversation {id}"), 404)
-    })
+    conversation_by_id(store, id)?.ok_or_else(|| unknown_conversation(id))
+}
+
+/// The refusal for a conversation that is not there.
+fn unknown_conversation(id: i64) -> LedgerError {
+    LedgerError::refused_with("unknown-conversation", format!("no conversation {id}"), 404)
 }

@@ -239,6 +239,48 @@ pub(crate) fn copied_item_with(
         .optional()?)
 }
 
+/// Whether the participant's windows hold words the human typed after the
+/// delivery of message `after`, copied since `since` (when that message was
+/// queued): a user item no delivery made, which is one with no header of
+/// ConsensFlow's, that comes after the message's own item in its window's
+/// record. What a harness put in its record before the message (Codex's
+/// `# AGENTS.md instructions`, written when its first turn begins and so first
+/// copied with the message) is no news after it. An item copied again as it
+/// was keeps the time it was first copied, so it is not new either.
+pub(crate) fn typed_since(
+    store: &Store,
+    participant_id: i64,
+    since: &str,
+    after: i64,
+) -> Result<bool, LedgerError> {
+    let items = store
+        .db
+        .prepare(
+            "SELECT t.conversation_id, t.seq, t.text FROM transcript t
+       JOIN conversation c ON c.id = t.conversation_id
+       WHERE c.participant_id = ? AND t.role = 'user' AND t.copied_at > ?",
+        )?
+        .query_map(params![participant_id, since], |row| {
+            Ok((
+                row.get::<_, i64>("conversation_id")?,
+                row.get::<_, i64>("seq")?,
+                row.get::<_, String>("text")?,
+            ))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    // Where the message itself sits in each window's record, where it does.
+    let delivered_at = |conversation: i64| {
+        items
+            .iter()
+            .filter(|(of, _, text)| *of == conversation && header_of(text) == Some(after))
+            .map(|(_, seq, _)| *seq)
+            .min()
+    };
+    Ok(items.iter().any(|(conversation, seq, text)| {
+        header_of(text).is_none() && delivered_at(*conversation).is_none_or(|at| *seq > at)
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

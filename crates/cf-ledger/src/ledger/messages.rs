@@ -17,6 +17,27 @@ impl Ledger {
         messages::note(&mut self.store, project_id, note)
     }
 
+    /// A note from ConsensFlow to `to`, about no task, that says its
+    /// conversation `role` again, in the words `body`: the ledger knows it for a
+    /// replacement of a role from then on ([`Ledger::role_notes_to`]), and records
+    /// the role as told when the note is confirmed
+    /// ([`Ledger::confirm_delivery_telling`]).
+    pub fn note_role(
+        &mut self,
+        project_id: i64,
+        to: &str,
+        body: &str,
+        role: &str,
+    ) -> Result<MessageView, LedgerError> {
+        messages::note_role(&mut self.store, project_id, to, body, role)
+    }
+
+    /// The ids of the replacements of a role written to a participant, whatever
+    /// became of them, oldest first.
+    pub fn role_notes_to(&self, participant_id: i64) -> Result<Vec<i64>, LedgerError> {
+        messages::role_notes_to(&self.store, participant_id)
+    }
+
     /// ConsensFlow tells `to` that T-`number` is paused and why, when a stall
     /// paused it: a note of the task alone, which the other stalls of the
     /// pass join ([`Ledger::join_pause_note`]).
@@ -130,6 +151,17 @@ impl Ledger {
         messages::next_delivery(&self.store, participant_id)
     }
 
+    /// `message_id`, if it may go by every rule the head of the participant's
+    /// queue goes by, whatever waits before it: for a message the engine puts
+    /// ahead of the queue.
+    pub fn next_delivery_of(
+        &self,
+        participant_id: i64,
+        message_id: i64,
+    ) -> Result<Option<MessageView>, LedgerError> {
+        messages::next_delivery_of(&self.store, participant_id, message_id)
+    }
+
     /// A message's delivery into its window begins: it, and the rows its paste carries.
     pub fn begin_delivery(&mut self, message_id: i64) -> Result<Begun, LedgerError> {
         messages::begin_delivery(&mut self.store, message_id)
@@ -161,6 +193,17 @@ impl Ledger {
         receipt: Option<&Value>,
     ) -> Result<MessageView, LedgerError> {
         messages::confirm_delivery(&mut self.store, message_id, receipt)
+    }
+
+    /// The harness's own record proves a message that says its recipient's
+    /// conversation a role ([`Ledger::note_role`]) arrived: it is confirmed and
+    /// the conversation recorded as told that role, in one write.
+    pub fn confirm_delivery_telling(
+        &mut self,
+        message_id: i64,
+        receipt: Option<&Value>,
+    ) -> Result<MessageView, LedgerError> {
+        messages::confirm_delivery_telling(&mut self.store, message_id, receipt)
     }
 
     /// A message not yet delivered that no longer applies.

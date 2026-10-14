@@ -11,6 +11,8 @@ use tempfile::TempDir;
 use super::*;
 use crate::testing::EPOCH_MS;
 
+mod prompts;
+
 const MINUTE: i64 = 60_000;
 
 /// A wire log of its own, and a look at it.

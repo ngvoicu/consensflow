@@ -366,8 +366,11 @@ async fn an_operation_is_begun_where_its_frame_is_read_and_its_turns_end_before_
         .await;
 }
 
+mod describing;
 mod gate;
 mod reading;
 mod scripted;
+mod specs;
 mod stopping;
 mod turns;
+mod wake_up;

@@ -297,9 +297,56 @@ pub fn newest_session(
     Ok(answer.as_str().map(str::to_owned))
 }
 
+/// Where a harness has a Specmint variant installed for its user, as its adapter
+/// finds it (`Adapter::specmint`): the file of its `SKILL.md`, and whether the
+/// harness has it there, or has none and ConsensFlow would write its own where
+/// `skill` says.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SpecmintSkill {
+    pub installed: bool,
+    pub skill: String,
+}
+
+/// Where the harness of the kind `kind` has the Specmint variant `variant`
+/// (`core`, `core-html`, `tdd`, `tdd-html`) installed for its user, in the places
+/// `env` names (the machine's own, for a run of real harnesses).
+pub fn specmint(kind: &str, variant: &str, env: &[(String, String)]) -> Result<SpecmintSkill> {
+    let answer = question(&json!({
+        "op": "specmint", "kind": kind, "variant": variant, "env": env_object(env),
+    }))?;
+    Ok(specmint_of(&answer))
+}
+
+/// The skill an answer to `specmint` holds.
+fn specmint_of(answer: &Value) -> SpecmintSkill {
+    SpecmintSkill {
+        installed: answer["installed"] == true,
+        skill: answer["skill"].as_str().unwrap_or_default().to_owned(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_specmint_answer_says_whether_the_harness_has_the_variant_and_where_its_skill_is() {
+        let have = specmint_of(
+            &json!({ "installed": true, "skill": "/h/.agents/skills/specmint-tdd/SKILL.md" }),
+        );
+        assert!(have.installed && have.skill.ends_with("specmint-tdd/SKILL.md"));
+        let none =
+            specmint_of(&json!({ "installed": false, "skill": "/cf/role/specmint-core/SKILL.md" }));
+        assert!(!none.installed);
+        // An answer that says nothing is a harness that has none.
+        assert_eq!(
+            specmint_of(&Value::Null),
+            SpecmintSkill {
+                installed: false,
+                skill: String::new()
+            }
+        );
+    }
 
     #[test]
     fn the_answer_is_the_last_line_the_binary_printed() {

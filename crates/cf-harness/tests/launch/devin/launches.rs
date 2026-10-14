@@ -5,11 +5,13 @@ use std::fs;
 use std::path::Path;
 
 use cf_base::path;
-use cf_harness::contract::{Agent, Prepared};
-use cf_harness::testing::called;
+use cf_harness::contract::{Adapter, Agent, Prepared, Skill};
+use cf_harness::testing::{called, finished};
+use cf_proto::specs::Variant;
 use serde_json::{json, Value};
 
 use super::fixtures::*;
+use crate::kept;
 
 #[test]
 fn launches_devin_on_its_own_config_in_full_permission_mode_with_the_task_in_a_prompt_file() {
@@ -125,6 +127,39 @@ fn resumes_the_session_it_has() {
             "false",
         ])
     );
+}
+
+#[test]
+fn can_go_on_with_a_session_whose_store_holds_a_message_of_the_users_and_not_with_one_it_holds_none_of(
+) {
+    let home = Home::new();
+    let devin = home.adapter();
+    assert_eq!(
+        finished(devin.resumable("calm-river")),
+        None,
+        "Devin's store is not there: its record cannot be read"
+    );
+    let store = home.store();
+    assert_eq!(
+        finished(devin.resumable("calm-river")),
+        Some(false),
+        "the store has no row of the session: Devin writes it with the first message"
+    );
+    store.begins("calm-river");
+    assert_eq!(
+        finished(devin.resumable("calm-river")),
+        Some(false),
+        "nothing was said in it"
+    );
+    store.says("calm-river", "system", "You are Devin.");
+    assert_eq!(
+        finished(devin.resumable("calm-river")),
+        Some(false),
+        "what Devin writes of itself is no turn"
+    );
+    store.begins("brisk-ember");
+    store.says("brisk-ember", "user", "Write the parser");
+    assert_eq!(finished(devin.resumable("brisk-ember")), Some(true));
 }
 
 #[test]
@@ -259,4 +294,131 @@ fn refuses_a_window_without_its_role_text_and_writes_it_in_a_private_file() {
     }
     #[cfg(not(unix))]
     let _ = file;
+}
+
+/// Where the skills of a launch's role are, for the launch `id`.
+fn role_skills(home: &Home, id: &str) -> String {
+    path::join(&[
+        &home.root,
+        "consensflow",
+        "integrations",
+        "devin",
+        id,
+        "role",
+        ".claude",
+        "skills",
+    ])
+}
+
+#[test]
+fn a_chief_given_specs_has_the_skill_kept_for_every_launch_and_devin_is_given_nothing_more_than_its_role_text_which_names_it(
+) {
+    const OFF: &str = "3d4e5f60-7182-4394-8dbe-2f3a4b5c6d70";
+    const ON: &str = "3d4e5f60-7182-4394-8dbe-2f3a4b5c6d71";
+    for variant in Variant::ALL {
+        let home = Home::new();
+        let adapter = home.adapter();
+        let off = prepare_as(&adapter, &Request::chief(), OFF).unwrap();
+        let chief = Request {
+            specs: Some(variant),
+            ..Request::chief()
+        };
+        let on = prepare_as(&adapter, &chief, ON).unwrap();
+        let moved = |text: &str| text.replace(ON, OFF);
+        assert_eq!(
+            on.argv.iter().map(|arg| moved(arg)).collect::<Vec<_>>(),
+            off.argv,
+            "{variant:?}"
+        );
+        assert_eq!(
+            on.env
+                .iter()
+                .map(|(name, value)| (name.clone(), moved(value)))
+                .collect::<Vec<_>>(),
+            off.env
+        );
+        assert_eq!(
+            fs::read_dir(role_skills(&home, OFF)).unwrap().count(),
+            1,
+            "specs off: the role alone"
+        );
+        let consensflow = path::join(&[&home.root, "consensflow"]);
+        let skill = path::join(&[&kept::skill(&consensflow, "devin", variant), "SKILL.md"]);
+        assert_eq!(
+            adapter.specmint(variant).unwrap(),
+            Skill::Own(skill.clone()),
+            "{variant:?}: the place the role text names is the place written"
+        );
+        assert!(fs::read_to_string(&skill)
+            .unwrap()
+            .starts_with(&format!("---\nname: {}\n", variant.skill_name())));
+        assert_eq!(
+            fs::read_dir(role_skills(&home, ON)).unwrap().count(),
+            1,
+            "the role's skill alone: this one is kept beside no launch's"
+        );
+        // Devin reads the launches' folders for their wire logs, and a folder
+        // that holds a copy of a skill is none of them.
+        assert_eq!(
+            kept::names_in(&path::join(&[&consensflow, "integrations", "devin"])),
+            [OFF, ON],
+            "{variant:?}: the folder of Devin's launches holds launches"
+        );
+    }
+}
+
+#[test]
+#[cfg(unix)]
+fn a_devin_that_has_the_variant_installed_in_its_config_or_the_agents_skills_is_given_nothing_of_ours_and_another_variant_installed_is_left_alone(
+) {
+    let home = Home::new();
+    let adapter = home.adapter();
+    let install = |folder: &str, name: &str| {
+        let dir = path::join(&[&home.root, folder, name]);
+        fs::create_dir_all(&dir).unwrap();
+        let file = path::join(&[&dir, "SKILL.md"]);
+        fs::write(&file, format!("---\nname: {name}\n---\nthe human's own\n")).unwrap();
+        file
+    };
+    let own = install("config/devin/skills", "specmint-core-html");
+    let shared = install("home/.agents/skills", "specmint-tdd");
+    for (n, (variant, file)) in [(Variant::CoreHtml, &own), (Variant::Tdd, &shared)]
+        .into_iter()
+        .enumerate()
+    {
+        let id = format!("3d4e5f60-7182-4394-8dbe-2f3a4b5c6d8{n}");
+        assert_eq!(
+            adapter.specmint(variant).unwrap(),
+            Skill::Global(file.clone())
+        );
+        let chief = Request {
+            specs: Some(variant),
+            ..Request::chief()
+        };
+        prepare_as(&adapter, &chief, &id).unwrap();
+        assert_eq!(
+            fs::read_dir(role_skills(&home, &id)).unwrap().count(),
+            1,
+            "{variant:?}: nothing is written"
+        );
+    }
+    let before = (fs::read(&own).unwrap(), fs::read(&shared).unwrap());
+    let id = "3d4e5f60-7182-4394-8dbe-2f3a4b5c6d90";
+    let chief = Request {
+        specs: Some(Variant::Core),
+        ..Request::chief()
+    };
+    prepare_as(&adapter, &chief, id).unwrap();
+    assert_eq!(
+        kept::names_in(&kept::skills(
+            &path::join(&[&home.root, "consensflow"]),
+            "devin",
+            Variant::Core
+        )),
+        ["specmint-core"]
+    );
+    assert_eq!(
+        (fs::read(&own).unwrap(), fs::read(&shared).unwrap()),
+        before
+    );
 }

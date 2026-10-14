@@ -177,6 +177,36 @@ button:disabled { opacity: .45; cursor: default; }
   cursor: pointer;
 }
 .project-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* What the human wrote under a project's name: one line, quieter than the name, cut with an
+   ellipsis where it is too long (its whole text is the title). */
+.project-description { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--muted); }
+.project-name + .project-description { margin-top: -3px; }
+/* A project's menu, opened where it was asked for and over whatever the page draws: it sits
+   outside the list, which would clip it. */
+.project-menu {
+  position: fixed;
+  z-index: 30;
+  min-width: 168px;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-raised);
+  box-shadow: 0 8px 24px var(--shadow);
+}
+.project-menu button {
+  display: block;
+  width: 100%;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.project-menu button:hover, .project-menu button:focus-visible { background: var(--panel); }
+.project-menu button:focus-visible { outline-offset: -2px; }
 .project-tools {
   display: flex;
   justify-content: flex-end;
@@ -594,6 +624,20 @@ tr[data-session] .row-name { font-weight: 600; letter-spacing: .08em; text-trans
 .staff-pick .staff-add { border: 0; padding: 4px 0 0; margin-bottom: 0; }
 .board-empty td { padding: 14px 12px; font: 12px var(--mono); color: var(--muted); }
 .staff-hint { flex-basis: 100%; margin: 0; font-size: 12px; color: var(--muted); }
+/* The project's wake-up calls: whether, how often and what is said. */
+.staff-wakeup { display: grid; gap: 12px; border: 1px solid var(--line-soft); border-radius: 8px; padding: 10px 12px; margin: 0; }
+.staff-wakeup legend { padding: 0 6px; font: 700 10px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+.staff-wakeup .wakeup-help { margin: 0; font-size: 12px; color: var(--muted); }
+.staff-wakeup .wakeup-when { display: flex; gap: 12px; }
+.staff-wakeup .wakeup-when input[type="number"] { width: 6em; }
+.staff-wakeup .staff-hint { color: var(--buoy); }
+.staff-wakeup textarea { padding: 7px 9px; border-radius: 6px; border: 1px solid var(--line); background: var(--ink); color: var(--foam); font: inherit; resize: vertical; }
+/* The project's specs: its own group of the staff dialog, the controls one under another. */
+.project-specs { display: grid; gap: 10px; border: 1px solid var(--line-soft); border-radius: 8px; padding: 10px 12px; margin: 0; }
+.project-specs legend { padding: 0 6px; font: 700 10px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+.project-specs .specs-help { margin: 0; font-size: 12px; color: var(--muted); }
+.project-specs button { justify-self: start; }
+.project-specs :disabled { opacity: .5; }
 .member-confirm { color: var(--buoy); font-size: 12px; margin-right: 8px; }
 /* Each part of a task is a panel of its own, headed by what it is. */
 .drawer-section {
@@ -817,6 +861,8 @@ dialog::backdrop { background: rgba(4, 12, 15, .6); }
   color: var(--foam);
 }
 .dialog-actions { display: flex; gap: 8px; justify-content: flex-end; }
+/* What the daemon refused, said under the field the human typed in. */
+.dialog-refusal { margin: 0; font-size: 12px; color: var(--buoy); }
 /* What a delete keeps on the board, and why. */
 .dialog-kept { margin: 0; padding-left: 18px; display: grid; gap: 4px; font-size: 12px; color: var(--amber); }
 .icon-button { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; padding: 0; border-radius: 8px; border: 1px solid var(--line); background: transparent; color: var(--muted); cursor: pointer; }

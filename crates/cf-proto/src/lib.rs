@@ -12,4 +12,6 @@ pub mod ledger;
 pub mod page;
 pub mod panes;
 pub mod questions;
+pub mod specs;
 pub mod trace;
+pub mod wake_ups;

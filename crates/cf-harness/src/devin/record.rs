@@ -30,6 +30,7 @@ use crate::shared::record::cache::{Look, Options};
 use crate::shared::record::key::Keys;
 use crate::shared::record::reading::Reading;
 use store::Store;
+pub(crate) use store::MISSING_SESSION;
 use wires::Wires;
 
 /// The reader of the session `session`, in the Devin folders and the

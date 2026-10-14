@@ -4,8 +4,10 @@
 //! SHA-256 it was given gets in, and any other, or none, is turned away at the
 //! handshake. And what a window the daemon opens runs on (the regressions stand on
 //! it): what the daemon asks of the CLI before it opens one, the plugin servers the
-//! window opens with, and the turns its server takes and the rollout it writes them in.
+//! window opens with, the turns its server takes and the rollout it writes them in,
+//! which a thread has only once it has had one: what a window resumed on it finds.
 
+use std::net::TcpStream;
 use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -16,7 +18,8 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use tungstenite::client::IntoClientRequest;
 use tungstenite::http::HeaderValue;
-use tungstenite::Message;
+use tungstenite::stream::MaybeTlsStream;
+use tungstenite::{Message, WebSocket};
 
 #[cfg(unix)]
 use crate::stand_ins::{beside, until_there};
@@ -69,13 +72,10 @@ fn the_stand_in_codexs_server_on_loopback_lets_in_only_the_token_whose_hash_it_w
     let _turn = cf_e2e::serial::turn();
     let root = tempfile::tempdir()?;
     let log = root.path().join("codex.jsonl");
-    let hash: String = Sha256::digest(TOKEN.as_bytes())
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect();
     let server = Run::new(FAKE_CODEX)
         .args(["app-server", "--listen", "ws://127.0.0.1:0"])
-        .args(["--ws-auth", "capability-token", "--ws-token-sha256", &hash])
+        .args(["--ws-auth", "capability-token", "--ws-token-sha256"])
+        .arg(token_hash())
         .var("CF_TEST_CODEX_LOG", &log)
         .closed_input()
         .spawn()?;
@@ -231,62 +231,25 @@ fn the_stand_in_codexs_server_takes_a_turn_and_writes_its_rollout_where_the_daem
 ) -> Outcome {
     let _turn = cf_e2e::serial::turn();
     let root = tempfile::tempdir()?;
-    let hash: String = Sha256::digest(TOKEN.as_bytes())
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect();
-    let server = Run::new(FAKE_CODEX)
-        .args(["app-server", "--listen", "ws://127.0.0.1:0"])
-        .args(["--ws-auth", "capability-token", "--ws-token-sha256", &hash])
-        .var("CF_TEST_CODEX_LOG", root.path().join("codex.jsonl"))
-        .var("CF_TEST_CODEX_THREADS", "unique")
-        .var("CODEX_HOME", root.path())
-        .closed_input()
-        .spawn()?;
-    let port = listening_on(&server);
-    let (mut socket, _) =
-        tungstenite::connect(request_to(port, Some(&format!("Bearer {TOKEN}")))?)?;
-    let mut call =
-        |id: u64, method: &str, params: Value| -> Result<Value, Box<dyn std::error::Error>> {
-            socket.send(Message::text(
-                json!({ "id": id, "method": method, "params": params }).to_string(),
-            ))?;
-            let Message::Text(answer) = socket.read()? else {
-                panic!("the server did not answer with text");
-            };
-            Ok(serde_json::from_str(answer.as_str())?)
-        };
-    let started = call(1, "thread/start", json!({ "ephemeral": false }))?;
-    let thread = started["result"]["thread"]["id"]
-        .as_str()
-        .unwrap_or_default()
-        .to_owned();
+    let server = server_in(root.path())?;
+    let mut client = Client::connect(listening_on(&server))?;
+    let thread = client.start_thread()?;
     assert_ne!(
         thread, "01a09094-938f-7fd1-a2d3-315cf92b4559",
         "a thread of its own"
     );
-    let input = json!([{
-        "type": "text",
-        "text": "[ConsensFlow m-4 · T-1 · task from @chief]\nSLEEP 1 Reply with exactly: DONE",
-        "text_elements": [],
-    }]);
-    let handed = call(
-        2,
+    let handed = client.call(
         "turn/start",
-        json!({ "threadId": thread, "input": input }),
+        json!({ "threadId": thread, "input": turn_input(DONE_IN_A_SECOND) }),
     )?;
     assert!(handed["result"]["turn"].is_object(), "{handed}");
 
     // The rollout is in `sessions/YYYY/MM/DD/`, its name holding the thread, and it ends
     // with the turn complete once the message's seconds are worked.
-    let rollout = loop_until(|| find_rollout(&root.path().join("sessions"), &thread))
-        .ok_or("no rollout was written")?;
+    let rollout =
+        loop_until(|| rollout_of(root.path(), &thread)).ok_or("no rollout was written")?;
     let records = loop_until(|| {
-        let records: Vec<Value> = files::read_string(&rollout)
-            .unwrap_or_default()
-            .lines()
-            .filter_map(|line| serde_json::from_str(line).ok())
-            .collect();
+        let records = records_of(&rollout);
         records
             .iter()
             .any(|record| record["payload"]["type"] == "task_complete")
@@ -327,6 +290,132 @@ fn the_stand_in_codexs_server_takes_a_turn_and_writes_its_rollout_where_the_daem
     Ok(())
 }
 
+/// A thread has a rollout only once it has had a turn, as Codex's does: a window
+/// resumed on one that has had none finds nothing, and the server of another
+/// window resumes one that has, and goes on in its rollout.
+#[test]
+fn the_stand_in_codexs_thread_has_no_rollout_before_its_first_turn_and_another_server_resumes_it_once_it_has_one(
+) -> Outcome {
+    let _turn = cf_e2e::serial::turn();
+    let root = tempfile::tempdir()?;
+    let first = server_in(root.path())?;
+    let mut client = Client::connect(listening_on(&first))?;
+    let thread = client.start_thread()?;
+    // Started, and nothing said in it: no record of it, and a resume of it finds none.
+    assert_eq!(rollout_of(root.path(), &thread), None);
+    let refused = client.call("thread/resume", json!({ "threadId": thread }))?;
+    assert_eq!(
+        refused["error"]["message"],
+        format!("no rollout found for thread id {thread}")
+    );
+    assert!(refused.get("result").is_none(), "{refused}");
+    let unknown = client.call("thread/resume", json!({ "threadId": "no-such-thread" }))?;
+    assert!(unknown["error"].is_object(), "{unknown}");
+
+    // Its first turn begins its rollout.
+    client.call(
+        "turn/start",
+        json!({ "threadId": thread, "input": turn_input(DONE_IN_A_SECOND) }),
+    )?;
+    let rollout =
+        loop_until(|| rollout_of(root.path(), &thread)).ok_or("no rollout was written")?;
+    loop_until(|| (completed(&rollout) == 1).then_some(())).ok_or("the turn never completed")?;
+
+    // Another window's server is resumed on it, and its next turn is in the same record.
+    let second = server_in(root.path())?;
+    let mut again = Client::connect(listening_on(&second))?;
+    let resumed = again.call("thread/resume", json!({ "threadId": thread }))?;
+    assert_eq!(resumed["result"]["thread"]["id"], thread.as_str());
+    again.call(
+        "turn/start",
+        json!({ "threadId": thread, "input": turn_input(DONE_IN_A_SECOND) }),
+    )?;
+    loop_until(|| (completed(&rollout) == 2).then_some(()))
+        .ok_or("the turn after the resume never completed")?;
+    let records = records_of(&rollout);
+    let begun = records
+        .iter()
+        .filter(|record| record["type"] == "session_meta")
+        .count();
+    assert_eq!(begun, 1, "the record was begun once, by the first turn");
+    let ordinals: Vec<u64> = records
+        .iter()
+        .filter_map(|record| record["ordinal"].as_u64())
+        .collect();
+    assert!(
+        ordinals.first() == Some(&0) && ordinals.windows(2).all(|pair| pair[1] == pair[0] + 1),
+        "numbered on from where the record ended: {ordinals:?}"
+    );
+    Ok(())
+}
+
+/// A message as the daemon gives a task's brief, which the stand-in's agent works
+/// for a second before it answers.
+const DONE_IN_A_SECOND: &str =
+    "[ConsensFlow m-4 · T-1 · task from @chief]\nSLEEP 1 Reply with exactly: DONE";
+
+/// The input a turn is handed with: `text`, as the first of it.
+fn turn_input(text: &str) -> Value {
+    json!([{ "type": "text", "text": text, "text_elements": [] }])
+}
+
+/// The SHA-256 of the token the stand-in's server lets in, as the server is told it.
+fn token_hash() -> String {
+    Sha256::digest(TOKEN.as_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+/// A stand-in Codex's server on loopback, with the Codex home `home`, its threads its own.
+fn server_in(home: &Path) -> Result<Spawned, Box<dyn std::error::Error>> {
+    Ok(Run::new(FAKE_CODEX)
+        .args(["app-server", "--listen", "ws://127.0.0.1:0"])
+        .args(["--ws-auth", "capability-token", "--ws-token-sha256"])
+        .arg(token_hash())
+        .var("CF_TEST_CODEX_LOG", home.join("codex.jsonl"))
+        .var("CF_TEST_CODEX_THREADS", "unique")
+        .var("CODEX_HOME", home)
+        .closed_input()
+        .spawn()?)
+}
+
+/// A connection to the stand-in's server, asking what a TUI asks.
+struct Client {
+    socket: WebSocket<MaybeTlsStream<TcpStream>>,
+    asked: u64,
+}
+
+impl Client {
+    /// Connected to the server on `port`, with the token it lets in.
+    fn connect(port: u16) -> Result<Self, Box<dyn std::error::Error>> {
+        let (socket, _) =
+            tungstenite::connect(request_to(port, Some(&format!("Bearer {TOKEN}")))?)?;
+        Ok(Self { socket, asked: 0 })
+    }
+
+    /// What the server answers `method` with, whole: its `result`, or its `error`.
+    fn call(&mut self, method: &str, params: Value) -> Result<Value, Box<dyn std::error::Error>> {
+        self.asked += 1;
+        self.socket.send(Message::text(
+            json!({ "id": self.asked, "method": method, "params": params }).to_string(),
+        ))?;
+        let Message::Text(answer) = self.socket.read()? else {
+            panic!("the server did not answer with text");
+        };
+        Ok(serde_json::from_str(answer.as_str())?)
+    }
+
+    /// The thread the server starts.
+    fn start_thread(&mut self) -> Result<String, Box<dyn std::error::Error>> {
+        let started = self.call("thread/start", json!({ "ephemeral": false }))?;
+        Ok(started["result"]["thread"]["id"]
+            .as_str()
+            .unwrap_or_default()
+            .to_owned())
+    }
+}
+
 /// What `look` finds, looked for up to fifteen seconds.
 fn loop_until<T>(mut look: impl FnMut() -> Option<T>) -> Option<T> {
     let started = Instant::now();
@@ -341,21 +430,25 @@ fn loop_until<T>(mut look: impl FnMut() -> Option<T>) -> Option<T> {
     }
 }
 
-/// The rollout of `thread` under Codex's `sessions` folder: the first file whose
-/// name holds it, as the daemon finds one.
-fn find_rollout(folder: &Path, thread: &str) -> Option<PathBuf> {
-    for entry in std::fs::read_dir(folder).ok()?.flatten() {
-        let path = entry.path();
-        if path.is_dir() {
-            if let Some(found) = find_rollout(&path, thread) {
-                return Some(found);
-            }
-        } else if path
-            .file_name()
-            .is_some_and(|name| name.to_string_lossy().contains(thread))
-        {
-            return Some(path);
-        }
-    }
-    None
+/// The rollout of `thread` under Codex's `sessions` folder in `home`: the first
+/// file whose name holds it, as the daemon finds one.
+fn rollout_of(home: &Path, thread: &str) -> Option<PathBuf> {
+    files::find(&home.join("sessions"), &|name| name.contains(thread))
+}
+
+/// The records of a rollout, whole ones only.
+fn records_of(rollout: &Path) -> Vec<Value> {
+    files::read_finished_lines(rollout)
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|line| serde_json::from_str(line).ok())
+        .collect()
+}
+
+/// How many turns the rollout says are complete.
+fn completed(rollout: &Path) -> usize {
+    records_of(rollout)
+        .iter()
+        .filter(|record| record["payload"]["type"] == "task_complete")
+        .count()
 }

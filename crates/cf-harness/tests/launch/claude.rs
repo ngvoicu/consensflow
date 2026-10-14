@@ -17,18 +17,20 @@ use cf_base::env::Env;
 use cf_base::path;
 use cf_harness::claude::ClaudeAdapter;
 use cf_harness::contract::{
-    Adapter, Admission, Agent, Held, HostError, Launch, LaunchId, Pane, Prepared, Readiness,
+    Adapter, Admission, Agent, Held, HostError, Launch, LaunchId, Pane, Prepared, Readiness, Specs,
     Waiting, Window,
 };
 use cf_harness::records::Role;
 use cf_harness::testing::{
     fake_executable, finished, AnsweringHost, Fakes, OtherProcess, FIRST_MESSAGE_MS,
 };
+use cf_proto::specs::Variant;
 use serde_json::{json, Map, Value};
 use tempfile::TempDir;
 
 mod agents;
 mod resumed;
+mod specs;
 mod stops;
 
 /// The launch's id: a uuid, as the engine mints one (Node's tests took any
@@ -132,6 +134,8 @@ struct Request {
     resume: Option<String>,
     message: Option<String>,
     agent: Option<Agent<'static>>,
+    /// The Specmint variant a chief is given, where its project has specs on.
+    specs: Option<Variant>,
 }
 
 impl Default for Request {
@@ -148,6 +152,7 @@ impl Default for Request {
                 thinking: None,
                 designer: false,
             }),
+            specs: None,
         }
     }
 }
@@ -176,6 +181,9 @@ impl Request {
 
 fn prepare(adapter: &ClaudeAdapter, request: &Request) -> Result<Prepared, String> {
     let id = LaunchId::new(LAUNCH).unwrap();
+    let skill = request
+        .specs
+        .map(|variant| adapter.specmint(variant).unwrap());
     let launch = Launch {
         id: &id,
         project: 1,
@@ -186,6 +194,10 @@ fn prepare(adapter: &ClaudeAdapter, request: &Request) -> Result<Prepared, Strin
         message: request.message.as_deref(),
         agent: request.agent,
         instructions: request.instructions,
+        specs: request
+            .specs
+            .zip(skill.as_ref())
+            .map(|(variant, skill)| Specs { variant, skill }),
         first_message_ms: FIRST_MESSAGE_MS,
     };
     finished(adapter.prepare(&launch))
@@ -396,6 +408,28 @@ fn starts_afresh_under_the_same_id_a_conversation_claude_never_kept_instead_of_r
         Some("Review T-1"),
         "the brief goes in as its first message"
     );
+}
+
+#[test]
+fn can_go_on_with_a_conversation_whose_transcript_claude_kept_and_not_with_one_it_kept_none_of() {
+    let home = Home::new();
+    let session = "0f8fad5b-d9cb-469f-a165-70867728950e";
+    let claude = home.adapter();
+    assert_eq!(
+        finished(claude.resumable(session)),
+        Some(false),
+        "nothing was said in it: Claude kept no transcript"
+    );
+    home.transcript(session, &[user_line(session, 1, "Write the parser")]);
+    assert_eq!(finished(claude.resumable(session)), Some(true));
+    assert_eq!(
+        finished(claude.resumable("6a2f41ac-8c1d-4c55-9b4e-2f1e8a3d9c70")),
+        Some(false),
+        "another conversation's"
+    );
+    // Where its folder cannot be looked for, Claude cannot tell.
+    let nowhere = adapter(&Env::default(), Path::new(&home.root));
+    assert_eq!(finished(nowhere.resumable(session)), None);
 }
 
 #[test]

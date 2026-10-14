@@ -217,6 +217,8 @@ pub fn project_of(participants: Vec<ParticipantView>) -> ProjectView {
         created_at: "2026-09-19T10:00:01.000Z".to_owned(),
         updated_at: "2026-09-19T10:00:01.000Z".to_owned(),
         participants,
+        specs: None,
+        description: None,
     }
 }
 

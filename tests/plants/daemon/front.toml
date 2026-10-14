@@ -226,7 +226,7 @@ replace = ""
 
 [[plant]]
 name = "page: an operation is named otherwise than the page names it"
-meant = "the_operations_are_the_twenty_eight_the_app_forwards"
+meant = "the_operations_are_the_ones_the_app_forwards"
 runs = ["proto-page"]
 
 [[plant.edit]]

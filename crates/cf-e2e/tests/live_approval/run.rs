@@ -7,13 +7,12 @@
 use std::path::PathBuf;
 use std::time::Instant;
 
-use cf_e2e::live::{self, cut, warnings, Harness, Installed, Log};
+use cf_e2e::live::{self, cleanup, cut, warnings, Harness, Installed, Log};
 use cf_e2e::process::own_var;
 use cf_e2e::rig::Rig;
 use cf_e2e::Result;
 
 use crate::agents;
-use crate::cleanup;
 use crate::flow::Ctx;
 use crate::plan::{Planned, Step};
 use crate::project;

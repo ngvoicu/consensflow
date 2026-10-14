@@ -74,16 +74,6 @@ impl Task {
             output: format!("ran: {COMMAND}"),
         }
     }
-
-    /// The task of a stand-in that leaves work behind it, as a worker does that starts a
-    /// job in the background and ends its turn: a job of `seconds` seconds that runs on
-    /// past the turn, and the reply that says it was left.
-    pub fn stand_in_leaving(seconds: u64) -> Self {
-        Self {
-            brief: format!("BACKGROUND {seconds} left a job running"),
-            output: "left a job running".to_owned(),
-        }
-    }
 }
 
 #[cfg(test)]
@@ -120,12 +110,5 @@ mod tests {
         let task = Task::stand_in();
         assert_eq!(task.brief, "RUN hostname");
         assert_eq!(task.output, "ran: hostname");
-    }
-
-    #[test]
-    fn the_stand_in_that_leaves_work_is_told_how_long_the_job_runs_and_says_it_left_it() {
-        let task = Task::stand_in_leaving(9);
-        assert_eq!(task.brief, "BACKGROUND 9 left a job running");
-        assert_eq!(task.output, "left a job running");
     }
 }

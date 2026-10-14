@@ -9,16 +9,34 @@
 //! nothing". A screen that showed nothing is an empty `tail`.
 //!
 //! The host also says what a window's program started and left running: the
-//! processes of the window's tree that began after the turn did, which
-//! `pane.mark` fixes the start of ([`MarkRequest`]) and `pane.background`
-//! answers ([`BackgroundProcess`]), and which `pane.exit` lists for a window
-//! that closed with some of it running.
+//! processes of the window's tree that began after the turn did and that it can
+//! tell are the turn's work, which `pane.mark` fixes the start of
+//! ([`MarkRequest`]) and `pane.background` answers ([`BackgroundProcess`]), and
+//! which `pane.exit` lists for a window that closed with some of it running. It
+//! ends them without closing the window when asked (`pane.end_background`:
+//! [`EndRequest`], answered by [`Ending`]), and chooses what to end itself, from
+//! the whole of what it can tell: the daemon names no process, so no number crosses
+//! from one look to the next. A process it cannot tell the turn's from the
+//! harness's it leaves alone, and says nothing of; nor does it end what it cannot
+//! prove the turn's by a chain of processes that run to a shell the harness started.
+//! What it ends it chooses once, when the ending begins, and answers within
+//! [`ENDING_BOUND`].
+
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
 /// The most lines of a screen the host sends as its tail, and so the most a
 /// request for it gets. Empty lines are not counted: they are not sent.
 pub const TAIL_LINES: usize = 12;
+
+/// The most the host takes to end what a turn left, and to answer that it has: the
+/// moment it waits before it looks again at what it found (two seconds), the grace a
+/// close gives what it asks to end (ten), what it waits after it has killed what
+/// ignored the request (two) and its looks between, with room; on Windows the whole of
+/// its passes is held to less than this. The daemon waits for the answer by this and a
+/// margin, and holds the window until it has it.
+pub const ENDING_BOUND: Duration = Duration::from_secs(20);
 
 /// The most processes the host names when it says what a window left running
 /// (it says how many there are besides): a note quotes a few, and a frame is
@@ -33,8 +51,9 @@ pub const COMMAND_CHARS: usize = 512;
 /// anything the processes are: a server and a recording run are both children of
 /// the harness. The harness's adapter says it of its windows and every
 /// `pane.mark` carries it. Each shape says what is the harness's, and so no turn's
-/// work, however late it began; what else the window's tree has that the mark did
-/// not is the turn's, as it always was.
+/// work, however late it began, and the host ends none of it: what it lists and
+/// ends as the turn's is what a shell the harness started started, and what that
+/// started, and these are told apart from it.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Servers {
@@ -51,10 +70,15 @@ pub enum Servers {
     /// process, which is in the window's group. What any of them starts later is
     /// the harness's.
     AtLaunch,
-    /// Not known: the host tells the harness's processes from the turn's by when
-    /// they began alone. What a harness is until someone has looked at what a
-    /// window's tree holds with a command of its agent running; and what a word
-    /// this host does not know reads as.
+    /// Not known: no process is told for the harness's by where it is, so only what
+    /// the host can prove the harness's by its program (a program named for it
+    /// that is beside its own binary, and what descends from one) is left alone, and
+    /// only what it can prove the turn's (a shell the harness started after the
+    /// mark and what the shell started, by a chain of processes that run) is the
+    /// turn's: what it can tell neither it leaves alone, and does not name. What a
+    /// harness is until someone has looked at what a window's tree holds with a
+    /// command of its agent running; and what a word this host does not know reads
+    /// as.
     #[default]
     #[serde(other)]
     Unknown,
@@ -70,8 +94,9 @@ impl Servers {
 
 /// A `pane.mark` request: a turn is about to begin in the pane, and what its
 /// tree has now came before it. `servers` says how the window's harness keeps its
-/// own processes; a request without it (an older daemon's) is one that does not
-/// say.
+/// own processes, and `harness` which harness it is (`claude`, `codex`…), by whose
+/// name the host knows the programs of its own; a request without either (an older
+/// daemon's) is one that does not say.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct MarkRequest {
@@ -79,6 +104,8 @@ pub struct MarkRequest {
     pub generation: u64,
     #[serde(default, skip_serializing_if = "Servers::is_unknown")]
     pub servers: Servers,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub harness: Option<String>,
 }
 
 /// A process the window's program started and left running past its turn: its
@@ -91,13 +118,37 @@ pub struct BackgroundProcess {
 }
 
 /// `pane.background`'s answer: what the window's tree has running that began
-/// after the window's last `pane.mark`, `total` of it and the first `processes`
-/// of it by how long ago they began. A window with no mark has none: nothing
-/// says where its turn began.
+/// after the window's last `pane.mark` and that the host can tell is the turn's
+/// work, `total` of it and the first `processes` of it by how long ago they began.
+/// A window with no mark has none: nothing says where its turn began.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Background {
     pub total: usize,
     pub processes: Vec<BackgroundProcess>,
+}
+
+/// A `pane.end_background` request: the pane's turn is over and the daemon has
+/// taken its answer for the task's result, so what the turn left running is
+/// to end, the window staying open. It names no process: the host chooses, from all
+/// of what it can tell is the turn's, and keeps what it chose by what each process
+/// is (its number and when it began), not by a number a later look could find
+/// another process at.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct EndRequest {
+    pub id: String,
+    pub generation: u64,
+}
+
+/// `pane.end_background`'s answer: what the host ended of the turn's work, and what
+/// of it it could not end. Each is listed as `pane.background` lists its answer:
+/// how many, and the first. A process the host could not tell the turn's from the
+/// harness's is left alone and is in neither.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Ending {
+    pub ended: Background,
+    pub left: Background,
 }
 
 /// `pane.exit`'s body: the pane that ended, and what the host kept of its end.
@@ -267,6 +318,7 @@ mod tests {
                 id: "p1-zeus".to_owned(),
                 generation: 4,
                 servers: Servers::Unknown,
+                harness: None,
             }
         );
         assert_eq!(
@@ -287,6 +339,24 @@ mod tests {
     }
 
     #[test]
+    fn a_mark_names_the_harness_only_where_the_daemon_knows_which_it_is() {
+        let body =
+            json!({ "id": "p1-zeus", "generation": 4, "servers": "atLaunch", "harness": "codex" });
+        let said: MarkRequest = serde_json::from_value(body.clone()).unwrap();
+        assert_eq!(said.harness.as_deref(), Some("codex"));
+        assert_eq!(serde_json::to_value(&said).unwrap(), body);
+
+        let alone: MarkRequest =
+            serde_json::from_value(json!({ "id": "p1-zeus", "generation": 4, "harness": "pi" }))
+                .unwrap();
+        assert_eq!(alone.servers, Servers::Unknown);
+        assert_eq!(
+            serde_json::to_value(&alone).unwrap(),
+            json!({ "id": "p1-zeus", "generation": 4, "harness": "pi" })
+        );
+    }
+
+    #[test]
     fn a_way_of_keeping_servers_this_host_does_not_know_is_not_known_and_the_mark_stands() {
         // A newer daemon's word: the window is marked, told by time alone.
         let said: MarkRequest = serde_json::from_value(
@@ -304,6 +374,7 @@ mod tests {
             json!({ "generation": 4 }),
             json!({ "id": "p", "generation": "4" }),
             json!({ "id": "p", "generation": 4, "servers": 7 }),
+            json!({ "id": "p", "generation": 4, "harness": 7 }),
             json!({ "id": "p", "generation": 4, "group": true }),
             // What the field was called before the second way was known.
             json!({ "id": "p", "generation": 4, "harnessGroup": true }),
@@ -313,6 +384,56 @@ mod tests {
                 "{refused}"
             );
         }
+    }
+
+    #[test]
+    fn an_end_names_its_pane_and_no_process_and_refuses_what_it_does_not_know() {
+        let body = json!({ "id": "p1-zeus", "generation": 4 });
+        let asked: EndRequest = serde_json::from_value(body.clone()).unwrap();
+        assert_eq!(
+            asked,
+            EndRequest {
+                id: "p1-zeus".to_owned(),
+                generation: 4,
+            }
+        );
+        assert_eq!(serde_json::to_value(&asked).unwrap(), body);
+
+        for refused in [
+            json!({ "generation": 4 }),
+            json!({ "id": "p" }),
+            json!({ "id": "p", "generation": "4" }),
+            // The host chooses what it ends: a daemon that names processes asks for
+            // what this one does not do.
+            json!({ "id": "p", "generation": 4, "pids": [4242] }),
+            json!({ "id": "p", "generation": 4, "all": true }),
+        ] {
+            assert!(
+                serde_json::from_value::<EndRequest>(refused.clone()).is_err(),
+                "{refused}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_ending_says_what_was_ended_and_what_was_left_and_a_word_that_is_missing_says_none() {
+        let answer = json!({
+            "ok": true,
+            "ended": { "total": 2, "processes": [
+                { "pid": 4242, "command": "python3 lock.py record --run 7" },
+                { "pid": 4243, "command": "tail -f run.log" },
+            ] },
+            "left": { "total": 1, "processes": [{ "pid": 4300, "command": "node server.js" }] },
+        });
+        let ending: Ending = serde_json::from_value(answer).unwrap();
+        assert_eq!(ending.ended.total, 2);
+        assert_eq!(ending.ended.processes[1].command, "tail -f run.log");
+        assert_eq!(ending.left.processes[0].pid, 4300);
+
+        // A host that says no more than that it answered ended nothing and left nothing.
+        let said: Ending = serde_json::from_value(json!({ "ok": true })).unwrap();
+        assert_eq!(said, Ending::default());
+        assert_eq!(said.ended.total, 0);
     }
 
     #[test]

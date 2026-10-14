@@ -15,6 +15,7 @@ use std::time::Duration;
 
 use cf_proto::agents::Harness;
 use cf_proto::panes::Servers;
+use cf_proto::specs::Variant;
 use serde_json::Value;
 
 use crate::records::{Item, Options, Quota, Reading, Record, Role, Settlement};
@@ -22,14 +23,29 @@ use crate::records::{Item, Options, Quota, Reading, Record, Role, Settlement};
 /// What waits, on the engine's one thread.
 pub type Work<'a, T> = Pin<Box<dyn Future<Output = T> + 'a>>;
 
-/// A harness's side of the engine: how its windows are launched, and how
-/// one is interrupted. A conversation's record with no window open is the
-/// engine's own look through [`Records`], the same for every harness.
+/// A harness's side of the engine: how its windows are launched, whether a
+/// conversation of its can be gone on with, and how one is interrupted. A
+/// conversation's record with no window open is the engine's own look through
+/// [`Records`], the same for every harness.
 pub trait Adapter {
     /// Prepares a window on `launch`: writes the files it runs with and
     /// says how it opens, or why it cannot (the launch then fails with that
     /// sentence).
     fn prepare<'a>(&'a self, launch: &'a Launch<'a>) -> Work<'a, Result<Prepared, String>>;
+
+    /// Whether a window can be opened again on its conversation `session`, as
+    /// the harness's own record of it says: yes where it holds the conversation,
+    /// no where it holds nothing a resume could find (Codex writes a thread's
+    /// record at its first turn, and a window resumed on a thread with none ends
+    /// at once, which closes a chief's project), and none where it cannot tell
+    /// (its record cannot be read, or says nothing of whether there is anything
+    /// to go on with). Only no opens the window afresh; the engine goes on with
+    /// the conversation on a yes and on a none, as it did before it asked. So a
+    /// no is for a harness that is sure of it: a conversation wrongly said to be
+    /// empty is left behind.
+    fn resumable<'a>(&'a self, _session: &'a str) -> Work<'a, Option<bool>> {
+        Box::pin(async { None })
+    }
 
     /// The keys that interrupt a turn in this harness's window
     /// (`adapter.interrupt`): Escape once, unless the harness says more.
@@ -43,9 +59,13 @@ pub trait Adapter {
     /// How the harness keeps its own processes (its MCP servers, its helpers),
     /// which the pane host tells a turn's work from them by (`pane.mark`'s
     /// `servers`): what a server is, and so what it starts, is the harness's and
-    /// no work a turn left. Where it is not known the host tells by when each
-    /// process began alone, and a server that begins after the first turn's mark
-    /// is the turn's.
+    /// no work a turn left, to be listed or ended. Where it is not known the host
+    /// still leaves alone what it can prove the harness's (a program named for the
+    /// harness that runs beside its own binary, and what descends from one), and
+    /// takes for the turn's only what it can prove: a shell the harness started after
+    /// the mark and what the shell started, by a chain of processes that run. What it
+    /// cannot trace so (a job detached with `nohup … &` from a shell that then ended)
+    /// and a server that begins after the mark are left alone, and are not named.
     ///
     /// Only what someone has looked at is said: what a window's tree holds with a
     /// command of its agent running (`ps -axo pid,pgid,ppid,command`). Claude Code
@@ -58,6 +78,58 @@ pub trait Adapter {
     fn servers(&self) -> Servers {
         Servers::Unknown
     }
+
+    /// Whether a resumed conversation keeps the instructions it began with. Every
+    /// launch gives a window its role text ([`Launch::instructions`]), and a
+    /// harness that takes it again at each launch (Claude Code, OpenCode, Pi,
+    /// Devin) needs nothing more to read a role that changed since its conversation
+    /// began. One that keeps the first instructions of the conversation it resumes
+    /// reads the new text and does not use it: a change never reaches it, and
+    /// whoever launches it must say the new text itself, as a message.
+    fn keeps_first_instructions(&self) -> bool {
+        false
+    }
+
+    /// Where the window of a chief given specs finds the Specmint skill of
+    /// `variant`, asked before the window is prepared, as its role text names
+    /// the file. The copy the human installed where this harness looks for
+    /// skills, if it is the chosen variant: used where it is. Otherwise the
+    /// copy ConsensFlow keeps for this harness, at the place [`Adapter::prepare`]
+    /// will have it written: the same place for every launch, so that the role
+    /// text that names it is the same from one launch to the next. An installed
+    /// copy of any other variant is no copy of this one, and is left alone.
+    fn specmint(&self, variant: Variant) -> Result<Skill, String>;
+}
+
+/// Where a window finds the Specmint skill of its chief's variant: the file
+/// that is its `SKILL.md`, which every harness can be told to read, and which
+/// is next to the `references` (and `assets`) it names.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Skill {
+    /// The human's own, installed where the harness looks for skills itself:
+    /// the harness has it, so nothing is registered and nothing is written.
+    Global(String),
+    /// ConsensFlow's, written when the window is prepared where the harness has
+    /// none: in a folder of its own, outside every launch's, that lasts from one
+    /// launch to the next.
+    Own(String),
+}
+
+impl Skill {
+    /// The path of the skill's `SKILL.md`.
+    pub fn path(&self) -> &str {
+        match self {
+            Skill::Global(path) | Skill::Own(path) => path,
+        }
+    }
+}
+
+/// What a chief's launch is given of specs: the variant it plans with, and
+/// where the skill of it is ([`Adapter::specmint`]).
+#[derive(Debug, Clone, Copy)]
+pub struct Specs<'a> {
+    pub variant: Variant,
+    pub skill: &'a Skill,
 }
 
 /// A harness's interrupt as keys into its window: Escape `presses` times in a
@@ -88,6 +160,9 @@ pub struct Launch<'a> {
     pub agent: Option<Agent<'a>>,
     /// The role's text.
     pub instructions: &'a str,
+    /// The specs a chief plans with, when its project has them on: only a
+    /// chief's launch is given any, and with none the launch is as it always was.
+    pub specs: Option<Specs<'a>>,
     /// How long the window has to show its first message, in milliseconds: the
     /// engine's limit for a launch (`CONSENSFLOW_LAUNCH_TIMEOUT_MS`). What a
     /// window waits for before that message can show, such as the conversation
@@ -172,6 +247,15 @@ pub trait Window {
     ) -> Work<'a, Result<Admission, String>>;
     /// What the window's harness says of it now.
     fn observe(&self) -> Work<'_, Result<Observed, String>>;
+    /// Whether the harness says, after the hand-over, that its own queue holds
+    /// the message last handed to it: it took the paste, and its record shows
+    /// it when it gets to it, however long that is. A harness that says so at
+    /// the hand-over ([`Admission::Admitted`]'s `queued`) needs no answer here;
+    /// one that can say it only later, by what it writes (Devin's wire log),
+    /// does. The engine asks at each look until the answer is yes.
+    fn took(&self) -> bool {
+        false
+    }
     /// The engine pressed the interrupt keys into the window, and the host
     /// took them: the turn it shows at work is the one they were for. A
     /// harness whose record says how an interrupted turn ended has no use for

@@ -14,6 +14,9 @@ use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 
+#[cfg(target_os = "macos")]
+use cf_panes::pty::Sentinel;
+
 const FRAME_TIMEOUT: Duration = Duration::from_secs(3);
 
 fn serial_headless_test() -> MutexGuard<'static, ()> {
@@ -1622,12 +1625,13 @@ fn background_with(
 #[test]
 fn a_turn_marked_over_the_wire_lists_what_it_left_and_the_exit_of_the_window_closed_says_so() {
     let _pty_guard = serial_headless_test();
+    let mut outsider = Sentinel::start();
     let mut helper = Headless::spawn();
     let mut events = Vec::new();
     let opened = helper.request(
         "pane.open",
         open_body(
-            "sleep 33 & printf ready; read go; sleep 31 & printf started; wait",
+            "sleep 33 & printf ready; read go; /bin/sh -c 'sleep 31 & wait' & printf started; wait",
             4096,
         ),
         &mut events,
@@ -1660,10 +1664,9 @@ fn a_turn_marked_over_the_wire_lists_what_it_left_and_the_exit_of_the_window_clo
     let left = background_with(&mut helper, &mut events, &pane, "sleep 31");
     assert_eq!(left["ok"], true, "{left}");
     assert_eq!(
-        left["total"], 1,
-        "the server it had before the mark is not the turn's: {left}"
+        left["total"], 2,
+        "the shell the program ran and its job; the server it had before the mark is not the turn's: {left}"
     );
-    assert_eq!(left["processes"][0]["command"], "sleep 31", "{left}");
     assert!(left["processes"][0]["pid"].as_u64().is_some(), "{left}");
 
     assert_eq!(
@@ -1673,36 +1676,81 @@ fn a_turn_marked_over_the_wire_lists_what_it_left_and_the_exit_of_the_window_clo
     let exit = exit_of(&helper, &mut events, &opened);
     assert_eq!(
         exit["background"].as_array().map(Vec::len),
-        Some(1),
+        Some(2),
         "{exit}"
     );
-    assert_eq!(exit["background"][0]["command"], "sleep 31", "{exit}");
+    assert!(
+        exit["background"]
+            .as_array()
+            .is_some_and(|work| work.iter().any(|process| process["command"] == "sleep 31")),
+        "{exit}"
+    );
+    assert!(outsider.runs(), "a process outside the window");
     helper.close_input_and_wait();
+}
+
+/// The program of a window whose turn began: a command of the agent's that is a
+/// shell in the program's group, as a server a user wrapped in one is; one that is a
+/// shell in a group of its own, as a command a tool runs; and a job detached from
+/// a shell that ended, which keeps the shell's group, and whose number is written to
+/// the file `$JOB`.
+#[cfg(target_os = "macos")]
+const GROUPS: &str = "printf ready; read go; /bin/sh -c 'sleep 31 & wait' & \
+     /usr/bin/python3 -c 'import os; os.setpgrp(); os.execv(\"/bin/sh\", [\"sh\", \"-c\", \"sleep 32 & wait\"])' & \
+     /usr/bin/python3 -c 'import os; os.setpgrp(); os.system(\"nohup sleep 33 >/dev/null 2>&1 & echo $! > $JOB\")' & \
+     printf started; wait";
+
+/// The body of an open of [`GROUPS`], with the file the detached job writes its
+/// number to, which is not there yet.
+#[cfg(target_os = "macos")]
+fn open_groups() -> (Value, std::path::PathBuf) {
+    static MADE: AtomicU64 = AtomicU64::new(0);
+    let job = std::env::temp_dir().join(format!(
+        "cf-headless-job-{}-{}",
+        std::process::id(),
+        MADE.fetch_add(1, Ordering::Relaxed)
+    ));
+    let _ = std::fs::remove_file(&job);
+    let mut body = open_body(GROUPS, 4096);
+    body["env"] = json!({"JOB": job});
+    (body, job)
+}
+
+/// The number of the job detached from a shell that ended, waited for.
+#[cfg(target_os = "macos")]
+fn detached_job(file: &std::path::Path) -> i32 {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        if let Some(pid) = std::fs::read_to_string(file)
+            .ok()
+            .and_then(|text| text.trim().parse().ok())
+        {
+            return pid;
+        }
+        assert!(Instant::now() < deadline, "the job never said its number");
+        thread::sleep(Duration::from_millis(10));
+    }
 }
 
 /// The daemon says, with the mark, that its harness keeps its servers in the
 /// group of the window's program: what the program starts after it and keeps in
-/// its group (a server) is not the turn's, in the answer to a look and in the
-/// exit of a window closed; what leaves the group (a command run by a tool) is.
-/// A mark that says nothing, as an older daemon's, is the turn's by time alone:
+/// its group (a server a user wrapped in a shell) is not the turn's, in the
+/// answer to a look and in the exit of a window closed; what a shell it started in
+/// a group of its own runs (a command run by a tool) is. A job detached from a shell
+/// that ended is the window's, but no work of the turn: no chain of processes that
+/// run leads from it to a shell, and it is left alone and not named. A mark that
+/// says nothing, as an older daemon's, is the turn's by what a shell started:
 /// what the test above holds.
 #[cfg(target_os = "macos")]
 #[test]
 fn a_mark_that_says_the_servers_are_in_the_group_leaves_what_stays_in_it_out_of_what_the_turn_left()
 {
     let _pty_guard = serial_headless_test();
+    let mut outsider = Sentinel::start();
     let mut helper = Headless::spawn();
     let mut events = Vec::new();
-    let opened = helper.request(
-        "pane.open",
-        open_body(
-            "printf ready; read go; sleep 31 & \
-             /usr/bin/python3 -c 'import os,time; os.setsid(); time.sleep(32)' & \
-             printf started; wait",
-            4096,
-        ),
-        &mut events,
-    );
+    let (body, job) = open_groups();
+    let opened = helper.request("pane.open", body, &mut events);
     assert_eq!(opened["ok"], true, "{opened}");
     let pane_id = opened["id"].as_str().expect("opened pane id").to_string();
     let generation = opened["generation"].as_u64().expect("opened generation");
@@ -1711,6 +1759,7 @@ fn a_mark_that_says_the_servers_are_in_the_group_leaves_what_stays_in_it_out_of_
 
     let mut mark = pane.clone();
     mark["servers"] = json!("inGroup");
+    mark["harness"] = json!("claude");
     assert_eq!(
         helper.request("pane.mark", mark, &mut events),
         json!({"ok":true})
@@ -1722,28 +1771,31 @@ fn a_mark_that_says_the_servers_are_in_the_group_leaves_what_stays_in_it_out_of_
     );
     output_until(&helper, &mut events, &pane_id, generation, b"started");
 
-    // The job leaves the group a moment after it began: until it has, it is the
-    // program's own, and nothing is listed.
-    let deadline = Instant::now() + Duration::from_secs(10);
-    let left = loop {
-        let left = helper.request("pane.background", pane.clone(), &mut events);
-        if left["total"].as_u64().is_some_and(|total| total > 0) {
-            break left;
-        }
-        assert!(
-            Instant::now() < deadline,
-            "the job was never listed: {left}"
-        );
-        thread::sleep(Duration::from_millis(10));
-    };
-    assert_eq!(
-        left["total"], 1,
+    // The tool's shell and its job: the commands become what they are a moment after
+    // they began (until they have, they are copies of what forked them). The detached
+    // job is running by the time its number is written.
+    background_with(&mut helper, &mut events, &pane, "sleep 32");
+    let detached = detached_job(&job);
+    assert!(process_exists(detached));
+    let left = helper.request("pane.background", pane.clone(), &mut events);
+    let commands: Vec<&str> = left["processes"]
+        .as_array()
+        .map(|work| {
+            work.iter()
+                .filter_map(|process| process["command"].as_str())
+                .collect()
+        })
+        .unwrap_or_default();
+    assert!(
+        !commands.iter().any(|command| command.contains("sleep 31")),
         "the server stays in the window's group: {left}"
     );
     assert!(
-        left["processes"][0]["command"]
-            .as_str()
-            .is_some_and(|command| command.contains("os.setsid()")),
+        !commands.iter().any(|command| command.contains("sleep 33")),
+        "the detached job has no shell that runs: {left}"
+    );
+    assert!(
+        commands.iter().any(|command| command.contains("sleep 32")),
         "{left}"
     );
 
@@ -1752,18 +1804,255 @@ fn a_mark_that_says_the_servers_are_in_the_group_leaves_what_stays_in_it_out_of_
         json!({"ok":true})
     );
     let exit = exit_of(&helper, &mut events, &opened);
-    assert_eq!(
-        exit["background"].as_array().map(Vec::len),
-        Some(1),
+    assert!(
+        exit["background"]
+            .as_array()
+            .is_some_and(|work| !work.is_empty()
+                && work.iter().all(|process| {
+                    let command = process["command"].as_str().unwrap_or("");
+                    !command.contains("sleep 31") && !command.contains("sleep 33")
+                })),
         "{exit}"
+    );
+    assert!(outsider.runs(), "a process outside the window");
+    helper.close_input_and_wait();
+    let _ = std::fs::remove_file(&job);
+}
+
+/// The daemon asks the host to end what the turn left running, once it has taken
+/// the turn's answer for its result: the host ends what it proves the turn's (a
+/// command's shell and its job), says what it ended, and the window stays open, its
+/// program and what its harness keeps as they were, and with nothing left for its
+/// exit to list. A job detached from a shell that ended runs on, unnamed, until the
+/// window closes with it: it is in the session the window's program leads.
+#[cfg(target_os = "macos")]
+#[test]
+fn an_ending_asked_over_the_wire_ends_what_the_turn_left_and_the_window_stays_open() {
+    let _pty_guard = serial_headless_test();
+    let mut outsider = Sentinel::start();
+    let mut helper = Headless::spawn();
+    let mut events = Vec::new();
+    let (body, job) = open_groups();
+    let opened = helper.request("pane.open", body, &mut events);
+    assert_eq!(opened["ok"], true, "{opened}");
+    let pane_id = opened["id"].as_str().expect("opened pane id").to_string();
+    let generation = opened["generation"].as_u64().expect("opened generation");
+    let pane = json!({"id":pane_id,"generation":generation});
+    output_until(&helper, &mut events, &pane_id, generation, b"ready");
+    let mut mark = pane.clone();
+    mark["servers"] = json!("inGroup");
+    mark["harness"] = json!("claude");
+    helper.request("pane.mark", mark, &mut events);
+    helper.request(
+        "pane.input",
+        json!({"id":pane_id,"generation":generation,"bytes":[103,111,10]}),
+        &mut events,
+    );
+    output_until(&helper, &mut events, &pane_id, generation, b"started");
+    background_with(&mut helper, &mut events, &pane, "sleep 32");
+    let detached = detached_job(&job);
+
+    let ended = helper.request("pane.end_background", pane.clone(), &mut events);
+
+    assert_eq!(ended["ok"], true, "{ended}");
+    let said: Vec<&str> = ended["ended"]["processes"]
+        .as_array()
+        .map(|work| {
+            work.iter()
+                .filter_map(|process| process["command"].as_str())
+                .collect()
+        })
+        .unwrap_or_default();
+    assert!(
+        said.iter().any(|command| command.contains("sleep 32")),
+        "{ended}"
+    );
+    for kept in ["sleep 31", "sleep 33"] {
+        assert!(
+            !said.iter().any(|command| command.contains(kept)),
+            "{kept} is not ended, nor named: {ended}"
+        );
+    }
+    assert_eq!(ended["left"]["total"], 0, "{ended}");
+    assert!(process_exists(detached), "the detached job runs on");
+    assert!(outsider.runs(), "a process outside the window");
+    assert_eq!(
+        helper.request("pane.background", pane.clone(), &mut events)["total"],
+        0,
+        "what was ended is not listed after"
+    );
+    let panes = helper.request("pane.list", json!({}), &mut events);
+    assert_eq!(
+        panes["panes"][0]["alive"], true,
+        "the window stays open: {panes}"
+    );
+
+    assert_eq!(
+        helper.request("pane.kill", pane, &mut events),
+        json!({"ok":true})
+    );
+    let exit = exit_of(&helper, &mut events, &opened);
+    assert!(
+        exit.get("background").is_none(),
+        "the close has nothing left to list: {exit}"
+    );
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while process_exists(detached) && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(10));
+    }
+    assert!(
+        !process_exists(detached),
+        "the window's close ended the job that was the window's"
+    );
+    assert!(outsider.runs(), "nor a close's");
+    helper.close_input_and_wait();
+    let _ = std::fs::remove_file(&job);
+}
+
+/// A folder, with a space in its name, holding the programs of a harness named
+/// `codex`: its binary and, beside it, the helper it keeps (`codex-code-mode-host`).
+/// Both are one small program of C, which runs the command it is given with `system`
+/// and waits for it, or sleeps where it is given none.
+#[cfg(target_os = "macos")]
+fn codex_programs() -> std::path::PathBuf {
+    static MADE: AtomicU64 = AtomicU64::new(0);
+    let dir = std::env::temp_dir().join(format!(
+        "cf-headless-{}-{} codex bin",
+        std::process::id(),
+        MADE.fetch_add(1, Ordering::Relaxed)
+    ));
+    std::fs::create_dir_all(&dir).expect("a folder for the harness's programs");
+    let source = dir.join("program.c");
+    std::fs::write(
+        &source,
+        "#include <stdlib.h>\n#include <unistd.h>\n\
+         int main(int argc, char **argv) {\n\
+         \tif (argc > 1) return system(argv[1]);\n\
+         \tsleep(60);\n\
+         \treturn 0;\n}\n",
+    )
+    .expect("the source of the harness's programs");
+    let helper = dir.join("codex-code-mode-host");
+    let made = Command::new("cc")
+        .arg(&source)
+        .arg("-o")
+        .arg(&helper)
+        .status()
+        .expect("compile the harness's programs");
+    assert!(made.success(), "the harness's programs were not made");
+    std::fs::copy(&helper, dir.join("codex")).expect("the harness's binary");
+    dir
+}
+
+/// The daemon names the harness with the mark: a program named for it that runs beside
+/// its binary (the helper Codex keeps for the session), and the shell it runs after the
+/// mark, are the harness's and not the turn's; where the mark does not name it the
+/// shell is a command's, as a shell a process from before the mark started is, and is
+/// listed.
+#[cfg(target_os = "macos")]
+#[test]
+fn a_mark_that_names_the_harness_leaves_its_programs_and_what_they_run_out_of_what_the_turn_left() {
+    let _pty_guard = serial_headless_test();
+    let mut outsider = Sentinel::start();
+    let bins = codex_programs();
+    for named in [true, false] {
+        let mut helper = Headless::spawn();
+        let mut events = Vec::new();
+        let said = bins.join(format!("said-{named}"));
+        let go = bins.join(format!("go-{named}"));
+        let mut body = open_body(
+            // The helper, which began before the turn, waits for the window to say it
+            // has begun and runs a shell, which says so once it runs a job; the window
+            // says it started once it has.
+            r#""$BINS/codex" & "$BINS/codex-code-mode-host" 'while [ ! -e "$GO" ]; do sleep 0.05; done; /bin/sh -c "sleep 31 & echo inner-started; wait"' > "$SAID" & printf ready; read go; : > "$GO"; until [ -s "$SAID" ]; do sleep 0.05; done; printf started; wait"#,
+            4096,
+        );
+        body["env"] = json!({"BINS": bins, "SAID": said, "GO": go});
+        let opened = helper.request("pane.open", body, &mut events);
+        assert_eq!(opened["ok"], true, "{opened}");
+        let pane_id = opened["id"].as_str().expect("opened pane id").to_string();
+        let generation = opened["generation"].as_u64().expect("opened generation");
+        let pane = json!({"id":pane_id,"generation":generation});
+        output_until(&helper, &mut events, &pane_id, generation, b"ready");
+
+        let mut mark = pane.clone();
+        if named {
+            mark["harness"] = json!("codex");
+        }
+        assert_eq!(
+            helper.request("pane.mark", mark, &mut events),
+            json!({"ok":true})
+        );
+        helper.request(
+            "pane.input",
+            json!({"id":pane_id,"generation":generation,"bytes":[103,111,10]}),
+            &mut events,
+        );
+        output_until(&helper, &mut events, &pane_id, generation, b"started");
+
+        if named {
+            assert_eq!(
+                helper.request("pane.background", pane.clone(), &mut events)["total"],
+                0,
+                "the helper is the harness's, and so is the shell it runs"
+            );
+            assert_eq!(
+                helper.request("pane.end_background", pane.clone(), &mut events)["ended"]["total"],
+                0
+            );
+        } else {
+            let left = background_with(&mut helper, &mut events, &pane, "sleep 31");
+            assert!(left["total"].as_u64() >= Some(2), "{left}");
+        }
+        assert_eq!(
+            helper.request("pane.kill", pane, &mut events),
+            json!({"ok":true})
+        );
+        helper.close_input_and_wait();
+        assert!(outsider.runs(), "a process outside the window");
+    }
+    let _ = std::fs::remove_dir_all(&bins);
+}
+
+/// An ending names its pane and no process, which it chooses itself; one that does
+/// otherwise is refused as a request that is not one, and a window that is not open
+/// has nothing to end.
+#[test]
+fn an_ending_that_says_more_or_otherwise_than_what_it_asks_to_end_is_refused() {
+    let _pty_guard = serial_headless_test();
+    let mut helper = Headless::spawn();
+    let mut events = Vec::new();
+    for body in [
+        json!({"id":"nobody","generation":"1"}),
+        json!({"id":"nobody","generation":1,"pids":[1]}),
+        json!({"id":"nobody","generation":1,"all":true}),
+        json!({"generation":1}),
+    ] {
+        let refused = helper.request("pane.end_background", body.clone(), &mut events);
+        assert_eq!(refused["ok"], false, "{body}: {refused}");
+        assert!(
+            refused["error"]
+                .as_str()
+                .is_some_and(|error| error.contains("invalid")),
+            "it is the request that is refused: {refused}"
+        );
+    }
+    let nobody = json!({"id":"nobody","generation":1});
+    let refused = helper.request("pane.end_background", nobody, &mut events);
+    assert_eq!(refused["ok"], false, "{refused}");
+    assert!(
+        refused["error"]
+            .as_str()
+            .is_some_and(|error| !error.contains("invalid")),
+        "it is the pane that is not there: {refused}"
     );
     helper.close_input_and_wait();
 }
 
 /// A mark names its pane and says no more than how its harness keeps its servers,
-/// in a word; one that says more, or says it otherwise, is refused as a request
-/// that is not one. A word this host does not know is not a refusal: the mark
-/// stands, as for a harness it knows nothing of.
+/// in a word, and which harness it is, in a name; one that says more, or says it
+/// otherwise, is refused as a request that is not one. A word this host does not
+/// know is not a refusal: the mark stands, as for a harness it knows nothing of.
 #[test]
 fn a_mark_that_says_more_or_otherwise_than_how_the_servers_are_kept_is_refused() {
     let _pty_guard = serial_headless_test();
@@ -1772,6 +2061,7 @@ fn a_mark_that_says_more_or_otherwise_than_how_the_servers_are_kept_is_refused()
     for body in [
         json!({"id":"nobody","generation":1,"harnessGroup":true}),
         json!({"id":"nobody","generation":1,"servers":7}),
+        json!({"id":"nobody","generation":1,"harness":7}),
         json!({"id":"nobody","generation":1,"group":true}),
     ] {
         let refused = helper.request("pane.mark", body.clone(), &mut events);

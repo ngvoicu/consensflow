@@ -551,6 +551,31 @@ pub fn finished<T>(mut work: Work<'_, T>) -> T {
     }
 }
 
+/// What a prepared window is launched with (its arguments, the variables it
+/// adds and the ones it drops), with `root`, the throwaway home it was made
+/// in, taken out of every word, and the hash of a bundle published under it
+/// (which is named by what its files say of that home): two homes of one make,
+/// with fakes of one make, give two launches that read the same where nothing
+/// differs between them.
+pub fn unrooted(
+    plan: &crate::contract::Prepared,
+    root: &str,
+) -> (Vec<String>, Vec<(String, String)>, Vec<String>) {
+    let hash = regex::Regex::new("[0-9a-f]{64}").expect("a pattern");
+    let without = |text: &String| {
+        hash.replace_all(&text.replace(root, "<home>"), "<hash>")
+            .into_owned()
+    };
+    (
+        plan.argv.iter().map(without).collect(),
+        plan.env
+            .iter()
+            .map(|(name, value)| (name.clone(), without(value)))
+            .collect(),
+        plan.drop_env.clone(),
+    )
+}
+
 /// Work begun, as the driver holds it.
 type Begun<T> = Pin<Box<dyn Future<Output = T>>>;
 

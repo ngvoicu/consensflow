@@ -27,6 +27,10 @@ use crate::shared::record::sqlite::{
     self, greater_of, key_of, same_of, text_of, Cell, Reads, Unparsed,
 };
 
+/// Why a look at a session Devin's store holds no row of fails: Devin writes
+/// the row with the session's first message.
+pub(crate) const MISSING_SESSION: &str = "missing Devin session";
+
 /// The last rows of a conversation each look reads again, in case one was rewritten.
 const RECHECKED: usize = 8;
 
@@ -90,7 +94,7 @@ impl Store {
     ) -> Result<(Store, bool), String> {
         let found = reads
             .get("select main_chain_id from sessions where id = ?", [session])?
-            .ok_or_else(|| "missing Devin session".to_owned())?;
+            .ok_or_else(|| MISSING_SESSION.to_owned())?;
         let head = found
             .get("main_chain_id")
             .map_or(Key::Undefined, |head| head.key(keys));

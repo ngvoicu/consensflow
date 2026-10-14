@@ -2,7 +2,7 @@
 //! written, read and copied with the path in whatever goes wrong, and the
 //! folders above a file made when it is written.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::{fs, io};
 
 use crate::{Error, Result};
@@ -83,6 +83,28 @@ pub fn copy(from: &Path, to: &Path) -> Result {
     write(to, read(from)?)
 }
 
+/// The first file under the folder `root`, or in the folders under it, whose name
+/// `wanted` takes: none where none is, or `root` is not there. What finds a
+/// record that a program keeps in the folder of the day it was begun, by a name
+/// that holds something of its own (a Codex's rollout holds its thread), where a
+/// case does not know the day.
+pub fn find(root: &Path, wanted: &dyn Fn(&str) -> bool) -> Option<PathBuf> {
+    for entry in fs::read_dir(root).ok()?.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            if let Some(found) = find(&path, wanted) {
+                return Some(found);
+            }
+        } else if path
+            .file_name()
+            .is_some_and(|name| wanted(&name.to_string_lossy()))
+        {
+            return Some(path);
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -160,6 +182,24 @@ mod tests {
         let to = root.path().join("deeper").join("to.json");
         copy(&from, &to).unwrap();
         assert_eq!(read(&to).unwrap(), [0, 159, 146, 150]);
+    }
+
+    #[test]
+    fn a_file_is_found_by_its_name_in_the_folders_below_a_root_and_none_where_there_is_none() {
+        let root = tempfile::tempdir().unwrap();
+        let sessions = root.path().join("sessions");
+        let day = sessions.join("2026").join("10").join("13");
+        write(&day.join("rollout-at-0001.jsonl"), "one").unwrap();
+        write(&sessions.join("2026").join("note.txt"), "no rollout").unwrap();
+        let ends = |end: &'static str| move |name: &str| name.ends_with(end);
+        assert_eq!(
+            find(&sessions, &ends("-0001.jsonl")),
+            Some(day.join("rollout-at-0001.jsonl"))
+        );
+        assert_eq!(find(&sessions, &ends("-0002.jsonl")), None);
+        // A folder is not a file by its name, and a root that is not there holds none.
+        assert_eq!(find(&sessions, &ends("13")), None);
+        assert_eq!(find(&root.path().join("nowhere"), &ends("")), None);
     }
 
     #[test]

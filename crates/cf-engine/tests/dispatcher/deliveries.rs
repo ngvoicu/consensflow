@@ -18,7 +18,7 @@ use crate::traces::held_to;
 const SUITES: &[&str] = &["the dispatcher"];
 
 /// The Enters pressed into windows (`pane.input` with the byte 13).
-fn enters(context: &Context) -> usize {
+pub(crate) fn enters(context: &Context) -> usize {
     context
         .host
         .inputs()

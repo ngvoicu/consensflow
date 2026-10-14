@@ -1,0 +1,11 @@
+-- The role text a conversation was last given: the instructions its window began
+-- with, or the message that replaced them. A harness that keeps a resumed
+-- thread's first instructions (Codex) never reads a changed role at a Resume, so
+-- the engine compares the text a resumed conversation's window would be given
+-- with this one, and says the new text in a message where they differ. A NULL is
+-- not known (a conversation from before this column, or one the human switched
+-- their window to), and counts as changed. Added in place, as 0014 added its own
+-- columns: nothing of the table moves, and no view of a conversation holds it.
+-- The column is one line: the test players that hold a database this ledger left
+-- to what Node's did read the line to know what Node's schema never had.
+  ALTER TABLE conversation ADD COLUMN role_text TEXT;

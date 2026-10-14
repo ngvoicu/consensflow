@@ -1,8 +1,9 @@
-//! The projects: listed, opened, resumed, closed, deleted and gated.
+//! The projects: listed, opened, resumed, closed, deleted, gated, renamed and
+//! described.
 
 use cf_base::js;
 use cf_ledger::model::parse_gate;
-use cf_ledger::{NewChief, NewMember, NewProject};
+use cf_ledger::{parse_description, parse_name, NewChief, NewMember, NewProject};
 use serde_json::{json, Map, Value};
 
 use super::agents::{chief_on, last_staff_now, membership, saved};
@@ -86,6 +87,31 @@ pub(super) async fn gate(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
         .ledger
         .borrow_mut()
         .set_gate(body.whole("project")?, gate)?;
+    one("project", project)
+}
+
+/// `project.rename`: the name the human gives the project, which has the rules a
+/// name has when a project is opened and is checked before the project is looked
+/// for. The folder the project is in stays as it was.
+pub(super) async fn rename(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
+    let name = parse_name(body.get("name"))?;
+    let project = page
+        .ledger
+        .borrow_mut()
+        .rename_project(body.whole("project")?, &name)?;
+    one("project", project)
+}
+
+/// `project.describe`: the line the human writes under the project's name, one
+/// line of plain text of at most 200 characters, checked before the project is
+/// looked for. A `description` that is left out, `null` or blank takes the line
+/// away. The line is the human's alone: no agent is told it.
+pub(super) async fn describe(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
+    let description = parse_description(body.get("description"))?;
+    let project = page
+        .ledger
+        .borrow_mut()
+        .describe_project(body.whole("project")?, description.as_deref())?;
     one("project", project)
 }
 

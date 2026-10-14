@@ -24,6 +24,22 @@
 
 // The cases are in `tests/regressions/`: cargo looks for the modules of a test's
 // root file beside it, where each would be a suite of its own.
+// The stand-in's command is a shell of a Unix machine.
+#[cfg(unix)]
+#[path = "regressions/a_command_that_goes_on_reporting_held_a_devin_workers_result.rs"]
+mod a_command_that_goes_on_reporting_held_a_devin_workers_result;
+#[path = "regressions/a_command_that_never_exits_held_a_workers_result.rs"]
+mod a_command_that_never_exits_held_a_workers_result;
+// The stand-in's status line is a `bash`.
+#[cfg(unix)]
+#[path = "regressions/claude_status_line_taken_for_background_work.rs"]
+mod claude_status_line_taken_for_background_work;
+// The stand-in Codex is a script, so Unix's: Windows has no window of it to resume.
+#[cfg(unix)]
+#[path = "regressions/codex_role_on_resume.rs"]
+mod codex_role_on_resume;
+#[path = "regressions/devin_notes_twice.rs"]
+mod devin_notes_twice;
 #[path = "regressions/devin_pause.rs"]
 mod devin_pause;
 // Windows keeps the limit the report documents (a job object has no process
@@ -31,6 +47,10 @@ mod devin_pause;
 #[cfg(unix)]
 #[path = "regressions/mcp_servers_held_a_workers_result.rs"]
 mod mcp_servers_held_a_workers_result;
+#[path = "regressions/resume_of_a_chief_with_no_turn.rs"]
+mod resume_of_a_chief_with_no_turn;
+#[path = "regressions/resume_of_a_turn_the_daemon_never_copied.rs"]
+mod resume_of_a_turn_the_daemon_never_copied;
 
 use std::time::Duration;
 

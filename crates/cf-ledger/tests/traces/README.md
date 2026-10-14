@@ -46,7 +46,8 @@ are not rewritten, and the replay holds the database this ledger left to them
 as Node's schema had it (`cf_ledger::testing::hold_apart_what_node_never_had_in_its_schema`).
 And `ledger-008`, a ledger one version past what the build knows, which it refuses,
 says 14 and 13 where Node's said 12 and 11: it was changed by hand, in those two
-numbers, to stay the probe it was (each migration moves it again). And the four traces
+numbers, to stay the probe it was; since migration 0014 the replay puts this build's
+own numbers in it (`at_this_schema`), so no migration moves it again. And the four traces
 whose refusals list the roles a member may hold or the pools a task may be for
 (`ledger-projects-005`, `-008`, `ledger-staff-001` and `ledger-tiered-003`) list the
 tester too, in the words they quote, as the ledger's refusals now do: changed by
@@ -63,3 +64,51 @@ and `hold_apart_the_resume_mark_in_a_dump`). The one call that cannot be held so
 `forgetResume` of a project that is not there, which Node refused as an unknown
 project and this ledger has no mark to refuse for: `ledger-projects-011` is in
 `DEPARTED` at that call.
+
+Migration 0014 (a project's wake-up calls) gave `project` three columns Node's
+schema never had. Every `final` lacks them, and the replay takes them out of
+what this ledger left, in the rows and in the text of the schema where SQLite
+wrote them (`cf_ledger::testing::hold_apart_what_node_never_writes` and
+`hold_apart_what_node_never_had_in_its_schema`, which read the columns from the
+migration's own lines). Nothing a recording holds is rewritten.
+
+Migration 0015 (a project says whether its chief plans big work as specs, in which
+folder and with which variant of Specmint: three columns of `project`, none given
+until the human says it) added what Node's projects never had. Every `final` lacks the
+columns `specs`, `specs_folder` and `specs_variant` and their lines in the schema of
+`project`, as SQLite writes them into the table's text when a column is added to it:
+none of them is rewritten, and the replay takes them out of what this ledger left,
+where Node's has none (`cf_ledger::testing::hold_apart_what_node_never_writes` for the
+rows, and `hold_apart_what_node_never_had_in_its_schema` for the text of the table).
+No answer of Node's says anything of specs: a project's view holds `specs` only once
+the human has said something of them, and the ledger's `project.specs` event is its
+own.
+
+Migration 0016 (the role text a conversation was last given, which a harness that
+keeps a resumed thread's first instructions is compared against at each Resume) added
+a column to `conversation` that Node's conversations never had. Every `final` lacks
+`role_text` and its words in the schema of `conversation`: none of them is rewritten,
+and the replay takes them out of what this ledger left, in the rows and in the text of
+the table (`cf_ledger::testing::hold_apart_what_node_never_writes` and
+`hold_apart_what_node_never_had_in_its_schema`). No answer of Node's says anything of
+it, a conversation's view never holds it, and the ledger logs no event for it.
+
+Migration 0017 (the line a human writes under a project's name, which no agent is told:
+one nullable column of `project`, numbered after 0016) added what Node's projects never had. Every `final`
+lacks the column `description` and its text in the schema of `project`, and the replay
+takes them out of what this ledger left as it does the wake-up columns, which it reads
+from the migration's own line (`cf_ledger::testing::hold_apart_what_node_never_writes`
+for the rows, and `hold_apart_what_node_never_had_in_its_schema` for the text of the
+table). No answer of Node's says anything of it: a project's view holds `description`
+only while there is a line, and the ledger's `project.renamed` and `project.described`
+events are its own. Nothing a recording holds is rewritten.
+
+Migration 0018 (the role text a message tells, by which the ledger knows the note that
+says a conversation its role again, and by nothing in its words: one nullable column of
+`message`, numbered after 0017) added what Node's messages never had. Every `final`
+lacks the column `role_text` and its words in the schema of `message`: none of them is
+rewritten, and the replay takes them out of what this ledger left, in the rows and in
+the text of the table (`cf_ledger::testing::hold_apart_what_node_never_writes` and
+`hold_apart_what_node_never_had_in_its_schema`). No answer of Node's says anything of
+it, a message's view never holds it, and the ledger logs no event for it: such a note's
+event is any note's own.

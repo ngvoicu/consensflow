@@ -10,9 +10,10 @@
 //! - A result for a chief whose turn ended with agents pending goes into its
 //!   window at once, though they run on: its window is at rest, and nothing waits
 //!   for them.
-//! - A worker's turn that ends so is not its task's result: the board says the
-//!   window works and why, and the agents run on until they end; the turn their end
-//!   wakes is the one whose end is.
+//! - A worker's turn that ends so is its task's result at once (the owner's decision
+//!   of 2026-10-13, which reverses the hold of 2026-10-11): nothing waits for the
+//!   agents, the chief is told in a note beside the result that the turn left them,
+//!   and they end with the window that closes after the result.
 //! - A switch the human asked for after the chief's turn is no message: it closes
 //!   the window, and the agents end with it. It waits for a turn that leaves none.
 
@@ -100,47 +101,20 @@ fn a_result_for_a_chief_whose_turn_ended_with_agents_pending_goes_in_at_once_and
 }
 
 #[test]
-fn a_workers_turn_that_ends_with_agents_pending_is_not_its_result_the_agents_end_and_the_turn_they_wake_is(
+fn a_workers_turn_that_ends_with_agents_pending_is_its_result_at_once_and_the_chief_is_told_it_left_them(
 ) -> Outcome {
     let rig = Rig::start(config())?;
     let project = Project::open(&rig, "chief", json!({}))?;
     let added = project.add_member("worker")?;
+    // Agents that run for a minute: the result does not wait for them.
     rig.tell(
         project.id(),
         &format!(
-            "DISPATCH --tier {} AGENTS 2 20 started the research",
+            "DISPATCH --tier {} AGENTS 2 60 started the research",
             tier(&added)
         ),
     )?;
-    rig.wait_for(
-        "the worker's turn to end with its agents running",
-        secs(60),
-        || {
-            let state = project.task(1)?["state"].clone();
-            let over = ["done", "failed", "cancelled"]
-                .iter()
-                .any(|ended| state == *ended);
-            Ok(over || project.lane("worker")?["activity"]["reason"].is_string())
-        },
-    )?;
-
-    assert_eq!(
-        project.task(1)?["state"],
-        "working",
-        "the turn ended with agents running: the task has no result yet"
-    );
-    assert_eq!(
-        project.lane("worker")?["activity"],
-        json!({ "state": "working", "reason": "background agents running" })
-    );
-    assert_eq!(
-        results(&project)?,
-        Vec::<Value>::new(),
-        "the chief is given no result"
-    );
-
-    // The agents end by themselves, the window is woken, and its turn's end is the result.
-    rig.wait_for("T-1 to be done", secs(60), || {
+    rig.wait_for("T-1 to be done", secs(30), || {
         Ok(project.task(1)?["state"] == "done")
     })?;
     rig.wait_for("the result to reach the chief", secs(30), || {
@@ -148,7 +122,19 @@ fn a_workers_turn_that_ends_with_agents_pending_is_not_its_result_the_agents_end
     })?;
     assert_eq!(
         results(&project)?[0]["body"],
-        "started the research\n\nwoken: started the research"
+        "started the research",
+        "the turn the agents' end would have woken is not waited for"
+    );
+    rig.wait_for("the chief to be told it left them", secs(30), || {
+        Ok(project.inbox("chief")?.iter().any(|message| {
+            message["kind"] == "note"
+                && message["body"] == "T-1's turn left background agents running."
+        }))
+    })?;
+    assert_eq!(
+        project.lane("worker")?["activity"]["reason"],
+        Value::Null,
+        "the board says no work is running"
     );
     rig.close()?;
     Ok(())

@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+
 import { chromium, expect, test } from '@playwright/test'
 
 import { tempEnv } from '../../tests/helpers.mjs'
@@ -254,10 +257,36 @@ async function open(page, data = model()) {
     // How long an operation takes to answer, in ms, set by a test while it runs:
     // the real core answers when it can, and a page that assumes at once races.
     window.__delay = {}
+    // The answer to an operation, held by a test until it lets it go (`__hold[operation]`
+    // is a promise, `__release[operation]` what lets it go); it holds the next request
+    // for that operation, and only that one. And every operation answered, in order.
+    window.__hold = {}
+    window.__release = {}
+    window.__answered = []
     // Why the daemon is down, while a test has it down: the app answers every
     // core request with this, as Rust does with no bridge to the daemon.
     window.__down = null
     const answer = (value) => JSON.parse(JSON.stringify({ ok: true, ...value }))
+    // A project's wake-up calls as the daemon says them: the interval in the
+    // largest unit that holds it whole, the default words where none were written.
+    const UNIT_MS = { days: 86_400_000, hours: 3_600_000, minutes: 60_000 }
+    const DEFAULT_WORDS =
+      'Do you still have work to do? If tasks are left on the board or in your plan, carry on.'
+    const wakeUpOf = (project) => {
+      const saved = data.wakeUps?.[project] ?? { on: false, everyMs: 3_600_000, text: null }
+      const [unit, size] = Object.entries(UNIT_MS).find(([, ms]) => saved.everyMs % ms === 0)
+      return {
+        on: saved.on,
+        everyMs: saved.everyMs,
+        every: saved.everyMs / size,
+        unit,
+        text: saved.text ?? DEFAULT_WORDS,
+        defaultText: saved.text === null,
+      }
+    }
+    // A project as the list has it and as its board has it: the daemon says one and the same.
+    const shownProject = (id) =>
+      [data.projects.find((project) => project.id === id), data.boards[id]?.project].filter(Boolean)
     const operations = {
       'projects.list': () => answer({ projects: data.projects }),
       'agents.list': () => answer({ agents: data.agents, missing: data.missing ?? [] }),
@@ -271,6 +300,59 @@ async function open(page, data = model()) {
       'project.gate': ({ project, gate }) => {
         data.boards[project].project.gate = gate
         return answer({ project: data.boards[project].project })
+      },
+      // A project renamed, and a line written under its name, as the daemon does it: checked,
+      // kept on the project of the list and on the one of its board, and refused in its words.
+      'project.rename': ({ project, name }) => {
+        if (typeof name !== 'string' || name.trim() === '' || name.length > 100) {
+          return { ok: false, error: 'name must be text, not empty, at most 100 characters' }
+        }
+        for (const shown of shownProject(project)) shown.name = name
+        return answer({ project: shownProject(project)[0] })
+      },
+      'project.describe': ({ project, description }) => {
+        const line = (description ?? '').trim()
+        if (line.length > 200) {
+          const error =
+            "a project's description is one line of plain text: it is at most 200 characters"
+          return { ok: false, error }
+        }
+        for (const shown of shownProject(project)) {
+          if (line === '') delete shown.description
+          else shown.description = line
+        }
+        return answer({ project: shownProject(project)[0] })
+      },
+      'wakeup.get': ({ project }) => answer({ wakeUp: wakeUpOf(project) }),
+      'wakeup.set': ({ project, on, every, unit, text }) => {
+        if (!(unit in UNIT_MS) || !Number.isInteger(every) || every < 1) {
+          const error = `a wake-up comes every whole number of minutes, hours or days, not ${every} "${unit}"`
+          return { ok: false, error }
+        }
+        if (text.trim() === '') {
+          const error = 'the wake-up text must be text, not empty, at most 1000000 characters'
+          return { ok: false, error }
+        }
+        data.wakeUps ??= {}
+        data.wakeUps[project] = {
+          on,
+          everyMs: every * UNIT_MS[unit],
+          text: text === DEFAULT_WORDS ? null : text,
+        }
+        return answer({ wakeUp: wakeUpOf(project) })
+      },
+      // What a project says of specs: kept as it was said, each part left out when
+      // it says none, and the daemon's own refusal where a test has it refuse.
+      'project.specs': ({ project, on, folder, variant }) => {
+        if (data.specsRefusal) return { ok: false, error: data.specsRefusal }
+        const said = {}
+        if (on !== null) said.on = on
+        if (folder !== null) said.folder = folder
+        if (variant !== null) said.variant = variant
+        const shown = data.boards[project].project
+        if (Object.keys(said).length === 0) delete shown.specs
+        else shown.specs = said
+        return answer({ project: shown })
       },
       // The newest messages one frame holds (all of them, unless a test says
       // how many fit) and how many there are; asked for what For you lists,
@@ -325,6 +407,11 @@ async function open(page, data = model()) {
         const handle = operations[args.operation]
         const ms = window.__delay[args.operation] ?? 0
         if (ms > 0) await new Promise((wake) => setTimeout(wake, ms))
+        const held = window.__hold[args.operation]
+        if (held !== undefined) {
+          delete window.__hold[args.operation]
+          await held
+        }
         if (window.__down !== null) {
           return {
             ok: false,
@@ -333,7 +420,9 @@ async function open(page, data = model()) {
             detail: window.__down,
           }
         }
-        return handle ? handle(args.body) : { ok: true }
+        const result = handle ? handle(args.body) : { ok: true }
+        window.__answered.push(args.operation)
+        return result
       }
       if (command === 'subscribe_output') {
         window.__output = args.onOutput
@@ -2924,6 +3013,315 @@ test('shows and sets human approval from the staff dialog, which has no review p
   await expect(gate).toBeChecked()
 })
 
+/** The project's Specs group of the staff dialog, opened. */
+async function openSpecs(page) {
+  await page.getByRole('button', { name: 'Staff' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project staff' })
+  const group = dialog.getByRole('group', { name: 'Specs' })
+  return {
+    dialog,
+    group,
+    mode: group.locator('[name="specs"]'),
+    folder: group.locator('[name="specsFolder"]'),
+    variant: group.locator('[name="specsVariant"]'),
+    save: group.getByRole('button', { name: 'Save specs' }),
+    note: group.locator('#staff-specs-note'),
+  }
+}
+
+test('saves the specs on Enter in the folder and adds nobody to the staff', async ({ page }) => {
+  await open(page)
+  const specs = await openSpecs(page)
+  await specs.mode.selectOption('on')
+  await specs.folder.fill('docs/specs')
+  await specs.folder.press('Enter')
+  await expect
+    .poll(() => calls(page, 'project.specs'))
+    .toEqual([{ project: 1, on: true, folder: 'docs/specs', variant: 'core' }])
+  expect(await calls(page, 'member.add')).toEqual([])
+  expect(await calls(page, 'member.roles')).toEqual([])
+})
+
+test('a project follows the app’s setting for specs until it says on or off, and the dialog says when a change takes hold', async ({
+  page,
+}) => {
+  await open(page)
+  const specs = await openSpecs(page)
+  await expect(specs.group).toContainText('A change reaches the chief when it next starts')
+  // It says nothing: it follows what the human set for every project (Settings, Agents).
+  await expect(specs.mode).toHaveValue('follow')
+  await expect(specs.mode.locator('option:checked')).toHaveText(/^Follow the app's setting/)
+  await expect(specs.folder).toHaveValue('')
+  await expect(specs.folder).toHaveAttribute('placeholder', '.specs')
+  await expect(specs.variant).toHaveValue('core')
+  await expect(specs.variant.locator('option')).toHaveText(['core', 'core-html', 'tdd', 'tdd-html'])
+  await expect(specs.note).toBeHidden()
+
+  // On, with its own folder and the variant it plans with.
+  await specs.mode.selectOption('on')
+  await specs.folder.fill('  docs/specs ')
+  await specs.variant.selectOption('tdd')
+  await specs.save.click()
+  await expect
+    .poll(() => calls(page, 'project.specs'))
+    .toEqual([{ project: 1, on: true, folder: 'docs/specs', variant: 'tdd' }])
+  await expect(specs.note).toHaveText('Saved: the specs reach the chief when it next starts.')
+  await expect(page.locator('#status')).toHaveText(
+    'Saved: the specs reach the chief when it next starts.',
+  )
+  // The board is drawn again and the dialog shows what the daemon keeps.
+  await expect(specs.mode).toHaveValue('on')
+  await expect(specs.folder).toHaveValue('docs/specs')
+  await expect(specs.variant).toHaveValue('tdd')
+
+  // Off needs no folder and no variant.
+  await specs.mode.selectOption('off')
+  await expect(specs.folder).toBeDisabled()
+  await expect(specs.variant).toBeDisabled()
+  await specs.save.click()
+  await expect.poll(async () => (await calls(page, 'project.specs')).length).toBe(2)
+  expect((await calls(page, 'project.specs'))[1]).toMatchObject({ project: 1, on: false })
+  await expect(specs.note).toHaveText(
+    'Specs are off in this project: the chief is told so when it next starts.',
+  )
+  await expect(specs.mode).toHaveValue('off')
+
+  // Back to following the app's setting: it says none of the three.
+  await specs.mode.selectOption('follow')
+  await expect(specs.folder).toBeEnabled()
+  await specs.folder.fill('')
+  await specs.save.click()
+  await expect.poll(async () => (await calls(page, 'project.specs')).length).toBe(3)
+  expect((await calls(page, 'project.specs'))[2]).toEqual({
+    project: 1,
+    on: null,
+    folder: null,
+    variant: 'tdd',
+  })
+})
+
+test('a folder the daemon refuses is said in the dialog, where it was typed, and what was typed stays', async ({
+  page,
+}) => {
+  const data = model()
+  data.specsRefusal =
+    'the specs folder is a folder inside the project: it stays inside it, with no `..`'
+  await open(page, data)
+  const specs = await openSpecs(page)
+  await specs.mode.selectOption('on')
+  await specs.folder.fill('../elsewhere')
+  await specs.save.click()
+  await expect(specs.note).toHaveText(data.specsRefusal)
+  await expect(specs.folder).toHaveValue('../elsewhere')
+  await expect(specs.mode).toHaveValue('on')
+  // The refusal is no note on the status line, and the next save clears it.
+  await expect(page.locator('#status')).not.toHaveText(/Saved/)
+})
+
+test('a board drawn again while the dialog is open leaves what the human is typing, and a project that says otherwise sets it', async ({
+  page,
+}) => {
+  const data = model()
+  // A closed project has no staff to settle; this one is open, and says its own word.
+  data.projects[1].state = 'open'
+  data.boards[2].project.state = 'open'
+  data.boards[2].project.specs = { on: false, folder: 'plans', variant: 'core-html' }
+  await open(page, data)
+  const specs = await openSpecs(page)
+  await specs.folder.fill('half-typed')
+  // The page reads the board again as it is told something changed.
+  const reads = async () => (await calls(page, 'board.get')).length
+  const before = await reads()
+  await page.evaluate(() => window.__listeners.get('state-changed')())
+  await expect.poll(reads).toBeGreaterThan(before)
+  await expect(specs.folder).toHaveValue('half-typed')
+  // Another project is another's: each shows its own.
+  await specs.dialog.getByRole('button', { name: 'Close' }).click()
+  await chooseProject(page, 'foundry')
+  await page.getByRole('button', { name: 'Staff' }).click()
+  await expect(specs.mode).toHaveValue('off')
+  await expect(specs.folder).toHaveValue('plans')
+  await expect(specs.folder).toBeDisabled()
+  await expect(specs.variant).toHaveValue('core-html')
+})
+
+const DEFAULT_WAKE_UP_WORDS =
+  'Do you still have work to do? If tasks are left on the board or in your plan, carry on.'
+
+/** The staff dialog open on project 1, and its group of wake-up calls. */
+async function wakeUpGroup(page) {
+  await page.getByRole('button', { name: 'Staff' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project staff' })
+  const group = dialog.getByRole('group', { name: 'Wake-up calls' })
+  return {
+    dialog,
+    group,
+    on: group.getByRole('checkbox'),
+    // A label that wraps its control is named with the control's value as well.
+    every: group.getByLabel('Every'),
+    unit: group.getByLabel('Unit'),
+    words: group.getByLabel('What it says'),
+    save: group.getByRole('button', { name: 'Save wake-up calls' }),
+  }
+}
+
+test('shows the wake-up calls of the project in the staff dialog: off, an hour apart, and the default words', async ({
+  page,
+}) => {
+  await open(page)
+  const calling = await wakeUpGroup(page)
+  await expect(calling.on).not.toBeChecked()
+  await expect(calling.every).toHaveValue('1')
+  await expect(calling.unit).toHaveValue('hours')
+  await expect(calling.words).toHaveValue(DEFAULT_WAKE_UP_WORDS)
+  expect(await calls(page, 'wakeup.get')).toEqual([{ project: 1 }])
+  expect(await calls(page, 'wakeup.set')).toEqual([])
+})
+
+test('saves the wake-up calls as a number, a unit and the words, shows them as the daemon says them, and shows what was saved when the dialog opens again', async ({
+  page,
+}) => {
+  await open(page)
+  const calling = await wakeUpGroup(page)
+  await calling.on.check()
+  await calling.every.fill('120')
+  await calling.unit.selectOption('minutes')
+  await calling.words.fill('Anything left? Carry on, or say what is.')
+  await calling.save.click()
+  await expect
+    .poll(() => calls(page, 'wakeup.set'))
+    .toEqual([
+      {
+        project: 1,
+        on: true,
+        every: 120,
+        unit: 'minutes',
+        text: 'Anything left? Carry on, or say what is.',
+      },
+    ])
+  // The daemon says the interval in the largest unit that holds it: 120 minutes are 2 hours.
+  await expect(calling.every).toHaveValue('2')
+  await expect(calling.unit).toHaveValue('hours')
+  await expect(page.locator('#status')).toHaveText(
+    'Wake-up calls are on: the chief is asked every 2 hours.',
+  )
+  // Closed and opened again, it shows what was saved.
+  await calling.dialog.getByRole('button', { name: 'Close' }).click()
+  await expect(calling.dialog).toBeHidden()
+  await page.getByRole('button', { name: 'Staff' }).click()
+  await expect(calling.on).toBeChecked()
+  await expect(calling.every).toHaveValue('2')
+  await expect(calling.unit).toHaveValue('hours')
+  await expect(calling.words).toHaveValue('Anything left? Carry on, or say what is.')
+  // And what the daemon has when it opens, not what the page last drew: the
+  // setting was changed elsewhere meanwhile.
+  await calling.dialog.getByRole('button', { name: 'Close' }).click()
+  await page.evaluate(() => {
+    window.__model.wakeUps[1] = { on: false, everyMs: 5_400_000, text: null }
+  })
+  await page.getByRole('button', { name: 'Staff' }).click()
+  await expect(calling.on).not.toBeChecked()
+  await expect(calling.every).toHaveValue('90')
+  await expect(calling.unit).toHaveValue('minutes')
+  await expect(calling.words).toHaveValue(DEFAULT_WAKE_UP_WORDS)
+  expect(await calls(page, 'wakeup.get')).toHaveLength(3)
+})
+
+test('converts the wake-up interval the human picks in minutes, hours and days as the daemon counts it, and says it in the largest unit that holds it whole', async ({
+  page,
+}) => {
+  await open(page)
+  const calling = await wakeUpGroup(page)
+  await calling.on.check()
+  for (const [every, unit, shown, saidUnit, said] of [
+    ['90', 'minutes', '90', 'minutes', 'every 90 minutes'],
+    ['60', 'minutes', '1', 'hours', 'every 1 hour'],
+    ['24', 'hours', '1', 'days', 'every 1 day'],
+    ['36', 'hours', '36', 'hours', 'every 36 hours'],
+    ['3', 'days', '3', 'days', 'every 3 days'],
+    ['1', 'minutes', '1', 'minutes', 'every 1 minute'],
+  ]) {
+    await calling.every.fill(every)
+    await calling.unit.selectOption(unit)
+    await calling.save.click()
+    await expect(calling.every).toHaveValue(shown)
+    await expect(calling.unit).toHaveValue(saidUnit)
+    await expect(page.locator('#status')).toHaveText(
+      `Wake-up calls are on: the chief is asked ${said}.`,
+    )
+  }
+  expect((await calls(page, 'wakeup.set')).map(({ every, unit }) => [every, unit])).toEqual([
+    [90, 'minutes'],
+    [60, 'minutes'],
+    [24, 'hours'],
+    [36, 'hours'],
+    [3, 'days'],
+    [1, 'minutes'],
+  ])
+})
+
+test('turns the wake-up calls off with the same Save, and sends no save for a number that is no whole number of at least one', async ({
+  page,
+}) => {
+  const data = model()
+  data.wakeUps = { 1: { on: true, everyMs: 7_200_000, text: 'Still there?' } }
+  await open(page, data)
+  const calling = await wakeUpGroup(page)
+  await expect(calling.on).toBeChecked()
+  await expect(calling.words).toHaveValue('Still there?')
+  // The browser holds back a number under one or none: nothing is sent.
+  for (const bad of ['0', '-3', '1.5', '']) {
+    await calling.every.fill(bad)
+    await calling.save.click()
+    await expect(calling.every).toHaveJSProperty('validity.valid', false)
+  }
+  expect(await calls(page, 'wakeup.set')).toEqual([])
+  await calling.every.fill('2')
+  await calling.on.uncheck()
+  await calling.save.click()
+  await expect(page.locator('#status')).toHaveText('Wake-up calls are off.')
+  expect(await calls(page, 'wakeup.set')).toEqual([
+    { project: 1, on: false, every: 2, unit: 'hours', text: 'Still there?' },
+  ])
+})
+
+test('says the daemon refusal of a wake-up in the dialog and keeps what the human typed', async ({
+  page,
+}) => {
+  await open(page)
+  const calling = await wakeUpGroup(page)
+  await calling.on.check()
+  await calling.words.fill('   ')
+  await calling.save.click()
+  const hint = calling.group.locator('.wakeup-hint')
+  await expect(hint).toHaveText(
+    'the wake-up text must be text, not empty, at most 1000000 characters',
+  )
+  await expect(calling.words).toHaveValue('   ')
+  await expect(calling.on).toBeChecked()
+  // Written again, it saves and the refusal goes.
+  await calling.words.fill('Go on?')
+  await calling.save.click()
+  await expect(hint).toBeHidden()
+  await expect(calling.words).toHaveValue('Go on?')
+})
+
+test('saves the wake-up calls on Enter in the number and adds nobody to the staff', async ({
+  page,
+}) => {
+  await open(page)
+  const calling = await wakeUpGroup(page)
+  await calling.on.check()
+  await calling.every.fill('5')
+  await calling.unit.selectOption('minutes')
+  await calling.every.press('Enter')
+  await expect
+    .poll(() => calls(page, 'wakeup.set'))
+    .toEqual([{ project: 1, on: true, every: 5, unit: 'minutes', text: DEFAULT_WAKE_UP_WORDS }])
+  expect(await calls(page, 'member.add')).toEqual([])
+  expect(await calls(page, 'member.roles')).toEqual([])
+})
+
 test('lists what waits for approval in For you, and approves or declines it, writing to no agent', async ({
   page,
 }) => {
@@ -3143,6 +3541,46 @@ test('a screen opened again keeps what the human left on it, and lists the agent
     screen = agents.frameLocator('iframe')
     await expect(screen.locator('#agents .member .callsign')).toHaveText(['newbie'])
     await expect(screen.getByLabel('Show', { exact: true })).toHaveValue('mine')
+  } finally {
+    await daemon.close()
+  }
+})
+
+/** The preferences the daemon keeps in the agents file of the home `env` names. */
+const preferencesIn = (env) =>
+  JSON.parse(readFileSync(join(env.CONSENSFLOW_HOME, 'agents.json'), 'utf8')).preferences
+
+test('the app’s setting for specs is a box of the Agents screen, kept in the agents file beside the other choice, and shown again when the screen opens', async ({
+  page,
+}) => {
+  const daemon = await agentsScreens()
+  try {
+    await open(page, { ...model(), screens: daemon.screens })
+    let agents = await openScreen(page, 'Agents')
+    let screen = agents.frameLocator('iframe')
+    await expect(screen.locator('#agents-count')).toHaveText(/^(\d+) of \1 shown$/)
+    const box = (screen) => screen.getByLabel('Plan big work as specs', { exact: false })
+    // Off until the human turns it on.
+    await expect(box(screen)).not.toBeChecked()
+    await box(screen).check()
+    await expect(screen.locator('#roster-note')).toHaveText('')
+    await expect
+      .poll(() => preferencesIn(daemon.env))
+      .toEqual({ ownHarnessOnly: false, specs: true })
+    // The other choice goes on beside it, and neither moves the other.
+    await screen.getByLabel('Claude and OpenAI models only', { exact: false }).check()
+    await expect
+      .poll(() => preferencesIn(daemon.env))
+      .toEqual({ ownHarnessOnly: true, specs: true })
+    await agents.getByRole('button', { name: 'Close' }).click()
+
+    // Opened again, it shows what is kept; turned off, it is kept no more.
+    agents = await openScreen(page, 'Agents')
+    screen = agents.frameLocator('iframe')
+    await expect(box(screen)).toBeChecked()
+    await box(screen).uncheck()
+    await expect.poll(() => preferencesIn(daemon.env)).toEqual({ ownHarnessOnly: true })
+    await expect(box(screen)).not.toBeChecked()
   } finally {
     await daemon.close()
   }
@@ -3388,6 +3826,694 @@ test('resumes a suspended project from the list', async ({ page }) => {
   await page.getByRole('button', { name: 'Resume foundry' }).click()
   await expect.poll(() => calls(page, 'project.resume')).toEqual([{ project: 2 }])
 })
+
+// --- The project menu: a right-click, or the keyboard, on a project in the list. ---
+
+/** A project's card in the list, by id, the button that chooses it, and its menu. */
+const projectCard = (page, id) => page.locator(`li.project[data-project="${id}"]`)
+const projectButton = (page, id) => projectCard(page, id).locator('.project-select')
+const projectMenu = (page) => page.getByRole('menu')
+const itemNamed = (page, name) => projectMenu(page).getByRole('menuitem', { name })
+
+/** The menu, opened on project `id` by a right-click on its button. */
+async function menuOn(page, id, position) {
+  await projectButton(page, id).click({ button: 'right', position })
+  await expect(projectMenu(page)).toBeVisible()
+}
+
+/**
+ * The page's timers set so far have run: one set now, with the same delay, runs after them. The
+ * menu gives the keyboard back to a project once a click has had its way with the focus, in a
+ * timer a few milliseconds after it, so what a test says of the focus after a click waits for it.
+ */
+const settled = (page) => page.evaluate(() => new Promise((done) => setTimeout(done)))
+
+/** The dialog an item of the menu opens, for project `id`. */
+async function dialogFrom(page, id, item, title) {
+  await menuOn(page, id)
+  await itemNamed(page, item).click()
+  const dialog = page.getByRole('dialog', { name: title })
+  await expect(dialog).toBeVisible()
+  return dialog
+}
+
+test('project menu: a right-click on a project opens its menu beside the pointer, Rename and Description, and selects nothing', async ({
+  page,
+}) => {
+  await open(page)
+  // foundry is not the project shown: the menu is for the one right-clicked.
+  const button = await projectButton(page, 2).boundingBox()
+  await menuOn(page, 2, { x: 40, y: 10 })
+  await expect(projectMenu(page).getByRole('menuitem')).toHaveText(['Rename…', 'Description…'])
+  await expect(projectMenu(page)).toHaveAccessibleName('foundry')
+  await expect(itemNamed(page, 'Rename…')).toBeFocused()
+  const opened = await projectMenu(page).boundingBox()
+  expect(Math.abs(opened.x - (button.x + 40))).toBeLessThan(2)
+  expect(Math.abs(opened.y - (button.y + 10))).toBeLessThan(2)
+  await expect(page.locator('#project-title')).toHaveText('harbour')
+  await expect(projectButton(page, 1)).toHaveAttribute('aria-current', 'true')
+  await expect(projectButton(page, 2)).toHaveAttribute('aria-current', 'false')
+  // The tools of a card are part of the project: a right-click there is the same.
+  await page.keyboard.press('Escape')
+  await page.getByRole('button', { name: 'Close harbour' }).click({ button: 'right' })
+  await expect(projectMenu(page)).toHaveAccessibleName('harbour')
+  // The menu is the page's: the browser's own is taken away on a project, and left where the
+  // list has none of one.
+  await page.keyboard.press('Escape')
+  const taken = (locator) =>
+    locator.evaluate((node) => {
+      const asked = new MouseEvent('contextmenu', { bubbles: true, cancelable: true })
+      node.dispatchEvent(asked)
+      return asked.defaultPrevented
+    })
+  expect(await taken(projectButton(page, 1))).toBe(true)
+  await page.keyboard.press('Escape')
+  expect(await taken(page.locator('#project-title'))).toBe(false)
+  await expect(projectMenu(page)).toBeHidden()
+})
+
+test('project menu: a menu that would run off the window is kept inside it', async ({ page }) => {
+  await page.setViewportSize({ width: 900, height: 250 })
+  await open(page)
+  await menuOn(page, 2, { x: 190, y: 20 })
+  const box = await projectMenu(page).boundingBox()
+  expect(box.y + box.height).toBeLessThanOrEqual(250)
+  expect(box.x + box.width).toBeLessThanOrEqual(900)
+  expect(box.y).toBeGreaterThanOrEqual(0)
+})
+
+test('project menu: Shift+F10 and the context-menu key open it on the project the keyboard is on, and the arrow keys choose', async ({
+  page,
+}) => {
+  await open(page)
+  await projectButton(page, 2).focus()
+  await page.keyboard.press('Shift+F10')
+  await expect(projectMenu(page)).toBeVisible()
+  await expect(projectMenu(page)).toHaveAccessibleName('foundry')
+  await expect(itemNamed(page, 'Rename…')).toBeFocused()
+  // Where there is no pointer it opens at the project's button: its left edge, just under it.
+  // (The browser has its own place for the context-menu key, at the control the keyboard is on.)
+  const anchored = async (id) => {
+    const [menu, button] = await Promise.all([
+      projectMenu(page).boundingBox(),
+      projectButton(page, id).boundingBox(),
+    ])
+    expect(Math.abs(menu.x - button.x)).toBeLessThan(2)
+    expect(Math.abs(menu.y - (button.y + button.height))).toBeLessThan(2)
+  }
+  await anchored(2)
+  await page.keyboard.press('Escape')
+  await expect(projectMenu(page)).toBeHidden()
+  await expect(projectButton(page, 2)).toBeFocused()
+
+  // The context-menu key, from any control of a card: it is the card's project.
+  await page.getByRole('button', { name: 'Close harbour' }).focus()
+  await page.keyboard.press('ContextMenu')
+  await expect(projectMenu(page)).toBeVisible()
+  await expect(projectMenu(page)).toHaveAccessibleName('harbour')
+  await anchored(1)
+  // The arrow keys go round the items, Home and End to either end.
+  await expect(itemNamed(page, 'Rename…')).toBeFocused()
+  await page.keyboard.press('ArrowDown')
+  await expect(itemNamed(page, 'Description…')).toBeFocused()
+  await page.keyboard.press('ArrowDown')
+  await expect(itemNamed(page, 'Rename…')).toBeFocused()
+  await page.keyboard.press('ArrowUp')
+  await expect(itemNamed(page, 'Description…')).toBeFocused()
+  await page.keyboard.press('Home')
+  await expect(itemNamed(page, 'Rename…')).toBeFocused()
+  await page.keyboard.press('End')
+  await expect(itemNamed(page, 'Description…')).toBeFocused()
+  // Enter chooses the item the keyboard is on.
+  await page.keyboard.press('Enter')
+  await expect(projectMenu(page)).toBeHidden()
+  await expect(page.getByRole('dialog', { name: 'Project description' })).toBeVisible()
+  await page.keyboard.press('Escape')
+  // The dialog gives the keyboard back to the project as it closes: after that, not before.
+  await expect(page.getByRole('dialog', { name: 'Project description' })).toBeHidden()
+  await expect(projectButton(page, 1)).toBeFocused()
+
+  // Anywhere but on a project the keys open nothing.
+  await page.locator('#inbox-button').focus()
+  await page.keyboard.press('Shift+F10')
+  await page.keyboard.press('ContextMenu')
+  await expect(projectMenu(page)).toBeHidden()
+})
+
+test('project menu: Escape closes it, and so does a click elsewhere, the keyboard going back to the project', async ({
+  page,
+}) => {
+  await open(page)
+  await menuOn(page, 1)
+  await page.keyboard.press('Escape')
+  await expect(projectMenu(page)).toBeHidden()
+  await expect(projectButton(page, 1)).toBeFocused()
+  // A click on nothing in particular.
+  await menuOn(page, 2)
+  await page.locator('#project-title').click()
+  await expect(projectMenu(page)).toBeHidden()
+  await expect(projectButton(page, 2)).toBeFocused()
+  // A click on a control is that control's: the menu is shut, and the control keeps the keyboard.
+  await menuOn(page, 2)
+  await page.locator('#inbox-button').click()
+  await settled(page)
+  await expect(projectMenu(page)).toBeHidden()
+  await expect(page.locator('#inbox-button')).toBeFocused()
+  // Tab leaves the menu, back to the project.
+  await menuOn(page, 1)
+  await page.keyboard.press('Tab')
+  await expect(projectMenu(page)).toBeHidden()
+  await expect(projectButton(page, 1)).toBeFocused()
+  // A right-click on another project moves the menu there, and the keyboard is the new menu's.
+  await menuOn(page, 1, { x: 190, y: 5 })
+  await menuOn(page, 2, { x: 30, y: 10 })
+  await settled(page)
+  await expect(projectMenu(page)).toHaveAccessibleName('foundry')
+  await expect(itemNamed(page, 'Rename…')).toBeFocused()
+  // None of it asked the daemon for a change.
+  expect(await calls(page, 'project.rename')).toEqual([])
+  expect(await calls(page, 'project.describe')).toEqual([])
+})
+
+test('project menu: a board drawn again leaves the menu open, and Escape then goes back to the project as it is drawn now', async ({
+  page,
+}) => {
+  await open(page)
+  await menuOn(page, 1)
+  await changed(page, () => {
+    for (const shown of [window.__model.projects[0], window.__model.boards[1].project]) {
+      shown.name = 'harbour two'
+    }
+  })
+  await expect(projectButton(page, 1).locator('.project-name')).toHaveText('harbour two')
+  await expect(projectMenu(page)).toBeVisible()
+  await expect(itemNamed(page, 'Rename…')).toBeFocused()
+  await page.keyboard.press('Escape')
+  await expect(projectMenu(page)).toBeHidden()
+  await expect(projectButton(page, 1)).toBeFocused()
+})
+
+/** `project` gone from what the daemon lists, as when it is deleted from elsewhere. */
+const goneFrom = (project) => {
+  window.__model.projects = window.__model.projects.filter((listed) => listed.id !== project)
+}
+
+test('project menu: an open menu follows a rename made elsewhere, and is for the project as the page has it now', async ({
+  page,
+}) => {
+  await open(page)
+  await menuOn(page, 1)
+  await expect(projectMenu(page)).toHaveAccessibleName('harbour')
+  await changed(page, () => {
+    for (const shown of [window.__model.projects[0], window.__model.boards[1].project]) {
+      shown.name = 'harbour two'
+    }
+  })
+  await expect(projectMenu(page)).toHaveAccessibleName('harbour two')
+  await expect(projectMenu(page)).toBeVisible()
+  await expect(itemNamed(page, 'Rename…')).toBeFocused()
+  // What it opens is on the name the project has now.
+  await itemNamed(page, 'Rename…').click()
+  await expect(page.getByRole('dialog', { name: 'Rename project' }).getByLabel('Name')).toHaveValue(
+    'harbour two',
+  )
+})
+
+test('project menu: an open menu shuts when its project is gone, and the keyboard goes to the project that took its place, or the one before it', async ({
+  page,
+}) => {
+  const data = model()
+  data.projects.push({ id: 3, name: 'quarry', directory: '/work/quarry', state: 'suspended' })
+  await open(page, data)
+  // The one in the middle goes: the one after it is where it was.
+  await menuOn(page, 2)
+  await changed(page, goneFrom, 2)
+  await expect(projectMenu(page)).toBeHidden()
+  await expect(projectCard(page, 2)).toHaveCount(0)
+  await expect(projectButton(page, 3)).toBeFocused()
+  // The last one goes: the one before it.
+  await menuOn(page, 3)
+  await changed(page, goneFrom, 3)
+  await expect(projectMenu(page)).toBeHidden()
+  await expect(projectCard(page, 3)).toHaveCount(0)
+  await expect(projectButton(page, 1)).toBeFocused()
+})
+
+test('project menu: with no project left an open menu shuts and the keyboard goes to New project', async ({
+  page,
+}) => {
+  await open(page)
+  await menuOn(page, 1)
+  await page.evaluate(() => {
+    window.__model.projects = []
+    window.__listeners.get('state-changed')()
+  })
+  await expect(projectMenu(page)).toBeHidden()
+  await expect(page.locator('li.project')).toHaveCount(0)
+  await expect(page.locator('#new-project')).toBeFocused()
+})
+
+test('project menu: an open menu whose project is gone leaves the keyboard where the human had put it', async ({
+  page,
+}) => {
+  await open(page)
+  await menuOn(page, 2)
+  // The keyboard is elsewhere (the menu is still open: nothing was pressed outside it).
+  await page.locator('#inbox-button').focus()
+  await expect(projectMenu(page)).toBeVisible()
+  await changed(page, goneFrom, 2)
+  await expect(projectMenu(page)).toBeHidden()
+  await expect(page.locator('#inbox-button')).toBeFocused()
+})
+
+test('project menu: Rename… saves with Enter, and the new name is in the list, over the board and in the buttons named after it', async ({
+  page,
+}) => {
+  await open(page)
+  const dialog = await dialogFrom(page, 1, 'Rename…', 'Rename project')
+  const name = dialog.getByLabel('Name')
+  await expect(name).toHaveValue('harbour')
+  await expect(name).toBeFocused()
+  // What is there is selected, to be typed over.
+  expect(
+    await name.evaluate((input) => input.value.slice(input.selectionStart, input.selectionEnd)),
+  ).toBe('harbour')
+  await name.fill('  Quay  ')
+  await name.press('Enter')
+  await expect.poll(() => calls(page, 'project.rename')).toEqual([{ project: 1, name: 'Quay' }])
+  await expect(dialog).toBeHidden()
+  await expect(projectButton(page, 1).locator('.project-name')).toHaveText('Quay')
+  await expect(page.locator('#project-title')).toHaveText('Quay')
+  await expect(page.getByRole('button', { name: 'Close Quay' })).toBeVisible()
+  await expect(page.locator('#status')).toHaveText('harbour is now Quay.')
+  // The keyboard is on the project, drawn again under its new name.
+  await expect(projectButton(page, 1)).toBeFocused()
+  // The folder is the one the project was opened in, and another project is as it was.
+  await expect(page.locator('#project-directory')).toHaveText('/work/harbour')
+  await expect(projectButton(page, 2).locator('.project-name')).toHaveText('foundry')
+  // Opened again, it shows what was saved.
+  await dialogFrom(page, 1, 'Rename…', 'Rename project')
+  await expect(name).toHaveValue('Quay')
+})
+
+test('project menu: Enter pressed twice while the daemon answers asks it once', async ({
+  page,
+}) => {
+  await open(page)
+  await page.evaluate(() => {
+    window.__delay['project.rename'] = 300
+  })
+  const dialog = await dialogFrom(page, 1, 'Rename…', 'Rename project')
+  const name = dialog.getByLabel('Name')
+  await name.fill('Quay')
+  await name.press('Enter')
+  await name.press('Enter')
+  await expect(dialog).toBeHidden()
+  expect(await calls(page, 'project.rename')).toEqual([{ project: 1, name: 'Quay' }])
+  await expect(projectButton(page, 1).locator('.project-name')).toHaveText('Quay')
+})
+
+test('project menu: Escape in the rename dialog, and Cancel, leave the name and ask the daemon nothing', async ({
+  page,
+}) => {
+  await open(page)
+  const dialog = await dialogFrom(page, 1, 'Rename…', 'Rename project')
+  const name = dialog.getByLabel('Name')
+  await name.fill('Quay')
+  await page.keyboard.press('Escape')
+  await expect(dialog).toBeHidden()
+  await expect(projectButton(page, 1)).toBeFocused()
+  await dialogFrom(page, 1, 'Rename…', 'Rename project')
+  // What was typed is not kept: it opens on the name as it is.
+  await expect(name).toHaveValue('harbour')
+  await name.fill('Quay')
+  await dialog.getByRole('button', { name: 'Cancel' }).click()
+  await expect(dialog).toBeHidden()
+  await expect(projectButton(page, 1)).toBeFocused()
+  expect(await calls(page, 'project.rename')).toEqual([])
+  await expect(projectButton(page, 1).locator('.project-name')).toHaveText('harbour')
+  await expect(page.locator('#project-title')).toHaveText('harbour')
+})
+
+test('project menu: what the daemon refuses is said in the dialog, which stays open on what was typed', async ({
+  page,
+}) => {
+  await open(page)
+  const dialog = await dialogFrom(page, 1, 'Rename…', 'Rename project')
+  const name = dialog.getByLabel('Name')
+  const refusal = dialog.getByRole('alert')
+  await expect(refusal).toBeHidden()
+  // A field left empty is the browser's to stop: nothing is asked of the daemon.
+  await name.fill('')
+  await name.press('Enter')
+  await expect(dialog).toBeVisible()
+  expect(await calls(page, 'project.rename')).toEqual([])
+  // Nothing but spaces gets past the field, and is the daemon's to refuse.
+  await name.fill('   ')
+  await name.press('Enter')
+  await expect(refusal).toHaveText('name must be text, not empty, at most 100 characters')
+  await expect(dialog).toBeVisible()
+  await expect(name).toHaveValue('   ')
+  expect(await calls(page, 'project.rename')).toEqual([{ project: 1, name: '' }])
+  // The field stops at the most a name may have; one that gets past it (a field that does not
+  // stop it) is refused all the same.
+  await name.fill('x'.repeat(150))
+  expect((await name.inputValue()).length).toBe(100)
+  await name.evaluate((input) => input.removeAttribute('maxlength'))
+  await name.fill('x'.repeat(101))
+  await name.press('Enter')
+  await expect.poll(async () => (await calls(page, 'project.rename')).length).toBe(2)
+  await expect(refusal).toHaveText('name must be text, not empty, at most 100 characters')
+  await expect(name).toHaveValue('x'.repeat(101))
+  await expect(projectButton(page, 1).locator('.project-name')).toHaveText('harbour')
+  // Mended and saved, the refusal goes with the dialog, and is not there when it opens again.
+  await name.fill('Quay')
+  await name.press('Enter')
+  await expect(dialog).toBeHidden()
+  await expect(projectButton(page, 1).locator('.project-name')).toHaveText('Quay')
+  await dialogFrom(page, 1, 'Rename…', 'Rename project')
+  await expect(refusal).toBeHidden()
+})
+
+test('project menu: Description… writes a line under the name, smaller and quieter, cut with an ellipsis and whole on hover', async ({
+  page,
+}) => {
+  await open(page)
+  const dialog = await dialogFrom(page, 1, 'Description…', 'Project description')
+  const line = dialog.getByLabel('Description')
+  await expect(line).toHaveValue('')
+  await expect(line).toHaveAttribute('maxlength', '200')
+  const whole =
+    'Ships the cargo to the quay and back again, every tide, with not a day off in the whole year'
+  await line.fill(`  ${whole}  `)
+  await line.press('Enter')
+  await expect
+    .poll(() => calls(page, 'project.describe'))
+    .toEqual([{ project: 1, description: whole }])
+  await expect(dialog).toBeHidden()
+  await expect(page.locator('#status')).toHaveText('The description of harbour is saved.')
+  await expect(projectButton(page, 1)).toBeFocused()
+  const name = projectButton(page, 1).locator('.project-name')
+  const shown = projectButton(page, 1).locator('.project-description')
+  await expect(shown).toHaveText(whole)
+  // Under the name, smaller and quieter than it.
+  const [nameBox, shownBox] = await Promise.all([name.boundingBox(), shown.boundingBox()])
+  expect(shownBox.y).toBeGreaterThanOrEqual(nameBox.y + nameBox.height - 1)
+  const looks = (locator) =>
+    locator.evaluate((node) => {
+      const style = getComputedStyle(node)
+      return { size: Number.parseFloat(style.fontSize), color: style.color }
+    })
+  const [nameLooks, shownLooks] = await Promise.all([looks(name), looks(shown)])
+  expect(shownLooks.size).toBeLessThan(nameLooks.size)
+  expect(shownLooks.color).not.toBe(nameLooks.color)
+  // Cut with an ellipsis where it is too long for the list, and whole on hover.
+  expect(
+    await shown.evaluate(
+      (node) =>
+        node.scrollWidth > node.clientWidth && getComputedStyle(node).textOverflow === 'ellipsis',
+    ),
+  ).toBe(true)
+  await expect(shown).toHaveAttribute('title', whole)
+  await shown.hover()
+  // The line is the human's alone: the board and the other project show nothing of it.
+  await expect(page.locator('.board')).not.toContainText('Ships the cargo')
+  await expect(projectButton(page, 2).locator('.project-description')).toHaveCount(0)
+  // Written again, it is a line of the daemon's too: a short one is not cut.
+  await dialogFrom(page, 1, 'Description…', 'Project description')
+  await expect(line).toHaveValue(whole)
+  await line.fill('Moves the cargo')
+  await line.press('Enter')
+  await expect(shown).toHaveText('Moves the cargo')
+  expect(await shown.evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true)
+  await expect(shown).toHaveAttribute('title', 'Moves the cargo')
+})
+
+test('project menu: saving an empty description takes the line away, and the dialog shows what was saved when it opens again', async ({
+  page,
+}) => {
+  const data = model()
+  for (const shown of [data.projects[0], data.boards[1].project]) {
+    shown.description = 'Moves the cargo'
+  }
+  await open(page, data)
+  const shown = projectButton(page, 1).locator('.project-description')
+  await expect(shown).toHaveText('Moves the cargo')
+  const dialog = await dialogFrom(page, 1, 'Description…', 'Project description')
+  const line = dialog.getByLabel('Description')
+  // It opens on the line the project has.
+  await expect(line).toHaveValue('Moves the cargo')
+  await line.fill('')
+  await line.press('Enter')
+  await expect
+    .poll(() => calls(page, 'project.describe'))
+    .toEqual([{ project: 1, description: '' }])
+  await expect(dialog).toBeHidden()
+  await expect(shown).toHaveCount(0)
+  await expect(page.locator('#status')).toHaveText('harbour has no description.')
+  await expect(projectButton(page, 1)).toBeFocused()
+  // Opened again, it is empty; spaces alone are no line either.
+  await dialogFrom(page, 1, 'Description…', 'Project description')
+  await expect(line).toHaveValue('')
+  await line.fill('   ')
+  await line.press('Enter')
+  await expect(dialog).toBeHidden()
+  expect(await calls(page, 'project.describe')).toEqual([
+    { project: 1, description: '' },
+    { project: 1, description: '' },
+  ])
+  await expect(shown).toHaveCount(0)
+})
+
+test('project menu: a line the daemon refuses is said in the dialog, and a dialog opens on the project as it is now', async ({
+  page,
+}) => {
+  await open(page)
+  const dialog = await dialogFrom(page, 1, 'Description…', 'Project description')
+  const line = dialog.getByLabel('Description')
+  const refusal = dialog.getByRole('alert')
+  // The field stops at two hundred; one that gets past it is refused in the daemon's words.
+  await line.evaluate((input) => input.removeAttribute('maxlength'))
+  await line.fill('a'.repeat(201))
+  await line.press('Enter')
+  await expect(refusal).toHaveText(
+    "a project's description is one line of plain text: it is at most 200 characters",
+  )
+  await expect(dialog).toBeVisible()
+  await expect(line).toHaveValue('a'.repeat(201))
+  await line.fill('First')
+  await line.press('Enter')
+  await expect(dialog).toBeHidden()
+  await expect(projectButton(page, 1).locator('.project-description')).toHaveText('First')
+  // The daemon has another line by the time it opens again: it shows that one, not the last drawn.
+  await changed(page, () => {
+    for (const shown of [window.__model.projects[0], window.__model.boards[1].project]) {
+      shown.description = 'Elsewhere'
+    }
+  })
+  await dialogFrom(page, 1, 'Description…', 'Project description')
+  await expect(line).toHaveValue('Elsewhere')
+  await expect(refusal).toBeHidden()
+})
+
+test('project menu: a closed project is renamed and described from its menu as an open one is', async ({
+  page,
+}) => {
+  await open(page)
+  const rename = await dialogFrom(page, 2, 'Rename…', 'Rename project')
+  await rename.getByLabel('Name').fill('forge')
+  await rename.getByLabel('Name').press('Enter')
+  await expect.poll(() => calls(page, 'project.rename')).toEqual([{ project: 2, name: 'forge' }])
+  await expect(projectButton(page, 2).locator('.project-name')).toHaveText('forge')
+  await expect(page.getByRole('button', { name: 'Resume forge' })).toBeVisible()
+  const describe = await dialogFrom(page, 2, 'Description…', 'Project description')
+  await describe.getByLabel('Description').fill('Where the iron goes')
+  await describe.getByLabel('Description').press('Enter')
+  await expect(projectButton(page, 2).locator('.project-description')).toHaveText(
+    'Where the iron goes',
+  )
+  // The project shown is the one it was, whatever was done to the other.
+  await expect(page.locator('#project-title')).toHaveText('harbour')
+  await expect(projectButton(page, 1).locator('.project-name')).toHaveText('harbour')
+})
+
+/**
+ * The daemon's next answer to `operation` is held until `letGo`: what the page asked
+ * is on its way, and the page goes on meanwhile. `answers` counts what it answered.
+ */
+const hold = (page, operation) =>
+  page.evaluate((operation) => {
+    window.__hold[operation] = new Promise((go) => {
+      window.__release[operation] = go
+    })
+  }, operation)
+const letGo = (page, operation) =>
+  page.evaluate((operation) => window.__release[operation](), operation)
+const answers = (page, operation) =>
+  page.evaluate(
+    (operation) => window.__answered.filter((answered) => answered === operation).length,
+    operation,
+  )
+
+/**
+ * What differs between the two dialogs where the human saves and cancels before the daemon
+ * answers: the item that opens each; what is typed for harbour, which is saved, and for
+ * foundry, which is not; a text the daemon refuses (spaces for a name, over two hundred
+ * characters for a line: the field's own limit is lifted for it); what the list shows of
+ * a save; what the status line says of harbour's; and how the human leaves the dialog.
+ */
+const CANCELLED = [
+  {
+    what: 'rename',
+    item: 'Rename…',
+    title: 'Rename project',
+    label: 'Name',
+    operation: 'project.rename',
+    body: (project, text) => ({ project, name: text }),
+    saved: 'Quay',
+    typed: 'forge',
+    refused: '   ',
+    told: 'harbour is now Quay.',
+    leaves: 'Cancel',
+    shows: (page, project, text) =>
+      expect(projectButton(page, project).locator('.project-name')).toHaveText(text),
+  },
+  {
+    what: 'description',
+    item: 'Description…',
+    title: 'Project description',
+    label: 'Description',
+    operation: 'project.describe',
+    body: (project, text) => ({ project, description: text }),
+    saved: 'Moves the cargo',
+    typed: 'Where the iron goes',
+    refused: 'a'.repeat(201),
+    told: 'The description of harbour is saved.',
+    leaves: 'Escape',
+    shows: (page, project, text) =>
+      expect(projectButton(page, project).locator('.project-description')).toHaveText(text),
+  },
+]
+
+/** The dialog of `spec` opened on project `id`, with `text` typed in its field. */
+async function typedIn(page, spec, id, text, { unlimited = false } = {}) {
+  const dialog = await dialogFrom(page, id, spec.item, spec.title)
+  const field = dialog.getByLabel(spec.label)
+  if (unlimited) await field.evaluate((input) => input.removeAttribute('maxlength'))
+  await field.fill(text)
+  return { dialog, field }
+}
+
+/** The human leaves the dialog without saving, as `spec` says. */
+async function leave(page, spec, dialog) {
+  if (spec.leaves === 'Cancel') await dialog.getByRole('button', { name: 'Cancel' }).click()
+  else await page.keyboard.press('Escape')
+  await expect(dialog).toBeHidden()
+}
+
+for (const spec of CANCELLED) {
+  test(`project menu: a ${spec.what} saved and cancelled before the daemon answers does not close the dialog opened next on another project`, async ({
+    page,
+  }) => {
+    await open(page)
+    await hold(page, spec.operation)
+    const first = await typedIn(page, spec, 1, spec.saved)
+    await first.field.press('Enter')
+    await expect.poll(() => calls(page, spec.operation)).toEqual([spec.body(1, spec.saved)])
+    await leave(page, spec, first.dialog)
+    // foundry's dialog, opened after it, with its own text typed and not saved.
+    const next = await typedIn(page, spec, 2, spec.typed)
+    // The daemon answers harbour's save now, and the list shows what it did.
+    await letGo(page, spec.operation)
+    await spec.shows(page, 1, spec.saved)
+    await settled(page)
+    // foundry's dialog is as the human left it, and theirs to save. Cancelling did not
+    // take harbour's change back, and the status line tells it.
+    await expect(next.dialog).toBeVisible()
+    await expect(next.field).toHaveValue(spec.typed)
+    await expect(next.field).toBeFocused()
+    await expect(page.locator('#status')).toHaveText(spec.told)
+    await next.field.press('Enter')
+    await expect
+      .poll(() => calls(page, spec.operation))
+      .toEqual([spec.body(1, spec.saved), spec.body(2, spec.typed)])
+    await expect(next.dialog).toBeHidden()
+    await spec.shows(page, 2, spec.typed)
+  })
+
+  test(`project menu: a ${spec.what} that the daemon refuses after the human cancelled it is not said in the dialog opened next on another project`, async ({
+    page,
+  }) => {
+    await open(page)
+    await hold(page, spec.operation)
+    const first = await typedIn(page, spec, 1, spec.refused, { unlimited: true })
+    await first.field.press('Enter')
+    await expect
+      .poll(() => calls(page, spec.operation))
+      .toEqual([spec.body(1, spec.refused.trim())])
+    await leave(page, spec, first.dialog)
+    const next = await typedIn(page, spec, 2, spec.typed)
+    await letGo(page, spec.operation)
+    await expect.poll(() => answers(page, spec.operation)).toBe(1)
+    await settled(page)
+    // The refusal was of a dialog the human had left: foundry's has nothing of it, and its text.
+    await expect(next.dialog).toBeVisible()
+    await expect(next.dialog.getByRole('alert')).toBeHidden()
+    await expect(next.field).toHaveValue(spec.typed)
+    await next.field.press('Enter')
+    await expect(next.dialog).toBeHidden()
+    await spec.shows(page, 2, spec.typed)
+  })
+
+  test(`project menu: a ${spec.what} saved and cancelled before the daemon answers does not close the dialog opened next on the same project`, async ({
+    page,
+  }) => {
+    await open(page)
+    await hold(page, spec.operation)
+    const first = await typedIn(page, spec, 1, spec.saved)
+    await first.field.press('Enter')
+    await expect.poll(() => calls(page, spec.operation)).toEqual([spec.body(1, spec.saved)])
+    await leave(page, spec, first.dialog)
+    // The same dialog on the same project: an opening of its own, with its own text.
+    const again = await typedIn(page, spec, 1, spec.typed)
+    await letGo(page, spec.operation)
+    await spec.shows(page, 1, spec.saved)
+    await settled(page)
+    await expect(again.dialog).toBeVisible()
+    await expect(again.field).toHaveValue(spec.typed)
+    await expect(again.field).toBeFocused()
+    await again.field.press('Enter')
+    await expect
+      .poll(() => calls(page, spec.operation))
+      .toEqual([spec.body(1, spec.saved), spec.body(1, spec.typed)])
+    await expect(again.dialog).toBeHidden()
+    await spec.shows(page, 1, spec.typed)
+  })
+
+  test(`project menu: a ${spec.what} saved and cancelled, not yet answered, does not keep the dialog opened next from saving`, async ({
+    page,
+  }) => {
+    await open(page)
+    await hold(page, spec.operation)
+    const first = await typedIn(page, spec, 1, spec.saved)
+    await first.field.press('Enter')
+    await expect.poll(() => calls(page, spec.operation)).toEqual([spec.body(1, spec.saved)])
+    await leave(page, spec, first.dialog)
+    // harbour's save is still not answered: foundry's dialog saves all the same.
+    const next = await typedIn(page, spec, 2, spec.typed)
+    await next.field.press('Enter')
+    await expect
+      .poll(() => calls(page, spec.operation))
+      .toEqual([spec.body(1, spec.saved), spec.body(2, spec.typed)])
+    await expect(next.dialog).toBeHidden()
+    await spec.shows(page, 2, spec.typed)
+    expect(await answers(page, spec.operation)).toBe(1)
+    // And harbour's answer, when it comes, is the list's as well.
+    await letGo(page, spec.operation)
+    await spec.shows(page, 1, spec.saved)
+    await expect(page.locator('#status')).toHaveText(spec.told)
+  })
+}
 
 test("counts the human's unread notes on Inbox, and opens For you with it, from a folded board too", async ({
   page,

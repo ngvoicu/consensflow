@@ -2,12 +2,14 @@
 //! suite and the Codex cases of its role-skills suite held them (TEST-BDC-05,
 //! IMPL-BDC-07), each case under its sentence: how a Codex window is launched
 //! under the supervisor (here), how it is followed (`windows`), how a message
-//! reaches it through the supervisor's broker (`channel`), and the role it is
-//! given (`roles`). Each test gets a throwaway home and a stand-in `codex` on
-//! PATH, whose answers (its native queue, its version) and whose app-server are
-//! scripted. Asked anything else, the stand-in is not there: a launch that asks
-//! it more fails. The channel's cases against a broker on real sockets and the
-//! machine's own clock are in `tests/channels/codex.rs`.
+//! reaches it through the supervisor's broker (`channel`), the role it is
+//! given (`roles`), the Specmint skill a chief is given (`specs`), and a window
+//! opened again on a thread the app's quit cut in a turn (`resumed`). Each test
+//! gets a throwaway home and a stand-in `codex` on PATH, whose answers (its
+//! native queue, its version) and whose app-server are scripted. Asked anything
+//! else, the stand-in is not there: a launch that asks it more fails. The
+//! channel's cases against a broker on real sockets and the machine's own clock
+//! are in `tests/channels/codex.rs`.
 //!
 //! A window comes only from a prepare here, where Node's tests made up a
 //! launch bag: a test of a window on a known thread prepares it as that
@@ -20,7 +22,9 @@
 //! the cases left.
 
 mod channel;
+mod resumed;
 mod roles;
+mod specs;
 mod windows;
 
 use std::fs;
@@ -30,10 +34,11 @@ use std::rc::Rc;
 use cf_base::env::Env;
 use cf_base::path;
 use cf_harness::codex::CodexAdapter;
-use cf_harness::contract::{Adapter, Agent, Launch, LaunchId, Pane, Prepared, Records};
+use cf_harness::contract::{Adapter, Agent, Launch, LaunchId, Pane, Prepared, Records, Specs};
 use cf_harness::testing::{
     fake_executable, finished, named, ChildScript, Ends, Fakes, Sent, Served, FIRST_MESSAGE_MS,
 };
+use cf_proto::specs::Variant;
 use serde_json::{json, Value};
 use tempfile::TempDir;
 
@@ -100,6 +105,8 @@ struct Request {
     agent: Option<Agent<'static>>,
     instructions: String,
     first_message_ms: i64,
+    /// The Specmint variant a chief is given, where its project has specs on.
+    specs: Option<Variant>,
 }
 
 impl Default for Request {
@@ -111,6 +118,7 @@ impl Default for Request {
             agent: Some(LUNA),
             instructions: ROLE.to_owned(),
             first_message_ms: FIRST_MESSAGE_MS,
+            specs: None,
         }
     }
 }
@@ -137,6 +145,9 @@ impl Request {
 
 fn prepare(adapter: &CodexAdapter, request: &Request) -> Result<Prepared, String> {
     let id = LaunchId::new(LAUNCH).unwrap();
+    let skill = request
+        .specs
+        .map(|variant| adapter.specmint(variant).unwrap());
     let launch = Launch {
         id: &id,
         project: 1,
@@ -147,6 +158,10 @@ fn prepare(adapter: &CodexAdapter, request: &Request) -> Result<Prepared, String
         message: request.message.as_deref(),
         agent: request.agent,
         instructions: &request.instructions,
+        specs: request
+            .specs
+            .zip(skill.as_ref())
+            .map(|(variant, skill)| Specs { variant, skill }),
         first_message_ms: request.first_message_ms,
     };
     finished(adapter.prepare(&launch))
@@ -327,6 +342,57 @@ fn resumes_its_thread() {
             "--dangerously-bypass-approvals-and-sandbox",
         ]
     );
+}
+
+#[test]
+fn can_go_on_with_a_thread_whose_rollout_codex_kept_and_not_with_one_it_kept_none_of() {
+    let home = Home::new();
+    let (codex, _fakes) = adapter(&home);
+    assert_eq!(
+        finished(codex.resumable(THREAD)),
+        Some(false),
+        "a thread that has had no turn has no rollout"
+    );
+    // Codex begins a thread's rollout with its first turn, in the folder of the day,
+    // and names it by when it began and the thread. Only that name counts: a copy
+    // kept beside it, and a file that holds the thread's id and no more, are none.
+    let day = Path::new(&home.root)
+        .join("home")
+        .join(".codex")
+        .join("sessions")
+        .join("2026")
+        .join("10")
+        .join("13");
+    fs::create_dir_all(&day).unwrap();
+    for name in [
+        format!("rollout-2026-10-13T10-00-00-{THREAD}.jsonl.bak"),
+        format!("rollout-2026-10-13T10-00-00-{THREAD}-copy.jsonl"),
+        format!("{THREAD}.jsonl"),
+    ] {
+        fs::write(day.join(name), "").unwrap();
+    }
+    assert_eq!(
+        finished(codex.resumable(THREAD)),
+        Some(false),
+        "a copy of a rollout is no rollout"
+    );
+    // The file is found and not read: an empty one is the record all the same.
+    fs::write(
+        day.join(format!("rollout-2026-10-13T10-00-00-{THREAD}.jsonl")),
+        "",
+    )
+    .unwrap();
+    assert_eq!(finished(codex.resumable(THREAD)), Some(true));
+    assert_eq!(
+        finished(codex.resumable(NEXT)),
+        Some(false),
+        "another thread's"
+    );
+    // Where its folder cannot be looked for, Codex cannot tell.
+    let env = Env::default();
+    let services = Fakes::new(&env).services(&env, Path::new(&home.root));
+    let nowhere = CodexAdapter::new(&services);
+    assert_eq!(finished(nowhere.resumable(THREAD)), None);
 }
 
 #[test]

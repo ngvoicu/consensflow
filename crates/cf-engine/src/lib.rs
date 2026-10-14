@@ -14,6 +14,7 @@
 
 #![forbid(unsafe_code)]
 
+mod arrival;
 mod background;
 mod chief_switch;
 mod deliveries;
@@ -23,16 +24,19 @@ pub mod handoff;
 pub mod host;
 mod record;
 mod resume;
+mod role_change;
 pub mod roles;
 pub mod runtime;
 mod scheduler;
 pub mod seams;
 mod shown;
+mod specs;
 mod stalls;
 mod stops;
 mod taken_back;
 mod transcripts;
 mod unstarted;
+mod wake_ups;
 mod windows;
 
 pub use chief_switch::SwitchTo;

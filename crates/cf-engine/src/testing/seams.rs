@@ -15,6 +15,7 @@ use cf_proto::trace::{TraceLine, Traced};
 use serde_json::{json, Value};
 
 use super::recorder::Recorder;
+use crate::roles::ProjectSpecs;
 use crate::seams::{
     Credentials, LaunchFiles, LaunchIds, Log, PaneEnv, Roles, Roster, SavedAgent, Trace,
 };
@@ -86,21 +87,40 @@ impl PaneEnv for FakePaneEnv {
 /// A role text per role: `instructions for <role>`.
 pub struct FakeRoles {
     pub(crate) recorder: Recorder,
+    /// What a test adds to every text to say the roles were rewritten (a release
+    /// of ConsensFlow that changed them): nothing, as no trace of Node's has any.
+    pub rewritten: RefCell<String>,
 }
 
 impl Roles for FakeRoles {
+    /// A chief's text with the section of its project's specs where it is given
+    /// them (what the call writes down is what Node's was asked: nothing of
+    /// specs, which no trace of Node's has).
     fn instructions(
         &self,
         participant: &ParticipantView,
         _project: &ProjectView,
+        specs: Option<&ProjectSpecs<'_>>,
     ) -> Result<String, String> {
-        let text = format!("instructions for {}", participant.role);
+        let mut text = format!(
+            "instructions for {}{}",
+            participant.role,
+            self.rewritten.borrow()
+        );
         self.recorder.called(
             "roles",
             None,
             json!([{ "handle": participant.handle, "role": participant.role }]),
             json!(text),
         );
+        if let Some(specs) = specs {
+            text += &format!(
+                " with specs: {} in {} at {}",
+                specs.variant.as_str(),
+                specs.folder,
+                specs.skill
+            );
+        }
         Ok(text)
     }
 }
@@ -117,6 +137,9 @@ pub struct FakeRoster {
     pub broken: Cell<bool>,
     /// Every agent runs on this model, where a test's roster names one for all.
     pub model: RefCell<Option<String>>,
+    /// The human turned specs on for every project (the agents file's choice),
+    /// which a call of the roster does not write down: no trace of Node's has it.
+    pub specs_by_default: Cell<bool>,
 }
 
 /// Why the agents file cannot be read, as the roster says it.
@@ -152,6 +175,10 @@ impl Roster for FakeRoster {
             thinking: None,
             designer,
         }))
+    }
+
+    fn specs_by_default(&self) -> bool {
+        self.specs_by_default.get()
     }
 }
 

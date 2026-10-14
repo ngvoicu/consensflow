@@ -8,27 +8,51 @@
 //! starts with the MCP servers Codex has, the chief's and a member's alike (the
 //! owner's choice, 2026-10-06): a launch never lists them, and its command line
 //! switches none off.
+//!
+//! A thread is resumed by its id (`codex resume <id>`) and has a record to be
+//! resumed from only once it has had a turn: a window resumed on one that never
+//! had any ends at once (2026-10-13). The adapter says whether a thread has its
+//! record ([`Adapter::resumable`]): a file under Codex's `sessions` named as Codex
+//! names the rollout of that thread (`rollout-<timestamp>-<thread>.jsonl`). The
+//! file is found and not read, so an empty or corrupt rollout counts as the
+//! record, and a window resumed on it ends as it did before. The engine opens the
+//! window afresh on a thread that has none; the launch itself resumes whatever
+//! thread it is given.
+//!
+//! A thread the app's quit cut in a turn is found with that turn open, and no
+//! process in it. A window opened on one with no message to begin a turn (a
+//! role's replacement is given to a resumed window by paste, once it is up: see
+//! `keeps_first_instructions`) is read at rest once its broker names the thread,
+//! while its record holds no more than it held when the window was opened
+//! ([`LeftOpen`]), as Claude's and Pi's are. What Codex itself does with such a
+//! thread is `cargo xtask live resume-cut codex`: one that goes on with the turn
+//! or closes it writes to the record, and the record is then read as it always
+//! was.
 
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::sync::Arc;
 use std::time::Duration;
 
 use cf_base::text::window_text;
 use cf_proto::agents::Harness;
 use cf_proto::panes::Servers;
+use cf_proto::specs::Variant;
 
 use super::channel::{send, Channel, Session, Shown, Target};
-use super::{launch, role};
+use super::{launch, paths, role};
 use crate::contract::{
     Adapter, Admission, Agent, Held, Launch, Observed, Pane, PaneHost, Prepared, Readiness,
-    Records, Window, Work,
+    Records, Skill, Window, Work,
 };
 use crate::detect::executable;
 use crate::records::Options;
 use crate::seams::{Loopback, Services, Time};
 use crate::shared::admission::admission;
+use crate::shared::left_open::LeftOpen;
 use crate::shared::record_state::{record_state, switched_to, unnamed};
-use crate::shared::window_args;
+use crate::shared::resumable::transcript_kept;
+use crate::shared::{specmint, window_args};
 
 /// Codex's question tool (`request_user_input`) is behind a feature still
 /// marked under development; the broker answers a member's from the board.
@@ -97,6 +121,11 @@ impl Adapter for CodexAdapter {
                 launch.instructions,
             )
             .await?;
+            // A chief given specs reads its Specmint skill by the path its role
+            // text names: where Codex has none of its own, ConsensFlow's is
+            // written where it is kept for every launch, which Codex is told of
+            // by that path alone.
+            specmint::write_own(Harness::Codex, &services.env, launch)?;
             // An image agent's window is Codex on its own default model, whose
             // image tool draws: it names no model or effort of its own.
             let agent = match launch.agent {
@@ -112,6 +141,20 @@ impl Adapter for CodexAdapter {
             // None only for a conversation of an empty id, which no ledger holds.
             let invocation = open(Harness::Codex, agent, launch.resume, message.as_deref())
                 .ok_or_else(|| "a Codex window resumes a thread by its id".to_owned())?;
+            // What the record holds before this window exists is the old
+            // process's: a turn it left open, which a window with no message to
+            // begin one is told apart from by what the record holds later. A
+            // window given a message begins its own turn.
+            let left_open = match launch.resume {
+                Some(thread) if launch.message.is_none() => {
+                    let before = services
+                        .records
+                        .look(Harness::Codex, thread, &Options::default())
+                        .await;
+                    LeftOpen::of(&before)
+                }
+                _ => None,
+            };
             let mut args = role;
             if launch.role != "chief" {
                 args.extend(QUESTION_TOOL.map(str::to_owned));
@@ -134,9 +177,15 @@ impl Adapter for CodexAdapter {
                     channel: launched.channel,
                     thread: RefCell::new(launch.resume.map(str::to_owned)),
                     discover_for_ms: DISCOVER_FOR_MS.min(launch.first_message_ms),
+                    left_open: RefCell::new(left_open),
                 }),
             })
         })
+    }
+
+    /// Codex keeps a thread's rollout once the thread has a turn.
+    fn resumable<'a>(&'a self, session: &'a str) -> Work<'a, Option<bool>> {
+        transcript_kept(&*self.services.records, Harness::Codex, session)
     }
 
     /// Codex opens the window's servers (its plugins': computer use, a REPL) as
@@ -153,6 +202,31 @@ impl Adapter for CodexAdapter {
             Servers::AtLaunch
         }
     }
+
+    /// A resumed thread keeps the developer message its first turn began with:
+    /// the role text a launch gives it (`developer_instructions`, see the
+    /// module `role`) is read at a resume and not used. Found live on Codex 0.162.1,
+    /// 2026-10-13: a chief's rollout held the one developer message of its start,
+    /// with no section of the specs turned on before its Resume. And probed through
+    /// `codex app-server` the same day: a thread started with the developer
+    /// instructions "Your code word is ROLEONE." answered ROLEONE, and the same
+    /// thread resumed by a second app-server (`thread/resume`) with "Your code
+    /// word is now ROLETWO; this replaces any earlier code word." answered ROLEONE
+    /// to the same question, so the field of the resume request replaces nothing
+    /// either.
+    fn keeps_first_instructions(&self) -> bool {
+        true
+    }
+
+    fn specmint(&self, variant: Variant) -> Result<Skill, String> {
+        let env = &self.services.env;
+        specmint::place(
+            Harness::Codex,
+            env,
+            variant,
+            paths::global_specmint(env, variant),
+        )
+    }
 }
 
 /// A Codex window, and the channel to the broker of its supervisor.
@@ -168,6 +242,9 @@ struct CodexWindow {
     /// How long the broker has to name the thread of a window that has none
     /// yet, in milliseconds.
     discover_for_ms: i64,
+    /// The turn the record had open when the window was opened, while the
+    /// window has begun no turn of its own: the old process's.
+    left_open: RefCell<Option<LeftOpen>>,
 }
 
 impl CodexWindow {
@@ -183,6 +260,8 @@ impl Window for CodexWindow {
 
     fn follow(&self, session: &str) {
         *self.thread.borrow_mut() = Some(session.to_owned());
+        // The turn the record had open was a thread's the window left.
+        *self.left_open.borrow_mut() = None;
     }
 
     fn started(&self) -> Work<'_, Result<Option<String>, String>> {
@@ -276,7 +355,7 @@ impl Window for CodexWindow {
                 .records
                 .look(Harness::Codex, &thread, &Options::default())
                 .await;
-            let observed = record_state(reading);
+            let mut observed = record_state(Arc::clone(&reading));
             Ok(match shown {
                 Some(Shown {
                     session: Session::Thread(shown),
@@ -284,6 +363,18 @@ impl Window for CodexWindow {
                 }) => {
                     // The thread the window was followed to meanwhile, if it was.
                     if self.thread.borrow().as_deref() == Some(shown.as_str()) {
+                        // A turn the quit cut is over, though no record says so:
+                        // the window, which names its thread, has been given no
+                        // message since it was opened, and its record holds no
+                        // more than it did.
+                        if self
+                            .left_open
+                            .borrow()
+                            .as_ref()
+                            .is_some_and(|open| open.still(&reading))
+                        {
+                            observed.settled = true;
+                        }
                         observed
                     } else {
                         switched_to(observed, shown)

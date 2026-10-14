@@ -27,6 +27,7 @@ mod projects;
 mod questions;
 mod queue;
 mod schema;
+mod specs;
 mod staff;
 mod store;
 mod tasks;
@@ -34,6 +35,7 @@ mod tasks;
 #[cfg(feature = "test-support")]
 pub mod testing;
 mod views;
+mod wake_ups;
 
 pub use cf_proto::ledger::{
     Begun, Board, Candidate, ChiefConversation, ChiefOpenWork, Claim, ConversationView, Cut,
@@ -42,6 +44,7 @@ pub use cf_proto::ledger::{
     Resume, StaffMember, Stop, TaskCard, TaskCreated, TaskMoved, TaskReleased, TaskThatFits,
     TaskThread, TaskTranscript, TaskView, TierChange,
 };
+pub use cf_proto::wake_ups::WakeUpView;
 pub use conversations::{ChiefSwitch, TRANSCRIPT_ITEM_MAX};
 #[cfg(feature = "test-support")]
 pub use ledger::Watcher;
@@ -49,6 +52,8 @@ pub use ledger::{open_ledger, Event, Ledger, Options};
 pub use messages::{NewNote, NewQuestion, Read};
 pub use model::LedgerError;
 pub use page_reads::PAGE_BYTES;
-pub use projects::{NewChief, NewMember, NewProject};
+pub use projects::{parse_description, parse_name, NewChief, NewMember, NewProject};
 pub use schema::{migrate, MIGRATIONS, SCHEMA_VERSION};
+pub use specs::SpecsChange;
 pub use tasks::{NewTask, RESUME_WORDS};
+pub use wake_ups::{NewWakeUp, WakeUpSetting, WakeUpUnit, DEFAULT_WAKE_UP_TEXT, WAKE_UP_FLOOR_MS};

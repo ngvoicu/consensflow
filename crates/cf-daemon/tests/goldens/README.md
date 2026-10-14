@@ -17,7 +17,7 @@ traces, for the players that read them (`../api/`, `../page/`, `../screens/`,
 |---|---|
 | `<suite>-<NNN>.json.gz` | one trace per test that reached a surface |
 | `pages/agents.html`, `pages/harnesses.html` | the two pages the screens served, `$TOKEN` and `$VERSION` where the token and the version go |
-| `operations.json`, `daemon.json`, `files.json` | the page's 28 operations, the daemon's handle line and start and stop lines, and its log and trace line formats |
+| `operations.json`, `daemon.json`, `files.json` | the page's operations (Node's 28 and the ones added since: `wakeup.get`, `wakeup.set`, `project.specs`, `project.rename`, `project.describe`), the daemon's handle line and start and stop lines, and its log and trace line formats |
 
 ## Changed after Node
 

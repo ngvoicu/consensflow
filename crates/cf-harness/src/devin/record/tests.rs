@@ -189,6 +189,19 @@ fn tool_call() -> Value {
     json!({ "sessionId": SESSION, "update": { "sessionUpdate": "tool_call" } })
 }
 
+/// What a tool says of a call it began: a line a command printed, with `status` where
+/// it says one.
+fn tool_update(status: Option<&str>) -> Value {
+    let mut update = json!({
+        "sessionUpdate": "tool_call_update",
+        "content": "Reply from 127.0.0.1: bytes=32 time<1ms TTL=128",
+    });
+    if let Some(status) = status {
+        update["status"] = json!(status);
+    }
+    json!({ "sessionId": SESSION, "update": update })
+}
+
 const AT: &str = "2026-10-04T10:00:00Z";
 
 /// The items of a user's request and a reply, `complete` or not.

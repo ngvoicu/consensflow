@@ -56,9 +56,9 @@ use leftovers::Leftovers;
 pub use account::{clock, plural, plus, plus_maybe, squash, Account};
 pub use board::{
     answer_to, brief_delivered, delivered_result, find, first_answer, first_question, is_over,
-    last_result, session_of, MemberWindow, Paused,
+    last_result, notes_of_work, session_of, MemberWindow, Paused,
 };
-pub use command::{shown, LongCommand};
+pub use command::{quiet_command, shown, LongCommand};
 pub use door::{judge, moves, ms_of, waited_then_worked, Finding, Judged, Seen};
 pub use plan::{
     member, member_as, question_brief, stand_in_chief, stand_in_question_brief, stand_in_worker,
@@ -367,6 +367,15 @@ impl Members {
         self.rig.host(
             "pane.write_paste",
             json!({ "id": pane["id"], "generation": pane["generation"], "body": body }),
+        )
+    }
+
+    /// Presses `keys` in the window `pane` as the human does (`pane.input`: the
+    /// bytes the keys send).
+    pub fn press(&self, pane: &Value, keys: &[u8]) -> Result<Value> {
+        self.rig.host(
+            "pane.input",
+            json!({ "id": pane["id"], "generation": pane["generation"], "bytes": keys }),
         )
     }
 

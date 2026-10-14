@@ -139,6 +139,57 @@ fn of_two_logs_written_at_once_the_one_listed_later_says_whether_devin_works() {
     }
 }
 
+/// A command a turn left running may go on reporting while it runs (a ping says a line a
+/// second), and a shell an Escape left running ends after its turn did: neither is new
+/// work, and a window that read them as work read as working for good, its task never
+/// done: the symptom of a worker's ping left running, on zeewin, 2026-10-14.
+#[test]
+fn what_a_tool_goes_on_saying_once_its_turn_has_ended_is_no_new_work_whatever_its_status() {
+    for status in [
+        None,
+        Some("in_progress"),
+        Some("completed"),
+        Some("failed"),
+        Some("cancelled"),
+    ] {
+        let staged = Staged::new();
+        requested_done(&staged);
+        staged.wire(
+            "launch-1",
+            &[
+                tool_call(),
+                chunk(Some(json!("Done.")), "stream-1"),
+                complete(),
+                tool_update(status),
+                tool_update(status),
+            ],
+        );
+        assert_eq!(read_once(&staged), settled_done(), "its status: {status:?}");
+    }
+}
+
+#[test]
+fn a_call_begun_after_a_turns_end_is_work_again_and_what_it_says_is_no_more_of_it() {
+    let staged = Staged::new();
+    requested_done(&staged);
+    staged.wire(
+        "launch-1",
+        &[
+            chunk(Some(json!("Done.")), "stream-1"),
+            complete(),
+            tool_call(),
+            tool_update(Some("in_progress")),
+        ],
+    );
+    assert_eq!(
+        read_once(&staged),
+        format!(
+            r#"{{"items":{},"inFlight":true,"asking":false,"failed":false,"settlement":"in-flight"}}"#,
+            asked_and_replied("Done.", true)
+        )
+    );
+}
+
 #[test]
 fn a_launches_folder_that_is_a_file_fails_the_look() {
     let staged = Staged::new();

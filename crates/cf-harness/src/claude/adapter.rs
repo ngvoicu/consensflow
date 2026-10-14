@@ -51,14 +51,15 @@ use cf_base::js;
 use cf_base::text::window_text;
 use cf_proto::agents::Harness;
 use cf_proto::panes::Servers;
+use cf_proto::specs::Variant;
 use serde_json::Value;
 
-use super::install;
 use super::status::{self, State, Status};
 use super::stopped::{self, Pressed};
+use super::{install, paths};
 use crate::contract::{
     Adapter, Admission, Held, Launch, Observed, Pane, PaneHost, Prepared, Readiness, Records,
-    Waiting, Window, Work,
+    Skill, Waiting, Window, Work,
 };
 use crate::detect::executable;
 use crate::records::{Options, Reading, Settlement};
@@ -66,7 +67,8 @@ use crate::seams::{self, Entropy, Services, Time};
 use crate::shared::admission::admission;
 use crate::shared::left_open::LeftOpen;
 use crate::shared::record_state::switched_to;
-use crate::shared::{pane, window_args};
+use crate::shared::resumable::transcript_kept;
+use crate::shared::{pane, specmint, window_args};
 
 /// Claude Code, as the engine launches its windows.
 pub struct ClaudeAdapter {
@@ -100,10 +102,10 @@ impl Adapter for ClaudeAdapter {
             let settings = install::settings(&self.env, launch.id, launch.role != "chief")?;
             let role = install::role(&self.env, launch)?;
             // Claude keeps a conversation only once something was said in
-            // it: a window that closed before that (opened by hand, then
-            // lost to a restart) has nothing to resume, and `--resume` would
-            // exit at once. It starts afresh under the same id, so the
-            // conversation stays bound.
+            // it, and what it kept can be gone since: the engine asks
+            // `resumable` first, but a transcript that is not there has
+            // nothing to resume, and `--resume` would exit at once. It starts
+            // afresh under the same id, so the conversation stays bound.
             let session = match launch.resume {
                 Some(resume) => resume.to_owned(),
                 None => seams::uuid(&*self.entropy)?,
@@ -168,6 +170,11 @@ impl Adapter for ClaudeAdapter {
         })
     }
 
+    /// Claude keeps a conversation's transcript once something was said in it.
+    fn resumable<'a>(&'a self, session: &'a str) -> Work<'a, Option<bool>> {
+        transcript_kept(&*self.records, Harness::Claude, session)
+    }
+
     /// Claude Code runs each command of its Bash tool, in the foreground and in
     /// the background alike, in a process group of its own (a
     /// `/bin/zsh -c source …/shell-snapshots/snapshot-zsh-….sh …` that leads its
@@ -182,6 +189,15 @@ impl Adapter for ClaudeAdapter {
         } else {
             Servers::InGroup
         }
+    }
+
+    fn specmint(&self, variant: Variant) -> Result<Skill, String> {
+        specmint::place(
+            Harness::Claude,
+            &self.env,
+            variant,
+            paths::global_specmint(&self.env, variant),
+        )
     }
 }
 

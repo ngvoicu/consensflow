@@ -12,8 +12,11 @@
 //! comes back out (`deliveries`), the human's Switch chief (`chief_switch`),
 //! the copy of each window's conversation (`transcripts`), the task whose
 //! window went away, its requester told once for the tasks of a pass (`stalls`),
-//! and the human's Resume of a project a start suspended, and what a start
-//! leaves for it (`resume`).
+//! the human's Resume of a project a start suspended, and what a start
+//! leaves for it (`resume`), the human's wake-up calls, which nudge a chief
+//! at rest (`wake_ups`), and a role that changed under a conversation whose
+//! harness keeps its first instructions, which its resumed window is told in a
+//! message (`role_change`).
 //!
 //! Work runs as Node's did ([`crate::runtime`]): a piece of work is begun
 //! where JavaScript called it, and what JavaScript did not await goes on
@@ -34,7 +37,7 @@ use cf_ledger::{
 use cf_proto::panes::PaneExit;
 use cf_proto::trace::{TraceLine, Traced, WindowEvent};
 
-use crate::background::{agent_processes, quote, Left};
+use crate::background::quote;
 use crate::chief_switch::SwitchTo;
 use crate::record::Record;
 use crate::resume::Coming;
@@ -214,6 +217,7 @@ impl Dispatcher {
             .borrow_mut()
             .set_project_state(project, "suspended")?;
         let kept = self.close_windows(&suspended.participants).await?;
+        self.withdraw_wake_up(project)?;
         self.changed();
         if !kept.is_empty() {
             let windows: Vec<String> = kept
@@ -662,6 +666,10 @@ impl Dispatcher {
             return Ok(());
         }
         let delivering = record.delivery.borrow_mut().delivering.take();
+        // What a launch that was to say the role first still owed the window
+        // that exited: the role it was never told.
+        let owed = self.owed(&record)?;
+        record.delivery.borrow_mut().prelude = None;
         self.closed(&record);
         // No door survives its window: what one claimed and none acknowledged is the ledger's again.
         self.seams
@@ -690,9 +698,10 @@ impl Dispatcher {
             return Ok(());
         };
         // A launch the exit ended says what its window showed.
-        let at_launch = delivering
-            .as_ref()
-            .is_some_and(|delivering| delivering.launch);
+        let at_launch = owed.is_some()
+            || delivering
+                .as_ref()
+                .is_some_and(|delivering| delivering.launch);
         let closed = format!("@{}'s window closed", participant.handle);
         let because = if at_launch {
             self.unstarted_because(&record, &closed, &shown)
@@ -708,10 +717,16 @@ impl Dispatcher {
                 self.settle_failure(delivering, &because, retry)?;
             }
         }
+        let launch_owed = owed.is_some();
+        if let Some(prelude) = owed {
+            self.settle_exited_launch(&record, &project, &participant, &prelude, &because)?;
+        }
         if participant.role == "chief" {
-            // The chief's own exit closes the project as Close does.
+            // The chief's own exit closes the project as Close does, but for the
+            // window of a launch that was to say the role: it did not come up, and
+            // is tried again (`settle_exited_launch`).
             let own = record.window.borrow().own_exit;
-            if project.state == "open" && !own {
+            if project.state == "open" && !own && !launch_owed {
                 self.seams
                     .ledger
                     .borrow_mut()
@@ -731,7 +746,9 @@ impl Dispatcher {
             }
         } else {
             let task = self.seams.ledger.borrow().active_task(record.id, false)?;
-            let left = agent_processes(participant.harness.as_deref(), shown.left_running());
+            // What the host lists is the turn's work, by its own proof, as it was when the
+            // window closed.
+            let left = shown.left_running();
             if let Some(thread) = task {
                 // The pause note says what the close ended, where there was any.
                 let because = if left.is_empty() {
@@ -740,12 +757,12 @@ impl Dispatcher {
                     format!(
                         "@{}'s window closed with background work still running: {}",
                         participant.handle,
-                        quote(&left)
+                        quote(left)
                     )
                 };
                 self.stall(&project, &thread.task, &because)?;
             } else {
-                self.tell_left_running(&project, &participant, &left)?;
+                self.tell_left_running(&project, &participant, left)?;
             }
         }
         self.changed();
@@ -841,21 +858,6 @@ impl Dispatcher {
             return Ok(());
         }
         let starting = drawing || (unnamed && !record.window.borrow().named);
-        // A worker's turn that ended with work it started still running is not
-        // at rest: its window works on, and its task has no result yet.
-        let left = if participant.role == "chief" || self.is_out(&owner) {
-            Left::Nothing
-        } else {
-            let left = self
-                .left_running(participant, record, &observed, starting)
-                .await?;
-            // The participant may have been forgotten, or the window closed,
-            // while the host answered.
-            if self.forgotten(record) || record.window.borrow().pane.is_none() {
-                return Ok(());
-            }
-            left
-        };
         // An out member's window says so, and nothing else, until the reset.
         if !self.is_out(&owner) {
             let activity = if starting {
@@ -865,8 +867,6 @@ impl Dispatcher {
                     state: ActivityState::Waiting,
                     reason: waiting.reason.clone(),
                 }
-            } else if let Some(reason) = left.reason() {
-                Activity::because(ActivityState::Working, reason)
             } else if observed.settled {
                 Activity::of(ActivityState::Idle)
             } else {
@@ -906,6 +906,11 @@ impl Dispatcher {
         if record.delivery.borrow().delivering.is_some() {
             returning(self.watch_arrival(record, &observed)).await?;
         }
+        // What the launch owes the window (the role it was to say first) is
+        // watched as a first message is, and a launch given up closes its window.
+        if self.watch_prelude(project, participant, record).await? {
+            return Ok(());
+        }
         // A window that began to close in this step is not acted on.
         if record.window.borrow().retiring {
             return Ok(());
@@ -918,8 +923,14 @@ impl Dispatcher {
             // A turn a refusal cut short, its member past it now, failed nothing: its task goes on.
             if self.cut_short(&observed) {
                 self.go_on(project, participant)?;
-            } else if left == Left::Nothing {
-                self.collect(project, participant, &observed)?;
+            } else if let Some(task) = self.collect(project, participant, &observed)? {
+                // Its answer is its result at once, whatever the turn left running.
+                // What it left is ended, whoever gave the task told and the window
+                // closed if it is free, as work of the window's own apart from this
+                // pass: the grace the host gives what it ends is no other window's wait.
+                self.end_work_apart(project, record, task, observed.agents_pending())
+                    .await;
+                return Ok(());
             }
             if self.close_if_free(record).await? {
                 return Ok(());
@@ -935,7 +946,12 @@ impl Dispatcher {
                 .await;
         }
         if idle {
-            let next = self.seams.ledger.borrow().next_delivery(participant.id)?;
+            // A chief at rest may be due a wake-up: queued here, it is the next
+            // message of its queue, delivered by the rules of every message.
+            if participant.role == "chief" {
+                self.queue_wake_up_if_due(project, participant)?;
+            }
+            let next = self.next_in_line(record)?;
             if let Some(next) = next {
                 let (this, held) = (Rc::clone(self), Rc::clone(record));
                 self.act(record, async move { this.deliver(&held, next).await })
@@ -970,6 +986,11 @@ impl Dispatcher {
             record,
             Activity::because(ActivityState::Out, format!("out of quota until {until}")),
         )?;
+        // The time a launch waits while its member is out is no slowness of its
+        // window: the role it was to say first is told when the quota is back.
+        if let Some(prelude) = record.delivery.borrow_mut().prelude.as_mut() {
+            prelude.since = self.now();
+        }
         if participant.role != "chief" {
             returning(self.settle_stop(project, participant, record, observed, starting)).await?;
             if !self.forgotten(record) {
@@ -1120,7 +1141,9 @@ impl Dispatcher {
     /// meanwhile, or a participant forgotten meanwhile opens nothing.
     ///
     /// `coming` is for a window the human's Resume brings back (`resume`): it is
-    /// told, as the first thing it is given, that its turn was cut, if it was.
+    /// told, as the first thing it is given, that its turn was cut, if it was
+    /// (after the note that says its role again, where it is to be told that:
+    /// `role_change`).
     pub(crate) async fn open_soon(self: &Rc<Self>, participant: i64, coming: Option<Coming>) {
         let record = self.record_of(participant);
         let (this, held) = (Rc::clone(self), Rc::clone(&record));

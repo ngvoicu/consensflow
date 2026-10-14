@@ -1,7 +1,9 @@
-//! A process seen by its id alone: whether it is there, and a signal sent to
-//! it. The cases that look for what a window left behind (a Codex server that
+//! A process seen by its id alone: whether it is there, when it began, and a signal
+//! sent to it. The cases that look for what a window left behind (a Codex server that
 //! must have gone with its window, a stand-in harness that must be gone once the
-//! pane host is) have only the id the stand-in wrote down.
+//! pane host is) have only the id the stand-in wrote down, and one that holds a
+//! process to be the one it was (a harness's server that must have lived through an
+//! ending) holds it to when it began as well.
 //!
 //! On Unix the system call, through `nix` and no unsafe code of ours. Windows
 //! has neither signals nor a call std offers, so `taskkill` and `tasklist` do:
@@ -9,7 +11,6 @@
 
 use std::io;
 
-#[cfg(windows)]
 use super::Run;
 
 /// A signal a case sends. Windows has no `Interrupt`, and its `Terminate` is a
@@ -55,6 +56,21 @@ pub fn group_of(pid: u32) -> Option<u32> {
     u32::try_from(group.as_raw()).ok()
 }
 
+/// When the process `pid` began, in the words the system says it in: the same for the
+/// same process, and others for one that took its number after it. None where it is
+/// not there or the system will not say. A case that holds a process by its id holds it
+/// to this too: a number is no process.
+#[cfg(unix)]
+pub fn started(pid: u32) -> Option<String> {
+    let ran = Run::new("ps")
+        .args(["-o", "lstart=", "-p", &pid.to_string()])
+        .inheriting_env()
+        .run()
+        .ok()?;
+    let said = ran.stdout.trim();
+    (ran.code == Some(0) && !said.is_empty()).then(|| said.to_owned())
+}
+
 #[cfg(unix)]
 fn as_pid(pid: u32) -> io::Result<nix::unistd::Pid> {
     i32::try_from(pid)
@@ -96,4 +112,20 @@ pub fn is_alive(pid: u32) -> bool {
         .args(["/FI", &format!("PID eq {pid}"), "/NH", "/FO", "CSV"])
         .run()
         .is_ok_and(|ran| ran.stdout.contains(&format!("\"{pid}\"")))
+}
+
+/// When the process `pid` began, in the words the system says it in (the 100 ns
+/// since 1601 that PowerShell's `StartTime` is): the same for the same process, and
+/// others for one that took its number after it. None where it is not there or the
+/// system will not say.
+#[cfg(windows)]
+pub fn started(pid: u32) -> Option<String> {
+    let script = format!("(Get-Process -Id {pid} -ErrorAction Stop).StartTime.ToFileTimeUtc()");
+    let ran = Run::new("powershell")
+        .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+        .finding_programs()
+        .run()
+        .ok()?;
+    let said = ran.stdout.trim();
+    (ran.code == Some(0) && !said.is_empty()).then(|| said.to_owned())
 }

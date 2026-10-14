@@ -42,8 +42,18 @@ const DEPARTED: &[Departed] = &[(
     "a release cancels the old window's kept rows with the reason `carried into T-n's brief for its next window`; Node gave none",
 )];
 
-/// Every operation of the page is asked by some trace: what the traces hold is
-/// the whole of what the page can ask.
+/// The operations this build added to Node's: no recording of Node's asks
+/// them, and the page's own unit tests (`src/page/tests`) do.
+const ADDED: [PageOperation; 5] = [
+    PageOperation::WakeUpGet,
+    PageOperation::WakeUpSet,
+    PageOperation::ProjectSpecs,
+    PageOperation::ProjectRename,
+    PageOperation::ProjectDescribe,
+];
+
+/// Every operation of Node's page is asked by some trace: what the traces hold
+/// is the whole of what Node's page could ask.
 #[test]
 fn the_traces_ask_every_operation_of_the_page() {
     let mut asked = std::collections::BTreeSet::new();
@@ -59,8 +69,10 @@ fn the_traces_ask_every_operation_of_the_page() {
         }
     }
     let every: std::collections::BTreeSet<String> = PageOperation::ALL
+        .into_iter()
+        .filter(|operation| !ADDED.contains(operation))
         .map(|operation| operation.as_str().to_owned())
-        .into();
+        .collect();
     assert_eq!(asked, every);
     println!("{operations} operations and {calls} calls on the stand-ins in the traces");
 }

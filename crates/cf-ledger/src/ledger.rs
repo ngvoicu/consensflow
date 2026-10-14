@@ -1,7 +1,7 @@
 //! The ledger as its callers hold it: opened on a file, it answers one
 //! operation at a time, each its concern's, and runs it on its store, which no
 //! caller reaches. Its operations are in a file per concern: projects, staff,
-//! conversations, tasks, messages, and what the page reads.
+//! conversations, tasks, messages, wake-up calls, and what the page reads.
 
 mod conversations;
 mod messages;
@@ -9,6 +9,7 @@ mod page_reads;
 mod projects;
 mod staff;
 mod tasks;
+mod wake_ups;
 
 use std::path::Path;
 use std::time::Duration;
@@ -124,8 +125,9 @@ fn opening_refusal(file: &Path, cause: LedgerError) -> LedgerError {
 #[cfg(feature = "test-support")]
 impl Ledger {
     /// Tells `watcher` of each read of `projects` and `next_delivery`, and
-    /// each write of `pause_task` (by its task's number), before it is made:
-    /// the engine's tests count them, or fail one.
+    /// each write of `pause_task` (by its task's number), `take_back` (by the
+    /// message's id) and `set_conversation_role_text` (by the conversation's),
+    /// before it is made: the engine's tests count them, or fail one.
     pub fn watch(&mut self, watcher: Watcher) {
         *self.watcher.get_mut() = Some(watcher);
     }

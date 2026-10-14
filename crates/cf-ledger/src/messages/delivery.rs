@@ -13,6 +13,7 @@ use super::again::tell_failed_answer;
 use super::carrying::{adopt, carried, release_carried};
 use super::receipt::reconcile;
 use super::{known_message, message_task, messages, require_message};
+use crate::conversations::{current_conversation, set_conversation_role_text};
 use crate::model::{self, sql_list, LedgerError, HELD_TASK_STATES, MEMBER_ROLES};
 use crate::store::Store;
 use crate::tasks::release_ready;
@@ -54,6 +55,28 @@ pub(crate) fn next_delivery(
     store: &Store,
     participant_id: i64,
 ) -> Result<Option<MessageView>, LedgerError> {
+    next_delivery_among(store, participant_id, None)
+}
+
+/// `message_id`, if it is what the head of the participant's queue would be were
+/// it the only row waiting: it may go by every rule the head goes by, whatever
+/// else waits before it. The engine asks it of a message it puts ahead of the
+/// queue.
+pub(crate) fn next_delivery_of(
+    store: &Store,
+    participant_id: i64,
+    message_id: i64,
+) -> Result<Option<MessageView>, LedgerError> {
+    next_delivery_among(store, participant_id, Some(message_id))
+}
+
+/// The head of the participant's queue that may go now, of the one row `only`
+/// when it names one.
+fn next_delivery_among(
+    store: &Store,
+    participant_id: i64,
+    only: Option<i64>,
+) -> Result<Option<MessageView>, LedgerError> {
     let participant = store.participant_row(participant_id)?;
     if participant.role == "human" {
         return Ok(None);
@@ -83,10 +106,13 @@ pub(crate) fn next_delivery(
              AND words.recipient_id = m.recipient_id AND words.kind = 'task'
              AND words.state = 'gated'
          ))
+         AND (?3 IS NULL OR m.id = ?3)
        ORDER BY m.id LIMIT 1",
             sql_list(&HELD_TASK_STATES)
         ))?
-        .query_map(params![participant_id, serial], |row| row.get::<_, i64>(0))?
+        .query_map(params![participant_id, serial, only], |row| {
+            row.get::<_, i64>(0)
+        })?
         .next()
         .transpose()?;
     next.map_or(Ok(None), |id| store.message(id))
@@ -251,6 +277,35 @@ pub(crate) fn confirm_delivery(
             reconcile(store, task.id)?;
         }
         known_message(store, message_id)
+    })
+}
+
+/// The harness's own record proves that a message that says its recipient's
+/// conversation a role (its `role_text`) arrived: the message is confirmed and
+/// the recipient's current conversation recorded as told that role, in one write.
+/// Neither stands without the other: a note confirmed with the role not recorded
+/// would be said again at the next Resume, and a role recorded for a note not
+/// confirmed would never be. A message that says no role is confirmed as any is,
+/// and so is one whose recipient has no current conversation (it ended while the
+/// note was on its way): there is none to have told.
+pub(crate) fn confirm_delivery_telling(
+    store: &mut Store,
+    message_id: i64,
+    receipt: Option<&Value>,
+) -> Result<MessageView, LedgerError> {
+    store.write(|store| {
+        let confirmed = confirm_delivery(store, message_id, receipt)?;
+        let role: Option<String> = store.db.query_row(
+            "SELECT role_text FROM message WHERE id = ?",
+            [message_id],
+            |row| row.get(0),
+        )?;
+        if let Some(role) = role {
+            if let Some(conversation) = current_conversation(store, confirmed.recipient_id)? {
+                set_conversation_role_text(store, conversation.id, &role)?;
+            }
+        }
+        Ok(confirmed)
     })
 }
 

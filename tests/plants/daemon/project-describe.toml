@@ -1,0 +1,998 @@
+# A project's name and the line under it (2026-10-13: a right-click on a project in the list
+# renames it, or writes a line under its name, for the human alone). The migration adds a
+# nullable `description` to `project` and keeps every row; a rename has the rules a name has
+# when a project is opened, a description is one line of at most 200 characters and none where
+# it is blank; each change logs an event (`project.renamed`, `project.described`) only where
+# something changed; both are page operations of the human's, which no route of the agents'
+# API reaches, and no agent is told the line. One plant takes one rule out; a test of it fails.
+# The ledger's plants run its own tests (`crates/cf-ledger/tests/described.rs`, the unit tests
+# of `projects::describing`, `schema` and `testing`), the page's the operations'
+# (`crates/cf-daemon/src/page/tests/describing.rs`) and the menu's and the dialogs' the
+# browser's (`project menu` in `app/tests/core-page.spec.mjs`; the page's xterm they stand on
+# is the tracked `app/ui/vendor`, so no plant bundles it). Every name holds `describe`, so
+# `npm run plants:daemon -- describe` runs them all.
+
+[run]
+# The migration, a rename, the line under the name and the event each logs.
+ledger-described = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "described"]
+# What a text makes of a description: its trim, its limit, its line.
+ledger-describing-lib = ["cargo", "test", "--offline", "-p", "cf-ledger", "--lib", "projects::describing::"]
+# Each migration, byte for byte as it shipped.
+ledger-schema-lib = ["cargo", "test", "--offline", "-p", "cf-ledger", "--lib", "schema::"]
+# What the players of Node's recordings hold apart from this ledger's.
+ledger-testing-lib = ["cargo", "test", "--offline", "-p", "cf-ledger", "--lib", "testing::"]
+# The page's operations over the bridge, and the agents' API they are not reached by.
+daemon-describing-page = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "page::tests::describing"]
+# The names of the page's operations, which the app forwards, and which of them wake the dispatcher.
+proto-page-describing = ["cargo", "test", "--offline", "-p", "cf-proto", "--lib", "page::"]
+# The case of the rig (a real daemon and pane host, a stand-in chief): the event file, the
+# folder, and what no window is told.
+rig-described = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "described::"]
+# The menu and the dialogs, in the browser Playwright keeps.
+page-project-menu =["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "project menu"]
+
+# --- the ledger: the migration ---
+
+[[plant]]
+name = "describe: the migration loses the events of a ledger it runs over"
+meant = "a_ledger_at_0015_gains_the_description_empty_and_every_row_and_sequence_stays"
+runs = ["ledger-described"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0017.sql"
+find = "  ALTER TABLE project ADD COLUMN description TEXT;"
+replace = '''  DELETE FROM event;
+  ALTER TABLE project ADD COLUMN description TEXT;'''
+
+[[plant]]
+name = "describe: the migration gives a project a line it did not have"
+meant = "a_ledger_at_0015_gains_the_description_empty_and_every_row_and_sequence_stays"
+runs = ["ledger-described"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0017.sql"
+find = "ADD COLUMN description TEXT;"
+replace = "ADD COLUMN description TEXT NOT NULL DEFAULT '';"
+
+[[plant]]
+name = "describe: a migration that shipped is edited"
+meant = "keeps_each_migration_byte_for_byte_as_it_shipped"
+runs = ["ledger-schema-lib"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0017.sql"
+find = "in a line under its name in the sidebar: plain"
+replace = "in a line under its name in the list: plain"
+
+# --- the ledger: the name ---
+
+[[plant]]
+name = "describe: a project is renamed to nothing"
+meant = "a_name_that_is_refused_is_refused_before_the_project_is_looked_for_and_writes_nothing"
+runs = ["ledger-described"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects/describing.rs"
+find = '''    require_name(name)?;
+    store.write(|store| {'''
+replace = '''    store.write(|store| {'''
+
+[[plant]]
+name = "describe: a rename has a limit of its own"
+meant = "a_name_is_checked_as_a_new_project_s_is_and_kept_as_given"
+runs = ["ledger-described"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects/describing.rs"
+find = "    require_name(name)?;"
+replace = '    crate::model::require_text(name, "name", 200)?;'
+
+[[plant]]
+name = "describe: the project is looked for before the name is checked"
+meant = "a_name_that_is_refused_is_refused_before_the_project_is_looked_for_and_writes_nothing"
+runs = ["ledger-described"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects/describing.rs"
+find = '''    require_name(name)?;
+    store.write(|store| {
+        let from = store.project_row(id)?.name;'''
+replace = '''    store.write(|store| {
+        let from = store.project_row(id)?.name;
+        require_name(name)?;'''
+
+[[plant]]
+name = "describe: a project that is not there is renamed before it is refused"
+meant = "a_project_the_ledger_does_not_have_is_refused_in_the_usual_words_and_nothing_is_logged"
+runs = ["ledger-described"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects/describing.rs"
+find = "        let from = store.project_row(id)?.name;"
+replace = "        let from = store.project_row(id).map_or_else(|_| String::new(), |row| row.name);"
+
+[[plant]]
+name = "describe: a rename to the name a project has is logged"
+meant = "a_rename_logs_what_the_name_was_and_became_tells_the_trace_and_a_name_kept_logs_nothing"
+runs = ["ledger-described"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects/describing.rs"
+find = "        if from != name {"
+replace = "        if true {"
+
+[[plant]]
+name = "describe: the event of a rename does not say what the name was"
+meant = "a_rename_logs_what_the_name_was_and_became_tells_the_trace_and_a_name_kept_logs_nothing"
+runs = ["ledger-described"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects/describing.rs"
+find = 'json!({ "from": from, "to": name })'
+replace = 'json!({ "to": name })'
+
+# --- the ledger: the line under the name ---
+
+[[plant]]
+name = "describe: a description is kept with the spaces it was typed with"
+meant = "a_description_is_kept_trimmed_and_blank_text_is_none"
+runs = ["ledger-describing-lib"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects/describing.rs"
+find = "    let text = js::trim(text);"
+replace = "    let text = text;"
+
+[[plant]]
+name = "describe: a blank description is kept as a line"
+meant = "a_description_is_kept_trimmed_and_blank_text_is_none"
+runs = ["ledger-describing-lib"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects/describing.rs"
+find = '''    if text.is_empty() {
+        return Ok(None);
+    }
+'''
+replace = ""
+
+[[plant]]
+name = "describe: a description may be as long as it likes"
+meant = "a_description_has_two_hundred_characters_as_javascript_counts_them_and_no_more"
+runs = ["ledger-describing-lib"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects/describing.rs"
+find = "    if utf16_len(text) > DESCRIPTION_MAX {"
+replace = "    if false {"
+
+[[plant]]
+name = "describe: a description is counted in code points, not as JavaScript counts"
+meant = "a_description_has_two_hundred_characters_as_javascript_counts_them_and_no_more"
+runs = ["ledger-describing-lib"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects/describing.rs"
+find = "    if utf16_len(text) > DESCRIPTION_MAX {"
+replace = "    if text.chars().count() > DESCRIPTION_MAX {"
+
+[[plant]]
+name = "describe: a line break goes into the line"
+meant = "a_line_break_and_any_other_control_character_inside_the_text_is_refused_and_never_made_a_space"
+runs = ["ledger-describing-lib"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects/describing.rs"
+find = "    if text.chars().any(breaks_the_line) {"
+replace = "    if false {"
+
+[[plant]]
+name = "describe: the line and paragraph separators of Unicode are no line break"
+meant = "a_line_break_and_any_other_control_character_inside_the_text_is_refused_and_never_made_a_space"
+runs = ["ledger-describing-lib"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects/describing.rs"
+find = '''    character.is_control() || matches!(character, '\u{2028}' | '\u{2029}')'''
+replace = "    character.is_control()"
+
+[[plant]]
+name = "describe: only a line feed is a line break"
+meant = "a_line_break_and_any_other_control_character_inside_the_text_is_refused_and_never_made_a_space"
+runs = ["ledger-describing-lib"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects/describing.rs"
+find = '''    character.is_control() || matches!(character, '\u{2028}' | '\u{2029}')'''
+replace = "    character == '\\n'"
+
+[[plant]]
+name = "describe: a description that is no text is taken for none"
+meant = "a_description_that_is_not_text_is_refused_and_a_missing_one_or_null_takes_it_away"
+runs = ["ledger-describing-lib"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects/describing.rs"
+find = '''        Some(_) => Err(description_refused("it is text, or none to take it away")),'''
+replace = '''        Some(_) => Ok(None),'''
+
+[[plant]]
+name = "describe: a description kept as it was is logged"
+meant = "a_description_kept_or_taken_away_when_there_is_none_logs_nothing_and_touches_nothing"
+runs = ["ledger-described"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects/describing.rs"
+find = "        if from != to {"
+replace = "        if true {"
+
+[[plant]]
+name = "describe: the event of a description does not say what it was"
+meant = "a_description_is_set_changed_and_taken_away_and_the_view_has_it_only_while_there_is_one"
+runs = ["ledger-described"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects/describing.rs"
+find = 'json!({ "from": from, "to": to })'
+replace = 'json!({ "to": to })'
+
+[[plant]]
+name = "describe: a project that is not there is written to before it is refused"
+meant = "a_project_the_ledger_does_not_have_is_refused_in_the_usual_words_and_nothing_is_logged"
+runs = ["ledger-described"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects/describing.rs"
+find = "        let from = store.project_row(id)?.description;"
+replace = "        let from = store.project_row(id).map_or(None, |row| row.description);"
+
+[[plant]]
+name = "describe: the view says no description as null"
+meant = "a_description_is_set_changed_and_taken_away_and_the_view_has_it_only_while_there_is_one"
+runs = ["ledger-described"]
+
+[[plant.edit]]
+file = "crates/cf-proto/src/ledger.rs"
+find = '''    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,'''
+replace = '''    pub description: Option<String>,'''
+
+[[plant]]
+name = "describe: the view says the description by another name"
+meant = "the_human_describes_a_project_and_every_view_of_it_carries_the_line_until_it_is_taken_away"
+runs = ["daemon-describing-page"]
+
+[[plant.edit]]
+file = "crates/cf-proto/src/ledger.rs"
+find = '''    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,'''
+replace = '''    #[serde(rename = "about", skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,'''
+
+[[plant]]
+name = "describe: the replay of Node's recordings does not hold the description against Node's ledger"
+meant = "every_ledger_the_node_suite_opened_answers_here_as_it_answered_there"
+runs = ["ledger-replay"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/testing.rs"
+find = '''        include_str!("../migrations/0017.sql"),
+'''
+replace = ""
+
+[[plant]]
+name = "describe: the text of Node's schema is not held apart from the description's column"
+meant = "takes_the_description_out_of_the_text_sqlite_wrote_for_the_project_table_and_of_no_other"
+runs = ["ledger-testing-lib"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/testing.rs"
+find = '''                    *sql = sql.replace(&format!(", {column}"), "");'''
+replace = '''                    let _ = column;'''
+
+# --- the page's operations ---
+
+[[plant]]
+name = "describe page: a rename does not wake the dispatcher"
+meant = "the_human_renames_a_project_and_every_view_of_it_shows_the_new_name_its_folder_staying"
+runs = ["daemon-describing-page", "proto-page-describing"]
+
+[[plant.edit]]
+file = "crates/cf-proto/src/page.rs"
+find = '''                | Self::WakeUpGet
+        )'''
+replace = '''                | Self::WakeUpGet
+                | Self::ProjectRename
+        )'''
+
+[[plant]]
+name = "describe page: a description does not wake the dispatcher"
+meant = "the_human_describes_a_project_and_every_view_of_it_carries_the_line_until_it_is_taken_away"
+runs = ["daemon-describing-page", "proto-page-describing"]
+
+[[plant.edit]]
+file = "crates/cf-proto/src/page.rs"
+find = '''                | Self::WakeUpGet
+        )'''
+replace = '''                | Self::WakeUpGet
+                | Self::ProjectDescribe
+        )'''
+
+[[plant]]
+name = "describe page: the app does not forward the rename"
+meant = "the_operations_are_the_ones_the_app_forwards"
+runs = ["proto-page-describing"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/commands.rs"
+find = '''    "project.rename",
+'''
+replace = ""
+
+[[plant]]
+name = "describe page: the app does not forward the description"
+meant = "the_operations_are_the_ones_the_app_forwards"
+runs = ["proto-page-describing"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/commands.rs"
+find = '''    "project.describe",
+'''
+replace = ""
+
+[[plant]]
+name = "describe page: a name may be as long as it likes"
+meant = "a_name_that_is_empty_too_long_or_no_text_is_refused_and_wakes_nothing"
+runs = ["daemon-describing-page"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects.rs"
+find = "const NAME_MAX: usize = 100;"
+replace = "const NAME_MAX: usize = 1000;"
+
+[[plant]]
+name = "describe page: a name of nothing is taken"
+meant = "a_name_that_is_empty_too_long_or_no_text_is_refused_and_wakes_nothing"
+runs = ["daemon-describing-page"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/model.rs"
+find = "    if js::trim(value).is_empty() || utf16_len(value) > max {"
+replace = "    if utf16_len(value) > max {"
+
+[[plant]]
+name = "describe page: a description may be as long as it likes"
+meant = "a_description_that_is_too_long_has_a_line_break_or_is_no_text_is_refused_and_changes_nothing"
+runs = ["daemon-describing-page"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects/describing.rs"
+find = "    if utf16_len(text) > DESCRIPTION_MAX {"
+replace = "    if false {"
+
+[[plant]]
+name = "describe page: a name that is no text is taken for one"
+meant = "a_name_that_is_empty_too_long_or_no_text_is_refused_and_wakes_nothing"
+runs = ["daemon-describing-page"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/projects.rs"
+find = '    let name = parse_name(body.get("name"))?;'
+replace = '    let name = body.get("name").and_then(Value::as_str).unwrap_or("x").to_owned();'
+
+[[plant]]
+name = "describe page: a description that is no text takes the line away"
+meant = "a_description_that_is_too_long_has_a_line_break_or_is_no_text_is_refused_and_changes_nothing"
+runs = ["daemon-describing-page"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/projects.rs"
+find = '    let description = parse_description(body.get("description"))?;'
+replace = '    let description = body.get("description").and_then(Value::as_str).map(str::to_owned);'
+
+[[plant]]
+name = "describe page: a member's token reaches a route that renames"
+meant = "a_member_s_token_reaches_no_route_that_renames_or_describes_a_project_so_only_the_human_can"
+runs = ["daemon-describing-page"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/mod.rs"
+find = '    if get && path == "/api/whoami" {'
+replace = '''    if path == "/api/project/rename" {
+        return Some(Route::Whoami);
+    }
+    if get && path == "/api/whoami" {'''
+
+[[plant]]
+name = "describe page: a window is told the line under the name"
+meant = "a_window_that_asks_who_it_is_hears_the_new_name_and_never_the_line_under_it"
+runs = ["daemon-describing-page"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/whoami.rs"
+find = '            "directory": caller.project.directory,'
+replace = '''            "directory": caller.project.directory,
+            "description": caller.project.description,'''
+
+# --- the menu ---
+
+[[plant]]
+name = "describe menu: the browser's own menu is not taken away on a project"
+meant = "project menu: a right-click on a project opens its menu beside the pointer, Rename and Description, and selects nothing"
+runs = ["page-project-menu"]
+
+[[plant.edit]]
+file = "app/ui/core/project-menu.js"
+find = '''      if (card === null) return
+      event.preventDefault()
+      this.#show(card, { x: event.clientX, y: event.clientY })'''
+replace = '''      if (card === null) return
+      this.#show(card, { x: event.clientX, y: event.clientY })'''
+
+[[plant]]
+name = "describe menu: a right-click opens nothing"
+meant = "project menu: a right-click on a project opens its menu beside the pointer, Rename and Description, and selects nothing"
+runs = ["page-project-menu"]
+
+[[plant.edit]]
+file = "app/ui/core/project-menu.js"
+find = "      this.#show(card, { x: event.clientX, y: event.clientY })"
+replace = ""
+
+[[plant]]
+name = "describe menu: Shift+F10 opens nothing"
+meant = "project menu: Shift+F10 and the context-menu key open it on the project the keyboard is on, and the arrow keys choose"
+runs = ["page-project-menu"]
+
+[[plant.edit]]
+file = "app/ui/core/project-menu.js"
+find = "const isMenuKey = (event) => event.key === 'ContextMenu' || (event.key === 'F10' && event.shiftKey)"
+replace = "const isMenuKey = (event) => event.key === 'ContextMenu'"
+
+[[plant]]
+name = "describe menu: the context-menu key opens nothing"
+meant = "project menu: Shift+F10 and the context-menu key open it on the project the keyboard is on, and the arrow keys choose"
+runs = ["page-project-menu"]
+
+[[plant.edit]]
+file = "app/ui/core/project-menu.js"
+find = "const isMenuKey = (event) => event.key === 'ContextMenu' || (event.key === 'F10' && event.shiftKey)"
+replace = "const isMenuKey = (event) => event.key === 'F10' && event.shiftKey"
+
+[[plant]]
+name = "describe menu: the keyboard opens the menu of the project that is shown, not the one it is on"
+meant = "project menu: Shift+F10 and the context-menu key open it on the project the keyboard is on, and the arrow keys choose"
+runs = ["page-project-menu"]
+
+[[plant.edit]]
+file = "app/ui/core/project-menu.js"
+find = "      const card = isMenuKey(event) ? event.target.closest('li.project') : null"
+replace = '''      const card = isMenuKey(event) ? list.querySelector('li.project[data-current="true"]') : null'''
+
+[[plant]]
+name = "describe menu: the menu opens on no item"
+meant = "project menu: a right-click on a project opens its menu beside the pointer, Rename and Description, and selects nothing"
+runs = ["page-project-menu"]
+
+[[plant.edit]]
+file = "app/ui/core/project-menu.js"
+find = "    this.#items[0].focus()"
+replace = ""
+
+[[plant]]
+name = "describe menu: the menu runs off the window"
+meant = "project menu: a menu that would run off the window is kept inside it"
+runs = ["page-project-menu"]
+
+[[plant.edit]]
+file = "app/ui/core/project-menu.js"
+find = "    const within = (at, size, room) => Math.max(EDGE, Math.min(at, room - size - EDGE))"
+replace = "    const within = (at) => at"
+
+[[plant]]
+name = "describe menu: the arrow keys stop at the ends"
+meant = "project menu: Shift+F10 and the context-menu key open it on the project the keyboard is on, and the arrow keys choose"
+runs = ["page-project-menu"]
+
+[[plant.edit]]
+file = "app/ui/core/project-menu.js"
+find = "      ArrowDown: at >= last ? 0 : at + 1,"
+replace = "      ArrowDown: Math.min(at + 1, last),"
+
+[[plant]]
+name = "describe menu: Escape leaves the keyboard nowhere"
+meant = "project menu: Escape closes it, and so does a click elsewhere, the keyboard going back to the project"
+runs = ["page-project-menu"]
+
+[[plant.edit]]
+file = "app/ui/core/project-menu.js"
+find = '''        this.#hide(BACK.now)
+      },
+      true,'''
+replace = '''        this.#hide(BACK.nowhere)
+      },
+      true,'''
+
+[[plant]]
+name = "describe menu: Tab leaves the keyboard nowhere"
+meant = "project menu: Escape closes it, and so does a click elsewhere, the keyboard going back to the project"
+runs = ["page-project-menu"]
+
+[[plant.edit]]
+file = "app/ui/core/project-menu.js"
+find = '''    } else if (event.key === 'Tab') {
+      event.preventDefault()
+      this.#hide(BACK.now)'''
+replace = '''    } else if (event.key === 'Tab') {
+      event.preventDefault()
+      this.#hide(BACK.nowhere)'''
+
+[[plant]]
+name = "describe menu: a click elsewhere leaves the menu open"
+meant = "project menu: Escape closes it, and so does a click elsewhere, the keyboard going back to the project"
+runs = ["page-project-menu"]
+
+[[plant.edit]]
+file = "app/ui/core/project-menu.js"
+find = "    document.addEventListener('pointerdown', (event) => this.#outside(event), true)"
+replace = ""
+
+[[plant]]
+name = "describe menu: a click elsewhere leaves the keyboard nowhere"
+meant = "project menu: Escape closes it, and so does a click elsewhere, the keyboard going back to the project"
+runs = ["page-project-menu"]
+
+[[plant.edit]]
+file = "app/ui/core/project-menu.js"
+find = "    if (this.#open !== null && !this.#menu.contains(event.target)) this.#hide(BACK.unlessMoved)"
+replace = "    if (this.#open !== null && !this.#menu.contains(event.target)) this.#hide(BACK.nowhere)"
+
+[[plant]]
+name = "describe menu: a click on another control takes the keyboard back to the project"
+meant = "project menu: Escape closes it, and so does a click elsewhere, the keyboard going back to the project"
+runs = ["page-project-menu"]
+
+[[plant.edit]]
+file = "app/ui/core/project-menu.js"
+find = "        if (nowhere && this.#open === null) this.#focus(id)"
+replace = "        if (this.#open === null) this.#focus(id)"
+
+[[plant]]
+name = "describe menu: the menu of another project loses the keyboard to the one before it"
+meant = "project menu: Escape closes it, and so does a click elsewhere, the keyboard going back to the project"
+runs = ["page-project-menu"]
+
+[[plant.edit]]
+file = "app/ui/core/project-menu.js"
+find = "        if (nowhere && this.#open === null) this.#focus(id)"
+replace = "        if (nowhere) this.#focus(id)"
+
+[[plant]]
+name = "describe menu: the keyboard goes back to the first project, whichever it came from"
+meant = "project menu: Escape closes it, and so does a click elsewhere, the keyboard going back to the project"
+runs = ["page-project-menu"]
+
+[[plant.edit]]
+file = "app/ui/core/project-menu.js"
+find = '''    this.#list.querySelector(`li.project[data-project="${id}"] .project-select`)?.focus()'''
+replace = '''    this.#list.querySelector('.project-select')?.focus()'''
+
+# --- the dialogs ---
+
+[[plant]]
+name = "describe dialog: the name is sent with the spaces it was typed with"
+meant = "project menu: Rename… saves with Enter, and the new name is in the list, over the board and in the buttons named after it"
+runs = ["page-project-menu"]
+
+[[plant.edit]]
+file = "app/ui/core/project-menu.js"
+find = "    ask: (project, text) => ['project.rename', { project: project.id, name: text.trim() }],"
+replace = "    ask: (project, text) => ['project.rename', { project: project.id, name: text }],"
+
+[[plant]]
+name = "describe dialog: Enter does not save"
+meant = "project menu: Rename… saves with Enter, and the new name is in the list, over the board and in the buttons named after it"
+runs = ["page-project-menu"]
+
+[[plant.edit]]
+file = "app/ui/core/project-menu.js"
+find = '''      event.preventDefault()
+      void this.#save()'''
+replace = '''      event.preventDefault()'''
+
+[[plant]]
+name = "describe dialog: Escape saves what was typed"
+meant = "project menu: Escape in the rename dialog, and Cancel, leave the name and ask the daemon nothing"
+runs = ["page-project-menu"]
+
+[[plant.edit]]
+file = "app/ui/core/project-menu.js"
+find = '''    dialog.querySelector('[value="cancel"]').addEventListener('click', () => dialog.close())'''
+replace = '''    dialog.querySelector('[value="cancel"]').addEventListener('click', () => dialog.close())
+    dialog.addEventListener('cancel', () => void this.#save())'''
+
+[[plant]]
+name = "describe dialog: a save does not draw the page again"
+meant = "project menu: Rename… saves with Enter, and the new name is in the list, over the board and in the buttons named after it"
+runs = ["page-project-menu"]
+
+[[plant.edit]]
+file = "app/ui/core/app.js"
+find = '''    project: (id) => state.projects.find((project) => project.id === id),
+    daemon,
+    act,'''
+replace = '''    project: (id) => state.projects.find((project) => project.id === id),
+    daemon,
+    act: (work) => work(),'''
+
+[[plant]]
+name = "describe dialog: the name opens empty"
+meant = "project menu: Rename… saves with Enter, and the new name is in the list, over the board and in the buttons named after it"
+runs = ["page-project-menu"]
+
+[[plant.edit]]
+file = "app/ui/core/project-menu.js"
+find = "    start: (project) => project.name,"
+replace = "    start: () => '',"
+
+[[plant]]
+name = "describe dialog: a save asked twice is asked of the daemon twice"
+meant = "project menu: Enter pressed twice while the daemon answers asks it once"
+runs = ["page-project-menu"]
+
+[[plant.edit]]
+file = "app/ui/core/project-menu.js"
+find = "    if (opening === null || opening.saving) return"
+replace = "    if (opening === null) return"
+
+[[plant]]
+name = "describe dialog: a refusal closes the dialog"
+meant = "project menu: what the daemon refuses is said in the dialog, which stays open on what was typed"
+runs = ["page-project-menu"]
+
+[[plant.edit]]
+file = "app/ui/core/project-menu.js"
+find = '''    if (refused !== null) {
+      if (current) this.#say(refused)
+      return
+    }'''
+replace = '''    if (refused !== null && current) this.#say(refused)'''
+
+[[plant]]
+name = "describe dialog: a refusal is not said"
+meant = "project menu: what the daemon refuses is said in the dialog, which stays open on what was typed"
+runs = ["page-project-menu"]
+
+[[plant.edit]]
+file = "app/ui/core/project-menu.js"
+find = "      if (current) this.#say(refused)"
+replace = "      if (current) this.#say('')"
+
+[[plant]]
+name = "describe dialog: the dialog opens on what was typed in it the last time"
+meant = "project menu: Escape in the rename dialog, and Cancel, leave the name and ask the daemon nothing"
+runs = ["page-project-menu"]
+
+[[plant.edit]]
+file = "app/ui/core/project-menu.js"
+find = '''    this.#input.value = this.#field.start(project)'''
+replace = '''    this.#input.value ||= this.#field.start(project)'''
+
+[[plant]]
+name = "describe dialog: the keyboard is not given back to the project once the dialog closes"
+meant = "project menu: Rename… saves with Enter, and the new name is in the list, over the board and in the buttons named after it"
+runs = ["page-project-menu"]
+
+[[plant.edit]]
+file = "app/ui/core/project-menu.js"
+find = "      if (opening !== null) back(opening.project.id)"
+replace = "      if (opening !== null && false) back(opening.project.id)"
+
+[[plant]]
+name = "describe dialog: the answer to a save the human cancelled closes the dialog opened after it"
+meant = "project menu: a rename saved and cancelled before the daemon answers does not close the dialog opened next on another project"
+runs = ["page-project-menu"]
+
+[[plant.edit]]
+file = "app/ui/core/project-menu.js"
+find = "    if (current) this.#dialog.close()"
+replace = "    this.#dialog.close()"
+
+[[plant]]
+name = "describe dialog: the refusal of a save the human cancelled is said in the dialog opened after it"
+meant = "project menu: a rename that the daemon refuses after the human cancelled it is not said in the dialog opened next on another project"
+runs = ["page-project-menu"]
+
+[[plant.edit]]
+file = "app/ui/core/project-menu.js"
+find = "      if (current) this.#say(refused)"
+replace = "      this.#say(refused)"
+
+[[plant]]
+name = "describe dialog: the answer to a save is taken for the dialog's when it is of the same project"
+meant = "project menu: a rename saved and cancelled before the daemon answers does not close the dialog opened next on the same project"
+runs = ["page-project-menu"]
+
+[[plant.edit]]
+file = "app/ui/core/project-menu.js"
+find = "    const current = opening === this.#opening"
+replace = "    const current = this.#opening !== null && opening.project.id === this.#opening.project.id"
+
+[[plant]]
+name = "describe dialog: a save the human cancelled and the daemon has not answered keeps the dialog opened next from saving"
+meant = "project menu: a rename saved and cancelled, not yet answered, does not keep the dialog opened next from saving"
+runs = ["page-project-menu"]
+
+[[plant.edit]]
+file = "app/ui/core/project-menu.js"
+find = "class FieldDialog {"
+replace = '''let saving = false
+
+class FieldDialog {'''
+
+[[plant.edit]]
+file = "app/ui/core/project-menu.js"
+find = '''    if (opening === null || opening.saving) return
+    opening.saving = true'''
+replace = '''    if (opening === null || saving) return
+    saving = true'''
+
+[[plant.edit]]
+file = "app/ui/core/project-menu.js"
+find = "      opening.saving = false"
+replace = "      saving = false"
+
+[[plant]]
+name = "describe menu: an open menu keeps the name it opened with"
+meant = "project menu: an open menu follows a rename made elsewhere, and is for the project as the page has it now"
+runs = ["page-project-menu"]
+
+[[plant.edit]]
+file = "app/ui/core/project-menu.js"
+find = '''    this.#adopt(project)
+  }'''
+replace = '''    this.#at = this.#placeOf(id)
+  }'''
+
+[[plant]]
+name = "describe menu: an open menu stays open when its project is gone"
+meant = "project menu: an open menu shuts when its project is gone, and the keyboard goes to the project that took its place, or the one before it"
+runs = ["page-project-menu"]
+
+[[plant.edit]]
+file = "app/ui/core/project-menu.js"
+find = '''    if (project === undefined) {
+      this.#lose()
+      return
+    }'''
+replace = '''    if (project === undefined) return'''
+
+[[plant]]
+name = "describe menu: the keyboard of an open menu whose project is gone is left on nothing"
+meant = "project menu: an open menu shuts when its project is gone, and the keyboard goes to the project that took its place, or the one before it"
+runs = ["page-project-menu"]
+
+[[plant.edit]]
+file = "app/ui/core/project-menu.js"
+find = "    if (!held) return"
+replace = "    return"
+
+[[plant]]
+name = "describe menu: the keyboard of an open menu whose project is gone goes to the first project"
+meant = "project menu: an open menu shuts when its project is gone, and the keyboard goes to the project that took its place, or the one before it"
+runs = ["page-project-menu"]
+
+[[plant.edit]]
+file = "app/ui/core/project-menu.js"
+find = "    const near = cards[Math.min(this.#at, cards.length - 1)]?.querySelector('.project-select')"
+replace = "    const near = cards[0]?.querySelector('.project-select')"
+
+[[plant]]
+name = "describe menu: the keyboard of an open menu whose last project is gone goes past the end"
+meant = "project menu: an open menu shuts when its project is gone, and the keyboard goes to the project that took its place, or the one before it"
+runs = ["page-project-menu"]
+
+[[plant.edit]]
+file = "app/ui/core/project-menu.js"
+find = "cards[Math.min(this.#at, cards.length - 1)]"
+replace = "cards[this.#at]"
+
+[[plant]]
+name = "describe menu: with no project left the keyboard of an open menu is left on nothing"
+meant = "project menu: with no project left an open menu shuts and the keyboard goes to New project"
+runs = ["page-project-menu"]
+
+[[plant.edit]]
+file = "app/ui/core/project-menu.js"
+find = '''    const target = near ?? this.#fallback
+    target.focus()'''
+replace = '''    near?.focus()'''
+
+[[plant]]
+name = "describe menu: the keyboard of an open menu whose project is gone is taken from where the human put it"
+meant = "project menu: an open menu whose project is gone leaves the keyboard where the human had put it"
+runs = ["page-project-menu"]
+
+[[plant.edit]]
+file = "app/ui/core/project-menu.js"
+find = "    const held = focused === null || focused === document.body || this.#menu.contains(focused)"
+replace = "    const held = true"
+
+[[plant]]
+name = "describe app: the page does not tell an open menu it was drawn again"
+meant = "project menu: an open menu follows a rename made elsewhere, and is for the project as the page has it now"
+runs = ["page-project-menu"]
+
+[[plant.edit]]
+file = "app/ui/core/app.js"
+find = '''      projectMenu.follow()
+'''
+replace = ""
+
+[[plant]]
+name = "describe dialog: the field takes a name of any length"
+meant = "project menu: what the daemon refuses is said in the dialog, which stays open on what was typed"
+runs = ["page-project-menu"]
+
+[[plant.edit]]
+file = "app/ui/index.html"
+find = '<input name="name" required maxlength="100" autocomplete="off" spellcheck="false">'
+replace = '<input name="name" required maxlength="1000" autocomplete="off" spellcheck="false">'
+
+[[plant]]
+name = "describe dialog: the field takes an empty name"
+meant = "project menu: what the daemon refuses is said in the dialog, which stays open on what was typed"
+runs = ["page-project-menu"]
+
+[[plant.edit]]
+file = "app/ui/index.html"
+find = '<input name="name" required maxlength="100" autocomplete="off" spellcheck="false">'
+replace = '<input name="name" maxlength="100" autocomplete="off" spellcheck="false">'
+
+[[plant]]
+name = "describe dialog: the field takes a description of any length"
+meant = "project menu: Description… writes a line under the name, smaller and quieter, cut with an ellipsis and whole on hover"
+runs = ["page-project-menu"]
+
+[[plant.edit]]
+file = "app/ui/index.html"
+find = '<input name="description" maxlength="200" autocomplete="off">'
+replace = '<input name="description" maxlength="2000" autocomplete="off">'
+
+# --- the list ---
+
+[[plant]]
+name = "describe list: the line has no title"
+meant = "project menu: Description… writes a line under the name, smaller and quieter, cut with an ellipsis and whole on hover"
+runs = ["page-project-menu"]
+
+[[plant.edit]]
+file = "app/ui/core/app.js"
+find = '''      line.title = project.description
+'''
+replace = ""
+
+[[plant]]
+name = "describe list: a project with no line has one drawn"
+meant = "project menu: saving an empty description takes the line away, and the dialog shows what was saved when it opens again"
+runs = ["page-project-menu"]
+
+[[plant.edit]]
+file = "app/ui/core/app.js"
+find = "    if (project.description) {"
+replace = "    if (true) {"
+
+[[plant]]
+name = "describe list: the line is not cut"
+meant = "project menu: Description… writes a line under the name, smaller and quieter, cut with an ellipsis and whole on hover"
+runs = ["page-project-menu"]
+
+[[plant.edit]]
+file = "app/ui/page.css"
+find = ".project-description { overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
+replace = ".project-description { overflow: hidden; text-overflow: ellipsis; white-space: normal;"
+
+[[plant]]
+name = "describe list: the line is as big as the name"
+meant = "project menu: Description… writes a line under the name, smaller and quieter, cut with an ellipsis and whole on hover"
+runs = ["page-project-menu"]
+
+[[plant.edit]]
+file = "app/ui/page.css"
+find = "white-space: nowrap; font-size: 11px; color: var(--muted); }"
+replace = "white-space: nowrap; font-size: 13px; color: var(--muted); }"
+
+[[plant]]
+name = "describe list: the line is as loud as the name"
+meant = "project menu: Description… writes a line under the name, smaller and quieter, cut with an ellipsis and whole on hover"
+runs = ["page-project-menu"]
+
+[[plant.edit]]
+file = "app/ui/page.css"
+find = "white-space: nowrap; font-size: 11px; color: var(--muted); }"
+replace = "white-space: nowrap; font-size: 11px; color: var(--foam); }"
+
+[[plant]]
+name = "describe list: the menu is drawn in the flow of the page, not where it was asked for"
+meant = "project menu: a right-click on a project opens its menu beside the pointer, Rename and Description, and selects nothing"
+runs = ["page-project-menu"]
+
+[[plant.edit]]
+file = "app/ui/page.css"
+find = '''  position: fixed;
+  z-index: 30;'''
+replace = '''  position: static;
+  z-index: 30;'''
+
+# --- the rig: a real daemon and pane host, a stand-in chief ---
+
+[[plant]]
+name = "describe rig: the line goes into the environment of a window"
+meant = "a_project_the_human_renames_and_describes_is_in_the_event_file_and_no_window_is_told_of_either"
+runs = ["rig-described"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/seams.rs"
+find = '''            ("CONSENSFLOW_PROJECT".to_owned(), project.id.to_string()),'''
+replace = '''            ("CONSENSFLOW_PROJECT".to_owned(), project.id.to_string()),
+            (
+                "CONSENSFLOW_ABOUT".to_owned(),
+                project.description.clone().unwrap_or_default(),
+            ),'''
+
+[[plant]]
+name = "describe rig: the line goes into the role text of a window"
+meant = "a_project_the_human_renames_and_describes_is_in_the_event_file_and_no_window_is_told_of_either"
+runs = ["rig-described"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/seams.rs"
+find = '''        .map_err(|failed| failed.to_string())
+    }
+}
+
+/// Each launch's id'''
+replace = '''        .map(|text| {
+            format!(
+                "{text}\n{}",
+                project.description.as_deref().unwrap_or_default()
+            )
+        })
+        .map_err(|failed| failed.to_string())
+    }
+}
+
+/// Each launch's id'''
+
+[[plant]]
+name = "describe rig: the new name goes into the role text of a window"
+meant = "a_project_the_human_renames_and_describes_is_in_the_event_file_and_no_window_is_told_of_either"
+runs = ["rig-described"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/seams.rs"
+find = '''        .map_err(|failed| failed.to_string())
+    }
+}
+
+/// Each launch's id'''
+replace = '''        .map(|text| format!("{text}\n{}", project.name))
+        .map_err(|failed| failed.to_string())
+    }
+}
+
+/// Each launch's id'''
+
+[[plant]]
+name = "describe rig: a rename is not in the event file"
+meant = "a_project_the_human_renames_and_describes_is_in_the_event_file_and_no_window_is_told_of_either"
+runs = ["rig-described"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects/describing.rs"
+find = '''            store.log(id, "project.renamed", json!({ "from": from, "to": name }))?;'''
+replace = ""

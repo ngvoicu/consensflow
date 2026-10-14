@@ -31,13 +31,13 @@ pub const ENTER: EnterTiming = EnterTiming {
 /// Ends every pane the table still holds, all at once: each is closed as
 /// `PaneTable::kill` closes one (asked to end and given its grace; on Windows
 /// ended at once), and a window whose programs ignore the request does not make
-/// the others wait for it.
+/// the others wait for it. A quit's: no one is told what a window left running.
 pub fn reap_all(panes: &PaneTable) {
     if let Ok(open) = panes.list() {
         std::thread::scope(|scope| {
             for pane in open {
                 scope.spawn(move || {
-                    let _ = panes.kill(&PaneKey::new(pane.id, pane.generation));
+                    let _ = panes.reap(&PaneKey::new(pane.id, pane.generation));
                 });
             }
         });

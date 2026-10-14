@@ -31,7 +31,19 @@
 //! `pending_agents`: what it does with the agents a turn left running, which no
 //! program of the window's tree is. So is `start_suspended`: a start opens
 //! nothing, and the human's Resume brings back the chief and the windows at
-//! work, the one whose turn the quit cut told so.)
+//! work, the one whose turn the quit cut told so. So is `specs`: the Specmint
+//! skill a chief of a project with specs on is given, ConsensFlow's copy kept at
+//! one place for every launch and read besides its role, and no worker, and no
+//! chief of a project with them off; and `specs_codex`, a chief on the stand-in
+//! Codex, whose resumed thread keeps the instructions it began with, told of them
+//! by a message once the project is resumed, and of nothing at the Resume after.
+//! So is `wake_ups`: the human's
+//! wake-up calls, which nudge a chief at rest; its two cases wait out a real
+//! minute each, the least a wake-up may wait. So is `described`: a project the
+//! human renames and writes a line under, which are in the event file and which no
+//! window is told of. So is `stranger` (Unix's): the rig keeps a process that is
+//! none of any window's beside them, which every case that ends a window holds the
+//! pane host to leaving running.)
 //!
 //! The cases take turns ([`cf_e2e::serial`]): each starts a daemon and a pane
 //! host of its own, with windows in real terminals, and the waits are timed.
@@ -42,6 +54,8 @@
 // file beside it, where each would be a suite of its own.
 #[path = "rig/approval.rs"]
 mod approval;
+#[path = "rig/background_close.rs"]
+mod background_close;
 #[path = "rig/background_work.rs"]
 mod background_work;
 #[path = "rig/cf_native.rs"]
@@ -62,6 +76,8 @@ mod core_tiered;
 mod daemon_seam;
 #[path = "rig/decided_result.rs"]
 mod decided_result;
+#[path = "rig/described.rs"]
+mod described;
 #[path = "rig/help.rs"]
 mod help;
 #[path = "rig/live_base.rs"]
@@ -72,14 +88,24 @@ mod live_members;
 mod live_support;
 #[path = "rig/pending_agents.rs"]
 mod pending_agents;
+#[path = "rig/specs.rs"]
+mod specs;
+#[cfg(unix)]
+#[path = "rig/specs_codex.rs"]
+mod specs_codex;
 #[path = "rig/stand_in_codex.rs"]
 mod stand_in_codex;
 #[path = "rig/stand_ins.rs"]
 mod stand_ins;
 #[path = "rig/start_suspended.rs"]
 mod start_suspended;
+#[cfg(unix)]
+#[path = "rig/stranger.rs"]
+mod stranger;
 #[path = "rig/waiting_notes.rs"]
 mod waiting_notes;
+#[path = "rig/wake_ups.rs"]
+mod wake_ups;
 #[path = "rig/window_says_why.rs"]
 mod window_says_why;
 

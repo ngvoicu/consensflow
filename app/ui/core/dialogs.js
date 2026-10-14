@@ -1,5 +1,7 @@
 import { button, element, redraw } from '../dom.js'
 import { isMember } from './board.js'
+import { SpecsGroup } from './specs.js'
+import { WakeUpCalls } from './wake-up.js'
 
 /**
  * The dialogs that say who works on a project: New project (its folder, the
@@ -397,6 +399,10 @@ export class StaffDialog {
   #gate
   #hint
   #page
+  /** The project's wake-up calls, read when the dialog opens and saved as a whole. */
+  #wakeUp
+  /** What the project says of specs: its own group of the dialog. */
+  #specs
   /** The member whose removal waits for the human's yes, kept across redraws. */
   #removing = null
 
@@ -412,6 +418,8 @@ export class StaffDialog {
     this.#gate = dialog.querySelector('#staff-gate')
     this.#hint = dialog.querySelector('#staff-hint')
     this.#page = page
+    this.#wakeUp = new WakeUpCalls(dialog.querySelector('#staff-wakeup'), page)
+    this.#specs = new SpecsGroup(dialog.querySelector('#staff-specs'), page)
     // The dialog's staff is the shown board's, and so is what it changes.
     this.#gate.addEventListener('change', () =>
       page.act(async () => {
@@ -453,10 +461,15 @@ export class StaffDialog {
     dialog.querySelector('[value="cancel"]').addEventListener('click', () => dialog.close())
   }
 
-  /** Opens on the board shown, with no removal waiting from the last time. */
-  open() {
+  /**
+   * Opens on the board shown, with no removal waiting from the last time, and
+   * the project's wake-up calls as the daemon has them.
+   */
+  async open() {
     this.#removing = null
+    await this.#wakeUp.load(this.#page.board().project.id)
     this.#draw()
+    this.#specs.draw(this.#page.board()?.project, true)
     this.#dialog.showModal()
   }
 
@@ -483,6 +496,7 @@ export class StaffDialog {
     if (rows.length === 0) rows.push(nobodyRow('Nobody yet: add the agents this project may use.'))
     redraw(this.#members, rows)
     this.#gate.checked = this.#page.board()?.project.gate ?? false
+    this.#specs.draw(this.#page.board()?.project)
     rolePicker(
       this.#page.agents,
       this.#form.elements.role,

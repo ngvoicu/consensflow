@@ -49,6 +49,7 @@ fn every_command_of_the_plan_is_there_once() {
             "eval",
             "watch",
             "scrub-transcript",
+            "specmint-sync",
             "departures",
             "bench records-memory",
             "plants",
