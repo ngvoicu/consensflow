@@ -46,6 +46,10 @@ const GIVEN: Duration = Duration::from_secs(900);
 /// How often the board is looked at.
 const LOOK: Duration = Duration::from_millis(500);
 
+/// How many times the human presses Enter again for the first command, and the key.
+const ENTERS: u32 = 3;
+const ENTER: u8 = b'\r';
+
 /// A number of milliseconds as the events count them.
 fn ms(value: u64) -> i64 {
     i64::try_from(value).unwrap_or(i64::MAX)
@@ -99,13 +103,27 @@ pub fn drive(chief: Harness, mut members: Members, log: &Log) -> Result<Account>
     // The human asks the chief to run a long command: it is in a turn.
     let pane = members.lane("chief")?["pane"].clone();
     members.paste(&pane, &ask::window_text(&first_ask())?)?;
-    let inside = find(
-        log,
-        "the chief to go into its first turn",
-        WORK,
-        LOOK,
-        || Ok((chief_state(&members)? == "working").then_some(())),
-    )?;
+    // A window that has just gone idle can take the paste and lose its Enter (a Devin
+    // chief kept the command in its input, twice on 2026-10-14): the human presses
+    // Enter again while the chief has not gone to work, as every live check that types
+    // to a chief does (`Human::tells`).
+    let mut inside = None;
+    for again in 0..=ENTERS {
+        inside = find(
+            log,
+            "the chief to go into its first turn",
+            WORK / (ENTERS + 1),
+            LOOK,
+            || Ok((chief_state(&members)? == "working").then_some(())),
+        )?;
+        if inside.is_some() || again == ENTERS {
+            break;
+        }
+        log.say(
+            "the chief has not gone to work on what the human typed: the human presses Enter again",
+        );
+        members.press(&pane, &[ENTER])?;
+    }
     if inside.is_none() {
         case.fail(format!(
             "the chief never went into a turn: {}",
