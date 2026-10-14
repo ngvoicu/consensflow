@@ -29,22 +29,40 @@
 //! whatever becomes of the process that started it or of the session's leader; what has
 //! gone is let go of.
 //!
+//! The bound only permits: it chooses nothing, and what it allows is not what is signalled.
+//! A close attempts what the selection names, and an ending what the turn's lineage names,
+//! so a job a look saw under the program that then left its session (`setsid`), whose shell
+//! has gone, is permitted here and is no candidate of a close unless the selection names it
+//! (by the process that started it, the session or the marker): it is left running, which
+//! ends less, and is the limit written down in [`super`].
+//!
 //! The pane's process group, which a close signals whole, is the pane's program's own
 //! while the program runs ([`Bound::signal_group`]); once it has gone its number may have
 //! been given to another process that leads a group of its own, and the group's members
 //! are each signalled through the bound instead.
+//!
+//! Every place that can send a signal is held to a table by an audit of the sources
+//! (`audit`), the bound's own senders among them. In a test build the real system's
+//! senders ask a guard (`guard`) that reads the system itself, which does not depend on the
+//! table the bound judges by: a fault in that table, which the bound would trust, is the
+//! guard's to stop.
 
 use std::collections::{HashMap, HashSet};
 use std::io;
 use std::sync::{Arc, Mutex, PoisonError};
 
-use super::{native, Identity, Process};
+use super::{key_of, native, Identity, Process};
+use crate::background::ProcessKey;
 
-/// What a tree asks of the system: the processes there are, and a signal sent to one.
-/// The tests of the tree ask a machine made up, which signals nothing.
+/// What a tree asks of the system: the processes there are, whether one runs, and a signal
+/// sent to one. The tests of the tree ask a machine made up, which signals nothing.
 pub(super) trait System {
     /// Every process of ours there is now.
     fn processes(&self) -> io::Result<Vec<Process>>;
+
+    /// Whether the process `key` names (its number and when it began) runs now: none that
+    /// has taken its number does.
+    fn runs(&self, key: ProcessKey) -> bool;
 
     /// Sends `signal` to the process `to` names, and to none that has taken its
     /// number: one that is gone is no error. Only [`Bound::signal`] calls it.
@@ -61,6 +79,13 @@ pub(super) struct Native;
 impl System for Native {
     fn processes(&self) -> io::Result<Vec<Process>> {
         native::processes()
+    }
+
+    fn runs(&self, key: ProcessKey) -> bool {
+        i32::try_from(key.pid)
+            .ok()
+            .and_then(native::process)
+            .is_some_and(|process| key_of(process.identity) == key)
     }
 
     fn send(&self, to: Identity, signal: i32) -> io::Result<()> {

@@ -75,6 +75,22 @@ mod unix {
         file.exists()
     }
 
+    /// The number a job writes in `file` once it runs, waited for up to ten seconds.
+    #[cfg(target_os = "macos")]
+    fn pid_in(file: &Path) -> i32 {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            if let Some(pid) = fs::read_to_string(file)
+                .ok()
+                .and_then(|text| text.trim().parse().ok())
+            {
+                return pid;
+            }
+            assert!(Instant::now() < deadline, "the job runs");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
     /// Waits until nothing of the process group is left, up to two seconds.
     fn gone(group: i32) -> bool {
         let deadline = Instant::now() + Duration::from_secs(2);
@@ -241,13 +257,13 @@ mod unix {
         let table = PaneTable::closing_within(GRACE * 8);
         let (started, released) = (scratch("started"), scratch("released"));
         let job = format!(
-            "import signal,sys,time\n\
+            "import os,signal,sys,time\n\
          def release(*_):\n\
          \x20   open({released:?}, 'w').write('RELEASED')\n\
          \x20   sys.exit(0)\n\
          signal.signal(signal.SIGTERM, release)\n\
          signal.signal(signal.SIGHUP, release)\n\
-         open({started:?}, 'w').write('up')\n\
+         open({started:?}, 'w').write(str(os.getpid()))\n\
          time.sleep(60)\n"
         );
         let parent = format!(
@@ -271,10 +287,9 @@ mod unix {
             )
             .expect("open the job's parent");
         until_shown(&mut reader, "ready");
-        assert!(
-            until_there(&started, Duration::from_secs(10)),
-            "the job runs"
-        );
+        // The group's TERM ends the program first, and the job, in a session of its own, is
+        // then one the test started with no parent: the guard of the real signals is told.
+        crate::process_tree::guard::register(pid_in(&started));
 
         let closing = Instant::now();
         table.kill(&key).expect("close the pane");

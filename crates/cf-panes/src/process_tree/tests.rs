@@ -1,7 +1,9 @@
-use super::testing::{
-    a_window_among_strangers, identity_of, listed, the_tests_own_parent, the_windows, Machine,
-    DEEP, DETACHED, JOB, LEFT, PROGRAM, SHELL, USERS_SHELL,
-};
+//! What the tree is of the processes there are: the lineage of a turn and the session of a
+//! pane, told on a table written out, and the tree's look at real processes the tests
+//! start. What the tree signals, on a machine made up, is in `machine_tests`.
+
+use super::machine_tests::every_process;
+use super::testing::{listed, Machine};
 use super::*;
 
 /// The numbers of what `found` names, in order.
@@ -20,6 +22,7 @@ fn a_lineage_is_its_processes_that_run_and_what_descends_from_them_or_from_one_t
             listed(41, 410, 1).identity,
         ],
         members: Vec::new(),
+        unverified: Vec::new(),
     };
     let snapshot = [
         listed(40, 400, 1),
@@ -46,6 +49,7 @@ fn what_a_process_the_ending_found_started_is_found_whether_or_not_that_process_
     let lineage = Lineage {
         identities: vec![listed(40, 400, 1).identity],
         members: Vec::new(),
+        unverified: Vec::new(),
     };
     // A handler of the shell's started a process and went; the ending knows it by
     // the identity it found, and what that started is the lineage's too.
@@ -94,248 +98,6 @@ fn the_session_is_the_panes_while_its_number_is_nobody_elses() {
         in_session(501, 5010),
     ];
     assert!(tree.select(&taken, &HashMap::new()).is_empty());
-}
-
-// What the tree signals, on a machine made up (`testing`): a table of the window among
-// strangers, and a record of the signals sent to it. No process there is is signalled.
-
-/// The tree of the window of [`a_window_among_strangers`]: its program leads its session.
-fn tree_of(table: &[Process]) -> ProcessTree {
-    let mut tree = ProcessTree::new();
-    tree.root = Some(identity_of(table, PROGRAM));
-    tree.session = Some(PROGRAM);
-    tree.bound = Bound::new(tree.root);
-    tree
-}
-
-/// A selection gone wrong: a lineage that names every process of the machine, as a
-/// plant of the selection once did, and the ending signalled them all.
-fn every_process(table: &[Process]) -> Lineage {
-    Lineage {
-        identities: table.iter().map(|process| process.identity).collect(),
-        members: Vec::new(),
-    }
-}
-
-/// The numbers of `table`'s processes the test names `of`, as the members of a lineage.
-fn members_of(table: &[Process], of: &[i32]) -> Vec<Member> {
-    of.iter()
-        .map(|pid| Member {
-            key: key_of(identity_of(table, *pid)),
-            command: format!("sleep {pid}"),
-            program: "sleep".to_owned(),
-            exe: String::new(),
-            group: None,
-            parent: None,
-        })
-        .collect()
-}
-
-#[test]
-fn a_selection_of_every_process_of_the_machine_asks_only_the_windows_own_to_end() {
-    let machine = Machine::new(a_window_among_strangers());
-    let table = machine.processes().expect("the table");
-    let tree = tree_of(&table);
-    let wrong = every_process(&table);
-
-    let asked = tree
-        .ask_by(&machine, Subject::Lineage(&wrong), None)
-        .expect("asked");
-
-    assert_eq!(machine.sent(libc::SIGTERM), the_windows());
-    assert_eq!(machine.sent(libc::SIGHUP), the_windows());
-    let waited_for: Vec<i32> = asked.identities.iter().map(|asked| asked.pid).collect();
-    assert_eq!(waited_for, the_windows(), "no stranger is waited for");
-    assert!(!asked.failed());
-}
-
-#[test]
-fn a_selection_of_every_process_of_the_machine_stops_and_kills_only_the_windows_own() {
-    let machine = Machine::new(a_window_among_strangers());
-    let table = machine.processes().expect("the table");
-    let tree = tree_of(&table);
-    let wrong = every_process(&table);
-
-    let forced = tree.force_by(&machine, Subject::Lineage(&wrong), &[]);
-
-    assert!(forced.failure.is_none(), "{:?}", forced.failure);
-    assert_eq!(machine.sent(libc::SIGSTOP), the_windows());
-    assert_eq!(machine.sent(libc::SIGKILL), the_windows());
-    let named: Vec<i32> = forced
-        .members
-        .iter()
-        .map(|member| i32::try_from(member.key.pid).expect("a number"))
-        .collect();
-    assert_eq!(named, the_windows(), "the strangers are no member of it");
-}
-
-#[test]
-fn a_close_signals_the_windows_by_its_parents_and_its_session_and_none_of_what_the_selection_adds()
-{
-    let machine = Machine::new(a_window_among_strangers());
-    let table = machine.processes().expect("the table");
-    let tree = tree_of(&table);
-    // The selection names the job a detached shell left in the window's session, which is
-    // the window's, and carries on a process an earlier pass found: one that left the
-    // session (`setsid`), whose shell is gone and which no look saw under the program.
-    let left = identity_of(&table, LEFT);
-    let chosen = tree.select(&table, &HashMap::from([(left.pid, left)]));
-    assert!(
-        chosen.contains_key(&DETACHED) && chosen.contains_key(&LEFT),
-        "the selection names both: {chosen:?}"
-    );
-
-    let forced = tree.force_by(&machine, Subject::Whole, &[left]);
-
-    assert!(forced.failure.is_none(), "{:?}", forced.failure);
-    assert_eq!(machine.sent(libc::SIGSTOP), the_windows());
-    assert_eq!(machine.sent(libc::SIGKILL), the_windows());
-}
-
-#[test]
-fn a_job_seen_under_the_program_is_ended_by_a_close_though_its_parent_has_gone_since() {
-    let machine = Machine::new(a_window_among_strangers());
-    let table = machine.processes().expect("the table");
-    let tree = tree_of(&table);
-    // A look while the shell runs.
-    tree.members_by(&machine).expect("a look");
-
-    // The shell is gone and its job runs on, in the shell's own session; the selection
-    // carries it on, with the job that left the window's session, which no look saw.
-    let (job, left) = (identity_of(&table, JOB), identity_of(&table, LEFT));
-    let later = Machine::new(vec![
-        table[0].clone(),
-        table[2].clone(),
-        table[5].clone(),
-        table[9].clone(),
-    ]);
-    let forced = tree.force_by(&later, Subject::Whole, &[job, left]);
-
-    assert!(forced.failure.is_none(), "{:?}", forced.failure);
-    assert_eq!(later.sent(libc::SIGKILL), [PROGRAM, JOB]);
-}
-
-#[test]
-fn what_the_bound_refuses_is_no_part_of_the_turns_lineage_whoever_proves_it_the_turns() {
-    let shell = |pid, unique, parent| Process {
-        name: "sh".to_owned(),
-        session: Some(PROGRAM),
-        ..listed(pid, unique, parent)
-    };
-    // Before the turn: the window's program, and a job in its session whose parent has
-    // gone.
-    let before = vec![
-        Process {
-            session: Some(PROGRAM),
-            ..listed(PROGRAM, 1000, 700)
-        },
-        Process {
-            session: Some(PROGRAM),
-            ..listed(DETACHED, 1400, 1)
-        },
-    ];
-    let tree = tree_of(&before);
-    // The mark is made of what the selection finds, which no look of the bound has seen.
-    let mut baseline = Baseline::default();
-    baseline.mark(
-        &tree.members_in(&before, &tree.select(&before, &HashMap::new())),
-        None,
-        None,
-    );
-
-    // After it the program has gone, and nothing holds its number: the session is the
-    // pane's to the selection still, and a shell the job started, a shell with a parent
-    // from before the mark, is proved the turn's. The leader is not there to say the
-    // session is the window's, and no look saw the job.
-    let after = Machine::new(vec![before[1].clone(), shell(USERS_SHELL, 2100, 1400)]);
-    let lineage = tree.lineage_by(&after, &baseline).expect("the lineage");
-
-    assert_eq!(lineage.identities, [], "nothing the bound refuses");
-    assert!(lineage.members.is_empty());
-}
-
-#[test]
-fn a_close_signals_the_panes_group_whole_while_its_program_leads_it_and_else_by_the_bound() {
-    let machine = Machine::new(a_window_among_strangers());
-    let table = machine.processes().expect("the table");
-    let tree = tree_of(&table);
-
-    tree.signal_group_by(&machine, PROGRAM, libc::SIGTERM)
-        .expect("signalled");
-
-    assert_eq!(machine.sent_to_groups(libc::SIGTERM), [PROGRAM]);
-    assert!(machine.sent(libc::SIGTERM).is_empty());
-
-    // The program has gone and a stranger has its number: it leads a group of that number,
-    // as what it started does, and the window's own member of it is the one signalled.
-    let later = Machine::new(vec![
-        Process {
-            group: PROGRAM,
-            ..table[1].clone()
-        },
-        Process {
-            group: PROGRAM,
-            ..listed(4_000_090, 9900, 1)
-        },
-    ]);
-    tree.signal_group_by(&later, PROGRAM, libc::SIGKILL)
-        .expect("signalled");
-
-    assert!(later.sent_to_groups(libc::SIGKILL).is_empty());
-    assert_eq!(later.sent(libc::SIGKILL), [SHELL]);
-}
-
-#[test]
-fn an_ending_names_as_ended_only_what_it_signalled() {
-    let machine = Machine::new(a_window_among_strangers());
-    let table = machine.processes().expect("the table");
-    let tree = tree_of(&table);
-    // A lineage that names the window's shell and job, and the test's own parent, which
-    // is alive: whatever chose it.
-    let lineage = Lineage {
-        identities: vec![identity_of(&table, SHELL), identity_of(&table, JOB)],
-        members: members_of(&table, &[SHELL, JOB, the_tests_own_parent()]),
-    };
-    let asked = tree
-        .ask_by(&machine, Subject::Lineage(&lineage), None)
-        .expect("asked");
-
-    let ending = tree.finish_by(&machine, &lineage, asked);
-
-    let ended: Vec<i32> = ending
-        .ended
-        .processes
-        .iter()
-        .map(|ended| i32::try_from(ended.pid).expect("a number"))
-        .collect();
-    assert_eq!(
-        ended,
-        [SHELL, JOB, DEEP],
-        "what it signalled, and what that started"
-    );
-    assert!(
-        !ended.contains(&the_tests_own_parent()),
-        "the test's own parent was never signalled and is not named: {ending:?}"
-    );
-    assert_eq!(ending.left.total, 0, "{ending:?}");
-    assert_eq!(machine.sent(libc::SIGKILL), [SHELL, JOB, DEEP]);
-}
-
-#[test]
-fn a_tree_with_no_program_signals_nothing_whatever_is_selected() {
-    let machine = Machine::new(a_window_among_strangers());
-    let table = machine.processes().expect("the table");
-    // A pane whose program could not be read: nothing is under it, and nothing was seen.
-    let tree = ProcessTree::new();
-    let wrong = every_process(&table);
-
-    let asked = tree
-        .ask_by(&machine, Subject::Lineage(&wrong), None)
-        .expect("asked");
-    let forced = tree.force_by(&machine, Subject::Lineage(&wrong), &[]);
-
-    assert!(machine.signalled_none());
-    assert!(asked.identities.is_empty() && forced.members.is_empty());
 }
 
 /// A Python that starts a Python that sleeps, says its number, and waits to be

@@ -505,19 +505,3 @@ fn a_number_that_names_more_than_a_group_is_refused() {
     }
     assert!(machine.signalled_none());
 }
-
-#[test]
-fn nothing_but_the_bound_sends_a_signal() {
-    // The selection reads the whole table and may be wrong: it picks who, and never signals.
-    for (file, source) in [
-        ("process_tree.rs", include_str!("../../process_tree.rs")),
-        ("selection.rs", include_str!("../selection.rs")),
-    ] {
-        for call in [".send(", ".send_group(", "native::signal", "libc::kill"] {
-            assert!(
-                !source.contains(call),
-                "{file} sends a signal itself ({call}): only the bound does"
-            );
-        }
-    }
-}

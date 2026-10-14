@@ -156,12 +156,18 @@ pub(super) fn started(
     table.write(&pane.key, b"go\n").expect("tell it to go");
     let said = until_line(&pane.output, "started ");
     let numbers: Value = serde_json::from_str(&said).expect("the numbers it started");
-    let pids = numbers
+    let pids: HashMap<String, i32> = numbers
         .as_object()
         .expect("an object")
         .iter()
         .map(|(name, pid)| (name.clone(), pid.as_i64().expect("a number") as i32))
         .collect();
+    // What the program says it started is the test's, and some of it, in a session of its
+    // own, has no parent once the close has ended the one that started it: the guard of the
+    // real signals is told of it.
+    for pid in pids.values() {
+        crate::process_tree::guard::register(*pid);
+    }
     (pane, pids)
 }
 

@@ -119,6 +119,9 @@ pub(super) fn signal(identity: Identity, signal: i32) -> io::Result<()> {
     if process(identity.pid).map(|p| p.identity) != Some(identity) {
         return Ok(());
     }
+    // A test build asks the guard, which reads the system by queries of its own, last.
+    #[cfg(any(test, feature = "test-support"))]
+    super::guard::before_sending(identity.pid, signal)?;
     // SAFETY: kill takes two integers and touches no memory of ours; the pid
     // was checked above to still be the process this tree discovered.
     if unsafe { libc::kill(identity.pid, signal) } == 0 {
@@ -142,6 +145,9 @@ pub(super) fn signal_group(group: i32, signal: i32) -> io::Result<()> {
             format!("{group} names no process group of a pane"),
         ));
     }
+    // A test build asks the guard, which reads the system by queries of its own, last.
+    #[cfg(any(test, feature = "test-support"))]
+    super::guard::before_sending_to_group(group, signal)?;
     // SAFETY: kill takes two integers and touches no memory of ours; the number was
     // checked above to name a group alone.
     if unsafe { libc::kill(-group, signal) } == 0 {

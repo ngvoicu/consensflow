@@ -29,6 +29,20 @@
 # the headless tests nor the rig, where the processes are real and the user's own are among
 # them. A plant that widens what the tree selects is held by the bound, and its real runs
 # have a process outside the window that must still run after (`Sentinel`).
+#
+# **No plant may edit the guard** (`crates/cf-panes/src/process_tree/guard.rs`). In every
+# build that tests with real signals the real system's senders ask it first, by queries of
+# its own, whether the target descends from the test process (or is in the session of a
+# program the test started, or was registered), and a test that would signal any other
+# panics and sends nothing. That is what makes a plant of the snapshot, the selection or
+# the bound safe to run on real processes (a fault in the table the bound judges by would
+# otherwise reach the user's programs, as it did six times on 2026-10-14), and a plant that
+# weakens it takes that away from every run beside it. What holds the guard is its own
+# tests, which send signal 0 or none (`panes-lib-guard`); the plants of `background guard:`
+# plant what the senders ask of it, or the snapshot it guards against, and run only
+# `panes-lib-guard` and `panes-lib-guarded` (a window of real processes, where the guard's
+# refusal is what ends the run). If the guard refuses on any other run, stop: something
+# signalled what is none of the window's.
 
 [run]
 # The engine's tests of the ending, the requester's note, the marks and the close notes,
@@ -49,6 +63,11 @@ panes-lib-turn = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "turn
 panes-lib-close = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "close"]
 # The sentinel its real-process tests keep outside the window, which must say when it was ended.
 panes-lib-sentinel = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "sentinel"]
+# The guard of a test build's real signals, whose tests send signal 0 or none.
+panes-lib-guard = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "process_tree::guard"]
+# A window of real processes closed by a test: where what the snapshot wrongly admits reaches
+# the senders, and the guard stops it.
+panes-lib-guarded = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "a_program_that_ignores_the_request_to_end"]
 # The same over the wire, with the helper the daemon runs.
 panes-headless-turn-marked = ["cargo", "test", "--offline", "-p", "cf-panes", "--test", "headless", "a_turn_marked"]
 panes-headless-ending = ["cargo", "test", "--offline", "-p", "cf-panes", "--test", "headless", "an_ending"]
@@ -762,7 +781,7 @@ meant = "a_process_has_the_process_that_started_it_as_its_parent_until_that_has_
 runs = ["panes-lib-tree"]
 
 [[plant.edit]]
-file = "crates/cf-panes/src/process_tree.rs"
+file = "crates/cf-panes/src/process_tree/selection.rs"
 find = '                parent: keys.get(&p.parent).copied(),'
 replace = '                parent: keys.get(&p.parent).copied().or_else(|| keys.values().next().copied()),'
 
@@ -772,7 +791,7 @@ meant = "a_job_whose_shell_has_gone_is_in_the_tree_by_the_session_it_kept_and_ha
 runs = ["panes-lib-tree"]
 
 [[plant.edit]]
-file = "crates/cf-panes/src/process_tree.rs"
+file = "crates/cf-panes/src/process_tree/selection.rs"
 find = '                exe: exe_of(p.identity.pid),'
 replace = '                exe: String::new(),'
 
@@ -1001,7 +1020,9 @@ runs = ["panes-lib-tree"]
 [[plant.edit]]
 file = "crates/cf-panes/src/process_tree.rs"
 find = '''
-                Ok(false) => {}
+                Ok(false) => {
+                    refused.insert(identity.pid, identity);
+                }
                 Ok(true) => asked.push(identity),'''
 replace = '''
                 Ok(false) => asked.push(identity),
@@ -1168,18 +1189,6 @@ replace = '''
         }'''
 
 [[plant]]
-name = "background sentinel: a sentinel sets its trap before its job has started"
-meant = "a_sentinel_dropped_as_soon_as_it_starts_takes_its_job_with_it"
-runs = ["panes-lib-sentinel"]
-
-[[plant.edit]]
-file = "crates/cf-panes/src/pty/sentinel.rs"
-find = '''
-                "sleep 120 & job=$!; trap 'kill $job 2>/dev/null; exit 0' TERM; echo $job; wait $job",'''
-replace = '''
-                "trap 'kill $job 2>/dev/null; exit 0' TERM; sleep 120 & job=$!; echo $job; wait $job",'''
-
-[[plant]]
 name = "background rig: a rig that finds its stranger ended closes clean"
 meant = "a_rig_that_finds_the_process_that_is_none_of_any_windows_ended_says_so_when_it_closes"
 runs = ["rig-stranger"]
@@ -1188,6 +1197,244 @@ runs = ["rig-stranger"]
 file = "crates/cf-e2e/src/rig/mod.rs"
 find = '        if !self.stranger.runs() {'
 replace = '        if false && !self.stranger.runs() {'
+
+# What an ending names of what the bound refuses: the turn's work the chain of processes
+# proved and nothing shows is the window's is not signalled, and is not dropped: the chief is
+# told it may run on. These run only `panes-lib-tree`, on the machine made up.
+
+[[plant]]
+name = "background bound: what the bound refuses of the turn’s work is not kept apart"
+meant = "what_the_bound_refuses_is_no_part_of_the_turns_lineage_whoever_proves_it_the_turns"
+runs = ["panes-lib-tree"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/process_tree.rs"
+find = '''
+            members,
+            unverified,
+        })'''
+replace = '''
+            members,
+            unverified: Vec::new(),
+        })'''
+
+[[plant]]
+name = "background bound: what an ending asks and the bound refuses is not kept apart"
+meant = "a_selection_of_every_process_of_the_machine_asks_only_the_windows_own_to_end"
+runs = ["panes-lib-tree"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/process_tree.rs"
+find = '''
+            unverified: self.unverified(subject, &snapshot, &refused),
+            failed,'''
+replace = '''
+            unverified: Vec::new(),
+            failed,'''
+
+[[plant]]
+name = "background bound: what an ending finds and the bound refuses is not kept apart"
+meant = "what_an_ending_finds_of_the_turns_work_and_the_bound_refuses_is_named_as_left_too"
+runs = ["panes-lib-tree"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/process_tree.rs"
+find = '''
+            unverified: self.unverified(subject, &snapshot, &refused),
+            failure,'''
+replace = '''
+            unverified: Vec::new(),
+            failure,'''
+
+[[plant]]
+name = "background bound: what the bound refused is not named as left"
+meant = "what_the_bound_refuses_of_the_turns_work_is_named_as_left_and_nothing_is_signalled"
+runs = ["panes-lib-tree"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/process_tree.rs"
+find = '            if system.runs(member.key) {'
+replace = '            if false && system.runs(member.key) {'
+
+[[plant]]
+name = "background bound: what the bound refused and has gone is named as left"
+meant = "what_the_bound_refused_and_has_gone_by_the_end_is_not_named"
+runs = ["panes-lib-tree"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/process_tree.rs"
+find = '            if system.runs(member.key) {'
+replace = '            if true || system.runs(member.key) {'
+
+[[plant]]
+name = "background bound: a close names what the bound refused"
+meant = "a_close_signals_the_windows_by_its_parents_and_its_session_and_none_of_what_the_selection_adds"
+runs = ["panes-lib-tree"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/process_tree.rs"
+find = '            Subject::Whole => Vec::new(),'
+replace = '            Subject::Whole => self.members_in(snapshot, refused),'
+
+# What sends a signal, held to a table by an audit of the sources: a sender of the close that
+# is not the one named, a raw one around the bound, and the Windows job's. `panes-lib-tree`
+# only: the audit reads the sources and runs none of them; the close's raw sender is compiled
+# out on a Mac, and the job's is Windows'.
+
+[[plant]]
+name = "background bound: a close signals its group by a call of its own, around the bound"
+meant = "nothing_but_the_bound_sends_a_signal"
+runs = ["panes-lib-tree"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/close.rs"
+find = '''
+        pane.process_tree
+            .signal_group(group, signal)
+            .map_err(PaneError::Io)'''
+replace = '''
+        let _ = &pane.process_tree;
+        // SAFETY: planted.
+        if unsafe { libc::kill(-group, signal) } == 0 {
+            Ok(())
+        } else {
+            Err(PaneError::Io(io::Error::last_os_error()))
+        }'''
+
+[[plant]]
+name = "background bound: the sender of another Unix is not the one named"
+meant = "nothing_but_the_bound_sends_a_signal"
+runs = ["panes-lib-tree"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/close.rs"
+find = '    if unsafe { kill(-process_group_id, signal) } == 0 {'
+replace = '    if unsafe { kill(-process_group_id, signal | 0) } == 0 {'
+
+[[plant]]
+name = "background bound: the sender of the Windows job is not the one named"
+meant = "nothing_but_the_bound_sends_a_signal"
+runs = ["panes-lib-tree"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/job_object.rs"
+find = 'TerminateProcess(self.0, 1)'
+replace = 'TerminateProcess(self.0, 2)'
+
+# The guard of a test build's real signals (see the head of this file): what the senders ask
+# of it, and the snapshot it guards against. None edits the guard.
+
+[[plant]]
+name = "background guard: the real sender of a process does not ask the guard"
+meant = "the_process_that_started_the_test_is_refused_and_nothing_is_sent"
+runs = ["panes-lib-guard"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/process_tree/native.rs"
+find = '    super::guard::before_sending(identity.pid, signal)?;'
+replace = '    let _unasked = (identity.pid, signal);'
+
+[[plant]]
+name = "background guard: the real sender of a group does not ask the guard"
+meant = "a_sentinel_is_refused_as_a_stranger_is_by_the_senders_of_a_process_and_of_a_group"
+runs = ["panes-lib-guard"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/process_tree/native.rs"
+find = '    super::guard::before_sending_to_group(group, signal)?;'
+replace = '    let _unasked = (group, signal);'
+
+[[plant]]
+name = "background guard: the tree does not note the program it attaches to"
+meant = "a_tree_notes_the_program_it_attaches_to_for_the_guard_as_a_pane_does_as_it_opens"
+runs = ["panes-lib-guard"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/process_tree.rs"
+find = '        guard::note_program(pid);'
+replace = '        let _ = pid;'
+
+# What the review of 157fc8e6 found (P1-2): one erroneous snapshot, attaching every process
+# of the machine to the pane's program, is admitted by the bound and selected by the
+# selection, and nothing there stops it. The first of these sends signal 0, which delivers
+# nothing even if the guard failed; the second, the incident itself, sends what the host
+# sends. Both end at the guard's refusal, in a window of real processes closed by a test.
+
+[[plant]]
+name = "background guard: the incident with signal 0, a snapshot that attaches every process to the program"
+meant = "a_program_that_ignores_the_request_to_end_is_killed_once_the_grace_is_over"
+runs = ["panes-lib-guarded"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/process_tree/native.rs"
+find = 'pub(super) fn process(pid: i32) -> Option<Process> {'
+replace = '''
+/// Planted: the unique identifier of the pane's program, which every process is parented by.
+pub(super) static PLANTED_PARENT: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+
+pub(super) fn process(pid: i32) -> Option<Process> {'''
+
+[[plant.edit]]
+file = "crates/cf-panes/src/process_tree/native.rs"
+find = '        parent: native.parent,'
+replace = '''
+        parent: match PLANTED_PARENT.load(std::sync::atomic::Ordering::SeqCst) {
+            0 => native.parent,
+            planted => planted,
+        },'''
+
+[[plant.edit]]
+file = "crates/cf-panes/src/process_tree.rs"
+find = '        self.session = root.and_then(|p| p.session);'
+replace = '''
+        self.session = root.and_then(|p| p.session);
+        if let Some(root) = self.root {
+            native::PLANTED_PARENT.store(root.unique, std::sync::atomic::Ordering::SeqCst);
+        }'''
+
+[[plant.edit]]
+file = "crates/cf-panes/src/process_tree/native.rs"
+find = '    if unsafe { libc::kill(identity.pid, signal) } == 0 {'
+replace = '    if unsafe { libc::kill(identity.pid, 0) } == 0 {'
+
+[[plant.edit]]
+file = "crates/cf-panes/src/process_tree/native.rs"
+find = '    if unsafe { libc::kill(-group, signal) } == 0 {'
+replace = '    if unsafe { libc::kill(-group, 0) } == 0 {'
+
+[[plant]]
+name = "background guard: the incident, a snapshot that attaches every process to the program"
+meant = "a_program_that_ignores_the_request_to_end_is_killed_once_the_grace_is_over"
+runs = ["panes-lib-guarded"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/process_tree/native.rs"
+find = 'pub(super) fn process(pid: i32) -> Option<Process> {'
+replace = '''
+/// Planted: the unique identifier of the pane's program, which every process is parented by.
+pub(super) static PLANTED_PARENT: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+
+pub(super) fn process(pid: i32) -> Option<Process> {'''
+
+[[plant.edit]]
+file = "crates/cf-panes/src/process_tree/native.rs"
+find = '        parent: native.parent,'
+replace = '''
+        parent: match PLANTED_PARENT.load(std::sync::atomic::Ordering::SeqCst) {
+            0 => native.parent,
+            planted => planted,
+        },'''
+
+[[plant.edit]]
+file = "crates/cf-panes/src/process_tree.rs"
+find = '        self.session = root.and_then(|p| p.session);'
+replace = '''
+        self.session = root.and_then(|p| p.session);
+        if let Some(root) = self.root {
+            native::PLANTED_PARENT.store(root.unique, std::sync::atomic::Ordering::SeqCst);
+        }'''
 
 [[plant]]
 name = "background bound: the members of a group are signalled past the bound"

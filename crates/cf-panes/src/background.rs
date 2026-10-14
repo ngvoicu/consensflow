@@ -45,7 +45,10 @@
 //! begins, and is those processes and what they start while they end
 //! (`process_tree::Lineage`; `job_object`'s `end`): never what a later look of the
 //! whole tree takes for the turn's, which a new turn's work is, started in the window
-//! by a human or by a message that went in meanwhile.
+//! by a human or by a message that went in meanwhile. What it chose and the bound of
+//! the tree refused (nothing shows it is the window's: on the Mac, where the bound
+//! is) is not signalled and is not dropped: it is named as left where it still runs,
+//! and the chief is told it may.
 //!
 //! Only looking at the tree is the platform's: the macOS process tree and the
 //! Windows job object each list their members, with the program each runs and the

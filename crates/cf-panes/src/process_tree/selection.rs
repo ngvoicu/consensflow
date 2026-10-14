@@ -1,24 +1,28 @@
 //! What a tree selects of the system's table of processes: the processes that are the
 //! pane's (the whole of its tree, which a close ends) and the turn's lineage (what an
-//! ending of a turn ends). It reads the whole table, and what it names is a choice that
-//! can be wrong: it signals nothing, and what it names is signalled only through
-//! [`super::bound`], which shares none of this code.
+//! ending of a turn ends), and the members the daemon is told them by. It reads the whole
+//! table, and what it names is a choice that can be wrong: it signals nothing, and what
+//! it names is signalled only through [`super::bound`], which shares none of this code.
 
 use std::collections::{HashMap, HashSet};
 
-use super::{has_marker, Identity, Process, ProcessTree, Subject};
-use crate::background::Member;
+use super::native::{command_line, exe_of, has_marker, procargs};
+use super::{key_of, Identity, Process, ProcessTree, Subject};
+use crate::background::{Member, ProcessKey};
 
 /// The turn's work as it was when its ending began, chosen once: each process by
 /// identity (its number, when it began and the identifier the system gives it, which no
 /// later process takes), and the members the daemon is told it by. What an ending of the
 /// turn goes on to end is these and what they started, found by the identifier of the
 /// process that started it, which names a parent that has gone as it does one that
-/// runs.
+/// runs. What the chain of processes proved the turn's and the bound refused (nothing
+/// shows it is the window's) is none of these, and is kept apart: it is not signalled, and
+/// an ending names it as left, unverified, where it still runs.
 #[derive(Debug)]
 pub(crate) struct Lineage {
     pub(super) identities: Vec<Identity>,
     pub(super) members: Vec<Member>,
+    pub(super) unverified: Vec<Member>,
 }
 
 impl Lineage {
@@ -104,6 +108,41 @@ impl ProcessTree {
             Subject::Whole => self.select(snapshot, known),
             Subject::Lineage(lineage) => lineage.found(snapshot, known),
         }
+    }
+
+    /// The members of `snapshot` that `tree` holds.
+    ///
+    /// The system names the parent a process was started by with a number that
+    /// is the parent's alone, and keeps naming it after the parent has gone (seen
+    /// on macOS 26.x with a `sleep` and a Python that `sh` left running: their
+    /// ordinary parent number becomes launchd's, and this one does not). Such a
+    /// process names a parent that is no process of the tree (as one that named
+    /// launchd would), and has none here: its parent is gone.
+    pub(super) fn members_in(
+        &self,
+        snapshot: &[Process],
+        tree: &HashMap<i32, Identity>,
+    ) -> Vec<Member> {
+        let held: Vec<&Process> = snapshot
+            .iter()
+            .filter(|p| tree.get(&p.identity.pid) == Some(&p.identity))
+            .collect();
+        let keys: HashMap<u64, ProcessKey> = held
+            .iter()
+            .map(|p| (p.identity.unique, key_of(p.identity)))
+            .collect();
+        held.iter()
+            .map(|p| Member {
+                key: key_of(p.identity),
+                command: procargs(p.identity.pid)
+                    .and_then(|bytes| command_line(&bytes))
+                    .unwrap_or_else(|| p.name.clone()),
+                program: p.name.clone(),
+                exe: exe_of(p.identity.pid),
+                group: Some(p.group),
+                parent: keys.get(&p.parent).copied(),
+            })
+            .collect()
     }
 
     /// Whether `p` carries the pane's marker. One that began before the root

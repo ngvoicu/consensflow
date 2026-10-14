@@ -53,9 +53,11 @@
 //! - Whoever gave the task is told in a note right after the result, one line in the
 //!   voice of the notes beside it ([`left_note`]): what was ended (a command is
 //!   quoted as a close's note quotes it, with its keys and tokens masked), what of
-//!   the turn's work could not be ended and still runs, and that the turn left
-//!   background agents. Nothing is said of a turn that left nothing, nor of a
-//!   process the host left alone.
+//!   the turn's work could not be ended and still runs (which is also what the host
+//!   chose as the turn's and its bound would not let it signal, as nothing showed it
+//!   was the window's: it may run on), and that the turn left background agents.
+//!   Nothing is said of a turn that left nothing, nor of a process the host left
+//!   alone.
 //! - The agents and workflows a turn started in its harness are work the turn left
 //!   running too, which the pane host cannot see (they are no process of the
 //!   window's tree): the harness says so on its record, on the reading of a turn

@@ -1797,6 +1797,9 @@ mod tests {
         let mut line = String::new();
         reader.read_line(&mut line).unwrap();
         let pid = line.trim().parse::<i32>().expect("native child pid");
+        // The close ends the program first, and the child, in a session of its own, is
+        // then a job with no parent: one the test started, which the guard is told of.
+        crate::process_tree::guard::register(pid);
         assert_ne!(
             // SAFETY: getpgid takes an integer and touches no memory of ours.
             unsafe { libc::getpgid(pid) },

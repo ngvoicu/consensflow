@@ -6,7 +6,8 @@ use std::cell::RefCell;
 use std::io;
 
 use super::bound::System;
-use super::{Identity, Process};
+use super::{key_of, Identity, Process};
+use crate::background::ProcessKey;
 
 /// A process of a table, started by the process whose identifier is `parent`, in a
 /// group and a session of its own.
@@ -152,6 +153,18 @@ impl Machine {
 impl System for Machine {
     fn processes(&self) -> io::Result<Vec<Process>> {
         Ok(self.processes.clone())
+    }
+
+    /// A process of the table runs until it is sent SIGKILL.
+    fn runs(&self, key: ProcessKey) -> bool {
+        self.processes
+            .iter()
+            .any(|process| key_of(process.identity) == key)
+            && !self
+                .sent
+                .borrow()
+                .iter()
+                .any(|(pid, signal)| u32::try_from(*pid) == Ok(key.pid) && *signal == libc::SIGKILL)
     }
 
     fn send(&self, to: Identity, signal: i32) -> io::Result<()> {

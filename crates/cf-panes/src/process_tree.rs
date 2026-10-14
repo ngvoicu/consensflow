@@ -31,15 +31,39 @@
 //! the program leads while it runs, nor seen so at a look before, is not signalled and is
 //! not named as ended; so a close ends no job that only the marker its environment
 //! carries says is the window's, which no look saw under the window's program, and leaves
-//! it running.
+//! it running. What the bound refuses of what an ending chose (the turn's work, proved by a
+//! chain of processes that run) is not signalled but is not dropped either: the ending names
+//! it as left, unverified, where it still runs, and the chief is told it may.
+//!
+//! In every build that tests with real signals (this crate under `cfg(test)`, or with the
+//! `test-support` feature) the real system's senders ask [`guard`] first, which reads the
+//! system itself, at the moment of sending, and stops a test that would signal a process
+//! that is none of its own: a fault in the table every look is made of would otherwise reach
+//! the user's programs before any assertion could say so. An audit of the sources
+//! (`audit`) holds that nothing but the bound sends a signal, and names the exceptions.
 //!
 //! Limits. The last signal is not bound to the process it was meant for: `signal` (in
-//! [`native`]) looks at the process and then signals its number, and a process that
-//! ended in between, whose number another took, would be signalled. The system gives
-//! numbers out one after the other, and the window between the look and the signal is
-//! microseconds; the kernel can bind a signal to one process by its audit token (xnu's
-//! `proc_info`), which this does not use.
+//! [`native`]) checks that the process is the one this tree discovered, and then signals its
+//! number, and a process that ended between the check and the call (it exited, was reaped,
+//! and another took its number) would be signalled. The system gives numbers out one after
+//! the other, and the window between the check and the call is microseconds, which the guard
+//! of a test build narrows (it reads the target again) and does not close; the kernel can
+//! bind a signal to one process by its audit token (xnu's `proc_info`), which this does not
+//! use.
+//!
+//! A close ends less than the bound permits. What the bound allows is the window's by what
+//! a look saw (the process that started it, or the session its program leads), and the
+//! close attempts only what the selection names: by the parents of the tree, by the pane's
+//! session and by the marker. A job a look saw under the program that left the session
+//! (`setsid`) after its shell had gone, with no marker to show it, is the bound's to allow
+//! and no candidate of the close: it is left running.
+#[cfg(test)]
+mod audit;
 mod bound;
+#[cfg(any(test, feature = "test-support"))]
+pub(crate) mod guard;
+#[cfg(test)]
+mod machine_tests;
 mod native;
 mod selection;
 #[cfg(test)]
@@ -52,7 +76,7 @@ use std::time::{Duration, Instant};
 use crate::background::{report, Baseline, Member, ProcessKey};
 use bound::{Bound, Native, System, Table};
 use cf_proto::panes::Ending;
-use native::{command_line, exe_of, has_marker, procargs, process};
+use native::process;
 pub(crate) use selection::Lineage;
 
 pub(crate) const OWNER_ENV: &str = "CF_PANE_PROCESS_OWNER";
@@ -94,6 +118,9 @@ struct Process {
 /// The processes of a tree that were asked to end, and are waited for.
 pub(crate) struct Asked {
     identities: Vec<Identity>,
+    /// What an ending chose and the bound refused: not asked, and named as left, where it
+    /// still runs, by what ends the ending. Nothing for a close.
+    unverified: Vec<Member>,
     /// Whether any of the signals could not be sent: a process that is ending, or
     /// that is not ours to signal.
     failed: bool,
@@ -115,9 +142,11 @@ impl Asked {
 }
 
 /// What forcing an ending made of the tree: the members it told the processes it
-/// stopped by, and the failure that last stopped it from doing all it was asked.
+/// stopped by, what it chose and the bound refused (still there when it was done), and the
+/// failure that last stopped it from doing all it was asked.
 struct Forced {
     members: Vec<Member>,
+    unverified: Vec<Member>,
     failure: Option<io::Error>,
 }
 
@@ -145,6 +174,9 @@ impl ProcessTree {
     }
 
     pub fn attach(&mut self, pid: i32) {
+        // A test build notes the programs it starts, for the guard of its real signals.
+        #[cfg(any(test, feature = "test-support"))]
+        guard::note_program(pid);
         let root = process(pid);
         self.root = root.as_ref().map(|p| p.identity);
         self.session = root.and_then(|p| p.session);
@@ -166,45 +198,14 @@ impl ProcessTree {
         Ok(self.members_in(&snapshot, &tree))
     }
 
-    /// The members of `snapshot` that `tree` holds.
-    ///
-    /// The system names the parent a process was started by with a number that
-    /// is the parent's alone, and keeps naming it after the parent has gone (seen
-    /// on macOS 26.x with a `sleep` and a Python that `sh` left running: their
-    /// ordinary parent number becomes launchd's, and this one does not). Such a
-    /// process names a parent that is no process of the tree (as one that named
-    /// launchd would), and has none here: its parent is gone.
-    fn members_in(&self, snapshot: &[Process], tree: &HashMap<i32, Identity>) -> Vec<Member> {
-        let held: Vec<&Process> = snapshot
-            .iter()
-            .filter(|p| tree.get(&p.identity.pid) == Some(&p.identity))
-            .collect();
-        let keys: HashMap<u64, ProcessKey> = held
-            .iter()
-            .map(|p| (p.identity.unique, key_of(p.identity)))
-            .collect();
-        held.iter()
-            .map(|p| Member {
-                key: key_of(p.identity),
-                command: procargs(p.identity.pid)
-                    .and_then(|bytes| command_line(&bytes))
-                    .unwrap_or_else(|| p.name.clone()),
-                program: p.name.clone(),
-                exe: exe_of(p.identity.pid),
-                group: Some(p.group),
-                parent: keys.get(&p.parent).copied(),
-            })
-            .collect()
-    }
-
     /// The turn's work as `baseline` proves it now, chosen once, in one look at the
     /// tree: what an ending of the turn is bound to ([`Lineage`]).
     pub fn lineage(&self, baseline: &Baseline) -> io::Result<Lineage> {
         self.lineage_by(&Native, baseline)
     }
 
-    /// [`ProcessTree::lineage`], less what the bound would refuse: none of that is the
-    /// turn's, whatever chose it.
+    /// [`ProcessTree::lineage`], less what the bound would refuse, which is kept apart
+    /// ([`Lineage`]): it is not signalled, and an ending names it as left, unverified.
     fn lineage_by(&self, system: &impl System, baseline: &Baseline) -> io::Result<Lineage> {
         let snapshot = system.processes()?;
         let table = Table::of(&snapshot);
@@ -221,12 +222,13 @@ impl ProcessTree {
             .filter(|identity| self.bound.allows(&table, *identity))
             .collect();
         let allowed: HashSet<ProcessKey> = identities.iter().map(|id| key_of(*id)).collect();
+        let (members, unverified) = work
+            .into_iter()
+            .partition(|member| allowed.contains(&member.key));
         Ok(Lineage {
             identities,
-            members: work
-                .into_iter()
-                .filter(|member| allowed.contains(&member.key))
-                .collect(),
+            members,
+            unverified,
         })
     }
 
@@ -235,7 +237,8 @@ impl ProcessTree {
     /// a close signals whole (an ending has none). Nothing is stopped first: a
     /// stopped process cannot answer a signal. The processes asked, which are kept
     /// for the ending's end, and whether some could not be. What the bound refuses
-    /// is not asked, and is none of what is kept.
+    /// is not asked, and is none of what is kept; of a turn's lineage it is kept apart,
+    /// for the ending to name.
     pub fn ask_to_exit(&self, subject: Subject<'_>, group: Option<i32>) -> io::Result<Asked> {
         self.ask_by(&Native, subject, group)
     }
@@ -257,10 +260,13 @@ impl ProcessTree {
             .map(|p| p.identity)
             .collect();
         let mut asked = Vec::new();
+        let mut refused: HashMap<i32, Identity> = HashMap::new();
         let mut failed = false;
         for identity in outside {
             match self.bound.signal(system, &table, identity, libc::SIGTERM) {
-                Ok(false) => {}
+                Ok(false) => {
+                    refused.insert(identity.pid, identity);
+                }
                 Ok(true) => asked.push(identity),
                 Err(_) => {
                     failed = true;
@@ -276,8 +282,24 @@ impl ProcessTree {
         }
         Ok(Asked {
             identities: asked,
+            unverified: self.unverified(subject, &snapshot, &refused),
             failed,
         })
+    }
+
+    /// What the bound `refused` of what an ending of `subject` chose, as members of
+    /// `snapshot`: named by the ending as left, where it still runs. None for a close,
+    /// which names nothing it ended or left.
+    fn unverified(
+        &self,
+        subject: Subject<'_>,
+        snapshot: &[Process],
+        refused: &HashMap<i32, Identity>,
+    ) -> Vec<Member> {
+        match subject {
+            Subject::Lineage(_) => self.members_in(snapshot, refused),
+            Subject::Whole => Vec::new(),
+        }
     }
 
     /// Signals the pane's process group `group` with `signal`, as a close does: whole
@@ -307,8 +329,10 @@ impl ProcessTree {
     /// and what it started while it was given the grace (a handler asked to end may
     /// have started a process before it ended, whose parent is gone: it is still its
     /// parent's), then waits for every process it ended to be gone. What it chose and
-    /// signalled, told by whether it is: ended, or not ended. What was never signalled
-    /// (the bound refused it, or it was gone before it was asked) is not named.
+    /// signalled, told by whether it is: ended, or not ended. What it chose and the bound
+    /// refused was not signalled and was not waited for, and is named as left where it
+    /// still runs: nothing shows it is the window's, and it may run on. What was gone
+    /// before it was asked is not named.
     pub fn finish(&self, lineage: &Lineage, asked: Asked) -> Ending {
         self.finish_by(&Native, lineage, asked)
     }
@@ -321,6 +345,21 @@ impl ProcessTree {
             .map(|identity| key_of(*identity))
             .chain(forced.members.iter().map(|member| member.key))
             .collect();
+        let mut unverified: Vec<Member> = Vec::new();
+        for member in lineage
+            .unverified
+            .iter()
+            .cloned()
+            .chain(asked.unverified)
+            .chain(forced.unverified)
+        {
+            // Named once, and none that a later look allowed and signalled.
+            if !signalled.contains(&member.key)
+                && !unverified.iter().any(|known| known.key == member.key)
+            {
+                unverified.push(member);
+            }
+        }
         let mut chosen: Vec<Member> = lineage
             .members
             .iter()
@@ -333,13 +372,10 @@ impl ProcessTree {
             }
         }
         let deadline = Instant::now() + AFTER_KILL;
-        let alive = loop {
+        let mut alive = loop {
             let alive: HashSet<ProcessKey> = chosen
                 .iter()
-                .filter(|member| {
-                    process(i32::try_from(member.key.pid).unwrap_or(0))
-                        .is_some_and(|p| key_of(p.identity) == member.key)
-                })
+                .filter(|member| system.runs(member.key))
                 .map(|member| member.key)
                 .collect();
             if alive.is_empty() || Instant::now() >= deadline {
@@ -347,6 +383,13 @@ impl ProcessTree {
             }
             std::thread::sleep(Duration::from_millis(10));
         };
+        // What was never ended is not waited for: it is left, if it is still there.
+        for member in unverified {
+            if system.runs(member.key) {
+                alive.insert(member.key);
+                chosen.push(member);
+            }
+        }
         report(chosen, &alive)
     }
 
@@ -355,7 +398,8 @@ impl ProcessTree {
     /// asked, are parents of what it finds though they are gone. What a lineage
     /// finds is its own and what descends from it, which a stopped process starts no
     /// more of. What the bound refuses is not stopped nor killed, and not looked for
-    /// again.
+    /// again: of a lineage, what is still there when it is done is kept apart, for the
+    /// ending to name.
     fn force_by(&self, system: &impl System, subject: Subject<'_>, seeds: &[Identity]) -> Forced {
         let mut known: HashMap<i32, Identity> =
             seeds.iter().map(|seed| (seed.pid, *seed)).collect();
@@ -424,7 +468,11 @@ impl ProcessTree {
                 failure = Some(error);
             }
         }
-        Forced { members, failure }
+        Forced {
+            members,
+            unverified: self.unverified(subject, &snapshot, &refused),
+            failure,
+        }
     }
 }
 
