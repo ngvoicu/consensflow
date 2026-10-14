@@ -16,7 +16,9 @@
 //! `CF_TEST_MCP_BROWSER` set the server launches a browser of its own, in a session
 //! of its own, as `@playwright/mcp` and `chrome-devtools-mcp` do. And the
 //! program is the job too: started with `--background-job` first, it is not a
-//! window but the work a window left running.
+//! window but the work a window left running. With `CF_TEST_STATUS_LINE` set (on Unix)
+//! it runs its harness's status line, a script of the user's that shows the branch,
+//! for as long as it lives (`status_line`).
 //!
 //! Escape stops the turn at work, as it stops Claude's: a turn that works (a
 //! `SLEEP`) ends there, writing the record Claude writes of a turn the user
@@ -50,6 +52,9 @@ mod records;
 mod reply;
 #[path = "fake_agent/signals.rs"]
 mod signals;
+#[path = "fake_agent/status_line.rs"]
+#[cfg(unix)]
+mod status_line;
 #[path = "fake_agent/stop.rs"]
 mod stop;
 #[path = "fake_agent/terminal.rs"]
@@ -192,6 +197,13 @@ fn run(
     // A server the harness starts with its window, before any turn, as an MCP
     // server may be (one that is late begins with the first message instead).
     window.server.as_the_window_opens(&window.jobs)?;
+    // The harness's status line, which the user's script is run for, while it lives.
+    #[cfg(unix)]
+    if let Some(status_line) =
+        status_line::StatusLine::of(own_var("CF_TEST_STATUS_LINE").as_deref())
+    {
+        status_line.go(Path::new(&config), &window.jobs)?;
+    }
     {
         let status_file = status_file.clone();
         thread::spawn(move || {

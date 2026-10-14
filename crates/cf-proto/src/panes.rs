@@ -31,10 +31,11 @@ use serde::{Deserialize, Serialize};
 pub const TAIL_LINES: usize = 12;
 
 /// The most the host takes to end what a turn left, and to answer that it has: the
-/// grace a close gives what it asks to end (ten seconds), what it waits after it
-/// has killed what ignored the request (two) and its looks between, with room; on
-/// Windows the whole of its passes is held to less than this. The daemon waits for the
-/// answer by this and a margin, and holds the window until it has it.
+/// moment it waits before it looks again at what it found (two seconds), the grace a
+/// close gives what it asks to end (ten), what it waits after it has killed what
+/// ignored the request (two) and its looks between, with room; on Windows the whole of
+/// its passes is held to less than this. The daemon waits for the answer by this and a
+/// margin, and holds the window until it has it.
 pub const ENDING_BOUND: Duration = Duration::from_secs(20);
 
 /// The most processes the host names when it says what a window left running

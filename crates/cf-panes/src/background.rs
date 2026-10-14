@@ -44,6 +44,23 @@
 //! turn's work and nothing of the rest, and a process that cannot be told is left as
 //! it is.
 //!
+//! **A moment later.** A harness runs short commands of its own at any time, and the
+//! host cannot tell one from the agent's by anything it is. Claude Code runs its status
+//! line (the user's script: a `bash` that runs `git … branch --show-current` and ends a
+//! moment later) in a group of its own, as it runs the commands its agent asks for, so a
+//! look that comes while one runs finds a shell the harness started after the mark with
+//! a job under it, which is all the chain asks of the turn's work (seen in 3.0.3: a
+//! close named two runs of one, and the `git`, as work the window left running). So
+//! whatever the host names, at a window's close, at the exit of its program and at the
+//! end of a turn, it looks at again [`SETTLE`] after it first found it, and names (and
+//! ends) only what both looks find: a process that is still there ([`steady`]), by its
+//! number and when it began. A run of a status line that ended meanwhile is none of it,
+//! nor is the next run, which is another process. Where the first look finds nothing
+//! there is nothing to wait for, and no second look is made. The look the daemon asks
+//! for while a turn runs (`pane.background`) is one look, and says what it finds then;
+//! the closes of a quit make none, with no one left to tell. What lasts longer than the
+//! moment and is in no group of the window's is named all the same, as the agent's.
+//!
 //! An ending is bound to the turn it ends. What it ends is chosen once, when it
 //! begins, and is those processes and what they start while they end
 //! (`process_tree::Lineage`; `job_object`'s `end`): never what a later look of the
@@ -65,10 +82,16 @@ mod work;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, PoisonError};
+use std::time::Duration;
 
 use cf_proto::panes::{Background, BackgroundProcess, Ending, BACKGROUND_PROCESSES, COMMAND_CHARS};
 
 pub(crate) use harness::Kept;
+
+/// How long the host waits before it looks again at what it found the turn's work, where
+/// it names what a window left running (see above): longer than a run of a harness's
+/// status line takes, and short enough for a close, and the end of a turn, to wait for.
+pub(crate) const SETTLE: Duration = Duration::from_secs(2);
 
 /// A process by what tells it from a later one of the same number: the number,
 /// and when it began, in whatever unit its platform keeps that in.
@@ -234,6 +257,20 @@ pub(crate) fn descending_from(roots: &HashSet<ProcessKey>, tree: &[Member]) -> H
             false
         })
         .map(|member| member.key)
+        .collect()
+}
+
+/// The members of `later`, the turn's work as a look [`SETTLE`] after another found it,
+/// that `earlier`, the turn's work as the other found it, has too: what is still there,
+/// each process told by its number and when it began, so that a process that took the
+/// number of one that ended is not mistaken for it. What `earlier` has that has ended
+/// since is none of it, and so is what `later` has that began since: a window's own
+/// short run is another process at every look.
+pub(crate) fn steady(earlier: &[Member], later: Vec<Member>) -> Vec<Member> {
+    let named: HashSet<ProcessKey> = earlier.iter().map(|member| member.key).collect();
+    later
+        .into_iter()
+        .filter(|member| named.contains(&member.key))
         .collect()
 }
 

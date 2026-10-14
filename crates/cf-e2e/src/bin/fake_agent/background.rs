@@ -208,6 +208,22 @@ impl Jobs {
         self
     }
 
+    /// Notes the process `pid` as one of the window's the rig looks for, named `label`: a
+    /// program the window started that is no job of this program (a command of the
+    /// harness's own that a script runs), in the file a job's would be
+    /// (`<label>-<window>-<n>.pid`), for a case to ask whether it ran.
+    #[cfg(unix)]
+    pub fn note(&self, label: &str, pid: u32) -> Result<(), String> {
+        fs::create_dir_all(&self.folder)
+            .map_err(|failed| format!("{}: {failed}", self.folder.display()))?;
+        let number = self.started.fetch_add(1, Ordering::Relaxed) + 1;
+        let file = self
+            .folder
+            .join(format!("{label}-{}-{number}.pid", self.window));
+        fs::write(&file, format!("{pid}\n"))
+            .map_err(|failed| format!("{}: {failed}", file.display()))
+    }
+
     /// Starts the server of the window's harness, which runs past any case, in
     /// `group`, and the browser it launches if it does.
     fn start_server(&self, group: Group) -> Result<(), String> {

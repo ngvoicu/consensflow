@@ -19,9 +19,10 @@
 //! [`native`].
 //!
 //! An ending of a turn's work is bound to the turn: [`ProcessTree::lineage`] chooses
-//! what it ends once, by process identity, and what the ending looks for after that is
-//! what those processes started, never what a look of the whole tree takes for the
-//! turn's work by the baseline, which a window's new work is.
+//! what it ends once, by process identity, of what two looks a moment apart both find
+//! (a short run of the harness's own is gone by the second), and what the ending looks
+//! for after that is what those processes started, never what a look of the whole tree
+//! takes for the turn's work by the baseline, which a window's new work is.
 //!
 //! What is selected is not what is signalled. The selection reads the whole table of the
 //! machine's processes, and a wrong one (a bug, or a plant of one) would signal anyone's:
@@ -198,10 +199,18 @@ impl ProcessTree {
         Ok(self.members_in(&snapshot, &tree))
     }
 
-    /// The turn's work as `baseline` proves it now, chosen once, in one look at the
-    /// tree: what an ending of the turn is bound to ([`Lineage`]).
-    pub fn lineage(&self, baseline: &Baseline) -> io::Result<Lineage> {
-        self.lineage_by(&Native, baseline)
+    /// The turn's work as `baseline` proves it, chosen once: what an ending of the
+    /// turn is bound to ([`Lineage`]). It is what one look at the tree finds and a look
+    /// `settle` after it finds too, by identity, and the choice is made of the second:
+    /// a look that finds nothing is not made again, and a short run of the harness's own
+    /// (its status line) has ended by the second.
+    pub fn lineage(&self, baseline: &Baseline, settle: Duration) -> io::Result<Lineage> {
+        let first = self.lineage_by(&Native, baseline)?;
+        if first.is_empty() {
+            return Ok(first);
+        }
+        std::thread::sleep(settle);
+        Ok(self.lineage_by(&Native, baseline)?.steady_since(&first))
     }
 
     /// [`ProcessTree::lineage`], less what the bound would refuse, which is kept apart

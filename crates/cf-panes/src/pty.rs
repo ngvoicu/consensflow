@@ -768,11 +768,22 @@ impl PaneTable {
     /// first and given [`CLOSE_GRACE`] to do it in; on Windows they are ended at
     /// once (see [`close`]).
     pub fn kill(&self, key: &PaneKey) -> Result<(), PaneError> {
+        self.close_pane(key, true)
+    }
+
+    /// [`PaneTable::kill`] for a quit, where no one is left to be told what the window
+    /// left running (the daemon has stopped): its tree is not looked at, so a window with
+    /// work in it does not make the quit wait for the second look ([`crate::background`]).
+    pub(crate) fn reap(&self, key: &PaneKey) -> Result<(), PaneError> {
+        self.close_pane(key, false)
+    }
+
+    fn close_pane(&self, key: &PaneKey, told: bool) -> Result<(), PaneError> {
         let mut panes = self.lock_panes()?;
         let Some(pane) = panes.remove(key) else {
             return Ok(());
         };
-        self.tear_down(panes, pane)
+        self.tear_down(panes, pane, told)
     }
 
     /// A pane whose program has ended leaves the table by a kill's rules:
@@ -799,7 +810,7 @@ impl PaneTable {
             };
             if has_exited(pane)? {
                 if let Some(pane) = panes.remove(key) {
-                    self.tear_down(panes, pane)?;
+                    self.tear_down(panes, pane, true)?;
                 }
                 return Ok(true);
             }
@@ -812,18 +823,22 @@ impl PaneTable {
     }
 
     /// Ends a pane just taken out of the table. Its teardown is counted before
-    /// the table's lock goes, so no installer is admitted in between.
+    /// the table's lock goes, so no installer is admitted in between. `told`: whether
+    /// what the window leaves running is kept for the exit that is sent.
     fn tear_down(
         &self,
         panes: MutexGuard<'_, HashMap<PaneKey, Pane>>,
         mut pane: Pane,
+        told: bool,
     ) -> Result<(), PaneError> {
         self.teardown.begin();
         drop(panes);
         close_output(&pane);
         // What the close ends is what the window leaves running: the exit it
         // sends says so, and by then the processes are gone.
-        pane.keep_background();
+        if told {
+            pane.keep_background();
+        }
         if pane.active_writes.load(Ordering::Acquire) == 0 {
             let result = terminate(&mut pane, self.close_grace);
             self.teardown.resolve(result.is_ok());

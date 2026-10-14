@@ -40,9 +40,14 @@ print("started " + json.dumps(numbers), flush=True)
 time.sleep(60)
 "#;
 
-/// A command whose handler for the request to end starts a job of its own, and
-/// ends: the job is begun while the command is given its grace, and its parent
-/// is gone by the time it is found. The handler is for TERM, the first of the two requests
+/// A command whose handler for the request to end starts a job of its own, and goes on:
+/// the job is begun while the command is given its grace, and its parent runs when it is
+/// found. (A handler that started a job and ended would leave a job the system names its
+/// parent by the identifier of, or by launchd, as it likes: it takes the one for a process
+/// that has run a moment and the other for one that has run for seconds, and an ending
+/// that waits a moment before it asks is of the second kind. The lineage finds it by the
+/// identifier of its parent where the system gives it, which `process_tree`'s tests
+/// hold on a table written out.) The handler is for TERM, the first of the two requests
 /// (TERM and then HUP, which follow each other within a moment), and HUP is ignored: a
 /// handler for both runs once or twice by how close the two are, and starts a job each time.
 pub(super) const SPAWNER: &str = r#"
@@ -52,7 +57,7 @@ before = subprocess.Popen(["sleep", "33"])
 print("ready", flush=True)
 input()
 shell = subprocess.Popen(
-    ["/bin/sh", "-c", "trap 'sleep 38 & echo $! > \"$CHILD\"; exit 0' TERM; trap '' HUP; sleep 32 & echo $!; wait"],
+    ["/bin/sh", "-c", "trap 'sleep 38 & echo $! > \"$CHILD\"; wait' TERM; trap '' HUP; sleep 32 & echo $!; wait"],
     stdout=subprocess.PIPE, text=True, preexec_fn=os.setpgrp)
 job = int(shell.stdout.readline())
 print("started " + json.dumps({"program": os.getpid(), "before": before.pid, "shell": shell.pid, "job": job}), flush=True)
