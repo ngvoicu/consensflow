@@ -233,13 +233,14 @@ impl Jobs {
             detached: false,
         };
         self.begin(SERVER, SERVER_SECONDS, false, group, how, || {})
+            .map(|_| ())
     }
 
     /// Starts the job `label`, a command the agent's tool runs, which runs
     /// `seconds` (and ignores the requests to end if it is `deaf`), in `group`. Its
     /// files are `<label>-<window>-<n>.*`. `then` runs once it has ended, however
     /// it ended; where the agent `detached` it, once the shell it was started by has,
-    /// which is at once.
+    /// which is at once. What it returns is the job's file, which [`until_up`] waits on.
     pub fn start(
         &self,
         label: &str,
@@ -247,7 +248,7 @@ impl Jobs {
         deaf: bool,
         detached: bool,
         then: impl FnOnce() + Send + 'static,
-    ) -> Result<(), String> {
+    ) -> Result<PathBuf, String> {
         let how = How {
             browser: false,
             command: true,
@@ -266,7 +267,7 @@ impl Jobs {
         group: Group,
         how: How,
         then: impl FnOnce() + Send + 'static,
-    ) -> Result<(), String> {
+    ) -> Result<PathBuf, String> {
         fs::create_dir_all(&self.folder)
             .map_err(|failed| format!("{}: {failed}", self.folder.display()))?;
         let number = self.started.fetch_add(1, Ordering::Relaxed) + 1;
@@ -310,7 +311,7 @@ impl Jobs {
             }
             then();
         });
-        Ok(())
+        Ok(file)
     }
 
     /// The program that runs the job `words` say: this one, as it is, or where `how`
@@ -323,6 +324,31 @@ impl Jobs {
         }
     }
 }
+
+/// Waits until the job whose file is `file` runs: it has written its process
+/// (`<file>.pid`), as a tool returns once the command it started runs. An agent that
+/// answered before that left a turn whose end could come before the job was there to
+/// be seen (GitHub's Windows runner, 2026-10-15).
+pub fn until_up(file: &Path) -> Result<(), String> {
+    let mut pid = file.as_os_str().to_owned();
+    pid.push(".pid");
+    let pid = PathBuf::from(pid);
+    let deadline = std::time::Instant::now() + UP;
+    while !pid.exists() {
+        if std::time::Instant::now() >= deadline {
+            return Err(format!(
+                "{} never ran: no {}",
+                file.display(),
+                pid.display()
+            ));
+        }
+        thread::sleep(LOOK);
+    }
+    Ok(())
+}
+
+/// How long a job has to write its process once it is started.
+const UP: Duration = Duration::from_secs(30);
 
 /// `program` with `words`, run as a harness's tool runs a command for its agent: by a
 /// shell (a PowerShell on Windows) that waits for it and ends with its code, in a group

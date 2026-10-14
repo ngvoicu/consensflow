@@ -63,7 +63,7 @@ use regex::Regex;
 use serde_json::{json, Value};
 
 use crate::agents::Agents;
-use crate::background::{Jobs, Server, THINKING};
+use crate::background::{until_up, Jobs, Server, THINKING};
 use crate::stop::Stop;
 
 /// How long the shell that detaches a job may take to end: a PowerShell's
@@ -228,9 +228,10 @@ pub fn reply_to(text: &str, window: &Window) -> Result<Reply, String> {
         let seconds: u64 = job[2].parse().map_err(|_| format!("JOB {}", &job[2]))?;
         // An agent thinks before it runs a tool (see `BACKGROUND`).
         thread::sleep(THINKING);
-        window
+        let file = window
             .jobs
             .start("job", seconds, !job[1].is_empty(), false, || {})?;
+        until_up(&file)?;
         return reply_to(&job[3], window);
     }
     if let Some(job) = pattern::once(
@@ -267,12 +268,13 @@ pub fn reply_to(text: &str, window: &Window) -> Result<Reply, String> {
         // turn's work by the chain (a PowerShell's `Start-Process` takes a second or
         // two: Windows CI and zeewin, 2026-10-14).
         let (shell_ended, ended) = std::sync::mpsc::channel();
-        window.jobs.start("job", seconds, deaf, detached, move || {
+        let file = window.jobs.start("job", seconds, deaf, detached, move || {
             if wakes {
                 let _ = wake.send(woken);
             }
             let _ = shell_ended.send(());
         })?;
+        until_up(&file)?;
         if detached && ended.recv_timeout(DETACHED_SHELL).is_err() {
             return Err(format!(
                 "BACKGROUND --detach: the shell that detached the job did not end in {} s",
