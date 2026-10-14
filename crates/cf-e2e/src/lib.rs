@@ -19,6 +19,8 @@
 //! - [`checkout`] finds the repository's own files for the suites that read
 //!   its words.
 //! - [`wire`] reads the bridge's frames off a program's streams.
+//! - [`devin_store`] is where Devin keeps its store of sessions, and the messages
+//!   it holds, for the stand-in that writes it and the cases that read it.
 //! - [`daemon`] is `cf ui` as a process, on a home of its own.
 //! - [`rig`] is the daemon and the pane host together, with stand-in agents in
 //!   the windows, driven as the page and the app drive them.
@@ -62,9 +64,11 @@
 //! projects sending what the human approves, behind the approval gate, and
 //! `live_mcp` a real Claude Code worker that has an MCP server finishing its
 //! task, `live_finish` a real worker of any harness running a shell
-//! command and finishing its task with nothing held back, and `live_specs` a
+//! command and finishing its task with nothing held back, `live_specs` a
 //! real chief of each harness told of specs where its project has them on,
-//! planning one and carrying it to the board). Run them with `cargo xtask test clis`, `daemons`, `integration`,
+//! planning one and carrying it to the board, and `live_notes` a real chief,
+//! Devin's or Claude's, in a turn when two notes come for it, handed each once).
+//! Run them with `cargo xtask test clis`, `daemons`, `integration`,
 //! `regressions`, `agents` and `load`, and `cargo xtask smoke` (the `npm run`
 //! names are the same), a live one with `cargo xtask live <name>`, or one with
 //! `cargo test -p cf-e2e --test cli`.
@@ -81,6 +85,7 @@ pub mod cf;
 pub mod checkout;
 pub mod daemon;
 pub mod daemon_log;
+pub mod devin_store;
 mod error;
 pub mod files;
 pub mod http;

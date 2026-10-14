@@ -6,6 +6,22 @@
 //! is pasted, behind whatever the input box holds, and only while Devin still
 //! shows the conversation we know.
 //!
+//! What Devin is handed while its agent is in a turn goes into the agent's own queue,
+//! and Devin writes it to its store when it runs it (a live run, Devin 3000.11.3,
+//! 2026-10-13: a note pasted a second after another showed in the record 63 s later,
+//! when the 60 s command of the turn before it ended; the input box says "Guide
+//! Devin while it works"). A turn reads at rest in its first seconds, though: the
+//! wire shows none of its work until the agent's first word (`ttftMs` of the wire's
+//! own `stats`), so a note was pasted into a turn that had begun, and the engine,
+//! which gave the record a minute from the hand-over, pasted it again (the report
+//! of the same day: a chief read each of two notes twice). Three things stand
+//! against that. The window reads busy from the TUI's prompt to its agent
+//! (`wire_log`), so nothing is pasted into a turn that has begun. A message the TUI
+//! has put to its agent is the agent's own, whatever its record shows (`took`), and
+//! is waited for as the queue of Codex, OpenCode or Pi is. And where neither is
+//! told, the engine waits out a window's turns before it takes the record for
+//! lacking (`cf-engine`'s `arrival`).
+//!
 //! Kept from Node on purpose: a conversation of an empty id, which no
 //! ledger holds, is refused in a sentence of this module's own, where V8
 //! threw its `TypeError` for the window it made none of.
@@ -27,7 +43,7 @@ use super::install;
 use super::paths;
 use super::record;
 use super::wire::selected_session;
-use super::wire_log::WireLog;
+use super::wire_log::{WireLog, PROMPT_GAP_MS};
 use crate::contract::{
     Adapter, Admission, Held, Interrupt, Launch, LaunchId, Observed, Pane, PaneHost, Prepared,
     Readiness, Records, Skill, Window, Work,
@@ -209,6 +225,17 @@ impl DevinWindow {
     fn known(&self, shown: &str) -> bool {
         self.session.borrow().as_deref() == Some(shown)
     }
+
+    /// Whether a prompt the TUI put to its agent, first read at `asked_at`, has begun
+    /// a turn that the agent has said nothing of yet: nothing of its work is on the
+    /// wire before its first word, so a window read at rest then is a window a
+    /// message would be pasted into, which Devin keeps in its queue and writes to its
+    /// store when it runs it. A record with no message in it has no conversation for
+    /// the prompt to begin a turn of.
+    fn begun_by_a_prompt(&self, observed: &Observed, asked_at: Option<i64>) -> bool {
+        !observed.items().is_empty()
+            && asked_at.is_some_and(|at| self.time.wall_ms() - at < PROMPT_GAP_MS)
+    }
 }
 
 impl Window for DevinWindow {
@@ -276,10 +303,20 @@ impl Window for DevinWindow {
             } else {
                 window_text(text)
             };
+            // Its first line holds the message's id: the TUI's request that holds it
+            // is the sign the agent's queue has the message (`took`).
+            let first = body.lines().find(|line| !js::trim(line).is_empty());
+            self.wire.expect(first.unwrap_or_default());
             let session = self.session.borrow().clone();
             let sent = channel::send(host, pane, self.wire.path(), session.as_deref(), &body).await;
             Ok(admission(&sent, "Devin refused the paste", false))
         })
+    }
+
+    fn took(&self) -> bool {
+        self.wire
+            .read(self.time.wall_ms())
+            .is_ok_and(|wire| wire.sent)
     }
 
     fn observe(&self) -> Work<'_, Result<Observed, String>> {
@@ -308,6 +345,9 @@ impl Window for DevinWindow {
             let mut observed = record_state(reading);
             observed.waiting = dialog_waiting(observed.reading.as_deref());
             observed.quota = wire.quota;
+            if self.begun_by_a_prompt(&observed, wire.asked_at) {
+                observed.settled = false;
+            }
             Ok(match wire.shown {
                 None => unnamed(observed, HOLD),
                 Some(shown) if !self.known(&shown) => switched_to(observed, shown),

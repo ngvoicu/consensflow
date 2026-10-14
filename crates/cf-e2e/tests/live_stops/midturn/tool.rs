@@ -22,7 +22,7 @@
 use std::time::Duration;
 
 use cf_e2e::live::ask;
-use cf_e2e::live::members::{plus, Account, MemberWindow, Members};
+use cf_e2e::live::members::{plus, quiet_command, Account, MemberWindow, Members};
 use cf_e2e::live::tree::{self, Read};
 use cf_e2e::live::Harness;
 use cf_e2e::live::{command, cut};
@@ -78,20 +78,12 @@ impl Command {
     /// a ping of the machine's own address (which says its lines to nobody who looks) on
     /// Windows, which has none. The stand-in agent runs it.
     pub fn quiet(seconds: u64, windows: bool) -> Self {
-        if windows {
-            let mark = format!("-n {} 127.0.0.1", seconds + 1);
-            Self {
-                text: format!("ping {mark}"),
-                mark,
-                replies: None,
-            }
-        } else {
-            let text = format!("sleep {seconds}");
-            Self {
-                mark: text.clone(),
-                text,
-                replies: None,
-            }
+        let text = quiet_command(seconds, windows);
+        let mark = text.strip_prefix("ping ").unwrap_or(&text).to_owned();
+        Self {
+            text,
+            mark,
+            replies: None,
         }
     }
 

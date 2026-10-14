@@ -1,9 +1,8 @@
 //! What goes into a window and what comes back out: into a window, ready,
-//! `beginDelivery`, the hand-over, then the record watched for the message's
-//! header to confirm it, try it again or fail it, with one more Enter for a
-//! paste left unsent; at start, what was in flight is settled. Out of a window,
-//! a worker's answer becomes its task's result. It owns the record's delivery
-//! part; the window's part it only reads.
+//! `beginDelivery`, the hand-over; its arrival is watched for by `arrival`, and
+//! what it came to is settled here: tried again or failed, and at start, what
+//! was in flight. Out of a window, a worker's answer becomes its task's result.
+//! It owns the record's delivery part; the window's part it only reads.
 
 use std::rc::Rc;
 
@@ -13,21 +12,13 @@ use cf_harness::records::{Options, Reading, Role};
 use cf_ledger::{MessageView, NewNote, ParticipantView, ProjectView, TaskView};
 use cf_proto::agents::Harness;
 use cf_proto::trace::WindowEvent;
-use serde_json::{json, Value};
+use serde_json::json;
 
 use crate::delivery_text::{delivery_text, marker_of};
 use crate::dispatcher::Dispatcher;
 use crate::record::Record;
-use crate::runtime::{begin, caught, returning};
+use crate::runtime::{caught, returning};
 use crate::seams::EngineError;
-
-/// An Enter, pressed once more for a paste its window did not send.
-const ENTER: u8 = 13;
-/// How long a paste may go unshown in the record before its window gets that Enter.
-const ENTER_AGAIN_MS: i64 = 10_000;
-/// How long the window must have printed nothing first: one being typed into,
-/// or drawing, is left be.
-const ENTER_AGAIN_QUIET_MS: f64 = 3_000.0;
 
 /// The one message on its way into a window.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -37,6 +28,10 @@ pub(crate) struct Delivering {
     pub(crate) marker: String,
     /// When it was handed over, on the engine's clock.
     pub(crate) since: i64,
+    /// Since when the window has been at rest without the record showing it:
+    /// from the hand-over, but for the turns the window was in since. None
+    /// while it is in one (`arrival`).
+    pub(crate) rested_since: Option<i64>,
     /// It is a launch's first message.
     pub(crate) launch: bool,
     /// It is the chief's first message: a handoff, most often.
@@ -131,10 +126,13 @@ impl Dispatcher {
         if self.forgotten(record) {
             return Ok(());
         }
+        let since = self.now();
         let delivering = Delivering {
             message: message.id,
             marker: marker_of(message.id),
-            since: self.now(),
+            since,
+            // The window was at rest when it was handed over.
+            rested_since: Some(since),
             launch: false,
             chief: false,
             // The harness's own queue took it (a peer inbox, a broker, a
@@ -158,167 +156,6 @@ impl Dispatcher {
         record.delivery.borrow_mut().delivering = Some(delivering);
         self.changed();
         Ok(())
-    }
-
-    /// Whether the message on its way shows in the window's record; it is
-    /// confirmed if so. Only what the window was given counts: a tool's
-    /// output that prints a header proves nothing arrived. One withdrawn on
-    /// its way (its task cancelled, or taken back from the window) is waited
-    /// for no longer, and stays withdrawn whether it shows or not.
-    pub(crate) fn confirm_arrival(
-        &self,
-        record: &Record,
-        observed: &Observed,
-    ) -> Result<bool, EngineError> {
-        let Some(delivering) = record.delivery.borrow().delivering.clone() else {
-            return Ok(true);
-        };
-        let message = self.seams.ledger.borrow().message(delivering.message)?;
-        if message.is_none_or(|found| found.state != "delivering") {
-            record.delivery.borrow_mut().delivering = None;
-            return Ok(true);
-        }
-        let arrived = observed
-            .items()
-            .iter()
-            .find(|item| item.role == Role::User && item.text.contains(&delivering.marker));
-        let Some(arrived) = arrived else {
-            return Ok(false);
-        };
-        let receipt = json!({ "item": &*arrived.id });
-        self.seams
-            .ledger
-            .borrow_mut()
-            .confirm_delivery(delivering.message, Some(&receipt))?;
-        record.delivery.borrow_mut().delivering = None;
-        self.changed();
-        Ok(true)
-    }
-
-    /// Watches the record for what is on its way: confirmed, waited for,
-    /// pressed Enter for once, tried again or failed.
-    pub(crate) async fn watch_arrival(
-        self: &Rc<Self>,
-        record: &Rc<Record>,
-        observed: &Observed,
-    ) -> Result<(), EngineError> {
-        let launching = record
-            .delivery
-            .borrow()
-            .delivering
-            .as_ref()
-            .is_some_and(|delivering| delivering.launch);
-        if self.confirm_arrival(record, observed)? {
-            // A launch's first message went in with the window, so the turn
-            // it began is told by the record: its header showing is the
-            // harness's own start of it.
-            let pane = record.window.borrow().pane.clone();
-            if let Some(pane) = pane.filter(|_| launching) {
-                self.mark_turn(record, &pane).await;
-            }
-            return Ok(());
-        }
-        let Some(delivering) = record.delivery.borrow().delivering.clone() else {
-            return Ok(());
-        };
-        let waited = self.now() - delivering.since;
-        if delivering.launch {
-            // The chief's window is the human's: however long it takes to
-            // show its first message (the handoff), it is never closed for that.
-            if delivering.chief || waited <= self.seams.limits.launch_ms {
-                return Ok(());
-            }
-            // What the window shows is asked before it closes: the screen goes with it.
-            let pane = record.window.borrow().pane.clone();
-            let (shown, settles) = self.look_before_giving_up(record, pane.as_ref()).await;
-            // An exit that came while the host answered settled the launch already.
-            if !settles {
-                return Ok(());
-            }
-            let (this, held) = (Rc::clone(self), Rc::clone(record));
-            let closing = begin(&*self.seams.spawn, async move { this.retire(&held).await }).await;
-            let because = "the window never showed its first message";
-            self.settle_failure(
-                delivering,
-                &self.unstarted_because(record, because, &shown),
-                false,
-            )?;
-            closing.await?;
-            return Ok(());
-        }
-        if delivering.queued {
-            return Ok(());
-        }
-        if waited <= self.seams.limits.arrival_ms {
-            if waited > ENTER_AGAIN_MS && !delivering.entered_again {
-                self.enter_again(record, delivering.message).await?;
-            }
-            return Ok(());
-        }
-        record.delivery.borrow_mut().delivering = None;
-        // A paste the harness record never showed after the whole window did
-        // not land: sending it again is how it reaches the reader. (A message
-        // the harness queued itself waits for the record, or for the window
-        // to close.)
-        self.settle_failure(delivering, "the harness record never showed it", true)
-    }
-
-    /// One more Enter, for a paste its window has not sent: an Enter that
-    /// came before the window had read the paste finds nothing to send, and
-    /// the text waits in the input, where a second paste would only stack a
-    /// copy beside it. Pressed once, and only into a window quiet for a
-    /// while; the next look tries again.
-    async fn enter_again(
-        self: &Rc<Self>,
-        record: &Rc<Record>,
-        message: i64,
-    ) -> Result<(), EngineError> {
-        let Some(pane) = record.window.borrow().pane.clone() else {
-            return Ok(());
-        };
-        self.entered_again(record, message, true);
-        let body = json!({ "id": pane.id, "generation": pane.generation });
-        // `.catch(() => null)` made a promise of its own to wait on, a turn
-        // after the host's answer.
-        let snapshot = returning(self.seams.host.request("pane.snapshot", body))
-            .await
-            .ok();
-        let quiet = snapshot
-            .as_ref()
-            .and_then(|snapshot| snapshot.get("outputQuietMs"))
-            .and_then(Value::as_f64);
-        // What the human has typed since would go with it: they send both.
-        let ready = snapshot
-            .as_ref()
-            .is_some_and(|snapshot| snapshot.get("ok") == Some(&Value::Bool(true)))
-            && !js::truthy(
-                snapshot
-                    .as_ref()
-                    .and_then(|snapshot| snapshot.get("unsent")),
-            )
-            && quiet.is_some_and(|quiet| quiet >= ENTER_AGAIN_QUIET_MS);
-        if !ready {
-            self.entered_again(record, message, false);
-            return Ok(());
-        }
-        let input = json!({ "id": pane.id, "generation": pane.generation, "bytes": [ENTER] });
-        // A key the host did not take is pressed again at the next look's
-        // Enter, if any: `.catch(() => {})` made a promise of its own to wait on.
-        let _ = returning(self.seams.host.request("pane.input", input)).await;
-        self.trace_window(record, WindowEvent::EnterAgain { message })
-    }
-
-    /// Marks whether Enter was pressed again for `message`, while it is the one on its way.
-    fn entered_again(&self, record: &Record, message: i64, pressed: bool) {
-        if let Some(delivering) = record
-            .delivery
-            .borrow_mut()
-            .delivering
-            .as_mut()
-            .filter(|delivering| delivering.message == message)
-        {
-            delivering.entered_again = pressed;
-        }
     }
 
     /// A worker's answer to its task's latest message finishes the task.

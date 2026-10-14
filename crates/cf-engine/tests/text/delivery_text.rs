@@ -129,6 +129,27 @@ fn starts_with_the_marker_a_window_s_record_is_searched_for_which_names_no_other
     }
 }
 
+#[test]
+fn a_note_keeps_its_marker_through_what_windows_console_carries_to_devin() {
+    // m-186 of the report of 2026-10-13: a note from ConsensFlow itself, naming
+    // windows with @, on two lines a Windows machine lines with CR LF.
+    let note = message(
+        186,
+        "note",
+        None,
+        Some(17),
+        "@human cancelled T-17 (the parser): @zeus's window was stopped.\r\nIts job ran on.",
+    );
+    let carried = cf_base::text::console_text(&cf_base::text::window_text(&alone(&note)));
+    assert!(carried.starts_with(&marker_of(186)), "{carried}");
+    assert!(
+        carried.starts_with("[ConsensFlow m-186 | T-17 | note from ConsensFlow]\n"),
+        "{carried}"
+    );
+    // As the record gives it back, whichever line ends the window kept.
+    assert!(carried.replace('\n', "\r\n").contains(&marker_of(186)));
+}
+
 /// What a carrier's paste says: its own words and the rows it carries, in the
 /// order of their ids, under the one header that proves it arrived.
 #[test]

@@ -230,3 +230,173 @@ fn a_look_takes_the_wires_word_on_the_quota_never_the_records_and_the_rest_from_
         "the rest is the record's"
     );
 }
+
+/// The log gains `text`.
+fn append(wire: &Path, text: &str) {
+    let mut log = fs::read(wire).unwrap_or_default();
+    log.extend_from_slice(text.as_bytes());
+    fs::write(wire, log).unwrap();
+}
+
+/// A prompt of the TUI to its agent, as its request is in the log.
+fn asks(session: &str, text: &str) -> String {
+    let record = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 2,
+        "method": "session/prompt",
+        "params": { "sessionId": session, "prompt": [{ "type": "text", "text": text }] },
+    });
+    format!("{record}\n")
+}
+
+/// A window on `wire`, conversation `mild-coin`, whose record says `record`.
+fn window_reading(fakes: &Fakes, wire: &Path, env: Env, record: Record) -> Rc<DevinWindow> {
+    Rc::new(DevinWindow {
+        env,
+        records: Rc::new(Says(record)),
+        time: Rc::clone(&fakes.time) as Rc<dyn Time>,
+        session: RefCell::new(Some("mild-coin".to_owned())),
+        wire: WireLog::new(&wire.to_string_lossy(), jiff::tz::TimeZone::UTC),
+        discover_for_ms: MINUTE_MS,
+    })
+}
+
+/// A window on `wire`, conversation `mild-coin`, whose record reads at rest: its
+/// message is the last of it, and its agent has said nothing.
+fn window_at_rest(fakes: &Fakes, wire: &Path, env: Env) -> Rc<DevinWindow> {
+    let mut record = Record::new();
+    record.settlement = Settlement::Settled;
+    record.items.push(crate::records::Item {
+        id: Arc::from("row-1"),
+        role: crate::records::Role::User,
+        text: Arc::from("hello"),
+        complete: true,
+        at: None,
+        commentary: false,
+    });
+    window_reading(fakes, wire, env, record)
+}
+
+#[test]
+fn a_window_its_record_reads_at_rest_is_read_in_the_turn_its_tui_begins_by_a_prompt_for_the_gap() {
+    let dir = tempfile::tempdir().unwrap();
+    let wire = dir.path().join("wire.jsonl");
+    fs::write(&wire, shows("mild-coin")).unwrap();
+    let fakes = Fakes::new(&Env::default());
+    let window = window_at_rest(&fakes, &wire, Env::default());
+    assert!(
+        finished(window.observe()).unwrap().settled,
+        "nothing asked of its agent: at rest"
+    );
+    // The TUI puts a prompt to its agent, which has said nothing of it.
+    append(&wire, &asks("mild-coin", "hello"));
+    assert!(!finished(window.observe()).unwrap().settled);
+    fakes.time.settle_at(EPOCH_MS + PROMPT_GAP_MS - 1);
+    assert!(!finished(window.observe()).unwrap().settled);
+    // An agent that says nothing for the whole gap is read as its record reads it.
+    fakes.time.settle_at(EPOCH_MS + PROMPT_GAP_MS);
+    assert!(finished(window.observe()).unwrap().settled);
+}
+
+#[test]
+fn a_prompt_begins_no_turn_of_a_conversation_whose_record_holds_no_message_yet() {
+    let dir = tempfile::tempdir().unwrap();
+    let wire = dir.path().join("wire.jsonl");
+    fs::write(&wire, shows("mild-coin")).unwrap();
+    let fakes = Fakes::new(&Env::default());
+    let mut record = Record::new();
+    record.settlement = Settlement::Settled;
+    let window = window_reading(&fakes, &wire, Env::default(), record);
+    append(&wire, &asks("mild-coin", "hello"));
+    assert!(finished(window.observe()).unwrap().settled);
+}
+
+#[test]
+fn a_turn_the_agent_ends_or_a_prompt_it_answers_ends_the_turn_its_tui_began_in_the_window() {
+    let dir = tempfile::tempdir().unwrap();
+    let wire = dir.path().join("wire.jsonl");
+    fs::write(&wire, shows("mild-coin")).unwrap();
+    let fakes = Fakes::new(&Env::default());
+    let window = window_at_rest(&fakes, &wire, Env::default());
+    append(&wire, &asks("mild-coin", "hello"));
+    assert!(!finished(window.observe()).unwrap().settled);
+    append(
+        &wire,
+        "{\"cause\":\"complete\",\"sessionId\":\"mild-coin\"}\n",
+    );
+    assert!(finished(window.observe()).unwrap().settled);
+    // A prompt the agent refuses ends with its answer, and no turn's end.
+    append(&wire, &asks("mild-coin", "again"));
+    assert!(!finished(window.observe()).unwrap().settled);
+    append(
+        &wire,
+        "{\"jsonrpc\":\"2.0\",\"id\":2,\"error\":{\"code\":-32011,\"message\":\"Quota exhausted.\"}}\n",
+    );
+    assert!(finished(window.observe()).unwrap().settled);
+    // A prompt of another conversation is none of this window's.
+    append(&wire, &asks("another-one", "elsewhere"));
+    assert!(finished(window.observe()).unwrap().settled);
+}
+
+#[test]
+fn a_message_pasted_is_the_agents_own_when_a_request_of_its_tui_holds_the_line_that_begins_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let wire = dir.path().join("wire.jsonl");
+    fs::write(&wire, shows("mild-coin")).unwrap();
+    let fakes = Fakes::new(&Env::default());
+    let window = window_at_rest(&fakes, &wire, Env::default());
+    let host = crate::testing::AnsweringHost::new(|_| Ok(serde_json::json!({ "ok": true })));
+    let pane = Pane {
+        id: "s1-zeus".to_owned(),
+        generation: 2,
+    };
+    let text = "[ConsensFlow m-9 · T-1 · note from ConsensFlow]\n@human cancelled T-1";
+    assert_eq!(
+        finished(window.deliver(&host, &pane, text)),
+        Ok(Admission::Admitted { queued: false }),
+        "the paste is the window's, and no word of the agent's queue yet"
+    );
+    assert!(!window.took());
+    // Another message's request, and the agent's own words, are not it.
+    append(
+        &wire,
+        &asks(
+            "mild-coin",
+            "[ConsensFlow m-8 · T-1 · note from ConsensFlow]\nelse",
+        ),
+    );
+    assert!(!window.took());
+    append(&wire, &asks("mild-coin", text));
+    assert!(window.took());
+    // The next paste is another message: told by its own request.
+    let next = "[ConsensFlow m-10 · T-1 · note from ConsensFlow]\nlater";
+    assert!(finished(window.deliver(&host, &pane, next)).is_ok());
+    assert!(!window.took());
+}
+
+#[test]
+fn on_windows_a_message_is_told_by_its_first_line_as_the_console_carries_it_to_devin() {
+    let dir = tempfile::tempdir().unwrap();
+    let wire = dir.path().join("wire.jsonl");
+    fs::write(&wire, shows("mild-coin")).unwrap();
+    let fakes = Fakes::new(&Env::default());
+    let window = window_at_rest(&fakes, &wire, Env::from_vars([("OS", "Windows_NT")]));
+    let host = crate::testing::AnsweringHost::new(|_| Ok(serde_json::json!({ "ok": true })));
+    let pane = Pane {
+        id: "s1-zeus".to_owned(),
+        generation: 2,
+    };
+    let text = "[ConsensFlow m-9 · T-1 · note from ConsensFlow]\n@human cancelled T-1";
+    assert!(finished(window.deliver(&host, &pane, text)).is_ok());
+    // The TUI had what the console carried: the middle dots are bars.
+    append(&wire, &asks("mild-coin", text));
+    assert!(!window.took(), "words that were not pasted");
+    append(
+        &wire,
+        &asks(
+            "mild-coin",
+            "[ConsensFlow m-9 | T-1 | note from ConsensFlow]\n@human cancelled T-1",
+        ),
+    );
+    assert!(window.took());
+}

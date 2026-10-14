@@ -24,6 +24,8 @@
 
 // The cases are in `tests/regressions/`: cargo looks for the modules of a test's
 // root file beside it, where each would be a suite of its own.
+#[path = "regressions/devin_notes_twice.rs"]
+mod devin_notes_twice;
 #[path = "regressions/devin_pause.rs"]
 mod devin_pause;
 // Windows keeps the limit the report documents (a job object has no process
