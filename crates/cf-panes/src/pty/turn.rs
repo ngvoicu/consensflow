@@ -17,10 +17,16 @@
 //! grace is found again before the force, whoever started it and wherever it went.
 //! On Windows they are ended at once: a job object ends all of its tree or none of
 //! it, and each process an ending chooses is ended by itself, and waited for.
+//!
+//! What a close, the exit of a window's program and an ending name as the turn's work
+//! is what the host finds at two looks, [`SETTLE`] apart: a short run of the harness's
+//! own, which the host cannot tell from the agent's, is no process at the second
+//! ([`crate::background`]). The look the daemon asks for while a turn runs is one look.
 
 use std::io;
 #[cfg(windows)]
 use std::sync::Arc;
+use std::thread;
 use std::time::Duration;
 #[cfg(target_os = "macos")]
 use std::time::Instant;
@@ -30,7 +36,7 @@ use cf_proto::panes::{Background, BackgroundProcess, Ending, Servers};
 #[cfg(target_os = "macos")]
 use super::close;
 use super::{Pane, PaneError, PaneKey, PaneTable};
-use crate::background::{Baseline, Kept, Member};
+use crate::background::{listed, steady, Baseline, Kept, Member, SETTLE};
 use crate::ended::EndedSlot;
 #[cfg(target_os = "macos")]
 use crate::process_tree::Subject;
@@ -62,25 +68,37 @@ impl Tree {
         }
     }
 
-    /// Ends the turn's work that `baseline` proves, the rest of the tree staying as
-    /// it is: where there is anyone to ask they are asked to end and given `grace`
-    /// to, and what is left after is ended by force. What it ends is chosen once,
-    /// when it begins, and is those processes and what they start meanwhile: the
-    /// window's new work, which a human typed in or a message began while the grace
-    /// went, is none of it. It says what it ended and what it could not, told by
-    /// looking at what it chose when it was done.
+    /// The turn's work that `baseline` proves, and still is [`SETTLE`] after it was
+    /// first found ([`steady`]): looked at again when the first look finds any, so that
+    /// a run of the harness's own, which has ended by then, is none of it.
+    fn steady_work(&self, baseline: &Baseline) -> io::Result<Vec<Member>> {
+        let first = baseline.turn_work(&self.members()?);
+        if first.is_empty() {
+            return Ok(first);
+        }
+        thread::sleep(SETTLE);
+        Ok(steady(&first, baseline.turn_work(&self.members()?)))
+    }
+
+    /// Ends the turn's work that `baseline` proves, and still is [`SETTLE`] after it was
+    /// first found, the rest of the tree staying as it is: where there is anyone to ask
+    /// they are asked to end and given `grace` to, and what is left after is ended by
+    /// force. What it ends is chosen once, at the second look, and is those processes
+    /// and what they start meanwhile: the window's new work, which a human typed in or
+    /// a message began while the grace went, is none of it. It says what it ended and
+    /// what it could not, told by looking at what it chose when it was done.
     #[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
     fn end(&self, baseline: &Baseline, grace: Duration) -> io::Result<Ending> {
         #[cfg(target_os = "macos")]
         {
-            let lineage = self.tree.lineage(baseline)?;
+            let lineage = self.tree.lineage(baseline, SETTLE)?;
             let asked = self.tree.ask_to_exit(Subject::Lineage(&lineage), None)?;
             close::wait_until_gone(Instant::now() + grace, || !asked.any_alive());
             Ok(self.tree.finish(&lineage, asked))
         }
         #[cfg(windows)]
         {
-            self.job.end(baseline)
+            self.job.end(baseline, SETTLE)
         }
         #[cfg(not(any(target_os = "macos", windows)))]
         {
@@ -98,6 +116,15 @@ fn looked_at(baseline: &Baseline, tree: &Tree) -> io::Result<Background> {
     Ok(baseline.left_running(&tree.members()?))
 }
 
+/// [`looked_at`], and what it finds is looked for again [`SETTLE`] later: what is still
+/// there. What a close and the exit of a window's program say the window left running.
+fn steadily_looked_at(baseline: &Baseline, tree: &Tree) -> io::Result<Background> {
+    if !baseline.is_marked() {
+        return Ok(Background::default());
+    }
+    Ok(listed(tree.steady_work(baseline)?))
+}
+
 impl Pane {
     fn tree(&self) -> Tree {
         Tree {
@@ -108,15 +135,16 @@ impl Pane {
         }
     }
 
-    /// What the tree has running that is the turn's work. A tree that cannot be
-    /// looked at has none, and nothing is made up for it.
-    fn left_running(&self) -> Background {
-        looked_at(&self.baseline, &self.tree()).unwrap_or_default()
-    }
-
-    /// What this pane's close is about to end, kept for the exit it will send.
+    /// What this pane's close is about to end, kept for the exit it will send, once:
+    /// where the exit of the window's program was told it already, that is what is
+    /// kept, and the tree is not looked at again. A tree that cannot be looked at has
+    /// none, and nothing is made up for it.
     pub(super) fn keep_background(&self) {
-        self.ended.keep_background(self.left_running().processes);
+        if self.ended.background().is_some() {
+            return;
+        }
+        let left = steadily_looked_at(&self.baseline, &self.tree()).unwrap_or_default();
+        self.ended.keep_background(left.processes);
     }
 }
 
@@ -167,10 +195,10 @@ impl PaneTable {
 
     /// Ends what the pane's turn left running, and nothing of the pane's own, the
     /// window staying open: all of what the host tells for the turn's work with no
-    /// doubt ([`Baseline::turn_work`]), and what it started. They are asked to end and
-    /// given the table's grace, so this waits as long as a close would. What it
-    /// ended is said, and so is what it chose and could not end. A pane never marked
-    /// has none.
+    /// doubt ([`Baseline::turn_work`]), at two looks [`SETTLE`] apart, and what it
+    /// started. They are asked to end and given the table's grace, so this waits as
+    /// long as a close would, and the settle more. What it ended is said, and so is
+    /// what it chose and could not end. A pane never marked has none.
     pub fn end_background(&self, key: &PaneKey) -> Result<Ending, PaneError> {
         let (tree, baseline) = {
             let panes = self.lock_panes()?;
@@ -187,7 +215,8 @@ impl PaneTable {
 
     /// What the window left running when its program exited, for the exit that
     /// says so: what its close kept if a close ended it, else what its tree
-    /// has now, kept so that the close that follows does not look again.
+    /// has at two looks, [`SETTLE`] apart, kept so that the close that follows does
+    /// not look again.
     pub(crate) fn left_running_at_exit(
         &self,
         key: &PaneKey,
@@ -204,7 +233,9 @@ impl PaneTable {
         };
         let (tree, baseline) = (pane.tree(), pane.baseline.clone());
         drop(panes);
-        let left = looked_at(&baseline, &tree).unwrap_or_default().processes;
+        let left = steadily_looked_at(&baseline, &tree)
+            .unwrap_or_default()
+            .processes;
         slot.keep_background(left);
         slot.background().unwrap_or_default()
     }
@@ -212,6 +243,8 @@ impl PaneTable {
 
 #[cfg(test)]
 mod ending_tests;
+#[cfg(test)]
+mod second_look_tests;
 #[cfg(test)]
 mod support;
 #[cfg(test)]

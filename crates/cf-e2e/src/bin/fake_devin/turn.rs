@@ -529,6 +529,7 @@ mod tests {
     }
 
     /// Where on `wire` the first record is that `holds`.
+    #[cfg(unix)]
     fn first_that(wire: &[Value], holds: impl Fn(&Value) -> bool) -> Option<usize> {
         wire.iter().position(holds)
     }

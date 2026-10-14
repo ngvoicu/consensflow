@@ -94,6 +94,8 @@ rig-stranger = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "
 regression-never-exits = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_command_that_never_exits"]
 # The same of a Devin worker whose command goes on reporting on its wire after its turn ended (zeewin, 2026-10-14).
 regression-reporting-command = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_command_that_goes_on_reporting"]
+# Claude Code's own status line, told as work its window left (T-42, 3.0.3, 2026-10-14): the three cases of its regression.
+regression-status-line = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "claude_status_line"]
 
 # The result is the turn's end, whatever the turn left running.
 
@@ -865,8 +867,8 @@ replace = '''
 
 [[plant]]
 name = "background: what a command started while it was given the grace escapes the ending"
-meant = "what_a_command_asked_to_end_started_before_it_ended_is_ended_with_it"
-runs = ["panes-lib-turn"]
+meant = "a_lineage_is_its_processes_that_run_and_what_descends_from_them_or_from_one_that_has_gone"
+runs = ["panes-lib-tree"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/process_tree/selection.rs"
@@ -1587,13 +1589,13 @@ find = '''
         std::thread::scope(|scope| {
             for pane in open {
                 scope.spawn(move || {
-                    let _ = panes.kill(&PaneKey::new(pane.id, pane.generation));
+                    let _ = panes.reap(&PaneKey::new(pane.id, pane.generation));
                 });
             }
         });'''
 replace = '''
         for pane in open {
-            let _ = panes.kill(&PaneKey::new(pane.id, pane.generation));
+            let _ = panes.reap(&PaneKey::new(pane.id, pane.generation));
         }'''
 
 [[plant]]
@@ -1821,6 +1823,249 @@ replace = '''
             left: baseline.left_running(&tree.members()?),
             ..Ending::default()
         })'''
+
+# The harness's own short runs (T-42, 3.0.3, 2026-10-14): Claude Code runs its status line, a
+# `bash` that runs `git … branch --show-current` and ends a moment later, in a group of its own,
+# so a look that comes while one runs finds a shell the harness started after the mark with a job
+# under it, and a close named two runs and the `git` as work its window left running. Two rules
+# keep it out: what is in the window's group is the harness's (Claude and Pi, on Unix), and what
+# the host names it finds at two looks a moment apart, so a run that has ended by the second is
+# none of it, nor is the next run, which is another process.
+#
+# The crates' own tests hold each part of the second look apart: what is still there
+# (`steady`), what a lineage keeps of two looks (`steady_since`), and what a close and an ending
+# of real processes name.
+
+[[plant]]
+name = "background second look: what the second look finds is all of it, whether or not the first found it"
+meant = "a_run_of_the_harnesss_status_line_is_the_turns_work_to_one_look_and_none_of_it_to_two"
+runs = ["panes-lib-background"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/background.rs"
+find = '''
+        .filter(|member| named.contains(&member.key))
+        .collect()'''
+replace = '''
+        .filter(|member| named.contains(&member.key) || member.key.pid > 0)
+        .collect()'''
+
+[[plant]]
+name = "background second look: a process is the one that was there by its number alone"
+meant = "what_is_still_there_a_moment_later_is_what_both_looks_find_by_number_and_start"
+runs = ["panes-lib-background"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/background.rs"
+find = '''
+    let named: HashSet<ProcessKey> = earlier.iter().map(|member| member.key).collect();
+    later
+        .into_iter()
+        .filter(|member| named.contains(&member.key))'''
+replace = '''
+    let named: HashSet<u32> = earlier.iter().map(|member| member.key.pid).collect();
+    later
+        .into_iter()
+        .filter(|member| named.contains(&member.key.pid))'''
+
+[[plant]]
+name = "background second look: what an ending ends is what the second look finds, and the next run of a status line is among it"
+meant = "a_lineage_is_what_two_looks_find_by_identity_and_a_run_that_ended_between_them_is_none_of_it"
+runs = ["panes-lib-tree"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/process_tree/selection.rs"
+find = '''
+            identities: self
+                .identities
+                .into_iter()
+                .filter(|identity| kept.contains(&key_of(*identity)))
+                .collect(),'''
+replace = '''
+            identities: self.identities,'''
+
+[[plant]]
+name = "background second look: what the second look names of the turn’s work is all of it"
+meant = "a_lineage_is_what_two_looks_find_by_identity_and_a_run_that_ended_between_them_is_none_of_it"
+runs = ["panes-lib-tree"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/process_tree/selection.rs"
+find = '        let members = steady(&named, self.members);'
+replace = '        let members = self.members;'
+
+[[plant]]
+name = "background second look: what the bound refused at the first look is named as left though it has ended"
+meant = "what_the_bound_refuses_is_named_as_left_only_if_both_looks_find_it"
+runs = ["panes-lib-tree"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/process_tree/selection.rs"
+find = '            unverified: steady(&named, self.unverified),'
+replace = '            unverified: self.unverified,'
+
+[[plant]]
+name = "background second look: a close names what its first look found"
+meant = "a_close_keeps_what_the_window_left_running_for_the_exit_and_not_a_run_of_the_harnesss_status_line"
+runs = ["panes-lib-turn"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/turn.rs"
+find = '''
+        thread::sleep(SETTLE);
+        Ok(steady(&first, baseline.turn_work(&self.members()?)))'''
+replace = '''
+        let _ = SETTLE;
+        Ok(first)'''
+
+[[plant]]
+name = "background second look: an ending ends and names what its first look found"
+meant = "a_run_of_the_harnesss_status_line_is_named_by_one_look_and_none_of_an_ending"
+runs = ["panes-lib-turn"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/process_tree.rs"
+find = '''
+        std::thread::sleep(settle);
+        Ok(self.lineage_by(&Native, baseline)?.steady_since(&first))'''
+replace = '''
+        let _ = settle;
+        Ok(first)'''
+
+[[plant]]
+name = "background second look: a close looks again though its first look found nothing"
+meant = "a_window_that_left_nothing_is_looked_at_once_by_an_ending_and_by_a_close"
+runs = ["panes-lib-turn"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/turn.rs"
+find = '''
+        if first.is_empty() {
+            return Ok(first);
+        }
+        thread::sleep(SETTLE);'''
+replace = '''
+        thread::sleep(SETTLE);'''
+
+[[plant]]
+name = "background second look: an ending looks again though its first look found nothing"
+meant = "a_window_that_left_nothing_is_looked_at_once_by_an_ending_and_by_a_close"
+runs = ["panes-lib-turn"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/process_tree.rs"
+find = '''
+        if first.is_empty() {
+            return Ok(first);
+        }
+        std::thread::sleep(settle);'''
+replace = '''
+        std::thread::sleep(settle);'''
+
+[[plant]]
+name = "background second look: a close looks at the tree again though the exit said what the window left"
+meant = "a_close_after_the_exit_has_said_what_was_left_does_not_look_again"
+runs = ["panes-lib-turn"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/turn.rs"
+find = '''
+        if self.ended.background().is_some() {
+            return;
+        }'''
+replace = ''
+
+[[plant]]
+name = "background second look: a quit looks at what each window left, with no one to tell"
+meant = "a_quit_ends_a_window_without_looking_at_what_it_left_running"
+runs = ["panes-lib-turn"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/headless.rs"
+find = '                    let _ = panes.reap(&PaneKey::new(pane.id, pane.generation));'
+replace = '                    let _ = panes.kill(&PaneKey::new(pane.id, pane.generation));'
+
+# The same through the daemon and the pane host, on the stand-in Claude whose window runs a
+# status line as Claude Code does (`crates/cf-e2e/tests/regressions/
+# claude_status_line_taken_for_background_work.rs`): each rule, taken out alone, and 3.0.3's
+# rule, which is none of them.
+
+[[plant]]
+name = "background regression: a close names what its first look found, a run of the status line among it"
+meant = "a_claude_workers_status_line_in_a_group_of_its_own_is_no_work_its_turn_left_at_its_end_or_at_its_windows_close"
+runs = ["regression-status-line"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/turn.rs"
+find = '''
+        thread::sleep(SETTLE);
+        Ok(steady(&first, baseline.turn_work(&self.members()?)))'''
+replace = '''
+        let _ = SETTLE;
+        Ok(first)'''
+
+[[plant]]
+name = "background regression: an ending ends and names what its first look found, a run of the status line among it"
+meant = "a_claude_workers_status_line_in_a_group_of_its_own_is_no_work_its_turn_left_at_its_end_or_at_its_windows_close"
+runs = ["regression-status-line"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-panes/src/process_tree.rs"
+find = '''
+        std::thread::sleep(settle);
+        Ok(self.lineage_by(&Native, baseline)?.steady_since(&first))'''
+replace = '''
+        let _ = settle;
+        Ok(first)'''
+
+[[plant]]
+name = "background regression: what is in the window’s group is taken for the turn’s work, a helper of the harness’s among it"
+meant = "a_claude_workers_helper_in_its_windows_group_is_never_told_however_long_it_runs"
+runs = ["regression-status-line"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-panes/src/background/harness.rs"
+find = '        Servers::InGroup => member.group == Some(kept.group),'
+replace = '        Servers::InGroup => false,'
+
+# 3.0.3 (T-42): the turn's work was what began after the mark and was not in the window's
+# group, at the one look the host made.
+[[plant]]
+name = "background regression: the host names what began after the mark and is not in the window’s group, at one look (3.0.3)"
+meant = "a_claude_workers_status_line_in_a_group_of_its_own_is_no_work_its_turn_left_at_its_end_or_at_its_windows_close"
+runs = ["regression-status-line"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-panes/src/background.rs"
+find = '        let turns = work::turns(&started, &protected);'
+replace = '''
+        let turns: HashSet<ProcessKey> = started
+            .iter()
+            .filter(|member| !protected.contains(&member.key))
+            .map(|member| member.key)
+            .collect();'''
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/turn.rs"
+find = '''
+        thread::sleep(SETTLE);
+        Ok(steady(&first, baseline.turn_work(&self.members()?)))'''
+replace = '''
+        let _ = SETTLE;
+        Ok(first)'''
+
+[[plant.edit]]
+file = "crates/cf-panes/src/process_tree.rs"
+find = '''
+        std::thread::sleep(settle);
+        Ok(self.lineage_by(&Native, baseline)?.steady_since(&first))'''
+replace = '''
+        let _ = settle;
+        Ok(first)'''
 
 [[plant]]
 name = "background regression: what the worker left is not ended and the chief is told nothing"

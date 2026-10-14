@@ -356,6 +356,80 @@ fn a_process_that_was_the_harnesss_by_where_it_was_and_has_left_is_the_turns_by_
 }
 
 #[test]
+fn a_run_of_the_harnesss_status_line_is_the_turns_work_to_one_look_and_none_of_it_to_two() {
+    // The window's program started the status line's `bash` after the mark, in a group
+    // of its own, and the `git` it runs: a shell the harness started, and its job. That
+    // is all a chain of processes asks of the turn's work, so a look that comes while a
+    // run lives names both.
+    let status_line = |pid, command: &str, program, parent| Member {
+        group: Some(i32::try_from(pid).expect("a number")),
+        ..member(pid, command, program, parent)
+    };
+    let baseline = marked(&[program()], Kept::of(Servers::InGroup, Some(10)), None);
+    let run = vec![
+        program(),
+        status_line(60, "bash ~/.claude/statusline-command.sh", "bash", of(10)),
+        status_line(
+            61,
+            "git -C /work --no-optional-locks branch --show-current",
+            "git",
+            of(60),
+        ),
+    ];
+    let first = baseline.turn_work(&run);
+    assert_eq!(
+        first.len(),
+        2,
+        "a look that comes while a run lives names it"
+    );
+
+    // A moment later that run has ended, and the next is another process; a look that
+    // comes then names it too, and the two looks have no process in common.
+    let next = vec![
+        program(),
+        status_line(70, "bash ~/.claude/statusline-command.sh", "bash", of(10)),
+    ];
+    let later = baseline.turn_work(&next);
+    assert_eq!(later.len(), 1);
+    assert_eq!(steady(&first, later), Vec::<Member>::new());
+
+    // The agent's own command lives through both, and is still there.
+    let command = member(80, "bash -c make", "bash", of(10));
+    let (mut during, mut after) = (run, next);
+    during.push(command.clone());
+    after.push(command);
+    let steady_work = steady(&baseline.turn_work(&during), baseline.turn_work(&after));
+    assert_eq!(
+        steady_work
+            .iter()
+            .map(|member| member.key.pid)
+            .collect::<Vec<_>>(),
+        [80]
+    );
+}
+
+#[test]
+fn what_is_still_there_a_moment_later_is_what_both_looks_find_by_number_and_start() {
+    let shell = member(41, "bash -c sleep 600", "bash", of(10));
+    let first = vec![
+        shell.clone(),
+        member(42, "bash -c sleep 1", "bash", of(10)),
+        member(43, "bash -c sleep 2", "bash", of(10)),
+    ];
+    // The second ended, and the third's number is another process's now: it began later.
+    let reused = Member {
+        key: ProcessKey { pid: 43, began: 99 },
+        ..member(43, "bash -c sleep 3", "bash", of(10))
+    };
+    let new = member(44, "bash -c sleep 4", "bash", of(10));
+    let later = vec![shell.clone(), reused, new];
+
+    assert_eq!(steady(&first, later), vec![shell]);
+    assert_eq!(steady(&first, Vec::new()), Vec::<Member>::new());
+    assert_eq!(steady(&[], first), Vec::<Member>::new());
+}
+
+#[test]
 fn what_an_ending_could_not_end_is_left_and_said_so() {
     let chosen = vec![
         member(1, "sleep 1", "sleep", of(10)),

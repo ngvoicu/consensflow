@@ -21,27 +21,16 @@ mod macos {
     use cf_proto::panes::{Ending, Servers};
 
     use super::programs::{HELPERS, LEFT, MANY, NEW, SPAWNER, TURN};
+    use crate::background::SETTLE;
     use crate::pty::turn::support::{
-        gone, harness_programs, kill, listed, numbers, open_python, scratch, started, until_line,
-        DETACHED,
+        ended_pids, gone, harness_programs, kill, listed, numbers, open_python, scratch, started,
+        until_line, DETACHED,
     };
     use crate::pty::{process_exists, serial_pty_test, PaneError, PaneKey, PaneTable, Sentinel};
 
     /// What a test's table gives the programs it asks to end: long enough to tell
     /// from none, and short enough to wait for.
     const GRACE: Duration = Duration::from_millis(1500);
-
-    /// The numbers an ending names as ended, in order.
-    fn ended_pids(ending: &Ending) -> Vec<u32> {
-        let mut pids: Vec<u32> = ending
-            .ended
-            .processes
-            .iter()
-            .map(|process| process.pid)
-            .collect();
-        pids.sort_unstable();
-        pids
-    }
 
     /// What `RELEASED` and, where it is wanted, `STUBBORN` say to the program.
     fn env_with(released: &Path, stubborn: bool) -> HashMap<String, String> {
@@ -222,7 +211,7 @@ mod macos {
     }
 
     #[test]
-    fn what_a_command_asked_to_end_started_before_it_ended_is_ended_with_it() {
+    fn what_a_command_asked_to_end_started_while_it_was_given_the_grace_is_ended_with_it() {
         let _serial = serial_pty_test();
         let mut outsider = Sentinel::start();
         let table = Arc::new(PaneTable::closing_within(GRACE));
@@ -233,9 +222,9 @@ mod macos {
 
         let ending = table.end_background(&pane.key).expect("end it");
 
-        // The command's handler started a job of its own and ended: the job is what the
-        // ending's own started, found by the identifier of its parent, which has gone,
-        // and it is ended and said.
+        // The command's handler started a job of its own and went on: the job is what the
+        // ending's own started, found by the identifier of its parent, and it is ended and
+        // said.
         let started_late: i32 = fs::read_to_string(&child)
             .expect("the handler wrote the job's number")
             .trim()
@@ -267,12 +256,13 @@ mod macos {
         assert_eq!(listed(&table, &pane.key), old);
 
         // The command ignores the request to end, so the ending waits the grace out; a
-        // human types into the window meanwhile (the delivery of a message would be
-        // held), and the window's program starts new work, a shell in a group of its
-        // own with a job, which the old turn's mark takes for the turn's work as well.
+        // human types into the window meanwhile, once the ending has looked twice and asked
+        // (the delivery of a message would be held), and the window's program starts new
+        // work, a shell in a group of its own with a job, which the old turn's mark takes
+        // for the turn's work as well.
         let (ending, new) = std::thread::scope(|scope| {
             let ending = scope.spawn(|| table.end_background(&pane.key).expect("end it"));
-            std::thread::sleep(Duration::from_millis(300));
+            std::thread::sleep(SETTLE + Duration::from_millis(700));
             table
                 .write(&pane.key, b"more\n")
                 .expect("type into the window");

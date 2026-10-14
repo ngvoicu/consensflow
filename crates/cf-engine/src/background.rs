@@ -48,8 +48,14 @@
 //!   servers, by the programs it is named for, or by having been seen the harness's.
 //!   What it can tell neither (a server a harness starts late: Claude Code's MCP
 //!   servers begin as it takes its first message, Codex's when a tool first needs one)
-//!   it leaves alone, and says nothing of. So the engine ends nothing the host did not
-//!   choose, and a harness's own process is not at its mercy.
+//!   it leaves alone, and says nothing of. A short run of the harness's own that is in
+//!   no group of the window's (Claude Code's status line: a `bash` that runs `git …
+//!   branch --show-current`, in a group of its own as its agent's commands are, T-42 on
+//!   3.0.3) is told from the agent's by its ending: the host looks again a moment after
+//!   it first finds the turn's work, at a close, at a program's exit and at a turn's
+//!   end, and names and ends only what both looks find (`cf-panes`' `background`). So
+//!   the engine ends nothing the host did not choose, and a harness's own process is
+//!   not at its mercy.
 //! - Whoever gave the task is told in a note right after the result, one line in the
 //!   voice of the notes beside it ([`left_note`]): what was ended (a command is
 //!   quoted as a close's note quotes it, with its keys and tokens masked), what of
@@ -97,6 +103,10 @@
 //! for when the turn ends, and one the harness runs in the background for its agent
 //! and keeps the shell of. Whether a harness's own tool call ends what its tool
 //! started when the call ends (Codex and Devin, seen live on 2026-10-14) is its own.
+//! A process of the harness's own that is in no group of the window's and lasts longer
+//! than the moment the host waits before it looks again (a status line that takes
+//! seconds) is named, and ended at a turn's end, as the agent's: the host tells it from
+//! a command by nothing but its ending.
 //!
 //! **What keeps a window working.** A worker's answer is its result when its window's
 //! turn has settled, which each harness's reader says of its own record. A Devin

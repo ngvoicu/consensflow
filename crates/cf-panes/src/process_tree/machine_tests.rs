@@ -270,6 +270,148 @@ fn what_the_bound_refused_and_has_gone_by_the_end_is_not_named() {
     assert_eq!(ending.ended.total, 0, "and it was never ended: {ending:?}");
 }
 
+/// The window of a turn whose program started, after the mark, a run of the harness's
+/// status line (a shell with the `git` it runs) and a command of the agent's (a shell
+/// with a job), each in a session of its own, as Claude Code's tool shells are. The tree
+/// and the mark; and the numbers of the processes of a look at the window, which the
+/// program started `shells` of, each by its number, its identifier and the one that
+/// started it.
+fn a_window_of_shells(shells: &[(i32, u64, u64)]) -> (ProcessTree, Baseline, Machine) {
+    let program = Process {
+        session: Some(PROGRAM),
+        ..listed(PROGRAM, 1000, 700)
+    };
+    let before = vec![program.clone()];
+    let tree = tree_of(&before);
+    let mut baseline = Baseline::default();
+    baseline.mark(
+        &tree.members_in(&before, &tree.select(&before, &HashMap::new())),
+        None,
+        None,
+    );
+    let mut table = before;
+    table.extend(shells.iter().map(|(pid, unique, parent)| Process {
+        name: "sh".to_owned(),
+        session: Some(*pid),
+        ..listed(*pid, *unique, *parent)
+    }));
+    (tree, baseline, Machine::new(table))
+}
+
+/// A run of the status line: the shell and its `git`; the agent's command: a shell and its
+/// job. A later run of the status line is another two processes.
+const RUN: [(i32, u64, u64); 2] = [(SHELL, 1100, 1000), (JOB, 1200, 1100)];
+const NEXT_RUN: [(i32, u64, u64); 2] = [(4_000_015, 1500, 1000), (4_000_016, 1600, 1500)];
+const COMMAND: [(i32, u64, u64); 2] = [(DEEP, 1300, 1000), (DETACHED, 1400, 1300)];
+
+#[test]
+fn a_lineage_is_what_two_looks_find_by_identity_and_a_run_that_ended_between_them_is_none_of_it() {
+    let (tree, baseline, first) = a_window_of_shells(&[RUN, COMMAND].concat());
+    let (_, _, second) = a_window_of_shells(&[NEXT_RUN, COMMAND].concat());
+    let (_, _, quiet) = a_window_of_shells(&[]);
+
+    let before = tree.lineage_by(&first, &baseline).expect("the first look");
+    let after = tree
+        .lineage_by(&second, &baseline)
+        .expect("the second look");
+
+    assert_eq!(
+        numbers_of(&before.members),
+        [SHELL, JOB, DEEP, DETACHED],
+        "a look while the run lives names it"
+    );
+    assert_eq!(
+        numbers_of(&after.members),
+        [DEEP, DETACHED, 4_000_015, 4_000_016]
+    );
+    assert!(!before.is_empty());
+    assert!(tree
+        .lineage_by(&quiet, &baseline)
+        .expect("a look")
+        .is_empty());
+
+    let steady = after.steady_since(&before);
+
+    assert_eq!(
+        numbers_of(&steady.members),
+        [DEEP, DETACHED],
+        "the next run is another process, and the last has ended"
+    );
+    let named: Vec<i32> = steady
+        .identities
+        .iter()
+        .map(|identity| identity.pid)
+        .collect();
+    assert_eq!(
+        named,
+        [DEEP, DETACHED],
+        "what is ended is what both looks find"
+    );
+    assert!(steady.unverified.is_empty());
+}
+
+#[test]
+fn a_process_that_took_the_number_of_one_that_ended_is_not_the_lineage_it_was() {
+    let (tree, baseline, first) = a_window_of_shells(&COMMAND);
+    // The command's shell has ended and another process has its number, which began later.
+    let mut table = first.processes().expect("the table");
+    let reused = Process {
+        identity: Identity {
+            born: (5, 0),
+            unique: 1999,
+            ..table[1].identity
+        },
+        ..table[1].clone()
+    };
+    table[1] = reused;
+    let second = Machine::new(table);
+
+    let before = tree.lineage_by(&first, &baseline).expect("the first look");
+    let after = tree
+        .lineage_by(&second, &baseline)
+        .expect("the second look");
+    assert_eq!(
+        numbers_of(&after.members),
+        [DEEP],
+        "the number is still there"
+    );
+
+    let steady = after.steady_since(&before);
+
+    assert!(steady.is_empty(), "{steady:?}");
+}
+
+#[test]
+fn what_the_bound_refuses_is_named_as_left_only_if_both_looks_find_it() {
+    let (tree, baseline, after) = a_turn_whose_work_the_bound_refuses();
+    let first = tree.lineage_by(&after, &baseline).expect("the first look");
+    assert_eq!(numbers_of(&first.unverified), [USERS_SHELL]);
+
+    // The same shell a moment later: it is still named, as left.
+    let same = tree
+        .lineage_by(&after, &baseline)
+        .expect("the second look")
+        .steady_since(&first);
+    assert_eq!(numbers_of(&same.unverified), [USERS_SHELL]);
+
+    // Another process that took its number, and began later: none of it.
+    let mut table = after.processes().expect("the table");
+    let shell = table
+        .iter_mut()
+        .find(|process| process.identity.pid == USERS_SHELL)
+        .expect("the shell");
+    shell.identity = Identity {
+        born: (9, 0),
+        unique: 2199,
+        ..shell.identity
+    };
+    let later = tree
+        .lineage_by(&Machine::new(table), &baseline)
+        .expect("a look")
+        .steady_since(&first);
+    assert!(later.is_empty(), "{later:?}");
+}
+
 #[test]
 fn a_close_signals_the_panes_group_whole_while_its_program_leads_it_and_else_by_the_bound() {
     let machine = Machine::new(a_window_among_strangers());

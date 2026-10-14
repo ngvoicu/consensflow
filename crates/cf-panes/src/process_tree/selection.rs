@@ -8,16 +8,21 @@ use std::collections::{HashMap, HashSet};
 
 use super::native::{command_line, exe_of, has_marker, procargs};
 use super::{key_of, Identity, Process, ProcessTree, Subject};
-use crate::background::{Member, ProcessKey};
+use crate::background::{steady, Member, ProcessKey};
 
 /// The turn's work as it was when its ending began, chosen once: each process by
 /// identity (its number, when it began and the identifier the system gives it, which no
 /// later process takes), and the members the daemon is told it by. What an ending of the
 /// turn goes on to end is these and what they started, found by the identifier of the
 /// process that started it, which names a parent that has gone as it does one that
-/// runs. What the chain of processes proved the turn's and the bound refused (nothing
-/// shows it is the window's) is none of these, and is kept apart: it is not signalled, and
-/// an ending names it as left, unverified, where it still runs.
+/// runs: for a while. The system usually keeps it for the children of a process that
+/// has run a moment, and often names launchd as the parent of those of one that has run
+/// for seconds once it has ended (seen on Darwin 25.5, by a shell given the request to
+/// end at different ages), so what such a process started as it ended is then no process
+/// of the lineage, and is left running, not named. What the chain of processes proved
+/// the turn's and the bound refused (nothing shows it is the window's) is none of these,
+/// and is kept apart: it is not signalled, and an ending names it as left, unverified,
+/// where it still runs.
 #[derive(Debug)]
 pub(crate) struct Lineage {
     pub(super) identities: Vec<Identity>,
@@ -26,6 +31,36 @@ pub(crate) struct Lineage {
 }
 
 impl Lineage {
+    /// Whether it names nothing: no process to end and none to name as left.
+    pub(super) fn is_empty(&self) -> bool {
+        self.identities.is_empty() && self.members.is_empty() && self.unverified.is_empty()
+    }
+
+    /// What it names that `earlier`, the lineage of a look a moment before, named too:
+    /// the processes that were there at both looks and were the turn's at both, by
+    /// identity. What ended between them, and what began between them (the next run of
+    /// a status line is another process), is none of it. What the bound refused at one
+    /// look and allowed at the other is kept as the second says it.
+    pub(super) fn steady_since(self, earlier: &Lineage) -> Self {
+        let named: Vec<Member> = earlier
+            .members
+            .iter()
+            .chain(&earlier.unverified)
+            .cloned()
+            .collect();
+        let members = steady(&named, self.members);
+        let kept: HashSet<ProcessKey> = members.iter().map(|member| member.key).collect();
+        Self {
+            identities: self
+                .identities
+                .into_iter()
+                .filter(|identity| kept.contains(&key_of(*identity)))
+                .collect(),
+            members,
+            unverified: steady(&named, self.unverified),
+        }
+    }
+
     /// What of `snapshot` is the lineage's: its processes that run, by identity, those
     /// of `known` (what was found under it before, which may have gone), and
     /// whatever descends from any of them, by the process each was started by.
