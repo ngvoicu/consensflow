@@ -132,6 +132,48 @@ fn a_command_that_ran_on_is_said_to_have_been_found_by_the_close_or_not_and_only
     );
 }
 
+#[test]
+fn a_process_is_said_with_its_command_and_where_it_stands_by_the_process_that_started_it_its_group_and_its_terminal(
+) {
+    assert_eq!(
+        standing("86330     1 86301 ??       sleep 4711").as_deref(),
+        Some("86330 sleep 4711 (parent 1, group 86301, terminal ??)"),
+        "a session of its own has no terminal"
+    );
+    assert_eq!(
+        standing("51 4 50 ttys003  /bin/zsh   -c  sleep 4711").as_deref(),
+        Some("51 /bin/zsh -c sleep 4711 (parent 4, group 50, terminal ttys003)"),
+        "the window's terminal, the command on one line"
+    );
+    // What the number of such a line begins with is still the process's.
+    assert_eq!(
+        pid_of(&standing("51 4 50 ??  sleep 4711").unwrap()),
+        Some(51)
+    );
+    assert_eq!(standing("51 4 50 ??"), None, "a line that says no command");
+    assert_eq!(standing(""), None);
+}
+
+#[test]
+fn a_command_that_escaped_with_no_terminal_is_said_to_be_in_a_session_of_its_own() {
+    let mut left = good();
+    left.listed.clear();
+    left.notes.clear();
+    left.escaped = vec![standing("86330 1 86301 ?? sleep 4711").unwrap()];
+    let said = judge(&left).unwrap_err().remove(0);
+    assert!(
+        said.contains(
+            "86330 sleep 4711 (parent 1, group 86301, terminal ??); the window had not closed when the run last looked (terminal ??: it has none, so it is in a session of its own"
+        ),
+        "{said}"
+    );
+    // One that has a terminal is not said so, nor is one a Windows machine lists.
+    left.escaped = vec![standing("86330 1 86301 ttys004 sleep 4711").unwrap()];
+    assert!(!judge(&left).unwrap_err()[0].contains("session of its own"));
+    left.escaped = vec!["4242 sleep 4711".to_owned()];
+    assert!(!judge(&left).unwrap_err()[0].contains("session of its own"));
+}
+
 #[cfg(unix)]
 #[test]
 fn what_runs_the_command_is_ended_and_nothing_else_is() {

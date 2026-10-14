@@ -25,12 +25,19 @@
 //! Devin's TUI puts a message typed in a turn to its agent at once is not
 //! recorded: `cargo xtask live notes devin` shows it.
 //!
+//! A turn can leave a command running (`BACKGROUND <seconds> <words>`: `command`):
+//! its agent runs it as a tool once it has thought, answers, and the turn ends; the
+//! command goes on saying what it prints on the wire for as long as it runs, as a
+//! tool does whose turn has ended.
+//!
 //! The terminal and the signals are the other stand-in's own (`fake_agent/`).
 
 // The parts are in `fake_devin/` and `fake_agent/`: cargo looks for the modules
 // of a binary's root file beside it, where each would be a binary of its own.
 #[path = "fake_devin/args.rs"]
 mod args;
+#[path = "fake_devin/command.rs"]
+mod command;
 #[path = "fake_devin/escapes.rs"]
 mod escapes;
 #[path = "fake_agent/signals.rs"]
@@ -138,10 +145,16 @@ fn run(launch: &Launch, signals: signals::Signals) -> Result<Infallible, String>
         own_var(turn::WORK_VARIABLE).as_deref(),
     );
     let (turns, queued) = mpsc::channel::<String>();
+    // The jobs of a window are in `jobs/` beside the daemon's home, where the rig looks.
+    let jobs = own_var("CONSENSFLOW_HOME")
+        .and_then(|home| Path::new(&home).parent().map(|folder| folder.join("jobs")));
     {
         let stop = Arc::clone(&stop);
         thread::spawn(move || {
             let mut window = Window::new(store, wire, stop, io::stdout(), pace);
+            if let Some(folder) = jobs {
+                window = window.leaving_jobs_in(folder, std::process::id(), command::THINKING);
+            }
             // One turn at a time, in the order the messages came.
             for text in queued {
                 if let Err(failed) = window.take(&text) {

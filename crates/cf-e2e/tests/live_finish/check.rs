@@ -12,6 +12,7 @@ use cf_e2e::live::members::{
     self, delivered_result, find, is_over, notes_of_work, Account, Members, Plan, STAND_IN_WORKER,
 };
 use cf_e2e::live::tree::{self, Read};
+use cf_e2e::live::wire;
 use cf_e2e::live::{self, cut, last_lines, text, Harness, Log, Who};
 use cf_e2e::{Error, Result};
 use serde_json::Value;
@@ -218,8 +219,9 @@ fn block(title: &str, body: &str) -> String {
 }
 
 /// What the product showed of a task that did not end as it should have: the worker's
-/// lane of the board, what its window recorded and last drew, and what the daemon
-/// warned of.
+/// lane of the board, what its window recorded and last drew, what the daemon warned of,
+/// and, of a Devin worker, how its wire log ends (a window that reads as working while
+/// its screen is at rest is read from the wire).
 pub fn failure(members: &Members, agent: &str, number: i64) -> Vec<String> {
     let rig = members.rig();
     let screen = members
@@ -228,7 +230,7 @@ pub fn failure(members: &Members, agent: &str, number: i64) -> Vec<String> {
         .flatten()
         .map(|window| last_lines(&rig.screen(window.id())))
         .unwrap_or_default();
-    vec![
+    let mut shown = vec![
         block(
             "the worker's lane of the board",
             &live::pretty(members.lane(agent)),
@@ -239,7 +241,11 @@ pub fn failure(members: &Members, agent: &str, number: i64) -> Vec<String> {
         ),
         block("what the worker's window last drew", &screen),
         block("the daemon's log", &live::warnings(&rig.log()).join("\n")),
-    ]
+    ];
+    if let Some(wire) = wire::tail(&rig.home()) {
+        shown.push(block("how Devin's wire log ends", &wire));
+    }
+    shown
 }
 
 #[cfg(test)]

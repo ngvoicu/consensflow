@@ -31,6 +31,7 @@
 //! - [`human`] plays the human at a project whose chief is a real harness (the
 //!   page's calls, and the keys typed into the chief's window), and [`cleanup`]
 //!   has the harnesses forget what they kept of a run's folder.
+//! - [`wire`] says Devin's wire log in runs of what its records are, and how it ends.
 //! - [`report`] says what each check of a run came to, and ends the run with
 //!   them ([`report::conclude`]).
 //!
@@ -56,6 +57,7 @@ pub mod trace;
 pub mod tree;
 pub mod who;
 pub mod window;
+pub mod wire;
 
 #[cfg(test)]
 mod tests;

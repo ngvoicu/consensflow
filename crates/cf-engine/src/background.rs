@@ -98,6 +98,15 @@
 //! and keeps the shell of. Whether a harness's own tool call ends what its tool
 //! started when the call ends (Codex and Devin, seen live on 2026-10-14) is its own.
 //!
+//! **What keeps a window working.** A worker's answer is its result when its window's
+//! turn has settled, which each harness's reader says of its own record. A Devin
+//! window is working while its wire log says its turn is on (the thoughts, the words
+//! and the calls it begins since the last end of a turn), and what a command the turn
+//! left running goes on saying (a ping says a line a second, a server its log) is no
+//! part of that (`cf-harness`'s `devin::record`): else a worker that left a command
+//! that reports would never have its task done, whatever the host ended of what it
+//! left.
+//!
 //! What the host takes for a job it cannot tell from a server is ended: a server the
 //! user wraps in `bash` or `powershell` and the harness starts after the mark, where
 //! the harness is not known to keep its servers in a way (OpenCode, Devin, and
