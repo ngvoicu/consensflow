@@ -25,10 +25,21 @@
 //! way every message goes in (`next_in_line`): then the message the launch would
 //! have given first (a handoff, a brief, the note that its turn was cut), then
 //! the rest of the queue in its order. The command line carries the role once, as
-//! the developer instructions a window always had.
+//! the developer instructions a window always had. What the launch owes the note
+//! until it is told, and what comes of a launch that cannot tell it, is in
+//! [`prelude`].
+//!
+//! The ledger knows a replacement by the role text it holds
+//! (`Ledger::note_role`), and by nothing in its words. A note of ConsensFlow's
+//! about no task is not enough: the engine writes others to a chief (its handoff,
+//! the note that its turn was cut), and a message that quotes the words of a
+//! replacement is none. So every place that tells one apart (the replacements that
+//! wait, the one that is confirmed, the turn of a member's record that answers
+//! one) asks the ledger for its id, and a turn of a record is a replacement's by
+//! the id in its header (`header_id`).
 //!
 //! The text is recorded when the note is delivered, not when it is written, and
-//! in the very write that confirms the delivery (`confirm_delivered`, at the two
+//! in the very write that confirms the delivery (`confirm_delivered`, at the
 //! places a delivery is confirmed), so that what the ledger holds is what the
 //! conversation has really been told, and neither stands without the other. A note
 //! that never comes in (its window did not open, went before the harness's record
@@ -39,10 +50,7 @@
 //! (`settle_replacements`), and one that is there is confirmed and recorded, so
 //! that a role the thread was told is never taken for one it was not: a human who
 //! went back to the role the conversation began with is not left with a thread
-//! that holds the other. One whose delivery was given up (its attempts spent)
-//! after its window took it is not looked for, and the record then holds a role
-//! the ledger does not: that takes as many windows closed before a note was seen
-//! as a message is given attempts.
+//! that holds the other.
 //!
 //! A note that still waits when a launch begins is withdrawn, whatever the launch
 //! is: it was written for a window that never took it, and a conversation that
@@ -62,23 +70,8 @@
 //! window owes read, before its harness is asked, so that a pause that comes
 //! during the ask is seen; its role is compared once the ask is answered, in the
 //! plan of its launch, and where it is then to be said first the message that was
-//! begun goes back to its queue with its attempt, to go in after the note. A limit,
-//! written down and met by no test: a pause that comes while the window of such a
-//! launch is prepared does not stop it from opening, as one does a launch whose
-//! message is begun and held (`launch_over`): nothing is begun for it to hold, so
-//! the window opens with the note, and the message waits on its paused task.
-//!
-//! A member whose launch fails has its first message fail, and a brief that fails
-//! fails its task, which whoever gave it hears of. A launch that is to say a role
-//! first has no message on its command line, but it was for the message the note
-//! goes ahead of: where the launch fails, whether its window did not open or
-//! could not start, that message fails with it as it always did
-//! (`begin_displaced`), or the launch would be tried again at every pass, a new
-//! note written each time, and no end to it. The note written for the launch is
-//! withdrawn at the failure: no queue of a member's gives a note about no task to
-//! a window, so it would wait for ever. A chief's stays: it is the head of the
-//! chief's queue, which keeps the chief tried again at the backoff, and the
-//! launch that comes withdraws it before it says the role.
+//! begun goes back to its queue with its attempt, to go in after the note
+//! ([`prelude`]).
 //!
 //! A role too long for one message (more than 16,000 units: a staff of more than
 //! 43 rows with specs on, 72 without, two roles to a row, on the real text) is
@@ -121,21 +114,76 @@
 //! launch's first message the role was on the line twice, and a staff of 25 with
 //! 2,500 units of Codex's own instructions was over the limit.) A test holds
 //! these numbers to the real text.
+//!
+//! What is written down and not done (the limits of this):
+//!
+//! - A launch that fails and is tried again by itself (a chief, at the backoff)
+//!   is tried with the head of its queue as the message it would have begun
+//!   with, and a handoff keeps its place (`chief_first`). The note that its turn
+//!   was cut, which a Resume wrote and put ahead of older work, does not: it
+//!   goes behind what it was ahead of. The first launch would have said the
+//!   role, the note and then the older work; the next says the role, the older
+//!   work and then the note. The priority of the continuation is lost with a
+//!   failed launch.
+//! - What a launch finds in the conversation's own record is taken as it is
+//!   read. Where the record cannot be read (a file that is not there for a
+//!   moment, an adapter that fails) a replacement that waited is taken as not
+//!   received: it is withdrawn, and the role is said again at the next launch. A
+//!   thread that took it meanwhile then holds the role twice, and a human who
+//!   had gone back to the role the conversation began with is not told that the
+//!   thread holds another. A replacement whose delivery was given up is not
+//!   looked for at all: it failed, and nothing reconciles it with what the
+//!   thread may hold. Unreadable evidence is not told from none.
+//! - A role told in part (cut at 16,000 units) is not recorded, so the role the
+//!   conversation was told before stays recorded: where the human goes back to
+//!   that one, the launch says nothing, though the thread holds the cut words
+//!   after it. A staff that shrinks, or a role that changes again, tells the
+//!   thread a whole one.
+//! - A resumed Codex window that is given no first message has the turn its
+//!   record ended in read as the old process's, not as its own, until it begins
+//!   one (`LeftOpen`), whether or not a replacement is due. That is a different
+//!   reading from the one `main` made of every resume with no message, whatever
+//!   the role.
+//! - Attempts are spent within one window as much as across windows. A paste the
+//!   harness refuses or never shows is given again, and given up after as many
+//!   attempts as any message is given, so a paste that was taken and did not show
+//!   can arrive twice. A replacement the harness's own queue took (a Codex
+//!   broker's admission) is waited for in the record as any message that was
+//!   queued is, with no time it is given up at.
+//! - What goes into a chief's window after the replacement is given up as any
+//!   message is where the harness refuses it as many times as a message is
+//!   given attempts: the handoff or the note that its turn was cut is then lost
+//!   as it would be at any other moment. It is never given up for being slow, and
+//!   goes back to its queue with its window.
+//! - A chief whose window went before it was told its role is tried again at the
+//!   backoff where something waits for it, as a chief that could not start is;
+//!   with nothing queued it waits for what comes. A member's message that the
+//!   role went ahead of, and that rides in the paste of another by the time its
+//!   launch is given up (its task was paused and resumed while the window
+//!   waited), cannot fail with the launch: it goes with its carrier, which is
+//!   the message the launch that follows is for.
+//! - A pause that comes while the window of a member's launch that says the role
+//!   first is prepared does not stop it from opening, as one does a launch whose
+//!   message is begun and held (`launch_over`): nothing is begun for it to hold, so
+//!   the window opens with the note, and the message waits on its paused task.
+
+mod prelude;
+#[cfg(test)]
+mod tests;
 
 use cf_harness::records::{Item, Role};
 use cf_ledger::{ConversationView, MessageView, NewNote, ParticipantView, ProjectView};
 use serde_json::{json, Value};
 
-use crate::deliveries::Delivering;
-use crate::delivery_text::{goes_whole, marker_of};
+use crate::delivery_text::{goes_whole, header_id, marker_of};
 use crate::dispatcher::Dispatcher;
-use crate::record::Record;
 use crate::seams::EngineError;
 use crate::specs::RoleText;
 
-/// What a replacement says before the role text, and how one is told from any
-/// other note of ConsensFlow's.
-const OPENING: &str = "Your ConsensFlow role instructions have changed since this conversation began. The instructions below replace the ones you were given then: follow these from now on, and where they differ from what you were told before, these are right. This is context, not a task: say in one short line that you have them, and wait for the next message.";
+pub(crate) use prelude::Prelude;
+
+/// What a replacement says before the role text.
+pub(crate) const OPENING: &str = "Your ConsensFlow role instructions have changed since this conversation began. The instructions below replace the ones you were given then: follow these from now on, and where they differ from what you were told before, these are right. This is context, not a task: say in one short line that you have them, and wait for the next message.";
 
 /// Why a replacement that waited is withdrawn.
 const WITHDRAWN: &str = "the window it was written for never took it";
@@ -147,10 +195,10 @@ pub(crate) struct Compared {
     /// was given, but for a replacement that waited and was withdrawn; and none
     /// where the role is to be said first, since the window then opens with none.
     pub(crate) first: Option<MessageView>,
-    /// What goes into the window before anything else of its queue once it is up,
-    /// in this order: the replacement of the role, and the message it displaced,
-    /// if there was one. Empty where the role is not to be said.
-    pub(crate) due: Vec<i64>,
+    /// What goes into the window before anything else of its queue once it is up:
+    /// the replacement of the role, and the message it displaced, if there was
+    /// one. None where the role is not to be said.
+    pub(crate) prelude: Option<Prelude>,
     /// The role text the comparison was made with, for the launch to use and not
     /// ask for again; none where there was nothing to compare.
     pub(crate) role: Option<RoleText>,
@@ -166,14 +214,7 @@ impl Dispatcher {
         &self,
         participant: &ParticipantView,
     ) -> Result<Vec<i64>, EngineError> {
-        let waiting: Vec<MessageView> = self
-            .seams
-            .ledger
-            .borrow()
-            .pending(participant.id)?
-            .into_iter()
-            .filter(|message| message.state == "queued" && is_replacement(message))
-            .collect();
+        let waiting = self.waiting_replacements(participant)?;
         let mut told = Vec::new();
         for note in waiting {
             let shown = self
@@ -206,7 +247,7 @@ impl Dispatcher {
         let apart = |first| {
             Ok(Compared {
                 first,
-                due: Vec::new(),
+                prelude: None,
                 role: None,
             })
         };
@@ -235,19 +276,38 @@ impl Dispatcher {
         if told.as_deref() == Some(role.instructions.as_str()) {
             return Ok(Compared {
                 first,
-                due: Vec::new(),
+                prelude: None,
                 role: Some(role),
             });
         }
         let replacement = self.replace_role(project, participant, &role)?;
-        let due = std::iter::once(replacement.id)
-            .chain(first.as_ref().map(|message| message.id))
-            .collect();
+        let prelude = Prelude {
+            replacement: replacement.id,
+            displaced: first.as_ref().map(|message| message.id),
+            chief: participant.role == "chief",
+            since: self.now(),
+            begun: false,
+        };
         Ok(Compared {
             first: None,
-            due,
+            prelude: Some(prelude),
             role: Some(role),
         })
+    }
+
+    /// The replacements of `participant`'s role that still wait, as the ledger
+    /// knows them.
+    fn waiting_replacements(
+        &self,
+        participant: &ParticipantView,
+    ) -> Result<Vec<MessageView>, EngineError> {
+        let ledger = self.seams.ledger.borrow();
+        let notes = ledger.role_notes_to(participant.id)?;
+        Ok(ledger
+            .pending(participant.id)?
+            .into_iter()
+            .filter(|message| message.state == "queued" && notes.contains(&message.id))
+            .collect())
     }
 
     /// The replacements of `participant`'s role that still wait, withdrawn: their
@@ -257,13 +317,12 @@ impl Dispatcher {
         &self,
         participant: &ParticipantView,
     ) -> Result<Vec<i64>, EngineError> {
+        let waiting = self.waiting_replacements(participant)?;
         let mut ledger = self.seams.ledger.borrow_mut();
         let mut withdrawn = Vec::new();
-        for waiting in ledger.pending(participant.id)? {
-            if waiting.state == "queued" && is_replacement(&waiting) {
-                ledger.cancel_message(waiting.id, WITHDRAWN)?;
-                withdrawn.push(waiting.id);
-            }
+        for note in waiting {
+            ledger.cancel_message(note.id, WITHDRAWN)?;
+            withdrawn.push(note.id);
         }
         Ok(withdrawn)
     }
@@ -276,93 +335,12 @@ impl Dispatcher {
         participant: &ParticipantView,
         role: &RoleText,
     ) -> Result<MessageView, EngineError> {
-        Ok(self.seams.ledger.borrow_mut().note(
+        Ok(self.seams.ledger.borrow_mut().note_role(
             project.id,
-            &NewNote {
-                from: None,
-                to: participant.handle.clone(),
-                task: None,
-                body: body_of(&role.instructions),
-            },
+            &participant.handle,
+            &body_of(&role.instructions),
+            &role.instructions,
         )?)
-    }
-
-    /// The next message to go into `record`'s window: what the launch put ahead
-    /// of its queue, in its order, while it waits and may go, else the head of the
-    /// queue. The replacement of a role goes whatever its recipient holds (a
-    /// note about no task would not be the head of a member's queue); the message
-    /// it displaced goes by the rules the head goes by. Nothing goes while a
-    /// delivery is on its way. What the launch put ahead of its queue and has been
-    /// settled since (delivered, withdrawn or given up) is passed over.
-    pub(crate) fn next_in_line(&self, record: &Record) -> Result<Option<MessageView>, EngineError> {
-        let ledger = self.seams.ledger.borrow();
-        let mut waiting = Vec::new();
-        for id in record.delivery.borrow().due.iter().copied() {
-            let found = ledger.message(id)?;
-            waiting.extend(
-                found.filter(|message| matches!(message.state.as_str(), "queued" | "delivering")),
-            );
-        }
-        let busy = !waiting.is_empty()
-            && ledger
-                .pending(record.id)?
-                .iter()
-                .any(|other| other.state == "delivering");
-        if !busy {
-            for message in waiting {
-                let goes = message.state == "queued"
-                    && (is_replacement(&message)
-                        || ledger.next_delivery_of(record.id, message.id)?.is_some());
-                if goes {
-                    return Ok(Some(message));
-                }
-            }
-        }
-        Ok(ledger.next_delivery(record.id)?)
-    }
-
-    /// The message a member's launch was for, which the replacement of a role
-    /// went ahead of: what the launch's failure settles, as it would have as the
-    /// launch's first message, and what the plan of a launch gives back to its
-    /// queue (a member's message is begun before its harness is asked, and the
-    /// role is compared after). None for a chief's, which waits in its queue for
-    /// its next window, and none where no message was displaced.
-    pub(crate) fn displaced(
-        &self,
-        participant: &ParticipantView,
-        due: &[i64],
-    ) -> Option<Delivering> {
-        let message = *due.get(1)?;
-        (participant.role != "chief").then(|| Delivering {
-            message,
-            marker: marker_of(message),
-            since: self.now(),
-            // A launch's first message is waited for by the launch's own time.
-            rested_since: None,
-            launch: true,
-            chief: false,
-            queued: false,
-            entered_again: false,
-        })
-    }
-
-    /// The message a launch was for, which the replacement of a role went ahead
-    /// of, is begun where it waits still, so that the launch's failure settles it
-    /// as it would have as the launch's first message.
-    pub(crate) fn begin_displaced(&self, delivering: &Delivering) -> Result<(), EngineError> {
-        let queued = self
-            .seams
-            .ledger
-            .borrow()
-            .message(delivering.message)?
-            .is_some_and(|message| message.state == "queued");
-        if queued {
-            self.seams
-                .ledger
-                .borrow_mut()
-                .begin_delivery(delivering.message)?;
-        }
-        Ok(())
     }
 
     /// The harness's own record proves `message` arrived: it is confirmed. A
@@ -377,45 +355,31 @@ impl Dispatcher {
         message: &MessageView,
         receipt: &Value,
     ) -> Result<(), EngineError> {
-        let Some(instructions) = instructions_of(message) else {
-            self.seams
-                .ledger
-                .borrow_mut()
-                .confirm_delivery(message.id, Some(receipt))?;
-            return Ok(());
-        };
-        let conversation = self
+        let says_a_role = self
             .seams
             .ledger
             .borrow()
-            .current_conversation(message.recipient_id)?;
+            .role_notes_to(message.recipient_id)?
+            .contains(&message.id);
         let mut ledger = self.seams.ledger.borrow_mut();
-        match conversation.filter(|_| goes_whole(message, &[])) {
-            Some(conversation) => {
-                ledger.confirm_delivery_telling(
-                    message.id,
-                    Some(receipt),
-                    conversation.id,
-                    instructions,
-                )?;
-            }
-            None => {
-                ledger.confirm_delivery(message.id, Some(receipt))?;
-                if !goes_whole(message, &[]) {
-                    ledger.note(
-                        message.project_id,
-                        &NewNote {
-                            from: None,
-                            to: "human".to_owned(),
-                            task: message.task_number,
-                            body: format!(
-                                "@{} was told its new role in part: the staff is too large for one message (m-{} was cut at 16,000 characters). It is told again at every Resume until the staff is smaller.",
-                                message.recipient, message.id
-                            ),
-                        },
-                    )?;
-                }
-            }
+        if !says_a_role {
+            ledger.confirm_delivery(message.id, Some(receipt))?;
+        } else if goes_whole(message, &[]) {
+            ledger.confirm_delivery_telling(message.id, Some(receipt))?;
+        } else {
+            ledger.confirm_delivery(message.id, Some(receipt))?;
+            ledger.note(
+                message.project_id,
+                &NewNote {
+                    from: None,
+                    to: "human".to_owned(),
+                    task: message.task_number,
+                    body: format!(
+                        "@{} was told its new role in part: the staff is too large for one message (m-{} was cut at 16,000 characters). It is told again at every Resume until the staff is smaller.",
+                        message.recipient, message.id
+                    ),
+                },
+            )?;
         }
         Ok(())
     }
@@ -427,43 +391,24 @@ fn body_of(instructions: &str) -> String {
     format!("{OPENING}\n\n{instructions}")
 }
 
-/// Whether `message` is a replacement of a role: a note from ConsensFlow that
-/// opens as one does.
-fn is_replacement(message: &MessageView) -> bool {
-    message.sender.is_none() && message.kind == "note" && message.body.starts_with(OPENING)
-}
-
-/// The role text a replacement says: what follows its opening.
-fn instructions_of(message: &MessageView) -> Option<&str> {
-    message
-        .body
-        .strip_prefix(OPENING)
-        .and_then(|rest| rest.strip_prefix("\n\n"))
-        .filter(|_| is_replacement(message))
-}
-
-/// Whether `text`, a message of a conversation's record, is a replacement of a
-/// role as its window was given it: it holds the opening of one.
-pub(crate) fn says_a_replacement(text: &str) -> bool {
-    text.contains(OPENING)
-}
-
 /// The assistant's items among `items`, a member's record after its brief, that
 /// answer the task: not those of a turn that answers a replacement of the role.
 /// A user's message that says a role begins a turn whose words are the window's
 /// word of its role and none of its task's, and the next user's message ends it.
-pub(crate) fn answers_to_the_task(items: &[Item]) -> Vec<&Item> {
+/// `replacements` are the ids of the replacements the ledger knows were written
+/// to the member; a message is one by the id of its header, and not by any words.
+pub(crate) fn answers_to_the_task<'a>(items: &'a [Item], replacements: &[i64]) -> Vec<&'a Item> {
     let mut of_the_role = false;
     let mut answers = Vec::new();
     for item in items {
         match item.role {
-            Role::User => of_the_role = says_a_replacement(&item.text),
+            Role::User => {
+                of_the_role =
+                    header_id(&item.text).is_some_and(|message| replacements.contains(&message));
+            }
             Role::Assistant if !of_the_role => answers.push(item),
             _ => {}
         }
     }
     answers
 }
-
-#[cfg(test)]
-mod tests;

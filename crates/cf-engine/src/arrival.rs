@@ -11,7 +11,11 @@
 //! the hand-over or from the end of the last turn the window went into since.
 //! However often the window goes into a turn, a paste the record has not shown
 //! within [`RECONCILE_MS`] of its hand-over is pasted again at the window's next
-//! rest, so unrelated turns never hold the queue behind it for good.
+//! rest, so unrelated turns never hold the queue behind it for good. What a chief's
+//! launch put ahead of its queue (the role it says first, and the message that
+//! role displaced) is its first messages, as its handoff is on its command line:
+//! waited for as those are, and never pasted again for being slow
+//! (`Delivering::chief`).
 //!
 //! Limits (Astraeus, 2026-10-14). A harness's word that its queue holds the
 //! message is not withdrawn: a Devin wire log that named the pasted header and
@@ -151,6 +155,11 @@ impl Dispatcher {
             {
                 self.enter_again(record, delivering.message).await?;
             }
+            return Ok(());
+        }
+        // What went into the chief's window as its first messages (the role its
+        // launch said, the handoff after it) is waited for as a first message is.
+        if delivering.chief {
             return Ok(());
         }
         record.delivery.borrow_mut().delivering = None;

@@ -5,7 +5,9 @@
 //! its window afresh, with the role as it is now on its command line, and is given
 //! no note that says a role changed. Were the role compared with the conversation
 //! the ledger holds before the harness is asked, a note would be written for a
-//! conversation the window does not open on, saying a role it already has. Node's
+//! conversation the window does not open on, saying a role it already has. So is
+//! a launch given up while its harness is asked (a pause came): it has written
+//! nothing of a role, which the launch that follows says first. Node's
 //! dispatcher asked its harness nothing of the kind, so no trace holds these.
 
 use cf_engine::testing::Context;
@@ -14,8 +16,9 @@ use serde_json::Value;
 use super::members::{finished_session, follow_up, said_to};
 use super::{
     chief_launches, codex, project_of, recorded, relaunch, replacements, said_to_the_chief, specs,
-    WITH_SPECS,
+    REPLACES, WITH_SPECS,
 };
+use crate::fixtures::native_of;
 
 #[test]
 fn a_chief_whose_harness_holds_nothing_of_its_conversation_opens_afresh_with_its_role_and_is_told_no_other(
@@ -47,6 +50,15 @@ fn a_chief_whose_harness_holds_nothing_of_its_conversation_opens_afresh_with_its
         replacements(&context, chief).is_empty(),
         "nothing is written to tell it a role it begins with"
     );
+    assert!(
+        context
+            .ledger
+            .borrow()
+            .role_notes_to(chief)
+            .unwrap()
+            .is_empty(),
+        "and the ledger knows of no note that says it a role"
+    );
     assert_eq!(
         recorded(&context, chief).as_deref(),
         Some(WITH_SPECS),
@@ -58,6 +70,12 @@ fn a_chief_whose_harness_holds_nothing_of_its_conversation_opens_afresh_with_its
         context.pass().unwrap();
     }
     assert!(replacements(&context, chief).is_empty());
+    assert!(context
+        .ledger
+        .borrow()
+        .role_notes_to(chief)
+        .unwrap()
+        .is_empty());
     assert!(
         said_to_the_chief(&context)
             .iter()
@@ -100,6 +118,15 @@ fn a_member_whose_harness_holds_nothing_of_its_conversation_opens_afresh_with_it
         replacements(&context, member).is_empty(),
         "no note says a role it begins with"
     );
+    assert!(
+        context
+            .ledger
+            .borrow()
+            .role_notes_to(member)
+            .unwrap()
+            .is_empty(),
+        "and the ledger knows of no note that says it a role"
+    );
     assert_eq!(
         recorded(&context, member).as_deref(),
         Some("instructions for worker (rewritten)"),
@@ -111,6 +138,12 @@ fn a_member_whose_harness_holds_nothing_of_its_conversation_opens_afresh_with_it
         context.pass().unwrap();
     }
     assert!(replacements(&context, member).is_empty());
+    assert!(context
+        .ledger
+        .borrow()
+        .role_notes_to(member)
+        .unwrap()
+        .is_empty());
     assert_eq!(context.task(project.id, 2).task.state, "working");
     assert!(
         said_to(&context, &session)
@@ -118,6 +151,70 @@ fn a_member_whose_harness_holds_nothing_of_its_conversation_opens_afresh_with_it
             .all(|text| !text.contains(super::REPLACES)),
         "{:?}",
         said_to(&context, &session)
+    );
+    context.close();
+}
+
+#[test]
+fn a_member_whose_launch_is_given_up_while_its_harness_is_asked_has_written_nothing_of_a_role_and_the_next_launch_says_it_first(
+) {
+    let context = codex();
+    let (project, session, member) = finished_session(&context);
+    context.roles.rewritten.replace(" (rewritten)".to_owned());
+    let conversation = native_of(&context, member).expect("its conversation");
+    let asking = context
+        .codex
+        .resumable_holds
+        .hold(move |asked| asked[0] == conversation.as_str());
+
+    // The follow-up begins a launch, which waits for what the harness says of the
+    // conversation it would resume.
+    follow_up(&context, &project, "Now the lexer");
+    context.pass().unwrap();
+    let brief = context
+        .inbox(member)
+        .into_iter()
+        .find(|message| message.kind == "task" && message.task_number == Some(2))
+        .expect("the follow-up's brief");
+    assert_eq!(brief.state, "delivering", "its launch has begun it");
+
+    // The pause comes while the harness is asked: the launch is given up.
+    context.human_pause(project.id, 2);
+    asking.open();
+    context.settle();
+    assert_eq!(context.codex.prepared().len(), 1, "no window is prepared");
+    assert_eq!(context.message(brief.id).state, "queued", "given back");
+    assert!(
+        context
+            .ledger
+            .borrow()
+            .role_notes_to(member)
+            .unwrap()
+            .is_empty(),
+        "and a launch that was given up has written nothing of a role"
+    );
+
+    // The words that resume the task bring the window back, and the role is the
+    // first thing it is told.
+    context.resume_task(project.id, 2, "Go on");
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(context.codex.prepared().len(), 2);
+    assert_eq!(
+        context.ledger.borrow().role_notes_to(member).unwrap().len(),
+        1,
+        "the launch that came wrote it, once"
+    );
+    context.codex.answer(&session, "Understood.");
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    let said = said_to(&context, &session);
+    assert!(said[0].contains(REPLACES), "the role first: {said:?}");
+    assert!(
+        said[1..].iter().any(|text| text.contains("Now the lexer")),
+        "and then the follow-up: {said:?}"
     );
     context.close();
 }

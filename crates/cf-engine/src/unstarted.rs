@@ -11,6 +11,7 @@ use cf_proto::panes::{SnapshotRequest, TAIL_LINES};
 
 use crate::dispatcher::Dispatcher;
 use crate::record::Record;
+use crate::role_change::Prelude;
 use crate::runtime::returning;
 use crate::seams::EngineError;
 use crate::shown::Shown;
@@ -53,6 +54,24 @@ impl Dispatcher {
         };
         let settles = record.delivery.borrow_mut().delivering.take().is_some();
         (shown, settles)
+    }
+
+    /// A launch that was to say the role first, about to be given up on, and its
+    /// window closed. What the window shows is asked first, for the screen goes
+    /// with it, and what the launch owed is taken out of the record. Says what the
+    /// window showed, and what the launch owed: none where an exit came while the
+    /// host answered, which settled it and said what it knew.
+    pub(crate) async fn look_before_abandoning(
+        &self,
+        record: &Record,
+        pane: Option<&Pane>,
+    ) -> (Shown, Option<Prelude>) {
+        let shown = match pane {
+            Some(pane) => self.look_at(pane).await,
+            None => Shown::default(),
+        };
+        let owed = record.delivery.borrow_mut().prelude.take();
+        (shown, owed)
     }
 
     /// `because`, with what the window showed said after it, for the failure

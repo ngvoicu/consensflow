@@ -666,6 +666,10 @@ impl Dispatcher {
             return Ok(());
         }
         let delivering = record.delivery.borrow_mut().delivering.take();
+        // What a launch that was to say the role first still owed the window
+        // that exited: the role it was never told.
+        let owed = self.owed(&record)?;
+        record.delivery.borrow_mut().prelude = None;
         self.closed(&record);
         // No door survives its window: what one claimed and none acknowledged is the ledger's again.
         self.seams
@@ -694,9 +698,10 @@ impl Dispatcher {
             return Ok(());
         };
         // A launch the exit ended says what its window showed.
-        let at_launch = delivering
-            .as_ref()
-            .is_some_and(|delivering| delivering.launch);
+        let at_launch = owed.is_some()
+            || delivering
+                .as_ref()
+                .is_some_and(|delivering| delivering.launch);
         let closed = format!("@{}'s window closed", participant.handle);
         let because = if at_launch {
             self.unstarted_because(&record, &closed, &shown)
@@ -712,10 +717,16 @@ impl Dispatcher {
                 self.settle_failure(delivering, &because, retry)?;
             }
         }
+        let launch_owed = owed.is_some();
+        if let Some(prelude) = owed {
+            self.settle_exited_launch(&record, &project, &participant, &prelude, &because)?;
+        }
         if participant.role == "chief" {
-            // The chief's own exit closes the project as Close does.
+            // The chief's own exit closes the project as Close does, but for the
+            // window of a launch that was to say the role: it did not come up, and
+            // is tried again (`settle_exited_launch`).
             let own = record.window.borrow().own_exit;
-            if project.state == "open" && !own {
+            if project.state == "open" && !own && !launch_owed {
                 self.seams
                     .ledger
                     .borrow_mut()
@@ -910,6 +921,11 @@ impl Dispatcher {
         if record.delivery.borrow().delivering.is_some() {
             returning(self.watch_arrival(record, &observed)).await?;
         }
+        // What the launch owes the window (the role it was to say first) is
+        // watched as a first message is, and a launch given up closes its window.
+        if self.watch_prelude(project, participant, record).await? {
+            return Ok(());
+        }
         // A window that began to close in this step is not acted on.
         if record.window.borrow().retiring {
             return Ok(());
@@ -979,6 +995,11 @@ impl Dispatcher {
             record,
             Activity::because(ActivityState::Out, format!("out of quota until {until}")),
         )?;
+        // The time a launch waits while its member is out is no slowness of its
+        // window: the role it was to say first is told when the quota is back.
+        if let Some(prelude) = record.delivery.borrow_mut().prelude.as_mut() {
+            prelude.since = self.now();
+        }
         if participant.role != "chief" {
             returning(self.settle_stop(project, participant, record, observed, starting)).await?;
             if !self.forgotten(record) {

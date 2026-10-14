@@ -102,3 +102,13 @@ for the rows, and `hold_apart_what_node_never_had_in_its_schema` for the text of
 table). No answer of Node's says anything of it: a project's view holds `description`
 only while there is a line, and the ledger's `project.renamed` and `project.described`
 events are its own. Nothing a recording holds is rewritten.
+
+Migration 0018 (the role text a message tells, by which the ledger knows the note that
+says a conversation its role again, and by nothing in its words: one nullable column of
+`message`, numbered after 0017) added what Node's messages never had. Every `final`
+lacks the column `role_text` and its words in the schema of `message`: none of them is
+rewritten, and the replay takes them out of what this ledger left, in the rows and in
+the text of the table (`cf_ledger::testing::hold_apart_what_node_never_writes` and
+`hold_apart_what_node_never_had_in_its_schema`). No answer of Node's says anything of
+it, a message's view never holds it, and the ledger logs no event for it: such a note's
+event is any note's own.

@@ -23,7 +23,7 @@ use crate::delivery_text::{delivery_text, marker_of};
 use crate::dispatcher::Dispatcher;
 use crate::host::{EngineHost, Killed, OpenPane, Opened};
 use crate::record::Record;
-use crate::role_change::Compared;
+use crate::role_change::{Compared, Prelude};
 use crate::runtime::{begin, caught, returning};
 use crate::seams::{EngineError, SavedAgent};
 use crate::shown::Shown;
@@ -252,8 +252,8 @@ struct Planned {
     conversation: Option<ConversationView>,
     stop: Option<Stop>,
     /// What goes into the window before anything else of its queue once it is up,
-    /// in this order ([`Compared::due`]).
-    due: Vec<i64>,
+    /// in this order ([`Compared::prelude`]).
+    prelude: Option<Prelude>,
     /// The text the window starts with, for a harness that keeps the first
     /// instructions of its conversations: what a conversation this launch starts
     /// is recorded as begun with.
@@ -345,7 +345,9 @@ impl Dispatcher {
     /// is resumed and whose role changed, on a harness that keeps its first
     /// instructions, has no first message on its command line: the note that says
     /// the role goes in first once the window is up, and `message` after it
-    /// ([`Dispatcher::compare_role`]). Whether it is resumed is decided first: a
+    /// ([`Dispatcher::compare_role`]); the launch owes its window that note until it
+    /// is told, and a window that exits or is never ready before is a launch that
+    /// did not come up ([`Prelude`]). Whether it is resumed is decided first: a
     /// conversation its harness holds nothing of opens afresh, and has no role to
     /// be told ([`Dispatcher::conversation_to_go_on_with`]). One that does not come
     /// up says why ([`Dispatcher::launch_failed`]); a participant forgotten while
@@ -375,7 +377,7 @@ impl Dispatcher {
         let mut conversation = None;
         let mut compared = Compared {
             first: message,
-            due: Vec::new(),
+            prelude: None,
             role: None,
         };
         if participant.role == "chief" {
@@ -387,7 +389,11 @@ impl Dispatcher {
                 .filter(|conversation| conversation.native_session.is_some());
             compared = self.compare_role(project, participant, resumed, first)?;
         }
-        let Compared { first, due, role } = compared;
+        let Compared {
+            first,
+            prelude,
+            role,
+        } = compared;
         let launch_id = self.seams.launch_ids.draw();
         let generation = self.next_generation();
         let delivering = first.as_ref().map(|first| Delivering {
@@ -407,7 +413,7 @@ impl Dispatcher {
         // that is found in the plan, and the message is given back to its queue.
         let failing = delivering
             .clone()
-            .or_else(|| self.displaced(participant, &due));
+            .or_else(|| self.displaced(participant, prelude.as_ref()));
         // Boxed, so that the work of an operation that launches stays small
         // (`dispatcher::tests`): the plan asks the harness and prepares the window.
         let planned = match Box::pin(self.plan(
@@ -419,7 +425,7 @@ impl Dispatcher {
             &launch_id,
             delivering.as_ref(),
             role,
-            due,
+            prelude,
         ))
         .await
         {
@@ -441,8 +447,13 @@ impl Dispatcher {
         // its window goes on with, and where the role is to be said first the
         // message the launch was for went back to its queue: the window opens with
         // no first message, and that one goes after the note that says the role.
-        let due = planned.due.clone();
-        let delivering = delivering.filter(|_| due.get(1).is_none());
+        let prelude = planned.prelude.clone();
+        let says_the_role = prelude.is_some();
+        let delivering = delivering.filter(|_| {
+            prelude
+                .as_ref()
+                .is_none_or(|prelude| prelude.displaced.is_none())
+        });
         if self.launch_over(
             record,
             participant,
@@ -571,7 +582,7 @@ impl Dispatcher {
         {
             let mut delivery = record.delivery.borrow_mut();
             delivery.delivering = delivering;
-            delivery.due = due;
+            delivery.prelude = prelude;
         }
         // A window that exited before its open was answered goes as any exit does.
         if let Some(shown) = exited {
@@ -608,7 +619,14 @@ impl Dispatcher {
         if self.forgotten(record) {
             return Ok(());
         }
-        record.window.borrow_mut().relaunch = None;
+        // A launch that is to say the role has not come up until it has: a chief
+        // whose window was given up for it, and is tried again, keeps its count of
+        // failures, so that its wait grows and the human is told once. The
+        // human's Resume and switch clear it, and so does a launch that has no
+        // role to say.
+        if !says_the_role {
+            record.window.borrow_mut().relaunch = None;
+        }
         if let (Ok(Some(native)), Some(conversation)) = (&started, conversation_id) {
             if !native.is_empty() && Some(native) != planned.native_session.as_ref() {
                 self.seams
@@ -627,10 +645,10 @@ impl Dispatcher {
     /// ([`Dispatcher::launch_over`]), or why the launch failed. `conversation` is
     /// the chief's, which was looked into before its first message was chosen.
     /// `role` is the text the window starts with where it was asked for already
-    /// ([`Dispatcher::compare_role`]), and `due` what goes into the window first
-    /// where it was compared: a chief's was, before its first message was chosen,
-    /// and a member's is, here, once its harness has said which conversation its
-    /// window goes on with.
+    /// ([`Dispatcher::compare_role`]), and `prelude` what goes into the window
+    /// first where it was compared: a chief's was, before its first message was
+    /// chosen, and a member's is, here, once its harness has said which
+    /// conversation its window goes on with.
     #[allow(clippy::too_many_arguments)]
     async fn plan(
         self: &Rc<Self>,
@@ -642,7 +660,7 @@ impl Dispatcher {
         launch_id: &LaunchId,
         delivering: Option<&Delivering>,
         role: Option<RoleText>,
-        due: Vec<i64>,
+        prelude: Option<Prelude>,
     ) -> Result<Option<Planned>, EngineError> {
         let begun = first
             .map(|first| self.seams.ledger.borrow_mut().begin_delivery(first.id))
@@ -676,21 +694,21 @@ impl Dispatcher {
         // message of its window: it goes back to its queue with its attempt, to go
         // in after the note that says the role. It is still what a launch that does
         // not come up fails ([`Dispatcher::launch_failed`]).
-        let (begun, role, due) = if participant.role == "chief" {
-            (begun, role, due)
+        let (begun, role, prelude) = if participant.role == "chief" {
+            (begun, role, prelude)
         } else {
             let resumed = conversation
                 .as_ref()
                 .filter(|conversation| conversation.native_session.is_some());
             let compared = self.compare_role(project, participant, resumed, first.cloned())?;
-            let begun = match self.displaced(participant, &compared.due) {
+            let begun = match self.displaced(participant, compared.prelude.as_ref()) {
                 Some(displaced) => {
                     self.give_back(displaced, "its window is told its role first")?;
                     None
                 }
                 None => begun,
             };
-            (begun, compared.role, compared.due)
+            (begun, compared.role, compared.prelude)
         };
         let resume = conversation
             .as_ref()
@@ -756,7 +774,7 @@ impl Dispatcher {
             native_session: prepared.native_session,
             conversation,
             stop,
-            due,
+            prelude,
             first_instructions: adapter.keeps_first_instructions().then_some(instructions),
         }))
     }
@@ -896,7 +914,7 @@ impl Dispatcher {
     /// role is withdrawn with it; a chief's stays in its queue (`role_change`).
     /// A participant forgotten while it launched hears nothing and settles
     /// nothing.
-    fn launch_failed(
+    pub(crate) fn launch_failed(
         &self,
         record: &Rc<Record>,
         project: &ProjectView,

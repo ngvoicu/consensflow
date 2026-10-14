@@ -8,10 +8,18 @@
 //! fresh, a role that did not change and a harness that takes its role at every
 //! launch are given nothing extra. What is less plain (a window that never took
 //! it, a text nobody recorded, a skill copy of ConsensFlow's, a variant that
-//! changed) is in `unusual`, and a member's session in `members`. Node's
-//! dispatcher had no such harness, so no trace holds these.
+//! changed) is in `unusual`, a member's session in `members`, a launch that
+//! cannot say the role (its window exits, is never ready, or refuses it) in
+//! `launch` for a member and `chief_launch` for the chief, what tells a
+//! replacement from any other message in `identity`, and a conversation whose
+//! harness holds nothing of it, which opens afresh and is told no role, in
+//! `fresh`.
+//! Node's dispatcher had no such harness, so no trace holds these.
 
+mod chief_launch;
 mod fresh;
+mod identity;
+mod launch;
 mod members;
 mod skill;
 mod told;
