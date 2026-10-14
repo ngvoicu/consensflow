@@ -274,6 +274,26 @@ pub(crate) fn steady(earlier: &[Member], later: Vec<Member>) -> Vec<Member> {
         .collect()
 }
 
+/// What a look of `tree` finds that `roots` started and that still runs: the processes
+/// of it that descend from one of `roots`, by the process each was started by, are none
+/// of them and are among `running`. `tree` may list processes that have ended, which a
+/// handle held keeps: each is still the parent it names to what it started, and none
+/// of what is found, for a process that ended by itself while the ending went on (a
+/// short run of the harness's own, in a shell that lasts) is not there to end, and an
+/// ending names as ended what it ended. The Windows job's ending asks it of the handles
+/// it holds; a Mac looks at what runs and has no such list, so only its tests ask it.
+#[cfg(any(windows, test))]
+pub(crate) fn started_by(
+    roots: &HashSet<ProcessKey>,
+    tree: &[Member],
+    running: &HashSet<ProcessKey>,
+) -> Vec<ProcessKey> {
+    descending_from(roots, tree)
+        .into_iter()
+        .filter(|key| !roots.contains(key) && running.contains(key))
+        .collect()
+}
+
 /// What an ending came to, once it was made: the processes it chose that are not
 /// among `alive`, the processes of the tree now, were ended; those that are were
 /// not, and are said so.

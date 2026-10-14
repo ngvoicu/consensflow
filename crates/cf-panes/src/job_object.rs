@@ -56,7 +56,7 @@ use windows_sys::Win32::System::Threading::{
     PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SET_QUOTA, PROCESS_SYNCHRONIZE, PROCESS_TERMINATE,
 };
 
-use crate::background::{descending_from, report, steady, Baseline, Member, ProcessKey};
+use crate::background::{report, started_by, steady, Baseline, Member, ProcessKey};
 
 /// How many times an ending looks again for what the processes it ended had
 /// started: a process that is ended starts no more, and none of them is ended
@@ -153,12 +153,14 @@ impl JobObject {
     /// ends is chosen once, before it ends anything, and then only what those processes
     /// started (a process that is ended starts nothing, but another that is not yet
     /// may have started one): each pass ends what is fresh, waits for it to be gone,
-    /// and looks again for what it started. Never what a look of the whole job takes
-    /// for the turn's work by the baseline once the ending has begun, which a human's
-    /// or a message's new work is. The choice is of what two looks, `settle` apart,
-    /// both find the turn's work and running (a look that finds none is not made
-    /// again): a short run of the harness's own has ended by the second, and is none
-    /// of it. What was chosen, told by whether it is gone: ended, or not.
+    /// and looks again for what it started that runs ([`started_by`]: one that ended by
+    /// itself meanwhile, which a handle held keeps as the parent it names, is none of
+    /// it). Never what a look of the whole job takes for the turn's work by the
+    /// baseline once the ending has begun, which a human's or a message's new work is.
+    /// The choice is of what two looks, `settle` apart, both find the turn's work and
+    /// running (a look that finds none is not made again): a short run of the
+    /// harness's own has ended by the second, and is none of it. What was chosen, told
+    /// by whether it is gone: ended, or not.
     pub fn end(&self, baseline: &Baseline, settle: Duration) -> io::Result<Ending> {
         let deadline = Instant::now() + BUDGET;
         let mut held: HashMap<u32, Held> = HashMap::new();
@@ -167,9 +169,10 @@ impl JobObject {
         if !work.is_empty() {
             thread::sleep(settle);
             self.hold_into(&mut held)?;
-            // A process that has ended is held still, to be the parent it names.
-            let running = members_of(held.values().filter(|one| !one.process.gone()));
-            work = steady(&work, baseline.turn_work(&running));
+            // What runs now: a process that has ended is held still, to be the parent
+            // it names, and is not there.
+            let there = members_of(held.values().filter(|one| one.runs()));
+            work = steady(&work, baseline.turn_work(&there));
         }
         let mut fresh: Vec<ProcessKey> = work.into_iter().map(|member| member.key).collect();
         let mut chosen: Vec<ProcessKey> = Vec::new();
@@ -197,17 +200,19 @@ impl JobObject {
             }
             self.hold_into(&mut held)?;
             let roots: HashSet<ProcessKey> = chosen.iter().copied().collect();
-            fresh = descending_from(&roots, &members_of(held.values()))
-                .into_iter()
-                .filter(|key| !roots.contains(key))
+            let running: HashSet<ProcessKey> = held
+                .values()
+                .filter(|one| one.runs())
+                .map(|one| one.member.key)
                 .collect();
+            fresh = started_by(&roots, &members_of(held.values()), &running);
         }
         // What was found and not ended, for the passes or the time ran out, is said
         // to be left.
         chosen.append(&mut fresh);
         let alive: HashSet<ProcessKey> = chosen
             .iter()
-            .filter(|key| held.get(&key.pid).is_some_and(|held| !held.process.gone()))
+            .filter(|key| held.get(&key.pid).is_some_and(Held::runs))
             .copied()
             .collect();
         let members: Vec<Member> = members_of(held.values())
@@ -251,6 +256,11 @@ impl JobObject {
             return None;
         }
         let process = Process(handle);
+        // One that ended since the list is no process of the job: its object is still
+        // there to open while another handle to it is.
+        if process.gone() {
+            return None;
+        }
         let mut inside = 0;
         // SAFETY: both handles are open, and `inside` is writable.
         let asked = unsafe { IsProcessInJob(process.0, self.handle, &mut inside) };
@@ -341,6 +351,15 @@ struct Held {
     member: Member,
     /// The number of the process that started it, as the system names it.
     parent: Option<u32>,
+}
+
+impl Held {
+    /// Whether the process runs. A process that has ended is a process object still
+    /// while a handle to it is open, and a look of what is held lists it, to be the
+    /// parent it names to what it started: it is not a process that is there.
+    fn runs(&self) -> bool {
+        !self.process.gone()
+    }
 }
 
 /// The members of `held`, each with the process that started it where that is one
