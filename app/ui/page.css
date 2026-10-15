@@ -205,7 +205,7 @@ button:disabled { opacity: .45; cursor: default; }
   text-align: left;
   cursor: pointer;
 }
-.project-menu button:not(:disabled):hover, .project-menu button:focus-visible { background: var(--panel); }
+.project-menu button:hover, .project-menu button:focus-visible { background: var(--panel); }
 .project-menu button:focus-visible { outline-offset: -2px; }
 .project-tools {
   display: flex;

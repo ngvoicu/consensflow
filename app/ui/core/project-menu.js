@@ -12,8 +12,10 @@
  * empty it is taken away. The daemon checks both, and a refusal is said in the
  * dialog, where the human typed, which keeps what they typed. The project's
  * folder never changes, and the description is the human's alone: no agent is
- * told it. A closed project is read-only, as its board is: it has no Project
- * settings to open.
+ * told it. A closed project's board is read-only, but its settings are not: its
+ * menu offers Project settings… as an open project's does, for what it says of
+ * the chief's specs and wake-up calls is what the chief starts with, which the
+ * Resume does.
  *
  * The menu and the dialogs are outside the list, which is drawn again whenever
  * the board is, so the menu keeps only the project's id and finds its button
@@ -262,14 +264,11 @@ export class ProjectMenu {
 
   /**
    * The open menu is for `project` as the page has it: it takes its name, and notes where its
-   * card is. A closed project has no settings to open, as the board's button is not for it.
+   * card is.
    */
   #adopt(project) {
     this.#menu.setAttribute('aria-label', project.name)
     this.#at = this.#placeOf(project.id)
-    for (const item of this.#items) {
-      if (item.dataset.action === 'settings') item.disabled = project.state !== 'open'
-    }
   }
 
   /**
@@ -297,11 +296,10 @@ export class ProjectMenu {
     )
   }
 
-  /** The arrow keys move between the items there are to choose, and Tab leaves the menu, back to the project. */
+  /** The arrow keys move between the items, and Tab leaves the menu, back to the project. */
   #key(event) {
-    const items = this.#items.filter((item) => !item.disabled)
-    const last = items.length - 1
-    const at = items.indexOf(document.activeElement)
+    const last = this.#items.length - 1
+    const at = this.#items.indexOf(document.activeElement)
     const to = {
       ArrowDown: at >= last ? 0 : at + 1,
       ArrowUp: at <= 0 ? last : at - 1,
@@ -310,7 +308,7 @@ export class ProjectMenu {
     }[event.key]
     if (to !== undefined) {
       event.preventDefault()
-      items[to].focus()
+      this.#items[to].focus()
     } else if (event.key === 'Tab') {
       event.preventDefault()
       this.#hide(BACK.now)

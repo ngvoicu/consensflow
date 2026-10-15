@@ -373,5 +373,6 @@ mod reading;
 mod scripted;
 mod specs;
 mod stopping;
+mod suspended;
 mod turns;
 mod wake_up;
