@@ -37,9 +37,10 @@ export class SpecsGroup {
 
   /**
    * `group` is the fieldset, which holds the controls by their names. With a
-   * `page` the section saves, for the project the board shows: `page.board()`
-   * is the board shown, `page.daemon` asks the daemon, `page.act` runs a change
-   * and redraws the page and `page.note` tells the human what came of it. With
+   * `page` the section saves, for the project the dialog is for: `page.project()`
+   * is that project, not the one the page shows, `page.daemon` asks the daemon,
+   * `page.act` runs a change and redraws the page, `page.note` tells the human
+   * what came of it and `page.report` says a refusal on the status line. With
    * none it only holds what is set in it (`values`), as New project's does.
    */
   constructor(group, page = null) {
@@ -119,11 +120,13 @@ export class SpecsGroup {
     this.#note.hidden = text === ''
   }
 
-  /** Says all three to the daemon, which refuses a folder that leaves the project. */
+  /**
+   * Says all three to the daemon, which refuses a folder that leaves the project,
+   * for the project the dialog is for, by its id.
+   */
   async #save() {
-    const project = this.#page.board()?.project
-    if (project === undefined) return
-    const body = { project: project.id, ...this.#said() }
+    const project = this.#page.project()
+    const body = { project, ...this.#said() }
     let refused = null
     await this.#page.act(async () => {
       try {
@@ -132,12 +135,15 @@ export class SpecsGroup {
         refused = cause instanceof Error ? cause.message : String(cause)
       }
     })
-    // Said where the human is typing, after the board was drawn again.
     const saved =
       body.on === false
         ? 'Specs are off in this project: the chief is told so when it next starts.'
         : 'Saved: the specs reach the chief when it next starts.'
-    this.#say(refused ?? saved)
+    // Said where the human is typing, after the board was drawn again; a dialog left (shut, or
+    // opened on another project since) is not the place for a refusal, and the status line says it.
+    const here = this.#page.project() === project
+    if (here) this.#say(refused ?? saved)
     if (refused === null) this.#page.note(saved)
+    else if (!here) this.#page.report(refused)
   }
 }

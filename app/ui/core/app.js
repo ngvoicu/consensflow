@@ -522,14 +522,16 @@ function choose(id) {
 }
 
 /**
- * Shows project `id` unless the board shows it, and waits for its board: a read already on
- * its way may be of the project shown before, and the next one is of this. Whether the board
- * shown is its now, which it is not where the project is gone or its board could not be read
- * (the page has said why).
+ * Shows project `id`: chosen, unless it is the choice already (the human may have chosen
+ * another, whose board is on its way while the board still shows `id`: asked for after it,
+ * `id` is the choice again), and its board waited for unless the board shows it (a read
+ * already on its way may be of the project chosen before, and the next one is of this).
+ * Whether the board shown is its now, which it is not where the project is gone or its board
+ * could not be read (the page has said why).
  */
 async function showProject(id) {
+  if (state.selected !== id) choose(id)
   if (state.board?.project.id !== id) {
-    choose(id)
     await refresh()
     while (refreshing !== null) await refreshing
   }
@@ -608,33 +610,32 @@ inboxButton.addEventListener('click', () => {
   boardRoot.querySelector('.foryou')?.scrollIntoView({ block: 'start' })
 })
 
-// Project settings (the staff, human approval, wake-up calls and specs), drawn
-// from the board shown and the agents as the page has them now; the button
-// reads the agents again before it opens.
+// Project settings (the staff, human approval, wake-up calls and specs), for the project
+// asked for: drawn from its board while the board shown is its, and from the agents as the
+// page has them now; opening it reads the agents again. The button asks for the project
+// the board shows.
 const projectSettings = new ProjectSettingsDialog($('#project-settings-dialog'), {
   board: () => state.board,
+  selected: () => state.selected,
   agents: () => state.agents,
   daemon,
   act,
   note,
+  report,
 })
 projectSettingsButton.addEventListener('click', () =>
-  act(async () => {
-    await readAgents()
-    await projectSettings.open()
-  }),
+  act(() => openSettings(state.board.project.id)),
 )
 
 /**
- * Project settings opened on project `id`, which is shown first if the board shows another:
- * the same dialog as the board's button opens, for the project the human asked for. One
- * chosen in the list meanwhile is the board's now, and no dialog is opened for the other.
+ * Project settings opened on project `id`, which is shown first if it is not: the dialog of
+ * the board's button, for the project the human asked for. One the human chooses another
+ * project before it is up is not opened.
  */
 async function openSettings(id) {
   if (!(await showProject(id))) return
   await readAgents()
-  if (state.board?.project.id !== id) return
-  await projectSettings.open()
+  await projectSettings.open(id)
 }
 
 // New project: the native folder picker first, then the saved agent the chief

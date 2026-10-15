@@ -5,9 +5,10 @@
  * section reads the project's setting from the daemon when the dialog opens and
  * shows exactly what is saved (the daemon says the interval in the largest unit
  * that holds it whole: 120 minutes come back as 2 hours), and one Save sends the
- * whole of it. A refusal is said in the section, where the human is looking. In
- * New project there is nothing to save yet: the section holds what the human
- * sets, and `values` is what the project starts with.
+ * whole of it, for the project the dialog is for. A refusal is said in the
+ * section, where the human is looking. In New project there is nothing to save
+ * yet: the section holds what the human sets, and `values` is what the project
+ * starts with.
  */
 
 /**
@@ -38,10 +39,11 @@ export class WakeUpCalls {
 
   /**
    * `group` is the fieldset, which holds the controls by their names. With a
-   * `page` the section saves, for the project the board shows: `page.board()`
-   * is the board shown, `page.daemon` asks the daemon, `page.act` runs a change
-   * and redraws the page, `page.note` tells the human what came of it. With none
-   * it only holds what is set in it (`values`), as New project's does.
+   * `page` the section saves, for the project the dialog is for: `page.project()`
+   * is that project, not the one the page shows, `page.daemon` asks the daemon,
+   * `page.act` runs a change and redraws the page, `page.note` tells the human
+   * what came of it and `page.report` says a refusal on the status line. With
+   * none it only holds what is set in it (`values`), as New project's does.
    */
   constructor(group, page = null) {
     this.#on = group.querySelector('[name="wakeup-on"]')
@@ -63,15 +65,27 @@ export class WakeUpCalls {
     this.reset()
   }
 
-  /** Reads the project's calls from the daemon and shows them as saved. */
-  async load(project) {
-    const { wakeUp } = await this.#page.daemon('wakeup.get', { project })
-    this.#show(wakeUp)
+  /**
+   * What the daemon has of `project`'s calls, as saved. It shows nothing: the
+   * dialog shows it (`show`) once it is still for `project`, for the human may
+   * have gone on to another while the daemon answered.
+   */
+  async read(project) {
+    return (await this.#page.daemon('wakeup.get', { project })).wakeUp
+  }
+
+  /** Shows `calls` as the daemon says them. */
+  show(calls) {
+    this.#on.checked = calls.on
+    this.#every.value = String(calls.every)
+    this.#unit.value = calls.unit
+    this.#text.value = calls.text
+    this.#say('')
   }
 
   /** The section as it is for a project that never set it. */
   reset() {
-    this.#show(UNSET)
+    this.show(UNSET)
   }
 
   /**
@@ -94,31 +108,30 @@ export class WakeUpCalls {
     }
   }
 
-  /** Shows `calls` as the daemon says them. */
-  #show(calls) {
-    this.#on.checked = calls.on
-    this.#every.value = String(calls.every)
-    this.#unit.value = calls.unit
-    this.#text.value = calls.text
-    this.#say('')
-  }
-
   #say(words) {
     this.#hint.textContent = words
     this.#hint.hidden = words === ''
   }
 
-  /** Saves what the group shows; the project is the board's, as the gate's is. */
+  /**
+   * Saves what the group shows, for the project the dialog is for, by its id. What the
+   * daemon answers is shown only while the dialog is still for that project: one left
+   * (shut, or opened on another project since) is not the place for it, and a refusal
+   * then goes to the status line.
+   */
   #save() {
     if (!this.#every.reportValidity()) return Promise.resolve()
-    const body = { project: this.#page.board().project.id, ...this.#calls() }
+    const project = this.#page.project()
+    const body = { project, ...this.#calls() }
     return this.#page.act(async () => {
       try {
         const { wakeUp } = await this.#page.daemon('wakeup.set', body)
-        this.#show(wakeUp)
+        if (this.#page.project() === project) this.show(wakeUp)
         this.#page.note(saidOf(wakeUp))
       } catch (cause) {
-        this.#say(cause instanceof Error ? cause.message : String(cause))
+        const words = cause instanceof Error ? cause.message : String(cause)
+        if (this.#page.project() === project) this.#say(words)
+        else this.#page.report(words)
       }
     })
   }

@@ -5111,6 +5111,356 @@ for (const spec of CANCELLED) {
   })
 }
 
+// --- Project settings are for one project, from the moment they are asked for until they close. ---
+
+/**
+ * twoOpen's two projects with settings of their own in every section of Project settings, so that
+ * a dialog that mixes the two shows it: staff (harbour's zeus is a worker and a reviewer, and
+ * foundry has a zeus of its own), approval, specs and wake-up calls.
+ */
+function twoWithOwnSettings() {
+  const data = twoOpen()
+  const member = (id, handle, extra) => ({
+    participant: { ...participant(id, handle, 'worker', extra), projectId: 2 },
+    tasks: [],
+    activity: { state: 'closed' },
+    pane: null,
+  })
+  data.boards[1].lanes.find((lane) => lane.participant.handle === 'zeus').participant.roles = [
+    'worker',
+    'reviewer',
+  ]
+  data.boards[2].lanes.push(
+    member(11, 'zeus'),
+    member(12, 'athena', { harness: 'opencode', tier: 'light' }),
+  )
+  data.boards[2].project.gate = true
+  data.boards[1].project.specs = { on: true, folder: 'plans', variant: 'tdd' }
+  data.boards[2].project.specs = { on: false, folder: 'docs', variant: 'core-html' }
+  data.wakeUps = {
+    1: { on: true, everyMs: 7_200_000, text: 'Harbour: anything left?' },
+    2: { on: false, everyMs: 1_800_000, text: null },
+  }
+  return data
+}
+
+/** What each of those projects has, as the dialog of Project settings shows it. */
+const HARBOURS = {
+  staff: ['zeus', 'diana', 'zeus'],
+  approval: false,
+  specs: ['on', 'plans', 'tdd'],
+  calls: [true, '2', 'hours', 'Harbour: anything left?'],
+}
+const FOUNDRYS = {
+  staff: ['zeus', 'athena'],
+  approval: true,
+  specs: ['off', 'docs', 'core-html'],
+  calls: [false, '30', 'minutes', DEFAULT_WAKE_UP_WORDS],
+}
+
+/** What the dialog shows in each of its sections now, whichever project it is for. */
+const shownIn = (dialog) =>
+  dialog.evaluate((node) => {
+    const control = (name) => node.querySelector(`[name="${name}"]`)
+    return {
+      staff: [...node.querySelectorAll('#staff-members tr[data-handle]')].map(
+        (row) => row.dataset.handle,
+      ),
+      approval: control('gate').checked,
+      specs: [control('specs').value, control('specsFolder').value, control('specsVariant').value],
+      calls: [
+        control('wakeup-on').checked,
+        control('wakeup-every').value,
+        control('wakeup-unit').value,
+        control('wakeup-text').value,
+      ],
+    }
+  })
+
+test('Project settings: asked for from a project’s menu while another is being chosen, whose board is on its way, they are the menu’s project’s, and that board is not drawn in them when it comes', async ({
+  page,
+}) => {
+  await open(page, twoWithOwnSettings())
+  // The human chooses foundry, whose board is on its way, and asks for harbour's settings from
+  // harbour's menu: the project they asked for last is the one they are on.
+  await hold(page, 'board.get')
+  await chooseProject(page, 'foundry')
+  const dialog = await dialogFrom(page, 1, 'Project settings…', 'Project settings')
+  await expect(page.locator('#project-title')).toHaveText('harbour')
+  expect(await shownIn(dialog)).toEqual(HARBOURS)
+  // foundry's board comes, late: the page is on harbour, which is read again, and the dialog is
+  // not drawn from a board that is not its own.
+  await letGo(page, 'board.get')
+  await settled(page)
+  expect(await shownIn(dialog)).toEqual(HARBOURS)
+  await expect(page.locator('#project-title')).toHaveText('harbour')
+  await expect(projectButton(page, 1)).toHaveAttribute('aria-current', 'true')
+  await expect(projectButton(page, 2)).toHaveAttribute('aria-current', 'false')
+  // What is saved there is harbour's, whole, as the dialog shows it.
+  await dialog
+    .getByRole('group', { name: 'Human approval', exact: true })
+    .getByRole('checkbox')
+    .check()
+  await expect.poll(() => calls(page, 'project.gate')).toEqual([{ project: 1, gate: true }])
+  await dialog.getByRole('button', { name: 'Save wake-up calls' }).click()
+  await expect
+    .poll(() => calls(page, 'wakeup.set'))
+    .toEqual([{ project: 1, on: true, every: 2, unit: 'hours', text: 'Harbour: anything left?' }])
+})
+
+test('Project settings: asked for a project the human has left before its calls came, they are not opened, and the calls that came show nowhere', async ({
+  page,
+}) => {
+  await open(page, twoWithOwnSettings())
+  await chooseProject(page, 'foundry')
+  await expect(page.locator('#project-title')).toHaveText('foundry')
+  // foundry's settings are asked for, and its calls are on their way.
+  await hold(page, 'wakeup.get')
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  await expect.poll(() => calls(page, 'wakeup.get')).toEqual([{ project: 2 }])
+  // The human goes to harbour, whose board comes at once. The calls of foundry come after.
+  await chooseProject(page, 'harbour')
+  await expect(page.locator('#project-title')).toHaveText('harbour')
+  await letGo(page, 'wakeup.get')
+  await expect.poll(() => answers(page, 'wakeup.get')).toBe(1)
+  await settled(page)
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
+  await expect(dialog).toBeHidden()
+  // The next asked for is the project the human is on, with nothing of foundry's in it.
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  await expect(dialog).toBeVisible()
+  expect(await shownIn(dialog)).toEqual(HARBOURS)
+  expect(await calls(page, 'wakeup.get')).toEqual([{ project: 2 }, { project: 1 }])
+})
+
+test('Project settings: asked for while the human chooses another project, whose board is on its way, they are not opened, nor when the human is back on the project asked for and its board is on its way', async ({
+  page,
+}) => {
+  await open(page, twoWithOwnSettings())
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
+  const title = page.locator('#project-title')
+  const settings = page.getByRole('button', { name: 'Project settings' })
+  // harbour's settings are asked for; the human chooses foundry, whose board is on its way, and
+  // the board shown is still harbour's when harbour's calls come.
+  await hold(page, 'wakeup.get')
+  await settings.click()
+  await expect.poll(() => calls(page, 'wakeup.get')).toEqual([{ project: 1 }])
+  await hold(page, 'board.get')
+  await chooseProject(page, 'foundry')
+  await expect(title).toHaveText('harbour')
+  await letGo(page, 'wakeup.get')
+  await expect.poll(() => answers(page, 'wakeup.get')).toBe(1)
+  await settled(page)
+  await expect(dialog).toBeHidden()
+  await letGo(page, 'board.get')
+  await expect(title).toHaveText('foundry')
+  await expect(dialog).toBeHidden()
+  // foundry's are asked for; the human goes to harbour, whose board comes, and back to foundry,
+  // whose board is on its way again: the board shown is harbour's when foundry's calls come.
+  await hold(page, 'wakeup.get')
+  await settings.click()
+  await expect.poll(() => calls(page, 'wakeup.get')).toHaveLength(2)
+  await chooseProject(page, 'harbour')
+  await expect(title).toHaveText('harbour')
+  await hold(page, 'board.get')
+  await chooseProject(page, 'foundry')
+  await expect(title).toHaveText('harbour')
+  await letGo(page, 'wakeup.get')
+  await expect.poll(() => answers(page, 'wakeup.get')).toBe(2)
+  await settled(page)
+  await expect(dialog).toBeHidden()
+  await letGo(page, 'board.get')
+  await expect(title).toHaveText('foundry')
+  await expect(dialog).toBeHidden()
+})
+
+test('Project settings: open for a project they show and save its own, whole, while the page is taken to another project', async ({
+  page,
+}) => {
+  await open(page, twoWithOwnSettings())
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
+  await expect(dialog).toBeVisible()
+  expect(await shownIn(dialog)).toEqual(HARBOURS)
+  // The dialog is modal, and the human cannot choose a project under it. A page taken to
+  // another all the same (a shortcut, a project gone from the list) leaves it as it is.
+  await page.evaluate(() =>
+    document.querySelector('li.project[data-project="2"] .project-select').click(),
+  )
+  await expect(page.locator('#project-title')).toHaveText('foundry')
+  await settled(page)
+  expect(await shownIn(dialog)).toEqual(HARBOURS)
+  // Every save is harbour's, by its id, whichever project the page shows.
+  const section = (name) => dialog.getByRole('group', { name, exact: true })
+  await section('Human approval').getByRole('checkbox').check()
+  await expect.poll(() => calls(page, 'project.gate')).toEqual([{ project: 1, gate: true }])
+  await section('Wake-up calls').getByLabel('Every').fill('3')
+  await section('Wake-up calls').getByRole('button', { name: 'Save wake-up calls' }).click()
+  await expect
+    .poll(() => calls(page, 'wakeup.set'))
+    .toEqual([{ project: 1, on: true, every: 3, unit: 'hours', text: 'Harbour: anything left?' }])
+  await section('Specs').locator('[name="specsFolder"]').fill('docs')
+  await section('Specs').getByRole('button', { name: 'Save specs' }).click()
+  await expect
+    .poll(() => calls(page, 'project.specs'))
+    .toEqual([{ project: 1, on: true, folder: 'docs', variant: 'tdd' }])
+  await section('Staff').getByRole('button', { name: 'Add to staff' }).click()
+  await expect
+    .poll(() => calls(page, 'member.add'))
+    .toEqual([{ project: 1, agent: 'hera', roles: ['worker'] }])
+  await dialog.getByLabel('Role').selectOption('advisor')
+  await dialog.getByLabel('Agent').selectOption('zeus')
+  await section('Staff').getByRole('button', { name: 'Add to staff' }).click()
+  await expect
+    .poll(() => calls(page, 'member.roles'))
+    .toEqual([{ project: 1, agent: 'zeus', roles: ['worker', 'reviewer', 'advisor'] }])
+  // foundry has a zeus too, with one role: it is harbour's, with two, that loses one.
+  await dialog.getByRole('button', { name: 'Remove Reviewer @zeus' }).click()
+  await expect.poll(() => calls(page, 'member.roles')).toHaveLength(2)
+  expect((await calls(page, 'member.roles'))[1]).toEqual({
+    project: 1,
+    agent: 'zeus',
+    roles: ['worker'],
+  })
+  // And the one that leaves the staff altogether is harbour's.
+  await dialog.getByRole('button', { name: 'Remove Worker @diana' }).click()
+  await dialog.getByRole('button', { name: 'Remove @diana', exact: true }).click()
+  await expect.poll(() => calls(page, 'member.remove')).toEqual([{ project: 1, agent: 'diana' }])
+  await expect(page.locator('#project-title')).toHaveText('foundry')
+})
+
+test('Project settings: asked for twice while the calls are on their way, they open once, and the answer that comes second leaves what the human typed', async ({
+  page,
+}) => {
+  await open(page, twoWithOwnSettings())
+  const settings = page.getByRole('button', { name: 'Project settings' })
+  // The first ask is held; the second is answered at once, and opens the dialog.
+  await page.evaluate(() => {
+    window.__hold['wakeup.get'] = new Promise((go) => {
+      window.__first = go
+    })
+  })
+  await settings.click()
+  await expect.poll(() => calls(page, 'wakeup.get')).toHaveLength(1)
+  await settings.click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
+  await expect(dialog).toBeVisible()
+  const folder = dialog.locator('[name="specsFolder"]')
+  await folder.fill('typed')
+  // The first answer comes with the dialog open: it is for a dialog that is up already.
+  await page.evaluate(() => window.__first())
+  await expect.poll(() => answers(page, 'wakeup.get')).toBe(2)
+  await settled(page)
+  await expect(folder).toHaveValue('typed')
+})
+
+/** What the daemon says of the saves below when it refuses them (blank words, a folder outside). */
+const REFUSED = {
+  calls: 'the wake-up text must be text, not empty, at most 1000000 characters',
+  specs: 'the specs folder is a folder inside the project: it stays inside it, with no `..`',
+}
+
+/**
+ * harbour's calls (with `words`, which the daemon refuses when they are blank) and specs saved
+ * and not yet answered, and the dialog left; with `next`, foundry's settings are asked for from
+ * its menu then. Gives the dialog and its two sections.
+ */
+async function leftWithSavesOnTheirWay(page, words, { next = false } = {}) {
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
+  const calling = dialog.getByRole('group', { name: 'Wake-up calls', exact: true })
+  const specs = dialog.getByRole('group', { name: 'Specs', exact: true })
+  await expect.poll(() => shownIn(dialog)).toEqual(HARBOURS)
+  await hold(page, 'wakeup.set')
+  await hold(page, 'project.specs')
+  await calling.getByLabel('Every').fill('3')
+  await calling.getByLabel('What it says').fill(words)
+  await calling.getByRole('button', { name: 'Save wake-up calls' }).click()
+  await specs.locator('[name="specsFolder"]').fill('late')
+  await specs.getByRole('button', { name: 'Save specs' }).click()
+  await expect.poll(() => calls(page, 'wakeup.set')).toHaveLength(1)
+  await expect.poll(() => calls(page, 'project.specs')).toHaveLength(1)
+  await page.keyboard.press('Escape')
+  await expect(dialog).toBeHidden()
+  if (next) {
+    await dialogFrom(page, 2, 'Project settings…', 'Project settings')
+    expect(await shownIn(dialog)).toEqual(FOUNDRYS)
+  }
+  return { dialog, calling, specs }
+}
+
+test('Project settings: a save answered after the dialog was left for another project’s shows nothing in that one, and the status line says it', async ({
+  page,
+}) => {
+  await open(page, twoWithOwnSettings())
+  const left = await leftWithSavesOnTheirWay(page, 'Harbour: anything left?', { next: true })
+  const { calling, specs, dialog } = left
+  // harbour's answers come now: nothing of them is in foundry's dialog.
+  await letGo(page, 'wakeup.set')
+  await expect(page.locator('#status')).toHaveText(
+    'Wake-up calls are on: the chief is asked every 3 hours.',
+  )
+  await letGo(page, 'project.specs')
+  await expect(page.locator('#status')).toHaveText(
+    'Saved: the specs reach the chief when it next starts.',
+  )
+  await settled(page)
+  expect(await shownIn(dialog)).toEqual(FOUNDRYS)
+  await expect(specs.locator('.specs-note')).toBeHidden()
+  // The next save from it is foundry's own, as its dialog shows it.
+  await calling.getByRole('button', { name: 'Save wake-up calls' }).click()
+  await expect
+    .poll(() => calls(page, 'wakeup.set'))
+    .toEqual([
+      { project: 1, on: true, every: 3, unit: 'hours', text: 'Harbour: anything left?' },
+      { project: 2, on: false, every: 30, unit: 'minutes', text: DEFAULT_WAKE_UP_WORDS },
+    ])
+})
+
+test('Project settings: a save the daemon refuses after the dialog was left for another project’s is said on the status line, and nowhere in that one', async ({
+  page,
+}) => {
+  await open(page, twoWithOwnSettings())
+  const { specs, calling, dialog } = await leftWithSavesOnTheirWay(page, '   ', { next: true })
+  await page.evaluate((words) => {
+    window.__model.specsRefusal = words
+  }, REFUSED.specs)
+  // A refusal is said as one, each on its own: not as a note.
+  const status = page.locator('#status')
+  await letGo(page, 'wakeup.set')
+  await expect(status).toHaveText(REFUSED.calls)
+  await expect(status).toHaveAttribute('data-tone', 'error')
+  await letGo(page, 'project.specs')
+  await expect(status).toHaveText(REFUSED.specs)
+  await expect(status).toHaveAttribute('data-tone', 'error')
+  await settled(page)
+  expect(await shownIn(dialog)).toEqual(FOUNDRYS)
+  await expect(calling.locator('.wakeup-hint')).toBeHidden()
+  await expect(specs.locator('.specs-note')).toBeHidden()
+})
+
+test('Project settings: a save the daemon refuses after the dialog was left, with none opened since, is said on the status line, and not where nobody looks', async ({
+  page,
+}) => {
+  await open(page, twoWithOwnSettings())
+  await leftWithSavesOnTheirWay(page, '   ')
+  await page.evaluate((words) => {
+    window.__model.specsRefusal = words
+  }, REFUSED.specs)
+  const status = page.locator('#status')
+  await letGo(page, 'wakeup.set')
+  await expect(status).toHaveText(REFUSED.calls)
+  await expect(status).toHaveAttribute('data-tone', 'error')
+  await letGo(page, 'project.specs')
+  await expect(status).toHaveText(REFUSED.specs)
+  await expect(status).toHaveAttribute('data-tone', 'error')
+  await settled(page)
+  // The shut dialog has no refusal in it either: what it shows is read again when it opens.
+  for (const words of ['.wakeup-hint', '.specs-note']) {
+    await expect(page.locator(`#project-settings-dialog ${words}`)).toHaveJSProperty('hidden', true)
+  }
+})
+
 test("counts the human's unread notes on Inbox, and opens For you with it, from a folded board too", async ({
   page,
 }) => {

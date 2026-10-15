@@ -9,7 +9,7 @@ import { WakeUpCalls } from './wake-up.js'
  * drift apart. They differ in what a section does with what the human sets:
  *
  * - in Project settings (`page` is given) each saves as it always did, for the
- *   project the board shows: the approval when it is ticked or unticked, the
+ *   project the dialog is for: the approval when it is ticked or unticked, the
  *   calls and the specs by their own Save;
  * - in New project (no `page`) nothing is saved, for there is no project yet:
  *   the sections hold what the human sets, and `values` is what the project
@@ -22,8 +22,8 @@ export class ProjectSections {
 
   /**
    * Puts the sections where `mount` is. `page` is what Project settings'
-   * sections save through: the board shown, the daemon, and how a change is run
-   * and told (`WakeUpCalls` and `SpecsGroup` say which).
+   * sections save through: the project the dialog is for, the daemon, and how a
+   * change is run and told (`WakeUpCalls` and `SpecsGroup` say which).
    */
   constructor(mount, page = null) {
     const sections = document.querySelector('#project-sections').content.cloneNode(true)

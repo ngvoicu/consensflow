@@ -530,9 +530,10 @@ runs = ["page-project-settings"]
 file = "app/ui/core/app.js"
 find = '''  if (!(await showProject(id))) return
   await readAgents()
-  if (state.board?.project.id !== id) return
+  await projectSettings.open(id)
 '''
 replace = '''  await readAgents()
+  await projectSettings.open(state.board.project.id)
 '''
 
 [[plant]]
@@ -585,3 +586,198 @@ file = "app/ui/index.html"
 find = '''    <li role="none"><button type="button" role="menuitem" data-action="settings">Project settings…</button></li>
 '''
 replace = ""
+
+# --- the dialog is for one project, from the moment it is asked for until it closes ---
+# (2026-10-15, an Astra review of the first version: the dialog was drawn from whatever board the
+# page showed, and saved to it, so a project chosen while it opened, or a board that came late,
+# mixed two projects, and a save of the calls could land on the wrong one.)
+
+[[plant]]
+name = "project settings: the menu's project is not chosen again while the board shows it and another is chosen"
+meant = "Project settings: asked for from a project’s menu while another is being chosen, whose board is on its way, they are the menu’s project’s, and that board is not drawn in them when it comes"
+runs = ["page-project-settings"]
+
+[[plant.edit]]
+file = "app/ui/core/app.js"
+find = "  if (state.selected !== id) choose(id)\n"
+replace = "  if (state.board?.project.id !== id) choose(id)\n"
+
+[[plant]]
+name = "project settings: an opening goes on though the human has chosen another project"
+meant = "Project settings: asked for while the human chooses another project, whose board is on its way, they are not opened, nor when the human is back on the project asked for and its board is on its way"
+runs = ["page-project-settings"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = "    if (this.#dialog.open || this.#page.selected() !== project || board?.project.id !== project) {"
+replace = "    if (this.#dialog.open || board?.project.id !== project) {"
+
+[[plant]]
+name = "project settings: an opening goes on though the board shown is another project's"
+meant = "Project settings: asked for while the human chooses another project, whose board is on its way, they are not opened, nor when the human is back on the project asked for and its board is on its way"
+runs = ["page-project-settings"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = "    if (this.#dialog.open || this.#page.selected() !== project || board?.project.id !== project) {"
+replace = "    if (this.#dialog.open || this.#page.selected() !== project) {"
+
+[[plant]]
+name = "project settings: the calls that come late open the dialog for a project the human has left"
+meant = "Project settings: asked for a project the human has left before its calls came, they are not opened, and the calls that came show nowhere"
+runs = ["page-project-settings"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = "    if (this.#dialog.open || this.#page.selected() !== project || board?.project.id !== project) {"
+replace = "    if (this.#dialog.open) {"
+
+[[plant]]
+name = "project settings: a second opening draws over the dialog that is up"
+meant = "Project settings: asked for twice while the calls are on their way, they open once, and the answer that comes second leaves what the human typed"
+runs = ["page-project-settings"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = "    if (this.#dialog.open || this.#page.selected() !== project || board?.project.id !== project) {"
+replace = "    if (this.#page.selected() !== project || board?.project.id !== project) {"
+
+[[plant]]
+name = "project settings: a board of another project redraws the open dialog"
+meant = "Project settings: open for a project they show and save its own, whole, while the page is taken to another project"
+runs = ["page-project-settings"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = "    if (!this.#dialog.open || board?.project.id !== this.#project) return\n    this.#board = board\n"
+replace = "    if (!this.#dialog.open) return\n    this.#board = board\n"
+
+[[plant]]
+name = "project settings: the approval is saved for the project the board shows"
+meant = "Project settings: open for a project they show and save its own, whole, while the page is taken to another project"
+runs = ["page-project-settings"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = "    this.#gate.addEventListener('change', () => {\n      const project = this.#project\n"
+replace = "    this.#gate.addEventListener('change', () => {\n      const project = page.board().project.id\n"
+
+[[plant]]
+name = "project settings: a member is added to the project the board shows"
+meant = "Project settings: open for a project they show and save its own, whole, while the page is taken to another project"
+runs = ["page-project-settings"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = "      if (!agent) return\n      const project = this.#project\n"
+replace = "      if (!agent) return\n      const project = page.board().project.id\n"
+
+[[plant]]
+name = "project settings: a member is removed from the project the board shows"
+meant = "Project settings: open for a project they show and save its own, whole, while the page is taken to another project"
+runs = ["page-project-settings"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = "          await page.daemon('member.remove', { project: this.#project, agent: handle })"
+replace = "          await page.daemon('member.remove', { project: page.board().project.id, agent: handle })"
+
+[[plant]]
+name = "project settings: a member loses a role in the project the board shows"
+meant = "Project settings: open for a project they show and save its own, whole, while the page is taken to another project"
+runs = ["page-project-settings"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = "            await page.daemon('member.roles', {\n              project: this.#project,\n"
+replace = "            await page.daemon('member.roles', {\n              project: page.board().project.id,\n"
+
+[[plant]]
+name = "project settings: a member is looked for on the board shown, whose members are another project's"
+meant = "Project settings: open for a project they show and save its own, whole, while the page is taken to another project"
+runs = ["page-project-settings"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = "      this.#board.lanes.find(\n        (lane) => lane.participant.handle === member.handle && isMember(lane.participant),\n"
+replace = "      this.#page.board().lanes.find(\n        (lane) => lane.participant.handle === member.handle && isMember(lane.participant),\n"
+
+[[plant]]
+name = "project settings: the calls and the specs are saved for the project the board shows"
+meant = "Project settings: open for a project they show and save its own, whole, while the page is taken to another project"
+runs = ["page-project-settings"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = "      project: () => (dialog.open ? this.#project : null),\n"
+replace = "      project: () => page.board().project.id,\n"
+
+[[plant]]
+name = "project settings: a dialog that is shut is still for the project it was"
+meant = "Project settings: a save the daemon refuses after the dialog was left, with none opened since, is said on the status line, and not where nobody looks"
+runs = ["page-project-settings"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = "      project: () => (dialog.open ? this.#project : null),\n"
+replace = "      project: () => this.#project,\n"
+
+[[plant]]
+name = "project settings: the answer to a save of the calls is shown in the dialog of another project"
+meant = "Project settings: a save answered after the dialog was left for another project’s shows nothing in that one, and the status line says it"
+runs = ["page-project-settings"]
+
+[[plant.edit]]
+file = "app/ui/core/wake-up.js"
+find = "        if (this.#page.project() === project) this.show(wakeUp)\n"
+replace = "        this.show(wakeUp)\n"
+
+[[plant]]
+name = "project settings: the refusal of a save of the calls is said in the dialog of another project"
+meant = "Project settings: a save the daemon refuses after the dialog was left for another project’s is said on the status line, and nowhere in that one"
+runs = ["page-project-settings"]
+
+[[plant.edit]]
+file = "app/ui/core/wake-up.js"
+find = "        if (this.#page.project() === project) this.#say(words)\n        else this.#page.report(words)\n"
+replace = "        this.#say(words)\n"
+
+[[plant]]
+name = "project settings: the refusal of a save of the calls is said as a note once the dialog is another project's"
+meant = "Project settings: a save the daemon refuses after the dialog was left for another project’s is said on the status line, and nowhere in that one"
+runs = ["page-project-settings"]
+
+[[plant.edit]]
+file = "app/ui/core/wake-up.js"
+find = "        else this.#page.report(words)\n"
+replace = "        else this.#page.note(words)\n"
+
+[[plant]]
+name = "project settings: the words on a save of the specs are said in the dialog of another project"
+meant = "Project settings: a save answered after the dialog was left for another project’s shows nothing in that one, and the status line says it"
+runs = ["page-project-settings"]
+
+[[plant.edit]]
+file = "app/ui/core/specs.js"
+find = "    if (here) this.#say(refused ?? saved)\n"
+replace = "    this.#say(refused ?? saved)\n"
+
+[[plant]]
+name = "project settings: the refusal of a save of the specs is said nowhere once the dialog is another project's"
+meant = "Project settings: a save the daemon refuses after the dialog was left for another project’s is said on the status line, and nowhere in that one"
+runs = ["page-project-settings"]
+
+[[plant.edit]]
+file = "app/ui/core/specs.js"
+find = "    else if (!here) this.#page.report(refused)\n"
+replace = ""
+
+[[plant]]
+name = "project settings: the refusal of a save of the specs is said as a note once the dialog is another project's"
+meant = "Project settings: a save the daemon refuses after the dialog was left for another project’s is said on the status line, and nowhere in that one"
+runs = ["page-project-settings"]
+
+[[plant.edit]]
+file = "app/ui/core/specs.js"
+find = "    else if (!here) this.#page.report(refused)\n"
+replace = "    else if (!here) this.#page.note(refused)\n"

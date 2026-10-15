@@ -444,7 +444,7 @@ prepare = [["node", "app/scripts/bundle-ui.mjs"]]
 
 [[plant.edit]]
 file = "app/ui/core/dialogs.js"
-find = '''    await this.#wakeUp.load(this.#page.board().project.id)
+find = '''    this.#wakeUp.show(calls)
 '''
 replace = ''
 
@@ -479,8 +479,11 @@ prepare = [["node", "app/scripts/bundle-ui.mjs"]]
 
 [[plant.edit]]
 file = "app/ui/core/wake-up.js"
-find = '        this.#say(cause instanceof Error ? cause.message : String(cause))'
-replace = '        throw cause'
+find = '''        if (this.#page.project() === project) this.#say(words)
+        else this.#page.report(words)
+'''
+replace = '''        throw cause
+'''
 
 # --- the live run's judgment ---
 
