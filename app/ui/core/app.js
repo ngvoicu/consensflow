@@ -422,11 +422,12 @@ function render() {
   const waiting = state.inbox.total
   inboxButton.textContent = waiting === 0 ? 'Inbox' : `Inbox (${waiting})`
   inboxButton.dataset.waiting = String(waiting > 0)
-  // A closed project is read-only: nothing runs, so nothing here may act on
-  // it. Its board and its tasks still read.
+  // A closed project's board is read-only: nothing runs, so nothing on it may act. Its board
+  // and its tasks still read. Its settings change all the same, for they are what its chief
+  // starts with, which the Resume does: Project settings opens for it as for an open project.
   const suspended = project?.state === 'suspended'
   main.dataset.suspended = String(suspended)
-  projectSettingsButton.disabled = project === null || suspended
+  projectSettingsButton.disabled = project === null
   const lanes = state.board?.lanes ?? []
   if (!lanes.some((lane) => lane.participant.handle === state.focus)) state.focus = 'chief'
   if (state.board === null) {

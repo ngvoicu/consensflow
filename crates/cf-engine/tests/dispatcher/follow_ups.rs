@@ -139,3 +139,43 @@ fn a_follow_up_released_by_the_cancel_of_its_sessions_task_goes_once_the_window_
         r"^\[ConsensFlow m-\d+ · T-2 · task from @chief\]\nNow the lexer$",
     );
 }
+
+/// A session that a follow-up waits for on the board is not deleted by the human: the
+/// follow-up's release would queue it for a session no window opens for again. Once the
+/// follow-up is cancelled, it is.
+#[test]
+fn a_session_a_follow_up_waits_for_is_not_deleted_until_the_follow_up_is_cancelled() {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    let project = tiers.project.id;
+    tiers.open();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let session = tiers.assignee(1);
+    context.adapter.answer("zeus", "Parser done");
+    context.pass().unwrap();
+    assert_eq!(tiers.task(1).task.state, "done");
+    context.create_task(
+        project,
+        NewTask {
+            from: "chief".to_owned(),
+            after: Some(1),
+            needs: vec![1],
+            body: "Now the lexer".to_owned(),
+            ..NewTask::default()
+        },
+    );
+    assert_eq!(tiers.task(2).task.state, "open");
+
+    let refused = context.end_session(project, &session).unwrap_err();
+    assert_eq!(refused.refusal().code, "session-busy");
+    assert!(tiers.participant(&session).is_some(), "still on the board");
+
+    context
+        .ledger
+        .borrow_mut()
+        .cancel_task(project, 2, "chief")
+        .unwrap();
+    context.end_session(project, &session).unwrap();
+    assert!(tiers.participant(&session).is_none());
+}

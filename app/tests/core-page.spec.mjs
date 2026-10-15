@@ -4128,7 +4128,8 @@ test('shows a closed project read-only: it reads, nothing on it acts, and a bann
   await expect(main).toHaveAttribute('data-suspended', 'true')
   const banner = page.getByRole('status').filter({ hasText: 'Waiting for Resume.' })
   await expect(banner).toContainText('1 open task, 2 messages waiting.')
-  await expect(page.getByRole('button', { name: 'Project settings' })).toBeDisabled()
+  // Only its settings change: they are what its chief starts with, so they open before the Resume.
+  await expect(page.getByRole('button', { name: 'Project settings' })).toBeEnabled()
   await expect(page.locator('.terminal-card')).toHaveCount(0)
   // Nothing on the board acts: no button for it to be reached by, with the keyboard either.
   const board = page.getByRole('region', { name: 'Board' })
@@ -4903,34 +4904,36 @@ test('project menu: Project settings… on a project while the board of another 
   expect(await calls(page, 'wakeup.get')).toEqual([{ project: 2 }])
 })
 
-test('project menu: a closed project has no Project settings to open, as the board has no button for it, and the keys pass it by', async ({
+test('project menu: a closed project has Project settings… to open as an open one has, and the keys reach it', async ({
   page,
 }) => {
   await open(page)
   // foundry is closed.
   await menuOn(page, 2)
-  await expect(itemNamed(page, 'Project settings…')).toBeDisabled()
-  await expect(itemNamed(page, 'Rename…')).toBeFocused()
-  await page.keyboard.press('ArrowDown')
-  await expect(itemNamed(page, 'Description…')).toBeFocused()
-  await page.keyboard.press('ArrowDown')
-  await expect(itemNamed(page, 'Rename…')).toBeFocused()
-  await page.keyboard.press('End')
-  await expect(itemNamed(page, 'Description…')).toBeFocused()
-  await itemNamed(page, 'Project settings…').click({ force: true })
-  await expect(page.getByRole('dialog', { name: 'Project settings' })).toBeHidden()
-  expect(await calls(page, 'wakeup.get')).toEqual([])
-  await expect(page.locator('#project-title')).toHaveText('harbour')
-  // The menu is for the project as the page has it now: resumed from elsewhere, it has settings.
-  await changed(page, () => {
-    window.__model.projects[1].state = 'open'
-    window.__model.boards[2].project.state = 'open'
-  })
-  await expect(projectMenu(page)).toBeVisible()
+  await expect(projectMenu(page).getByRole('menuitem')).toHaveText([
+    'Rename…',
+    'Description…',
+    'Project settings…',
+  ])
   await expect(itemNamed(page, 'Project settings…')).toBeEnabled()
-  await itemNamed(page, 'Rename…').focus()
+  await expect(itemNamed(page, 'Rename…')).toBeFocused()
+  await page.keyboard.press('ArrowDown')
+  await expect(itemNamed(page, 'Description…')).toBeFocused()
+  await page.keyboard.press('ArrowDown')
+  await expect(itemNamed(page, 'Project settings…')).toBeFocused()
+  await page.keyboard.press('ArrowDown')
+  await expect(itemNamed(page, 'Rename…')).toBeFocused()
   await page.keyboard.press('End')
   await expect(itemNamed(page, 'Project settings…')).toBeFocused()
+  // Chosen, it shows foundry, as it does for any project the board does not show, and opens
+  // the dialog on it.
+  await page.keyboard.press('Enter')
+  await expect(page.getByRole('dialog', { name: 'Project settings' })).toBeVisible()
+  await expect(page.locator('#project-title')).toHaveText('foundry')
+  expect(await calls(page, 'wakeup.get')).toEqual([{ project: 2 }])
+  // Nothing of the project is resumed by it: the board is still a closed project's.
+  await expect(page.locator('main.main')).toHaveAttribute('data-suspended', 'true')
+  expect(await calls(page, 'project.resume')).toEqual([])
 })
 
 /**
@@ -5459,6 +5462,80 @@ test('Project settings: a save the daemon refuses after the dialog was left, wit
   for (const words of ['.wakeup-hint', '.specs-note']) {
     await expect(page.locator(`#project-settings-dialog ${words}`)).toHaveJSProperty('hidden', true)
   }
+})
+
+// --- A closed project's settings open as an open project's do, and its board stays read-only. ---
+
+/**
+ * twoWithOwnSettings with foundry closed, as every project is after a start: no window, nothing
+ * at work, its Resume waiting.
+ */
+function closedWithOwnSettings() {
+  const data = twoWithOwnSettings()
+  data.projects[1].state = 'suspended'
+  const board = data.boards[2]
+  board.project.state = 'suspended'
+  for (const lane of board.lanes) {
+    lane.activity = { state: 'closed' }
+    lane.pane = null
+  }
+  board.resume = { tasks: 0, messages: 0 }
+  return data
+}
+
+test('Project settings: open for a closed project from its menu and from the board’s button, and every section saves for it, while its board stays a closed project’s', async ({
+  page,
+}) => {
+  await open(page, closedWithOwnSettings())
+  const main = page.locator('main.main')
+  const banner = page.getByRole('status').filter({ hasText: 'Waiting for Resume.' })
+  // From its menu: foundry is shown, closed, and the dialog is its own.
+  const dialog = await dialogFrom(page, 2, 'Project settings…', 'Project settings')
+  await expect(page.locator('#project-title')).toHaveText('foundry')
+  await expect(main).toHaveAttribute('data-suspended', 'true')
+  expect(await shownIn(dialog)).toEqual(FOUNDRYS)
+  const section = (name) => dialog.getByRole('group', { name, exact: true })
+  // Its specs and its calls are saved as an open project's are, and asked of foundry.
+  await section('Specs').locator('[name="specs"]').selectOption('on')
+  await section('Specs').locator('[name="specsFolder"]').fill('plans')
+  await section('Specs').getByRole('button', { name: 'Save specs' }).click()
+  await expect
+    .poll(() => calls(page, 'project.specs'))
+    .toEqual([{ project: 2, on: true, folder: 'plans', variant: 'core-html' }])
+  await section('Wake-up calls').getByRole('checkbox').check()
+  await section('Wake-up calls').getByLabel('Every').fill('45')
+  await section('Wake-up calls').getByRole('button', { name: 'Save wake-up calls' }).click()
+  await expect
+    .poll(() => calls(page, 'wakeup.set'))
+    .toEqual([{ project: 2, on: true, every: 45, unit: 'minutes', text: DEFAULT_WAKE_UP_WORDS }])
+  await page.keyboard.press('Escape')
+  await expect(dialog).toBeHidden()
+  // From the board's own button, with foundry shown: the same dialog, with what was saved in it.
+  const button = page.getByRole('button', { name: 'Project settings' })
+  await expect(button).toBeEnabled()
+  await button.click()
+  await expect(dialog).toBeVisible()
+  expect(await shownIn(dialog)).toEqual({
+    ...FOUNDRYS,
+    specs: ['on', 'plans', 'core-html'],
+    calls: [true, '45', 'minutes', DEFAULT_WAKE_UP_WORDS],
+  })
+  // Its approval and its staff are saved too, for foundry.
+  await section('Human approval').getByRole('checkbox').uncheck()
+  await expect.poll(() => calls(page, 'project.gate')).toEqual([{ project: 2, gate: false }])
+  await section('Staff').getByRole('button', { name: 'Add to staff' }).click()
+  await expect
+    .poll(() => calls(page, 'member.add'))
+    .toEqual([{ project: 2, agent: 'hera', roles: ['worker'] }])
+  await dialog.getByRole('button', { name: 'Remove Worker @athena' }).click()
+  await dialog.getByRole('button', { name: 'Remove @athena', exact: true }).click()
+  await expect.poll(() => calls(page, 'member.remove')).toEqual([{ project: 2, agent: 'athena' }])
+  await dialog.getByRole('button', { name: 'Close' }).click()
+  // Nothing of it resumed the project: its board is read-only still, and its banner waits.
+  await expect(main).toHaveAttribute('data-suspended', 'true')
+  await expect(banner).toBeVisible()
+  await expect(page.locator('.terminal-card')).toHaveCount(0)
+  expect(await calls(page, 'project.resume')).toEqual([])
 })
 
 test("counts the human's unread notes on Inbox, and opens For you with it, from a folded board too", async ({

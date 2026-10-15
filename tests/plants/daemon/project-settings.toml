@@ -1,6 +1,6 @@
 # Project settings, and a new project's (2026-10-15: the board's Staff button became Project
 # settings, with Staff, Human approval, Wake-up calls and Specs as its sections; New project has
-# the same four, built from the same code; the project's menu opens them for any open project; a
+# the same four, built from the same code; the project's menu opens them for any project; a
 # project's description shows whole in the list). The wake-up calls and the specs a new project
 # says are carried by `project.open` and kept in the very write that makes the project, because
 # the chief's first launch reads the specs of the project it is given, and a second call from
@@ -14,7 +14,11 @@
 # page's xterm they stand on is the tracked `app/ui/vendor`, so no plant bundles it). The
 # `project settings rig:` plants run the case of the rig that holds the chief's very first
 # window to the specs (`crates/cf-e2e/tests/rig/specs.rs`), and say `builds`: the family builds
-# the native `cf` again once each is put back. Every name holds `project settings`, so
+# the native `cf` again once each is put back. The settings of a closed project open as an open
+# one's do (the owner's report, the same day: a start leaves every project closed until its
+# Resume, and the specs reach the chief only as it starts); the daemon accepts each save of
+# them and starts nothing for it, which the page's operations hold on the real dispatcher
+# (`crates/cf-daemon/src/page/tests/suspended.rs`). Every name holds `project settings`, so
 # `npm run plants:daemon -- "project settings"` runs them all.
 
 [run]
@@ -26,8 +30,12 @@ engine-opened-wake-up = ["cargo", "test", "--offline", "-p", "cf-engine", "--tes
 # The page's `project.open`, over the bridge, and the words New project starts the calls with.
 daemon-opening-page = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "page::tests::opening"]
 daemon-wake-up-page = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "page::tests::wake_up"]
+# The page's saves of a closed project, over the bridge: accepted, and no window opened for them.
+daemon-suspended = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "page::tests::suspended"]
 # The dialog and the menu, in the browser Playwright keeps, and New project's start.
 page-project-settings = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "Project settings"]
+# The same, with the closed project's board that stays read-only beside them.
+page-closed-settings = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "Project settings|closed project"]
 page-new-project = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "New project"]
 # What the board says of a project with no members, which names where to add them.
 page-board-empty = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "no members yet|board says it has none"]
@@ -547,24 +555,14 @@ find = "    while (refreshing !== null) await refreshing\n"
 replace = ""
 
 [[plant]]
-name = "project settings: the menu offers them for a closed project"
-meant = "project menu: a closed project has no Project settings to open, as the board has no button for it, and the keys pass it by"
-runs = ["page-project-settings"]
+name = "project settings: the menu's item is off for a project that is not open"
+meant = "project menu: a closed project has Project settings… to open as an open one has, and the keys reach it"
+runs = ["page-closed-settings"]
 
 [[plant.edit]]
 file = "app/ui/core/project-menu.js"
-find = "item.disabled = project.state !== 'open'"
-replace = "item.disabled = false"
-
-[[plant]]
-name = "project settings: the arrow keys stop on the item that cannot be chosen"
-meant = "project menu: a closed project has no Project settings to open, as the board has no button for it, and the keys pass it by"
-runs = ["page-project-settings"]
-
-[[plant.edit]]
-file = "app/ui/core/project-menu.js"
-find = "    const items = this.#items.filter((item) => !item.disabled)\n"
-replace = "    const items = this.#items\n"
+find = "    this.#at = this.#placeOf(project.id)\n"
+replace = "    this.#at = this.#placeOf(project.id)\n    for (const item of this.#items) {\n      if (item.dataset.action === 'settings') item.disabled = project.state !== 'open'\n    }\n"
 
 [[plant]]
 name = "project settings: the keyboard does not go back to the project when its settings are left"
@@ -781,3 +779,61 @@ runs = ["page-project-settings"]
 file = "app/ui/core/specs.js"
 find = "    else if (!here) this.#page.report(refused)\n"
 replace = "    else if (!here) this.#page.note(refused)\n"
+
+# --- a closed project's settings open as an open project's do, and its board stays read-only ---
+# (2026-10-15, the owner's report: every project is closed after a start until its Resume, so the
+# settings were greyed out most of the time, and specs reach the chief only as it starts. The
+# menu's item has its plant above, beside the menu's others.)
+
+[[plant]]
+name = "project settings: the board's button is off for a closed project"
+meant = "Project settings: open for a closed project from its menu and from the board’s button, and every section saves for it, while its board stays a closed project’s"
+runs = ["page-closed-settings"]
+
+[[plant.edit]]
+file = "app/ui/core/app.js"
+find = "  projectSettingsButton.disabled = project === null\n"
+replace = "  projectSettingsButton.disabled = project === null || suspended\n"
+
+[[plant]]
+name = "project settings: the pass steps the windows of a closed project, and a task waiting opens one for a save's sake"
+meant = "each_section_saves_for_a_closed_project_and_nothing_starts_or_goes_until_it_is_resumed"
+runs = ["daemon-suspended"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''        if project.state != "open" {
+            return Ok(());
+        }
+        // A chief whose agent is gone stays closed'''
+replace = '''        // A chief whose agent is gone stays closed'''
+
+[[plant]]
+name = "project settings: the daemon refuses the approval of a closed project"
+meant = "each_section_saves_for_a_closed_project_and_nothing_starts_or_goes_until_it_is_resumed"
+runs = ["daemon-suspended"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/projects.rs"
+find = '''    let gate = parse_gate(body.get("gate"))?;
+    let project = page'''
+replace = '''    let gate = parse_gate(body.get("gate"))?;
+    if let Some(shut) = page.ledger.borrow().project(body.whole("project")?)? {
+        cf_engine::require_open(&shut)?;
+    }
+    let project = page'''
+
+[[plant]]
+name = "project settings: the daemon refuses a member's removal from a closed project"
+meant = "a_member_removed_from_a_closed_project_has_its_tasks_cancelled_and_the_chief_is_told_at_the_resume"
+runs = ["daemon-suspended"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/staff.rs"
+find = '''pub(super) async fn remove(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
+'''
+replace = '''pub(super) async fn remove(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
+    if let Some(shut) = page.ledger.borrow().project(body.whole("project")?)? {
+        cf_engine::require_open(&shut)?;
+    }
+'''
