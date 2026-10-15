@@ -1,0 +1,68 @@
+# A follow-up refused behind another that waited for the same idle window (the owner's report of
+# 2026-10-14, ConsensFlow 3.0.3: T-44, `--after T-40 --before T-43`, was refused because T-43, a
+# follow-up for the same session, waited on the board for T-41 and T-42). A door refuses a session
+# only while it has a task in hand (`require_free`), and the release gives its window what waits for
+# it one at a time. The case is `crates/cf-e2e/tests/regressions/follow_up_refused_behind_a_waiting_follow_up.rs`;
+# the ledger's own tests are in `crates/cf-ledger/tests/receipt/sessions.rs`.
+#
+# The first two plants put 3.0.3's rule back: a follow-up that waits on the board makes its session
+# busy to every door. The rule's going made two states reachable that no door gave before, a session
+# with a task in hand and another waiting for it on the board, and the last two plants take out what
+# holds them: a follow-up paused while it waited is not resumed into a window at work on another, and
+# a cancel that releases what waited stops the window on the task it was given, not on the one the
+# release queued (an Astra review of the change, 2026-10-15). The case builds the native `cf` from the
+# sources as they are planted, so its plant says `builds`. Every name holds `follow-ups queue`, so
+# `npm run plants:daemon -- "follow-ups queue"` runs them all.
+
+[run]
+rig-regression-follow-ups = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "follow_up_refused_behind_a_waiting_follow_up::"]
+# The engine's dispatcher tests of a follow-up that waits for its session.
+engine-follow-ups-queue = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "follow_ups"]
+
+[[plant]]
+name = "follow-ups queue: a follow-up waiting on the board makes its session busy, and the chief's follow-up before it is refused"
+meant = "a_follow_up_put_before_one_that_waits_for_the_same_idle_window_goes_to_it_and_the_waiting_one_after"
+runs = ["rig-regression-follow-ups"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff/sessions.rs"
+find = "    if taker.member_id.is_some() && on_other_work(store, taker.id, giving)? {"
+replace = '''    if taker.member_id.is_some()
+        && (on_other_work(store, taker.id, giving)? || has_task_in(store, taker.id, &["open"])?)
+    {'''
+
+[[plant]]
+name = "follow-ups queue: a follow-up waiting on the board makes its session busy to every door"
+meant = "a_follow_up_waiting_for_what_it_needs_leaves_its_session_free_to_every_door"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff/sessions.rs"
+find = "    if taker.member_id.is_some() && on_other_work(store, taker.id, giving)? {"
+replace = '''    if taker.member_id.is_some()
+        && (on_other_work(store, taker.id, giving)? || has_task_in(store, taker.id, &["open"])?)
+    {'''
+
+[[plant]]
+name = "follow-ups queue: a follow-up paused while it waited is resumed into a window at work on another"
+meant = "a_waiting_follow_up_paused_is_not_resumed_into_a_session_at_work_on_another"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = """
+        require_free(store, &assignee, Giving::Resumed(number))?;
+        let words = carrier_body(store, &task, assignee.id, &format!("Resumed: {body}"))?;"""
+replace = """
+        let words = carrier_body(store, &task, assignee.id, &format!("Resumed: {body}"))?;"""
+
+[[plant]]
+name = "follow-ups queue: a cancel that releases what waited looks for the cancelled task in what the release queued"
+meant = "a_follow_up_released_by_the_cancel_of_its_sessions_task_goes_once_the_window_is_stopped"
+runs = ["engine-follow-ups-queue"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/stops.rs"
+find = "        let cancelled = self.seams.ledger.borrow().task_given(participant.id)?;"
+replace = "        let cancelled = self.seams.ledger.borrow().last_task(participant.id)?;"

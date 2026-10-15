@@ -173,6 +173,26 @@ pub(crate) fn last_task(
     )
 }
 
+/// The task a participant's window was last given, whatever its state now, or
+/// none: the one the newest task message that began to reach it (being pasted,
+/// pasted or read) was about. A task message queued for it since is not given
+/// yet: a cancel that frees a session releases what waited on the board for it
+/// in the same step, and the window is on the cancelled task until it is
+/// stopped.
+pub(crate) fn task_given(
+    store: &Store,
+    participant_id: i64,
+) -> Result<Option<TaskThread>, LedgerError> {
+    task_found(
+        store,
+        "SELECT t.project_id, t.number FROM message m JOIN task t ON t.id = m.task_id
+       WHERE m.recipient_id = ? AND m.kind = 'task'
+         AND m.state IN ('delivering', 'delivered', 'read')
+       ORDER BY m.id DESC LIMIT 1",
+        participant_id,
+    )
+}
+
 fn task_row_by_id(store: &Store, id: i64) -> Result<TaskRow, LedgerError> {
     Ok(store
         .db

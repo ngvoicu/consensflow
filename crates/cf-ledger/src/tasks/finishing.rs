@@ -127,9 +127,9 @@ fn require_result_received(store: &Store, task: &TaskRow, by: &str) -> Result<()
 /// the end of a session's task in hand: its result, its calling off, its
 /// failing (`fail_task`, and a delivery that fails for good), and its being
 /// taken back for its tier. It refuses nothing of its own, which would fail
-/// that step for something else's sake. Every door gives a session one waiting
-/// task at a time (`holds_work`), so a session is busy here only in a ledger
-/// written before they did.
+/// that step for something else's sake. A session can have several waiting:
+/// a door refuses it only while it has a task in hand (`require_free`), and
+/// `--before` orders them by what each needs.
 pub(crate) fn release_ready(store: &mut Store, project_id: i64) -> Result<(), LedgerError> {
     let waiting = store
         .db
@@ -168,8 +168,7 @@ pub(crate) fn release_ready(store: &mut Store, project_id: i64) -> Result<(), Le
 
 /// A follow-up on a finished or failed task: it goes back to its assignee's
 /// queue, and a session the human deleted is brought back to the board for it.
-/// A session that is spoken for (`holds_work`: on another task, or with a
-/// follow-up waiting for what it needs) takes none, and is refused as a
+/// A session with another task in hand takes none, and is refused as a
 /// follow-up is, `session-busy`, in the words of a task sent back (it is not
 /// opened for a tier; what it needs can be given as a new task): its window
 /// has one task to work on. The follow-up is a task message that carries what

@@ -253,13 +253,16 @@ impl Dispatcher {
 
     /// The window is at work and the task it was last given was cancelled:
     /// when its turn is the one about it, three rounds of Escape, and no more.
+    /// A task queued for the window since (what waited on the board for the
+    /// session, released by the cancel) is not given yet: it waits for the
+    /// window to be at rest.
     async fn interrupt_cancelled(
         self: &Rc<Self>,
         participant: &ParticipantView,
         record: &Rc<Record>,
         observed: &Observed,
     ) -> Result<(), EngineError> {
-        let cancelled = self.seams.ledger.borrow().last_task(participant.id)?;
+        let cancelled = self.seams.ledger.borrow().task_given(participant.id)?;
         let Some(cancelled) = cancelled.filter(|thread| thread.task.state == "cancelled") else {
             return Ok(());
         };

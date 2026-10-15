@@ -15,6 +15,7 @@ use super::{
 use crate::messages::{fold, leave_pause_notes, release_carried, tell_goes_on, transfer};
 use crate::model::{self, LedgerError, ACTIVE_TASK_STATES, MAX_BODY};
 use crate::queue::{queue, send, Queued, Sent};
+use crate::staff::{require_free, Giving};
 use crate::store::Store;
 use crate::views::TaskRow;
 
@@ -325,6 +326,10 @@ pub(crate) fn told_since_paused(
 ///   the window kept in its brief, once; a task given by name has no other
 ///   session to go to, and is refused.
 ///
+/// A session at work on another task is refused, as a door refuses it
+/// (`require_free`): a follow-up paused while it waited on the board for its
+/// needs may find its session on a task given it since.
+///
 /// `by` is none when the daemon resumes a held task in its own name. Whoever
 /// resumes it, what its requester was told of the pause and has not been
 /// given yet is withdrawn: it would arrive after the pause was over. What the
@@ -417,6 +422,7 @@ pub(crate) fn resume_task(
                 message: None,
             });
         }
+        require_free(store, &assignee, Giving::Resumed(number))?;
         let words = carrier_body(store, &task, assignee.id, &format!("Resumed: {body}"))?;
         let message_id = queue(
             store,

@@ -200,4 +200,10 @@ impl Ledger {
     pub fn last_task(&self, participant_id: i64) -> Result<Option<TaskThread>, LedgerError> {
         tasks::last_task(&self.store, participant_id)
     }
+
+    /// The task a participant's window was last given, whatever its state now: a
+    /// task message queued for it since is not given yet.
+    pub fn task_given(&self, participant_id: i64) -> Result<Option<TaskThread>, LedgerError> {
+        tasks::task_given(&self.store, participant_id)
+    }
 }

@@ -162,28 +162,39 @@ pub(crate) enum Giving {
     /// that task, and cannot be opened for a tier; what it still needs can be
     /// given as a new one.
     SentBack(i64),
+    /// Task `number`, paused, resumed into its session's window: it counts as in
+    /// hand while paused, and only another task in hand makes the session busy.
+    /// A follow-up paused while it waited on the board for its needs is one: the
+    /// session may have taken another task since.
+    Resumed(i64),
 }
 
 /// A member session takes one task at a time, and this is the one rule that
 /// every door giving a session a task holds it to: a follow-up (`--after`), a
 /// task sent back to it (a reopen) and a task named for it are refused
-/// `session-busy` while it [`holds_work`], so that its window is never at work
-/// on one task while the board speaks of another. The refusal says what the
-/// door can do instead (`giving`). What waits on the board for its needs is
-/// not refused: that release (`release_ready`) is the ledger's own, and waits
-/// for the session to be free. The chief, the human and a member's own lane
-/// are no sessions, and are held to nothing.
+/// `session-busy` while it has a task in hand ([`has_task_in_hand`]), and so is
+/// a paused task resumed into its window while it has another, so that its
+/// window is never at work on one task while the board speaks of another.
+/// The refusal says what the door can do instead (`giving`). A task that waits
+/// on the board for what it needs does not make its session busy: the release
+/// (`release_ready`) gives the session's window those one at a time, each once
+/// the window is free, so a door that gives the session another task meanwhile
+/// leaves the board and the window speaking of one (the owner's report of
+/// 2026-10-14, a follow-up refused while another waited for the same idle
+/// window). The chief, the human and a member's own lane are no sessions, and
+/// are held to nothing.
 pub(crate) fn require_free(
     store: &Store,
     taker: &ParticipantRow,
     giving: Giving,
 ) -> Result<(), LedgerError> {
-    if taker.member_id.is_some() && holds_work(store, taker.id)? {
+    if taker.member_id.is_some() && on_other_work(store, taker.id, giving)? {
         let instead = match giving {
             Giving::Task => ", or open the task for its tier".to_owned(),
             Giving::SentBack(number) => {
                 format!(" before sending T-{number} back, or open a new task for its tier")
             }
+            Giving::Resumed(number) => format!(" before resuming T-{number}"),
         };
         return Err(LedgerError::refused_with(
             "session-busy",
@@ -197,28 +208,32 @@ pub(crate) fn require_free(
     Ok(())
 }
 
-/// Whether a session is spoken for, so that no door gives it another task: it
-/// has a task in hand ([`has_task_in_hand`]), or a follow-up that waits on the
-/// board for what it needs (`open`: given with `--after … --needs`). The
-/// waiting one counts though nothing of it has reached the window, because it
-/// is the session's already and goes to its window the moment its needs are
-/// accepted: a task given to the session meanwhile would find the window at
-/// work on one when the other arrived, and the board and the window would
-/// speak of two.
-fn holds_work(store: &Store, participant_id: i64) -> Result<bool, LedgerError> {
-    has_task_in(
-        store,
-        participant_id,
-        &[&HELD_TASK_STATES[..], &["paused", "open"]].concat(),
-    )
+/// Whether a participant has a task in hand that is not the one `giving` gives
+/// it: any, but for a task resumed, which is its own already.
+fn on_other_work(store: &Store, participant_id: i64, giving: Giving) -> Result<bool, LedgerError> {
+    let Giving::Resumed(number) = giving else {
+        return has_task_in_hand(store, participant_id);
+    };
+    Ok(store
+        .db
+        .query_row(
+            &format!(
+                "SELECT 1 FROM task WHERE assignee_id = ? AND number != ? AND state IN ({})",
+                sql_list(&[&HELD_TASK_STATES[..], &["paused"]].concat())
+            ),
+            params![participant_id, number],
+            |_| Ok(()),
+        )
+        .optional()?
+        .is_some())
 }
 
 /// Whether a participant's window has a task in hand: queued, working or
 /// waiting, or paused, whose window stays for the resumption. A follow-up that
 /// waits on the board for what it needs is not: nothing of it has reached the
-/// window, which closes when it has no task in hand (`holds_work` is what
-/// keeps the session from being given another), and the follow-up goes, once
-/// its needs are accepted, to a session with none in hand.
+/// window, which closes when it has no task in hand, and the follow-up goes,
+/// once its needs are accepted, to a session with none in hand; of several
+/// waiting for one session, one at a time (`release_ready`).
 pub(crate) fn has_task_in_hand(store: &Store, participant_id: i64) -> Result<bool, LedgerError> {
     has_task_in(
         store,

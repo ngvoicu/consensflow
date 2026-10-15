@@ -42,6 +42,8 @@ mod codex_role_on_resume;
 mod devin_notes_twice;
 #[path = "regressions/devin_pause.rs"]
 mod devin_pause;
+#[path = "regressions/follow_up_refused_behind_a_waiting_follow_up.rs"]
+mod follow_up_refused_behind_a_waiting_follow_up;
 // Windows keeps the limit the report documents (a job object has no process
 // groups or parents to look at), so there is nothing there to assert.
 #[cfg(unix)]

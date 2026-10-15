@@ -3,7 +3,9 @@
 # one (a follow-up, a reopen, a task named for it, or what waited on the board
 # for its needs), and what waited goes to the session once it is free. One
 # plant takes one check out; a test of the door fails. The reopen's plant is
-# in `obligations.toml`, which is where the rule was first made.
+# in `obligations.toml`, which is where the rule was first made; the plant of
+# 3.0.3's rule, which counted a follow-up waiting on the board as work in hand,
+# is in `follow-ups-queue.toml`.
 
 [run]
 # The engine's dispatcher tests about a follow-up that waits for its session.
@@ -34,24 +36,14 @@ find = '''
 replace = "                let named = store.participant_by_handle(project_id, to)?;"
 
 [[plant]]
-name = "session: a follow-up that waits for what it needs does not make its session busy"
-meant = "a_follow_up_waiting_for_what_it_needs_makes_its_session_busy_to_every_door_though_its_window_has_nothing_in_hand"
-runs = ["ledger-receipt"]
-
-[[plant.edit]]
-file = "crates/cf-ledger/src/staff/sessions.rs"
-find = '        &[&HELD_TASK_STATES[..], &["paused", "open"]].concat(),'
-replace = '        &[&HELD_TASK_STATES[..], &["paused"]].concat(),'
-
-[[plant]]
 name = "session: the rule holds a member that is no session, the chief too"
 meant = "the_rule_is_a_member_sessions_and_the_chief_and_a_members_own_lane_are_held_to_none"
 runs = ["ledger-receipt"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/staff/sessions.rs"
-find = "    if taker.member_id.is_some() && holds_work(store, taker.id)? {"
-replace = "    if holds_work(store, taker.id)? {"
+find = "    if taker.member_id.is_some() && on_other_work(store, taker.id, giving)? {"
+replace = "    if on_other_work(store, taker.id, giving)? {"
 
 [[plant]]
 name = "session: a window is kept open for a follow-up that waits for what it needs"
@@ -65,7 +57,7 @@ replace = '        &[&HELD_TASK_STATES[..], &["paused", "open"]].concat(),'
 
 [[plant]]
 name = "session: a follow-up that waits for what it needs is in hand of its window"
-meant = "a_follow_up_waiting_for_what_it_needs_makes_its_session_busy_to_every_door_though_its_window_has_nothing_in_hand"
+meant = "a_follow_up_waiting_for_what_it_needs_leaves_its_session_free_to_every_door"
 runs = ["ledger-receipt"]
 
 [[plant.edit]]
@@ -95,7 +87,7 @@ replace = "        if assignee.member_id.is_some() && false && has_task_in_hand(
 
 [[plant]]
 name = "session: a task waiting for its session is not released when its need is accepted"
-meant = "a_follow_up_waiting_for_what_it_needs_makes_its_session_busy_to_every_door_though_its_window_has_nothing_in_hand"
+meant = "a_follow_up_put_before_one_that_waits_goes_to_the_window_now_and_the_waiting_one_after_it"
 runs = ["ledger-receipt"]
 
 [[plant.edit]]

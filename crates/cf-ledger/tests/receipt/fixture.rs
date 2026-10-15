@@ -181,8 +181,8 @@ impl World {
 
     /// Hands open task `number` to `session` as a ledger written before one
     /// task per session could have: a follow-up waiting on the board for what
-    /// it needs, given to a session that has another waiting or at work. No
-    /// door of this ledger gives one.
+    /// it needs, given to a session that has another at work. No door of this
+    /// ledger gives one.
     pub fn hand_to(&mut self, number: i64, session: &str) {
         let session = self.id(session);
         self.edit(|db| {
@@ -216,6 +216,26 @@ impl World {
                 from: "chief".into(),
                 after: Some(after),
                 needs: numbers(needs),
+                body: body.into(),
+                ..NewTask::default()
+            },
+        )
+    }
+
+    /// The chief gives a follow-up to the session that did task `after`, which
+    /// the open tasks `before` then wait for as well; the ledger may refuse it.
+    pub fn follow_up_before(
+        &mut self,
+        after: i64,
+        body: &str,
+        before: &[i64],
+    ) -> Result<TaskCreated, LedgerError> {
+        self.ledger.create_task(
+            self.project,
+            &NewTask {
+                from: "chief".into(),
+                after: Some(after),
+                before: numbers(before),
                 body: body.into(),
                 ..NewTask::default()
             },
