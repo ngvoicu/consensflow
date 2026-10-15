@@ -225,6 +225,14 @@ fn the_uncommitted_work_is_played_against_the_stand_in_agent_on_a_workspace_with
     );
     assert_eq!(report["checks"].as_array().unwrap().len(), 8);
     assert_eq!(report["mechanics"].as_array().unwrap().len(), 6);
+    // The undo is the owner's second message, typed once the chief was done with the
+    // first, which is when the page is read for T-1's result.
+    assert_eq!(report["followUpsSent"], 1, "{report}");
+    assert!(
+        ran.stdout
+            .contains("the owner's next message (1): Acum dă o continuare"),
+        "{ran}"
+    );
     let metrics = &report["metrics"];
     assert_eq!(
         metrics["filesChanged"],

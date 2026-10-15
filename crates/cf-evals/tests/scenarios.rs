@@ -142,6 +142,17 @@ fn only_the_uncommitted_work_has_a_change_of_the_owner_s_reads_its_page_and_coun
             // find for itself.
             assert!(!scenario.prompt.contains(change.replace), "{id}");
             assert!(!scenario.prompt.contains("100"), "{id}");
+            // The undo is the owner's second message, never the first's: the run reads
+            // the page T-1 left just before it is typed (Sol, 2026-10-15).
+            assert!(!scenario.prompt.contains("--after"), "{id}");
+            let [FollowUp::Say(undo)] = scenario.follow_ups.as_slice() else {
+                panic!("{id}: one message after the first, the undo");
+            };
+            assert!(undo.contains("cf task add --after T-1"), "{undo}");
+            assert!(
+                !undo.contains(change.replace) && !undo.contains("100"),
+                "{undo}"
+            );
         } else {
             // The others' reports keep their shape: no file read, no file gone counted.
             assert!(scenario.uncommitted.is_none(), "{id}");

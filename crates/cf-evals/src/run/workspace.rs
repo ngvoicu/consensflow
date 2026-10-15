@@ -48,11 +48,13 @@ pub fn fresh(machine: &Machine, scenario: &Scenario) -> Result<PathBuf> {
 ///
 /// Git keeps the files' line ends as they are, on Windows too, so that a file a worker
 /// restores from the commit is the fixture's to the byte. Nothing of the person's git
-/// has a part in the setup: neither their global nor their system configuration (a
-/// hook folder, an excludes file, signing, line-end rules), nor a template folder
-/// (`--template=`, over `GIT_TEMPLATE_DIR` too), and over what the environment may
-/// still pass (`GIT_CONFIG_PARAMETERS`) the hooks are an empty folder and nothing is
-/// signed. Only the setup runs so: the workers run the person's git as it is.
+/// has a part in the setup (a hook folder, an excludes file, signing, line-end rules):
+/// neither their global nor their system configuration, nor what their environment
+/// passes in `GIT_CONFIG_PARAMETERS` or in `GIT_CONFIG_COUNT` and its
+/// `GIT_CONFIG_KEY_n` and `GIT_CONFIG_VALUE_n` (Sol, 2026-10-15), nor a `GIT_CONFIG`
+/// that would take the setup's own `git config` elsewhere, nor a template folder
+/// (`--template=`, over `GIT_TEMPLATE_DIR` too); the hooks are an empty folder and
+/// nothing is signed. Only the setup runs so: the workers run the person's git as it is.
 fn uncommitted(git: &Run, workspace: &Path, change: &Uncommitted) -> Result {
     let repository = workspace.join(".git");
     let hooks = repository.join("hooks-off");
@@ -61,6 +63,9 @@ fn uncommitted(git: &Run, workspace: &Path, change: &Uncommitted) -> Result {
             .clone()
             .var("GIT_CONFIG_GLOBAL", repository.join("no-global-config"))
             .var("GIT_CONFIG_NOSYSTEM", "1")
+            .var("GIT_CONFIG_PARAMETERS", "")
+            .var("GIT_CONFIG_COUNT", "0")
+            .var("GIT_CONFIG", repository.join("config"))
             .arg("-c")
             .arg(format!("core.hooksPath={}", hooks.display()))
             .args(["-c", "commit.gpgsign=false"])
@@ -299,6 +304,10 @@ mod tests {
         );
         write(&theirs, "global", &configuration);
         write(&theirs, "system", &configuration);
+        // And what their environment passes on top (Sol, 2026-10-15): the same excludes
+        // file in both of the environment's channels, `GIT_CONFIG_PARAMETERS` (which
+        // `git -c` writes for the programs it starts) and `GIT_CONFIG_COUNT` with its
+        // keys and values; and a `GIT_CONFIG` that would take a `git config` elsewhere.
         let hostile = plain_git()
             .var("GIT_CONFIG_GLOBAL", theirs.join("global"))
             .var("GIT_CONFIG_SYSTEM", theirs.join("system"))
@@ -306,12 +315,28 @@ mod tests {
             .var(
                 "GIT_CONFIG_PARAMETERS",
                 format!(
-                    "'core.hooksPath'='{}' 'commit.gpgsign'='true' 'gpg.program'='{}'",
+                    "'core.hooksPath'='{}' 'commit.gpgsign'='true' 'gpg.program'='{}' \
+                     'core.excludesFile'='{}'",
                     path("hooks"),
-                    path("no-such-gpg")
+                    path("no-such-gpg"),
+                    path("excludes"),
                 ),
-            );
+            )
+            .var("GIT_CONFIG_COUNT", "1")
+            .var("GIT_CONFIG_KEY_0", "core.excludesFile")
+            .var("GIT_CONFIG_VALUE_0", path("excludes"))
+            .var("GIT_CONFIG", theirs.join("elsewhere"));
         uncommitted(&hostile, &workspace, &CHANGE).unwrap();
+        // The repository's own configuration keeps the line ends as they are.
+        assert_eq!(
+            git(
+                &workspace,
+                &["config", "--file", ".git/config", "core.autocrlf"]
+            )
+            .trim(),
+            "false"
+        );
+        assert!(!theirs.join("elsewhere").exists());
         // The whole fixture in one commit, with its line ends, and the owner's change
         // the only one not in it.
         assert_eq!(
