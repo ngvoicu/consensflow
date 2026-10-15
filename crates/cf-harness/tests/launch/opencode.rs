@@ -28,6 +28,7 @@ mod looks;
 mod roles;
 mod seeds;
 mod stage;
+mod versions;
 
 use stage::{finish, pane, planned, planned_bridge, served, words, Stage, Wanted, LAUNCH, MODEL};
 

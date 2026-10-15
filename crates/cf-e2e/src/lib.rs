@@ -77,8 +77,8 @@
 //!
 //! The stand-ins the suites run in place of what ConsensFlow runs are
 //! binaries of this crate, behind the `test-support` feature the crate's own
-//! tests turn on: `fake-agent`, `fake-codex`, `fake-devin`, `liar-daemon` and
-//! the packaged smoke's `smoke-paste-reader`.
+//! tests turn on: `fake-agent`, `fake-codex`, `fake-devin`, `fake-opencode-2`,
+//! `liar-daemon` and the packaged smoke's `smoke-paste-reader`.
 
 #![forbid(unsafe_code)]
 

@@ -18,6 +18,11 @@
 //! there for good once the conversation is reopened, though OpenCode is
 //! idle.
 //!
+//! A window is opened only on an OpenCode ConsensFlow supports. Its version is
+//! the first thing a launch asks (`version`), before the plugin, the role, a
+//! port or a server is made, and an OpenCode 2 or newer is refused in words
+//! that say what to do: the windows opened on one were seen to wait for ever.
+//!
 //! Kept from Node on purpose:
 //! - a conversation of an empty id is refused in a sentence of this module's
 //!   own, where V8 threw its `TypeError`;
@@ -47,13 +52,14 @@ use super::install::prepare_extension;
 use super::paths;
 use super::quota::retry_quota;
 use super::role::configure;
+use super::version;
 use crate::contract::{
     Adapter, Admission, Held, Launch, Observed, Pane, PaneHost, Prepared, Readiness, Records,
     Skill, Window, Work,
 };
 use crate::detect::executable;
 use crate::records::Options;
-use crate::seams::{Entropy, Loopback, Ports, Processes, Services, Time};
+use crate::seams::{Entropy, Loopback, Ports, Probes, Processes, Services, Time};
 use crate::shared::admission::admission;
 use crate::shared::record_state::{dialog_waiting, record_state, switched_to, unnamed};
 use crate::shared::specmint::OwnCopy;
@@ -75,6 +81,7 @@ pub struct OpenCodeAdapter {
     ports: Rc<dyn Ports>,
     loopback: Rc<dyn Loopback>,
     processes: Rc<dyn Processes>,
+    probes: Rc<Probes>,
 }
 
 impl OpenCodeAdapter {
@@ -88,6 +95,7 @@ impl OpenCodeAdapter {
             ports: Rc::clone(&services.ports),
             loopback: Rc::clone(&services.loopback),
             processes: Rc::clone(&services.processes),
+            probes: Rc::clone(&services.probes),
         }
     }
 
@@ -104,6 +112,9 @@ impl Adapter for OpenCodeAdapter {
     fn prepare<'a>(&'a self, launch: &'a Launch<'a>) -> Work<'a, Result<Prepared, String>> {
         Box::pin(async move {
             let executable = executable(Harness::Opencode, &self.env)?;
+            // Before anything is made: no plugin, role, port or server is left
+            // by a launch that is refused.
+            version::check(&self.probes, &self.processes, &self.env, &executable).await?;
             let settings = prepare_extension(&self.env).into_config()?;
             // A chief given specs has ConsensFlow's own copy of its Specmint
             // skill written where it is kept for every launch, and the skills

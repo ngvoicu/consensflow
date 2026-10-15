@@ -1,0 +1,365 @@
+# An OpenCode that updated itself to 2 (the owner's report of 2026-10-15, ConsensFlow 3.0.4: their
+# OpenCode went from 1.19.0 to 2.0.29, whose flags and server a window is launched on are gone, and
+# every OpenCode window the daemon opened waited for ever for ConsensFlow's plugin). Three rules
+# stand in 3.0.5, each held by tests:
+#
+# - the OpenCode adapter asks `--version` first (`crates/cf-harness/src/opencode/version.rs`), once
+#   as the file is on disk, before the plugin, the role, a port or a server is made, and refuses an
+#   OpenCode of 2 or more in words that say what to do; one that cannot be asked, or says no version,
+#   is not refused on a guess (`tests/launch/opencode/versions.rs` and the unit tests of the module);
+# - the Harnesses screen says an OpenCode of 2 or more is not supported yet (a `setup`), and offers no
+#   update from it, nor to a release of 2 or more, which npm's `latest` is since 2.0 and a 1.x that is
+#   put back would be offered (`crates/cf-harness/src/admin/`);
+# - an OpenCode window is told not to update itself (`"autoupdate": false` in the
+#   `OPENCODE_CONFIG_CONTENT` it runs with), unless the configuration the human set names a word of its
+#   own (`crates/cf-harness/src/opencode/role.rs`).
+#
+# The recordings of Node's launch and admin that these moved, by hand and once, are held by the
+# goldens' own tests, which a plant of each rule below makes fail (`tests/goldens/README.md` says
+# what moved).
+#
+# The cases of the rig are `crates/cf-e2e/tests/regressions/opencode_updated_itself_to_2.rs`: the real
+# daemon and pane host on a stand-in OpenCode that says `opencode v2.0.29` and answers nothing else,
+# one with it as the chief and one with it as the worker. Their runs build the native `cf` from the
+# sources as they are planted, so each of their plants says `builds`: the family builds the `cf` again
+# once each is put back. One plant takes one rule out, or puts one wrong; a test fails.
+#
+# Every name holds `opencode 2`, so `npm run plants:daemon -- "opencode 2"` runs them all.
+
+[run]
+harness-opencode = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "opencode::"]
+harness-admin = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "admin::"]
+harness-launch-opencode-versions = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "opencode::versions::"]
+harness-launch-goldens = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "every_scenario_plays_as_node_played_it"]
+harness-admin-goldens = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "admin", "every_scenario_answers_as_node_answered_step_by_step"]
+rig-regression-opencode-2 = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "opencode_updated_itself_to_2::"]
+rig-install = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "rig::install::"]
+fake-opencode-2 = ["cargo", "test", "--offline", "-p", "cf-e2e", "--bin", "fake-opencode-2"]
+
+# The version, as 1.x and 2 say it.
+
+[[plant]]
+name = "opencode 2: the version is asked for between word boundaries, which the v of opencode v2.0.29 is not"
+meant = "an_opencode_of_2_or_more_is_not_supported_yet_as_1_x_and_2_say_their_versions"
+runs = ["harness-opencode", "harness-launch-opencode-versions"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/opencode/version.rs"
+find = 'static VERSION: LazyLock<Regex> = LazyLock::new(|| compile(r"(?:^|\s|v)([0-9]+)\.[0-9]+\.[0-9]+"));'
+replace = 'static VERSION: LazyLock<Regex> = LazyLock::new(|| compile(r"(?-u:\b)([0-9]+)\.[0-9]+\.[0-9]+"));'
+
+[[plant]]
+name = "opencode 2: an OpenCode 2 is the first that is not supported yet, read as a 3"
+meant = "an_opencode_of_2_or_more_is_not_supported_yet_as_1_x_and_2_say_their_versions"
+runs = ["harness-opencode", "harness-launch-opencode-versions"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/opencode/version.rs"
+find = "const FIRST_UNSUPPORTED: u64 = 2;"
+replace = "const FIRST_UNSUPPORTED: u64 = 3;"
+
+[[plant]]
+name = "opencode 2: a 1.x is not supported either"
+meant = "an_opencode_of_2_or_more_is_not_supported_yet_as_1_x_and_2_say_their_versions"
+runs = ["harness-opencode", "harness-launch-opencode-versions", "harness-admin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/opencode/version.rs"
+find = "const FIRST_UNSUPPORTED: u64 = 2;"
+replace = "const FIRST_UNSUPPORTED: u64 = 1;"
+
+[[plant]]
+name = "opencode 2: an OpenCode that says no version is refused on a guess"
+meant = "what_names_no_version_of_three_numbers_is_no_opencode_that_is_not_supported"
+runs = ["harness-opencode", "harness-launch-opencode-versions"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/opencode/version.rs"
+find = "    VERSION.captures(output).is_some_and(|found| {"
+replace = "    VERSION.captures(output).is_none_or(|found| {"
+
+[[plant]]
+name = "opencode 2: an OpenCode that cannot be asked is refused on a guess"
+meant = "an_opencode_that_cannot_be_asked_or_says_no_version_is_not_refused_on_a_guess"
+runs = ["harness-opencode", "harness-launch-opencode-versions"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/opencode/version.rs"
+find = '''        Ok(answered) if unsupported(&answered.stdout) => Err(not_supported()),
+        _ => Ok(()),'''
+replace = '''        Ok(answered) if !unsupported(&answered.stdout) => Ok(()),
+        _ => Err(not_supported()),'''
+
+[[plant]]
+name = "opencode 2: a version an OpenCode says with an exit code is not read"
+meant = "a_version_it_says_is_read_whatever_it_exits_with"
+runs = ["harness-opencode", "harness-launch-opencode-versions"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/opencode/version.rs"
+find = "        Ok(answered) if unsupported(&answered.stdout) => Err(not_supported()),"
+replace = "        Ok(answered) if answered.code == 0 && unsupported(&answered.stdout) => Err(not_supported()),"
+
+[[plant]]
+name = "opencode 2: the version is asked at every launch"
+meant = "an_opencode_that_says_it_is_2_is_refused_in_the_words_and_a_1_x_goes_on"
+runs = ["harness-opencode", "harness-launch-opencode-versions"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/opencode/version.rs"
+find = '''        probes,
+        processes,
+        Path::new(executable),'''
+replace = '''        &Probes::default(),
+        processes,
+        Path::new(executable),'''
+
+# What a launch makes before it asks.
+
+[[plant]]
+name = "opencode 2: the launch asks the version after the plugin is made"
+meant = "an_opencode_that_says_it_is_2_is_refused_in_words_that_say_what_to_do_and_nothing_is_made"
+runs = ["harness-launch-opencode-versions"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/opencode/adapter.rs"
+find = '''            // Before anything is made: no plugin, role, port or server is left
+            // by a launch that is refused.
+            version::check(&self.probes, &self.processes, &self.env, &executable).await?;
+            let settings = prepare_extension(&self.env).into_config()?;'''
+replace = '''            let settings = prepare_extension(&self.env).into_config()?;
+            version::check(&self.probes, &self.processes, &self.env, &executable).await?;'''
+
+[[plant]]
+name = "opencode 2: the launch asks no version"
+meant = "an_opencode_that_says_it_is_2_is_refused_in_words_that_say_what_to_do_and_nothing_is_made"
+runs = ["harness-launch-opencode-versions"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/opencode/adapter.rs"
+find = '''            // Before anything is made: no plugin, role, port or server is left
+            // by a launch that is refused.
+            version::check(&self.probes, &self.processes, &self.env, &executable).await?;
+'''
+replace = ""
+
+# The Harnesses screen.
+
+[[plant]]
+name = "opencode 2: the Harnesses screen says nothing of an OpenCode 2"
+meant = "an_opencode_of_2_or_more_is_said_not_to_be_supported_yet_and_is_offered_no_update_further"
+runs = ["harness-admin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/admin/inspect.rs"
+find = "        Harness::Opencode if version.is_some_and(opencode::unsupported_version) => {"
+replace = "        Harness::Opencode if false => {"
+
+[[plant]]
+name = "opencode 2: the Harnesses screen offers the update to a release of an OpenCode 2"
+meant = "an_opencode_of_2_or_more_is_said_not_to_be_supported_yet_and_is_offered_no_update_further"
+runs = ["harness-admin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/admin/inspect.rs"
+find = "                Some(true) if offered => Update::Available(release),"
+replace = "                Some(true) => Update::Available(release),"
+
+[[plant]]
+name = "opencode 2: the Harnesses screen says an OpenCode of 1.x is not supported yet either"
+meant = "an_opencode_of_1_x_has_no_setup_and_is_offered_the_update_to_a_1_x_and_none_to_a_2"
+runs = ["harness-admin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/admin/inspect.rs"
+find = "        Harness::Opencode if version.is_some_and(opencode::unsupported_version) => {"
+replace = "        Harness::Opencode if version.is_some() => {"
+
+[[plant]]
+name = "opencode 2: the Harnesses screen offers an OpenCode of 1.x the update to a 2"
+meant = "an_opencode_of_1_x_has_no_setup_and_is_offered_the_update_to_a_1_x_and_none_to_a_2"
+runs = ["harness-admin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/admin/inspect.rs"
+find = '''    let held_back = matches!(setup, Some(Setup::NotSupportedYet { .. }))
+        || (harness == Harness::Opencode && opencode::unsupported_version(release));'''
+replace = '''    let held_back = matches!(setup, Some(Setup::NotSupportedYet { .. }));
+    let _ = (harness, release);'''
+
+[[plant]]
+name = "opencode 2: the Harnesses screen holds the update to a release of 2 back for every CLI"
+meant = "an_opencode_of_1_x_has_no_setup_and_is_offered_the_update_to_a_1_x_and_none_to_a_2"
+runs = ["harness-admin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/admin/inspect.rs"
+find = "        || (harness == Harness::Opencode && opencode::unsupported_version(release));"
+replace = "        || opencode::unsupported_version(release);"
+
+[[plant]]
+name = "opencode 2: the setup of an OpenCode 2 is written in another word"
+meant = "every_state_of_a_version_and_an_update_is_written_as_its_word_with_its_fields"
+runs = ["harness-admin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/admin/row.rs"
+find = '''    NotSupportedYet {
+        reason: String,
+    },'''
+replace = '''    #[serde(rename = "unsupported")]
+    NotSupportedYet {
+        reason: String,
+    },'''
+
+# What a window is told of its updates.
+
+[[plant]]
+name = "opencode 2: a window is not told not to update itself"
+meant = "a_window_is_told_not_to_update_itself_last_of_what_its_configuration_says"
+runs = ["harness-opencode", "harness-launch-opencode-versions"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/opencode/role.rs"
+find = "    not_to_update(&mut configuration);"
+replace = ""
+
+[[plant]]
+name = "opencode 2: what the human says of updates is overwritten"
+meant = "what_the_human_says_of_updates_is_kept_where_they_say_it_and_null_is_no_word"
+runs = ["harness-opencode", "harness-launch-opencode-versions"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/opencode/role.rs"
+find = '    if configuration.get("autoupdate").is_none_or(Value::is_null) {'
+replace = "    if true {"
+
+[[plant]]
+name = "opencode 2: a null word on updates is taken for the human's"
+meant = "what_the_human_says_of_updates_is_kept_where_they_say_it_and_null_is_no_word"
+runs = ["harness-opencode"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/opencode/role.rs"
+find = '    if configuration.get("autoupdate").is_none_or(Value::is_null) {'
+replace = '    if configuration.get("autoupdate").is_none() {'
+
+# The recordings Node made, moved on purpose (`crates/cf-harness/tests/goldens/README.md`).
+
+[[plant]]
+name = "opencode 2: the recordings of the launch hold a window told to update itself"
+meant = "every_scenario_plays_as_node_played_it"
+runs = ["harness-launch-goldens"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/opencode/role.rs"
+find = '        configuration.insert("autoupdate".to_owned(), Value::Bool(false));'
+replace = '        configuration.insert("autoupdate".to_owned(), Value::Bool(true));'
+
+[[plant]]
+name = "opencode 2: the recordings of the launch hold the version asked first"
+meant = "every_scenario_plays_as_node_played_it"
+runs = ["harness-launch-goldens"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/opencode/adapter.rs"
+find = '''            // Before anything is made: no plugin, role, port or server is left
+            // by a launch that is refused.
+            version::check(&self.probes, &self.processes, &self.env, &executable).await?;
+'''
+replace = ""
+
+[[plant]]
+name = "opencode 2: the recordings of the admin hold the update an OpenCode 2 is not offered"
+meant = "every_scenario_answers_as_node_answered_step_by_step"
+runs = ["harness-admin-goldens"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/admin/inspect.rs"
+find = "                Some(true) if offered => Update::Available(release),"
+replace = "                Some(true) => Update::Available(release),"
+
+# The cases of the rig, and the stand-in they run on.
+
+[[plant]]
+name = "opencode 2: the daemon opens its window on an OpenCode 2 as it opens one on 1.x, and a chief is told nothing"
+meant = "a_chief_on_an_opencode_that_says_it_is_2_is_said_not_to_start_and_no_window_is_made_on_it"
+runs = ["rig-regression-opencode-2"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-harness/src/opencode/adapter.rs"
+find = '''            // Before anything is made: no plugin, role, port or server is left
+            // by a launch that is refused.
+            version::check(&self.probes, &self.processes, &self.env, &executable).await?;
+'''
+replace = ""
+
+[[plant]]
+name = "opencode 2: the daemon opens its window on an OpenCode 2 as it opens one on 1.x, and a worker's task is not failed in words"
+meant = "a_task_for_a_worker_on_an_opencode_that_says_it_is_2_fails_in_those_words_and_its_requester_is_told"
+runs = ["rig-regression-opencode-2"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-harness/src/opencode/adapter.rs"
+find = '''            // Before anything is made: no plugin, role, port or server is left
+            // by a launch that is refused.
+            version::check(&self.probes, &self.processes, &self.env, &executable).await?;
+'''
+replace = ""
+
+[[plant]]
+name = "opencode 2: a chief that cannot start tells the human nothing"
+meant = "a_chief_on_an_opencode_that_says_it_is_2_is_said_not_to_start_and_no_window_is_made_on_it"
+runs = ["rig-regression-opencode-2"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = "        if failures == 1 {"
+replace = "        if failures == 0 {"
+
+[[plant]]
+name = "opencode 2: a worker's task that cannot be given fails and its requester is not told why"
+meant = "a_task_for_a_worker_on_an_opencode_that_says_it_is_2_fails_in_those_words_and_its_requester_is_told"
+runs = ["rig-regression-opencode-2"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = "                self.tell_requester(&project, &thread.task, because)?;"
+replace = "                let _ = because;"
+
+[[plant]]
+name = "opencode 2: the words of the refusal end with a full stop of their own, and the board's follow with another"
+meant = "a_chief_on_an_opencode_that_says_it_is_2_is_said_not_to_start_and_no_window_is_made_on_it"
+runs = ["rig-regression-opencode-2"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-harness/src/opencode/version.rs"
+find = '''Install the last OpenCode 1.x release"
+    )'''
+replace = '''Install the last OpenCode 1.x release."
+    )'''
+
+[[plant]]
+name = "opencode 2: the rig's stand-in OpenCode writes down what it is asked where the case does not look"
+meant = "a_rig_given_an_opencode_2_has_its_stand_in_found_as_opencode_and_named_in_the_environment"
+runs = ["rig-install"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/install.rs"
+find = '                text(&root.join("opencode.jsonl")),'
+replace = '                text(&root.join("opencode.log")),'
+
+[[plant]]
+name = "opencode 2: the stand-in OpenCode takes any list of words that begins with --version for the question of its version"
+meant = "the_daemons_question_of_the_version_is_the_word_alone"
+runs = ["fake-opencode-2"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_opencode_2.rs"
+find = '    matches!(args, [only] if only == "--version")'
+replace = '    matches!(args, [first, ..] if first == "--version")'

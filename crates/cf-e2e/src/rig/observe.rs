@@ -70,6 +70,17 @@ impl Rig {
         events_of(&text.unwrap_or_default())
     }
 
+    /// What the rig's stand-in `opencode` ([`Config::opencode_2`](super::Config::opencode_2))
+    /// was asked so far, the arguments of each time it was started, oldest first:
+    /// nothing where it never was, or the rig has none.
+    pub fn opencode_asked(&self) -> Vec<Vec<String>> {
+        let text = files::read_finished_lines(&self.root.join("opencode.jsonl"));
+        text.unwrap_or_default()
+            .lines()
+            .filter_map(|line| serde_json::from_str(line).ok())
+            .collect()
+    }
+
     /// When the daemon pressed the key `bytes` into the window `id`, in
     /// milliseconds since the epoch (the clock of the daemon's events and of a
     /// harness's status file), in order: the `pane.input` requests it made of the
