@@ -47,9 +47,9 @@ use std::thread;
 use std::time::Instant;
 
 use cf_e2e::pattern;
-use cf_e2e::process::is_alive;
 #[cfg(unix)]
-use cf_e2e::process::{group_of, signal, started, Signal};
+use cf_e2e::process::group_of;
+use cf_e2e::process::{is_alive, signal, started, Signal};
 use cf_e2e::rig::{Job, Project, Rig};
 use cf_e2e::Error;
 use regex::Regex;
@@ -387,13 +387,6 @@ fn a_job_the_agent_leaves_is_ended_beside_the_harnesss_server_which_runs_on() ->
 /// the result is the task's all the same. The window is the human's, open, so that its
 /// close does not end the job before this looks at it (a close ends what the tree finds,
 /// and on a Mac a job in a session of its own with no marker is not found).
-///
-/// Unix's only for now: on GitHub's Windows runner the stand-in's job, detached by a
-/// PowerShell's `Start-Process`, was gone a moment after it wrote its process, with
-/// nothing of ConsensFlow's ending it (CI on 51055d73, 2026-10-14), while it passes on a
-/// Windows machine with a session of its own (zeewin). The cause is not found; the brain's
-/// issue `stand-in-detached-job-dies-on-the-windows-runner` holds what is known.
-#[cfg(unix)]
 #[test]
 fn a_job_the_agent_detached_from_its_shell_is_left_running_and_nothing_is_said_of_it() -> Outcome {
     let rig = Rig::start(config())?;

@@ -114,16 +114,25 @@ pub fn is_alive(pid: u32) -> bool {
         .is_ok_and(|ran| ran.stdout.contains(&format!("\"{pid}\"")))
 }
 
+/// How long the PowerShell that says when a process began is given: well past what
+/// it takes on a loaded runner.
+#[cfg(windows)]
+const STARTED_LIMIT: std::time::Duration = std::time::Duration::from_secs(120);
+
 /// When the process `pid` began, in the words the system says it in (the 100 ns
 /// since 1601 that PowerShell's `StartTime` is): the same for the same process, and
 /// others for one that took its number after it. None where it is not there or the
-/// system will not say.
+/// system will not say. A PowerShell takes its time to start: 11 to 17 s on GitHub's
+/// Windows runner (2026-10-15), and more under a suite's load, past the limit a
+/// program is given by default, which ended it, and a process that ran was said
+/// to be none ([`STARTED_LIMIT`]).
 #[cfg(windows)]
 pub fn started(pid: u32) -> Option<String> {
     let script = format!("(Get-Process -Id {pid} -ErrorAction Stop).StartTime.ToFileTimeUtc()");
     let ran = Run::new("powershell")
         .args(["-NoProfile", "-NonInteractive", "-Command", &script])
         .finding_programs()
+        .limit(STARTED_LIMIT)
         .run()
         .ok()?;
     let said = ran.stdout.trim();
