@@ -50,7 +50,7 @@ Install the ones you want to use, and sign in to each once in a terminal:
 | ----------- | ------------------------------------------------ |
 | Claude Code | `npm install -g @anthropic-ai/claude-code`, or Anthropic's installer |
 | Codex       | `npm install -g @openai/codex`, or its own installer |
-| OpenCode    | `npm install -g opencode-ai`, or its own installer |
+| OpenCode    | `npm install -g opencode-ai@1`, or its own installer (version 1.x: OpenCode 2 is not supported yet) |
 | Pi          | `npm install -g @earendil-works/pi-coding-agent`, or its own installer |
 | Devin       | Devin's own CLI installer (version 3000.10.21 or later) |
 

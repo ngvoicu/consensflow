@@ -81,6 +81,13 @@ fn every_state_of_a_version_and_an_update_is_written_as_its_word_with_its_fields
         r#"{"state":"update-required","reason":"r"}"#
     );
     assert_eq!(
+        serde_json::to_string(&Setup::NotSupportedYet {
+            reason: "r".to_owned()
+        })
+        .unwrap(),
+        r#"{"state":"not-supported-yet","reason":"r"}"#
+    );
+    assert_eq!(
         serde_json::to_string(&Setup::Ready).unwrap(),
         r#"{"state":"ready"}"#
     );

@@ -1,5 +1,6 @@
 //! The configurations Node's role code merged a role into, each as Node
-//! (v26.8.1) wrote the result.
+//! (v26.8.1) wrote the result, and what a window is told of its updates, which
+//! Node's did not say.
 
 use std::fs;
 
@@ -12,7 +13,13 @@ const FILE: &str = "/role/.claude/skills/consensflow-worker/SKILL.md";
 
 /// `current` with the role merged in, or why not.
 fn merge(current: &str) -> Result<String, String> {
-    merged(current, &[SKILLS], FILE)
+    merge_with(current, &[SKILLS])
+}
+
+/// `current` with the role merged in, and the skills folders `skills` among
+/// the paths its skills are looked for in.
+fn merge_with(current: &str, skills: &[&str]) -> Result<String, String> {
+    merged(current, skills, FILE).map(|merged| js::stringify(&Value::Object(merged)))
 }
 
 #[test]
@@ -24,7 +31,7 @@ fn a_configuration_of_nothing_gets_the_roles_skills_folder_and_file() {
 #[test]
 fn a_skills_folder_of_the_copy_kept_for_specmint_comes_after_the_roles_and_once() {
     const KEPT: &str = "/cf/integrations/specmint/opencode/tdd-0123abcd/.claude/skills";
-    let merged = |current: &str| merged(current, &[SKILLS, KEPT], FILE).unwrap();
+    let merged = |current: &str| merge_with(current, &[SKILLS, KEPT]).unwrap();
     assert_eq!(
         merged(r#"{"skills":{"paths":["/p"]}}"#),
         format!(r#"{{"skills":{{"paths":["/p","{SKILLS}","{KEPT}"]}},"instructions":["{FILE}"]}}"#)
@@ -201,10 +208,74 @@ fn the_role_is_written_in_the_launchs_folder_before_the_configuration_is_looked_
             js::stringify(&serde_json::json!({
                 "skills": { "paths": [role] },
                 "instructions": [file],
+                "autoupdate": false,
             })),
             "an empty one is none"
         );
     }
+}
+
+/// The configuration a worker's window is given where the environment holds
+/// `config` (none where it holds none), as the keys it has in the order it
+/// writes them.
+fn configured(config: Option<&str>) -> Value {
+    let dir = tempfile::tempdir().unwrap();
+    let home = dir.path().to_string_lossy().into_owned();
+    let launch = LaunchId::new("0a1b2c3d-4e5f-4061-8a7b-9c0d1e2f3a4b").unwrap();
+    let mut vars = vec![
+        ("HOME".to_owned(), home.clone()),
+        ("CONSENSFLOW_HOME".to_owned(), path::join(&[&home, "app"])),
+    ];
+    vars.extend(config.map(|config| ("OPENCODE_CONFIG_CONTENT".to_owned(), config.to_owned())));
+    let made = configure(&Env::from_vars(vars), &launch, "worker", "role text", None).unwrap();
+    serde_json::from_str(&made).unwrap()
+}
+
+/// The names of the keys of `configuration`, in the order they are written.
+fn keys(configuration: &Value) -> Vec<&str> {
+    configuration
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(String::as_str)
+        .collect()
+}
+
+#[test]
+fn a_window_is_told_not_to_update_itself_last_of_what_its_configuration_says() {
+    for config in [None, Some(""), Some("{}")] {
+        let made = configured(config);
+        assert_eq!(made["autoupdate"], false, "{config:?}");
+        assert_eq!(keys(&made), ["skills", "instructions", "autoupdate"]);
+    }
+    // What the human set stays where it is, the word on updates after it.
+    let made = configured(Some(r#"{"theme":"user","instructions":["/i"]}"#));
+    assert_eq!(made["autoupdate"], false);
+    assert_eq!(
+        keys(&made),
+        ["theme", "instructions", "skills", "autoupdate"]
+    );
+}
+
+#[test]
+fn what_the_human_says_of_updates_is_kept_where_they_say_it_and_null_is_no_word() {
+    for said in [r#"true"#, r#""notify""#, r#"false"#] {
+        let made = configured(Some(&format!(r#"{{"autoupdate":{said},"theme":"user"}}"#)));
+        assert_eq!(made["autoupdate"].to_string(), said);
+        assert_eq!(
+            keys(&made),
+            ["autoupdate", "theme", "skills", "instructions"]
+        );
+    }
+    let made = configured(Some(r#"{"autoupdate":null,"theme":"user"}"#));
+    assert_eq!(
+        made["autoupdate"], false,
+        "null is none, as for the skill paths"
+    );
+    assert_eq!(
+        keys(&made),
+        ["autoupdate", "theme", "skills", "instructions"]
+    );
 }
 
 #[test]

@@ -23,7 +23,8 @@ pub struct Row {
     pub checked_at: i64,
     pub version: Version,
     pub update: Update,
-    /// Whether Devin is new enough to open a window on (Devin's alone).
+    /// Whether a window can be opened on the CLI: Devin's always, and
+    /// OpenCode's where it is one ConsensFlow does not support yet.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub setup: Option<Setup>,
     #[serde(skip_serializing_if = "Distribution::is_unlooked")]
@@ -68,7 +69,10 @@ impl Version {
 pub enum Update {
     /// The feed was not asked.
     NotChecked,
-    /// The release was read; the versions are no three whole numbers each.
+    /// The release was read, and says nothing of being newer: the versions
+    /// are no three whole numbers each, or no window is opened on the CLI
+    /// ([`Setup::NotSupportedYet`]) or on the release (OpenCode 2), which is
+    /// then offered as no update.
     Unknown(Release),
     Available(Release),
     Current(Release),
@@ -88,12 +92,20 @@ pub struct Release {
     pub command: Option<String>,
 }
 
-/// Whether Devin is new enough to open a window on.
+/// Whether a window can be opened on the CLI.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "state", rename_all = "kebab-case")]
 pub enum Setup {
     Ready,
-    UpdateRequired { reason: String },
+    /// Devin is older than a window needs.
+    UpdateRequired {
+        reason: String,
+    },
+    /// The CLI is newer than ConsensFlow supports yet (OpenCode 2), and no
+    /// update is the way out.
+    NotSupportedYet {
+        reason: String,
+    },
 }
 
 /// How the CLI was installed, as the row says it: no key before its
