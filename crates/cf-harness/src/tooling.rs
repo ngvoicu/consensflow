@@ -18,13 +18,17 @@
 //! | `program` | `argv`, `env`: a program and its arguments to open a window on (the program's absolute path first) | the argv the pane host is asked to open: an npm shim (a `.cmd` on Windows) as the node and the script it runs, anything else as it is; an error for a script of another shape, or a shim that has no node |
 //! | `newest_session` | `kind`, `workspace`, `since`, `env`: the newest top-level conversation a harness of that kind (OpenCode, Devin or Codex) opened in `workspace` at or after `since` (milliseconds), from its own store | the session's id, or null while there is none |
 //! | `specmint` | `kind`, `variant`, `env`: where the harness has the Specmint variant installed for its user (the adapter's own look, in the places the harness reads), with a home that is the one `env` names | `{installed, skill}`: whether the harness has it, and the file of its `SKILL.md` (where ConsensFlow's own copy would be written, for a launch of a made-up id, where it has none) |
+//! | `devin_launch` | `launch` (a lowercase uuid), `role`, `directory`, `resume`, `message`, `agent` (`model`, `effort`), `instructions` (the role's text), `cf` (the `cf` its session hook runs), `env`: a Devin window as the adapter prepares it for that role | `{command, args, env, dropEnv, session}` as `start` answers, the command being the program the adapter found: its `--config` (the owner's, with ConsensFlow's hooks) and the launch's files are written under the ConsensFlow home `env` names, and Devin is asked its version, as it is at every launch |
 //!
-//! The last three are the evals' and the live tests' own: the program a window
+//! The last four are the evals' and the live tests' own: the program a window
 //! opens on, which the daemon asks `cf_process::pane_argv` for, the
 //! conversation a window of a harness that names its own opened, which only
-//! its store says, and the Specmint skill a chief's window is given, which the
-//! live test of specs names the copy it was given by.
+//! its store says, the Specmint skill a chief's window is given, which the
+//! live test of specs names the copy it was given by, and the Devin window a
+//! member is given, whole, which `start` leaves bare (no config, no hooks, no
+//! first message).
 
+mod launch;
 mod session;
 
 use std::path::Path;
@@ -56,8 +60,9 @@ pub fn answer(question: &Value) -> Result<Value, String> {
         "program" => program(question),
         "newest_session" => newest_session(question),
         "specmint" => specmint(question),
+        "devin_launch" => launch::devin_launch(question),
         other => Err(format!(
-            "the question asks for {other}, which is none of records, start, window_text, console_text, claude_settings, interrupt, program, newest_session and specmint"
+            "the question asks for {other}, which is none of records, start, window_text, console_text, claude_settings, interrupt, program, newest_session, specmint and devin_launch"
         )),
     }
 }

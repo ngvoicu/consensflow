@@ -76,6 +76,7 @@ pub struct Config {
     stand_in: PathBuf,
     vars: Vec<(String, String)>,
     unset: Vec<String>,
+    first: Vec<PathBuf>,
     path: Vec<PathBuf>,
     existing_root: Option<PathBuf>,
     daemon: Option<PathBuf>,
@@ -92,6 +93,7 @@ impl Config {
             stand_in: stand_in.into(),
             vars: Vec::new(),
             unset: Vec::new(),
+            first: Vec::new(),
             path: Vec::new(),
             existing_root: None,
             daemon: None,
@@ -148,6 +150,17 @@ impl Config {
     #[must_use]
     pub fn also_on_path(mut self, dir: impl Into<PathBuf>) -> Self {
         self.path.push(dir.into());
+        self
+    }
+
+    /// With the folder `dir` on that `PATH` right after the folder of the stand-in
+    /// `claude`, before the folders [`Config::also_on_path`] adds and the system's:
+    /// for a program of a case's own that is found before the machine's of its
+    /// name (a stand-in `cf`, where the machine has the real one beside the
+    /// folders of its harnesses).
+    #[must_use]
+    pub fn first_on_path(mut self, dir: impl Into<PathBuf>) -> Self {
+        self.first.push(dir.into());
         self
     }
 

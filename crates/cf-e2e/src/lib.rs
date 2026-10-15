@@ -57,7 +57,9 @@
 //! question received once at the door of its harness, `live_stops` the stops
 //! the daemon presses, `live_codex_resume` and `live_codex_interrupt` Codex's
 //! thread and its interrupted question, `live_resume_cut` and
-//! `live_restart_cut` a window and a chief that a quit cut, `live_resume_fresh`
+//! `live_restart_cut` a window and a chief that a quit cut, `live_devin_resume` a
+//! Devin member's window opened again after a cut, asked to write, edit and run `cf`,
+//! `live_resume_fresh`
 //! a chief closed and resumed, whether it never had a turn or the human's typed
 //! turn was closed on at once, `live_bench` the
 //! board between a real chief and real workers, `live_designer` a real Codex
@@ -77,8 +79,8 @@
 //!
 //! The stand-ins the suites run in place of what ConsensFlow runs are
 //! binaries of this crate, behind the `test-support` feature the crate's own
-//! tests turn on: `fake-agent`, `fake-codex`, `fake-devin`, `liar-daemon` and
-//! the packaged smoke's `smoke-paste-reader`.
+//! tests turn on: `fake-agent`, `fake-codex`, `fake-devin`, `fake-cf`,
+//! `liar-daemon` and the packaged smoke's `smoke-paste-reader`.
 
 #![forbid(unsafe_code)]
 

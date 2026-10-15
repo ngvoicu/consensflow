@@ -15,7 +15,7 @@ use super::super::machine::{live_folder_in, Harness, Installed, ISOLATION};
 use super::super::{list, Log};
 use super::{trust_claude, Window};
 use crate::rig::Rig;
-use crate::{Error, Result};
+use crate::{cf, Error, Result};
 
 /// The launch the live windows' settings are written for: one id, so each is
 /// written over the last.
@@ -91,6 +91,43 @@ pub fn session_for(kind: &str) -> Option<String> {
     (kind == "claude-code" || kind == "pi").then(new_session)
 }
 
+/// A member's window as the daemon launches it: the adapter prepares it, with the
+/// owner's config and the hooks ConsensFlow adds to it, the role's text for a
+/// session of it to start with, and its first message in a prompt file
+/// ([`ask::devin_launch`]). Devin's alone.
+#[derive(Debug, Clone)]
+pub struct Member {
+    role: String,
+    instructions: String,
+    message: Option<String>,
+}
+
+impl Member {
+    /// A member of the role `role` (`worker`) whose sessions start with
+    /// `instructions`, opened with no message.
+    pub fn new(role: &str, instructions: &str) -> Self {
+        Self {
+            role: role.to_owned(),
+            instructions: instructions.to_owned(),
+            message: None,
+        }
+    }
+
+    /// With `message` the window's first, which its launch puts in a prompt file:
+    /// what the daemon does with the task of a new window, and with the note that a
+    /// window the quit cut is told so by when it is opened again.
+    #[must_use]
+    pub fn first_message(mut self, message: &str) -> Self {
+        self.message = Some(message.to_owned());
+        self
+    }
+
+    /// The window's first message, where it has one.
+    pub fn message(&self) -> Option<&str> {
+        self.message.as_deref()
+    }
+}
+
 /// How a window is to be opened.
 pub struct Open<'a> {
     rig: &'a Rig,
@@ -102,6 +139,7 @@ pub struct Open<'a> {
     drop_env: Vec<String>,
     trusting: bool,
     resume: Option<String>,
+    member: Option<Member>,
 }
 
 impl<'a> Open<'a> {
@@ -119,6 +157,7 @@ impl<'a> Open<'a> {
             drop_env: Vec::new(),
             trusting: true,
             resume: None,
+            member: None,
         }
     }
 
@@ -128,6 +167,15 @@ impl<'a> Open<'a> {
     #[must_use]
     pub fn resume(mut self, session: &str) -> Self {
         self.resume = Some(session.to_owned());
+        self
+    }
+
+    /// The window is a member's as the daemon launches it ([`Member`]): its command
+    /// line, its config and its variables are what the adapter prepares for it,
+    /// whole, and not the flags of a bare window. Each window is a launch of its own.
+    #[must_use]
+    pub fn member(mut self, member: Member) -> Self {
+        self.member = Some(member);
         self
     }
 
@@ -173,27 +221,42 @@ impl<'a> Open<'a> {
         Ok(window)
     }
 
-    /// Opens it. A Claude window is opened after Claude has been asked to trust
-    /// its folder, and says what came of that ([`Window::trust`]).
-    pub fn open(self) -> Result<Window<'a>> {
+    /// What the window opens on: the harness's own flags for a bare window, with the
+    /// program the machine has it at; a member's launch as the adapter prepares it,
+    /// with the program the adapter found. A launch is made once, so each is under
+    /// an id of its own.
+    fn command(
+        &self,
+        agent: &Value,
+        session: Option<&str>,
+        workspace: &Path,
+        env: &[(String, String)],
+    ) -> Result<(ask::Start, String)> {
         let harness = self.install.harness();
-        let home = self
-            .rig
-            .var("HOME")
-            .filter(|home| !home.is_empty())
-            .ok_or_else(|| Error::Daemon("the rig gives its windows no home".to_owned()))?;
-        let workspace = live_folder_in(Path::new(home), &self.folder)?;
-        let agent = self.agent.unwrap_or_else(|| agents::agent(harness));
-        let kind = agent["kind"]
-            .as_str()
-            .unwrap_or_else(|| harness.kind())
-            .to_owned();
-        // A window resumed on a conversation is given its id; one that is not opens on
-        // an id of its harness's kind ([`session_for`]).
-        let session = self.resume.clone().or_else(|| session_for(&kind));
+        if let Some(member) = &self.member {
+            if harness != Harness::Devin {
+                return Err(Error::Daemon(format!(
+                    "a member's launch is prepared for Devin alone, not {}",
+                    harness.name()
+                )));
+            }
+            let start = ask::devin_launch(&ask::DevinLaunch {
+                id: &new_session(),
+                role: &member.role,
+                directory: workspace,
+                resume: self.resume.as_deref(),
+                message: member.message.as_deref(),
+                agent,
+                instructions: &member.instructions,
+                cf: cf::binary()?,
+                env,
+            })?;
+            let program = start.command.clone();
+            return Ok((start, program));
+        }
         let start = match &self.resume {
-            Some(resumed) => ask::resume(&agent, resumed)?,
-            None => ask::start(&agent, session.as_deref(), None)?,
+            Some(resumed) => ask::resume(agent, resumed)?,
+            None => ask::start(agent, session, None)?,
         }
         .ok_or_else(|| {
             Error::Daemon(format!(
@@ -206,8 +269,30 @@ impl<'a> Open<'a> {
                 }
             ))
         })?;
-        let executable = self.install.command().to_string_lossy().into_owned();
+        let program = self.install.command().to_string_lossy().into_owned();
+        Ok((start, program))
+    }
+
+    /// Opens it. A Claude window is opened after Claude has been asked to trust
+    /// its folder, and says what came of that ([`Window::trust`]).
+    pub fn open(self) -> Result<Window<'a>> {
+        let harness = self.install.harness();
+        let home = self
+            .rig
+            .var("HOME")
+            .filter(|home| !home.is_empty())
+            .ok_or_else(|| Error::Daemon("the rig gives its windows no home".to_owned()))?;
+        let workspace = live_folder_in(Path::new(home), &self.folder)?;
+        let agent = self.agent.clone().unwrap_or_else(|| agents::agent(harness));
+        let kind = agent["kind"]
+            .as_str()
+            .unwrap_or_else(|| harness.kind())
+            .to_owned();
+        // A window resumed on a conversation is given its id; one that is not opens on
+        // an id of its harness's kind ([`session_for`]).
+        let session = self.resume.clone().or_else(|| session_for(&kind));
         let env = window_env(self.rig, &workspace);
+        let (start, executable) = self.command(&agent, session.as_deref(), &workspace, &env)?;
         let claude = harness == Harness::Claude;
         let trust = if claude && self.trusting {
             let shut_out = ISOLATION.map(str::to_owned);

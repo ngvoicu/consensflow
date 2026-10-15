@@ -10,6 +10,8 @@
 //! its output, `{"answered": value}`, or `{"threw": message}` for a question it
 //! could not answer, which is an error here that says why.
 
+mod launch;
+
 use std::path::Path;
 use std::time::Duration;
 
@@ -17,6 +19,8 @@ use serde_json::{json, Map, Value};
 
 use crate::process::Run;
 use crate::{cf, Error, Result};
+
+pub use launch::{devin_launch, DevinLaunch};
 
 /// Builds the test binary if it is not built yet, which the first question would
 /// do, minutes into a run: a live test asks this first, before it spends anything,
@@ -144,7 +148,8 @@ fn record_of(answer: &Value) -> Option<Record> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Start {
     /// The command's name (`claude`): find the program with
-    /// [`super::machine::command`], or take the installed harness's.
+    /// [`super::machine::command`], or take the installed harness's. A launch the
+    /// adapter prepared ([`devin_launch`]) names the program it found, whole.
     pub command: String,
     pub args: Vec<String>,
     /// The variables it is started with besides the window's, and the ones

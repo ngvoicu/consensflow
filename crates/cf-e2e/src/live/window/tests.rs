@@ -4,7 +4,7 @@
 
 use std::cell::Cell;
 
-use super::open::{asked_for, new_session, pasted_into, session_for, trust_line};
+use super::open::{asked_for, new_session, pasted_into, session_for, trust_line, Member};
 use super::*;
 
 fn item(role: &str, text: &str) -> Item {
@@ -88,6 +88,17 @@ fn claude_code_and_pi_are_opened_on_an_id_they_are_given_and_the_others_name_the
     for kind in ["devin", "codex", "opencode", "claude", ""] {
         assert_eq!(session_for(kind), None, "{kind}");
     }
+}
+
+#[test]
+fn a_member_has_the_first_message_it_was_given_and_none_until_it_is() {
+    let member = Member::new("worker", "# worker");
+    assert_eq!(member.message(), None);
+    let told = member.first_message("[ConsensFlow m-1 · T-1 · task from @chief]\nGo");
+    assert_eq!(
+        told.message(),
+        Some("[ConsensFlow m-1 · T-1 · task from @chief]\nGo")
+    );
 }
 
 #[test]

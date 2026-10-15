@@ -9,7 +9,9 @@
 //! which is the product's code), a Claude window has the settings file the app
 //! writes for a launch and the flags that shut the human's MCP servers and
 //! browser out, and Claude Code is asked, in a window of its own that is closed
-//! after, to trust the folder first ([`trust_claude`]). What goes in goes in as
+//! after, to trust the folder first ([`trust_claude`]). A Devin window may be a
+//! member's ([`Member`]): the launch is then the adapter's whole, its config and
+//! hooks and prompt file among it. What goes in goes in as
 //! the daemon sends it ([`Window::send`]: a bracketed paste, then Enter once the
 //! window has drawn it), and nothing presses Enter a second time. What a window
 //! printed is read as the text of its screen, and as it came ([`raw_end`]), which
@@ -34,7 +36,7 @@ use super::machine::Harness;
 use crate::rig::Rig;
 use crate::Result;
 
-pub use open::{pasted_installs, session_for, Open};
+pub use open::{pasted_installs, session_for, Member, Open};
 pub use raw::{raw_end, RawEnd};
 pub use trust::claude as trust_claude;
 
@@ -193,9 +195,10 @@ impl Window<'_> {
         }
     }
 
-    /// What the harness's own record holds so far, as the daemon reads it:
-    /// nothing while there is no record, or none can be read.
-    pub fn recorded(&self) -> Vec<Item> {
+    /// What the harness's own record says so far, as the daemon reads it: its
+    /// items, and whether its turn is over. None while there is no record, or none
+    /// can be read.
+    pub fn record(&self) -> Option<ask::Record> {
         let known = self.session.borrow().clone();
         let session = known.or_else(|| {
             let found =
@@ -205,10 +208,13 @@ impl Window<'_> {
             self.session.borrow_mut().clone_from(&found);
             found
         });
-        session
-            .and_then(|session| ask::records(&self.kind, &session, &self.env).ok().flatten())
-            .map(|record| record.items)
-            .unwrap_or_default()
+        session.and_then(|session| ask::records(&self.kind, &session, &self.env).ok().flatten())
+    }
+
+    /// What the harness's own record holds so far, as the daemon reads it:
+    /// nothing while there is no record, or none can be read.
+    pub fn recorded(&self) -> Vec<Item> {
+        self.record().map(|record| record.items).unwrap_or_default()
     }
 
     /// Pastes `body` as the daemon does (`pane.write_paste`: a bracketed paste,

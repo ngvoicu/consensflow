@@ -16,6 +16,9 @@
 //! stands in for the harnesses of (what the rig tells of its windows, the
 //! records the stand-ins leave in a Claude folder that is the person's, a
 //! window opened as the app opens one, the harness code asked as a process).
+//! So is `live_member`: a Devin member's window as `live_devin_resume` opens
+//! one, whole as the adapter prepares it, cut, and opened again on its
+//! conversation with the note in its launch.
 //! So is `live_members`: the project of the live checks that play the chief with
 //! its own token, with the stand-in agent for the chief and the member, a
 //! question judged from what the daemon wrote of it, and the app quit and started
@@ -82,6 +85,8 @@ mod described;
 mod help;
 #[path = "rig/live_base.rs"]
 mod live_base;
+#[path = "rig/live_member.rs"]
+mod live_member;
 #[path = "rig/live_members.rs"]
 mod live_members;
 #[path = "rig/live_support.rs"]
