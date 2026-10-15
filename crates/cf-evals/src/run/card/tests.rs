@@ -64,3 +64,97 @@ fn what_changes_when_the_run_is_not_quiet_is_the_chiefs_state_the_tasks_and_ever
     let lane = Chief::lane_of(&again);
     assert_eq!(signature_of(&again, &lane, &tasks_of(&again)), signature);
 }
+
+#[test]
+fn the_files_are_read_at_the_first_look_that_sees_the_first_worker_task_s_result_in() {
+    let tasks = |cards: Value| -> Vec<Value> { cards.as_array().unwrap().clone() };
+    let first_in = |cards: Value| first_result_in(&tasks(cards).iter().collect::<Vec<_>>());
+    // T-1 at work, then done, then accepted beside its follow-up.
+    assert!(!first_in(
+        json!([{ "number": 1, "pool": "worker", "state": "working" }])
+    ));
+    assert!(first_in(
+        json!([{ "number": 1, "pool": "worker", "state": "done" }])
+    ));
+    assert!(first_in(json!([
+        { "number": 2, "pool": null, "state": "working" },
+        { "number": 1, "pool": "worker", "state": "accepted" },
+    ])));
+    // The follow-up's result is not T-1's, while T-1 waits for its own.
+    assert!(!first_in(json!([
+        { "number": 1, "pool": "worker", "state": "working" },
+        { "number": 2, "pool": null, "state": "done" },
+    ])));
+    // A review, an advice, a test or an image done first is no worker's result.
+    for pool in ["reviewer", "advisor", "tester", "designer"] {
+        assert!(
+            !first_in(json!([
+                { "number": 1, "pool": pool, "state": "done" },
+                { "number": 2, "pool": "worker", "state": "working" },
+            ])),
+            "{pool}"
+        );
+    }
+    // A failed or cancelled T-1 brought no line in, and a board with no task has no result.
+    assert!(!first_in(
+        json!([{ "number": 1, "pool": "worker", "state": "failed" }])
+    ));
+    assert!(!first_in(
+        json!([{ "number": 1, "pool": "worker", "state": "cancelled" }])
+    ));
+    assert!(!first_in(json!([])));
+}
+
+#[test]
+fn the_files_kept_at_t_1_s_result_are_what_they_held_at_that_look_and_no_later_one() {
+    let workspace = tempfile::tempdir().unwrap();
+    let page = workspace.path().join("site/evaluare.html");
+    cf_e2e::files::write(&page, "the owner's page").unwrap();
+    let mut read = crate::measure::begun(workspace.path(), &["site/evaluare.html"]).unwrap();
+    let mut kept = false;
+    let look = |cards: Value, read: &mut BTreeMap<String, FileRead>, kept: &mut bool| {
+        let cards = cards.as_array().unwrap().clone();
+        let tasks: Vec<&Value> = cards.iter().collect();
+        keep_at_result(read, kept, &tasks, workspace.path()).unwrap();
+    };
+    let at_result =
+        |read: &BTreeMap<String, FileRead>| read["site/evaluare.html"].at_result.clone();
+    // T-1 at work, its line not in yet: nothing kept.
+    look(
+        json!([{ "number": 1, "pool": "worker", "state": "working" }]),
+        &mut read,
+        &mut kept,
+    );
+    assert!(!kept);
+    assert_eq!(at_result(&read), None);
+    // Its result in, the line in the page: kept.
+    cf_e2e::files::write(&page, "the owner's page, and the worker's line").unwrap();
+    look(
+        json!([{ "number": 1, "pool": "worker", "state": "done" }]),
+        &mut read,
+        &mut kept,
+    );
+    assert!(kept);
+    assert_eq!(
+        at_result(&read).as_deref(),
+        Some("the owner's page, and the worker's line")
+    );
+    // The follow-up took the line out: what was kept stays, and the start too.
+    cf_e2e::files::write(&page, "the owner's page").unwrap();
+    look(
+        json!([
+            { "number": 1, "pool": "worker", "state": "accepted" },
+            { "number": 2, "pool": null, "state": "done" },
+        ]),
+        &mut read,
+        &mut kept,
+    );
+    assert_eq!(
+        at_result(&read).as_deref(),
+        Some("the owner's page, and the worker's line")
+    );
+    assert_eq!(
+        read["site/evaluare.html"].start.as_deref(),
+        Some("the owner's page")
+    );
+}

@@ -21,7 +21,7 @@ use super::owner::{Owner, Seen, Step};
 use super::report::{keep, Bare, Said};
 use super::{start, Plan};
 use crate::bare::{asking_turn_end, bare_metrics};
-use crate::measure::{changed, OpenQuestion};
+use crate::measure::{begun, changed, ended, gone, Metrics, OpenQuestion};
 use crate::plan::{harness, last_lines, terminal_answer};
 use crate::scenarios::FollowUp;
 use crate::{js, Error, Result};
@@ -113,7 +113,9 @@ pub fn play(plan: &Plan, index: u32, out: &mut dyn Write) -> Result<bool> {
     let (options, scenario) = (plan.options, &plan.options.scenario);
     let since_ms = Timestamp::now().as_millisecond();
     let mut floor = Floor::new(out);
-    let workspace = super::workspace::fresh(plan.machine, scenario.fixture)?;
+    let workspace = super::workspace::fresh(plan.machine, scenario)?;
+    // A bare chief has no board, and so no worker's result to read the files at.
+    let begun = begun(&workspace, &scenario.reads())?;
     let rig = start(plan, &mut floor, &workspace)?;
     let kind = harness(&options.chief)?.kind;
     let mut window = Window {
@@ -141,7 +143,15 @@ pub fn play(plan: &Plan, index: u32, out: &mut dyn Write) -> Result<bool> {
     closed?;
 
     let fixture = super::workspace::fixture(scenario.fixture);
-    let metrics = bare_metrics(&items, changed(&fixture, &workspace)?, &ends);
+    let metrics = Metrics {
+        files_gone: if scenario.counts_gone_files() {
+            Some(gone(&fixture, &workspace)?)
+        } else {
+            None
+        },
+        files_read: ended(&workspace, &begun)?,
+        ..bare_metrics(&items, changed(&fixture, &workspace)?, &ends)
+    };
     let checks = scenario.verdict(&metrics);
     let kept = Bare {
         options,

@@ -12,6 +12,7 @@ pub(super) fn scenario() -> Scenario {
         id: "six-decisions",
         title: "A new page with owner decisions in it",
         fixture: "site",
+        uncommitted: None,
         prompt: join(&[
             "Pe site, în meniul de jos (Despre noi, FAQ, Contact, în română și engleză) vrem și un",
             "buton Legislație, care duce la o pagină nouă cu legislația despre burnout la locul de",

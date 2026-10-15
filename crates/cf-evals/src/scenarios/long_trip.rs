@@ -52,6 +52,7 @@ pub(super) fn scenario() -> Scenario {
         id: "long-trip",
         title: "Long messages both ways: members to the chief, the owner and the chief",
         fixture: "long",
+        uncommitted: None,
         prompt: [
             "Un test de funcționare pentru mesaje lungi. Nu modifica niciun fișier.",
             "1. Pune o sarcină unui worker: să citească interne/worker.txt și să-ți trimită ca rezultat",

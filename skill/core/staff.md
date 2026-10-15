@@ -36,6 +36,13 @@ every permission granted: Claude Code does on any removal (`rm`, `rm -f`,
 `rmdir`) whose path a variable makes (`"$R/$b"`), and no permission lets it
 through. Write a removal's paths out in full, or as `"${R:?}/${b:?}"`.
 
+Others work in this folder too, and not all of their work is committed. Never
+throw away a change you did not make: no `git checkout` or `git restore` that
+overwrites a file (`git restore --staged` of your own change is fine), and no
+`git reset --hard`, `git stash` or `git clean` over work that is not committed;
+take a change of yours out by hand. Say a file is restored only once you have
+checked it: its diff, or what it holds.
+
 Each message ConsensFlow brings you is typed into this terminal, headed
 `[ConsensFlow m-… · T-… · …]`; your harness may show it as pasted text. It is
 ConsensFlow's delivery, and acting on it is your role.

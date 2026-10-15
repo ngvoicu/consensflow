@@ -3,6 +3,8 @@
 //! the summary years later, so the keys are the ones JavaScript wrote, in its
 //! order (`camelCase`), and a number that is not there is `null`.
 
+use std::collections::BTreeMap;
+
 use serde_json::{json, Value};
 
 /// The project the ledger holds.
@@ -22,6 +24,23 @@ pub struct Task {
     pub tier: Option<String>,
     pub state: String,
     pub assignee: Option<String>,
+}
+
+/// A file a scenario reads whole: what it held as the run began, at the first look
+/// that saw the first worker task's result in, and at the end; none where it was
+/// not there, or not looked at.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct FileRead {
+    pub start: Option<String>,
+    pub at_result: Option<String>,
+    pub end: Option<String>,
+}
+
+impl FileRead {
+    /// The file as a report keeps it.
+    pub fn to_value(&self) -> Value {
+        json!({ "start": self.start, "atResult": self.at_result, "end": self.end })
+    }
 }
 
 /// A note the chief sent the human: the start of its words.
@@ -126,6 +145,12 @@ pub struct Metrics {
     pub member_questions_by: Vec<MemberQuestions>,
     /// The files of the fixture the run changed or added, by their paths.
     pub files_changed: Vec<String>,
+    /// The files of the fixture the run deleted, for a scenario that counts them
+    /// ([`crate::scenarios::Scenario::counts_gone_files`]); none for any other.
+    pub files_gone: Option<Vec<String>>,
+    /// The files the scenario reads whole ([`crate::scenarios::Scenario::reads`]), by
+    /// their paths.
+    pub files_read: BTreeMap<String, FileRead>,
 }
 
 impl Metrics {
@@ -135,9 +160,27 @@ impl Metrics {
         self.owner_questions.questions + self.owner_questions.pickers
     }
 
-    /// The numbers as a report keeps them: the keys JavaScript wrote, in its order.
+    /// `value`, a report's numbers, with what JavaScript had none of at its end, for a
+    /// scenario that looks at it only: `filesGone`, then `filesRead`.
+    pub fn with_files(&self, mut value: Value) -> Value {
+        if let Some(gone) = &self.files_gone {
+            value["filesGone"] = json!(gone);
+        }
+        if !self.files_read.is_empty() {
+            value["filesRead"] = self
+                .files_read
+                .iter()
+                .map(|(file, read)| (file.clone(), read.to_value()))
+                .collect::<serde_json::Map<_, _>>()
+                .into();
+        }
+        value
+    }
+
+    /// The numbers as a report keeps them: the keys JavaScript wrote, in its order,
+    /// and then the files a scenario looks at ([`Metrics::with_files`]).
     pub fn to_value(&self) -> Value {
-        json!({
+        self.with_files(json!({
             "project": { "id": self.project.id, "name": self.project.name },
             "chief": self.chief,
             "tasks": self.tasks.iter().map(task_value).collect::<Vec<_>>(),
@@ -173,7 +216,7 @@ impl Metrics {
                 .map(member_questions_value)
                 .collect::<Vec<_>>(),
             "filesChanged": self.files_changed,
-        })
+        }))
     }
 }
 
@@ -239,5 +282,46 @@ impl Check {
     /// A check as a report keeps it.
     pub fn to_value(&self) -> Value {
         json!({ "name": self.name, "ok": self.ok })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_files_gone_and_read_are_the_last_keys_of_a_report_and_no_keys_when_none_is_looked_at() {
+        let none = Metrics::default().to_value();
+        assert!(none.get("filesGone").is_none(), "{none}");
+        assert!(none.get("filesRead").is_none(), "{none}");
+        let looked = Metrics {
+            files_gone: Some(vec!["site/index.html".to_owned()]),
+            files_read: BTreeMap::from([(
+                "site/evaluare.html".to_owned(),
+                FileRead {
+                    start: Some("0 și 10".to_owned()),
+                    at_result: Some("0 și 10 · revizuită".to_owned()),
+                    end: None,
+                },
+            )]),
+            ..Metrics::default()
+        }
+        .to_value();
+        let keys: Vec<&String> = looked.as_object().unwrap().keys().collect();
+        assert_eq!(keys[keys.len() - 2..], ["filesGone", "filesRead"]);
+        assert_eq!(looked["filesGone"], json!(["site/index.html"]));
+        assert_eq!(
+            looked["filesRead"],
+            json!({ "site/evaluare.html": {
+                "start": "0 și 10", "atResult": "0 și 10 · revizuită", "end": null
+            } })
+        );
+        // A scenario that counts the files gone and finds none says so.
+        let counted = Metrics {
+            files_gone: Some(Vec::new()),
+            ..Metrics::default()
+        }
+        .to_value();
+        assert_eq!(counted["filesGone"], json!([]));
     }
 }
