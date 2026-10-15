@@ -1006,7 +1006,10 @@ fn a_pane_open_answers_the_process_id_of_the_windows_program() {
 /// left running ends with it. The program is its terminal's controlling
 /// process, and macOS revokes the terminal when it exits, so the output ends
 /// and `pane.exit` follows; Linux keeps the terminal open for the child, and
-/// would need an exit watcher as ConPTY does.
+/// would need an exit watcher as ConPTY does. The program exits on a line typed
+/// to it once the window is open: the host knows a program by what it read of it
+/// when the window opened, and on a loaded runner one that exits at once can be
+/// gone before that (then what it started is no window's, and is left running).
 #[cfg(target_os = "macos")]
 #[test]
 fn a_window_ends_when_its_program_exits_while_a_background_child_holds_its_terminal() {
@@ -1016,7 +1019,7 @@ fn a_window_ends_when_its_program_exits_while_a_background_child_holds_its_termi
     let opened = helper.request(
         "pane.open",
         open_body(
-            "trap '' HUP; /bin/sleep 1000 & printf 'CHILD %s END' \"$!\"; exit 0",
+            "trap '' HUP; /bin/sleep 1000 & printf 'CHILD %s END' \"$!\"; read _; exit 0",
             1024,
         ),
         &mut events,
@@ -1030,6 +1033,14 @@ fn a_window_ends_when_its_program_exits_while_a_background_child_holds_its_termi
         .trim_end_matches(" END")
         .parse::<i32>()
         .expect("the background child's pid");
+    assert_eq!(
+        helper.request(
+            "pane.input",
+            json!({"id":pane_id,"generation":generation,"bytes":[10]}),
+            &mut events,
+        ),
+        json!({"ok":true})
+    );
 
     let deadline = Instant::now() + Duration::from_secs(5);
     while !events
@@ -1042,10 +1053,7 @@ fn a_window_ends_when_its_program_exits_while_a_background_child_holds_its_termi
             Err(_) => panic!("no pane.exit while the background child holds the terminal"),
         }
     }
-    // What a window's exit ends it ends after a second look 2 s after the first (the
-    // status line's fix): room for that look, and for a loaded runner (CI's macOS took
-    // longer than 2 s on 68b433aa).
-    let gone = Instant::now() + Duration::from_secs(10);
+    let gone = Instant::now() + Duration::from_secs(2);
     while process_exists(child) && Instant::now() < gone {
         thread::sleep(Duration::from_millis(10));
     }
