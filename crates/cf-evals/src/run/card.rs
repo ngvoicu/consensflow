@@ -174,12 +174,6 @@ fn conduct(
         let lane = Chief::lane_of(&current);
         let tasks = tasks_of(&current);
         scene.board_tasks = i64::try_from(tasks.len()).unwrap_or(i64::MAX);
-        keep_at_result(
-            &mut scene.read,
-            &mut scene.read_at_result,
-            &tasks,
-            workspace,
-        )?;
         let state = lane["activity"]["state"].as_str();
         let now = signature_of(&current, &lane, &tasks);
         if now != signature {
@@ -207,6 +201,13 @@ fn conduct(
         let step = owner.step(scenario, &seen, options.timeout, &mut || {
             chief_open_question(&file)
         })?;
+        keep_at_result(
+            &mut scene.read,
+            &mut scene.read_at_result,
+            &step,
+            &tasks,
+            workspace,
+        )?;
         match step {
             Step::Wait => {}
             Step::Dialog => {
@@ -275,9 +276,7 @@ fn tasks_of(board: &Value) -> Vec<&Value> {
 }
 
 /// Whether the first worker task of a board, the lowest number that is no advice,
-/// review, test or image, has its result in: done, or accepted already. The look
-/// that first sees it keeps the files the scenario reads as they were then; the
-/// chief's turn and the follow-up's window lie between it and any later work.
+/// review, test or image, has its result in: done, or accepted already.
 fn first_result_in(tasks: &[&Value]) -> bool {
     tasks
         .iter()
@@ -291,16 +290,21 @@ fn first_result_in(tasks: &[&Value]) -> bool {
         .is_some_and(|task| matches!(task["state"].as_str(), Some("done" | "accepted")))
 }
 
-/// At a look at the board, whose tasks are `tasks`: the files the scenario reads, as
-/// they are in `workspace`, kept in `read` as they were when the first worker task's
-/// result came in; once, and `kept` says it was.
+/// At a look at the board, whose tasks are `tasks`, where the owner's next step is
+/// `step`: the files the scenario reads, as they are in `workspace`, kept in `read` as
+/// the first worker task's result left them; once, and `kept` says it was. They are
+/// read as the owner is about to say the next thing, which is the scenario's next step
+/// (an undo, Sol 2026-10-15): nothing of that step is asked for yet, so nothing of it
+/// can be in them. A look of the board alone would be behind a chief that went on at
+/// once.
 fn keep_at_result(
     read: &mut BTreeMap<String, FileRead>,
     kept: &mut bool,
+    step: &Step,
     tasks: &[&Value],
     workspace: &Path,
 ) -> Result {
-    if *kept || !first_result_in(tasks) {
+    if *kept || !matches!(step, Step::Next(FollowUp::Say(_))) || !first_result_in(tasks) {
         return Ok(());
     }
     for (file, seen) in read.iter_mut() {
