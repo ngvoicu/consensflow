@@ -1,9 +1,13 @@
-//! Which files of the fixture a run changed or added: the workspace the chief
-//! worked in against the fixture it was copied from, any harness.
+//! Which files of the fixture a run changed, added or deleted: the workspace the
+//! chief worked in against the fixture it was copied from, any harness; and what
+//! the files a scenario reads hold as the run begins and at the end.
 
+use std::collections::BTreeMap;
 use std::fs;
+use std::io::ErrorKind;
 use std::path::Path;
 
+use super::FileRead;
 use crate::{Error, Result};
 
 /// Files a harness keeps in the project for itself, which no agent wrote: Claude
@@ -26,6 +30,59 @@ pub fn changed(fixture: &Path, workspace: &Path) -> Result<Vec<String>> {
     }
     changed.sort();
     Ok(changed)
+}
+
+/// Files of the fixture that the workspace no longer has, relative to the folders,
+/// sorted: what [`changed`] cannot see, since it lists the files that are there.
+pub fn gone(fixture: &Path, workspace: &Path) -> Result<Vec<String>> {
+    let mut files = Vec::new();
+    list(fixture, fixture, &mut files)?;
+    let mut gone: Vec<String> = files
+        .into_iter()
+        .filter(|name| !workspace.join(name).is_file())
+        .collect();
+    gone.sort();
+    Ok(gone)
+}
+
+/// What the file `file` (a path relative to `workspace`, with `/` between folders)
+/// holds, or none for a file that is not there.
+pub fn read(workspace: &Path, file: &str) -> Result<Option<String>> {
+    let path = workspace.join(file);
+    match fs::read(&path) {
+        Ok(bytes) => Ok(Some(String::from_utf8_lossy(&bytes).into_owned())),
+        Err(failure) if failure.kind() == ErrorKind::NotFound => Ok(None),
+        Err(failure) => Err(Error::file("read", &path)(failure)),
+    }
+}
+
+/// The files `files` as a run begins: what each holds, as its start.
+pub fn begun(workspace: &Path, files: &[&str]) -> Result<BTreeMap<String, FileRead>> {
+    let mut begun = BTreeMap::new();
+    for &file in files {
+        let start = read(workspace, file)?;
+        begun.insert(
+            file.to_owned(),
+            FileRead {
+                start,
+                ..FileRead::default()
+            },
+        );
+    }
+    Ok(begun)
+}
+
+/// `seen`, what a run saw of the files a scenario reads, with what each holds now
+/// as its end.
+pub fn ended(
+    workspace: &Path,
+    seen: &BTreeMap<String, FileRead>,
+) -> Result<BTreeMap<String, FileRead>> {
+    let mut ended = seen.clone();
+    for (file, read_now) in &mut ended {
+        read_now.end = read(workspace, file)?;
+    }
+    Ok(ended)
 }
 
 /// Every file below `dir`, as a path relative to `root`.
@@ -119,6 +176,65 @@ mod tests {
             changed(&dir.path().join("fixture"), &dir.path().join("workspace"))
                 .unwrap()
                 .is_empty()
+        );
+    }
+
+    #[test]
+    fn a_file_read_is_what_it_holds_as_the_run_begins_and_at_the_end_and_one_that_is_gone_is_none()
+    {
+        let dir = tempfile::tempdir().unwrap();
+        write(dir.path(), "site/evaluare.html", "un scor între 0 și 10.");
+        write(dir.path(), "site/old.html", "old");
+        let begun = begun(dir.path(), &["site/evaluare.html", "site/old.html"]).unwrap();
+        write(dir.path(), "site/evaluare.html", "<p>wrecked</p>");
+        fs::remove_file(dir.path().join("site/old.html")).unwrap();
+        let ended = ended(dir.path(), &begun).unwrap();
+        assert_eq!(
+            ended,
+            BTreeMap::from([
+                (
+                    "site/evaluare.html".to_owned(),
+                    FileRead {
+                        start: Some("un scor între 0 și 10.".to_owned()),
+                        at_result: None,
+                        end: Some("<p>wrecked</p>".to_owned()),
+                    }
+                ),
+                (
+                    "site/old.html".to_owned(),
+                    FileRead {
+                        start: Some("old".to_owned()),
+                        at_result: None,
+                        end: None,
+                    }
+                ),
+            ])
+        );
+    }
+
+    #[test]
+    fn the_files_of_the_fixture_the_workspace_no_longer_has_are_gone_and_none_else() {
+        let dir = tempfile::tempdir().unwrap();
+        for (file, text) in [
+            ("fixture/site/index.html", "home"),
+            ("fixture/site/evaluare.html", "scor"),
+            ("fixture/README.md", "readme"),
+            ("fixture/node_modules/x.js", "x"),
+            ("workspace/site/evaluare.html", "scor 10"),
+            ("workspace/site/notes.md", "new"),
+        ] {
+            write(dir.path(), file, text);
+        }
+        // A folder where the file was is no file of it either.
+        fs::create_dir_all(dir.path().join("workspace/README.md")).unwrap();
+        assert_eq!(
+            gone(&dir.path().join("fixture"), &dir.path().join("workspace")).unwrap(),
+            ["README.md", "site/index.html"]
+        );
+        // What `changed` lists of the same workspace has none of them.
+        assert_eq!(
+            changed(&dir.path().join("fixture"), &dir.path().join("workspace")).unwrap(),
+            ["site/evaluare.html", "site/notes.md"]
         );
     }
 

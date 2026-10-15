@@ -2,10 +2,11 @@
 
 #![allow(clippy::unwrap_used)]
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 
 use cf_e2e::live::ask::Item;
 use cf_evals::bare::{asking_turn_end, bare_metrics, report_value};
+use cf_evals::measure::{FileRead, Metrics};
 
 fn item(id: &str, role: &str, text: &str, complete: bool) -> Item {
     Item {
@@ -152,4 +153,44 @@ fn a_bare_report_keeps_the_numbers_a_bare_run_has_in_the_order_the_other_arms_re
     assert_eq!(said["chiefEdits"], serde_json::Value::Null);
     assert_eq!(said["ownerQuestions"]["questions"], 2);
     assert_eq!(said["filesChanged"], serde_json::json!(["site/a.html"]));
+}
+
+#[test]
+fn a_bare_report_of_a_scenario_that_reads_files_keeps_them_and_the_files_gone_at_its_end() {
+    let metrics = Metrics {
+        files_gone: Some(vec!["site/index.html".to_owned()]),
+        files_read: BTreeMap::from([(
+            "site/evaluare.html".to_owned(),
+            FileRead {
+                start: Some("un scor între 0 și 10.".to_owned()),
+                at_result: None,
+                end: Some("un scor între 0 și 100.".to_owned()),
+            },
+        )]),
+        ..bare_metrics(
+            &record(),
+            vec!["site/evaluare.html".to_owned()],
+            &HashSet::new(),
+        )
+    };
+    let said = report_value(&metrics);
+    let keys: Vec<&str> = said
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(String::as_str)
+        .collect();
+    assert_eq!(
+        keys[keys.len() - 3..],
+        ["filesChanged", "filesGone", "filesRead"]
+    );
+    assert_eq!(said["filesGone"], serde_json::json!(["site/index.html"]));
+    assert_eq!(
+        said["filesRead"],
+        serde_json::json!({ "site/evaluare.html": {
+            "start": "un scor între 0 și 10.",
+            "atResult": null,
+            "end": "un scor între 0 și 100.",
+        } })
+    );
 }

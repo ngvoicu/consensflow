@@ -16,6 +16,7 @@ pub(super) fn scenario() -> Scenario {
         id: "conversation",
         title: "A working conversation of small asks: how many go to the board",
         fixture: "site",
+        uncommitted: None,
         prompt: "Salut. Ce pagini are site-ul acum și ce face fiecare, pe scurt?".to_owned(),
         follow_ups: [
             "În site/evaluare.html scorul e de la 0 la 10, dar docs/ghidul-managerului.md zice de la 1 la 5. Corectează ghidul să spună 0 la 10.",

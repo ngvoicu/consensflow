@@ -163,6 +163,17 @@ fn teaches_only_the_boards_commands(role: &str) {
             r#"Write a removal's paths out in full, or as `"\$\{R:\?\}/\$\{b:\?\}"`\."#,
             &text
         ));
+        // The owner's Windows machine, 2026-10-15: a worker overwrote a file that held
+        // uncommitted work with `git checkout`, and others said they had restored files
+        // they had not.
+        assert!(found(
+            r"Never\s+throw away a change you did not make: no `git checkout` or `git restore` that\s+overwrites a file \(`git restore --staged` of your own change is fine\), and no\s+`git reset --hard`, `git stash` or `git clean` over work that is not committed;",
+            &text
+        ));
+        assert!(found(
+            r"Say a file is restored only once you have\s+checked it: its diff, or what it holds\.",
+            &text
+        ));
     }
 }
 

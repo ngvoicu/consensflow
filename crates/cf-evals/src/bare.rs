@@ -69,9 +69,10 @@ pub fn asking_turn_end<'a>(items: &'a [Item], ends: &HashSet<String>) -> Option<
 }
 
 /// The numbers of a bare run as its report keeps them: those a bare run has, in
-/// the order the reports of the other arms have them.
+/// the order the reports of the other arms have them, the files a scenario looks at
+/// too ([`Metrics::with_files`]).
 pub fn report_value(metrics: &Metrics) -> Value {
-    json!({
+    metrics.with_files(json!({
         "chief": metrics.chief,
         "tasks": [],
         "parallel": 0,
@@ -89,5 +90,5 @@ pub fn report_value(metrics: &Metrics) -> Value {
         "chiefLastWords": metrics.chief_last_words,
         "ownerQuestions": owner_questions_value(&metrics.owner_questions),
         "filesChanged": metrics.files_changed,
-    })
+    }))
 }
