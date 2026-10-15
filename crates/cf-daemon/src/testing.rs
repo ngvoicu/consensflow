@@ -214,6 +214,8 @@ pub fn scene() -> Scene {
             },
             staff: Vec::new(),
             gate: false,
+            wake_up: None,
+            specs: None,
         })
         .unwrap();
     ledger

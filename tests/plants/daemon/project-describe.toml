@@ -418,7 +418,7 @@ replace = '''            "directory": caller.project.directory,
 
 [[plant]]
 name = "describe menu: the browser's own menu is not taken away on a project"
-meant = "project menu: a right-click on a project opens its menu beside the pointer, Rename and Description, and selects nothing"
+meant = "project menu: a right-click on a project opens its menu beside the pointer, Rename, Description and Project settings, and selects nothing"
 runs = ["page-project-menu"]
 
 [[plant.edit]]
@@ -431,7 +431,7 @@ replace = '''      if (card === null) return
 
 [[plant]]
 name = "describe menu: a right-click opens nothing"
-meant = "project menu: a right-click on a project opens its menu beside the pointer, Rename and Description, and selects nothing"
+meant = "project menu: a right-click on a project opens its menu beside the pointer, Rename, Description and Project settings, and selects nothing"
 runs = ["page-project-menu"]
 
 [[plant.edit]]
@@ -471,7 +471,7 @@ replace = '''      const card = isMenuKey(event) ? list.querySelector('li.projec
 
 [[plant]]
 name = "describe menu: the menu opens on no item"
-meant = "project menu: a right-click on a project opens its menu beside the pointer, Rename and Description, and selects nothing"
+meant = "project menu: a right-click on a project opens its menu beside the pointer, Rename, Description and Project settings, and selects nothing"
 runs = ["page-project-menu"]
 
 [[plant.edit]]
@@ -851,7 +851,7 @@ replace = '<input name="name" maxlength="100" autocomplete="off" spellcheck="fal
 
 [[plant]]
 name = "describe dialog: the field takes a description of any length"
-meant = "project menu: Description… writes a line under the name, smaller and quieter, cut with an ellipsis and whole on hover"
+meant = "project menu: Description… writes a line under the name, smaller and quieter, whole on as many rows as it takes, with no ellipsis and no title"
 runs = ["page-project-menu"]
 
 [[plant.edit]]
@@ -862,15 +862,18 @@ replace = '<input name="description" maxlength="2000" autocomplete="off">'
 # --- the list ---
 
 [[plant]]
-name = "describe list: the line has no title"
-meant = "project menu: Description… writes a line under the name, smaller and quieter, cut with an ellipsis and whole on hover"
+name = "describe list: the line is given a title to read it whole by"
+meant = "project menu: Description… writes a line under the name, smaller and quieter, whole on as many rows as it takes, with no ellipsis and no title"
 runs = ["page-project-menu"]
 
 [[plant.edit]]
 file = "app/ui/core/app.js"
-find = '''      line.title = project.description
+find = '''      select.append(element('span', 'project-description', project.description))
 '''
-replace = ""
+replace = '''      const line = element('span', 'project-description', project.description)
+      line.title = project.description
+      select.append(line)
+'''
 
 [[plant]]
 name = "describe list: a project with no line has one drawn"
@@ -883,38 +886,48 @@ find = "    if (project.description) {"
 replace = "    if (true) {"
 
 [[plant]]
-name = "describe list: the line is not cut"
-meant = "project menu: Description… writes a line under the name, smaller and quieter, cut with an ellipsis and whole on hover"
+name = "describe list: the line is cut to one row with an ellipsis"
+meant = "project menu: Description… writes a line under the name, smaller and quieter, whole on as many rows as it takes, with no ellipsis and no title"
 runs = ["page-project-menu"]
 
 [[plant.edit]]
 file = "app/ui/page.css"
-find = ".project-description { overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
-replace = ".project-description { overflow: hidden; text-overflow: ellipsis; white-space: normal;"
+find = ".project-description { overflow-wrap: anywhere;"
+replace = ".project-description { overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
+
+[[plant]]
+name = "describe list: a word too long for the list widens it"
+meant = "project menu: a description of two hundred characters is shown whole in the list, and a word too long for it is broken, not made to widen it"
+runs = ["page-project-menu"]
+
+[[plant.edit]]
+file = "app/ui/page.css"
+find = ".project-description { overflow-wrap: anywhere;"
+replace = ".project-description { overflow-wrap: normal;"
 
 [[plant]]
 name = "describe list: the line is as big as the name"
-meant = "project menu: Description… writes a line under the name, smaller and quieter, cut with an ellipsis and whole on hover"
+meant = "project menu: Description… writes a line under the name, smaller and quieter, whole on as many rows as it takes, with no ellipsis and no title"
 runs = ["page-project-menu"]
 
 [[plant.edit]]
 file = "app/ui/page.css"
-find = "white-space: nowrap; font-size: 11px; color: var(--muted); }"
-replace = "white-space: nowrap; font-size: 13px; color: var(--muted); }"
+find = "overflow-wrap: anywhere; font-size: 11px; color: var(--muted); }"
+replace = "overflow-wrap: anywhere; font-size: 13px; color: var(--muted); }"
 
 [[plant]]
 name = "describe list: the line is as loud as the name"
-meant = "project menu: Description… writes a line under the name, smaller and quieter, cut with an ellipsis and whole on hover"
+meant = "project menu: Description… writes a line under the name, smaller and quieter, whole on as many rows as it takes, with no ellipsis and no title"
 runs = ["page-project-menu"]
 
 [[plant.edit]]
 file = "app/ui/page.css"
-find = "white-space: nowrap; font-size: 11px; color: var(--muted); }"
-replace = "white-space: nowrap; font-size: 11px; color: var(--foam); }"
+find = "overflow-wrap: anywhere; font-size: 11px; color: var(--muted); }"
+replace = "overflow-wrap: anywhere; font-size: 11px; color: var(--foam); }"
 
 [[plant]]
 name = "describe list: the menu is drawn in the flow of the page, not where it was asked for"
-meant = "project menu: a right-click on a project opens its menu beside the pointer, Rename and Description, and selects nothing"
+meant = "project menu: a right-click on a project opens its menu beside the pointer, Rename, Description and Project settings, and selects nothing"
 runs = ["page-project-menu"]
 
 [[plant.edit]]

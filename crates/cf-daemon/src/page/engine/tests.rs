@@ -24,6 +24,8 @@ fn request() -> NewProject {
             tier: "standard".to_owned(),
         }],
         gate: false,
+        wake_up: None,
+        specs: None,
     }
 }
 

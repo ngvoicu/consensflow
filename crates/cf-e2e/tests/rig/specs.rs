@@ -247,6 +247,49 @@ fn a_chief_of_a_project_with_specs_on_is_given_the_skill_beside_its_role_at_its_
 }
 
 #[test]
+fn a_project_opened_with_specs_on_has_its_chief_given_the_skill_beside_its_role_at_its_very_first_window(
+) -> Outcome {
+    let rig = rig()?;
+    // The human says it as the project opens, in the one request New project makes.
+    let project = Project::open(
+        &rig,
+        "chief",
+        json!({ "specs": { "on": true, "folder": "plans", "variant": "tdd" } }),
+    )?;
+    let first = rig.open_frame(&format!("p{}-chief", project.id()), OPEN)?;
+    // Its first window, which nothing relaunched, has the skill in the folder it is
+    // kept in, and its role names it and the folder the specs are kept in.
+    assert_eq!(chief_windows(&rig, &project).len(), 1);
+    assert_eq!(
+        skills_named(&first),
+        ["consensflow-chief"],
+        "{:?}",
+        first["argv"]
+    );
+    assert_eq!(
+        specmint_named(&first),
+        ["specmint-tdd"],
+        "{:?}",
+        first["argv"]
+    );
+    let kept = add_dirs(&first).remove(1);
+    assert!(
+        is_kept(&rig, &kept, "claude", "tdd"),
+        "{} is no folder of the copy: {:?}",
+        kept.display(),
+        first["argv"]
+    );
+    let role = role_of(&first);
+    assert!(role.contains("## This project's specs"), "{role}");
+    assert!(
+        role.contains("Where Specmint says `.specs`, it means `plans`"),
+        "{role}"
+    );
+    rig.close()?;
+    Ok(())
+}
+
+#[test]
 fn with_specs_on_for_every_project_a_project_that_says_nothing_follows_and_one_that_says_off_is_given_nothing(
 ) -> Outcome {
     let rig = rig()?;

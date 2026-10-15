@@ -1,8 +1,9 @@
 //! Projects: each with its human, its chief and its staff, open or suspended,
 //! gated or not; every open one suspended when the daemon starts, for the human
 //! to resume, logged event by event, and deleted with everything in it once
-//! closed. The human may rename one and write a line under its name
-//! ([`describing`]).
+//! closed. One opens with the wake-up calls and the specs the human says for it,
+//! in the write that makes it. The human may rename one and write a line under
+//! its name ([`describing`]).
 
 mod describing;
 
@@ -16,10 +17,11 @@ pub use describing::parse_description;
 pub(crate) use describing::{describe_project, rename_project};
 
 use crate::model::{self, LedgerError, COORDINATOR_HANDLES};
+use crate::specs::{keep_specs, SpecsChange};
 use crate::staff::{add_participant, NewParticipant};
 use crate::store::Store;
 use crate::views::{participant_view, ParticipantRow, PARTICIPANT_SELECT};
-use crate::wake_ups::withdraw_queued;
+use crate::wake_ups::{keep_wake_up, withdraw_queued, NewWakeUp};
 
 /// The most characters a project's name may have, when it is given and when
 /// the human changes it.
@@ -101,7 +103,8 @@ pub struct NewMember {
 }
 
 /// A project to open: where, under what name, its chief, its staff (the
-/// last project's, usually), and whether the human approves each message.
+/// last project's, usually), whether the human approves each message, and
+/// what the human says of its wake-up calls and its specs, kept with it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct NewProject {
     pub directory: String,
@@ -109,10 +112,16 @@ pub struct NewProject {
     pub chief: NewChief,
     pub staff: Vec<NewMember>,
     pub gate: bool,
+    /// The wake-up calls it starts with; none leaves them as a project has them
+    /// that never set them: off, an hour apart, with the default words.
+    pub wake_up: Option<NewWakeUp>,
+    /// What it says of specs; none says nothing, and it follows the app's setting.
+    pub specs: Option<SpecsChange>,
 }
 
 impl NewProject {
-    /// The request as JSON gives it, read in the order the Node ledger checked it.
+    /// The request as JSON gives it, read in the order the Node ledger checked it;
+    /// what this build added, the calls (`wakeUp`) and the specs, after it.
     pub fn from_json(value: &Value) -> Result<Self, LedgerError> {
         let directory = model::parse_text(value.get("directory"), "directory", 4096)?;
         let name = parse_name(value.get("name"))?;
@@ -148,6 +157,8 @@ impl NewProject {
             },
             staff,
             gate,
+            wake_up: NewWakeUp::from_opening(value.get("wakeUp"))?,
+            specs: SpecsChange::from_opening(value.get("specs"))?,
         })
     }
 }
@@ -201,7 +212,10 @@ fn designer_refused() -> LedgerError {
     )
 }
 
-/// A project with its chief, on the saved agent it runs on, and its staff.
+/// A project with its chief, on the saved agent it runs on, and its staff, and
+/// the calls and specs the human said for it, kept in the same write: the
+/// chief's first launch reads the specs, and the project is never seen without
+/// them. Everything the ledger refuses is refused before the write begins.
 pub(crate) fn create_project(
     store: &mut Store,
     request: &NewProject,
@@ -217,6 +231,11 @@ pub(crate) fn create_project(
         .iter()
         .map(|member| Ok((member, member.check()?)))
         .collect::<Result<Vec<_>, LedgerError>>()?;
+    let wake_up = request
+        .wake_up
+        .as_ref()
+        .map(NewWakeUp::setting)
+        .transpose()?;
     store.write(|store| {
         let at = store.at();
         store.db.execute(
@@ -261,6 +280,14 @@ pub(crate) fn create_project(
             "project.created",
             json!({ "name": request.name, "directory": request.directory }),
         )?;
+        // Said as the project opens, kept and logged as if the human had said
+        // them the moment after: a setting that is the default changes nothing.
+        if let Some(wake_up) = wake_up {
+            keep_wake_up(store, id, wake_up)?;
+        }
+        if let Some(specs) = &request.specs {
+            keep_specs(store, id, specs)?;
+        }
         known_project(store, id)
     })
 }

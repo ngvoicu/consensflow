@@ -7,9 +7,11 @@
 //!
 //! The setting is columns of the project's row (on or off, how often, and the
 //! words, or none for the default's); only the human changes it, and each
-//! change is logged (`project.wake_up_setting`). Each wake-up queued is logged
-//! too (`project.wake_up`), and that log is all `due` reads: when the last one
-//! went, whether it is still on its way, and whether anything moved since.
+//! change is logged (`project.wake_up_setting`). A project the human opens with
+//! calls set has them kept in the write that makes it. Each wake-up queued is
+//! logged too (`project.wake_up`), and that log is all `due` reads: when the
+//! last one went, whether it is still on its way, and whether anything moved
+//! since.
 
 mod due;
 
@@ -167,6 +169,15 @@ impl NewWakeUp {
         })
     }
 
+    /// What a request says of the calls as a project opens: none where it says
+    /// nothing at all, else the calls as [`from_json`](Self::from_json) reads them.
+    pub fn from_opening(value: Option<&Value>) -> Result<Option<Self>, LedgerError> {
+        match value {
+            None | Some(Value::Null) => Ok(None),
+            Some(said) => Self::from_json(said).map(Some),
+        }
+    }
+
     /// The setting this asks for, or why it cannot be: an interval under a
     /// minute (or too long to count), and words that say nothing or are too long.
     pub fn setting(&self) -> Result<WakeUpSetting, LedgerError> {
@@ -223,27 +234,36 @@ pub(crate) fn set_wake_up(
     request: &NewWakeUp,
 ) -> Result<WakeUpSetting, LedgerError> {
     let to = request.setting()?;
-    store.write(|store| {
-        let from = setting(store, project_id)?;
-        if from == to {
-            return Ok(to);
-        }
-        let at = store.at();
-        store.db.execute(
-            "UPDATE project SET wake_up_on = ?, wake_up_every_ms = ?, wake_up_text = ?, updated_at = ?
-             WHERE id = ?",
-            rusqlite::params![i64::from(to.on), to.every_ms, to.text, at, project_id],
-        )?;
-        store.log(
-            project_id,
-            "project.wake_up_setting",
-            json!({ "from": from.logged(), "to": to.logged() }),
-        )?;
-        if from.on && !to.on {
-            withdraw_queued(store, project_id, "wake-up calls were turned off")?;
-        }
-        Ok(to)
-    })
+    store.write(|store| keep_wake_up(store, project_id, to))
+}
+
+/// What [`set_wake_up`] writes of a setting that was checked, inside the write
+/// of a caller that holds more than the calls: the opening of a project keeps
+/// them in its own.
+pub(crate) fn keep_wake_up(
+    store: &mut Store,
+    project_id: i64,
+    to: WakeUpSetting,
+) -> Result<WakeUpSetting, LedgerError> {
+    let from = setting(store, project_id)?;
+    if from == to {
+        return Ok(to);
+    }
+    let at = store.at();
+    store.db.execute(
+        "UPDATE project SET wake_up_on = ?, wake_up_every_ms = ?, wake_up_text = ?, updated_at = ?
+         WHERE id = ?",
+        rusqlite::params![i64::from(to.on), to.every_ms, to.text, at, project_id],
+    )?;
+    store.log(
+        project_id,
+        "project.wake_up_setting",
+        json!({ "from": from.logged(), "to": to.logged() }),
+    )?;
+    if from.on && !to.on {
+        withdraw_queued(store, project_id, "wake-up calls were turned off")?;
+    }
+    Ok(to)
 }
 
 #[cfg(test)]

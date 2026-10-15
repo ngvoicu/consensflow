@@ -42,6 +42,8 @@ fn project(ledger: &mut Ledger, staff: Vec<NewMember>) -> ProjectView {
             },
             staff,
             gate: false,
+            wake_up: None,
+            specs: None,
         })
         .expect("a project")
 }

@@ -1,12 +1,15 @@
 /**
- * The Specs group of a project's settings dialog: whether the chief plans big
- * work as specs (Specmint's), in which folder of the project and with which
- * variant. A project follows what the human set for every project (Settings,
- * Agents) until it says on or off itself; the folder and the variant are its
- * own. The daemon checks the folder (inside the project, never `..`) and keeps
- * all three; a change reaches the chief when it next starts, and the dialog
- * says so. The controls keep what the human typed while the board is drawn
- * again, and are set again when what the project says changed.
+ * The Specs section of a project's settings: whether the chief plans big work
+ * as specs (Specmint's), in which folder of the project and with which variant.
+ * A project follows what the human set for every project (Settings, Agents)
+ * until it says on or off itself; the folder and the variant are its own. The
+ * daemon checks the folder (inside the project, never `..`) and keeps all
+ * three. In Project settings the section saves, and a change reaches the chief
+ * when it next starts, which the dialog says; the controls keep what the human
+ * typed while the board is drawn again, and are set again when what the project
+ * says changed. In New project there is nothing to save yet: the section holds
+ * what the human sets, and `values` is what the project starts with, and its
+ * chief starts with.
  */
 
 /** The folder and the variant a project has when it names none: the daemon's. */
@@ -33,25 +36,31 @@ export class SpecsGroup {
   #shown = null
 
   /**
-   * `page.board()` is the board shown, `page.daemon` asks the daemon,
-   * `page.act` runs a change and redraws the page and `page.note` tells the
-   * human what came of it.
+   * `group` is the fieldset, which holds the controls by their names. With a
+   * `page` the section saves, for the project the board shows: `page.board()`
+   * is the board shown, `page.daemon` asks the daemon, `page.act` runs a change
+   * and redraws the page and `page.note` tells the human what came of it. With
+   * none it only holds what is set in it (`values`), as New project's does.
    */
-  constructor(group, page) {
+  constructor(group, page = null) {
     this.#mode = group.querySelector('[name="specs"]')
     this.#folder = group.querySelector('[name="specsFolder"]')
     this.#variant = group.querySelector('[name="specsVariant"]')
-    this.#note = group.querySelector('#staff-specs-note')
+    this.#note = group.querySelector('.specs-note')
     this.#page = page
     this.#folder.placeholder = DEFAULT_FOLDER
     this.#mode.addEventListener('change', () => this.#enable())
-    group.querySelector('#staff-specs-save').addEventListener('click', () => this.#save())
-    // Enter in the folder saves the specs, and sends nothing else the form holds.
+    if (page !== null) {
+      group.querySelector('[name="specs-save"]').addEventListener('click', () => this.#save())
+    }
+    // Enter in the folder saves the specs where they are saved, and sends
+    // nothing else the form holds: the form of New project starts the project.
     this.#folder.addEventListener('keydown', (event) => {
       if (event.key !== 'Enter') return
       event.preventDefault()
-      void this.#save()
+      if (page !== null) void this.#save()
     })
+    this.reset()
   }
 
   /**
@@ -71,6 +80,32 @@ export class SpecsGroup {
     this.#enable()
   }
 
+  /** The section as it is for a project that says nothing of specs. */
+  reset() {
+    this.draw(null, true)
+  }
+
+  /**
+   * What a new project says of specs: none while the section is as it opened,
+   * which leaves the project following the app's setting as one that said
+   * nothing does, else all three, as `project.specs` takes them.
+   */
+  values() {
+    const said = this.#said()
+    const asOpened = said.on === null && said.folder === null && said.variant === DEFAULT_VARIANT
+    return asOpened ? null : said
+  }
+
+  /** What the controls say, as `project.specs` takes it. */
+  #said() {
+    const folder = this.#folder.value.trim()
+    return {
+      on: SAID[this.#mode.value],
+      folder: folder === '' ? null : folder,
+      variant: this.#variant.value,
+    }
+  }
+
   /** A project that says off has no folder or variant to name. */
   #enable() {
     const off = this.#mode.value === 'off'
@@ -88,13 +123,7 @@ export class SpecsGroup {
   async #save() {
     const project = this.#page.board()?.project
     if (project === undefined) return
-    const folder = this.#folder.value.trim()
-    const body = {
-      project: project.id,
-      on: SAID[this.#mode.value],
-      folder: folder === '' ? null : folder,
-      variant: this.#variant.value,
-    }
+    const body = { project: project.id, ...this.#said() }
     let refused = null
     await this.#page.act(async () => {
       try {

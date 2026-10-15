@@ -27,6 +27,8 @@ fn project(ledger: &mut Ledger) -> ProjectView {
             },
             staff: Vec::new(),
             gate: false,
+            wake_up: None,
+            specs: None,
         })
         .expect("a project")
 }

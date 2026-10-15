@@ -22,6 +22,8 @@ fn project() -> NewProject {
         },
         staff: Vec::new(),
         gate: false,
+        wake_up: None,
+        specs: None,
     }
 }
 

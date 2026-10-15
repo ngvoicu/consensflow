@@ -89,6 +89,8 @@ impl World {
                 },
                 staff: vec![member("zeus"), member("diana")],
                 gate,
+                wake_up: None,
+                specs: None,
             })
             .expect("a project");
         Self {

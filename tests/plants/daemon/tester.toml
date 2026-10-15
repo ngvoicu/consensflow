@@ -4,7 +4,7 @@
 # takes one piece of that out; a test of it fails: the ledger's (the roles and pools it
 # knows, migration 0012 that lets its two tables hold them, and what the recordings of
 # Node's ledger are held apart by), the engine's (the role it has a text for, and the
-# texts), the daemon's route, the page's staff dialog, and the rig's case that carries a
+# texts), the daemon's route, the page's Project settings, and the rig's case that carries a
 # test from the chief to a tester's window and its result back. A run written `{ node:
 # [...] }` is `node --test`.
 #
@@ -22,7 +22,7 @@ ledger-lib-testing = ["cargo", "test", "--offline", "-p", "cf-ledger", "--lib", 
 # The texts of the roles, and what the chief reads of them: not the golden of Node's chief text, which
 # the whole of the `text` test holds with them.
 engine-text-roles = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "text", "roles::", "--", "--skip", "goldens_roles"]
-# The page's staff dialog and board: what it offers a human who adds a member, and what it shows of a
+# The page's Project settings and board: what it offers a human who adds a member, and what it shows of a
 # tester's tasks (the cases of `app/tests/core-page.spec.mjs` that say tester, in the browser Playwright
 # keeps; each plant's `prepare` bundles the page's xterm first, as `npm run test:ui` does).
 page-tester = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "tester"]
@@ -296,7 +296,7 @@ find = '''
 replace = "            } else {"
 
 [[plant]]
-name = "tester page: the staff dialog does not offer the tester among the roles"
+name = "tester page: Project settings does not offer the tester among the roles"
 meant = "adds a saved agent to the staff as a tester, or as one more role of a member, in the place a tester has among the roles"
 runs = ["page-tester"]
 prepare = [["node", "app/scripts/bundle-ui.mjs"]]
@@ -307,7 +307,7 @@ find = "const ROLES = ['worker', 'advisor', 'reviewer', 'tester', 'designer']"
 replace = "const ROLES = ['worker', 'advisor', 'reviewer', 'designer']"
 
 [[plant]]
-name = "tester page: the staff dialog has no word for the tester"
+name = "tester page: Project settings has no word for the tester"
 meant = "adds a saved agent to the staff as a tester, or as one more role of a member, in the place a tester has among the roles"
 runs = ["page-tester"]
 prepare = [["node", "app/scripts/bundle-ui.mjs"]]
@@ -320,7 +320,7 @@ find = '''
 replace = "  designer: 'Image designer',"
 
 [[plant]]
-name = "tester page: the staff dialog does not say what a tester is for"
+name = "tester page: Project settings does not say what a tester is for"
 meant = "adds a saved agent to the staff as a tester, or as one more role of a member, in the place a tester has among the roles"
 runs = ["page-tester"]
 prepare = [["node", "app/scripts/bundle-ui.mjs"]]

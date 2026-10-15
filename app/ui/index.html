@@ -19,7 +19,7 @@
       </div>
       <span class="spacer"></span>
       <button class="quiet-button" id="inbox-button" type="button">Inbox</button>
-      <button class="quiet-button" id="staff-button" type="button">Staff</button>
+      <button class="quiet-button" id="project-settings-button" type="button">Project settings</button>
       <button class="primary-button" id="new-project" type="button">New project</button>
       <button class="icon-button" id="settings-button" type="button" aria-label="Settings" title="Settings">
         <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
@@ -60,6 +60,7 @@
   <ul class="project-menu" id="project-menu" role="menu" aria-label="Project" hidden>
     <li role="none"><button type="button" role="menuitem" data-action="rename">Rename…</button></li>
     <li role="none"><button type="button" role="menuitem" data-action="describe">Description…</button></li>
+    <li role="none"><button type="button" role="menuitem" data-action="settings">Project settings…</button></li>
   </ul>
   <dialog id="rename-dialog" class="settings" aria-labelledby="rename-title">
     <form class="dialog-form">
@@ -142,8 +143,8 @@
       <label>The chief runs on
         <select name="chief" required></select>
       </label>
-      <fieldset class="staff-pick">
-        <legend>The staff</legend>
+      <fieldset class="project-section staff-pick">
+        <legend>Staff</legend>
         <p class="dialog-help">Pick a role, then an agent. The last project's staff is here already.</p>
         <table class="staff" aria-label="Agents for the staff">
           <thead>
@@ -158,7 +159,8 @@
         </div>
         <p class="staff-hint" id="new-project-hint" hidden></p>
       </fieldset>
-      <label class="check"><input type="checkbox" name="gate">Human approval required: every message between the chief and its staff waits until you pass it on</label>
+      <div data-project-sections></div>
+      <p class="dialog-refusal" role="alert" hidden></p>
       <div class="dialog-actions">
         <button class="quiet-button" type="button" value="cancel">Cancel</button>
         <button class="primary-button" type="submit">Start project</button>
@@ -196,65 +198,78 @@
     </form>
   </dialog>
 
-  <dialog id="staff-dialog" aria-labelledby="staff-title">
+  <dialog id="project-settings-dialog" aria-labelledby="project-settings-title">
     <form class="dialog-form">
-      <h2 id="staff-title">Project staff</h2>
-      <p class="dialog-help">The chief names the tier a task needs and ConsensFlow picks a free member of that tier: a worker does the work, an advisor advises the chief, a reviewer reviews finished work when the chief asks, a tester checks it by running it when the chief asks. An image designer draws: only an image agent is one, and an image agent takes no other role. A member may hold more than one role: one row here per role.</p>
-      <table class="staff" aria-label="On the staff">
-        <thead>
-          <tr><th>Member</th><th>Role</th><th></th></tr>
-        </thead>
-        <tbody id="staff-members"></tbody>
-      </table>
-      <fieldset class="staff-add">
-        <legend>Add a member</legend>
-        <label>Role<select name="role"></select></label>
-        <label>Agent<select name="agent"></select></label>
-        <button class="primary-button" type="submit">Add to staff</button>
-        <p class="staff-hint" id="staff-hint" hidden></p>
+      <h2 id="project-settings-title">Project settings</h2>
+      <fieldset class="project-section">
+        <legend>Staff</legend>
+        <p class="dialog-help">The chief names the tier a task needs and ConsensFlow picks a free member of that tier: a worker does the work, an advisor advises the chief, a reviewer reviews finished work when the chief asks, a tester checks it by running it when the chief asks. An image designer draws: only an image agent is one, and an image agent takes no other role. A member may hold more than one role: one row here per role.</p>
+        <table class="staff" aria-label="On the staff">
+          <thead>
+            <tr><th>Member</th><th>Role</th><th></th></tr>
+          </thead>
+          <tbody id="staff-members"></tbody>
+        </table>
+        <fieldset class="staff-add">
+          <legend>Add a member</legend>
+          <label>Role<select name="role"></select></label>
+          <label>Agent<select name="agent"></select></label>
+          <button class="primary-button" type="submit">Add to staff</button>
+          <p class="staff-hint" id="staff-hint" hidden></p>
+        </fieldset>
       </fieldset>
-      <label class="check"><input type="checkbox" id="staff-gate" name="gate">Human approval required: every message between the chief and its staff waits until you pass it on</label>
-      <fieldset class="staff-wakeup" id="staff-wakeup">
-        <legend>Wake-up calls</legend>
-        <label class="check"><input type="checkbox" name="wakeup-on">Wake the chief now and then</label>
-        <p class="wakeup-help">A chief that stopped while work is left carries on: it is asked whether it still has work to do. Nothing is sent while the project is closed, or while you have typed to the chief and not sent it; its answer stays in its terminal.</p>
-        <div class="wakeup-when">
-          <label>Every<input type="number" name="wakeup-every" min="1" step="1" required></label>
-          <label>Unit<select name="wakeup-unit"><option value="minutes">minutes</option><option value="hours">hours</option><option value="days">days</option></select></label>
-        </div>
-        <label>What it says<textarea name="wakeup-text" rows="3"></textarea></label>
-        <p class="staff-hint wakeup-hint" role="alert" hidden></p>
-        <div class="dialog-actions"><button class="primary-button" type="button" name="wakeup-save">Save wake-up calls</button></div>
-      </fieldset>
-      <fieldset class="project-specs" id="staff-specs">
-        <legend>Specs</legend>
-        <p class="specs-help">With specs on, the chief plans big work as a spec, with Specmint, and puts each phase on the board as tasks; a small ask still goes straight on the board. The app's setting is under Settings, on the Agents screen. A change reaches the chief when it next starts: after Resume, or when you switch the chief.</p>
-        <label>Specs
-          <select name="specs">
-            <option value="follow">Follow the app's setting</option>
-            <option value="on">On</option>
-            <option value="off">Off</option>
-          </select>
-        </label>
-        <label>Specs folder, inside the project
-          <input name="specsFolder" placeholder=".specs" autocomplete="off" spellcheck="false">
-        </label>
-        <label>Specmint variant
-          <select name="specsVariant">
-            <option value="core">core</option>
-            <option value="core-html">core-html</option>
-            <option value="tdd">tdd</option>
-            <option value="tdd-html">tdd-html</option>
-          </select>
-        </label>
-        <p class="staff-hint" id="staff-specs-note" role="status" hidden></p>
-        <button class="quiet-button" type="button" id="staff-specs-save">Save specs</button>
-      </fieldset>
+      <div data-project-sections></div>
       <div class="dialog-actions">
         <button class="quiet-button" type="button" value="cancel">Close</button>
       </div>
     </form>
   </dialog>
+
+  <!-- The sections of a project's settings that Project settings and New project share, one markup
+       for both: each dialog has a copy (core/project-sections.js). What only a saved project has is
+       marked data-live: New project does not show it. -->
+  <template id="project-sections">
+    <fieldset class="project-section">
+      <legend>Human approval</legend>
+      <label class="check"><input type="checkbox" name="gate">Human approval required: every message between the chief and its staff waits until you pass it on</label>
+    </fieldset>
+    <fieldset class="project-section wakeup-section">
+      <legend>Wake-up calls</legend>
+      <label class="check"><input type="checkbox" name="wakeup-on">Wake the chief now and then</label>
+      <p class="wakeup-help">A chief that stopped while work is left carries on: it is asked whether it still has work to do. Nothing is sent while the project is closed, or while you have typed to the chief and not sent it; its answer stays in its terminal.</p>
+      <div class="wakeup-when">
+        <label>Every<input type="number" name="wakeup-every" min="1" step="1" required></label>
+        <label>Unit<select name="wakeup-unit"><option value="minutes">minutes</option><option value="hours">hours</option><option value="days">days</option></select></label>
+      </div>
+      <label>What it says<textarea name="wakeup-text" rows="3"></textarea></label>
+      <p class="staff-hint wakeup-hint" role="alert" hidden></p>
+      <div class="dialog-actions" data-live><button class="primary-button" type="button" name="wakeup-save">Save wake-up calls</button></div>
+    </fieldset>
+    <fieldset class="project-section project-specs">
+      <legend>Specs</legend>
+      <p class="specs-help">With specs on, the chief plans big work as a spec, with Specmint, and puts each phase on the board as tasks; a small ask still goes straight on the board. The app's setting is under Settings, on the Agents screen. <span data-live>A change reaches the chief when it next starts: after Resume, or when you switch the chief.</span></p>
+      <label>Specs
+        <select name="specs">
+          <option value="follow">Follow the app's setting</option>
+          <option value="on">On</option>
+          <option value="off">Off</option>
+        </select>
+      </label>
+      <label>Specs folder, inside the project
+        <input name="specsFolder" placeholder=".specs" autocomplete="off" spellcheck="false">
+      </label>
+      <label>Specmint variant
+        <select name="specsVariant">
+          <option value="core">core</option>
+          <option value="core-html">core-html</option>
+          <option value="tdd">tdd</option>
+          <option value="tdd-html">tdd-html</option>
+        </select>
+      </label>
+      <p class="staff-hint specs-note" role="status" hidden></p>
+      <button class="quiet-button" type="button" name="specs-save" data-live>Save specs</button>
+    </fieldset>
+  </template>
 
   <script type="module" src="./core/app.js"></script>
 </body>

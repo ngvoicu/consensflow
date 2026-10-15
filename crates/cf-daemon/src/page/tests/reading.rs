@@ -231,6 +231,8 @@ async fn the_board_marks_the_agent_of_a_member_gone_and_not_that_of_the_session_
                             tier: "standard".to_owned(),
                         }],
                         gate: false,
+                        wake_up: None,
+                        specs: None,
                     })
                     .unwrap();
                 let mine = project
@@ -346,6 +348,8 @@ async fn the_agents_file_is_read_at_each_lane_and_not_once_for_the_board() {
                     },
                     staff: vec![member("a1"), member("a2")],
                     gate: false,
+                    wake_up: None,
+                    specs: None,
                 })
                 .unwrap()
                 .id;
@@ -403,6 +407,8 @@ async fn an_inbox_is_the_humans_unless_the_page_names_a_handle_in_text() {
                         tier: "standard".to_owned(),
                     }],
                     gate: false,
+                    wake_up: None,
+                    specs: None,
                 })
                 .unwrap()
                 .id;

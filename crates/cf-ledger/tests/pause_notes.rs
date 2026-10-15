@@ -41,6 +41,8 @@ fn world() -> World {
             },
             staff,
             gate: false,
+            wake_up: None,
+            specs: None,
         })
         .expect("a project")
         .id;

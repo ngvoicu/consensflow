@@ -1,7 +1,8 @@
-//! The human's wake-up calls: what the Staff dialog reads of a project's, and
-//! what it saves. Only the page asks for them: no route of the agents' API
-//! reaches them, so a window's token, the chief's or a member's, changes
-//! nothing of them.
+//! The human's wake-up calls: what Project settings reads of a project's, and
+//! what it saves. (New project says them in `project.open`, which keeps them in
+//! the write that makes the project.) Only the page asks for them: no route of
+//! the agents' API reaches them, so a window's token, the chief's or a member's,
+//! changes nothing of them.
 
 use cf_ledger::NewWakeUp;
 

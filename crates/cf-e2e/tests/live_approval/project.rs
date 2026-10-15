@@ -1,5 +1,5 @@
 //! A project of the run: its folder, and the opening of it with its staff and
-//! the gate on, as the app opens one and as the checkbox of its Staff dialog
+//! the gate on, as the app opens one and as the checkbox of its Project settings
 //! turns the gate on. (The trust Claude Code asks of the folder is
 //! [`cf_e2e::live::window::trust_claude`]'s.)
 
@@ -45,7 +45,7 @@ pub fn folder(rig: &Rig, planned: &Planned) -> Result<PathBuf> {
 
 /// Opens the project: the chief on its agent, the staff in their seats (the
 /// image designer too, where the plan has one), then the gate on, by the call
-/// the Staff dialog's checkbox makes. The gate is read back from the board.
+/// the Project settings' checkbox makes. The gate is read back from the board.
 pub fn open<'a>(rig: &'a Rig, planned: &Planned, folder: &Path) -> Result<Project<'a>> {
     let seats = &planned.seats;
     let mut staff = vec![

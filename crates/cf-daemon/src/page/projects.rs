@@ -3,7 +3,9 @@
 
 use cf_base::js;
 use cf_ledger::model::parse_gate;
-use cf_ledger::{parse_description, parse_name, NewChief, NewMember, NewProject};
+use cf_ledger::{
+    parse_description, parse_name, NewChief, NewMember, NewProject, NewWakeUp, SpecsChange,
+};
 use serde_json::{json, Map, Value};
 
 use super::agents::{chief_on, last_staff_now, membership, saved};
@@ -17,7 +19,12 @@ pub(super) async fn list(page: &Page) -> Result<Fields, Said> {
 }
 
 /// `project.open`: the chief on the saved agent given; the staff given, as the
-/// roster has those agents now, else the last staff.
+/// roster has those agents now, else the last staff. The gate, the wake-up calls
+/// (`wakeUp`, as `wakeup.set` takes them) and the specs (`specs`, as
+/// `project.specs` takes them) are the human's word for the project, kept in
+/// the write that makes it, so the chief's first launch has them; one the
+/// ledger refuses refuses the whole start, in the words the Project settings
+/// dialog shows for it, and no project is made.
 pub(super) async fn open(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
     let directory = body.get("directory");
     let name = match body.get("name") {
@@ -53,8 +60,10 @@ pub(super) async fn open(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
         "chief".to_owned(),
         json!({ "harness": chief.harness, "agent": chief.agent }),
     );
-    if let Some(gate) = body.get("gate") {
-        request.insert("gate".to_owned(), gate.clone());
+    for key in ["gate", "wakeUp", "specs"] {
+        if let Some(said) = body.get(key) {
+            request.insert(key.to_owned(), said.clone());
+        }
     }
     request.insert("staff".to_owned(), Value::Array(staff));
     let project = page.engine.open_project(new_project(request)?).await?;
@@ -117,10 +126,10 @@ pub(super) async fn describe(page: &Page, body: Body<'_>) -> Result<Fields, Said
 
 /// The request as the dispatcher takes it. Where the page sent what the ledger
 /// takes (text for the folder and the name, a flag or none for the gate, roles
-/// that are a list of words), it is typed as sent and left to the dispatcher
-/// and then the ledger to refuse in the order Node's did: a harness no adapter
-/// opens is refused before a role that does not fit. Where it did not, the
-/// ledger's own words for it, which are the same words.
+/// that are a list of words, calls and specs that read), it is typed as sent and
+/// left to the dispatcher and then the ledger to refuse in the order Node's did:
+/// a harness no adapter opens is refused before a role that does not fit. Where
+/// it did not, the ledger's own words for it, which are the same words.
 fn new_project(request: Map<String, Value>) -> Result<NewProject, Said> {
     if let Some(typed) = typed(&request) {
         return Ok(typed);
@@ -146,6 +155,8 @@ fn typed(request: &Map<String, Value>) -> Option<NewProject> {
             Some(Value::Bool(gate)) => *gate,
             Some(_) => return None,
         },
+        wake_up: NewWakeUp::from_opening(request.get("wakeUp")).ok()?,
+        specs: SpecsChange::from_opening(request.get("specs")).ok()?,
     })
 }
 

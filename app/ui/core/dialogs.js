@@ -1,15 +1,16 @@
 import { button, element, redraw } from '../dom.js'
 import { isMember } from './board.js'
-import { SpecsGroup } from './specs.js'
-import { WakeUpCalls } from './wake-up.js'
+import { ProjectSections } from './project-sections.js'
 
 /**
- * The dialogs that say who works on a project: New project (its folder, the
- * saved agent its chief runs on, its first staff), Switch chief and the
- * project staff. Each keeps what it is in the middle of to itself, and reads
- * the page's board and saved agents as they are when it draws or acts; what
- * it changes on the page goes back through the page's callbacks. A dialog
- * that cannot open says why by throwing, as the daemon's refusals do.
+ * The dialogs that say who works on a project and how: New project (its
+ * folder, the saved agent its chief runs on, and its settings: the first
+ * staff, human approval, wake-up calls and specs), Switch chief and Project
+ * settings (the same four, for a project that is open). Each keeps what it is
+ * in the middle of to itself, and reads the page's board and saved agents as
+ * they are when it draws or acts; what it changes on the page goes back
+ * through the page's callbacks. A dialog that cannot open says why by
+ * throwing, as the daemon's refusals do.
  */
 
 const ROLES = ['worker', 'advisor', 'reviewer', 'tester', 'designer']
@@ -204,17 +205,23 @@ function fillChiefs(select, agents, missing, current = null) {
 
 /**
  * New project, on the folder the human picked: the saved agent its chief runs
- * on, among those on a harness installed here, the staff (the last
- * project's picked already) and the approval setting.
+ * on, among those on a harness installed here, and the project's settings, the
+ * sections Project settings has (`ProjectSections`): the staff (the last
+ * project's picked already), human approval, wake-up calls and specs. The
+ * project starts with them all, in one request.
  */
 export class NewProjectDialog {
   #dialog
   #form
   #staff
   #hint
+  #refusal
+  #sections
   #page
   /** The agents and roles picked for the new project, the last staff's to start with. */
   #picked = []
+  /** Whether a start is on its way: a second ask waits for its answer, as the daemon's. */
+  #starting = false
 
   /**
    * `page.agents()` are the page's saved agents as they are now, and
@@ -227,6 +234,8 @@ export class NewProjectDialog {
     this.#form = dialog.querySelector('form')
     this.#staff = dialog.querySelector('#new-project-staff')
     this.#hint = dialog.querySelector('#new-project-hint')
+    this.#refusal = dialog.querySelector('.dialog-refusal')
+    this.#sections = new ProjectSections(dialog.querySelector('[data-project-sections]'))
     this.#page = page
     const form = this.#form
     dialog.querySelector('#new-project-add').addEventListener('click', () => {
@@ -238,15 +247,7 @@ export class NewProjectDialog {
     })
     form.addEventListener('submit', (event) => {
       event.preventDefault()
-      const directory = form.elements.directory.value
-      const agent = form.elements.chief.value
-      const gate = form.elements.gate.checked
-      const staff = this.#pickedStaff()
-      dialog.close()
-      void page.act(async () => {
-        const { project } = await page.daemon('project.open', { directory, agent, gate, staff })
-        page.onStart(project)
-      })
+      void this.#start()
     })
     dialog.querySelector('[value="cancel"]').addEventListener('click', () => dialog.close())
   }
@@ -260,8 +261,60 @@ export class NewProjectDialog {
     fillChiefs(this.#form.elements.chief, agents, missing)
     this.#page.onAgents(agents)
     this.#pickLast(staff)
+    this.#sections.reset()
+    this.#say('')
     this.#form.elements.directory.value = directory
     this.#dialog.showModal()
+  }
+
+  /** What is said above the buttons: the daemon's refusal of the start, until the next try or the next opening. */
+  #say(words) {
+    this.#refusal.textContent = words
+    this.#refusal.hidden = words === ''
+  }
+
+  /**
+   * Starts the project as the dialog says it, in one request: its chief, staff
+   * and approval, and the calls and specs unless they are as the dialog opened.
+   * The dialog stays until the daemon has opened the project. One it refuses (a
+   * specs folder outside the project, an interval under a minute) is said here
+   * in the daemon's own words, as the settings of a project say them, with
+   * what the human chose still in the dialog, and no project is made.
+   */
+  async #start() {
+    if (this.#starting) return
+    this.#starting = true
+    const form = this.#form
+    const { gate, wakeUp, specs } = this.#sections.values()
+    const body = {
+      directory: form.elements.directory.value,
+      agent: form.elements.chief.value,
+      gate,
+      staff: this.#pickedStaff(),
+    }
+    if (wakeUp !== null) body.wakeUp = wakeUp
+    if (specs !== null) body.specs = specs
+    this.#say('')
+    let refused = null
+    try {
+      await this.#page.act(async () => {
+        try {
+          const { project } = await this.#page.daemon('project.open', body)
+          this.#page.onStart(project)
+          // Closed before the page is drawn for the project: its chief's terminal takes
+          // the keyboard when its card is first shown, which a dialog over the page
+          // would not let it.
+          this.#dialog.close()
+        } catch (cause) {
+          // A dialog the human left meanwhile has no one to say it to: the status line does.
+          if (!this.#dialog.open) throw cause
+          refused = cause instanceof Error ? cause.message : String(cause)
+        }
+      })
+    } finally {
+      this.#starting = false
+    }
+    if (refused !== null) this.#say(refused)
   }
 
   /** The last project's staff, picked: its agents still saved and installed, in their roles. */
@@ -389,10 +442,14 @@ export class SwitchChiefDialog {
 }
 
 /**
- * The project staff: who the chief may hand work to, drawn from the board
- * shown, and drawn again in place while open, so it stays current.
+ * Project settings: the project's staff (who the chief may hand work to, drawn
+ * from the board shown, and drawn again in place while open, so it stays
+ * current), and the sections New project has too (`ProjectSections`): human
+ * approval, wake-up calls and specs. Each saves as it always did: the staff as
+ * it is added to or removed from, the approval as it is ticked, the calls and
+ * the specs by their own Save.
  */
-export class StaffDialog {
+export class ProjectSettingsDialog {
   #dialog
   #form
   #members
@@ -401,7 +458,7 @@ export class StaffDialog {
   #page
   /** The project's wake-up calls, read when the dialog opens and saved as a whole. */
   #wakeUp
-  /** What the project says of specs: its own group of the dialog. */
+  /** What the project says of specs: its own section of the dialog. */
   #specs
   /** The member whose removal waits for the human's yes, kept across redraws. */
   #removing = null
@@ -415,11 +472,12 @@ export class StaffDialog {
     this.#dialog = dialog
     this.#form = dialog.querySelector('form')
     this.#members = dialog.querySelector('#staff-members')
-    this.#gate = dialog.querySelector('#staff-gate')
     this.#hint = dialog.querySelector('#staff-hint')
     this.#page = page
-    this.#wakeUp = new WakeUpCalls(dialog.querySelector('#staff-wakeup'), page)
-    this.#specs = new SpecsGroup(dialog.querySelector('#staff-specs'), page)
+    const sections = new ProjectSections(dialog.querySelector('[data-project-sections]'), page)
+    this.#gate = sections.gate
+    this.#wakeUp = sections.wakeUp
+    this.#specs = sections.specs
     // The dialog's staff is the shown board's, and so is what it changes.
     this.#gate.addEventListener('change', () =>
       page.act(async () => {

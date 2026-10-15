@@ -294,7 +294,7 @@ const resting = (participant, activity) =>
 /**
  * A session's row says whose window it is; the member's row says what it
  * is. Each says what its agent runs: its model, and its effort when it has
- * one, as the staff dialog does; so does the chief's card in the dock.
+ * one, as Project settings does; so does the chief's card in the dock.
  */
 export const identity = (participant, agent) =>
   (participant.member
@@ -683,7 +683,7 @@ export class BoardView {
       const cell = element(
         'td',
         null,
-        'No members yet: add the agents this project may use under Staff.',
+        'No members yet: add the agents this project may use under Project settings.',
       )
       cell.colSpan = COLUMNS.length + 1
       row.append(cell)
