@@ -80,7 +80,10 @@ pub(crate) fn wait_for_the_chief(rig: &Rig, project: &Project) -> cf_e2e::Result
 /// The human's Close and Resume: the project is suspended and the chief's window
 /// gone, and then the project is open and the chief's window opened again. The
 /// window that was open, and the one opened again.
-fn closed_and_resumed(rig: &Rig, project: &Project) -> Result<(Value, Value), Box<dyn Error>> {
+pub(crate) fn closed_and_resumed(
+    rig: &Rig,
+    project: &Project,
+) -> Result<(Value, Value), Box<dyn Error>> {
     let before = windows_of(rig, project)
         .into_iter()
         .next()

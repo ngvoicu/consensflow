@@ -141,7 +141,11 @@ impl Transcript {
 
     /// A user's record: the results of tools it holds, the interrupt that
     /// ends a turn, or a real prompt, which begins one, unless it is the
-    /// late ancestor of an answer that already ended its turn.
+    /// late ancestor of an answer that already ended its turn. The summary a
+    /// compaction writes is an item as any, and begins no turn where none is
+    /// open: Claude Code compacts a conversation while it is idle, and runs no
+    /// turn after (the owner's report of 2026-10-15, a Resume that told a chief
+    /// at rest its turn was cut). One in a turn, as Node read it.
     fn user(&mut self, record: &User, place: Option<usize>, seq: usize) -> Result<(), String> {
         let number = Value::from(seq);
         let at = record.at.as_ref().unwrap_or(&number);
@@ -165,7 +169,7 @@ impl Transcript {
         }
         let id = id_of(record.uuid.as_ref(), "claude user", seq)?;
         self.items.push(id, Role::User, &record.text, at, seq);
-        if self.late_ancestor(place) {
+        if (record.summary && !self.turn_open) || self.late_ancestor(place) {
             return Ok(());
         }
         self.queues.consumed(&record.text, record.queued);

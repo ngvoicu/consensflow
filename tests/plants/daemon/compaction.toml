@@ -1,0 +1,46 @@
+# A compaction while idle read as a cut turn (the owner's report of 2026-10-15, ConsensFlow 3.0.4: at
+# a Resume a Claude chief at rest was told "ConsensFlow stopped in the middle of your turn", twice,
+# m-2048 and m-2063). Claude Code compacts a conversation while it is idle: a `compact_boundary`, and
+# the summary as a user's record (`isCompactSummary`), with no turn. Claude's reader leaves the
+# summary out (`crates/cf-harness/src/claude/record/project.rs`), so the record stays at rest. The
+# case is `crates/cf-e2e/tests/regressions/idle_compaction_read_as_a_cut_turn.rs`; the reader's own
+# test is `crates/cf-harness/src/claude/record/tests/compaction.rs`.
+#
+# The case builds the native `cf` from the sources as they are planted, so its plant says `builds`.
+# Every name holds `compaction`, so `npm run plants:daemon -- "compaction"` runs them all.
+
+[run]
+harness-claude-records = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::record"]
+rig-regression-compaction = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "idle_compaction_read_as_a_cut_turn::"]
+
+[[plant]]
+name = "compaction: the summary a compaction writes is read as the user's prompt, and the Resume tells the chief its turn was cut"
+meant = "a_claude_chief_whose_conversation_was_compacted_while_idle_is_given_no_note_at_a_resume"
+runs = ["rig-regression-compaction"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/replay.rs"
+find = "        if (record.summary && !self.turn_open) || self.late_ancestor(place) {"
+replace = "        if self.late_ancestor(place) {"
+
+[[plant]]
+name = "compaction: the reader reads the summary a compaction writes as the user's prompt"
+meant = "a_compaction_while_idle_leaves_the_turn_before_it_at_rest"
+runs = ["harness-claude-records"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/replay.rs"
+find = "        if (record.summary && !self.turn_open) || self.late_ancestor(place) {"
+replace = "        if self.late_ancestor(place) {"
+
+[[plant]]
+name = "compaction: the reader drops the field that says a record is a compaction's summary"
+meant = "a_compaction_while_idle_leaves_the_turn_before_it_at_rest"
+runs = ["harness-claude-records"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/keep.rs"
+find = '''    ("isCompactSummary", &Keep::Scalar),
+'''
+replace = ""

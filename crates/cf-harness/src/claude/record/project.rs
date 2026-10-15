@@ -109,6 +109,8 @@ pub(super) struct User {
     pub(super) interrupt: bool,
     /// The prompt came from the queue (`promptSource`).
     pub(super) queued: bool,
+    /// The summary a compaction writes (`isCompactSummary`): Claude Code's own.
+    pub(super) summary: bool,
 }
 
 /// The record `record` of the session `session`, as replay reads it.
@@ -261,6 +263,7 @@ fn user(record: &Value) -> Projected {
         text: claude_text(content),
         interrupt: is_interrupt(record),
         queued: record.get("promptSource").and_then(Value::as_str) == Some("queued"),
+        summary: record.get("isCompactSummary") == Some(&Value::Bool(true)),
     }))
 }
 

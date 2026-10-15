@@ -20,6 +20,7 @@ mod agents;
 mod ancestry;
 mod boundaries;
 mod clear;
+mod compaction;
 mod fields;
 mod interrupts;
 mod items;
