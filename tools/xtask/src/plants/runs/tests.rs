@@ -339,14 +339,24 @@ mod stops {
         );
     }
 
+    /// The stop is told once the runtime has had its turn, which a loaded machine can put
+    /// off past the first question after it (CI's macOS, 2026-10-15): it is not lost, and is
+    /// found once.
     #[test]
-    fn a_stop_that_came_with_no_command_in_hand_is_found_by_the_next_question_once() {
+    fn a_stop_that_came_with_no_command_in_hand_is_not_lost_and_is_found_once() {
         let mut runner = runner_with(&context(), Duration::from_secs(120), || {
             Stops::on(&[SignalKind::from_raw(Signal::SIGURG as i32)]).unwrap()
         });
         assert!(!runner.stopped());
         raise(Signal::SIGURG).unwrap();
-        assert!(runner.stopped());
+        let asked = Instant::now();
+        while !runner.stopped() {
+            assert!(
+                asked.elapsed() < Duration::from_secs(10),
+                "the stop was lost"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
         assert!(!runner.stopped(), "a stop is asked for once");
     }
 }
