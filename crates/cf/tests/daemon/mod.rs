@@ -98,6 +98,8 @@ impl Root {
                     tier: "standard".to_owned(),
                 }],
                 gate: false,
+                wake_up: None,
+                specs: None,
             })
             .expect("a project");
         let question = ledger

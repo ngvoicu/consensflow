@@ -44,6 +44,8 @@ fn project(name: &str, harness: &str) -> NewProject {
         },
         staff: Vec::new(),
         gate: false,
+        wake_up: None,
+        specs: None,
     }
 }
 

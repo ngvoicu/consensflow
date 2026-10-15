@@ -88,7 +88,10 @@ are the harnesses you want to use.
 
 1. Install at least one harness and sign in to it.
 2. Open ConsensFlow and choose **New project**: pick the project's folder,
-   the agent the chief runs on, and the staff.
+   the agent the chief runs on, and the staff; human approval, wake-up calls
+   and specs can be set there too. Once the project is running, the board's
+   **Project settings** (and the project's right-click menu) change the same
+   four.
 3. Tell the chief what you want, in its terminal.
 4. Watch the board. Open a task to read it, or open a member's terminal from
    its row to see it work.

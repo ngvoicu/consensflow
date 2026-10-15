@@ -396,7 +396,12 @@ async function open(page, data = model()) {
         const last = items.slice(Math.max(0, items.length - limit))
         return answer({ items: last, total, shown: last.length })
       },
-      'project.open': ({ directory }) => answer({ project: { id: 3, name: 'new', directory } }),
+      // A start the daemon refuses is refused whole, in its words, and no project is made (a
+      // test says which words with `openRefusal`).
+      'project.open': ({ directory }) =>
+        data.openRefusal
+          ? { ok: false, error: data.openRefusal }
+          : answer({ project: { id: 3, name: 'new', directory } }),
     }
     const invoke = async (command, args = {}) => {
       window.__calls.push([
@@ -1776,11 +1781,11 @@ test('says so on the board when the project has no members yet', async ({ page }
   await open(page, data)
   const table = page.getByRole('table', { name: 'Tasks' })
   await expect(table.locator('tr.board-empty')).toHaveText(
-    'No members yet: add the agents this project may use under Staff.',
+    'No members yet: add the agents this project may use under Project settings.',
   )
-  await page.getByRole('button', { name: 'Staff' }).click()
+  await page.getByRole('button', { name: 'Project settings' }).click()
   await expect(
-    page.getByRole('dialog', { name: 'Project staff' }).locator('tbody tr.staff-empty'),
+    page.getByRole('dialog', { name: 'Project settings' }).locator('tbody tr.staff-empty'),
   ).toHaveText('Nobody yet: add the agents this project may use.')
   await open(page)
   await expect(table.locator('tr.board-empty')).toHaveCount(0)
@@ -1797,10 +1802,10 @@ test('takes a chief switched to a saved agent for no member: the board says it h
   Object.assign(board.lanes[1].participant, { agent: 'hera', harness: 'codex' })
   await open(page, data)
   await expect(page.locator('tr.board-empty')).toHaveText(
-    'No members yet: add the agents this project may use under Staff.',
+    'No members yet: add the agents this project may use under Project settings.',
   )
-  await page.getByRole('button', { name: 'Staff' }).click()
-  const dialog = page.getByRole('dialog', { name: 'Project staff' })
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
   await expect(dialog.locator('tbody tr')).toHaveText([
     'Nobody yet: add the agents this project may use.',
   ])
@@ -2099,8 +2104,8 @@ test('a member whose agent is gone says so on the board and in the staff, with R
     'No agent named diana any more: define one under Agents, or remove @diana from the staff',
   )
   await expect(row.locator('.row-status')).toHaveAttribute('data-state', 'missing')
-  await page.getByRole('button', { name: 'Staff' }).click()
-  const dialog = page.getByRole('dialog', { name: 'Project staff' })
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
   const member = dialog.locator('tr[data-handle="diana"]')
   await expect(member.locator('.member-meta')).toHaveText(
     'no agent named diana any more: define one under Agents, or remove it',
@@ -2278,9 +2283,9 @@ test('a redraw leaves the keyboard where it was, on the board, the projects and 
   await page.getByRole('button', { name: 'Close harbour' }).focus()
   await lampDrawn('chief', 'working')
   expect(await focusedLabel(page)).toBe('Close harbour')
-  // A member's Remove in the staff dialog.
-  await page.getByRole('button', { name: 'Staff' }).click()
-  const dialog = page.getByRole('dialog', { name: 'Project staff' })
+  // A member's Remove in Project settings.
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
   await dialog.getByRole('button', { name: 'Remove Worker @diana' }).focus()
   await lampDrawn('chief', 'idle')
   expect(await focusedLabel(page)).toBe('Remove Worker @diana')
@@ -2311,8 +2316,8 @@ test('a button kept across redraws acts on what the board shows now', async ({ p
   await open(page, data)
   // A role added to zeus leaves its Worker row drawn the same: removing the
   // worker role now takes that role only, and asks nothing.
-  await page.getByRole('button', { name: 'Staff' }).click()
-  const dialog = page.getByRole('dialog', { name: 'Project staff' })
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
   await dialog.getByLabel('Role').selectOption('reviewer')
   await dialog.getByLabel('Agent').selectOption('zeus')
   await dialog.getByRole('button', { name: 'Add to staff' }).click()
@@ -2581,8 +2586,8 @@ test('shows the staff as one row per member and role, and adds a saved agent in 
     pane: { id: 'p1-zeus-pale-comet', generation: 1 },
   })
   await open(page, data)
-  await page.getByRole('button', { name: 'Staff' }).click()
-  const dialog = page.getByRole('dialog', { name: 'Project staff' })
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
   const table = dialog.getByRole('table', { name: 'On the staff' })
   await expect(table.locator('thead th')).toHaveText(['Member', 'Role', ''])
   await expect(table.locator('tbody tr')).toHaveText([
@@ -2662,8 +2667,8 @@ test('adds a saved agent to the staff as a tester, or as one more role of a memb
   page,
 }) => {
   await open(page)
-  await page.getByRole('button', { name: 'Staff' }).click()
-  const dialog = page.getByRole('dialog', { name: 'Project staff' })
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
   await expect(dialog.locator('.dialog-help')).toContainText(
     'a tester checks it by running it when the chief asks',
   )
@@ -2700,8 +2705,8 @@ test('says why no image designer is on offer: Codex, which image agents run thro
     { hidden: true, notInstalled: true },
   )
   await open(page, data)
-  await page.getByRole('button', { name: 'Staff' }).click()
-  const dialog = page.getByRole('dialog', { name: 'Project staff' })
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
   const hint = dialog.locator('#staff-hint')
   await dialog.getByLabel('Role').selectOption('designer')
   await expect(hint).toHaveText(
@@ -2733,7 +2738,7 @@ test('says why no image designer is on offer: Codex, which image agents run thro
     window.__listeners.get('state-changed')()
   })
   await expect(page.locator('tr[data-handle="pygmalion"]')).toHaveCount(1)
-  await page.getByRole('button', { name: 'Staff' }).click()
+  await page.getByRole('button', { name: 'Project settings' }).click()
   await dialog.getByLabel('Role').selectOption('designer')
   await expect(hint).toHaveText('Every image agent is on the staff as Image designer already.')
   await expect(dialog.getByRole('button', { name: 'Add to staff' })).toBeDisabled()
@@ -2744,8 +2749,8 @@ test("drops one role from a member's row, and asks before its last", async ({ pa
   const lane = data.boards[1].lanes.find((l) => l.participant.handle === 'diana')
   lane.participant.roles = ['worker', 'reviewer']
   await open(page, data)
-  await page.getByRole('button', { name: 'Staff' }).click()
-  const dialog = page.getByRole('dialog', { name: 'Project staff' })
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
   const table = dialog.getByRole('table', { name: 'On the staff' })
   await expect(table.locator('tbody tr[data-handle="diana"]')).toHaveCount(2)
   await dialog.getByRole('button', { name: 'Remove Worker @diana' }).click()
@@ -2759,8 +2764,8 @@ test("drops one role from a member's row, and asks before its last", async ({ pa
 
 test('takes a member off the staff once the human confirms', async ({ page }) => {
   await open(page)
-  await page.getByRole('button', { name: 'Staff' }).click()
-  const dialog = page.getByRole('dialog', { name: 'Project staff' })
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
   await dialog.getByRole('button', { name: 'Remove Worker @zeus' }).click()
   await expect(dialog.getByText('Remove @zeus? Its open tasks are cancelled.')).toBeVisible()
   await dialog.getByRole('button', { name: 'Keep @zeus' }).click()
@@ -2777,14 +2782,14 @@ test("offers, after a role is picked, the agents the staff shown does not hold i
   page,
 }) => {
   await open(page, twoOpen())
-  const dialog = page.getByRole('dialog', { name: 'Project staff' })
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
   const offered = () =>
     dialog
       .getByLabel('Agent')
       .locator('option')
       .evaluateAll((options) => options.map((option) => option.value))
   // harbour's staff seen first, then a reviewer role added there.
-  await page.getByRole('button', { name: 'Staff' }).click()
+  await page.getByRole('button', { name: 'Project settings' }).click()
   await dialog.getByLabel('Role').selectOption('reviewer')
   await dialog.getByLabel('Agent').selectOption('zeus')
   await dialog.getByRole('button', { name: 'Add to staff' }).click()
@@ -2796,7 +2801,7 @@ test("offers, after a role is picked, the agents the staff shown does not hold i
   // foundry has nobody on its staff: every agent may work there.
   await chooseProject(page, 'foundry')
   await expect(page.locator('#project-title')).toHaveText('foundry')
-  await page.getByRole('button', { name: 'Staff' }).click()
+  await page.getByRole('button', { name: 'Project settings' }).click()
   await dialog.getByLabel('Role').selectOption('advisor')
   await dialog.getByLabel('Role').selectOption('worker')
   expect(await offered()).toEqual(['hera', 'zeus', 'diana', 'athena'])
@@ -2813,8 +2818,8 @@ test('keeps a pending removal and the chosen agent when the daemon redraws the s
     profile: { workTier: 'light' },
   })
   await open(page, data)
-  await page.getByRole('button', { name: 'Staff' }).click()
-  const dialog = page.getByRole('dialog', { name: 'Project staff' })
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
   await dialog.getByLabel('Agent').selectOption('hera')
   await dialog.getByRole('button', { name: 'Remove Worker @zeus' }).click()
   const boards = () =>
@@ -2835,8 +2840,8 @@ test('says why the staff picker offers nobody: every saved agent holds the role,
   // Only the staff's own agents are saved, and both are workers already.
   data.agents = data.agents.filter((agent) => ['zeus', 'diana'].includes(agent.name))
   await open(page, data)
-  await page.getByRole('button', { name: 'Staff' }).click()
-  const dialog = page.getByRole('dialog', { name: 'Project staff' })
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
   const hint = dialog.locator('#staff-hint')
   await expect(hint).toHaveText('Every saved agent is on the staff as Worker already.')
   await expect(dialog.getByLabel('Agent')).toBeDisabled()
@@ -2849,7 +2854,7 @@ test('says why the staff picker offers nobody: every saved agent holds the role,
   await page.evaluate(() => {
     window.__model.agents = []
   })
-  await page.getByRole('button', { name: 'Staff' }).click()
+  await page.getByRole('button', { name: 'Project settings' }).click()
   await expect(hint).toHaveText('No saved agents yet: add one under Settings, Agents.')
   await expect(dialog.getByRole('button', { name: 'Add to staff' })).toBeDisabled()
 })
@@ -2888,6 +2893,333 @@ test('starts no project until its chief is picked: a chief runs on a saved agent
     .poll(() => calls(page, 'project.open'))
     .toEqual([{ directory: '/work/fresh', agent: 'hera', gate: false, staff: [] }])
   await expect(dialog).toBeHidden()
+})
+
+/** New project open on /work/fresh, and its sections by name. */
+async function newProject(page) {
+  await page.getByRole('button', { name: 'New project' }).click()
+  const dialog = page.getByRole('dialog', { name: 'New project' })
+  const section = (name) => dialog.getByRole('group', { name, exact: true })
+  return {
+    dialog,
+    chief: dialog.getByLabel('The chief runs on'),
+    start: dialog.getByRole('button', { name: 'Start project' }),
+    refusal: dialog.getByRole('alert'),
+    staff: section('Staff'),
+    approval: section('Human approval').getByRole('checkbox'),
+    calls: {
+      on: section('Wake-up calls').getByRole('checkbox'),
+      every: section('Wake-up calls').getByLabel('Every'),
+      unit: section('Wake-up calls').getByLabel('Unit'),
+      words: section('Wake-up calls').getByLabel('What it says'),
+      save: section('Wake-up calls').getByRole('button', { name: 'Save wake-up calls' }),
+    },
+    specs: {
+      group: section('Specs'),
+      mode: section('Specs').locator('[name="specs"]'),
+      folder: section('Specs').locator('[name="specsFolder"]'),
+      variant: section('Specs').locator('[name="specsVariant"]'),
+      save: section('Specs').getByRole('button', { name: 'Save specs' }),
+    },
+  }
+}
+
+test('New project has Staff, Human approval, Wake-up calls and Specs after the folder and the chief, with the defaults a project has', async ({
+  page,
+}) => {
+  const data = model()
+  data.lastStaff = [{ agent: 'zeus', roles: ['worker', 'reviewer'] }]
+  await open(page, data)
+  const made = await newProject(page)
+  const { dialog } = made
+  // The folder, the chief, and then the four sections of Project settings, in its order.
+  expect(
+    await dialog
+      .locator('form > label, form > fieldset')
+      .evaluateAll((nodes) =>
+        nodes.map((node) =>
+          node.matches('fieldset')
+            ? node.querySelector('legend').textContent
+            : node.querySelector('[name]').name,
+        ),
+      ),
+  ).toEqual(['directory', 'chief', 'Staff', 'Human approval', 'Wake-up calls', 'Specs'])
+  // The defaults: the last project's staff, approval off, wake-ups off and specs following the app's setting.
+  await expect(made.staff.locator('tbody tr')).toHaveText([/zeus.*Worker/, /zeus.*Reviewer/])
+  await expect(made.approval).not.toBeChecked()
+  await expect(made.calls.on).not.toBeChecked()
+  await expect(made.calls.every).toHaveValue('1')
+  await expect(made.calls.unit).toHaveValue('hours')
+  await expect(made.calls.words).toHaveValue(DEFAULT_WAKE_UP_WORDS)
+  await expect(made.specs.mode).toHaveValue('follow')
+  await expect(made.specs.mode.locator('option:checked')).toHaveText(/^Follow the app's setting/)
+  await expect(made.specs.folder).toHaveValue('')
+  await expect(made.specs.folder).toHaveAttribute('placeholder', '.specs')
+  await expect(made.specs.variant).toHaveValue('core')
+  // Nothing is saved before there is a project: no Save, and nothing of when a change reaches the chief.
+  await expect(made.calls.save).toBeHidden()
+  await expect(made.specs.save).toBeHidden()
+  await expect(made.specs.group.locator('.specs-help [data-live]')).toBeHidden()
+  await expect(made.specs.group).toContainText("The app's setting is under Settings")
+  // The same markup as Project settings has for them, control for control and word for word.
+  const markup = (id) =>
+    page.evaluate(
+      (id) =>
+        [...document.querySelectorAll(`#${id} .project-section`)]
+          .slice(1)
+          .map((section) => section.outerHTML.replaceAll(' hidden=""', '')),
+      id,
+    )
+  const [here, there] = [
+    await markup('new-project-dialog'),
+    await markup('project-settings-dialog'),
+  ]
+  expect(here).toHaveLength(3)
+  expect(here).toEqual(there)
+  // Left as it opened, the start says nothing of what a project has anyway: the request is the one it was.
+  await made.chief.selectOption('zeus')
+  await made.start.click()
+  await expect
+    .poll(() => calls(page, 'project.open'))
+    .toEqual([
+      {
+        directory: '/work/fresh',
+        agent: 'zeus',
+        gate: false,
+        staff: [{ agent: 'zeus', roles: ['worker', 'reviewer'] }],
+      },
+    ])
+})
+
+test('New project: starts a project with its approval, wake-up calls and specs set, all in the one request that opens it', async ({
+  page,
+}) => {
+  await open(page)
+  const made = await newProject(page)
+  await made.chief.selectOption('zeus')
+  await made.approval.check()
+  await made.calls.on.check()
+  await made.calls.every.fill('2')
+  await made.calls.unit.selectOption('days')
+  await made.calls.words.fill('Anything left on the board?')
+  await made.specs.mode.selectOption('on')
+  await made.specs.folder.fill('  docs/specs ')
+  await made.specs.variant.selectOption('tdd')
+  await made.start.click()
+  await expect
+    .poll(() => calls(page, 'project.open'))
+    .toEqual([
+      {
+        directory: '/work/fresh',
+        agent: 'zeus',
+        gate: true,
+        staff: [],
+        wakeUp: { on: true, every: 2, unit: 'days', text: 'Anything left on the board?' },
+        specs: { on: true, folder: 'docs/specs', variant: 'tdd' },
+      },
+    ])
+  await expect(made.dialog).toBeHidden()
+  // The chief starts with them, so nothing is said of them afterwards, when it has launched already.
+  for (const operation of ['project.gate', 'wakeup.set', 'project.specs']) {
+    expect(await calls(page, operation), operation).toEqual([])
+  }
+})
+
+test('New project: says all of its specs and all of its wake-up calls once either is set at all, as Project settings saves them', async ({
+  page,
+}) => {
+  await open(page)
+  const made = await newProject(page)
+  await made.chief.selectOption('zeus')
+  // A variant alone is a word of the project's: it follows the app's setting, with that variant.
+  await made.specs.variant.selectOption('core-html')
+  // The calls left off, an hour apart no more, are the human's word too.
+  await made.calls.every.fill('45')
+  await made.calls.unit.selectOption('minutes')
+  await made.start.click()
+  await expect
+    .poll(() => calls(page, 'project.open'))
+    .toEqual([
+      {
+        directory: '/work/fresh',
+        agent: 'zeus',
+        gate: false,
+        staff: [],
+        wakeUp: { on: false, every: 45, unit: 'minutes', text: DEFAULT_WAKE_UP_WORDS },
+        specs: { on: null, folder: null, variant: 'core-html' },
+      },
+    ])
+  await expect(made.dialog).toBeHidden()
+  // Off needs no folder or variant, as in Project settings.
+  await page.getByRole('button', { name: 'New project' }).click()
+  await made.chief.selectOption('hera')
+  await made.specs.mode.selectOption('off')
+  await expect(made.specs.folder).toBeDisabled()
+  await expect(made.specs.variant).toBeDisabled()
+  await made.start.click()
+  await expect.poll(async () => (await calls(page, 'project.open')).length).toBe(2)
+  expect((await calls(page, 'project.open'))[1].specs).toEqual({
+    on: false,
+    folder: null,
+    variant: 'core',
+  })
+})
+
+test('New project: a start the daemon refuses is said in the dialog in the daemon’s words, with what the human chose kept, and starts nothing', async ({
+  page,
+}) => {
+  const data = model()
+  data.lastStaff = [{ agent: 'zeus', roles: ['worker'] }]
+  data.openRefusal =
+    'the specs folder is a folder inside the project: it stays inside it, with no `..`'
+  await open(page, data)
+  const made = await newProject(page)
+  await made.chief.selectOption('hera')
+  await made.specs.mode.selectOption('on')
+  await made.specs.folder.fill('../elsewhere')
+  await made.start.click()
+  await expect(made.refusal).toHaveText(data.openRefusal)
+  // The dialog is as the human left it, to mend and try again.
+  await expect(made.dialog).toBeVisible()
+  await expect(made.chief).toHaveValue('hera')
+  await expect(made.specs.mode).toHaveValue('on')
+  await expect(made.specs.folder).toHaveValue('../elsewhere')
+  await expect(made.staff.locator('tbody tr')).toHaveText([/zeus.*Worker/])
+  // Nothing was started: the project shown is the one that was, and the status line says nothing.
+  await expect(page.locator('#project-title')).toHaveText('harbour')
+  await expect(page.locator('#status')).toHaveText('')
+  // Mended, the next try goes through, and the refusal goes with the dialog.
+  await page.evaluate(() => {
+    window.__model.openRefusal = null
+  })
+  await made.specs.folder.fill('docs')
+  await made.start.click()
+  await expect(made.dialog).toBeHidden()
+  const asked = await calls(page, 'project.open')
+  expect(asked.map((body) => body.specs)).toEqual([
+    { on: true, folder: '../elsewhere', variant: 'core' },
+    { on: true, folder: 'docs', variant: 'core' },
+  ])
+  // Opened again, it is as a new project's dialog opens, with no refusal in it.
+  await page.getByRole('button', { name: 'New project' }).click()
+  await expect(made.refusal).toBeHidden()
+})
+
+test('New project: a number that is no whole number of at least one holds the start back, as it holds the save in Project settings', async ({
+  page,
+}) => {
+  await open(page)
+  const made = await newProject(page)
+  await made.chief.selectOption('zeus')
+  // The browser holds a number under one, or none, or no whole number: nothing is asked of the daemon.
+  for (const bad of ['0', '-3', '1.5', '']) {
+    await made.calls.every.fill(bad)
+    await made.start.click()
+    await expect(made.calls.every).toHaveJSProperty('validity.valid', false)
+  }
+  await expect(made.dialog).toBeVisible()
+  expect(await calls(page, 'project.open')).toEqual([])
+  await made.calls.every.fill('2')
+  await made.start.click()
+  await expect.poll(() => calls(page, 'project.open')).toHaveLength(1)
+  expect((await calls(page, 'project.open'))[0].wakeUp).toEqual({
+    on: false,
+    every: 2,
+    unit: 'hours',
+    text: DEFAULT_WAKE_UP_WORDS,
+  })
+})
+
+test("New project: the new chief's terminal has the keyboard once its project is open, which the dialog over the page would not let it", async ({
+  page,
+}) => {
+  const data = model()
+  data.realTerminals = true
+  data.projects.push({ id: 3, name: 'new', directory: '/work/fresh', state: 'open' })
+  data.boards[3] = {
+    project: { id: 3, name: 'new', directory: '/work/fresh', state: 'open' },
+    open: [],
+    lanes: [
+      {
+        participant: { ...participant(30, 'chief', 'chief'), projectId: 3 },
+        tasks: [],
+        activity: { state: 'starting' },
+        pane: { id: 'p3-chief', generation: 1 },
+      },
+    ],
+  }
+  await open(page, data)
+  const made = await newProject(page)
+  await made.chief.selectOption('zeus')
+  await made.start.click()
+  await expect(page.locator('#project-title')).toHaveText('new')
+  await expect(made.dialog).toBeHidden()
+  // The page shows a chief's terminal the first time once, and gives it the keyboard then.
+  await expect.poll(() => typingIn(page)).toBe('chief')
+})
+
+test('New project: a start asked twice while the daemon answers is asked of it once, and one refused after the human left the dialog is said on the status line', async ({
+  page,
+}) => {
+  const data = model()
+  data.openRefusal = 'the wake-up text must be text, not empty, at most 1000000 characters'
+  await open(page, data)
+  const made = await newProject(page)
+  await made.chief.selectOption('zeus')
+  await made.calls.on.check()
+  await made.calls.words.fill('   ')
+  await hold(page, 'project.open')
+  await made.start.click()
+  await made.start.click()
+  await expect.poll(() => calls(page, 'project.open')).toHaveLength(1)
+  // The human leaves before the daemon answers: its refusal has no dialog to be said in.
+  await page.keyboard.press('Escape')
+  await expect(made.dialog).toBeHidden()
+  await letGo(page, 'project.open')
+  await expect(page.locator('#status')).toHaveText(data.openRefusal)
+  expect(await calls(page, 'project.open')).toHaveLength(1)
+})
+
+test('Enter in the number of the wake-up calls or in the specs folder of New project starts no project, and Start does', async ({
+  page,
+}) => {
+  await open(page)
+  const made = await newProject(page)
+  await made.chief.selectOption('zeus')
+  await made.calls.every.press('Enter')
+  await made.specs.folder.fill('docs')
+  await made.specs.folder.press('Enter')
+  await expect(made.dialog).toBeVisible()
+  expect(await calls(page, 'project.open')).toEqual([])
+  expect(await calls(page, 'wakeup.set')).toEqual([])
+  expect(await calls(page, 'project.specs')).toEqual([])
+  await made.start.click()
+  await expect.poll(() => calls(page, 'project.open')).toHaveLength(1)
+})
+
+test('New project opens on the defaults every time: what was set in it before is not kept', async ({
+  page,
+}) => {
+  await open(page)
+  const made = await newProject(page)
+  await made.approval.check()
+  await made.calls.on.check()
+  await made.calls.every.fill('9')
+  await made.calls.words.fill('Hello?')
+  await made.specs.mode.selectOption('on')
+  await made.specs.folder.fill('docs')
+  await made.specs.variant.selectOption('tdd-html')
+  await made.dialog.getByRole('button', { name: 'Cancel' }).click()
+  await expect(made.dialog).toBeHidden()
+  await page.getByRole('button', { name: 'New project' }).click()
+  await expect(made.approval).not.toBeChecked()
+  await expect(made.calls.on).not.toBeChecked()
+  await expect(made.calls.every).toHaveValue('1')
+  await expect(made.calls.words).toHaveValue(DEFAULT_WAKE_UP_WORDS)
+  await expect(made.specs.mode).toHaveValue('follow')
+  await expect(made.specs.folder).toHaveValue('')
+  await expect(made.specs.variant).toHaveValue('core')
+  await expect(made.specs.folder).toBeEnabled()
 })
 
 test("offers a new project's chief only the agents on a harness installed here, harness by harness", async ({
@@ -2984,14 +3316,14 @@ test('says in New project who may be picked: nobody yet, or no agent saved at al
   await expect(dialog.locator('[name="pickAgent"]')).toBeDisabled()
 })
 
-test('shows and sets human approval from the staff dialog, which has no review policy', async ({
+test('shows and sets human approval from Project settings, which has no review policy', async ({
   page,
 }) => {
   const data = model()
   data.boards[1].project.gate = true
   await open(page, data)
-  await page.getByRole('button', { name: 'Staff' }).click()
-  const dialog = page.getByRole('dialog', { name: 'Project staff' })
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
   await expect(dialog.getByLabel('Second review of')).toHaveCount(0)
   const gate = dialog.getByLabel('Human approval required', { exact: false })
   await expect(gate).toBeChecked()
@@ -3013,10 +3345,78 @@ test('shows and sets human approval from the staff dialog, which has no review p
   await expect(gate).toBeChecked()
 })
 
-/** The project's Specs group of the staff dialog, opened. */
+test("names the board's button and its dialog Project settings, with Staff, Human approval, Wake-up calls and Specs as its sections, in that order", async ({
+  page,
+}) => {
+  await open(page)
+  const button = page.getByRole('button', { name: 'Project settings' })
+  await expect(button).toHaveText('Project settings')
+  // It is the button that was Staff, and nothing of that name is left to find.
+  await expect(page.getByRole('button', { name: 'Staff', exact: true })).toHaveCount(0)
+  await button.click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
+  await expect(dialog.getByRole('heading', { name: 'Project settings' })).toBeVisible()
+  await expect(dialog.locator('fieldset.project-section > legend')).toHaveText([
+    'Staff',
+    'Human approval',
+    'Wake-up calls',
+    'Specs',
+  ])
+  for (const name of ['Staff', 'Human approval', 'Wake-up calls', 'Specs']) {
+    await expect(dialog.getByRole('group', { name, exact: true })).toBeVisible()
+  }
+  // The old title is nowhere in the page, hidden or not.
+  await expect(page.locator('body')).not.toContainText('Project staff')
+})
+
+test('Project settings: each section saves in its own way as before, and none saves another', async ({
+  page,
+}) => {
+  await open(page)
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
+  const section = (name) => dialog.getByRole('group', { name, exact: true })
+  const [approval, calling, specs] = ['Human approval', 'Wake-up calls', 'Specs'].map(section)
+  const asked = () =>
+    Promise.all(
+      ['project.gate', 'wakeup.set', 'project.specs', 'member.add'].map((operation) =>
+        calls(page, operation),
+      ),
+    )
+  // The calls and the specs wait for their own Save: nothing is sent as they are set.
+  await calling.getByRole('checkbox').check()
+  await calling.getByLabel('Every').fill('3')
+  await specs.locator('[name="specs"]').selectOption('on')
+  await specs.locator('[name="specsFolder"]').fill('docs')
+  expect(await asked()).toEqual([[], [], [], []])
+  // The approval saves as it is ticked, and nothing but it.
+  await approval.getByRole('checkbox').check()
+  await expect.poll(() => calls(page, 'project.gate')).toEqual([{ project: 1, gate: true }])
+  expect(await asked()).toEqual([[{ project: 1, gate: true }], [], [], []])
+  // The calls by their own Save, the whole of them.
+  await calling.getByRole('button', { name: 'Save wake-up calls' }).click()
+  await expect
+    .poll(() => calls(page, 'wakeup.set'))
+    .toEqual([{ project: 1, on: true, every: 3, unit: 'hours', text: DEFAULT_WAKE_UP_WORDS }])
+  expect(await calls(page, 'project.specs')).toEqual([])
+  // The specs by theirs.
+  await specs.getByRole('button', { name: 'Save specs' }).click()
+  await expect
+    .poll(() => calls(page, 'project.specs'))
+    .toEqual([{ project: 1, on: true, folder: 'docs', variant: 'core' }])
+  expect(await calls(page, 'wakeup.set')).toHaveLength(1)
+  // The staff as a member is added, at once.
+  await section('Staff').getByRole('button', { name: 'Add to staff' }).click()
+  await expect
+    .poll(() => calls(page, 'member.add'))
+    .toEqual([{ project: 1, agent: 'hera', roles: ['worker'] }])
+  expect(await calls(page, 'project.gate')).toHaveLength(1)
+})
+
+/** The project's Specs section of Project settings, opened. */
 async function openSpecs(page) {
-  await page.getByRole('button', { name: 'Staff' }).click()
-  const dialog = page.getByRole('dialog', { name: 'Project staff' })
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
   const group = dialog.getByRole('group', { name: 'Specs' })
   return {
     dialog,
@@ -3025,7 +3425,7 @@ async function openSpecs(page) {
     folder: group.locator('[name="specsFolder"]'),
     variant: group.locator('[name="specsVariant"]'),
     save: group.getByRole('button', { name: 'Save specs' }),
-    note: group.locator('#staff-specs-note'),
+    note: group.locator('.specs-note'),
   }
 }
 
@@ -3138,7 +3538,7 @@ test('a board drawn again while the dialog is open leaves what the human is typi
   // Another project is another's: each shows its own.
   await specs.dialog.getByRole('button', { name: 'Close' }).click()
   await chooseProject(page, 'foundry')
-  await page.getByRole('button', { name: 'Staff' }).click()
+  await page.getByRole('button', { name: 'Project settings' }).click()
   await expect(specs.mode).toHaveValue('off')
   await expect(specs.folder).toHaveValue('plans')
   await expect(specs.folder).toBeDisabled()
@@ -3148,10 +3548,10 @@ test('a board drawn again while the dialog is open leaves what the human is typi
 const DEFAULT_WAKE_UP_WORDS =
   'Do you still have work to do? If tasks are left on the board or in your plan, carry on.'
 
-/** The staff dialog open on project 1, and its group of wake-up calls. */
+/** Project settings open on project 1, and its section of wake-up calls. */
 async function wakeUpGroup(page) {
-  await page.getByRole('button', { name: 'Staff' }).click()
-  const dialog = page.getByRole('dialog', { name: 'Project staff' })
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
   const group = dialog.getByRole('group', { name: 'Wake-up calls' })
   return {
     dialog,
@@ -3165,7 +3565,7 @@ async function wakeUpGroup(page) {
   }
 }
 
-test('shows the wake-up calls of the project in the staff dialog: off, an hour apart, and the default words', async ({
+test('shows the wake-up calls of the project in Project settings: off, an hour apart, and the default words', async ({
   page,
 }) => {
   await open(page)
@@ -3208,7 +3608,7 @@ test('saves the wake-up calls as a number, a unit and the words, shows them as t
   // Closed and opened again, it shows what was saved.
   await calling.dialog.getByRole('button', { name: 'Close' }).click()
   await expect(calling.dialog).toBeHidden()
-  await page.getByRole('button', { name: 'Staff' }).click()
+  await page.getByRole('button', { name: 'Project settings' }).click()
   await expect(calling.on).toBeChecked()
   await expect(calling.every).toHaveValue('2')
   await expect(calling.unit).toHaveValue('hours')
@@ -3219,7 +3619,7 @@ test('saves the wake-up calls as a number, a unit and the words, shows them as t
   await page.evaluate(() => {
     window.__model.wakeUps[1] = { on: false, everyMs: 5_400_000, text: null }
   })
-  await page.getByRole('button', { name: 'Staff' }).click()
+  await page.getByRole('button', { name: 'Project settings' }).click()
   await expect(calling.on).not.toBeChecked()
   await expect(calling.every).toHaveValue('90')
   await expect(calling.unit).toHaveValue('minutes')
@@ -3447,8 +3847,11 @@ async function agentsScreens() {
 
 /** Settings, then one of its screens: the dialog it opens in. */
 async function openScreen(page, name) {
-  await page.getByRole('button', { name: 'Settings' }).click()
-  await page.getByRole('dialog', { name: 'Settings' }).getByRole('button', { name }).click()
+  await page.getByRole('button', { name: 'Settings', exact: true }).click()
+  await page
+    .getByRole('dialog', { name: 'Settings', exact: true })
+    .getByRole('button', { name })
+    .click()
   return page.getByRole('dialog', { name })
 }
 
@@ -3463,7 +3866,7 @@ test('opens Agents from Settings in a dialog over the board, the daemon’s agen
     await open(page, { ...model(), screens: daemon.screens })
     const agents = await openScreen(page, 'Agents')
     await expect(agents).toBeVisible()
-    await expect(page.getByRole('dialog', { name: 'Settings' })).toBeHidden()
+    await expect(page.getByRole('dialog', { name: 'Settings', exact: true })).toBeHidden()
     await expect(agents.getByRole('button', { name: 'Close' })).toBeFocused()
     const screen = agents.frameLocator('iframe')
     await expect(screen.locator('#agents-count')).toHaveText(/^(\d+) of \1 shown$/)
@@ -3471,7 +3874,7 @@ test('opens Agents from Settings in a dialog over the board, the daemon’s agen
     const read = await agentsRead(page)
     await agents.getByRole('button', { name: 'Close' }).click()
     await expect(agents).toBeHidden()
-    await expect(page.getByRole('button', { name: 'Settings' })).toBeFocused()
+    await expect(page.getByRole('button', { name: 'Settings', exact: true })).toBeFocused()
     // What the screen changed (a model, a tier) is on the board's agents too.
     await expect.poll(() => agentsRead(page)).toBe(read + 1)
     expect(await page.getByRole('dialog').count()).toBe(0)
@@ -3502,7 +3905,7 @@ test('opens Harnesses from Settings in a dialog where a check runs against the d
     await harnesses.getByRole('button', { name: 'Close' }).focus()
     await page.keyboard.press('Escape')
     await expect(harnesses).toBeHidden()
-    await expect(page.getByRole('button', { name: 'Settings' })).toBeFocused()
+    await expect(page.getByRole('button', { name: 'Settings', exact: true })).toBeFocused()
   } finally {
     await daemon.close()
   }
@@ -3518,7 +3921,7 @@ test('Escape pressed inside a screen closes its dialog, as it closes every other
     await agents.frameLocator('iframe').getByRole('searchbox').fill('gefjon')
     await page.keyboard.press('Escape')
     await expect(agents).toBeHidden()
-    await expect(page.getByRole('button', { name: 'Settings' })).toBeFocused()
+    await expect(page.getByRole('button', { name: 'Settings', exact: true })).toBeFocused()
   } finally {
     await daemon.close()
   }
@@ -3725,7 +4128,7 @@ test('shows a closed project read-only: it reads, nothing on it acts, and a bann
   await expect(main).toHaveAttribute('data-suspended', 'true')
   const banner = page.getByRole('status').filter({ hasText: 'Waiting for Resume.' })
   await expect(banner).toContainText('1 open task, 2 messages waiting.')
-  await expect(page.getByRole('button', { name: 'Staff' })).toBeDisabled()
+  await expect(page.getByRole('button', { name: 'Project settings' })).toBeDisabled()
   await expect(page.locator('.terminal-card')).toHaveCount(0)
   // Nothing on the board acts: no button for it to be reached by, with the keyboard either.
   const board = page.getByRole('region', { name: 'Board' })
@@ -3771,7 +4174,7 @@ test('shows a closed project read-only: it reads, nothing on it acts, and a bann
   await chooseProject(page, 'harbour')
   await unfold(page)
   await expect(main).toHaveAttribute('data-suspended', 'false')
-  await expect(page.getByRole('button', { name: 'Staff' })).toBeEnabled()
+  await expect(page.getByRole('button', { name: 'Project settings' })).toBeEnabled()
 })
 
 test('says in one line that a suspended project waits for Resume and what Resume will start', async ({
@@ -3857,14 +4260,18 @@ async function dialogFrom(page, id, item, title) {
   return dialog
 }
 
-test('project menu: a right-click on a project opens its menu beside the pointer, Rename and Description, and selects nothing', async ({
+test('project menu: a right-click on a project opens its menu beside the pointer, Rename, Description and Project settings, and selects nothing', async ({
   page,
 }) => {
   await open(page)
   // foundry is not the project shown: the menu is for the one right-clicked.
   const button = await projectButton(page, 2).boundingBox()
   await menuOn(page, 2, { x: 40, y: 10 })
-  await expect(projectMenu(page).getByRole('menuitem')).toHaveText(['Rename…', 'Description…'])
+  await expect(projectMenu(page).getByRole('menuitem')).toHaveText([
+    'Rename…',
+    'Description…',
+    'Project settings…',
+  ])
   await expect(projectMenu(page)).toHaveAccessibleName('foundry')
   await expect(itemNamed(page, 'Rename…')).toBeFocused()
   const opened = await projectMenu(page).boundingBox()
@@ -3937,12 +4344,16 @@ test('project menu: Shift+F10 and the context-menu key open it on the project th
   await page.keyboard.press('ArrowDown')
   await expect(itemNamed(page, 'Description…')).toBeFocused()
   await page.keyboard.press('ArrowDown')
+  await expect(itemNamed(page, 'Project settings…')).toBeFocused()
+  await page.keyboard.press('ArrowDown')
   await expect(itemNamed(page, 'Rename…')).toBeFocused()
   await page.keyboard.press('ArrowUp')
-  await expect(itemNamed(page, 'Description…')).toBeFocused()
+  await expect(itemNamed(page, 'Project settings…')).toBeFocused()
   await page.keyboard.press('Home')
   await expect(itemNamed(page, 'Rename…')).toBeFocused()
   await page.keyboard.press('End')
+  await expect(itemNamed(page, 'Project settings…')).toBeFocused()
+  await page.keyboard.press('ArrowUp')
   await expect(itemNamed(page, 'Description…')).toBeFocused()
   // Enter chooses the item the keyboard is on.
   await page.keyboard.press('Enter')
@@ -4195,7 +4606,15 @@ test('project menu: what the daemon refuses is said in the dialog, which stays o
   await expect(refusal).toBeHidden()
 })
 
-test('project menu: Description… writes a line under the name, smaller and quieter, cut with an ellipsis and whole on hover', async ({
+/** How many rows the text of `node` is on: the tops its pieces are drawn at. */
+const rowsOf = (locator) =>
+  locator.evaluate((node) => {
+    const range = document.createRange()
+    range.selectNodeContents(node)
+    return new Set([...range.getClientRects()].map((rect) => Math.round(rect.top))).size
+  })
+
+test('project menu: Description… writes a line under the name, smaller and quieter, whole on as many rows as it takes, with no ellipsis and no title', async ({
   page,
 }) => {
   await open(page)
@@ -4227,26 +4646,79 @@ test('project menu: Description… writes a line under the name, smaller and qui
   const [nameLooks, shownLooks] = await Promise.all([looks(name), looks(shown)])
   expect(shownLooks.size).toBeLessThan(nameLooks.size)
   expect(shownLooks.color).not.toBe(nameLooks.color)
-  // Cut with an ellipsis where it is too long for the list, and whole on hover.
+  // Whole where it is too long for one row of the list: on as many rows as it takes, with no
+  // ellipsis, nothing cut, and no title to read the rest by.
+  expect(await rowsOf(shown)).toBeGreaterThan(1)
   expect(
-    await shown.evaluate(
-      (node) =>
-        node.scrollWidth > node.clientWidth && getComputedStyle(node).textOverflow === 'ellipsis',
-    ),
-  ).toBe(true)
-  await expect(shown).toHaveAttribute('title', whole)
-  await shown.hover()
+    await shown.evaluate((node) => ({
+      ellipsis: getComputedStyle(node).textOverflow === 'ellipsis',
+      cutAcross: node.scrollWidth > node.clientWidth,
+      cutDown: node.scrollHeight > node.clientHeight,
+      title: node.getAttribute('title'),
+    })),
+  ).toEqual({ ellipsis: false, cutAcross: false, cutDown: false, title: null })
+  expect(await projectButton(page, 1).getAttribute('title')).toBeNull()
   // The line is the human's alone: the board and the other project show nothing of it.
   await expect(page.locator('.board')).not.toContainText('Ships the cargo')
   await expect(projectButton(page, 2).locator('.project-description')).toHaveCount(0)
-  // Written again, it is a line of the daemon's too: a short one is not cut.
+  // Written again, it is a line of the daemon's too: a short one is on a row of its own.
   await dialogFrom(page, 1, 'Description…', 'Project description')
   await expect(line).toHaveValue(whole)
   await line.fill('Moves the cargo')
   await line.press('Enter')
   await expect(shown).toHaveText('Moves the cargo')
-  expect(await shown.evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true)
-  await expect(shown).toHaveAttribute('title', 'Moves the cargo')
+  expect(await rowsOf(shown)).toBe(1)
+  expect(await shown.getAttribute('title')).toBeNull()
+})
+
+test('project menu: a description of two hundred characters is shown whole in the list, and a word too long for it is broken, not made to widen it', async ({
+  page,
+}) => {
+  await open(page)
+  const sidebar = page.getByRole('navigation', { name: 'Projects' })
+  const sizes = () =>
+    sidebar.evaluate((node) => ({
+      width: node.getBoundingClientRect().width,
+      beyond: node.scrollWidth - node.clientWidth,
+    }))
+  // The list as it is with no line under any name.
+  const bare = await sizes()
+  // The most a description may be: two hundred characters, of words and of one.
+  const words = `${'tides '.repeat(33)}ab`
+  expect(words.length).toBe(200)
+  const unbroken = 'x'.repeat(200)
+  await changed(
+    page,
+    ([first, second]) => {
+      for (const [at, text] of [first, second].entries()) {
+        for (const shown of [window.__model.projects[at], window.__model.boards[at + 1].project]) {
+          shown.description = text
+        }
+      }
+    },
+    [words, unbroken],
+  )
+  // Whole on several rows, each inside its card.
+  const spread = projectButton(page, 1).locator('.project-description')
+  await expect(spread).toHaveText(words)
+  expect(await rowsOf(spread)).toBeGreaterThan(2)
+  const inside = async (project, line) => {
+    const [card, row] = await Promise.all([
+      projectButton(page, project).boundingBox(),
+      line.boundingBox(),
+    ])
+    expect(row.x + row.width).toBeLessThanOrEqual(card.x + card.width)
+  }
+  await inside(1, spread)
+  // A word that no row holds is broken where it must be, and still all there.
+  const broken = projectButton(page, 2).locator('.project-description')
+  await expect(broken).toHaveText(unbroken)
+  expect(await rowsOf(broken)).toBeGreaterThan(1)
+  await inside(2, broken)
+  // The sidebar is as wide as it was, with no sideways scroll.
+  const now = await sizes()
+  expect(now.width).toBe(bare.width)
+  expect(now.beyond).toBeLessThanOrEqual(0)
 })
 
 test('project menu: saving an empty description takes the line away, and the dialog shows what was saved when it opens again', async ({
@@ -4335,6 +4807,130 @@ test('project menu: a closed project is renamed and described from its menu as a
   // The project shown is the one it was, whatever was done to the other.
   await expect(page.locator('#project-title')).toHaveText('harbour')
   await expect(projectButton(page, 1).locator('.project-name')).toHaveText('harbour')
+})
+
+/** twoOpen's foundry with a staff of its own: athena, and nobody else. */
+function twoWithStaffs() {
+  const data = twoOpen()
+  data.boards[2].lanes.push({
+    participant: {
+      ...participant(11, 'athena', 'worker', { harness: 'opencode', tier: 'light' }),
+      projectId: 2,
+    },
+    tasks: [],
+    activity: { state: 'closed' },
+    pane: null,
+  })
+  return data
+}
+
+test('project menu: Project settings… opens the dialog of the board’s Project settings button for the project the board shows', async ({
+  page,
+}) => {
+  await open(page)
+  const dialog = await dialogFrom(page, 1, 'Project settings…', 'Project settings')
+  await expect(page.locator('#project-title')).toHaveText('harbour')
+  // The same dialog the button opens: its sections, and the project's own staff and calls.
+  await expect(dialog.locator('fieldset.project-section > legend')).toHaveText([
+    'Staff',
+    'Human approval',
+    'Wake-up calls',
+    'Specs',
+  ])
+  await expect(dialog.getByRole('table', { name: 'On the staff' }).locator('tbody tr')).toHaveText([
+    /@zeus.*Worker/,
+    /@diana.*Worker/,
+  ])
+  expect(await calls(page, 'wakeup.get')).toEqual([{ project: 1 }])
+  // Left, it gives the keyboard back to the project it was asked of.
+  await dialog.getByRole('button', { name: 'Close' }).click()
+  await expect(dialog).toBeHidden()
+  await expect(projectButton(page, 1)).toBeFocused()
+})
+
+test('project menu: Project settings… on a project the board does not show shows it first, and opens the dialog on it', async ({
+  page,
+}) => {
+  await open(page, twoWithStaffs())
+  await expect(page.locator('#project-title')).toHaveText('harbour')
+  const dialog = await dialogFrom(page, 2, 'Project settings…', 'Project settings')
+  // foundry is the project shown, as if it had been chosen in the list.
+  await expect(page.locator('#project-title')).toHaveText('foundry')
+  await expect(projectButton(page, 2)).toHaveAttribute('aria-current', 'true')
+  await expect(projectButton(page, 1)).toHaveAttribute('aria-current', 'false')
+  // The dialog is foundry's, not harbour's: its calls were read, its staff is in it, and it acts on it.
+  expect(await calls(page, 'wakeup.get')).toEqual([{ project: 2 }])
+  await expect(dialog.getByRole('table', { name: 'On the staff' }).locator('tbody tr')).toHaveText([
+    /@athena.*Worker/,
+  ])
+  await dialog
+    .getByRole('group', { name: 'Human approval', exact: true })
+    .getByRole('checkbox')
+    .check()
+  await expect.poll(() => calls(page, 'project.gate')).toEqual([{ project: 2, gate: true }])
+  // Left with Escape, the keyboard is on foundry's card.
+  await page.keyboard.press('Escape')
+  await expect(dialog).toBeHidden()
+  await expect(projectButton(page, 2)).toBeFocused()
+  // And the board's own button opens the same dialog for the project shown now, without that asked again.
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  await expect(dialog.getByRole('table', { name: 'On the staff' }).locator('tbody tr')).toHaveText([
+    /@athena.*Worker/,
+  ])
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('button', { name: 'Project settings' })).toBeFocused()
+})
+
+test('project menu: Project settings… on a project while the board of another is being read opens it on the project asked for', async ({
+  page,
+}) => {
+  await open(page, twoWithStaffs())
+  // harbour's board is read again, slowly, when the human asks for foundry's settings.
+  await page.evaluate(() => {
+    window.__delay['board.get'] = 300
+  })
+  const boards = (await calls(page, 'board.get')).length
+  await page.evaluate(() => window.__listeners.get('state-changed')())
+  await expect.poll(async () => (await calls(page, 'board.get')).length).toBeGreaterThan(boards)
+  await menuOn(page, 2)
+  await itemNamed(page, 'Project settings…').click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
+  await expect(dialog).toBeVisible()
+  await expect(page.locator('#project-title')).toHaveText('foundry')
+  await expect(dialog.getByRole('table', { name: 'On the staff' }).locator('tbody tr')).toHaveText([
+    /@athena.*Worker/,
+  ])
+  expect(await calls(page, 'wakeup.get')).toEqual([{ project: 2 }])
+})
+
+test('project menu: a closed project has no Project settings to open, as the board has no button for it, and the keys pass it by', async ({
+  page,
+}) => {
+  await open(page)
+  // foundry is closed.
+  await menuOn(page, 2)
+  await expect(itemNamed(page, 'Project settings…')).toBeDisabled()
+  await expect(itemNamed(page, 'Rename…')).toBeFocused()
+  await page.keyboard.press('ArrowDown')
+  await expect(itemNamed(page, 'Description…')).toBeFocused()
+  await page.keyboard.press('ArrowDown')
+  await expect(itemNamed(page, 'Rename…')).toBeFocused()
+  await page.keyboard.press('End')
+  await expect(itemNamed(page, 'Description…')).toBeFocused()
+  await itemNamed(page, 'Project settings…').click({ force: true })
+  await expect(page.getByRole('dialog', { name: 'Project settings' })).toBeHidden()
+  expect(await calls(page, 'wakeup.get')).toEqual([])
+  await expect(page.locator('#project-title')).toHaveText('harbour')
+  // The menu is for the project as the page has it now: resumed from elsewhere, it has settings.
+  await changed(page, () => {
+    window.__model.projects[1].state = 'open'
+    window.__model.boards[2].project.state = 'open'
+  })
+  await expect(projectMenu(page)).toBeVisible()
+  await expect(itemNamed(page, 'Project settings…')).toBeEnabled()
+  await itemNamed(page, 'Rename…').focus()
+  await page.keyboard.press('End')
+  await expect(itemNamed(page, 'Project settings…')).toBeFocused()
 })
 
 /**
@@ -4514,6 +5110,356 @@ for (const spec of CANCELLED) {
     await expect(page.locator('#status')).toHaveText(spec.told)
   })
 }
+
+// --- Project settings are for one project, from the moment they are asked for until they close. ---
+
+/**
+ * twoOpen's two projects with settings of their own in every section of Project settings, so that
+ * a dialog that mixes the two shows it: staff (harbour's zeus is a worker and a reviewer, and
+ * foundry has a zeus of its own), approval, specs and wake-up calls.
+ */
+function twoWithOwnSettings() {
+  const data = twoOpen()
+  const member = (id, handle, extra) => ({
+    participant: { ...participant(id, handle, 'worker', extra), projectId: 2 },
+    tasks: [],
+    activity: { state: 'closed' },
+    pane: null,
+  })
+  data.boards[1].lanes.find((lane) => lane.participant.handle === 'zeus').participant.roles = [
+    'worker',
+    'reviewer',
+  ]
+  data.boards[2].lanes.push(
+    member(11, 'zeus'),
+    member(12, 'athena', { harness: 'opencode', tier: 'light' }),
+  )
+  data.boards[2].project.gate = true
+  data.boards[1].project.specs = { on: true, folder: 'plans', variant: 'tdd' }
+  data.boards[2].project.specs = { on: false, folder: 'docs', variant: 'core-html' }
+  data.wakeUps = {
+    1: { on: true, everyMs: 7_200_000, text: 'Harbour: anything left?' },
+    2: { on: false, everyMs: 1_800_000, text: null },
+  }
+  return data
+}
+
+/** What each of those projects has, as the dialog of Project settings shows it. */
+const HARBOURS = {
+  staff: ['zeus', 'diana', 'zeus'],
+  approval: false,
+  specs: ['on', 'plans', 'tdd'],
+  calls: [true, '2', 'hours', 'Harbour: anything left?'],
+}
+const FOUNDRYS = {
+  staff: ['zeus', 'athena'],
+  approval: true,
+  specs: ['off', 'docs', 'core-html'],
+  calls: [false, '30', 'minutes', DEFAULT_WAKE_UP_WORDS],
+}
+
+/** What the dialog shows in each of its sections now, whichever project it is for. */
+const shownIn = (dialog) =>
+  dialog.evaluate((node) => {
+    const control = (name) => node.querySelector(`[name="${name}"]`)
+    return {
+      staff: [...node.querySelectorAll('#staff-members tr[data-handle]')].map(
+        (row) => row.dataset.handle,
+      ),
+      approval: control('gate').checked,
+      specs: [control('specs').value, control('specsFolder').value, control('specsVariant').value],
+      calls: [
+        control('wakeup-on').checked,
+        control('wakeup-every').value,
+        control('wakeup-unit').value,
+        control('wakeup-text').value,
+      ],
+    }
+  })
+
+test('Project settings: asked for from a project’s menu while another is being chosen, whose board is on its way, they are the menu’s project’s, and that board is not drawn in them when it comes', async ({
+  page,
+}) => {
+  await open(page, twoWithOwnSettings())
+  // The human chooses foundry, whose board is on its way, and asks for harbour's settings from
+  // harbour's menu: the project they asked for last is the one they are on.
+  await hold(page, 'board.get')
+  await chooseProject(page, 'foundry')
+  const dialog = await dialogFrom(page, 1, 'Project settings…', 'Project settings')
+  await expect(page.locator('#project-title')).toHaveText('harbour')
+  expect(await shownIn(dialog)).toEqual(HARBOURS)
+  // foundry's board comes, late: the page is on harbour, which is read again, and the dialog is
+  // not drawn from a board that is not its own.
+  await letGo(page, 'board.get')
+  await settled(page)
+  expect(await shownIn(dialog)).toEqual(HARBOURS)
+  await expect(page.locator('#project-title')).toHaveText('harbour')
+  await expect(projectButton(page, 1)).toHaveAttribute('aria-current', 'true')
+  await expect(projectButton(page, 2)).toHaveAttribute('aria-current', 'false')
+  // What is saved there is harbour's, whole, as the dialog shows it.
+  await dialog
+    .getByRole('group', { name: 'Human approval', exact: true })
+    .getByRole('checkbox')
+    .check()
+  await expect.poll(() => calls(page, 'project.gate')).toEqual([{ project: 1, gate: true }])
+  await dialog.getByRole('button', { name: 'Save wake-up calls' }).click()
+  await expect
+    .poll(() => calls(page, 'wakeup.set'))
+    .toEqual([{ project: 1, on: true, every: 2, unit: 'hours', text: 'Harbour: anything left?' }])
+})
+
+test('Project settings: asked for a project the human has left before its calls came, they are not opened, and the calls that came show nowhere', async ({
+  page,
+}) => {
+  await open(page, twoWithOwnSettings())
+  await chooseProject(page, 'foundry')
+  await expect(page.locator('#project-title')).toHaveText('foundry')
+  // foundry's settings are asked for, and its calls are on their way.
+  await hold(page, 'wakeup.get')
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  await expect.poll(() => calls(page, 'wakeup.get')).toEqual([{ project: 2 }])
+  // The human goes to harbour, whose board comes at once. The calls of foundry come after.
+  await chooseProject(page, 'harbour')
+  await expect(page.locator('#project-title')).toHaveText('harbour')
+  await letGo(page, 'wakeup.get')
+  await expect.poll(() => answers(page, 'wakeup.get')).toBe(1)
+  await settled(page)
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
+  await expect(dialog).toBeHidden()
+  // The next asked for is the project the human is on, with nothing of foundry's in it.
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  await expect(dialog).toBeVisible()
+  expect(await shownIn(dialog)).toEqual(HARBOURS)
+  expect(await calls(page, 'wakeup.get')).toEqual([{ project: 2 }, { project: 1 }])
+})
+
+test('Project settings: asked for while the human chooses another project, whose board is on its way, they are not opened, nor when the human is back on the project asked for and its board is on its way', async ({
+  page,
+}) => {
+  await open(page, twoWithOwnSettings())
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
+  const title = page.locator('#project-title')
+  const settings = page.getByRole('button', { name: 'Project settings' })
+  // harbour's settings are asked for; the human chooses foundry, whose board is on its way, and
+  // the board shown is still harbour's when harbour's calls come.
+  await hold(page, 'wakeup.get')
+  await settings.click()
+  await expect.poll(() => calls(page, 'wakeup.get')).toEqual([{ project: 1 }])
+  await hold(page, 'board.get')
+  await chooseProject(page, 'foundry')
+  await expect(title).toHaveText('harbour')
+  await letGo(page, 'wakeup.get')
+  await expect.poll(() => answers(page, 'wakeup.get')).toBe(1)
+  await settled(page)
+  await expect(dialog).toBeHidden()
+  await letGo(page, 'board.get')
+  await expect(title).toHaveText('foundry')
+  await expect(dialog).toBeHidden()
+  // foundry's are asked for; the human goes to harbour, whose board comes, and back to foundry,
+  // whose board is on its way again: the board shown is harbour's when foundry's calls come.
+  await hold(page, 'wakeup.get')
+  await settings.click()
+  await expect.poll(() => calls(page, 'wakeup.get')).toHaveLength(2)
+  await chooseProject(page, 'harbour')
+  await expect(title).toHaveText('harbour')
+  await hold(page, 'board.get')
+  await chooseProject(page, 'foundry')
+  await expect(title).toHaveText('harbour')
+  await letGo(page, 'wakeup.get')
+  await expect.poll(() => answers(page, 'wakeup.get')).toBe(2)
+  await settled(page)
+  await expect(dialog).toBeHidden()
+  await letGo(page, 'board.get')
+  await expect(title).toHaveText('foundry')
+  await expect(dialog).toBeHidden()
+})
+
+test('Project settings: open for a project they show and save its own, whole, while the page is taken to another project', async ({
+  page,
+}) => {
+  await open(page, twoWithOwnSettings())
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
+  await expect(dialog).toBeVisible()
+  expect(await shownIn(dialog)).toEqual(HARBOURS)
+  // The dialog is modal, and the human cannot choose a project under it. A page taken to
+  // another all the same (a shortcut, a project gone from the list) leaves it as it is.
+  await page.evaluate(() =>
+    document.querySelector('li.project[data-project="2"] .project-select').click(),
+  )
+  await expect(page.locator('#project-title')).toHaveText('foundry')
+  await settled(page)
+  expect(await shownIn(dialog)).toEqual(HARBOURS)
+  // Every save is harbour's, by its id, whichever project the page shows.
+  const section = (name) => dialog.getByRole('group', { name, exact: true })
+  await section('Human approval').getByRole('checkbox').check()
+  await expect.poll(() => calls(page, 'project.gate')).toEqual([{ project: 1, gate: true }])
+  await section('Wake-up calls').getByLabel('Every').fill('3')
+  await section('Wake-up calls').getByRole('button', { name: 'Save wake-up calls' }).click()
+  await expect
+    .poll(() => calls(page, 'wakeup.set'))
+    .toEqual([{ project: 1, on: true, every: 3, unit: 'hours', text: 'Harbour: anything left?' }])
+  await section('Specs').locator('[name="specsFolder"]').fill('docs')
+  await section('Specs').getByRole('button', { name: 'Save specs' }).click()
+  await expect
+    .poll(() => calls(page, 'project.specs'))
+    .toEqual([{ project: 1, on: true, folder: 'docs', variant: 'tdd' }])
+  await section('Staff').getByRole('button', { name: 'Add to staff' }).click()
+  await expect
+    .poll(() => calls(page, 'member.add'))
+    .toEqual([{ project: 1, agent: 'hera', roles: ['worker'] }])
+  await dialog.getByLabel('Role').selectOption('advisor')
+  await dialog.getByLabel('Agent').selectOption('zeus')
+  await section('Staff').getByRole('button', { name: 'Add to staff' }).click()
+  await expect
+    .poll(() => calls(page, 'member.roles'))
+    .toEqual([{ project: 1, agent: 'zeus', roles: ['worker', 'reviewer', 'advisor'] }])
+  // foundry has a zeus too, with one role: it is harbour's, with two, that loses one.
+  await dialog.getByRole('button', { name: 'Remove Reviewer @zeus' }).click()
+  await expect.poll(() => calls(page, 'member.roles')).toHaveLength(2)
+  expect((await calls(page, 'member.roles'))[1]).toEqual({
+    project: 1,
+    agent: 'zeus',
+    roles: ['worker'],
+  })
+  // And the one that leaves the staff altogether is harbour's.
+  await dialog.getByRole('button', { name: 'Remove Worker @diana' }).click()
+  await dialog.getByRole('button', { name: 'Remove @diana', exact: true }).click()
+  await expect.poll(() => calls(page, 'member.remove')).toEqual([{ project: 1, agent: 'diana' }])
+  await expect(page.locator('#project-title')).toHaveText('foundry')
+})
+
+test('Project settings: asked for twice while the calls are on their way, they open once, and the answer that comes second leaves what the human typed', async ({
+  page,
+}) => {
+  await open(page, twoWithOwnSettings())
+  const settings = page.getByRole('button', { name: 'Project settings' })
+  // The first ask is held; the second is answered at once, and opens the dialog.
+  await page.evaluate(() => {
+    window.__hold['wakeup.get'] = new Promise((go) => {
+      window.__first = go
+    })
+  })
+  await settings.click()
+  await expect.poll(() => calls(page, 'wakeup.get')).toHaveLength(1)
+  await settings.click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
+  await expect(dialog).toBeVisible()
+  const folder = dialog.locator('[name="specsFolder"]')
+  await folder.fill('typed')
+  // The first answer comes with the dialog open: it is for a dialog that is up already.
+  await page.evaluate(() => window.__first())
+  await expect.poll(() => answers(page, 'wakeup.get')).toBe(2)
+  await settled(page)
+  await expect(folder).toHaveValue('typed')
+})
+
+/** What the daemon says of the saves below when it refuses them (blank words, a folder outside). */
+const REFUSED = {
+  calls: 'the wake-up text must be text, not empty, at most 1000000 characters',
+  specs: 'the specs folder is a folder inside the project: it stays inside it, with no `..`',
+}
+
+/**
+ * harbour's calls (with `words`, which the daemon refuses when they are blank) and specs saved
+ * and not yet answered, and the dialog left; with `next`, foundry's settings are asked for from
+ * its menu then. Gives the dialog and its two sections.
+ */
+async function leftWithSavesOnTheirWay(page, words, { next = false } = {}) {
+  await page.getByRole('button', { name: 'Project settings' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Project settings' })
+  const calling = dialog.getByRole('group', { name: 'Wake-up calls', exact: true })
+  const specs = dialog.getByRole('group', { name: 'Specs', exact: true })
+  await expect.poll(() => shownIn(dialog)).toEqual(HARBOURS)
+  await hold(page, 'wakeup.set')
+  await hold(page, 'project.specs')
+  await calling.getByLabel('Every').fill('3')
+  await calling.getByLabel('What it says').fill(words)
+  await calling.getByRole('button', { name: 'Save wake-up calls' }).click()
+  await specs.locator('[name="specsFolder"]').fill('late')
+  await specs.getByRole('button', { name: 'Save specs' }).click()
+  await expect.poll(() => calls(page, 'wakeup.set')).toHaveLength(1)
+  await expect.poll(() => calls(page, 'project.specs')).toHaveLength(1)
+  await page.keyboard.press('Escape')
+  await expect(dialog).toBeHidden()
+  if (next) {
+    await dialogFrom(page, 2, 'Project settings…', 'Project settings')
+    expect(await shownIn(dialog)).toEqual(FOUNDRYS)
+  }
+  return { dialog, calling, specs }
+}
+
+test('Project settings: a save answered after the dialog was left for another project’s shows nothing in that one, and the status line says it', async ({
+  page,
+}) => {
+  await open(page, twoWithOwnSettings())
+  const left = await leftWithSavesOnTheirWay(page, 'Harbour: anything left?', { next: true })
+  const { calling, specs, dialog } = left
+  // harbour's answers come now: nothing of them is in foundry's dialog.
+  await letGo(page, 'wakeup.set')
+  await expect(page.locator('#status')).toHaveText(
+    'Wake-up calls are on: the chief is asked every 3 hours.',
+  )
+  await letGo(page, 'project.specs')
+  await expect(page.locator('#status')).toHaveText(
+    'Saved: the specs reach the chief when it next starts.',
+  )
+  await settled(page)
+  expect(await shownIn(dialog)).toEqual(FOUNDRYS)
+  await expect(specs.locator('.specs-note')).toBeHidden()
+  // The next save from it is foundry's own, as its dialog shows it.
+  await calling.getByRole('button', { name: 'Save wake-up calls' }).click()
+  await expect
+    .poll(() => calls(page, 'wakeup.set'))
+    .toEqual([
+      { project: 1, on: true, every: 3, unit: 'hours', text: 'Harbour: anything left?' },
+      { project: 2, on: false, every: 30, unit: 'minutes', text: DEFAULT_WAKE_UP_WORDS },
+    ])
+})
+
+test('Project settings: a save the daemon refuses after the dialog was left for another project’s is said on the status line, and nowhere in that one', async ({
+  page,
+}) => {
+  await open(page, twoWithOwnSettings())
+  const { specs, calling, dialog } = await leftWithSavesOnTheirWay(page, '   ', { next: true })
+  await page.evaluate((words) => {
+    window.__model.specsRefusal = words
+  }, REFUSED.specs)
+  // A refusal is said as one, each on its own: not as a note.
+  const status = page.locator('#status')
+  await letGo(page, 'wakeup.set')
+  await expect(status).toHaveText(REFUSED.calls)
+  await expect(status).toHaveAttribute('data-tone', 'error')
+  await letGo(page, 'project.specs')
+  await expect(status).toHaveText(REFUSED.specs)
+  await expect(status).toHaveAttribute('data-tone', 'error')
+  await settled(page)
+  expect(await shownIn(dialog)).toEqual(FOUNDRYS)
+  await expect(calling.locator('.wakeup-hint')).toBeHidden()
+  await expect(specs.locator('.specs-note')).toBeHidden()
+})
+
+test('Project settings: a save the daemon refuses after the dialog was left, with none opened since, is said on the status line, and not where nobody looks', async ({
+  page,
+}) => {
+  await open(page, twoWithOwnSettings())
+  await leftWithSavesOnTheirWay(page, '   ')
+  await page.evaluate((words) => {
+    window.__model.specsRefusal = words
+  }, REFUSED.specs)
+  const status = page.locator('#status')
+  await letGo(page, 'wakeup.set')
+  await expect(status).toHaveText(REFUSED.calls)
+  await expect(status).toHaveAttribute('data-tone', 'error')
+  await letGo(page, 'project.specs')
+  await expect(status).toHaveText(REFUSED.specs)
+  await expect(status).toHaveAttribute('data-tone', 'error')
+  await settled(page)
+  // The shut dialog has no refusal in it either: what it shows is read again when it opens.
+  for (const words of ['.wakeup-hint', '.specs-note']) {
+    await expect(page.locator(`#project-settings-dialog ${words}`)).toHaveJSProperty('hidden', true)
+  }
+})
 
 test("counts the human's unread notes on Inbox, and opens For you with it, from a folded board too", async ({
   page,
@@ -6554,7 +7500,7 @@ test('says what to do with no project yet: start one; there is no board to read,
   await expect(page.getByRole('region', { name: 'Terminals' })).toHaveText(
     'No terminal is open yet.',
   )
-  await expect(page.getByRole('button', { name: 'Staff' })).toBeDisabled()
+  await expect(page.getByRole('button', { name: 'Project settings' })).toBeDisabled()
   await expect(page.getByRole('button', { name: 'Inbox', exact: true })).toHaveAttribute(
     'data-waiting',
     'false',

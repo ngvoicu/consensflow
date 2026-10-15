@@ -3,7 +3,7 @@
 
 use serde::Serialize;
 
-/// The setting of a project's wake-up calls, as the Staff dialog shows it.
+/// The setting of a project's wake-up calls, as Project settings shows it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WakeUpView {

@@ -11,6 +11,7 @@ use cf_engine::ActivityState;
 use cf_harness::contract::{Held, Readiness, Waiting};
 use cf_harness::records::Role;
 use cf_ledger::{NewWakeUp, ProjectView, WakeUpUnit, DEFAULT_WAKE_UP_TEXT};
+use serde_json::json;
 
 use crate::fixtures::soon;
 
@@ -139,6 +140,37 @@ fn a_wake_up_goes_once_the_interval_has_passed_and_the_chief_is_at_rest_and_only
         context.inbox(context.id(project.id, "zeus")).is_empty(),
         "no member is sent one"
     );
+}
+
+#[test]
+fn a_project_opened_with_the_calls_on_is_woken_when_their_interval_has_passed_with_no_save_after_it_opened(
+) {
+    let context = Context::new();
+    let project = context
+        .open_project(json!({
+            "directory": "/work/app",
+            "name": "app",
+            "chief": { "harness": "claude-code", "agent": "apollo" },
+            "staff": [{ "agent": "zeus", "harness": "claude-code", "roles": ["worker"], "tier": "standard" }],
+            "wakeUp": { "on": true, "every": 5, "unit": "minutes" },
+        }))
+        .unwrap()
+        .expect("the project");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(
+        context
+            .dispatcher
+            .activity(context.id(project.id, "chief"))
+            .state,
+        ActivityState::Idle
+    );
+    context.advance(5 * MINUTE - 1);
+    passes(&context);
+    assert_eq!(given(&context), 0, "a millisecond short of the interval");
+    context.advance(1);
+    passes(&context);
+    assert_eq!(given(&context), 1, "the interval has passed");
 }
 
 #[test]

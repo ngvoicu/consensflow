@@ -1,16 +1,19 @@
 /**
  * The menu of a project in the list on the left: Rename… and Description…,
- * each in a small dialog of its own. It opens on a right-click, and from the
- * keyboard on the project that has it (the context-menu key, or Shift+F10).
- * Escape closes it, and so does a click anywhere else, and the keyboard goes
- * back to the project.
+ * each in a small dialog of its own, and Project settings…, which opens the
+ * dialog of the board's Project settings button for this project (the page
+ * shows the project first, if the board shows another). It opens on a
+ * right-click, and from the keyboard on the project that has it (the
+ * context-menu key, or Shift+F10). Escape closes it, and so does a click
+ * anywhere else, and the keyboard goes back to the project.
  *
  * The name has the rules a name has when a project is opened (some text, at
  * most 100 characters); the description is one line of at most 200, and left
  * empty it is taken away. The daemon checks both, and a refusal is said in the
  * dialog, where the human typed, which keeps what they typed. The project's
  * folder never changes, and the description is the human's alone: no agent is
- * told it.
+ * told it. A closed project is read-only, as its board is: it has no Project
+ * settings to open.
  *
  * The menu and the dialogs are outside the list, which is drawn again whenever
  * the board is, so the menu keeps only the project's id and finds its button
@@ -147,6 +150,7 @@ export class ProjectMenu {
   #list
   #menu
   #items
+  #settings
   #page
   #dialogs
   #fallback
@@ -154,26 +158,37 @@ export class ProjectMenu {
   #open = null
   /** Where that project's card was in the list when it was last drawn: where the keyboard goes if it is gone. */
   #at = 0
+  /** The project whose Project settings the menu asked the page to open, until that dialog closes. */
+  #settingsFor = null
 
   /**
    * `elements` are the list of projects (each of its items holds its id in
    * `data-project` and its button in `.project-select`), the menu, the two
-   * dialogs, and `fallback`, the control the keyboard goes to when the project
-   * of an open menu is gone and the list has no other. `page.project(id)` is the
-   * project as the page has it now; `daemon`, `act` and `note` are the page's, as
-   * the dialogs use them.
+   * dialogs of a line of text, the dialog of Project settings, and `fallback`,
+   * the control the keyboard goes to when the project of an open menu is gone
+   * and the list has no other. `page.project(id)` is the project as the page
+   * has it now; `daemon`, `act` and `note` are the page's, as the dialogs use
+   * them; `page.openSettings(id)` shows the project if the board shows another,
+   * and opens Project settings on it.
    */
-  constructor({ list, menu, rename, describe, fallback }, page) {
+  constructor({ list, menu, rename, describe, settings, fallback }, page) {
     this.#list = list
     this.#menu = menu
     this.#fallback = fallback
     this.#items = [...menu.querySelectorAll('[role="menuitem"]')]
+    this.#settings = settings
     this.#page = page
     const back = (id) => this.#focus(id)
     this.#dialogs = {
       rename: new FieldDialog(rename, FIELDS.rename, page, back),
       describe: new FieldDialog(describe, FIELDS.describe, page, back),
     }
+    // The keyboard goes back to the project whichever way its settings are left.
+    settings.addEventListener('close', () => {
+      const project = this.#settingsFor
+      this.#settingsFor = null
+      if (project !== null) back(project)
+    })
     for (const item of this.#items) {
       item.addEventListener('click', () => this.#choose(item.dataset.action))
     }
@@ -245,10 +260,16 @@ export class ProjectMenu {
     this.#adopt(project)
   }
 
-  /** The open menu is for `project` as the page has it: it takes its name, and notes where its card is. */
+  /**
+   * The open menu is for `project` as the page has it: it takes its name, and notes where its
+   * card is. A closed project has no settings to open, as the board's button is not for it.
+   */
   #adopt(project) {
     this.#menu.setAttribute('aria-label', project.name)
     this.#at = this.#placeOf(project.id)
+    for (const item of this.#items) {
+      if (item.dataset.action === 'settings') item.disabled = project.state !== 'open'
+    }
   }
 
   /**
@@ -276,10 +297,11 @@ export class ProjectMenu {
     )
   }
 
-  /** The arrow keys move between the items, and Tab leaves the menu, back to the project. */
+  /** The arrow keys move between the items there are to choose, and Tab leaves the menu, back to the project. */
   #key(event) {
-    const last = this.#items.length - 1
-    const at = this.#items.indexOf(document.activeElement)
+    const items = this.#items.filter((item) => !item.disabled)
+    const last = items.length - 1
+    const at = items.indexOf(document.activeElement)
     const to = {
       ArrowDown: at >= last ? 0 : at + 1,
       ArrowUp: at <= 0 ? last : at - 1,
@@ -288,7 +310,7 @@ export class ProjectMenu {
     }[event.key]
     if (to !== undefined) {
       event.preventDefault()
-      this.#items[to].focus()
+      items[to].focus()
     } else if (event.key === 'Tab') {
       event.preventDefault()
       this.#hide(BACK.now)
@@ -306,7 +328,21 @@ export class ProjectMenu {
   #choose(action) {
     const project = this.#page.project(this.#open)
     this.#hide(BACK.nowhere)
-    if (project !== undefined) this.#dialogs[action].open(project)
+    if (project === undefined) return
+    if (action === 'settings') void this.#openSettings(project.id)
+    else this.#dialogs[action].open(project)
+  }
+
+  /**
+   * Project settings on a project: the page shows it first, if the board shows another, and
+   * opens the dialog, which gives the keyboard back to the project as it closes. A dialog the
+   * page could not open (the project is gone, or its board could not be read) leaves nothing
+   * of the ask for the next one.
+   */
+  async #openSettings(id) {
+    this.#settingsFor = id
+    await this.#page.openSettings(id)
+    if (!this.#settings.open) this.#settingsFor = null
   }
 
   /** Shuts the menu, and gives the keyboard where `back` says. */

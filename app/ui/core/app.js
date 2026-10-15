@@ -1,7 +1,7 @@
 import { button, element, redraw } from '../dom.js'
 import { initializeUpdates } from '../updates.js'
 import { BoardView, TaskDrawer } from './board.js'
-import { NewProjectDialog, StaffDialog, SwitchChiefDialog } from './dialogs.js'
+import { NewProjectDialog, ProjectSettingsDialog, SwitchChiefDialog } from './dialogs.js'
 import { Layout } from './layout.js'
 import { ProjectMenu } from './project-menu.js'
 import { TerminalsView } from './terminals.js'
@@ -27,7 +27,7 @@ const projectList = $('#projects')
 const projectTitle = $('#project-title')
 const projectDirectory = $('#project-directory')
 const inboxButton = $('#inbox-button')
-const staffButton = $('#staff-button')
+const projectSettingsButton = $('#project-settings-button')
 const boardRoot = $('#board')
 const stage = $('#stage')
 const status = $('#status')
@@ -396,7 +396,7 @@ async function refresh() {
         new Set(open.map((project) => project.id)),
       )
       render()
-      staff.render()
+      projectSettings.render()
       projectMenu.follow()
       await rereadTask()
     } catch (cause) {
@@ -426,7 +426,7 @@ function render() {
   // it. Its board and its tasks still read.
   const suspended = project?.state === 'suspended'
   main.dataset.suspended = String(suspended)
-  staffButton.disabled = project === null || suspended
+  projectSettingsButton.disabled = project === null || suspended
   const lanes = state.board?.lanes ?? []
   if (!lanes.some((lane) => lane.participant.handle === state.focus)) state.focus = 'chief'
   if (state.board === null) {
@@ -514,6 +514,30 @@ $('#delete-tasks-confirm').addEventListener('click', () => {
   })
 })
 
+/** The human chooses a project: its board is the one to read and show, its chief's window in front. */
+function choose(id) {
+  state.selected = id
+  state.focus = 'chief'
+  closeTask()
+}
+
+/**
+ * Shows project `id`: chosen, unless it is the choice already (the human may have chosen
+ * another, whose board is on its way while the board still shows `id`: asked for after it,
+ * `id` is the choice again), and its board waited for unless the board shows it (a read
+ * already on its way may be of the project chosen before, and the next one is of this).
+ * Whether the board shown is its now, which it is not where the project is gone or its board
+ * could not be read (the page has said why).
+ */
+async function showProject(id) {
+  if (state.selected !== id) choose(id)
+  if (state.board?.project.id !== id) {
+    await refresh()
+    while (refreshing !== null) await refreshing
+  }
+  return state.board?.project.id === id
+}
+
 function renderProjects() {
   const shown = state.board?.project.id ?? null
   const items = state.projects.map((project) => {
@@ -522,19 +546,15 @@ function renderProjects() {
     item.dataset.project = String(project.id)
     item.dataset.current = String(project.id === shown)
     const select = button('', 'project-select', () => {
-      state.selected = project.id
-      state.focus = 'chief'
-      closeTask()
+      choose(project.id)
       void refresh()
     })
     select.setAttribute('aria-current', String(project.id === shown))
     // A closed project says so by its buttons (Delete, Resume), not by a pill.
     select.append(element('span', 'project-name', project.name))
-    // The line the human wrote under the name: cut where it is long, whole on hover.
+    // The line the human wrote under the name, whole, on as many rows as it takes.
     if (project.description) {
-      const line = element('span', 'project-description', project.description)
-      line.title = project.description
-      select.append(line)
+      select.append(element('span', 'project-description', project.description))
     }
     item.append(select)
     const open = project.state === 'open'
@@ -562,7 +582,8 @@ function renderProjects() {
 }
 
 // A right-click on a project (or the context-menu key, or Shift+F10, on the one the
-// keyboard is on) opens its menu: rename it, or write a line under its name. An open
+// keyboard is on) opens its menu: rename it, write a line under its name, or open its
+// Project settings (the project is shown first, if the board shows another). An open
 // menu follows each refresh; with its project gone and no other in the list, the
 // keyboard goes to New project.
 const projectMenu = new ProjectMenu(
@@ -571,6 +592,7 @@ const projectMenu = new ProjectMenu(
     menu: $('#project-menu'),
     rename: $('#rename-dialog'),
     describe: $('#describe-dialog'),
+    settings: $('#project-settings-dialog'),
     fallback: $('#new-project'),
   },
   {
@@ -578,6 +600,7 @@ const projectMenu = new ProjectMenu(
     daemon,
     act,
     note,
+    openSettings: (id) => act(() => openSettings(id)),
   },
 )
 
@@ -587,26 +610,39 @@ inboxButton.addEventListener('click', () => {
   boardRoot.querySelector('.foryou')?.scrollIntoView({ block: 'start' })
 })
 
-// The project staff, drawn from the board shown and the agents as the page
-// has them now; Staff reads the agents again before it opens.
-const staff = new StaffDialog($('#staff-dialog'), {
+// Project settings (the staff, human approval, wake-up calls and specs), for the project
+// asked for: drawn from its board while the board shown is its, and from the agents as the
+// page has them now; opening it reads the agents again. The button asks for the project
+// the board shows.
+const projectSettings = new ProjectSettingsDialog($('#project-settings-dialog'), {
   board: () => state.board,
+  selected: () => state.selected,
   agents: () => state.agents,
   daemon,
   act,
   note,
+  report,
 })
-staffButton.addEventListener('click', () =>
-  act(async () => {
-    await readAgents()
-    await staff.open()
-  }),
+projectSettingsButton.addEventListener('click', () =>
+  act(() => openSettings(state.board.project.id)),
 )
 
+/**
+ * Project settings opened on project `id`, which is shown first if it is not: the dialog of
+ * the board's button, for the project the human asked for. One the human chooses another
+ * project before it is up is not opened.
+ */
+async function openSettings(id) {
+  if (!(await showProject(id))) return
+  await readAgents()
+  await projectSettings.open(id)
+}
+
 // New project: the native folder picker first, then the saved agent the chief
-// runs on, the staff (the last project's ticked already) and the approval
-// setting. The agents it reads are the page's too, and the project it starts
-// is shown.
+// runs on and the project's settings: the staff (the last project's ticked
+// already), human approval, wake-up calls and specs, which the project starts
+// with. The agents it reads are the page's too, and the project it starts is
+// shown.
 const newProject = new NewProjectDialog($('#new-project-dialog'), {
   agents: () => state.agents,
   daemon,

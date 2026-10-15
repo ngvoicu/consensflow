@@ -206,6 +206,8 @@ async fn a_line_may_name_any_message_number_and_only_this_project_s_are_read_out
                 },
                 staff: Vec::new(),
                 gate: false,
+                wake_up: None,
+                specs: None,
             })
             .unwrap();
         let note = ledger

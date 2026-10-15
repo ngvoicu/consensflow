@@ -1,7 +1,9 @@
 //! What a project says of specs, which its chief plans big work by: whether
 //! they are on, the folder they are kept in and the Specmint variant. The
 //! human's alone, as the gate is: no window's token reaches it (the daemon's
-//! API has no route for it, and the page is the app's).
+//! API has no route for it, and the page is the app's). Project settings says
+//! it here; New project says it in `project.open`, which keeps it in the write
+//! that makes the project.
 
 use cf_ledger::SpecsChange;
 use serde_json::json;

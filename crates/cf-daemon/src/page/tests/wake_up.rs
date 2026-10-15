@@ -1,9 +1,10 @@
-//! The human's wake-up calls on the page: the Staff dialog reads a project's
+//! The human's wake-up calls on the page: Project settings reads a project's
 //! (`wakeup.get`) and saves them (`wakeup.set`, a number and a unit and the
 //! words); a save the ledger refuses says why and wakes nothing, one that holds
-//! wakes the dispatcher, and no token of a window reaches either. Not held to
-//! a Node recording: Node's page had no such operation. The real dispatcher
-//! stands behind the page.
+//! wakes the dispatcher, and no token of a window reaches either. New project
+//! starts with the calls a project has that never set them, and the words of
+//! those are the ledger's. Not held to a Node recording: Node's page had no
+//! such operation. The real dispatcher stands behind the page.
 
 use cf_ledger::DEFAULT_WAKE_UP_TEXT;
 use hyper::Method;
@@ -206,6 +207,39 @@ async fn a_save_is_in_the_ledger_at_once_and_each_one_wakes_the_dispatcher_so_no
             ask(&page.app, "wakeup.set", off).await;
             assert!(!kit.ledger.borrow().wake_up(page.project).unwrap().on);
             assert_eq!(page.rig.kicks.get(), 2);
+        })
+        .await;
+}
+
+/// New project has no project to read the calls of, so its section of them
+/// starts with a copy of what a project has that never set them: off, how often,
+/// and the words. One that is not the ledger's would be shown as the default and
+/// sent as the human's own once it was unlike what the section opened with, and
+/// kept as such. The copy is in the page's own file, and is held to what the
+/// daemon says of a project that never set its calls.
+#[tokio::test]
+async fn new_project_starts_the_wake_up_calls_as_a_project_that_never_set_them_has_them() {
+    LocalSet::new()
+        .run_until(async {
+            let page = asked();
+            let read = ask(&page.app, "wakeup.get", json!({ "project": page.project })).await;
+            let fresh = &read["wakeUp"];
+            let source = include_str!("../../../../../app/ui/core/wake-up.js");
+            let words = format!("DEFAULT_WAKE_UP_WORDS =\n  '{DEFAULT_WAKE_UP_TEXT}'\n");
+            assert!(
+                source.contains(&words),
+                "the page's constant is not the ledger's default words: {DEFAULT_WAKE_UP_TEXT}"
+            );
+            let unset = format!(
+                "const UNSET = {{ on: {}, every: {}, unit: '{}', text: DEFAULT_WAKE_UP_WORDS }}",
+                fresh["on"],
+                fresh["every"],
+                fresh["unit"].as_str().unwrap_or_default()
+            );
+            assert!(
+                source.contains(&unset),
+                "the page does not start the calls as a fresh project has them ({fresh}): {unset}"
+            );
         })
         .await;
 }

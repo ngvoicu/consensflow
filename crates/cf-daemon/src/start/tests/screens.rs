@@ -124,6 +124,8 @@ async fn a_change_to_the_agents_moves_the_members_tiers_and_tells_the_page() {
                         },
                         staff: Vec::new(),
                         gate: false,
+                        wake_up: None,
+                        specs: None,
                     })
                     .unwrap();
                 ledger

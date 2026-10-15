@@ -19,7 +19,7 @@
 //! [`cf_e2e::live::Harness::ALL`], so that every harness holds every seat once.
 //! Each project is a folder in the run's home (`git init`, a README, the bench's
 //! brief in `AGENTS.md` and `CLAUDE.md`), opened with its staff and with the
-//! gate on by the call the Staff dialog's checkbox makes ([`project`]).
+//! gate on by the call the Project settings' checkbox makes ([`project`]).
 //!
 //! The human is the page's calls (`message.approve` and `message.decline`, what
 //! the board's buttons make) and the keys typed into the chief's window, which

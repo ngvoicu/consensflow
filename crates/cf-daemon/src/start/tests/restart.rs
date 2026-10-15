@@ -51,6 +51,8 @@ fn ledger_before_the_start(root: &Path) -> (Ledger, i64) {
             },
             staff: Vec::new(),
             gate: false,
+            wake_up: None,
+            specs: None,
         })
         .unwrap();
     (ledger, project.id)

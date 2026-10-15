@@ -1,0 +1,783 @@
+# Project settings, and a new project's (2026-10-15: the board's Staff button became Project
+# settings, with Staff, Human approval, Wake-up calls and Specs as its sections; New project has
+# the same four, built from the same code; the project's menu opens them for any open project; a
+# project's description shows whole in the list). The wake-up calls and the specs a new project
+# says are carried by `project.open` and kept in the very write that makes the project, because
+# the chief's first launch reads the specs of the project it is given, and a second call from
+# the page could not beat it. A setting the ledger refuses refuses the whole start, in the words
+# the Project settings dialog is refused in, before anything is written, and a write that fails
+# after the project's row is made leaves no project. One plant takes one rule out; a test of it
+# fails. The ledger's plants run its own tests (`crates/cf-ledger/tests/opened_with.rs`), the
+# engine's the dispatcher's (`specs::` and `wake_ups::` of `tests/dispatcher`), the page's the
+# operation's (`crates/cf-daemon/src/page/tests/opening.rs`) and the dialogs' the browser's
+# (`Project settings`, `New project` and `project menu` in `app/tests/core-page.spec.mjs`; the
+# page's xterm they stand on is the tracked `app/ui/vendor`, so no plant bundles it). The
+# `project settings rig:` plants run the case of the rig that holds the chief's very first
+# window to the specs (`crates/cf-e2e/tests/rig/specs.rs`), and say `builds`: the family builds
+# the native `cf` again once each is put back. Every name holds `project settings`, so
+# `npm run plants:daemon -- "project settings"` runs them all.
+
+[run]
+# The ledger's tests of a project opened with its calls and specs said.
+ledger-opened-with = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "opened_with"]
+# The dispatcher's: the chief's first launch has the specs, and the calls wake it.
+engine-specs = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "specs::"]
+engine-opened-wake-up = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "wake_ups::a_project_opened"]
+# The page's `project.open`, over the bridge, and the words New project starts the calls with.
+daemon-opening-page = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "page::tests::opening"]
+daemon-wake-up-page = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "page::tests::wake_up"]
+# The dialog and the menu, in the browser Playwright keeps, and New project's start.
+page-project-settings = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "Project settings"]
+page-new-project = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "New project"]
+# What the board says of a project with no members, which names where to add them.
+page-board-empty = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "no members yet|board says it has none"]
+# The case of the rig (a real daemon and pane host, a stand-in chief): the chief's very first window.
+rig-specs-first = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "specs::a_project_opened_with_specs_on"]
+
+# --- the ledger: kept in the write that makes the project ---
+
+[[plant]]
+name = "project settings: the specs a project opens with are not kept"
+meant = "a_project_opened_with_calls_and_specs_has_them_when_it_is_first_seen"
+runs = ["ledger-opened-with", "engine-specs", "daemon-opening-page"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects.rs"
+find = '''        if let Some(specs) = &request.specs {
+            keep_specs(store, id, specs)?;
+        }
+'''
+replace = ""
+
+[[plant]]
+name = "project settings: the calls a project opens with are not kept"
+meant = "a_project_opened_with_calls_and_specs_has_them_when_it_is_first_seen"
+runs = ["ledger-opened-with", "engine-opened-wake-up", "daemon-opening-page"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects.rs"
+find = '''        if let Some(wake_up) = wake_up {
+            keep_wake_up(store, id, wake_up)?;
+        }
+'''
+replace = ""
+
+[[plant]]
+name = "project settings: the specs are kept in a write of their own after the project is made"
+meant = "a_write_the_file_refuses_after_the_projects_row_is_made_leaves_no_project"
+runs = ["ledger-opened-with"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects.rs"
+find = '''        if let Some(specs) = &request.specs {
+            keep_specs(store, id, specs)?;
+        }
+        known_project(store, id)
+    })
+}'''
+replace = '''        known_project(store, id)
+    })
+    .and_then(|made| {
+        if let Some(specs) = &request.specs {
+            store.write(|store| keep_specs(store, made.id, specs))?;
+        }
+        known_project(store, made.id)
+    })
+}'''
+
+[[plant]]
+name = "project settings: the calls are checked and kept in a write of their own after the project is made"
+meant = "calls_the_ledger_refuses_refuse_the_opening_before_a_write_and_no_project_is_made"
+runs = ["ledger-opened-with"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects.rs"
+find = '''    let wake_up = request
+        .wake_up
+        .as_ref()
+        .map(NewWakeUp::setting)
+        .transpose()?;
+'''
+replace = ""
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects.rs"
+find = '''        if let Some(wake_up) = wake_up {
+            keep_wake_up(store, id, wake_up)?;
+        }
+        if let Some(specs) = &request.specs {
+            keep_specs(store, id, specs)?;
+        }
+        known_project(store, id)
+    })
+}'''
+replace = '''        if let Some(specs) = &request.specs {
+            keep_specs(store, id, specs)?;
+        }
+        known_project(store, id)
+    })
+    .and_then(|made| {
+        if let Some(wake_up) = request.wake_up.as_ref().map(NewWakeUp::setting).transpose()? {
+            store.write(|store| keep_wake_up(store, made.id, wake_up))?;
+        }
+        known_project(store, made.id)
+    })
+}'''
+
+[[plant]]
+name = "project settings: a project opened with nothing said has a setting logged anyway"
+meant = "a_project_that_says_nothing_is_as_it_always_was_and_so_is_one_that_says_what_a_project_has"
+runs = ["ledger-opened-with"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects.rs"
+find = '''        if let Some(specs) = &request.specs {
+            keep_specs(store, id, specs)?;
+        }
+        known_project(store, id)'''
+replace = '''        keep_specs(store, id, &request.specs.clone().unwrap_or_default())?;
+        known_project(store, id)'''
+
+[[plant]]
+name = "project settings: the project is logged as made after its settings"
+meant = "what_is_said_as_a_project_opens_is_logged_as_the_same_words_said_right_after"
+runs = ["ledger-opened-with"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects.rs"
+find = '''        store.log(
+            id,
+            "project.created",
+            json!({ "name": request.name, "directory": request.directory }),
+        )?;
+        // Said as the project opens, kept and logged as if the human had said
+        // them the moment after: a setting that is the default changes nothing.
+        if let Some(wake_up) = wake_up {
+            keep_wake_up(store, id, wake_up)?;
+        }
+        if let Some(specs) = &request.specs {
+            keep_specs(store, id, specs)?;
+        }
+'''
+replace = '''        if let Some(wake_up) = wake_up {
+            keep_wake_up(store, id, wake_up)?;
+        }
+        if let Some(specs) = &request.specs {
+            keep_specs(store, id, specs)?;
+        }
+        store.log(
+            id,
+            "project.created",
+            json!({ "name": request.name, "directory": request.directory }),
+        )?;
+'''
+
+[[plant]]
+name = "project settings: the specs a request says are read and forgotten"
+meant = "a_chief_is_given_the_specs_its_project_was_opened_with_at_its_very_first_launch"
+runs = ["engine-specs", "ledger-opened-with"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/specs.rs"
+find = '            Some(said @ Value::Object(_)) => Self::from_json(said).map(Some),'
+replace = '            Some(said @ Value::Object(_)) => Self::from_json(said).map(|_| None),'
+
+[[plant]]
+name = "project settings: a request in JSON loses its calls"
+meant = "a_request_in_json_says_its_calls_and_specs_after_the_rest_and_is_refused_in_the_dialogs_words"
+runs = ["ledger-opened-with"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects.rs"
+find = '            wake_up: NewWakeUp::from_opening(value.get("wakeUp"))?,'
+replace = '            wake_up: None,'
+
+[[plant]]
+name = "project settings: specs said as anything but an object are taken for none"
+meant = "a_request_in_json_says_its_calls_and_specs_after_the_rest_and_is_refused_in_the_dialogs_words"
+runs = ["ledger-opened-with"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/specs.rs"
+find = '            Some(said @ Value::Object(_)) => Self::from_json(said).map(Some),'
+replace = '            Some(said) => Self::from_json(said).map(Some),'
+
+# --- the rig: a real daemon and pane host, a stand-in chief ---
+
+[[plant]]
+name = "project settings rig: the specs a project opens with are not kept"
+meant = "a_project_opened_with_specs_on_has_its_chief_given_the_skill_beside_its_role_at_its_very_first_window"
+runs = ["rig-specs-first"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects.rs"
+find = '''        if let Some(specs) = &request.specs {
+            keep_specs(store, id, specs)?;
+        }
+'''
+replace = ""
+
+[[plant]]
+name = "project settings rig: the page leaves the specs out of the request it makes to the ledger"
+meant = "a_project_opened_with_specs_on_has_its_chief_given_the_skill_beside_its_role_at_its_very_first_window"
+runs = ["rig-specs-first"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/projects.rs"
+find = '    for key in ["gate", "wakeUp", "specs"] {'
+replace = '    for key in ["gate", "wakeUp"] {'
+
+# --- the page's `project.open` ---
+
+[[plant]]
+name = "project settings: a setting the page sends the daemon cannot read is let through"
+meant = "a_setting_the_daemon_refuses_refuses_the_whole_start_in_the_dialogs_words_and_makes_no_project"
+runs = ["daemon-opening-page"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/projects.rs"
+find = '        specs: SpecsChange::from_opening(request.get("specs")).ok()?,'
+replace = '        specs: SpecsChange::from_opening(request.get("specs")).unwrap_or_default(),'
+
+[[plant]]
+name = "project settings: the page leaves the calls out of the request it makes to the ledger"
+meant = "a_project_opened_with_calls_and_specs_has_them_and_its_chief_is_given_the_specs_at_its_first_launch"
+runs = ["daemon-opening-page"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/projects.rs"
+find = '    for key in ["gate", "wakeUp", "specs"] {'
+replace = '    for key in ["gate", "specs"] {'
+
+[[plant]]
+name = "project settings: New project starts the calls with other words than the ledger's default"
+meant = "new_project_starts_the_wake_up_calls_as_a_project_that_never_set_them_has_them"
+runs = ["daemon-wake-up-page"]
+
+[[plant.edit]]
+file = "app/ui/core/wake-up.js"
+find = "  'Do you still have work to do? If tasks are left on the board or in your plan, carry on.'"
+replace = "  'Do you still have work to do?'"
+
+[[plant]]
+name = "project settings: New project starts the calls two hours apart where a project has them an hour apart"
+meant = "new_project_starts_the_wake_up_calls_as_a_project_that_never_set_them_has_them"
+runs = ["daemon-wake-up-page"]
+
+[[plant.edit]]
+file = "app/ui/core/wake-up.js"
+find = "const UNSET = { on: false, every: 1, unit: 'hours', text: DEFAULT_WAKE_UP_WORDS }"
+replace = "const UNSET = { on: false, every: 2, unit: 'hours', text: DEFAULT_WAKE_UP_WORDS }"
+
+# --- the dialogs: four sections, one markup, one code ---
+
+[[plant]]
+name = "project settings: the board's button is still called Staff"
+meant = "names the board's button and its dialog Project settings, with Staff, Human approval, Wake-up calls and Specs as its sections, in that order"
+runs = ["page-project-settings"]
+
+[[plant.edit]]
+file = "app/ui/index.html"
+find = '<button class="quiet-button" id="project-settings-button" type="button">Project settings</button>'
+replace = '<button class="quiet-button" id="project-settings-button" type="button">Staff</button>'
+
+[[plant]]
+name = "project settings: the dialog is still titled Project staff"
+meant = "names the board's button and its dialog Project settings, with Staff, Human approval, Wake-up calls and Specs as its sections, in that order"
+runs = ["page-project-settings"]
+
+[[plant.edit]]
+file = "app/ui/index.html"
+find = '<h2 id="project-settings-title">Project settings</h2>'
+replace = '<h2 id="project-settings-title">Project staff</h2>'
+
+[[plant]]
+name = "project settings: the approval section is not called Human approval"
+meant = "names the board's button and its dialog Project settings, with Staff, Human approval, Wake-up calls and Specs as its sections, in that order"
+runs = ["page-project-settings"]
+
+[[plant.edit]]
+file = "app/ui/index.html"
+find = '''    <fieldset class="project-section">
+      <legend>Human approval</legend>'''
+replace = '''    <fieldset class="project-section">
+      <legend>Approval</legend>'''
+
+[[plant]]
+name = "project settings: the sections come before the staff"
+meant = "names the board's button and its dialog Project settings, with Staff, Human approval, Wake-up calls and Specs as its sections, in that order"
+runs = ["page-project-settings"]
+
+[[plant.edit]]
+file = "app/ui/index.html"
+find = '''      <h2 id="project-settings-title">Project settings</h2>
+'''
+replace = '''      <h2 id="project-settings-title">Project settings</h2>
+      <div data-project-sections></div>
+'''
+
+[[plant.edit]]
+file = "app/ui/index.html"
+find = '''      </fieldset>
+      <div data-project-sections></div>
+      <div class="dialog-actions">
+        <button class="quiet-button" type="button" value="cancel">Close</button>'''
+replace = '''      </fieldset>
+      <div class="dialog-actions">
+        <button class="quiet-button" type="button" value="cancel">Close</button>'''
+
+[[plant]]
+name = "project settings: New project has its sections before its staff"
+meant = "New project has Staff, Human approval, Wake-up calls and Specs after the folder and the chief, with the defaults a project has"
+runs = ["page-new-project"]
+
+[[plant.edit]]
+file = "app/ui/index.html"
+find = '''      <fieldset class="project-section staff-pick">'''
+replace = '''      <div data-project-sections></div>
+      <fieldset class="project-section staff-pick">'''
+
+[[plant.edit]]
+file = "app/ui/index.html"
+find = '''      </fieldset>
+      <div data-project-sections></div>
+      <p class="dialog-refusal" role="alert" hidden></p>'''
+replace = '''      </fieldset>
+      <p class="dialog-refusal" role="alert" hidden></p>'''
+
+[[plant]]
+name = "project settings: the empty board still says Staff is where the members are added"
+meant = "says so on the board when the project has no members yet"
+runs = ["page-board-empty"]
+
+[[plant.edit]]
+file = "app/ui/core/board.js"
+find = "add the agents this project may use under Project settings."
+replace = "add the agents this project may use under Staff."
+
+[[plant]]
+name = "project settings: the wake-up calls are saved with the approval's tick"
+meant = "Project settings: each section saves in its own way as before, and none saves another"
+runs = ["page-project-settings"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = '''        await page.daemon('project.gate', {'''
+replace = '''        await page.daemon('wakeup.set', { project: page.board().project.id, ...this.#wakeUp.values() })
+        await page.daemon('project.gate', {'''
+
+[[plant]]
+name = "project settings: New project's copy of the sections is not Project settings'"
+meant = "New project has Staff, Human approval, Wake-up calls and Specs after the folder and the chief, with the defaults a project has"
+runs = ["page-new-project"]
+
+[[plant.edit]]
+file = "app/ui/core/project-sections.js"
+find = "    mount.replaceWith(sections)"
+replace = '''    if (page === null) sections.querySelector('.wakeup-help').remove()
+    mount.replaceWith(sections)'''
+
+[[plant]]
+name = "project settings: New project does not reset its sections when it opens"
+meant = "New project opens on the defaults every time: what was set in it before is not kept"
+runs = ["page-new-project"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = '''    this.#sections.reset()
+'''
+replace = ""
+
+[[plant]]
+name = "project settings: New project does not send the specs"
+meant = "New project: starts a project with its approval, wake-up calls and specs set, all in the one request that opens it"
+runs = ["page-new-project"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = '''    if (specs !== null) body.specs = specs
+'''
+replace = ""
+
+[[plant]]
+name = "project settings: New project does not send the wake-up calls"
+meant = "New project: starts a project with its approval, wake-up calls and specs set, all in the one request that opens it"
+runs = ["page-new-project"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = '''    if (wakeUp !== null) body.wakeUp = wakeUp
+'''
+replace = ""
+
+[[plant]]
+name = "project settings: New project sends the sections as they opened, whatever they say"
+meant = "New project has Staff, Human approval, Wake-up calls and Specs after the folder and the chief, with the defaults a project has"
+runs = ["page-new-project"]
+
+[[plant.edit]]
+file = "app/ui/core/specs.js"
+find = "    return asOpened ? null : said"
+replace = "    return asOpened ? said : said"
+
+[[plant]]
+name = "project settings: New project says a variant of core as none"
+meant = "New project: says all of its specs and all of its wake-up calls once either is set at all, as Project settings saves them"
+runs = ["page-new-project"]
+
+[[plant.edit]]
+file = "app/ui/core/specs.js"
+find = "      variant: this.#variant.value,"
+replace = "      variant: this.#variant.value === DEFAULT_VARIANT ? null : this.#variant.value,"
+
+[[plant]]
+name = "project settings: New project leaves the calls out unless they are on"
+meant = "New project: says all of its specs and all of its wake-up calls once either is set at all, as Project settings saves them"
+runs = ["page-new-project"]
+
+[[plant.edit]]
+file = "app/ui/core/wake-up.js"
+find = "    return Object.keys(UNSET).every((part) => calls[part] === UNSET[part]) ? null : calls"
+replace = "    return calls.on ? calls : null"
+
+[[plant]]
+name = "project settings: the number of the calls takes any number"
+meant = "New project: a number that is no whole number of at least one holds the start back, as it holds the save in Project settings"
+runs = ["page-new-project"]
+
+[[plant.edit]]
+file = "app/ui/index.html"
+find = '<input type="number" name="wakeup-every" min="1" step="1" required>'
+replace = '<input type="number" name="wakeup-every">'
+
+[[plant]]
+name = "project settings: New project closes before the daemon answers"
+meant = "New project: a start the daemon refuses is said in the dialog in the daemon’s words, with what the human chose kept, and starts nothing"
+runs = ["page-new-project"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = '''    this.#say('')
+    let refused = null'''
+replace = '''    this.#say('')
+    this.#dialog.close()
+    let refused = null'''
+
+[[plant]]
+name = "project settings: New project closes a moment after the page is drawn for its project"
+meant = "New project: the new chief's terminal has the keyboard once its project is open, which the dialog over the page would not let it"
+runs = ["page-new-project"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = '''          this.#dialog.close()
+        } catch (cause) {'''
+replace = '''          setTimeout(() => this.#dialog.close(), 200)
+        } catch (cause) {'''
+
+[[plant]]
+name = "project settings: New project asks the daemon twice for a start asked twice"
+meant = "New project: a start asked twice while the daemon answers is asked of it once, and one refused after the human left the dialog is said on the status line"
+runs = ["page-new-project"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = "    if (this.#starting) return\n"
+replace = ""
+
+[[plant]]
+name = "project settings: a start refused after the human left the dialog is said nowhere"
+meant = "New project: a start asked twice while the daemon answers is asked of it once, and one refused after the human left the dialog is said on the status line"
+runs = ["page-new-project"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = "          if (!this.#dialog.open) throw cause\n"
+replace = ""
+
+[[plant]]
+name = "project settings: Enter in the specs folder of New project starts the project"
+meant = "Enter in the number of the wake-up calls or in the specs folder of New project starts no project, and Start does"
+runs = ["page-new-project"]
+
+[[plant.edit]]
+file = "app/ui/core/specs.js"
+find = '''      event.preventDefault()
+      if (page !== null) void this.#save()'''
+replace = '''      if (page !== null) void this.#save()'''
+
+[[plant]]
+name = "project settings: the specs of a project are saved with the approval's tick"
+meant = "Project settings: each section saves in its own way as before, and none saves another"
+runs = ["page-project-settings"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = '''        await page.daemon('project.gate', {'''
+replace = '''        await page.daemon('project.specs', { project: page.board().project.id, ...this.#specs.values() })
+        await page.daemon('project.gate', {'''
+
+# --- the project's menu ---
+
+[[plant]]
+name = "project settings: the menu opens them for the project the board shows, not the one asked for"
+meant = "project menu: Project settings… on a project the board does not show shows it first, and opens the dialog on it"
+runs = ["page-project-settings"]
+
+[[plant.edit]]
+file = "app/ui/core/app.js"
+find = '''  if (!(await showProject(id))) return
+  await readAgents()
+  await projectSettings.open(id)
+'''
+replace = '''  await readAgents()
+  await projectSettings.open(state.board.project.id)
+'''
+
+[[plant]]
+name = "project settings: the menu opens them before the board of the project asked for is read"
+meant = "project menu: Project settings… on a project while the board of another is being read opens it on the project asked for"
+runs = ["page-project-settings"]
+
+[[plant.edit]]
+file = "app/ui/core/app.js"
+find = "    while (refreshing !== null) await refreshing\n"
+replace = ""
+
+[[plant]]
+name = "project settings: the menu offers them for a closed project"
+meant = "project menu: a closed project has no Project settings to open, as the board has no button for it, and the keys pass it by"
+runs = ["page-project-settings"]
+
+[[plant.edit]]
+file = "app/ui/core/project-menu.js"
+find = "item.disabled = project.state !== 'open'"
+replace = "item.disabled = false"
+
+[[plant]]
+name = "project settings: the arrow keys stop on the item that cannot be chosen"
+meant = "project menu: a closed project has no Project settings to open, as the board has no button for it, and the keys pass it by"
+runs = ["page-project-settings"]
+
+[[plant.edit]]
+file = "app/ui/core/project-menu.js"
+find = "    const items = this.#items.filter((item) => !item.disabled)\n"
+replace = "    const items = this.#items\n"
+
+[[plant]]
+name = "project settings: the keyboard does not go back to the project when its settings are left"
+meant = "project menu: Project settings… opens the dialog of the board’s Project settings button for the project the board shows"
+runs = ["page-project-settings"]
+
+[[plant.edit]]
+file = "app/ui/core/project-menu.js"
+find = "      if (project !== null) back(project)\n"
+replace = ""
+
+[[plant]]
+name = "project settings: the menu has no third item"
+meant = "project menu: a right-click on a project opens its menu beside the pointer, Rename, Description and Project settings, and selects nothing"
+runs = ["page-project-settings"]
+
+[[plant.edit]]
+file = "app/ui/index.html"
+find = '''    <li role="none"><button type="button" role="menuitem" data-action="settings">Project settings…</button></li>
+'''
+replace = ""
+
+# --- the dialog is for one project, from the moment it is asked for until it closes ---
+# (2026-10-15, an Astra review of the first version: the dialog was drawn from whatever board the
+# page showed, and saved to it, so a project chosen while it opened, or a board that came late,
+# mixed two projects, and a save of the calls could land on the wrong one.)
+
+[[plant]]
+name = "project settings: the menu's project is not chosen again while the board shows it and another is chosen"
+meant = "Project settings: asked for from a project’s menu while another is being chosen, whose board is on its way, they are the menu’s project’s, and that board is not drawn in them when it comes"
+runs = ["page-project-settings"]
+
+[[plant.edit]]
+file = "app/ui/core/app.js"
+find = "  if (state.selected !== id) choose(id)\n"
+replace = "  if (state.board?.project.id !== id) choose(id)\n"
+
+[[plant]]
+name = "project settings: an opening goes on though the human has chosen another project"
+meant = "Project settings: asked for while the human chooses another project, whose board is on its way, they are not opened, nor when the human is back on the project asked for and its board is on its way"
+runs = ["page-project-settings"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = "    if (this.#dialog.open || this.#page.selected() !== project || board?.project.id !== project) {"
+replace = "    if (this.#dialog.open || board?.project.id !== project) {"
+
+[[plant]]
+name = "project settings: an opening goes on though the board shown is another project's"
+meant = "Project settings: asked for while the human chooses another project, whose board is on its way, they are not opened, nor when the human is back on the project asked for and its board is on its way"
+runs = ["page-project-settings"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = "    if (this.#dialog.open || this.#page.selected() !== project || board?.project.id !== project) {"
+replace = "    if (this.#dialog.open || this.#page.selected() !== project) {"
+
+[[plant]]
+name = "project settings: the calls that come late open the dialog for a project the human has left"
+meant = "Project settings: asked for a project the human has left before its calls came, they are not opened, and the calls that came show nowhere"
+runs = ["page-project-settings"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = "    if (this.#dialog.open || this.#page.selected() !== project || board?.project.id !== project) {"
+replace = "    if (this.#dialog.open) {"
+
+[[plant]]
+name = "project settings: a second opening draws over the dialog that is up"
+meant = "Project settings: asked for twice while the calls are on their way, they open once, and the answer that comes second leaves what the human typed"
+runs = ["page-project-settings"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = "    if (this.#dialog.open || this.#page.selected() !== project || board?.project.id !== project) {"
+replace = "    if (this.#page.selected() !== project || board?.project.id !== project) {"
+
+[[plant]]
+name = "project settings: a board of another project redraws the open dialog"
+meant = "Project settings: open for a project they show and save its own, whole, while the page is taken to another project"
+runs = ["page-project-settings"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = "    if (!this.#dialog.open || board?.project.id !== this.#project) return\n    this.#board = board\n"
+replace = "    if (!this.#dialog.open) return\n    this.#board = board\n"
+
+[[plant]]
+name = "project settings: the approval is saved for the project the board shows"
+meant = "Project settings: open for a project they show and save its own, whole, while the page is taken to another project"
+runs = ["page-project-settings"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = "    this.#gate.addEventListener('change', () => {\n      const project = this.#project\n"
+replace = "    this.#gate.addEventListener('change', () => {\n      const project = page.board().project.id\n"
+
+[[plant]]
+name = "project settings: a member is added to the project the board shows"
+meant = "Project settings: open for a project they show and save its own, whole, while the page is taken to another project"
+runs = ["page-project-settings"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = "      if (!agent) return\n      const project = this.#project\n"
+replace = "      if (!agent) return\n      const project = page.board().project.id\n"
+
+[[plant]]
+name = "project settings: a member is removed from the project the board shows"
+meant = "Project settings: open for a project they show and save its own, whole, while the page is taken to another project"
+runs = ["page-project-settings"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = "          await page.daemon('member.remove', { project: this.#project, agent: handle })"
+replace = "          await page.daemon('member.remove', { project: page.board().project.id, agent: handle })"
+
+[[plant]]
+name = "project settings: a member loses a role in the project the board shows"
+meant = "Project settings: open for a project they show and save its own, whole, while the page is taken to another project"
+runs = ["page-project-settings"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = "            await page.daemon('member.roles', {\n              project: this.#project,\n"
+replace = "            await page.daemon('member.roles', {\n              project: page.board().project.id,\n"
+
+[[plant]]
+name = "project settings: a member is looked for on the board shown, whose members are another project's"
+meant = "Project settings: open for a project they show and save its own, whole, while the page is taken to another project"
+runs = ["page-project-settings"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = "      this.#board.lanes.find(\n        (lane) => lane.participant.handle === member.handle && isMember(lane.participant),\n"
+replace = "      this.#page.board().lanes.find(\n        (lane) => lane.participant.handle === member.handle && isMember(lane.participant),\n"
+
+[[plant]]
+name = "project settings: the calls and the specs are saved for the project the board shows"
+meant = "Project settings: open for a project they show and save its own, whole, while the page is taken to another project"
+runs = ["page-project-settings"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = "      project: () => (dialog.open ? this.#project : null),\n"
+replace = "      project: () => page.board().project.id,\n"
+
+[[plant]]
+name = "project settings: a dialog that is shut is still for the project it was"
+meant = "Project settings: a save the daemon refuses after the dialog was left, with none opened since, is said on the status line, and not where nobody looks"
+runs = ["page-project-settings"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = "      project: () => (dialog.open ? this.#project : null),\n"
+replace = "      project: () => this.#project,\n"
+
+[[plant]]
+name = "project settings: the answer to a save of the calls is shown in the dialog of another project"
+meant = "Project settings: a save answered after the dialog was left for another project’s shows nothing in that one, and the status line says it"
+runs = ["page-project-settings"]
+
+[[plant.edit]]
+file = "app/ui/core/wake-up.js"
+find = "        if (this.#page.project() === project) this.show(wakeUp)\n"
+replace = "        this.show(wakeUp)\n"
+
+[[plant]]
+name = "project settings: the refusal of a save of the calls is said in the dialog of another project"
+meant = "Project settings: a save the daemon refuses after the dialog was left for another project’s is said on the status line, and nowhere in that one"
+runs = ["page-project-settings"]
+
+[[plant.edit]]
+file = "app/ui/core/wake-up.js"
+find = "        if (this.#page.project() === project) this.#say(words)\n        else this.#page.report(words)\n"
+replace = "        this.#say(words)\n"
+
+[[plant]]
+name = "project settings: the refusal of a save of the calls is said as a note once the dialog is another project's"
+meant = "Project settings: a save the daemon refuses after the dialog was left for another project’s is said on the status line, and nowhere in that one"
+runs = ["page-project-settings"]
+
+[[plant.edit]]
+file = "app/ui/core/wake-up.js"
+find = "        else this.#page.report(words)\n"
+replace = "        else this.#page.note(words)\n"
+
+[[plant]]
+name = "project settings: the words on a save of the specs are said in the dialog of another project"
+meant = "Project settings: a save answered after the dialog was left for another project’s shows nothing in that one, and the status line says it"
+runs = ["page-project-settings"]
+
+[[plant.edit]]
+file = "app/ui/core/specs.js"
+find = "    if (here) this.#say(refused ?? saved)\n"
+replace = "    this.#say(refused ?? saved)\n"
+
+[[plant]]
+name = "project settings: the refusal of a save of the specs is said nowhere once the dialog is another project's"
+meant = "Project settings: a save the daemon refuses after the dialog was left for another project’s is said on the status line, and nowhere in that one"
+runs = ["page-project-settings"]
+
+[[plant.edit]]
+file = "app/ui/core/specs.js"
+find = "    else if (!here) this.#page.report(refused)\n"
+replace = ""
+
+[[plant]]
+name = "project settings: the refusal of a save of the specs is said as a note once the dialog is another project's"
+meant = "Project settings: a save the daemon refuses after the dialog was left for another project’s is said on the status line, and nowhere in that one"
+runs = ["page-project-settings"]
+
+[[plant.edit]]
+file = "app/ui/core/specs.js"
+find = "    else if (!here) this.#page.report(refused)\n"
+replace = "    else if (!here) this.#page.note(refused)\n"

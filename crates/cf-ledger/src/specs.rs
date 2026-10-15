@@ -2,7 +2,8 @@
 //! big work by them, the folder they are kept in and the one Specmint variant
 //! it plans with. The human says all three at once; what they leave out is not
 //! said, and the project then follows the app's default, `.specs` and `core`.
-//! Kept on the project's row, and logged as `project.specs` when it changes.
+//! Kept on the project's row, and logged as `project.specs` when it changes;
+//! said as the project opens, it is kept in the write that makes the project.
 //! The folder is the project's own, and is checked here: relative to the
 //! project, with nowhere to go but down.
 
@@ -12,7 +13,7 @@ use cf_proto::specs::{SpecsView, Variant};
 use rusqlite::params;
 use serde_json::{json, Value};
 
-use crate::model::LedgerError;
+use crate::model::{printed, LedgerError};
 use crate::projects::known_project;
 use crate::store::Store;
 
@@ -39,6 +40,23 @@ impl SpecsChange {
             folder: parse_folder(value.get("folder"))?,
             variant: parse_variant(value.get("variant"))?,
         })
+    }
+
+    /// What a request says of specs as a project opens: none where it says
+    /// nothing at all, else the three parts as [`from_json`](Self::from_json)
+    /// reads them.
+    pub fn from_opening(value: Option<&Value>) -> Result<Option<Self>, LedgerError> {
+        match value {
+            None | Some(Value::Null) => Ok(None),
+            Some(said @ Value::Object(_)) => Self::from_json(said).map(Some),
+            Some(other) => Err(LedgerError::refused(
+                "invalid-specs",
+                format!(
+                    "specs are said as on, folder and variant, not {}",
+                    printed(Some(other))
+                ),
+            )),
+        }
     }
 
     /// What the project says once it is set.
@@ -162,30 +180,41 @@ pub(crate) fn set_specs(
     change: &SpecsChange,
 ) -> Result<ProjectView, LedgerError> {
     store.write(|store| {
-        let row = store.project_row(id)?;
-        let from = row.specs_view();
-        let to = change.view();
-        let at = store.at();
-        store.db.execute(
-            "UPDATE project SET specs = ?, specs_folder = ?, specs_variant = ?, updated_at = ?
-             WHERE id = ?",
-            params![
-                change.on.map(i64::from),
-                change.folder,
-                change.variant.map(Variant::as_str),
-                at,
-                id
-            ],
-        )?;
-        if from != to {
-            store.log(
-                id,
-                "project.specs",
-                json!({ "from": said(from.as_ref()), "to": said(to.as_ref()) }),
-            )?;
-        }
+        keep_specs(store, id, change)?;
         known_project(store, id)
     })
+}
+
+/// What [`set_specs`] writes, inside the write of a caller that holds more than
+/// the specs: the opening of a project keeps them in its own.
+pub(crate) fn keep_specs(
+    store: &mut Store,
+    id: i64,
+    change: &SpecsChange,
+) -> Result<(), LedgerError> {
+    let row = store.project_row(id)?;
+    let from = row.specs_view();
+    let to = change.view();
+    let at = store.at();
+    store.db.execute(
+        "UPDATE project SET specs = ?, specs_folder = ?, specs_variant = ?, updated_at = ?
+         WHERE id = ?",
+        params![
+            change.on.map(i64::from),
+            change.folder,
+            change.variant.map(Variant::as_str),
+            at,
+            id
+        ],
+    )?;
+    if from != to {
+        store.log(
+            id,
+            "project.specs",
+            json!({ "from": said(from.as_ref()), "to": said(to.as_ref()) }),
+        )?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]

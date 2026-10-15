@@ -190,7 +190,10 @@ impl Dispatcher {
     }
 
     /// A new project: the ledger records it with its chief, on the saved
-    /// agent it names, and its staff; its chief window opens after the answer.
+    /// agent it names, and its staff, and with the wake-up calls and the specs
+    /// the request says, all in one write; its chief window opens after the
+    /// answer, on the project as that write left it, so its first launch has
+    /// the specs.
     pub async fn open_project(
         self: &Rc<Self>,
         request: NewProject,

@@ -44,8 +44,8 @@ runs = ["ledger-wake-ups"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/wake_ups.rs"
-find = '        if from == to {'
-replace = '        if false {'
+find = '    if from == to {'
+replace = '    if false {'
 
 [[plant]]
 name = "wake-up: the calls turned off leave a wake-up that waits to be delivered"
@@ -54,8 +54,8 @@ runs = ["ledger-wake-ups"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/wake_ups.rs"
-find = '        if from.on && !to.on {'
-replace = '        if false {'
+find = '    if from.on && !to.on {'
+replace = '    if false {'
 
 [[plant]]
 name = "wake-up: the words the human left as the default are kept as their own"
@@ -115,11 +115,11 @@ runs = ["ledger-wake-ups"]
 [[plant.edit]]
 file = "crates/cf-ledger/src/wake_ups.rs"
 find = '''    let to = request.setting()?;
-    store.write(|store| {
-        let from = setting(store, project_id)?;'''
+    store.write(|store| keep_wake_up(store, project_id, to))'''
 replace = '''    store.write(|store| {
-        let from = setting(store, project_id)?;
-        let to = request.setting()?;'''
+        setting(store, project_id)?;
+        keep_wake_up(store, project_id, request.setting()?)
+    })'''
 
 [[plant]]
 name = "wake-up: a new project's calls are on, a minute apart"
@@ -444,7 +444,7 @@ prepare = [["node", "app/scripts/bundle-ui.mjs"]]
 
 [[plant.edit]]
 file = "app/ui/core/dialogs.js"
-find = '''    await this.#wakeUp.load(this.#page.board().project.id)
+find = '''    this.#wakeUp.show(calls)
 '''
 replace = ''
 
@@ -457,8 +457,8 @@ prepare = [["node", "app/scripts/bundle-ui.mjs"]]
 [[plant.edit]]
 file = "app/ui/core/wake-up.js"
 find = '''      event.preventDefault()
-      void this.#save()'''
-replace = '''      void this.#save()'''
+      if (page !== null) void this.#save()'''
+replace = '''      if (page !== null) void this.#save()'''
 
 [[plant]]
 name = "wake-up dialog: a number the browser holds back is sent"
@@ -479,8 +479,11 @@ prepare = [["node", "app/scripts/bundle-ui.mjs"]]
 
 [[plant.edit]]
 file = "app/ui/core/wake-up.js"
-find = '        this.#say(cause instanceof Error ? cause.message : String(cause))'
-replace = '        throw cause'
+find = '''        if (this.#page.project() === project) this.#say(words)
+        else this.#page.report(words)
+'''
+replace = '''        throw cause
+'''
 
 # --- the live run's judgment ---
 
