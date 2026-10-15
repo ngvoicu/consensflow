@@ -366,7 +366,14 @@ fn a_message_pasted_is_the_agents_own_when_a_request_of_its_tui_holds_the_line_t
         ),
     );
     assert!(!window.took());
-    append(&wire, &asks("mild-coin", text));
+    // The TUI's request holds what was pasted: on Windows, what the console carried
+    // (Windows CI, 2026-10-15: the middle dots).
+    let pasted = if Env::default().on_windows() {
+        console_text(&window_text(text))
+    } else {
+        text.to_owned()
+    };
+    append(&wire, &asks("mild-coin", &pasted));
     assert!(window.took());
     // The next paste is another message: told by its own request.
     let next = "[ConsensFlow m-10 · T-1 · note from ConsensFlow]\nlater";

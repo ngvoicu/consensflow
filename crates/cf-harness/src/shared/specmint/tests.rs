@@ -313,8 +313,13 @@ fn a_variant_vendored_at_another_commit_is_another_folder() {
     };
     assert_ne!(at("aaaa"), at("bbbb"));
     assert_eq!(at("aaaa"), at("aaaa"));
+    // As paths, not text: Windows writes the folders with backslashes.
     assert!(
-        at("aaaa").ends_with("specmint/pi/core-aaaa"),
+        std::path::Path::new(&at("aaaa")).ends_with(
+            std::path::Path::new("specmint")
+                .join("pi")
+                .join("core-aaaa")
+        ),
         "{}",
         at("aaaa")
     );

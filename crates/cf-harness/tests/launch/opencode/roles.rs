@@ -6,6 +6,7 @@
 use std::fs;
 use std::path::Path;
 
+use cf_base::path;
 use cf_harness::contract::{Adapter, Prepared, Skill};
 use cf_harness::testing::unrooted;
 use cf_proto::specs::Variant;
@@ -187,6 +188,9 @@ fn unrooted_apart(plan: &Prepared, root: &str) -> (Launched, Value) {
         .position(|(name, _)| name == "OPENCODE_CONFIG_CONTENT")
         .unwrap();
     let (_, text) = env.remove(at);
+    // In JSON a Windows root's backslashes are escaped, so the text holds it so.
+    let escaped = Value::from(root).to_string();
+    let text = text.replace(escaped.trim_matches('"'), "<home>");
     ((argv, env, drop_env), serde_json::from_str(&text).unwrap())
 }
 
@@ -249,9 +253,12 @@ fn an_opencode_that_has_the_variant_installed_in_any_place_it_reads_is_given_not
 ) {
     let stage = Stage::new();
     let install = |folder: &str, name: &str| {
-        let dir = format!("{}/home/{folder}/{name}", stage.home.root);
+        let mut parts = vec![stage.home.root.as_str(), "home"];
+        parts.extend(folder.split('/'));
+        parts.push(name);
+        let dir = path::join(&parts);
         fs::create_dir_all(&dir).unwrap();
-        let file = format!("{dir}/SKILL.md");
+        let file = path::join(&[&dir, "SKILL.md"]);
         fs::write(&file, format!("---\nname: {name}\n---\nthe human's own\n")).unwrap();
         file
     };

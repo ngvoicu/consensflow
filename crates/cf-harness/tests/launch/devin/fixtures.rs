@@ -86,14 +86,16 @@ impl Home {
     }
 
     /// Devin's store of sessions, made in this home as Devin makes it: `sessions.db` in
-    /// its data folder, a table of sessions and a table of the messages of each.
+    /// its data folder (`AppData/Roaming` in the home on Windows, `.local/share`
+    /// elsewhere), a table of sessions and a table of the messages of each.
     pub(super) fn store(&self) -> Store {
-        let folder = Path::new(&self.root)
-            .join("home")
-            .join(".local")
-            .join("share")
-            .join("devin")
-            .join("cli");
+        let home = Path::new(&self.root).join("home");
+        let data = if cfg!(windows) {
+            home.join("AppData").join("Roaming")
+        } else {
+            home.join(".local").join("share")
+        };
+        let folder = data.join("devin").join("cli");
         fs::create_dir_all(&folder).unwrap();
         let db = rusqlite::Connection::open(folder.join("sessions.db")).unwrap();
         db.execute_batch(

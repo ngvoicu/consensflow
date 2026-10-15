@@ -1042,7 +1042,10 @@ fn a_window_ends_when_its_program_exits_while_a_background_child_holds_its_termi
             Err(_) => panic!("no pane.exit while the background child holds the terminal"),
         }
     }
-    let gone = Instant::now() + Duration::from_secs(2);
+    // What a window's exit ends it ends after a second look 2 s after the first (the
+    // status line's fix): room for that look, and for a loaded runner (CI's macOS took
+    // longer than 2 s on 68b433aa).
+    let gone = Instant::now() + Duration::from_secs(10);
     while process_exists(child) && Instant::now() < gone {
         thread::sleep(Duration::from_millis(10));
     }
