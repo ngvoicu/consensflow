@@ -320,8 +320,22 @@ pub(super) mod support {
 
     /// A task the chief gave `zeus` by name and its window took: working.
     pub(in crate::api::routes) fn working_task(scene: &Scene) -> i64 {
+        let (number, brief) = queued_task(scene);
         let mut ledger = scene.context.ledger.borrow_mut();
-        let created = ledger
+        ledger.begin_delivery(brief).unwrap();
+        ledger
+            .confirm_delivery(brief, Some(&json!({ "item": "test" })))
+            .unwrap();
+        number
+    }
+
+    /// A task the chief gave `zeus` by name, its brief queued for a window not
+    /// up yet: its number, and its brief's.
+    pub(in crate::api::routes) fn queued_task(scene: &Scene) -> (i64, i64) {
+        let created = scene
+            .context
+            .ledger
+            .borrow_mut()
             .create_task(
                 scene.project.id,
                 &NewTask {
@@ -332,12 +346,7 @@ pub(super) mod support {
                 },
             )
             .unwrap();
-        let brief = created.message.unwrap().id;
-        ledger.begin_delivery(brief).unwrap();
-        ledger
-            .confirm_delivery(brief, Some(&json!({ "item": "test" })))
-            .unwrap();
-        created.task.number
+        (created.task.number, created.message.unwrap().id)
     }
 
     /// [`working_task`], and a question `zeus` asked the chief through its

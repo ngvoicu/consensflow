@@ -12,6 +12,7 @@ use serde_json::{json, Value};
 use super::again::tell_failed_answer;
 use super::carrying::{adopt, carried, release_carried};
 use super::receipt::reconcile;
+use super::told::{behind_held_words, fail_for, is_told, told};
 use super::{known_message, message_task, messages, require_message};
 use crate::conversations::{current_conversation, set_conversation_role_text};
 use crate::model::{self, sql_list, LedgerError, HELD_TASK_STATES, MEMBER_ROLES};
@@ -50,7 +51,8 @@ pub(crate) fn with_work(store: &Store, project_id: i64) -> Result<Vec<i64>, Ledg
 /// message's paste, or that a door took for its harness, is not the head; and
 /// while a task message for the window waits for the human's approval, nothing
 /// else about its task goes, whoever wrote it and in whatever order they are
-/// approved: the words that came first are not passed over.
+/// approved: the words that came first are not passed over. Nor are older words
+/// told to the window (`told`) that the human still holds.
 pub(crate) fn next_delivery(
     store: &Store,
     participant_id: i64,
@@ -106,9 +108,11 @@ fn next_delivery_among(
              AND words.recipient_id = m.recipient_id AND words.kind = 'task'
              AND words.state = 'gated'
          ))
+         AND NOT {}
          AND (?3 IS NULL OR m.id = ?3)
        ORDER BY m.id LIMIT 1",
-            sql_list(&HELD_TASK_STATES)
+            sql_list(&HELD_TASK_STATES),
+            behind_held_words("m")
         ))?
         .query_map(params![participant_id, serial, only], |row| {
             row.get::<_, i64>(0)
@@ -118,10 +122,12 @@ fn next_delivery_among(
     next.map_or(Ok(None), |id| store.message(id))
 }
 
-/// The newest message pasted into a participant's window about a task, and
-/// proved by what the window's record showed: a task message or an answer
-/// that is `delivered` and rides in no other's paste. What the window wrote
-/// after its marker is the task's result.
+/// The message last pasted into a participant's window about a task, and
+/// proved by what the window's record showed: a task message, an answer or
+/// words told to the window (`told`) that is `delivered` and rides in no
+/// other's paste. What the window wrote after its marker is the task's result.
+/// The last is the last delivered, whatever their ids say: the human may pass
+/// on held words in another order than they were written.
 pub(crate) fn last_pasted(
     store: &Store,
     participant_id: i64,
@@ -131,8 +137,10 @@ pub(crate) fn last_pasted(
         store,
         &format!(
             "{MESSAGE_SELECT} WHERE m.task_id = ? AND m.recipient_id = ?
-         AND m.kind IN ('task', 'answer') AND m.state = 'delivered' AND m.carried_by IS NULL
-       ORDER BY m.id DESC LIMIT 1"
+         AND (m.kind IN ('task', 'answer') OR ({}))
+         AND m.state = 'delivered' AND m.carried_by IS NULL
+       ORDER BY m.delivered_at DESC, m.id DESC LIMIT 1",
+            told("m")
         ),
         params![task_id, participant_id],
     )?
@@ -395,6 +403,8 @@ pub(crate) fn retry_delivery(
 /// was, so each row it carried is kept again too, and rides with it. The
 /// receipt it was given is no receipt: the carrier's will be. The task's state
 /// is not moved: it is paused, or queued behind the words that resume it.
+/// Words told to the window (`told`), pasted on their own, are taken back the
+/// same way, and the words that resume the task carry them.
 pub(crate) fn take_back(
     store: &mut Store,
     message_id: i64,
@@ -408,7 +418,7 @@ pub(crate) fn take_back(
             [message_id],
             |row| row.get(0),
         )?;
-        if message.kind != "task" || carried_by.is_some() {
+        if !(message.kind == "task" || is_told(&message)) || carried_by.is_some() {
             return Err(LedgerError::refused_with(
                 "invalid-transition",
                 format!("message {message_id} is not a task message of its own"),
@@ -443,7 +453,8 @@ pub(crate) fn take_back(
 }
 
 /// A delivery given up: a task it carried, still queued, fails with it, and
-/// what it carried is its own again, for the reopening to take.
+/// what it carried is its own again, for the reopening to take. Words told to
+/// the window fail their task too (`told`).
 pub(crate) fn fail_delivery(
     store: &mut Store,
     message_id: i64,
@@ -467,6 +478,7 @@ pub(crate) fn fail_delivery(
                 store.move_task(&task, "failed", json!({}))?;
                 release_ready(store, task.project_id)?;
             }
+            fail_for(store, &message, &task)?;
             if message.kind == "answer" {
                 tell_failed_answer(store, &message, &task, reason)?;
             }

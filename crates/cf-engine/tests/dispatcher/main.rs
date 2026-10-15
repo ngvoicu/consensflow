@@ -51,6 +51,7 @@ mod out_of_quota;
 mod participant_leaves;
 mod pause_notes;
 mod pending_agents;
+mod queued_tells;
 mod quota;
 mod receipts;
 mod restart;

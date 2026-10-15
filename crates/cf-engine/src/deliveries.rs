@@ -9,7 +9,7 @@ use std::rc::Rc;
 use cf_base::js;
 use cf_harness::contract::{Admission, Held, Observed, PaneHost, Readiness};
 use cf_harness::records::{Options, Reading, Role};
-use cf_ledger::{MessageView, NewNote, ParticipantView, ProjectView, TaskView};
+use cf_ledger::{is_told, MessageView, NewNote, ParticipantView, ProjectView, TaskView};
 use cf_proto::agents::Harness;
 use cf_proto::trace::WindowEvent;
 use serde_json::json;
@@ -173,7 +173,10 @@ impl Dispatcher {
     /// running is no part of it ([`Dispatcher::end_turn_work`]). An answer to the
     /// note that says the worker its role is none of the task's
     /// ([`answers_to_the_task`]): where nothing else answers, there is no result,
-    /// and nothing the turn left running is ended.
+    /// and nothing the turn left running is ended. Nor while words told to the
+    /// window before it was up are still on their way to it (the brief was in
+    /// flight when they were told): they go in next, and the answer to them is
+    /// the result.
     pub(crate) fn collect(
         &self,
         project: &ProjectView,
@@ -209,6 +212,14 @@ impl Dispatcher {
             return Ok(None);
         }
         if !observed.settled {
+            return Ok(None);
+        }
+        let told = self
+            .seams
+            .ledger
+            .borrow()
+            .told_waiting(participant.id, thread.task.id)?;
+        if told {
             return Ok(None);
         }
         // The turn is over once its last message is complete (one that
@@ -284,18 +295,30 @@ impl Dispatcher {
     }
 
     /// A message that will not be delivered. A brief fails its task, and
-    /// whoever gave it hears why. Whoever waits on any other kind would wait
-    /// forever, so the human hears, once, what it was, for whom and why.
+    /// whoever gave it hears why; so do words told to the window while its
+    /// task waits on it (`is_told`): an answer the window gave without them is
+    /// no result. Whoever waits on any other kind would wait forever, so the
+    /// human hears, once, what it was, for whom and why.
     fn fail_delivery(&self, message: &MessageView, because: &str) -> Result<(), EngineError> {
         self.seams
             .ledger
             .borrow_mut()
             .fail_delivery(message.id, because)?;
         let project = self.known_project(message.project_id)?;
-        if let Some(number) = message.task_number.filter(|_| message.kind == "task") {
+        let fails = message.kind == "task" || is_told(message);
+        if let Some(number) = message.task_number.filter(|_| fails) {
             let task = self.seams.ledger.borrow().task(project.id, number)?;
             if let Some(thread) = task.filter(|thread| thread.task.state == "failed") {
-                self.tell_requester(&project, &thread.task, because)?;
+                let because = if message.kind == "task" {
+                    because.to_owned()
+                } else {
+                    format!(
+                        "what @{} told its window, m-{}, did not reach it ({because})",
+                        message.sender.as_deref().unwrap_or("null"),
+                        message.id
+                    )
+                };
+                self.tell_requester(&project, &thread.task, &because)?;
                 // A task the human gave: that note was theirs.
                 if thread.task.requester == "human" {
                     return Ok(());

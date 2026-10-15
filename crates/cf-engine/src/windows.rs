@@ -846,7 +846,9 @@ impl Dispatcher {
     /// launch holds only while its first message is still on its way and no stop
     /// was asked of its window since `captured` was read, which is a pause that
     /// came in between: the message goes back to wait for the words that resume
-    /// the task, with `because`.
+    /// the task, with `because`. A task called off meanwhile took the message
+    /// with it, and whoever told the window words that rode in it hears that the
+    /// window never had them (`Ledger::launch_called_off`).
     fn launch_over(
         &self,
         record: &Rc<Record>,
@@ -872,6 +874,10 @@ impl Dispatcher {
             return Ok(false);
         }
         self.give_back(delivering.clone(), because)?;
+        self.seams
+            .ledger
+            .borrow_mut()
+            .launch_called_off(delivering.message)?;
         Ok(true)
     }
 

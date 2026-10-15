@@ -69,9 +69,10 @@ pub(crate) fn approve_message(
 }
 
 /// The human declines a gated message, and whoever sent it is told. A
-/// declined task is cancelled; a declined answer leaves its question open
+/// declined task is cancelled, and whoever told its window words it never had
+/// hears that they went with it; a declined answer leaves its question open
 /// for another, which is held for approval again if the answer had taken it
-/// off the gate. A result or a question is passed on, never declined.
+/// off the gate. A result, a question or a note is passed on, never declined.
 pub(crate) fn decline_message(
     store: &mut Store,
     message_id: i64,
@@ -107,12 +108,16 @@ pub(crate) fn decline_message(
         );
         if message.kind == "task" {
             if let Some(task) = &task {
-                told = Some(store.participant_row(task.requester_id)?.handle);
-                call_off(store, message.project_id, task.number, by)?;
-                word = format!(
+                let requester = store.participant_row(task.requester_id)?.handle;
+                let off = call_off(store, message.project_id, task.number, by)?;
+                let lead = format!(
                     "@{by} declined T-{} ({}). It is cancelled.",
                     task.number, task.title
                 );
+                word = format!("{lead}{}", off.dropped.said_to(&requester));
+                off.dropped
+                    .tell_the_others(store, task, &lead, &[by, &requester])?;
+                told = Some(requester);
             }
         }
         if told.as_deref() != Some(by) {

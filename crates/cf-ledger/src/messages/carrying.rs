@@ -18,6 +18,7 @@ use serde_json::json;
 use super::delivery::cancel_message;
 use super::messages;
 use super::receipt::reconcile;
+use super::told::behind_held_words;
 use crate::model::LedgerError;
 use crate::store::Store;
 use crate::tasks::RESUME_WORDS;
@@ -145,19 +146,22 @@ fn requeue_unreceived_reads(
 /// - an answer or a note joins the newest one;
 /// - a task message joins only one newer than itself;
 /// - one that already carries rows brings them along, so the set stays flat;
-/// - one in flight adopts nothing.
+/// - one in flight adopts nothing;
+/// - words told to the window wait behind older ones the human still holds
+///   (`told`), and join nothing ahead of them.
 pub(crate) fn adopt(store: &mut Store, id: i64) -> Result<(), LedgerError> {
     let adopted: Option<i64> = store
         .db
-        .prepare(
+        .prepare(&format!(
             "SELECT c.id FROM message m
              JOIN message c ON c.task_id = m.task_id AND c.recipient_id = m.recipient_id
              WHERE m.id = ?1 AND m.urgent = 0 AND m.state = 'queued' AND m.carried_by IS NULL
-               AND m.kind IN ('task', 'answer', 'note')
+               AND m.kind IN ('task', 'answer', 'note') AND NOT {}
                AND c.kind = 'task' AND c.carried_by IS NULL AND c.state IN ('queued', 'gated')
                AND c.id != m.id AND (m.kind != 'task' OR c.id > m.id)
              ORDER BY c.id DESC LIMIT 1",
-        )?
+            behind_held_words("m")
+        ))?
         .query_map([id], |row| row.get(0))?
         .next()
         .transpose()?;
@@ -246,6 +250,12 @@ pub(crate) fn release_stranded(store: &mut Store) -> Result<(), LedgerError> {
     })
 }
 
+/// Why a row a window kept went no further: [`transfer`] said it in the task's
+/// brief for its next window.
+pub(super) fn carried_into(number: i64) -> String {
+    format!("carried into T-{number}'s brief for its next window")
+}
+
 /// What a task takes on from a window that is gone: the words kept for it,
 /// as the section of the brief that follows the task's own, and the rows it
 /// still held at the gate that went with it.
@@ -320,11 +330,7 @@ pub(crate) fn transfer(
         "UPDATE message SET state = 'cancelled', reason = ?3
          WHERE task_id = ?1 AND recipient_id = ?2 AND urgent = 0
            AND kind IN ('task', 'answer', 'note') AND state IN ('queued', 'delivering')",
-        params![
-            task.id,
-            window.id,
-            format!("carried into T-{}'s brief for its next window", task.number)
-        ],
+        params![task.id, window.id, carried_into(task.number)],
     )?;
     let gated = ids(
         store,

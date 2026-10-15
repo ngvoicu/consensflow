@@ -265,11 +265,20 @@ fn tell(rest: &[String], board: &Board, input: &mut dyn Read) -> Result<Said, Fa
         "cf tell T-<n> \"what to put to its window now\"",
     )?;
     let message = posted(board, &format!("/api/tasks/{number}/tell"), body_of(what))?;
-    let text = format!(
-        "T-{number} is paused and m-{} put to @{}; its answer arrives as a message. Then: cf task resume T-{number} \"…\"",
+    let (id, window) = (
         js::text(message.get("id")),
-        js::text(message.get("recipient"))
+        js::text(message.get("recipient")),
     );
+    // A task still queued is not stopped: its window is not up, and the words wait for it.
+    let text = if js::text(message.get("kind")) == "note" {
+        format!(
+            "T-{number} is queued: m-{id} waits for @{window}'s window and goes in after its brief. Nothing is paused, and nothing waits for an answer."
+        )
+    } else {
+        format!(
+            "T-{number} is paused and m-{id} put to @{window}; its answer arrives as a message. Then: cf task resume T-{number} \"…\""
+        )
+    };
     Ok(Said::new(message, text))
 }
 

@@ -334,7 +334,13 @@ fn moved(
         body.insert("body".into(), text.into());
     }
     let path = format!("/api/tasks/{number}/{action}");
-    let task = board.post(&path, &Value::Object(body))?.take("task")?;
+    let mut answer = board.post(&path, &Value::Object(body))?;
+    // What a cancel took with it of the words you told the task's window.
+    let dropped = match answer.value().get("dropped") {
+        Some(dropped) => went_with_it(answer.list(Some(dropped), "dropped")?),
+        None => String::new(),
+    };
+    let task = answer.take("task")?;
     let said = match action {
         "pause" => format!(
             "T-{number} is paused: its window stops and its work waits. Resume it with: cf task resume T-{number} \"what to do now\""
@@ -344,9 +350,26 @@ fn moved(
             a_pool(task.get("pool"), task.get("tier"))
         ),
         "resume" => format!("T-{number} resumes in @{} with your words.", js::text(task.get("assignee"))),
-        _ => task_line(&task),
+        _ => format!("{}{dropped}", task_line(&task)),
     };
     Ok(Said::new(task, said))
+}
+
+/// What a cancel says of the messages `ids`, the words you told the task's
+/// window that it never had: nothing when there are none.
+fn went_with_it(ids: &[Value]) -> String {
+    let ids: Vec<String> = ids
+        .iter()
+        .map(|id| format!("m-{}", js::text(Some(id))))
+        .collect();
+    match ids.as_slice() {
+        [] => String::new(),
+        [one] => format!("\nWhat you told its window, {one}, went with it: it never had it."),
+        several => format!(
+            "\nWhat you told its window, {}, went with it: it never had them.",
+            several.join(", ")
+        ),
+    }
 }
 
 /// `text` cut to `units` UTF-16 units, with an ellipsis when it was longer.

@@ -26,6 +26,15 @@ parentheses. Changed by hand, in those words alone, when the tester was added; t
 daemon's traces of the same words (`crates/cf-daemon/tests/goldens`) were changed with
 them.
 
+## The usage after a tell could wait
+
+`cf tell` to a task still queued, its window not up yet, keeps its words for the window
+(the field report of 2026-10-15). Its entry in the usage has a third line that says so,
+`(queued: kept for its window, to go in after its brief)`: added by hand to the six prints
+of `board.json` that hold the usage (`cf task --help` among them, which prints the lines
+that go on from the commands), as `crates/cf/src/board/usage.txt` has it, and to the
+daemon's traces of the same words.
+
 ## Two cases changed by hand after Node
 
 In `cli.darwin.json` and `cli.win32.json`, the cases `unknown command: -h`

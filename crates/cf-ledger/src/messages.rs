@@ -7,9 +7,10 @@
 //! one asked, told to answer again when an answer did not stand (`again`); and
 //! the note that tells a requester its tasks stalled, one for the tasks of a
 //! pass, which goes when they are resumed (`pauses`); the note that tells
-//! it a task is held for its member's quota, and that it goes on (`holds`); and
-//! the note that says a conversation its role again, which the ledger knows for
-//! one (`roles`).
+//! it a task is held for its member's quota, and that it goes on (`holds`); the
+//! note that says a conversation its role again, which the ledger knows for one
+//! (`roles`); and the words told to a task's window before the window has it,
+//! kept for it (`told`).
 
 mod again;
 mod carrying;
@@ -19,6 +20,7 @@ mod holds;
 mod pauses;
 mod receipt;
 mod roles;
+mod told;
 
 use cf_proto::ledger::{MessageView, Question};
 use rusqlite::{params, OptionalExtension};
@@ -47,6 +49,8 @@ pub(crate) use receipt::{
     settle_claim,
 };
 pub(crate) use roles::{note_role, role_notes_to};
+pub use told::is_told;
+pub(crate) use told::{launch_called_off, tell_queued, told_unreceived, told_waiting, Dropped};
 
 /// A note: from a participant (ConsensFlow itself when none) to another,
 /// about one of the project's tasks or none.

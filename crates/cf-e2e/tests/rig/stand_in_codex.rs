@@ -22,7 +22,7 @@ use tungstenite::stream::MaybeTlsStream;
 use tungstenite::{Message, WebSocket};
 
 #[cfg(unix)]
-use crate::stand_ins::{beside, until_there};
+use crate::stand_ins::{beside, until_pid, until_there};
 use crate::Outcome;
 
 const FAKE_CODEX: &str = env!("CARGO_BIN_EXE_fake-codex");
@@ -192,13 +192,7 @@ fn the_stand_in_codexs_plugin_server_leads_a_group_of_its_own_and_starts_its_wor
     server.send("call\n");
     let mut started = Vec::new();
     for number in 1..=2 {
-        assert!(
-            until_there(&beside(&worker(number), "pid")),
-            "worker {number} runs"
-        );
-        let pid: u32 = files::read_string(&beside(&worker(number), "pid"))?
-            .trim()
-            .parse()?;
+        let pid = until_pid(&worker(number)).ok_or(format!("worker {number} never ran"))?;
         assert_eq!(
             group_of(pid),
             Some(server.id()),

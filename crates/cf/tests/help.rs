@@ -130,6 +130,7 @@ const BOARD: [(&[&str], &str); 17] = [
         concat!(
             "  cf tell T-3 \"…\"                   stop T-3 and put this to its window: its answer arrives as\n",
             "                                    a message; then cf task resume T-3 \"…\"\n",
+            "                                    (queued: kept for its window, to go in after its brief)\n",
         ),
     ),
     (

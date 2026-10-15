@@ -29,6 +29,9 @@ recordings in four ways, none of them by recording again.
   and `-021`: changed by hand, in those words alone.
 - The refusal that lists the roles a member may hold lists the tester, in
   `corners-page-005`: changed by hand in the same way.
+- `cf tell`'s usage has a third line, for a task still queued (the field report of
+  2026-10-15: a tell to a queued task waits for its window), in `cf-board-028` and
+  `-029`: changed by hand, that line alone.
 - Every trace that holds a database says `userVersion: 11` and a role check and a pool
   check without the tester, as Node's ledger had them (migration 0012 added the
   tester). They are not rewritten: the player holds the database this ledger left to

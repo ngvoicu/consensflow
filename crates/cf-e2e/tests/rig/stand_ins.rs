@@ -107,7 +107,8 @@ pub(crate) fn beside(file: &Path, kind: &str) -> PathBuf {
     PathBuf::from(name)
 }
 
-/// Waits until `file` is there, for up to ten seconds.
+/// Waits until `file` is there, for up to ten seconds. The cases that ask are Unix's.
+#[cfg(unix)]
 pub(crate) fn until_there(file: &Path) -> bool {
     let started = Instant::now();
     while !file.exists() && started.elapsed() < Duration::from_secs(10) {
@@ -116,17 +117,33 @@ pub(crate) fn until_there(file: &Path) -> bool {
     file.exists()
 }
 
+/// The process the `.pid` file of the job `file` names, once it holds one, for
+/// up to ten seconds; none if it never does. The file is there, empty, from the
+/// moment its program makes it until the few bytes it writes are in: read as it
+/// appeared, it said nothing (the Codex stand-in's case, under the suite's load,
+/// 2026-10-15).
+pub(crate) fn until_pid(file: &Path) -> Option<u32> {
+    let pid = beside(file, "pid");
+    let started = Instant::now();
+    loop {
+        let read = files::read_string(&pid).ok();
+        if let Some(process) = read.and_then(|text| text.trim().parse().ok()) {
+            return Some(process);
+        }
+        if started.elapsed() > Duration::from_secs(10) {
+            return None;
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+}
+
 #[test]
 fn the_stand_in_agents_job_writes_its_process_runs_its_seconds_and_says_it_finished() -> Outcome {
     let folder = tempfile::tempdir()?;
     let file = folder.path().join("job-1-1");
     let mut job = start_job("1", &file, false)?;
 
-    assert!(until_there(&beside(&file, "pid")), "the job says it runs");
-    assert_eq!(
-        files::read_string(&beside(&file, "pid"))?,
-        job.id().to_string()
-    );
+    assert_eq!(until_pid(&file), Some(job.id()), "the job says it runs");
     let ended = job
         .wait(Duration::from_secs(10))?
         .ok_or("the job did not end in ten seconds")?;
@@ -240,14 +257,7 @@ fn the_stand_in_agents_server_launches_a_browser_that_is_its_child_in_a_group_of
         .closed_input()
         .spawn()?;
     assert!(until_there(&beside(&server_file, "pid")), "the server runs");
-    assert!(
-        until_there(&beside(&browser_file, "pid")),
-        "so does its browser"
-    );
-
-    let browser: u32 = files::read_string(&beside(&browser_file, "pid"))?
-        .trim()
-        .parse()?;
+    let browser = until_pid(&browser_file).ok_or("its browser never said it runs")?;
     assert_eq!(
         group_of(browser),
         Some(browser),

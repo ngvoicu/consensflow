@@ -206,7 +206,11 @@ fn task_by_id(store: &Store, id: i64) -> Result<TaskView, LedgerError> {
 }
 
 /// A task still on the board, in one of `states`, for `action`.
-fn require_task_state(task: &TaskRow, states: &[&str], action: &str) -> Result<(), LedgerError> {
+pub(crate) fn require_task_state(
+    task: &TaskRow,
+    states: &[&str],
+    action: &str,
+) -> Result<(), LedgerError> {
     require_on_board(task, action)?;
     if states.contains(&task.state.as_str()) {
         return Ok(());

@@ -1166,19 +1166,34 @@ const cutNote = (part, number) =>
     : []
 
 /**
+ * Words told to the task's window before it was up (`cf tell` to a task still
+ * queued): a note someone sent its window. ConsensFlow's notes have no sender,
+ * and a member's go to the chief.
+ */
+const toldWords = (message, task) =>
+  message.kind === 'note' && Boolean(message.sender) && message.recipient === task.assignee
+
+/**
  * A task's story, oldest first: every message but a note (ConsensFlow
  * talking to the chief) and a withdrawn one (it reached nobody), each with
- * who sent it to whom and how its delivery went. A request is numbered,
- * and a result takes the number of the request it answers.
+ * who sent it to whom and how its delivery went. Words told to its window
+ * are in it, under Told, waiting for the window until it has them. A
+ * request is numbered, and a result takes the number of the request it
+ * answers.
  */
-function storyOf(task) {
+export function storyOf(task) {
   const told = task.messages.filter(
-    (message) => message.kind !== 'note' && message.state !== 'cancelled',
+    (message) =>
+      (message.kind !== 'note' || toldWords(message, task)) && message.state !== 'cancelled',
   )
   const steps = told.map((message) => ({
     ...message,
     route: `${who(message.sender)} → ${who(message.recipient)}`,
-    delivery: delivery(message),
+    told: toldWords(message, task),
+    delivery:
+      toldWords(message, task) && message.state === 'queued'
+        ? 'waits for its window'
+        : delivery(message),
   }))
   // A task sent to nobody yet (open, waiting on what it needs, the chief's
   // own) asks in its body, from its requester. It was never sent: no time.
@@ -1201,7 +1216,9 @@ function storyOf(task) {
         ? `Request ${round}`
         : step.kind === 'result' && round > 0
           ? `Result ${round}`
-          : (KIND_LABEL[step.kind] ?? step.kind)
+          : step.told
+            ? 'Told'
+            : (KIND_LABEL[step.kind] ?? step.kind)
     return { ...step, label }
   })
 }

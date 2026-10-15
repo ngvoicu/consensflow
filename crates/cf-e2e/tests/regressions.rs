@@ -57,6 +57,8 @@ mod opencode_updated_itself_to_2;
 mod resume_of_a_chief_with_no_turn;
 #[path = "regressions/resume_of_a_turn_the_daemon_never_copied.rs"]
 mod resume_of_a_turn_the_daemon_never_copied;
+#[path = "regressions/tell_refused_for_a_queued_task.rs"]
+mod tell_refused_for_a_queued_task;
 
 use std::time::Duration;
 
