@@ -327,6 +327,37 @@ fn a_waiting_follow_up_paused_is_not_resumed_into_a_session_at_work_on_another()
     assert_eq!(w.state(later), "working");
 }
 
+/// A session that follow-ups wait for on the board is not deleted: their release
+/// would queue them for a session no window opens for again. Once they are
+/// cancelled, it is.
+#[test]
+fn a_session_that_follow_ups_wait_for_is_not_deleted_until_they_are_cancelled() {
+    let mut w = world();
+    let (session, a) = done_by_a_session(&mut w);
+    let waiting =
+        ["Later", "Last"].map(|body| w.follow_up(a, body, &[a]).expect("a follow-up").task.number);
+    let refused = w
+        .ledger
+        .end_session(w.project, &session, "human")
+        .expect_err("follow-ups wait for it");
+    assert_eq!(refused.code(), Some("session-busy"));
+    assert_eq!(
+        refused.to_string(),
+        format!(
+            "@{session} has work waiting for it on the board (T-{}, T-{}): cancel it first",
+            waiting[0], waiting[1]
+        )
+    );
+    for number in waiting {
+        w.ledger
+            .cancel_task(w.project, number, "chief")
+            .expect("cancelled");
+    }
+    w.ledger
+        .end_session(w.project, &session, "human")
+        .expect("deleted");
+}
+
 /// A session that did A, with two follow-ups waiting on the board for A to be
 /// accepted, given one after the other: the session, A, the first and the
 /// second.

@@ -242,6 +242,16 @@ pub(crate) fn has_task_in_hand(store: &Store, participant_id: i64) -> Result<boo
     )
 }
 
+/// The numbers of the tasks that wait on the board for a participant, oldest
+/// first: given it, and open until what they need is accepted.
+fn waiting_for(store: &Store, participant_id: i64) -> Result<Vec<i64>, LedgerError> {
+    Ok(store
+        .db
+        .prepare("SELECT number FROM task WHERE assignee_id = ? AND state = 'open' ORDER BY id")?
+        .query_map([participant_id], |row| row.get(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
 /// Whether a participant is assigned a task in one of `states`.
 fn has_task_in(store: &Store, participant_id: i64, states: &[&str]) -> Result<bool, LedgerError> {
     Ok(store
@@ -289,7 +299,9 @@ pub(super) fn close_session(
 /// into its member's, and its conversation is kept, so a follow-up (`--after`,
 /// a reopen) brings it back while its member is on the staff. One still
 /// holding work (queued, working or waiting) is refused; paused work goes
-/// back on the board when resumed.
+/// back on the board when resumed. So is one that tasks wait for on the board
+/// (follow-ups given it, waiting for their needs): their release would queue
+/// them for a session no window opens for again.
 pub(crate) fn end_session(
     store: &mut Store,
     project_id: i64,
@@ -310,6 +322,18 @@ pub(crate) fn end_session(
             return Err(LedgerError::refused_with(
                 "session-busy",
                 format!("@{handle} still holds work: accept, cancel or pause it first"),
+                409,
+            ));
+        }
+        let waiting = waiting_for(store, session.id)?;
+        if !waiting.is_empty() {
+            let numbers: Vec<String> = waiting.iter().map(|number| format!("T-{number}")).collect();
+            return Err(LedgerError::refused_with(
+                "session-busy",
+                format!(
+                    "@{handle} has work waiting for it on the board ({}): cancel it first",
+                    numbers.join(", ")
+                ),
                 409,
             ));
         }

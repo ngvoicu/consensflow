@@ -10,7 +10,9 @@
 # with a task in hand and another waiting for it on the board, and the last two plants take out what
 # holds them: a follow-up paused while it waited is not resumed into a window at work on another, and
 # a cancel that releases what waited stops the window on the task it was given, not on the one the
-# release queued (an Astra review of the change, 2026-10-15). The case builds the native `cf` from the
+# release queued (an Astra review of the change, 2026-10-15). The last one lets the human delete a
+# session that follow-ups wait for, which strands them (the same review; Gabriel chose the refusal).
+# The case builds the native `cf` from the
 # sources as they are planted, so its plant says `builds`. Every name holds `follow-ups queue`, so
 # `npm run plants:daemon -- "follow-ups queue"` runs them all.
 
@@ -66,3 +68,13 @@ runs = ["engine-follow-ups-queue"]
 file = "crates/cf-engine/src/stops.rs"
 find = "        let cancelled = self.seams.ledger.borrow().task_given(participant.id)?;"
 replace = "        let cancelled = self.seams.ledger.borrow().last_task(participant.id)?;"
+
+[[plant]]
+name = "follow-ups queue: a session that follow-ups wait for on the board is deleted, and they are stranded"
+meant = "a_session_that_follow_ups_wait_for_is_not_deleted_until_they_are_cancelled"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff/sessions.rs"
+find = "        if !waiting.is_empty() {"
+replace = "        if false && !waiting.is_empty() {"
