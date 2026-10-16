@@ -2,15 +2,62 @@
 //! conversation, oldest first and the current one too, with the agent it ran
 //! on, what ended it as far as the log says (a Switch chief, the window going
 //! to another conversation, a window opened fresh), and every item copied,
-//! a compaction's summary marked as one. Reading it writes nothing.
+//! a compaction's summary marked as one, read a page at a time from a place
+//! that does not move. Reading it writes nothing.
 
 #![allow(clippy::expect_used)]
 
+#[path = "whole_history/reads.rs"]
+mod reads;
+
 use cf_ledger::{
-    open_ledger, ChiefSwitch, Ledger, NewChief, NewMember, NewProject, Options,
-    ParticipantConversation, ProjectView,
+    open_ledger, ChiefSwitch, HistoryAsk, HistoryFrom, HistoryItem, Ledger, LedgerError, NewChief,
+    NewMember, NewProject, Options, ParticipantConversation, ProjectView, HISTORY_SCAN_BYTES,
 };
 use serde_json::{json, Value};
+
+/// A conversation, headed, and its items.
+type Conversation = (ParticipantConversation, Vec<HistoryItem>);
+
+/// Everything of `handle`'s history, the tools' outputs too, read a row at a
+/// time from the most recent back (each read's room takes its first row
+/// alone), and set out by conversation, oldest first.
+fn everything(
+    ledger: &Ledger,
+    project: i64,
+    handle: &str,
+) -> Result<Vec<Conversation>, LedgerError> {
+    let mut ask = HistoryAsk {
+        from: HistoryFrom::Newest,
+        find: None,
+        tools: true,
+        room: 1,
+        scan: HISTORY_SCAN_BYTES,
+    };
+    let mut rows = Vec::new();
+    // A history of these tests is a few rows: a read that never ends is a fault.
+    for _ in 0..100 {
+        let read = ledger.read_history(project, handle, &ask)?;
+        rows.extend(read.rows);
+        let Some(resume) = read.resume else {
+            let mut shown: Vec<Conversation> = read
+                .conversations
+                .into_iter()
+                .map(|conversation| (conversation, Vec::new()))
+                .collect();
+            for row in rows.into_iter().rev() {
+                let (_, items) = shown
+                    .iter_mut()
+                    .find(|(conversation, _)| conversation.conversation.id == row.key.conversation)
+                    .expect("its conversation");
+                items.push(row.item);
+            }
+            return Ok(shown);
+        };
+        ask.from = HistoryFrom::Before(resume);
+    }
+    panic!("no end after 100 reads: {} rows", rows.len());
+}
 
 fn ledger_in(dir: &tempfile::TempDir) -> Ledger {
     open_ledger(&dir.path().join("consensflow.db"), Options::default()).expect("a ledger")
@@ -49,12 +96,11 @@ fn item(id: &str, role: &str, text: &str) -> Value {
 }
 
 /// What each conversation is, in a line: its harness, agent and end, and its items.
-fn lines(history: &[ParticipantConversation]) -> Vec<String> {
+fn lines(history: &[Conversation]) -> Vec<String> {
     history
         .iter()
-        .map(|conversation| {
-            let items: Vec<String> = conversation
-                .items
+        .map(|(conversation, items)| {
+            let items: Vec<String> = items
                 .iter()
                 .map(|item| {
                     let mark = if item.compaction { " (compaction)" } else { "" };
@@ -132,9 +178,7 @@ fn reads_every_conversation_of_the_chief_across_a_clear_a_resume_a_compaction_a_
         .expect("a conversation");
 
     let logged = ledger.events(project.id, 0, 500).expect("the log").len();
-    let history = ledger
-        .participant_history(project.id, "chief")
-        .expect("the history");
+    let history = everything(&ledger, project.id, "chief").expect("the history");
     assert_eq!(
         lines(&history),
         [
@@ -144,10 +188,10 @@ fn reads_every_conversation_of_the_chief_across_a_clear_a_resume_a_compaction_a_
             "codex maia None []",
         ]
     );
-    let ids: Vec<i64> = history.iter().map(|c| c.conversation.id).collect();
+    let ids: Vec<i64> = history.iter().map(|(c, _)| c.conversation.id).collect();
     assert_eq!(ids, [first.id, cleared.id, third.id, fourth.id]);
     assert!(
-        history[3].conversation.ended_at.is_none(),
+        history[3].0.conversation.ended_at.is_none(),
         "the current one"
     );
     assert_eq!(
@@ -196,9 +240,7 @@ fn a_clear_to_a_conversation_the_ledger_never_saw_and_a_member_s_agent_and_an_un
             },
         )
         .expect("switched");
-    let history = ledger
-        .participant_history(project.id, "zeus")
-        .expect("the history");
+    let history = everything(&ledger, project.id, "zeus").expect("the history");
     assert_eq!(
         lines(&history),
         [
@@ -206,9 +248,7 @@ fn a_clear_to_a_conversation_the_ledger_never_saw_and_a_member_s_agent_and_an_un
             "pi zeus None []",
         ]
     );
-    let refused = ledger
-        .participant_history(project.id, "nobody")
-        .expect_err("no such participant");
+    let refused = everything(&ledger, project.id, "nobody").expect_err("no such participant");
     assert!(refused.to_string().contains("nobody"), "{refused}");
 }
 
@@ -234,14 +274,8 @@ fn a_summary_copied_before_the_mark_stays_the_user_s_item_it_was_copied_as() {
     ledger
         .copy_transcript(conversation.id, &[again, marked], 0)
         .expect("copied");
-    let history = ledger
-        .participant_history(project.id, "chief")
-        .expect("the history");
-    let marks: Vec<bool> = history[0]
-        .items
-        .iter()
-        .map(|item| item.compaction)
-        .collect();
+    let history = everything(&ledger, project.id, "chief").expect("the history");
+    let marks: Vec<bool> = history[0].1.iter().map(|item| item.compaction).collect();
     assert_eq!(
         marks,
         [false, true],

@@ -88,6 +88,7 @@ pub fn open_ledger(file: &Path, options: Options) -> Result<Ledger, LedgerError>
         drop(db);
         return Err(opening_refusal(file, cause));
     }
+    crate::conversations::register_search(&db)?;
     let mut store = Store::new(db, options.clock, options.names, options.trace);
     release_stranded(&mut store)?;
     Ok(Ledger {

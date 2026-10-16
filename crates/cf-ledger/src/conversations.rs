@@ -18,7 +18,8 @@ use crate::views::conversation_view;
 
 pub use chief::ChiefSwitch;
 pub(crate) use chief::{chief_history, chief_open_work, history_read, last_switch, switch_chief};
-pub(crate) use history::participant_history;
+pub(crate) use history::{read_history, read_history_part, register_search};
+pub use history::{HistoryAsk, HISTORY_PART, HISTORY_SCAN_BYTES};
 pub use transcripts::TRANSCRIPT_ITEM_MAX;
 pub(crate) use transcripts::{copied_item_with, copy_transcript, transcript, typed_since};
 

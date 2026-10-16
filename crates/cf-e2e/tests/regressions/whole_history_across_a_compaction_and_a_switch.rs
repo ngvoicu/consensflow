@@ -125,9 +125,10 @@ fn the_history_reads_a_chief_s_conversations_whole_across_a_compaction_and_a_swi
     })?;
 
     let read = history(&rig, &project)?;
+    // One page holds it all: nothing older, nothing newer.
     assert_eq!(
-        (read["page"].clone(), read["pages"].clone()),
-        (json!(1), json!(1)),
+        (read["older"].clone(), read["newer"].clone()),
+        (Value::Null, Value::Null),
         "{read}"
     );
     let conversations = read["conversations"].as_array().ok_or("no conversations")?;

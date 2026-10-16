@@ -1,5 +1,4 @@
-//! Entries of the history packed into pages: `cf history`'s, and the pieces
-//! of the history viewer's.
+//! Entries of the history packed into pages.
 
 /// A page of `cf history` at its longest: under what Codex shows of a
 /// command's output, the least of any harness (about 10 KiB and 256 lines).
@@ -10,73 +9,37 @@ const PAGE_LINES: usize = 200;
 const FRAME_BYTES: usize = 600;
 const FRAME_LINES: usize = 6;
 
-/// What a piece takes of a page, or what a page holds.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(super) struct Size {
-    pub(super) bytes: usize,
-    pub(super) lines: usize,
-}
-
-impl Size {
-    fn plus(self, other: Size) -> Size {
-        Size {
-            bytes: self.bytes + other.bytes,
-            lines: self.lines + other.lines,
-        }
-    }
-
-    fn within(self, room: Size) -> bool {
-        self.bytes <= room.bytes && self.lines <= room.lines
-    }
-}
-
-/// Pieces in the order they were said, packed into pages from the newest:
-/// each page oldest first, the newest page first. A page takes pieces while
-/// what they take is within `room`; `size` says what a piece takes given the
-/// piece after it on its page (none for a page's newest), and the first piece
-/// of a page is taken whatever it takes.
-pub(super) fn pack<T>(
-    pieces: Vec<T>,
-    room: Size,
-    size: impl Fn(&T, Option<&T>) -> Size,
-) -> Vec<Vec<T>> {
+/// Entries in the order they were said, packed into pages from the newest:
+/// each page oldest first, the newest page first.
+pub(super) fn paginate(entries: &[String]) -> Vec<Vec<String>> {
+    let max_bytes = PAGE_BYTES - FRAME_BYTES;
+    let max_lines = PAGE_LINES - FRAME_LINES;
+    // A continuation line is added to every piece after the first.
+    let pieces: Vec<String> = entries
+        .iter()
+        .flat_map(|entry| fit(entry, max_bytes - 16, max_lines - 1))
+        .collect();
     let mut pages = Vec::new();
-    let mut page: Vec<T> = Vec::new();
-    let mut used = Size::default();
+    let mut page: Vec<String> = Vec::new();
+    let (mut used_bytes, mut used_lines) = (0, 0);
     for piece in pieces.into_iter().rev() {
-        let mut cost = size(&piece, page.last());
-        if !page.is_empty() && !used.plus(cost).within(room) {
+        let (cost_bytes, cost_lines) = (piece.len() + 2, lines(&piece) + 1);
+        if !page.is_empty()
+            && (used_bytes + cost_bytes > max_bytes || used_lines + cost_lines > max_lines)
+        {
             page.reverse();
             pages.push(std::mem::take(&mut page));
-            used = Size::default();
-            cost = size(&piece, None);
+            (used_bytes, used_lines) = (0, 0);
         }
         page.push(piece);
-        used = used.plus(cost);
+        used_bytes += cost_bytes;
+        used_lines += cost_lines;
     }
     if !page.is_empty() {
         page.reverse();
         pages.push(page);
     }
     pages
-}
-
-/// Entries in the order they were said, packed into pages from the newest:
-/// each page oldest first, the newest page first.
-pub(super) fn paginate(entries: &[String]) -> Vec<Vec<String>> {
-    let room = Size {
-        bytes: PAGE_BYTES - FRAME_BYTES,
-        lines: PAGE_LINES - FRAME_LINES,
-    };
-    // A continuation line is added to every piece after the first.
-    let pieces: Vec<String> = entries
-        .iter()
-        .flat_map(|entry| fit(entry, room.bytes - 16, room.lines - 1))
-        .collect();
-    pack(pieces, room, |piece, _| Size {
-        bytes: piece.len() + 2,
-        lines: lines(piece) + 1,
-    })
 }
 
 /// How many lines `text` is.
@@ -225,36 +188,6 @@ mod tests {
         assert_eq!(utf8_len(&[pair[0], pair[0]]), 6);
         assert_eq!(utf8_len(&[pair[1], pair[0]]), 6);
         assert_eq!(utf8_len(&[0x7F, 0x80, 0x7FF, 0x800]), 1 + 2 + 2 + 3);
-    }
-
-    #[test]
-    fn a_piece_takes_what_it_takes_beside_the_piece_after_it_and_more_at_the_head_of_a_page() {
-        // Each costs 10, and 5 more as the newest of its run on its page (its heading).
-        let size = |piece: &(u8, char), newer: Option<&(u8, char)>| Size {
-            bytes: if newer.is_some_and(|newer| newer.0 == piece.0) {
-                10
-            } else {
-                15
-            },
-            lines: 0,
-        };
-        let room = |bytes| Size { bytes, lines: 0 };
-        let pieces = vec![(1, 'a'), (1, 'b'), (2, 'c'), (2, 'd')];
-        // d heads its run (15), c follows it (10), b heads its own (15): 40.
-        assert_eq!(
-            pack(pieces.clone(), room(40), size),
-            [vec![(1, 'b'), (2, 'c'), (2, 'd')], vec![(1, 'a')]]
-        );
-        assert_eq!(
-            pack(pieces, room(39), size),
-            [vec![(2, 'c'), (2, 'd')], vec![(1, 'a'), (1, 'b')]]
-        );
-        // A piece that heads a new page takes its heading again: at 20, no two fit.
-        let run = vec![(1, 'a'), (1, 'b'), (1, 'c')];
-        assert_eq!(
-            pack(run, room(20), size),
-            [vec![(1, 'c')], vec![(1, 'b')], vec![(1, 'a')]]
-        );
     }
 
     #[test]

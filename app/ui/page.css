@@ -1095,8 +1095,10 @@ dialog.history-viewer[open] { grid-template-rows: auto auto auto minmax(0, 1fr) 
 dialog.history-viewer .dialog-actions { grid-row: 5; }
 .history-conversation { display: grid; gap: 8px; }
 .history-heading { margin: 0; font-size: 14px; font-weight: 650; color: var(--seafoam); }
-.history-about, .history-more { margin: 0; font: 11px var(--mono); color: var(--muted); }
-.history-more { font-style: italic; }
+.history-about { margin: 0; font: 11px var(--mono); color: var(--muted); }
+/* A part of a long item: which, and the way to read it whole. */
+.history-cut { margin: 0 0 4px; display: flex; align-items: center; gap: 8px; font: 11px var(--mono); color: var(--amber); }
+.history-cut .quiet-button { padding: 2px 9px; font: 12px var(--ui); }
 :is(.history-note, .history-refusal) { margin: 0; font-size: 13px; color: var(--muted); }
 .history-refusal { color: var(--buoy); }
 .transcript-item[data-compaction="true"] { border-color: var(--amber); }

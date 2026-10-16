@@ -3,7 +3,7 @@
 
 use cf_base::js;
 use cf_base::refusal::Refusal;
-use cf_proto::ledger::{ChiefConversation, HistoryItem};
+use cf_proto::ledger::{ChiefConversation, HistoryItem, MessageView};
 
 use super::text::{defuse, delivered, first_line, name_of, Shown};
 use super::{is_handoff, Lookup};
@@ -103,7 +103,20 @@ fn render(
 
 /// A delivery as one line: what it was, and what came of it. `digits` are the
 /// id the header names, read as `Number(digits)` was.
-pub(super) fn delivery_line(digits: &str, message: Lookup<'_>) -> Result<String, Refusal> {
+fn delivery_line(digits: &str, message: Lookup<'_>) -> Result<String, Refusal> {
+    let (id, found) = named_message(digits, message)?;
+    Ok(match found {
+        Some(m) => outcome_line(&id, &m),
+        None => format!("· m-{id}: a message ConsensFlow delivered (no longer on record)"),
+    })
+}
+
+/// The message a delivery's header names by `digits`, read as `Number(digits)`
+/// was: its id as a line writes it, and the message where `message` gives it.
+pub(super) fn named_message(
+    digits: &str,
+    message: Lookup<'_>,
+) -> Result<(String, Option<MessageView>), Refusal> {
     let number = js::number(digits);
     let id = js::number_text(number);
     // No other number is the id of a message, and none of them has a line.
@@ -112,11 +125,11 @@ pub(super) fn delivery_line(digits: &str, message: Lookup<'_>) -> Result<String,
         Some(ledger_id) => message(ledger_id)?,
         None => None,
     };
-    let Some(m) = found else {
-        return Ok(format!(
-            "· m-{id}: a message ConsensFlow delivered (no longer on record)"
-        ));
-    };
+    Ok((id, found))
+}
+
+/// A delivered message `m`, named `id`, as one line: what it was, and what came of it.
+pub(super) fn outcome_line(id: &str, m: &MessageView) -> String {
     let from = m
         .sender
         .as_ref()
@@ -126,7 +139,7 @@ pub(super) fn delivery_line(digits: &str, message: Lookup<'_>) -> Result<String,
         .map_or_else(String::new, |number| format!(" on T-{number}"));
     let task = Shown(&m.task_number);
     let gist = || defuse(&first_line(&m.body, 160));
-    Ok(match m.kind.as_str() {
+    match m.kind.as_str() {
         "result" => format!("· m-{id}: {from}'s result{on} (cf task get T-{task})"),
         "question" => {
             format!(
@@ -136,12 +149,12 @@ pub(super) fn delivery_line(digits: &str, message: Lookup<'_>) -> Result<String,
         }
         "task" => format!("· m-{id}: {from} gave the chief T-{task}: \"{}\"", gist()),
         "answer" => format!("· m-{id}: {from} answered{on}: \"{}\"", gist()),
-        _ if is_handoff(&m) => format!("· m-{id}: the handoff that brought this chief in"),
+        _ if is_handoff(m) => format!("· m-{id}: the handoff that brought this chief in"),
         _ => format!(
             "· m-{id}: a note from {from}{on}: \"{}\" (cf inbox read m-{id})",
             gist()
         ),
-    })
+    }
 }
 
 #[cfg(test)]

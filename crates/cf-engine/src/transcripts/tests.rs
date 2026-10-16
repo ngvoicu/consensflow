@@ -6,7 +6,9 @@ use std::sync::Arc;
 
 use cf_harness::contract::Observed;
 use cf_harness::records::{Item, Reading, Record, Role, Settlement};
-use cf_ledger::{NewProject, ParticipantView};
+use cf_ledger::{
+    HistoryAsk, HistoryFrom, NewProject, ParticipantView, HISTORY_SCAN_BYTES, PAGE_BYTES,
+};
 use serde_json::json;
 
 use crate::testing::Context;
@@ -149,15 +151,29 @@ fn a_compaction_s_summary_is_copied_marked_as_one_where_its_reading_says_nothing
         .dispatcher
         .copy(&chief, &record, &look(items))
         .expect("copied");
+    let ask = HistoryAsk {
+        from: HistoryFrom::Newest,
+        find: None,
+        tools: false,
+        room: PAGE_BYTES,
+        scan: HISTORY_SCAN_BYTES,
+    };
     let history = context
         .ledger
         .borrow()
-        .participant_history(chief.project_id, "chief")
+        .read_history(chief.project_id, "chief", &ask)
         .expect("its history");
-    let marks: Vec<(&str, &str, bool)> = history[0]
-        .items
+    let marks: Vec<(&str, &str, bool)> = history
+        .rows
         .iter()
-        .map(|item| (item.id.as_str(), item.role.as_str(), item.compaction))
+        .rev()
+        .map(|row| {
+            (
+                row.item.id.as_str(),
+                row.item.role.as_str(),
+                row.item.compaction,
+            )
+        })
         .collect();
     assert_eq!(marks, [("u-1", "user", false), ("s-1", "user", true)]);
 }

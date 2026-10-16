@@ -66,6 +66,7 @@ pub(super) async fn serve(page: &Page, operation: PageOperation, body: Value) ->
         PageOperation::SpecsOpen => viewer::open(page, body).await,
         // A participant's whole history, for the viewer of its window's History button.
         PageOperation::HistoryGet => history::get(page, body).await,
+        PageOperation::HistoryPart => history::part(page, body).await,
     };
     served.map_err(|said| said.0)
 }

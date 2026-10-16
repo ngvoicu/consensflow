@@ -192,9 +192,9 @@ pub enum ConversationEnd {
     Fresh,
 }
 
-/// A participant's conversation as the history viewer reads it: the agent it
-/// ran on and what ended it where the ledger knows them, and its copied items
-/// in order.
+/// A participant's conversation as the history viewer heads it: the agent it
+/// ran on and what ended it where the ledger knows them, and how many of its
+/// items are tools' outputs.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ParticipantConversation {
@@ -202,7 +202,76 @@ pub struct ParticipantConversation {
     pub conversation: ConversationView,
     pub agent: Option<String>,
     pub ended_by: Option<ConversationEnd>,
-    pub items: Vec<HistoryItem>,
+    pub tools: usize,
+}
+
+/// Where an item stands in a participant's history, in the order the viewer
+/// reads it: its conversation, its place there, and the row the ledger keeps
+/// it in. The row never changes; the place changes only with the item's text,
+/// and can repeat in a conversation whose record shrank and was copied again.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HistoryKey {
+    pub conversation: i64,
+    pub seq: i64,
+    pub row: i64,
+}
+
+/// Where a read of a participant's history begins, and which way it goes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HistoryFrom {
+    /// The most recent items, newest first.
+    Newest,
+    /// The items before this one, newest first.
+    Before(HistoryKey),
+    /// The items after this one, oldest first.
+    After(HistoryKey),
+}
+
+/// The part of a long text that is shown: how many characters come before
+/// it, and the size of the whole text, in bytes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct TextCut {
+    pub from: usize,
+    pub bytes: usize,
+}
+
+/// An item as a read of the history gives it: where it stands, and its text
+/// whole, or the part of it that is shown (`cut`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct HistoryRow {
+    pub key: HistoryKey,
+    pub item: HistoryItem,
+    pub cut: Option<TextCut>,
+}
+
+/// How much of the history a read went through: rows, and the bytes of their texts.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Scanned {
+    pub rows: usize,
+    pub bytes: usize,
+}
+
+/// One read of a participant's history: its conversations, all of them, the
+/// rows read in the order the read went, where the next read that way goes on
+/// (none: there is no more that way), whether the read stopped at the most a
+/// read goes through, and how much it went through.
+#[derive(Debug, Clone, PartialEq)]
+pub struct HistoryRead {
+    pub participant: i64,
+    pub conversations: Vec<ParticipantConversation>,
+    pub rows: Vec<HistoryRow>,
+    pub resume: Option<HistoryKey>,
+    pub bounded: bool,
+    pub scanned: Scanned,
+}
+
+/// A part of an item's text: from which character, and where the next part
+/// begins (none: this is its last).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct TextPart {
+    pub text: String,
+    pub from: usize,
+    pub next: Option<usize>,
 }
 
 /// One item a task's windows wrote, and the conversation it is from.

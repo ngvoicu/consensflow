@@ -44,7 +44,7 @@ const DEPARTED: &[Departed] = &[(
 
 /// The operations this build added to Node's: no recording of Node's asks
 /// them, and the page's own unit tests (`src/page/tests`) do.
-const ADDED: [PageOperation; 12] = [
+const ADDED: [PageOperation; 13] = [
     PageOperation::WakeUpGet,
     PageOperation::WakeUpSet,
     PageOperation::ProjectSpecs,
@@ -57,6 +57,7 @@ const ADDED: [PageOperation; 12] = [
     PageOperation::SpecsPresent,
     PageOperation::SpecsOpen,
     PageOperation::HistoryGet,
+    PageOperation::HistoryPart,
 ];
 
 /// Every operation of Node's page is asked by some trace: what the traces hold

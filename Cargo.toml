@@ -76,8 +76,9 @@ regex = "1"
 # own) would leave rustls with none to choose. `cf-daemon` hands the client its
 # own TLS settings, built on ring, and so installs nothing process-wide.
 reqwest = { version = "0.13.4", default-features = false, features = ["rustls-no-provider"] }
-# The ledger's SQLite, built in: every platform runs the same SQLite.
-rusqlite = { version = "0.40", features = ["bundled"] }
+# The ledger's SQLite, built in: every platform runs the same SQLite. Its
+# functions are the ledger's own search of a participant's history (`cf_holds`).
+rusqlite = { version = "0.40", features = ["bundled", "functions"] }
 # The TLS of the harness feed's client, on ring alone (see `reqwest`).
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 # The system's own trust in a feed's certificate, as the platform keeps it.

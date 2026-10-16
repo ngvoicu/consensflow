@@ -5,8 +5,8 @@ use serde_json::Value;
 
 use super::Ledger;
 use crate::{
-    conversations, ChiefConversation, ChiefOpenWork, ChiefSwitch, ConversationView, LastSwitch,
-    LedgerError, ParticipantConversation, ProjectView, TaskTranscript,
+    conversations, ChiefConversation, ChiefOpenWork, ChiefSwitch, ConversationView, HistoryAsk,
+    HistoryRead, LastSwitch, LedgerError, ProjectView, TaskTranscript, TextPart,
 };
 
 impl Ledger {
@@ -54,15 +54,28 @@ impl Ledger {
         conversations::chief_history(&self.store, project_id)
     }
 
-    /// Every conversation of participant `handle`, the current one too, oldest
-    /// first, with the agent it ran on, what ended it as far as the log says,
-    /// and its items: what the history viewer reads.
-    pub fn participant_history(
+    /// One read of participant `handle`'s history for the viewer: every
+    /// conversation, headed, and the items from where `ask` says, a page's
+    /// worth at most and no more text than `ask.scan`.
+    pub fn read_history(
         &self,
         project_id: i64,
         handle: &str,
-    ) -> Result<Vec<ParticipantConversation>, LedgerError> {
-        conversations::participant_history(&self.store, project_id, handle)
+        ask: &HistoryAsk<'_>,
+    ) -> Result<HistoryRead, LedgerError> {
+        conversations::read_history(&self.store, project_id, handle, ask)
+    }
+
+    /// A part of one item's text, of participant `handle`'s history, from character `from`.
+    pub fn read_history_part(
+        &self,
+        project_id: i64,
+        handle: &str,
+        conversation: i64,
+        item: &str,
+        from: usize,
+    ) -> Result<TextPart, LedgerError> {
+        conversations::read_history_part(&self.store, project_id, handle, conversation, item, from)
     }
 
     /// What waits on the chief now, for a chief that takes over.

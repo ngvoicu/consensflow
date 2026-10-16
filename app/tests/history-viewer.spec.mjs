@@ -5,10 +5,11 @@ import { refusedByPolicy, serveUi } from './serve-ui.mjs'
 /**
  * The history viewer (core/history-viewer.js) and the History button on every
  * window's head (core/terminals.js), against a stand-in for the app: the
- * daemon's `history.get` is answered from an in-page model of pages, searched
- * and with the tools' outputs left out as the daemon does, and every call is
- * recorded. The page is served under the app's own Content-Security-Policy,
- * which refuses nothing here.
+ * daemon's `history.get` is answered from an in-page model of each history,
+ * paged from a place as the daemon pages it (a few items a page), searched and
+ * with the tools' outputs left out as the daemon does; `history.part` gives a
+ * long item's parts; every call is recorded. The page is served under the
+ * app's own Content-Security-Policy, which refuses nothing here.
  */
 let ui
 let refused
@@ -49,7 +50,11 @@ const participant = (id, handle, role, extra = {}) => ({
 /** What an XSS would look like, were text ever taken as markup. */
 const HOSTILE = '<img src=x onerror="window.__pwned=1"><script>window.__pwned=2</script>'
 
-const item = (id, role, text, extra = {}) => ({
+/** Item `id` of conversation `conversation`, at place `seq` there. */
+const item = (conversation, seq, id, role, text, extra = {}) => ({
+  conversation,
+  seq,
+  row: conversation * 100 + seq,
   id,
   role,
   text,
@@ -61,33 +66,20 @@ const item = (id, role, text, extra = {}) => ({
 const DELIVERY = '[ConsensFlow m-12 · T-1 · result from @zeus]\nParser done, 14 tests.'
 
 /**
- * The chief's history in two pages, newest first, as the daemon pages it: its
- * Claude Code conversation on ares, which a Switch chief to Codex on maia ended,
- * across both, and the one going on now.
+ * The chief's history: its Claude Code conversation on ares, which a Switch chief to
+ * Codex on maia ended, and the one going on now. Four items a page, the tools' left
+ * out: the most recent page holds the summary onwards, the one before it the rest.
  */
-function chiefPages() {
-  const claude = {
-    id: 1,
-    harness: 'claude-code',
-    agent: 'ares',
-    startedAt: '2026-10-16T09:00:00.000Z',
-    endedAt: '2026-10-16T11:00:00.000Z',
-    endedBy: { by: 'switch', harness: 'codex', agent: 'maia' },
-    toolsLeftOut: 0,
-    earlier: false,
-    later: false,
-  }
-  return [
-    [
+function chiefHistory() {
+  return {
+    conversations: [
       {
-        ...claude,
-        earlier: true,
-        items: [
-          item('u-3', 'user', 'This session is being continued from a previous conversation.', {
-            compaction: true,
-          }),
-          item('a-2', 'assistant', HOSTILE),
-        ],
+        id: 1,
+        harness: 'claude-code',
+        agent: 'ares',
+        startedAt: '2026-10-16T09:00:00.000Z',
+        endedAt: '2026-10-16T11:00:00.000Z',
+        endedBy: { by: 'switch', harness: 'codex', agent: 'maia' },
       },
       {
         id: 2,
@@ -96,34 +88,27 @@ function chiefPages() {
         startedAt: '2026-10-16T11:01:00.000Z',
         endedAt: null,
         endedBy: null,
-        toolsLeftOut: 0,
-        earlier: false,
-        later: false,
-        items: [
-          item('u-5', 'user', 'Where are we?'),
-          item('t-2', 'tool', 'ls: 3 files'),
-          item('a-5', 'assistant', 'Taken over: the parser is done.'),
-        ],
       },
     ],
-    [
-      {
-        ...claude,
-        later: true,
-        items: [
-          item('u-1', 'user', 'Ship the parser'),
-          item('u-2', 'user', `half a thought${DELIVERY}`, {
-            delivery: {
-              line: `· m-12: @zeus's result on T-1 (cf task get T-1) ${HOSTILE}`,
-              at: 'half a thought'.length,
-            },
-          }),
-          item('a-1', 'assistant', 'On it'),
-          item('t-1', 'tool', 'ok 12 passed'),
-        ],
-      },
+    items: [
+      item(1, 0, 'u-1', 'user', 'Ship the parser'),
+      item(1, 1, 'u-2', 'user', `half a thought${DELIVERY}`, {
+        delivery: {
+          line: `· m-12: @zeus's result on T-1 (cf task get T-1) ${HOSTILE}`,
+          at: 'half a thought'.length,
+        },
+      }),
+      item(1, 2, 'a-1', 'assistant', 'On it'),
+      item(1, 3, 't-1', 'tool', 'ok 12 passed'),
+      item(1, 4, 'u-3', 'user', 'This session is being continued from a previous conversation.', {
+        compaction: true,
+      }),
+      item(1, 5, 'a-2', 'assistant', HOSTILE),
+      item(2, 0, 'u-5', 'user', 'Where are we?'),
+      item(2, 1, 't-2', 'tool', 'ls: 3 files'),
+      item(2, 2, 'a-5', 'assistant', 'Taken over: the parser is done.'),
     ],
-  ]
+  }
 }
 
 function model() {
@@ -165,10 +150,12 @@ function model() {
         },
       ],
     },
+    pageSize: 4,
     histories: {
-      chief: chiefPages(),
-      'zeus-amber-pine': [
-        [
+      chief: chiefHistory(),
+      // The session's: a short item, and a long one shown by its first part.
+      'zeus-amber-pine': {
+        conversations: [
           {
             id: 7,
             harness: 'pi',
@@ -176,14 +163,16 @@ function model() {
             startedAt: '2026-10-16T10:00:00.000Z',
             endedAt: null,
             endedBy: null,
-            toolsLeftOut: 0,
-            earlier: false,
-            later: false,
-            items: [item('w-1', 'user', 'Write the lexer')],
           },
         ],
-      ],
+        items: [
+          item(7, 0, 'w-1', 'user', 'Write the lexer'),
+          item(7, 1, 'w-2', 'assistant', 'The first part', { cut: { from: 0, bytes: 700_000 } }),
+        ],
+      },
     },
+    // A long item's parts, as `history.part` reads them.
+    parts: { 'w-2': ['The first part', ' and the rest, ', 'to its end.'] },
   }
 }
 
@@ -193,39 +182,74 @@ async function open(page, data = model()) {
     window.__model = data
     window.__listeners = new Map()
     const answer = (value) => JSON.parse(JSON.stringify({ ok: true, ...value }))
+    const order = (a, b) => a.conversation - b.conversation || a.seq - b.seq || a.row - b.row
+    const placeOf = (it) => it && { conversation: it.conversation, seq: it.seq, row: it.row }
     const operations = {
       'projects.list': () => answer({ projects: data.projects }),
       'agents.list': () => answer({ agents: [], missing: [] }),
       'board.get': () => answer({ board: window.__model.board }),
       'inbox.get': () => answer({ messages: [], total: 0, shown: 0 }),
-      // The daemon's pages: a search keeps the items that hold it in any case, in their text
-      // or a delivery's line, and the conversations it found something in; the tools' outputs
-      // are left out, and counted, unless asked for.
-      'history.get': ({ handle, page = 1, find, tools }) => {
-        if (window.__model.historyRefusal)
-          return { ok: false, error: window.__model.historyRefusal }
-        const holds = (it) =>
-          `${it.text}\n${it.delivery?.line ?? ''}`.toLowerCase().includes(find.toLowerCase())
-        const pages = (window.__model.histories[handle] ?? [])
-          .map((conversations) =>
-            conversations
-              .map((conversation) => ({
-                ...conversation,
-                toolsLeftOut: tools
-                  ? 0
-                  : conversation.items.filter((it) => it.role === 'tool').length,
-                items: conversation.items
-                  .filter((it) => tools || it.role !== 'tool')
-                  .filter((it) => !find || holds(it)),
-              }))
-              .filter((conversation) => !find || conversation.items.length > 0),
-          )
-          .filter((conversations) => conversations.length > 0)
-        if (pages.length === 0) return answer({ history: { page: 0, pages: 0, conversations: [] } })
-        if (page < 1 || page > pages.length) {
-          return { ok: false, error: `there are ${pages.length} pages` }
+      // The daemon's pages: the most recent, the one before a place or the one after it;
+      // a search keeps the items that hold it in any case, and the conversations it found
+      // something in; the tools' outputs are left out, and counted, unless asked for. A
+      // search the model says stops short (`partial`) finds nothing, and says where it stopped.
+      'history.get': ({ handle, before, after, find, tools }) => {
+        const model = window.__model
+        if (model.historyRefusal) return { ok: false, error: model.historyRefusal }
+        const history = model.histories[handle] ?? { conversations: [], items: [] }
+        const size = model.pageSize
+        const holds = (it) => !find || it.text.toLowerCase().includes(find.toLowerCase())
+        const shown = history.items
+          .filter((it) => tools || it.role !== 'tool')
+          .filter((it) => holds(it) && !(find && model.partial))
+        let items
+        let older
+        let newer
+        if (after) {
+          const rest = shown.filter((it) => order(it, after) > 0)
+          items = rest.slice(0, size)
+          older = placeOf(items[0]) ?? after
+          newer = rest.length > size ? placeOf(items.at(-1)) : null
+        } else {
+          const rest = before ? shown.filter((it) => order(it, before) < 0) : shown
+          items = rest.slice(-size)
+          older = rest.length > size ? placeOf(items[0]) : null
+          newer = before ? (placeOf(items.at(-1)) ?? before) : null
         }
-        return answer({ history: { page, pages: pages.length, conversations: pages[page - 1] } })
+        if (find && model.partial) older = { conversation: 1, seq: 0, row: 100 }
+        const last = items.at(-1)?.conversation ?? -Infinity
+        const conversations = history.conversations
+          .map((conversation) => ({
+            ...conversation,
+            toolsLeftOut: tools
+              ? 0
+              : history.items.filter(
+                  (it) => it.conversation === conversation.id && it.role === 'tool',
+                ).length,
+            items: items
+              .filter((it) => it.conversation === conversation.id)
+              .map(({ conversation: _, seq: __, row: ___, ...shownItem }) => shownItem),
+          }))
+          .filter(
+            (conversation) =>
+              conversation.items.length > 0 || (!find && newer === null && conversation.id > last),
+          )
+        return answer({
+          history: { conversations, older, newer, partial: !!(find && model.partial) },
+        })
+      },
+      // A long item's text, a part at a time, as the daemon reads it.
+      'history.part': ({ item: id, from }) => {
+        const parts = window.__model.parts[id]
+        let at = 0
+        for (const [index, text] of parts.entries()) {
+          if (at === from) {
+            const next = index + 1 < parts.length ? at + text.length : null
+            return answer({ part: { text, from, next } })
+          }
+          at += text.length
+        }
+        return { ok: false, error: `no part of ${id} from ${from}` }
       },
     }
     const invoke = async (command, args = {}) => {
@@ -260,12 +284,14 @@ async function open(page, data = model()) {
   await expect(page.locator('body')).toHaveAttribute('data-ready', 'true')
 }
 
-/** What the page's requests for `history.get` asked. */
-const asked = (page) =>
-  page.evaluate(() =>
-    window.__calls
-      .filter(([command, args]) => command === 'daemon_request' && args.operation === 'history.get')
-      .map(([, args]) => args.body),
+/** What the page's requests for `operation` asked. */
+const asked = (page, operation = 'history.get') =>
+  page.evaluate(
+    (operation) =>
+      window.__calls
+        .filter(([command, args]) => command === 'daemon_request' && args.operation === operation)
+        .map(([, args]) => args.body),
+    operation,
   )
 
 /** The daemon says something changed: the page reads the board again. */
@@ -280,6 +306,19 @@ async function openChief(page) {
     .getByRole('button', { name: "Read everything kept of Chief of Staff's conversations" })
     .click()
   const viewer = page.getByRole('dialog', { name: 'History of Chief of Staff' })
+  await expect(viewer).toBeVisible()
+  return viewer
+}
+
+/** Opens a session's terminal, and its history from its card. */
+async function openSession(page) {
+  await page.locator('button.fold-sessions[aria-expanded="false"]').first().click()
+  await page.getByRole('button', { name: "Show @zeus · amber-pine's terminal" }).click()
+  await page
+    .locator('#stage .terminal-card[data-handle="zeus-amber-pine"]')
+    .getByRole('button', { name: "Read everything kept of @zeus · amber-pine's conversations" })
+    .click()
+  const viewer = page.getByRole('dialog', { name: 'History of @zeus · amber-pine' })
   await expect(viewer).toBeVisible()
   return viewer
 }
@@ -301,6 +340,9 @@ const labels = (viewer) =>
     .locator('.history-item > .transcript-head')
     .evaluateAll((heads) => heads.map((head) => head.textContent.split(' · ')[0]))
 
+/** The ids the stand-in gave the items shown, by their text, in order. */
+const texts = (viewer) => viewer.locator('.history-item > .transcript-body').allTextContents()
+
 test.describe('the History button', () => {
   test("is on the chief's head beside Switch chief, on a session's, and on the chief's card with no window", async ({
     page,
@@ -311,18 +353,9 @@ test.describe('the History button', () => {
       'Switch chief',
     ])
     // A session's terminal, once the human shows it, reads its own history.
-    await page.locator('button.fold-sessions[aria-expanded="false"]').first().click()
-    await page.getByRole('button', { name: "Show @zeus · amber-pine's terminal" }).click()
-    const sessionCard = page.locator('#stage .terminal-card[data-handle="zeus-amber-pine"]')
-    await sessionCard
-      .getByRole('button', { name: "Read everything kept of @zeus · amber-pine's conversations" })
-      .click()
-    const viewer = page.getByRole('dialog', { name: 'History of @zeus · amber-pine' })
-    await expect(viewer).toBeVisible()
+    const viewer = await openSession(page)
     await expect(viewer.locator('.history-who')).toHaveText('Pi · zeus')
-    expect(await asked(page)).toEqual([
-      { project: 1, handle: 'zeus-amber-pine', page: 1, tools: false },
-    ])
+    expect(await asked(page)).toEqual([{ project: 1, handle: 'zeus-amber-pine', tools: false }])
     await expect(viewer.locator('.history-body')).toContainText('Write the lexer')
     await viewer.getByRole('button', { name: 'Close' }).click()
     // The chief's window goes down: its card stays, with History.
@@ -346,7 +379,7 @@ test.describe('the History button', () => {
     await page.keyboard.press('Enter')
     const viewer = page.getByRole('dialog', { name: 'History of Chief of Staff' })
     await expect(viewer).toBeVisible()
-    expect(await asked(page)).toEqual([{ project: 1, handle: 'chief', page: 1, tools: false }])
+    expect(await asked(page)).toEqual([{ project: 1, handle: 'chief', tools: false }])
     await page.keyboard.press('Escape')
     await expect(viewer).toBeHidden()
   })
@@ -363,25 +396,22 @@ test.describe('the history viewer', () => {
     const said = await headings(viewer)
     expect(said.map(([heading]) => heading)).toEqual(['Claude Code · ares', 'Codex · maia'])
     expect(said[0][1]).toMatch(
-      /^\d{4}-\d\d-\d\d \d\d:\d\d to \d{4}-\d\d-\d\d \d\d:\d\d · ended by Switch chief, to Codex · maia$/,
+      /^\d{4}-\d\d-\d\d \d\d:\d\d to \d{4}-\d\d-\d\d \d\d:\d\d · ended by Switch chief, to Codex · maia · 1 tool output left out$/,
     )
     expect(said[1][1]).toMatch(
       /^since \d{4}-\d\d-\d\d \d\d:\d\d, going on now · 1 tool output left out$/,
     )
-    await expect(viewer.locator('.history-conversation').first()).toContainText(
-      'Its earlier items are on an older page.',
-    )
     // The words for each end the ledger knows, and for one it does not.
     await viewer.getByRole('button', { name: 'Close' }).click()
     await page.evaluate(() => {
-      const [conversations] = window.__model.histories.chief
+      const { conversations } = window.__model.histories.chief
       const [claude, codex] = conversations
       claude.endedBy = { by: 'window', resumed: false }
       codex.endedAt = '2026-10-16T12:00:00.000Z'
       codex.endedBy = { by: 'window', resumed: true }
       conversations.push(
-        { ...codex, id: 3, endedBy: { by: 'fresh' }, items: [] },
-        { ...codex, id: 4, endedBy: null, items: [] },
+        { ...codex, id: 3, endedBy: { by: 'fresh' } },
+        { ...codex, id: 4, endedBy: null },
       )
     })
     await openChief(page)
@@ -389,7 +419,7 @@ test.describe('the history viewer', () => {
       about.split(' · ').slice(1).join(' · '),
     )
     expect(ends).toEqual([
-      'ended when the window went to another conversation (/clear, /new or /resume)',
+      'ended when the window went to another conversation (/clear, /new or /resume) · 1 tool output left out',
       'ended when the window resumed an earlier conversation (/resume) · 1 tool output left out',
       'ended when a window opened on a fresh conversation',
       'ended (the ledger does not say why)',
@@ -443,44 +473,71 @@ test.describe('the history viewer', () => {
     await expect(whole).toBeVisible()
   })
 
-  test('pages from the most recent to older and back', async ({ page }) => {
+  test('goes older from the oldest item shown and newer from the newest, never repeating or skipping one', async ({
+    page,
+  }) => {
     await open(page)
     const viewer = await openChief(page)
     const status = viewer.locator('.history-page')
     const older = viewer.getByRole('button', { name: 'Older' })
     const newer = viewer.getByRole('button', { name: 'Newer' })
-    await expect(status).toHaveText('Page 1 of 2, the most recent')
+    await expect(status).toHaveText('The most recent')
     await expect(newer).toBeDisabled()
+    const first = await texts(viewer)
+    // Meanwhile the chief says more: a page already read is not moved by it.
+    await page.evaluate(() => {
+      const { items } = window.__model.histories.chief
+      items.push({ ...items.at(-1), seq: 3, row: 203, id: 'a-6', text: 'And more.' })
+    })
     await older.click()
-    await expect(status).toHaveText('Page 2 of 2')
+    await expect(status).toHaveText('Earlier items')
     await expect(older).toBeDisabled()
-    await expect(viewer.locator('.history-conversation')).toHaveCount(1)
-    await expect(viewer.locator('.history-conversation')).toContainText(
-      'It goes on on a newer page.',
-    )
+    const before = await texts(viewer)
+    expect([...before, ...first]).toEqual([
+      'Ship the parser',
+      'half a thought',
+      'On it',
+      'This session is being continued from a previous conversation.',
+      HOSTILE,
+      'Where are we?',
+      'Taken over: the parser is done.',
+    ])
     await newer.click()
-    await expect(status).toHaveText('Page 1 of 2, the most recent')
-    expect((await asked(page)).map((body) => body.page)).toEqual([1, 2, 1])
+    await expect(status).toHaveText('Earlier items')
+    await expect(viewer.locator('.history-item')).toHaveCount(4)
+    await newer.click()
+    await expect(status).toHaveText('The most recent')
+    expect(await texts(viewer)).toEqual(['And more.'])
+    const places = (await asked(page)).map(({ before, after }) => ({ before, after }))
+    expect(places).toEqual([
+      { before: undefined, after: undefined },
+      { before: { conversation: 1, seq: 4, row: 104 }, after: undefined },
+      { before: undefined, after: { conversation: 1, seq: 2, row: 102 } },
+      { before: undefined, after: { conversation: 2, seq: 2, row: 202 } },
+    ])
   })
 
-  test('finds words in any case, and says when nothing holds them', async ({ page }) => {
+  test('finds words in any case, says when nothing holds them, and where a search stopped short', async ({
+    page,
+  }) => {
     await open(page)
     const viewer = await openChief(page)
     const find = viewer.getByRole('searchbox', { name: 'Find in the history' })
     await find.fill('PARSER')
     await find.press('Enter')
-    // The most recent page of what holds it: the one item of it there.
-    await expect(viewer.locator('.history-item .transcript-body')).toHaveText([
+    // The stored text is searched: the delivery holds "Parser done", under what was typed with it.
+    expect(await texts(viewer)).toEqual([
+      'Ship the parser',
+      'half a thought',
       'Taken over: the parser is done.',
     ])
     expect((await asked(page)).at(-1)).toEqual({
       project: 1,
       handle: 'chief',
-      page: 1,
       tools: false,
       find: 'PARSER',
     })
-    await expect(viewer.locator('.history-page')).toHaveText('Page 1 of 2, the most recent')
+    await expect(viewer.locator('.history-page')).toHaveText('The most recent')
     await find.fill('zzz')
     await viewer.getByRole('button', { name: 'Find' }).click()
     await expect(viewer.locator('.history-note')).toHaveText(
@@ -488,6 +545,25 @@ test.describe('the history viewer', () => {
     )
     await expect(viewer.getByRole('button', { name: 'Older' })).toBeDisabled()
     await expect(viewer.getByRole('button', { name: 'Newer' })).toBeDisabled()
+    // A search through a long history stops at what one read may go through, and goes on.
+    await page.evaluate(() => {
+      window.__model.partial = true
+    })
+    await viewer.getByRole('button', { name: 'Find' }).click()
+    await expect(viewer.locator('.history-note')).toHaveText(
+      'Nothing found yet that holds "zzz": Older searches further back.',
+    )
+    await expect(viewer.locator('.history-page')).toHaveText(
+      'The most recent; the search stopped here to stay quick: Older searches further back',
+    )
+    await viewer.getByRole('button', { name: 'Older' }).click()
+    expect((await asked(page)).at(-1)).toEqual({
+      project: 1,
+      handle: 'chief',
+      tools: false,
+      find: 'zzz',
+      before: { conversation: 1, seq: 0, row: 100 },
+    })
   })
 
   test("shows the tools' outputs on the switch", async ({ page }) => {
@@ -496,14 +572,39 @@ test.describe('the history viewer', () => {
     await expect(viewer.locator('.history-item[data-role="tool"]')).toHaveCount(0)
     await viewer.getByRole('checkbox', { name: 'Show tool output' }).check()
     await expect(viewer.locator('.history-item[data-role="tool"]')).toHaveText(/ls: 3 files/)
-    expect((await asked(page)).at(-1)).toEqual({
-      project: 1,
-      handle: 'chief',
-      page: 1,
-      tools: true,
-    })
+    expect((await asked(page)).at(-1)).toEqual({ project: 1, handle: 'chief', tools: true })
     expect(await labels(viewer)).toContain('Tool output')
-    expect((await headings(viewer))[1][1]).not.toContain('left out')
+    expect((await headings(viewer)).at(-1)[1]).not.toContain('left out')
+  })
+
+  test('shows a long item by a part, and the whole of it on asking, read a part at a time', async ({
+    page,
+  }) => {
+    await open(page)
+    const viewer = await openSession(page)
+    const long = viewer.locator('.history-item').filter({ hasText: 'The first part' })
+    await expect(long.locator('.history-cut')).toContainText('Its first part')
+    await long.getByRole('button', { name: 'Show the whole item (684 KB)' }).click()
+    const whole = viewer.locator('.history-item').filter({ hasText: 'to its end.' })
+    await expect(whole.locator('.transcript-body')).toHaveText(
+      'The first part and the rest, to its end.',
+    )
+    await expect(whole.locator('.history-cut')).toHaveCount(0)
+    const read = (await asked(page, 'history.part')).map(({ from }) => from)
+    expect(read).toEqual([0, 14, 29])
+    expect((await asked(page, 'history.part'))[0]).toEqual({
+      project: 1,
+      handle: 'zeus-amber-pine',
+      conversation: 7,
+      item: 'w-2',
+      from: 0,
+    })
+    // A search shows the part where it found its words, and says from where.
+    await page.evaluate(() => {
+      window.__model.histories['zeus-amber-pine'].items[1].cut = { from: 5_000, bytes: 700_000 }
+    })
+    await viewer.getByRole('button', { name: 'Refresh' }).click()
+    await expect(viewer.locator('.history-cut')).toContainText('… from character 5001')
   })
 
   test("says the daemon's refusal in its words, and draws in the app's theme", async ({ page }) => {

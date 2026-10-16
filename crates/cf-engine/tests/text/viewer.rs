@@ -1,36 +1,33 @@
-//! The history viewer's pages (the History button on a window's head): every
-//! conversation of a participant, the current one too, paged newest first
-//! within one frame of the app's bridge, searched in any case, the tools'
-//! outputs left out unless asked for, a delivery said in one line, and a
-//! compaction's summary named as one.
+//! The history viewer's pages (the History button on a window's head): one
+//! read of the ledger's, taken while a frame of the app's bridge has room, set
+//! out by conversation with their headings, and the places the next pages go
+//! on from; a delivery to this participant said in one line, any other header
+//! left as text; a long item's part as the read cut it.
 
 use cf_base::refusal::Refusal;
 use cf_engine::handoff::{whole_history_page, WholeHistoryPage};
-use cf_ledger::{PAGE_BYTES, TRANSCRIPT_ITEM_MAX};
+use cf_ledger::{HistoryFrom, PAGE_BYTES};
 use cf_proto::ledger::{
-    ConversationEnd, ConversationView, HistoryItem, MessageView, ParticipantConversation,
+    ConversationEnd, ConversationView, HistoryItem, HistoryKey, HistoryRead, HistoryRow,
+    MessageView, ParticipantConversation, Scanned, TextCut,
 };
 use serde_json::json;
 
 use super::support::message;
 
-/// The messages a delivery's line may name.
+/// The messages this participant was sent or sent, as the daemon looks them up
+/// for it: m-5 is its, and any other number names none of its.
 fn messages(id: i64) -> Result<Option<MessageView>, Refusal> {
-    Ok(match id {
-        5 => Some(message(5, "result", Some("zeus"), Some(1), "Parser done")),
-        _ => None,
-    })
+    Ok((id == 5).then(|| message(5, "result", Some("zeus"), Some(1), "Parser done")))
 }
 
-/// Conversation `n` of the chief, on `harness` and `agent`, with its items each
-/// a role and its text; `ended_by` none for the one going on now. A role of
-/// `summary` is the summary a compaction wrote, a `user` item marked.
-fn conversation(
+/// Conversation `n` of the chief, on `harness` and `agent`; `ended_by` none for the current one.
+fn heading(
     n: i64,
     harness: &str,
     agent: &str,
     ended_by: Option<ConversationEnd>,
-    items: Vec<(&str, String)>,
+    tools: usize,
 ) -> ParticipantConversation {
     ParticipantConversation {
         conversation: ConversationView {
@@ -45,22 +42,47 @@ fn conversation(
         },
         agent: Some(agent.to_owned()),
         ended_by,
-        items: items
-            .into_iter()
-            .enumerate()
-            .map(|(index, (role, text))| HistoryItem {
-                id: format!("{n}-{index}"),
-                role: if role == "summary" { "user" } else { role }.to_owned(),
-                text,
-                complete: true,
-                at: Some(format!("2026-10-1{n}T10:{:02}:00.000Z", index % 60)),
-                compaction: role == "summary",
-            })
-            .collect(),
+        tools,
     }
 }
 
-/// What a switch to Codex on maia says ended a conversation.
+/// An item of conversation `conversation` at place `seq`: a role (`summary`, a
+/// compaction's) and its text.
+fn row(conversation: i64, seq: i64, role: &str, text: &str) -> HistoryRow {
+    HistoryRow {
+        key: HistoryKey {
+            conversation,
+            seq,
+            row: conversation * 100 + seq,
+        },
+        item: HistoryItem {
+            id: format!("{conversation}-{seq}"),
+            role: if role == "summary" { "user" } else { role }.to_owned(),
+            text: text.to_owned(),
+            complete: true,
+            at: Some(format!("2026-10-1{conversation}T10:{seq:02}:00.000Z")),
+            compaction: role == "summary",
+        },
+        cut: None,
+    }
+}
+
+/// A read of the ledger's that gave `rows`, and goes on from `resume`.
+fn read(
+    conversations: Vec<ParticipantConversation>,
+    rows: Vec<HistoryRow>,
+    resume: Option<HistoryKey>,
+) -> HistoryRead {
+    HistoryRead {
+        participant: 2,
+        conversations,
+        rows,
+        resume,
+        bounded: false,
+        scanned: Scanned::default(),
+    }
+}
+
 fn switched() -> Option<ConversationEnd> {
     Some(ConversationEnd::Switch {
         harness: "codex".to_owned(),
@@ -68,29 +90,8 @@ fn switched() -> Option<ConversationEnd> {
     })
 }
 
-/// Page `number` of `conversations`.
-fn page(
-    conversations: &[ParticipantConversation],
-    number: usize,
-    find: Option<&str>,
-    tools: bool,
-) -> WholeHistoryPage {
-    whole_history_page(conversations, &messages, number as f64, find, tools).unwrap()
-}
-
-/// Every page, newest first.
-fn every_page(conversations: &[ParticipantConversation], tools: bool) -> Vec<WholeHistoryPage> {
-    let first = page(conversations, 1, None, tools);
-    (1..=first.pages)
-        .map(|number| page(conversations, number, None, tools))
-        .collect()
-}
-
-/// The size of the answer that carries `page`, as the bridge carries it.
-fn answered(page: &WholeHistoryPage) -> usize {
-    serde_json::to_vec(&json!({ "ok": true, "history": page }))
-        .unwrap()
-        .len()
+fn page(read: &HistoryRead, from: HistoryFrom, searching: bool) -> WholeHistoryPage {
+    whole_history_page(read, from, searching, &messages).unwrap()
 }
 
 /// The ids of a page's items, in order.
@@ -102,90 +103,40 @@ fn ids(page: &WholeHistoryPage) -> Vec<String> {
 }
 
 #[test]
-fn pages_run_newest_first_each_in_order_within_a_frame_a_conversation_headed_on_each_it_is_on() {
-    let long = |n: usize| format!("{n} {}", "word ".repeat(10_000));
-    let mut before: Vec<(&str, String)> = (0..30).map(|n| ("assistant", long(n))).collect();
-    before[15] = ("summary", long(15));
-    let after: Vec<(&str, String)> = (30..60).map(|n| ("user", long(n))).collect();
-    let history = [
-        conversation(1, "claude-code", "chief", switched(), before),
-        conversation(2, "codex", "maia", None, after),
-    ];
-    let pages = every_page(&history, false);
-    assert!(pages.len() >= 6, "{} pages", pages.len());
-    for (at, shown) in pages.iter().enumerate() {
-        assert_eq!((shown.page, shown.pages), (at + 1, pages.len()));
-        assert!(answered(shown) <= PAGE_BYTES, "{} bytes", answered(shown));
-        // A conversation is headed once on a page.
-        let headed: Vec<i64> = shown.conversations.iter().map(|c| c.id).collect();
-        let mut once = headed.clone();
-        once.dedup();
-        assert_eq!(headed, once);
-        // It says where it goes on: on the page older than this, and the one newer.
-        let first = shown.conversations.first().unwrap();
-        let last = shown.conversations.last().unwrap();
-        let older = pages
-            .get(at + 1)
-            .map(|older| older.conversations.last().unwrap().id);
-        let newer = at
-            .checked_sub(1)
-            .map(|newer| pages[newer].conversations[0].id);
-        assert_eq!(first.earlier, older == Some(first.id), "page {}", at + 1);
-        assert_eq!(last.later, newer == Some(last.id), "page {}", at + 1);
-    }
-    // Page 1 ends with the newest item; every item is on one page, once, in order.
-    assert_eq!(ids(&pages[0]).last().unwrap(), "2-29");
-    let read: Vec<String> = pages.iter().rev().flat_map(ids).collect();
-    let all: Vec<String> = history
-        .iter()
-        .flat_map(|conversation| conversation.items.iter().map(|item| item.id.clone()))
-        .collect();
-    assert_eq!(read, all);
-    // The summary is named as one, a user's item that is the harness's own.
-    let summary = pages
-        .iter()
-        .flat_map(|shown| &shown.conversations)
-        .flat_map(|conversation| &conversation.items)
-        .find(|item| item.id == "1-15")
-        .unwrap();
-    assert_eq!((summary.role.as_str(), summary.compaction), ("user", true));
-}
-
-#[test]
-fn heads_each_conversation_with_its_harness_agent_times_and_what_ended_it_the_current_one_with_none(
-) {
-    let history = [
-        conversation(
-            1,
-            "claude-code",
-            "chief",
-            switched(),
-            vec![
-                ("user", "Ship it".to_owned()),
-                ("summary", "This session is being continued".to_owned()),
-            ],
-        ),
-        conversation(
+fn heads_each_conversation_with_its_harness_agent_times_and_end_and_the_current_one_with_none() {
+    let conversations = vec![
+        heading(1, "claude-code", "chief", switched(), 0),
+        heading(
             2,
             "codex",
             "maia",
             Some(ConversationEnd::Window { resumed: false }),
-            vec![("assistant", "Shipped".to_owned())],
+            0,
         ),
-        conversation(3, "codex", "maia", None, vec![("tool", "ok".to_owned())]),
+        heading(3, "codex", "maia", None, 1),
     ];
-    let shown = serde_json::to_value(page(&history, 1, None, false)).unwrap();
+    // The most recent page, newest first as the ledger reads it: the current
+    // conversation holds a tool's output alone, left out.
+    let rows = vec![
+        row(2, 0, "assistant", "Shipped"),
+        row(1, 1, "summary", "This session is being continued"),
+        row(1, 0, "user", "Ship it"),
+    ];
+    let shown = serde_json::to_value(page(
+        &read(conversations, rows, None),
+        HistoryFrom::Newest,
+        false,
+    ))
+    .unwrap();
     assert_eq!(
         shown,
         json!({
-            "page": 1,
-            "pages": 1,
             "conversations": [
                 {
                     "id": 1, "harness": "claude-code", "agent": "chief",
                     "startedAt": "2026-10-11T09:00:00.000Z", "endedAt": "2026-10-11T17:00:00.000Z",
                     "endedBy": { "by": "switch", "harness": "codex", "agent": "maia" },
-                    "toolsLeftOut": 0, "earlier": false, "later": false,
+                    "toolsLeftOut": 0,
                     "items": [
                         { "id": "1-0", "role": "user", "text": "Ship it", "complete": true, "at": "2026-10-11T10:00:00.000Z" },
                         { "id": "1-1", "role": "user", "text": "This session is being continued", "complete": true, "at": "2026-10-11T10:01:00.000Z", "compaction": true },
@@ -195,40 +146,43 @@ fn heads_each_conversation_with_its_harness_agent_times_and_what_ended_it_the_cu
                     "id": 2, "harness": "codex", "agent": "maia",
                     "startedAt": "2026-10-12T09:00:00.000Z", "endedAt": "2026-10-12T17:00:00.000Z",
                     "endedBy": { "by": "window", "resumed": false },
-                    "toolsLeftOut": 0, "earlier": false, "later": false,
+                    "toolsLeftOut": 0,
                     "items": [
                         { "id": "2-0", "role": "assistant", "text": "Shipped", "complete": true, "at": "2026-10-12T10:00:00.000Z" },
                     ],
                 },
-                // The one going on now, its one item a tool's output left out: its heading alone.
                 {
                     "id": 3, "harness": "codex", "agent": "maia",
                     "startedAt": "2026-10-13T09:00:00.000Z", "endedAt": null, "endedBy": null,
-                    "toolsLeftOut": 1, "earlier": false, "later": false,
+                    "toolsLeftOut": 1,
                     "items": [],
                 },
             ],
+            "older": null,
+            "newer": null,
+            "partial": false,
         })
     );
 }
 
 #[test]
-fn says_a_delivery_in_its_line_and_where_it_begins_and_no_summary_or_agent_s_quote_is_one() {
+fn says_a_delivery_to_this_participant_in_its_line_and_leaves_any_other_header_as_text() {
     let header = "[ConsensFlow m-5 · T-1 · result from @zeus]\nParser done";
-    let history = [conversation(
-        1,
-        "pi",
-        "chief",
-        None,
-        vec![
-            ("user", format!("héllo 🙂{header}")),
-            ("custom", header.to_owned()),
-            ("summary", format!("Summed up: {header}")),
-            ("assistant", format!("I quoted {header}")),
-            ("user", "[ConsensFlow m-99 · note]\ngone".to_owned()),
-        ],
-    )];
-    let shown = page(&history, 1, None, false);
+    // Another participant's message, quoted in this one's window.
+    let theirs = "[ConsensFlow m-9 · T-2 · result from @hera]\nSecret plans";
+    let rows = vec![
+        row(1, 5, "user", "[ConsensFlow m-99 · note]\ngone"),
+        row(1, 4, "user", theirs),
+        row(1, 3, "assistant", &format!("I quoted {header}")),
+        row(1, 2, "summary", &format!("Summed up: {header}")),
+        row(1, 1, "custom", header),
+        row(1, 0, "user", &format!("héllo 🙂{header}")),
+    ];
+    let shown = page(
+        &read(vec![heading(1, "pi", "chief", None, 0)], rows, None),
+        HistoryFrom::Newest,
+        false,
+    );
     let items = &shown.conversations[0].items;
     let line = "· m-5: @zeus's result on T-1 (cf task get T-1)";
     let delivery = items[0].delivery.as_ref().unwrap();
@@ -237,122 +191,143 @@ fn says_a_delivery_in_its_line_and_where_it_begins_and_no_summary_or_agent_s_quo
     assert_eq!(items[0].text, format!("héllo 🙂{header}"), "the text whole");
     assert_eq!(items[1].delivery.as_ref().unwrap().at, 0);
     assert!(items[2].delivery.is_none() && items[2].compaction);
-    assert!(items[3].delivery.is_none());
-    assert_eq!(
-        items[4].delivery.as_ref().unwrap().line,
-        "· m-99: a message ConsensFlow delivered (no longer on record)"
-    );
-}
-
-#[test]
-fn searches_in_any_case_in_the_text_and_a_delivery_s_line_and_leaves_the_tools_out_unless_asked() {
-    let history = [
-        conversation(
-            1,
-            "claude-code",
-            "chief",
-            switched(),
-            vec![
-                ("user", "Run the PARSER tests".to_owned()),
-                ("tool", "ok 12 passed".to_owned()),
-                (
-                    "user",
-                    "[ConsensFlow m-5 · T-1 · result from @zeus]\nAll green".to_owned(),
-                ),
-            ],
-        ),
-        conversation(
-            2,
-            "codex",
-            "maia",
-            None,
-            vec![("assistant", "noted".to_owned())],
-        ),
-    ];
-    let found = |find: &str, tools: bool| ids(&page(&history, 1, Some(find), tools));
-    assert_eq!(found("parser", false), ["1-0"]);
-    // "cf task get T-1" is in the delivery's line alone.
-    assert_eq!(found("CF TASK GET t-1", false), ["1-2"]);
-    // A search heads only the conversations it found something in.
-    let searched = page(&history, 1, Some("noted"), false);
-    assert_eq!(searched.conversations.len(), 1);
-    assert_eq!(searched.conversations[0].id, 2);
-    // A tool's output only when asked for, in a search too.
-    let off = page(&history, 1, Some("passed"), false);
-    assert_eq!((off.page, off.pages, off.conversations.len()), (0, 0, 0));
-    assert_eq!(found("passed", true), ["1-1"]);
-    let shown = page(&history, 1, None, false);
-    assert_eq!(shown.conversations[0].tools_left_out, 1);
-    assert_eq!(ids(&shown), ["1-0", "1-2", "2-0"]);
-    let with_tools = page(&history, 1, None, true);
-    assert_eq!(with_tools.conversations[0].tools_left_out, 0);
-    assert_eq!(ids(&with_tools), ["1-0", "1-1", "1-2", "2-0"]);
-    // An empty search is none.
-    assert_eq!(
-        ids(&page(&history, 1, Some(""), false)),
-        ["1-0", "1-2", "2-0"]
-    );
-}
-
-#[test]
-fn cuts_an_item_too_long_for_a_frame_alone_and_keeps_every_page_within_one() {
-    let huge = "x".repeat(2_000_000);
-    // Each control character is six bytes of JSON.
-    let escaped = "\u{1}".repeat(300_000);
-    let mut many = vec![
-        conversation(1, "claude-code", "chief", switched(), vec![("user", huge)]),
-        conversation(
-            2,
-            "claude-code",
-            "chief",
-            switched(),
-            vec![("assistant", escaped)],
-        ),
-    ];
-    // Three thousand conversations of one word each: their headings fill pages too,
-    // and take more of one than their items do.
-    for n in 3..3_003 {
-        many.push(conversation(
-            n,
-            "codex",
-            "maia",
-            Some(ConversationEnd::Fresh),
-            vec![("assistant", "ok".to_owned())],
-        ));
-    }
-    let pages = every_page(&many, false);
-    for shown in &pages {
-        assert!(answered(shown) <= PAGE_BYTES, "{} bytes", answered(shown));
-    }
-    let oldest = &pages.last().unwrap().conversations;
-    let first = &oldest[0].items[0];
+    assert!(items[3].delivery.is_none(), "an agent's quote");
     assert!(
-        first.text.ends_with("… (2000000 characters; cut here)"),
-        "{}",
-        &first.text[first.text.len() - 40..]
+        items[4].delivery.is_none(),
+        "another's message: no line, nothing of it"
     );
-    assert!(first.text.starts_with(&"x".repeat(TRANSCRIPT_ITEM_MAX)));
-    let read: Vec<String> = pages.iter().rev().flat_map(ids).collect();
-    assert_eq!(read.len(), 3_002, "every item, once");
+    assert_eq!(items[4].text, theirs);
+    assert!(
+        items[5].delivery.is_none(),
+        "a message not on record is text too"
+    );
 }
 
 #[test]
-fn refuses_a_page_that_is_not_there_as_cf_history_does_and_says_none_of_nothing() {
-    let history = [conversation(
-        1,
-        "pi",
-        "chief",
+fn takes_rows_while_a_frame_has_room_and_says_where_the_next_pages_go_on_from() {
+    // Five items of 200 KB, newest first: two fit a frame, and the rest are the next page's.
+    let big = "x".repeat(200_000);
+    let rows: Vec<HistoryRow> = (0..5).rev().map(|seq| row(1, seq, "user", &big)).collect();
+    let resume = Some(rows[4].key);
+    let all = read(
+        vec![heading(1, "pi", "chief", None, 0)],
+        rows.clone(),
+        resume,
+    );
+    let newest = page(&all, HistoryFrom::Newest, false);
+    assert_eq!(ids(&newest), ["1-3", "1-4"]);
+    assert!(
+        serde_json::to_vec(&json!({ "ok": true, "history": newest }))
+            .unwrap()
+            .len()
+            <= PAGE_BYTES
+    );
+    assert_eq!(
+        newest.older,
+        Some(rows[1].key),
+        "from the oldest shown, not past what was read"
+    );
+    assert_eq!(newest.newer, None, "the most recent");
+    // A page read before a place goes back to it; one read after goes on from where the read stopped.
+    let before = page(&all, HistoryFrom::Before(rows[0].key), false);
+    assert_eq!(before.newer, Some(rows[0].key));
+    let some = read(
+        vec![heading(1, "pi", "chief", None, 0)],
+        rows[3..].to_vec(),
         None,
-        vec![("user", "hi".to_owned())],
-    )];
-    for asked in [0.0, 2.0, 1.5, f64::NAN, -1.0] {
-        let refused = whole_history_page(&history, &messages, asked, None, false).unwrap_err();
-        assert_eq!(
-            (refused.code, refused.status, refused.message.as_str()),
-            ("no-such-page", 400, "there is 1 page"),
-            "page {asked}"
-        );
-    }
-    let none = whole_history_page(&[], &messages, 1.0, None, false).unwrap();
-    assert_eq!((none.page, none.pages, none.conversations.len()), (0, 0, 0));
+    );
+    let after = page(&some, HistoryFrom::After(rows[2].key), false);
+    assert_eq!((after.older, after.newer), (Some(rows[3].key), None));
+}
+
+#[test]
+fn counts_each_conversation_s_heading_against_the_frame_as_well_as_its_items() {
+    // Three thousand conversations of one word each: their headings take more of a
+    // frame than their items do.
+    let conversations: Vec<ParticipantConversation> = (1..=3_000)
+        .map(|n| heading(n, "codex", "maia", Some(ConversationEnd::Fresh), 0))
+        .collect();
+    let rows: Vec<HistoryRow> = (1..=3_000)
+        .rev()
+        .map(|n| row(n, 0, "assistant", "ok"))
+        .collect();
+    let resume = rows.last().map(|row| row.key);
+    let shown = page(
+        &read(conversations, rows, resume),
+        HistoryFrom::Newest,
+        false,
+    );
+    let size = serde_json::to_vec(&json!({ "ok": true, "history": shown }))
+        .unwrap()
+        .len();
+    assert!(size <= PAGE_BYTES, "{size} bytes");
+    assert!(ids(&shown).len() < 3_000, "the rest are older pages'");
+}
+
+#[test]
+fn a_search_shows_the_conversations_it_found_in_and_says_where_it_stopped_short() {
+    let conversations = vec![
+        heading(1, "pi", "chief", switched(), 0),
+        heading(2, "codex", "maia", None, 0),
+    ];
+    let mut stopped = read(
+        conversations,
+        vec![row(1, 3, "user", "Run the PARSER tests")],
+        Some(HistoryKey {
+            conversation: 1,
+            seq: 1,
+            row: 101,
+        }),
+    );
+    stopped.bounded = true;
+    let found = page(&stopped, HistoryFrom::Newest, true);
+    assert_eq!(
+        found.conversations.len(),
+        1,
+        "no heading of the one it found nothing in"
+    );
+    assert!(found.partial);
+    assert_eq!(
+        found.older, stopped.resume,
+        "on from where it stopped, not from the hit"
+    );
+}
+
+#[test]
+fn a_part_of_a_long_item_shows_as_the_read_cut_it_and_a_delivery_only_from_its_start() {
+    let header = "[ConsensFlow m-5 · T-1 · result from @zeus]\nParser done";
+    let mut start = row(1, 1, "user", header);
+    start.cut = Some(TextCut {
+        from: 0,
+        bytes: 900_000,
+    });
+    let mut middle = row(1, 0, "user", header);
+    middle.cut = Some(TextCut {
+        from: 70_000,
+        bytes: 900_000,
+    });
+    let shown = page(
+        &read(
+            vec![heading(1, "pi", "chief", None, 0)],
+            vec![start, middle],
+            None,
+        ),
+        HistoryFrom::Newest,
+        false,
+    );
+    let items = &shown.conversations[0].items;
+    assert!(items[1].delivery.is_some());
+    assert_eq!(
+        items[1].cut,
+        Some(TextCut {
+            from: 0,
+            bytes: 900_000
+        })
+    );
+    assert!(
+        items[0].delivery.is_none(),
+        "a part from its middle is text"
+    );
+    let said = serde_json::to_value(&items[0]).unwrap();
+    assert_eq!(said["cut"], json!({ "from": 70_000, "bytes": 900_000 }));
 }

@@ -69,12 +69,15 @@ pub enum PageOperation {
     /// a page at a time: the viewer of a window's History button, read and
     /// never written.
     HistoryGet,
+    /// A long item of a participant's history, a part at a time, for the
+    /// viewer to show it whole: read and never written.
+    HistoryPart,
 }
 
 impl PageOperation {
     /// Every operation, in the order Node's page listed them, then those this
     /// build added, in the order it added them.
-    pub const ALL: [PageOperation; 40] = [
+    pub const ALL: [PageOperation; 41] = [
         Self::ProjectsList,
         Self::ProjectOpen,
         Self::ProjectResume,
@@ -115,6 +118,7 @@ impl PageOperation {
         Self::SpecsPresent,
         Self::SpecsOpen,
         Self::HistoryGet,
+        Self::HistoryPart,
     ];
 
     /// The name the page, the app and the bridge say it by (`project.open`).
@@ -160,6 +164,7 @@ impl PageOperation {
             Self::SpecsPresent => "specs.present",
             Self::SpecsOpen => "specs.open",
             Self::HistoryGet => "history.get",
+            Self::HistoryPart => "history.part",
         }
     }
 
@@ -191,6 +196,7 @@ impl PageOperation {
                 | Self::WakeUpGet
                 | Self::SpecsGet
                 | Self::HistoryGet
+                | Self::HistoryPart
         )
     }
 }
@@ -219,7 +225,7 @@ mod tests {
             .unwrap();
         let mut forwarded: Vec<&str> = list.split('"').skip(1).step_by(2).collect();
         let mut named: Vec<&str> = PageOperation::ALL.map(PageOperation::as_str).to_vec();
-        assert_eq!(named.len(), 40);
+        assert_eq!(named.len(), 41);
         forwarded.sort_unstable();
         named.sort_unstable();
         assert_eq!(named, forwarded);
@@ -274,7 +280,7 @@ mod tests {
             "message.approve",
             "message.decline",
         ];
-        const ADDED: [&str; 12] = [
+        const ADDED: [&str; 13] = [
             "wakeup.get",
             "wakeup.set",
             "project.specs",
@@ -287,6 +293,7 @@ mod tests {
             "specs.present",
             "specs.open",
             "history.get",
+            "history.part",
         ];
         let listed: Vec<&str> = PageOperation::ALL.map(PageOperation::as_str).to_vec();
         assert_eq!(listed[..RECORDED.len()], RECORDED);
@@ -317,6 +324,7 @@ mod tests {
                 "specs.present",
                 "specs.open",
                 "history.get",
+                "history.part",
             ]
         );
     }

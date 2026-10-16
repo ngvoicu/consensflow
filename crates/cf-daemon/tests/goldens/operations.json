@@ -39,7 +39,8 @@
     "specs.file",
     "specs.present",
     "specs.open",
-    "history.get"
+    "history.get",
+    "history.part"
   ],
   "ping": "{\"ok\":true}"
 }

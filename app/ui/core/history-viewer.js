@@ -1,23 +1,27 @@
-import { element } from '../dom.js'
+import { button, element } from '../dom.js'
 import { itemLabel, laneName } from './board.js'
 import { HARNESS_NAMES } from './dialogs.js'
 
 /**
  * The history viewer: everything ConsensFlow keeps of a participant's
  * conversations, from the History button on its window's head (the chief's, a
- * session's). It reads through the daemon (`history.get`), a page at a time,
- * and changes nothing.
+ * session's). It reads through the daemon (`history.get`, `history.part`), a
+ * page at a time, and changes nothing.
  *
  * One column, oldest above. Each conversation has a heading: the harness and
  * the agent it ran on, from when until when, and what ended it as far as the
  * ledger knows (a Switch chief; the window going to another conversation, a
  * `/clear`, `/new` or `/resume`; a window that opened on a fresh one); the
  * one going on now says so. Its items are labelled as the task drawer labels
- * them, a compaction's summary as one. A delivery ConsensFlow made shows as its
- * line, as `cf history` says it, and opens on a click to what went in. Page 1
- * is the most recent; Older and Newer move a page, a search keeps the items
- * that hold its words in any case, and Show tool output adds the tools'
- * outputs. Everything shows as text, never as markup.
+ * them, a compaction's summary as one. A delivery ConsensFlow made to this
+ * participant shows as its line, as `cf history` says it, and opens on a click
+ * to what went in. The first page is the most recent; Older goes on from the
+ * oldest item shown and Newer from the newest, so no page repeats or skips an
+ * item, whatever comes or grows meanwhile. A search keeps the items that hold
+ * its words in any case, and says where it stopped when it went through as
+ * much as one read may; Show tool output adds the tools' outputs. A long item
+ * shows a part (from its start, or where the search found it), and is read
+ * whole on asking, a part at a time. Everything shows as text, never as markup.
  */
 export class HistoryViewer {
   #dialog
@@ -30,7 +34,10 @@ export class HistoryViewer {
   #status
   #body
   #page
-  /** What is shown: whose history (the project's id and the participant), and which page. */
+  /**
+   * What is shown: whose history (the project's id and the participant), and the
+   * places the pages before and after this one go on from.
+   */
   #shown = null
   /** Each read is numbered: what comes back for a read the human has left since is not shown. */
   #reads = 0
@@ -49,14 +56,14 @@ export class HistoryViewer {
     this.#body = dialog.querySelector('.history-body')
     dialog.querySelector('.history-search').addEventListener('submit', (event) => {
       event.preventDefault()
-      void this.#read(1)
+      void this.#read({})
     })
-    this.#tools.addEventListener('change', () => void this.#read(1))
+    this.#tools.addEventListener('change', () => void this.#read({}))
     // A newer page goes on from the top; any other is read from its newest, at the bottom.
-    this.#newer.addEventListener('click', () => void this.#read(this.#shown.number - 1, true))
-    this.#older.addEventListener('click', () => void this.#read(this.#shown.number + 1))
+    this.#newer.addEventListener('click', () => void this.#read({ after: this.#shown.newer }, true))
+    this.#older.addEventListener('click', () => void this.#read({ before: this.#shown.older }))
     dialog.querySelector('[name="history-refresh"]').addEventListener('click', () => {
-      void this.#read(this.#shown?.number || 1)
+      void this.#read({})
     })
     // Shut, it holds nothing, and what is still on its way is not shown.
     dialog.addEventListener('close', () => {
@@ -69,7 +76,13 @@ export class HistoryViewer {
   /** Opens on the most recent page of `participant`'s history. */
   async open(participant) {
     const name = laneName(participant)
-    this.#shown = { project: participant.projectId, handle: participant.handle, name, number: 1 }
+    this.#shown = {
+      project: participant.projectId,
+      handle: participant.handle,
+      name,
+      older: null,
+      newer: null,
+    }
     this.#title.textContent = `History of ${name}`
     this.#who.textContent = [
       HARNESS_NAMES[participant.harness] ?? participant.harness,
@@ -81,14 +94,15 @@ export class HistoryViewer {
     this.#tools.checked = false
     this.#body.replaceChildren(element('p', 'history-note', 'Reading the history…'))
     if (!this.#dialog.open) this.#dialog.showModal()
-    await this.#read(1)
+    await this.#read({})
   }
 
   /**
-   * Reads page `number` with the search and the tools as the human set them, and shows it
-   * scrolled to its newest, or to its `top`.
+   * Reads the page `place` says (before a place, after one, or the most recent) with the
+   * search and the tools as the human set them, and shows it scrolled to its newest, or
+   * to its `top`.
    */
-  async #read(number, top = false) {
+  async #read(place, top = false) {
     const shown = this.#shown
     if (shown === null) return
     const read = ++this.#reads
@@ -96,14 +110,15 @@ export class HistoryViewer {
     const asked = {
       project: shown.project,
       handle: shown.handle,
-      page: number,
       tools: this.#tools.checked,
+      ...place,
     }
     if (find) asked.find = find
     try {
       const { history } = await this.#page.daemon('history.get', asked)
       if (read !== this.#reads) return
-      shown.number = history.page
+      shown.older = history.older
+      shown.newer = history.newer
       this.#drawPaging(history)
       this.#body.replaceChildren(...this.#draw(history, find))
       this.#body.scrollTop = top ? 0 : this.#body.scrollHeight
@@ -115,28 +130,55 @@ export class HistoryViewer {
     }
   }
 
-  #drawPaging({ page, pages }) {
-    this.#status.textContent =
-      pages === 0 ? '' : `Page ${page} of ${pages}${page === 1 ? ', the most recent' : ''}`
-    this.#newer.disabled = page <= 1
-    this.#older.disabled = page >= pages
+  #drawPaging({ older, newer, partial }) {
+    const where = newer === null ? 'The most recent' : 'Earlier items'
+    this.#status.textContent = partial
+      ? `${where}; the search stopped here to stay quick: Older searches further back`
+      : where
+    this.#newer.disabled = newer === null
+    this.#older.disabled = older === null
   }
 
   /** A page as it shows: each conversation's heading and items, or what there is none of. */
   #draw(history, find) {
-    if (history.pages === 0) {
-      const { name } = this.#shown
-      const none = find
-        ? `Nothing in ${name}'s history holds "${find}".`
-        : `Nothing is kept of ${name}'s conversations yet.`
+    const { name } = this.#shown
+    const shown = history.conversations.some((conversation) => conversation.items.length > 0)
+    if (history.conversations.length === 0 || (find && !shown)) {
+      let none = `Nothing is kept of ${name}'s conversations yet.`
+      if (find) {
+        none = history.partial
+          ? `Nothing found yet that holds "${find}": Older searches further back.`
+          : `Nothing in ${name}'s history holds "${find}".`
+      }
       return [element('p', 'history-note', none)]
     }
-    return history.conversations.map((conversation) => drawConversation(conversation))
+    return history.conversations.map((conversation) =>
+      drawConversation(conversation, (item) => this.#whole(conversation.id, item)),
+    )
+  }
+
+  /** The whole text of item `item` of conversation `conversation`, read a part at a time. */
+  async #whole(conversation, item) {
+    const { project, handle } = this.#shown
+    let text = ''
+    let from = 0
+    while (from !== null) {
+      const { part } = await this.#page.daemon('history.part', {
+        project,
+        handle,
+        conversation,
+        item: item.id,
+        from,
+      })
+      text += part.text
+      from = part.next
+    }
+    return text
   }
 }
 
-/** A conversation: its heading, then its items on the page. */
-function drawConversation(conversation) {
+/** A conversation: its heading, then its items on the page; `whole` reads a cut item whole. */
+function drawConversation(conversation, whole) {
   const section = element('section', 'history-conversation')
   section.dataset.conversation = String(conversation.id)
   const runsOn = [HARNESS_NAMES[conversation.harness] ?? conversation.harness, conversation.agent]
@@ -152,20 +194,17 @@ function drawConversation(conversation) {
     about.push(`${conversation.toolsLeftOut} tool ${outputs} left out`)
   }
   section.append(heading, element('p', 'history-about', about.join(' · ')))
-  if (conversation.earlier) {
-    section.append(element('p', 'history-more', 'Its earlier items are on an older page.'))
-  }
   const list = element('ol', 'transcript history-items')
-  list.append(...conversation.items.map(drawItem))
+  list.append(...conversation.items.map((item) => drawItem(item, whole)))
   section.append(list)
-  if (conversation.later) {
-    section.append(element('p', 'history-more', 'It goes on on a newer page.'))
-  }
   return section
 }
 
-/** One item, labelled as the drawer labels it; a delivery as its line, opened on a click. */
-function drawItem(item) {
+/**
+ * One item, labelled as the drawer labels it; a delivery as its line, opened on a
+ * click; a part of a long one with the way to read it whole, which draws it again.
+ */
+function drawItem(item, whole) {
   const entry = element('li', 'transcript-item history-item')
   entry.dataset.role = item.role
   if (item.compaction) entry.dataset.compaction = 'true'
@@ -173,6 +212,33 @@ function drawItem(item) {
   if (item.at) head.push(clock(item.at))
   if (!item.complete) head.push('still writing')
   entry.append(element('div', 'transcript-head', head.join(' · ')))
+  if (item.cut) {
+    const said = item.cut.from > 0 ? `… from character ${item.cut.from + 1}` : 'Its first part'
+    const more = button(
+      `Show the whole item (${measure(item.cut.bytes)})`,
+      'quiet-button',
+      async () => {
+        more.disabled = true
+        try {
+          const text = await whole(item)
+          // A delivery is said only on a part from the start: its place holds in the whole.
+          entry.replaceWith(drawItem({ ...item, text, cut: undefined }, whole))
+        } catch (cause) {
+          more.disabled = false
+          more.after(
+            element(
+              'span',
+              'history-refusal',
+              cause instanceof Error ? cause.message : String(cause),
+            ),
+          )
+        }
+      },
+    )
+    const cut = element('p', 'history-cut', said)
+    cut.append(' ', more)
+    entry.append(cut)
+  }
   if (!item.delivery) {
     entry.append(element('pre', 'transcript-body', item.text))
     return entry
@@ -188,6 +254,10 @@ function drawItem(item) {
   entry.append(delivery)
   return entry
 }
+
+/** A size as the page says it. */
+const measure = (bytes) =>
+  bytes < 1024 * 1024 ? `${Math.round(bytes / 1024)} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`
 
 /** From when until when, or since when for the one going on now. */
 const period = ({ startedAt, endedAt }) =>

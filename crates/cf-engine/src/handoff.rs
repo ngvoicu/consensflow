@@ -32,7 +32,9 @@ use serde::Serialize;
 use entries::entries_of;
 use pages::paginate;
 use text::{defuse, delivered, first_line, name_of, Shown};
-pub use viewer::{whole_history_page, Delivery, ShownConversation, ShownItem, WholeHistoryPage};
+pub use viewer::{
+    whole_history_page, Delivery, ShownConversation, ShownItem, WholeHistoryPage, HISTORY_ROOM,
+};
 
 /// How ConsensFlow's handoff to a chief the human switched in begins.
 pub const HANDOFF_TITLE: &str = "You are the chief now";
