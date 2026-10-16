@@ -18,6 +18,7 @@ use serde_json::{json, Value};
 use crate::delivery_text::{delivery_text, marker_of};
 use crate::dispatcher::Dispatcher;
 use crate::record::Record;
+use crate::resume::Captured;
 use crate::role_change::{answers_to_the_task, Prelude};
 use crate::runtime::{caught, returning};
 use crate::seams::EngineError;
@@ -69,13 +70,21 @@ pub(crate) struct DeliveryPart {
 /// its hand-over, after every wait of its own (Claude's keys that clear its input
 /// box, the pane's claim Pi's rename waits for, OpenCode's wait for its server, the
 /// connection a send over loopback waits for): a Close that comes during any of them
-/// hands the window nothing (both reviews of 2026-10-16, rounds 4 and 5).
+/// hands the window nothing (both reviews of 2026-10-16, rounds 4 and 5). A
+/// hand-over that says a continuation goes only while the tasks it names stand as
+/// they did when it was begun ([`Admitting::watching`]): one of them that moved
+/// meanwhile hands the window nothing either (round 6).
 pub(crate) struct Admitting<'a> {
     dispatcher: &'a Dispatcher,
     /// The window's project.
     project: i64,
+    /// The window, and its work as it was read when the paste was begun, where a
+    /// continuation in it names tasks.
+    watched: Option<(i64, &'a Captured)>,
     /// It said no, or could not tell: what was to go in did not.
     refused: Cell<bool>,
+    /// It said no because the work watched moved.
+    moved: Cell<bool>,
     /// Why it could not tell, where the ledger could not be read.
     failed: RefCell<Option<EngineError>>,
 }
@@ -86,15 +95,59 @@ impl<'a> Admitting<'a> {
         Self {
             dispatcher,
             project,
+            watched: None,
             refused: Cell::new(false),
+            moved: Cell::new(false),
             failed: RefCell::new(None),
         }
+    }
+
+    /// The host that also watches the work of `participant`'s window as
+    /// `captured` read it, where a continuation in the hand-over names tasks: it
+    /// admits nothing once one of them moved ([`Dispatcher::unmoved`]).
+    pub(crate) fn watching(mut self, participant: i64, captured: &'a Captured) -> Self {
+        if !captured.tasks.is_empty() {
+            self.watched = Some((participant, captured));
+        }
+        self
     }
 
     /// Whether it turned a hand-over away: then nothing of it went in, and why it
     /// could not tell, if the ledger failed it.
     pub(crate) fn turned_away(&self) -> Option<Option<EngineError>> {
         self.refused.get().then(|| self.failed.borrow_mut().take())
+    }
+
+    /// Whether it turned a hand-over away because the work watched moved, the
+    /// project still open.
+    pub(crate) fn moved(&self) -> bool {
+        self.moved.get()
+    }
+
+    /// Why what was to go in went back to its queue, where it turned it away.
+    pub(crate) fn because(&self) -> &'static str {
+        if self.moved.get() {
+            "a task it names moved before it was handed over"
+        } else {
+            "its project was closed before it was handed over"
+        }
+    }
+
+    /// Whether the window may be handed text now: its project is open, and the
+    /// work watched is as it was read.
+    fn may(&self) -> Result<bool, EngineError> {
+        self.moved.set(false);
+        if !self.dispatcher.in_open_project(self.project)? {
+            return Ok(false);
+        }
+        let Some((participant, captured)) = self.watched else {
+            return Ok(true);
+        };
+        let unmoved = self
+            .dispatcher
+            .unmoved(participant, self.project, captured)?;
+        self.moved.set(!unmoved);
+        Ok(unmoved)
     }
 }
 
@@ -104,7 +157,7 @@ impl PaneHost for Admitting<'_> {
     }
 
     fn admits(&self) -> bool {
-        match self.dispatcher.in_open_project(self.project) {
+        match self.may() {
             Ok(true) => return true,
             Ok(false) => {}
             Err(cause) => *self.failed.borrow_mut() = Some(cause),
@@ -182,6 +235,18 @@ impl Dispatcher {
         let (Some(window), Some(pane)) = self.window_of(record) else {
             return Ok(());
         };
+        // A continuation names only the tasks its window still holds as it is
+        // begun, and one that holds none goes no more (the ledger's).
+        if self
+            .seams
+            .ledger
+            .borrow_mut()
+            .as_it_stands(message.id)?
+            .is_none()
+        {
+            self.changed();
+            return Ok(());
+        }
         // What is pasted is what the ledger says it is when delivery begins: the
         // message, and the rows it carries still waiting, which are the set from now.
         let begun = self.seams.ledger.borrow_mut().begin_delivery(message.id)?;
@@ -189,10 +254,12 @@ impl Dispatcher {
             self.pay_with_words(record)?;
         }
         let text = delivery_text(&begun.message, &begun.carried);
+        let watched = Captured::read(self, record.id, message.project_id, Some(&begun))?;
         // A turn begins with this message: what the window's tree runs now came before it.
         self.mark_turn(record, &pane).await;
-        // The adapter asks whether the project is still open at its hand-over.
-        let admitting = Admitting::new(self, message.project_id);
+        // The adapter asks whether the project is still open at its hand-over, and
+        // whether the tasks a continuation in it names stand as they did.
+        let admitting = Admitting::new(self, message.project_id).watching(record.id, &watched);
         let outcome = match returning(window.deliver(&admitting, &pane, &text)).await {
             Ok(admission) => admission,
             // An adapter that failed never handed it over, and its error must show.
@@ -203,12 +270,10 @@ impl Dispatcher {
         if self.forgotten(record) {
             return Ok(());
         }
-        // Closed before the hand-over: nothing went in, and the message waits for the Resume.
+        // Turned away before the hand-over: nothing went in, and the message waits,
+        // for the Resume, or to be narrowed at its next beginning.
         if let Some(failed) = admitting.turned_away() {
-            self.give_back(
-                message.id,
-                "its project was closed before it was handed over",
-            )?;
+            self.give_back(message.id, admitting.because())?;
             return failed.map_or(Ok(()), Err);
         }
         let since = self.now();

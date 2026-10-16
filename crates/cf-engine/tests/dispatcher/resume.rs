@@ -186,6 +186,35 @@ fn a_resume_of_a_project_that_is_open_opens_no_window_again_and_tells_none_its_t
     }
 }
 
+/// The same where zeus's turn had ended before the quit: the Resume has no turn
+/// to tell it of, and its continuation is not what keeps the window closed (one
+/// that names a paused task names none of it as it is begun). The work the
+/// Resume brings back is the work at work.
+#[test]
+fn a_task_the_human_paused_whose_window_was_at_rest_brings_back_no_window_for_it() {
+    let context = Context::new();
+    let tiers = at_work(&context);
+    let project = tiers.project.id;
+    context
+        .adapter
+        .answer("zeus-amber-pine", "Still on the lexer.");
+    context.human_pause(project, 1);
+    let after = quit_and_start(&context);
+
+    after.resume_project(project).unwrap();
+    after.pass().unwrap();
+
+    assert_eq!(tiers.task(1).task.state, "paused");
+    assert_eq!(
+        opened(&context)
+            .iter()
+            .filter(|id| id.contains("zeus"))
+            .count(),
+        1,
+        "no new window for it"
+    );
+}
+
 #[test]
 fn a_task_the_human_paused_stays_paused_through_a_restart_and_a_resume() {
     let context = Context::new();

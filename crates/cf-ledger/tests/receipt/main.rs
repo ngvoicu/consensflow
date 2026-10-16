@@ -17,6 +17,7 @@
 mod answered_again;
 mod approval;
 mod carrying;
+mod continuations;
 mod decided;
 mod doors;
 mod fixture;

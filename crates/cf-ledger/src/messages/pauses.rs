@@ -283,10 +283,16 @@ pub(crate) fn warnings_on_their_way(
 }
 
 /// `message`, on its way and not to arrive (it goes back to its queue, or is
-/// given up), if it is a pause note whose task was cancelled while it was on its
-/// way ([`warnings_on_their_way`]): it is withdrawn, as the cancel withdrew the
-/// rest, and the warning it said of its task is said again, in a note of its
-/// own. Whether it was; nothing is written for any other message.
+/// given up), if it is a pause note naming a task cancelled while it was on its
+/// way: a cancel leaves on their way the notes of its task alone that say a
+/// warning ([`warnings_on_their_way`]), and every note that names others too.
+/// Each such task leaves the note, as a cancel takes it out of a note still
+/// queued, and a warning the note said of it is said again, in a note of its own:
+/// the warning outlives the words of a pause that went stale (both reviews of
+/// 2026-10-16, round 6: a note of two given up lost the warning of the one
+/// cancelled). A note with no task left is withdrawn, which this says; one with
+/// tasks left names those, and goes back or is given up as any message does.
+/// Nothing is written for any other message.
 pub(crate) fn withdrawn_on_its_way(
     store: &mut Store,
     message: &MessageView,
@@ -294,24 +300,42 @@ pub(crate) fn withdrawn_on_its_way(
     if message.kind != "note" || message.sender.is_some() {
         return Ok(false);
     }
-    let Some((number, because)) = message
-        .task_number
-        .and_then(|number| Some((number, warning_in(&message.body, number)?)))
-    else {
+    let Some(paused) = read(&message.body) else {
         return Ok(false);
     };
-    let task = store.task_row(message.project_id, number)?;
-    if task.state != "cancelled" {
+    let mut left: Vec<Paused> = Vec::new();
+    let mut gone: Vec<(TaskRow, String)> = Vec::new();
+    for named in paused {
+        let task = store.task_row(message.project_id, named.number)?;
+        if task.state == "cancelled" {
+            gone.push((task, named.because));
+        } else {
+            left.push(named);
+        }
+    }
+    if gone.is_empty() {
         return Ok(false);
     }
-    let reason = format!("T-{number} cancelled");
+    for (task, because) in &gone {
+        if because.contains(MAY_STILL_RUN) {
+            say_again(store, task, "cancelled", vec![because.clone()])?;
+        }
+    }
+    if !left.is_empty() {
+        set(store, message.id, message.project_id, &left)?;
+        return Ok(false);
+    }
+    let numbers: Vec<String> = gone
+        .iter()
+        .map(|(task, _)| format!("T-{}", task.number))
+        .collect();
+    let reason = format!("{} cancelled", numbers.join(", "));
     withdraw(store, message.id, &reason)?;
     store.log(
         message.project_id,
         "delivery.cancelled",
         json!({ "message": message.id, "reason": reason }),
     )?;
-    say_again(store, &task, "cancelled", vec![because])?;
     Ok(true)
 }
 

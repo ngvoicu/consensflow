@@ -11,6 +11,7 @@ use serde_json::{json, Value};
 
 use super::again::tell_failed_answer;
 use super::carrying::{adopt, carried, release_carried};
+use super::continuations::{narrow, repoint};
 use super::pauses::withdrawn_on_its_way;
 use super::receipt::reconcile;
 use super::{known_message, message_task, messages, require_message};
@@ -227,6 +228,11 @@ pub(crate) fn begin_delivery(store: &mut Store, message_id: i64) -> Result<Begun
                 409,
             ));
         }
+        // A continuation that rides in the paste names only the tasks its window
+        // still holds, and goes no more where it holds none (`continuations`).
+        for row in carried(store, message_id)? {
+            narrow(store, &row)?;
+        }
         store.db.execute(
             "UPDATE message SET state = 'delivering', attempts = attempts + 1, reason = NULL
          WHERE id = ?",
@@ -353,7 +359,8 @@ pub(crate) fn cancel_message(
 /// delivery that settles it) is let go of that carrier first: carried, it
 /// would be skipped as one and never delivered. A pause note whose task was
 /// cancelled while it was on its way goes no more, and says its warning again
-/// (`withdrawn_on_its_way`).
+/// (`withdrawn_on_its_way`); a continuation is about the first task its window
+/// still holds (`continuations`).
 pub(crate) fn retry_delivery(
     store: &mut Store,
     message_id: i64,
@@ -382,6 +389,10 @@ pub(crate) fn retry_delivery(
                AND carried_by IN (SELECT id FROM message WHERE state NOT IN ('queued', 'gated'))",
             [message_id],
         )?;
+        // A continuation back in its queue is about the first task its window still
+        // holds: one about a task paused since would wait for that task, the others
+        // with it (`continuations`).
+        repoint(store, &known_message(store, message_id)?)?;
         adopt(store, message_id)?;
         known_message(store, message_id)
     })

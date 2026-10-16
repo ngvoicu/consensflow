@@ -526,6 +526,110 @@ fn a_pause_note_its_window_was_given_keeps_nothing_when_its_task_is_cancelled() 
     assert!(said_again(&w).is_empty(), "{:?}", said_again(&w));
 }
 
+/// One note naming T-`warned`, with the words that its window's program may still
+/// run, and T-`plain`, on its way to the chief when the human cancels T-`warned`.
+/// A cancel leaves a note of several as it is: it is on its way.
+fn a_note_of_two_on_its_way(w: &mut World) -> (i64, i64, i64) {
+    let warned = at_work(w, "zeus");
+    let plain = at_work(w, "diana");
+    closed_with(w, &[warned], OUTLIVED);
+    closed_with(w, &[plain], CLOSED);
+    let note = w
+        .ledger
+        .note_pause(w.project, "chief", warned, OUTLIVED)
+        .expect("the chief is told");
+    w.ledger
+        .join_pause_note(note.id, plain, CLOSED)
+        .expect("joined")
+        .expect("the note takes it");
+    w.ledger.begin_delivery(note.id).expect("on its way");
+    w.ledger
+        .cancel_task(w.project, warned, "human")
+        .expect("called off");
+    assert_eq!(w.message(note.id).state, "delivering");
+    assert!(said_again(w).is_empty(), "it may yet arrive");
+    (warned, plain, note.id)
+}
+
+/// The warning of each task the note names that was cancelled on its way, and
+/// the words of the note once it came back.
+fn kept(w: &World, note: i64) -> (Vec<String>, String) {
+    (said_again(w), w.message(note).body)
+}
+
+/// Both reviews of 2026-10-16, round 6: a note naming T-1 and T-2, given up at
+/// its last attempt after T-1 was cancelled, failed with T-1's warning in it, and
+/// nothing said the warning again.
+#[test]
+fn a_note_of_several_given_up_after_one_of_its_tasks_was_cancelled_says_that_task_s_warning_again()
+{
+    let mut w = world();
+    let (warned, plain, note) = a_note_of_two_on_its_way(&mut w);
+
+    let given_up = w
+        .ledger
+        .fail_delivery(note, "the window refused it")
+        .expect("given up");
+
+    assert_eq!(given_up.state, "failed", "the rest of it failed");
+    let alone = format!(
+        "T-{plain} is paused: {CLOSED}. Resume it with: cf task resume T-{plain} \"…\"; its window comes back on its own conversation."
+    );
+    assert_eq!(
+        kept(&w, note),
+        (
+            vec![format!("T-{warned} cancelled. Before that, {OUTLIVED}.")],
+            alone
+        )
+    );
+}
+
+/// The same where it goes back to its queue: it names the rest, and the warning of
+/// the one cancelled is said apart (Round 6's written limit: it went back whole).
+#[test]
+fn a_note_of_several_that_goes_back_after_one_of_its_tasks_was_cancelled_names_the_rest_and_says_the_warning_apart(
+) {
+    let mut w = world();
+    let (warned, plain, note) = a_note_of_two_on_its_way(&mut w);
+
+    w.ledger
+        .retry_delivery(note, "the window went", true)
+        .expect("tried again");
+
+    assert_eq!(w.message(note).state, "queued");
+    assert_eq!(
+        w.message(note).task_number,
+        Some(plain),
+        "it is T-{plain}'s alone"
+    );
+    assert_eq!(
+        said_again(&w),
+        [format!("T-{warned} cancelled. Before that, {OUTLIVED}.")]
+    );
+}
+
+/// And where every task it names was cancelled: it goes no more, and each warning
+/// it said is said again.
+#[test]
+fn a_note_of_several_whose_tasks_were_all_cancelled_on_its_way_is_withdrawn_when_it_comes_back() {
+    let mut w = world();
+    let (warned, plain, note) = a_note_of_two_on_its_way(&mut w);
+    w.ledger
+        .cancel_task(w.project, plain, "human")
+        .expect("called off");
+
+    let given_up = w
+        .ledger
+        .fail_delivery(note, "the window refused it")
+        .expect("given up");
+
+    assert_eq!(given_up.state, "cancelled");
+    assert_eq!(
+        said_again(&w),
+        [format!("T-{warned} cancelled. Before that, {OUTLIVED}.")]
+    );
+}
+
 #[test]
 fn a_ledger_from_before_the_mark_keeps_every_paused_task_paused_through_a_resume() {
     const AT: &str = "2026-10-15T00:00:00.000Z";

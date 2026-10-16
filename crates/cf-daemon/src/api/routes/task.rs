@@ -10,7 +10,9 @@
 //! received when `cf` says it wrote it whole (`POST /api/answers/read`), not
 //! when the thread was served. What the human has not passed on is not for an
 //! agent to read: the thread leaves out a gated message, and the brief is
-//! not given while it waits at the gate.
+//! not given while it waits at the gate. Nor is what waits for the Resume: while
+//! the project is closed, the thread leaves out a message no window was handed
+//! yet, and the brief while it is one ([`Waits`]).
 
 use cf_base::js;
 use cf_ledger::{NewQuestion, TaskThread};
@@ -19,6 +21,7 @@ use serde_json::{json, Map, Value};
 
 use super::{Answer, Caller, Context, Failure, Request, TaskAction};
 use crate::api::views::{value, MessageSummary, TaskSummary};
+use crate::api::waits::Waits;
 
 /// A task in one of these states has a window a `tell` reaches (a queued one
 /// has none yet).
@@ -57,9 +60,14 @@ pub(super) async fn handle(
     let get = request.method == Method::GET;
     if action.is_none() && get {
         // The thread as far as the human has let it go: a gated message waits
-        // unseen, and so does the brief while it is one of them.
-        let held_back = brief_waits_at_the_gate(&task);
-        task.messages.retain(|message| message.state != "gated");
+        // unseen, and so does the brief while it is one of them. While the
+        // project is closed, so does a message no window was handed yet, and the
+        // brief while it is one: `cf` would take an answer it printed for
+        // received, so one whose text waits is not in the thread at all.
+        let waits = Waits::now(context, caller)?;
+        let held_back = brief_waits(&task, &waits);
+        task.messages
+            .retain(|message| message.state != "gated" && !waits.holds(message));
         if held_back {
             task.task.body.clear();
         }
@@ -94,13 +102,14 @@ pub(super) async fn handle(
     }
 }
 
-/// Whether the task's brief still waits for the human to pass it on: a task
-/// message for the window that has the task is held at the gate, and none was
-/// received by it. A window that received the brief has it, and a later task
-/// message held at the gate (the words of a resume) does not take it back.
-/// The brief is `TaskView.body`: the human and the board read it from the
-/// ledger, and an agent does not until it has passed.
-fn brief_waits_at_the_gate(task: &TaskThread) -> bool {
+/// Whether the task's brief still waits: for the human to pass it on (a task
+/// message for the window that has the task is held at the gate), or for the
+/// Resume (one no window was handed yet, read while the project is closed,
+/// [`Waits`]), and none was received by the window. A window that received the
+/// brief has it, and a later task message that waits (the words of a resume)
+/// does not take it back. The brief is `TaskView.body`: the human and the board
+/// read it from the ledger, and an agent does not until it has passed.
+fn brief_waits(task: &TaskThread, waits: &Waits) -> bool {
     let Some(window) = task.task.assignee.as_deref() else {
         return false;
     };
@@ -113,6 +122,7 @@ fn brief_waits_at_the_gate(task: &TaskThread) -> bool {
         match message.state.as_str() {
             "delivered" | "read" => return false,
             "gated" => held = true,
+            _ if waits.holds(message) => held = true,
             _ => {}
         }
     }

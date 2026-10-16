@@ -206,6 +206,12 @@ impl Ledger {
         messages::confirm_delivery_telling(&mut self.store, message_id, receipt)
     }
 
+    /// A message about to be begun, as it stands: a continuation names only the
+    /// tasks its window still holds, and one that holds none is withdrawn (none).
+    pub fn as_it_stands(&mut self, message_id: i64) -> Result<Option<MessageView>, LedgerError> {
+        messages::as_it_stands(&mut self.store, message_id)
+    }
+
     /// A message not yet delivered that no longer applies.
     pub fn cancel_message(
         &mut self,

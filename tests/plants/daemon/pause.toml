@@ -220,7 +220,7 @@ runs = ["engine-dispatcher"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
-find = "        if on_its_way && self.unmoved(participant, captured)? {"
+find = "        if on_its_way && self.unmoved(participant.id, participant.project_id, captured)? {"
 replace = "        if on_its_way {"
 
 [[plant]]
@@ -315,8 +315,8 @@ runs = ["daemon-lib-routes-task"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/api/routes/task.rs"
-find = '        task.messages.retain(|message| message.state != "gated");'
-replace = "        task.messages.retain(|_| true);"
+find = '            .retain(|message| message.state != "gated" && !waits.holds(message));'
+replace = "            .retain(|message| !waits.holds(message));"
 
 [[plant]]
 name = "pause: a lane says nothing of a stop its window ignores"

@@ -859,7 +859,7 @@ impl Dispatcher {
                 participant.clone(),
             );
             self.act(&record, async move {
-                this.launch(&held, &at, &who, Some(next), None).await
+                this.launch(&held, &at, &who, Some(next)).await
             })
             .await;
             return Ok(());
@@ -1227,21 +1227,28 @@ impl Dispatcher {
                 return Ok(());
             };
             // A window the Resume brings back opens only for work still at work once
-            // its cut was read, and pays only the stops the Resume read with that
-            // work: one asked after is owed.
-            let (first, captured) = match &coming {
-                Some(coming) => {
-                    let note = this.cut_note(&project, &who, coming).await?;
-                    if !this.still_coming(&who, coming)? {
-                        return Ok(());
+            // its cut was read. Work that moved while the record was read is read
+            // again, and the window comes back for what is at work then, if anything
+            // is (both reviews of 2026-10-16, round 6: a window of two tasks, one
+            // paused meanwhile, was to come back for both). What moves after is the
+            // launch's: its continuation names only what its window holds as it is
+            // begun, and the launch watches that.
+            let first = match coming {
+                Some(mut coming) => loop {
+                    let note = this.cut_note(&project, &who, &coming).await?;
+                    if this.still_coming(&who, &coming)? {
+                        break note;
                     }
-                    (note, coming.captured())
-                }
-                None => (None, None),
+                    match this.coming_now(&project, participant)? {
+                        Some(now) => coming = now,
+                        None => return Ok(()),
+                    }
+                },
+                None => None,
             };
             let (launching, at) = (Rc::clone(&this), Rc::clone(&held));
             this.act(&held, async move {
-                launching.launch(&at, &project, &who, first, captured).await
+                launching.launch(&at, &project, &who, first).await
             })
             .await;
             Ok(())

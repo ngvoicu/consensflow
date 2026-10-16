@@ -204,7 +204,7 @@ replace = '''project.filter(|project| project.state == "open")'''
 
 [[plant]]
 name = "start suspended: a Resume opens the window of a task the human paused"
-meant = "a_task_the_human_paused_stays_paused_through_a_restart_and_a_resume"
+meant = "a_task_the_human_paused_whose_window_was_at_rest_brings_back_no_window_for_it"
 runs = ["engine-resume"]
 
 [[plant.edit]]
@@ -214,7 +214,7 @@ replace = '''matches!(task.state.as_str(), "working" | "waiting" | "paused")'''
 
 [[plant]]
 name = "start suspended: a Resume after a Close opens the window of a task the chief paused"
-meant = "the_chiefs_pause_and_its_tell_stay_paused_through_a_close_and_a_resume"
+meant = "a_task_the_human_paused_whose_window_was_at_rest_brings_back_no_window_for_it"
 runs = ["engine-resume"]
 
 [[plant.edit]]
@@ -292,8 +292,9 @@ runs = ["engine-resume"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/resume.rs"
-find = '''        if told.is_some() {
-            return Ok(told);
+find = '''        if let Some(note) = told.next() {
+            self.one_continuation(told.chain(others))?;
+            return Ok(Some(note));
         }
 '''
 replace = ""

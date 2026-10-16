@@ -15,9 +15,9 @@ use std::rc::Rc;
 
 use cf_engine::testing::{Context, Gate};
 use cf_engine::SwitchWhen;
-use cf_harness::contract::Admission;
+use cf_harness::contract::{Admission, Readiness};
 use cf_harness::records::Role;
-use cf_ledger::{LedgerError, MessageView};
+use cf_ledger::{continuation, LedgerError, MessageView, NewNote};
 use serde_json::json;
 
 use crate::chiefs::{handoffs_of, to, with_codex};
@@ -268,11 +268,22 @@ fn holding_two(context: &Context, project: i64, zeus: i64) {
     assert_eq!(stop.map(|stop| stop.number), Some(2));
 }
 
+/// The continuations zeus's window was given, in their own words.
+fn continuations_given(context: &Context) -> Vec<String> {
+    given(context, "zeus-amber-pine")
+        .iter()
+        .flat_map(|text| text.split('\n'))
+        .filter(|line| line.starts_with("ConsensFlow stopped while you were working on "))
+        .map(str::to_owned)
+        .collect()
+}
+
 /// Sol's review of 2026-10-16, round 5: the Resume read the stops of T-2 alone,
 /// and the human's pause of T-1 while it read zeus's record was taken for
-/// nothing: the window opened told to go on with both.
+/// nothing: the window opened told to go on with both. Round 6: it comes back
+/// for T-2, which the Close paused, and is told of T-2 alone.
 #[test]
-fn a_task_the_human_pauses_while_the_resume_reads_the_record_of_a_session_with_two_stays_paused_and_its_window_stays_closed(
+fn a_task_the_human_pauses_while_the_resume_reads_the_record_of_a_session_with_two_stays_paused_and_its_window_comes_back_for_the_other(
 ) {
     let context = Context::new();
     let tiers = at_work(&context);
@@ -293,22 +304,291 @@ fn a_task_the_human_pauses_while_the_resume_reads_the_record_of_a_session_with_t
         context.pass().unwrap();
     }
 
-    assert_eq!(tiers.task(1).task.state, "paused");
+    assert_eq!(
+        [tiers.task(1).task.state, tiers.task(2).task.state],
+        ["paused", "working"]
+    );
     assert_eq!(
         opened(&context)[before..],
-        ["p1-chief"],
-        "zeus's window stays closed"
+        ["p1-chief", "p1-zeus-amber-pine"]
     );
-    assert!(
-        cut_notes(&context, zeus).is_empty(),
-        "no note told it to go on"
+    assert_eq!(continuations_given(&context), [continuation(&[2])]);
+    // The Resume read the work again and gave it in its own launch: no launch
+    // went on the work as it was and gave the continuation back.
+    let note = cut_notes(&context, zeus).pop().expect("the continuation");
+    assert_eq!(sent_back(&context, project, note.id), 0);
+}
+
+/// The same where the human paused T-2, the task whose stops zeus's window pays:
+/// the window as the Resume read it comes no more, and the Resume reads its work
+/// again and brings it back for T-1.
+#[test]
+fn a_task_the_human_pauses_while_the_resume_reads_the_record_of_a_session_with_two_is_read_again_and_the_window_comes_back_for_the_other(
+) {
+    let context = Context::new();
+    let tiers = at_work(&context);
+    let project = tiers.project.id;
+    let zeus = tiers.id("zeus-amber-pine");
+    let native = native_of(&context, zeus).expect("its conversation");
+    context.close_project(project).unwrap();
+    holding_two(&context, project, zeus);
+    let reading = context
+        .adapter
+        .record_holds
+        .hold(move |asked| asked[0]["conversation"]["nativeSession"] == native.as_str());
+    let before = opened(&context).len();
+    context.resume_project(project).unwrap();
+    context.human_pause(project, 2);
+    reading.open();
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+
+    assert_eq!(
+        [tiers.task(1).task.state, tiers.task(2).task.state],
+        ["working", "paused"]
     );
+    assert_eq!(
+        opened(&context)[before..],
+        ["p1-chief", "p1-zeus-amber-pine"]
+    );
+    assert_eq!(continuations_given(&context), [continuation(&[1])]);
+}
+
+/// How often `message` was sent back to its queue.
+fn sent_back(context: &Context, project: i64, message: i64) -> usize {
+    context
+        .ledger
+        .borrow()
+        .events(project, 0, 1000)
+        .unwrap()
+        .iter()
+        .filter(|event| event.kind == "delivery.retried" && event.data["message"] == message)
+        .count()
+}
+
+/// Both reviews of 2026-10-16, round 6: the Resume's launch watched T-1 and T-2,
+/// and the human paused T-2 while the window was prepared. The launch was over,
+/// its continuation went back to its queue whole, and the next launch, which
+/// watched nothing, opened the window told to go on with T-2 too.
+#[test]
+fn a_continuation_a_launch_gave_back_names_only_the_work_still_at_work_when_the_next_launch_begins_it(
+) {
+    let context = Context::new();
+    let tiers = at_work(&context);
+    let project = tiers.project.id;
+    let zeus = tiers.id("zeus-amber-pine");
+    context.close_project(project).unwrap();
+    holding_two(&context, project, zeus);
+    let whole = continuation(&[1, 2]);
+    let preparing = context.adapter.prepare_holds.hold(move |asked| {
+        asked[0]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains(&whole))
+    });
+    let before = opened(&context).len();
+    context.resume_project(project).unwrap();
+    context.settle();
+    context.human_pause(project, 2);
+    preparing.open();
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+
+    assert_eq!(
+        [tiers.task(1).task.state, tiers.task(2).task.state],
+        ["working", "paused"]
+    );
+    assert_eq!(
+        opened(&context)[before..],
+        ["p1-chief", "p1-zeus-amber-pine"]
+    );
+    assert_eq!(continuations_given(&context), [continuation(&[1])]);
+}
+
+/// OpenCode's shape: the continuation goes in once the window is up, through its
+/// own server, and the human paused T-2 while the window came up. Nothing of it
+/// goes in then, and the window, up, is given it naming T-1 alone.
+#[test]
+fn a_continuation_a_window_takes_once_it_is_up_names_only_the_work_still_at_work_when_it_goes_in() {
+    let context = Context::new();
+    context.adapter.seeds.set(true);
+    let tiers = at_work(&context);
+    let project = tiers.project.id;
+    let zeus = tiers.id("zeus-amber-pine");
+    let native = native_of(&context, zeus).expect("its conversation");
+    context.close_project(project).unwrap();
+    holding_two(&context, project, zeus);
+    let starting = context
+        .adapter
+        .start_holds
+        .hold(move |asked| asked[0]["launch"]["nativeSession"] == native.as_str());
+    context.resume_project(project).unwrap();
+    context.settle();
+    context.human_pause(project, 2);
+    starting.open();
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+
+    assert_eq!(tiers.task(2).task.state, "paused");
+    assert_eq!(continuations_given(&context), [continuation(&[1])]);
+}
+
+/// A continuation an earlier read left queued, written for work as it was then
+/// (a launch that never opened, a quit before it went in): the Resume tells the
+/// window once, of its work as it is now.
+#[test]
+fn the_resume_withdraws_a_continuation_left_queued_for_work_as_it_was_and_tells_the_window_once() {
+    let context = Context::new();
+    let tiers = at_work(&context);
+    let project = tiers.project.id;
+    let zeus = tiers.id("zeus-amber-pine");
+    context.close_project(project).unwrap();
+    holding_two(&context, project, zeus);
+    let old = context
+        .ledger
+        .borrow_mut()
+        .note(
+            project,
+            &NewNote {
+                from: None,
+                to: "zeus-amber-pine".to_owned(),
+                task: Some(1),
+                body: continuation(&[1, 2]),
+            },
+        )
+        .unwrap();
+    // The human's pause takes over the one the Close made: T-2 stays paused.
+    context.human_pause(project, 2);
+    context.resume_project(project).unwrap();
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+
+    assert_eq!(context.message(old.id).state, "cancelled");
+    assert_eq!(continuations_given(&context), [continuation(&[1])]);
+}
+
+/// Zeus's window, open and at rest, holding T-1 and T-2, and a continuation
+/// queued for it naming both: one a window is delivered, not launched with
+/// (behind the note that says its role, or after a first message that went
+/// back while the window came up).
+fn continuation_for_an_open_window(context: &Context, project: i64, zeus: i64) {
+    holding_two(context, project, zeus);
+    context
+        .adapter
+        .with("zeus-amber-pine", |agent| agent.settled = true);
+    context
+        .ledger
+        .borrow_mut()
+        .note(
+            project,
+            &NewNote {
+                from: None,
+                to: "zeus-amber-pine".to_owned(),
+                task: Some(1),
+                body: continuation(&[1, 2]),
+            },
+        )
+        .unwrap();
+}
+
+/// The same with T-1 paused while the window was prepared, its continuation
+/// begun already: T-1 is not the task whose stops the window pays, and what was
+/// read of every task it names ends the launch all the same.
+#[test]
+fn a_continuation_a_launch_gave_back_for_a_task_other_than_the_one_its_window_pays_names_only_the_work_still_at_work(
+) {
+    let context = Context::new();
+    let tiers = at_work(&context);
+    let project = tiers.project.id;
+    let zeus = tiers.id("zeus-amber-pine");
+    context.close_project(project).unwrap();
+    holding_two(&context, project, zeus);
+    let whole = continuation(&[1, 2]);
+    let preparing = context.adapter.prepare_holds.hold(move |asked| {
+        asked[0]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains(&whole))
+    });
+    let before = opened(&context).len();
+    context.resume_project(project).unwrap();
+    context.settle();
+    context.human_pause(project, 1);
+    preparing.open();
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+
+    assert_eq!(
+        [tiers.task(1).task.state, tiers.task(2).task.state],
+        ["paused", "working"]
+    );
+    assert_eq!(
+        opened(&context)[before..],
+        ["p1-chief", "p1-zeus-amber-pine"]
+    );
+    assert_eq!(continuations_given(&context), [continuation(&[2])]);
+}
+
+/// The same of a continuation delivered into an open window: the human paused
+/// T-2 while the window got ready for it, and it names only the work still at
+/// work as its delivery begins.
+#[test]
+fn a_continuation_delivered_into_an_open_window_names_only_the_work_still_at_work_as_it_is_begun() {
+    let context = Context::new();
+    let tiers = at_work(&context);
+    let project = tiers.project.id;
+    let zeus = tiers.id("zeus-amber-pine");
+    *context.adapter.ready.borrow_mut() = Some(Rc::new(|| Ok(Readiness::Ready)));
+    let readying = context
+        .adapter
+        .ready_holds
+        .hold(|asked| asked[0]["pane"]["id"] == "p1-zeus-amber-pine");
+    continuation_for_an_open_window(&context, project, zeus);
+    context.pass().unwrap();
+    context.human_pause(project, 2);
+    readying.open();
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+
+    assert_eq!(tiers.task(2).task.state, "paused");
+    assert_eq!(continuations_given(&context), [continuation(&[1])]);
+}
+
+/// And where the human paused T-2 while the adapter took the continuation, its
+/// delivery begun: nothing of it goes in, and it goes again, naming T-1 alone.
+#[test]
+fn a_continuation_whose_task_moved_while_its_adapter_took_it_is_handed_nothing_and_goes_again_narrowed(
+) {
+    let context = Context::new();
+    let tiers = at_work(&context);
+    let project = tiers.project.id;
+    let zeus = tiers.id("zeus-amber-pine");
+    let whole = continuation(&[1, 2]);
+    let handing = context.adapter.deliver_holds.hold(move |asked| {
+        asked[0]["text"]
+            .as_str()
+            .is_some_and(|text| text.contains(&whole))
+    });
+    continuation_for_an_open_window(&context, project, zeus);
+    context.pass().unwrap();
+    context.human_pause(project, 2);
+    handing.open();
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+
+    assert_eq!(tiers.task(2).task.state, "paused");
+    assert_eq!(continuations_given(&context), [continuation(&[1])]);
 }
 
 /// The same, of the launch's own wait for zeus's record, once the Resume found
 /// its work unmoved.
 #[test]
-fn a_task_the_human_pauses_while_the_resume_s_launch_reads_the_record_of_a_session_with_two_stays_paused_and_its_window_stays_closed(
+fn a_task_the_human_pauses_while_the_resume_s_launch_reads_the_record_of_a_session_with_two_stays_paused_and_its_window_comes_back_for_the_other(
 ) {
     let context = Context::new();
     let tiers = at_work(&context);
@@ -334,16 +614,19 @@ fn a_task_the_human_pauses_while_the_resume_s_launch_reads_the_record_of_a_sessi
     context.resume_project(project).unwrap();
     context.human_pause(project, 1);
     looking.open();
-    for _ in 0..3 {
+    for _ in 0..4 {
         context.pass().unwrap();
     }
 
-    assert_eq!(tiers.task(1).task.state, "paused");
+    assert_eq!(
+        [tiers.task(1).task.state, tiers.task(2).task.state],
+        ["paused", "working"]
+    );
     assert_eq!(
         opened(&context)[before..],
-        ["p1-chief"],
-        "zeus's window stays closed"
+        ["p1-chief", "p1-zeus-amber-pine"]
     );
+    assert_eq!(continuations_given(&context), [continuation(&[2])]);
 }
 
 /// Astra's review of 2026-10-16, round 4: a Close answers at the first window's
@@ -670,6 +953,48 @@ fn a_cancel_keeps_the_warning_of_a_pause_note_whose_last_attempt_its_window_refu
             .all(|message| !message.body.contains("did not reach")),
         "nothing failed"
     );
+}
+
+/// Both reviews of 2026-10-16, round 6: a note naming T-1, with its warning, and
+/// T-2 was refused at its last attempt after T-1 was cancelled on its way; it
+/// failed with the warning in it, and the warning was lost.
+#[test]
+fn a_cancel_keeps_the_warning_of_a_note_of_several_whose_last_attempt_its_window_refused() {
+    let context = Context::new();
+    let tiers = at_work(&context);
+    let project = tiers.project.id;
+    context.adapter.with("chief", |agent| agent.admit = false);
+    let note = {
+        let mut ledger = context.ledger.borrow_mut();
+        ledger.pause_task(project, 1, None, Some(SURVIVOR)).unwrap();
+        ledger.pause_task(project, 2, None, None).unwrap();
+        let note = ledger.note_pause(project, "chief", 1, SURVIVOR).unwrap();
+        ledger
+            .join_pause_note(note.id, 2, "@diana-brisk-birch's window closed")
+            .unwrap()
+            .unwrap()
+    };
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(context.message(note.id).attempts, 2);
+    let marking = context.background.hold_marks();
+    context.pass().unwrap();
+    assert_eq!(context.message(note.id).state, "delivering");
+    context
+        .ledger
+        .borrow_mut()
+        .cancel_task(project, 1, "human")
+        .unwrap();
+    marking.open();
+    context.settle();
+
+    assert_eq!(
+        said_again(&context, project),
+        [format!("T-1 cancelled. Before that, {SURVIVOR}.")]
+    );
+    let failed = context.message(note.id);
+    assert_eq!(failed.state, "failed");
+    assert!(!failed.body.contains("T-1"), "{}", failed.body);
 }
 
 /// And where the app quits with the note on its way: the start finds it never

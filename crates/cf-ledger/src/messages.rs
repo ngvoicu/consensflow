@@ -13,6 +13,7 @@
 
 mod again;
 mod carrying;
+mod continuations;
 mod delivery;
 mod gate;
 mod holds;
@@ -33,6 +34,8 @@ use crate::views::{message_view, TaskRow, MESSAGE_SELECT};
 
 pub(crate) use again::tell_sent_back;
 pub(crate) use carrying::{adopt, fold, release_carried, release_stranded, transfer};
+pub(crate) use continuations::as_it_stands;
+pub use continuations::{continuation, continuation_tasks};
 pub(crate) use delivery::{
     begin_delivery, cancel_message, confirm_delivery, confirm_delivery_telling, fail_delivery,
     first_received, in_flight, last_pasted, next_delivery, next_delivery_of, retry_delivery,
