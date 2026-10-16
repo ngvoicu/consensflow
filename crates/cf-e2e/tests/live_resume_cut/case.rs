@@ -44,8 +44,8 @@ impl<'a> Run<'a> {
     fn window(&self, id: &str, session: Option<&str>) -> Result<Window<'a>> {
         let open = Open::new(self.rig, self.install, FOLDER, id).agent(self.agent.clone());
         match session {
-            Some(session) => open.resume(session).open(),
-            None => open.open(),
+            Some(session) => open.resume(session).open(self.log),
+            None => open.open(self.log),
         }
     }
 

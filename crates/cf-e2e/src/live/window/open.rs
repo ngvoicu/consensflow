@@ -230,7 +230,7 @@ impl<'a> Open<'a> {
     /// [`Open::open`], and what came of asking Claude to trust the folder said in
     /// the `log` where it was asked, as the run of `who` (`claude: trust: trusted`).
     pub fn open_telling(self, log: &Log, who: &str) -> Result<Window<'a>> {
-        let window = self.open()?;
+        let window = self.open(log)?;
         if let Some(trust) = window.trust() {
             log.say(trust_line(who, trust));
         }
@@ -292,9 +292,12 @@ impl<'a> Open<'a> {
         Ok((start, program))
     }
 
-    /// Opens it. A Claude window is opened after Claude has been asked to trust
-    /// its folder, and says what came of that ([`Window::trust`]).
-    pub fn open(self) -> Result<Window<'a>> {
+    /// Opens it, and notes in the run's `log` the agent it was launched on
+    /// ([`Log::launched`]). A Claude window is opened after Claude has been asked
+    /// to trust its folder, and says what came of that ([`Window::trust`]). An
+    /// agent a window opened here cannot run is the error, before anything opens
+    /// ([`without_the_daemon`]).
+    pub fn open(self, log: &Log) -> Result<Window<'a>> {
         let harness = self.install.harness();
         let home = self
             .rig
@@ -303,6 +306,7 @@ impl<'a> Open<'a> {
             .ok_or_else(|| Error::Daemon("the rig gives its windows no home".to_owned()))?;
         let workspace = live_folder_in(Path::new(home), &self.folder)?;
         let agent = self.agent.clone().unwrap_or_else(|| agents::agent(harness));
+        without_the_daemon(&agent)?;
         let kind = agent["kind"]
             .as_str()
             .unwrap_or_else(|| harness.kind())
@@ -359,6 +363,7 @@ impl<'a> Open<'a> {
                 harness.name()
             )));
         }
+        log.launched(&agent);
         Ok(Window {
             rig: self.rig,
             harness,
@@ -413,6 +418,28 @@ fn keep_only_consensflows_hooks(args: &[String], cf: &Path) -> Result<()> {
         .map_err(|failed| Error::Daemon(format!("the launch's config is no JSON: {failed}")))?;
     consensflows_hooks_of(&mut config, &ask::devin_hooks(cf, true)?);
     files::write(path, config.to_string())
+}
+
+/// Why a window opened here, without the daemon, cannot run `agent`: an OpenCode
+/// agent given an effort. OpenCode takes its effort as the `variant` of the first
+/// message, which the daemon posts to the window's own server; a window opened
+/// here has no such server (its messages are typed into it) and its command line
+/// has no word for an effort, so it would run on the model's default while the run
+/// said it ran on the effort.
+pub fn without_the_daemon(agent: &Value) -> Result {
+    let text = |key: &str| agent[key].as_str().filter(|text| !text.is_empty());
+    match (
+        agents::harness_of(agent),
+        text("effort").or(text("thinking")),
+    ) {
+        (Some(Harness::OpenCode), Some(effort)) => Err(Error::Daemon(format!(
+            "an OpenCode window opened without the daemon is given no effort: OpenCode takes \
+             it as the variant of the first message the daemon sends to the window's server, \
+             which this window has not; run opencode={} with no :{effort}",
+            text("model").unwrap_or("<model>")
+        ))),
+        _ => Ok(()),
+    }
 }
 
 /// The environment a harness is asked where its records are with, for a window in

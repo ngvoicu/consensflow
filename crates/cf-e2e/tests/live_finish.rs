@@ -151,7 +151,7 @@ fn each(log: &Log, checked: &str, step: impl Fn(Who) -> Result<Finished>) -> Res
             format!("{version}: {}", finished.summary),
         ));
     }
-    log.block("what each worker came to", &report::table(&checks));
+    log.report("what each worker came to", &report::table(&checks));
     report::verdict(&checks)
 }
 
@@ -159,7 +159,7 @@ fn each(log: &Log, checked: &str, step: impl Fn(Who) -> Result<Finished>) -> Res
 #[ignore = "opt-in: spends the machine's quota on one short task of each harness named; cargo xtask live finish (npm run live:finish)"]
 fn a_worker_that_runs_a_command_finishes_its_task_and_its_result_reaches_the_chief_with_nothing_of_its_own_ended(
 ) -> Result {
-    let log = Log::new("live finish");
+    let log = Log::begin("live finish")?;
     each(&log, CHECKED, |who| {
         let task = check::task(who)?;
         check::run(who, &check::plan(who), &task, Path::new(FAKE_AGENT), &log)
@@ -170,7 +170,7 @@ fn a_worker_that_runs_a_command_finishes_its_task_and_its_result_reaches_the_chi
 #[ignore = "opt-in: spends the machine's quota on one short task of each harness named; cargo xtask live finish (npm run live:finish)"]
 fn a_worker_that_leaves_a_long_command_running_and_answers_has_its_task_done_the_command_ended_and_the_chief_told(
 ) -> Result {
-    let log = Log::new("live finish (a command left running)");
+    let log = Log::begin("live finish (a command left running)")?;
     each(&log, CHECKED_LEAVING, |who| {
         leaving::run(who, &leaving::plan(who), Path::new(FAKE_AGENT), &log)
     })

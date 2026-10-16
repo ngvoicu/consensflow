@@ -126,7 +126,7 @@ fn plan_of(options: &Options) -> Plan {
 #[ignore = "opt-in: spends the machine's quota on a chief and a worker of each harness named; cargo xtask live bench (npm run bench:core)"]
 fn the_core_delivers_between_a_real_chief_and_real_workers_and_comes_back_after_the_apps_quit(
 ) -> Result {
-    let log = Log::new("live bench");
+    let log = Log::begin("live bench")?;
     let options = options(
         live::option("chief").as_deref(),
         live::option("reviewer").as_deref(),
@@ -193,7 +193,7 @@ fn the_core_delivers_between_a_real_chief_and_real_workers_and_comes_back_after_
         checks.len() - failed,
         checks.len()
     ));
-    log.block("what each check came to", &report::table(&checks));
+    log.report("what each check came to", &report::table(&checks));
     // A rig that would not end fails the run after what the checks came to is said.
     closed?;
     report::verdict(&checks)

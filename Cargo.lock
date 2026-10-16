@@ -450,9 +450,11 @@ dependencies = [
  "http-body-util",
  "hyper",
  "hyper-util",
+ "nix",
  "regex",
  "reqwest",
  "rusqlite",
+ "rustix",
  "rustls",
  "rustls-platform-verifier",
  "serde",
@@ -463,6 +465,8 @@ dependencies = [
  "thiserror 2.0.20",
  "tokio",
  "url",
+ "winapi-util",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

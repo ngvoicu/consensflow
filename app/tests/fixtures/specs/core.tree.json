@@ -1,0 +1,148 @@
+[
+  {
+    "name": "api-refactor",
+    "path": "api-refactor",
+    "entries": [
+      {
+        "name": "SPEC.md",
+        "path": "api-refactor/SPEC.md",
+        "size": 719
+      },
+      {
+        "name": "research-01.md",
+        "path": "api-refactor/research-01.md",
+        "size": 104
+      }
+    ]
+  },
+  {
+    "name": "legacy-cleanup",
+    "path": "legacy-cleanup",
+    "entries": [
+      {
+        "name": "SPEC.md",
+        "path": "legacy-cleanup/SPEC.md",
+        "size": 295
+      }
+    ]
+  },
+  {
+    "name": "notes.txt",
+    "path": "notes.txt",
+    "size": 62
+  },
+  {
+    "name": "registry.md",
+    "path": "registry.md",
+    "size": 416
+  },
+  {
+    "name": "unlisted-spike",
+    "path": "unlisted-spike",
+    "entries": [
+      {
+        "name": "SPEC.md",
+        "path": "unlisted-spike/SPEC.md",
+        "size": 257
+      }
+    ]
+  },
+  {
+    "name": "upload-fix",
+    "path": "upload-fix",
+    "entries": [
+      {
+        "name": "SPEC.md",
+        "path": "upload-fix/SPEC.md",
+        "size": 441
+      }
+    ]
+  },
+  {
+    "name": "user-auth",
+    "path": "user-auth",
+    "entries": [
+      {
+        "name": "SPEC.md",
+        "path": "user-auth/SPEC.md",
+        "size": 3472
+      },
+      {
+        "name": "SPEC.md.sha256",
+        "path": "user-auth/SPEC.md.sha256",
+        "size": 74
+      },
+      {
+        "name": "artifacts",
+        "path": "user-auth/artifacts",
+        "entries": [
+          {
+            "name": "capture.bin",
+            "path": "user-auth/artifacts/capture.bin",
+            "size": 12
+          },
+          {
+            "name": "lockouts.json",
+            "path": "user-auth/artifacts/lockouts.json",
+            "size": 76
+          },
+          {
+            "name": "notes.md",
+            "path": "user-auth/artifacts/notes.md",
+            "size": 87
+          }
+        ]
+      },
+      {
+        "name": "flow.png",
+        "path": "user-auth/flow.png",
+        "size": 92
+      },
+      {
+        "name": "interview-01.md",
+        "path": "user-auth/interview-01.md",
+        "size": 180
+      },
+      {
+        "name": "interview-02.md",
+        "path": "user-auth/interview-02.md",
+        "size": 98
+      },
+      {
+        "name": "logo.svg",
+        "path": "user-auth/logo.svg",
+        "size": 266
+      },
+      {
+        "name": "page-audit.md",
+        "path": "user-auth/page-audit.md",
+        "size": 150
+      },
+      {
+        "name": "research-01.md",
+        "path": "user-auth/research-01.md",
+        "size": 496
+      },
+      {
+        "name": "research-02.md",
+        "path": "user-auth/research-02.md",
+        "size": 358
+      },
+      {
+        "name": "research-10.md",
+        "path": "user-auth/research-10.md",
+        "size": 92
+      },
+      {
+        "name": "research-9.md",
+        "path": "user-auth/research-9.md",
+        "size": 105
+      },
+      {
+        "name": "strategy-api-v1.md",
+        "path": "user-auth/strategy-api-v1.md",
+        "size": 77
+      }
+    ]
+  }
+]

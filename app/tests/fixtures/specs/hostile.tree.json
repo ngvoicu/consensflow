@@ -1,0 +1,50 @@
+[
+  {
+    "name": "assets",
+    "path": "assets",
+    "entries": [
+      {
+        "name": "spec-styles.css",
+        "path": "assets/spec-styles.css",
+        "size": 103
+      }
+    ]
+  },
+  {
+    "name": "evil",
+    "path": "evil",
+    "entries": [
+      {
+        "name": "SPEC.md",
+        "path": "evil/SPEC.md",
+        "size": 1715
+      }
+    ]
+  },
+  {
+    "name": "evil-html",
+    "path": "evil-html",
+    "entries": [
+      {
+        "name": "SPEC.html",
+        "path": "evil-html/SPEC.html",
+        "size": 5570
+      },
+      {
+        "name": "mockup-app.html",
+        "path": "evil-html/mockup-app.html",
+        "size": 715
+      },
+      {
+        "name": "mockup-leave.html",
+        "path": "evil-html/mockup-leave.html",
+        "size": 260
+      }
+    ]
+  },
+  {
+    "name": "registry.md",
+    "path": "registry.md",
+    "size": 414
+  }
+]

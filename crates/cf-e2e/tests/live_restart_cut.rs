@@ -537,7 +537,7 @@ fn checked(
 #[ignore = "opt-in: spends the machine's quota on a chief or a worker of each harness named; cargo xtask live restart-cut (npm run live:restart-cut)"]
 fn a_window_the_quit_cut_in_a_turn_comes_back_on_the_humans_resume_told_so_once_and_goes_on(
 ) -> Result {
-    let log = Log::new("live restart-cut");
+    let log = Log::begin("live restart-cut")?;
     ask::prepare()?;
     let asked = cases(
         &live::list("chief"),
@@ -647,9 +647,9 @@ mod tests {
             let plan = chief_plan(chief);
             assert_eq!(plan.folder, "restart-cut");
             assert_eq!(plan.chief, "chief");
-            let (cheap, _) = live::agents::cheap(chief);
+            let model = live::agents::model(chief).name;
             assert_eq!(plan.roster[0]["id"], "chief");
-            assert_eq!(plan.roster[0]["model"], cheap, "{chief:?}");
+            assert_eq!(plan.roster[0]["model"], model, "{chief:?}");
             assert_eq!(plan.roster[0]["kind"], chief.kind());
             // The member has no model: it only notes what it is sent.
             assert_eq!(plan.roster[1]["model"], "fake");
@@ -657,7 +657,7 @@ mod tests {
             assert_eq!(plan.harnesses(), [chief]);
         }
         assert_eq!(
-            live::agents::cheap(Harness::Pi).0,
+            live::agents::model(Harness::Pi).name,
             "openrouter/meta/muse-spark-1.3"
         );
     }
@@ -670,8 +670,8 @@ mod tests {
             assert_eq!(plan.chief, "chief");
             // The chief has no model: nothing answers a question or takes a task but the check.
             assert_eq!(plan.roster[0]["model"], "fake-chief");
-            let (cheap, _) = live::agents::cheap(worker);
-            assert_eq!(plan.roster[1]["model"], cheap, "{worker:?}");
+            let model = live::agents::model(worker).name;
+            assert_eq!(plan.roster[1]["model"], model, "{worker:?}");
             assert_eq!(plan.roster[1]["kind"], worker.kind());
             assert_eq!(plan.harnesses(), [worker]);
         }

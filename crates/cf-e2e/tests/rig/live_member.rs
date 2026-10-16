@@ -15,7 +15,7 @@ use std::time::Duration;
 
 use cf_e2e::devin_store::{self, Message};
 use cf_e2e::live::window::{Member, Open};
-use cf_e2e::live::{ask, calls, until, Harness, Installed};
+use cf_e2e::live::{ask, calls, until, Harness, Installed, Log};
 use cf_e2e::rig::Rig;
 use cf_e2e::{cf, files};
 use serde_json::{json, Value};
@@ -83,7 +83,7 @@ fn a_devin_members_window_is_opened_whole_cut_and_opened_again_on_its_conversati
     let first = Open::new(&rig, &install, "member", "member-devin")
         .agent(agent.clone())
         .member(Member::new("worker", role).first_message(task))
-        .open()?;
+        .open(&Log::new("live member"))?;
     let argv = first.argv().to_vec();
     assert!(
         argv[0].contains("devin"),
@@ -155,7 +155,7 @@ fn a_devin_members_window_is_opened_whole_cut_and_opened_again_on_its_conversati
         .agent(agent)
         .member(Member::new("worker", role).first_message(note))
         .resume(&session)
-        .open()?;
+        .open(&Log::new("live member"))?;
     let argv = again.argv().to_vec();
     assert_eq!(after(&argv, "--resume"), Some(session.as_str()));
     let second = file_of(&argv, "--config")?;
@@ -235,7 +235,7 @@ fn a_window_cut_in_its_first_turn_comes_back_in_the_normal_mode_and_the_daemons_
     let first = Open::new(&rig, &install, "cut", "cut-devin")
         .agent(agent.clone())
         .member(Member::new("worker", role).first_message(task))
-        .open()?;
+        .open(&Log::new("live member"))?;
     let session = until(secs(30), step, || started_on(&first.screen()))
         .ok_or("the stand-in named no conversation")?;
     until(secs(30), step, || {
@@ -252,7 +252,7 @@ fn a_window_cut_in_its_first_turn_comes_back_in_the_normal_mode_and_the_daemons_
         .agent(agent)
         .member(Member::new("worker", role))
         .resume(&session)
-        .open()?;
+        .open(&Log::new("live member"))?;
     let wire = file_of(again.argv(), "--config")?.with_file_name("wire.jsonl");
     let read = until(secs(30), step, || {
         ask::devin_ready(&wire)
@@ -325,7 +325,7 @@ fn the_check_ends_the_command_its_window_runs_and_nothing_outside_the_window_tha
         .member(Member::new("worker", "# ConsensFlow worker\n").first_message(
             "[ConsensFlow m-1 · T-1 · task from @chief]\nBACKGROUND 613 Reply with exactly: LEFT_IT",
         ))
-        .open()?;
+        .open(&Log::new("live member"))?;
     // Read as the pane host answered the window's open, and kept.
     let own = window
         .process()
@@ -414,7 +414,7 @@ fn a_member_launch_without_the_owners_hooks_keeps_the_ones_consensflow_adds_and_
         let window = Open::new(&rig, &install, "member", id)
             .agent(agent.clone())
             .member(member)
-            .open()?;
+            .open(&Log::new("live member"))?;
         let file = file_of(window.argv(), "--config")?;
         let config: Value = serde_json::from_str(&files::read_string(&file)?)?;
         Ok(config)
@@ -478,7 +478,7 @@ fn the_launch_of_a_member_is_prepared_for_devin_alone() -> Outcome {
     let claude = Installed::at(Harness::Claude, "/nowhere/claude", &home);
     let refused = Open::new(&rig, &claude, "member", "member-claude")
         .member(Member::new("worker", "# worker\n"))
-        .open()
+        .open(&Log::new("live member"))
         .err()
         .map(|failed| failed.to_string());
     assert_eq!(

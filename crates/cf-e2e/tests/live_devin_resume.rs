@@ -1,7 +1,8 @@
 //! Live: what a Devin worker can do in a window that was opened again after the
 //! app's quit cut it. It is opt-in (`cargo xtask live devin-resume`,
 //! `npm run live:devin-resume`): it spends the machine's quota on windows of Devin,
-//! on its cheap model, and needs Devin installed and logged in, so it is ignored
+//! on its cheap model (or the one `--models devin=…` names), and needs Devin
+//! installed and logged in, so it is ignored
 //! unless asked for and is no part of `check` or of CI. It runs wherever the pane
 //! host does, on macOS and on Windows.
 //!
@@ -278,16 +279,17 @@ fn lived(setup: &Setup, case: Case) -> Done {
 #[ignore = "opt-in: spends the machine's quota on windows of Devin; cargo xtask live devin-resume (npm run live:devin-resume)"]
 fn a_member_window_opened_again_after_a_cut_is_asked_to_write_edit_and_run_cf_and_what_devin_does_is_said(
 ) -> Result {
-    let log = Log::new("live devin-resume");
+    let log = Log::begin("live devin-resume")?;
     // A word that asks for what this does not run is refused before anything is built.
     let options = options(&live::list("harness"), &live::list("case"))?;
     // What a window is opened on is the harness code's to say: built before anything is spent.
     ask::prepare()?;
     let install = log.found(Harness::Devin)?;
     let interrupt = ask::interrupt(Harness::Devin.kind())?;
-    // The model as Devin is given it: its level is part of its id (`swe-2-medium`).
-    let (family, level) = agents::cheap(Harness::Devin);
-    let model = level.map_or_else(|| family.to_owned(), |level| format!("{family}-{level}"));
+    // The model as Devin is given it (its cheap one unless `--models` names another): its
+    // level is part of its id (`swe-2-medium`).
+    let agents::Model { name, effort, .. } = agents::model(Harness::Devin);
+    let model = effort.map_or_else(|| name.clone(), |level| format!("{name}-{level}"));
     // The stand-in `cf` is first on the windows' PATH: the machine may have the real one
     // beside its harnesses.
     let stand_in = tempfile::tempdir().map_err(|source| Error::File {

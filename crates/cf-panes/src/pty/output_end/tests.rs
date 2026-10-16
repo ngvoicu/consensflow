@@ -64,22 +64,23 @@ fn output(table: &PaneTable, key: &PaneKey, reader: Box<dyn Read + Send>, gone: 
 }
 
 /// Everything `output` gives until it ends, on a thread of its own: each piece as it
-/// comes, and `None` at its end.
+/// comes, and `None` at its end. Then, or once nothing takes the pieces, the terminal is
+/// read on until nothing holds it, as the host reads it through a close: on macOS a
+/// program's exit waits for what it wrote to be read, and a close waits for the exit. A
+/// test can say its program has gone while it runs and writes on, where the host's reader
+/// reads on; left unread, the close of such a program waited for ever (a macOS runner,
+/// 2026-10-16).
 fn read_all(mut output: Output) -> mpsc::Receiver<Option<Vec<u8>>> {
     let (send, read) = mpsc::channel();
-    thread::spawn(move || loop {
+    thread::spawn(move || {
         let mut bytes = [0; 1024];
-        match output.read(&mut bytes) {
-            Got::Bytes(count) => {
-                if send.send(Some(bytes[..count].to_vec())).is_err() {
-                    return;
-                }
-            }
-            Got::End => {
-                let _ = send.send(None);
-                return;
+        while let Got::Bytes(count) = output.read(&mut bytes) {
+            if send.send(Some(bytes[..count].to_vec())).is_err() {
+                break;
             }
         }
+        let _ = send.send(None);
+        while matches!(output.reader.read(&mut bytes), Ok(count) if count > 0) {}
     });
     read
 }

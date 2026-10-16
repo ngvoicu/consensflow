@@ -154,7 +154,7 @@ impl Members {
                 rig.keep_home().display()
             ));
         }
-        agents::write_roster(&rig, &plan.roster)?;
+        agents::write_roster(&rig, &plan.roster, log)?;
         let folder = prepare(&rig, plan)?;
         rig.forget_claude_memory_of(&folder);
         let trust = match installs

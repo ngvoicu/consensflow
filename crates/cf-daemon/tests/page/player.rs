@@ -140,6 +140,10 @@ impl Player {
             engine,
             env: self.world.env(),
             kick: self.kicks.waker(),
+            // No trace of Node's opens a file: none is opened here either.
+            specs: page::Specs::opening_with(Rc::new(|_, _| {
+                Box::pin(async { Err("the trace player opens no file".to_owned()) })
+            })),
         });
         let (daemon_end, app_end) = duplex(256 * 1024);
         let (daemon_input, daemon_output) = split(daemon_end);

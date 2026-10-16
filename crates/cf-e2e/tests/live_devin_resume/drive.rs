@@ -82,8 +82,8 @@ impl Run<'_> {
             .agent(self.agent.clone())
             .member(member);
         match resume {
-            Some(session) => open.resume(session).open(),
-            None => open.open(),
+            Some(session) => open.resume(session).open(self.log),
+            None => open.open(self.log),
         }
     }
 

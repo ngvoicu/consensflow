@@ -220,7 +220,7 @@ fn run(case: Case, harness: Harness, options: &Options, log: &Log) -> Result<Acc
 #[ignore = "opt-in: spends the machine's quota on a member of the harness each case runs; cargo xtask live stops (npm run live:stops)"]
 fn a_stop_the_daemon_presses_is_paid_at_rest_and_never_said_to_be_ignored_where_the_window_stopped(
 ) -> Result {
-    let log = Log::new("live stops");
+    let log = Log::begin("live stops")?;
     let options = options(
         &live::list("case"),
         live::option("hook").as_deref(),
