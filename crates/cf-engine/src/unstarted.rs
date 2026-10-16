@@ -3,7 +3,9 @@
 //! screen goes with the window, so the engine asks the pane host for it before
 //! it closes a window itself, and takes it from the host's `pane.exit` when
 //! the window closed first. The words go into the failure the requester and
-//! the human are told ([`Shown::after`]), and one line of the daemon's log.
+//! the human are told ([`Shown::after`]), and one line of the daemon's log;
+//! where they name a secret (Pi's do: "No API key found"), the failure says
+//! that its lines were left out, and quotes none of them.
 
 use cf_harness::contract::Pane;
 use cf_ledger::{NewNote, ProjectView};

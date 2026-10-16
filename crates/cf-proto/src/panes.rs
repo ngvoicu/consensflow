@@ -192,6 +192,15 @@ pub struct PaneExit {
         skip_serializing_if = "Vec::is_empty"
     )]
     pub background: Vec<BackgroundProcess>,
+    /// The window's program, by its process number, where the host could not prove it
+    /// gone when it sent this, though it had begun to end it and waited a while for the
+    /// end (0 where its number was not known): it may still run. None where it has gone.
+    #[serde(
+        default,
+        deserialize_with = "or_unsaid",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub survivor: Option<u32>,
 }
 
 /// A list as it should be, or an empty one: what is not a list of `T` was not said.
@@ -255,6 +264,7 @@ mod tests {
                 signal: None,
                 tail: None,
                 background: Vec::new(),
+                survivor: None,
             }
         );
         assert_eq!(
@@ -452,6 +462,7 @@ mod tests {
             "exitCode": "3",
             "signal": 9,
             "tail": ["a", 7],
+            "survivor": "4242",
         }))
         .unwrap();
         assert_eq!(
@@ -463,8 +474,14 @@ mod tests {
                 signal: None,
                 tail: None,
                 background: Vec::new(),
+                survivor: None,
             }
         );
+        let survived: PaneExit = serde_json::from_value(json!({
+            "id": "p1-zeus", "generation": 4, "survivor": 4242,
+        }))
+        .unwrap();
+        assert_eq!(survived.survivor, Some(4242));
         // The pane is the one thing an exit must name.
         assert!(serde_json::from_value::<PaneExit>(json!({ "generation": 4 })).is_err());
         assert!(

@@ -1,11 +1,14 @@
-//! A window that does not come up says why on its own screen (Pi without a
-//! login: "No API key found for the selected model … Use /login"), and the
-//! screen goes with the window. The pane host keeps it, and how the program
-//! ended; the engine tells both in the failure the requester and the human
-//! hear, as a short quote, and in one line of the daemon's log. Three ways a
-//! launch fails are told that way: the window exits right after its start, it
-//! never shows its first message, and it never says which session it opened.
-//! None of these tests is held to a Node recording: Node's host said neither.
+//! A window that does not come up says why on its own screen (a model the
+//! account cannot use: "Model gpt-9 is not available on your plan … Run
+//! /model"), and the screen goes with the window. The pane host keeps it, and
+//! how the program ended; the engine tells both in the failure the requester
+//! and the human hear, as a short quote, and in one line of the daemon's log.
+//! Three ways a launch fails are told that way: the window exits right after
+//! its start, it never shows its first message, and it never says which
+//! session it opened. A screen that names a secret is not quoted (Pi without a
+//! login: "No API key found for the selected model"): the failure says its
+//! lines were left out (`cf-engine`'s `shown`). None of these tests is held to a
+//! Node recording: Node's host said neither.
 
 use std::rc::Rc;
 
@@ -16,14 +19,20 @@ use serde_json::{json, Value};
 use crate::chiefs::{to, to_human, with_codex};
 use crate::fixtures::notes;
 
-/// What Pi's window said when it had no login to run on.
+/// What a window said whose model its account could not use.
 const PI: [&str; 2] = [
-    "No API key found for the selected model.",
-    "Use /login to log into a provider.",
+    "Model gpt-9 is not available on your plan.",
+    "Run /model to choose another one.",
 ];
 /// Those two lines as a quote holds them.
 const QUOTED: &str =
-    "No API key found for the selected model. / Use /login to log into a provider.";
+    "Model gpt-9 is not available on your plan. / Run /model to choose another one.";
+
+/// What Pi's window said when it had no login to run on: it names a secret.
+const NO_LOGIN: [&str; 2] = [
+    "No API key found for the selected model.",
+    "Use /login to log into a provider.",
+];
 
 /// The member a task is given by name, whose window is its own.
 const ZEUS: &str = "zeus";
@@ -79,6 +88,37 @@ fn a_window_that_exits_right_after_its_start_fails_its_task_with_its_code_and_wh
     assert_eq!(task.task.state, "failed");
     let because =
         format!(r#"@{ZEUS}'s window closed (exit code 3); its screen ended with: "{QUOTED}""#);
+    let told = told(&context, project);
+    assert_eq!(told.to_chief, [failure_of_t1(&because)]);
+    assert_eq!(
+        told.to_human,
+        [format!(
+            "m-{}, a task from @chief on T-1, did not reach @{ZEUS}: {because}.",
+            task.messages[0].id
+        )]
+    );
+    assert_eq!(
+        told.logged,
+        [format!("the launch of p1-{ZEUS} failed: {because}")]
+    );
+}
+
+/// What the lead's decision of 2026-10-16 changes for a launch: a screen that names a
+/// secret is not quoted, Pi's without a login among them. The failure keeps its exit
+/// code, and says the lines were left out, to the requester, the human and the log.
+#[test]
+fn a_window_whose_screen_names_a_secret_fails_with_its_code_and_its_lines_left_out() {
+    let context = Context::new();
+    let project = launched(&context);
+    context.host.exits_showing(Some(3), None, Some(&NO_LOGIN));
+    context.exit("zeus");
+
+    let task = context.task(project, 1);
+    assert_eq!(task.task.state, "failed");
+    let because = format!(
+        "@{ZEUS}'s window closed (exit code 3); its last screen lines named a secret, \
+         so they are left out"
+    );
     let told = told(&context, project);
     assert_eq!(told.to_chief, [failure_of_t1(&because)]);
     assert_eq!(
@@ -330,7 +370,7 @@ fn a_key_looking_string_on_the_screen_is_masked_in_the_note_and_in_the_log() {
     let context = Context::new();
     let project = launched(&context);
     let key = "sk-ant-api03-AbCdEfGhIjKlMnOpQrStUvWxYz0123456789";
-    let screen = format!("Invalid API key: {key}");
+    let screen = format!("request with {key} was refused");
     context
         .host
         .exits_showing(Some(1), None, Some(&[screen.as_str()]));
@@ -338,7 +378,7 @@ fn a_key_looking_string_on_the_screen_is_masked_in_the_note_and_in_the_log() {
 
     let told = told(&context, project);
     let because = format!(
-        "@{ZEUS}'s window closed (exit code 1); its screen ended with: \"Invalid API key: [masked]\" \
+        "@{ZEUS}'s window closed (exit code 1); its screen ended with: \"request with [masked] was refused\" \
          (1 key- or token-like string masked)"
     );
     assert_eq!(told.to_chief, [failure_of_t1(&because)]);
