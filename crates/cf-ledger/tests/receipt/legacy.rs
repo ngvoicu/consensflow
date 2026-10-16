@@ -221,7 +221,8 @@ fn a_gated_question_node_withdrew_whose_answer_node_then_cancelled_obliges_until
 /// ledger is opened again (this daemon starts) with the carrier so, and the
 /// task going on, as Node's confirm moves it, unless the carrier still waits.
 /// Each of the states a carrier that cannot carry any more can be left in
-/// frees what it carried, and the one that waits does not.
+/// frees what it carried, and the one that waits does not, nor the one on its
+/// way, which is settled with what it carried.
 fn after_node_left_the_carrier(state: &str) -> (World, i64, i64) {
     after_node_left(state, "queued")
 }
@@ -293,21 +294,30 @@ fn a_row_left_under_a_carrier_node_delivered_cancelled_or_failed_is_a_queued_mes
     }
 }
 
+/// This daemon's start settles what was on its way: the record showed the carrier,
+/// so it is confirmed, and the row in its set with it. A carrier this daemon was
+/// pasting when it stopped had the row in its paste, which a second paste of it
+/// would have given the window twice (a review of 2026-10-16). What Node pasted was
+/// the carrier's own words alone, so the row is taken for received though it was
+/// not, and that is kept on purpose: 3.0.0-alpha.82 is the one build that shipped
+/// both carriers and the Node daemon, and every version since alpha.82 settles such
+/// rows on its first restart, by the old rule, so no ledger today can hold one.
 #[test]
-fn a_row_left_under_a_carrier_node_began_to_paste_is_not_taken_for_received_with_it() {
+fn a_row_left_under_a_carrier_on_its_way_is_settled_with_it_whoever_began_to_paste_it() {
     let (mut w, carrier, answer) = after_node_left_the_carrier("delivering");
-    // This daemon's start settles what was on its way: the record showed the
-    // carrier, so it is confirmed. What Node pasted was the carrier's own
-    // words: the answer was never in the paste, and is not marked received by
-    // it. A carrier this daemon began when it stopped looks the same, and its
-    // rows go again: pasted twice, never lost.
     let in_flight = w.ledger.in_flight().unwrap();
     assert_eq!(ids(&in_flight), [carrier]);
+    assert!(
+        w.ledger
+            .events(w.project, 0, 500)
+            .expect("the log")
+            .iter()
+            .all(|event| event.kind != "message.uncarried"),
+        "the start lets go of nothing"
+    );
     w.confirm(carrier);
-    assert_eq!(w.states(&[carrier, answer]), ["delivered", "queued"]);
-    assert_eq!(w.next("zeus"), Some(answer));
-    w.deliver(answer);
-    assert_eq!(w.states(&[answer]), ["delivered"]);
+    assert_eq!(w.states(&[carrier, answer]), ["delivered", "delivered"]);
+    assert_eq!(w.next("zeus"), None);
 }
 
 #[test]

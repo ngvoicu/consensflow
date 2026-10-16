@@ -600,7 +600,7 @@ meant = "a_replacement_in_flight_when_the_daemon_stopped_is_recorded_as_told_onc
 runs = ["engine-role-change"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/deliveries.rs"
+file = "crates/cf-engine/src/in_flight.rs"
 find = '''                    self.confirm_delivered(&message, &json!({ "item": item }))?;
 '''
 replace = '''                    self.seams
@@ -918,9 +918,9 @@ meant = "a_replacement_the_window_never_took_is_still_withdrawn_when_the_record_
 runs = ["engine-role-change"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/role_change.rs"
-find = '''                .recorded_item_with(participant.id, &marker_of(note.id))'''
-replace = '''                .recorded_item_with(participant.id, "[ConsensFlow m-")'''
+file = "crates/cf-engine/src/in_flight.rs"
+find = '''                item.role == Role::User && is_paste_of(&item.text, message, first.as_deref())'''
+replace = '''                item.role == Role::User && item.text.contains("[ConsensFlow m-")'''
 
 [[plant]]
 name = "codex role: a replacement found in the record is not taken out of the launch's first message, which is told it again"

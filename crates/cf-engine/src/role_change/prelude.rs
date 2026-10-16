@@ -42,7 +42,6 @@ use std::rc::Rc;
 use cf_ledger::{LedgerError, MessageView, ParticipantView, ProjectView};
 
 use crate::deliveries::Delivering;
-use crate::delivery_text::marker_of;
 use crate::dispatcher::Dispatcher;
 use crate::record::Record;
 use crate::runtime::begin;
@@ -164,13 +163,13 @@ impl Dispatcher {
         let message = prelude?.displaced?;
         (participant.role != "chief").then(|| Delivering {
             message,
-            marker: marker_of(message),
             since: self.now(),
             // A launch's first message is waited for by the launch's own time.
             rested_since: None,
             launch: true,
             chief: false,
             queued: false,
+            held: false,
             entered_again: false,
         })
     }

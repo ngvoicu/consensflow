@@ -12,6 +12,7 @@ use cf_proto::agents::Harness;
 use serde_json::json;
 
 use super::adapter::{Asked, FakeAdapter};
+use super::holds::Wrapped;
 use crate::seams::Adapters;
 
 /// The adapters the test's engine is made with: the fake under every
@@ -104,13 +105,18 @@ impl Records for FakeRecords {
             Some("record"),
             json!([{ "conversation": { "nativeSession": session } }]),
         );
-        let reading = record_of(fake, session);
+        let wrapped = fake.record_holds.wrap(&json!([session]));
+        // Made when called, or once the test lets a held look go.
+        let early = (!matches!(wrapped, Wrapped::Held { .. })).then(|| record_of(fake, session));
         Box::pin(async move {
+            wrapped.before().await;
+            let reading = early.unwrap_or_else(|| record_of(fake, session));
             let written = match &reading {
                 Reading::Unknown(_) => json!({ "unknown": true }),
                 Reading::Known(record) => json!({ "items": record.items }),
             };
             fake.recorder.answered(at, written);
+            wrapped.after().await;
             Arc::new(reading)
         })
     }

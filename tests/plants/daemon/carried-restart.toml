@@ -1,0 +1,120 @@
+# What a paste carried, when the daemon stopped between the paste and its receipt (a review of
+# 2026-10-16, GPT-6-Astra and GPT-6.1-Sol): the words that resume a task carry what was kept for its
+# window (the answers to its questions), and the start that finds their carrier still on its way
+# settles what it carried with it: received with it where the window's record shows the carrier's
+# marker, queued again with it where it does not. Opening the ledger let go of the rows of a carrier
+# that was `delivering`, which a start then pasted again on their own, or sent without their carrier.
+#
+# The cases are `crates/cf-e2e/tests/regressions/rows_a_paste_carried_pasted_again_after_a_restart.rs`
+# (the real daemon and pane host, a Claude worker and a Devin worker, the paste caught by the rig and
+# the app started again on the same home) and the ledger's own, `crates/cf-ledger/tests/receipt/`
+# (`carrying.rs`, and `legacy.rs` for the rows the Node daemon left). The rig's cases build the native
+# `cf` from the sources as planted, so their plants say `builds`.
+#
+# Every name holds `carried restart`, so `npm run plants:daemon -- "carried restart"` runs them all.
+
+[run]
+# `ledger-receipt` (the ledger's receipt tests) is the kit's own.
+rig-regression-carried-received = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "rows_a_paste_carried_pasted_again_after_a_restart::answers_a_paste_carried_into"]
+rig-regression-carried-requeued = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "rows_a_paste_carried_pasted_again_after_a_restart::answers_a_paste_never_carried_into"]
+# The rig's reader of Devin's store, which the Devin cases read the worker's record by.
+rig-lib-devin-store = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "devin_store::"]
+# The engine's start and the human's Resume after it.
+engine-dispatcher-resume = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "resume::"]
+
+[[plant]]
+name = "carried restart: a start lets go of what a carrier on its way carried, and the window is given the answers again after the paste that had them (main, 2026-10-16)"
+meant = "answers_a_paste_carried_into_a_claude_workers_window_are_not_pasted_again_after_a_restart"
+runs = ["rig-regression-carried-received"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/carrying.rs"
+find = "WHERE m.state = 'queued' AND c.state NOT IN ('queued', 'gated', 'delivering')"
+replace = "WHERE m.state = 'queued' AND c.state NOT IN ('queued', 'gated')"
+
+[[plant]]
+name = "carried restart: a start lets go of what a carrier on its way carried, and a carrier that never reached the window goes again without it (main, 2026-10-16)"
+meant = "answers_a_paste_never_carried_into_a_claude_workers_window_go_again_in_it_after_a_restart"
+runs = ["rig-regression-carried-requeued"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/carrying.rs"
+find = "WHERE m.state = 'queued' AND c.state NOT IN ('queued', 'gated', 'delivering')"
+replace = "WHERE m.state = 'queued' AND c.state NOT IN ('queued', 'gated')"
+
+[[plant]]
+name = "carried restart: the ledger opened again lets go of what a carrier on its way carried"
+meant = "rows_that_rode_in_a_paste_the_daemon_stopped_in_are_received_with_it_when_the_record_shows_it"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/carrying.rs"
+find = "WHERE m.state = 'queued' AND c.state NOT IN ('queued', 'gated', 'delivering')"
+replace = "WHERE m.state = 'queued' AND c.state NOT IN ('queued', 'gated')"
+
+[[plant]]
+name = "carried restart: a carrier queued again at a start lets go of what it carried"
+meant = "rows_that_rode_in_a_paste_the_daemon_stopped_in_go_again_in_its_paste_when_the_record_does_not_show_it"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = '''
+             WHERE id = ?1
+               AND carried_by IN (SELECT id FROM message WHERE state NOT IN ('queued', 'gated'))",
+            [message_id],
+        )?;'''
+replace = '''
+             WHERE id = ?1
+               AND carried_by IN (SELECT id FROM message WHERE state NOT IN ('queued', 'gated'))",
+            [message_id],
+        )?;
+        store.db.execute(
+            "UPDATE message SET carried_by = NULL WHERE carried_by = ?1 AND state = 'queued'",
+            [message_id],
+        )?;'''
+
+[[plant]]
+name = "carried restart: a start lets go of the rows of a carrier that is over but for one Node left on its way, and of none on its way"
+meant = "a_row_left_under_a_carrier_node_delivered_cancelled_or_failed_is_a_queued_message_of_its_own"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/carrying.rs"
+find = "WHERE m.state = 'queued' AND c.state NOT IN ('queued', 'gated', 'delivering')"
+replace = "WHERE m.state = 'queued' AND c.state NOT IN ('queued', 'gated', 'delivering', 'delivered')"
+
+[[plant]]
+name = "carried restart: a row told after a carrier's first paste joins it, and the first paste's marker takes it for received though no paste had it (the reviews of 2026-10-16)"
+meant = "a_row_that_comes_after_a_carriers_first_paste_is_never_taken_for_received_with_it"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/carrying.rs"
+find = '''
+               AND NOT EXISTS (SELECT 1 FROM event e
+                               WHERE e.project_id = c.project_id AND e.kind = 'delivery.begun'
+                                 AND json_extract(e.data, '$.message') = c.id)'''
+replace = ""
+
+[[plant]]
+name = "carried restart: the rig reads Devin's store never waiting on it, and a case that reads it as a window of Devin's opens again fails on a locked store (the workspace run of 2026-10-16)"
+meant = "a_store_held_for_a_moment_is_read_once_it_is_let_go"
+runs = ["rig-lib-devin-store"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/devin_store.rs"
+find = "const HELD_FOR: Duration = Duration::from_secs(5);"
+replace = "const HELD_FOR: Duration = Duration::ZERO;"
+
+[[plant]]
+name = "carried restart: a Resume while the start reads what was on its way brings no window back for the task the start then makes at work, which the next pass pauses (the rig under load, 2026-10-16)"
+meant = "a_resume_while_the_start_reads_what_was_on_its_way_brings_back_the_window_it_makes_at_work"
+runs = ["engine-dispatcher-resume"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/resume.rs"
+find = "        self.resumes.settled().await;"
+replace = "        let _ = &self.resumes;"

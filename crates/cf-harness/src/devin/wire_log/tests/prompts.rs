@@ -167,6 +167,85 @@ fn the_message_last_pasted_is_told_sent_by_a_request_of_the_tui_that_holds_its_t
 }
 
 #[test]
+fn a_message_pasted_while_a_prompt_is_asked_is_held_until_no_prompt_is_and_is_no_word_that_the_agent_has_it(
+) {
+    let log = Log::new();
+    let header = "[ConsensFlow m-9 | T-1 | result from @worker]";
+    log.write(&format!("{}{}", shows("s"), asks(2, "s", "hello")));
+    assert_eq!(log.said().asked_at, Some(EPOCH_MS));
+    // The turn the prompt began is at work, its agent silent as it may be: the paste
+    // is held in it, and nothing says the agent has it.
+    log.wire.expect(header);
+    let said = log.said();
+    assert!(said.held && !said.sent, "held, not sent");
+    assert!(log.said().held, "held at every look while the turn is on");
+    // The turn ends: held no longer. The TUI puts the paste to its agent, and the turn
+    // of a prompt asked after it is none the paste went into.
+    log.append(&ends("s"));
+    assert!(!log.said().held);
+    log.append(&asks(3, "s", &format!("{header}\nRESULT_ONE")));
+    log.append(&ends("s"));
+    log.append(&asks(4, "s", "a message of the human's"));
+    assert!(!log.said().held, "a turn the paste did not go into");
+    // A paste made at rest (a look read the turn's end) is held by nothing, nor by a
+    // turn that begins after the TUI put it to its agent.
+    log.append(&ends("s"));
+    assert_eq!(log.said().asked_at, None);
+    let next = "[ConsensFlow m-10 | T-1 | result from @worker]";
+    log.wire.expect(next);
+    assert!(!log.said().held);
+    log.append(&asks(5, "s", &format!("{next}\nRESULT_TWO")));
+    log.append(&asks(6, "s", "another message of the human's"));
+    assert!(!log.said().held);
+}
+
+#[test]
+fn a_prompt_read_after_a_paste_the_tui_has_not_put_to_its_agent_holds_the_paste_in_its_turn() {
+    let log = Log::new();
+    let header = "[ConsensFlow m-9 | T-1 | result from @worker]";
+    // Nothing pasted yet: a turn holds nothing.
+    log.write(&format!("{}{}", shows("s"), asks(1, "s", "hello")));
+    assert!(!log.said().held);
+    // The look before the paste read the window at rest.
+    log.append(&ends("s"));
+    assert_eq!(log.said().asked_at, None);
+    log.wire.expect(header);
+    // A prompt of the human's the TUI put to its agent before it had the paste, which
+    // it queues behind the turn (a review of 2026-10-16).
+    log.append(&asks(2, "s", "a message of the human's"));
+    let said = log.said();
+    assert!(said.held && !said.sent, "held in the human's turn");
+    // The turn ends, and the TUI puts the paste to its agent: held no longer.
+    log.append(&ends("s"));
+    assert!(!log.said().held);
+    log.append(&asks(3, "s", &format!("{header}\nwords")));
+    let said = log.said();
+    assert!(said.sent && !said.held);
+}
+
+#[test]
+fn a_prompt_of_the_conversation_the_window_showed_is_no_turn_of_the_one_it_shows_now() {
+    let log = Log::new();
+    log.write(&format!("{}{}", shows("s"), asks(2, "s", "hello")));
+    assert_eq!(log.said().asked_at, Some(EPOCH_MS));
+    log.wire
+        .expect("[ConsensFlow m-9 | T-1 | note from ConsensFlow]");
+    assert!(log.said().held);
+    // The human opened another conversation in the window: its prompt is not asked,
+    // and nothing is held in the turn it began.
+    log.append(&shows("t"));
+    assert_eq!(log.said().asked_at, None);
+    assert!(!log.said().held);
+    // Nor is it when the window shows the first again: the turn it began is not this one.
+    log.append(&shows("s"));
+    assert_eq!(log.said().asked_at, None);
+    // A window that says again which conversation it shows forgets none of its prompts.
+    log.append(&asks(3, "s", "again"));
+    log.append(&shows("s"));
+    assert_eq!(log.said().asked_at, Some(EPOCH_MS));
+}
+
+#[test]
 fn the_text_is_found_in_a_request_wherever_it_is_whatever_the_method_and_a_text_with_quotes_is_found_whole(
 ) {
     let log = Log::new();

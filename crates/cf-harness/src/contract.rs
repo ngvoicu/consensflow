@@ -256,6 +256,14 @@ pub trait Window {
     fn took(&self) -> bool {
         false
     }
+    /// Whether the message last handed to the window went into a turn the harness
+    /// was in, which it is in still: a harness that holds what it is given in a turn
+    /// and runs it when the turn ends (Devin) shows it then, however long the turn
+    /// says nothing that would read as work. It is no word that the harness has the
+    /// message: only that its record has had no time to show it.
+    fn held(&self) -> bool {
+        false
+    }
     /// The engine pressed the interrupt keys into the window, and the host
     /// took them: the turn it shows at work is the one they were for. A
     /// harness whose record says how an interrupted turn ended has no use for

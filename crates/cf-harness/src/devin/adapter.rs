@@ -15,12 +15,18 @@
 //! own `stats`), so a note was pasted into a turn that had begun, and the engine,
 //! which gave the record a minute from the hand-over, pasted it again (the report
 //! of the same day: a chief read each of two notes twice). Three things stand
-//! against that. The window reads busy from the TUI's prompt to its agent
-//! (`wire_log`), so nothing is pasted into a turn that has begun. A message the TUI
-//! has put to its agent is the agent's own, whatever its record shows (`took`), and
-//! is waited for as the queue of Codex, OpenCode or Pi is. And where neither is
-//! told, the engine waits out a window's turns before it takes the record for
-//! lacking (`cf-engine`'s `arrival`).
+//! against that. The window reads busy from the TUI's prompt to its agent for a
+//! model's time to its first word (`wire_log`), so nothing is pasted into a turn that
+//! has just begun; one whose agent says nothing for longer reads as its record reads
+//! it, so that it holds back no message for good. A message the TUI has put to its
+//! agent is the agent's own, whatever its record shows (`took`), and is waited for as
+//! the queue of Codex, OpenCode or Pi is. And the engine waits out a window's turns
+//! before it takes the record for lacking (`cf-engine`'s `arrival`), the turn a
+//! message was pasted into among them for as long as a prompt of the TUI's is asked,
+//! however long its agent says nothing (`held`): a Devin resumed after a cut sat at
+//! "Thinking" for minutes (3000.11.92, 2026-10-15), and the rig's regression of a
+//! result pasted into a turn silent that long had it pasted again after the daemon's
+//! minute of the window's rest, into the queue that held it.
 //!
 //! Kept from Node on purpose: a conversation of an empty id, which no
 //! ledger holds, is refused in a sentence of this module's own, where V8
@@ -317,6 +323,12 @@ impl Window for DevinWindow {
         self.wire
             .read(self.time.wall_ms())
             .is_ok_and(|wire| wire.sent)
+    }
+
+    fn held(&self) -> bool {
+        self.wire
+            .read(self.time.wall_ms())
+            .is_ok_and(|wire| wire.held)
     }
 
     fn observe(&self) -> Work<'_, Result<Observed, String>> {

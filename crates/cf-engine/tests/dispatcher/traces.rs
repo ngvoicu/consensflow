@@ -157,7 +157,12 @@ const SUSPENDED_AT_START: &str = "the restart settles what was on its way into a
 
 /// What the engine does when the human resumes a project whose chief's turn
 /// was cut (its record has a turn with no end): it is told so first.
-const CUT_CHIEF: &str = "the human resumes the project and the chief's turn was cut (the harness took the paste and the window closed before it answered): the chief is given a note from ConsensFlow that says so as its first message, and the paste after it, where Node opens it with the paste alone";
+const CUT_CHIEF: &str = "the window closes as its harness takes the paste, which its record shows: the paste is confirmed as the window goes, where Node gave it back to its queue; and when the human resumes the project the chief's turn was cut: the chief is given a note from ConsensFlow that says so as its first message, and not the paste again, where Node opens it with the paste alone";
+
+/// What the engine does with a paste on its way into a window that went (its program
+/// ended, or it was closed) after its harness took it: the window's record is read
+/// for it, and it is confirmed where the record shows it (`in_flight`, 2026-10-16).
+const TAKEN_AS_IT_WENT: &str = "the window goes with a paste on its way into it that its harness took and its record shows: the record is read (`record`) and the paste confirmed, where Node gave it back to its queue to be pasted again into the conversation that held it";
 
 /// What the engine says in a hold note, where Node's said the task goes on at
 /// the reset.
@@ -305,6 +310,22 @@ const DEPARTED: &[(&str, &str)] = &[
     (
         "a note written 3 turns after a restart that finds a message in its harness's record",
         SUSPENDED_AT_START,
+    ),
+    (
+        "tells the requester of a waiting task, though a deleted project's waiting task was told before it",
+        TAKEN_AS_IT_WENT,
+    ),
+    (
+        "fails the Close that made its exit, which nothing logs: the exit it settles is its own",
+        TAKEN_AS_IT_WENT,
+    ),
+    (
+        "lets go of its participant: its next step runs, the failure is written down, and an operation waiting on it ends",
+        TAKEN_AS_IT_WENT,
+    ),
+    (
+        "closes a window only once the paste its harness is taking is over, and that message goes again",
+        "the human closes the project as the chief's harness takes a paste, which its record shows: the window closes once the harness has taken it, and the paste is confirmed (the name is Node's, which sent it again), where Node gave it back to its queue",
     ),
 ];
 

@@ -1,32 +1,29 @@
 //! What goes into a window and what comes back out: into a window, ready,
 //! `beginDelivery`, the hand-over; its arrival is watched for by `arrival`, and
-//! what it came to is settled here: tried again or failed, and at start, what
-//! was in flight. Out of a window, a worker's answer becomes its task's result.
-//! It owns the record's delivery part; the window's part it only reads.
+//! what it came to is settled here: tried again or failed. What was on its way
+//! when the daemon or the window went is `in_flight`'s. Out of a window, a
+//! worker's answer becomes its task's result. It owns the record's delivery
+//! part; the window's part it only reads.
 
 use std::rc::Rc;
 
 use cf_base::js;
 use cf_harness::contract::{Admission, Held, Observed, PaneHost, Readiness};
-use cf_harness::records::{Options, Reading, Role};
 use cf_ledger::{MessageView, NewNote, ParticipantView, ProjectView, TaskView};
-use cf_proto::agents::Harness;
 use cf_proto::trace::WindowEvent;
-use serde_json::json;
 
 use crate::delivery_text::{delivery_text, marker_of};
 use crate::dispatcher::Dispatcher;
 use crate::record::Record;
 use crate::role_change::{answers_to_the_task, Prelude};
-use crate::runtime::{caught, returning};
+use crate::runtime::returning;
 use crate::seams::EngineError;
 
 /// The one message on its way into a window.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Delivering {
+    /// It, whose paste proves it arrived (`is_paste_of`).
     pub(crate) message: i64,
-    /// Its header's start, which proves it arrived (`markerOf`).
-    pub(crate) marker: String,
     /// When it was handed over, on the engine's clock.
     pub(crate) since: i64,
     /// Since when the window has been at rest without the record showing it:
@@ -40,6 +37,10 @@ pub(crate) struct Delivering {
     pub(crate) chief: bool,
     /// The harness's own queue took it.
     pub(crate) queued: bool,
+    /// Its harness held it in a turn it went into (`Window::held`): never pasted
+    /// again while it does, and from that turn's end its record has a whole
+    /// arrival window of rest, however long ago it was handed over.
+    pub(crate) held: bool,
     /// Enter was pressed once more for it.
     pub(crate) entered_again: bool,
 }
@@ -138,7 +139,6 @@ impl Dispatcher {
         let since = self.now();
         let delivering = Delivering {
             message: message.id,
-            marker: marker_of(message.id),
             since,
             // The window was at rest when it was handed over.
             rested_since: Some(since),
@@ -149,19 +149,26 @@ impl Dispatcher {
             // plugin): it shows when the harness gets to it, and sending it
             // again would only make a duplicate.
             queued: matches!(outcome, Admission::Admitted { queued: true }),
+            held: false,
             entered_again: false,
         };
         if let Admission::Refused { reason } = &outcome {
             return self.settle_failure(delivering, reason, true);
         }
         // A window that closed while its harness took the message had nothing
-        // on its way to settle when it went: the message goes again.
+        // on its way to settle when it went: the message goes again, unless the
+        // harness's record shows it took it (`in_flight`).
         if record.window.borrow().pane.as_ref() != Some(&pane) {
-            return self.settle_failure(
-                delivering,
-                "its window closed while it was handed over",
-                true,
-            );
+            let this = Rc::clone(self);
+            self.settle_gone(delivering, move |delivering| {
+                this.settle_failure(
+                    delivering,
+                    "its window closed while it was handed over",
+                    true,
+                )
+            })
+            .await?;
+            return Ok(());
         }
         record.delivery.borrow_mut().delivering = Some(delivering);
         self.changed();
@@ -361,106 +368,5 @@ impl Dispatcher {
             },
         )?;
         Ok(())
-    }
-
-    /// Once, at start: what was on its way to a window when the previous
-    /// process ended. A message whose header ConsensFlow's copy of the
-    /// window shows had arrived, and so had one the harness's own record
-    /// shows (the copy can lag the record, and a message the harness took
-    /// must not go again). Any other goes back to its queue with its
-    /// attempt, as does one whose record cannot be read.
-    pub(crate) async fn settle_in_flight(self: &Rc<Self>) -> Result<(), EngineError> {
-        // No door lives through a start: what one claimed is the ledger's again.
-        self.seams.ledger.borrow_mut().release_all_claims()?;
-        let messages = self.seams.ledger.borrow().in_flight()?;
-        for message in messages {
-            let marker = marker_of(message.id);
-            let copied = self
-                .seams
-                .ledger
-                .borrow()
-                .copied_item_with(message.recipient_id, &marker)?;
-            let item = match copied {
-                Some(item) => Some(item),
-                // An `async` method: its answer reaches this a turn after it was made.
-                None => returning(self.recorded_item_with(message.recipient_id, &marker)).await?,
-            };
-            match item {
-                None => {
-                    self.seams.ledger.borrow_mut().retry_delivery(
-                        message.id,
-                        "the daemon stopped before it arrived",
-                        true,
-                    )?;
-                }
-                Some(item) => {
-                    self.confirm_delivered(&message, &json!({ "item": item }))?;
-                }
-            }
-        }
-        Ok(())
-    }
-
-    /// The first item a participant's harness recorded it was given that
-    /// holds `marker`, read with no window open: none when none does, or
-    /// when its record cannot be read.
-    pub(crate) async fn recorded_item_with(
-        &self,
-        participant: i64,
-        marker: &str,
-    ) -> Result<Option<String>, EngineError> {
-        let Some((harness, session)) = self.readable(participant)? else {
-            return Ok(None);
-        };
-        // The adapter's `record` is an `async` function, and `.catch(() =>
-        // null)` made a promise of its own to wait on.
-        let reading = caught(
-            self.seams
-                .records
-                .look(harness, &session, &Options::default()),
-        )
-        .await;
-        let Reading::Known(record) = &*reading else {
-            return Ok(None);
-        };
-        Ok(record
-            .items
-            .iter()
-            .find(|item| item.role == Role::User && item.text.contains(marker))
-            .map(|item| item.id.to_string()))
-    }
-
-    /// Whether a participant's harness's record of its current conversation,
-    /// read with no window open, ends in a turn with no end (the one the app's
-    /// quit cut, or a Close), and none where it cannot tell: the record cannot,
-    /// or there is none to read.
-    pub(crate) async fn turn_cut(&self, participant: i64) -> Result<Option<bool>, EngineError> {
-        let Some((harness, session)) = self.readable(participant)? else {
-            return Ok(None);
-        };
-        Ok(self.seams.records.turn_cut(harness, &session).await)
-    }
-
-    /// The harness and the session a participant's current conversation is on,
-    /// where its record can be read with no window open: none when it has no
-    /// conversation, no session yet, or a harness no adapter opens.
-    fn readable(&self, participant: i64) -> Result<Option<(Harness, String)>, EngineError> {
-        let conversation = self
-            .seams
-            .ledger
-            .borrow()
-            .current_conversation(participant)?;
-        let Some(conversation) = conversation else {
-            return Ok(None);
-        };
-        let Some(session) = conversation
-            .native_session
-            .filter(|session| !session.is_empty())
-        else {
-            return Ok(None);
-        };
-        Ok(Harness::from_kind(&conversation.harness)
-            .filter(|_| self.seams.adapters.adapter(&conversation.harness).is_some())
-            .map(|harness| (harness, session)))
     }
 }

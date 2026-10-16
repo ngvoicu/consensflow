@@ -136,10 +136,12 @@ runs = ["engine-resume", "daemon-lib-start"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/resume.rs"
-find = '''        // An `async` method: its answer reaches this a turn after it was made.
+find = '''
         returning(self.settle_in_flight()).await
     }'''
-replace = '''        returning(self.settle_in_flight()).await?;
+replace = '''
+        returning(self.settle_in_flight()).await?;
+        drop(_settling);
         let suspended: Vec<i64> = self
             .seams
             .ledger
@@ -162,9 +164,11 @@ runs = ["engine-dispatcher"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/resume.rs"
-find = '''        returning(self.settle_in_flight()).await
+find = '''
+        returning(self.settle_in_flight()).await
     }'''
-replace = '''        Ok(())
+replace = '''
+        Ok(())
     }'''
 
 [[plant]]
@@ -371,10 +375,12 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-engine/src/resume.rs"
-find = '''        // An `async` method: its answer reaches this a turn after it was made.
+find = '''
         returning(self.settle_in_flight()).await
     }'''
-replace = '''        returning(self.settle_in_flight()).await?;
+replace = '''
+        returning(self.settle_in_flight()).await?;
+        drop(_settling);
         let suspended: Vec<i64> = self
             .seams
             .ledger

@@ -304,15 +304,22 @@ impl Restarted<'_> {
 
     /// One pass, everything it began run to stillness.
     pub fn pass(&self) -> Result<(), EngineError> {
+        self.context.run(self.passing())
+    }
+
+    /// One pass, begun where it is called.
+    pub fn begin_pass(&self) -> Answer<Result<(), EngineError>> {
+        self.context.executor.start_now(self.passing())
+    }
+
+    fn passing(&self) -> impl Future<Output = Result<(), EngineError>> + 'static {
         let engine = self.engine();
-        let pass =
-            self.context.operation(
-                "pass",
-                json!([]),
-                nothing,
-                async move { engine.pass().await },
-            );
-        self.context.run(pass)
+        self.context.operation(
+            "pass",
+            json!([]),
+            nothing,
+            async move { engine.pass().await },
+        )
     }
 
     /// The human's Switch chief, everything it began run to stillness.
@@ -354,12 +361,25 @@ impl Restarted<'_> {
 
     /// The human's Resume, of a project this engine's start left suspended.
     pub fn resume_project(&self, project: i64) -> Result<Option<ProjectView>, EngineError> {
+        self.context.run(self.resuming(project))
+    }
+
+    /// The human's Resume, begun where it is called.
+    pub fn begin_resume_project(
+        &self,
+        project: i64,
+    ) -> Answer<Result<Option<ProjectView>, EngineError>> {
+        self.context.executor.start_now(self.resuming(project))
+    }
+
+    fn resuming(
+        &self,
+        project: i64,
+    ) -> impl Future<Output = Result<Option<ProjectView>, EngineError>> + 'static {
         let engine = self.engine();
-        let resume =
-            self.context
-                .operation("resumeProject", json!([project]), answer, async move {
-                    engine.resume_project(project).await
-                });
-        self.context.run(resume)
+        self.context
+            .operation("resumeProject", json!([project]), answer, async move {
+                engine.resume_project(project).await
+            })
     }
 }

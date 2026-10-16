@@ -9,7 +9,11 @@
 //! again (`deliveries`), whatever turns the window went through since: the wait is
 //! bounded by the window's rest, and nothing a window does stops the queue behind it.
 //! However often the window goes into a turn, a paste its record never showed is
-//! pasted again at the first rest past half an hour from its hand-over.
+//! pasted again at the first rest past half an hour from its hand-over. A window
+//! whose harness says it holds the paste in the turn it went into (`Window::held`)
+//! is in that turn, however at rest it reads, as long as the harness says so, and
+//! the paste never goes again meanwhile, however old: once that turn ends, its
+//! record has a whole arrival window of rest.
 //! The one more Enter a paste is given (`deliveries`) is pressed in the first arrival
 //! window only, whatever the wait after it.
 //!
@@ -334,6 +338,99 @@ fn waits_on_a_message_the_harness_says_its_queue_holds_whatever_its_window_does_
     context.pass().unwrap();
     assert_eq!(context.message(note.id).state, "delivered");
     assert_eq!(pasted.get(), 1);
+}
+
+/// The report of 2026-10-15 (B5): a result went into a Devin chief's window twice. A
+/// turn whose agent says nothing reads at rest, and what was pasted into it is held
+/// until it ends.
+#[test]
+fn counts_no_rest_while_the_harness_holds_the_paste_in_the_turn_it_went_into_and_pastes_it_once() {
+    let context = Context::new();
+    let project = holding(&context);
+    let pasted = counting(&context);
+    let note = context.note(project, "zeus", "chief", "hello");
+    context.pass().unwrap();
+    assert_eq!(pasted.get(), 1);
+
+    // The window reads at rest for five minutes, ten arrival windows, and its harness
+    // says the paste went into the turn it is in still.
+    context.adapter.with("chief", |agent| agent.held = true);
+    for _ in 0..10 {
+        context.advance(ARRIVAL_MS);
+        context.pass().unwrap();
+    }
+    let waiting = context.message(note.id);
+    assert_eq!(
+        (waiting.state.as_str(), waiting.attempts),
+        ("delivering", 1),
+        "still on its way, not tried again"
+    );
+    assert_eq!(pasted.get(), 1, "not pasted again");
+
+    // The turn ends: the record gets a whole arrival window of rest from there, and
+    // the harness runs the message within it.
+    context.adapter.with("chief", |agent| agent.held = false);
+    context.pass().unwrap();
+    context.advance(ARRIVAL_MS - 1_000);
+    context.pass().unwrap();
+    assert_eq!(context.message(note.id).attempts, 1);
+    shows(&context, "chief", &waiting);
+    context.pass().unwrap();
+    let delivered = context.message(note.id);
+    assert_eq!(
+        (delivered.state.as_str(), delivered.attempts),
+        ("delivered", 1)
+    );
+    assert_eq!(pasted.get(), 1);
+}
+
+/// The reviews of 2026-10-16: past half an hour, a paste held in a turn whose agent
+/// said nothing went again into that turn, and both ran when it ended.
+#[test]
+fn never_pastes_again_a_paste_held_in_a_turn_however_long_and_gives_its_record_a_window_when_it_ends(
+) {
+    let context = Context::new();
+    let project = holding(&context);
+    let pasted = counting(&context);
+    let note = context.note(project, "zeus", "chief", "hello");
+    let behind = context.note(project, "zeus", "chief", "behind");
+    context.pass().unwrap();
+
+    // A turn whose agent never says a word holds the paste, and the window reads at
+    // rest all the while: an hour of it, and the queue behind it waits.
+    context.adapter.with("chief", |agent| agent.held = true);
+    for _ in 0..120 {
+        context.advance(ARRIVAL_MS);
+        context.pass().unwrap();
+    }
+    let waiting = context.message(note.id);
+    assert_eq!(
+        (waiting.state.as_str(), waiting.attempts),
+        ("delivering", 1)
+    );
+    assert_eq!(pasted.get(), 1, "never pasted again while it is held");
+    assert_eq!(context.message(behind.id).state, "queued");
+
+    // The turn ends (the human stopped it): the record has a whole arrival window
+    // of rest from there, the half hour long past as it is.
+    context.adapter.with("chief", |agent| agent.held = false);
+    context.pass().unwrap();
+    context.advance(ARRIVAL_MS - 1_000);
+    context.pass().unwrap();
+    assert_eq!(pasted.get(), 1, "not at the turn's end");
+    // It never shows: it goes again, once, and says why.
+    context.advance(2_000);
+    context.pass().unwrap();
+    let again = context.message(note.id);
+    assert_eq!((again.state.as_str(), again.attempts), ("delivering", 2));
+    assert_eq!(pasted.get(), 2, "pasted again once");
+    assert_eq!(
+        why_retried(&context, project),
+        format!(
+            "the harness record never showed it in the {} s its window was at rest since its last turn",
+            ARRIVAL_MS / 1000
+        )
+    );
 }
 
 #[test]

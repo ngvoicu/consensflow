@@ -1,5 +1,7 @@
 //! Whether a message handed over to a window arrived: its harness's record is
-//! watched for the message's header, which confirms it. A paste the window may
+//! watched for the message's paste, an item the message's header begins as the
+//! harness records a paste, which confirms it; a header quoted in other words
+//! proves nothing (`is_paste_of`). A paste the window may
 //! not have sent is given one more Enter, and one the record never showed is
 //! pasted again. Two things keep a record that is late from being taken for
 //! lacking, and the paste from being a second copy of one the window has (a
@@ -8,8 +10,12 @@
 //! harness queued itself is. And a window in a turn may hold what it is given and
 //! write it to its record when it gets to it, so only the window's rest counts
 //! towards the record's time: a record gets a whole arrival window of rest, from
-//! the hand-over or from the end of the last turn the window went into since.
-//! However often the window goes into a turn, a paste the record has not shown
+//! the hand-over or from the end of the last turn the window went into since. A
+//! window whose harness says the paste went into a turn it is in still
+//! (`Window::held`) is in that turn, however at rest it reads (a Devin turn whose
+//! agent says nothing for minutes: a result of 2026-10-15 was pasted twice into
+//! one), and the paste is never pasted again while it is, however long the turn:
+//! the human can stop it. However often the window goes into other turns, a paste the record has not shown
 //! within [`RECONCILE_MS`] of its hand-over is pasted again at the window's next
 //! rest, so unrelated turns never hold the queue behind it for good. What a chief's
 //! launch put ahead of its queue (the role it says first, and the message that
@@ -20,7 +26,10 @@
 //! Limits (Astraeus, 2026-10-14). A harness's word that its queue holds the
 //! message is not withdrawn: a Devin wire log that named the pasted header and
 //! then refused it leaves the message waited for until the window closes; the
-//! header is the message's own, so no other text matches it. The one Enter is
+//! header is the message's own, so no other text matches it. A paste held in a turn
+//! that never ends waits with it, and the window's queue behind it, until the human
+//! stops the turn or closes the window (the reviews of 2026-10-16: pasted again past
+//! half an hour into the turn that held it, both ran when it ended). The one Enter is
 //! pressed whatever the window shows, as it was before (a quiet dialog may take
 //! it), and the screen is looked at apart from the press, so a human's typing in
 //! between can meet it.
@@ -36,6 +45,7 @@ use cf_harness::records::Role;
 use cf_proto::trace::WindowEvent;
 use serde_json::{json, Value};
 
+use crate::delivery_text::is_paste_of;
 use crate::dispatcher::Dispatcher;
 use crate::record::Record;
 use crate::runtime::{begin, returning};
@@ -49,7 +59,8 @@ const ENTER_AGAIN_MS: i64 = 10_000;
 /// or drawing, is left be.
 const ENTER_AGAIN_QUIET_MS: f64 = 3_000.0;
 /// How long after its hand-over a paste the record never showed is pasted again
-/// at the window's next rest, however its rest was cut by turns.
+/// at the window's next rest, however its rest was cut by turns: by turns other
+/// than one its harness held it in (`Delivering::held`).
 const RECONCILE_MS: i64 = 30 * 60_000;
 
 impl Dispatcher {
@@ -71,10 +82,15 @@ impl Dispatcher {
             record.delivery.borrow_mut().delivering = None;
             return Ok(true);
         };
-        let arrived = observed
-            .items()
-            .iter()
-            .find(|item| item.role == Role::User && item.text.contains(&delivering.marker));
+        // Only a launch's first message goes in behind the brief its window received.
+        let first = if delivering.launch {
+            self.brief_given_first(&message)?
+        } else {
+            None
+        };
+        let arrived = observed.items().iter().find(|item| {
+            item.role == Role::User && is_paste_of(&item.text, message.id, first.as_deref())
+        });
         let Some(arrived) = arrived else {
             return Ok(false);
         };
@@ -145,9 +161,17 @@ impl Dispatcher {
             return Ok(());
         }
         let waited = self.now() - delivering.since;
-        let (rested, turned) = self.rested(record, observed);
+        let held = self.held(record);
+        if held {
+            self.held_in_a_turn(record);
+        }
+        let (rested, turned) = self.rested(record, observed, held);
         let at_rest = observed.settled && observed.waiting.is_none();
-        let overdue = waited > RECONCILE_MS && at_rest;
+        // A paste its harness holds in a turn goes again never while it does, at any
+        // age, and the half hour's shortcut is none once it did: the turn's end gives
+        // its record a whole arrival window (the reviews of 2026-10-16: past the half
+        // hour, a second copy went into the turn that held the first).
+        let overdue = waited > RECONCILE_MS && at_rest && !held && !delivering.held;
         if rested <= self.seams.limits.arrival_ms && !overdue {
             if waited > ENTER_AGAIN_MS
                 && waited <= self.seams.limits.arrival_ms
@@ -196,20 +220,34 @@ impl Dispatcher {
         }
     }
 
+    /// Whether the window's harness says the message on its way went into a turn
+    /// it is in still.
+    fn held(&self, record: &Record) -> bool {
+        self.window_of(record).0.is_some_and(|window| window.held())
+    }
+
+    /// The message on its way went into a turn its harness held it in.
+    fn held_in_a_turn(&self, record: &Record) {
+        if let Some(delivering) = record.delivery.borrow_mut().delivering.as_mut() {
+            delivering.held = true;
+        }
+    }
+
     /// How long the window has been at rest since the message on its way was
     /// handed over, or since its last turn ended: the time its record has had
     /// to show it. A look that finds the window in a turn starts the count
     /// again, whatever the harness does with what came in meanwhile: it may
     /// hold it until it runs it, which is the record's wait, not its failure. A
-    /// window waiting on a dialog is in its turn still. And whether a turn was
-    /// found since the hand-over.
-    fn rested(&self, record: &Record, observed: &Observed) -> (i64, bool) {
+    /// window waiting on a dialog is in its turn still, and so is one whose harness
+    /// `held` the message in the turn it went into. And whether a turn was found
+    /// since the hand-over.
+    fn rested(&self, record: &Record, observed: &Observed, held: bool) -> (i64, bool) {
         let now = self.now();
         let mut part = record.delivery.borrow_mut();
         let Some(delivering) = part.delivering.as_mut() else {
             return (0, false);
         };
-        if observed.settled && observed.waiting.is_none() {
+        if observed.settled && observed.waiting.is_none() && !held {
             let since = *delivering.rested_since.get_or_insert(now);
             (now - since, since != delivering.since)
         } else {

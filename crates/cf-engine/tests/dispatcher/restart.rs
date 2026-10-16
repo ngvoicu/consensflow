@@ -213,27 +213,33 @@ fn gives_a_paste_back_to_the_queue_when_its_window_closes_while_the_harness_take
     }));
     let note = context.note(project.id, "zeus", "chief", "Lost");
     context.pass().unwrap();
+    // The harness had taken the paste, and its record has it: the conversation
+    // holds it, so it is confirmed, where Node gave it back to the queue (a
+    // departure: `traces`' `DEPARTED`).
     assert_eq!(
         context.message(note.id).state,
-        "queued",
-        "not left on its way"
+        "delivered",
+        "not left on its way, and not given back"
     );
 
     *context.adapter.deliver.borrow_mut() = None;
     context.resume_project(project.id).unwrap();
-    // The harness had taken the paste, so the chief's turn was cut with it: it
-    // is told so first, and the message waits behind the turn that answers it.
+    // The chief's turn was cut with it: it is told so, and goes on from it.
     assert_match(
         &last_message(&context),
         r"^\[ConsensFlow m-\d+ · note from ConsensFlow\]\nConsensFlow stopped in the middle of your turn",
     );
-    context.pass().unwrap();
-    assert_eq!(context.message(note.id).state, "queued");
     context.adapter.answer("chief", "Going on.");
     context.pass().unwrap();
-    assert_eq!(context.message(note.id).state, "delivering");
     context.pass().unwrap();
-    assert_eq!(context.message(note.id).state, "delivered");
+    let again = context
+        .adapter
+        .agent("chief")
+        .items
+        .iter()
+        .filter(|item| item.role == Role::User && item.text.contains("Lost"))
+        .count();
+    assert_eq!(again, 0, "the window that came back is not given it again");
     held_to(
         context.close(),
         SUITES,

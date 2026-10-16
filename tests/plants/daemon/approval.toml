@@ -192,8 +192,8 @@ runs = ["ledger-approval"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/carrying.rs"
-find = '''WHERE m.state = 'queued' AND c.state NOT IN ('queued', 'gated')'''
-replace = '''WHERE m.state = 'queued' AND c.state NOT IN ('queued')'''
+find = '''WHERE m.state = 'queued' AND c.state NOT IN ('queued', 'gated', 'delivering')'''
+replace = '''WHERE m.state = 'queued' AND c.state NOT IN ('queued', 'delivering')'''
 
 [[plant]]
 name = "approval: switching approval off passes on what waits at the gate"

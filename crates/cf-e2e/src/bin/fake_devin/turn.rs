@@ -13,8 +13,11 @@
 //!
 //! A turn takes the time a model takes ([`Pace`]): from the message put to the
 //! agent to its first word, in which the turn is begun and its work is not to be
-//! seen, and the work itself, which no words but a `SLEEP` set. What a message
-//! the window is handed while a turn is at work comes to is the window's
+//! seen, and the work itself, which no words but a `SLEEP` set. A line `THINK
+//! <seconds> <words>` is a turn whose agent says nothing for that long, whatever the
+//! pace, before it does what the words say: a Devin that sat at "Thinking" (a window
+//! resumed after a cut, 3000.11.92 on 2026-10-15, never came back to rest). What a
+//! message the window is handed while a turn is at work comes to is the window's
 //! (`fake_devin.rs`): it waits, and is written to the store when its turn begins.
 
 use std::io::{self, Write};
@@ -26,6 +29,7 @@ use cf_e2e::pattern;
 use regex::Regex;
 
 use crate::command;
+use crate::faults::Fault;
 use crate::said;
 use crate::stop::Stop;
 use crate::store::Store;
@@ -64,6 +68,8 @@ impl Pace {
 /// What a turn is asked to do.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Plan {
+    /// How long its agent says nothing before its first word.
+    pub first_word: Duration,
     /// How long it works before it answers.
     pub work: Duration,
     /// How many seconds of a command it leaves running as it answers, if it does.
@@ -72,18 +78,22 @@ pub struct Plan {
     pub answer: String,
 }
 
-/// What the message `text` asks of a turn, which works as long as `pace` says
+/// What the message `text` asks of a turn, which takes as long as `pace` says
 /// where the message says nothing of it.
 pub fn plan_of(text: &str, pace: Pace) -> Plan {
+    static THINK: OnceLock<Regex> = OnceLock::new();
     static SLEEP: OnceLock<Regex> = OnceLock::new();
     static BACKGROUND: OnceLock<Regex> = OnceLock::new();
     static EXACT: OnceLock<Regex> = OnceLock::new();
-    let (work, words) = match pattern::once(&SLEEP, r"(?m)^SLEEP (\d+) (.+)$").captures(text) {
-        Some(slow) => (
-            Duration::from_secs(slow[1].parse().unwrap_or(0)),
-            slow[2].to_owned(),
-        ),
-        None => (pace.work, text.to_owned()),
+    let seconds = |count: &str| Duration::from_secs(count.parse().unwrap_or(0));
+    let (first_word, words) = match pattern::once(&THINK, r"(?m)^THINK (\d+) (.+)$").captures(text)
+    {
+        Some(silent) => (seconds(&silent[1]), silent[2].to_owned()),
+        None => (pace.first_word, text.to_owned()),
+    };
+    let (work, words) = match pattern::once(&SLEEP, r"(?m)^SLEEP (\d+) (.+)$").captures(&words) {
+        Some(slow) => (seconds(&slow[1]), slow[2].to_owned()),
+        None => (pace.work, words),
     };
     let (background, words) =
         match pattern::once(&BACKGROUND, r"(?m)^BACKGROUND (\d+) (.+)$").captures(&words) {
@@ -95,6 +105,7 @@ pub fn plan_of(text: &str, pace: Pace) -> Plan {
         None => format!("noted: {}", words.split('\n').next().unwrap_or_default()),
     };
     Plan {
+        first_word,
         work,
         background,
         answer,
@@ -112,6 +123,8 @@ pub struct Window<W: Write> {
     turns: u64,
     /// Where a command a turn leaves is written, where the window has any.
     jobs: Option<Jobs>,
+    /// The message the window ends at, once it is recorded (`faults`).
+    crash: Fault,
 }
 
 /// Where the rig looks for the jobs of a window, which window it is (its process), and
@@ -132,7 +145,16 @@ impl<W: Write> Window<W> {
             pace,
             turns: 0,
             jobs: None,
+            crash: Fault::default(),
         }
+    }
+
+    /// The window ends at the message `crash` meets, once its row and its prompt
+    /// are written.
+    #[must_use]
+    pub fn crashing_on(mut self, crash: Fault) -> Self {
+        self.crash = crash;
+        self
     }
 
     /// The window's jobs are written in `folder`, as those of the window `window`; its
@@ -169,11 +191,14 @@ impl<W: Write> Window<W> {
         let plan = plan_of(text, self.pace);
         self.store.user(text, &client)?;
         self.wire.prompt(self.turns + 1, text).map_err(said)?;
+        if self.crash.meets(text) {
+            crate::leave(1);
+        }
         self.say("working (esc twice to interrupt)\n")
             .map_err(said)?;
         // The turn is begun, and its agent has not said a word: a model's time,
         // in which the wire shows none of its work.
-        let mut stopped = self.stop.work(self.pace.first_word);
+        let mut stopped = self.stop.work(plan.first_word);
         let mut left = None;
         if !stopped {
             self.wire.thinking(&client).map_err(said)?;
@@ -229,6 +254,7 @@ mod tests {
         assert_eq!(
             plan_of("Reply with exactly: WORKER_OK", quick),
             Plan {
+                first_word: Duration::ZERO,
                 work: Duration::ZERO,
                 background: None,
                 answer: "WORKER_OK".to_owned()
@@ -255,6 +281,7 @@ mod tests {
         assert_eq!(
             plan,
             Plan {
+                first_word: Duration::ZERO,
                 work: Duration::from_secs(120),
                 background: None,
                 answer: "T5_DONE".to_owned()
@@ -282,6 +309,35 @@ mod tests {
     }
 
     #[test]
+    fn a_think_line_is_a_silence_that_long_before_the_first_word_whatever_the_pace_and_then_what_the_words_say(
+    ) {
+        let slow = Pace::of(Some("3000"), Some("14000"));
+        assert_eq!(
+            plan_of("THINK 150 SLEEP 2 Reply with exactly: BUSY", slow),
+            Plan {
+                first_word: Duration::from_secs(150),
+                work: Duration::from_secs(2),
+                background: None,
+                answer: "BUSY".to_owned()
+            }
+        );
+        assert_eq!(
+            plan_of("THINK 150 hello", slow).work,
+            Duration::from_secs(14),
+            "the work is the pace's"
+        );
+        // A line that is no silence is none.
+        assert_eq!(
+            plan_of("say THINK 5 x", slow).first_word,
+            Duration::from_secs(3)
+        );
+        assert_eq!(
+            plan_of("THINK soon x", slow).first_word,
+            Duration::from_secs(3)
+        );
+    }
+
+    #[test]
     fn a_background_line_leaves_a_command_running_that_long_and_does_what_the_words_after_it_say() {
         let quick = Pace::default();
         let plan = plan_of(
@@ -291,6 +347,7 @@ mod tests {
         assert_eq!(
             plan,
             Plan {
+                first_word: Duration::ZERO,
                 work: Duration::ZERO,
                 background: Some(600),
                 answer: "LEFT_IT".to_owned()

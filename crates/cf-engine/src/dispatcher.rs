@@ -41,6 +41,7 @@ use crate::background::quote;
 use crate::chief_switch::SwitchTo;
 use crate::record::Record;
 use crate::resume::Coming;
+use crate::resume::ResumeState;
 use crate::runtime::{all, begin, returning, Begun, LocalWork};
 use crate::scheduler::SchedulerState;
 use crate::seams::{EngineError, Seams};
@@ -94,6 +95,8 @@ pub struct Dispatcher {
     pub(crate) scheduler: SchedulerState,
     /// What the bursts of stalls under way keep (`stalls`).
     pub(crate) stalls: StallsState,
+    /// What the human's Resume waits for after a start (`resume`).
+    pub(crate) resumes: ResumeState,
 }
 
 impl Dispatcher {
@@ -107,6 +110,7 @@ impl Dispatcher {
             windows: WindowsState::default(),
             scheduler: SchedulerState::default(),
             stalls: StallsState::default(),
+            resumes: ResumeState::default(),
         })
     }
 
@@ -711,15 +715,39 @@ impl Dispatcher {
         } else {
             closed
         };
-        if let Some(delivering) = delivering {
-            // A chief's first message (a handoff, most often) waits for its next window.
-            if delivering.chief {
-                self.give_back(delivering, &because)?;
-            } else {
-                let retry = !delivering.launch;
-                self.settle_failure(delivering, &because, retry)?;
+        let project = match delivering {
+            None => project,
+            Some(delivering) => {
+                let on = self.conversation_on(record.id)?;
+                // A paste its harness's record shows it took is confirmed (`in_flight`).
+                let (this, told) = (Rc::clone(self), because.clone());
+                let read = self
+                    .settle_gone(delivering, move |delivering| {
+                        // A chief's first message (a handoff, most often) waits for its next window.
+                        if delivering.chief {
+                            this.give_back(delivering, &told)
+                        } else {
+                            let retry = !delivering.launch;
+                            this.settle_failure(delivering, &told, retry)
+                        }
+                    })
+                    .await?;
+                if !read {
+                    project
+                } else {
+                    // The record was read with no window open: a participant that moved
+                    // on meanwhile settles nothing more of this exit, and one that did not
+                    // goes on with its project as it is now.
+                    match self.project_of(record.id)? {
+                        Some(now) if self.still_as_it_went(&record, on)? => now,
+                        _ => {
+                            self.changed();
+                            return Ok(());
+                        }
+                    }
+                }
             }
-        }
+        };
         let launch_owed = owed.is_some();
         if let Some(prelude) = owed {
             self.settle_exited_launch(&record, &project, &participant, &prelude, &because)?;

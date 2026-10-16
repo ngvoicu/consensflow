@@ -157,6 +157,81 @@ fn a_resume_opens_the_chief_and_each_window_with_a_task_in_hand_and_not_an_idle_
     assert_eq!(context.project(project).state, "open");
 }
 
+/// The rig's restart of 2026-10-16 (`rows_a_paste_carried_pasted_again_after_a_restart`,
+/// red under load): the human's Resume came while the start still read the record of the
+/// words that resume a worker's paused task. The task was paused still, so the Resume
+/// brought no window back for it; the start then confirmed the words, the task was at
+/// work, and the next pass found it with no window and nothing due, and paused it for a
+/// window that was gone.
+#[test]
+fn a_resume_while_the_start_reads_what_was_on_its_way_brings_back_the_window_it_makes_at_work() {
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    context.give(project.id, "zeus", "Parser");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    // T-1 is paused, and the words that resume it are on their way into zeus's window,
+    // which took them, when the app quits.
+    context.adapter.busy("zeus");
+    context
+        .ledger
+        .borrow_mut()
+        .pause_task(project.id, 1, Some("chief"), None)
+        .unwrap();
+    context.pass().unwrap();
+    context
+        .ledger
+        .borrow_mut()
+        .resume_task(project.id, 1, Some("chief"), "Go on")
+        .unwrap();
+    context.adapter.answer("zeus", "Paused");
+    context.pass().unwrap();
+    let words = context
+        .ledger
+        .borrow()
+        .in_flight()
+        .unwrap()
+        .into_iter()
+        .next()
+        .expect("the words on their way");
+    assert_eq!(
+        context.task(project.id, 1).task.state,
+        "queued",
+        "behind its words"
+    );
+    let windows = |context: &Context| {
+        opened(context)
+            .iter()
+            .filter(|pane| pane.as_str() == "p1-zeus")
+            .count()
+    };
+    let before = windows(&context);
+    context.ledger.borrow_mut().suspend_for_restart().unwrap();
+    let after = context.make();
+    let reading = context.adapter.record_holds.hold(|_| true);
+    let settling = after.begin_settle_after_restart();
+    context.settle();
+
+    // The human resumes the project while the start reads zeus's record: it waits.
+    let resuming = after.begin_resume_project(project.id);
+    context.settle();
+    assert_eq!(context.project(project.id).state, "suspended");
+    reading.open();
+    context.settle();
+    settling.take().unwrap().unwrap();
+    resuming.take().unwrap().unwrap();
+    assert_eq!(context.message(words.id).state, "delivered");
+    after.pass().unwrap();
+    after.pass().unwrap();
+    assert_eq!(
+        context.task(project.id, 1).task.state,
+        "working",
+        "not paused for a window that is gone: {:?}",
+        context.inbox(context.id(project.id, "chief"))
+    );
+    assert_eq!(windows(&context), before + 1, "zeus's window is back");
+}
+
 #[test]
 fn a_resume_of_a_project_that_is_open_opens_no_window_again_and_tells_none_its_turn_was_cut() {
     let context = Context::new();

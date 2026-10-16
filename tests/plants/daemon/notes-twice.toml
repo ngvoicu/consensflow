@@ -42,8 +42,8 @@ replace = ""
 
 [[plant.edit]]
 file = "crates/cf-engine/src/arrival.rs"
-find = "        let (rested, turned) = self.rested(record, observed);"
-replace = "        let (rested, turned) = (waited, false);"
+find = "        let (rested, turned) = self.rested(record, observed, held);"
+replace = "        let (rested, turned) = (waited, held && false);"
 
 [[plant]]
 name = "notes twice: the engine counts the arrival window from the hand-over, its turns or none"
@@ -52,8 +52,8 @@ runs = ["engine-slow-records"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/arrival.rs"
-find = "        let (rested, turned) = self.rested(record, observed);"
-replace = "        let (rested, turned) = (waited, false);"
+find = "        let (rested, turned) = self.rested(record, observed, held);"
+replace = "        let (rested, turned) = (waited, held && false);"
 
 [[plant]]
 name = "notes twice: a window that waits on a dialog of its own is at rest"
@@ -62,8 +62,8 @@ runs = ["engine-slow-records"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/arrival.rs"
-find = "        if observed.settled && observed.waiting.is_none() {"
-replace = "        if observed.settled {"
+find = "        if observed.settled && observed.waiting.is_none() && !held {"
+replace = "        if observed.settled && !held {"
 
 [[plant]]
 name = "notes twice: a message the harness says its own queue holds is tried again all the same"
@@ -142,8 +142,11 @@ runs = ["harness-devin"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/devin/wire_log.rs"
-find = "                self.asked.clear();"
-replace = ""
+find = '''
+            if record.get("sessionId").and_then(Value::as_str) == self.shown.as_deref() {
+                self.asked.clear();'''
+replace = '''
+            if record.get("sessionId").and_then(Value::as_str) == self.shown.as_deref() {'''
 
 [[plant]]
 name = "notes twice: the answer to a prompt's request does not close it"
@@ -192,5 +195,5 @@ runs = ["engine-slow-records"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/arrival.rs"
-find = "        let overdue = waited > RECONCILE_MS && at_rest;"
-replace = "        let overdue = false && waited > RECONCILE_MS && at_rest;"
+find = "        let overdue = waited > RECONCILE_MS && at_rest && !held && !delivering.held;"
+replace = "        let overdue = false && waited > RECONCILE_MS && at_rest && !held && !delivering.held;"
