@@ -166,7 +166,9 @@ function model() {
         ],
         items: [
           item(7, 0, 'w-1', 'user', 'Write the lexer'),
-          item(7, 1, 'w-2', 'assistant', 'The first part', { cut: { from: 0, bytes: 700_000 } }),
+          item(7, 1, 'w-2', 'assistant', 'The first part', {
+            cut: { from: 0, bytes: 700_000, revision: 1 },
+          }),
         ],
       },
     },
@@ -669,6 +671,43 @@ test.describe('the history viewer', () => {
     )
     await expect(button).toBeEnabled()
     expect((await asked(page, 'history.part')).length).toBe(5 + 6)
+  })
+
+  test('keeps a long delivery folded when its whole is the copy the page showed, and not one copied again since', async ({
+    page,
+  }) => {
+    const data = model()
+    const header = '[ConsensFlow m-12 · T-1 · result from @zeus]\n'
+    const line = "· m-12: @zeus's result on T-1 (cf task get T-1)"
+    // A long delivery, shown by its first part and folded to its line.
+    data.histories['zeus-amber-pine'].items.push(
+      item(7, 2, 'w-3', 'user', `${header}Parser done`, {
+        cut: { from: 0, bytes: 700_000, revision: 1 },
+        delivery: { line, at: 0 },
+      }),
+    )
+    data.parts['w-3'] = [`${header}Parser done`, ', all of it.']
+    await open(page, data)
+    const viewer = await openSession(page)
+    const long = () => viewer.locator('.history-item').nth(2)
+    await expect(long().locator('.history-delivery summary')).toHaveText(line)
+    await long().getByRole('button', { name: 'Show the whole item (684 KB)' }).click()
+    await expect(long().locator('.history-cut')).toHaveCount(0)
+    await expect(long().locator('.history-delivery summary')).toHaveText(line)
+    await expect(long().locator('.history-delivery pre')).toContainText('Parser done, all of it.')
+    // Copied again since the page was read, the human's words in its place: the whole of
+    // the new copy is drawn as it is, under no line of the message it no longer holds.
+    await page.evaluate(() => {
+      window.__model.copies = {
+        'w-3': [{ revision: 2, parts: ['Typed instead', ' by the human.'] }],
+      }
+    })
+    await viewer.getByRole('button', { name: 'Refresh' }).click()
+    await expect(long().locator('.history-cut')).toHaveCount(1)
+    await long().getByRole('button', { name: 'Show the whole item (684 KB)' }).click()
+    await expect(long().locator('.history-cut')).toHaveCount(0)
+    await expect(long().locator('.history-delivery')).toHaveCount(0)
+    await expect(long().locator('.transcript-body')).toHaveText('Typed instead by the human.')
   })
 
   test('holds a search to 1,000 characters, and says so of a longer one', async ({ page }) => {

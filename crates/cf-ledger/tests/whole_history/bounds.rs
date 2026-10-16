@@ -10,7 +10,7 @@ use std::time::Instant;
 
 use cf_ledger::{
     HistoryAsk, HistoryEntry, HistoryFrom, HistoryRead, Ledger, MessageOpening, NewMember, NewNote,
-    Scanned, HISTORY_ID_SHOWN, MESSAGE_OPENING,
+    Scanned, MESSAGE_OPENING,
 };
 use serde_json::Value;
 
@@ -155,85 +155,6 @@ fn a_read_never_loads_the_role_a_conversation_was_given() {
     assert_eq!(
         (searched.scanned.conversations, searched.resume),
         (50, None)
-    );
-}
-
-#[test]
-fn a_heading_s_long_fields_and_an_item_s_long_id_are_charged_as_what_they_are() {
-    let dir = tempfile::tempdir().expect("a folder");
-    let mut ledger = ledger_in(&dir);
-    let project = project(&mut ledger);
-    let chief = id_of(&project, "chief");
-    for _ in 0..20 {
-        ledger
-            .start_conversation(chief, "claude-code")
-            .expect("a conversation");
-    }
-    // Conversations of native sessions of 10 KB each, as no build of today
-    // binds (512 characters at most) and an older one may have, holding
-    // nothing: a search that may go through 100,000 bytes reaches as many as
-    // that pays for.
-    ledger.close().expect("closed");
-    let db = rusqlite::Connection::open(dir.path().join("consensflow.db")).expect("the file");
-    db.execute(
-        "UPDATE conversation SET native_session = id || '-' || ?",
-        ["s".repeat(10_000)],
-    )
-    .expect("long sessions");
-    drop(db);
-    let mut ledger = ledger_in(&dir);
-    let bounded = |ledger: &Ledger, scan: usize| {
-        ledger
-            .read_history(
-                project.id,
-                "chief",
-                &HistoryAsk {
-                    scan,
-                    ..ask(HistoryFrom::Newest, Some("nowhere"), false, ROOM)
-                },
-            )
-            .expect("a search")
-    };
-    let read = bounded(&ledger, 100_000);
-    assert!(read.bounded, "{:?}", read.scanned);
-    assert!(read.scanned.conversations <= 10, "{:?}", read.scanned);
-    // Items of ids of 100 KB each: each read no further than a page shows of
-    // it, and that charged; none loaded whole.
-    let now = ledger
-        .start_conversation(chief, "claude-code")
-        .expect("a conversation");
-    let items: Vec<Value> = (0..20)
-        .map(|at| item(&format!("{at:02}{}", "i".repeat(100_000)), "user", "x"))
-        .collect();
-    ledger.copy_transcript(now.id, &items, 0).expect("copied");
-    ledger.limit_value_length(50_000).expect("held");
-    let read = ledger
-        .read_history(
-            project.id,
-            "chief",
-            &ask(HistoryFrom::Newest, None, false, ROOM),
-        )
-        .expect("a page");
-    assert_eq!(
-        ids(&read)[0],
-        format!("19{}…", "i".repeat(HISTORY_ID_SHOWN - 2))
-    );
-    assert_eq!(read.scanned.rows, 20);
-    let headings: usize = read
-        .conversations
-        .iter()
-        .map(|heading| {
-            let view = &heading.conversation;
-            view.harness.len()
-                + view.native_session.as_ref().map_or(0, String::len)
-                + view.started_at.len()
-                + view.ended_at.as_ref().map_or(0, String::len)
-        })
-        .sum();
-    assert_eq!(
-        (read.scanned.conversations, read.scanned.fields),
-        (21, headings + 20 * 4 * (HISTORY_ID_SHOWN + 1)),
-        "each heading's fields, and each id's first bytes"
     );
 }
 

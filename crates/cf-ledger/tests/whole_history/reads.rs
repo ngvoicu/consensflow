@@ -402,6 +402,79 @@ fn a_search_inside_an_item_longer_than_its_bound_stops_at_the_bound_and_goes_on_
 }
 
 #[test]
+fn every_read_moves_however_little_it_may_go_through_and_older_reaches_the_oldest() {
+    let dir = tempfile::tempdir().expect("a folder");
+    let mut ledger = ledger_in(&dir);
+    let project = project(&mut ledger);
+    let chief = id_of(&project, "chief");
+    // A conversation of a tool's output alone; one of short items and a long
+    // one of four parts, its words in its last; and the one going on now.
+    let conversation = |ledger: &mut Ledger, items: &[Value]| {
+        let id = ledger
+            .start_conversation(chief, "claude-code")
+            .expect("a conversation")
+            .id;
+        ledger.copy_transcript(id, items, 0).expect("copied");
+        id
+    };
+    let tools = conversation(&mut ledger, &[item("t-0", "tool", "ok")]);
+    let long = format!("{} the NEEDLE", "a".repeat(HISTORY_PART * 3));
+    conversation(
+        &mut ledger,
+        &[
+            item("w-0", "user", "a needle"),
+            item("w-1", "assistant", &long),
+            item("w-2", "user", "after"),
+        ],
+    );
+    conversation(&mut ledger, &[item("n-0", "user", "now")]);
+    // Each read may go through a byte: it takes its first step all the same,
+    // and no more, so Older goes on an entry or a part at a time to the end.
+    let walk = |find: Option<&str>, tools: bool| {
+        let mut seen = Vec::new();
+        let mut from = HistoryFrom::Newest;
+        for _ in 0..50 {
+            let read = ledger
+                .read_history(
+                    project.id,
+                    "chief",
+                    &HistoryAsk {
+                        scan: 1,
+                        ..ask(from, find, tools, ROOM)
+                    },
+                )
+                .expect("a read");
+            assert!(
+                read.scanned.bytes <= 2 * HISTORY_PART,
+                "a part and the end of the one before at most: {:?}",
+                read.scanned
+            );
+            // A place inside the long item is at one of its four parts: one
+            // gone all through is passed, never stood at past its last.
+            assert!(
+                read.resume.is_none_or(|key| key.part < 4),
+                "{:?}",
+                read.resume
+            );
+            seen.extend(read.entries.iter().map(|entry| match entry {
+                HistoryEntry::Item(row) => row.item.id.clone(),
+                HistoryEntry::Heading(key) => format!("heading {}", key.conversation),
+            }));
+            let Some(place) = read.resume else {
+                return seen;
+            };
+            from = HistoryFrom::Before(place);
+        }
+        panic!("no end after 50 reads: {seen:?}");
+    };
+    let heading = format!("heading {tools}");
+    assert_eq!(walk(None, false), ["n-0", "w-2", "w-1", "w-0", &heading]);
+    assert_eq!(walk(None, true), ["n-0", "w-2", "w-1", "w-0", "t-0"]);
+    assert_eq!(walk(Some("needle"), false), ["w-1", "w-0"]);
+    assert!(walk(Some("nowhere"), false).is_empty());
+}
+
+#[test]
 fn a_long_item_shows_a_part_its_first_or_where_a_search_found_and_reads_whole_a_part_at_a_time() {
     let dir = tempfile::tempdir().expect("a folder");
     let (mut ledger, project, conversation) = chief(&dir);
@@ -617,17 +690,37 @@ fn each_part_says_which_copy_of_its_item_it_is_of_and_a_copy_written_again_chang
             .expect("a part")
             .revision
     };
+    // The copy the part a page shows of a long item is of, as the page says it.
+    let shown = |ledger: &Ledger| {
+        let read = ledger
+            .read_history(
+                project,
+                "chief",
+                &ask(HistoryFrom::Newest, None, false, ROOM),
+            )
+            .expect("a page");
+        read.entries
+            .iter()
+            .find_map(|entry| match entry {
+                HistoryEntry::Item(row) if row.item.id == "long" => row.cut,
+                _ => None,
+            })
+            .expect("the long item, cut")
+            .revision
+    };
     let first = "a".repeat(HISTORY_PART * 2 + 5);
     copy(&mut ledger, "long", &first);
     let long = row_of(&ledger, project, "long");
     let at_first = revision(&ledger, long, 0);
+    assert_eq!(shown(&ledger), at_first);
     // Copied again as it was, it is the copy it was; written again changed,
-    // the next, at every part.
+    // the next, at every part, and on the page.
     copy(&mut ledger, "long", &first);
     assert_eq!(revision(&ledger, long, HISTORY_PART), at_first);
     copy(&mut ledger, "long", &"b".repeat(HISTORY_PART * 2 + 5));
     assert_eq!(revision(&ledger, long, 0), at_first + 1);
     assert_eq!(revision(&ledger, long, HISTORY_PART), at_first + 1);
+    assert_eq!(shown(&ledger), at_first + 1);
     // An item shorter than a part too: one that grows past a part as it is
     // read is no part of the copy read before.
     copy(&mut ledger, "short", "ok");

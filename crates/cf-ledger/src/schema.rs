@@ -100,11 +100,17 @@ pub fn migrate(db: &Connection, migrations: &[&str]) -> Result<(), LedgerError> 
     migrated
 }
 
-/// What the migration to `version` does past its SQL: 0019 splits the long
-/// items copied before it into the parts its table keeps, which needs each
-/// text read once, whole, where SQL's own functions would read it once a part.
+/// What the migration to `version` does past its SQL: 0019 cuts the items'
+/// ids and the conversations' native sessions an older build wrote past their
+/// ceilings, as the copy and a binding keep them within (a hash of a long id,
+/// a count of a session's characters, as JavaScript counts them), then splits
+/// the long items copied before it into the parts its table keeps, by the ids
+/// as they are cut: that needs each text read once, whole, where SQL's own
+/// functions would read it once a part.
 fn after(db: &Connection, version: usize) -> Result<(), LedgerError> {
     if version == 19 {
+        crate::conversations::cut_copied(db)?;
+        crate::conversations::cut_sessions(db)?;
         crate::conversations::split_copied(db)?;
     }
     Ok(())
@@ -141,7 +147,7 @@ mod tests {
             "33053c05edf05fb28fdfed70def7dd9a93d28763f1b444651d24beeba1654352",
             "d73267cfa36e7769831bc565137149029fdc90c32342e6438816e01db5c68c63",
             "63715a099a8464bb97a304c1c7623cada58ade9effb5418625d6df27da26f2b1",
-            "9c54f5b7282369a3479649be443a28f75f11667b2562b21915c0565efc620ff9",
+            "c6ede37cb2efbce59eddac9270e28d781a50358d824303c297c837a455555e48",
         ];
         for (at, (sql, shipped)) in MIGRATIONS.iter().zip(SHIPPED).enumerate() {
             let hash: String = Sha256::digest(sql.as_bytes())

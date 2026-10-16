@@ -13,6 +13,43 @@
 -- they are of one copy. An item copied before this column is at its first.
   ALTER TABLE transcript ADD COLUMN revision INTEGER NOT NULL DEFAULT 0;
 
+-- Every field the history viewer reads but an item's text has a ceiling, which
+-- each write keeps (`conversations::FIELD_MAX`, `HEADING_EVENT_MAX`): what an
+-- older build wrote past it is cut here, once, before the indexes below are
+-- built on it, and never fails on what it finds. An item's time longer than 256
+-- characters is none, as the copy keeps a time it does not read; a
+-- conversation's times, cut to 256; its harness too, and its native session
+-- none, so that no two are made one; an item's id and a longer native session
+-- after this SQL (`schema::after`). Each of these is read only where its size
+-- says it is long, never past an item's text to find out.
+  UPDATE transcript SET at = NULL
+    WHERE CASE WHEN octet_length(at) > 256 THEN length(at) > 256 END;
+  UPDATE conversation SET harness = substr(harness, 1, 255) || '…', native_session = NULL
+    WHERE CASE WHEN octet_length(harness) > 256 THEN length(harness) > 256 END;
+  UPDATE conversation SET started_at = substr(started_at, 1, 255) || '…'
+    WHERE CASE WHEN octet_length(started_at) > 256 THEN length(started_at) > 256 END;
+  UPDATE conversation SET ended_at = substr(ended_at, 1, 255) || '…'
+    WHERE CASE WHEN octet_length(ended_at) > 256 THEN length(ended_at) > 256 END;
+-- An event a heading reads whose data is longer than 4,096 bytes is written as
+-- what a heading reads of it, and the size it was: the conversation's id where
+-- it is a whole number, and each name where it is text no longer than 256
+-- characters; none where its data is no JSON.
+  UPDATE event SET data = json_object(
+      'conversation', CASE WHEN json_valid(data) THEN CASE WHEN json_type(data, '$.conversation') = 'integer' THEN json_extract(data, '$.conversation') END END,
+      'participant', CASE WHEN json_valid(data) THEN CASE WHEN json_type(data, '$.participant') = 'text' THEN CASE WHEN length(json_extract(data, '$.participant')) <= 256 THEN json_extract(data, '$.participant') END END END,
+      'cutFromBytes', octet_length(data))
+    WHERE kind IN ('conversation.started', 'conversation.followed', 'conversation.ended') AND octet_length(data) > 4096;
+  UPDATE event SET data = json_object(
+      'from', json_object(
+        'harness', CASE WHEN json_valid(data) THEN CASE WHEN json_type(data, '$.from.harness') = 'text' THEN CASE WHEN length(json_extract(data, '$.from.harness')) <= 256 THEN json_extract(data, '$.from.harness') END END END,
+        'agent', CASE WHEN json_valid(data) THEN CASE WHEN json_type(data, '$.from.agent') = 'text' THEN CASE WHEN length(json_extract(data, '$.from.agent')) <= 256 THEN json_extract(data, '$.from.agent') END END END),
+      'to', json_object(
+        'harness', CASE WHEN json_valid(data) THEN CASE WHEN json_type(data, '$.to.harness') = 'text' THEN CASE WHEN length(json_extract(data, '$.to.harness')) <= 256 THEN json_extract(data, '$.to.harness') END END END,
+        'agent', CASE WHEN json_valid(data) THEN CASE WHEN json_type(data, '$.to.agent') = 'text' THEN CASE WHEN length(json_extract(data, '$.to.agent')) <= 256 THEN json_extract(data, '$.to.agent') END END END),
+      'cut', CASE WHEN json_valid(data) THEN CASE json_type(data, '$.cut') WHEN 'true' THEN json('true') WHEN 'false' THEN json('false') END END,
+      'cutFromBytes', octet_length(data))
+    WHERE kind = 'chief.switched' AND octet_length(data) > 4096;
+
 -- The history viewer reads a participant's history a page at a time, and what
 -- one page costs is bounded whatever the history's size: it reaches what it
 -- reads through these indexes, and scans nothing. A participant's conversations:

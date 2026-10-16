@@ -8,8 +8,9 @@ mod chief;
 mod history;
 mod transcripts;
 
+use cf_base::text::utf16_len;
 use cf_proto::ledger::ConversationView;
-use rusqlite::{params, OptionalExtension};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::json;
 
 use crate::model::{self, LedgerError};
@@ -20,13 +21,36 @@ pub use chief::ChiefSwitch;
 pub(crate) use chief::{chief_history, chief_open_work, history_read, last_switch, switch_chief};
 pub(crate) use history::{message_opening, read_history, read_history_part};
 pub use history::{
-    HistoryAsk, HISTORY_FIND_MAX, HISTORY_ID_SHOWN, HISTORY_PART, HISTORY_SCAN_BYTES,
-    MESSAGE_OPENING, OPENING_COST,
+    HistoryAsk, HISTORY_FIND_MAX, HISTORY_PART, HISTORY_SCAN_BYTES, MESSAGE_OPENING, OPENING_COST,
 };
 pub use transcripts::TRANSCRIPT_ITEM_MAX;
 pub(crate) use transcripts::{
-    copied_item_with, copy_transcript, split_copied, transcript, typed_since,
+    copied_item_with, copy_transcript, cut_copied, split_copied, transcript, typed_since,
 };
+
+/// The most characters a field of the history holds that is no item's text:
+/// an item's id and its time, and a conversation's harness and times. A
+/// harness's own ids are tens of characters, a time thirty, a harness's kind
+/// eleven. The copy keeps a longer id as one this long that is still its own
+/// (`copy_transcript`) and a longer time as none, as a time it does not read;
+/// migration 0019 cuts what an older build wrote past it, once, the same way.
+pub const FIELD_MAX: usize = 256;
+
+/// The most characters (as JavaScript counts them) a conversation's native
+/// session holds: a harness's session ids are tens. A longer one is refused
+/// where it is bound; migration 0019 leaves a conversation an older build
+/// bound to a longer one bound to none, as one the ledger never learned the
+/// session of.
+pub const NATIVE_SESSION_MAX: usize = 512;
+
+/// The most bytes of data an event the history's headings read holds: where
+/// a conversation began, was gone to or ended, and a Switch chief. What this
+/// build logs of them is a handle, a conversation's id, a native session, and
+/// harnesses and agents, and stays below it whatever they are (a native session
+/// of characters JSON escapes, six bytes each, is 3,072 bytes at most);
+/// migration 0019 writes what an older build logged longer as what a heading
+/// reads of it, and the size it was (`cutFromBytes`).
+pub const HEADING_EVENT_MAX: usize = 4_096;
 
 /// A participant's new native conversation; the one before it ends.
 pub(crate) fn start_conversation(
@@ -62,7 +86,7 @@ pub(crate) fn bind_conversation(
     conversation_id: i64,
     native_session: &str,
 ) -> Result<ConversationView, LedgerError> {
-    model::require_text(native_session, "native session", 512)?;
+    model::require_text(native_session, "native session", NATIVE_SESSION_MAX)?;
     store.write(|store| {
         let conversation = known_conversation(store, conversation_id)?;
         let taken = store
@@ -92,6 +116,32 @@ pub(crate) fn bind_conversation(
         )?;
         known_conversation(store, conversation_id)
     })
+}
+
+/// Leaves each conversation an older build bound to a native session longer
+/// than [`NATIVE_SESSION_MAX`] characters bound to none: what migration 0019
+/// does past its SQL. No harness gives such a session and none is bound to one
+/// now, so none is lost: the conversation is one the ledger never learned the
+/// session of, as one a window followed onto another's session is.
+pub(crate) fn cut_sessions(db: &Connection) -> rusqlite::Result<()> {
+    let long = db
+        .prepare("SELECT id FROM conversation WHERE octet_length(native_session) > ?")?
+        .query_map(
+            [i64::try_from(NATIVE_SESSION_MAX).unwrap_or(i64::MAX)],
+            |row| row.get::<_, i64>(0),
+        )?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let mut read = db.prepare("SELECT native_session FROM conversation WHERE id = ?")?;
+    let mut unbind = db.prepare("UPDATE conversation SET native_session = NULL WHERE id = ?")?;
+    for id in long {
+        let session = read.query_row([id], |row| {
+            Ok(crate::openings::text_of(row.get_ref(0)?.as_bytes()?))
+        })?;
+        if utf16_len(&session) > NATIVE_SESSION_MAX {
+            unbind.execute([id])?;
+        }
+    }
+    Ok(())
 }
 
 /// The role text a conversation was last given (migration 0016): none where it
@@ -184,7 +234,7 @@ pub(crate) fn follow_conversation(
     native_session: &str,
 ) -> Result<ConversationView, LedgerError> {
     model::require_harness(harness)?;
-    model::require_text(native_session, "native session", 512)?;
+    model::require_text(native_session, "native session", NATIVE_SESSION_MAX)?;
     store.write(|store| {
         let participant = store.participant_row(participant_id)?;
         let held = store

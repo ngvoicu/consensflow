@@ -68,7 +68,8 @@ fn a_populated_version_18_ledger_has_its_long_items_split_into_parts_in_migratio
 
 /// What migration 19 takes on a ledger of 200 MB of items of 4 KB, 100 long
 /// ones of 1 MB and one of 24 MiB, and a log of 200,000 events of the kinds
-/// its indexes read, each JSON checked as it is indexed: what a ledger pays
+/// its indexes read, each JSON checked as it is indexed, with fields past their
+/// ceilings to cut (ids, times, events, native sessions): what a ledger pays
 /// once, at its first open by this build. Run in release:
 /// `cargo test --release -p cf-ledger --test long_items -- --ignored --nocapture`.
 #[test]
@@ -98,8 +99,18 @@ fn migration_19_splits_a_long_history_s_long_items_in_what_one_read_of_each_take
     let short = "w".repeat(4_000);
     let long = "l".repeat(1_000_000);
     let longest = "a".repeat(24 * 1024 * 1024);
+    // Past the fields' ceilings, as an older build could have left them: one
+    // item in fifty of an id of a kilobyte, ten of a time of a mebibyte.
+    let long_id = "x".repeat(1_000);
+    let long_time = format!("2026-10-16T12:00:00.{}Z", "0".repeat(1 << 20));
     for seq in 0_i64..50_000 {
-        copy.execute(params![format!("i-{seq}"), seq, short, AT, AT])
+        let id = if seq % 50 == 0 {
+            format!("i-{seq}-{long_id}")
+        } else {
+            format!("i-{seq}")
+        };
+        let at = if seq < 10 { long_time.as_str() } else { AT };
+        copy.execute(params![id, seq, short, at, AT])
             .expect("copied");
     }
     for seq in 50_000_i64..50_100 {
@@ -118,13 +129,27 @@ fn migration_19_splits_a_long_history_s_long_items_in_what_one_read_of_each_take
         "conversation.ended",
         "chief.switched",
     ];
+    // One event in two hundred of 8 KB.
+    let pad = "z".repeat(8_000);
     for at in 0_i64..200_000 {
         let kind = kinds[usize::try_from(at % 4).expect("a kind")];
-        let data =
-            format!(r#"{{"conversation": {at}, "participant": "chief", "harness": "codex"}}"#);
+        let data = if at % 200 == 0 {
+            format!(r#"{{"conversation": {at}, "participant": "chief", "pad": "{pad}"}}"#)
+        } else {
+            format!(r#"{{"conversation": {at}, "participant": "chief", "harness": "codex"}}"#)
+        };
         log.execute(params![AT, kind, data]).expect("logged");
     }
     drop(log);
+    // A hundred ended conversations bound to sessions of a kilobyte.
+    for id in 2_i64..102 {
+        db.execute(
+            "INSERT INTO conversation (id, participant_id, harness, native_session, started_at, ended_at)
+               VALUES (?, 2, 'codex', ?, ?, ?)",
+            params![id, format!("s-{id}-{long_id}"), AT, AT],
+        )
+        .expect("a conversation");
+    }
     db.execute_batch("COMMIT").expect("committed");
     println!("built: {:?}", started.elapsed());
     let started = std::time::Instant::now();
@@ -134,4 +159,17 @@ fn migration_19_splits_a_long_history_s_long_items_in_what_one_read_of_each_take
         .query_row("SELECT COUNT(*) FROM transcript_part", [], |row| row.get(0))
         .expect("the parts");
     assert_eq!(kept, 100 * 16 + 394);
+    // Each field within its ceiling.
+    let cut: (i64, i64, i64, i64) = db
+        .query_row(
+            "SELECT (SELECT max(length(item_id)) FROM transcript),
+                    (SELECT COUNT(*) FROM transcript WHERE at IS NULL),
+                    (SELECT COUNT(*) FROM conversation WHERE native_session IS NULL),
+                    (SELECT max(octet_length(data)) FROM event)",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .expect("the fields");
+    assert_eq!((cut.0, cut.1, cut.2), (256, 10, 101));
+    assert!(cut.3 <= 4_096, "{cut:?}");
 }

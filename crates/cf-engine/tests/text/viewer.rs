@@ -364,11 +364,13 @@ fn a_part_of_a_long_item_shows_as_the_read_cut_it_and_a_delivery_only_from_its_s
     start.cut = Some(TextCut {
         from: 0,
         bytes: 900_000,
+        revision: 3,
     });
     let mut middle = row(1, 0, "user", header);
     middle.cut = Some(TextCut {
         from: 70_000,
         bytes: 900_000,
+        revision: 4,
     });
     let shown = page(
         &read(
@@ -384,7 +386,8 @@ fn a_part_of_a_long_item_shows_as_the_read_cut_it_and_a_delivery_only_from_its_s
         items[1].cut,
         Some(TextCut {
             from: 0,
-            bytes: 900_000
+            bytes: 900_000,
+            revision: 3,
         })
     );
     assert!(
@@ -392,7 +395,11 @@ fn a_part_of_a_long_item_shows_as_the_read_cut_it_and_a_delivery_only_from_its_s
         "a part from its middle is text"
     );
     let said = serde_json::to_value(&items[0]).unwrap();
-    assert_eq!(said["cut"], json!({ "from": 70_000, "bytes": 900_000 }));
+    assert_eq!(
+        said["cut"],
+        json!({ "from": 70_000, "bytes": 900_000, "revision": 4 }),
+        "with the copy of its item the part is of"
+    );
 }
 
 #[test]

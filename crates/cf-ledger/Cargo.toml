@@ -14,6 +14,8 @@ cf-proto.workspace = true
 rusqlite = { workspace = true, features = ["blob"] }
 serde.workspace = true
 serde_json.workspace = true
+# The hash an item's id longer than the copy keeps one is kept apart by.
+sha2.workspace = true
 thiserror.workspace = true
 
 [features]
@@ -27,7 +29,6 @@ test-support = ["rusqlite/limits"]
 base64.workspace = true
 cf-ledger = { path = ".", features = ["test-support"] }
 flate2.workspace = true
-sha2.workspace = true
 tempfile.workspace = true
 
 [lints]

@@ -237,11 +237,14 @@ pub enum HistoryFrom {
 }
 
 /// The part of a long text that is shown: how many characters come before
-/// it, and the size of the whole text, in bytes.
+/// it, the size of the whole text, in bytes, and which copy of its item it is
+/// of (as a [`TextPart`]'s `revision`), so that the whole of it read later is
+/// known to be of another where the item was copied again changed meanwhile.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct TextCut {
     pub from: usize,
     pub bytes: usize,
+    pub revision: i64,
 }
 
 /// An item as a read of the history gives it: where it stands, and its text
@@ -274,8 +277,8 @@ impl HistoryEntry {
 
 /// How much of the history a read went through: the conversations it came
 /// to, the rows it read, the bytes of text it read of them, the bytes of the
-/// conversations' fields and the items' ids it read with them (`fields`), and
-/// the steps SQLite's machine took for it all.
+/// conversations' fields, the items' ids and times, and the data of the events
+/// the headings read (`fields`), and the steps SQLite's machine took for it all.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Scanned {
     pub conversations: usize,

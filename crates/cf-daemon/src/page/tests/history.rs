@@ -303,7 +303,7 @@ async fn reads_a_long_item_whole_a_part_at_a_time_and_only_its_participant_s() {
                 .unwrap();
             let page = ask(&app, "history.get", json!({ "project": harbour, "handle": "chief" })).await;
             let shown = &page["history"]["conversations"][0]["items"][0];
-            assert_eq!(shown["cut"], json!({ "from": 0, "bytes": whole.len() }));
+            assert_eq!(shown["cut"], json!({ "from": 0, "bytes": whole.len(), "revision": 0 }));
             let row = shown["row"].clone();
             let mut read = String::new();
             let mut revisions = Vec::new();
@@ -421,8 +421,10 @@ async fn an_item_s_id_however_long_is_shown_cut_and_its_page_fits_a_frame() {
             assert!(said.len() <= PAGE_BYTES, "{} bytes", said.len());
             let shown = &answer["history"]["conversations"][0]["items"][0];
             assert_eq!(shown["text"], "ok");
+            // As the copy keeps it: its first characters and its hash, as many as a field holds.
             let id = shown["id"].as_str().unwrap();
-            assert_eq!(id, format!("{}…", "i".repeat(256)));
+            assert!(id.starts_with(&format!("{}…", "i".repeat(223))), "{id}");
+            assert_eq!(id.chars().count(), cf_ledger::FIELD_MAX);
             // Its text is read by its place, never by its id.
             let part = ask(
                 &app,

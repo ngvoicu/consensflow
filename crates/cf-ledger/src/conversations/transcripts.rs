@@ -1,15 +1,18 @@
 //! The copy ConsensFlow keeps of each conversation, item by item, and what
 //! the windows that had a task wrote.
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 
 use cf_base::time;
 use cf_proto::ledger::{HistoryItem, TaskTranscript, TranscriptItem};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 
-use super::known_conversation;
+use super::{known_conversation, FIELD_MAX};
 use crate::model::{cut, LedgerError};
+use crate::openings::text_of;
 use crate::store::Store;
 
 /// The most of one tool's output that is copied: it can run to megabytes,
@@ -22,12 +25,17 @@ const TRANSCRIPT_ROLES: [&str; 4] = ["user", "assistant", "tool", "custom"];
 /// The header every delivery opens with, naming its message: `[ConsensFlow m-12 `.
 const HEADER: &str = "[ConsensFlow m-";
 
+/// How many hexadecimal digits of its hash end an id the copy cut ([`kept_id`]).
+const ID_HASH: usize = 32;
+
 /// The copy of a window's conversation, one row per item as the harness's
 /// own record has them: what is new is added, and an item still being
 /// written is brought up to date. `from` is the position of the first item
 /// given, so a caller may pass only the tail. An item is read as the
 /// harness's record wrote it: one with no id is passed over, and a role or
-/// a time it does not know is `custom`, or none. An item that says it is a
+/// a time it does not know is `custom`, or none. An id or a time longer than
+/// [`FIELD_MAX`] characters is kept within it: the id as [`kept_id`] says, the
+/// time as none. An item that says it is a
 /// compaction's summary (`compaction: true`) is marked so when it is first
 /// copied; one copied before the mark stays as it was. An item written again
 /// changed is its next revision. How many rows changed.
@@ -57,6 +65,7 @@ pub(crate) fn copy_transcript(
             else {
                 continue;
             };
+            let id = kept_id(id);
             let text = item.get("text").and_then(Value::as_str).unwrap_or_default();
             let role = item
                 .get("role")
@@ -71,7 +80,7 @@ pub(crate) fn copy_transcript(
             let at = item
                 .get("at")
                 .and_then(Value::as_str)
-                .filter(|at| time::parse(at).is_some());
+                .filter(|at| within(at) && time::parse(at).is_some());
             let changed = upsert.execute(params![
                 conversation_id,
                 id,
@@ -84,12 +93,78 @@ pub(crate) fn copy_transcript(
                 i64::from(item.get("compaction") == Some(&Value::Bool(true))),
             ])?;
             if changed > 0 {
-                write_parts(&store.db, conversation_id, id, &text)?;
+                write_parts(&store.db, conversation_id, &id, &text)?;
             }
             written += changed;
         }
         Ok(written)
     })
+}
+
+/// Whether `text` is no longer than [`FIELD_MAX`] characters.
+fn within(text: &str) -> bool {
+    text.chars().nth(FIELD_MAX).is_none()
+}
+
+/// An item's id as the copy keeps it: as it is, where it is no longer than
+/// [`FIELD_MAX`] characters; else its first characters, "…" and the first
+/// [`ID_HASH`] hexadecimal digits of the SHA-256 of the whole of it,
+/// [`FIELD_MAX`] characters in all. The same id is kept the same each time it
+/// is copied, so a copy made again finds its row; two that begin alike are
+/// kept apart.
+fn kept_id(id: &str) -> Cow<'_, str> {
+    if within(id) {
+        return Cow::Borrowed(id);
+    }
+    Cow::Owned(marked(id, id.as_bytes(), 0))
+}
+
+/// Id `id` cut as [`kept_id`] cuts one, its hash of `whole` (its bytes), and
+/// of `count` too where that is not 0.
+fn marked(id: &str, whole: &[u8], count: u32) -> String {
+    let mut hash = Sha256::new();
+    hash.update(whole);
+    if count > 0 {
+        hash.update(count.to_le_bytes());
+    }
+    let digits: String = hash
+        .finalize()
+        .iter()
+        .take(ID_HASH / 2)
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    let head: String = id.chars().take(FIELD_MAX - 1 - ID_HASH).collect();
+    format!("{head}…{digits}")
+}
+
+/// Cuts each id of an item an older build copied longer than [`FIELD_MAX`]
+/// characters to the one the copy keeps of it ([`kept_id`]): what migration
+/// 0019 does past its SQL, before it splits the long items into parts, which
+/// name their item by its id. An id that is no UTF-8 is cut as it reads, its
+/// hash of its bytes as they are. Where another of the conversation's items
+/// holds that id already, as only an id written to be one could, its hash is
+/// of the id and a count, the first that none holds.
+pub(crate) fn cut_copied(db: &Connection) -> rusqlite::Result<()> {
+    let long = db
+        .prepare("SELECT rowid FROM transcript WHERE octet_length(item_id) > ?")?
+        .query_map([i64::try_from(FIELD_MAX).unwrap_or(i64::MAX)], |row| {
+            row.get::<_, i64>(0)
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let mut read = db.prepare("SELECT item_id FROM transcript WHERE rowid = ?")?;
+    let mut write = db.prepare("UPDATE OR IGNORE transcript SET item_id = ?2 WHERE rowid = ?1")?;
+    for row in long {
+        let whole = read.query_row([row], |found| Ok(found.get_ref(0)?.as_bytes()?.to_vec()))?;
+        let id = text_of(&whole);
+        if within(&id) {
+            continue;
+        }
+        let mut count = 0;
+        while write.execute(params![row, marked(&id, &whole, count)])? == 0 {
+            count += 1;
+        }
+    }
+    Ok(())
 }
 
 /// The parts of a text longer than one ([`TRANSCRIPT_ITEM_MAX`] characters
@@ -162,9 +237,7 @@ pub(crate) fn split_copied(db: &Connection) -> rusqlite::Result<()> {
        SELECT conversation_id, item_id, ?2, ?3 FROM transcript WHERE rowid = ?1",
     )?;
     for row in long {
-        let text = read.query_row([row], |found| {
-            Ok(crate::openings::text_of(found.get_ref(0)?.as_bytes()?))
-        })?;
+        let text = read.query_row([row], |found| Ok(text_of(found.get_ref(0)?.as_bytes()?)))?;
         for (part, piece) in (0_i64..).zip(parts_of(&text)) {
             write.execute(params![row, part, piece])?;
         }

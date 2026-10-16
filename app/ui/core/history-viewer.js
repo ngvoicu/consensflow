@@ -178,9 +178,9 @@ export class HistoryViewer {
 
   /**
    * The whole text of item `item` of conversation `conversation`, read a part at a time by
-   * its place. Every part is of one copy of it: a part of another (the item was copied
-   * again meanwhile) reads it again from its start, so no text of two copies is shown;
-   * after three reads it changed in, the viewer says so.
+   * its place, and the copy of it it is (its revision). Every part is of one copy of it: a
+   * part of another (the item was copied again meanwhile) reads it again from its start, so
+   * no text of two copies is shown; after three reads it changed in, the viewer says so.
    */
   async #whole(conversation, item) {
     const { project, handle } = this.#shown
@@ -201,7 +201,7 @@ export class HistoryViewer {
         text += part.text
         from = part.next
       }
-      if (from === null) return text
+      if (from === null) return { text, revision }
     }
     throw new Error('It changed each time it was read: show it again to read it as it is now.')
   }
@@ -253,9 +253,11 @@ function drawItem(item, whole) {
       async () => {
         more.disabled = true
         try {
-          const text = await whole(item)
-          // A delivery is said only on a part from the start: its place holds in the whole.
-          entry.replaceWith(drawItem({ ...item, text, cut: undefined }, whole))
+          const { text, revision } = await whole(item)
+          // A delivery is said only on a part from the start: its line and its place hold
+          // in the whole of the copy the page showed. Another, copied since, is drawn as it is.
+          const delivery = revision === item.cut.revision ? item.delivery : undefined
+          entry.replaceWith(drawItem({ ...item, text, delivery, cut: undefined }, whole))
         } catch (cause) {
           more.disabled = false
           more.after(

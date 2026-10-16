@@ -9,6 +9,8 @@
 
 #[path = "whole_history/bounds.rs"]
 mod bounds;
+#[path = "whole_history/ceilings.rs"]
+mod ceilings;
 #[path = "whole_history/headings.rs"]
 mod headings;
 #[path = "whole_history/old_logs.rs"]

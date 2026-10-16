@@ -17,7 +17,7 @@ use rusqlite::{params, Connection};
 use super::reads::{ask, ids, ROOM};
 use super::{everything, lines};
 
-const AT: &str = "2026-10-16T12:00:00.000Z";
+pub(super) const AT: &str = "2026-10-16T12:00:00.000Z";
 
 /// What an older build could have left as an event's data where this one
 /// writes an object: no JSON, empty, JSON of another kind, a conversation's id
@@ -49,7 +49,11 @@ const READ: [&str; 4] = [
 /// whose chief runs on Codex as diana, its conversations 1 to `conversations`
 /// (the last going on now), each with one item, and the log `events` (a kind
 /// and its data) in order.
-fn version_18(dir: &tempfile::TempDir, conversations: i64, events: &[(&str, &str)]) -> PathBuf {
+pub(super) fn version_18(
+    dir: &tempfile::TempDir,
+    conversations: i64,
+    events: &[(&str, &str)],
+) -> PathBuf {
     let file = dir.path().join("consensflow.db");
     let db = Connection::open(&file).expect("a database");
     migrate(&db, &MIGRATIONS[..18]).expect("version 18");
@@ -85,7 +89,7 @@ fn version_18(dir: &tempfile::TempDir, conversations: i64, events: &[(&str, &str
 }
 
 /// An event of the chief's `kind`, of conversation `id`, as the ledger writes it.
-fn of(kind: &'static str, id: i64) -> (&'static str, String) {
+pub(super) fn of(kind: &'static str, id: i64) -> (&'static str, String) {
     (
         kind,
         format!(r#"{{"conversation": {id}, "participant": "chief"}}"#),
@@ -204,31 +208,68 @@ fn a_version_18_ledger_holding_a_text_that_is_no_utf_8_migrates_and_is_read_with
 }
 
 #[test]
-fn a_switch_whose_data_is_longer_than_a_switch_s_is_not_read_and_says_nothing() {
+fn a_switch_an_older_build_logged_long_is_cut_once_to_what_a_heading_reads_of_it() {
     let dir = tempfile::tempdir().expect("a folder");
-    // A switch's data of a mebibyte, as no build writes (a few names).
-    let long = format!(
-        r#"{{"from": {{"harness": "codex", "agent": "diana"}}, "to": {{"harness": "codex", "agent": "maia"}}, "pad": "{}"}}"#,
-        "z".repeat(1 << 20)
+    // A switch's data of a mebibyte, as no build writes (a few names); and one
+    // of the same size whose names are no text, or longer than a field's.
+    let long = |from: &str, to: &str| {
+        format!(
+            r#"{{"from": {from}, "to": {to}, "cut": true, "pad": "{}"}}"#,
+            "z".repeat(1 << 20)
+        )
+    };
+    let named = long(
+        r#"{"harness": "codex", "agent": "diana"}"#,
+        r#"{"harness": "codex", "agent": "maia"}"#,
     );
+    let unnamed = long(
+        r#"{"harness": 5, "agent": ["x"]}"#,
+        &format!(r#"{{"harness": "codex", "agent": "{}"}}"#, "m".repeat(257)),
+    );
+    let sizes = (named.len(), unnamed.len());
     let events = [
         of("conversation.started", 1),
-        ("chief.switched", long),
+        ("chief.switched", named),
         of("conversation.started", 2),
+        ("chief.switched", unnamed),
+        of("conversation.started", 3),
     ];
     let events: Vec<(&str, &str)> = events
         .iter()
         .map(|(kind, data)| (*kind, data.as_str()))
         .collect();
-    let file = version_18(&dir, 2, &events);
+    let file = version_18(&dir, 3, &events);
     let ledger = open_ledger(&file, Options::default()).expect("migrated and open");
     // A read that loaded the data whole would fail.
     ledger.limit_value_length(64 * 1024).expect("held");
     assert_eq!(
         lines(&everything(&ledger, 1, "chief").expect("read")),
         [
-            r#"codex - Some(Switch { harness: "", agent: None }) ["user: said in 1"]"#,
-            r#"codex diana None ["user: said in 2"]"#,
+            r#"codex diana Some(Switch { harness: "codex", agent: Some("maia") }) ["user: said in 1"]"#,
+            r#"codex - Some(Switch { harness: "codex", agent: None }) ["user: said in 2"]"#,
+            r#"codex diana None ["user: said in 3"]"#,
+        ]
+    );
+    drop(ledger);
+    let db = Connection::open(&file).expect("the file");
+    let data: Vec<String> = db
+        .prepare("SELECT data FROM event WHERE kind = 'chief.switched' ORDER BY id")
+        .expect("a query")
+        .query_map([], |row| row.get(0))
+        .expect("the switches")
+        .map(|data| data.expect("one"))
+        .collect();
+    assert_eq!(
+        data,
+        [
+            format!(
+                r#"{{"from":{{"harness":"codex","agent":"diana"}},"to":{{"harness":"codex","agent":"maia"}},"cut":true,"cutFromBytes":{}}}"#,
+                sizes.0
+            ),
+            format!(
+                r#"{{"from":{{"harness":null,"agent":null}},"to":{{"harness":"codex","agent":null}},"cut":true,"cutFromBytes":{}}}"#,
+                sizes.1
+            ),
         ]
     );
 }
