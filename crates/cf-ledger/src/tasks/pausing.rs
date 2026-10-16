@@ -12,7 +12,7 @@
 //! pause a ledger made before the mark, which has none.
 
 use cf_base::time;
-use cf_proto::ledger::{HeldTask, Stop, TaskMoved, TaskThread, TaskView};
+use cf_proto::ledger::{HeldTask, Standing, Stop, TaskMoved, TaskThread, TaskView};
 use rusqlite::{params, OptionalExtension};
 use serde_json::{json, Map, Value};
 
@@ -345,6 +345,35 @@ pub(crate) fn stop_of(store: &Store, participant_id: i64) -> Result<Option<Stop>
             },
         )
         .optional()?)
+}
+
+/// Where tasks `numbers` of a project stand ([`Standing`]), in that order: a
+/// number that is no task of it is left out. What [`stop_of`] tells of one task
+/// a window works on, this tells of each of several: a participant that holds
+/// several is told of them all, and any of them can move.
+pub(crate) fn standings(
+    store: &Store,
+    project_id: i64,
+    numbers: &[i64],
+) -> Result<Vec<Standing>, LedgerError> {
+    let mut read = store.db.prepare(
+        "SELECT number, state, assignee_id, stop_seq FROM task WHERE project_id = ? AND number = ?",
+    )?;
+    let mut found = Vec::with_capacity(numbers.len());
+    for number in numbers {
+        let standing = read
+            .query_row(params![project_id, number], |row| {
+                Ok(Standing {
+                    number: row.get("number")?,
+                    state: row.get("state")?,
+                    assignee_id: row.get("assignee_id")?,
+                    stop_seq: row.get("stop_seq")?,
+                })
+            })
+            .optional()?;
+        found.extend(standing);
+    }
+    Ok(found)
 }
 
 /// The task a participant's window is on as far as a question or a note it

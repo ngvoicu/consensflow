@@ -15,6 +15,7 @@ use std::rc::Rc;
 
 use cf_engine::testing::{Context, Gate};
 use cf_engine::SwitchWhen;
+use cf_harness::contract::Admission;
 use cf_harness::records::Role;
 use cf_ledger::{LedgerError, MessageView};
 use serde_json::json;
@@ -248,6 +249,103 @@ fn a_task_the_human_pauses_while_the_resume_s_launch_reads_its_record_stays_paus
     );
 }
 
+/// Zeus's session holds T-2 as well as T-1, as a ledger written before one task
+/// per session may have it, and its newest words are T-2's: what tells the stops
+/// of the task its window works on tells T-2's alone.
+fn holding_two(context: &Context, project: i64, zeus: i64) {
+    context
+        .ledger
+        .borrow_mut()
+        .write_raw(&format!(
+            "UPDATE task SET assignee_id = {zeus}, pool = NULL, tier = NULL
+               WHERE project_id = {project} AND number = 2;
+             UPDATE message SET recipient_id = {zeus}
+               WHERE kind = 'task'
+                 AND task_id = (SELECT id FROM task WHERE project_id = {project} AND number = 2);"
+        ))
+        .unwrap();
+    let stop = context.ledger.borrow().stop_of(zeus).unwrap();
+    assert_eq!(stop.map(|stop| stop.number), Some(2));
+}
+
+/// Sol's review of 2026-10-16, round 5: the Resume read the stops of T-2 alone,
+/// and the human's pause of T-1 while it read zeus's record was taken for
+/// nothing: the window opened told to go on with both.
+#[test]
+fn a_task_the_human_pauses_while_the_resume_reads_the_record_of_a_session_with_two_stays_paused_and_its_window_stays_closed(
+) {
+    let context = Context::new();
+    let tiers = at_work(&context);
+    let project = tiers.project.id;
+    let zeus = tiers.id("zeus-amber-pine");
+    let native = native_of(&context, zeus).expect("its conversation");
+    context.close_project(project).unwrap();
+    holding_two(&context, project, zeus);
+    let reading = context
+        .adapter
+        .record_holds
+        .hold(move |asked| asked[0]["conversation"]["nativeSession"] == native.as_str());
+    let before = opened(&context).len();
+    context.resume_project(project).unwrap();
+    context.human_pause(project, 1);
+    reading.open();
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+
+    assert_eq!(tiers.task(1).task.state, "paused");
+    assert_eq!(
+        opened(&context)[before..],
+        ["p1-chief"],
+        "zeus's window stays closed"
+    );
+    assert!(
+        cut_notes(&context, zeus).is_empty(),
+        "no note told it to go on"
+    );
+}
+
+/// The same, of the launch's own wait for zeus's record, once the Resume found
+/// its work unmoved.
+#[test]
+fn a_task_the_human_pauses_while_the_resume_s_launch_reads_the_record_of_a_session_with_two_stays_paused_and_its_window_stays_closed(
+) {
+    let context = Context::new();
+    let tiers = at_work(&context);
+    let project = tiers.project.id;
+    let zeus = tiers.id("zeus-amber-pine");
+    let native = native_of(&context, zeus).expect("its conversation");
+    context.close_project(project).unwrap();
+    holding_two(&context, project, zeus);
+    context
+        .ledger
+        .borrow_mut()
+        .note_role(
+            project,
+            "zeus-amber-pine",
+            "Your instructions changed.",
+            "worker, as it was",
+        )
+        .unwrap();
+    let looking = context.adapter.record_holds.hold(move |asked| {
+        asked[0]["conversation"]["nativeSession"] == native.as_str() && asked.get(1).is_none()
+    });
+    let before = opened(&context).len();
+    context.resume_project(project).unwrap();
+    context.human_pause(project, 1);
+    looking.open();
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+
+    assert_eq!(tiers.task(1).task.state, "paused");
+    assert_eq!(
+        opened(&context)[before..],
+        ["p1-chief"],
+        "zeus's window stays closed"
+    );
+}
+
 /// Astra's review of 2026-10-16, round 4: a Close answers at the first window's
 /// close that fails, and the Resume went through while zeus's kill was still out.
 #[test]
@@ -399,6 +497,199 @@ fn a_cancel_keeps_the_warning_of_a_pause_note_on_its_way_that_its_window_then_re
     marking.open();
     context.settle();
 
+    assert_eq!(
+        said_again(&context, project),
+        [format!("T-1 cancelled. Before that, {SURVIVOR}.")]
+    );
+}
+
+/// The note on its way, cancelled, and handed to a chief whose harness says
+/// nothing sure of it: `admission` answers each hand-over, and the chief's
+/// record never shows the note.
+fn cancelled_and_never_shown(context: &Context, project: i64, admission: Admission) -> MessageView {
+    let (note, marking) = warning_on_its_way(context, project);
+    context
+        .ledger
+        .borrow_mut()
+        .cancel_task(project, 1, "human")
+        .unwrap();
+    *context.adapter.deliver.borrow_mut() = Some(Rc::new(move |_| {
+        let admission = admission.clone();
+        Box::pin(async move { Ok(admission) })
+    }));
+    marking.open();
+    context.settle();
+    assert_eq!(
+        context.message(note.id).state,
+        "delivering",
+        "it may yet arrive"
+    );
+    assert!(said_again(context, project).is_empty());
+    note
+}
+
+/// Astra's review of 2026-10-16, round 5: the cancel withdrew the note on its
+/// way, the hand-over was uncertain, and the look that watched for its arrival let
+/// it go as withdrawn: the warning was lost though the record never showed it.
+#[test]
+fn a_cancel_keeps_the_warning_of_a_pause_note_on_its_way_whose_hand_over_was_uncertain() {
+    let context = Context::new();
+    let tiers = at_work(&context);
+    let project = tiers.project.id;
+    let note = cancelled_and_never_shown(
+        &context,
+        project,
+        Admission::Uncertain {
+            reason: "the plugin did not answer".to_owned(),
+        },
+    );
+    context.advance(31_000);
+    context.pass().unwrap();
+
+    assert_eq!(context.message(note.id).state, "cancelled");
+    assert_eq!(
+        said_again(&context, project),
+        [format!("T-1 cancelled. Before that, {SURVIVOR}.")]
+    );
+}
+
+/// The same of a paste the window took and its record never showed.
+#[test]
+fn a_cancel_keeps_the_warning_of_a_pause_note_on_its_way_that_never_showed_in_the_record() {
+    let context = Context::new();
+    let tiers = at_work(&context);
+    let project = tiers.project.id;
+    cancelled_and_never_shown(&context, project, Admission::Admitted { queued: false });
+    context.advance(31_000);
+    context.pass().unwrap();
+
+    assert_eq!(
+        said_again(&context, project),
+        [format!("T-1 cancelled. Before that, {SURVIVOR}.")]
+    );
+}
+
+/// Sol's review of 2026-10-16, round 5: the warning was the first message of a
+/// chief's launch, its delivery begun, and the cancel came while the launch was
+/// prepared; the preparation then failed, and the message given back was
+/// withdrawn already.
+#[test]
+fn a_cancel_keeps_the_warning_of_a_pause_note_a_chief_launch_was_to_open_with_when_the_launch_fails(
+) {
+    let context = Context::new();
+    let tiers = at_work(&context);
+    let project = tiers.project.id;
+    {
+        let mut ledger = context.ledger.borrow_mut();
+        ledger.pause_task(project, 1, None, Some(SURVIVOR)).unwrap();
+        ledger.note_pause(project, "chief", 1, SURVIVOR).unwrap();
+    }
+    context.close_project(project).unwrap();
+    // The chief's window the Resume opens fails to start; the one tried after it
+    // opens with what waits first in its queue, the note.
+    let fails = "the harness would not start".to_owned();
+    context
+        .adapter
+        .prepare_holds
+        .hold_instead(
+            |asked| asked[0]["role"] == "chief" && asked[0]["message"].is_null(),
+            fails.clone(),
+        )
+        .open();
+    let preparing = context.adapter.prepare_holds.hold_instead(
+        |asked| {
+            asked[0]["message"]
+                .as_str()
+                .is_some_and(|message| message.contains("T-1 is paused: "))
+        },
+        fails,
+    );
+    context.resume_project(project).unwrap();
+    context.settle();
+    context.advance(5_001);
+    context.pass().unwrap();
+    let note = context
+        .inbox(context.id(project, "chief"))
+        .into_iter()
+        .find(|message| message.body.starts_with("T-1 is paused: "))
+        .expect("the pause note");
+    assert_eq!(note.state, "delivering", "the chief's launch opens with it");
+    context
+        .ledger
+        .borrow_mut()
+        .cancel_task(project, 1, "human")
+        .unwrap();
+    preparing.open();
+    context.settle();
+
+    assert_eq!(context.message(note.id).state, "cancelled");
+    assert_eq!(
+        said_again(&context, project),
+        [format!("T-1 cancelled. Before that, {SURVIVOR}.")]
+    );
+}
+
+/// The note's last attempt, refused after the cancel: it is not given up but
+/// withdrawn, its warning said again in a note with attempts of its own, and the
+/// human is told of no delivery that failed.
+#[test]
+fn a_cancel_keeps_the_warning_of_a_pause_note_whose_last_attempt_its_window_refused() {
+    let context = Context::new();
+    let tiers = at_work(&context);
+    let project = tiers.project.id;
+    context.adapter.with("chief", |agent| agent.admit = false);
+    let note = {
+        let mut ledger = context.ledger.borrow_mut();
+        ledger.pause_task(project, 1, None, Some(SURVIVOR)).unwrap();
+        ledger.note_pause(project, "chief", 1, SURVIVOR).unwrap()
+    };
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let refused = context.message(note.id);
+    assert_eq!((refused.state.as_str(), refused.attempts), ("queued", 2));
+    let marking = context.background.hold_marks();
+    context.pass().unwrap();
+    assert_eq!(context.message(note.id).state, "delivering");
+    context
+        .ledger
+        .borrow_mut()
+        .cancel_task(project, 1, "human")
+        .unwrap();
+    marking.open();
+    context.settle();
+
+    assert_eq!(context.message(note.id).state, "cancelled");
+    assert_eq!(
+        said_again(&context, project),
+        [format!("T-1 cancelled. Before that, {SURVIVOR}.")]
+    );
+    assert!(
+        context
+            .inbox(context.id(project, "human"))
+            .iter()
+            .all(|message| !message.body.contains("did not reach")),
+        "nothing failed"
+    );
+}
+
+/// And where the app quits with the note on its way: the start finds it never
+/// arrived, and the warning is said again.
+#[test]
+fn a_cancel_keeps_the_warning_of_a_pause_note_on_its_way_when_the_app_quits() {
+    let context = Context::new();
+    let tiers = at_work(&context);
+    let project = tiers.project.id;
+    let (note, _marking) = warning_on_its_way(&context, project);
+    context
+        .ledger
+        .borrow_mut()
+        .cancel_task(project, 1, "human")
+        .unwrap();
+    context.ledger.borrow_mut().suspend_for_restart().unwrap();
+    let after = context.make();
+    after.settle_after_restart().unwrap();
+
+    assert_eq!(context.message(note.id).state, "cancelled");
     assert_eq!(
         said_again(&context, project),
         [format!("T-1 cancelled. Before that, {SURVIVOR}.")]

@@ -11,6 +11,7 @@ use serde_json::{json, Value};
 
 use super::again::tell_failed_answer;
 use super::carrying::{adopt, carried, release_carried};
+use super::pauses::withdrawn_on_its_way;
 use super::receipt::reconcile;
 use super::{known_message, message_task, messages, require_message};
 use crate::conversations::{current_conversation, set_conversation_role_text};
@@ -350,7 +351,9 @@ pub(crate) fn cancel_message(
 /// under a carrier that cannot carry it any more (the Node daemon was pasting
 /// it on its own when it stopped, which `release_stranded` leaves to the
 /// delivery that settles it) is let go of that carrier first: carried, it
-/// would be skipped as one and never delivered.
+/// would be skipped as one and never delivered. A pause note whose task was
+/// cancelled while it was on its way goes no more, and says its warning again
+/// (`withdrawn_on_its_way`).
 pub(crate) fn retry_delivery(
     store: &mut Store,
     message_id: i64,
@@ -360,6 +363,9 @@ pub(crate) fn retry_delivery(
     model::require_text(reason, "reason", 1000)?;
     store.write(|store| {
         let message = require_message(store, message_id, "delivering")?;
+        if withdrawn_on_its_way(store, &message)? {
+            return known_message(store, message_id);
+        }
         store.db.execute(
             "UPDATE message SET state = 'queued', reason = ?, attempts = MAX(attempts - ?, 0)
          WHERE id = ?",
@@ -443,7 +449,10 @@ pub(crate) fn take_back(
 }
 
 /// A delivery given up: a task it carried, still queued, fails with it, and
-/// what it carried is its own again, for the reopening to take.
+/// what it carried is its own again, for the reopening to take. A pause note
+/// whose task was cancelled while it was on its way is withdrawn instead, and
+/// says its warning again in a note of its own, which has its own attempts
+/// (`withdrawn_on_its_way`).
 pub(crate) fn fail_delivery(
     store: &mut Store,
     message_id: i64,
@@ -452,6 +461,9 @@ pub(crate) fn fail_delivery(
     model::require_text(reason, "reason", 1000)?;
     store.write(|store| {
         let message = require_message(store, message_id, "delivering")?;
+        if withdrawn_on_its_way(store, &message)? {
+            return known_message(store, message_id);
+        }
         store.db.execute(
             "UPDATE message SET state = 'failed', reason = ? WHERE id = ?",
             params![reason, message_id],

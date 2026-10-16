@@ -2,8 +2,8 @@
 
 use super::Ledger;
 use crate::{
-    tasks, HeldTask, LedgerError, NewTask, Stop, TaskCreated, TaskMoved, TaskReleased, TaskThread,
-    TaskView,
+    tasks, HeldTask, LedgerError, NewTask, Standing, Stop, TaskCreated, TaskMoved, TaskReleased,
+    TaskThread, TaskView,
 };
 
 impl Ledger {
@@ -125,6 +125,16 @@ impl Ledger {
     /// for the stops of that one.
     pub fn stop_of(&self, participant_id: i64) -> Result<Option<Stop>, LedgerError> {
         tasks::stop_of(&self.store, participant_id)
+    }
+
+    /// Where tasks `numbers` of a project stand, in that order: their states,
+    /// sessions and stops. A number that is no task of it is left out.
+    pub fn standings(
+        &self,
+        project_id: i64,
+        numbers: &[i64],
+    ) -> Result<Vec<Standing>, LedgerError> {
+        tasks::standings(&self.store, project_id, numbers)
     }
 
     /// The task a participant's window is on as far as what it sends goes: the

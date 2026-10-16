@@ -7,7 +7,9 @@
 //! paste skips it from then on, until the door says it handed it to its
 //! harness (`POST /api/answers/<id>/receipt`) or the claim is voided. The
 //! ledger is asked every 250 ms, one claim at a time, and never holds
-//! anything across the wait. A door that was shut by a pause is told so at
+//! anything across the wait. A door of a closed project waits as one with no
+//! answer yet does, whatever came: its answer is kept for the Resume (the
+//! ledger's `claim_answer`). A door that was shut by a pause is told so at
 //! once (409 `door-closed`), in words its model is to take as they are; a
 //! daemon that is stopping, a window that exited (its token revoked), and a
 //! client that has gone (the server runs a handler on after its client left)

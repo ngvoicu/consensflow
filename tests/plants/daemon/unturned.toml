@@ -126,7 +126,7 @@ find = '''        let conversation = if participant.role == "chief" {
                 record,
                 participant,
                 delivering,
-                stop,
+                &captured,
                 "a pause came while its harness was asked about its conversation",
             )? {
                 return Ok(None);
@@ -146,7 +146,7 @@ find = '''            if self.launch_over(
                 record,
                 participant,
                 delivering,
-                stop,
+                &captured,
                 "a pause came while its harness was asked about its conversation",
             )? {
                 return Ok(None);

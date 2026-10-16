@@ -42,7 +42,8 @@ pub(crate) use gate::{approve_message, decline_message, mark_read};
 pub(crate) use holds::{note_hold, tell_goes_on};
 pub use pauses::MAY_STILL_RUN;
 pub(crate) use pauses::{
-    join_pause_note, keep_warning, leave_pause_notes, note_pause, say_again, warnings_queued,
+    join_pause_note, leave_pause_notes, note_pause, say_again, warnings_on_their_way,
+    warnings_queued,
 };
 pub use receipt::Read;
 pub(crate) use receipt::{

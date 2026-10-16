@@ -139,6 +139,13 @@ impl Ledger {
             None => Ok(()),
         }
     }
+
+    /// Writes `sql` as it is: rows a ledger written before a rule of this build
+    /// can hold and no door of it writes (a session with several tasks), for the
+    /// engine's tests to meet.
+    pub fn write_raw(&mut self, sql: &str) -> Result<(), LedgerError> {
+        Ok(self.store.db.execute_batch(sql)?)
+    }
 }
 
 impl Ledger {

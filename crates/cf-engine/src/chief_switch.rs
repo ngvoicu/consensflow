@@ -148,7 +148,7 @@ impl Dispatcher {
         )?;
         if let Some(delivering) = delivering {
             self.give_back(
-                delivering,
+                delivering.message,
                 &format!("{agent} is no longer among your agents"),
             )?;
         }
@@ -304,7 +304,10 @@ impl Dispatcher {
             }
             let delivering = record.delivery.borrow_mut().delivering.take();
             if let Some(delivering) = delivering {
-                self.give_back(delivering, "the chief was switched before it arrived")?;
+                self.give_back(
+                    delivering.message,
+                    "the chief was switched before it arrived",
+                )?;
             }
             if !self.close_own(record, &pane).await? {
                 // The old window would not close: the switch waits, as one

@@ -146,6 +146,41 @@ fn a_send_the_host_stops_admitting_while_its_claim_waits_is_never_posted() {
     );
 }
 
+/// Astra's review of 2026-10-16, round 5: the claim was answered and admitted,
+/// and the project closed while the post to the plugin waited for its
+/// connection. The host is asked once the connection is up, before a byte goes.
+#[test]
+fn a_send_the_host_stops_admitting_while_its_connection_is_made_is_never_posted() {
+    let stage = Stage::new();
+    let plan = stage.fresh("ses_abc123");
+    stage.fakes.loopback.take_asked();
+    let host = Rc::new(ScriptedHost::default());
+    host.answer("pane.claim", [Answer::Now(Ok(json!({ "ok": true })))]);
+    stage.fakes.loopback.hold_connection("POST /deliver");
+    let mut driver = Driver::default();
+    let (window, claims) = (Rc::clone(&plan.window), Rc::clone(&host));
+    driver.begin(
+        0,
+        async move { window.deliver(&*claims, &pane(), "late").await },
+    );
+    assert!(driver.run().is_empty(), "the connection is being made");
+    host.refuse_hand_overs();
+    assert!(stage.fakes.loopback.connect("POST /deliver"));
+    assert_eq!(
+        driver.run(),
+        [(
+            0,
+            Ok(Admission::Refused {
+                reason: NOT_ADMITTED.to_owned()
+            })
+        )]
+    );
+    assert!(
+        stage.fakes.loopback.take_asked().is_empty(),
+        "the plugin was asked nothing"
+    );
+}
+
 #[test]
 fn delivers_through_the_real_channel_a_claim_then_the_plugin() {
     let stage = Stage::new();

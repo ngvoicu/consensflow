@@ -11,9 +11,7 @@ use std::time::Duration;
 
 use cf_harness::contract::{Interrupt, Launch, LaunchId, Observed, Pane, Window};
 use cf_harness::seams::Time;
-use cf_ledger::{
-    Begun, ConversationView, MessageView, NewNote, ParticipantView, ProjectView, Stop,
-};
+use cf_ledger::{Begun, ConversationView, MessageView, NewNote, ParticipantView, ProjectView};
 use cf_proto::agents::Harness;
 use cf_proto::panes::Servers;
 use cf_proto::trace::WindowEvent;
@@ -24,6 +22,7 @@ use crate::delivery_text::{delivery_text, marker_of};
 use crate::dispatcher::Dispatcher;
 use crate::host::{EngineHost, Killed, OpenPane, Opened};
 use crate::record::Record;
+use crate::resume::Captured;
 use crate::role_change::{Compared, Prelude};
 use crate::runtime::{begin, caught, returning};
 use crate::seams::{EngineError, SavedAgent};
@@ -259,9 +258,9 @@ fn assign(env: &mut Vec<(String, String)>, key: &str, value: &str) {
 
 /// What a launch was prepared with: the window, the keys that interrupt it,
 /// how its harness keeps its own processes and which harness it is, how its pane
-/// opens, the conversation it goes on with if there is one, and the stop its task
-/// had asked when the first message was begun, which the new window owes nothing
-/// for.
+/// opens, the conversation it goes on with if there is one, and the work it was
+/// read for: the stop its task had asked when the first message was begun, which
+/// the new window owes nothing for, or what its caller read before.
 struct Planned {
     window: Rc<dyn Window>,
     keys: Interrupt,
@@ -272,7 +271,7 @@ struct Planned {
     drop_env: Vec<String>,
     native_session: Option<String>,
     conversation: Option<ConversationView>,
-    stop: Option<Stop>,
+    captured: Captured,
     /// What goes into the window before anything else of its queue once it is up,
     /// in this order ([`Compared::prelude`]).
     prelude: Option<Prelude>,
@@ -371,18 +370,19 @@ impl Dispatcher {
     /// conversation its harness holds nothing of opens afresh, and has no role to
     /// be told ([`Dispatcher::conversation_to_go_on_with`]). One that does not come
     /// up says why ([`Dispatcher::launch_failed`]); a participant forgotten while
-    /// its launch waits gets nothing more under its ids. `paid` is the stops its
-    /// window is to have paid where its caller read them before a wait of its own
-    /// (the human's Resume, before it read whether the turn was cut): a stop asked
-    /// since is owed, and ends the launch as one asked while it is prepared does.
-    /// Without, they are read once its first message is begun.
+    /// its launch waits gets nothing more under its ids. `captured` is the work
+    /// its caller read before a wait of its own (the human's Resume, before it
+    /// read whether the turn was cut): the stops its window is to have paid, and
+    /// where each task it comes back for stood. A stop asked since is owed, and a
+    /// task moved since ends the launch as a pause while it is prepared does.
+    /// Without, the stops are read once its first message is begun.
     pub(crate) async fn launch(
         self: &Rc<Self>,
         record: &Rc<Record>,
         project: &ProjectView,
         participant: &ParticipantView,
         message: Option<MessageView>,
-        paid: Option<Option<Stop>>,
+        captured: Option<Captured>,
     ) -> Result<(), EngineError> {
         let harness = participant.harness.clone().unwrap_or_default();
         // A role the window took before it closed, though its arrival was never
@@ -451,7 +451,7 @@ impl Dispatcher {
             delivering.as_ref(),
             role,
             prelude,
-            paid,
+            captured,
         ))
         .await
         {
@@ -484,7 +484,7 @@ impl Dispatcher {
             record,
             participant,
             delivering.as_ref(),
-            planned.stop,
+            &planned.captured,
             "a pause came while its window was prepared",
         )? {
             self.seams.launch_files.forget(&launch_id);
@@ -604,7 +604,7 @@ impl Dispatcher {
             part.activity = Activity::of(ActivityState::Starting);
             part.drawn = false;
             part.named = false;
-            part.stopped = planned.stop.map(|stop| (stop.task_id, stop.seq));
+            part.stopped = planned.captured.paid.map(|stop| (stop.task_id, stop.seq));
         }
         {
             let mut delivery = record.delivery.borrow_mut();
@@ -626,7 +626,7 @@ impl Dispatcher {
         if let Some(failed) = admitting.turned_away() {
             let delivering = record.delivery.borrow_mut().delivering.take();
             if let Some(delivering) = delivering {
-                self.handed_nothing(
+                self.give_back(
                     delivering.message,
                     "its project was closed before its window was given it",
                 )?;
@@ -702,7 +702,7 @@ impl Dispatcher {
         delivering: Option<&Delivering>,
         role: Option<RoleText>,
         prelude: Option<Prelude>,
-        paid: Option<Option<Stop>>,
+        captured: Option<Captured>,
     ) -> Result<Option<Planned>, EngineError> {
         let begun = first
             .map(|first| self.seams.ledger.borrow_mut().begin_delivery(first.id))
@@ -711,10 +711,14 @@ impl Dispatcher {
         // that comes while it is prepared or opened is asked after it, and is
         // owed. Read in this turn, with the first message begun: the window
         // works on the task that message is about. Those its caller read before
-        // a wait of its own are the ones it paid, where it read them.
-        let stop = match paid {
-            Some(paid) => paid,
-            None => self.seams.ledger.borrow().stop_of(participant.id)?,
+        // a wait of its own are the ones it paid, where it read them, with the
+        // work it comes back for.
+        let captured = match captured {
+            Some(captured) => captured,
+            None => Captured {
+                paid: self.seams.ledger.borrow().stop_of(participant.id)?,
+                tasks: Vec::new(),
+            },
         };
         // A member's conversation is looked into now, which asks its harness and
         // may wait: a pause that comes during it is asked after the stop was read,
@@ -727,7 +731,7 @@ impl Dispatcher {
                 record,
                 participant,
                 delivering,
-                stop,
+                &captured,
                 "a pause came while its harness was asked about its conversation",
             )? {
                 return Ok(None);
@@ -749,7 +753,7 @@ impl Dispatcher {
             let compared = self.compare_role(project, participant, resumed, first.cloned())?;
             let begun = match self.displaced(participant, compared.prelude.as_ref()) {
                 Some(displaced) => {
-                    self.give_back(displaced, "its window is told its role first")?;
+                    self.give_back(displaced.message, "its window is told its role first")?;
                     None
                 }
                 None => begun,
@@ -825,7 +829,7 @@ impl Dispatcher {
             drop_env: prepared.drop_env,
             native_session: prepared.native_session,
             conversation,
-            stop,
+            captured,
             prelude,
             first_instructions: adapter.keeps_first_instructions().then_some(instructions),
         }))
@@ -890,16 +894,17 @@ impl Dispatcher {
     /// which would go in on its command line, waits for the Resume, never handed
     /// over (both reviews of 2026-10-16, round 4: a chief's handoff went into a
     /// window the Close then closed, and again after the Resume). A member's
-    /// launch holds only while its first message is still on its way and no stop
-    /// was asked of its window since `captured` was read, which is a pause that
-    /// came in between: the message goes back to wait for the words that resume
+    /// launch holds only while its first message is still on its way and its work
+    /// is as `captured` read it ([`Dispatcher::unmoved`]): no stop was asked of its
+    /// window since, and no task it comes back for moved, which is a pause that
+    /// came in between. The message goes back to wait for the words that resume
     /// the task, with `because`.
     fn launch_over(
         &self,
         record: &Rc<Record>,
         participant: &ParticipantView,
         delivering: Option<&Delivering>,
-        captured: Option<Stop>,
+        captured: &Captured,
         because: &str,
     ) -> Result<bool, EngineError> {
         if self.forgotten(record) {
@@ -907,7 +912,7 @@ impl Dispatcher {
         }
         if !self.in_open_project(participant.project_id)? {
             if let Some(delivering) = delivering {
-                self.handed_nothing(
+                self.give_back(
                     delivering.message,
                     "its project was closed before its window opened",
                 )?;
@@ -917,17 +922,16 @@ impl Dispatcher {
         let Some(delivering) = delivering.filter(|_| participant.role != "chief") else {
             return Ok(false);
         };
-        let holds = {
-            let ledger = self.seams.ledger.borrow();
-            let on_its_way = ledger
-                .message(delivering.message)?
-                .is_some_and(|message| message.state == "delivering");
-            on_its_way && ledger.stop_of(participant.id)? == captured
-        };
-        if holds {
+        let on_its_way = self
+            .seams
+            .ledger
+            .borrow()
+            .message(delivering.message)?
+            .is_some_and(|message| message.state == "delivering");
+        if on_its_way && self.unmoved(participant, captured)? {
             return Ok(false);
         }
-        self.give_back(delivering.clone(), because)?;
+        self.give_back(delivering.message, because)?;
         Ok(true)
     }
 
@@ -1017,7 +1021,7 @@ impl Dispatcher {
             return Ok(());
         }
         if let Some(delivering) = delivering {
-            self.give_back(delivering, because)?;
+            self.give_back(delivering.message, because)?;
         }
         let failures = record
             .window

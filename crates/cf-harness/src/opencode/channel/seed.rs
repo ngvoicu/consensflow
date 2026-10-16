@@ -63,9 +63,9 @@ pub struct Seed<'a> {
 
 /// Posts the first message to `channel`'s server once it answers: how it
 /// failed, in ConsensFlow's sentences, or Node's for a folder that is gone.
-/// The post is the hand-over, after every wait for the server: it goes only if
-/// `host` admits it then ([`PaneHost::admits`]), and one it does not is
-/// [`NOT_ADMITTED`], nothing posted.
+/// The post is the hand-over, after every wait for the server and its own
+/// connection: it goes only if `host` admits it then ([`PaneHost::admits`]), and
+/// one it does not is [`NOT_ADMITTED`], nothing posted.
 pub async fn seed_session(
     wires: Wires<'_>,
     channel: &Channel,
@@ -116,10 +116,7 @@ pub async fn seed_session(
     if seed.resume {
         asked.adopt_settings(seed.session, &mut body).await?;
     }
-    if !host.admits() {
-        return Err(NOT_ADMITTED.to_owned());
-    }
-    asked.admit(seed.session, body).await
+    asked.admit(seed.session, body, host).await
 }
 
 /// What the requests of one seed have in common.
@@ -250,15 +247,27 @@ impl Asked<'_> {
         Ok(())
     }
 
-    /// Posts the task, once: only the lifetime bounds it, and any failure
-    /// after it started leaves its admission uncertain.
-    async fn admit(&self, session: &str, body: Map<String, Value>) -> Result<(), String> {
+    /// Posts the task, once, if `host` admits it once the post's connection is
+    /// up ([`Loopback::hand_over`](crate::seams::loopback::Loopback::hand_over)):
+    /// only the lifetime bounds it, and any other failure after it started leaves
+    /// its admission uncertain.
+    async fn admit(
+        &self,
+        session: &str,
+        body: Map<String, Value>,
+        host: &dyn PaneHost,
+    ) -> Result<(), String> {
         self.alive()?;
         let url = url::prompt(&self.channel.endpoint, session, self.directory);
         let text = js::stringify(&Value::Object(body));
         let request = self.request(Method::Post, url, Some(text.into_bytes()));
-        let reply = match self.lifetime.bound(self.wires.loopback.send(request)).await {
+        let reply = match self
+            .lifetime
+            .bound(self.wires.loopback.hand_over(request, host))
+            .await
+        {
             Some(Ok(reply)) => reply,
+            Some(Err(failed)) if failed == NOT_ADMITTED => return Err(failed),
             Some(Err(_)) | None => {
                 return Err("OpenCode task admission is uncertain; task was not retried".to_owned());
             }

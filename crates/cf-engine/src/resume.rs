@@ -37,7 +37,8 @@ use std::rc::Rc;
 use std::task::{Poll, Waker};
 
 use cf_ledger::{
-    ConversationView, MessageView, NewNote, ParticipantView, ProjectView, Stop, RESUME_WORDS,
+    ConversationView, MessageView, NewNote, ParticipantView, ProjectView, Standing, Stop,
+    RESUME_WORDS,
 };
 
 use crate::dispatcher::Dispatcher;
@@ -118,9 +119,22 @@ impl Drop for Closing {
 pub(crate) enum Coming {
     /// The chief's.
     Chief,
-    /// A member's, which has these tasks (their numbers) at work or waiting, and
-    /// the stops its window had paid when the Resume read them.
-    Member(Vec<i64>, Option<Stop>),
+    /// A member's, with its work as the Resume read it.
+    Member(Captured),
+}
+
+/// What a member's launch comes back for, read before anything of it waited: the
+/// stops its window had paid (`stop_of`), which its launch pays and no more, and
+/// where each task it has at work or waiting stood. The launch goes on only while
+/// all of it is as it was read ([`Dispatcher::unmoved`]): a pause, a cancel, a
+/// release or an end of any of those tasks that came meanwhile ends it. One task
+/// is not enough to watch: a session that holds several (a ledger written before
+/// the rule of one) names them all in its note (Sol's review of 2026-10-16, round
+/// 5). A launch nobody read for ahead reads the stops alone, as it is begun.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Captured {
+    pub(crate) paid: Option<Stop>,
+    pub(crate) tasks: Vec<Standing>,
 }
 
 impl Coming {
@@ -133,10 +147,10 @@ impl Coming {
                 "ConsensFlow stopped in the middle of your turn, which was cut. Go on where you stopped."
                     .to_owned()
             }
-            Coming::Member(tasks, _) => {
+            Coming::Member(work) => {
                 format!(
                     "ConsensFlow stopped while you were working on {}. {RESUME_WORDS}",
-                    named(tasks)
+                    named(&work.tasks)
                 )
             }
         }
@@ -147,9 +161,9 @@ impl Coming {
     /// still hold queued for a window that never came.
     fn told_in(&self, body: &str) -> bool {
         body == self.words()
-            || matches!(self, Coming::Member(tasks, _) if body == format!(
+            || matches!(self, Coming::Member(work) if body == format!(
                 "ConsensFlow quit while you were working on {}. {RESUME_WORDS}",
-                named(tasks)
+                named(&work.tasks)
             ))
     }
 
@@ -157,23 +171,26 @@ impl Coming {
     fn task(&self) -> Option<i64> {
         match self {
             Coming::Chief => None,
-            Coming::Member(tasks, _) => tasks.first().copied(),
+            Coming::Member(work) => work.tasks.first().map(|task| task.number),
         }
     }
 
-    /// The stops a member's window had paid when the Resume read its work, which
-    /// its launch pays and no more ([`Dispatcher::launch`]); none for the chief's.
-    pub(crate) fn paid(&self) -> Option<Option<Stop>> {
+    /// A member's work as the Resume read it, which its launch goes on with and
+    /// pays the stops of ([`Dispatcher::launch`]); none for the chief's.
+    pub(crate) fn captured(&self) -> Option<Captured> {
         match self {
             Coming::Chief => None,
-            Coming::Member(_, paid) => Some(*paid),
+            Coming::Member(work) => Some(work.clone()),
         }
     }
 }
 
 /// The tasks a member's note names, as it names them.
-fn named(tasks: &[i64]) -> String {
-    let tasks: Vec<String> = tasks.iter().map(|number| format!("T-{number}")).collect();
+fn named(tasks: &[Standing]) -> String {
+    let tasks: Vec<String> = tasks
+        .iter()
+        .map(|task| format!("T-{}", task.number))
+        .collect();
     tasks.join(", ")
 }
 
@@ -250,8 +267,8 @@ impl Dispatcher {
     }
 
     /// The participants other than the chief and the human that hold a task at
-    /// work or waiting, each as its window comes back: with the numbers of those
-    /// tasks, and the stops its window had paid, read with them, before anything
+    /// work or waiting, each as its window comes back: with where those tasks
+    /// stand, and the stops its window had paid, read with them, before anything
     /// of the Resume waits. A member whose agent is gone from the human's agents
     /// opens no window: its work goes back to the board at the next pass, as it
     /// does whenever it is found so (the roster is asked of those with a task in
@@ -276,27 +293,47 @@ impl Dispatcher {
             })
             .filter(|(participant, _)| !self.agent_gone(participant))
             .map(|(participant, tasks)| {
-                let paid = self.seams.ledger.borrow().stop_of(participant.id)?;
-                Ok((participant.id, Coming::Member(tasks, paid)))
+                let ledger = self.seams.ledger.borrow();
+                let work = Captured {
+                    paid: ledger.stop_of(participant.id)?,
+                    tasks: ledger.standings(project.id, &tasks)?,
+                };
+                Ok((participant.id, Coming::Member(work)))
             })
             .collect()
     }
 
-    /// Whether a member's window the Resume brings back still comes: no stop was
-    /// asked of it since the Resume read its work. A pause, a cancel, a release or
-    /// an end of its task that came meanwhile, as its record was read, brings it
-    /// back no more (Astra's review of 2026-10-16, round 4: a pause the human made
-    /// while the Resume read whether the turn was cut was taken for one the window
-    /// had paid, and the window opened told to go on). The chief's always comes.
+    /// Whether a member's window the Resume brings back still comes: its work is
+    /// as the Resume read it ([`Dispatcher::unmoved`]). A pause, a cancel, a
+    /// release or an end of any task it comes back for that came meanwhile, as its
+    /// record was read, brings it back no more (Astra's review of 2026-10-16, round
+    /// 4: a pause the human made while the Resume read whether the turn was cut was
+    /// taken for one the window had paid, and the window opened told to go on). The
+    /// chief's always comes.
     pub(crate) fn still_coming(
         &self,
         participant: &ParticipantView,
         coming: &Coming,
     ) -> Result<bool, EngineError> {
-        let Coming::Member(_, paid) = coming else {
+        let Coming::Member(work) = coming else {
             return Ok(true);
         };
-        Ok(self.seams.ledger.borrow().stop_of(participant.id)? == *paid)
+        self.unmoved(participant, work)
+    }
+
+    /// Whether a member's work is as `captured` read it: its window's stops, and
+    /// where each task it comes back for stands.
+    pub(crate) fn unmoved(
+        &self,
+        participant: &ParticipantView,
+        captured: &Captured,
+    ) -> Result<bool, EngineError> {
+        let ledger = self.seams.ledger.borrow();
+        if ledger.stop_of(participant.id)? != captured.paid {
+            return Ok(false);
+        }
+        let numbers: Vec<i64> = captured.tasks.iter().map(|task| task.number).collect();
+        Ok(ledger.standings(participant.project_id, &numbers)? == captured.tasks)
     }
 
     /// The note that tells a window its turn was cut, when it was, to be its

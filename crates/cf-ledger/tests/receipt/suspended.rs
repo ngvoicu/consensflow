@@ -395,59 +395,100 @@ fn said_again(w: &World) -> Vec<String> {
         .collect()
 }
 
-/// Both reviews of 2026-10-16, round 4: a cancel withdraws a pause note on its
-/// way too, whose warning it cannot keep, for the window may have it already.
-/// The engine says when the window was handed nothing of it, and the warning is
-/// said then.
-#[test]
-fn a_pause_note_the_cancel_withdrew_on_its_way_keeps_its_warning_once_its_window_was_handed_nothing(
-) {
-    let mut w = world();
-    let cancelled = at_work(&mut w, "zeus");
-    let outlived =
-        "@zeus's window closed, but its program (process 4242) could not be ended and may still run";
-    closed_with(&mut w, &[cancelled], outlived);
+/// The words of a pause that the Close could not end zeus's program.
+const OUTLIVED: &str =
+    "@zeus's window closed, but its program (process 4242) could not be ended and may still run";
+
+/// T-`cancelled`'s pause note, which says [`OUTLIVED`], on its way to the chief
+/// when the human cancels the task.
+fn cancelled_on_its_way(w: &mut World) -> (i64, i64) {
+    let cancelled = at_work(w, "zeus");
+    closed_with(w, &[cancelled], OUTLIVED);
     let note = w
         .ledger
-        .note_pause(w.project, "chief", cancelled, outlived)
+        .note_pause(w.project, "chief", cancelled, OUTLIVED)
         .expect("the chief is told");
     w.ledger.begin_delivery(note.id).expect("on its way");
-    w.ledger.keep_warning(note.id).expect("asked");
-    assert!(said_again(&w).is_empty(), "on its way, it may yet go in");
-
     w.ledger
         .cancel_task(w.project, cancelled, "human")
         .expect("called off");
-    assert_eq!(w.message(note.id).state, "cancelled");
-    assert!(
-        said_again(&w).is_empty(),
-        "the cancel keeps the warnings of the notes still queued alone"
-    );
-    w.ledger.keep_warning(note.id).expect("kept");
+    (cancelled, note.id)
+}
 
+/// Both reviews of 2026-10-16, round 5: the cancel withdrew a pause note on its
+/// way, and only some of the ways it ended without reaching the window said its
+/// warning again (one whose arrival was uncertain, a launch that failed, a start
+/// of the daemon did not). The note stays on its way, and its warning is owed
+/// until its arrival is known: whatever sends it back to its queue says it again.
+#[test]
+fn a_pause_note_on_its_way_when_its_task_is_cancelled_says_its_warning_again_if_it_goes_back() {
+    let mut w = world();
+    let (cancelled, note) = cancelled_on_its_way(&mut w);
+    assert_eq!(w.message(note).state, "delivering", "it may yet arrive");
+    assert!(said_again(&w).is_empty());
+
+    w.ledger
+        .retry_delivery(note, "the harness record never showed it", false)
+        .expect("tried again");
+
+    assert_eq!(w.message(note).state, "cancelled", "it goes no more");
     assert_eq!(
         said_again(&w),
-        [format!("T-{cancelled} cancelled. Before that, {outlived}.")]
+        [format!("T-{cancelled} cancelled. Before that, {OUTLIVED}.")]
     );
 }
 
+/// The same where its delivery is given up: the warning is said again, in a note
+/// with attempts of its own, and nothing failed.
 #[test]
-fn a_message_withdrawn_on_its_way_that_says_no_warning_of_a_cancelled_task_keeps_nothing() {
+fn a_pause_note_on_its_way_when_its_task_is_cancelled_says_its_warning_again_if_it_is_given_up() {
+    let mut w = world();
+    let (cancelled, note) = cancelled_on_its_way(&mut w);
+
+    let given_up = w
+        .ledger
+        .fail_delivery(note, "the window never showed its first message")
+        .expect("given up");
+
+    assert_eq!(given_up.state, "cancelled");
+    assert_eq!(
+        said_again(&w),
+        [format!("T-{cancelled} cancelled. Before that, {OUTLIVED}.")]
+    );
+}
+
+/// A note that arrived has its warning in the window: nothing is said again of it.
+#[test]
+fn a_pause_note_on_its_way_when_its_task_is_cancelled_that_arrives_says_nothing_again() {
+    let mut w = world();
+    let (_, note) = cancelled_on_its_way(&mut w);
+
+    w.ledger
+        .confirm_delivery(note, None)
+        .expect("in the chief's window");
+
+    assert_eq!(w.message(note).state, "delivered");
+    assert!(said_again(&w).is_empty(), "{:?}", said_again(&w));
+}
+
+/// A message on its way that says no warning goes with the cancel, as it always
+/// did, and so does a warning of a task that was not cancelled when it goes back.
+#[test]
+fn a_message_on_its_way_that_says_no_warning_of_a_cancelled_task_goes_with_the_cancel() {
     let mut w = world();
     let first = at_work(&mut w, "zeus");
     let second = at_work(&mut w, "diana");
-    let outlived =
-        "@zeus's window closed, but its program (process 4242) could not be ended and may still run";
-    closed_with(&mut w, &[first, second], outlived);
-    // A warning whose task was not cancelled: withdrawn some other way.
+    closed_with(&mut w, &[first, second], OUTLIVED);
+    // A warning whose task was not cancelled, tried again.
     let warning = w
         .ledger
-        .note_pause(w.project, "chief", first, outlived)
+        .note_pause(w.project, "chief", first, OUTLIVED)
         .expect("the chief is told");
     w.ledger.begin_delivery(warning.id).expect("on its way");
     w.ledger
-        .cancel_message(warning.id, "taken back")
-        .expect("withdrawn");
+        .retry_delivery(warning.id, "the window went", true)
+        .expect("tried again");
+    assert_eq!(w.message(warning.id).state, "queued");
     // A cancelled task's pause note that warns of nothing.
     let plain = w
         .ledger
@@ -458,9 +499,7 @@ fn a_message_withdrawn_on_its_way_that_says_no_warning_of_a_cancelled_task_keeps
         .cancel_task(w.project, second, "human")
         .expect("called off");
 
-    for id in [warning.id, plain.id] {
-        w.ledger.keep_warning(id).expect("asked");
-    }
+    assert_eq!(w.message(plain.id).state, "cancelled");
     assert!(said_again(&w).is_empty(), "{:?}", said_again(&w));
 }
 
@@ -470,12 +509,10 @@ fn a_message_withdrawn_on_its_way_that_says_no_warning_of_a_cancelled_task_keeps
 fn a_pause_note_its_window_was_given_keeps_nothing_when_its_task_is_cancelled() {
     let mut w = world();
     let cancelled = at_work(&mut w, "zeus");
-    let outlived =
-        "@zeus's window closed, but its program (process 4242) could not be ended and may still run";
-    closed_with(&mut w, &[cancelled], outlived);
+    closed_with(&mut w, &[cancelled], OUTLIVED);
     let note = w
         .ledger
-        .note_pause(w.project, "chief", cancelled, outlived)
+        .note_pause(w.project, "chief", cancelled, OUTLIVED)
         .expect("the chief is told");
     w.ledger.begin_delivery(note.id).expect("on its way");
     w.ledger
@@ -484,8 +521,6 @@ fn a_pause_note_its_window_was_given_keeps_nothing_when_its_task_is_cancelled() 
     w.ledger
         .cancel_task(w.project, cancelled, "human")
         .expect("called off");
-
-    w.ledger.keep_warning(note.id).expect("asked");
 
     assert_eq!(w.message(note.id).state, "delivered");
     assert!(said_again(&w).is_empty(), "{:?}", said_again(&w));

@@ -15,10 +15,13 @@
 //! But for a warning: a pause whose words say that its window's program could
 //! not be ended and may still run ([`MAY_STILL_RUN`]) warns of a program that
 //! outlives the pause, and whoever is told next opens a window beside it. When
-//! its note goes, the warning stays, in a note of its own.
+//! its note goes, the warning stays, in a note of its own. A cancel leaves such a
+//! note on its way to run its course, and only one that does not arrive says its
+//! warning again ([`withdrawn_on_its_way`]).
 
 use cf_proto::ledger::MessageView;
 use rusqlite::params;
+use serde_json::json;
 
 use super::holds::goes_on;
 use crate::model::LedgerError;
@@ -251,30 +254,65 @@ pub(crate) fn warnings_queued(store: &Store, task: &TaskRow) -> Result<Vec<Strin
         .collect())
 }
 
-/// The pause note `id`, withdrawn while it was on its way (a cancel of its task
-/// withdraws what is being delivered too), whose window was then handed nothing
-/// of it: the engine says so, and the warning it said of its task is said again,
-/// as a cancel says those of the notes still queued ([`warnings_queued`]; both
-/// reviews of 2026-10-16, round 4). Nothing for any other message, nor for a note
-/// still on its way, and nothing is written then.
-pub(crate) fn keep_warning(store: &mut Store, id: i64) -> Result<(), LedgerError> {
-    let Some(note) = store
-        .message(id)?
-        .filter(|note| note.kind == "note" && note.sender.is_none() && note.state == "cancelled")
-    else {
-        return Ok(());
-    };
-    let Some((number, because)) = note
-        .task_number
-        .and_then(|number| Some((number, warning_in(&note.body, number)?)))
-    else {
-        return Ok(());
-    };
-    let task = store.task_row(note.project_id, number)?;
-    if task.state != "cancelled" {
-        return Ok(());
+/// The pause notes of `task` on their way to its requester (being pasted, or the
+/// first message of its window's launch) that say a warning of it. A cancel of the
+/// task leaves them on their way: the window may have one already, and only its
+/// arrival says it was given. One that does not arrive says its warning again
+/// ([`withdrawn_on_its_way`]): a warning a cancel withdraws is owed until a
+/// delivery of it is known to have arrived (both reviews of 2026-10-16, round 5).
+pub(crate) fn warnings_on_their_way(
+    store: &Store,
+    task: &TaskRow,
+) -> Result<Vec<i64>, LedgerError> {
+    let notes: Vec<(i64, String)> = store
+        .db
+        .prepare(
+            "SELECT id, body FROM message
+             WHERE kind = 'note' AND sender_id IS NULL AND state = 'delivering'
+               AND recipient_id = ? AND task_id = ? ORDER BY id",
+        )?
+        .query_map(params![task.requester_id, task.id], |row| {
+            Ok((row.get(0)?, row.get(1)?))
+        })?
+        .collect::<rusqlite::Result<_>>()?;
+    Ok(notes
+        .into_iter()
+        .filter(|(_, body)| warning_in(body, task.number).is_some())
+        .map(|(id, _)| id)
+        .collect())
+}
+
+/// `message`, on its way and not to arrive (it goes back to its queue, or is
+/// given up), if it is a pause note whose task was cancelled while it was on its
+/// way ([`warnings_on_their_way`]): it is withdrawn, as the cancel withdrew the
+/// rest, and the warning it said of its task is said again, in a note of its
+/// own. Whether it was; nothing is written for any other message.
+pub(crate) fn withdrawn_on_its_way(
+    store: &mut Store,
+    message: &MessageView,
+) -> Result<bool, LedgerError> {
+    if message.kind != "note" || message.sender.is_some() {
+        return Ok(false);
     }
-    store.write(|store| say_again(store, &task, "cancelled", vec![because]))
+    let Some((number, because)) = message
+        .task_number
+        .and_then(|number| Some((number, warning_in(&message.body, number)?)))
+    else {
+        return Ok(false);
+    };
+    let task = store.task_row(message.project_id, number)?;
+    if task.state != "cancelled" {
+        return Ok(false);
+    }
+    let reason = format!("T-{number} cancelled");
+    withdraw(store, message.id, &reason)?;
+    store.log(
+        message.project_id,
+        "delivery.cancelled",
+        json!({ "message": message.id, "reason": reason }),
+    )?;
+    say_again(store, &task, "cancelled", vec![because])?;
+    Ok(true)
 }
 
 /// Says each of `warnings` again to the task's requester, as what came before

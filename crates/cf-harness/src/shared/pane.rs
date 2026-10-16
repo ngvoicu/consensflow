@@ -70,22 +70,18 @@ pub(crate) async fn snapshot(host: &dyn PaneHost, pane: &Pane) -> Result<Value, 
 /// `id`. The host's answer is returned as it came, for each channel to read in
 /// its own words; a request it never answered is the answer `{ok: false,
 /// error: "transport", cause}`, the cause the host's word for it, else its
-/// message: a claim never fails. A claim is the last wait before a native send
-/// is handed over, so once it is answered the host is asked whether it still
-/// admits the send ([`PaneHost::admits`]): one it does not is a claim refused,
-/// and the send hands nothing over (a claim reserves nothing at the host).
+/// message: a claim never fails. A claim reserves nothing at the host, and
+/// whether the host still admits the send ([`PaneHost::admits`]) is asked at
+/// the send's own last wait: Pi's, the claim; a send over loopback's, its
+/// connection (`Loopback::hand_over`).
 pub(crate) async fn claim(host: &dyn PaneHost, pane: &Pane) -> Value {
     let request = json!({ "pane": pane.id, "generation": pane.generation });
-    let answer = match host.request("pane.claim", request).await {
+    match host.request("pane.claim", request).await {
         Ok(answer) => answer,
         Err(HostError { error, message }) => {
             json!({ "ok": false, "error": "transport", "cause": error.unwrap_or(message) })
         }
-    };
-    if answer.get("ok") == Some(&Value::Bool(true)) && !host.admits() {
-        return json!({ "ok": false, "error": "not-admitted", "cause": NOT_ADMITTED });
     }
-    answer
 }
 
 /// A paste the host did not admit: refused, and nothing of it written.

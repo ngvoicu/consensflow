@@ -739,7 +739,7 @@ impl Dispatcher {
         if let Some(delivering) = delivering {
             // A chief's first message (a handoff, most often) waits for its next window.
             if delivering.chief {
-                self.give_back(delivering, &because)?;
+                self.give_back(delivering.message, &because)?;
             } else {
                 let retry = !delivering.launch;
                 self.settle_failure(delivering, &because, retry)?;
@@ -1229,19 +1229,19 @@ impl Dispatcher {
             // A window the Resume brings back opens only for work still at work once
             // its cut was read, and pays only the stops the Resume read with that
             // work: one asked after is owed.
-            let (first, paid) = match &coming {
+            let (first, captured) = match &coming {
                 Some(coming) => {
                     let note = this.cut_note(&project, &who, coming).await?;
                     if !this.still_coming(&who, coming)? {
                         return Ok(());
                     }
-                    (note, coming.paid())
+                    (note, coming.captured())
                 }
                 None => (None, None),
             };
             let (launching, at) = (Rc::clone(&this), Rc::clone(&held));
             this.act(&held, async move {
-                launching.launch(&at, &project, &who, first, paid).await
+                launching.launch(&at, &project, &who, first, captured).await
             })
             .await;
             Ok(())

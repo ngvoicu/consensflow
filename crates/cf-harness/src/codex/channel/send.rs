@@ -1,16 +1,17 @@
 //! One message sent to a Codex window's broker: the pane is claimed, then the
 //! text is handed to the broker for the thread the message is for, which admits
 //! it only while the window's TUI still shows that thread. The broker is the
-//! hand-over: a message refused before it, by the pane host or at the deadline,
-//! is known to have reached nothing, and from it on the broker may have taken
-//! the message, so any failure is uncertain and Codex's own record decides; the
-//! message is never retried automatically.
+//! hand-over: a message refused before it, by the pane host (its claim, or its
+//! word once the request's connection is up) or at the deadline, is known to have
+//! reached nothing, and from it on the broker may have taken the message, so any
+//! failure is uncertain and Codex's own record decides; the message is never
+//! retried automatically.
 
 use cf_base::js;
 use serde_json::{json, Value};
 
 use super::{is_thread, parse, Channel, BODY_LIMIT};
-use crate::contract::{Pane, PaneHost};
+use crate::contract::{Pane, PaneHost, NOT_ADMITTED};
 use crate::seams::loopback::Loopback;
 use crate::seams::{arm, Time};
 use crate::shared::admission::Sent;
@@ -175,16 +176,18 @@ pub async fn send(
     if deadline <= time.wall_ms() {
         return Ok(Answer::expired());
     }
-    Ok(hand_over(time, loopback, target.channel, thread, text, deadline).await)
+    Ok(hand_over(time, loopback, target, thread, text, deadline).await)
 }
 
 /// The text handed to the broker, with what is left of the deadline to be
-/// taken in. From here on the broker may be taking the message, so no failure
-/// is an error, and what is not the broker's own word is uncertain.
+/// taken in, if the pane host admits it once its connection is up
+/// ([`Loopback::hand_over`]): one it does not reached nothing. From the request
+/// on the broker may be taking the message, so no failure is an error, and what
+/// is not the broker's own word is uncertain.
 async fn hand_over(
     time: &dyn Time,
     loopback: &dyn Loopback,
-    channel: &Channel,
+    target: &Target<'_>,
     thread: &str,
     text: &str,
     deadline: i64,
@@ -193,18 +196,25 @@ async fn hand_over(
         return Answer::expired();
     }
     let body = js::stringify(&json!({
-        "launchId": channel.launch_id,
+        "launchId": target.channel.launch_id,
         "sessionId": thread,
         "text": text,
         "expiresAt": deadline,
     }));
-    let Some(request) = channel.request("/deliver", Some(body)) else {
+    let Some(request) = target.channel.request("/deliver", Some(body)) else {
         return Answer::uncertain(TRANSPORT);
     };
     let left = u64::try_from((deadline - time.wall_ms()).max(1)).unwrap_or(1);
     let attempt = arm(time, left);
-    let Some(Ok(mut reply)) = attempt.bound(loopback.send(request)).await else {
-        return Answer::uncertain(TRANSPORT);
+    let mut reply = match attempt
+        .bound(loopback.hand_over(request, target.host))
+        .await
+    {
+        Some(Ok(reply)) => reply,
+        Some(Err(failed)) if failed == NOT_ADMITTED => {
+            return Answer::zero_bytes("failed-with-zero-bytes", Some(failed));
+        }
+        _ => return Answer::uncertain(TRANSPORT),
     };
     let status = reply.status();
     let Some(Ok(bytes)) = attempt.bound(reply.body(BODY_LIMIT)).await else {

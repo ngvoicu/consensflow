@@ -154,8 +154,12 @@ runs = ["ledger-approval"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/finishing.rs"
-find = '''AND state IN ('queued', 'delivering', 'gated')",'''
-replace = '''AND state IN ('queued', 'delivering')",'''
+find = '''
+       WHERE task_id = ? AND state IN ('queued', 'delivering', 'gated')
+         AND id NOT IN'''
+replace = '''
+       WHERE task_id = ? AND state IN ('queued', 'delivering')
+         AND id NOT IN'''
 
 [[plant]]
 name = "approval: the chief’s pause leaves its words at the gate"

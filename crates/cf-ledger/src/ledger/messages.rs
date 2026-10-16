@@ -215,14 +215,9 @@ impl Ledger {
         messages::cancel_message(&mut self.store, message_id, reason)
     }
 
-    /// A message withdrawn on its way, whose window was handed nothing of it: a
-    /// pause note's warning that its task's program may still run is said again,
-    /// as a cancel says those of the notes still queued.
-    pub fn keep_warning(&mut self, message_id: i64) -> Result<(), LedgerError> {
-        messages::keep_warning(&mut self.store, message_id)
-    }
-
-    /// A delivery queued again; `refund` gives back its attempt.
+    /// A delivery queued again; `refund` gives back its attempt. A pause note
+    /// whose task was cancelled on its way is withdrawn instead, and says its
+    /// warning again.
     pub fn retry_delivery(
         &mut self,
         message_id: i64,
@@ -243,7 +238,8 @@ impl Ledger {
 
     /// A delivery given up. A task message that fails takes its task with it;
     /// an answer that fails leaves its question to be answered again, and the
-    /// one who was asked is told so.
+    /// one who was asked is told so. A pause note whose task was cancelled on
+    /// its way is withdrawn instead, and says its warning again.
     pub fn fail_delivery(
         &mut self,
         message_id: i64,

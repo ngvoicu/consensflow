@@ -187,6 +187,44 @@ async fn a_poll_claims_the_answer_it_finds_so_the_paste_skips_it_and_wakes_the_d
     assert_eq!(scene.kicks.get(), 1, "the dispatcher is woken");
 }
 
+/// Both reviews of 2026-10-16, round 5: a window the Close could not close kept
+/// its door, and was handed the answer given while its project was closed. The
+/// door waits as one with no answer does, and the Resume lets it have it.
+#[tokio::test(start_paused = true)]
+async fn a_door_of_a_closed_project_is_handed_nothing_until_the_project_opens() {
+    let scene = scene();
+    let question = working_question(&scene);
+    let project = scene.project.id;
+    let set = |state: &str| {
+        scene
+            .context
+            .ledger
+            .borrow_mut()
+            .set_project_state(project, state)
+            .unwrap();
+    };
+    set("suspended");
+    scene.choose(question.id, "red");
+    let id = question.id.to_string();
+    let target = format!("/api/questions/{id}?wait=3000");
+    let (status, body) = door(&scene, &scene.zeus, &target, &id).await;
+    assert_eq!((status, &body["answer"]), (200, &Value::Null));
+    assert_eq!(
+        scene.next_for_zeus(),
+        Some("H: red".to_owned()),
+        "nothing claimed it: it is kept for the Resume"
+    );
+
+    let started = Instant::now();
+    let target = format!("/api/questions/{id}?wait=20000");
+    let (waiting, ()) = tokio::join!(door(&scene, &scene.zeus, &target, &id), async {
+        tokio::time::sleep(Duration::from_millis(1100)).await;
+        set("open");
+    });
+    assert_eq!(waiting.1["answer"]["choices"], json!([["red"]]));
+    assert_eq!(started.elapsed(), Duration::from_millis(1250));
+}
+
 #[tokio::test(start_paused = true)]
 async fn the_same_answer_comes_again_to_a_second_poll_which_writes_nothing() {
     let scene = scene();

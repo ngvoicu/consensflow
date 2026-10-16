@@ -30,6 +30,12 @@ engine-closed-given-nothing = ["cargo", "test", "--offline", "-p", "cf-engine", 
 harness-hand-overs = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "shared::pane::"]
 # Each adapter's hand-over the host no longer admits, after the adapter's own waits.
 harness-admission = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "admit"]
+# A request to a peer on loopback over a real socket, its connection a wait of the system's.
+harness-net = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "shared::net::"]
+# The ledger's tests of a question's door, which claims an answer for its harness.
+ledger-doors = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "doors::"]
+# The daemon's door, which waits for an answer and has the ledger claim it.
+daemon-door = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "api::routes::door::"]
 # The owner's shape on the rig: two tasks at work and one the human paused, closed and resumed.
 rig-regression-resume-tasks = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "tasks_left_paused_by_a_close_and_resume::"]
 
@@ -528,10 +534,12 @@ runs = ["engine-closed-given-nothing"]
 file = "crates/cf-engine/src/deliveries.rs"
 find = '''
         if let Some(failed) = admitting.turned_away() {
-            self.handed_nothing('''
+            self.give_back(
+                message.id,'''
 replace = '''
         if let Some(failed) = admitting.turned_away().filter(|_| false) {
-            self.handed_nothing('''
+            self.give_back(
+                message.id,'''
 
 [[plant]]
 name = "resume tasks: the Enter for a paste left unsent goes into a closed project's window"
@@ -574,10 +582,40 @@ runs = ["engine-closed-given-nothing"]
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
 find = '''
-            Some(paid) => paid,
-            None => self.seams.ledger.borrow().stop_of(participant.id)?,'''
+            Some(captured) => captured,
+            None => Captured {'''
 replace = '''
-            Some(_) | None => self.seams.ledger.borrow().stop_of(participant.id)?,'''
+            Some(_) | None => Captured {'''
+
+[[plant]]
+name = "resume tasks: the Resume reads the stops of one task of a session that holds two"
+meant = "a_task_the_human_pauses_while_the_resume_reads_the_record_of_a_session_with_two_stays_paused_and_its_window_stays_closed"
+runs = ["engine-closed-given-nothing"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/resume.rs"
+find = "        self.unmoved(participant, work)"
+replace = "        Ok(self.seams.ledger.borrow().stop_of(participant.id)? == work.paid)"
+
+[[plant]]
+name = "resume tasks: the Resume's launch reads the stops of one task of a session that holds two"
+meant = "a_task_the_human_pauses_while_the_resume_s_launch_reads_the_record_of_a_session_with_two_stays_paused_and_its_window_stays_closed"
+runs = ["engine-closed-given-nothing"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = "        if on_its_way && self.unmoved(participant, captured)? {"
+replace = "        if on_its_way && self.seams.ledger.borrow().stop_of(participant.id)? == captured.paid {"
+
+[[plant]]
+name = "resume tasks: the work a Resume brings back is unmoved whatever became of its tasks"
+meant = "a_task_the_human_pauses_while_the_resume_reads_the_record_of_a_session_with_two_stays_paused_and_its_window_stays_closed"
+runs = ["engine-closed-given-nothing"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/resume.rs"
+find = "        Ok(ledger.standings(participant.project_id, &numbers)? == captured.tasks)"
+replace = "        Ok(!numbers.is_empty() || captured.tasks.is_empty())"
 
 [[plant]]
 name = "resume tasks: the windows' closes end for a Resume when the first of them fails"
@@ -595,46 +633,83 @@ find = "                let _part = part;"
 replace = ""
 
 [[plant]]
-name = "resume tasks: a pause note the cancel withdrew on its way, kept from its window by the Close, loses its warning"
-meant = "a_cancel_keeps_the_warning_of_a_pause_note_on_its_way_that_the_close_kept_from_the_chief"
-runs = ["engine-closed-given-nothing"]
+name = "resume tasks: a cancel withdraws a pause note on its way with the warning it says, as round 5 did"
+meant = "a_pause_note_on_its_way_when_its_task_is_cancelled_says_its_warning_again_if_it_goes_back"
+runs = ["ledger-suspended", "engine-closed-given-nothing"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/deliveries.rs"
-find = "            Some(_) => self.seams.ledger.borrow_mut().keep_warning(message)?,"
-replace = "            Some(_) => {}"
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = "         AND id NOT IN (SELECT value FROM json_each(?))\","
+replace = "         AND ? IS NOT NULL\","
 
 [[plant]]
-name = "resume tasks: a pause note the cancel withdrew on its way, which its window refused, loses its warning"
-meant = "a_cancel_keeps_the_warning_of_a_pause_note_on_its_way_that_its_window_then_refused"
+name = "resume tasks: a pause note left on its way by its task's cancel goes back to its queue as any does"
+meant = "a_cancel_keeps_the_warning_of_a_pause_note_on_its_way_whose_hand_over_was_uncertain"
+runs = ["engine-closed-given-nothing", "ledger-suspended"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = '''
+        let message = require_message(store, message_id, "delivering")?;
+        if withdrawn_on_its_way(store, &message)? {
+            return known_message(store, message_id);
+        }
+        store.db.execute(
+            "UPDATE message SET state = 'queued','''
+replace = '''
+        let message = require_message(store, message_id, "delivering")?;
+        store.db.execute(
+            "UPDATE message SET state = 'queued','''
+
+[[plant]]
+name = "resume tasks: a pause note left on its way by its task's cancel is given up as any is, its warning with it"
+meant = "a_pause_note_on_its_way_when_its_task_is_cancelled_says_its_warning_again_if_it_is_given_up"
+runs = ["ledger-suspended", "engine-closed-given-nothing"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = '''
+        let message = require_message(store, message_id, "delivering")?;
+        if withdrawn_on_its_way(store, &message)? {
+            return known_message(store, message_id);
+        }
+        store.db.execute(
+            "UPDATE message SET state = 'failed','''
+replace = '''
+        let message = require_message(store, message_id, "delivering")?;
+        store.db.execute(
+            "UPDATE message SET state = 'failed','''
+
+[[plant]]
+name = "resume tasks: the human hears that a pause note withdrawn at its last attempt did not reach the chief"
+meant = "a_cancel_keeps_the_warning_of_a_pause_note_whose_last_attempt_its_window_refused"
 runs = ["engine-closed-given-nothing"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
 find = '''
-            // its window's: a warning it said is kept.
-            self.seams.ledger.borrow_mut().keep_warning(message.id)?;'''
+        if given_up.state != "failed" {
+            return Ok(());
+        }'''
 replace = '''
-            // its window's: a warning it said is kept.'''
+        let _ = given_up;'''
 
 [[plant]]
-name = "resume tasks: a pause note the cancel withdrew on its way says its warning again though its window had it"
+name = "resume tasks: a pause note left on its way by its task's cancel says its warning again though it arrived"
 meant = "a_pause_note_cancelled_on_its_way_and_given_all_the_same_is_not_said_again"
-runs = ["engine-closed-given-nothing"]
+runs = ["engine-closed-given-nothing", "ledger-suspended"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/deliveries.rs"
+file = "crates/cf-ledger/src/messages/delivery.rs"
 find = '''
-        if self.forgotten(record) {
-            return Ok(());
-        }
-        // Closed before the hand-over'''
+        let message = require_message(store, message_id, "delivering")?;
+        let at = store.at();'''
 replace = '''
-        if self.forgotten(record) {
-            return Ok(());
+        let message = require_message(store, message_id, "delivering")?;
+        if withdrawn_on_its_way(store, &message)? {
+            return known_message(store, message_id);
         }
-        self.seams.ledger.borrow_mut().keep_warning(message.id)?;
-        // Closed before the hand-over'''
+        let at = store.at();'''
 
 [[plant]]
 name = "resume tasks: a pause note its window was given has its warning said again"
@@ -643,23 +718,21 @@ runs = ["ledger-suspended"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/pauses.rs"
-find = '        .filter(|note| note.kind == "note" && note.sender.is_none() && note.state == "cancelled")'
-replace = '        .filter(|note| note.kind == "note" && note.sender.is_none())'
+find = "             WHERE kind = 'note' AND sender_id IS NULL AND state = 'queued'"
+replace = "             WHERE kind = 'note' AND sender_id IS NULL AND state IN ('queued', 'delivered')"
 
 [[plant]]
-name = "resume tasks: a warning withdrawn some way other than its task's cancel is said again as a cancel's"
-meant = "a_message_withdrawn_on_its_way_that_says_no_warning_of_a_cancelled_task_keeps_nothing"
+name = "resume tasks: a warning that goes back to its queue says itself again though its task was not cancelled"
+meant = "a_message_on_its_way_that_says_no_warning_of_a_cancelled_task_goes_with_the_cancel"
 runs = ["ledger-suspended"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/pauses.rs"
 find = '''
     if task.state != "cancelled" {
-        return Ok(());
-    }
-    store.write(|store| say_again('''
-replace = '''
-    store.write(|store| say_again('''
+        return Ok(false);
+    }'''
+replace = ""
 
 [[plant]]
 name = "resume tasks: a paste goes in whatever the host admits (Claude, Devin)"
@@ -675,26 +748,146 @@ find = '''
 replace = ""
 
 [[plant]]
-name = "resume tasks: a native send goes once its claim is answered, whatever the host admits (Codex, OpenCode, Pi)"
-meant = "a_claim_answered_once_the_host_no_longer_admits_hand_overs_is_refused"
-runs = ["harness-hand-overs", "harness-admission"]
+name = "resume tasks: Pi renames its message into the inbox once its claim is answered, whatever the host admits"
+meant = "a_send_the_host_stops_admitting_while_its_claim_waits_never_reaches_the_inbox"
+runs = ["harness-admission"]
 
 [[plant.edit]]
-file = "crates/cf-harness/src/shared/pane.rs"
-find = "    if answer.get(\"ok\") == Some(&Value::Bool(true)) && !host.admits() {"
+file = "crates/cf-harness/src/pi/channel/send.rs"
+find = "    if claimed.get(\"ok\") == Some(&Value::Bool(true)) && !target.host.admits() {"
 replace = "    if false {"
 
 [[plant]]
-name = "resume tasks: OpenCode posts the first message once its server is up, whatever the host admits"
+name = "resume tasks: a claim asks the host whether it admits the send, before the send's own last wait"
+meant = "a_claim_returns_the_hosts_answer_and_asks_nothing_of_whether_it_admits"
+runs = ["harness-hand-overs"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/pane.rs"
+find = '''
+    match host.request("pane.claim", request).await {
+        Ok(answer) => answer,'''
+replace = '''
+    match host.request("pane.claim", request).await {
+        Ok(_) if !host.admits() => json!({ "ok": false, "error": "not-admitted", "cause": NOT_ADMITTED }),
+        Ok(answer) => answer,'''
+
+[[plant]]
+name = "resume tasks: a request over loopback asks whether it is admitted before its connection is up"
+meant = "a_send_is_asked_whether_it_is_admitted_once_its_connection_is_up"
+runs = ["harness-net"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/net.rs"
+find = '''
+    if !admits() {
+        return Err(Failed::NotAdmitted);
+    }
+    let mut asked = std::pin::pin!(sender.send_request(message));'''
+replace = '''
+    let mut asked = std::pin::pin!(sender.send_request(message));'''
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/net.rs"
+find = '''
+    let url = Url::parse(&request.url).map_err(|_| Failed::Fetch)?;'''
+replace = '''
+    if !admits() {
+        return Err(Failed::NotAdmitted);
+    }
+    let url = Url::parse(&request.url).map_err(|_| Failed::Fetch)?;'''
+
+[[plant]]
+name = "resume tasks: Codex's broker is sent the message once its connection is up, whatever the host admits"
+meant = "a_send_the_host_stops_admitting_while_its_connection_is_made_never_reaches_the_broker"
+runs = ["harness-admission"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/channel/send.rs"
+find = "        .bound(loopback.hand_over(request, target.host))"
+replace = "        .bound(loopback.send(request))"
+
+[[plant]]
+name = "resume tasks: a Codex send the host did not admit once its connection was up is uncertain"
+meant = "a_send_the_host_stops_admitting_while_its_connection_is_made_never_reaches_the_broker"
+runs = ["harness-admission"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/channel/send.rs"
+find = '''
+        Some(Err(failed)) if failed == NOT_ADMITTED => {
+            return Answer::zero_bytes("failed-with-zero-bytes", Some(failed));
+        }'''
+replace = ""
+
+[[plant]]
+name = "resume tasks: OpenCode's plugin is posted the message once its connection is up, whatever the host admits"
+meant = "a_send_the_host_stops_admitting_while_its_connection_is_made_is_never_posted"
+runs = ["harness-admission"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/opencode/channel/send.rs"
+find = "        .bound(wires.loopback.hand_over(request, target.host))"
+replace = "        .bound(wires.loopback.send(request))"
+
+[[plant]]
+name = "resume tasks: an OpenCode send the host did not admit once its connection was up is uncertain"
+meant = "a_send_the_host_stops_admitting_while_its_connection_is_made_is_never_posted"
+runs = ["harness-admission"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/opencode/channel/send.rs"
+find = '''
+        Some(Err(failed)) if failed == NOT_ADMITTED => {
+            return Ok(claim_refused(&json!({ "cause": failed })));
+        }'''
+replace = ""
+
+[[plant]]
+name = "resume tasks: OpenCode posts the first message once its connection is up, whatever the host admits"
+meant = "posts_nothing_where_the_host_stops_admitting_the_first_message_while_its_connection_is_made"
+runs = ["harness-admission"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/opencode/channel/seed.rs"
+find = "            .bound(self.wires.loopback.hand_over(request, host))"
+replace = "            .bound(self.wires.loopback.send(request))"
+
+[[plant]]
+name = "resume tasks: an OpenCode first message the host did not admit is uncertain"
 meant = "posts_nothing_where_the_host_stops_admitting_the_first_message_while_the_server_is_asked"
 runs = ["harness-admission"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/opencode/channel/seed.rs"
+find = "            Some(Err(failed)) if failed == NOT_ADMITTED => return Err(failed),"
+replace = ""
+
+# --- a question's door ---
+
+[[plant]]
+name = "resume tasks: a door of a closed project claims the answer given while it was closed"
+meant = "a_door_of_a_closed_project_claims_nothing_and_its_answer_waits_for_the_resume"
+runs = ["ledger-doors", "daemon-door"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/receipt.rs"
 find = '''
-    if !host.admits() {
-        return Err(NOT_ADMITTED.to_owned());
-    }
-    asked.admit(seed.session, body).await'''
+                    if !open {
+                        return Ok(Claim::Waiting);
+                    }'''
+replace = ""
+
+[[plant]]
+name = "resume tasks: a door of a closed project is told nothing of a claim it made before the Close"
+meant = "a_claim_made_before_the_close_is_the_door_s_and_comes_again"
+runs = ["ledger-doors"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/receipt.rs"
+find = '''
+            ("queued", None) => {
+                if claimed.is_none() {'''
 replace = '''
-    asked.admit(seed.session, body).await'''
+            ("queued", None) => {
+                if claimed.is_none() || claimed.is_some() {'''

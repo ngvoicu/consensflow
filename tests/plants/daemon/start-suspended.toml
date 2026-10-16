@@ -315,7 +315,7 @@ runs = ["engine-resume"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/resume.rs"
-find = '''            Coming::Member(tasks, _) => tasks.first().copied(),'''
+find = '''            Coming::Member(work) => work.tasks.first().map(|task| task.number),'''
 replace = '''            Coming::Member(..) => None,'''
 
 [[plant]]

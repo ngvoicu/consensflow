@@ -247,6 +247,40 @@ fn posts_nothing_where_the_host_stops_admitting_the_first_message_while_the_serv
     assert_eq!(host.admissions(), 1);
 }
 
+/// Astra's review of 2026-10-16, round 5: the server was up and the settings
+/// read, and the project closed while the post waited for its connection. The
+/// host is asked once the connection is up, before a byte goes.
+#[test]
+fn posts_nothing_where_the_host_stops_admitting_the_first_message_while_its_connection_is_made() {
+    let stage = Stage::new();
+    let window = resumed_window(&stage, "ses_late123", None, None);
+    let settings = json!({
+        "id": "ses_late123",
+        "model": { "id": "native-model", "providerID": "openrouter", "variant": "medium" },
+    })
+    .to_string();
+    let post = "POST /session/ses_late123/prompt_async";
+    stage.fakes.loopback.serve("GET /global/health", [up()]);
+    stage.fakes.loopback.serve(
+        "GET /session/ses_late123",
+        [served(200, settings.as_bytes())],
+    );
+    stage.fakes.loopback.hold_connection(post);
+    stage.fakes.loopback.serve(post, [served(204, b"")]);
+    let host = Rc::new(ScriptedHost::default());
+    let mut driver = Driver::default();
+    let (starting, admitting) = (Rc::clone(&window), Rc::clone(&host));
+    driver.begin(0, async move { starting.started(&*admitting).await });
+    assert!(
+        driver.run().is_empty(),
+        "the post's connection is being made"
+    );
+    host.refuse_hand_overs();
+    assert!(stage.fakes.loopback.connect(post));
+    assert_eq!(driver.run(), [(0, Err(NOT_ADMITTED.to_owned()))]);
+    assert!(asked(&stage, Method::Post).is_empty(), "nothing posted");
+}
+
 #[test]
 fn sends_the_selected_effort_to_the_native_prompt_api() {
     for variant in ["low", "medium"] {

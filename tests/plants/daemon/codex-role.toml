@@ -994,7 +994,7 @@ runs = ["engine-role-change"]
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
 find = '''                Some(displaced) => {
-                    self.give_back(displaced, "its window is told its role first")?;
+                    self.give_back(displaced.message, "its window is told its role first")?;
                     None
                 }'''
 replace = '''                Some(_) => None,'''
@@ -1020,10 +1020,10 @@ runs = ["engine-role-change"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
-find = '''            stop,
+find = '''            captured,
             prelude,
             first_instructions:'''
-replace = '''            stop,
+replace = '''            captured,
             prelude: None,
             first_instructions:'''
 

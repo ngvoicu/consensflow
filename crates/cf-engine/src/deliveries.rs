@@ -67,9 +67,9 @@ pub(crate) struct DeliveryPart {
 /// engine's word whether the window may be handed text now, which is no once its
 /// project is closed ([`PaneHost::admits`]). Every adapter asks it at the moment of
 /// its hand-over, after every wait of its own (Claude's keys that clear its input
-/// box, the pane's claim a native send waits for, OpenCode's wait for its server):
-/// a Close that comes during any of them hands the window nothing (both reviews of
-/// 2026-10-16, round 4).
+/// box, the pane's claim Pi's rename waits for, OpenCode's wait for its server, the
+/// connection a send over loopback waits for): a Close that comes during any of them
+/// hands the window nothing (both reviews of 2026-10-16, rounds 4 and 5).
 pub(crate) struct Admitting<'a> {
     dispatcher: &'a Dispatcher,
     /// The window's project.
@@ -121,27 +121,6 @@ impl Dispatcher {
         Ok(self
             .project_now(project)?
             .is_some_and(|project| project.state == "open"))
-    }
-
-    /// A message on its way that its window was handed nothing of, its project
-    /// closed first: queued again with its attempt, to wait for the Resume. One
-    /// withdrawn meanwhile (its task cancelled) stays so, and a warning it said,
-    /// that the program of its task's window may still run, is said again, as a
-    /// cancel says those of the notes still queued (both reviews of 2026-10-16,
-    /// round 4).
-    pub(crate) fn handed_nothing(&self, message: i64, because: &str) -> Result<(), EngineError> {
-        let found = self.seams.ledger.borrow().message(message)?;
-        match found {
-            Some(found) if found.state == "delivering" => {
-                self.seams
-                    .ledger
-                    .borrow_mut()
-                    .retry_delivery(message, because, true)?;
-            }
-            Some(_) => self.seams.ledger.borrow_mut().keep_warning(message)?,
-            None => {}
-        }
-        Ok(())
     }
 
     /// Hands `message` to a window that is idle. A participant forgotten
@@ -226,7 +205,7 @@ impl Dispatcher {
         }
         // Closed before the hand-over: nothing went in, and the message waits for the Resume.
         if let Some(failed) = admitting.turned_away() {
-            self.handed_nothing(
+            self.give_back(
                 message.id,
                 "its project was closed before it was handed over",
             )?;
@@ -249,9 +228,6 @@ impl Dispatcher {
             entered_again: false,
         };
         if let Admission::Refused { reason } = &outcome {
-            // One withdrawn on its way (its task cancelled), and refused, was never
-            // its window's: a warning it said is kept.
-            self.seams.ledger.borrow_mut().keep_warning(message.id)?;
             return self.settle_failure(delivering, reason, true);
         }
         // A window that closed while its harness took the message had nothing
@@ -342,20 +318,20 @@ impl Dispatcher {
     }
 
     /// What a window was to receive goes back to its queue with its attempt:
-    /// the window went before it had the chance to land.
-    pub(crate) fn give_back(
-        &self,
-        delivering: Delivering,
-        because: &str,
-    ) -> Result<(), EngineError> {
-        let message = self.seams.ledger.borrow().message(delivering.message)?;
-        if message.is_none_or(|found| found.state != "delivering") {
+    /// the window went before it had the chance to land, or was handed nothing of
+    /// it, its project closed first, and it waits for the Resume. One withdrawn
+    /// meanwhile stays so; a pause note whose task was cancelled on its way says
+    /// its warning again (the ledger's `retry_delivery`; both reviews of
+    /// 2026-10-16, rounds 4 and 5).
+    pub(crate) fn give_back(&self, message: i64, because: &str) -> Result<(), EngineError> {
+        let found = self.seams.ledger.borrow().message(message)?;
+        if found.is_none_or(|found| found.state != "delivering") {
             return Ok(());
         }
         self.seams
             .ledger
             .borrow_mut()
-            .retry_delivery(delivering.message, because, true)?;
+            .retry_delivery(message, because, true)?;
         Ok(())
     }
 
@@ -387,10 +363,16 @@ impl Dispatcher {
     /// whoever gave it hears why. Whoever waits on any other kind would wait
     /// forever, so the human hears, once, what it was, for whom and why.
     fn fail_delivery(&self, message: &MessageView, because: &str) -> Result<(), EngineError> {
-        self.seams
+        let given_up = self
+            .seams
             .ledger
             .borrow_mut()
             .fail_delivery(message.id, because)?;
+        // A pause note whose task was cancelled on its way was withdrawn instead,
+        // and its warning is said again: nothing failed.
+        if given_up.state != "failed" {
+            return Ok(());
+        }
         let project = self.known_project(message.project_id)?;
         if let Some(number) = message.task_number.filter(|_| message.kind == "task") {
             let task = self.seams.ledger.borrow().task(project.id, number)?;

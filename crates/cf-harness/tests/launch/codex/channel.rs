@@ -134,6 +134,45 @@ fn a_send_the_host_stops_admitting_while_its_claim_waits_never_reaches_the_broke
     );
 }
 
+/// Astra's review of 2026-10-16, round 5: the claim was answered and admitted,
+/// and the project closed while the request to the broker waited for its
+/// connection. The host is asked once the connection is up, before a byte goes.
+#[test]
+fn a_send_the_host_stops_admitting_while_its_connection_is_made_never_reaches_the_broker() {
+    let home = Home::new();
+    let (adapter, fakes) = adapter(&home);
+    let window = prepare(&adapter, &Request::resuming(THREAD))
+        .unwrap()
+        .window;
+    let host = Rc::new(ScriptedHost::default());
+    host.answer("pane.claim", [Answer::Now(Ok(json!({ "ok": true })))]);
+    fakes.loopback.hold_connection("POST /deliver");
+    fakes
+        .loopback
+        .serve("POST /deliver", [replies(r#"{"ok":true,"admitted":true}"#)]);
+    let mut driver = Driver::default();
+    let (deliver, claims) = (Rc::clone(&window), Rc::clone(&host));
+    driver.begin(0, async move {
+        deliver.deliver(&*claims, &pane(), "late").await
+    });
+    assert!(driver.run().is_empty(), "the connection is being made");
+    host.refuse_hand_overs();
+    assert!(fakes.loopback.connect("POST /deliver"));
+    assert_eq!(
+        driver.run(),
+        [(
+            0,
+            Ok(Admission::Refused {
+                reason: NOT_ADMITTED.to_owned()
+            })
+        )]
+    );
+    assert!(
+        fakes.loopback.take_asked().is_empty(),
+        "the broker was asked nothing"
+    );
+}
+
 /// A pane host that admits every claim and keeps what it was asked.
 #[derive(Default)]
 struct ScriptedClaims {

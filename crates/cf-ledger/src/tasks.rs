@@ -24,8 +24,8 @@ pub use giving::NewTask;
 pub(crate) use giving::{assign_task, check_release, create_task, release_task};
 pub(crate) use pausing::{
     clear_hold, held_tasks_due, hold_task, pause_task, pause_with_project, paused_task,
-    resume_task, resume_with_project, stop_of, take_over_pause, task_in_hand, told_since_paused,
-    unmark_pause,
+    resume_task, resume_with_project, standings, stop_of, take_over_pause, task_in_hand,
+    told_since_paused, unmark_pause,
 };
 
 /// What a paused task's window is told when it goes on: the human's Resume

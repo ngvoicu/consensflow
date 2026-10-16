@@ -334,6 +334,17 @@ pub struct Stop {
     pub seq: i64,
 }
 
+/// Where a task stands as far as a window's work in it goes: its state, the
+/// session it is with, and the stops its pauses have asked. A pause, a cancel, a
+/// release or an end of the task each moves it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Standing {
+    pub number: i64,
+    pub state: String,
+    pub assignee_id: Option<i64>,
+    pub stop_seq: i64,
+}
+
 /// One option of a question, as a harness's own question tool offers it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct QuestionOption {

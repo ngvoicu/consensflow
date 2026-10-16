@@ -280,18 +280,24 @@ pub trait PaneHost {
     fn request<'a>(&'a self, op: &'a str, body: Value) -> Work<'a, Result<Value, HostError>>;
 
     /// Whether text may be handed to the window now, asked at the moment of the
-    /// hand-over, after every wait before it: a paste as it is asked for, a native
-    /// send once the pane's claim is answered, and a first message a window posts
-    /// once it is up, as it is posted. The engine's host for a window says no once
-    /// the window's project is closed (the human's Close, or the chief's window
-    /// ending), and the text goes back to wait for the Resume, never handed over
-    /// ([`NOT_ADMITTED`]). A host that says nothing admits everything.
+    /// hand-over, after every wait before it: a paste as it is asked for (after
+    /// Claude's keys that clear its input box), Pi's inbox rename once the pane's
+    /// claim is answered, and a request to a peer on loopback (a Codex or OpenCode
+    /// send, OpenCode's first message) inside the send, once its connection is up
+    /// ([`Loopback::hand_over`](crate::seams::loopback::Loopback::hand_over)). The
+    /// engine's host for a window says no once the window's project is closed (the
+    /// human's Close, or the chief's window ending), and the text goes back to wait
+    /// for the Resume, never handed over ([`NOT_ADMITTED`]). A host that says
+    /// nothing admits everything.
     ///
-    /// What an adapter must keep: the hand-over begins in the same poll as the
-    /// answer, with no wait between (the bridge queues a request's frame where it
-    /// is asked, a bounded send polls its work before its timer, Pi's inbox rename
-    /// is a call), so nothing else of the engine runs in between. A hand-over begun
-    /// is the window's, whatever comes while it is on its way.
+    /// What an adapter must keep: no wait comes between the answer and the moment
+    /// the text is the transport's, so nothing else of the engine runs in between.
+    /// The bridge queues a paste's frame where the paste is asked for; the rename
+    /// is a call; a request is handed to its connection, which writes it as it is
+    /// next driven, in the same poll. A send's work polled in the same poll as the
+    /// answer is not enough: it may wait inside, as a connection is made (Astra's
+    /// review of 2026-10-16, round 5). A hand-over begun is the window's, whatever
+    /// comes while it is on its way.
     fn admits(&self) -> bool {
         true
     }

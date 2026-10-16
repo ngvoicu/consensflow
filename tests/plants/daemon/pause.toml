@@ -202,7 +202,7 @@ runs = ["engine-dispatcher"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
-find = "            part.stopped = planned.stop.map(|stop| (stop.task_id, stop.seq));"
+find = "            part.stopped = planned.captured.paid.map(|stop| (stop.task_id, stop.seq));"
 replace = '''
             part.stopped = self
                 .seams
@@ -220,8 +220,8 @@ runs = ["engine-dispatcher"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
-find = "            on_its_way && ledger.stop_of(participant.id)? == captured"
-replace = "            on_its_way"
+find = "        if on_its_way && self.unmoved(participant, captured)? {"
+replace = "        if on_its_way {"
 
 [[plant]]
 name = "pause: a delivery withdrawn while its window got ready is handed over"
