@@ -4,6 +4,7 @@
 //! before the next callback of its event loop.
 
 use std::cell::{OnceCell, RefCell};
+use std::time::Instant;
 
 use cf_engine::runtime::{begin, next_turn};
 use serde_json::json;
@@ -83,18 +84,33 @@ async fn an_answer_whose_work_ends_in_the_requests_first_part_is_out_before_the_
     LocalSet::new()
         .run_until(async {
             let Worked { spawn, .. } = worked();
-            // The client's socket as the system has it, which a read asks at
-            // once (tokio's would answer by what its reactor last saw).
+            // The client's socket as the system has it, read in a blocking
+            // wait (tokio's would answer by what its reactor last saw).
             let client: Rc<OnceCell<std::net::TcpStream>> = Rc::default();
             let read: Rc<RefCell<Vec<u8>>> = Rc::default();
             let wake = Rc::new(Notify::new());
             let (waiting, reader, kept) = (Rc::clone(&wake), Rc::clone(&client), Rc::clone(&read));
             let next = tokio::task::spawn_local(async move {
                 waiting.notified().await;
+                // The wait holds the one thread the test runs on, so no poll of
+                // the connection writes while it waits: what it reads was out
+                // before the next callback. It waits because loopback hands the
+                // written bytes to the client a while later, under load after a
+                // read that asked at once.
+                let deadline = Instant::now() + Duration::from_secs(10);
                 let mut buffer = [0_u8; 4096];
                 let mut stream = reader.get().expect("the client");
-                while let Ok(count @ 1..) = std::io::Read::read(&mut stream, &mut buffer) {
-                    kept.borrow_mut().extend_from_slice(&buffer[..count]);
+                while !kept.borrow().ends_with(br#"{"out":true}"#) {
+                    let left = deadline.saturating_duration_since(Instant::now());
+                    if left.is_zero() {
+                        break;
+                    }
+                    stream.set_read_timeout(Some(left)).unwrap();
+                    match std::io::Read::read(&mut stream, &mut buffer) {
+                        Ok(count @ 1..) => kept.borrow_mut().extend_from_slice(&buffer[..count]),
+                        Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
+                        Ok(0) | Err(_) => break,
+                    }
                 }
             });
             tokio::task::yield_now().await;
@@ -121,7 +137,6 @@ async fn an_answer_whose_work_ends_in_the_requests_first_part_is_out_before_the_
                 b"GET /x HTTP/1.1\r\nHost: t\r\nConnection: close\r\n\r\n",
             )
             .unwrap();
-            stream.set_nonblocking(true).unwrap();
             client.set(stream).unwrap();
             next.await.unwrap();
 

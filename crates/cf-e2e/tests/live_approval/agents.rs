@@ -4,7 +4,7 @@
 //! member of others, so one row serves both.
 
 use cf_e2e::live::agents as shared;
-use cf_e2e::live::Harness;
+use cf_e2e::live::{Harness, Log};
 use cf_e2e::rig::Rig;
 use cf_e2e::Result;
 
@@ -17,13 +17,14 @@ pub use shared::{id, question_tool, DESIGNER};
 pub const TIER: &str = "standard";
 
 /// Writes the roster of the rig's home: the agents of `harnesses`, over the
-/// one the rig started with.
-pub fn write_roster(rig: &Rig, harnesses: &[Harness]) -> Result {
+/// one the rig started with, each noted in the run's `log` as what its windows
+/// are launched on.
+pub fn write_roster(rig: &Rig, harnesses: &[Harness], log: &Log) -> Result {
     let rows: Vec<_> = harnesses
         .iter()
         .map(|harness| shared::row(*harness, TIER))
         .collect();
-    shared::write_roster(rig, &rows)
+    shared::write_roster(rig, &rows, log)
 }
 
 #[cfg(test)]

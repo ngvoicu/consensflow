@@ -81,8 +81,8 @@ fn body_of(message: Option<&Value>, most: usize) -> String {
     Value::String(body).to_string()
 }
 
-/// The member's row of the roster: its harness on its cheap model, or on the
-/// model `--model` gave it.
+/// The member's row of the roster: its harness on the run's model of it
+/// (`--models`, else its cheap one), or on the model `--model` gave it.
 fn row_of(harness: Harness, models: &BTreeMap<String, String>) -> Value {
     let mut row = members::member(harness);
     if let (Some(model), Some(fields)) = (models.get(harness.name()), row.as_object_mut()) {
@@ -415,6 +415,21 @@ mod tests {
         assert_eq!(
             row_of(Harness::Pi, &models)["model"],
             "openrouter/meta/muse-spark-1.3"
+        );
+    }
+
+    #[test]
+    fn the_report_names_the_model_door_model_gave_a_member_and_not_the_one_models_gives() {
+        let log = Log::begin("live door test").unwrap();
+        let models = BTreeMap::from([("opencode".to_owned(), "opencode/other".to_owned())]);
+        // What the daemon opens the member's window on is its row, as the roster has it.
+        let rig = cf_e2e::rig::Rig::start(cf_e2e::rig::Config::new(crate::FAKE_AGENT)).unwrap();
+        cf_e2e::live::agents::write_roster(&rig, &[row_of(Harness::OpenCode, &models)], &log)
+            .unwrap();
+        rig.close().unwrap();
+        assert_eq!(
+            log.ran_on().as_deref(),
+            Some("the windows ran on: opencode opencode/other")
         );
     }
 }

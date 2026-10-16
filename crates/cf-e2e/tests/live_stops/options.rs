@@ -217,7 +217,7 @@ mod tests {
         assert_eq!(stuck.roster[1]["kind"], "codex");
         assert_eq!(
             stuck.roster[1]["model"],
-            live::agents::cheap(Harness::Codex).0
+            live::agents::model(Harness::Codex).name
         );
     }
 }

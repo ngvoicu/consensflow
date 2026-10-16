@@ -74,7 +74,7 @@ fn open<'a>(
     rig: &'a Rig,
     log: &Log,
 ) -> Result<(PathBuf, cf_e2e::rig::Project<'a>)> {
-    agents::write_roster(rig, &planned.needs())?;
+    agents::write_roster(rig, &planned.needs(), log)?;
     let folder = project::folder(rig, planned)?;
     if let Some(claude) = machine
         .of(Harness::Claude)

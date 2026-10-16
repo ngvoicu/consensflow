@@ -121,7 +121,7 @@ fn check_of(window: &Window, asks: &[Ask; 2]) -> Result<Check> {
 #[test]
 #[ignore = "opt-in: spends the machine's quota on a window of each harness named; cargo xtask live interrupt (npm run live:interrupt)"]
 fn an_interrupt_at_an_idle_window_leaves_the_conversation_and_the_next_message_alone() -> Result {
-    let log = Log::new("live interrupt");
+    let log = Log::begin("live interrupt")?;
     // What a window is opened on is the harness code's to say: built before anything is spent.
     ask::prepare()?;
     let installs = window::pasted_installs(&log)?;
@@ -267,7 +267,7 @@ mod tests {
         let install = Installed::at(Harness::Claude, FAKE_AGENT, &home);
         let window = Open::new(&rig, &install, "interrupt", "interrupt-claude")
             .without_trust()
-            .open()?;
+            .open(&Log::new("live interrupt test"))?;
         let check = check_of(&window, &stand_in_asks())?;
         assert_eq!(check.who, "claude");
         assert!(check.ok, "{check:?}");
