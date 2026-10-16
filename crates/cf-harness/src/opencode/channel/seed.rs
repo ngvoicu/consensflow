@@ -19,6 +19,7 @@ use serde_json::{json, Map, Value};
 
 use super::directory::real_path;
 use super::{is_session_id, succeeded, url, Channel, Wires, OVERSIZED};
+use crate::contract::{PaneHost, NOT_ADMITTED};
 use crate::seams::loopback::{BodyFailed, Method, Request, TERMINATED};
 use crate::seams::{arm, Armed};
 
@@ -62,10 +63,14 @@ pub struct Seed<'a> {
 
 /// Posts the first message to `channel`'s server once it answers: how it
 /// failed, in ConsensFlow's sentences, or Node's for a folder that is gone.
+/// The post is the hand-over, after every wait for the server: it goes only if
+/// `host` admits it then ([`PaneHost::admits`]), and one it does not is
+/// [`NOT_ADMITTED`], nothing posted.
 pub async fn seed_session(
     wires: Wires<'_>,
     channel: &Channel,
     seed: &Seed<'_>,
+    host: &dyn PaneHost,
 ) -> Result<(), String> {
     if !is_session_id(seed.session) || seed.text.is_empty() {
         return Err("invalid OpenCode task launch".to_owned());
@@ -110,6 +115,9 @@ pub async fn seed_session(
     asked.ready().await?;
     if seed.resume {
         asked.adopt_settings(seed.session, &mut body).await?;
+    }
+    if !host.admits() {
+        return Err(NOT_ADMITTED.to_owned());
     }
     asked.admit(seed.session, body).await
 }

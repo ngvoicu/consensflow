@@ -179,8 +179,8 @@ runs = ["pause-notes-engine"]
 file = "crates/cf-engine/src/dispatcher.rs"
 find = '''
         let _burst = self.stalls.begin_burst();
-        let mut closing = Vec::new();'''
-replace = "        let mut closing = Vec::new();"
+        let parts: Vec<Closing> = participants'''
+replace = "        let parts: Vec<Closing> = participants"
 
 [[plant]]
 name = "pause notes: what a burst told outlives it"

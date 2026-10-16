@@ -87,17 +87,17 @@ file = "crates/cf-engine/src/windows.rs"
 find = '''
         let begun = first
             .map(|first| self.seams.ledger.borrow_mut().begin_delivery(first.id))
-            .transpose()?;
-        // The stops this window owes are those asked before this look: a pause
-        // that comes while it is prepared or opened is asked after it, and is
-        // owed. Read in this turn, with the first message begun: the window
-        // works on the task that message is about.
-        let stop = self.seams.ledger.borrow().stop_of(participant.id)?;'''
+            .transpose()?;'''
 replace = '''
-        let stop = self.seams.ledger.borrow().stop_of(participant.id)?;
+        let early = self.seams.ledger.borrow().stop_of(participant.id)?;
         let begun = first
             .map(|first| self.seams.ledger.borrow_mut().begin_delivery(first.id))
             .transpose()?;'''
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = "            None => self.seams.ledger.borrow().stop_of(participant.id)?,"
+replace = "            None => early,"
 
 [[plant]]
 name = "pause: the words that first reach a window do not answer a pause asked before them"

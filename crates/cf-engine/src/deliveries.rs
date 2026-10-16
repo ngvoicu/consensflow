@@ -4,15 +4,16 @@
 //! was in flight. Out of a window, a worker's answer becomes its task's result.
 //! It owns the record's delivery part; the window's part it only reads.
 
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use cf_base::js;
-use cf_harness::contract::{Admission, Held, Observed, PaneHost, Readiness};
+use cf_harness::contract::{Admission, Held, HostError, Observed, PaneHost, Readiness, Work};
 use cf_harness::records::{Options, Reading, Role};
 use cf_ledger::{MessageView, NewNote, ParticipantView, ProjectView, TaskView};
 use cf_proto::agents::Harness;
 use cf_proto::trace::WindowEvent;
-use serde_json::json;
+use serde_json::{json, Value};
 
 use crate::delivery_text::{delivery_text, marker_of};
 use crate::dispatcher::Dispatcher;
@@ -61,13 +62,86 @@ pub(crate) struct DeliveryPart {
     pub(crate) prelude: Option<Prelude>,
 }
 
+/// The pane host as a window is handed it for a hand-over (a delivery, or the
+/// first message a window posts once it is up): the host's own requests, and the
+/// engine's word whether the window may be handed text now, which is no once its
+/// project is closed ([`PaneHost::admits`]). Every adapter asks it at the moment of
+/// its hand-over, after every wait of its own (Claude's keys that clear its input
+/// box, the pane's claim a native send waits for, OpenCode's wait for its server):
+/// a Close that comes during any of them hands the window nothing (both reviews of
+/// 2026-10-16, round 4).
+pub(crate) struct Admitting<'a> {
+    dispatcher: &'a Dispatcher,
+    /// The window's project.
+    project: i64,
+    /// It said no, or could not tell: what was to go in did not.
+    refused: Cell<bool>,
+    /// Why it could not tell, where the ledger could not be read.
+    failed: RefCell<Option<EngineError>>,
+}
+
+impl<'a> Admitting<'a> {
+    /// The host for a window of `project`.
+    pub(crate) fn new(dispatcher: &'a Dispatcher, project: i64) -> Self {
+        Self {
+            dispatcher,
+            project,
+            refused: Cell::new(false),
+            failed: RefCell::new(None),
+        }
+    }
+
+    /// Whether it turned a hand-over away: then nothing of it went in, and why it
+    /// could not tell, if the ledger failed it.
+    pub(crate) fn turned_away(&self) -> Option<Option<EngineError>> {
+        self.refused.get().then(|| self.failed.borrow_mut().take())
+    }
+}
+
+impl PaneHost for Admitting<'_> {
+    fn request<'b>(&'b self, op: &'b str, body: Value) -> Work<'b, Result<Value, HostError>> {
+        self.dispatcher.seams.host.request(op, body)
+    }
+
+    fn admits(&self) -> bool {
+        match self.dispatcher.in_open_project(self.project) {
+            Ok(true) => return true,
+            Ok(false) => {}
+            Err(cause) => *self.failed.borrow_mut() = Some(cause),
+        }
+        self.refused.set(true);
+        false
+    }
+}
+
 impl Dispatcher {
-    /// Whether the record's project is open now, as a delivery asks after each wait:
-    /// a closed project's window is handed nothing.
-    fn in_open_project(&self, record: &Record) -> Result<bool, EngineError> {
+    /// Whether `project` is open now, as a delivery asks after each wait: a
+    /// closed project's window is handed nothing.
+    pub(crate) fn in_open_project(&self, project: i64) -> Result<bool, EngineError> {
         Ok(self
-            .project_of(record.id)?
+            .project_now(project)?
             .is_some_and(|project| project.state == "open"))
+    }
+
+    /// A message on its way that its window was handed nothing of, its project
+    /// closed first: queued again with its attempt, to wait for the Resume. One
+    /// withdrawn meanwhile (its task cancelled) stays so, and a warning it said,
+    /// that the program of its task's window may still run, is said again, as a
+    /// cancel says those of the notes still queued (both reviews of 2026-10-16,
+    /// round 4).
+    pub(crate) fn handed_nothing(&self, message: i64, because: &str) -> Result<(), EngineError> {
+        let found = self.seams.ledger.borrow().message(message)?;
+        match found {
+            Some(found) if found.state == "delivering" => {
+                self.seams
+                    .ledger
+                    .borrow_mut()
+                    .retry_delivery(message, because, true)?;
+            }
+            Some(_) => self.seams.ledger.borrow_mut().keep_warning(message)?,
+            None => {}
+        }
+        Ok(())
     }
 
     /// Hands `message` to a window that is idle. A participant forgotten
@@ -93,7 +167,7 @@ impl Dispatcher {
         }
         // A project closed while the window got ready gives it nothing: the message
         // waits, queued, for the Resume (both reviews of 2026-10-16, round 3).
-        if !self.in_open_project(record)? {
+        if !self.in_open_project(message.project_id)? {
             return Ok(());
         }
         // Withdrawn, or overtaken, while the window got ready (its task cancelled
@@ -138,16 +212,9 @@ impl Dispatcher {
         let text = delivery_text(&begun.message, &begun.carried);
         // A turn begins with this message: what the window's tree runs now came before it.
         self.mark_turn(record, &pane).await;
-        // Closed meanwhile: nothing is handed over, and the message is queued again.
-        if !self.in_open_project(record)? {
-            self.seams.ledger.borrow_mut().retry_delivery(
-                message.id,
-                "its project was closed before it was pasted",
-                true,
-            )?;
-            return Ok(());
-        }
-        let outcome = match returning(window.deliver(host, &pane, &text)).await {
+        // The adapter asks whether the project is still open at its hand-over.
+        let admitting = Admitting::new(self, message.project_id);
+        let outcome = match returning(window.deliver(&admitting, &pane, &text)).await {
             Ok(admission) => admission,
             // An adapter that failed never handed it over, and its error must show.
             Err(error) => Admission::Refused {
@@ -156,6 +223,14 @@ impl Dispatcher {
         };
         if self.forgotten(record) {
             return Ok(());
+        }
+        // Closed before the hand-over: nothing went in, and the message waits for the Resume.
+        if let Some(failed) = admitting.turned_away() {
+            self.handed_nothing(
+                message.id,
+                "its project was closed before it was handed over",
+            )?;
+            return failed.map_or(Ok(()), Err);
         }
         let since = self.now();
         let delivering = Delivering {
@@ -174,6 +249,9 @@ impl Dispatcher {
             entered_again: false,
         };
         if let Admission::Refused { reason } = &outcome {
+            // One withdrawn on its way (its task cancelled), and refused, was never
+            // its window's: a warning it said is kept.
+            self.seams.ledger.borrow_mut().keep_warning(message.id)?;
             return self.settle_failure(delivering, reason, true);
         }
         // A window that closed while its harness took the message had nothing

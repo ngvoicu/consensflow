@@ -10,9 +10,9 @@
 
 use std::rc::Rc;
 
-use cf_harness::contract::Window;
+use cf_harness::contract::{Window, NOT_ADMITTED};
 use cf_harness::seams::loopback::{Method, Request};
-use cf_harness::testing::{Driver, Sent, Served};
+use cf_harness::testing::{Driver, ScriptedHost, Sent, Served};
 use serde_json::{json, Value};
 use url::form_urlencoded::byte_serialize;
 
@@ -70,7 +70,9 @@ fn resumed_window(
 /// The task submitted, the clock moved on whenever the window waits.
 fn submit(stage: &Stage, window: &Rc<dyn Window>) -> Result<Option<String>, String> {
     let window = Rc::clone(window);
-    finish(&stage.fakes, async move { window.started().await })
+    finish(&stage.fakes, async move {
+        window.started(&ScriptedHost::default()).await
+    })
 }
 
 /// What was asked of the server, by method.
@@ -205,6 +207,44 @@ fn does_not_override_the_existing_native_model_on_a_resumed_conversation() {
             "agent": "review",
         })
     );
+}
+
+/// Both reviews of 2026-10-16, round 4: the first message goes in once the
+/// server is up, after waits of its own, and went into a project closed
+/// meanwhile. The post asks the host whether it still admits it.
+#[test]
+fn posts_nothing_where_the_host_stops_admitting_the_first_message_while_the_server_is_asked() {
+    let stage = Stage::new();
+    let window = resumed_window(&stage, "ses_late123", None, None);
+    let settings = json!({
+        "id": "ses_late123",
+        "model": { "id": "native-model", "providerID": "openrouter", "variant": "medium" },
+    });
+    stage.fakes.loopback.serve("GET /global/health", [up()]);
+    stage.fakes.loopback.serve(
+        "GET /session/ses_late123",
+        [Served::Head {
+            status: 200,
+            body: Sent::Held,
+        }],
+    );
+    stage
+        .fakes
+        .loopback
+        .serve("POST /session/ses_late123/prompt_async", [served(204, b"")]);
+    let host = Rc::new(ScriptedHost::default());
+    let mut driver = Driver::default();
+    let (starting, admitting) = (Rc::clone(&window), Rc::clone(&host));
+    driver.begin(0, async move { starting.started(&*admitting).await });
+    assert!(driver.run().is_empty());
+    host.refuse_hand_overs();
+    assert!(stage.fakes.loopback.release_body(
+        "GET /session/ses_late123",
+        Ok(settings.to_string().into_bytes())
+    ));
+    assert_eq!(driver.run(), [(0, Err(NOT_ADMITTED.to_owned()))]);
+    assert!(asked(&stage, Method::Post).is_empty(), "nothing posted");
+    assert_eq!(host.admissions(), 1);
 }
 
 #[test]
@@ -375,7 +415,9 @@ fn settings_that_arrive_as_the_time_is_up_end_the_startup_before_anything_is_pos
     );
     let mut driver = Driver::default();
     let starting = Rc::clone(&window);
-    driver.begin(0, async move { starting.started().await });
+    driver.begin(0, async move {
+        starting.started(&ScriptedHost::default()).await
+    });
     assert!(driver.run().is_empty());
     assert_eq!(stage.fakes.loopback.waits(0), ["GET /session/ses_race123"]);
     let body = settings.to_string().into_bytes();

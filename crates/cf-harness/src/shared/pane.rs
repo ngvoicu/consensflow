@@ -3,7 +3,7 @@
 
 use serde_json::{json, Value};
 
-use crate::contract::{HostError, Pane, PaneHost};
+use crate::contract::{HostError, Pane, PaneHost, NOT_ADMITTED};
 use crate::shared::admission::Sent;
 
 /// The pane's id and generation, as a request names it.
@@ -14,8 +14,13 @@ fn named(pane: &Pane) -> Value {
 /// Pastes `body` into the pane (`writePaste`). The host says whether a paste
 /// it did not finish wrote nothing (`admitted: false`) or may have written
 /// some; an answer that never came (the bridge ended) or did not say (its
-/// deadline passed) may have been written: uncertain, never a refusal.
+/// deadline passed) may have been written: uncertain, never a refusal. A
+/// paste the host does not admit as it is asked for, after every wait of the
+/// adapter's before it, is refused unwritten ([`PaneHost::admits`]).
 pub(crate) async fn write_paste(host: &dyn PaneHost, pane: &Pane, body: &str) -> Sent {
+    if !host.admits() {
+        return not_admitted();
+    }
     let mut request = named(pane);
     request["body"] = json!(body);
     match host.request("pane.write_paste", request).await {
@@ -65,14 +70,31 @@ pub(crate) async fn snapshot(host: &dyn PaneHost, pane: &Pane) -> Result<Value, 
 /// `id`. The host's answer is returned as it came, for each channel to read in
 /// its own words; a request it never answered is the answer `{ok: false,
 /// error: "transport", cause}`, the cause the host's word for it, else its
-/// message: a claim never fails.
+/// message: a claim never fails. A claim is the last wait before a native send
+/// is handed over, so once it is answered the host is asked whether it still
+/// admits the send ([`PaneHost::admits`]): one it does not is a claim refused,
+/// and the send hands nothing over (a claim reserves nothing at the host).
 pub(crate) async fn claim(host: &dyn PaneHost, pane: &Pane) -> Value {
     let request = json!({ "pane": pane.id, "generation": pane.generation });
-    match host.request("pane.claim", request).await {
+    let answer = match host.request("pane.claim", request).await {
         Ok(answer) => answer,
         Err(HostError { error, message }) => {
             json!({ "ok": false, "error": "transport", "cause": error.unwrap_or(message) })
         }
+    };
+    if answer.get("ok") == Some(&Value::Bool(true)) && !host.admits() {
+        return json!({ "ok": false, "error": "not-admitted", "cause": NOT_ADMITTED });
+    }
+    answer
+}
+
+/// A paste the host did not admit: refused, and nothing of it written.
+fn not_admitted() -> Sent {
+    Sent {
+        ok: false,
+        refused: true,
+        cause: Some(NOT_ADMITTED.to_owned()),
+        error: Some("not-admitted".to_owned()),
     }
 }
 

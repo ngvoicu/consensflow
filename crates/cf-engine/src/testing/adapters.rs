@@ -99,18 +99,18 @@ impl Records for FakeRecords {
         let Some(fake) = self.adapters.fake(harness.kind()) else {
             return Box::pin(async { Arc::new(Reading::Unknown("unknown".to_owned())) });
         };
-        let at = fake.recorder.call(
-            &seam,
-            Some("record"),
-            json!([{ "conversation": { "nativeSession": session } }]),
-        );
+        let asked = json!([{ "conversation": { "nativeSession": session } }]);
+        let at = fake.recorder.call(&seam, Some("record"), asked.clone());
+        let wrapped = fake.record_holds.wrap(&asked);
         let reading = record_of(fake, session);
         Box::pin(async move {
+            wrapped.before().await;
             let written = match &reading {
                 Reading::Unknown(_) => json!({ "unknown": true }),
                 Reading::Known(record) => json!({ "items": record.items }),
             };
             fake.recorder.answered(at, written);
+            wrapped.after().await;
             Arc::new(reading)
         })
     }
@@ -129,12 +129,21 @@ impl Records for FakeRecords {
 
     /// Whether the agent of `session` was never answered, and none where the
     /// fake has no record of it. Asked where Node's dispatcher asked nothing, so
-    /// it is no call of the adapter in a trace.
+    /// it is no call of the adapter in a trace. A read the test holds
+    /// (`record_holds`, told `[{ conversation: { nativeSession } }, "cut"]`)
+    /// answers once it is let go.
     fn turn_cut<'a>(&'a self, harness: Harness, session: &'a str) -> Work<'a, Option<bool>> {
-        let cut = self
-            .adapters
-            .fake(harness.kind())
-            .and_then(|fake| fake.cut_of(session));
-        Box::pin(async move { cut })
+        let fake = self.adapters.fake(harness.kind());
+        let cut = fake.and_then(|fake| fake.cut_of(session));
+        let wrapped = fake.map(|fake| {
+            fake.record_holds
+                .wrap(&json!([{ "conversation": { "nativeSession": session } }, "cut"]))
+        });
+        Box::pin(async move {
+            if let Some(wrapped) = wrapped {
+                wrapped.before().await;
+            }
+            cut
+        })
     }
 }

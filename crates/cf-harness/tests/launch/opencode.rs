@@ -18,8 +18,8 @@
 use std::path::Path;
 use std::rc::Rc;
 
-use cf_harness::contract::{Adapter, Admission};
-use cf_harness::testing::{finished, Answer, ScriptedHost};
+use cf_harness::contract::{Adapter, Admission, NOT_ADMITTED};
+use cf_harness::testing::{finished, Answer, Driver, ScriptedHost};
 use serde_json::{json, Value};
 
 mod creates;
@@ -110,6 +110,40 @@ fn can_go_on_with_any_conversation_of_its_own_though_nothing_was_said_in_it() {
     // The conversation is made first, before its window opens, and is there whether or
     // not a turn is ever had in it: nothing of the home says otherwise.
     assert_eq!(finished(stage.adapter.resumable("ses_old")), Some(true));
+}
+
+/// Both reviews of 2026-10-16, round 4: OpenCode's claim comes after the engine's
+/// last look at the project. Once it is answered, the host is asked whether it
+/// still admits the send, and one it does not posts nothing to the plugin.
+#[test]
+fn a_send_the_host_stops_admitting_while_its_claim_waits_is_never_posted() {
+    let stage = Stage::new();
+    let plan = stage.fresh("ses_abc123");
+    stage.fakes.loopback.take_asked();
+    let host = Rc::new(ScriptedHost::default());
+    host.answer("pane.claim", [Answer::Held]);
+    let mut driver = Driver::default();
+    let (window, claims) = (Rc::clone(&plan.window), Rc::clone(&host));
+    driver.begin(
+        0,
+        async move { window.deliver(&*claims, &pane(), "late").await },
+    );
+    assert!(driver.run().is_empty(), "the claim waits for the host");
+    host.refuse_hand_overs();
+    assert!(host.release("pane.claim", Ok(json!({ "ok": true }))));
+    assert_eq!(
+        driver.run(),
+        [(
+            0,
+            Ok(Admission::Refused {
+                reason: NOT_ADMITTED.to_owned()
+            })
+        )]
+    );
+    assert!(
+        stage.fakes.loopback.take_asked().is_empty(),
+        "the plugin was asked nothing"
+    );
 }
 
 #[test]

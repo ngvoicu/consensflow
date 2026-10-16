@@ -264,7 +264,7 @@ impl Window for CodexWindow {
         *self.left_open.borrow_mut() = None;
     }
 
-    fn started(&self) -> Work<'_, Result<Option<String>, String>> {
+    fn started<'a>(&'a self, _host: &'a dyn PaneHost) -> Work<'a, Result<Option<String>, String>> {
         Box::pin(async move {
             let named = self.thread.borrow().is_some();
             if named {

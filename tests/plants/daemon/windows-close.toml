@@ -167,8 +167,8 @@ runs = ["engine-closing"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
-find = "self.close_windows(&others, Some(&shown.after(&with)))"
-replace = "self.close_windows(&others, None)"
+find = "self.close_windows(project.id, &others, Some(&shown.after(&with)))"
+replace = "self.close_windows(project.id, &others, None)"
 
 [[plant]]
 name = "windows close: a window the engine closed quotes how the kill ended its program"

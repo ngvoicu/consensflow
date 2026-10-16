@@ -251,6 +251,32 @@ pub(crate) fn warnings_queued(store: &Store, task: &TaskRow) -> Result<Vec<Strin
         .collect())
 }
 
+/// The pause note `id`, withdrawn while it was on its way (a cancel of its task
+/// withdraws what is being delivered too), whose window was then handed nothing
+/// of it: the engine says so, and the warning it said of its task is said again,
+/// as a cancel says those of the notes still queued ([`warnings_queued`]; both
+/// reviews of 2026-10-16, round 4). Nothing for any other message, nor for a note
+/// still on its way, and nothing is written then.
+pub(crate) fn keep_warning(store: &mut Store, id: i64) -> Result<(), LedgerError> {
+    let Some(note) = store
+        .message(id)?
+        .filter(|note| note.kind == "note" && note.sender.is_none() && note.state == "cancelled")
+    else {
+        return Ok(());
+    };
+    let Some((number, because)) = note
+        .task_number
+        .and_then(|number| Some((number, warning_in(&note.body, number)?)))
+    else {
+        return Ok(());
+    };
+    let task = store.task_row(note.project_id, number)?;
+    if task.state != "cancelled" {
+        return Ok(());
+    }
+    store.write(|store| say_again(store, &task, "cancelled", vec![because]))
+}
+
 /// Says each of `warnings` again to the task's requester, as what came before
 /// `why`, in a note of its own that no wait of the task's takes back.
 pub(crate) fn say_again(

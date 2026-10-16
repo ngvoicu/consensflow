@@ -40,7 +40,7 @@ use cf_proto::trace::{TraceLine, Traced, WindowEvent};
 use crate::background::quote;
 use crate::chief_switch::SwitchTo;
 use crate::record::Record;
-use crate::resume::{Closings, Coming};
+use crate::resume::{Closing, Closings, Coming};
 use crate::runtime::{all, begin, returning, Begun, LocalWork};
 use crate::scheduler::SchedulerState;
 use crate::seams::{EngineError, Seams};
@@ -217,13 +217,17 @@ impl Dispatcher {
         self: &Rc<Self>,
         project: i64,
     ) -> Result<Option<ProjectView>, EngineError> {
+        // The Close as a whole, past its windows' closes: its wake-up withdrawn and
+        // its answer given before a Resume opens the project again.
         let _closing = self.closings.begin(project);
         let suspended = self
             .seams
             .ledger
             .borrow_mut()
             .set_project_state(project, "suspended")?;
-        let kept = self.close_windows(&suspended.participants, None).await?;
+        let kept = self
+            .close_windows(project, &suspended.participants, None)
+            .await?;
         self.withdraw_wake_up(project)?;
         self.changed();
         if !kept.is_empty() {
@@ -246,15 +250,23 @@ impl Dispatcher {
     /// over: the handles whose windows would not close. What closes is the
     /// window of the record waited on, forgotten meanwhile or not. The tasks
     /// the windows were working on are told to their requesters together, with
-    /// `because` after the word that each window closed where there is one.
+    /// `because` after the word that each window closed where there is one. Each
+    /// window's close is part of `project`'s Close, as a Resume waits for
+    /// ([`Closings`]), from before any of them waits until it is over, though the
+    /// first that fails answers this.
     async fn close_windows(
         self: &Rc<Self>,
+        project: i64,
         participants: &[ParticipantView],
         because: Option<&str>,
     ) -> Result<Vec<String>, EngineError> {
         let _burst = self.stalls.begin_burst();
+        let parts: Vec<Closing> = participants
+            .iter()
+            .map(|_| self.closings.begin(project))
+            .collect();
         let mut closing = Vec::new();
-        for participant in participants {
+        for (participant, part) in participants.iter().zip(parts) {
             let record = self.record_of(participant.id);
             let (this, held, handle) = (
                 Rc::clone(self),
@@ -263,6 +275,7 @@ impl Dispatcher {
             );
             let because = because.map(str::to_owned);
             let work = async move {
+                let _part = part;
                 let pane = held.window.borrow().pane.clone();
                 let went = match pane {
                     None => true,
@@ -742,7 +755,6 @@ impl Dispatcher {
             // is tried again (`settle_exited_launch`).
             let own = record.window.borrow().own_exit;
             if project.state == "open" && !own && !launch_owed {
-                let _closing = self.closings.begin(project.id);
                 self.seams
                     .ledger
                     .borrow_mut()
@@ -764,7 +776,7 @@ impl Dispatcher {
                     "with the project when @{}'s window closed",
                     participant.handle
                 );
-                self.close_windows(&others, Some(&shown.after(&with)))
+                self.close_windows(project.id, &others, Some(&shown.after(&with)))
                     .await?;
             }
         } else {
@@ -847,7 +859,7 @@ impl Dispatcher {
                 participant.clone(),
             );
             self.act(&record, async move {
-                this.launch(&held, &at, &who, Some(next)).await
+                this.launch(&held, &at, &who, Some(next), None).await
             })
             .await;
             return Ok(());
@@ -1214,13 +1226,22 @@ impl Dispatcher {
             else {
                 return Ok(());
             };
-            let first = match &coming {
-                Some(coming) => this.cut_note(&project, &who, coming).await?,
-                None => None,
+            // A window the Resume brings back opens only for work still at work once
+            // its cut was read, and pays only the stops the Resume read with that
+            // work: one asked after is owed.
+            let (first, paid) = match &coming {
+                Some(coming) => {
+                    let note = this.cut_note(&project, &who, coming).await?;
+                    if !this.still_coming(&who, coming)? {
+                        return Ok(());
+                    }
+                    (note, coming.paid())
+                }
+                None => (None, None),
             };
             let (launching, at) = (Rc::clone(&this), Rc::clone(&held));
             this.act(&held, async move {
-                launching.launch(&at, &project, &who, first).await
+                launching.launch(&at, &project, &who, first, paid).await
             })
             .await;
             Ok(())

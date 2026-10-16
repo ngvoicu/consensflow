@@ -19,7 +19,7 @@ use cf_proto::panes::Servers;
 use cf_proto::trace::WindowEvent;
 use serde_json::{json, Value};
 
-use crate::deliveries::Delivering;
+use crate::deliveries::{Admitting, Delivering};
 use crate::delivery_text::{delivery_text, marker_of};
 use crate::dispatcher::Dispatcher;
 use crate::host::{EngineHost, Killed, OpenPane, Opened};
@@ -371,13 +371,18 @@ impl Dispatcher {
     /// conversation its harness holds nothing of opens afresh, and has no role to
     /// be told ([`Dispatcher::conversation_to_go_on_with`]). One that does not come
     /// up says why ([`Dispatcher::launch_failed`]); a participant forgotten while
-    /// its launch waits gets nothing more under its ids.
+    /// its launch waits gets nothing more under its ids. `paid` is the stops its
+    /// window is to have paid where its caller read them before a wait of its own
+    /// (the human's Resume, before it read whether the turn was cut): a stop asked
+    /// since is owed, and ends the launch as one asked while it is prepared does.
+    /// Without, they are read once its first message is begun.
     pub(crate) async fn launch(
         self: &Rc<Self>,
         record: &Rc<Record>,
         project: &ProjectView,
         participant: &ParticipantView,
         message: Option<MessageView>,
+        paid: Option<Option<Stop>>,
     ) -> Result<(), EngineError> {
         let harness = participant.harness.clone().unwrap_or_default();
         // A role the window took before it closed, though its arrival was never
@@ -446,6 +451,7 @@ impl Dispatcher {
             delivering.as_ref(),
             role,
             prelude,
+            paid,
         ))
         .await
         {
@@ -612,7 +618,21 @@ impl Dispatcher {
         }
         // The adapter's `started` is an `async` function, and `.catch(...)`
         // made a promise of its own to wait on.
-        let started = caught(planned.window.started()).await;
+        let admitting = Admitting::new(self, project.id);
+        let started = caught(planned.window.started(&admitting)).await;
+        // A first message that was to go in once the window was up, its project
+        // closed first: it waits for the Resume, never handed over, and the window,
+        // given nothing, goes with the Close.
+        if let Some(failed) = admitting.turned_away() {
+            let delivering = record.delivery.borrow_mut().delivering.take();
+            if let Some(delivering) = delivering {
+                self.handed_nothing(
+                    delivering.message,
+                    "its project was closed before its window was given it",
+                )?;
+            }
+            return failed.map_or(Ok(()), Err);
+        }
         if let (Err(error), Some(delivering)) = (&started, failing) {
             // What the window shows is asked before it closes: the screen goes with it.
             let (shown, settles) = self.look_before_giving_up(record, Some(&pane)).await;
@@ -682,6 +702,7 @@ impl Dispatcher {
         delivering: Option<&Delivering>,
         role: Option<RoleText>,
         prelude: Option<Prelude>,
+        paid: Option<Option<Stop>>,
     ) -> Result<Option<Planned>, EngineError> {
         let begun = first
             .map(|first| self.seams.ledger.borrow_mut().begin_delivery(first.id))
@@ -689,8 +710,12 @@ impl Dispatcher {
         // The stops this window owes are those asked before this look: a pause
         // that comes while it is prepared or opened is asked after it, and is
         // owed. Read in this turn, with the first message begun: the window
-        // works on the task that message is about.
-        let stop = self.seams.ledger.borrow().stop_of(participant.id)?;
+        // works on the task that message is about. Those its caller read before
+        // a wait of its own are the ones it paid, where it read them.
+        let stop = match paid {
+            Some(paid) => paid,
+            None => self.seams.ledger.borrow().stop_of(participant.id)?,
+        };
         // A member's conversation is looked into now, which asks its harness and
         // may wait: a pause that comes during it is asked after the stop was read,
         // as one that comes while the window is prepared is, and the launch is over.
@@ -860,7 +885,11 @@ impl Dispatcher {
 
     /// Whether a launch that waited is over, with no window to open. A
     /// participant forgotten while its launch waits (it left, or its project was
-    /// deleted) gets nothing more under its ids, whose rows may be gone. A member's
+    /// deleted) gets nothing more under its ids, whose rows may be gone. A project
+    /// closed meanwhile opens no window, the chief's included: its first message,
+    /// which would go in on its command line, waits for the Resume, never handed
+    /// over (both reviews of 2026-10-16, round 4: a chief's handoff went into a
+    /// window the Close then closed, and again after the Resume). A member's
     /// launch holds only while its first message is still on its way and no stop
     /// was asked of its window since `captured` was read, which is a pause that
     /// came in between: the message goes back to wait for the words that resume
@@ -874,6 +903,15 @@ impl Dispatcher {
         because: &str,
     ) -> Result<bool, EngineError> {
         if self.forgotten(record) {
+            return Ok(true);
+        }
+        if !self.in_open_project(participant.project_id)? {
+            if let Some(delivering) = delivering {
+                self.handed_nothing(
+                    delivering.message,
+                    "its project was closed before its window opened",
+                )?;
+            }
             return Ok(true);
         }
         let Some(delivering) = delivering.filter(|_| participant.role != "chief") else {

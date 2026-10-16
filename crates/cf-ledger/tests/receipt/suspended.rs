@@ -384,6 +384,113 @@ fn a_cancel_withdraws_the_pause_note_and_keeps_the_word_that_a_program_may_still
     );
 }
 
+/// What the chief is told again of a task before it went, still queued.
+fn said_again(w: &World) -> Vec<String> {
+    w.ledger
+        .inbox(w.id("chief"), 100)
+        .expect("the chief's inbox")
+        .into_iter()
+        .filter(|message| message.state == "queued" && message.body.contains(" Before that, "))
+        .map(|message| message.body)
+        .collect()
+}
+
+/// Both reviews of 2026-10-16, round 4: a cancel withdraws a pause note on its
+/// way too, whose warning it cannot keep, for the window may have it already.
+/// The engine says when the window was handed nothing of it, and the warning is
+/// said then.
+#[test]
+fn a_pause_note_the_cancel_withdrew_on_its_way_keeps_its_warning_once_its_window_was_handed_nothing(
+) {
+    let mut w = world();
+    let cancelled = at_work(&mut w, "zeus");
+    let outlived =
+        "@zeus's window closed, but its program (process 4242) could not be ended and may still run";
+    closed_with(&mut w, &[cancelled], outlived);
+    let note = w
+        .ledger
+        .note_pause(w.project, "chief", cancelled, outlived)
+        .expect("the chief is told");
+    w.ledger.begin_delivery(note.id).expect("on its way");
+    w.ledger.keep_warning(note.id).expect("asked");
+    assert!(said_again(&w).is_empty(), "on its way, it may yet go in");
+
+    w.ledger
+        .cancel_task(w.project, cancelled, "human")
+        .expect("called off");
+    assert_eq!(w.message(note.id).state, "cancelled");
+    assert!(
+        said_again(&w).is_empty(),
+        "the cancel keeps the warnings of the notes still queued alone"
+    );
+    w.ledger.keep_warning(note.id).expect("kept");
+
+    assert_eq!(
+        said_again(&w),
+        [format!("T-{cancelled} cancelled. Before that, {outlived}.")]
+    );
+}
+
+#[test]
+fn a_message_withdrawn_on_its_way_that_says_no_warning_of_a_cancelled_task_keeps_nothing() {
+    let mut w = world();
+    let first = at_work(&mut w, "zeus");
+    let second = at_work(&mut w, "diana");
+    let outlived =
+        "@zeus's window closed, but its program (process 4242) could not be ended and may still run";
+    closed_with(&mut w, &[first, second], outlived);
+    // A warning whose task was not cancelled: withdrawn some other way.
+    let warning = w
+        .ledger
+        .note_pause(w.project, "chief", first, outlived)
+        .expect("the chief is told");
+    w.ledger.begin_delivery(warning.id).expect("on its way");
+    w.ledger
+        .cancel_message(warning.id, "taken back")
+        .expect("withdrawn");
+    // A cancelled task's pause note that warns of nothing.
+    let plain = w
+        .ledger
+        .note_pause(w.project, "chief", second, "@diana's window closed")
+        .expect("the chief is told");
+    w.ledger.begin_delivery(plain.id).expect("on its way");
+    w.ledger
+        .cancel_task(w.project, second, "human")
+        .expect("called off");
+
+    for id in [warning.id, plain.id] {
+        w.ledger.keep_warning(id).expect("asked");
+    }
+    assert!(said_again(&w).is_empty(), "{:?}", said_again(&w));
+}
+
+/// A note its window was given has its warning in the window already: whatever
+/// becomes of its task, nothing is said again of it.
+#[test]
+fn a_pause_note_its_window_was_given_keeps_nothing_when_its_task_is_cancelled() {
+    let mut w = world();
+    let cancelled = at_work(&mut w, "zeus");
+    let outlived =
+        "@zeus's window closed, but its program (process 4242) could not be ended and may still run";
+    closed_with(&mut w, &[cancelled], outlived);
+    let note = w
+        .ledger
+        .note_pause(w.project, "chief", cancelled, outlived)
+        .expect("the chief is told");
+    w.ledger.begin_delivery(note.id).expect("on its way");
+    w.ledger
+        .confirm_delivery(note.id, None)
+        .expect("in the chief's window");
+    w.ledger
+        .cancel_task(w.project, cancelled, "human")
+        .expect("called off");
+
+    w.ledger.keep_warning(note.id).expect("asked");
+
+    assert_eq!(w.message(note.id).state, "delivered");
+    assert!(said_again(&w).is_empty(), "{:?}", said_again(&w));
+}
+
 #[test]
 fn a_ledger_from_before_the_mark_keeps_every_paused_task_paused_through_a_resume() {
     const AT: &str = "2026-10-15T00:00:00.000Z";

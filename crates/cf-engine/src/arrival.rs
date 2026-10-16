@@ -31,11 +31,12 @@
 use std::rc::Rc;
 
 use cf_base::js;
-use cf_harness::contract::Observed;
+use cf_harness::contract::{Observed, PaneHost};
 use cf_harness::records::Role;
 use cf_proto::trace::WindowEvent;
 use serde_json::{json, Value};
 
+use crate::deliveries::Admitting;
 use crate::dispatcher::Dispatcher;
 use crate::record::Record;
 use crate::runtime::{begin, returning};
@@ -255,6 +256,20 @@ impl Dispatcher {
         if !ready {
             self.entered_again(record, message, false);
             return Ok(());
+        }
+        // Enter sends what waits in the input box: a project closed while the screen
+        // was looked at gives the window no key that sends (Astra's review of
+        // 2026-10-16, round 4), and the next look after the Resume presses it.
+        let project = self
+            .seams
+            .ledger
+            .borrow()
+            .message(message)?
+            .map_or(0, |message| message.project_id);
+        let admitting = Admitting::new(self, project);
+        if !admitting.admits() {
+            self.entered_again(record, message, false);
+            return admitting.turned_away().flatten().map_or(Ok(()), Err);
         }
         let input = json!({ "id": pane.id, "generation": pane.generation, "bytes": [ENTER] });
         // A key the host did not take is pressed again at the next look's

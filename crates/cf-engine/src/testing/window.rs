@@ -15,9 +15,9 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use cf_harness::contract::{
-    Admission, Held, Observed, Pane, PaneHost, Readiness, Waiting, Window, Work,
+    Admission, Held, Observed, Pane, PaneHost, Readiness, Waiting, Window, Work, NOT_ADMITTED,
 };
-use cf_harness::records::{Item, Reading, Record, Settlement};
+use cf_harness::records::{Item, Reading, Record, Role, Settlement};
 use serde_json::{json, Value};
 
 use super::adapter::{FakeAdapter, FakeAgent, Taking};
@@ -30,6 +30,9 @@ pub(super) struct FakeWindow {
     session: RefCell<String>,
     pid: Cell<Option<u32>>,
     fake: Rc<FakeAdapter>,
+    /// The first message it takes once it is up, where its adapter's windows
+    /// seed it so (`FakeAdapter::seeds`), not with the launch.
+    first: Option<String>,
 }
 
 impl FakeWindow {
@@ -38,6 +41,7 @@ impl FakeWindow {
         launch: String,
         session: String,
         fake: Rc<FakeAdapter>,
+        first: Option<String>,
     ) -> Self {
         Self {
             seam,
@@ -45,6 +49,7 @@ impl FakeWindow {
             session: RefCell::new(session),
             pid: Cell::new(None),
             fake,
+            first,
         }
     }
 
@@ -81,7 +86,7 @@ impl Window for FakeWindow {
         *self.session.borrow_mut() = session.to_owned();
     }
 
-    fn started(&self) -> Work<'_, Result<Option<String>, String>> {
+    fn started<'a>(&'a self, host: &'a dyn PaneHost) -> Work<'a, Result<Option<String>, String>> {
         let args = json!([{ "launch": self.bag() }]);
         let at = self.call("started", args.clone());
         let wrapped = self.fake.start_holds.wrap(&args);
@@ -96,6 +101,21 @@ impl Window for FakeWindow {
                     .recorder
                     .answered(at, json!({ "nativeSession": native }));
                 return Ok(Some(native));
+            }
+            // A first message that goes in once the window is up, as OpenCode's
+            // through its server, is handed over only if the host admits it then.
+            if let Some(first) = &self.first {
+                if !host.admits() {
+                    self.fake
+                        .recorder
+                        .answered(at, json!({ "$error": { "message": NOT_ADMITTED } }));
+                    return Err(NOT_ADMITTED.to_owned());
+                }
+                let item = self.fake.item(Role::User, first);
+                self.fake.of_launch(&self.launch, |agent| {
+                    agent.items.push(item);
+                    agent.settled = false;
+                });
             }
             let answer = early.unwrap_or_else(|| started.map_or(Ok(()), |started| started()));
             let answered = match answer {
@@ -151,7 +171,7 @@ impl Window for FakeWindow {
 
     fn deliver<'a>(
         &'a self,
-        _host: &'a dyn PaneHost,
+        host: &'a dyn PaneHost,
         pane: &'a Pane,
         text: &'a str,
     ) -> Work<'a, Result<Admission, String>> {
@@ -168,8 +188,18 @@ impl Window for FakeWindow {
         let own = self.fake.deliver.borrow().clone();
         // What a delivery does is done when it is called, as the JavaScript
         // fake's was, or once the test lets a held one go; a test's own
-        // `deliver` does what it does in its place.
+        // `deliver` does what it does in its place. Its hand-over, after any
+        // wait the test holds it in, as every adapter's after its own waits
+        // (Claude's keys that clear its input box, a native send's claim), goes
+        // only if the host admits it then.
         let deliver = move || -> Work<'a, Result<Admission, String>> {
+            if !host.admits() {
+                return Box::pin(async {
+                    Ok(Admission::Refused {
+                        reason: NOT_ADMITTED.to_owned(),
+                    })
+                });
+            }
             match own {
                 Some(own) => own(taking),
                 None => {

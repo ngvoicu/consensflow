@@ -158,6 +158,15 @@ pub struct FakeAdapter {
     pub ready_holds: Holds,
     /// Deliveries the test holds.
     pub deliver_holds: Holds,
+    /// Reads of a conversation's record with no window open that the test holds,
+    /// told the conversation as `[{ conversation: { nativeSession } }]`: the
+    /// engine's look (`adapter.record`), and its ask whether a turn was cut,
+    /// told `"cut"` after it.
+    pub record_holds: Holds,
+    /// Its windows take their first message once they are up, as OpenCode's do
+    /// through its server, and only if the host admits it then: not with the
+    /// launch, as a message on a command line goes in.
+    pub seeds: Cell<bool>,
     /// Where its harness has the Specmint variant installed, when the test says
     /// it has: the `SKILL.md` it answers. Without, the copy ConsensFlow would
     /// keep for it, which is the same for every launch.
@@ -205,6 +214,8 @@ impl FakeAdapter {
             start_holds: Holds::default(),
             ready_holds: Holds::default(),
             deliver_holds: Holds::default(),
+            record_holds: Holds::default(),
+            seeds: Cell::new(false),
             specmint_installed: RefCell::new(None),
             specmint_asked: RefCell::new(Vec::new()),
             resumable_holds: Holds::default(),
@@ -500,7 +511,11 @@ impl Asked {
             cannot_tell_a_cut: false,
             resumable: Some(true),
         };
-        if let Some(message) = launch.message {
+        let seeded = launch
+            .message
+            .filter(|_| fake.seeds.get())
+            .map(str::to_owned);
+        if let Some(message) = launch.message.filter(|_| seeded.is_none()) {
             agent.items.push(fake.item(Role::User, message));
             agent.settled = false;
         }
@@ -511,6 +526,7 @@ impl Asked {
             id.clone(),
             native.clone(),
             Rc::clone(fake),
+            seeded,
         ));
         Box::pin(async move {
             // A test's own `prepare` is an async function that returns the

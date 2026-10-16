@@ -190,7 +190,7 @@ runs = ["engine-resume"]
 [[plant.edit]]
 file = "crates/cf-engine/src/resume.rs"
 find = '''        let at_work = self.at_work(&resumed)?;'''
-replace = '''        let at_work: Vec<(i64, Vec<i64>)> = Vec::new();'''
+replace = '''        let at_work: Vec<(i64, Coming)> = Vec::new();'''
 
 [[plant]]
 name = "start suspended: a Resume opens a window that is open already"
@@ -262,8 +262,8 @@ runs = ["engine-resume"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/resume.rs"
-find = '''        if !cut {'''
-replace = '''        if true {'''
+find = '''        if !cut || '''
+replace = '''        if true || '''
 
 [[plant]]
 name = "start suspended: a member whose record cannot tell a cut is told nothing"
@@ -272,7 +272,7 @@ runs = ["engine-resume"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/resume.rs"
-find = '''            None => matches!(coming, Coming::Member(_)),'''
+find = '''            None => matches!(coming, Coming::Member(..)),'''
 replace = '''            None => false,'''
 
 [[plant]]
@@ -282,7 +282,7 @@ runs = ["engine-resume"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/resume.rs"
-find = '''            None => matches!(coming, Coming::Member(_)),'''
+find = '''            None => matches!(coming, Coming::Member(..)),'''
 replace = '''            None => true,'''
 
 [[plant]]
@@ -315,8 +315,8 @@ runs = ["engine-resume"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/resume.rs"
-find = '''            Coming::Member(tasks) => tasks.first().copied(),'''
-replace = '''            Coming::Member(_) => None,'''
+find = '''            Coming::Member(tasks, _) => tasks.first().copied(),'''
+replace = '''            Coming::Member(..) => None,'''
 
 [[plant]]
 name = "start suspended: a chief that is given its handoff again is told its turn was cut too"
@@ -398,8 +398,8 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-engine/src/resume.rs"
-find = '''        if !cut {'''
-replace = '''        if true {'''
+find = '''        if !cut || '''
+replace = '''        if true || '''
 
 # --- the page ---
 

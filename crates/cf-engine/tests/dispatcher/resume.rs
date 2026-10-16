@@ -24,7 +24,7 @@ const CHIEF_CUT: &str =
 
 /// Zeus and diana at work, each on a task of its own, their windows in the middle
 /// of a turn: the app quits now.
-fn at_work(context: &Context) -> Tiers<'_> {
+pub(crate) fn at_work(context: &Context) -> Tiers<'_> {
     let tiers = Tiers::new(context, &["zeus", "diana"]);
     tiers.open();
     tiers.open_body("Write the lexer");
@@ -47,7 +47,7 @@ fn quit_and_start(context: &Context) -> Restarted<'_> {
 }
 
 /// The panes opened so far, by their ids.
-fn opened(context: &Context) -> Vec<String> {
+pub(crate) fn opened(context: &Context) -> Vec<String> {
     context
         .host
         .opened()
@@ -68,7 +68,7 @@ fn launch_of(context: &Context, handle: &str) -> Value {
 }
 
 /// The notes ConsensFlow wrote to `to` that say a turn was cut, oldest first.
-fn cut_notes(context: &Context, to: i64) -> Vec<MessageView> {
+pub(crate) fn cut_notes(context: &Context, to: i64) -> Vec<MessageView> {
     let mut notes: Vec<MessageView> = context
         .inbox(to)
         .into_iter()

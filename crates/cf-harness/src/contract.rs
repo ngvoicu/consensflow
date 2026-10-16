@@ -227,8 +227,10 @@ pub trait Window {
     /// The conversation the window started on, where its harness says it
     /// itself; none where ConsensFlow named it. A window that waits for its
     /// harness to say it gives up by [`Launch::first_message_ms`], if not
-    /// before.
-    fn started(&self) -> Work<'_, Result<Option<String>, String>>;
+    /// before. A window whose first message goes in once it is up (OpenCode's,
+    /// through its server) hands it over only if `host` admits it then
+    /// ([`PaneHost::admits`]).
+    fn started<'a>(&'a self, host: &'a dyn PaneHost) -> Work<'a, Result<Option<String>, String>>;
     /// Whether a delivery may go in now, or why that could not be told.
     fn ready<'a>(
         &'a self,
@@ -276,7 +278,28 @@ pub struct Pane {
 /// through. Opening and ending panes are the engine's.
 pub trait PaneHost {
     fn request<'a>(&'a self, op: &'a str, body: Value) -> Work<'a, Result<Value, HostError>>;
+
+    /// Whether text may be handed to the window now, asked at the moment of the
+    /// hand-over, after every wait before it: a paste as it is asked for, a native
+    /// send once the pane's claim is answered, and a first message a window posts
+    /// once it is up, as it is posted. The engine's host for a window says no once
+    /// the window's project is closed (the human's Close, or the chief's window
+    /// ending), and the text goes back to wait for the Resume, never handed over
+    /// ([`NOT_ADMITTED`]). A host that says nothing admits everything.
+    ///
+    /// What an adapter must keep: the hand-over begins in the same poll as the
+    /// answer, with no wait between (the bridge queues a request's frame where it
+    /// is asked, a bounded send polls its work before its timer, Pi's inbox rename
+    /// is a call), so nothing else of the engine runs in between. A hand-over begun
+    /// is the window's, whatever comes while it is on its way.
+    fn admits(&self) -> bool {
+        true
+    }
 }
+
+/// What a hand-over the pane host did not admit ([`PaneHost::admits`]) says:
+/// nothing of it reached the window.
+pub const NOT_ADMITTED: &str = "the window is handed nothing while its project is closed";
 
 /// A request the pane host never answered: the bridge ended first, `error` its
 /// word for it (`eof`). A passed deadline and a frame too large are answers

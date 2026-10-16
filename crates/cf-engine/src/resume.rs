@@ -37,7 +37,7 @@ use std::rc::Rc;
 use std::task::{Poll, Waker};
 
 use cf_ledger::{
-    ConversationView, MessageView, NewNote, ParticipantView, ProjectView, RESUME_WORDS,
+    ConversationView, MessageView, NewNote, ParticipantView, ProjectView, Stop, RESUME_WORDS,
 };
 
 use crate::dispatcher::Dispatcher;
@@ -46,29 +46,39 @@ use crate::runtime::returning;
 use crate::seams::EngineError;
 
 /// The Closes under way, by project (the human's, and the one the chief's window
-/// ending makes): a Resume of a project waits for its Closes to end, every kill
-/// answered, before it reads which tasks they paused. A Resume that overtook a Close
-/// resumed a task whose crash a refused kill would have left paused, and left paused
-/// one whose kill came after it (both reviews of 2026-10-16, round 3). A Close waits
-/// for nothing without a bound: each kill has the pane host's deadline.
+/// ending makes), as the closes of their windows, and the human's as a whole, to its
+/// answer: a Resume of a project waits for them to end, every kill answered, before
+/// it reads which tasks they paused. A Resume that overtook a Close resumed a task
+/// whose crash a refused kill would have left paused, and left paused one whose kill
+/// came after it (both reviews of 2026-10-16, round 3). A Close waits for nothing
+/// without a bound: each kill has the pane host's deadline. Each window's close
+/// counts from before the Close waits on anything until it is over, however the
+/// others end: a Close answers at the first close that fails, and one that failed
+/// let the Resume through while another kill was still out (Astra's review of
+/// 2026-10-16, round 4).
 #[derive(Default)]
-pub(crate) struct Closings {
-    under_way: RefCell<HashMap<i64, usize>>,
+pub(crate) struct Closings(Rc<UnderWay>);
+
+/// The closes under way, and the Resumes that wait for them to end.
+#[derive(Default)]
+struct UnderWay {
+    count: RefCell<HashMap<i64, usize>>,
     waiting: RefCell<Vec<Waker>>,
 }
 
-/// A Close under way. Dropping it ends it, however its work ends.
-pub(crate) struct Closing<'a> {
-    closings: &'a Closings,
+/// A Close under way, or a window's close in it. Dropping it ends it, however
+/// its work ends.
+pub(crate) struct Closing {
+    closings: Rc<UnderWay>,
     project: i64,
 }
 
 impl Closings {
-    /// A Close of `project` begins.
-    pub(crate) fn begin(&self, project: i64) -> Closing<'_> {
-        *self.under_way.borrow_mut().entry(project).or_default() += 1;
+    /// A Close of `project` begins, or a window's close in it.
+    pub(crate) fn begin(&self, project: i64) -> Closing {
+        *self.0.count.borrow_mut().entry(project).or_default() += 1;
         Closing {
-            closings: self,
+            closings: Rc::clone(&self.0),
             project,
         }
     }
@@ -76,8 +86,8 @@ impl Closings {
     /// Ready once no Close of `project` is under way: at once where none is.
     fn ended(&self, project: i64) -> impl Future<Output = ()> + '_ {
         poll_fn(move |cx| {
-            if self.under_way.borrow().contains_key(&project) {
-                self.waiting.borrow_mut().push(cx.waker().clone());
+            if self.0.count.borrow().contains_key(&project) {
+                self.0.waiting.borrow_mut().push(cx.waker().clone());
                 Poll::Pending
             } else {
                 Poll::Ready(())
@@ -86,9 +96,9 @@ impl Closings {
     }
 }
 
-impl Drop for Closing<'_> {
+impl Drop for Closing {
     fn drop(&mut self) {
-        let mut under_way = self.closings.under_way.borrow_mut();
+        let mut under_way = self.closings.count.borrow_mut();
         if let Some(count) = under_way.get_mut(&self.project) {
             *count -= 1;
             if *count == 0 {
@@ -108,8 +118,9 @@ impl Drop for Closing<'_> {
 pub(crate) enum Coming {
     /// The chief's.
     Chief,
-    /// A member's, which has these tasks (their numbers) at work or waiting.
-    Member(Vec<i64>),
+    /// A member's, which has these tasks (their numbers) at work or waiting, and
+    /// the stops its window had paid when the Resume read them.
+    Member(Vec<i64>, Option<Stop>),
 }
 
 impl Coming {
@@ -122,7 +133,7 @@ impl Coming {
                 "ConsensFlow stopped in the middle of your turn, which was cut. Go on where you stopped."
                     .to_owned()
             }
-            Coming::Member(tasks) => {
+            Coming::Member(tasks, _) => {
                 format!(
                     "ConsensFlow stopped while you were working on {}. {RESUME_WORDS}",
                     named(tasks)
@@ -136,7 +147,7 @@ impl Coming {
     /// still hold queued for a window that never came.
     fn told_in(&self, body: &str) -> bool {
         body == self.words()
-            || matches!(self, Coming::Member(tasks) if body == format!(
+            || matches!(self, Coming::Member(tasks, _) if body == format!(
                 "ConsensFlow quit while you were working on {}. {RESUME_WORDS}",
                 named(tasks)
             ))
@@ -146,7 +157,16 @@ impl Coming {
     fn task(&self) -> Option<i64> {
         match self {
             Coming::Chief => None,
-            Coming::Member(tasks) => tasks.first().copied(),
+            Coming::Member(tasks, _) => tasks.first().copied(),
+        }
+    }
+
+    /// The stops a member's window had paid when the Resume read its work, which
+    /// its launch pays and no more ([`Dispatcher::launch`]); none for the chief's.
+    pub(crate) fn paid(&self) -> Option<Option<Stop>> {
+        match self {
+            Coming::Chief => None,
+            Coming::Member(_, paid) => Some(*paid),
         }
     }
 }
@@ -188,9 +208,8 @@ impl Dispatcher {
             self.record_of(chief.id).window.borrow_mut().relaunch = None;
             self.open_soon(chief.id, Some(Coming::Chief)).await;
         }
-        for (participant, tasks) in at_work {
-            self.open_soon(participant, Some(Coming::Member(tasks)))
-                .await;
+        for (participant, coming) in at_work {
+            self.open_soon(participant, Some(coming)).await;
         }
         self.changed();
         self.project_now(project)
@@ -231,13 +250,15 @@ impl Dispatcher {
     }
 
     /// The participants other than the chief and the human that hold a task at
-    /// work or waiting, each with the numbers of those tasks. A member whose
-    /// agent is gone from the human's agents opens no window: its work goes back
-    /// to the board at the next pass, as it does whenever it is found so (the
-    /// roster is asked of those with a task in hand alone).
-    fn at_work(&self, project: &ProjectView) -> Result<Vec<(i64, Vec<i64>)>, EngineError> {
+    /// work or waiting, each as its window comes back: with the numbers of those
+    /// tasks, and the stops its window had paid, read with them, before anything
+    /// of the Resume waits. A member whose agent is gone from the human's agents
+    /// opens no window: its work goes back to the board at the next pass, as it
+    /// does whenever it is found so (the roster is asked of those with a task in
+    /// hand alone).
+    fn at_work(&self, project: &ProjectView) -> Result<Vec<(i64, Coming)>, EngineError> {
         let board = self.seams.ledger.borrow().board(project.id)?;
-        Ok(board
+        board
             .lanes
             .into_iter()
             .filter(|lane| !matches!(lane.participant.role.as_str(), "chief" | "human"))
@@ -254,8 +275,28 @@ impl Dispatcher {
                 (!tasks.is_empty()).then_some((lane.participant, tasks))
             })
             .filter(|(participant, _)| !self.agent_gone(participant))
-            .map(|(participant, tasks)| (participant.id, tasks))
-            .collect())
+            .map(|(participant, tasks)| {
+                let paid = self.seams.ledger.borrow().stop_of(participant.id)?;
+                Ok((participant.id, Coming::Member(tasks, paid)))
+            })
+            .collect()
+    }
+
+    /// Whether a member's window the Resume brings back still comes: no stop was
+    /// asked of it since the Resume read its work. A pause, a cancel, a release or
+    /// an end of its task that came meanwhile, as its record was read, brings it
+    /// back no more (Astra's review of 2026-10-16, round 4: a pause the human made
+    /// while the Resume read whether the turn was cut was taken for one the window
+    /// had paid, and the window opened told to go on). The chief's always comes.
+    pub(crate) fn still_coming(
+        &self,
+        participant: &ParticipantView,
+        coming: &Coming,
+    ) -> Result<bool, EngineError> {
+        let Coming::Member(_, paid) = coming else {
+            return Ok(true);
+        };
+        Ok(self.seams.ledger.borrow().stop_of(participant.id)? == *paid)
     }
 
     /// The note that tells a window its turn was cut, when it was, to be its
@@ -264,6 +305,8 @@ impl Dispatcher {
     /// turn was not cut: its conversation's record, read with no window open,
     /// ends at rest, or cannot tell and the window is the chief's; and none for a
     /// chief that is given its handoff again, which tells it where things stand.
+    /// None too, and nothing written, where the work it was to come back for
+    /// stopped while the record was read ([`Dispatcher::still_coming`]).
     pub(crate) async fn cut_note(
         &self,
         project: &ProjectView,
@@ -289,9 +332,9 @@ impl Dispatcher {
         }
         let cut = match self.turn_cut(participant.id).await? {
             Some(cut) => cut,
-            None => matches!(coming, Coming::Member(_)),
+            None => matches!(coming, Coming::Member(..)),
         };
-        if !cut {
+        if !cut || !self.still_coming(participant, coming)? {
             return Ok(None);
         }
         let note = self.seams.ledger.borrow_mut().note(

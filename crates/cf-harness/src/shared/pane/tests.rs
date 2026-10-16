@@ -1,8 +1,10 @@
 use std::cell::RefCell;
+use std::rc::Rc;
 
 use super::*;
+use crate::contract::Admission;
 use crate::shared::admission::admission;
-use crate::testing::{finished, paste_answers, AnsweringHost};
+use crate::testing::{finished, paste_answers, Answer, AnsweringHost, Driver, ScriptedHost};
 
 fn pane() -> Pane {
     Pane {
@@ -93,6 +95,57 @@ fn a_paste_into_a_window_is_read_as_the_delivery_contract_has_it_whatever_the_ho
             "{way}: one paste, as the human would type it"
         );
     }
+}
+
+/// Both reviews of 2026-10-16, round 4: the engine's last look at a closed
+/// project came before an adapter's own waits (Claude's keys that clear its input
+/// box). A paste asks the host whether it admits it as it is asked for.
+#[test]
+fn a_paste_the_host_no_longer_admits_is_refused_unwritten_and_never_asked_of_the_pane() {
+    let host = ScriptedHost::default();
+    host.refuse_hand_overs();
+    let sent = finished(Box::pin(write_paste(&host, &pane(), "hello")));
+    assert_eq!(
+        admission(&sent, "refused", false),
+        Admission::Refused {
+            reason: NOT_ADMITTED.to_owned()
+        }
+    );
+    assert!(host.take_asked().is_empty(), "the pane was asked nothing");
+}
+
+/// The claim is the last wait before a native send (Codex's broker, OpenCode's
+/// plugin, Pi's inbox): once it is answered, the host is asked whether it still
+/// admits the send, and one it does not is a claim refused.
+#[test]
+fn a_claim_answered_once_the_host_no_longer_admits_hand_overs_is_refused() {
+    let host = Rc::new(ScriptedHost::default());
+    host.answer("pane.claim", [Answer::Held]);
+    let mut driver = Driver::default();
+    let claiming = Rc::clone(&host);
+    driver.begin(0, async move { claim(&*claiming, &pane()).await });
+    assert!(driver.run().is_empty(), "the claim waits for the host");
+    assert_eq!(
+        host.admissions(),
+        0,
+        "nothing asked before the claim's answer"
+    );
+    host.refuse_hand_overs();
+    assert!(host.release("pane.claim", Ok(json!({ "ok": true }))));
+    assert_eq!(
+        driver.run(),
+        [(
+            0,
+            json!({ "ok": false, "error": "not-admitted", "cause": NOT_ADMITTED })
+        )]
+    );
+    // A claim the host refused is its own answer, and asks nothing more.
+    host.answer(
+        "pane.claim",
+        [Answer::Now(Ok(json!({ "ok": false, "error": "stale" })))],
+    );
+    assert_eq!(claimed(&*host), json!({ "ok": false, "error": "stale" }));
+    assert_eq!(host.admissions(), 1);
 }
 
 #[test]

@@ -20,6 +20,16 @@ ledger-suspended = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "
 ledger-testing-mark = ["cargo", "test", "--offline", "-p", "cf-ledger", "--lib", "testing::"]
 # The engine's tests of a start, a Close and the human's Resume, on the fake windows.
 engine-resume-tasks = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "resume::"]
+# The engine's tests of a window slow to come up, Node's trace of a Resume that comes
+# while a Close is still under way among them.
+engine-window-takes-long = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "window_takes_long::"]
+# The engine's tests that a closed project's windows are handed nothing, whatever
+# wait the Close comes in, and of the Resume that follows.
+engine-closed-given-nothing = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "closed_given_nothing::"]
+# The hand-overs every adapter makes through the pane host: a paste, and a claim.
+harness-hand-overs = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "shared::pane::"]
+# Each adapter's hand-over the host no longer admits, after the adapter's own waits.
+harness-admission = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "admit"]
 # The owner's shape on the rig: two tasks at work and one the human paused, closed and resumed.
 rig-regression-resume-tasks = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "tasks_left_paused_by_a_close_and_resume::"]
 
@@ -162,14 +172,12 @@ find = '''
             self.record_of(chief.id).window.borrow_mut().relaunch = None;
             self.open_soon(chief.id, Some(Coming::Chief)).await;
         }
-        for (participant, tasks) in at_work {
-            self.open_soon(participant, Some(Coming::Member(tasks)))
-                .await;
+        for (participant, coming) in at_work {
+            self.open_soon(participant, Some(coming)).await;
         }'''
 replace = '''
-        for (participant, tasks) in at_work {
-            self.open_soon(participant, Some(Coming::Member(tasks)))
-                .await;
+        for (participant, coming) in at_work {
+            self.open_soon(participant, Some(coming)).await;
         }
         if let Some(chief) = resumed.participants.iter().find(|p| p.role == "chief") {
             // The human asks for the chief now: a chief that failed before is tried at once.
@@ -370,29 +378,28 @@ file = "crates/cf-engine/src/resume.rs"
 find = "        self.closings.ended(project).await;"
 replace = ""
 
+# Round 5: each window's close counts for the Resume until its kill is answered, and
+# the human's Close as a whole until it answers (Node's trace of a Resume that comes
+# while a Close is still under way, which this ledger's Resume follows).
 [[plant]]
-name = "resume tasks: the human's Close is over for a Resume before its kills are answered"
-meant = "a_resume_that_comes_while_the_close_waits_for_a_kill_resumes_the_task_that_kill_pauses"
-runs = ["engine-resume-tasks"]
+name = "resume tasks: the human's Close is over for a Resume before it answers"
+meant = "opens_the_chief_again_when_the_human_resumes_a_project_that_is_still_closing"
+runs = ["engine-window-takes-long"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
-find = '''
-    ) -> Result<Option<ProjectView>, EngineError> {
-        let _closing = self.closings.begin(project);'''
-replace = '''
-    ) -> Result<Option<ProjectView>, EngineError> {
-        drop(self.closings.begin(project));'''
+find = "        let _closing = self.closings.begin(project);"
+replace = "        drop(self.closings.begin(project));"
 
 [[plant]]
-name = "resume tasks: the Close the chief's window makes is none a Resume waits for"
+name = "resume tasks: a window's close is over for a Resume before its kill is answered"
 meant = "a_resume_that_comes_while_the_chief_window_s_close_waits_for_a_kill_resumes_the_task_that_kill_pauses"
 runs = ["engine-resume-tasks"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
-find = "                let _closing = self.closings.begin(project.id);"
-replace = ""
+find = "                let _part = part;"
+replace = "                drop(part);"
 
 [[plant]]
 name = "resume tasks: a Close that ends leaves the Resume that waits for it waiting"
@@ -425,11 +432,13 @@ runs = ["engine-resume-tasks"]
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
 find = '''
-        if !self.in_open_project(record)? {
+        if !self.in_open_project(message.project_id)? {
             return Ok(());
         }'''
 replace = ""
 
+# Round 5 hands the check before the paste to the hand-over itself (the host that
+# admits it); main's own deliver hands the adapter a host that admits everything.
 [[plant]]
 name = "resume tasks: a paste about to go goes into a closed project's window"
 meant = "a_delivery_whose_paste_is_about_to_go_while_the_project_closes_goes_back_to_its_queue"
@@ -437,12 +446,8 @@ runs = ["engine-resume-tasks"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
-find = '''
-        if !self.in_open_project(record)? {
-            self.seams.ledger.borrow_mut().retry_delivery('''
-replace = '''
-        if false {
-            self.seams.ledger.borrow_mut().retry_delivery('''
+find = "        let outcome = match returning(window.deliver(&admitting, &pane, &text)).await {"
+replace = "        let outcome = match returning(window.deliver(host, &pane, &text)).await {"
 
 [[plant]]
 name = "resume tasks: a switch that waited for the chief's turn goes in a closed project"
@@ -463,3 +468,233 @@ runs = ["engine-resume-tasks"]
 file = "crates/cf-engine/src/dispatcher.rs"
 find = '        if let Some(to) = pending.filter(|_| project.state == "open") {'
 replace = "        if let Some(to) = pending {"
+
+# --- the reviews of 2026-10-16, round 4: nothing handed to a closed project's window ---
+
+[[plant]]
+name = "resume tasks: a launch whose project closed while its window was prepared opens it with its first message"
+meant = "a_chief_launch_prepared_while_the_project_closes_opens_no_window_and_its_handoff_goes_in_once_after_the_resume"
+runs = ["engine-closed-given-nothing"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '''
+        if !self.in_open_project(participant.project_id)? {
+            if let Some(delivering) = delivering {'''
+replace = '''
+        if false {
+            if let Some(delivering) = delivering {'''
+
+[[plant]]
+name = "resume tasks: a window that takes its first message once it is up is given it in a closed project"
+meant = "a_first_message_a_window_takes_once_it_is_up_is_not_given_when_the_project_closes_first_and_goes_in_once_after_the_resume"
+runs = ["engine-closed-given-nothing"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = "        let started = caught(planned.window.started(&admitting)).await;"
+replace = "        let started = caught(planned.window.started(&*self.seams.host)).await;"
+
+[[plant]]
+name = "resume tasks: a first message the closed project kept from its window is a launch that failed"
+meant = "a_first_message_a_window_takes_once_it_is_up_is_not_given_when_the_project_closes_first_and_goes_in_once_after_the_resume"
+runs = ["engine-closed-given-nothing"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '''
+        if let Some(failed) = admitting.turned_away() {
+            let delivering = record.delivery.borrow_mut().delivering.take();'''
+replace = '''
+        if let Some(failed) = admitting.turned_away().filter(|_| false) {
+            let delivering = record.delivery.borrow_mut().delivering.take();'''
+
+[[plant]]
+name = "resume tasks: an adapter that waits before its hand-over hands the text to a closed project's window"
+meant = "a_delivery_whose_adapter_still_waits_when_the_project_closes_hands_nothing_over_and_waits_for_the_resume"
+runs = ["engine-closed-given-nothing"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = "        let outcome = match returning(window.deliver(&admitting, &pane, &text)).await {"
+replace = "        let outcome = match returning(window.deliver(host, &pane, &text)).await {"
+
+[[plant]]
+name = "resume tasks: a hand-over the closed project turned away is a refusal, and costs its message an attempt"
+meant = "a_delivery_whose_adapter_still_waits_when_the_project_closes_hands_nothing_over_and_waits_for_the_resume"
+runs = ["engine-closed-given-nothing"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''
+        if let Some(failed) = admitting.turned_away() {
+            self.handed_nothing('''
+replace = '''
+        if let Some(failed) = admitting.turned_away().filter(|_| false) {
+            self.handed_nothing('''
+
+[[plant]]
+name = "resume tasks: the Enter for a paste left unsent goes into a closed project's window"
+meant = "a_paste_left_unsent_in_a_window_the_close_could_not_close_gets_no_enter_until_the_resume"
+runs = ["engine-closed-given-nothing"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = "        if !admitting.admits() {"
+replace = "        if false {"
+
+[[plant]]
+name = "resume tasks: the Resume writes the note to go on for work paused while it read the record"
+meant = "a_task_the_human_pauses_while_the_resume_reads_whether_its_turn_was_cut_stays_paused_and_its_window_stays_closed"
+runs = ["engine-closed-given-nothing"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/resume.rs"
+find = "        if !cut || !self.still_coming(participant, coming)? {"
+replace = "        if !cut {"
+
+[[plant]]
+name = "resume tasks: the Resume opens the window of work paused while it read the record"
+meant = "a_task_the_human_pauses_while_the_resume_reads_whether_its_turn_was_cut_stays_paused_and_its_window_stays_closed"
+runs = ["engine-closed-given-nothing"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''
+                    if !this.still_coming(&who, coming)? {
+                        return Ok(());
+                    }'''
+replace = ""
+
+[[plant]]
+name = "resume tasks: the Resume's launch reads the stops its window paid after the waits before it"
+meant = "a_task_the_human_pauses_while_the_resume_s_launch_reads_its_record_stays_paused_and_its_window_stays_closed"
+runs = ["engine-closed-given-nothing"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '''
+            Some(paid) => paid,
+            None => self.seams.ledger.borrow().stop_of(participant.id)?,'''
+replace = '''
+            Some(_) | None => self.seams.ledger.borrow().stop_of(participant.id)?,'''
+
+[[plant]]
+name = "resume tasks: the windows' closes end for a Resume when the first of them fails"
+meant = "a_resume_waits_for_every_kill_of_the_close_though_another_window_s_close_failed"
+runs = ["engine-closed-given-nothing"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "        for (participant, part) in participants.iter().zip(parts) {"
+replace = "        for participant in participants {"
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "                let _part = part;"
+replace = ""
+
+[[plant]]
+name = "resume tasks: a pause note the cancel withdrew on its way, kept from its window by the Close, loses its warning"
+meant = "a_cancel_keeps_the_warning_of_a_pause_note_on_its_way_that_the_close_kept_from_the_chief"
+runs = ["engine-closed-given-nothing"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = "            Some(_) => self.seams.ledger.borrow_mut().keep_warning(message)?,"
+replace = "            Some(_) => {}"
+
+[[plant]]
+name = "resume tasks: a pause note the cancel withdrew on its way, which its window refused, loses its warning"
+meant = "a_cancel_keeps_the_warning_of_a_pause_note_on_its_way_that_its_window_then_refused"
+runs = ["engine-closed-given-nothing"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''
+            // its window's: a warning it said is kept.
+            self.seams.ledger.borrow_mut().keep_warning(message.id)?;'''
+replace = '''
+            // its window's: a warning it said is kept.'''
+
+[[plant]]
+name = "resume tasks: a pause note the cancel withdrew on its way says its warning again though its window had it"
+meant = "a_pause_note_cancelled_on_its_way_and_given_all_the_same_is_not_said_again"
+runs = ["engine-closed-given-nothing"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''
+        if self.forgotten(record) {
+            return Ok(());
+        }
+        // Closed before the hand-over'''
+replace = '''
+        if self.forgotten(record) {
+            return Ok(());
+        }
+        self.seams.ledger.borrow_mut().keep_warning(message.id)?;
+        // Closed before the hand-over'''
+
+[[plant]]
+name = "resume tasks: a pause note its window was given has its warning said again"
+meant = "a_pause_note_its_window_was_given_keeps_nothing_when_its_task_is_cancelled"
+runs = ["ledger-suspended"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/pauses.rs"
+find = '        .filter(|note| note.kind == "note" && note.sender.is_none() && note.state == "cancelled")'
+replace = '        .filter(|note| note.kind == "note" && note.sender.is_none())'
+
+[[plant]]
+name = "resume tasks: a warning withdrawn some way other than its task's cancel is said again as a cancel's"
+meant = "a_message_withdrawn_on_its_way_that_says_no_warning_of_a_cancelled_task_keeps_nothing"
+runs = ["ledger-suspended"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/pauses.rs"
+find = '''
+    if task.state != "cancelled" {
+        return Ok(());
+    }
+    store.write(|store| say_again('''
+replace = '''
+    store.write(|store| say_again('''
+
+[[plant]]
+name = "resume tasks: a paste goes in whatever the host admits (Claude, Devin)"
+meant = "a_paste_the_host_no_longer_admits_is_refused_unwritten_and_never_asked_of_the_pane"
+runs = ["harness-hand-overs", "harness-admission"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/pane.rs"
+find = '''
+    if !host.admits() {
+        return not_admitted();
+    }'''
+replace = ""
+
+[[plant]]
+name = "resume tasks: a native send goes once its claim is answered, whatever the host admits (Codex, OpenCode, Pi)"
+meant = "a_claim_answered_once_the_host_no_longer_admits_hand_overs_is_refused"
+runs = ["harness-hand-overs", "harness-admission"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/pane.rs"
+find = "    if answer.get(\"ok\") == Some(&Value::Bool(true)) && !host.admits() {"
+replace = "    if false {"
+
+[[plant]]
+name = "resume tasks: OpenCode posts the first message once its server is up, whatever the host admits"
+meant = "posts_nothing_where_the_host_stops_admitting_the_first_message_while_the_server_is_asked"
+runs = ["harness-admission"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/opencode/channel/seed.rs"
+find = '''
+    if !host.admits() {
+        return Err(NOT_ADMITTED.to_owned());
+    }
+    asked.admit(seed.session, body).await'''
+replace = '''
+    asked.admit(seed.session, body).await'''
