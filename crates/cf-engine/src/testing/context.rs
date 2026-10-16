@@ -18,6 +18,7 @@ use cf_harness::testing::ManualTime;
 use cf_ledger::{
     open_ledger, Ledger, NewProject, NewTask, Options, ProjectView, TaskCreated, TaskThread,
 };
+use cf_proto::specs::AppSpecs;
 use serde_json::{json, Value};
 
 use super::adapter::FakeAdapter;
@@ -161,7 +162,8 @@ impl Context {
             designers: RefCell::new(HashSet::new()),
             broken: Cell::new(false),
             model: RefCell::new(None),
-            specs_by_default: Cell::new(false),
+            app_specs: RefCell::new(AppSpecs::default()),
+            app_specs_asked: Cell::new(0),
         });
         let roles = Rc::new(FakeRoles {
             recorder: recorder.clone(),

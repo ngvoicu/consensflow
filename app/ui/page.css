@@ -638,6 +638,14 @@ tr[data-session] .row-name { font-weight: 600; letter-spacing: .08em; text-trans
 .project-specs .specs-help { margin: 0; font-size: 12px; color: var(--muted); }
 .project-specs button { justify-self: start; }
 .project-specs :disabled { opacity: .5; }
+/* The variant's choice, with the Specmint version of the one that will be used beside it. */
+.specs-pick { display: flex; align-items: center; gap: 12px; }
+.specs-pick select { flex: 1 1 auto; min-width: 0; }
+.specs-version { flex: none; font: 11px var(--mono); color: var(--muted); }
+/* Settings, Specs: the Specmint this build brings, its version and its variants. */
+.specmint { gap: 8px; }
+.specmint .specmint-version { margin: 0; font-size: 13px; }
+.specmint .staff { margin: 0; }
 .member-confirm { color: var(--buoy); font-size: 12px; margin-right: 8px; }
 /* Each part of a task is a panel of its own, headed by what it is. */
 .drawer-section {

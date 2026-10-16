@@ -11,6 +11,7 @@ use std::rc::Rc;
 use cf_base::refusal::Refusal;
 use cf_harness::contract::LaunchId;
 use cf_ledger::{Ledger, ParticipantView, ProjectView};
+use cf_proto::specs::AppSpecs;
 use cf_proto::trace::{TraceLine, Traced};
 use serde_json::{json, Value};
 
@@ -137,9 +138,13 @@ pub struct FakeRoster {
     pub broken: Cell<bool>,
     /// Every agent runs on this model, where a test's roster names one for all.
     pub model: RefCell<Option<String>>,
-    /// The human turned specs on for every project (the agents file's choice),
-    /// which a call of the roster does not write down: no trace of Node's has it.
-    pub specs_by_default: Cell<bool>,
+    /// What the human says of specs for every project (the agents file's
+    /// choice), which a call of the roster does not write down: no trace of
+    /// Node's has it.
+    pub app_specs: RefCell<AppSpecs>,
+    /// How often a launch asked what the human says of specs for every
+    /// project: a launch that no setting of the app could change asks nothing.
+    pub app_specs_asked: Cell<usize>,
 }
 
 /// Why the agents file cannot be read, as the roster says it.
@@ -177,8 +182,9 @@ impl Roster for FakeRoster {
         }))
     }
 
-    fn specs_by_default(&self) -> bool {
-        self.specs_by_default.get()
+    fn app_specs(&self) -> AppSpecs {
+        self.app_specs_asked.set(self.app_specs_asked.get() + 1);
+        self.app_specs.borrow().clone()
     }
 }
 

@@ -232,6 +232,8 @@ const DAEMON_OPERATIONS: &[&str] = &[
     "project.specs",
     "project.rename",
     "project.describe",
+    "specs.get",
+    "specs.set",
 ];
 
 #[tauri::command]

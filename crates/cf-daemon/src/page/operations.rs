@@ -7,7 +7,9 @@ use cf_proto::page::PageOperation;
 use serde_json::Value;
 
 use super::body::Body;
-use super::{board, messages, projects, sessions, specs, staff, tasks, wake_ups, Page, Served};
+use super::{
+    app_specs, board, messages, projects, sessions, specs, staff, tasks, wake_ups, Page, Served,
+};
 
 /// Serves `operation`, asked with `body` (an object the page sent, or `{}`).
 /// Its fields follow `ok: true` in the answer; its error is the words the page
@@ -52,8 +54,10 @@ pub(super) async fn serve(page: &Page, operation: PageOperation, body: Value) ->
         // The human's wake-up calls.
         PageOperation::WakeUpGet => wake_ups::get(page, body).await,
         PageOperation::WakeUpSet => wake_ups::set(page, body).await,
-        // What a project says of specs.
+        // What a project says of specs, and what the app says for every project.
         PageOperation::ProjectSpecs => specs::set(page, body).await,
+        PageOperation::SpecsGet => app_specs::get(page).await,
+        PageOperation::SpecsSet => app_specs::set(page, body).await,
     };
     served.map_err(|said| said.0)
 }

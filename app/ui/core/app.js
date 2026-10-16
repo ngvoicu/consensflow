@@ -4,6 +4,7 @@ import { BoardView, TaskDrawer } from './board.js'
 import { NewProjectDialog, ProjectSettingsDialog, SwitchChiefDialog } from './dialogs.js'
 import { Layout } from './layout.js'
 import { ProjectMenu } from './project-menu.js'
+import { SpecsSettings } from './specs-settings.js'
 import { TerminalsView } from './terminals.js'
 
 /**
@@ -44,6 +45,8 @@ const state = {
   board: null,
   inbox: NO_NOTES,
   agents: [],
+  /** What the app says of specs for every project and the Specmint it bundles, as last read. */
+  specs: null,
   focus: 'chief',
   openTask: null,
 }
@@ -84,6 +87,18 @@ async function daemon(operation, body = {}) {
 /** The saved agents, read again: what the board says members run, and what the pickers offer. */
 async function readAgents() {
   state.agents = (await daemon('agents.list')).agents
+}
+
+/**
+ * What the app says of specs for every project (whether, the folder and the variant, and what a
+ * project that names none then uses) and the Specmint it bundles, read again: each dialog that
+ * shows them reads as it opens, and Settings' Specs hands the page what a change answered. Read
+ * once the saves Settings' Specs asked for are answered: the app asks each on a worker of its own,
+ * and a read that overtook a save would leave the page an older answer than the save's.
+ */
+async function readSpecs() {
+  await specsSettings.settled()
+  state.specs = await daemon('specs.get')
 }
 
 // The daemon down: the banner says why and what comes next, and stays until
@@ -619,6 +634,8 @@ const projectSettings = new ProjectSettingsDialog($('#project-settings-dialog'),
   board: () => state.board,
   selected: () => state.selected,
   agents: () => state.agents,
+  specs: () => state.specs,
+  readSpecs,
   daemon,
   act,
   note,
@@ -646,6 +663,8 @@ async function openSettings(id) {
 // shown.
 const newProject = new NewProjectDialog($('#new-project-dialog'), {
   agents: () => state.agents,
+  specs: () => state.specs,
+  readSpecs,
   daemon,
   act,
   onAgents: (agents) => {
@@ -723,6 +742,27 @@ for (const entry of settingsDialog.querySelectorAll('[data-agents-page]')) {
     void act(readAgents)
   })
 }
+
+// Specs is no daemon screen but a dialog of the page: what it reads and keeps is the
+// page's own (`specs.get`, `specs.set`), the same that every project's Specs section says
+// what following the app means by. It opens as the screens do, Settings closed behind it,
+// and gives the focus back to the Settings button as it closes.
+const specsSettings = new SpecsSettings($('#specs-dialog'), {
+  daemon,
+  report,
+  specs: () => state.specs,
+  readSpecs,
+  setSpecs: (specs) => {
+    state.specs = specs
+  },
+})
+$('#specs-settings-button').addEventListener('click', () =>
+  act(async () => {
+    settingsDialog.close()
+    await specsSettings.open()
+  }),
+)
+$('#specs-dialog').addEventListener('close', () => settingsButton.focus())
 
 async function start() {
   if (typeof invoke !== 'function') {

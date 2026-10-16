@@ -6,8 +6,9 @@
 //! [`operations::serve`] is the table of which function serves which; each
 //! concern has a module of its own: [`projects`], [`staff`] (the agents and the
 //! staff), [`sessions`], [`board`] (and the inbox), [`tasks`], [`messages`],
-//! [`specs`] (what a project says of them) and [`wake_ups`] (the human's
-//! wake-up calls).
+//! [`specs`] (what a project says of them), [`app_specs`] (what the app says of
+//! them for every project, and the Specmint it bundles) and [`wake_ups`] (the
+//! human's wake-up calls).
 //! What they stand on is [`Page`] and the engine they call ([`Engine`]), a
 //! small trait of what Node's page called on the dispatcher and its five
 //! projections, which the dispatcher is; the saved agents are read from the
@@ -29,6 +30,7 @@
 //! it said.
 
 mod agents;
+mod app_specs;
 mod board;
 mod body;
 mod engine;
