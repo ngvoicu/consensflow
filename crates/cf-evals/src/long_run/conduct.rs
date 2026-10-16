@@ -226,7 +226,8 @@ fn run(words: &[String], out: &mut dyn Write, edge: &Edge) -> Result<i32> {
             found.command.display()
         ))?;
     }
-    let opened = setup::open(&options, &cast, &mut floor, edge.masker())?;
+    let scenario = options.ask.scenario(options.quiet);
+    let opened = setup::open(&options, &cast, &scenario, &mut floor, edge.masker())?;
     let daemon = opened.daemon.clone();
     let mut stage = Stage::new(opened.rig, opened.config, opened.project, opened.claude);
     let started = now();
@@ -253,7 +254,6 @@ fn run(words: &[String], out: &mut dyn Write, edge: &Edge) -> Result<i32> {
             ))?;
         }
     }
-    let scenario = options.ask.scenario(options.quiet);
     let conducted = conduct(&options, &cast, &scenario, &mut stage, &mut floor, &mut run);
     let error = conducted.err().map(|failed| failed.to_string());
     if let Some(error) = &error {

@@ -13,6 +13,7 @@ use cf_catalog::{efforts, Catalog, CatalogEntry, FoundEntry, Harness, Preset, Se
 mod catalog_presentation_follows_actual_model_and_effort;
 mod claude_haiku_5_5_is_light_work_on_claude_code_alone;
 mod every_tool_ships_a_list_of_ready_made_agents;
+mod nemotron_3_5_super_vl_is_light_work_on_opencode_zen_at_its_ceiling;
 
 fn catalog() -> Catalog {
     Catalog::bundled().unwrap()
@@ -123,7 +124,7 @@ fn ships_all_compatible_low_medium_choices_with_stable_identities_and_pi_openrou
             assert_eq!(entry.entry.effort.as_deref(), Some(effort), "{name}");
         }
     }
-    assert_eq!(entries(&catalog).count(), 120);
+    assert_eq!(entries(&catalog).count(), 121);
     for name in ["orpheus", "linus", "erato", "kronos", "atlas"] {
         let entry = found(&catalog, name);
         assert!(
@@ -249,6 +250,7 @@ fn assigns_four_work_tiers_by_model_and_effort_across_routes_without_agent_name_
         ("phaethon", "light"),
         ("asterope", "light"),
         ("huginn", "light"),
+        ("buri", "light"),
     ] {
         let entry = found(&catalog, name);
         assert_eq!(entry.entry.profile.work_tier.as_str(), tier, "{name}");

@@ -96,8 +96,13 @@ fn a_terminal_on_the_machine_has_its_path_and_homes_and_the_login_shell_is_not_t
         "the app would ask a shell for its PATH"
     );
     assert_eq!(
+        env.tool_folders(),
+        [sandbox.root.join("system-bin")],
+        "the app would put Homebrew's on it"
+    );
+    assert_eq!(
         env.iter().count(),
-        8,
+        9,
         "and nothing of the machine it runs on"
     );
 }
@@ -142,7 +147,7 @@ fn the_app_has_a_terminals_environment_in_its_own_home_and_the_self_tests_words(
     );
     assert_eq!(text(&env, "CONSENSFLOW_SELFTEST_DEADLINE_MS"), "190000");
     assert!(env.os("SHELL").is_none());
-    assert_eq!(env.iter().count(), 8 + 7);
+    assert_eq!(env.iter().count(), 9 + 7);
 }
 
 #[test]

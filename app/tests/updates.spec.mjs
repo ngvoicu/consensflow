@@ -1,8 +1,10 @@
 import { expect, test } from '@playwright/test'
 
-import { serveUi } from './serve-ui.mjs'
+import { refusedByPolicy, serveUi } from './serve-ui.mjs'
 
 let ui
+/** What the app's policy refused in the test running: nothing the page does is refused. */
+let refused
 
 test.setTimeout(12_000)
 
@@ -11,6 +13,14 @@ test.beforeAll(async () => {
 })
 
 test.afterAll(() => ui?.close())
+
+test.beforeEach(({ page }) => {
+  refused = refusedByPolicy(page)
+})
+
+test.afterEach(() => {
+  expect(refused, "the app's policy refuses nothing the page does").toEqual([])
+})
 
 function updateSnapshot(overrides = {}) {
   return {
@@ -61,13 +71,28 @@ function coreState(blocker = null) {
   }
 }
 
-async function installTauriShim(page, { snapshot = updateSnapshot(), state = coreState() } = {}) {
+/**
+ * The app's commands and events as the page sees them. With `lateDaemon`, the daemon
+ * answers nothing until `window.__answerDaemon()`: a daemon whose start waits on a
+ * slow login shell, which the page's requests wait for.
+ */
+async function installTauriShim(
+  page,
+  { snapshot = updateSnapshot(), state = coreState(), lateDaemon = false } = {},
+) {
   await page.addInitScript(
-    ({ initialSnapshot, initialState }) => {
+    ({ initialSnapshot, initialState, late }) => {
       const copy = (value) => JSON.parse(JSON.stringify(value))
       const eventListeners = new Map()
       const timers = []
       const nativeSetTimeout = window.setTimeout.bind(window)
+      let daemonUp = !late
+      const waitingOnDaemon = []
+      window.__answerDaemon = () => {
+        daemonUp = true
+        for (const answer of waitingOnDaemon.splice(0)) answer()
+      }
+      window.__listening = (name) => (eventListeners.get(name) ?? []).length
 
       window.__calls = []
       window.__updateSnapshot = copy(initialSnapshot)
@@ -91,6 +116,9 @@ async function installTauriShim(page, { snapshot = updateSnapshot(), state = cor
         window.__calls.push({ command, args: copy(args) })
         if (Object.hasOwn(window.__commandResults, command)) {
           return copy(window.__commandResults[command])
+        }
+        if (command === 'daemon_request' && !daemonUp) {
+          await new Promise((answer) => waitingOnDaemon.push(answer))
         }
         if (command === 'daemon_request') {
           const { operation, body } = args
@@ -156,7 +184,7 @@ async function installTauriShim(page, { snapshot = updateSnapshot(), state = cor
         },
       }
     },
-    { initialSnapshot: snapshot, initialState: state },
+    { initialSnapshot: snapshot, initialState: state, late: lateDaemon },
   )
 }
 
@@ -178,6 +206,26 @@ test('native menu opens and checks without a dedicated header button', async ({ 
   await expect(page.locator('#updates-dialog')).toBeVisible()
   await expect.poll(async () => (await commandCalls(page, 'update_check')).length).toBe(1)
   await expect(page.getByRole('button', { name: 'Close Updates' })).toBeFocused()
+})
+
+test('the menu check works while the daemon has not answered yet, as when a login shell is slow', async ({
+  page,
+}) => {
+  await installTauriShim(page, { lateDaemon: true })
+  await page.goto(ui.origin)
+  // The page listens for the menu before it asks the daemon anything.
+  await expect
+    .poll(() => page.evaluate(() => window.__listening('check-updates')), {
+      message: 'the page listens for Check for Updates while the daemon has not answered',
+    })
+    .toBe(1)
+  await page.evaluate(() => window.__emitTauriEvent('check-updates'))
+  await expect(page.locator('#updates-dialog')).toBeVisible()
+  await expect.poll(async () => (await commandCalls(page, 'update_check')).length).toBe(1)
+  await expect(page.locator('body')).not.toHaveAttribute('data-ready', 'true')
+  // And the board comes once the daemon answers.
+  await page.evaluate(() => window.__answerDaemon())
+  await expect(page.locator('body')).toHaveAttribute('data-ready', 'true', { timeout: 2_000 })
 })
 
 test('menu check keeps unavailable-feed failures visible and never enables download or install', async ({

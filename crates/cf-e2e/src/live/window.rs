@@ -34,7 +34,7 @@ use super::machine::Harness;
 use crate::rig::Rig;
 use crate::Result;
 
-pub use open::{pasted_installs, session_for, Open};
+pub use open::{pasted_installs, session_for, without_the_daemon, Open};
 pub use raw::{raw_end, RawEnd};
 pub use trust::claude as trust_claude;
 

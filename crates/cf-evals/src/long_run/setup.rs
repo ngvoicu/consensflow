@@ -7,7 +7,7 @@
 
 use std::path::PathBuf;
 
-use cf_e2e::live::{self, agents, Harness, Installed};
+use cf_e2e::live::{self, agents, Harness, Installed, Log};
 use cf_e2e::rig::{Config, Masker, Rig};
 use serde_json::{json, Value};
 
@@ -17,6 +17,7 @@ use crate::plan::{chief_environment, harness, Agent, ChiefSetup, Staff};
 use crate::run::floor::Floor;
 use crate::run::machine::Machine;
 use crate::run::{daemon_of, trust, workspace, wrappers, Crew};
+use crate::scenarios::Scenario;
 use crate::{Error, Result};
 
 /// Who the run is played by, before anything runs.
@@ -109,14 +110,20 @@ pub struct Opened {
     pub claude: PathBuf,
 }
 
-/// Starts the rig the cast runs on and opens the project: the fixture in a fresh
-/// workspace, trusted by Claude where Claude is of the run, the roster written,
-/// the project opened with the staff, specs on and wake-up calls every
-/// `options.wake_minutes`.
-pub fn open(options: &Options, cast: &Cast, floor: &mut Floor, masker: Masker) -> Result<Opened> {
+/// Starts the rig the cast runs on and opens the project: the fixture of
+/// `scenario` in a fresh workspace, trusted by Claude where Claude is of the run,
+/// the roster written, the project opened with the staff, specs on and wake-up
+/// calls every `options.wake_minutes`.
+pub fn open(
+    options: &Options,
+    cast: &Cast,
+    scenario: &Scenario,
+    floor: &mut Floor,
+    masker: Masker,
+) -> Result<Opened> {
     let machine = Machine::of(&cast.crew)?;
     let wrappers = wrappers::write(&machine, &cast.crew, &cast.chief)?;
-    let workspace = workspace::fresh(&machine, &options.fixture)?;
+    let workspace = workspace::fresh(&machine, scenario)?;
     let stand_in = wrappers
         .claude
         .clone()
@@ -134,7 +141,7 @@ pub fn open(options: &Options, cast: &Cast, floor: &mut Floor, masker: Masker) -
     }
     let mut rows: Vec<Value> = vec![cast.agent.to_value()];
     rows.extend(cast.staff.agents.iter().map(Agent::to_value));
-    agents::write_roster(&rig, &rows)?;
+    agents::write_roster(&rig, &rows, &Log::new("long run"))?;
     let opened = rig.page(
         "project.open",
         json!({

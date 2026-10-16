@@ -1,0 +1,4 @@
+{
+  "table": "lockouts",
+  "columns": ["account_id", "failures", "until"]
+}

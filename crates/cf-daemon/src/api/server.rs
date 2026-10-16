@@ -298,7 +298,8 @@ impl Drop for Leaves {
 /// the rest of it is the executor's, so that the client going away does not
 /// stop it, and the handler is told it has gone ([`Consumer`]); a panic in
 /// it is a 500. What the first part woke is run to its end before the
-/// connection goes on.
+/// connection goes on: an answer that ends there is written in this poll, as
+/// Node wrote it before its next callback.
 async fn respond(server: &Rc<Server>, request: hyper::Request<Incoming>) -> Response<Full<Bytes>> {
     let consumer = Consumer::default();
     let _client = Leaves(consumer.clone());

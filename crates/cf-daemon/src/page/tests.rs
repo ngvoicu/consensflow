@@ -34,8 +34,16 @@ fn rig() -> Rig {
 }
 
 /// A rig whose page is given `env`, and `engine` for the engine where a test
-/// stands its own in the dispatcher's place.
+/// stands its own in the dispatcher's place. Its specs viewer opens nothing:
+/// no test opens a browser.
 fn rig_over(env: Env, engine: Option<Rc<dyn Engine>>) -> Rig {
+    let opens_nothing: Opener =
+        Rc::new(|_, _| Box::pin(async { Err("a test opens no file".to_owned()) }));
+    rig_with(env, engine, Specs::opening_with(opens_nothing))
+}
+
+/// A rig as [`rig_over`] makes one, its specs viewer given `specs`.
+fn rig_with(env: Env, engine: Option<Rc<dyn Engine>>, specs: Specs) -> Rig {
     let Worked { home, spawn } = worked();
     let kit = Context::new();
     let kicks = Rc::new(Cell::new(0));
@@ -45,6 +53,7 @@ fn rig_over(env: Env, engine: Option<Rc<dyn Engine>>) -> Rig {
         engine: engine.unwrap_or_else(|| Rc::new(Rc::clone(&kit.dispatcher))),
         env,
         kick: Rc::new(move || counted.set(counted.get() + 1)),
+        specs,
     });
     Rig {
         home,
@@ -366,6 +375,7 @@ async fn an_operation_is_begun_where_its_frame_is_read_and_its_turns_end_before_
         .await;
 }
 
+mod app_specs;
 mod describing;
 mod gate;
 mod opening;
@@ -375,4 +385,5 @@ mod specs;
 mod stopping;
 mod suspended;
 mod turns;
+mod viewer;
 mod wake_up;

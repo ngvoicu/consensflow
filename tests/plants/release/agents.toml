@@ -4,7 +4,11 @@
 # packaged smoke (crates/cf-e2e/tests/smoke.rs) runs against the daemon a built
 # app started, must catch each: here it is run against the daemon from the
 # checkout, by the `agents_proof` cases of the daemon test of crates/cf-e2e
-# (`cargo xtask test agents`).
+# (`cargo xtask test agents`). The proof reads the catalog the build carries, so a
+# row of the catalog put wrong is the catalog's own tests' to catch.
+
+[run]
+catalog = ["cargo", "test", "--offline", "-p", "cf-catalog", "--test", "catalog"]
 
 [[plant]]
 name = "agents, native: a deleted agent is answered and kept"
@@ -113,3 +117,28 @@ replace = '''
             .skip(1)
             .map(catalog_row)
             .collect();'''
+
+[[plant]]
+name = "agents, catalog: Nemotron 3.5 Super VL on Zen names max, a level Zen does not list for it"
+meant = "is_the_one_nemotron_3_5_of_the_catalog_with_its_label_its_route_and_its_effort"
+runs = ["catalog"]
+
+[[plant.edit]]
+file = "crates/cf-catalog/data/presets.json"
+find = '''
+      "model": "opencode/nemotron-3.5-super-vl-free",
+      "effort": "xhigh"'''
+replace = '''
+      "model": "opencode/nemotron-3.5-super-vl-free",
+      "effort": "max"'''
+
+[[plant]]
+name = "agents, catalog: Nemotron 3.5 Super VL on Zen has no label of its model"
+meant = "is_the_one_nemotron_3_5_of_the_catalog_with_its_label_its_route_and_its_effort"
+runs = ["catalog"]
+
+[[plant.edit]]
+file = "crates/cf-catalog/data/presets.json"
+find = '''
+    "nemotron-3.5-super-vl-free": "Nemotron 3.5 Super VL (Zen free)",'''
+replace = ""

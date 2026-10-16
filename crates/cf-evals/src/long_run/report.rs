@@ -213,7 +213,7 @@ impl Kept<'_> {
             "daemon": self.daemon,
             "home": self.home,
             "ask": options.ask.name(),
-            "fixture": options.fixture,
+            "fixture": super::ask::FIXTURE,
             "budgetSeconds": options.budget.as_secs(),
             "everySeconds": options.every.as_secs(),
             "lookSeconds": options.look.as_secs_f64(),

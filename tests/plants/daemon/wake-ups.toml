@@ -361,9 +361,9 @@ runs = ["daemon-wake-up-page", "proto-page"]
 
 [[plant.edit]]
 file = "crates/cf-proto/src/page.rs"
-find = '''                | Self::WakeUpGet
+find = '''                | Self::SpecsGet
         )'''
-replace = '''                | Self::WakeUpGet
+replace = '''                | Self::SpecsGet
                 | Self::WakeUpSet
         )'''
 

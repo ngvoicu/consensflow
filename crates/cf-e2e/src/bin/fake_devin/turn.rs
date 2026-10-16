@@ -2,14 +2,15 @@
 //! the words the other stand-in does: a line `SLEEP <seconds> <words>` is a turn
 //! that works that long before it does what the words say, a line `BACKGROUND
 //! <seconds> <words>` is a turn that leaves a command running for that long
-//! (`command`) and does what the words say, and `Reply with exactly: X` is
-//! answered with X, as anything else is acknowledged. What Devin writes of a turn
-//! is written in its order: the message in the store and on the wire, the agent's
-//! thought, the tool it runs (the command a `BACKGROUND` leaves), and then the
-//! answer (the store first, so that a reader that sees the turn end on the wire
-//! finds the answer in the store) or, where an Escape stops the turn, the cancel
-//! and what was said so far. A command that was left goes on saying what it prints
-//! once the turn has ended.
+//! (`command`) and does what the words say, a line `EXIT <code> <words>` is a turn
+//! that ends the window's program once it has worked (`crash`), and `Reply with
+//! exactly: X` is answered with X, as anything else is acknowledged. What Devin
+//! writes of a turn is written in its order: the message in the store and on the
+//! wire, the agent's thought, the tool it runs (the command a `BACKGROUND` leaves),
+//! and then the answer (the store first, so that a reader that sees the turn end on
+//! the wire finds the answer in the store) or, where an Escape stops the turn, the
+//! cancel and what was said so far. A command that was left goes on saying what it
+//! prints once the turn has ended.
 //!
 //! A turn takes the time a model takes ([`Pace`]): from the message put to the
 //! agent to its first word, in which the turn is begun and its work is not to be
@@ -26,6 +27,7 @@ use cf_e2e::pattern;
 use regex::Regex;
 
 use crate::command;
+use crate::crash::{self, Crash};
 use crate::said;
 use crate::stop::Stop;
 use crate::store::Store;
@@ -68,6 +70,8 @@ pub struct Plan {
     pub work: Duration,
     /// How many seconds of a command it leaves running as it answers, if it does.
     pub background: Option<u64>,
+    /// How it ends the window's program once it has worked, instead of answering.
+    pub crash: Option<Crash>,
     /// What it answers.
     pub answer: String,
 }
@@ -97,6 +101,7 @@ pub fn plan_of(text: &str, pace: Pace) -> Plan {
     Plan {
         work,
         background,
+        crash: crash::of(&words),
         answer,
     }
 }
@@ -190,6 +195,11 @@ impl<W: Write> Window<W> {
             }
             stopped = self.stop.work(plan.work);
         }
+        if let Some(crash) = plan.crash.as_ref().filter(|_| !stopped) {
+            // Its last words, a line of their own, and the program is gone.
+            let _ = self.say(&format!("{}\n", crash.words));
+            crate::leave(crash.code);
+        }
         if stopped {
             // The TUI asks its agent to cancel, which keeps what it said so far.
             self.wire.cancel().map_err(said)?;
@@ -231,6 +241,7 @@ mod tests {
             Plan {
                 work: Duration::ZERO,
                 background: None,
+                crash: None,
                 answer: "WORKER_OK".to_owned()
             }
         );
@@ -257,8 +268,19 @@ mod tests {
             Plan {
                 work: Duration::from_secs(120),
                 background: None,
+                crash: None,
                 answer: "T5_DONE".to_owned()
             }
+        );
+        // A turn that works, and then ends its window's program.
+        let crashing = plan_of("SLEEP 10 EXIT 3 fatal: gone", quick);
+        assert_eq!(crashing.work, Duration::from_secs(10));
+        assert_eq!(
+            crashing.crash,
+            Some(Crash {
+                code: 3,
+                words: "fatal: gone".to_owned()
+            })
         );
         // A line that is no sleep is no wait.
         assert_eq!(plan_of("say SLEEP 5 x", quick).work, Duration::ZERO);
@@ -293,6 +315,7 @@ mod tests {
             Plan {
                 work: Duration::ZERO,
                 background: Some(600),
+                crash: None,
                 answer: "LEFT_IT".to_owned()
             }
         );

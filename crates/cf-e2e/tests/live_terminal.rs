@@ -150,16 +150,16 @@ mod on_windows {
     fn check_of(
         rig: &Rig,
         install: &Installed,
-        index: usize,
-        case: &Case,
+        (index, case): (usize, &Case),
         pane_host: &str,
+        log: &Log,
     ) -> Result<Check> {
         let open = Open::new(rig, install, "terminal", &format!("terminal-{index}"));
         let window = case
             .drop_env
             .iter()
             .fold(open, |open, name| open.without(name))
-            .open()?;
+            .open(log)?;
         let drawn = window.still(READY);
         let screen = window.screen();
         let warned = screen.contains(WARNING);
@@ -178,7 +178,7 @@ mod on_windows {
 
     /// Opens each case's window of Devin and judges what each shows of its terminal.
     pub fn run() -> Result {
-        let log = Log::new("live terminal");
+        let log = Log::begin("live terminal")?;
         // What a window is opened on is the harness code's to say: built before anything is spent.
         ask::prepare()?;
         let pane_host = cf::pane_host()?.to_string_lossy().into_owned();
@@ -188,7 +188,7 @@ mod on_windows {
         let mut checks = Vec::new();
         for (index, case) in CASES.iter().enumerate() {
             log.say(format!("window {}: {}", index + 1, case.name));
-            checks.push(check_of(&rig, &devin, index, case, &pane_host)?);
+            checks.push(check_of(&rig, &devin, (index, case), &pane_host, &log)?);
         }
         rig.close()?;
         report::conclude(&log, "what each window came to", &checks)
@@ -367,7 +367,7 @@ mod tests {
         let install = Installed::at(Harness::Claude, &program, &home);
         let window = Open::new(&rig, &install, "terminal", "terminal-slow")
             .without_trust()
-            .open()?;
+            .open(&cf_e2e::live::Log::new("live terminal test"))?;
         let opened = Instant::now();
         assert!(window.still(Duration::from_secs(60)));
         let screen = window.screen();

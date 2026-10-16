@@ -170,8 +170,11 @@ impl Daemon {
 /// names. A start that fails after its first line is in the log (the ledger
 /// is held by another daemon, say) is a process that ends with 1, and the log
 /// says so under that line, as Node's exit logger did: it was installed right
-/// after it.
+/// after it. Everything it runs, every window first, runs with the system's
+/// folders of programs after its PATH; a harness is still looked for on the
+/// PATH it was given, then in the home, then in them.
 pub async fn start(env: Env, options: Options) -> Result<Daemon, StartError> {
+    let env = env.with_tool_folders_on_path();
     // The home, and the files in it: every event and every change of a window
     // goes to events.jsonl as it happens, and what is worth knowing afterwards
     // to daemon.log, the start first.
@@ -439,6 +442,7 @@ async fn run(
         engine: Rc::new(Rc::clone(&dispatcher)),
         env: env.clone(),
         kick: Rc::clone(&kick),
+        specs: page::Specs::new(),
     });
     page::register(&bridge, &page, &spawn);
     let exiting = Rc::clone(&dispatcher);

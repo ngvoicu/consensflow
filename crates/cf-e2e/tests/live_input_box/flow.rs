@@ -237,7 +237,7 @@ mod tests {
         let install = Installed::at(Harness::Claude, FAKE_AGENT, &home);
         let window = Open::new(&rig, &install, "input-box", "input-box-ctrl-c")
             .without_trust()
-            .open()?;
+            .open(&cf_e2e::live::Log::new("live input-box test"))?;
         let outcome = flow(&window, strategy("ctrl-c")?, stand_in_message)?;
         let said = outcome.lines.join("\n");
         assert!(outcome.ok, "{said}");
@@ -270,7 +270,7 @@ mod tests {
         let install = Installed::at(Harness::Claude, FAKE_AGENT, &home);
         let window = Open::new(&rig, &install, "input-box", "input-box-keys")
             .without_trust()
-            .open()?;
+            .open(&cf_e2e::live::Log::new("live input-box test"))?;
         assert_eq!(window.ready(), Ok(()));
         // These leave the stand-in as it is (which takes no Control-U, and has no turn at
         // work for an Escape to stop); the pause between the Escapes is waited.

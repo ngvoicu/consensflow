@@ -229,7 +229,10 @@ fn check_of(window: &Window, opening: &Opening, asked: &Ask) -> Result<Check> {
 #[test]
 #[ignore = "opt-in: spends the machine's quota on a window of each agent named; cargo xtask live agent (npm run live:agent)"]
 fn each_catalog_agent_opens_on_its_model_and_its_record_says_it_answered() -> Result {
-    let log = Log::new("live agent");
+    let log = Log::own_agents(
+        "live agent",
+        "name the catalog's agents with --agent, and their levels with --effort",
+    )?;
     // What a window is opened on is the harness code's to say: built before anything is spent.
     ask::prepare()?;
     let named = live::list("agent");
@@ -462,7 +465,7 @@ mod tests {
         let window = Open::new(&rig, &install, "agent", &opening.pane())
             .agent(opening.agent())
             .without_trust()
-            .open()?;
+            .open(&Log::new("live agent test"))?;
         let argv = window.argv();
         for flag in [["--model", "claude-haiku-5-5"], ["--effort", "low"]] {
             assert!(

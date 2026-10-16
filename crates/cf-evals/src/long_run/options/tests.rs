@@ -24,7 +24,6 @@ fn a_long_run_with_no_words_is_two_hours_of_every_harness_under_a_claude_chief_w
     assert_eq!(options.settings, Settings::default());
     assert_eq!(options.disruptions, Disruption::ALL);
     assert_eq!(options.ask, Ask::Real);
-    assert_eq!(options.fixture, "long-run");
     assert_eq!(options.reports, checkout::path("evals/reports/long"));
     assert_eq!(
         (options.effort.as_str(), options.staff_effort.as_str()),

@@ -1,0 +1,1619 @@
+# The specs viewer (2026-10-15, for 3.0.5: the owner asked for a button beside Project settings that
+# opens a project's specs folder in a dialog, its tree on the left, each file shown as it is meant to
+# be read; reviewed twice by Astra and Sol as security reviewers, and rebuilt each time on what the
+# lead decided of their findings). The daemon reads the folder for the page through page operations
+# that change nothing (`specs.tree`, `specs.file`, `specs.present`): the folder the project names,
+# else `.specs`, specs on or off, found by a walk from the project's folder that follows no link,
+# through a door that opens each name through the folder above it and never a link, reads the very
+# object it checked, never waits on a FIFO and refuses a file of two names; within budgets of
+# entries, names read (each one the folder gives), depth and bytes, each said in words; off the
+# daemon's executor, so many at once, a presence looked at once however many ask. An HTML spec is
+# not run in the app: it shows as a card and opens in the browser as a copy of what was read, with
+# its assets (`specs.open`, a regular HTML file of the folder only, in time). The page draws the
+# board without waiting for the folder, arranges the tree by the registry, shows the registry as
+# rows (a parse in linear time, the rows capped), Markdown with its tasks and its Mermaid diagrams
+# (so many a document, none drawn for a file left), which draw under the app's own
+# Content-Security-Policy (`tauri.conf.json`), with a label sanitizer and a check of the drawing
+# behind it. One plant takes one rule out; a test of it fails. The daemon's plants run its tests
+# (`page::viewer::`, `page::tests::viewer`, the names of the page's operations in `cf-proto`, and
+# cf-process's `hand_over`); three run the door's tests on Windows, on zeewin (`viewer-windows`).
+# The page's arranging runs the Node tests of `app/ui/core/specs-folder.js`, and the rest the
+# browser's (`app/tests/specs-viewer.spec.mjs`, served under the app's policy, beside a server of
+# its own whose arrivals are what left the page, on fixture folders of each Specmint variant and
+# hostile ones; Mermaid and xterm are the tracked `app/ui/vendor`, so no plant bundles). Every name
+# holds `specs viewer`, so `npm run plants:daemon -- "specs viewer"` runs them all.
+
+[run]
+# The door, the folder read, the copies, the opener's program: on folders made by the test.
+viewer-folder = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "page::viewer::"]
+# How the opener is handed a file and let go (cf-process).
+viewer-hand-over = ["cargo", "test", "--offline", "-p", "cf-process", "--lib", "hand_over"]
+# What Windows's sharing keeps out of a held folder, and a junction on the copies' way: the viewer's
+# tests on Windows, on zeewin, over ssh (`cargo xtask windows`), from a checkout whose app/.cache and
+# resources are folders of its own.
+viewer-windows = ["cargo", "xtask", "windows", "--host", "zeewin", "--", "cargo", "test", "-p", "cf-daemon", "--lib", "page::viewer::"]
+# A short name given by hand, which takes zeewin's ssh shell to be an administrator's (the test is
+# ignored elsewhere): `fsutil file setshortname`.
+viewer-windows-admin = ["cargo", "xtask", "windows", "--host", "zeewin", "--", "cargo", "test", "-p", "cf-daemon", "--lib", "short_name_given_by_hand", "--", "--ignored"]
+# The operations over the bridge, and the fixture folders read as the page's stand-in answers.
+viewer-page = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "page::tests::viewer"]
+# The names of the page's operations, which the app forwards, and which of them wake the dispatcher.
+viewer-proto-page = ["cargo", "test", "--offline", "-p", "cf-proto", "--lib", "page::"]
+# The page's arranging of the tree, its registry, its links, in Node.
+viewer-arranging = ["node", "--test", "--test-reporter=tap", "tests/specs-folder.test.mjs"]
+# The viewer in the browser Playwright keeps, by its parts.
+viewer-button = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/specs-viewer.spec.mjs", "-g", "the Specs button"]
+viewer-menu = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/specs-viewer.spec.mjs", "-g", "in the project menu"]
+viewer-tree = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/specs-viewer.spec.mjs", "-g", "the specs tree"]
+viewer-registry = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/specs-viewer.spec.mjs", "-g", "the registry"]
+viewer-markdown = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/specs-viewer.spec.mjs", "-g", "a Markdown spec"]
+viewer-files = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/specs-viewer.spec.mjs", "-g", "other files"]
+viewer-html = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/specs-viewer.spec.mjs", "-g", "an HTML spec"]
+viewer-hostile = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/specs-viewer.spec.mjs", "-g", "a hostile spec"]
+viewer-policy = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/specs-viewer.spec.mjs", "-g", "the app's policy|makes no request leave"]
+viewer-refresh = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/specs-viewer.spec.mjs", "-g", "Refresh"]
+viewer-colours = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/specs-viewer.spec.mjs", "-g", "in the page's colours"]
+
+# --- the daemon: the names a path is made of ---
+
+[[plant]]
+name = "specs viewer: a path that climbs out of the folder is read"
+meant = "a_path_out_of_the_folder_or_to_what_is_no_file_is_refused_in_words"
+runs = ["viewer-folder"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/viewer/names.rs"
+find = '''        if *part == ".." {
+            return Err(format!("{path} climbs out of the specs folder (..)"));
+        }
+'''
+replace = ""
+
+[[plant]]
+name = "specs viewer: an absolute path is taken as the folder's"
+meant = "a_path_out_of_the_folder_or_to_what_is_no_file_is_refused_in_words"
+runs = ["viewer-folder"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/viewer/names.rs"
+find = '''    if path.starts_with('/') || (windows && path.starts_with('\\')) {'''
+replace = "    if false {"
+
+[[plant]]
+name = "specs viewer: a backslash is a name on Windows"
+meant = "a_path_is_names_in_slashes_on_either_system"
+runs = ["viewer-folder"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/viewer/names.rs"
+find = '''        if windows && part.contains('\\') {'''
+replace = "        if false {"
+
+[[plant]]
+name = "specs viewer: a drive or a stream is a name on Windows"
+meant = "a_path_is_names_in_slashes_on_either_system"
+runs = ["viewer-folder"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/viewer/names.rs"
+find = '''        if windows && part.contains(':') {'''
+replace = "        if false {"
+
+[[plant]]
+name = "specs viewer: a name ending in a dot or a space is taken on Windows"
+meant = "a_path_is_names_in_slashes_on_either_system"
+runs = ["viewer-folder"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/viewer/names.rs"
+find = "        if windows && (part.ends_with('.') || part.ends_with(' ')) {"
+replace = "        if false {"
+
+[[plant]]
+name = "specs viewer: a device's name is taken on Windows"
+meant = "a_path_is_names_in_slashes_on_either_system"
+runs = ["viewer-folder"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/viewer/names.rs"
+find = "        if windows && is_device(part) {"
+replace = "        if false {"
+
+# --- the daemon: the door ---
+
+[[plant]]
+name = "specs viewer: a name is opened through a link"
+meant = "a_file_swapped_for_a_link_between_its_look_and_its_opening_is_refused"
+runs = ["viewer-folder"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/viewer/door/unix.rs"
+find = '''    .union(OFlags::NOFOLLOW)
+'''
+replace = ""
+
+[[plant]]
+name = "specs viewer: a file is opened waiting for a FIFO's writer"
+meant = "a_fifo_is_refused_without_waiting_for_a_writer"
+runs = ["viewer-folder"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/viewer/door/unix.rs"
+find = '''    .union(OFlags::NONBLOCK)
+'''
+replace = ""
+
+[[plant]]
+name = "specs viewer: what was opened is not checked to be a regular file"
+meant = "a_fifo_is_refused_without_waiting_for_a_writer"
+runs = ["viewer-folder"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/viewer/door/unix.rs"
+find = "        if !kind.is_file() {"
+replace = "        if false {"
+
+[[plant]]
+name = "specs viewer: a file of more than one name is read"
+meant = "a_file_of_more_than_one_name_is_refused"
+runs = ["viewer-folder"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/viewer/door/unix.rs"
+find = "        if metadata.nlink() != 1 {"
+replace = "        if false {"
+
+[[plant]]
+name = "specs viewer: the specs folder is found by its real path, then opened by that path"
+meant = "a_folder_on_the_way_swapped_for_a_link_out_is_refused"
+runs = ["viewer-folder"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/viewer/folder.rs"
+find = '''    between();
+    for (at, name) in named.iter().enumerate() {'''
+replace = '''    let real = named
+        .iter()
+        .fold(project.to_path_buf(), |path, part| path.join(part))
+        .canonicalize()
+        .map_err(|error| error.to_string())?;
+    between();
+    held = Held::project(&real, &reading).map_err(|_| "gone".to_owned())?;
+    for (at, name) in named.iter().enumerate().take(0) {'''
+
+[[plant]]
+name = "specs viewer: a file is measured by its look, not by the handle it is read through"
+meant = "a_file_is_measured_through_the_handle_it_is_read_by"
+runs = ["viewer-folder"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/viewer/door/unix.rs"
+find = '''        match self.kind(name)? {
+            Kind::File { .. } => {}'''
+replace = '''        let looked = self.kind(name)?;
+        match looked {
+            Kind::File { .. } => {}'''
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/viewer/door/unix.rs"
+find = '''        Ok(Opened {
+            file,
+            size: metadata.len(),
+        })
+    }
+
+    /// The names in this folder, read as they are asked for.'''
+replace = '''        Ok(Opened {
+            file,
+            size: match looked {
+                Kind::File { size } => size,
+                _ => 0,
+            },
+        })
+    }
+
+    /// The names in this folder, read as they are asked for.'''
+
+# --- the daemon: the folder read ---
+
+[[plant]]
+name = "specs viewer: the specs folder's own names are opened through links"
+meant = "a_specs_folder_that_is_a_link_or_goes_through_one_is_refused_wherever_it_leads"
+runs = ["viewer-folder"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/viewer/folder.rs"
+find = "        held = match held.folder(name) {"
+replace = "        held = match Held::project(&named[..=at].iter().fold(project.to_path_buf(), |path, part| path.join(part)), &reading) {"
+
+[[plant]]
+name = "specs viewer: the tree lists dotfiles"
+meant = "the_tree_is_each_folder_by_name_with_each_file_s_size_and_no_dotfile"
+runs = ["viewer-folder"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/viewer/folder.rs"
+find = "                        if !name.starts_with('.') =>"
+replace = "                        if true =>"
+
+[[plant]]
+name = "specs viewer: a dotfile is read"
+meant = "a_path_out_of_the_folder_or_to_what_is_no_file_is_refused_in_words"
+runs = ["viewer-folder"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/viewer/folder.rs"
+find = '''    if named.iter().any(|part| part.starts_with('.')) {'''
+replace = "    if false {"
+
+[[plant]]
+name = "specs viewer: a file over the limit is shown"
+meant = "a_file_over_the_limit_or_whose_answer_would_not_fit_a_frame_is_withheld_with_its_size"
+runs = ["viewer-folder"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/viewer/folder.rs"
+find = "    if size > MAX_FILE {"
+replace = "    if false {"
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/viewer/folder.rs"
+find = '''    // Grown since it was measured.
+    if bytes.len() as u64 > MAX_FILE {'''
+replace = '''    // Grown since it was measured.
+    if false {'''
+
+[[plant]]
+name = "specs viewer: an answer too large for a frame is sent"
+meant = "a_file_over_the_limit_or_whose_answer_would_not_fit_a_frame_is_withheld_with_its_size"
+runs = ["viewer-folder"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/viewer/folder.rs"
+find = "    Ok(if answer > MAX_ANSWER {"
+replace = "    Ok(if false {"
+
+[[plant]]
+name = "specs viewer: a binary file is sent as text"
+meant = "a_file_is_its_text_an_image_its_bytes_and_anything_else_its_size_and_why"
+runs = ["viewer-folder"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/viewer/folder.rs"
+find = '''            Ok(text) if !text.contains('\0') => Content::Text(text),'''
+replace = "            Ok(text) => Content::Text(text),"
+
+[[plant]]
+name = "specs viewer: an image is sent as text"
+meant = "a_file_is_its_text_an_image_its_bytes_and_anything_else_its_size_and_why"
+runs = ["viewer-folder"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/viewer/folder.rs"
+find = "    let encoded = if has_extension(path, &IMAGES) {"
+replace = "    let encoded = if false {"
+
+[[plant]]
+name = "specs viewer: a text is sent other than the file says it"
+meant = "the_fixture_folders_read_as_the_page_s_stand_in_answers_for_them"
+runs = ["viewer-page"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/viewer/folder.rs"
+find = '''            Ok(text) if !text.contains('\0') => Content::Text(text),'''
+replace = '''            Ok(text) if !text.contains('\0') => Content::Text(text.trim_end().to_owned()),'''
+
+[[plant]]
+name = "specs viewer: a tree has no limit of entries"
+meant = "a_tree_of_more_entries_than_the_limit_is_cut_and_says_so"
+runs = ["viewer-folder"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/viewer/folder.rs"
+find = "            shown: MAX_ENTRIES,"
+replace = "            shown: usize::MAX / 2,"
+
+[[plant]]
+name = "specs viewer: a folder's slot is taken after what it holds is walked"
+meant = "a_subfolder_that_spends_the_whole_budget_is_counted_and_nothing_overflows"
+runs = ["viewer-folder"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/viewer/folder.rs"
+find = '''            // The entry's slot is its own before anything inside it is walked.
+            self.shown -= 1;
+            self.bytes -= cost;
+            match kind {
+                Kind::File { size } => entries.push(Entry::File { name, path, size }),
+                _ => {'''
+replace = '''            self.bytes -= cost;
+            match kind {
+                Kind::File { size } => {
+                    self.shown -= 1;
+                    entries.push(Entry::File { name, path, size });
+                }
+                _ => {'''
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/viewer/folder.rs"
+find = '''                    entries.push(Entry::Folder {
+                        name,
+                        path,
+                        entries: inside,
+                    });'''
+replace = '''                    self.shown -= 1;
+                    entries.push(Entry::Folder {
+                        name,
+                        path,
+                        entries: inside,
+                    });'''
+
+[[plant]]
+name = "specs viewer: a walk reads every name a folder holds"
+meant = "a_folder_of_more_names_than_a_walk_reads_is_read_no_further"
+runs = ["viewer-folder"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/viewer/folder.rs"
+find = '''                if !self.reading.charge() {
+                    self.passed(MORE_NAMES);
+                    break;
+                }
+'''
+replace = ""
+
+[[plant]]
+name = "specs viewer: a tree's names are sent whatever they weigh"
+meant = "a_tree_whose_names_would_not_fit_one_answer_is_cut_and_its_answer_fits"
+runs = ["viewer-folder"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/viewer/folder.rs"
+find = '''            if cost > self.bytes {
+                self.passed(TOO_LONG);
+                break;
+            }
+            // The entry's slot is its own before anything inside it is walked.
+            self.shown -= 1;
+            self.bytes -= cost;'''
+replace = '''            // The entry's slot is its own before anything inside it is walked.
+            self.shown -= 1;'''
+
+[[plant]]
+name = "specs viewer: a tree has no limit of depth"
+meant = "a_folder_deeper_than_the_limit_is_shown_empty_and_the_tree_says_so"
+runs = ["viewer-folder"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/viewer/folder.rs"
+find = "                    let inside = if depth + 1 >= MAX_DEPTH {"
+replace = "                    let inside = if false {"
+
+[[plant]]
+name = "specs viewer: a folder holds a file only where it is at the top"
+meant = "a_folder_holds_a_file_where_a_tree_would_show_one"
+runs = ["viewer-folder"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/viewer/folder.rs"
+find = '''    if depth + 1 >= MAX_DEPTH {
+        return false;
+    }'''
+replace = '''    if depth < MAX_DEPTH {
+        return false;
+    }'''
+
+[[plant]]
+name = "specs viewer: a file that is no HTML is opened in the browser"
+meant = "only_a_regular_html_file_is_read_for_the_browser_with_the_assets_it_names"
+runs = ["viewer-folder"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/viewer/folder/browser.rs"
+find = "        if !has_extension(path, &HTML) {"
+replace = "        if false {"
+
+[[plant]]
+name = "specs viewer: the assets an HTML file names are not copied with it"
+meant = "only_a_regular_html_file_is_read_for_the_browser_with_the_assets_it_names"
+runs = ["viewer-folder"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/viewer/folder/browser.rs"
+find = "            for name in assets_named(&files[0].1) {"
+replace = "            for name in assets_named(&[]) {"
+
+[[plant]]
+name = "specs viewer: an HTML file is copied with every asset it names"
+meant = "an_html_file_is_copied_with_so_many_assets_and_no_more"
+runs = ["viewer-folder"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/viewer/folder/browser.rs"
+find = "    while names.len() < MAX_ASSETS {"
+replace = "    while names.len() < usize::MAX {"
+
+[[plant]]
+name = "specs viewer: an HTML file of any size is copied for the browser"
+meant = "only_a_regular_html_file_is_read_for_the_browser_with_the_assets_it_names"
+runs = ["viewer-folder"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/viewer/folder/browser.rs"
+find = '''    if opened.size > MAX_FILE {
+        return Err(too_large(opened.size));'''
+replace = '''    if false {
+        return Err(too_large(opened.size));'''
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/viewer/folder/browser.rs"
+find = '''    if bytes.len() as u64 > MAX_FILE {
+        return Err(too_large(bytes.len() as u64));'''
+replace = '''    if false {
+        return Err(too_large(bytes.len() as u64));'''
+
+[[plant]]
+name = "specs viewer: a name the walk passes over is not counted"
+meant = "a_folder_of_names_passed_over_is_read_no_further_than_the_budget"
+runs = ["viewer-folder"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/viewer/folder.rs"
+find = '''            for named in names {
+                if !self.reading.charge() {'''
+replace = '''            for named in names {
+                if matches!(named, Ok(None)) {
+                    continue;
+                }
+                if !self.reading.charge() {'''
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/viewer/folder.rs"
+find = '''    for named in names {
+        if !reading.charge() {'''
+replace = '''    for named in names {
+        if matches!(named, Ok(None)) {
+            continue;
+        }
+        if !reading.charge() {'''
+
+[[plant]]
+name = "specs viewer: a name the door passes over is never given"
+meant = "a_name_passed_over_is_still_a_name_read"
+runs = ["viewer-folder"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/viewer/door/unix.rs"
+find = '''        else {
+            return Some(Ok(None));
+        };
+        if name == "." || name == ".." {'''
+replace = '''        else {
+            return self.next();
+        };
+        if name == "." || name == ".." {'''
+
+[[plant]]
+name = "specs viewer: a short (8.3) name is no short name on Windows"
+meant = "a_short_name_is_one_with_a_tilde_and_a_digit_on_windows"
+runs = ["viewer-folder"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/viewer/names.rs"
+find = '''    windows
+        && base
+'''
+replace = '''    !windows
+        && base
+'''
+
+[[plant]]
+name = "specs viewer: a short (8.3) name is read where dotfiles are left out"
+meant = "a_path_through_a_dotfile_or_on_windows_a_short_name_is_left_out"
+runs = ["viewer-folder"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/viewer/folder.rs"
+find = "    if let Some(part) = named.iter().find(|part| is_short_alias(part, windows)) {"
+replace = "    if let Some(part) = named.iter().find(|_| windows && false) {"
+
+# --- the daemon: the copy the browser is given ---
+
+[[plant]]
+name = "specs viewer: the browser is given the original's path, not a copy of what was checked"
+meant = "the_browser_is_given_a_copy_of_what_was_checked_whatever_the_original_becomes"
+runs = ["viewer-page"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/viewer.rs"
+find = '''            copies::place(&home, &found, kept_for)
+'''
+replace = '''            copies::place(&home, &found, kept_for)
+                .map(|_| directory.join(&name).join(&read))
+'''
+
+[[plant]]
+name = "specs viewer: the copies are never removed"
+meant = "copies_kept_their_time_are_removed_at_the_next_opening"
+runs = ["viewer-folder"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/viewer/copies.rs"
+find = '''    sweep(&root, kept_for);
+'''
+replace = ""
+
+[[plant]]
+name = "specs viewer: a copy is made for every user of the machine to read"
+meant = "a_copy_is_a_new_folder_of_its_own_with_its_files_where_they_were"
+runs = ["viewer-folder"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/viewer/copies/unix.rs"
+find = '''    pub(super) fn new_child(&self, name: &str) -> Result<Option<Self>, Refused> {
+        match mkdirat(&self.fd, name, Mode::RWXU) {'''
+replace = '''    pub(super) fn new_child(&self, name: &str) -> Result<Option<Self>, Refused> {
+        match mkdirat(&self.fd, name, Mode::RWXU.union(Mode::RGRP).union(Mode::XGRP).union(Mode::ROTH).union(Mode::XOTH)) {'''
+
+[[plant]]
+name = "specs viewer: every opening writes into one copy"
+meant = "a_copy_is_a_new_folder_of_its_own_with_its_files_where_they_were"
+runs = ["viewer-folder"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/viewer/copies.rs"
+find = "        match root.new_child(&name) {"
+replace = "        match root.new_child(if name.is_empty() { &name } else { \"copy\" }) {"
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/viewer/copies.rs"
+find = "            Ok(None) => {}"
+replace = "            Ok(None) => return root.child(\"copy\").map_err(|_| \"taken\".to_owned()),"
+
+[[plant]]
+name = "specs viewer: the copies' folder is reached through a link"
+meant = "a_link_left_on_the_way_to_the_copies_is_refused_and_where_it_leads_is_left_alone"
+runs = ["viewer-folder"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/viewer/copies/unix.rs"
+find = '''    .union(OFlags::NOFOLLOW)
+    .union(OFlags::CLOEXEC);'''
+replace = '''    .union(OFlags::CLOEXEC);'''
+
+[[plant]]
+name = "specs viewer: a link on the copies' way is said to be no folder"
+meant = "a_copies_folder_left_a_link_is_refused_and_nothing_where_it_leads_is_removed"
+runs = ["viewer-page"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/viewer/copies/unix.rs"
+find = "                    Ok(seen) if FileType::from_raw_mode(seen.st_mode) == FileType::Symlink => {"
+replace = "                    Ok(seen) if FileType::from_raw_mode(seen.st_mode) == FileType::Fifo => {"
+
+[[plant]]
+name = "specs viewer: a link in the copies' folder is taken for what it leads to"
+meant = "a_link_in_the_copies_folder_is_removed_as_itself_and_never_followed"
+runs = ["viewer-folder"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/viewer/copies/unix.rs"
+find = "            let Ok(seen) = statat(&self.fd, name, AtFlags::SYMLINK_NOFOLLOW) else {"
+replace = "            let Ok(seen) = statat(&self.fd, name, AtFlags::empty()) else {"
+
+[[plant]]
+name = "specs viewer: an HTML file read too late for the page is opened all the same"
+meant = "an_html_file_read_too_late_for_the_page_is_not_opened"
+runs = ["viewer-page"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/viewer.rs"
+find = "    if asked.elapsed() > page.specs.open_within {"
+replace = "    if false {"
+
+# --- the daemon: the operations ---
+
+[[plant]]
+name = "specs viewer: the folder a project names is passed over for .specs"
+meant = "the_folder_a_project_names_is_the_one_read_and_off_or_on_does_not_matter"
+runs = ["viewer-page"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/viewer.rs"
+find = "        .and_then(|specs| specs.folder.clone())"
+replace = "        .and_then(|_| None)"
+
+[[plant]]
+name = "specs viewer: the folder the app names for every project is passed over for .specs"
+meant = "a_project_that_names_no_folder_is_read_in_the_one_the_app_names_on_or_off"
+runs = ["viewer-page"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/viewer.rs"
+find = "        .unwrap_or_else(|| app.folder_or_default().to_owned())"
+replace = "        .unwrap_or_else(|| AppSpecs::default().folder_or_default().to_owned())"
+
+[[plant]]
+name = "specs viewer: a look at the folder runs on the daemon's executor"
+meant = "a_slow_look_at_the_folder_holds_up_nothing_else_of_the_daemon"
+runs = ["viewer-page"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/viewer.rs"
+find = '''            tokio::task::spawn_blocking(move || {
+                let _running = running;
+                before();
+                look()
+            })
+            .await'''
+replace = '''            std::future::ready(Ok::<_, tokio::task::JoinError>({
+                let _running = running;
+                before();
+                look()
+            }))
+            .await'''
+
+[[plant]]
+name = "specs viewer: looks at the folder run without limit"
+meant = "so_many_looks_at_the_folder_run_at_once_and_one_more_is_refused_until_one_ends"
+runs = ["viewer-page"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/viewer.rs"
+find = "        if jobs.fetch_add(1, Ordering::SeqCst) < MAX_JOBS {"
+replace = "        if jobs.fetch_add(1, Ordering::SeqCst) < usize::MAX {"
+
+[[plant]]
+name = "specs viewer: a look is counted only until its thread starts"
+meant = "so_many_looks_at_the_folder_run_at_once_and_one_more_is_refused_until_one_ends"
+runs = ["viewer-page"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/viewer.rs"
+find = '''            let running = admitted?;
+            tokio::task::spawn_blocking(move || {
+                let _running = running;
+'''
+replace = '''            drop(admitted?);
+            tokio::task::spawn_blocking(move || {
+'''
+
+[[plant]]
+name = "specs viewer: whether a folder holds a file is looked at by every one asking"
+meant = "whether_the_folder_holds_a_file_is_looked_at_once_however_many_ask_meanwhile"
+runs = ["viewer-page"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/viewer.rs"
+find = '''        .clone();
+    let answered = looking.clone().await;
+'''
+replace = '''        .clone();
+    page.specs.looking.borrow_mut().remove(&key);
+    let answered = looking.clone().await;
+'''
+
+[[plant]]
+name = "specs viewer: whether a folder holds a file is never remembered"
+meant = "whether_the_folder_holds_a_file_is_remembered_for_a_moment_which_is_said"
+runs = ["viewer-page"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/viewer.rs"
+find = "        let again = self.window.checked_sub(at.elapsed())?;"
+replace = "        let again = Duration::ZERO.checked_sub(at.elapsed())?;"
+
+[[plant]]
+name = "specs viewer: whether a folder holds a file is remembered for ever"
+meant = "a_folder_that_is_not_there_is_found_empty_and_its_files_are_refused"
+runs = ["viewer-page"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/viewer.rs"
+find = "        let again = self.window.checked_sub(at.elapsed())?;"
+replace = "        let again = Duration::MAX.checked_sub(at.elapsed())?;"
+
+[[plant]]
+name = "specs viewer: an answer from memory says nothing of when the folder is read again"
+meant = "whether_the_folder_holds_a_file_is_remembered_for_a_moment_which_is_said"
+runs = ["viewer-page"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/viewer.rs"
+find = '''            "readAgainIn".to_owned(),'''
+replace = '''            "remembered".to_owned(),'''
+
+[[plant]]
+name = "specs viewer: reading the folder wakes the dispatcher"
+meant = "the_operations_that_only_read_wake_nothing"
+runs = ["viewer-proto-page", "viewer-page"]
+
+[[plant.edit]]
+file = "crates/cf-proto/src/page.rs"
+find = '''                | Self::SpecsTree
+'''
+replace = ""
+
+[[plant]]
+name = "specs viewer: opening a file in the browser wakes the dispatcher"
+meant = "the_operations_that_only_read_wake_nothing"
+runs = ["viewer-proto-page", "viewer-page"]
+
+[[plant.edit]]
+file = "crates/cf-proto/src/page.rs"
+find = '''                | Self::SpecsOpen
+'''
+replace = ""
+
+[[plant]]
+name = "specs viewer: the app does not forward what the viewer asks"
+meant = "the_operations_are_the_ones_the_app_forwards"
+runs = ["viewer-proto-page"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/commands.rs"
+find = '''    "specs.open",
+'''
+replace = ""
+
+# --- the daemon: the opener ---
+
+[[plant]]
+name = "specs viewer: Explorer is given a path it splits at a comma"
+meant = "each_system_opens_the_one_file_with_its_own_program_and_one_argument"
+runs = ["viewer-folder"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/viewer/opener.rs"
+find = '''                args: vec![OsString::from(format!("\"{}\"", file.to_string_lossy()))],'''
+replace = '''                args: vec![OsString::from(format!("{}", file.to_string_lossy()))],'''
+
+[[plant]]
+name = "specs viewer: whatever Explorer ends with is taken for its success"
+meant = "what_the_opener_ended_with_says_whether_it_opened_the_file"
+runs = ["viewer-folder"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/viewer/opener.rs"
+find = "        Handed::Ended(Some(1)) if system == System::Windows => Ok(()),"
+replace = "        Handed::Ended(Some(_)) if system == System::Windows => Ok(()),"
+
+[[plant]]
+name = "specs viewer: the code an opener ends with is not read"
+meant = "what_the_opener_ended_with_says_whether_it_opened_the_file"
+runs = ["viewer-folder"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/viewer/opener.rs"
+find = "        Handed::Running | Handed::Ended(Some(0)) => Ok(()),"
+replace = "        Handed::Running | Handed::Ended(_) => Ok(()),"
+
+[[plant]]
+name = "specs viewer: an opener still running when it is let go is ended"
+meant = "a_program_still_running_is_let_go_and_runs_on_to_its_end"
+runs = ["viewer-hand-over"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/hand_over.rs"
+find = '''            tokio::spawn(async move {
+                let _ = child.wait().await;
+            });'''
+replace = "            let _ = child.start_kill();"
+
+[[plant]]
+name = "specs viewer: an opener is waited for to its end"
+meant = "a_program_still_running_is_let_go_and_runs_on_to_its_end"
+runs = ["viewer-hand-over"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/hand_over.rs"
+find = "    match tokio::time::timeout(within, child.wait()).await {"
+replace = "    match Ok::<_, ()>(child.wait().await) {"
+
+# --- the daemon on Windows: run there, through `cargo xtask windows` ---
+
+[[plant]]
+name = "specs viewer: the copies' folder may be a junction on Windows"
+meant = "a_junction_left_on_the_way_to_the_copies_is_refused_and_where_it_leads_is_left_alone"
+runs = ["viewer-windows"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/viewer/copies/windows.rs"
+find = '''        if metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+            return Err(Refused::Link);'''
+replace = '''        if false {
+            return Err(Refused::Link);'''
+
+[[plant]]
+name = "specs viewer: a folder's names are listed once on Windows, and a file written since is none"
+meant = "a_file_and_a_folder_written_while_the_folder_is_open_are_read"
+runs = ["viewer-windows"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/viewer/door/windows.rs"
+find = "            if listed.look == look {"
+replace = "            if listed.look <= look {"
+
+[[plant]]
+name = "specs viewer: a folder is listed again for each name it does not hold on Windows"
+meant = "an_opening_lists_a_folder_once_however_many_names_are_asked_of_it"
+runs = ["viewer-windows"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/viewer/door/windows.rs"
+find = '''            if listed.look == look {
+                return Ok(false);
+            }
+'''
+replace = ""
+
+[[plant]]
+name = "specs viewer: a listing takes nothing from the look's budget on Windows"
+meant = "an_opening_lists_a_folder_once_however_many_names_are_asked_of_it"
+runs = ["viewer-windows"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/viewer/door/windows.rs"
+find = '''            if !self.charge() {
+                break;
+            }
+'''
+replace = ""
+
+[[plant]]
+name = "specs viewer: a name is matched whatever its case on Windows"
+meant = "a_name_in_another_case_than_the_folder_s_is_not_found"
+runs = ["viewer-windows"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/viewer/door/windows.rs"
+find = "            if listed.names.contains(name) {"
+replace = "            if listed.names.contains(&name.to_uppercase()) {"
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/viewer/door/windows.rs"
+find = "            names.insert(entry?.file_name().to_string_lossy().into_owned());"
+replace = "            names.insert(entry?.file_name().to_string_lossy().to_uppercase());"
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/viewer/door/windows.rs"
+find = "        let found = names.contains(name);"
+replace = "        let found = names.contains(&name.to_uppercase());"
+
+[[plant]]
+name = "specs viewer: a file is read by a short name on Windows"
+meant = "a_short_name_given_by_hand_is_no_name_the_folder_holds"
+runs = ["viewer-windows-admin"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/viewer/door/windows.rs"
+find = '''        self.lists(name)?;
+        let path = self.path.join(name);
+        match kind_of(&fs::symlink_metadata(&path)?) {'''
+replace = '''        let path = self.path.join(name);
+        match kind_of(&fs::symlink_metadata(&path)?) {'''
+
+[[plant]]
+name = "specs viewer: a folder is opened by a short name on Windows"
+meant = "a_short_name_given_by_hand_is_no_name_the_folder_holds"
+runs = ["viewer-windows-admin"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/viewer/door/windows.rs"
+find = '''        self.lists(name)?;
+        self.listed_folder(name)'''
+replace = '''        self.listed_folder(name)'''
+
+[[plant]]
+name = "specs viewer: a held folder may be moved aside on Windows"
+meant = "a_held_folder_is_not_moved_aside_and_a_save_in_it_goes_on"
+runs = ["viewer-windows"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/viewer/door/windows.rs"
+find = "const LISTED: u32 = FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES;"
+replace = "const LISTED: u32 = FILE_READ_ATTRIBUTES;"
+
+[[plant]]
+name = "specs viewer: a file being read keeps an editor from saving it on Windows"
+meant = "a_held_folder_is_not_moved_aside_and_a_save_in_it_goes_on"
+runs = ["viewer-windows"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/viewer/door/windows.rs"
+find = "const FILE_SHARED: u32 = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;"
+replace = "const FILE_SHARED: u32 = FILE_SHARE_READ | FILE_SHARE_WRITE;"
+
+[[plant]]
+name = "specs viewer: a name the door passes over on Windows is never given"
+meant = "a_name_passed_over_is_still_a_name_read"
+runs = ["viewer-windows"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/viewer/door/windows.rs"
+find = '''        else {
+            return Some(Ok(None));
+        };
+        let metadata'''
+replace = '''        else {
+            return self.next();
+        };
+        let metadata'''
+
+# --- the page: the tree, the registry, the links ---
+
+[[plant]]
+name = "specs viewer: the specs are listed by name, not in the registry's order"
+meant = "lists the registry, the specs in its order by title"
+runs = ["viewer-arranging", "viewer-tree"]
+
+[[plant.edit]]
+file = "app/ui/core/specs-folder.js"
+find = "    .sort((a, b) => rank(a) - rank(b) || byName(a, b))"
+replace = "    .sort(byName)"
+
+[[plant]]
+name = "specs viewer: a spec's research and interviews are listed with the rest"
+meant = "lists inside a spec its spec, its research and interviews by number"
+runs = ["viewer-arranging", "viewer-tree"]
+
+[[plant.edit]]
+file = "app/ui/core/specs-folder.js"
+find = "      if (found !== null) return [1 + at, Number(found[1])]"
+replace = "      if (found !== null) return [NUMBERED.length + 1, 0]"
+
+[[plant]]
+name = "specs viewer: the page lists dotfiles it is given"
+meant = "leaves dotfiles out at every level"
+runs = ["viewer-arranging", "viewer-tree"]
+
+[[plant.edit]]
+file = "app/ui/core/specs-folder.js"
+find = "const undotted = (entries) => entries.filter((entry) => !entry.name.startsWith('.'))"
+replace = "const undotted = (entries) => [...entries]"
+
+[[plant]]
+name = "specs viewer: a subfolder of a spec is listed open"
+meant = "lists the registry, the specs by the registry, the rest by name and assets last, folded"
+runs = ["viewer-tree"]
+
+[[plant.edit]]
+file = "app/ui/core/specs-folder.js"
+find = "    ? { ...listed(entry), open: false, entries: byNames(entry.entries) }"
+replace = "    ? { ...listed(entry), open: true, entries: byNames(entry.entries) }"
+
+[[plant]]
+name = "specs viewer: assets are listed open"
+meant = "lists the registry, the specs by the registry, the rest by name and assets last, folded"
+runs = ["viewer-arranging", "viewer-tree"]
+
+[[plant.edit]]
+file = "app/ui/core/specs-folder.js"
+find = "      .map((assets) => ({ ...listed(assets), open: false, entries: byNames(assets.entries) })),"
+replace = "      .map((assets) => ({ ...listed(assets), open: true, entries: byNames(assets.entries) })),"
+
+[[plant]]
+name = "specs viewer: it opens on the first spec though there is a registry"
+meant = "opens on the registry, else on the first spec"
+runs = ["viewer-arranging", "viewer-registry"]
+
+[[plant.edit]]
+file = "app/ui/core/specs-folder.js"
+find = '''  if (arranged.some((entry) => entry.path === REGISTRY)) return REGISTRY
+'''
+replace = ""
+
+[[plant]]
+name = "specs viewer: any table is taken for the registry"
+meant = "is none where the text holds no such table"
+runs = ["viewer-arranging", "viewer-registry"]
+
+[[plant.edit]]
+file = "app/ui/core/specs-folder.js"
+find = "        .join('|') === COLUMNS.join('|') &&"
+replace = "        .join('|') !== '' &&"
+
+[[plant]]
+name = "specs viewer: the registry's rule is read by a pattern that reads a line again and again"
+meant = "reads a line built to make a pattern read it again and again in a moment"
+runs = ["viewer-arranging"]
+
+[[plant.edit]]
+file = "app/ui/core/specs-folder.js"
+find = "      isRule(lines[at + 1] ?? '', COLUMNS.length),"
+replace = "      /^\\s*\\|?\\s*:?-+:?\\s*(\\|\\s*:?-+:?\\s*)*\\|?\\s*$/.test(lines[at + 1] ?? ''),"
+
+[[plant]]
+name = "specs viewer: the registry's cell of escaped pipes is copied again at each pipe"
+meant = "reads a line built to make a pattern read it again and again in a moment"
+runs = ["viewer-arranging"]
+
+[[plant.edit]]
+file = "app/ui/core/specs-folder.js"
+find = '''function cells(row) {
+  const inner = row.trim().replace(/^\|/, '').replace(/\|$/, '')
+  const found = []
+  let pieces = []
+  let from = 0
+  for (let at = inner.indexOf('|'); at !== -1; at = inner.indexOf('|', at + 1)) {
+    if (inner[at - 1] === '\\') {
+      pieces.push(inner.slice(from, at - 1), '|')
+    } else {
+      pieces.push(inner.slice(from, at))
+      found.push(pieces.join(''))
+      pieces = []
+    }
+    from = at + 1
+  }
+  pieces.push(inner.slice(from))
+  found.push(pieces.join(''))
+  return found.map((cell) => cell.trim())
+}'''
+replace = '''function cells(row) {
+  const found = []
+  for (const piece of row.trim().replace(/^\|/, '').replace(/\|$/, '').split('|')) {
+    if (found.at(-1)?.endsWith('\\'))
+      found[found.length - 1] = `${found.at(-1).slice(0, -1)}|${piece}`
+    else found.push(piece)
+  }
+  return found.map((cell) => cell.trim())
+}'''
+
+[[plant]]
+name = "specs viewer: a Markdown cell of escaped pipes is read again at each pipe"
+meant = "built to make a parser slow is read in a moment"
+runs = ["viewer-registry"]
+
+[[plant.edit]]
+file = "app/ui/core/markdown.js"
+find = '''function cells(row) {
+  const inner = row.trim().replace(/^\|/, '').replace(/\|$/, '')
+  const found = []
+  let from = 0
+  for (let at = inner.indexOf('|'); at !== -1; at = inner.indexOf('|', at + 1)) {
+    if (inner[at - 1] === '\\') continue
+    found.push(inner.slice(from, at))
+    from = at + 1
+  }
+  found.push(inner.slice(from))
+  return found.map((cell) => cell.trim())
+}'''
+replace = '''function cells(row) {
+  const found = []
+  for (const piece of row.trim().replace(/^\|/, '').replace(/\|$/, '').split('|')) {
+    if (found.at(-1)?.endsWith('\\')) found[found.length - 1] += `|${piece}`
+    else found.push(piece)
+  }
+  return found.map((cell) => cell.trim())
+}'''
+
+[[plant]]
+name = "specs viewer: a link climbs above the folder and down onto a file of it"
+meant = "leads nowhere out of the folder"
+runs = ["viewer-arranging"]
+
+[[plant.edit]]
+file = "app/ui/core/specs-folder.js"
+find = "      if (names.length === 0) return null"
+replace = "      if (names.length === 0) continue"
+
+[[plant]]
+name = "specs viewer: a link to a file the folder does not hold is followed"
+meant = "leads nowhere out of the folder"
+runs = ["viewer-arranging", "viewer-markdown"]
+
+[[plant.edit]]
+file = "app/ui/core/specs-folder.js"
+find = "  return tries.find((target) => target !== null && files.has(target)) ?? null"
+replace = "  return tries.find((target) => target !== null) ?? null"
+
+# --- the page: the button, the menu, the viewer ---
+
+[[plant]]
+name = "specs viewer: the board walks the whole tree to show its button"
+meant = "is hidden with no specs folder, hidden while the folder is empty"
+runs = ["viewer-button"]
+
+[[plant.edit]]
+file = "app/ui/core/app.js"
+find = "  const said = await daemon('specs.present', { project }).catch(() => ({ present: false }))"
+replace = "  const said = await daemon('specs.tree', { project }).then(() => ({ present: true }), () => ({ present: false }))"
+
+[[plant]]
+name = "specs viewer: the button keeps what the first read said"
+meant = "a folder the daemon refuses shows none"
+runs = ["viewer-button"]
+
+[[plant.edit]]
+file = "app/ui/core/app.js"
+find = "  state.specsPresent = { project, present: said.present === true }"
+replace = "  state.specsPresent = { project, present: state.specsPresent?.present || said.present === true }"
+
+[[plant]]
+name = "specs viewer: the board waits for whether the specs folder holds a file"
+meant = "never holds up the board"
+runs = ["viewer-button"]
+
+[[plant.edit]]
+file = "app/ui/core/app.js"
+find = "      if (selected !== null) void readPresence(selected)"
+replace = "      if (selected !== null) await readPresence(selected)"
+
+[[plant]]
+name = "specs viewer: an answer that comes late is shown for whatever the board shows"
+meant = "never holds up the board"
+runs = ["viewer-button"]
+
+[[plant.edit]]
+file = "app/ui/core/app.js"
+find = "  if (read !== presenceReads || state.board?.project.id !== project) return"
+replace = "  if (read === null) return"
+
+[[plant]]
+name = "specs viewer: an answer from the daemon's memory is the last the page asks for"
+meant = "asks once more when the daemon answered from memory"
+runs = ["viewer-button"]
+
+[[plant.edit]]
+file = "app/ui/core/app.js"
+find = "  if (typeof said.readAgainIn === 'number') {"
+replace = "  if (typeof said.readAgainIn === 'never') {"
+
+[[plant]]
+name = "specs viewer: the menu opens the viewer on the project the board shows"
+meant = "opens the viewer on its project, shown first"
+runs = ["viewer-menu"]
+
+[[plant.edit]]
+file = "app/ui/core/app.js"
+find = '''    if (!(await showProject(id))) return
+    await specsViewer.open('''
+replace = "    await specsViewer.open("
+
+[[plant]]
+name = "specs viewer: Specs… in the menu opens nothing"
+meant = "opens the viewer on its project, shown first"
+runs = ["viewer-menu"]
+
+[[plant.edit]]
+file = "app/ui/core/project-menu.js"
+find = "      specs: { dialog: specs, open: (id) => page.openSpecs(id), for: null },"
+replace = "      specs: { dialog: specs, open: async () => {}, for: null },"
+
+[[plant]]
+name = "specs viewer: every status has the same chip"
+meant = "shows each spec as a row with its status chip"
+runs = ["viewer-registry"]
+
+[[plant.edit]]
+file = "app/ui/core/specs-viewer.js"
+find = "      chip.dataset.status = STATUSES.includes(status) ? status : 'other'"
+replace = "      chip.dataset.status = 'other'"
+
+[[plant]]
+name = "specs viewer: a progress bar is full whatever the progress"
+meant = "shows each spec as a row with its status chip"
+runs = ["viewer-registry"]
+
+[[plant.edit]]
+file = "app/ui/core/specs-viewer.js"
+find = "  const share = row.total === 0 ? 0 : Math.min(1, row.done / row.total)"
+replace = "  const share = 1"
+
+[[plant]]
+name = "specs viewer: a registry row opens nothing"
+meant = "shows each spec as a row with its status chip"
+runs = ["viewer-registry"]
+
+[[plant.edit]]
+file = "app/ui/core/specs-viewer.js"
+find = "        if (opens !== null) void this.#choose(opens)"
+replace = "        if (opens === null) void this.#choose(opens)"
+
+[[plant]]
+name = "specs viewer: every row of a registry of thousands is drawn"
+meant = "of thousands of specs draws its first 500 rows"
+runs = ["viewer-registry"]
+
+[[plant.edit]]
+file = "app/ui/core/specs-viewer.js"
+find = "    for (const row of registry.rows.slice(0, MAX_ROWS)) {"
+replace = "    for (const row of registry.rows) {"
+
+[[plant]]
+name = "specs viewer: Refresh opens on the registry again"
+meant = "reads the folder again and the file shown"
+runs = ["viewer-refresh"]
+
+[[plant.edit]]
+file = "app/ui/core/specs-viewer.js"
+find = "    await this.#read(this.#project, this.#chosen)"
+replace = "    await this.#read(this.#project, null)"
+
+[[plant]]
+name = "specs viewer: Refresh reads nothing after a read that failed"
+meant = "reads the folder again after a read that failed"
+runs = ["viewer-refresh"]
+
+[[plant.edit]]
+file = "app/ui/core/specs-viewer.js"
+find = "    if (this.#project === null) return"
+replace = "    if (this.#shown === null) return"
+
+[[plant]]
+name = "specs viewer: a file chosen again is not read again"
+meant = "reads the folder again and the file shown"
+runs = ["viewer-refresh"]
+
+[[plant.edit]]
+file = "app/ui/core/specs-viewer.js"
+find = "      const file = button(entry.label, 'tree-file', () => void this.#choose(entry.path))"
+replace = '''      const file = button(entry.label, 'tree-file', () => {
+        if (this.#chosen !== entry.path) void this.#choose(entry.path)
+      })'''
+
+[[plant]]
+name = "specs viewer: Mermaid fences are left as code"
+meant = "draws its Mermaid diagram, and a broken one shows its source"
+runs = ["viewer-markdown"]
+
+[[plant.edit]]
+file = "app/ui/core/specs-viewer.js"
+find = '''          if (lang !== 'mermaid') return null
+'''
+replace = '''          if (lang !== 'mermaid' || code !== null) return null
+'''
+
+[[plant]]
+name = "specs viewer: every diagram of a document is drawn"
+meant = "of many diagrams draws its first 50"
+runs = ["viewer-markdown"]
+
+[[plant.edit]]
+file = "app/ui/core/specs-viewer.js"
+find = "          return diagrams <= MAX_DIAGRAMS ? diagram(code, signal) : undrawn(code, MAX_DIAGRAMS)"
+replace = "          return diagram(code, signal)"
+
+[[plant]]
+name = "specs viewer: a diagram still to draw when its file is left is drawn all the same"
+meant = "of many diagrams draws its first 50"
+runs = ["viewer-markdown"]
+
+[[plant.edit]]
+file = "app/ui/core/diagrams.js"
+find = "  queue = queue.then(turn).then(() => (signal?.aborted ? undefined : draw(figure, code, signal)))"
+replace = "  queue = queue.then(turn).then(() => draw(figure, code, signal))"
+
+[[plant.edit]]
+file = "app/ui/core/diagrams.js"
+find = '''    const drawer = await mermaid()
+    if (signal?.aborted) return
+'''
+replace = '''    const drawer = await mermaid()
+'''
+
+[[plant]]
+name = "specs viewer: another file chosen leaves the diagrams of the one shown to draw"
+meant = "of many diagrams draws its first 50"
+runs = ["viewer-markdown"]
+
+[[plant.edit]]
+file = "app/ui/core/specs-viewer.js"
+find = '''    const read = ++this.#reads
+    this.#stopDrawing()
+    this.#chosen = path
+'''
+replace = '''    const read = ++this.#reads
+    this.#chosen = path
+'''
+
+[[plant]]
+name = "specs viewer: the viewer shut leaves the diagrams of the file shown to draw"
+meant = "of many diagrams draws its first 50"
+runs = ["viewer-markdown"]
+
+[[plant.edit]]
+file = "app/ui/core/specs-viewer.js"
+find = '''      this.#reads += 1
+      this.#stopDrawing()
+      this.#project = null
+'''
+replace = '''      this.#reads += 1
+      this.#project = null
+'''
+
+[[plant]]
+name = "specs viewer: the page is given no turn between two diagrams"
+meant = "of many diagrams draws its first 50"
+runs = ["viewer-markdown"]
+
+[[plant.edit]]
+file = "app/ui/core/diagrams.js"
+find = "  queue = queue.then(turn).then("
+replace = "  queue = queue.then("
+
+[[plant]]
+name = "specs viewer: a file left before it came is drawn"
+meant = "chosen and left before it came is never drawn"
+runs = ["viewer-markdown"]
+
+[[plant.edit]]
+file = "app/ui/core/specs-viewer.js"
+find = '''      const file = answered ?? (await this.#file(shown.project, path))
+      if (read !== this.#reads) return
+      const drawn = this.#draw(file)
+'''
+replace = '''      const file = answered ?? (await this.#file(shown.project, path))
+      const drawn = this.#draw(file)
+      if (read !== this.#reads) return
+'''
+
+[[plant]]
+name = "specs viewer: an image is drawn as markup"
+meant = "show text plain in monospace, images as images"
+runs = ["viewer-files"]
+
+[[plant.edit]]
+file = "app/ui/core/specs-viewer.js"
+find = "      const image = element('img', 'specs-image')"
+replace = '''      const image = element('div', 'specs-image')
+      image.innerHTML = atob(file.image)'''
+
+# --- the page: an HTML file, which never runs in the app ---
+
+[[plant]]
+name = "specs viewer: an HTML file is put in the page as markup"
+meant = "in HTML runs nothing in the app"
+runs = ["viewer-hostile"]
+
+[[plant.edit]]
+file = "app/ui/core/specs-viewer.js"
+find = "    if (kind === 'html') return this.#htmlCard(file)"
+replace = '''    if (kind === 'html') {
+      const page = element('div', 'spec-html')
+      page.innerHTML = file.text
+      return page
+    }'''
+
+[[plant]]
+name = "specs viewer: an HTML file's title is put in the page as markup"
+meant = "in HTML has its title read as text"
+runs = ["viewer-hostile"]
+
+[[plant.edit]]
+file = "app/ui/core/specs-viewer.js"
+find = "      element('h1', 'spec-html-title', titleOf(file.text) || name),"
+replace = '''      Object.assign(element('h1', 'spec-html-title'), {
+        innerHTML: file.text.match(/<title>([\s\S]*?)<\/title>/)?.[1] || name,
+      }),'''
+
+[[plant]]
+name = "specs viewer: the browser is asked to open the file by its name alone"
+meant = "shows as a card of its title, name and size, and opens in the browser from it"
+runs = ["viewer-html"]
+
+[[plant.edit]]
+file = "app/ui/core/specs-viewer.js"
+find = "          await this.#page.daemon('specs.open', { project, path: file.path })"
+replace = "          await this.#page.daemon('specs.open', { project, path: name })"
+
+# --- the page: Markdown, every word text ---
+
+[[plant]]
+name = "specs viewer: a word of Markdown is read as markup"
+meant = "in Markdown stays words"
+runs = ["viewer-hostile"]
+
+[[plant.edit]]
+file = "app/ui/core/markdown.js"
+find = "    if ('text' in span) return span.text"
+replace = '''    if ('text' in span) {
+      const markup = element('span')
+      markup.innerHTML = span.text
+      return markup
+    }'''
+
+[[plant]]
+name = "specs viewer: every link of Markdown is followed"
+meant = "in Markdown stays words"
+runs = ["viewer-hostile"]
+
+[[plant.edit]]
+file = "app/ui/core/markdown.js"
+find = "    const follow = 'link' in span ? options.link?.(span.href) : null"
+replace = "    const follow = 'link' in span ? () => {} : null"
+
+[[plant]]
+name = "specs viewer: a task's box is its words"
+meant = "shows its frontmatter, headings, task boxes"
+runs = ["viewer-markdown"]
+
+[[plant.edit]]
+file = "app/ui/core/markdown.js"
+find = "    const box = TASK.exec(item[3])"
+replace = "    const box = null"
+
+[[plant]]
+name = "specs viewer: a spec's headings are bold lines"
+meant = "shows its frontmatter, headings, task boxes"
+runs = ["viewer-markdown"]
+
+[[plant.edit]]
+file = "app/ui/core/markdown.js"
+find = "    const heading = element(options.levels ? `h${block.level}` : 'p', 'md-heading')"
+replace = "    const heading = element('p', 'md-heading')"
+
+[[plant]]
+name = "specs viewer: lists and quotes nest past what a page's stack holds"
+meant = "built to make a parser slow is read in a moment"
+runs = ["viewer-registry"]
+
+[[plant.edit]]
+file = "app/ui/core/markdown.js"
+find = "  const nests = depth < MAX_NESTING"
+replace = "  const nests = true"
+
+# --- the page: Mermaid, and the app's policy ---
+
+[[plant]]
+name = "specs viewer: a label keeps what loads while Mermaid lays it out"
+meant = "diagram makes no request leave the page while Mermaid lays it out"
+runs = ["viewer-policy"]
+
+[[plant.edit]]
+file = "app/ui/core/diagrams.js"
+find = '''      dompurifyConfig: LABELS,
+'''
+replace = ""
+
+[[plant]]
+name = "specs viewer: a node's image named by a quoted key keeps its address"
+meant = "diagram makes no request leave the page while Mermaid lays it out"
+runs = ["viewer-policy"]
+
+[[plant.edit]]
+file = "app/ui/core/diagrams.js"
+find = '''const NODE_IMAGE = /((?:\bimg|"img"|'img')\s*:\s*)("[^"]*"|'[^']*'|[^,}\s]*)/gi'''
+replace = '''const NODE_IMAGE = /(\bimg\s*:\s*)("[^"]*"|'[^']*'|[^,}\s]*)/gi'''
+
+[[plant]]
+name = "specs viewer: a node's image keeps its address"
+meant = "diagram makes no request leave the page while Mermaid lays it out"
+runs = ["viewer-policy"]
+
+[[plant.edit]]
+file = "app/ui/core/diagrams.js"
+find = "    const { svg } = await drawer.render(id, quieted)"
+replace = "    const { svg } = await drawer.render(id, code)"
+
+[[plant]]
+name = "specs viewer: a diagram sets its own colours and CSS"
+meant = "in Markdown stays words"
+runs = ["viewer-hostile"]
+
+[[plant.edit]]
+file = "app/ui/core/diagrams.js"
+find = '''  'themeVariables',
+  'themeCSS',
+'''
+replace = ""
+
+[[plant]]
+name = "specs viewer: a drawing keeps what runs or loads"
+meant = "drawing is checked before it joins the page"
+runs = ["viewer-hostile"]
+
+[[plant.edit]]
+file = "app/ui/core/diagrams.js"
+find = "    if (DROPPED.has(tag)) {"
+replace = "    if (false) {"
+
+[[plant]]
+name = "specs viewer: a drawing keeps its handlers"
+meant = "drawing is checked before it joins the page"
+runs = ["viewer-hostile"]
+
+[[plant.edit]]
+file = "app/ui/core/diagrams.js"
+find = "      if (said.startsWith('on')) node.removeAttribute(name)"
+replace = "      if (false) node.removeAttribute(name)"
+
+[[plant]]
+name = "specs viewer: a drawing keeps addresses out of it"
+meant = "drawing is checked before it joins the page"
+runs = ["viewer-hostile"]
+
+[[plant.edit]]
+file = "app/ui/core/diagrams.js"
+find = "      else if (ADDRESSES.has(said) && !value.trim().startsWith('#')) node.removeAttribute(name)"
+replace = "      else if (false) node.removeAttribute(name)"
+
+[[plant]]
+name = "specs viewer: a drawing's CSS may load"
+meant = "drawing is checked before it joins the page"
+runs = ["viewer-hostile"]
+
+[[plant.edit]]
+file = "app/ui/core/diagrams.js"
+find = "    if (tag === 'style') node.textContent = quiet(node.textContent)"
+replace = "    if (false) node.textContent = quiet(node.textContent)"
+
+[[plant]]
+name = "specs viewer: a drawing's CSS escapes are not read"
+meant = "drawing is checked before it joins the page"
+runs = ["viewer-hostile"]
+
+[[plant.edit]]
+file = "app/ui/core/diagrams.js"
+find = '    .replace(/\\([0-9a-f]{1,6})\s?|\\(.)/gis, (_, hex, character) => {'
+replace = "    .replace(/(?!)/g, (_, hex, character) => {"
+
+[[plant]]
+name = "specs viewer: diagrams are drawn in Mermaid's own colours"
+meant = "in the page's colours, its diagrams too"
+runs = ["viewer-colours"]
+
+[[plant.edit]]
+file = "app/ui/core/diagrams.js"
+find = "      themeVariables: colours(),"
+replace = "      themeVariables: {},"
+
+[[plant]]
+name = "specs viewer: the app's policy lets the page load an image from anywhere"
+meant = "lets the page load nothing from anywhere else"
+runs = ["viewer-policy"]
+
+[[plant.edit]]
+file = "app/src-tauri/tauri.conf.json"
+find = "img-src 'self' data: blob:;"
+replace = "img-src *;"
+
+[[plant]]
+name = "specs viewer: the app's policy lets the page connect anywhere"
+meant = "lets the page load nothing from anywhere else"
+runs = ["viewer-policy"]
+
+[[plant.edit]]
+file = "app/src-tauri/tauri.conf.json"
+find = "connect-src ipc: http://ipc.localhost;"
+replace = "connect-src *;"
+
+[[plant]]
+name = "specs viewer: the app's policy lets the page frame anything"
+meant = "lets the page load nothing from anywhere else"
+runs = ["viewer-policy"]
+
+[[plant.edit]]
+file = "app/src-tauri/tauri.conf.json"
+find = "frame-src http://localhost:* http://127.0.0.1:*;"
+replace = "frame-src *;"
+
+[[plant]]
+name = "specs viewer: the app's policy lets the page run a script from anywhere"
+meant = "lets the page load nothing from anywhere else"
+runs = ["viewer-policy"]
+
+[[plant.edit]]
+file = "app/src-tauri/tauri.conf.json"
+find = "script-src 'self';"
+replace = "script-src *;"
+
+[[plant]]
+name = "specs viewer: the app's policy lets the page take a stylesheet from anywhere"
+meant = "lets the page load nothing from anywhere else"
+runs = ["viewer-policy"]
+
+[[plant.edit]]
+file = "app/src-tauri/tauri.conf.json"
+find = "style-src 'self' 'unsafe-inline';"
+replace = "style-src * 'unsafe-inline';"
+
+[[plant]]
+name = "specs viewer: the app has no policy"
+meant = "diagram makes no request leave the page while Mermaid lays it out"
+runs = ["viewer-policy"]
+
+[[plant.edit]]
+file = "app/src-tauri/tauri.conf.json"
+find = '''      "csp": "default-src 'self';'''
+replace = '''      "csp": null, "csp-was": "default-src 'self';'''

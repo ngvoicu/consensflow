@@ -12,11 +12,12 @@
 use std::io::{BufRead, Write};
 
 use serde_json::{json, Value};
-use tauri::{AppHandle, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Manager, RunEvent, Runtime, WebviewUrl, WebviewWindowBuilder};
 
 pub mod commands;
 mod daemon;
 mod daemon_command;
+mod file_drop;
 mod launcher;
 // Only the Windows app reads a runtime from its own exe; tested everywhere.
 #[cfg_attr(not(windows), allow(dead_code))]
@@ -326,6 +327,89 @@ fn redirect_stderr(log: &std::path::Path) {
     }
 }
 
+/// What the page may ask the app, each by its command, refused for every window but
+/// the main one: what the app is built with, and what the tests of a command ask through.
+pub(crate) fn page_commands<R: Runtime>(
+) -> impl Fn(tauri::ipc::Invoke<R>) -> bool + Send + Sync + 'static {
+    let handler: fn(tauri::ipc::Invoke<R>) -> bool = tauri::generate_handler![
+        commands::daemon_request,
+        commands::pane_input_enqueue,
+        commands::pane_reply_enqueue,
+        commands::pane_input_wait,
+        commands::pane_resize,
+        commands::pane_ack,
+        commands::agents_screen,
+        commands::subscribe_output,
+        file_drop::short_paths,
+        file_drop::focus_after_drop,
+        updates::update_status,
+        updates::update_channel,
+        updates::update_check,
+        updates::update_download,
+        updates::update_install,
+        updates::update_open_page,
+        selftest_report,
+    ];
+    move |invoke| {
+        if !commands::window_command_allowed(
+            invoke.message.webview_ref().label(),
+            invoke.message.command(),
+        ) {
+            invoke
+                .resolver
+                .reject("This command is unavailable in this window");
+            return true;
+        }
+        handler(invoke)
+    }
+}
+
+/// What the app's builder is given for its page, by `with_page`: Tauri's builder, or
+/// in the tests one that keeps the handlers of its windows' events, which Tauri's
+/// stand-in runtime never tells a window.
+pub(crate) trait PageBuilder<R: Runtime>: Sized {
+    fn manage<T: Send + Sync + 'static>(self, state: T) -> Self;
+
+    fn on_window_event<F>(self, handler: F) -> Self
+    where
+        F: Fn(&tauri::Window<R>, &tauri::WindowEvent) + Send + Sync + 'static;
+
+    fn invoke_handler<F>(self, handler: F) -> Self
+    where
+        F: Fn(tauri::ipc::Invoke<R>) -> bool + Send + Sync + 'static;
+}
+
+impl<R: Runtime> PageBuilder<R> for tauri::Builder<R> {
+    fn manage<T: Send + Sync + 'static>(self, state: T) -> Self {
+        tauri::Builder::manage(self, state)
+    }
+
+    fn on_window_event<F>(self, handler: F) -> Self
+    where
+        F: Fn(&tauri::Window<R>, &tauri::WindowEvent) + Send + Sync + 'static,
+    {
+        tauri::Builder::on_window_event(self, handler)
+    }
+
+    fn invoke_handler<F>(self, handler: F) -> Self
+    where
+        F: Fn(tauri::ipc::Invoke<R>) -> bool + Send + Sync + 'static,
+    {
+        tauri::Builder::invoke_handler(self, handler)
+    }
+}
+
+/// The app's builder with what its page stands on: a file dropped on its window,
+/// which the app hears itself, the page asking of it only what the app heard
+/// (`file_drop`), and the commands the page may ask. The app is built with it, and
+/// the tests of the drop on the stand-in runtime.
+pub(crate) fn with_page<R: Runtime, B: PageBuilder<R>>(builder: B) -> B {
+    builder
+        .manage(file_drop::Dropped::default())
+        .on_window_event(file_drop::hear)
+        .invoke_handler(page_commands())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let context = tauri::generate_context!();
@@ -355,60 +439,32 @@ pub fn run() {
     if let Some(log) = error_log() {
         redirect_stderr(&log);
     }
-    let app = tauri::Builder::default()
-        .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
-        .invoke_handler(|invoke| {
-            if !commands::window_command_allowed(
-                invoke.message.webview_ref().label(),
-                invoke.message.command(),
-            ) {
-                invoke
-                    .resolver
-                    .reject("This command is unavailable in this window");
-                return true;
-            }
-            let handler: Box<dyn Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool> =
-                Box::new(tauri::generate_handler![
-                    commands::daemon_request,
-                    commands::pane_input_enqueue,
-                    commands::pane_reply_enqueue,
-                    commands::pane_input_wait,
-                    commands::pane_resize,
-                    commands::pane_ack,
-                    commands::agents_screen,
-                    commands::subscribe_output,
-                    updates::update_status,
-                    updates::update_channel,
-                    updates::update_check,
-                    updates::update_download,
-                    updates::update_install,
-                    updates::update_open_page,
-                    selftest_report,
-                ]);
-            handler(invoke)
-        })
-        .setup(|app| {
-            app.manage(AppRuntime::start(app.handle()));
-            // The terminal's command names this bundle's `cf`, whichever build wrote it.
-            launcher::repair_in_background(app.handle());
-            updates::setup(app)?;
-            // The product name, so a candidate's window never reads as the live app's.
-            let title = app.package_info().name.clone();
-            let mut window = WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
-                .title(title)
-                .inner_size(1280.0, 820.0)
-                .min_inner_size(720.0, 520.0)
-                .maximized(true);
-            if let Some(config) = selftest::config() {
-                window = window.initialization_script(selftest::initialization_script(&config));
-                selftest::watch_for_quit(app.handle().clone());
-            }
-            window.build()?;
-            Ok(())
-        })
-        .build(context)
-        .expect("error while building the ConsensFlow app");
+    let app = with_page(
+        tauri::Builder::default()
+            .plugin(tauri_plugin_dialog::init())
+            .plugin(tauri_plugin_updater::Builder::new().build()),
+    )
+    .setup(|app| {
+        app.manage(AppRuntime::start(app.handle()));
+        // The terminal's command names this bundle's `cf`, whichever build wrote it.
+        launcher::repair_in_background(app.handle());
+        updates::setup(app)?;
+        // The product name, so a candidate's window never reads as the live app's.
+        let title = app.package_info().name.clone();
+        let mut window = WebviewWindowBuilder::new(app, "main", WebviewUrl::default())
+            .title(title)
+            .inner_size(1280.0, 820.0)
+            .min_inner_size(720.0, 520.0)
+            .maximized(true);
+        if let Some(config) = selftest::config() {
+            window = window.initialization_script(selftest::initialization_script(&config));
+            selftest::watch_for_quit(app.handle().clone());
+        }
+        window.build()?;
+        Ok(())
+    })
+    .build(context)
+    .expect("error while building the ConsensFlow app");
 
     app.run(|handle, event| {
         if matches!(event, RunEvent::Exit) {

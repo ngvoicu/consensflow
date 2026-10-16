@@ -1,0 +1,39 @@
+[
+  {
+    "name": "rate-limiter",
+    "path": "rate-limiter",
+    "entries": [
+      {
+        "name": "SPEC.md",
+        "path": "rate-limiter/SPEC.md",
+        "size": 1384
+      },
+      {
+        "name": "interview-01.md",
+        "path": "rate-limiter/interview-01.md",
+        "size": 100
+      },
+      {
+        "name": "research-01.md",
+        "path": "rate-limiter/research-01.md",
+        "size": 166
+      }
+    ]
+  },
+  {
+    "name": "registry.md",
+    "path": "registry.md",
+    "size": 271
+  },
+  {
+    "name": "webhook-retries",
+    "path": "webhook-retries",
+    "entries": [
+      {
+        "name": "SPEC.md",
+        "path": "webhook-retries/SPEC.md",
+        "size": 419
+      }
+    ]
+  }
+]

@@ -19,6 +19,22 @@ fn each_page_is_the_page_node_recorded_to_the_byte() {
     );
 }
 
+/// What the app says of specs for every project is Settings' own place (Specs, a dialog
+/// of the page), so that it lives in one: the Agents screen keeps the one choice about
+/// the roster that is its own, and says nothing of specs.
+#[test]
+fn the_agents_page_has_one_choice_about_the_roster_and_none_about_specs() {
+    // Its two boxes: the choice it keeps, and the form's `designer` for an image agent.
+    assert_eq!(AGENTS.matches(r#"type="checkbox" name=""#).count(), 2);
+    assert!(AGENTS.contains(r#"<input type="checkbox" name="ownHarnessOnly">"#));
+    assert!(!AGENTS.contains(r#"name="specs""#), "no box for specs");
+    assert!(!AGENTS.contains("Plan big work"), "nor its words");
+    // The only choice it posts is the one it keeps.
+    assert_eq!(AGENTS.matches("'/api/preferences'").count(), 1);
+    assert!(AGENTS.contains("JSON.stringify({ ownHarnessOnly: wanted })"));
+    assert!(!AGENTS.contains("LAST.preferences?.specs"));
+}
+
 #[test]
 fn the_token_is_named_once_in_each_page_and_the_version_once_in_the_agents_page() {
     for (page, template) in [("agents", AGENTS), ("harnesses", HARNESSES)] {

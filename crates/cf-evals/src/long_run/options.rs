@@ -28,7 +28,7 @@ use crate::plan::harness;
 use crate::{Error, Result};
 
 /// The flags of `long`.
-const FLAGS: [Flag; 26] = [
+const FLAGS: [Flag; 25] = [
     Flag::or("chief", "claude"),
     Flag::or("staff", "claude,codex,pi,opencode,devin"),
     Flag::value("models"),
@@ -57,8 +57,6 @@ const FLAGS: [Flag; 26] = [
     // Where the report of the run is kept: beside the evals', in a folder of its own,
     // so that `eval summary` reads only the evals'.
     Flag::value("reports"),
-    // The project's fixture: `evals/fixtures/<name>/`.
-    Flag::or("fixture", "long-run"),
     // How long a result is let be before it is judged against the record, in seconds.
     Flag::or("settle-sec", "60"),
 ];
@@ -91,7 +89,6 @@ pub struct Options {
     pub switch_to: Option<String>,
     pub ask: Ask,
     pub reports: PathBuf,
-    pub fixture: String,
 }
 
 impl Options {
@@ -176,7 +173,6 @@ impl Options {
             reports: flags
                 .get("reports")
                 .map_or_else(|| checkout::path("evals/reports/long"), PathBuf::from),
-            fixture: text("fixture"),
         })
     }
 

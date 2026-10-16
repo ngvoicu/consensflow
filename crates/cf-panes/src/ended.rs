@@ -5,7 +5,13 @@
 //! tells the daemon the pane ended, wants it. What the window left running when
 //! it closed is kept here too, by the close that ended it: once it has, there is
 //! nothing left to look at.
+//!
+//! It is also the proof that the program has gone ([`EndedSlot::proven_gone`]):
+//! its status was read, or the system said there was no child left to read it
+//! of (it was reaped elsewhere). Nothing else is: a pane out of the table is one
+//! a close is still ending.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, PoisonError};
 
 use cf_proto::panes::BackgroundProcess;
@@ -24,6 +30,8 @@ pub struct Ended {
 pub struct EndedSlot {
     ended: Mutex<Option<Ended>>,
     background: Mutex<Option<Vec<BackgroundProcess>>>,
+    /// The system said the program had gone with no status to read of it.
+    reaped: AtomicBool,
 }
 
 impl EndedSlot {
@@ -65,6 +73,18 @@ impl EndedSlot {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .clone()
+    }
+
+    /// The system said the program has gone, with no status to read: it was
+    /// reaped elsewhere.
+    pub(crate) fn mark_reaped(&self) {
+        self.reaped.store(true, Ordering::Release);
+    }
+
+    /// Whether the program is proven gone: its status was read, or the system
+    /// said it was reaped.
+    pub fn proven_gone(&self) -> bool {
+        self.reaped.load(Ordering::Acquire) || self.get().is_some()
     }
 }
 

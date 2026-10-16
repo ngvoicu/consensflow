@@ -13,7 +13,7 @@
 //!
 //! A module for each thing it does:
 //!
-//! - [`scenarios`] are the twelve scenarios, code and not data: what the owner
+//! - [`scenarios`] are the thirteen scenarios, code and not data: what the owner
 //!   says, how it answers, and the expectations, closures over the numbers.
 //! - [`plan`] is the pure part of a run: the staff, the chief's model, the owner's
 //!   answers to the chief's questions.

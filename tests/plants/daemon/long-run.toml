@@ -1805,7 +1805,56 @@ file = "crates/cf-evals/src/long_run/timeline.rs"
 find = '        "project.wake_up" => Some(format!('
 replace = '        "project.wake_up.never" => Some(format!('
 
-# The edge: the one place every text the run prints, logs or keeps leaves it, and a screen masked
+# The owner's ask: the long run's project, as the evals' workspace is made of a scenario, with none
+# of the owner's work uncommitted
+
+[[plant]]
+name = "long run: the real ask works the long run's project with the owner's work uncommitted"
+meant = "both_asks_work_the_long_run_s_project_with_none_of_the_owner_s_work_uncommitted"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/ask.rs"
+find = '''
+        uncommitted: None,
+        prompt: PROMPT.to_owned(),'''
+replace = '''
+        uncommitted: Some(crate::scenarios::Uncommitted {
+            file: "README.md",
+            find: "ledgerline",
+            replace: "ledger",
+        }),
+        prompt: PROMPT.to_owned(),'''
+
+[[plant]]
+name = "long run: the stand-in ask works the long run's project with the owner's work uncommitted"
+meant = "both_asks_work_the_long_run_s_project_with_none_of_the_owner_s_work_uncommitted"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/ask.rs"
+find = '''
+        uncommitted: None,
+        prompt: "Reply with exactly: Currency?".to_owned(),'''
+replace = '''
+        uncommitted: Some(crate::scenarios::Uncommitted {
+            file: "README.md",
+            find: "ledgerline",
+            replace: "ledger",
+        }),
+        prompt: "Reply with exactly: Currency?".to_owned(),'''
+
+[[plant]]
+name = "long run: the asks work another fixture than the long run's project"
+meant = "both_asks_work_the_long_run_s_project_with_none_of_the_owner_s_work_uncommitted"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/ask.rs"
+find = 'pub const FIXTURE: &str = "long-run";'
+replace = 'pub const FIXTURE: &str = "long";'
+
+# The edge:the one place every text the run prints, logs or keeps leaves it, and a screen masked
 # as one text
 
 [[plant]]

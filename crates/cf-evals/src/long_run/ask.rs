@@ -60,6 +60,9 @@ impl Ask {
     }
 }
 
+/// The project the long run works on: `evals/fixtures/long-run/`.
+pub const FIXTURE: &str = "long-run";
+
 /// What a fixture's work asks of the staff: the ask a real chief is typed.
 pub const PROMPT: &str = "\
 This is ledgerline, a small bookkeeping library with a report site and a dev server (README.md). \
@@ -97,7 +100,8 @@ fn real(quiet: Duration) -> Scenario {
     Scenario {
         id: "long-run",
         title: "A real project worked for hours by a chief and a staff of every harness",
-        fixture: "long-run",
+        fixture: FIXTURE,
+        uncommitted: None,
         prompt: PROMPT.to_owned(),
         follow_ups: vec![FollowUp::Say(FOLLOW_UP.to_owned())],
         answers: vec![answer(r"(?i)currenc|EUR|USD|RON", CURRENCY)],
@@ -152,7 +156,8 @@ fn stand_in(quiet: Duration) -> Scenario {
     Scenario {
         id: "long-run",
         title: "The long run's shapes, in the stand-in agent's words",
-        fixture: "long-run",
+        fixture: FIXTURE,
+        uncommitted: None,
         prompt: "Reply with exactly: Currency?".to_owned(),
         follow_ups: vec![
             more("CSV-EXPORT", 400),
@@ -197,7 +202,15 @@ mod tests {
         );
         assert_eq!(scenario.follow_ups, [FollowUp::Say(FOLLOW_UP.to_owned())]);
         assert!(scenario.expectations.is_empty());
-        assert_eq!(scenario.fixture, "long-run");
+    }
+
+    #[test]
+    fn both_asks_work_the_long_run_s_project_with_none_of_the_owner_s_work_uncommitted() {
+        for ask in [Ask::Real, Ask::StandIn] {
+            let scenario = ask.scenario(Duration::from_secs(600));
+            assert_eq!(scenario.fixture, "long-run", "{}", ask.name());
+            assert_eq!(scenario.uncommitted, None, "{}", ask.name());
+        }
     }
 
     #[test]
