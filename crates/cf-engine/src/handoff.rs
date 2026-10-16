@@ -13,10 +13,14 @@
 //!
 //! The conversations are the ledger's `chief_history`, the rows the ledger
 //! keeps of the chief's earlier windows, which hold no half of a surrogate pair.
+//!
+//! The human reads the same records in the app, every participant's and the
+//! current conversation too, as the history viewer's pages (`viewer`).
 
 mod entries;
 mod pages;
 mod text;
+mod viewer;
 
 use cf_base::js;
 use cf_base::refusal::Refusal;
@@ -28,6 +32,7 @@ use serde::Serialize;
 use entries::entries_of;
 use pages::paginate;
 use text::{defuse, delivered, first_line, name_of, Shown};
+pub use viewer::{whole_history_page, Delivery, ShownConversation, ShownItem, WholeHistoryPage};
 
 /// How ConsensFlow's handoff to a chief the human switched in begins.
 pub const HANDOFF_TITLE: &str = "You are the chief now";
@@ -159,12 +164,13 @@ pub struct LastWords {
 
 /// The human's last words to the chief, in the latest conversation that has
 /// any, and whether the chief answered after them; none when there are none.
-/// A delivery is not the human's; what they typed before one went in is.
+/// A delivery is not the human's; what they typed before one went in is. The
+/// summary a compaction wrote in the user's place is not the human's either.
 pub fn last_words(conversations: &[ChiefConversation]) -> Option<LastWords> {
     for conversation in conversations.iter().rev() {
         let items = &conversation.items;
         for (index, item) in items.iter().enumerate().rev() {
-            if item.role != "user" {
+            if item.role != "user" || item.compaction {
                 continue;
             }
             let said = match delivered(&item.text) {

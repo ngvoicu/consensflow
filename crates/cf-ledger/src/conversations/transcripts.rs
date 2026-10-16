@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 
 use cf_base::time;
-use cf_proto::ledger::{TaskTranscript, TranscriptItem};
+use cf_proto::ledger::{HistoryItem, TaskTranscript, TranscriptItem};
 use rusqlite::{params, OptionalExtension};
 use serde_json::Value;
 
@@ -27,7 +27,9 @@ const HEADER: &str = "[ConsensFlow m-";
 /// written is brought up to date. `from` is the position of the first item
 /// given, so a caller may pass only the tail. An item is read as the
 /// harness's record wrote it: one with no id is passed over, and a role or
-/// a time it does not know is `custom`, or none. How many rows changed.
+/// a time it does not know is `custom`, or none. An item that says it is a
+/// compaction's summary (`compaction: true`) is marked so when it is first
+/// copied; one copied before the mark stays as it was. How many rows changed.
 pub(crate) fn copy_transcript(
     store: &mut Store,
     conversation_id: i64,
@@ -38,8 +40,8 @@ pub(crate) fn copy_transcript(
         known_conversation(store, conversation_id)?;
         let copied_at = store.at();
         let mut upsert = store.db.prepare_cached(
-            "INSERT INTO transcript (conversation_id, item_id, seq, role, text, complete, at, copied_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            "INSERT INTO transcript (conversation_id, item_id, seq, role, text, complete, at, copied_at, compaction)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (conversation_id, item_id) DO UPDATE
          SET seq = excluded.seq, text = excluded.text, complete = excluded.complete,
              at = excluded.at, copied_at = excluded.copied_at
@@ -78,10 +80,35 @@ pub(crate) fn copy_transcript(
                 i64::from(item.get("complete") != Some(&Value::Bool(false))),
                 at,
                 copied_at,
+                i64::from(item.get("compaction") == Some(&Value::Bool(true))),
             ])?;
         }
         Ok(written)
     })
+}
+
+/// The items of a conversation's copy, in order.
+pub(super) fn items_of(
+    store: &Store,
+    conversation_id: i64,
+) -> Result<Vec<HistoryItem>, LedgerError> {
+    Ok(store
+        .db
+        .prepare_cached(
+            "SELECT item_id, role, text, complete, at, compaction FROM transcript
+       WHERE conversation_id = ? ORDER BY seq",
+        )?
+        .query_map([conversation_id], |row| {
+            Ok(HistoryItem {
+                id: row.get("item_id")?,
+                role: row.get("role")?,
+                text: row.get("text")?,
+                complete: row.get::<_, i64>("complete")? == 1,
+                at: row.get("at")?,
+                compaction: row.get::<_, i64>("compaction")? == 1,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
 /// One copied item, as the transcript table holds it.
@@ -92,6 +119,7 @@ struct Copied {
     text: String,
     complete: i64,
     at: Option<String>,
+    compaction: i64,
 }
 
 /// What the windows that had a task wrote: the copied items of each window
@@ -134,6 +162,7 @@ pub(crate) fn transcript(
                 text: row.text,
                 complete: row.complete == 1,
                 at: row.at,
+                compaction: row.compaction == 1,
             })
             .collect(),
     })
@@ -149,7 +178,7 @@ fn part_of(store: &Store, task_id: i64, participant_id: i64) -> Result<Vec<Copie
     let copied = store
         .db
         .prepare(
-            "SELECT t.conversation_id, t.item_id, t.role, t.text, t.complete, t.at
+            "SELECT t.conversation_id, t.item_id, t.role, t.text, t.complete, t.at, t.compaction
        FROM transcript t JOIN conversation c ON c.id = t.conversation_id
        WHERE c.participant_id = ? ORDER BY t.conversation_id, t.seq",
         )?
@@ -161,6 +190,7 @@ fn part_of(store: &Store, task_id: i64, participant_id: i64) -> Result<Vec<Copie
                 text: row.get("text")?,
                 complete: row.get("complete")?,
                 at: row.get("at")?,
+                compaction: row.get("compaction")?,
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -245,8 +275,10 @@ pub(crate) fn copied_item_with(
 /// ConsensFlow's, that comes after the message's own item in its window's
 /// record. What a harness put in its record before the message (Codex's
 /// `# AGENTS.md instructions`, written when its first turn begins and so first
-/// copied with the message) is no news after it. An item copied again as it
-/// was keeps the time it was first copied, so it is not new either.
+/// copied with the message) is no news after it, nor is the summary a
+/// compaction writes in the user's place, which the human never typed. An item
+/// copied again as it was keeps the time it was first copied, so it is not new
+/// either.
 pub(crate) fn typed_since(
     store: &Store,
     participant_id: i64,
@@ -258,7 +290,7 @@ pub(crate) fn typed_since(
         .prepare(
             "SELECT t.conversation_id, t.seq, t.text FROM transcript t
        JOIN conversation c ON c.id = t.conversation_id
-       WHERE c.participant_id = ? AND t.role = 'user' AND t.copied_at > ?",
+       WHERE c.participant_id = ? AND t.role = 'user' AND t.compaction = 0 AND t.copied_at > ?",
         )?
         .query_map(params![participant_id, since], |row| {
             Ok((

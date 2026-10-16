@@ -79,6 +79,10 @@ fn render(
             defuse(text)
         )));
     }
+    // The harness's own words in the user's place: no human's, and no delivery.
+    if item.compaction {
+        return Ok(Some(format!("Compaction summary: {}", defuse(text))));
+    }
     let Some(header) = delivered(text) else {
         let who = if item.role == "user" {
             "Human"
@@ -99,7 +103,7 @@ fn render(
 
 /// A delivery as one line: what it was, and what came of it. `digits` are the
 /// id the header names, read as `Number(digits)` was.
-fn delivery_line(digits: &str, message: Lookup<'_>) -> Result<String, Refusal> {
+pub(super) fn delivery_line(digits: &str, message: Lookup<'_>) -> Result<String, Refusal> {
     let number = js::number(digits);
     let id = js::number_text(number);
     // No other number is the id of a message, and none of them has a line.

@@ -161,6 +161,7 @@ impl Session {
             complete,
             at: Some(at),
             commentary: false,
+            compaction: false,
         });
     }
 

@@ -449,6 +449,7 @@ impl Rollout {
                 complete,
                 at: Some(at),
                 commentary: false,
+                compaction: false,
             },
             final_text: None,
         });

@@ -303,6 +303,7 @@ fn item(
         complete,
         at,
         commentary: false,
+        compaction: false,
     })
 }
 

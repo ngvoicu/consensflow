@@ -160,6 +160,11 @@ pub struct HistoryItem {
     pub text: String,
     pub complete: bool,
     pub at: Option<String>,
+    /// The summary a compaction wrote in the user's place: a `user` item that
+    /// is the harness's own words, not the human's. Said only when true: an
+    /// item copied before the mark (migration 0019) is a plain `user` one.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub compaction: bool,
 }
 
 /// An earlier conversation of the chief, with its copied items in order.
@@ -167,6 +172,36 @@ pub struct HistoryItem {
 pub struct ChiefConversation {
     #[serde(flatten)]
     pub conversation: ConversationView,
+    pub items: Vec<HistoryItem>,
+}
+
+/// What ended a participant's conversation, as far as the ledger's log says.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "by", rename_all = "lowercase")]
+pub enum ConversationEnd {
+    /// The human's Switch chief, to the harness and agent the chief runs on after it.
+    Switch {
+        harness: String,
+        agent: Option<String>,
+    },
+    /// The window went to another conversation (`/clear`, `/new`, `/resume`):
+    /// one of the participant's own earlier ones (`resumed`), or one the ledger
+    /// had not seen, which is any of the three.
+    Window { resumed: bool },
+    /// A window opened on a fresh conversation in its place.
+    Fresh,
+}
+
+/// A participant's conversation as the history viewer reads it: the agent it
+/// ran on and what ended it where the ledger knows them, and its copied items
+/// in order.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ParticipantConversation {
+    #[serde(flatten)]
+    pub conversation: ConversationView,
+    pub agent: Option<String>,
+    pub ended_by: Option<ConversationEnd>,
     pub items: Vec<HistoryItem>,
 }
 
@@ -179,6 +214,9 @@ pub struct TranscriptItem {
     pub text: String,
     pub complete: bool,
     pub at: Option<String>,
+    /// A compaction's summary, as in [`HistoryItem`]: said only when true.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub compaction: bool,
 }
 
 /// What a task's windows wrote: how many items in all, and the last ones asked for.
@@ -558,11 +596,44 @@ mod tests {
                 text: "hello".into(),
                 complete: true,
                 at: None,
+                compaction: false,
             }],
         };
         assert_eq!(
             serde_json::to_string(&conversation).unwrap(),
             r#"{"id":4,"participantId":2,"harness":"codex","nativeSession":"s-1","startedAt":"2026-09-19T10:00:01.000Z","endedAt":"2026-09-19T10:00:02.000Z","items":[{"id":"i-1","role":"user","text":"hello","complete":true,"at":null}]}"#
+        );
+    }
+
+    #[test]
+    fn says_a_compaction_s_summary_only_where_an_item_is_one_and_what_ended_a_conversation_by_its_kind(
+    ) {
+        let item = |compaction| HistoryItem {
+            id: "s-1".into(),
+            role: "user".into(),
+            text: "This session is being continued".into(),
+            complete: true,
+            at: None,
+            compaction,
+        };
+        assert_eq!(
+            serde_json::to_string(&item(true)).unwrap(),
+            r#"{"id":"s-1","role":"user","text":"This session is being continued","complete":true,"at":null,"compaction":true}"#
+        );
+        assert!(!serde_json::to_string(&item(false))
+            .unwrap()
+            .contains("compaction"));
+        let ends = [
+            ConversationEnd::Switch {
+                harness: "codex".into(),
+                agent: Some("maia".into()),
+            },
+            ConversationEnd::Window { resumed: true },
+            ConversationEnd::Fresh,
+        ];
+        assert_eq!(
+            serde_json::to_string(&ends).unwrap(),
+            r#"[{"by":"switch","harness":"codex","agent":"maia"},{"by":"window","resumed":true},{"by":"fresh"}]"#
         );
     }
 }

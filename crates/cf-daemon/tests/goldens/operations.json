@@ -38,7 +38,8 @@
     "specs.tree",
     "specs.file",
     "specs.present",
-    "specs.open"
+    "specs.open",
+    "history.get"
   ],
   "ping": "{\"ok\":true}"
 }

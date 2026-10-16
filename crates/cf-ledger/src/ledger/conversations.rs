@@ -6,7 +6,7 @@ use serde_json::Value;
 use super::Ledger;
 use crate::{
     conversations, ChiefConversation, ChiefOpenWork, ChiefSwitch, ConversationView, LastSwitch,
-    LedgerError, ProjectView, TaskTranscript,
+    LedgerError, ParticipantConversation, ProjectView, TaskTranscript,
 };
 
 impl Ledger {
@@ -52,6 +52,17 @@ impl Ledger {
     /// The chief's earlier conversations, oldest first, with their items.
     pub fn chief_history(&self, project_id: i64) -> Result<Vec<ChiefConversation>, LedgerError> {
         conversations::chief_history(&self.store, project_id)
+    }
+
+    /// Every conversation of participant `handle`, the current one too, oldest
+    /// first, with the agent it ran on, what ended it as far as the log says,
+    /// and its items: what the history viewer reads.
+    pub fn participant_history(
+        &self,
+        project_id: i64,
+        handle: &str,
+    ) -> Result<Vec<ParticipantConversation>, LedgerError> {
+        conversations::participant_history(&self.store, project_id, handle)
     }
 
     /// What waits on the chief now, for a chief that takes over.

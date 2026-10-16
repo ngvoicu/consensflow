@@ -273,6 +273,7 @@ fn window_at_rest(fakes: &Fakes, wire: &Path, env: Env) -> Rc<DevinWindow> {
         complete: true,
         at: None,
         commentary: false,
+        compaction: false,
     });
     window_reading(fakes, wire, env, record)
 }

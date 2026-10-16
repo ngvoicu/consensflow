@@ -53,6 +53,7 @@ fn item(id: &str, role: Role, text: &str, complete: bool) -> Item {
         complete,
         at: None,
         commentary: false,
+        compaction: false,
     }
 }
 
@@ -132,6 +133,33 @@ fn a_look_copies_what_is_new_and_the_last_item_again_and_says_so_when_it_wrote()
             ("i-3".to_owned(), "ls".to_owned()),
         ]
     );
+}
+
+#[test]
+fn a_compaction_s_summary_is_copied_marked_as_one_where_its_reading_says_nothing_of_it() {
+    let (context, chief, _) = chief_talking();
+    let record = context.dispatcher.record_of(chief.id);
+    let mut summary = item("s-1", Role::User, "This session is being continued.", true);
+    summary.compaction = true;
+    let items = vec![item("u-1", Role::User, "Ship it", true), summary];
+    // The reading is the one Node wrote: the summary is a user's item there.
+    let read = serde_json::to_value(&items[1]).expect("written");
+    assert_eq!(read.get("compaction"), None);
+    context
+        .dispatcher
+        .copy(&chief, &record, &look(items))
+        .expect("copied");
+    let history = context
+        .ledger
+        .borrow()
+        .participant_history(chief.project_id, "chief")
+        .expect("its history");
+    let marks: Vec<(&str, &str, bool)> = history[0]
+        .items
+        .iter()
+        .map(|item| (item.id.as_str(), item.role.as_str(), item.compaction))
+        .collect();
+    assert_eq!(marks, [("u-1", "user", false), ("s-1", "user", true)]);
 }
 
 #[test]

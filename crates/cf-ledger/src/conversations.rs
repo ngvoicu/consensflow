@@ -1,9 +1,11 @@
 //! Conversations: each participant's native conversations, one current at a
 //! time and followed when the human switches its window to another; the copy
-//! ConsensFlow keeps of each, item by item (`transcripts`); and the chief's
-//! across a Switch chief, with what a chief that takes over reads (`chief`).
+//! ConsensFlow keeps of each, item by item (`transcripts`); the chief's
+//! across a Switch chief, with what a chief that takes over reads (`chief`);
+//! and a participant's whole history, for the human's viewer (`history`).
 
 mod chief;
+mod history;
 mod transcripts;
 
 use cf_proto::ledger::ConversationView;
@@ -16,6 +18,7 @@ use crate::views::conversation_view;
 
 pub use chief::ChiefSwitch;
 pub(crate) use chief::{chief_history, chief_open_work, history_read, last_switch, switch_chief};
+pub(crate) use history::participant_history;
 pub use transcripts::TRANSCRIPT_ITEM_MAX;
 pub(crate) use transcripts::{copied_item_with, copy_transcript, transcript, typed_since};
 

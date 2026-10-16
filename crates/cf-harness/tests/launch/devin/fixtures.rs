@@ -349,6 +349,7 @@ pub(super) fn settled(session: &str) -> Record {
             complete: true,
             at: None,
             commentary: false,
+            compaction: false,
         }],
         in_flight: false,
         asking: false,

@@ -6,6 +6,7 @@
 //! before it as cut, and told the chief so.
 
 use super::*;
+use crate::shared::record::reading::Role;
 
 /// The `compact_boundary` record `uuid`, after the record `logical`.
 fn compacted(uuid: &str, logical: &str) -> Value {
@@ -42,4 +43,34 @@ fn a_compaction_while_idle_leaves_the_turn_before_it_at_rest() {
     // A prompt after it is the user's, and opens a turn.
     compacting.push(user("u2", json!("s1"), json!("Go on")));
     assert_eq!(settlement_of(&compacting), Settlement::InFlight);
+}
+
+#[test]
+fn the_summary_is_a_user_s_item_marked_as_the_compaction_s_and_no_other_item_is() {
+    let mut stage = Stage::new();
+    stage.write(&[
+        hello(),
+        answer("a1", "u1"),
+        duration("d1", "a1"),
+        compacted("c1", "d1"),
+        compact_summary("s1", "c1"),
+        user("u2", json!("s1"), json!("Go on")),
+    ]);
+    let Reading::Known(record) = &*stage.reader.look(&Options::default(), 0) else {
+        panic!("an unknown reading");
+    };
+    let marked: Vec<(&str, Role, bool)> = record
+        .items
+        .iter()
+        .map(|item| (&*item.id, item.role, item.compaction))
+        .collect();
+    assert_eq!(
+        marked,
+        [
+            ("u1", Role::User, false),
+            ("m1", Role::Assistant, false),
+            ("s1", Role::User, true),
+            ("u2", Role::User, false),
+        ]
+    );
 }

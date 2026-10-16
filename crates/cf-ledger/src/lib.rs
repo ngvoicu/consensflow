@@ -38,11 +38,12 @@ mod views;
 mod wake_ups;
 
 pub use cf_proto::ledger::{
-    Begun, Board, Candidate, ChiefConversation, ChiefOpenWork, Claim, ConversationView, Cut,
-    DeletedProject, EventView, HeldTask, Lane, LastSwitch, LatestMessages, LatestTranscript,
-    MemberView, MessageView, ParticipantView, ProjectView, Question, QuestionOption, RemovedMember,
-    Resume, StaffMember, Stop, TaskCard, TaskCreated, TaskMoved, TaskReleased, TaskThatFits,
-    TaskThread, TaskTranscript, TaskView, TierChange,
+    Begun, Board, Candidate, ChiefConversation, ChiefOpenWork, Claim, ConversationEnd,
+    ConversationView, Cut, DeletedProject, EventView, HeldTask, HistoryItem, Lane, LastSwitch,
+    LatestMessages, LatestTranscript, MemberView, MessageView, ParticipantConversation,
+    ParticipantView, ProjectView, Question, QuestionOption, RemovedMember, Resume, StaffMember,
+    Stop, TaskCard, TaskCreated, TaskMoved, TaskReleased, TaskThatFits, TaskThread, TaskTranscript,
+    TaskView, TierChange,
 };
 pub use cf_proto::wake_ups::WakeUpView;
 pub use conversations::{ChiefSwitch, TRANSCRIPT_ITEM_MAX};

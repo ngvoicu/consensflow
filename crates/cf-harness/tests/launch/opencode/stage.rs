@@ -446,6 +446,7 @@ pub(super) fn working_record() -> Record {
             complete: true,
             at: None,
             commentary: false,
+            compaction: false,
         }],
         in_flight: true,
         asking: false,

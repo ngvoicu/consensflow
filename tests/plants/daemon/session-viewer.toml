@@ -1,0 +1,405 @@
+# The history viewer (the owner's ask of 2026-10-16, ConsensFlow 3.0.6: "near the Switch chief we
+# can have a button where we can see the transcript of the whole session we store? like even if we
+# change chiefs or they are compacted"): the History button on every window's head, the page's
+# `history.get` that reads a participant's every conversation, the current one too, and the summary
+# a compaction writes in the user's place marked as one, so that `cf history`, the wake-up's check of
+# what was typed and the handoff's last words leave it out. The rig's case in the owner's shape is
+# `crates/cf-e2e/tests/regressions/whole_history_across_a_compaction_and_a_switch.rs`.
+#
+# Its rig plant builds the native `cf` from the sources as they are planted, so it says `builds`.
+# Every name begins `session viewer`, so `npm run plants:daemon -- "session viewer"` runs them all.
+
+[run]
+viewer-ledger-history = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "whole_history"]
+viewer-ledger-wake-ups = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "wake_ups", "moved::"]
+viewer-ledger-held-apart = ["cargo", "test", "--offline", "-p", "cf-ledger", "--features", "test-support", "--lib", "testing::compaction"]
+viewer-engine-text = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "text"]
+viewer-engine-pages = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "handoff::pages"]
+viewer-engine-copy = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "transcripts::"]
+viewer-harness-claude = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::record::tests::compaction"]
+viewer-daemon-page = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "page::tests::history"]
+viewer-proto-page = ["cargo", "test", "--offline", "-p", "cf-proto", "--lib", "page::"]
+viewer-rig = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "whole_history_across_a_compaction_and_a_switch::"]
+# The viewer in the browser Playwright keeps, by its parts.
+viewer-ui-button = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/history-viewer.spec.mjs", "-g", "the History button"]
+viewer-ui-headings = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/history-viewer.spec.mjs", "-g", "heads each conversation"]
+viewer-ui-labels = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/history-viewer.spec.mjs", "-g", "shows every text as text"]
+viewer-ui-delivery = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/history-viewer.spec.mjs", "-g", "folds a delivery"]
+viewer-ui-paging = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/history-viewer.spec.mjs", "-g", "pages from the most recent"]
+viewer-ui-find = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/history-viewer.spec.mjs", "-g", "finds words in any case"]
+viewer-ui-tools = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/history-viewer.spec.mjs", "-g", "on the switch"]
+viewer-ui-theme = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/history-viewer.spec.mjs", "-g", "app's theme"]
+viewer-ui-drawer = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "names a compaction's summary in what a window wrote"]
+
+# The ledger.
+
+[[plant]]
+name = "session viewer: the wake-up's check of what was typed takes a compaction's summary for the human typing"
+meant = "the_summary_a_compaction_writes_in_the_user_s_place_is_no_typing_and_the_same_words_typed_are"
+runs = ["viewer-ledger-wake-ups"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/transcripts.rs"
+find = "t.role = 'user' AND t.compaction = 0 AND t.copied_at > ?"
+replace = "t.role = 'user' AND t.copied_at > ?"
+
+[[plant]]
+name = "session viewer: the copy drops the mark a compaction's summary comes with"
+meant = "reads_every_conversation_of_the_chief_across_a_clear_a_resume_a_compaction_a_switch_and_a_fresh_window"
+runs = ["viewer-ledger-history"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/transcripts.rs"
+find = '''                i64::from(item.get("compaction") == Some(&Value::Bool(true))),'''
+replace = "                0_i64,"
+
+[[plant]]
+name = "session viewer: a summary copied before the mark is marked when it is copied again"
+meant = "a_summary_copied_before_the_mark_stays_the_user_s_item_it_was_copied_as"
+runs = ["viewer-ledger-history"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/transcripts.rs"
+find = "SET seq = excluded.seq, text = excluded.text, complete = excluded.complete,"
+replace = "SET seq = excluded.seq, text = excluded.text, complete = excluded.complete, compaction = excluded.compaction,"
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/transcripts.rs"
+find = "OR transcript.complete != excluded.complete\","
+replace = "OR transcript.complete != excluded.complete OR transcript.compaction != excluded.compaction\","
+
+[[plant]]
+name = "session viewer: the history reads the ended conversations alone, never the current one"
+meant = "reads_every_conversation_of_the_chief_across_a_clear_a_resume_a_compaction_a_switch_and_a_fresh_window"
+runs = ["viewer-ledger-history"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/history.rs"
+find = "WHERE participant_id = ? ORDER BY id"
+replace = "WHERE participant_id = ? AND ended_at IS NOT NULL ORDER BY id"
+
+[[plant]]
+name = "session viewer: a /resume to the participant's own earlier conversation reads as a /clear"
+meant = "reads_every_conversation_of_the_chief_across_a_clear_a_resume_a_compaction_a_switch_and_a_fresh_window"
+runs = ["viewer-ledger-history"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/history.rs"
+find = "ConversationEnd::Window { resumed: seen }"
+replace = "ConversationEnd::Window { resumed: false }"
+
+[[plant]]
+name = "session viewer: every conversation of the chief is said to have run on the agent it has now"
+meant = "reads_every_conversation_of_the_chief_across_a_clear_a_resume_a_compaction_a_switch_and_a_fresh_window"
+runs = ["viewer-ledger-history"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/history.rs"
+find = "                Some(from) => from.clone(),"
+replace = "                Some(_) => now.map(str::to_owned),"
+
+[[plant]]
+name = "session viewer: the chief's switches are read into a member's history"
+meant = "a_clear_to_a_conversation_the_ledger_never_saw_and_a_member_s_agent_and_an_unknown_handle"
+runs = ["viewer-ledger-history"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/history.rs"
+find = '''.filter(|(kind, _)| chief || kind != "chief.switched")'''
+replace = ".filter(|_| true)"
+
+[[plant]]
+name = "session viewer: the players of Node's recordings keep the column of the mark in the transcript's rows"
+meant = "takes_the_compaction_column_and_its_values_out_of_the_transcript_table_and_nothing_else"
+runs = ["viewer-ledger-held-apart"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/testing.rs"
+find = '''        .chain(compaction::COLUMNS)
+'''
+replace = ""
+
+# The engine and the reader.
+
+[[plant]]
+name = "session viewer: cf history calls a compaction's summary the human's words"
+meant = "names_a_compaction_s_summary_as_one_never_as_the_human_s_words_nor_their_last"
+runs = ["viewer-engine-text"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/handoff/entries.rs"
+find = '''    if item.compaction {
+        return Ok(Some(format!("Compaction summary: {}", defuse(text))));
+    }
+'''
+replace = ""
+
+[[plant]]
+name = "session viewer: the handoff takes a compaction's summary for the human's last words"
+meant = "names_a_compaction_s_summary_as_one_never_as_the_human_s_words_nor_their_last"
+runs = ["viewer-engine-text"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/handoff.rs"
+find = '''if item.role != "user" || item.compaction {'''
+replace = '''if item.role != "user" {'''
+
+[[plant]]
+name = "session viewer: a piece that heads a new page is not charged its heading again"
+meant = "a_piece_takes_what_it_takes_beside_the_piece_after_it_and_more_at_the_head_of_a_page"
+runs = ["viewer-engine-pages"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/handoff/pages.rs"
+find = '''            cost = size(&piece, None);
+'''
+replace = ""
+
+[[plant]]
+name = "session viewer: a page counts its items and not their conversations' headings, and outgrows a frame"
+meant = "cuts_an_item_too_long_for_a_frame_alone_and_keeps_every_page_within_one"
+runs = ["viewer-engine-text"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/handoff/viewer.rs"
+find = "            _ => heading_bytes[piece.conversation],"
+replace = "            _ => 0,"
+
+[[plant]]
+name = "session viewer: an item too long for a frame on its own is not cut"
+meant = "cuts_an_item_too_long_for_a_frame_alone_and_keeps_every_page_within_one"
+runs = ["viewer-engine-text"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/handoff/viewer.rs"
+find = "    if bytes(&item) + 1 > room {"
+replace = "    if false && bytes(&item) + 1 > room {"
+
+[[plant]]
+name = "session viewer: a compaction's summary or an agent's quote of a header is shown as a delivery"
+meant = "says_a_delivery_in_its_line_and_where_it_begins_and_no_summary_or_agent_s_quote_is_one"
+runs = ["viewer-engine-text"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/handoff/viewer.rs"
+find = "match delivered(&item.text).filter(|_| !said) {"
+replace = "match delivered(&item.text).filter(|_| said || true) {"
+
+[[plant]]
+name = "session viewer: a search finds only words in the case it was typed in"
+meant = "searches_in_any_case_in_the_text_and_a_delivery_s_line_and_leaves_the_tools_out_unless_asked"
+runs = ["viewer-engine-text"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/handoff/viewer.rs"
+find = "let needle = find.filter(|find| !find.is_empty()).map(str::to_lowercase);"
+replace = "let needle = find.filter(|find| !find.is_empty()).map(str::to_owned);"
+
+[[plant]]
+name = "session viewer: the tools' outputs are shown when they were not asked for"
+meant = "searches_in_any_case_in_the_text_and_a_delivery_s_line_and_leaves_the_tools_out_unless_asked"
+runs = ["viewer-engine-text"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/handoff/viewer.rs"
+find = '''            if item.role == "tool" && !tools {'''
+replace = '''            if item.role == "tool" && !tools && false {'''
+
+[[plant]]
+name = "session viewer: a conversation whose earlier items are on an older page does not say so"
+meant = "pages_run_newest_first_each_in_order_within_a_frame_a_conversation_headed_on_each_it_is_on"
+runs = ["viewer-engine-text"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/handoff/viewer.rs"
+find = "heading.earlier = older == Some(piece.conversation) && shown.is_empty();"
+replace = "heading.earlier = false;"
+
+[[plant]]
+name = "session viewer: the engine copies a compaction's summary as the user's item its reading writes"
+meant = "a_compaction_s_summary_is_copied_marked_as_one_where_its_reading_says_nothing_of_it"
+runs = ["viewer-engine-copy"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/transcripts.rs"
+find = "    if item.compaction {"
+replace = "    if item.compaction && false {"
+
+[[plant]]
+name = "session viewer: Claude's reader does not mark the summary a compaction writes"
+meant = "the_summary_is_a_user_s_item_marked_as_the_compaction_s_and_no_other_item_is"
+runs = ["viewer-harness-claude"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/replay.rs"
+find = '''        if record.summary {
+            self.items.summary(id, &record.text, at, seq);
+        } else {
+            self.items.push(id, Role::User, &record.text, at, seq);
+        }
+'''
+replace = '''        self.items.push(id, Role::User, &record.text, at, seq);
+'''
+
+# The page's operation.
+
+[[plant]]
+name = "session viewer: history.get leaves the tools' outputs out though they were asked for"
+meant = "reads_a_participant_s_whole_history_for_the_viewer_and_writes_and_wakes_nothing"
+runs = ["viewer-daemon-page"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/history.rs"
+find = "    let tools = body.get(\"tools\") == Some(&Value::Bool(true));"
+replace = "    let tools = false;"
+
+[[plant]]
+name = "session viewer: history.get reads out another project's message on a delivery's line"
+meant = "reads_a_participant_s_whole_history_for_the_viewer_and_writes_and_wakes_nothing"
+runs = ["viewer-daemon-page"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/history.rs"
+find = "        Ok(found.filter(|found| found.project_id == project))"
+replace = "        Ok(found)"
+
+[[plant]]
+name = "session viewer: history.get wakes the dispatcher, as an operation that changes something does"
+meant = "the_operations_that_only_read_wake_nothing"
+runs = ["viewer-proto-page"]
+
+[[plant.edit]]
+file = "crates/cf-proto/src/page.rs"
+find = '''                | Self::SpecsGet
+                | Self::HistoryGet
+'''
+replace = '''                | Self::SpecsGet
+'''
+
+# The owner's shape on the rig.
+
+[[plant]]
+name = "session viewer: a Claude chief's compaction summary, switched to Codex, is kept as the human's words"
+meant = "the_history_reads_a_chief_s_conversations_whole_across_a_compaction_and_a_switch_of_harness"
+runs = ["viewer-rig"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/transcripts.rs"
+find = "    if item.compaction {"
+replace = "    if item.compaction && false {"
+
+# The page.
+
+[[plant]]
+name = "session viewer: a session's window head has no History"
+meant = "is on the chief's head beside Switch chief, on a session's, and on the chief's card with no window"
+runs = ["viewer-ui-button"]
+
+[[plant.edit]]
+file = "app/ui/core/terminals.js"
+find = '''            element('span', 'terminal-meta', participant.harness ?? ''),
+            history,
+'''
+replace = '''            element('span', 'terminal-meta', participant.harness ?? ''),
+'''
+
+[[plant]]
+name = "session viewer: an item's text is drawn as markup"
+meant = "labels items as the task drawer does, a compaction's summary as one, and shows every text as text"
+runs = ["viewer-ui-labels"]
+
+[[plant.edit]]
+file = "app/ui/core/history-viewer.js"
+find = "    entry.append(element('pre', 'transcript-body', item.text))"
+replace = "    entry.insertAdjacentHTML('beforeend', `<pre class=\"transcript-body\">${item.text}</pre>`)"
+
+[[plant]]
+name = "session viewer: a compaction's summary is labelled as what was sent to the window"
+meant = "labels items as the task drawer does, a compaction's summary as one, and shows every text as text"
+runs = ["viewer-ui-labels"]
+
+[[plant.edit]]
+file = "app/ui/core/board.js"
+find = "  item.compaction ? 'Compaction summary' : (TRANSCRIPT_ROLE[item.role] ?? item.role)"
+replace = "  TRANSCRIPT_ROLE[item.role] ?? item.role"
+
+[[plant]]
+name = "session viewer: the task drawer labels a compaction's summary as what was sent to the window"
+meant = "names a compaction's summary in what a window wrote as one, never as what was sent to it"
+runs = ["viewer-ui-drawer"]
+
+[[plant.edit]]
+file = "app/ui/core/board.js"
+find = "          `${itemLabel(item)}${item.complete ? '' : ' · still writing'}`,"
+replace = "          `${item.role === 'user' ? 'Sent to the window' : itemLabel(item)}${item.complete ? '' : ' · still writing'}`,"
+
+[[plant]]
+name = "session viewer: a delivery is shown whole, not folded to its line"
+meant = "folds a delivery to its line, under what the human typed with it, and opens it on a click or a key"
+runs = ["viewer-ui-delivery"]
+
+[[plant.edit]]
+file = "app/ui/core/history-viewer.js"
+find = "  if (!item.delivery) {"
+replace = "  if (!item.delivery || true) {"
+
+[[plant]]
+name = "session viewer: Older never moves to an older page"
+meant = "pages from the most recent to older and back"
+runs = ["viewer-ui-paging"]
+
+[[plant.edit]]
+file = "app/ui/core/history-viewer.js"
+find = "    this.#older.disabled = page >= pages"
+replace = "    this.#older.disabled = true"
+
+[[plant]]
+name = "session viewer: the search is not sent with the read"
+meant = "finds words in any case, and says when nothing holds them"
+runs = ["viewer-ui-find"]
+
+[[plant.edit]]
+file = "app/ui/core/history-viewer.js"
+find = "    if (find) asked.find = find"
+replace = ""
+
+[[plant]]
+name = "session viewer: Show tool output asks for no tools' outputs"
+meant = "shows the tools' outputs on the switch"
+runs = ["viewer-ui-tools"]
+
+[[plant.edit]]
+file = "app/ui/core/history-viewer.js"
+find = "      tools: this.#tools.checked,"
+replace = "      tools: false,"
+
+[[plant]]
+name = "session viewer: a conversation's heading does not say a Switch chief ended it, nor to what"
+meant = "heads each conversation with its harness and agent, from when until when, and what ended it"
+runs = ["viewer-ui-headings"]
+
+[[plant.edit]]
+file = "app/ui/core/history-viewer.js"
+find = "    return `ended by Switch chief, to ${to}`"
+replace = "    return 'ended'"
+
+[[plant]]
+name = "session viewer: the viewer does not say what is not stored"
+meant = "heads each conversation with its harness and agent, from when until when, and what ended it"
+runs = ["viewer-ui-headings"]
+
+[[plant.edit]]
+file = "app/ui/index.html"
+find = '''<p class="history-hint">Not stored: tool calls and thinking.</p>'''
+replace = '''<p class="history-hint"></p>'''
+
+[[plant]]
+name = "session viewer: the viewer's page is drawn in a colour of its own, not the theme's"
+meant = "says the daemon's refusal in its words, and draws in the app's theme"
+runs = ["viewer-ui-theme"]
+
+[[plant.edit]]
+file = "app/ui/page.css"
+find = "align-content: start; gap: 22px; background: var(--deep); }"
+replace = "align-content: start; gap: 22px; background: #0c2026; }"

@@ -157,7 +157,7 @@ function nobodyRow(text) {
 }
 
 /** The harnesses a chief runs in, as the human knows them, in the order their agents are offered. */
-const HARNESS_NAMES = {
+export const HARNESS_NAMES = {
   'claude-code': 'Claude Code',
   codex: 'Codex',
   opencode: 'OpenCode',

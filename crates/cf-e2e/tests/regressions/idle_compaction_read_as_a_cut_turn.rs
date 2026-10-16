@@ -36,7 +36,7 @@ use crate::{config, secs, Outcome};
 /// What a compaction while idle writes at the end of the record of `session`, in
 /// the Claude configuration `config`: the boundary, whose chain starts afresh, and
 /// the summary under it.
-fn compacted_while_idle(config: &str, session: &str) -> std::io::Result<()> {
+pub(crate) fn compacted_while_idle(config: &str, session: &str) -> std::io::Result<()> {
     let boundary = json!({
         "type": "system", "subtype": "compact_boundary", "uuid": "compact-boundary",
         "parentUuid": null, "logicalParentUuid": "the-turn-before",

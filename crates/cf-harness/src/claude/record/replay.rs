@@ -168,7 +168,11 @@ impl Transcript {
             return Ok(());
         }
         let id = id_of(record.uuid.as_ref(), "claude user", seq)?;
-        self.items.push(id, Role::User, &record.text, at, seq);
+        if record.summary {
+            self.items.summary(id, &record.text, at, seq);
+        } else {
+            self.items.push(id, Role::User, &record.text, at, seq);
+        }
         if (record.summary && !self.turn_open) || self.late_ancestor(place) {
             return Ok(());
         }
