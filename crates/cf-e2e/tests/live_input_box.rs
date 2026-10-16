@@ -62,7 +62,7 @@ const FAKE_AGENT: &str = env!("CARGO_BIN_EXE_fake-agent");
 #[ignore = "opt-in: spends the machine's quota on a window of Claude Code for each strategy; cargo xtask live input-box (npm run live:input-box)"]
 fn what_clears_the_box_claude_puts_a_message_back_into_clears_it_whole_and_is_harmless_at_an_empty_one(
 ) -> Result {
-    let log = Log::new("live input-box");
+    let log = Log::begin("live input-box")?;
     // What a window is opened on is the harness code's to say: built before anything is spent.
     ask::prepare()?;
     let tried = strategy::chosen(&live::list("strategy"))?;

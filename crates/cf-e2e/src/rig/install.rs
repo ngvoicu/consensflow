@@ -69,7 +69,7 @@ pub(super) fn environment(root: &Path, fake_bin: &Path, config: &Config) -> Vec<
     if let Some(devin) = &config.devin {
         env.push(("CF_TEST_DEVIN".to_owned(), text(devin)));
     }
-    if let Some(opencode) = &config.opencode_2 {
+    if let Some(opencode) = &config.opencode {
         // The stand-in's own: what it runs, and where it writes down what it is asked.
         env.extend([
             ("CF_TEST_OPENCODE".to_owned(), text(opencode)),
@@ -109,7 +109,7 @@ fn path(fake_bin: &Path, config: &Config) -> String {
 /// npm shim ([`stand_in::window_shim`]), which is how a window opens on it: it
 /// names the stand-in as both program and script, and the stand-in knows its own
 /// file when it is given it first. The stand-in `devin` beside it, where the rig
-/// has one, the stand-in `opencode` of an OpenCode 2 likewise, and the stand-in
+/// has one, the stand-in `opencode` (of a 1.x, or of an OpenCode 2) likewise, and the stand-in
 /// `codex` (Unix's). The folder they are in.
 pub(super) fn write_fake_install(root: &Path, config: &Config) -> Result<PathBuf> {
     let fake_bin = root.join("fake-bin");
@@ -123,7 +123,7 @@ pub(super) fn write_fake_install(root: &Path, config: &Config) -> Result<PathBuf
     if let Some(devin) = &config.devin {
         write_shim(&fake_bin, "devin", "CF_TEST_DEVIN", devin)?;
     }
-    if let Some(opencode) = &config.opencode_2 {
+    if let Some(opencode) = &config.opencode {
         write_shim(&fake_bin, "opencode", "CF_TEST_OPENCODE", opencode)?;
     }
     // The stand-in Codex's is a script, so Unix's.

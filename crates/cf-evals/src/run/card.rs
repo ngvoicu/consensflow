@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
-use cf_e2e::live::{agents, ask, text};
+use cf_e2e::live::{agents, ask, text, Log};
 use cf_e2e::rig::{Project, Rig};
 use serde_json::{json, Value};
 
@@ -123,7 +123,9 @@ fn conduct(
     let (options, scenario) = (plan.options, &plan.options.scenario);
     let mut rows = vec![plan.agent.to_value()];
     rows.extend(plan.staff.agents.iter().map(Agent::to_value));
-    agents::write_roster(rig, &rows)?;
+    // The eval's report says the chief's and the staff's models itself: the log is
+    // no live run's, whose report the launches would be.
+    agents::write_roster(rig, &rows, &Log::new("eval"))?;
     let file = rig.home().join("consensflow.db");
     let mut request = json!({
         "directory": workspace,

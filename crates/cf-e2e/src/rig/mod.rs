@@ -1,8 +1,9 @@
 //! The rig: a real daemon and the real pane host, connected as the app connects
 //! them, in a home of the case's own, with a stand-in `claude` in the windows
 //! it opens (and a stand-in `devin`, for a case that asks for one:
-//! [`Config::devin`]; and an `opencode` that has updated itself to 2:
-//! [`Config::opencode_2`]). The daemon is `cf ui --json --no-open`; the pane
+//! [`Config::devin`]; an `opencode` 1.x: [`Config::opencode`]; and an `opencode`
+//! that has updated itself to 2: [`Config::opencode_2`]). The daemon is `cf ui
+//! --json --no-open`; the pane
 //! host is `consensflow-bridge`, which gives each window a terminal of its own
 //! (a PTY, or ConPTY); they speak the bridge's frames to each other over their
 //! standard streams, and the rig stands between them ([`route`]). It only
@@ -83,7 +84,8 @@ pub struct Config {
     stand_in_records: Option<PathBuf>,
     codex: Option<PathBuf>,
     devin: Option<PathBuf>,
-    opencode_2: Option<PathBuf>,
+    /// The stand-in `opencode`: of an OpenCode 1.x, or of one that is 2.
+    opencode: Option<PathBuf>,
 }
 
 impl Config {
@@ -100,7 +102,7 @@ impl Config {
             stand_in_records: None,
             codex: None,
             devin: None,
-            opencode_2: None,
+            opencode: None,
         }
     }
 
@@ -132,7 +134,19 @@ impl Config {
     /// rig's folder ([`Rig::opencode_asked`]).
     #[must_use]
     pub fn opencode_2(mut self, program: impl Into<PathBuf>) -> Self {
-        self.opencode_2 = Some(program.into());
+        self.opencode = Some(program.into());
+        self
+    }
+
+    /// With the `opencode` the windows find first on their `PATH` the stand-in
+    /// `program` (the `fake-opencode-1` binary of this crate): an OpenCode 1.x the
+    /// daemon launches a window on as it launches one on OpenCode, which serves
+    /// what the launch asks of OpenCode's server and writes down what it is asked
+    /// and the requests it is sent in `opencode.jsonl` of the rig's folder
+    /// ([`Rig::opencode_asked`], [`Rig::opencode_requests`]).
+    #[must_use]
+    pub fn opencode(mut self, program: impl Into<PathBuf>) -> Self {
+        self.opencode = Some(program.into());
         self
     }
 
