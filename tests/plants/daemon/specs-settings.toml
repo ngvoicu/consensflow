@@ -1,0 +1,792 @@
+# What the app says of specs for every project, and the Specmint it brings (2026-10-15, the owner:
+# "I don't see in ConsensFlow in the settings what version of Specmint is brought over, if I can set
+# them up globally, coz per project says default to follow the app's settings"). Settings has Specs,
+# a third entry under Agents and Harnesses, a dialog of the page: whether specs are on for every
+# project, the folder and the variant a project uses unless it names its own, and the Specmint the
+# build bundles (its version, and each variant's name, commit and what it is), all read from the
+# bundled files by the daemon and never typed into the page. They are kept in the agents file beside
+# the human's choice about the roster and are no choice about it: the page alone says them
+# (`specs.get`, `specs.set`), and the screens' list and route neither say nor take them. A project
+# that names no folder or variant uses the app's, else `.specs` and `core`, where the chief's launch,
+# its role text and its skill are given them (`ProjectView::specs_setting`); a project's own Specs
+# section says what following means. One plant takes one rule out; a test of it fails. The tests are
+# in each layer's own place: `cf_proto::specs` (the resolution and the checks every folder and
+# variant is held to), the catalog's roster (`roster::app_specs` and `roster::preferences`, the
+# agents file), the dispatcher's `specs::` (what a chief is given), the harness's
+# `specmint::bundled` (the version read from the files), the daemon's page operations
+# (`page::tests::app_specs`), its roster seam, its Agents page and its screens' route, the browser's
+# (`Settings, Specs` and the Specs section of Project settings and of New project, in
+# `app/tests/core-page.spec.mjs`), and the rig's case that holds the real daemon and a real launch
+# to what Settings says (`crates/cf-e2e/tests/rig/specs.rs`), whose plant says `builds`. Every name
+# holds `specs settings`, so `npm run plants:daemon -- "specs settings"` runs them all.
+
+[run]
+settings-proto = ["cargo", "test", "--offline", "-p", "cf-proto", "--lib", "specs::"]
+settings-proto-page = ["cargo", "test", "--offline", "-p", "cf-proto", "--lib", "page::"]
+settings-ledger = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "specs"]
+settings-catalog = ["cargo", "test", "--offline", "-p", "cf-catalog", "--lib", "roster::"]
+settings-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "specs::"]
+settings-harness = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "specmint::bundled"]
+settings-daemon-roster = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "roster::"]
+settings-daemon-page = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "page::tests::app_specs"]
+settings-daemon-agents-page = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "screens::pages"]
+settings-daemon-route = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "screens::tests::routes"]
+# The case of the rig (a real daemon and pane host, a stand-in chief) that holds a launch to what Settings says.
+settings-rig = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "specs::what_settings_says"]
+# The dialog Settings opens, and the Specs section of Project settings and of New project, in the browser.
+settings-page-dialog = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "Settings, Specs|Settings has Specs"]
+settings-page-sections = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "following the app means|project that said a variant|variant that changes while"]
+settings-page-new-project = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "New project says what following|New project opened again shows the version"]
+# A version or a commit the bundled files do not say, in the three places that show them.
+settings-page-unknown = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "bundled files do not say its version"]
+
+# --- cf_proto::specs: a project's word over the app's over the documented default ---
+
+[[plant]]
+name = "specs settings: a project that names no folder uses the documented one, not the app's"
+meant = "what_the_project_leaves_unsaid_is_the_app_s_part_by_part_and_never_the_default_over_it"
+runs = ["settings-proto", "settings-engine"]
+
+[[plant.edit]]
+file = "crates/cf-proto/src/specs.rs"
+find = ".unwrap_or_else(|| app.folder_or_default().to_owned()),"
+replace = ".unwrap_or_else(|| DEFAULT_FOLDER.to_owned()),"
+
+[[plant]]
+name = "specs settings: a project that names no variant uses the documented one, not the app's"
+meant = "what_the_project_leaves_unsaid_is_the_app_s_part_by_part_and_never_the_default_over_it"
+runs = ["settings-proto", "settings-engine"]
+
+[[plant.edit]]
+file = "crates/cf-proto/src/specs.rs"
+find = ".unwrap_or_else(|| app.variant_or_default()),"
+replace = ".unwrap_or(Variant::DEFAULT),"
+
+[[plant]]
+name = "specs settings: the app's folder wins over the one a project names"
+meant = "the_project_s_word_wins_over_the_app_s_for_the_folder_and_for_the_variant"
+runs = ["settings-proto", "settings-engine"]
+
+[[plant.edit]]
+file = "crates/cf-proto/src/specs.rs"
+find = '''                .and_then(|own| own.folder.clone())
+                .unwrap_or_else(|| app.folder_or_default().to_owned()),'''
+replace = '''                .and_then(|own| app.folder.clone().or_else(|| own.folder.clone()))
+                .unwrap_or_else(|| app.folder_or_default().to_owned()),'''
+
+[[plant]]
+name = "specs settings: the app's variant wins over the one a project names"
+meant = "the_project_s_word_wins_over_the_app_s_for_the_folder_and_for_the_variant"
+runs = ["settings-proto", "settings-engine"]
+
+[[plant.edit]]
+file = "crates/cf-proto/src/specs.rs"
+find = '''                .and_then(Variant::from_name)
+                .unwrap_or_else(|| app.variant_or_default()),'''
+replace = '''                .and_then(Variant::from_name)
+                .map(|own| app.variant.unwrap_or(own))
+                .unwrap_or_else(|| app.variant_or_default()),'''
+
+[[plant]]
+name = "specs settings: a project that says nothing of whether does not follow the app's switch"
+meant = "the_project_s_word_on_whether_wins_and_none_follows_the_app_default"
+runs = ["settings-proto", "settings-engine"]
+
+[[plant.edit]]
+file = "crates/cf-proto/src/specs.rs"
+find = "let on = own.and_then(|own| own.on).unwrap_or(app.on);"
+replace = "let on = own.and_then(|own| own.on).unwrap_or(false);"
+
+[[plant]]
+name = "specs settings: a folder may climb out of the project with `..`"
+meant = "a_folder_that_leaves_the_project_is_refused"
+runs = ["settings-proto", "settings-catalog", "settings-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-proto/src/specs/check.rs"
+find = '        if part == ".." {'
+replace = '        if part == "..!" {'
+
+[[plant]]
+name = "specs settings: a variant says nothing of what it is in the last two"
+meant = "a_variant_says_what_it_is_in_a_few_words_and_the_app_says_only_what_was_set"
+runs = ["settings-proto"]
+
+[[plant.edit]]
+file = "crates/cf-proto/src/specs.rs"
+find = '            Variant::TddHtml => "Test-first specs as HTML pages",'
+replace = '            Variant::TddHtml => "Test-first Markdown specs",'
+
+[[plant]]
+name = "specs settings: the app says a folder and a variant it was never given"
+meant = "a_variant_says_what_it_is_in_a_few_words_and_the_app_says_only_what_was_set"
+runs = ["settings-proto"]
+
+[[plant.edit]]
+file = "crates/cf-proto/src/specs.rs"
+find = '''pub struct AppSpecs {
+    pub on: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]'''
+replace = '''pub struct AppSpecs {
+    pub on: bool,'''
+
+# --- the agents file: what the human says for every project, beside the roster's choice ---
+
+[[plant]]
+name = "specs settings: a folder that leaves the project is kept as the app's"
+meant = "a_part_refused_is_said_in_a_project_s_words_with_its_own_code_and_keeps_nothing"
+runs = ["settings-catalog", "settings-daemon-page"]
+
+[[plant.edit]]
+file = "crates/cf-catalog/src/roster/app_specs.rs"
+find = "        next.folder = folder_said(folder)?;"
+replace = "        next.folder = folder.as_str().map(str::to_owned);"
+
+[[plant]]
+name = "specs settings: a variant that is none of the four is let through as none"
+meant = "a_part_refused_is_said_in_a_project_s_words_with_its_own_code_and_keeps_nothing"
+runs = ["settings-catalog", "settings-daemon-page"]
+
+[[plant.edit]]
+file = "crates/cf-catalog/src/roster/app_specs.rs"
+find = "        Value::String(name) => check::variant(name).map(Some).map_err(refused),"
+replace = "        Value::String(name) => Ok(Variant::from_name(name)),"
+
+[[plant]]
+name = "specs settings: the app's switch is read from another key than the page says it by"
+meant = "each_part_said_is_kept_only_where_it_says_something_and_the_roster_s_choice_stays"
+runs = ["settings-catalog", "settings-daemon-page"]
+
+[[plant.edit]]
+file = "crates/cf-catalog/src/roster/app_specs.rs"
+find = '    if let Some(on) = said.get("on") {'
+replace = '    if let Some(on) = said.get("specs") {'
+
+[[plant]]
+name = "specs settings: a folder a file edited by hand names, outside the project, is the app's"
+meant = "a_folder_or_a_variant_a_file_edited_by_hand_cannot_have_is_read_as_none"
+runs = ["settings-catalog", "settings-daemon-roster"]
+
+[[plant.edit]]
+file = "crates/cf-catalog/src/roster/app_specs.rs"
+find = '        folder: text("specsFolder").and_then(|folder| check::folder(folder).ok().flatten()),'
+replace = '        folder: text("specsFolder").map(str::to_owned),'
+
+[[plant]]
+name = "specs settings: the variant the agents file names is never read"
+meant = "each_part_is_read_apart_and_only_true_itself_turns_them_on"
+runs = ["settings-catalog", "settings-daemon-roster"]
+
+[[plant.edit]]
+file = "crates/cf-catalog/src/roster/app_specs.rs"
+find = '        variant: text("specsVariant").and_then(Variant::from_name),'
+replace = "        variant: None,"
+
+[[plant]]
+name = "specs settings: a set of the app's specs drops the roster's choice from the file"
+meant = "each_part_said_is_kept_only_where_it_says_something_and_the_roster_s_choice_stays"
+runs = ["settings-catalog", "settings-daemon-page"]
+
+[[plant.edit]]
+file = "crates/cf-catalog/src/roster/app_specs.rs"
+find = "    let preferences = preferences_of(&document);"
+replace = "    let preferences = cf_proto::agents::Preferences { own_harness_only: false };"
+
+[[plant]]
+name = "specs settings: a set of the roster's choice drops the app's specs from the file"
+meant = "the_choice_set_leaves_the_app_s_specs_as_the_file_has_them_and_drops_what_this_build_does_not_know"
+runs = ["settings-catalog", "settings-daemon-route"]
+
+[[plant.edit]]
+file = "crates/cf-catalog/src/roster/preferences.rs"
+find = "    let app = app_specs_of(&document);"
+replace = "    let app = AppSpecs::default();"
+
+[[plant]]
+name = "specs settings: the screens' route takes the app's switch as a choice about the roster"
+meant = "the_app_s_specs_are_no_choice_about_the_roster_and_are_refused_by_name_leaving_the_file"
+runs = ["settings-catalog", "settings-daemon-route"]
+
+[[plant.edit]]
+file = "crates/cf-catalog/src/roster/preferences.rs"
+find = 'const PREFERENCE_KEYS: [&str; 1] = ["ownHarnessOnly"];'
+replace = 'const PREFERENCE_KEYS: [&str; 2] = ["ownHarnessOnly", "specs"];'
+
+[[plant]]
+name = "specs settings: the variant is never written to the agents file"
+meant = "each_part_said_is_kept_only_where_it_says_something_and_the_roster_s_choice_stays"
+runs = ["settings-catalog", "settings-daemon-page"]
+
+[[plant.edit]]
+file = "crates/cf-catalog/src/roster/preferences.rs"
+find = '''    if let Some(variant) = app.variant {
+        kept.insert(
+            "specsVariant".to_owned(),
+            Value::String(variant.as_str().to_owned()),
+        );
+    }
+'''
+replace = ""
+
+[[plant]]
+name = "specs settings: the folder is written to the agents file whatever it is, as null where none"
+meant = "the_choice_set_leaves_the_app_s_specs_as_the_file_has_them_and_drops_what_this_build_does_not_know"
+runs = ["settings-catalog"]
+
+[[plant.edit]]
+file = "crates/cf-catalog/src/roster/preferences.rs"
+find = '''    if let Some(folder) = &app.folder {
+        kept.insert("specsFolder".to_owned(), Value::String(folder.clone()));
+    }
+'''
+replace = '''    kept.insert(
+        "specsFolder".to_owned(),
+        app.folder.clone().map_or(Value::Null, Value::String),
+    );
+'''
+
+# --- the engine and the daemon's seam: what a chief's launch is given ---
+
+[[plant]]
+name = "specs settings: the app is asked of the roster only where the project says nothing of whether"
+meant = "a_project_that_names_no_folder_or_variant_uses_the_app_s_and_what_it_names_wins_part_by_part"
+runs = ["settings-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/specs.rs"
+find = "let says_off = project.specs.as_ref().and_then(|specs| specs.on) == Some(false);"
+replace = "let says_off = project.specs.as_ref().and_then(|specs| specs.on).is_some();"
+
+[[plant]]
+name = "specs settings: the app is asked of the roster for a project that says specs are off"
+meant = "the_roster_is_asked_what_the_app_says_unless_the_project_says_off"
+runs = ["settings-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/specs.rs"
+find = "let says_off = project.specs.as_ref().and_then(|specs| specs.on) == Some(false);"
+replace = "let says_off = false;"
+
+[[plant]]
+name = "specs settings: a chief's launch is given the app's switch and not its folder or variant"
+meant = "what_the_app_names_goes_where_the_app_names_nothing_is_the_documented_default"
+runs = ["settings-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/specs.rs"
+find = "            self.seams.roster.app_specs()\n"
+replace = '''            AppSpecs {
+                on: self.seams.roster.app_specs().on,
+                ..AppSpecs::default()
+            }
+'''
+
+[[plant]]
+name = "specs settings: a launch reads of the agents file only the switch for every project"
+meant = "the_human_s_choice_of_specs_for_every_project_is_read_from_the_file_at_each_launch"
+runs = ["settings-daemon-roster"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/roster.rs"
+find = "        self.roster().app_specs().unwrap_or_default()"
+replace = '''        AppSpecs {
+            on: self.roster().app_specs().unwrap_or_default().on,
+            ..AppSpecs::default()
+        }'''
+
+[[plant]]
+name = "specs settings rig: a launch reads of the agents file only the switch for every project"
+meant = "what_settings_says_for_every_project_is_the_folder_and_the_variant_a_chief_is_given_where_its_project_names_none"
+runs = ["settings-rig"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/roster.rs"
+find = "        self.roster().app_specs().unwrap_or_default()"
+replace = '''        AppSpecs {
+            on: self.roster().app_specs().unwrap_or_default().on,
+            ..AppSpecs::default()
+        }'''
+
+# --- the bundled Specmint: read from the files, never typed ---
+
+[[plant]]
+name = "specs settings: the Specmint version is written in the code"
+meant = "a_version_a_fixture_changes_is_the_version_that_is_read"
+runs = ["settings-harness", "settings-daemon-page"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/specmint/bundled.rs"
+find = '        version: (!versions.is_empty()).then(|| versions.join(", ")),'
+replace = '        version: Some("3.0.0".to_owned()),'
+
+[[plant]]
+name = "specs settings: the version of the Specmint is the first variant's, whatever the others say"
+meant = "a_version_a_fixture_changes_is_the_version_that_is_read"
+runs = ["settings-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/specmint/bundled.rs"
+find = "        if !versions.contains(&version) {"
+replace = "        if versions.is_empty() {"
+
+[[plant]]
+name = "specs settings: a commit is said whole"
+meant = "each_variant_says_its_version_its_short_commit_and_what_it_is"
+runs = ["settings-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/specmint/bundled.rs"
+find = "                .map(|commit| commit.chars().take(SHORT_COMMIT).collect()),"
+replace = "                .map(|commit| commit),"
+
+[[plant]]
+name = "specs settings: a version is read from a line of a description that runs on"
+meant = "the_version_is_the_frontmatters_at_its_top_or_under_metadata_and_nothing_else_is"
+runs = ["settings-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/specmint/bundled.rs"
+find = '''        if indented && !in_metadata {
+            continue;
+        }
+'''
+replace = ""
+
+# `str::lines` takes the `\r` of a CRLF off with the line break, and every comparison trims the
+# end too: a CRLF file is lost only where both stop doing it.
+[[plant]]
+name = "specs settings: a SKILL.md vendored with CRLF says no version"
+meant = "the_version_is_the_frontmatters_at_its_top_or_under_metadata_and_nothing_else_is"
+runs = ["settings-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/specmint/bundled.rs"
+find = "    let mut lines = text.lines();"
+replace = "    let mut lines = text.split('\\n');"
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/specmint/bundled.rs"
+find = '            in_metadata = line.trim_end() == "metadata:";'
+replace = '            in_metadata = line == "metadata:";'
+
+# --- the daemon: the page's operations, the screens, and the pages they serve ---
+
+[[plant]]
+name = "specs settings: what a project that names none uses is the app's word as it is, none where unset"
+meant = "a_human_who_said_nothing_has_specs_off_and_the_page_is_told_what_a_project_that_names_none_uses"
+runs = ["settings-daemon-page"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/app_specs.rs"
+find = '            "folder": app.folder_or_default(),'
+replace = '            "folder": app.folder,'
+
+[[plant]]
+name = "specs settings: specs.set only reads"
+meant = "each_part_the_human_says_is_kept_in_the_agents_file_beside_their_other_choices_and_shown_again"
+runs = ["settings-daemon-page"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/operations.rs"
+find = "PageOperation::SpecsSet => app_specs::set(page, body).await,"
+replace = "PageOperation::SpecsSet => app_specs::get(page).await,"
+
+[[plant]]
+name = "specs settings: specs.get wakes the dispatcher"
+meant = "the_operations_that_only_read_wake_nothing"
+runs = ["settings-proto-page", "settings-daemon-page"]
+
+[[plant.edit]]
+file = "crates/cf-proto/src/page.rs"
+find = '''                | Self::WakeUpGet
+                | Self::SpecsGet
+'''
+replace = '''                | Self::WakeUpGet
+'''
+
+[[plant]]
+name = "specs settings: the app does not forward specs.get to the daemon"
+meant = "the_operations_are_the_ones_the_app_forwards"
+runs = ["settings-proto-page"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/commands.rs"
+find = '''    "specs.get",
+'''
+replace = ""
+
+[[plant]]
+name = "specs settings: the screens' list of the agents says the app's switch again"
+meant = "the_app_s_specs_kept_beside_the_choice_are_neither_said_nor_taken_by_the_screens_and_a_set_keeps_them"
+runs = ["settings-daemon-route"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/screens/agents.rs"
+find = '            "preferences": roster.preferences().map_err(words)?,'
+replace = '            "preferences": json!({ "ownHarnessOnly": roster.preferences().map_err(words)?.own_harness_only, "specs": roster.app_specs().map_err(words)?.on }),'
+
+[[plant]]
+name = "specs settings: the Agents page has the box for specs again"
+meant = "the_agents_page_has_one_choice_about_the_roster_and_none_about_specs"
+runs = ["settings-daemon-agents-page"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/screens/pages/agents.html"
+find = '''  <label class="own-harness"><input type="checkbox" name="ownHarnessOnly"> Claude and OpenAI models only on their own harnesses: hidden on Pi and OpenCode</label>
+'''
+replace = '''  <label class="own-harness"><input type="checkbox" name="ownHarnessOnly"> Claude and OpenAI models only on their own harnesses: hidden on Pi and OpenCode</label>
+  <label class="own-harness"><input type="checkbox" name="specs"> Plan big work as specs in every project that does not say otherwise</label>
+'''
+
+[[plant.edit]]
+file = "crates/cf-daemon/tests/goldens/pages/agents.html"
+find = '''  <label class="own-harness"><input type="checkbox" name="ownHarnessOnly"> Claude and OpenAI models only on their own harnesses: hidden on Pi and OpenCode</label>
+'''
+replace = '''  <label class="own-harness"><input type="checkbox" name="ownHarnessOnly"> Claude and OpenAI models only on their own harnesses: hidden on Pi and OpenCode</label>
+  <label class="own-harness"><input type="checkbox" name="specs"> Plan big work as specs in every project that does not say otherwise</label>
+'''
+
+# --- the page: Settings, Specs ---
+
+[[plant]]
+name = "specs settings: Settings has no Specs entry"
+meant = "Settings has Specs as a third entry, under Agents and Harnesses, and it opens a dialog of the page, Settings closed behind it"
+runs = ["settings-page-dialog"]
+
+[[plant.edit]]
+file = "app/ui/index.html"
+find = '''        <li><button class="quiet-button" type="button" id="specs-settings-button" aria-controls="specs-dialog">Specs</button><span>Plan big work as specs in every project, and the Specmint ConsensFlow brings.</span></li>
+'''
+replace = ""
+
+[[plant]]
+name = "specs settings: Enter in the folder keeps it twice"
+meant = "Settings, Specs: the box, the folder and the variant every project uses unless it names its own, each kept as it changes and shown again when it opens"
+runs = ["settings-page-dialog"]
+
+[[plant.edit]]
+file = "app/ui/core/specs-settings.js"
+find = '''    if (folder.trim() === this.#kept) return
+'''
+replace = ""
+
+[[plant]]
+name = "specs settings: Enter in the folder keeps it twice while the daemon's answer is on its way"
+meant = "Settings, Specs: Enter in the folder asks the daemon once, however long its answer takes"
+runs = ["settings-page-dialog"]
+
+[[plant.edit]]
+file = "app/ui/core/specs-settings.js"
+find = '''    this.#kept = folder.trim()
+'''
+replace = ""
+
+[[plant]]
+name = "specs settings: the dialog does not read the daemon again as it opens"
+meant = "Settings, Specs: the box, the folder and the variant every project uses unless it names its own, each kept as it changes and shown again when it opens"
+runs = ["settings-page-dialog"]
+
+[[plant.edit]]
+file = "app/ui/core/specs-settings.js"
+find = '''    await this.#page.readSpecs()
+'''
+replace = ""
+
+[[plant]]
+name = "specs settings: what a change answers is not handed to the page"
+meant = "Settings, Specs: a change is what every project’s Specs section says following the app means, with no reload"
+runs = ["settings-page-dialog"]
+
+[[plant.edit]]
+file = "app/ui/core/specs-settings.js"
+find = "      this.#page.setSpecs(await this.#page.daemon('specs.set', part))"
+replace = "      await this.#page.daemon('specs.set', part)"
+
+[[plant]]
+name = "specs settings: a folder the daemon refuses is wiped from the field"
+meant = "Settings, Specs: a change the daemon refuses is said under the controls in its words, what was typed stays, and the next change clears it"
+runs = ["settings-page-dialog"]
+
+[[plant.edit]]
+file = "app/ui/core/specs-settings.js"
+find = "      this.#draw((name) => name !== 'folder' && untouched(name))"
+replace = "      this.#draw(untouched)"
+
+[[plant]]
+name = "specs settings: a box the daemon refuses stays as it was clicked"
+meant = "Settings, Specs: a change the daemon refuses is said under the controls in its words, what was typed stays, and the next change clears it"
+runs = ["settings-page-dialog"]
+
+[[plant.edit]]
+file = "app/ui/core/specs-settings.js"
+find = "    if (fresh('on')) this.#on.checked = app.on\n"
+replace = ""
+
+[[plant]]
+name = "specs settings: a refusal waits in the dialog for the next time it opens"
+meant = "Settings, Specs: a change the daemon refuses is said under the controls in its words, what was typed stays, and the next change clears it"
+runs = ["settings-page-dialog"]
+
+[[plant.edit]]
+file = "app/ui/core/specs-settings.js"
+find = '''    await this.#page.readSpecs()
+    this.#say('')
+'''
+replace = '''    await this.#page.readSpecs()
+'''
+
+[[plant]]
+name = "specs settings: a refusal that comes once the dialog is shut is said where nobody looks"
+meant = "Settings, Specs: a change the daemon refuses once the dialog is shut is said on the status line"
+runs = ["settings-page-dialog"]
+
+[[plant.edit]]
+file = "app/ui/core/specs-settings.js"
+find = '''      if (this.#dialog.open) this.#say(words)
+      else this.#page.report(words)
+'''
+replace = '''      this.#say(words)
+'''
+
+[[plant]]
+name = "specs settings: the Specmint version is written in the dialog"
+meant = "Settings, Specs: the Specmint it brings is shown as the daemon read it, its version and each variant’s name, version, commit and what it is"
+runs = ["settings-page-dialog"]
+
+[[plant.edit]]
+file = "app/ui/core/specs-settings.js"
+find = "        : `Specmint ${specmint.version}, brought with this app.`"
+replace = "        : 'Specmint 3.0.0, brought with this app.'"
+
+[[plant]]
+name = "specs settings: the dialog lists the first variant alone"
+meant = "Settings, Specs: the Specmint it brings is shown as the daemon read it, its version and each variant’s name, version, commit and what it is"
+runs = ["settings-page-dialog"]
+
+[[plant.edit]]
+file = "app/ui/core/specs-settings.js"
+find = "      specmint.variants.map((variant) => {"
+replace = "      specmint.variants.slice(0, 1).map((variant) => {"
+
+# --- the page: a project's Specs section says what following means ---
+
+[[plant]]
+name = "specs settings: following the app says nothing of what the app says"
+meant = "a project’s Specs section says what following the app means: whether it is on, the folder and the variant, with the Specmint version beside"
+runs = ["settings-page-sections"]
+
+[[plant.edit]]
+file = "app/ui/core/specs.js"
+find = "        : `Follow the app's setting (${specs.app.on ? 'on' : 'off'})`,"
+replace = "        : \"Follow the app's setting\","
+
+[[plant]]
+name = "specs settings: following the app says it is on whatever it says"
+meant = "a project’s Specs section says what following the app means: whether it is on, the folder and the variant, with the Specmint version beside"
+runs = ["settings-page-sections"]
+
+[[plant.edit]]
+file = "app/ui/core/specs.js"
+find = "(${specs.app.on ? 'on' : 'off'})"
+replace = "(${'on'})"
+
+[[plant]]
+name = "specs settings: the folder's hint is the documented folder and not the app's"
+meant = "a project’s Specs section says what following the app means: whether it is on, the folder and the variant, with the Specmint version beside"
+runs = ["settings-page-sections"]
+
+[[plant.edit]]
+file = "app/ui/core/specs.js"
+find = "    show(this.#folder, 'placeholder', specs?.applied.folder ?? '')"
+replace = "    show(this.#folder, 'placeholder', '.specs')"
+
+[[plant]]
+name = "specs settings: the variant's first choice names the documented variant and not the app's"
+meant = "a project’s Specs section says what following the app means: whether it is on, the folder and the variant, with the Specmint version beside"
+runs = ["settings-page-sections"]
+
+[[plant.edit]]
+file = "app/ui/core/specs.js"
+find = "`As the app says (${specs.applied.variant})`"
+replace = "'As the app says (core)'"
+
+[[plant]]
+name = "specs settings: the version beside the variant is the app's whichever variant is chosen"
+meant = "a project’s Specs section says what following the app means: whether it is on, the folder and the variant, with the Specmint version beside"
+runs = ["settings-page-sections"]
+
+[[plant.edit]]
+file = "app/ui/core/specs.js"
+find = "    const bundled = specs?.specmint.variants.find((variant) => variant.name === name)"
+replace = "    const bundled = specs?.specmint.variants[0]"
+
+# (2026-10-16, Astra and Sol: with mixed versions, New project cancelled with tdd chosen and opened
+# again showed tdd's version beside the app's variant; the code was mended in the Opus round, and its
+# New project case is held since.)
+[[plant]]
+name = "specs settings: the version beside the variant is the one before the project's own was set"
+meant = "New project opened again shows the version of the variant it opens with, not of the one chosen before it was cancelled"
+runs = ["settings-page-new-project", "settings-page-sections"]
+
+[[plant.edit]]
+file = "app/ui/core/specs.js"
+find = '''    this.#pick(specs.variant ?? '')
+    this.#showVersion()
+'''
+replace = '''    this.#pick(specs.variant ?? '')
+'''
+
+[[plant]]
+name = "specs settings: Project settings does not read what the app says as it opens"
+meant = "a project’s Specs section says what following the app means: whether it is on, the folder and the variant, with the Specmint version beside"
+runs = ["settings-page-sections"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = "    const [calls] = await Promise.all([this.#wakeUp.read(project), this.#page.readSpecs()])"
+replace = "    const calls = await this.#wakeUp.read(project)"
+
+[[plant]]
+name = "specs settings: New project does not read what the app says as it opens"
+meant = "New project says what following the app means as Project settings does, and starts nothing of it unless the human sets it"
+runs = ["settings-page-new-project"]
+
+[[plant.edit]]
+file = "app/ui/core/dialogs.js"
+find = '''      this.#page.readSpecs(),
+'''
+replace = ""
+
+[[plant]]
+name = "specs settings: a project that said a variant the Specmint does not have loses it"
+meant = "a project that said a variant keeps it whatever the app says, and one Specmint no longer has is still the project’s"
+runs = ["settings-page-sections"]
+
+[[plant.edit]]
+file = "app/ui/core/specs.js"
+find = '''      this.#variant.append(new Option(variant, variant))
+'''
+replace = ""
+
+[[plant]]
+name = "specs settings: New project says a section left as it opened as a word of its own"
+meant = "New project says what following the app means as Project settings does, and starts nothing of it unless the human sets it"
+runs = ["settings-page-new-project"]
+
+[[plant.edit]]
+file = "app/ui/core/specs.js"
+find = "    const asOpened = said.on === null && said.folder === null && said.variant === null"
+replace = "    const asOpened = said.on === null && said.folder === null && said.variant === ''"
+
+# --- what Astra and Sol found in round 1 (2026-10-16) ---
+
+# A save's answer redrew every control: the switch turned on, and a folder typed while its save
+# waited on the daemon, lost the folder when the answer came. The tests answered at once.
+[[plant]]
+name = "specs settings: a save's answer draws over what the human changed while it was on its way"
+meant = "Settings, Specs: what the human changes while a save is on its way is kept when that save’s answer comes"
+runs = ["settings-page-dialog"]
+
+[[plant.edit]]
+file = "app/ui/core/specs-settings.js"
+find = "      this.#draw(untouched)\n"
+replace = "      this.#draw(() => true)\n"
+
+# A bundled SKILL.md whose version could not be read failed `specs.get`, which New project and
+# Project settings wait on before they open: the human's settings came back only with the metadata.
+[[plant]]
+name = "specs settings: the human's settings are refused where the bundled files say no version"
+meant = "the_human_s_settings_come_back_whatever_the_bundled_files_say_of_their_version"
+runs = ["settings-daemon-page"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/app_specs.rs"
+find = '''pub(super) fn answered(app: &AppSpecs, bundled: &Bundled) -> Result<Fields, Said> {
+'''
+replace = '''pub(super) fn answered(app: &AppSpecs, bundled: &Bundled) -> Result<Fields, Said> {
+    if bundled.variants.iter().any(|row| row.version.is_none()) {
+        return Err(Said::from("the bundled Specmint says no version"));
+    }
+'''
+
+[[plant]]
+name = "specs settings: a variant whose version the bundled files do not say is left out"
+meant = "what_the_files_do_not_say_is_unknown_and_every_variant_is_listed_with_what_they_do_say"
+runs = ["settings-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/specmint/bundled.rs"
+find = '''            about: variant.about().to_owned(),
+        })
+        .collect();'''
+replace = '''            about: variant.about().to_owned(),
+        })
+        .filter(|row| row.version.is_some())
+        .collect();'''
+
+[[plant]]
+name = "specs settings: a YAML comment is read as part of a key and its value"
+meant = "the_version_is_the_frontmatters_at_its_top_or_under_metadata_and_nothing_else_is"
+runs = ["settings-harness"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/specmint/bundled.rs"
+find = "    for line in lines.map(uncommented) {"
+replace = "    for line in lines {"
+
+[[plant]]
+name = "specs settings: a project's section says the version of a variant that has none as null"
+meant = "a Specmint variant whose bundled files do not say its version or commit shows them unknown, in Settings, Project settings and New project"
+runs = ["settings-page-unknown"]
+
+[[plant.edit]]
+file = "app/ui/core/specs.js"
+find = "      label = bundled.version === null ? 'Specmint version unknown' : `Specmint ${bundled.version}`"
+replace = "      label = `Specmint ${bundled.version}`"
+
+[[plant]]
+name = "specs settings: Settings leaves a variant's unknown version and commit blank"
+meant = "a Specmint variant whose bundled files do not say its version or commit shows them unknown, in Settings, Project settings and New project"
+runs = ["settings-page-unknown"]
+
+[[plant.edit]]
+file = "app/ui/core/specs-settings.js"
+find = '''          element('td', 'member-meta', variant.version ?? UNKNOWN),
+          element('td', 'member-meta', variant.commit ?? UNKNOWN),'''
+replace = '''          element('td', 'member-meta', variant.version),
+          element('td', 'member-meta', variant.commit),'''
+
+[[plant]]
+name = "specs settings: Settings says a Specmint whose version nothing says is version null"
+meant = "a Specmint variant whose bundled files do not say its version or commit shows them unknown, in Settings, Project settings and New project"
+runs = ["settings-page-unknown"]
+
+[[plant.edit]]
+file = "app/ui/core/specs-settings.js"
+find = '''      specmint.version === null
+        ? 'Specmint, its version unknown, brought with this app.'
+        : `Specmint ${specmint.version}, brought with this app.`'''
+replace = '''      `Specmint ${specmint.version}, brought with this app.`'''
+
+# The test that a chief at work is left as it was when the app's specs change ran no pass of the
+# dispatcher after the change: one that closed the chief to give it the new specs passed it.
+[[plant]]
+name = "specs settings: a pass closes a chief at work where the app has specs on, for its next window to have them"
+meant = "a_project_that_said_a_variant_keeps_it_when_the_app_names_another_and_a_change_reaches_the_next_launch"
+runs = ["settings-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''        if record.window.borrow().retiring {
+            return Ok(());
+        }
+        // A participant forgotten while the step waits is done with.'''
+replace = '''        if record.window.borrow().retiring {
+            return Ok(());
+        }
+        if participant.role == "chief" && self.seams.roster.app_specs().on {
+            self.retire(record).await?;
+            return Ok(());
+        }
+        // A participant forgotten while the step waits is done with.'''

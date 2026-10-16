@@ -83,7 +83,6 @@ fn a_missing_file_is_an_empty_roster_for_every_read_and_nothing_is_made() {
         roster.preferences().unwrap(),
         Preferences {
             own_harness_only: false,
-            specs: false,
         }
     );
     assert!(roster.agent_row("thoth").unwrap().is_some());
@@ -238,7 +237,6 @@ fn a_tier_no_longer_known_fails_the_list_alone() {
         roster.preferences().unwrap(),
         Preferences {
             own_harness_only: false,
-            specs: false,
         }
     );
 }

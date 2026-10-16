@@ -1,7 +1,9 @@
 //! A chief plans big work as specs where its project has them on, end to end
 //! through the real daemon and pane host, the windows the stand-in `claude`:
 //! the human says it on the page (`project.specs`) or for every project (the
-//! agents file's preference), and the chief's next launch carries the Specmint
+//! agents file's preference, which Settings sets with `specs.set`, with the
+//! folder and the variant a project that names none uses), and the chief's next
+//! launch carries the Specmint
 //! skill, ConsensFlow's copy kept for every launch in a folder of its own
 //! (which Claude is given besides its role's) and named in its role text; a
 //! project that has them off, and every worker, are given nothing, and a skill
@@ -319,6 +321,64 @@ fn with_specs_on_for_every_project_a_project_that_says_nothing_follows_and_one_t
     );
     assert_eq!(add_dirs(&next).len(), 1, "{:?}", next["argv"]);
     assert!(!told_of_specs(&role_of(&next)), "told nothing of them");
+    rig.close()?;
+    Ok(())
+}
+
+#[test]
+fn what_settings_says_for_every_project_is_the_folder_and_the_variant_a_chief_is_given_where_its_project_names_none(
+) -> Outcome {
+    let rig = rig()?;
+    // Settings, Specs: on for every project, in this folder, with this variant.
+    let said = rig.page(
+        "specs.set",
+        json!({ "on": true, "folder": "docs/specs", "variant": "core-html" }),
+    )?;
+    assert_eq!(said["ok"], true, "{said}");
+    assert_eq!(
+        said["applied"],
+        json!({ "folder": "docs/specs", "variant": "core-html" })
+    );
+    // A project that says nothing: its chief's first window has the app's variant and folder.
+    let project = Project::open(&rig, "chief", json!({}))?;
+    let first = rig.open_frame(&format!("p{}-chief", project.id()), OPEN)?;
+    assert_eq!(
+        specmint_named(&first),
+        ["specmint-core-html"],
+        "{:?}",
+        first["argv"]
+    );
+    let kept = add_dirs(&first).remove(1);
+    assert!(is_kept(&rig, &kept, "claude", "core-html"), "{kept:?}");
+    let role = role_of(&first);
+    assert!(
+        role.contains("Where Specmint says `.specs`, it means `docs/specs`"),
+        "{role}"
+    );
+    // It names its own variant: that is the one, in the app's folder still.
+    let said = rig.page(
+        "project.specs",
+        json!({ "project": project.id(), "variant": "tdd" }),
+    )?;
+    assert_eq!(said["ok"], true, "{said}");
+    let next = relaunch(&rig, &project, 2)?;
+    assert_eq!(
+        specmint_named(&next),
+        ["specmint-tdd"],
+        "{:?}",
+        next["argv"]
+    );
+    assert!(
+        role_of(&next).contains("it means `docs/specs`"),
+        "{}",
+        role_of(&next)
+    );
+    // Settings turns specs off for every project: the project, which says nothing of whether, follows.
+    let said = rig.page("specs.set", json!({ "on": false }))?;
+    assert_eq!(said["ok"], true, "{said}");
+    let third = relaunch(&rig, &project, 3)?;
+    assert_eq!(add_dirs(&third).len(), 1, "{:?}", third["argv"]);
+    assert!(!told_of_specs(&role_of(&third)), "told nothing of them");
     rig.close()?;
     Ok(())
 }

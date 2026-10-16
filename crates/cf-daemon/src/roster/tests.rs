@@ -2,6 +2,7 @@
 //! launch reads of one, what the agents' API reads, and that the members'
 //! tiers follow the agents at a start without a broken file stopping it.
 
+use cf_proto::specs::Variant;
 use serde_json::json;
 
 use super::*;
@@ -185,18 +186,44 @@ fn the_human_s_choice_of_specs_for_every_project_is_read_from_the_file_at_each_l
     let home = tempfile::tempdir().unwrap();
     let file = home.path().join("agents.json");
     let agents = agents_in(home.path(), &mine());
-    let by_default = || cf_engine::seams::Roster::specs_by_default(&agents);
-    // A file that says nothing of it is off.
-    assert!(!by_default());
+    let by_default = || cf_engine::seams::Roster::app_specs(&agents);
+    let says = |on: bool, folder: Option<&str>, variant: Option<Variant>| AppSpecs {
+        on,
+        folder: folder.map(str::to_owned),
+        variant,
+    };
+    // A file that says nothing of it is off, and names no folder or variant.
+    assert_eq!(by_default(), AppSpecs::default());
     // The human turns it on, and the next launch reads it as it is then.
     let mut document = mine();
     document["preferences"] = json!({ "ownHarnessOnly": false, "specs": true });
     std::fs::write(&file, document.to_string()).unwrap();
-    assert!(by_default());
-    // Anything but true is off, and so is a file that cannot be read.
-    document["preferences"] = json!({ "specs": "yes" });
+    assert_eq!(by_default(), says(true, None, None));
+    // The folder and the variant every project uses come through the same file.
+    document["preferences"] = json!({
+        "ownHarnessOnly": false,
+        "specs": true,
+        "specsFolder": "docs/specs",
+        "specsVariant": "tdd-html",
+    });
     std::fs::write(&file, document.to_string()).unwrap();
-    assert!(!by_default());
+    assert_eq!(
+        by_default(),
+        says(true, Some("docs/specs"), Some(Variant::TddHtml))
+    );
+    // Named while specs are off, they wait for the day they are on.
+    document["preferences"] = json!({ "specsFolder": "plans", "specsVariant": "core-html" });
+    std::fs::write(&file, document.to_string()).unwrap();
+    assert_eq!(
+        by_default(),
+        says(false, Some("plans"), Some(Variant::CoreHtml))
+    );
+    // Anything but true is off, a folder or variant it cannot have is none, and
+    // so is a file that cannot be read.
+    document["preferences"] =
+        json!({ "specs": "yes", "specsFolder": "../outside", "specsVariant": "html" });
+    std::fs::write(&file, document.to_string()).unwrap();
+    assert_eq!(by_default(), AppSpecs::default());
     std::fs::write(&file, "{ not json").unwrap();
-    assert!(!by_default());
+    assert_eq!(by_default(), AppSpecs::default());
 }

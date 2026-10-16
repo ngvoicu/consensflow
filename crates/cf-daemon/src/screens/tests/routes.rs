@@ -258,45 +258,61 @@ async fn the_preferences_are_set_kept_and_told() {
     );
 }
 
+/// What the app says of specs for every project is kept in the agents file
+/// beside the roster's choice, and is the page's alone (`specs.get`,
+/// `specs.set`): the screens neither say it nor take it, and the choice they set
+/// keeps it as the file has it.
 #[tokio::test]
-async fn specs_for_every_project_are_set_kept_and_told_beside_the_other_choice_and_said_only_when_on(
+async fn the_app_s_specs_kept_beside_the_choice_are_neither_said_nor_taken_by_the_screens_and_a_set_keeps_them(
 ) {
     let rig = Rig::new(&[]);
-    let set = |body: &'static str| the_app_asks(&rig, Method::POST, "/api/preferences", body);
-    assert_eq!(
-        set(r#"{"specs":true}"#).await,
-        (
-            200,
-            json!({ "preferences": { "ownHarnessOnly": false, "specs": true } })
-        )
-    );
-    // The list the Agents screen reads says it, and the other choice set goes on beside it.
+    let file = rig.roster_file();
+    std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+    let specs = json!({ "specs": true, "specsFolder": "docs/specs", "specsVariant": "tdd-html" });
+    let mut document = json!({ "schemaVersion": 1, "agents": [] });
+    document["preferences"] = json!({ "ownHarnessOnly": false });
+    document["preferences"]
+        .as_object_mut()
+        .unwrap()
+        .extend(specs.as_object().unwrap().clone());
+    std::fs::write(&file, document.to_string()).unwrap();
+    let kept = || {
+        let text = roster_text(&rig).unwrap();
+        serde_json::from_str::<Value>(&text).unwrap()["preferences"].clone()
+    };
+    let before = kept();
+    // The list the Agents screen reads says the one choice about the roster.
     let (_, listed) = the_app_asks(&rig, Method::GET, "/api/agents", "").await;
-    assert_eq!(
-        listed["preferences"],
-        json!({ "ownHarnessOnly": false, "specs": true })
-    );
+    assert_eq!(listed["preferences"], json!({ "ownHarnessOnly": false }));
+    // A request that names them is refused as one that names anything else, and keeps nothing.
+    let set = |body: &'static str| the_app_asks(&rig, Method::POST, "/api/preferences", body);
+    for (body, key) in [
+        (r#"{"specs":false}"#, "specs"),
+        (r#"{"specsFolder":"plans"}"#, "specsFolder"),
+        (r#"{"specsVariant":"tdd"}"#, "specsVariant"),
+        (r#"{"ownHarnessOnly":true,"specs":false}"#, "specs"),
+    ] {
+        assert_eq!(
+            set(body).await,
+            (400, error(&format!("no preference named {key}"))),
+            "{body}"
+        );
+    }
+    assert_eq!(kept(), before, "the file is as it was");
+    // The choice set says itself alone, and the file keeps the app's specs as they were.
     assert_eq!(
         set(r#"{"ownHarnessOnly":true}"#).await,
-        (
-            200,
-            json!({ "preferences": { "ownHarnessOnly": true, "specs": true } })
-        )
-    );
-    assert_eq!(
-        set(r#"{"specs":false}"#).await,
         (200, json!({ "preferences": { "ownHarnessOnly": true } }))
     );
-    assert_eq!(
-        set(r#"{"specs":"yes"}"#).await,
-        (400, error("specs is on or off"))
-    );
+    let mut after = specs.clone();
+    after["ownHarnessOnly"] = json!(true);
+    assert_eq!(kept(), after);
     let (_, listed) = the_app_asks(&rig, Method::GET, "/api/agents", "").await;
     assert_eq!(listed["preferences"], json!({ "ownHarnessOnly": true }));
     assert_eq!(
         rig.changes.get(),
-        3,
-        "each write is told, the refusal is not"
+        1,
+        "the write is told, the refusals are not"
     );
 }
 

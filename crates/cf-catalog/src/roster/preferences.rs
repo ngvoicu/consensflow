@@ -1,40 +1,45 @@
 //! What the human chose about the roster, kept in the file beside their own
-//! agents.
+//! agents, under `preferences`; and the one writer of that object, which also
+//! holds what the human says of specs for every project (`app_specs`): a write
+//! of either keeps the other as the file has it.
 
 use std::path::Path;
 
 use cf_base::json::as_parsed_fields;
 use cf_base::refusal::Refusal;
 use cf_proto::agents::{AgentView, Preferences};
+use cf_proto::specs::AppSpecs;
 use serde_json::{Map, Value};
 
+use super::app_specs::app_specs_of;
 use super::document::{load_document, Document};
 use super::save::save_document;
 
 /// The choices the file records. One it does not record is off, and so is
 /// one that is anything but `true`.
 pub(crate) fn preferences_of(document: &Document) -> Preferences {
-    let chosen = |key: &str| {
-        document
-            .get("preferences")
-            .and_then(|preferences| preferences.get(key))
-            == Some(&Value::Bool(true))
-    };
     Preferences {
-        own_harness_only: chosen("ownHarnessOnly"),
-        specs: chosen("specs"),
+        own_harness_only: kept(document, "ownHarnessOnly") == Some(&Value::Bool(true)),
     }
 }
 
-/// What the human may choose: each by its name in the file.
-const PREFERENCE_KEYS: [&str; 2] = ["ownHarnessOnly", "specs"];
+/// What the file's `preferences` keep under `key`, as written.
+pub(super) fn kept<'a>(document: &'a Document, key: &str) -> Option<&'a Value> {
+    document
+        .get("preferences")
+        .and_then(|preferences| preferences.get(key))
+}
+
+/// What the human may choose about the roster: each by its name in the file.
+const PREFERENCE_KEYS: [&str; 1] = ["ownHarnessOnly"];
 
 /// `setPreferences`: the choices `patch` names set, each refused in the
 /// order JavaScript enumerates the request's keys, then the whole set kept
 /// in the file: a write even when nothing changes, and a file made when
 /// there is none. A key the file kept that this build does not know is
-/// dropped from it. Specs are kept only when on: a file that never knew of
-/// them reads, and is written, as it always was.
+/// dropped from it, and the app's specs are kept as they were: they are no
+/// choice about the roster, and a patch that names them is refused as one
+/// that names any other.
 pub(crate) fn set_preferences(path: &Path, patch: Option<&Value>) -> Result<Preferences, Refusal> {
     let mut document = load_document(path)?;
     let mut next = preferences_of(&document);
@@ -51,21 +56,42 @@ pub(crate) fn set_preferences(path: &Path, patch: Option<&Value>) -> Result<Pref
                 format!("{key} is on or off"),
             ));
         };
-        match key.as_str() {
-            "specs" => next.specs = on,
-            _ => next.own_harness_only = on,
-        }
+        next.own_harness_only = on;
     }
+    let app = app_specs_of(&document);
+    keep(path, &mut document, next, &app)?;
+    Ok(next)
+}
+
+/// Writes the whole of `preferences` into the file at `path`, whose
+/// `document` was read for the write: the human's choice about the roster,
+/// then the app's specs, each part of these only where it says something
+/// (specs only when on, the folder and the variant only when named), so a
+/// file that never knew of them is written as it always was.
+pub(super) fn keep(
+    path: &Path,
+    document: &mut Document,
+    preferences: Preferences,
+    app: &AppSpecs,
+) -> Result<(), Refusal> {
     let mut kept = Map::from_iter([(
         "ownHarnessOnly".to_owned(),
-        Value::Bool(next.own_harness_only),
+        Value::Bool(preferences.own_harness_only),
     )]);
-    if next.specs {
+    if app.on {
         kept.insert("specs".to_owned(), Value::Bool(true));
     }
+    if let Some(folder) = &app.folder {
+        kept.insert("specsFolder".to_owned(), Value::String(folder.clone()));
+    }
+    if let Some(variant) = app.variant {
+        kept.insert(
+            "specsVariant".to_owned(),
+            Value::String(variant.as_str().to_owned()),
+        );
+    }
     document.set("preferences", Value::Object(kept));
-    save_document(path, &mut document)?;
-    Ok(next)
+    save_document(path, document)
 }
 
 /// `Object.entries(patch ?? {})`: an object's fields in the order JavaScript
