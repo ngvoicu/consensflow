@@ -10,6 +10,7 @@ use cf_base::json::{from_slice_lossy_keeping, Keep};
 use serde_json::json;
 
 use super::*;
+use crate::testing::LONG_AFTER_MS;
 
 /// A parser that keeps a record's `a` and its `b` whole and drops the rest.
 static KEEPS: Keep = Keep::Members(&[("a", &Keep::All), ("b", &Keep::Scalar)]);
@@ -28,8 +29,8 @@ fn both(file: &Path) -> [Result<Vec<(Value, usize)>, String>; 2] {
             Ok(())
         };
         let looked = match with {
-            None => read_on(file, None, visit, None),
-            Some(parse) => read_on_with(file, None, parse, visit, None),
+            None => read_on(file, None, LONG_AFTER_MS, visit, None),
+            Some(parse) => read_on_with(file, None, LONG_AFTER_MS, parse, visit, None),
         };
         looked.map(|_| visited).map_err(|stop| stop.reason())
     };

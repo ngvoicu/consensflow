@@ -44,6 +44,20 @@ impl Log {
         fs::write(self.wire.path(), log).unwrap();
     }
 
+    /// Writes the log whole, and gives it `at_ms` for when it was last written:
+    /// whatever the file system's clock, the time a coarse one gives a rewrite
+    /// within its tick.
+    fn write_at(&self, text: &str, at_ms: i64) {
+        self.write(text);
+        let at = std::time::UNIX_EPOCH + std::time::Duration::from_millis(at_ms as u64);
+        fs::File::options()
+            .write(true)
+            .open(self.wire.path())
+            .unwrap()
+            .set_modified(at)
+            .unwrap();
+    }
+
     /// What the log says at the time every scenario starts at.
     fn said(&self) -> Said {
         self.wire.read(EPOCH_MS).unwrap()

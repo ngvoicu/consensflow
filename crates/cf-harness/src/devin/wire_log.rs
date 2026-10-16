@@ -29,7 +29,7 @@ use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock};
 
-use cf_base::file::{identity, FileError, Identity};
+use cf_base::file::{identity, mtime_ms, settled, FileError, Identity};
 use cf_base::js;
 use cf_base::json::from_slice_lossy;
 use jiff::tz::TimeZone;
@@ -94,9 +94,11 @@ struct State {
     offset: u64,
     /// Which file the log was ([`cf_base::file::identity`]), when it was last written
     /// to, and a hash of every byte read of it, as the look that read up to `offset`
-    /// found them: what tells the log read from another that replaced it.
+    /// found them, and when that look began: what tells the log read from another
+    /// that replaced it.
     identity: Option<Identity>,
-    modified: Option<std::time::SystemTime>,
+    written: Option<f64>,
+    looked_ms: i64,
     read: DefaultHasher,
     /// What follows its last newline: a line still being written.
     carry: String,
@@ -146,7 +148,8 @@ impl WireLog {
     /// that cannot be opened says what it said before. One that was replaced is
     /// read from its start, the mode read of the one before it forgotten: a log
     /// that shrank, that is another file, or that was written to and does not hold
-    /// what was read of it, whether it grew or not. `at_ms` is when it is.
+    /// what was read of it, whether it grew or not. `at_ms` is when it is, read
+    /// before the log is.
     pub(super) fn read(&self, at_ms: i64) -> Result<Said, String> {
         let mut state = self.state.borrow_mut();
         let Ok(mut file) = File::open(&self.file) else {
@@ -155,9 +158,9 @@ impl WireLog {
         let metadata = file
             .metadata()
             .map_err(|error| FileError::call(error, "fstat", None).to_string())?;
-        let (size, modified) = (metadata.len(), metadata.modified().ok());
+        let (size, written) = (metadata.len(), mtime_ms(&metadata).ok());
         let identity = identity(&file).ok();
-        if state.offset > 0 && state.replaced(&mut file, size, identity, modified)? {
+        if state.offset > 0 && state.replaced(&mut file, size, identity, written)? {
             state.offset = 0;
             state.read = DefaultHasher::default();
             state.carry.clear();
@@ -165,7 +168,8 @@ impl WireLog {
             state.mode = None;
         }
         state.identity = identity;
-        state.modified = modified;
+        state.written = written;
+        state.looked_ms = at_ms;
         let from = state.offset;
         if size > from {
             let appended = read_from(&mut file, from, size)?;
@@ -217,24 +221,28 @@ fn read_from(file: &mut File, from: u64, size: u64) -> Result<Vec<u8>, String> {
 
 impl State {
     /// Whether the log `file` (`size` bytes long, the file `identity`, last written to
-    /// at `modified`) is another than the one read so far: it is shorter than what was
-    /// read, it is another file, or it was written to since and what it holds up to
-    /// where the last look stopped is not what was read, whatever its length did. A
-    /// configuration rewritten at its size from `bypass` to `normal` was read as the
-    /// one before it, and so was one the log grew past with the same first kilobyte
-    /// (Astra and Sol on the B1 fix, twice).
+    /// at `written`) is another than the one read so far: it is shorter than what was
+    /// read, it is another file, or what it holds up to where the last look stopped is
+    /// not what was read, whatever its length did. A configuration rewritten at its size
+    /// from `bypass` to `normal` was read as the one before it, and so was one the log
+    /// grew past with the same first kilobyte (Astra and Sol on the B1 fix, twice). Its
+    /// bytes are read again unless its time is the one the last look found and was
+    /// [`settled`] then: on Windows a log rewritten within the clock's tick keeps its
+    /// time (main's Windows CI, run 38942619741).
     fn replaced(
         &self,
         file: &mut File,
         size: u64,
         identity: Option<Identity>,
-        modified: Option<std::time::SystemTime>,
+        written: Option<f64>,
     ) -> Result<bool, String> {
         if size < self.offset || identity != self.identity {
             return Ok(true);
         }
-        if modified.is_some() && modified == self.modified {
-            return Ok(false);
+        if let Some(written) = written.filter(|written| Some(*written) == self.written) {
+            if settled(written, self.looked_ms) {
+                return Ok(false);
+            }
         }
         Ok(hash_of(file, self.offset)? != self.read.finish())
     }

@@ -59,28 +59,48 @@ fn another_conversations_mode_is_none_of_the_shown_ones_and_a_new_one_is_in_its_
 #[test]
 fn a_log_replaced_by_one_as_long_says_the_mode_the_new_one_says_and_no_mode_of_the_old_one() {
     // A configuration rewritten at its size from bypass to normal was read as bypass,
-    // and the window as ready (Astra and Sol on the B1 fix).
+    // and the window as ready (Astra and Sol on the B1 fix). Each rewrite keeps the
+    // time of the one before, a second before the look, as Windows' clock gives a log
+    // rewritten within its tick: only its bytes tell it (main's Windows CI, run
+    // 38942619741).
     let log = Log::new();
-    log.write(&configured("mild-coin", "bypass"));
+    let tick = EPOCH_MS - 1_000;
+    log.write_at(&configured("mild-coin", "bypass"), tick);
     assert_eq!(log.said().mode.as_deref(), Some("bypass"));
     let normal = configured("mild-coin", "normal");
     assert_eq!(normal.len(), configured("mild-coin", "bypass").len());
-    log.write(&normal);
+    log.write_at(&normal, tick);
     assert_eq!(log.said().mode.as_deref(), Some("normal"));
     // Replaced by one that says no mode: none, and not the one before.
-    log.write(&shows("mild-coin"));
+    log.write_at(&shows("mild-coin"), tick);
     let said = log.said();
     assert_eq!(
         (said.shown.as_deref(), said.mode.as_deref()),
         (Some("mild-coin"), None)
     );
     // Emptied, it says no mode either, and what it says next is read whole.
-    log.write(&configured("mild-coin", "normal"));
+    log.write_at(&configured("mild-coin", "normal"), tick);
     assert_eq!(log.said().mode.as_deref(), Some("normal"));
-    log.write("");
+    log.write_at("", tick);
     assert_eq!(log.said().mode, None);
-    log.write(&configured("mild-coin", "bypass"));
+    log.write_at(&configured("mild-coin", "bypass"), tick);
     assert_eq!(log.said().mode.as_deref(), Some("bypass"));
+}
+
+#[test]
+fn a_log_last_written_well_before_the_look_that_read_it_is_not_read_again_while_its_time_stays() {
+    // Its time and size as the last look found them, and that time older than the look
+    // by more than a file time's step: what it holds is not hashed again at each look.
+    // Rewritten so at its size, it is the log read before (as git takes a clean entry).
+    let log = Log::new();
+    let long_ago = EPOCH_MS - 60 * MINUTE;
+    log.write_at(&configured("mild-coin", "bypass"), long_ago);
+    assert_eq!(log.said().mode.as_deref(), Some("bypass"));
+    log.write_at(&configured("mild-coin", "normal"), long_ago);
+    assert_eq!(log.said().mode.as_deref(), Some("bypass"));
+    // A time of its own, and it is read again.
+    log.write_at(&configured("mild-coin", "normal"), long_ago + 1);
+    assert_eq!(log.said().mode.as_deref(), Some("normal"));
 }
 
 /// Makes the log of `log` written to later than a look found it, whatever the file
@@ -120,10 +140,11 @@ fn a_log_rewritten_past_its_first_kilobyte_and_grown_says_the_mode_the_rewrite_s
 
 #[test]
 fn a_log_another_file_was_renamed_over_is_read_from_its_start_whatever_its_size_and_time() {
-    // Another file of the same size, written to at the same time: only which file it is
-    // tells it from the one read.
+    // Another file of the same size, written to at the same time, settled when the look
+    // found it: only which file it is tells it from the one read.
     let log = Log::new();
-    log.write(&configured("mild-coin", "bypass"));
+    let long_ago = EPOCH_MS - 60 * MINUTE;
+    log.write_at(&configured("mild-coin", "bypass"), long_ago);
     assert_eq!(log.said().mode.as_deref(), Some("bypass"));
     let written = fs::metadata(log.wire.path()).unwrap().modified().unwrap();
     let other = log.wire.path().with_file_name("other.jsonl");
