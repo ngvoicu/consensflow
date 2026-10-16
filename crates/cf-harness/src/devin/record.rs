@@ -62,8 +62,8 @@ struct Reader {
 impl Look for Reader {
     /// Takes no options and reads no clock: the store and the logs alone
     /// answer.
-    fn look(&mut self, _options: &Options, _now_ms: i64) -> Arc<Reading> {
-        self.read().unwrap_or_else(|reason| {
+    fn look(&mut self, _options: &Options, now_ms: i64) -> Arc<Reading> {
+        self.read(now_ms).unwrap_or_else(|reason| {
             self.store = None;
             self.wires = Wires::default();
             self.answer = None;
@@ -73,11 +73,12 @@ impl Look for Reader {
 }
 
 impl Reader {
-    /// What the session says now, or why it cannot be read.
-    fn read(&mut self) -> Result<Arc<Reading>, String> {
+    /// What the session says now, in a look that began at `now_ms`, or why it
+    /// cannot be read.
+    fn read(&mut self, now_ms: i64) -> Result<Arc<Reading>, String> {
         let (stored, store) =
             Store::read(&mut self.store, &mut self.keys, &self.session, &self.env)?;
-        let wired = self.wires.read(&self.session, &self.env)?;
+        let wired = self.wires.read(&self.session, &self.env, now_ms)?;
         if let (false, false, Some(answer)) = (stored, wired, &self.answer) {
             return Ok(Arc::clone(answer));
         }

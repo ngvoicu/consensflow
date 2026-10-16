@@ -81,7 +81,7 @@ use crate::{files, Error, Result};
 
 pub use machine::{
     codex, command, installed, isolated_claude, rig, rig_with_stand_ins, shimmed_claude,
-    shimmed_claude_with_servers, Harness, Installed, ISOLATION,
+    shimmed_claude_with_servers, working_command, Harness, Installed, ISOLATION,
 };
 pub use who::{between, Who};
 

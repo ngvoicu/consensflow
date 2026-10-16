@@ -103,6 +103,46 @@ pub fn quiet_command(seconds: u64, windows: bool) -> String {
     }
 }
 
+/// Whether the command line `line`, as a process list or the host's tree gives it, ends
+/// by running `command` (a program, then its words): its last words are the program, as
+/// told or named by a path, quoted or not, with or without `.exe` and in any case, then
+/// exactly the command's words and nothing after them. A shell's line that ends with the
+/// command runs it too (`/bin/sh -c "$0" "$@" sleep 119`). Windows' PowerShell starts a
+/// program it finds on the `PATH` by its path, and the line of a `ping -n 120 127.0.0.1`
+/// it ran is `"C:\WINDOWS\System32\PING.EXE" -n 120 127.0.0.1` (zeewin, 2026-10-16).
+pub fn runs_command(line: &str, command: &str) -> bool {
+    let line = line.trim_end();
+    match command.split_once(' ') {
+        Some((program, words)) => line
+            .strip_suffix(words)
+            .and_then(|before| before.strip_suffix(' '))
+            .is_some_and(|before| ends_with_program(before, program)),
+        None => ends_with_program(line, command),
+    }
+}
+
+/// Whether `before`, a command line up to a word, ends with the program `program` as a
+/// word of its own: named bare or by a path, quoted or not, with or without `.exe`, in
+/// any case.
+fn ends_with_program(before: &str, program: &str) -> bool {
+    let named = match before.strip_suffix('"') {
+        // A quoted path is a word of its own where its opening quote begins one.
+        Some(quoted) => match quoted.rsplit_once('"') {
+            Some((ahead, named)) if ahead.is_empty() || ahead.ends_with(' ') => named,
+            _ => return false,
+        },
+        None => before.rsplit(' ').next().unwrap_or(before),
+    };
+    let file = named.rsplit(['/', '\\']).next().unwrap_or(named);
+    let stem = match file.len().checked_sub(".exe".len()) {
+        Some(at) if file.is_char_boundary(at) && file[at..].eq_ignore_ascii_case(".exe") => {
+            &file[..at]
+        }
+        _ => file,
+    };
+    stem.eq_ignore_ascii_case(program)
+}
+
 /// The processes of `found` that are the `node -e` of the command: the program
 /// Node (by its name, with or without the folder it is in), then `-e`.
 fn of_node(found: Vec<Process>) -> Vec<Process> {
@@ -247,6 +287,78 @@ mod tests {
     ) {
         assert_eq!(quiet_command(45, false), "sleep 45");
         assert_eq!(quiet_command(45, true), "ping -n 46 127.0.0.1");
+    }
+
+    #[test]
+    fn a_line_runs_the_command_as_it_was_told_or_by_its_programs_path_as_powershell_starts_it() {
+        let ping = "ping -n 120 127.0.0.1";
+        // As it was told, alone or in its shell's line.
+        assert!(runs_command("ping -n 120 127.0.0.1", ping));
+        assert!(runs_command("bash -c ping -n 120 127.0.0.1", ping));
+        assert!(runs_command(
+            "/bin/sh -c \"$0\" \"$@\" sleep 119",
+            "sleep 119"
+        ));
+        // As PowerShell started it on zeewin: its path quoted, the name in capitals, `.exe`.
+        assert!(runs_command(
+            r#""C:\WINDOWS\System32\PING.EXE" -n 120 127.0.0.1"#,
+            ping
+        ));
+        // And by a path unquoted, a folder with a space in quotes, a Unix path.
+        assert!(runs_command(
+            r"C:\Windows\system32\ping.exe -n 120 127.0.0.1",
+            ping
+        ));
+        assert!(runs_command(
+            r#""C:\Program Files\Tools\ping.exe" -n 120 127.0.0.1"#,
+            ping
+        ));
+        assert!(runs_command("/sbin/ping -n 120 127.0.0.1", ping));
+        // Another program with the words, other words, a name that only ends in it.
+        assert!(!runs_command(
+            r#""C:\WINDOWS\System32\tracert.exe" -n 120 127.0.0.1"#,
+            ping
+        ));
+        assert!(!runs_command(
+            r#""C:\WINDOWS\System32\PING.EXE" -n 61 127.0.0.1"#,
+            ping
+        ));
+        assert!(!runs_command(r"C:\tools\noping.exe -n 120 127.0.0.1", ping));
+        assert!(!runs_command("-n 120 127.0.0.1", ping));
+    }
+
+    #[test]
+    fn a_line_runs_the_command_only_in_whole_words_and_only_to_its_end() {
+        let (sleep, ping) = ("sleep 119", "ping -n 120 127.0.0.1");
+        assert!(runs_command("sleep 119", sleep));
+        assert!(runs_command("sleep 119  ", sleep), "spaces after the line");
+        // A program whose name only ends in the command's, as told or by a path.
+        assert!(!runs_command("nosleep 119", sleep));
+        assert!(!runs_command("/usr/bin/nosleep 119", sleep));
+        assert!(!runs_command(
+            r#""C:\tools\noping.exe" -n 120 127.0.0.1"#,
+            ping
+        ));
+        // A quoted path whose quote does not begin a word of its own.
+        assert!(!runs_command(
+            r#"x"C:\WINDOWS\System32\PING.EXE" -n 120 127.0.0.1"#,
+            ping
+        ));
+        // A word that only begins with the command's last one.
+        assert!(!runs_command("sleep 1190", sleep));
+        assert!(!runs_command("ping -n 120 127.0.0.10", ping));
+        assert!(!runs_command(
+            r#""C:\WINDOWS\System32\PING.EXE" -n 120 127.0.0.10"#,
+            ping
+        ));
+        // More words after the command's.
+        assert!(!runs_command("sleep 119 30", sleep));
+        assert!(!runs_command("ping -n 120 127.0.0.1 -4", ping));
+        // A file name that only begins with the program's, or with `.exe` and more.
+        assert!(!runs_command("sleepy 119", sleep));
+        assert!(!runs_command(r"C:\x\ping.exe.bak -n 120 127.0.0.1", ping));
+        // The words apart from the program by more than the one space it was told with.
+        assert!(!runs_command("sleep  119", sleep));
     }
 
     #[test]

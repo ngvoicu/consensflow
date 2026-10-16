@@ -127,8 +127,11 @@ fn what_goes_over_is_packed_with_the_list_of_it_which_leaves_out_what_was_delete
         ["keep.txt", "new.txt", "src/deep/lib.rs"]
     );
     assert!(list.ends_with('\n'));
-    // And it is not left in the checkout.
+    // Beside it, the sweep that removes from the copy what the list does not name.
+    assert_eq!(held(SWEEP), Some(sweep_script()));
+    // And neither is left in the checkout.
     assert!(!dir.path().join(SYNCED).exists());
+    assert!(!dir.path().join(SWEEP).exists());
     assert!(git(&context, &["status", "--short"]).contains("new.txt"));
 }
 
@@ -146,6 +149,7 @@ fn a_tarball_that_cannot_be_made_is_said_with_what_tar_said_and_leaves_no_list_b
     let words = after.trim_start_matches(|c: char| c.is_ascii_digit());
     assert!(words.starts_with(": ") && words.len() > 2, "{said}");
     assert!(!dir.path().join(SYNCED).exists());
+    assert!(!dir.path().join(SWEEP).exists());
 }
 
 #[test]
@@ -221,6 +225,81 @@ fn a_name_git_wrote_that_is_no_text_is_refused_and_one_that_is_not_there_is_left
         ["a.txt", "b.txt"]
     );
     assert_eq!(kept("", exists).unwrap(), Vec::<String>::new());
+}
+
+/// The checkout's own `app/.gitignore`, read as it is now.
+fn app_gitignore() -> String {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../app/.gitignore");
+    fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
+}
+
+/// A checkout of `app` under the checkout's own `app/.gitignore`, with a new file in it.
+fn app_checkout() -> (tempfile::TempDir, Context) {
+    let (dir, context) = checkout(&[
+        ("app/.gitignore", &app_gitignore()),
+        ("app/package.json", "{}"),
+        ("app/src-tauri/tauri.conf.json", "{}"),
+    ]);
+    write(dir.path(), "app/new.txt", "not added yet");
+    (dir, context)
+}
+
+/// What goes of [`app_checkout`] where the staged folders do not.
+const APP_LISTED: [&str; 4] = [
+    "app/.gitignore",
+    "app/new.txt",
+    "app/package.json",
+    "app/src-tauri/tauri.conf.json",
+];
+
+/// The checkout's `app/.gitignore` keeps `app/.cache` and `app/src-tauri/resources` from
+/// the run whatever they are: the main checkout's folders, with what was staged in them,
+/// or anything else of those names, as a worker's links to them are to git, which looks
+/// at a link and not at what it points at (a pattern that ends in `/` matches a folder
+/// only). A link is a plain file here, which every system makes: worker trees, and their
+/// links into the main checkout, are the Mac's, and Windows makes a link only with a
+/// privilege (the links themselves: the next test, on Unix). Every other file of `app`
+/// goes.
+#[test]
+fn the_staged_folders_go_neither_as_the_main_checkouts_folders_nor_as_anything_else_of_their_names()
+{
+    let (dir, context) = app_checkout();
+    write(dir.path(), "app/.cache/conpty.zip", "package");
+    write(dir.path(), "app/src-tauri/resources/cli/bin/cf.exe", "cf");
+    assert_eq!(sorted(files(&context).unwrap()), APP_LISTED);
+    // In a worker's tree they are no folders.
+    let (dir, context) = app_checkout();
+    write(dir.path(), "app/.cache", "where a worker has a link");
+    write(
+        dir.path(),
+        "app/src-tauri/resources",
+        "where a worker has a link",
+    );
+    assert_eq!(sorted(files(&context).unwrap()), APP_LISTED);
+    // A file of another folder of that name is the tree's.
+    write(dir.path(), "app/ui/.cache", "a file of the page's");
+    assert!(files(&context)
+        .unwrap()
+        .contains(&"app/ui/.cache".to_owned()));
+}
+
+/// A worker's tree as it is on the Mac: `app/.cache` and `app/src-tauri/resources` are
+/// links into the main checkout, which hold what the main checkout staged, and they do
+/// not go.
+#[cfg(unix)]
+#[test]
+fn a_workers_links_into_the_main_checkouts_staged_folders_do_not_go() {
+    let main = tempfile::tempdir().unwrap();
+    write(main.path(), "cache/conpty.zip", "package");
+    write(main.path(), "resources/cli/bin/cf.exe", "cf");
+    let (dir, context) = app_checkout();
+    std::os::unix::fs::symlink(main.path().join("cache"), dir.path().join("app/.cache")).unwrap();
+    std::os::unix::fs::symlink(
+        main.path().join("resources"),
+        dir.path().join("app/src-tauri/resources"),
+    )
+    .unwrap();
+    assert_eq!(sorted(files(&context).unwrap()), APP_LISTED);
 }
 
 #[cfg(unix)]

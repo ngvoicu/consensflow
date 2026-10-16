@@ -22,6 +22,8 @@
 [run]
 # The Devin adapter's own tests, and its wire log's.
 harness-lib-devin = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "devin::"]
+# The shared record reader's tests: the JSONL file read on, and a transcript followed.
+harness-lib-record = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "shared::record::"]
 # The launch goldens, each harness's scenarios played.
 harness-launch-scenarios = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "scenarios::"]
 # A window that says it never will be ready, in the engine.
@@ -204,8 +206,155 @@ runs = ["harness-lib-devin"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/devin/wire_log.rs"
-find = '''        if modified.is_some() && modified == self.modified {'''
-replace = '''        if modified.is_some() {'''
+find = '''        if let Some(written) = written.filter(|written| Some(*written) == self.written) {
+            if settled(written, self.looked_ms) {'''
+replace = '''        if let Some(written) = written {
+            if written.is_finite() {'''
+
+# Main's Windows CI (run 38942619741): a log rewritten within the clock's tick keeps its
+# time, and was read as the one before. An equal time is trusted only when it was
+# settled, older than the look that found it by more than a file time's step (git's
+# racily clean entry); otherwise the bytes tell. The same in the shared JSONL reader the
+# Claude, Codex, Pi and Devin records follow, and in a followed transcript's failure.
+[[plant]]
+name = "devin resume: a log's time is trusted however near the look that found it"
+meant = "a_log_replaced_by_one_as_long_says_the_mode_the_new_one_says_and_no_mode_of_the_old_one"
+runs = ["harness-lib-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/wire_log.rs"
+find = '''            if settled(written, self.looked_ms) {'''
+replace = '''            if true {'''
+
+[[plant]]
+name = "devin resume: a file time is settled once older than the look, by no step"
+meant = "a_log_replaced_by_one_as_long_says_the_mode_the_new_one_says_and_no_mode_of_the_old_one"
+runs = ["harness-lib-devin"]
+
+[[plant.edit]]
+file = "crates/cf-base/src/file.rs"
+find = '''    written_ms + WRITE_TIME_STEP_MS < looked'''
+replace = '''    written_ms < looked'''
+
+[[plant]]
+name = "devin resume: a settled log is hashed again at every look"
+meant = "a_log_last_written_well_before_the_look_that_read_it_is_not_read_again_while_its_time_stays"
+runs = ["harness-lib-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/wire_log.rs"
+find = '''            if settled(written, self.looked_ms) {'''
+replace = '''            if false && settled(written, self.looked_ms) {'''
+
+[[plant]]
+name = "devin resume: a log's look keeps no time of its own"
+meant = "a_log_last_written_well_before_the_look_that_read_it_is_not_read_again_while_its_time_stays"
+runs = ["harness-lib-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/wire_log.rs"
+find = '''        state.looked_ms = at_ms;'''
+replace = ""
+
+[[plant]]
+name = "devin resume: a record's time is trusted however near the look that found it"
+meant = "a_file_written_over_at_its_size_within_a_file_times_step_of_the_look_is_not_the_one_read"
+runs = ["harness-lib-record"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/record/jsonl.rs"
+find = '''        if same && settled(written, seen.looked_ms) {'''
+replace = '''        if same {'''
+
+[[plant]]
+name = "devin resume: a settled record is checked again at every look"
+meant = "a_file_last_written_well_before_the_look_that_read_it_is_not_read_again_while_its_time_stays"
+runs = ["harness-lib-record"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/record/jsonl.rs"
+find = '''        if same && settled(written, seen.looked_ms) {'''
+replace = '''        if same && false {'''
+
+[[plant]]
+name = "devin resume: a record's look keeps no time of its own"
+meant = "a_file_last_written_well_before_the_look_that_read_it_is_not_read_again_while_its_time_stays"
+runs = ["harness-lib-record"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/record/jsonl.rs"
+find = '''        looked_ms,
+        offset,'''
+replace = '''        looked_ms: 0,
+        offset,'''
+
+[[plant]]
+name = "devin resume: a record checked and found as it was is read as changed"
+meant = "a_file_written_over_at_its_size_within_a_file_times_step_of_the_look_is_not_the_one_read"
+runs = ["harness-lib-record"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/record/jsonl.rs"
+find = '''        if same {
+            return Ok(Looked::Held(Seen {
+                looked_ms,
+                ..seen.clone()
+            }));
+        }'''
+replace = ""
+
+[[plant]]
+name = "devin resume: a record held as it was keeps the time of the look before"
+meant = "a_file_found_holding_what_was_read_once_its_time_is_settled_is_not_read_again"
+runs = ["harness-lib-record"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/record/jsonl.rs"
+find = '''            return Ok(Looked::Held(Seen {
+                looked_ms,
+                ..seen.clone()
+            }));'''
+replace = '''            return Ok(Looked::Held(Seen { ..seen.clone() }));'''
+
+[[plant]]
+name = "devin resume: a followed transcript held as it was keeps the time of the look before"
+meant = "a_transcript_read_a_moment_after_its_last_write_is_read_to_tell_once_and_then_by_its_time"
+runs = ["harness-lib-record"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/record/followed.rs"
+find = '''                    if let Looked::Held(seen) | Looked::Read(seen) = looked {'''
+replace = '''                    if let Looked::Read(seen) = looked {'''
+
+[[plant]]
+name = "devin resume: a launch's log held as it was keeps the time of the look before"
+meant = "a_log_read_a_moment_after_its_last_write_is_read_to_tell_once_and_then_by_its_time"
+runs = ["harness-lib-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/record/wires.rs"
+find = '''                            Looked::Held(seen) => log.seen = Some(seen),'''
+replace = '''                            Looked::Held(_) => {}'''
+
+[[plant]]
+name = "devin resume: a broken transcript's failure is kept however near the look that found it"
+meant = "a_broken_transcript_mended_at_its_size_within_a_file_times_step_is_read_again"
+runs = ["harness-lib-record"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/record/followed.rs"
+find = '''            if *stat == current && settled(stat.mtime_ms, *looked_ms) {'''
+replace = '''            if *stat == current {'''
+
+[[plant]]
+name = "devin resume: a broken transcript's failure keeps no time of its look"
+meant = "a_broken_transcript_mended_at_its_size_within_a_file_times_step_is_read_again"
+runs = ["harness-lib-record"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/record/followed.rs"
+find = '''                    self.broken = Some((current, now_ms, stop.reason()));'''
+replace = '''                    self.broken = Some((current, 0, stop.reason()));'''
 
 # Round 5 (Astra and Sol): a log rewritten past its first kilobyte and grown kept its
 # old mode; and a log another file was renamed over is told by which file it is.
