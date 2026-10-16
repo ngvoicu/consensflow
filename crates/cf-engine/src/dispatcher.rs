@@ -223,7 +223,7 @@ impl Dispatcher {
             .ledger
             .borrow_mut()
             .set_project_state(project, "suspended")?;
-        let kept = self.close_windows(&suspended.participants).await?;
+        let kept = self.close_windows(&suspended.participants, None).await?;
         self.withdraw_wake_up(project)?;
         self.changed();
         if !kept.is_empty() {
@@ -245,10 +245,12 @@ impl Dispatcher {
     /// Closes these participants' windows, each once its step in progress is
     /// over: the handles whose windows would not close. What closes is the
     /// window of the record waited on, forgotten meanwhile or not. The tasks
-    /// the windows were working on are told to their requesters together.
+    /// the windows were working on are told to their requesters together, with
+    /// `because` after the word that each window closed where there is one.
     async fn close_windows(
         self: &Rc<Self>,
         participants: &[ParticipantView],
+        because: Option<&str>,
     ) -> Result<Vec<String>, EngineError> {
         let _burst = self.stalls.begin_burst();
         let mut closing = Vec::new();
@@ -259,11 +261,17 @@ impl Dispatcher {
                 Rc::clone(&record),
                 participant.handle.clone(),
             );
+            let because = because.map(str::to_owned);
             let work = async move {
                 let pane = held.window.borrow().pane.clone();
                 let went = match pane {
                     None => true,
-                    Some(pane) => this.close_own(&held, &pane).await?,
+                    Some(pane) => {
+                        held.window.borrow_mut().closed_with = because;
+                        let went = this.close_own(&held, &pane).await;
+                        held.window.borrow_mut().closed_with = None;
+                        went?
+                    }
                 };
                 Ok::<_, EngineError>((!went).then_some(handle))
             };
@@ -782,7 +790,14 @@ impl Dispatcher {
                     .filter(|p| p.id != record.id)
                     .cloned()
                     .collect();
-                self.close_windows(&others).await?;
+                // The work of the windows that go with it pauses, saying so: a worker's
+                // own crash and its chief's read the same otherwise.
+                let with = format!(
+                    "with the project when @{}'s window closed",
+                    participant.handle
+                );
+                self.close_windows(&others, Some(&shown.after(&with)))
+                    .await?;
             }
         } else {
             let task = self.seams.ledger.borrow().active_task(record.id, false)?;
@@ -790,15 +805,30 @@ impl Dispatcher {
             // window closed.
             let left = shown.left_running();
             if let Some(thread) = task {
-                // The pause note says what the close ended, where there was any.
-                let because = if left.is_empty() {
-                    format!("@{}'s window closed", participant.handle)
+                // The pause note says how the window ended and what it showed last, as
+                // far as the host said, and what the close ended, where there was any:
+                // a harness that crashed under its task says why on its screen. A window
+                // the engine closed says why it did, where it was not the human's Close,
+                // and nothing of its end, which was the kill's (the host's exit can come
+                // while the kill is answered).
+                let besides = if left.is_empty() {
+                    String::new()
                 } else {
-                    format!(
-                        "@{}'s window closed with background work still running: {}",
-                        participant.handle,
-                        quote(left)
-                    )
+                    format!(" with background work still running: {}", quote(left))
+                };
+                let (own, with) = {
+                    let window = record.window.borrow();
+                    (window.own_exit, window.closed_with.clone())
+                };
+                let closed = match with {
+                    Some(with) => format!("@{}'s window closed {with}", participant.handle),
+                    None => format!("@{}'s window closed", participant.handle),
+                };
+                let because = if own {
+                    let outlived = shown.outlived().unwrap_or_default();
+                    format!("{closed}{outlived}{besides}")
+                } else {
+                    shown.after_with(&closed, &besides)
                 };
                 self.stall(&project, &thread.task, &because)?;
             } else {

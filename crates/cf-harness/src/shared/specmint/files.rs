@@ -16,7 +16,7 @@ pub(crate) type Shipped = (&'static str, &'static [u8]);
 
 /// The manifest that pins the variants: each one's upstream commit and the hash
 /// of each of its files.
-const MANIFEST: &str = include_str!("../../../../../skill/specmint/manifest.json");
+pub(super) const MANIFEST: &str = include_str!("../../../../../skill/specmint/manifest.json");
 
 /// The files of the variant `$variant`, embedded from its folder.
 macro_rules! shipped {
@@ -94,7 +94,7 @@ pub(crate) fn commit_of(variant: Variant) -> Result<String, String> {
 /// The commit `manifest` pins `variant` at, or why it pins none. A commit names
 /// a folder, so it is the hexadecimal digits of one and nothing else: a path is
 /// never made of what a manifest says.
-fn commit_in(manifest: &str, variant: Variant) -> Result<String, String> {
+pub(super) fn commit_in(manifest: &str, variant: Variant) -> Result<String, String> {
     let pinned: Value = serde_json::from_str(manifest)
         .map_err(|error| format!("the Specmint manifest is no JSON: {error}"))?;
     pinned[variant.as_str()]["commit"]

@@ -431,14 +431,14 @@ find = "    return asOpened ? null : said"
 replace = "    return asOpened ? said : said"
 
 [[plant]]
-name = "project settings: New project says a variant of core as none"
+name = "project settings: New project says the app's own variant as a variant named"
 meant = "New project: says all of its specs and all of its wake-up calls once either is set at all, as Project settings saves them"
 runs = ["page-new-project"]
 
 [[plant.edit]]
 file = "app/ui/core/specs.js"
-find = "      variant: this.#variant.value,"
-replace = "      variant: this.#variant.value === DEFAULT_VARIANT ? null : this.#variant.value,"
+find = "      variant: this.#variant.value === '' ? null : this.#variant.value,"
+replace = "      variant: this.#variant.value,"
 
 [[plant]]
 name = "project settings: New project leaves the calls out unless they are on"

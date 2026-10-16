@@ -2,8 +2,11 @@ import { button, element, redraw } from '../dom.js'
 import { initializeUpdates } from '../updates.js'
 import { BoardView, TaskDrawer } from './board.js'
 import { NewProjectDialog, ProjectSettingsDialog, SwitchChiefDialog } from './dialogs.js'
+import { listenForFileDrops } from './file-drop.js'
 import { Layout } from './layout.js'
 import { ProjectMenu } from './project-menu.js'
+import { SpecsSettings } from './specs-settings.js'
+import { SpecsViewer } from './specs-viewer.js'
 import { TerminalsView } from './terminals.js'
 
 /**
@@ -27,6 +30,7 @@ const projectList = $('#projects')
 const projectTitle = $('#project-title')
 const projectDirectory = $('#project-directory')
 const inboxButton = $('#inbox-button')
+const specsButton = $('#specs-button')
 const projectSettingsButton = $('#project-settings-button')
 const boardRoot = $('#board')
 const stage = $('#stage')
@@ -43,7 +47,13 @@ const state = {
   selected: null,
   board: null,
   inbox: NO_NOTES,
+  // Whether a project's specs folder holds a file (`{ project, present }`), read after its board
+  // and never waited for: whether Specs shows. The daemon stops at the first file, and remembers
+  // it for a moment.
+  specsPresent: null,
   agents: [],
+  /** What the app says of specs for every project and the Specmint it bundles, as last read. */
+  specs: null,
   focus: 'chief',
   openTask: null,
 }
@@ -84,6 +94,18 @@ async function daemon(operation, body = {}) {
 /** The saved agents, read again: what the board says members run, and what the pickers offer. */
 async function readAgents() {
   state.agents = (await daemon('agents.list')).agents
+}
+
+/**
+ * What the app says of specs for every project (whether, the folder and the variant, and what a
+ * project that names none then uses) and the Specmint it bundles, read again: each dialog that
+ * shows them reads as it opens, and Settings' Specs hands the page what a change answered. Read
+ * once the saves Settings' Specs asked for are answered: the app asks each on a worker of its own,
+ * and a read that overtook a save would leave the page an older answer than the save's.
+ */
+async function readSpecs() {
+  await specsSettings.settled()
+  state.specs = await daemon('specs.get')
 }
 
 // The daemon down: the banner says why and what comes next, and stays until
@@ -391,6 +413,7 @@ async function refresh() {
       }
       state.board = board
       state.inbox = inbox
+      if (selected !== null) void readPresence(selected)
       terminals.reconcile(
         [board, ...others].filter((read) => read !== null),
         new Set(open.map((project) => project.id)),
@@ -412,6 +435,32 @@ async function refresh() {
   return refreshing
 }
 
+/** Each read of whether a specs folder holds a file is numbered: only the last asked is shown. */
+let presenceReads = 0
+/** The read asked for again once the daemon no longer answers it from memory. */
+let presenceAgain = null
+
+/**
+ * Whether the specs folder of project `project` holds a file, which shows the Specs button: read
+ * apart from the board, which never waits for it (a folder on a drive that does not answer would
+ * hold the board, its inbox and its windows until the daemon gave up on it), and shown when it
+ * comes, for the project the board still shows. A folder that cannot be read shows no button. An
+ * answer the daemon gave from memory says when it reads the folder again: it is asked once more
+ * then, so the button never keeps what the folder said before a spec was written.
+ */
+async function readPresence(project) {
+  const read = ++presenceReads
+  clearTimeout(presenceAgain)
+  presenceAgain = null
+  const said = await daemon('specs.present', { project }).catch(() => ({ present: false }))
+  if (read !== presenceReads || state.board?.project.id !== project) return
+  state.specsPresent = { project, present: said.present === true }
+  specsButton.hidden = !state.specsPresent.present
+  if (typeof said.readAgainIn === 'number') {
+    presenceAgain = setTimeout(() => void readPresence(project), said.readAgainIn + 50)
+  }
+}
+
 function render() {
   renderProjects()
   // Everything here is the board's, under the project it was read for.
@@ -428,6 +477,13 @@ function render() {
   const suspended = project?.state === 'suspended'
   main.dataset.suspended = String(suspended)
   projectSettingsButton.disabled = project === null
+  // Specs shows while the project's specs folder holds a file: from the board's first read after
+  // the chief writes its first spec, open or closed, specs on or off (`readPresence`).
+  specsButton.hidden = !(
+    project !== null &&
+    state.specsPresent?.project === project.id &&
+    state.specsPresent.present
+  )
   const lanes = state.board?.lanes ?? []
   if (!lanes.some((lane) => lane.participant.handle === state.focus)) state.focus = 'chief'
   if (state.board === null) {
@@ -584,8 +640,8 @@ function renderProjects() {
 
 // A right-click on a project (or the context-menu key, or Shift+F10, on the one the
 // keyboard is on) opens its menu: rename it, write a line under its name, or open its
-// Project settings (the project is shown first, if the board shows another). An open
-// menu follows each refresh; with its project gone and no other in the list, the
+// Project settings or its specs (the project is shown first, if the board shows another).
+// An open menu follows each refresh; with its project gone and no other in the list, the
 // keyboard goes to New project.
 const projectMenu = new ProjectMenu(
   {
@@ -594,6 +650,7 @@ const projectMenu = new ProjectMenu(
     rename: $('#rename-dialog'),
     describe: $('#describe-dialog'),
     settings: $('#project-settings-dialog'),
+    specs: $('#specs-viewer-dialog'),
     fallback: $('#new-project'),
   },
   {
@@ -602,8 +659,27 @@ const projectMenu = new ProjectMenu(
     act,
     note,
     openSettings: (id) => act(() => openSettings(id)),
+    openSpecs: (id) => openSpecs(id),
   },
 )
+
+// The specs viewer: the specs folder of the project asked for, read through the daemon. The
+// button asks for the project the board shows; the menu for its own, shown first.
+const specsViewer = new SpecsViewer($('#specs-viewer-dialog'), { daemon })
+specsButton.addEventListener('click', () => {
+  const { project } = state.board
+  void specsViewer.open(project.id, project.name)
+})
+
+/** The specs viewer on project `id`, which is shown first if it is not. */
+async function openSpecs(id) {
+  try {
+    if (!(await showProject(id))) return
+    await specsViewer.open(id, state.board.project.name)
+  } catch (cause) {
+    report(cause)
+  }
+}
 
 // The notes are in For you, at the top of the board: a folded board unfolds for them.
 inboxButton.addEventListener('click', () => {
@@ -619,6 +695,8 @@ const projectSettings = new ProjectSettingsDialog($('#project-settings-dialog'),
   board: () => state.board,
   selected: () => state.selected,
   agents: () => state.agents,
+  specs: () => state.specs,
+  readSpecs,
   daemon,
   act,
   note,
@@ -646,6 +724,8 @@ async function openSettings(id) {
 // shown.
 const newProject = new NewProjectDialog($('#new-project-dialog'), {
   agents: () => state.agents,
+  specs: () => state.specs,
+  readSpecs,
   daemon,
   act,
   onAgents: (agents) => {
@@ -724,6 +804,27 @@ for (const entry of settingsDialog.querySelectorAll('[data-agents-page]')) {
   })
 }
 
+// Specs is no daemon screen but a dialog of the page: what it reads and keeps is the
+// page's own (`specs.get`, `specs.set`), the same that every project's Specs section says
+// what following the app means by. It opens as the screens do, Settings closed behind it,
+// and gives the focus back to the Settings button as it closes.
+const specsSettings = new SpecsSettings($('#specs-dialog'), {
+  daemon,
+  report,
+  specs: () => state.specs,
+  readSpecs,
+  setSpecs: (specs) => {
+    state.specs = specs
+  },
+})
+$('#specs-settings-button').addEventListener('click', () =>
+  act(async () => {
+    settingsDialog.close()
+    await specsSettings.open()
+  }),
+)
+$('#specs-dialog').addEventListener('close', () => settingsButton.focus())
+
 async function start() {
   if (typeof invoke !== 'function') {
     report('ConsensFlow is not running this page.')
@@ -748,10 +849,37 @@ async function start() {
         }, 50)
       })
       await listen('daemon-status', (event) => daemonStatus(event.payload))
+      // A file dropped on a terminal window types its path there.
+      await listenForFileDrops({
+        listen,
+        invoke,
+        focus: (id) => invoke('focus_after_drop', { id }),
+        dock: terminals,
+        report,
+      })
     } catch (cause) {
       report(cause)
     }
   }
+  // Updates are the app's, not the daemon's, and listen for the menu's Check for
+  // Updates before anything waits on the daemon: its start may wait on a slow login
+  // shell for half a minute, and a click before a listener is lost.
+  await initializeUpdates({
+    invoke,
+    listen,
+    getState: () => ({
+      tabs: state.board
+        ? [
+            {
+              name: state.board.project.name,
+              panes: state.board.lanes
+                .filter((lane) => lane.pane !== null)
+                .map((lane) => ({ ...lane.pane, name: `@${lane.participant.handle}` })),
+            },
+          ]
+        : [],
+    }),
+  })
   if (typeof Channel === 'function') {
     const channel = new Channel()
     channel.onmessage = (message) => {
@@ -786,22 +914,6 @@ async function start() {
       },
     })
   }
-  await initializeUpdates({
-    invoke,
-    listen,
-    getState: () => ({
-      tabs: state.board
-        ? [
-            {
-              name: state.board.project.name,
-              panes: state.board.lanes
-                .filter((lane) => lane.pane !== null)
-                .map((lane) => ({ ...lane.pane, name: `@${lane.participant.handle}` })),
-            },
-          ]
-        : [],
-    }),
-  })
 }
 
 void start()

@@ -130,7 +130,7 @@ fn machine(plan: &[plan::Planned], log: &Log) -> Result<Machine> {
 #[test]
 #[ignore = "opt-in: spends the machine's quota on all five harnesses; cargo xtask live approval (npm run live:approval)"]
 fn the_gate_sends_what_the_human_approves_between_real_harnesses_in_every_seat() -> Result {
-    let log = Log::new("live approval");
+    let log = Log::begin("live approval")?;
     let (chiefs, steps) = limits()?;
     let plan = plan::projects(&chiefs, &steps);
     if plan.iter().all(|project| project.steps.is_empty()) {
@@ -161,7 +161,7 @@ fn the_gate_sends_what_the_human_approves_between_real_harnesses_in_every_seat()
         rows.extend(done.rows);
     }
 
-    log.block("what each step came to", &report::table(&rows));
+    log.report("what each step came to", &report::table(&rows));
     if !findings.is_empty() {
         log.block("what the run noted in passing", &findings.join("\n"));
     }

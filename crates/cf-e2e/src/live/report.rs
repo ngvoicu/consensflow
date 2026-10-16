@@ -84,10 +84,11 @@ pub fn verdict(checks: &[Check]) -> Result {
     )))
 }
 
-/// How a run of checks ends: it says what each came to, under `title`, and fails
-/// with the ones that did not hold ([`verdict`]).
+/// How a run of checks ends: it says what each came to, under `title`, then what
+/// the harnesses ran on where the run says it ([`Log::begin`]), and fails with the
+/// ones that did not hold ([`verdict`]).
 pub fn conclude(log: &Log, title: &str, checks: &[Check]) -> Result {
-    log.block(title, &table(checks));
+    log.report(title, &table(checks));
     verdict(checks)
 }
 
@@ -157,5 +158,57 @@ mod tests {
         checks.remove(1);
         conclude(&log, "what each check came to", &checks).unwrap();
         assert!(conclude(&log, "nothing", &[]).is_err());
+    }
+
+    #[test]
+    fn the_report_of_a_run_that_begins_ends_with_what_each_of_its_windows_was_launched_on() {
+        use serde_json::json;
+
+        let checks = table(&sample());
+        // A run of agents of its own says none.
+        assert_eq!(Log::new("live agent").reported(&checks), checks);
+        // A run that launched nothing says so.
+        let asked = crate::live::agents::parse(Some("pi=openai/gpt-6-luna"), None).unwrap();
+        let begun = Log::begun("live test", Ok(asked)).unwrap();
+        assert_eq!(
+            begun.reported(&checks),
+            format!("{checks}\nno window was launched")
+        );
+        // What each window was launched on, in the order they were, once each: not what
+        // --models gave (a suite's own flag gave Pi another model here), and never the
+        // stand-in agent's. Pi's effort is its thinking, as Pi reads it.
+        let project = begun.scoped("claude");
+        project
+            .launched(&json!({ "kind": "pi", "model": "openai/gpt-5.6-luna", "thinking": "low" }));
+        begun.launched(&json!({ "kind": "codex", "model": "gpt-6.1-sol", "effort": "high" }));
+        begun.launched(&json!({ "kind": "claude-code", "model": "fake-chief" }));
+        project
+            .launched(&json!({ "kind": "pi", "model": "openai/gpt-5.6-luna", "thinking": "low" }));
+        let ran_on = "the windows ran on: pi openai/gpt-5.6-luna, effort low; codex gpt-6.1-sol, effort high";
+        assert_eq!(begun.ran_on().as_deref(), Some(ran_on));
+        assert_eq!(begun.reported(&checks), format!("{checks}\n{ran_on}"));
+        // One project of the run says it as the run does.
+        assert_eq!(project.reported(&checks), begun.reported(&checks));
+        // The first line is what the flags give, which is not the report's.
+        let line = crate::live::agents::parse(Some("pi=openai/gpt-6-luna"), None)
+            .unwrap()
+            .line();
+        assert!(
+            line.starts_with(
+                "the models --models and the cheap ones give: claude claude-sonnet-5-5; "
+            ),
+            "{line}"
+        );
+        assert!(line.contains("; pi openai/gpt-6-luna; "), "{line}");
+        // One asked for what no window could be asked for begins not at all, with what
+        // is wrong as its error.
+        let refused = Log::begun(
+            "live test",
+            Err(crate::Error::Daemon("--models names pi twice".to_owned())),
+        );
+        assert_eq!(
+            refused.err().map(|failed| failed.to_string()).as_deref(),
+            Some("--models names pi twice")
+        );
     }
 }

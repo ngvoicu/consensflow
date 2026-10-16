@@ -1,0 +1,340 @@
+# Plants in the PATH the app gives its daemon (`app/src-tauri/src/daemon_command.rs`):
+# the login shell's, given long enough to answer on a loaded machine, else the app's
+# own, as it is (the daemon puts the system's folders after it, and looks for a harness
+# on it as given: `daemon/detect.toml`); a line of the app's log when a login shell gave
+# none; a lookup bounded by its deadline and ended by the app's quit, which ends the
+# shell itself and never what its login files started, and starts none once the app is
+# quitting; no lookup on Windows; the page, whose menu's Check for Updates works while
+# the daemon waits on that shell; and the tests' own environments, which give no `cf`
+# the machine's Homebrew programs. The owner's login shell had not answered in five
+# seconds at load 17–18 (2026-10-15, 3.0.4), and the daemon ran on the Finder's PATH: a
+# Homebrew `codex` was "not installed", and Homebrew's `git` and `node` were off every
+# window's PATH. The two reviews of the fix (2026-10-16) found the rest. One plant takes
+# one rule out, or puts one wrong; a test fails. Every name holds `login path`, so
+# `npm run plants:cli -- "login path"` runs them all.
+
+[run]
+app-daemon-path = ["cargo", "xtask", "app", "test", "daemon_command::"]
+# The app's quit, with a start still asking the login shell.
+app-quit = ["cargo", "xtask", "app", "test", "quitting_ends_a_login_shell"]
+# The page's start with a daemon that has not answered (each plant's `prepare` bundles
+# the page's xterm first, as `npm run test:ui` does).
+page-late-daemon = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/updates.spec.mjs", "-g", "daemon has not answered"]
+# The environment the scripts' and the page's tests give what they start.
+js-helpers = ["node", "--test", "tests/helpers.test.mjs"]
+# Every source that starts the cf under test sets a folder for the system's programs.
+tool-folders-scan = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "cli", "tool_folders::"]
+# The rig's environment.
+rig-install = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "rig::install::"]
+
+# How long the login shell has.
+[[plant]]
+name = "login path: the login shell has the five seconds it had"
+meant = "a_login_shell_slower_than_five_seconds_still_gives_its_path"
+runs = ["app-daemon-path"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/daemon_command.rs"
+find = "const LOGIN_PATH_TIMEOUT: Duration = Duration::from_secs(30);"
+replace = "const LOGIN_PATH_TIMEOUT: Duration = Duration::from_secs(5);"
+
+# The PATH the daemon is handed: the login shell's or the app's, as it is.
+[[plant]]
+name = "login path: the daemon's command is given no PATH"
+meant = "a_login_shell_slower_than_five_seconds_still_gives_its_path"
+runs = ["app-daemon-path"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/daemon_command.rs"
+find = '''
+    if !given.is_empty() {
+        command.env("PATH", given);
+    }
+'''
+replace = ""
+
+[[plant]]
+name = "login path: the daemon is handed the system's folders on its PATH, and finds Homebrew's harness first"
+meant = "the_daemon_the_app_starts_finds_a_harness_in_the_home_before_the_systems_folders"
+runs = ["app-daemon-path"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/daemon_command.rs"
+find = '        command.env("PATH", given);'
+replace = '        command.env("PATH", path_with_folders(given, env.tool_folders()));'
+
+# The app's log.
+[[plant]]
+name = "login path: the log says nothing of a login shell that gave no PATH"
+meant = "a_login_shell_that_fails_or_hangs_leaves_the_apps_path_and_the_log_says_what_the_daemon_runs_on"
+runs = ["app-daemon-path"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/daemon_command.rs"
+find = "        .filter(|_| login.is_none())"
+replace = "        .filter(|_| false)"
+
+[[plant]]
+name = "login path: the log speaks of a login shell that answered"
+meant = "a_login_shell_slower_than_five_seconds_still_gives_its_path"
+runs = ["app-daemon-path"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/daemon_command.rs"
+find = "        .filter(|_| login.is_none())"
+replace = "        .filter(|_| true)"
+
+[[plant]]
+name = "login path: the log names the PATH the daemon is handed, not the one it runs on"
+meant = "a_login_shell_that_fails_or_hangs_leaves_the_apps_path_and_the_log_says_what_the_daemon_runs_on"
+runs = ["app-daemon-path"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/daemon_command.rs"
+find = "    let runs_on = path_with_folders(given, env.tool_folders());"
+replace = "    let runs_on = given.to_os_string();"
+
+# A lookup that gives no PATH: bounded, and leaving nothing running.
+[[plant]]
+name = "login path: the read waits a second for each piece of output, however long it goes on"
+meant = "a_shell_that_ends_without_its_path_while_what_it_started_writes_on_is_given_up_by_the_deadline"
+runs = ["app-daemon-path"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/daemon_command.rs"
+find = '''
+        let left = deadline.checked_duration_since(Instant::now())?;
+'''
+replace = ""
+
+[[plant.edit]]
+file = "app/src-tauri/src/daemon_command.rs"
+find = "                .recv_timeout(left.min(Duration::from_secs(1)))"
+replace = '''
+                .recv_timeout({
+                    let _ = deadline;
+                    Duration::from_secs(1)
+                })'''
+
+# Only the shell is ended, never what its login files started (the second reviews of
+# 2026-10-16: an `ssh-agent -D` a login file left in the shell's group was killed with
+# it). Each plant starts the shell in a group of its own and ends the group.
+[[plant]]
+name = "login path: a lookup given up on ends what the login file started too"
+meant = "a_login_shell_that_fails_or_hangs_gives_no_path_and_leaves_what_it_started"
+runs = ["app-daemon-path"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/daemon_command.rs"
+find = "        let mut started = shell.spawn().ok()?;"
+replace = '''
+        std::os::unix::process::CommandExt::process_group(shell, 0);
+        let mut started = shell.spawn().ok()?;'''
+
+[[plant.edit]]
+file = "app/src-tauri/src/daemon_command.rs"
+find = '''
+            if let Some(shell) = asking.shell.as_mut() {
+                let _ = shell.kill();
+            }
+            asking.shell.take()'''
+replace = '''
+            if let Some(shell) = asking.shell.as_mut() {
+                unsafe { libc::killpg(shell.id() as i32, libc::SIGKILL) };
+                let _ = shell.kill();
+            }
+            asking.shell.take()'''
+
+[[plant]]
+name = "login path: the app's quit ends what the login file started too"
+meant = "ending_a_lookup_ends_the_shell_it_asks_at_once_and_only_it"
+runs = ["app-daemon-path"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/daemon_command.rs"
+find = "        let mut started = shell.spawn().ok()?;"
+replace = '''
+        std::os::unix::process::CommandExt::process_group(shell, 0);
+        let mut started = shell.spawn().ok()?;'''
+
+[[plant.edit]]
+file = "app/src-tauri/src/daemon_command.rs"
+find = '''
+        if let Some(shell) = asking.shell.as_mut() {
+            let _ = shell.kill();
+'''
+replace = '''
+        if let Some(shell) = asking.shell.as_mut() {
+            unsafe { libc::killpg(shell.id() as i32, libc::SIGKILL) };
+            let _ = shell.kill();
+'''
+
+# A shell given up on is ended under the lock, then let go (the third review of 2026-10-16).
+[[plant]]
+name = "login path: a lookup given up on lets its shell go before it ends it"
+meant = "a_lookup_given_up_on_has_ended_its_shell_before_a_quit_can_miss_it"
+runs = ["app-daemon-path"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/daemon_command.rs"
+find = '''
+            let mut asking = self.lock();
+            if let Some(shell) = asking.shell.as_mut() {
+                let _ = shell.kill();
+            }
+            asking.shell.take()
+        };
+        between();
+        if let Some(mut shell) = shell {
+            let _ = shell.wait();'''
+replace = '''
+            let mut asking = self.lock();
+            asking.shell.take()
+        };
+        between();
+        if let Some(mut shell) = shell {
+            let _ = shell.kill();
+            let _ = shell.wait();'''
+
+# The quit, the start and the holding of the shell are one step.
+[[plant]]
+name = "login path: a start after the app began to quit starts a shell"
+meant = "a_lookup_the_app_has_quit_starts_no_shell"
+runs = ["app-daemon-path"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/daemon_command.rs"
+find = '''
+        if asking.ended {
+            return None;
+        }
+'''
+replace = ""
+
+# The app's quit: today's behaviour, which left a shell that never answers running.
+[[plant]]
+name = "login path: the app's quit leaves the login shell a start is asking running"
+meant = "quitting_ends_a_login_shell_a_start_is_still_asking_and_leaves_what_it_started"
+runs = ["app-quit"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/daemon.rs"
+find = '''
+        self.login.end();
+'''
+replace = ""
+
+[[plant]]
+name = "login path: the app's quit leaves the shell to the start's thread, which may never look again"
+meant = "ending_a_lookup_ends_the_shell_it_asks_at_once_and_only_it"
+runs = ["app-daemon-path"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/daemon_command.rs"
+find = '''
+        if let Some(shell) = asking.shell.as_mut() {
+            let _ = shell.kill();
+        }
+'''
+replace = ""
+
+# No login shell on Windows.
+[[plant]]
+name = "login path: on Windows the login shell SHELL names is asked"
+meant = "on_windows_no_login_shell_is_asked_and_the_daemon_keeps_the_apps_path"
+runs = ["app-daemon-path"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/daemon_command.rs"
+find = '    let shell = env.path("SHELL").filter(|_| !env.on_windows());'
+replace = '    let shell = env.path("SHELL");'
+
+# The rig's PATH: no folder a package manager installs into.
+[[plant]]
+name = "login path: the rig's PATH has Homebrew's folder of an Intel Mac"
+meant = "the_path_is_the_stand_ins_folder_then_the_systems_own_and_no_package_managers"
+runs = ["rig-install"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/install.rs"
+find = '        ["/usr/bin", "/bin"].map(str::to_owned).into()'
+replace = '        ["/usr/local/bin", "/usr/bin", "/bin"].map(str::to_owned).into()'
+
+# The page: the menu's Check for Updates before anything waits on the daemon.
+[[plant]]
+name = "login path: the page sets up updates only once the daemon has answered"
+meant = "the menu check works while the daemon has not answered yet, as when a login shell is slow"
+runs = ["page-late-daemon"]
+prepare = [["node", "app/scripts/bundle-ui.mjs"]]
+
+[[plant.edit]]
+file = "app/ui/core/app.js"
+find = '''
+  // Updates are the app's, not the daemon's, and listen for the menu's Check for
+  // Updates before anything waits on the daemon: its start may wait on a slow login
+  // shell for half a minute, and a click before a listener is lost.
+  await initializeUpdates({'''
+replace = '''
+  await readAgents().catch(() => {})
+  await initializeUpdates({'''
+
+# The tests' own: no cf a test starts finds the machine's Homebrew programs.
+[[plant]]
+name = "login path: the page's tests give the cf they start no folder of the system's of its own"
+meant = "names a folder of its own for the system's programs, and none of the machine's"
+runs = ["js-helpers"]
+
+[[plant.edit]]
+file = "tests/helpers.mjs"
+find = '''
+    CONSENSFLOW_TOOL_FOLDERS: join(root, 'system-bin'),
+'''
+replace = ""
+
+[[plant]]
+name = "login path: the page's tests give the cf they start no folder of the system's of its own, seen by the scan"
+meant = "every_source_that_starts_the_cf_under_test_names_a_folder_for_the_systems_programs"
+runs = ["tool-folders-scan"]
+
+[[plant.edit]]
+file = "tests/helpers.mjs"
+find = '''
+    CONSENSFLOW_TOOL_FOLDERS: join(root, 'system-bin'),
+'''
+replace = ""
+
+[[plant]]
+name = "login path: the suites' homes give the cf they start no folder of the system's, seen by the scan"
+meant = "every_source_that_starts_the_cf_under_test_names_a_folder_for_the_systems_programs"
+runs = ["tool-folders-scan"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/scratch_home.rs"
+find = '''
+            ("CONSENSFLOW_TOOL_FOLDERS", self.root().join("system-bin")),
+'''
+replace = ""
+
+[[plant]]
+name = "login path: the CLI goldens' runner gives its cf the machine's folders, seen by the scan"
+meant = "every_source_that_starts_the_cf_under_test_names_a_folder_for_the_systems_programs"
+runs = ["tool-folders-scan"]
+
+[[plant.edit]]
+file = "crates/cf/tests/cli_goldens/main.rs"
+find = '''
+    command.env("CONSENSFLOW_TOOL_FOLDERS", "");
+'''
+replace = ""
+
+[[plant]]
+name = "login path: the cf tests' runner gives its cf the machine's folders of programs"
+meant = "every_source_that_starts_the_cf_under_test_names_a_folder_for_the_systems_programs"
+runs = ["tool-folders-scan"]
+
+[[plant.edit]]
+file = "crates/cf/tests/common/mod.rs"
+find = '''
+    command.env("CONSENSFLOW_TOOL_FOLDERS", "");
+'''
+replace = ""

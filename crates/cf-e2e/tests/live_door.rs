@@ -123,7 +123,7 @@ fn asked() -> Result<Asked> {
 #[ignore = "opt-in: spends the machine's quota on a member of each harness named; cargo xtask live door (npm run live:door)"]
 fn a_question_answered_from_the_board_is_received_once_at_the_door_of_the_harness_that_asked(
 ) -> Result {
-    let log = Log::new("live door");
+    let log = Log::begin("live door")?;
     let asked = asked()?;
     let whom = doors(&live::list("harness"))?;
     let mut checks = Vec::new();

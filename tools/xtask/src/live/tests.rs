@@ -118,6 +118,61 @@ fn a_flag_has_its_value_and_a_flag_given_more_than_once_has_all_of_them_in_order
 }
 
 #[test]
+fn the_models_of_the_harnesses_reach_the_suites_as_they_were_given_with_claudes_own_flag_beside_them(
+) {
+    let (line, vars) =
+        runs("approval --models pi=openai/gpt-6-luna,codex=gpt-6.1-sol:high,devin=swe-2:medium")
+            .unwrap();
+    assert_eq!(
+        line,
+        "cargo test -p cf-e2e --test live_approval -- --ignored --nocapture"
+    );
+    assert_eq!(
+        vars,
+        [var(
+            "CONSENSFLOW_LIVE_MODELS",
+            "pi=openai/gpt-6-luna,codex=gpt-6.1-sol:high,devin=swe-2:medium"
+        )]
+    );
+    // Given twice, its values are one list; beside --claude-model and the harnesses, each is
+    // its own variable, which the suites read (and say which wins).
+    assert_eq!(
+        runs("paste claude --models pi=a --claude-model c:max --models codex=b:high")
+            .unwrap()
+            .1,
+        [
+            var("CONSENSFLOW_LIVE_HARNESS", "claude"),
+            var("CONSENSFLOW_LIVE_MODELS", "pi=a,codex=b:high"),
+            var("CONSENSFLOW_LIVE_CLAUDE_MODEL", "c:max"),
+        ]
+    );
+    // A value with spaces in it, as a shell quotes it, is one value, as it was given.
+    let asked = parse(
+        &["paste", "--models", " pi = a , codex=b "].map(OsString::from),
+        &names(),
+    )
+    .unwrap();
+    assert_eq!(
+        asked.vars,
+        [var("CONSENSFLOW_LIVE_MODELS", " pi = a , codex=b ")]
+    );
+    // It takes a value as every flag does.
+    assert!(matches!(
+        runs("paste --models"),
+        Err(Failure::Usage(message)) if message == "--models takes a value (a flag that takes none is --keep)"
+    ));
+    let help = dispatch::command_help(&COMMANDS[0]);
+    assert!(
+        help.contains("[--models harness=model[:effort],...]"),
+        "{help}"
+    );
+    assert!(
+        help.contains("--models wins where both name Claude"),
+        "{help}"
+    );
+}
+
+#[test]
 fn keep_takes_no_value_so_what_follows_it_is_a_word_of_its_own() {
     assert_eq!(
         runs("designer --keep").unwrap().1,
@@ -308,6 +363,8 @@ fn the_variables_the_words_set_are_the_ones_the_live_tests_read() {
     constant("KEEP", &variable(KEEP));
     constant("HARNESS", &variable(HARNESS));
     constant("STEPS", &variable("steps"));
+    constant("MODELS", &variable("models"));
+    constant("CLAUDE_MODEL", &variable("claude-model"));
     // And the rule that makes a variable of a flag is the same there.
     assert!(
         live.contains("format!(\"{PREFIX}{}\", flag.to_ascii_uppercase().replace('-', \"_\"))"),

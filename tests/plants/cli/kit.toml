@@ -2,8 +2,9 @@
 # their words with, the roster they write through, the recording that holds them to what Node's
 # CLI said (fixed since Node went), what the flip release left (the repair of the terminal's
 # command) and the bundle without Node (nothing reads the file the flip read, an npm shim with
-# no Node is refused, the daemon the app starts, the update's check, the page's console text), and
-# the check that holds Node's sources gone from the scripts that stay.
+# no Node is refused, the daemon the app starts, the update's check, the page's console text), the
+# PATH the app gives its daemon (the login shell's, else the app's, and the system's folders after
+# it), and the check that holds Node's sources gone from the scripts that stay.
 # A run here is any command, a script’s test among them.
 #
 # What a plant is, and what this file and the tables beside it hold, is told in
@@ -11,7 +12,7 @@
 
 run_limit_minutes = 10
 rebuild = ["cargo", "xtask", "build-cf", "--offline"]
-tables = ["parser", "verbs", "admin", "dispatch", "help", "flip", "deletion", "rig", "tester", "off-node"]
+tables = ["parser", "verbs", "admin", "dispatch", "help", "flip", "deletion", "login-path", "rig", "tester", "off-node"]
 
 [run]
 # The parser held to Node's `parseArgs` on three thousand lists of words.

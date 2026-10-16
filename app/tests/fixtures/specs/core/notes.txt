@@ -1,0 +1,1 @@
+Loose notes at the top of the specs folder, outside any spec.

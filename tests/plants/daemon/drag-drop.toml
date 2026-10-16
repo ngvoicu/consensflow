@@ -1,0 +1,1356 @@
+# A file dropped on a terminal window (the owner's request of 2026-10-15, ConsensFlow 3.0.5): in a
+# terminal, a file dropped on Claude Code, OpenCode or another harness types its path, and Claude
+# Code attaches an image from it; the dock's windows did nothing, for Tauri catches a drop over the
+# whole window and nothing in the page heard it. Now the page listens for the drag as Tauri says it
+# (`tauri://drag-enter`, `-over` and `-leave`) and for the drop as the app says it (`file-drop`:
+# Tauri's own, with the number the app keeps it by), which `core:default` lets it hear, and the
+# rules stand, each held by a test:
+#
+# - a drop types the paths of its files into the running window under the pointer when it is
+#   dropped, as a paste: xterm's own `paste`, so between the markers the program asked for and on
+#   the path any paste takes; each path is one word of the system's shell, a space between the paths
+#   and none after the last (`app/ui/core/file-drop.js`, Node's own tests in
+#   `tests/file-drop.test.mjs`, which bash and zsh read back): on a Mac a backslash before a space
+#   and every character a shell reads, on Windows double quotes round a path with a space;
+# - a name that holds a control character (U+0000 to U+001F, DEL; a Mac's may hold a line break or
+#   a tab) types nothing on either system, for no window takes one as part of a path, and the status
+#   line names the file, its control characters shown by their pictures (the lead's call, 2026-10-16:
+#   `$'…'` is a shell's, and the windows are no shells);
+# - a path is never typed changed: a window that reads key presses through Windows' console (Devin,
+#   Codex) gets a path its console would change by its short name (8.3), which the app looks up only
+#   for the paths of a drop it heard itself on its window, `main`, which the page names by its
+#   number (the app keeps the last 16, so a drop waiting for its lookup keeps its paths while others
+#   come), a bounded batch at a time, one lookup at a time, refusing what is no whole path to a file
+#   (`app/src-tauri/src/file_drop.rs`), the app built for it by the one function its tests build
+#   too (`with_page`, lib.rs), so a drop the app's builder routes nowhere fails them; a lookup is
+#   the turn of the task that reads Windows, given back when that task ends whoever waits for it,
+#   and one asked meanwhile is answered busy, which the page asks again (every 250 ms, a minute at
+#   most: a page reloaded while Windows read a far share leaves such a task); where there is none
+#   it takes, nothing is typed and the status line names the characters and says why, in the app's
+#   words; what the human types or pastes there still goes in the console's ASCII;
+# - where the drop is, Tauri says in the pointer's own units, and the page's pixels are not the
+#   same: Windows' in device pixels, which the display's scale divides, a Mac's in points, which are
+#   the page's already (wry's sources say so; the first thing to look at by hand is a drop on the
+#   right-hand one of two windows on a Retina Mac);
+# - a drop anywhere but on a running window types nothing: the board, the projects, a dialog (the
+#   window behind it is found by what is drawn at the place, not by boxes), a closed project's dock
+#   (another project's windows live on off screen); where it was meant for a window the status line
+#   says why: the chief's card while its window is down, the place of a window that ended under
+#   the file, until the drag ends, or a window that closed while its short names were read;
+# - drops are typed in the order they came, one waiting for the short names of the one before;
+# - while files are dragged over a running window it shows that a drop goes there (a ring and a tint
+#   in the app's seafoam), one window at a time, and the mark goes with the leave and with the drop
+#   (no leave comes before a drop); a drag that carries no file marks nothing and types nothing;
+# - the window dropped on has the keyboard after it, and on Windows the app's window comes in front
+#   (`focus_after_drop`, the app's, once for each drop and only while the window in front is still
+#   the one the file came from; no permission of the page's): unless the human acted after the drop
+#   (a click, a key, the app's window left or come back to), when the paths still go to the window
+#   they were dropped on, and nothing takes the keyboard or comes in front;
+# - the page hears each of its events with one listener: Tauri keeps every one it is given.
+#
+# One plant takes one rule out; a test of it fails. The unit plants run Node's own tests, the page's
+# the browser's (`file drop` in `app/tests/core-page.spec.mjs`, on real terminals; the xterm they
+# stand on is the tracked `app/ui/vendor`, so no plant bundles it), the app's the tests of the drop
+# module on this system. Its Windows-only lookups (`GetShortPathNameW`, the long form, the error
+# words) are held by the tests that run on Windows alone. Every name holds `file drop`, so
+# `npm run plants:daemon -- "file drop"` runs them all.
+
+[run]
+# The words a drop types, what a key-reading window takes, where the drop is, what the page may do.
+quoting = ["node", "--test", "tests/file-drop.test.mjs"]
+# The events, the window under the pointer, the mark and the paste, in the browser Playwright keeps.
+page-drop = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "file drop"]
+# How many listeners each of the app's events has.
+page-listeners = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "one listener"]
+# The app's drop module: what it hears, what it looks up and for whom, and when it comes in front.
+app-test-file-drop = ["cargo", "xtask", "app", "test", "file_drop"]
+
+# --- the words a Mac types ---
+
+[[plant]]
+name = "file drop: a space in a Mac path is not escaped"
+meant = "puts a backslash before a space, and writes a path without one as it is"
+runs = ["quoting", "page-drop"]
+
+[[plant.edit]]
+file = "app/ui/core/file-drop.js"
+find = "const SHELL_SPECIAL = /[ !"
+replace = "const SHELL_SPECIAL = /[!"
+
+[[plant]]
+name = "file drop: the parentheses of a Mac path are not escaped"
+meant = "writes a Mac screenshot name, its parentheses and its narrow no-break space"
+runs = ["quoting", "page-drop"]
+
+[[plant.edit]]
+file = "app/ui/core/file-drop.js"
+find = "&'()*;"
+replace = "&'*;"
+
+[[plant]]
+name = "file drop: the backslash of a Mac path is not escaped"
+meant = "puts a backslash before each character a shell reads as more than itself"
+runs = ["quoting"]
+
+[[plant.edit]]
+file = "app/ui/core/file-drop.js"
+find = '''?[\\\]^'''
+replace = '''?[\]^'''
+
+[[plant]]
+name = "file drop: a narrow no-break space of a Mac path is escaped as if a shell read it as a space"
+meant = "writes a Mac screenshot name, its parentheses and its narrow no-break space"
+runs = ["quoting", "page-drop"]
+
+[[plant.edit]]
+file = "app/ui/core/file-drop.js"
+find = "const SHELL_SPECIAL = /[ !"
+replace = '''const SHELL_SPECIAL = /[ \u202f!'''
+
+[[plant]]
+name = "file drop: the marks of a path that no shell reads are escaped too"
+meant = "leaves every other character as it is: letters, digits, marks of a path, and non-ASCII"
+runs = ["quoting"]
+
+[[plant.edit]]
+file = "app/ui/core/file-drop.js"
+find = "const SHELL_SPECIAL = /[ !"
+replace = "const SHELL_SPECIAL = /[ ,=%+@:!"
+
+# --- a name no window takes ---
+
+[[plant]]
+name = "file drop: a name with a control character is typed, and its line break ends the line"
+meant = "types nothing for a file whose name holds a control character, a line break, a tab or a delete, and names it"
+runs = ["page-drop"]
+
+[[plant.edit]]
+file = "app/ui/core/file-drop.js"
+find = "  const controlled = withControl(paths)"
+replace = "  const controlled = undefined"
+
+[[plant]]
+name = "file drop: a name with a control character is refused on a Mac only"
+meant = "types nothing for a path with a control character, which no Windows name holds, and names it"
+runs = ["page-drop"]
+
+[[plant.edit]]
+file = "app/ui/core/file-drop.js"
+find = "  const controlled = withControl(paths)"
+replace = "  const controlled = WINDOWS ? undefined : withControl(paths)"
+
+[[plant]]
+name = "file drop: a tab is taken for no control character, and completes"
+meant = "is one with a control character, a tab and a delete too, on any system"
+runs = ["quoting", "page-drop"]
+
+[[plant.edit]]
+file = "app/ui/core/file-drop.js"
+find = '''const control = (character) => character < ' ' || character === '\x7f''''
+replace = '''const control = (character) => (character < ' ' && character !== '\t') || character === '\x7f''''
+
+[[plant]]
+name = "file drop: a delete is taken for no control character, and rubs out"
+meant = "is one with a control character, a tab and a delete too, on any system"
+runs = ["quoting", "page-drop"]
+
+[[plant.edit]]
+file = "app/ui/core/file-drop.js"
+find = '''const control = (character) => character < ' ' || character === '\x7f''''
+replace = '''const control = (character) => character < ' ''''
+
+[[plant]]
+name = "file drop: a name with a control character is shown with it, which the status line does not"
+meant = "types nothing for a file whose name holds a control character, a line break, a tab or a delete, and names it"
+runs = ["page-drop"]
+
+[[plant.edit]]
+file = "app/ui/core/file-drop.js"
+find = "the name of ${shown(controlled)} holds"
+replace = "the name of ${controlled} holds"
+
+[[plant]]
+name = "file drop: the words of a name no window takes are not the page's"
+meant = "types nothing for a file whose name holds a control character, a line break, a tab or a delete, and names it"
+runs = ["page-drop"]
+
+[[plant.edit]]
+file = "app/ui/core/file-drop.js"
+find = "holds a control character, which no window can take."
+replace = "holds a control character."
+
+# --- the words Windows types ---
+
+[[plant]]
+name = "file drop: a Windows path is quoted whether or not it has a space"
+meant = "puts a path with a space in double quotes, and writes one without as it is"
+runs = ["quoting", "page-drop"]
+
+[[plant.edit]]
+file = "app/ui/core/file-drop.js"
+find = '''  if (windows) return path.includes(' ') ? `"${path}"` : path'''
+replace = '''  if (windows) return `"${path}"`'''
+
+[[plant]]
+name = "file drop: a Windows path with a space is not quoted"
+meant = "puts a path with a space in double quotes, and writes one without as it is"
+runs = ["quoting", "page-drop"]
+
+[[plant.edit]]
+file = "app/ui/core/file-drop.js"
+find = '''  if (windows) return path.includes(' ') ? `"${path}"` : path'''
+replace = '''  if (windows) return path'''
+
+[[plant]]
+name = "file drop: a Windows path with an ampersand is quoted too"
+meant = "quotes a share, a drive and a name with other marks only for a space"
+runs = ["quoting"]
+
+[[plant.edit]]
+file = "app/ui/core/file-drop.js"
+find = "path.includes(' ') ? "
+replace = "/[ &]/.test(path) ? "
+
+# --- the words between the paths ---
+
+[[plant]]
+name = "file drop: the paths are typed with nothing between them"
+meant = "separates several paths with a space, and ends with none"
+runs = ["quoting", "page-drop"]
+
+[[plant.edit]]
+file = "app/ui/core/file-drop.js"
+find = ".join(' ')"
+replace = ".join('')"
+
+[[plant]]
+name = "file drop: the paths are typed each followed by a space, the last too"
+meant = "separates several paths with a space, and ends with none"
+runs = ["quoting", "page-drop"]
+
+[[plant.edit]]
+file = "app/ui/core/file-drop.js"
+find = "return paths.map((path) => word(path, windows)).join(' ')"
+replace = "return paths.map((path) => `${word(path, windows)} `).join('')"
+
+# --- a window that reads key presses on Windows ---
+
+[[plant]]
+name = "file drop: a Devin window on Windows is typed the long path, which its console changes"
+meant = "types a path into a Devin window by its short name where its console would change the long one"
+runs = ["page-drop"]
+
+[[plant.edit]]
+file = "app/ui/core/terminals.js"
+find = "      return { pane: entry.pane, name, readsKeys: readsKeys(entry.harness) }"
+replace = "      return { pane: entry.pane, name, readsKeys: false }"
+
+[[plant]]
+name = "file drop: a Devin window on a Mac is taken for one that reads key presses through Windows' console"
+meant = "types a path into a Devin window as it is: only Windows’ console changes what it takes"
+runs = ["page-drop"]
+
+[[plant.edit]]
+file = "app/ui/core/terminals.js"
+find = "const readsKeys = (harness) => WINDOWS && KEY_READERS.has(harness)"
+replace = "const readsKeys = (harness) => KEY_READERS.has(harness)"
+
+[[plant]]
+name = "file drop: the short names are not asked for"
+meant = "types a path into a Devin window by its short name where its console would change the long one"
+runs = ["page-drop"]
+
+[[plant.edit]]
+file = "app/ui/core/file-drop.js"
+find = "invoke('short_paths', { id, paths: changed })"
+replace = "invoke('short_paths', { id, paths: [] })"
+
+[[plant]]
+name = "file drop: the short names of every path are asked for, and a path that needs none is refused"
+meant = "types a path into a Devin window by its short name where its console would change the long one"
+runs = ["page-drop"]
+
+[[plant.edit]]
+file = "app/ui/core/file-drop.js"
+find = "  const changed = paths.filter((path) => untakeable(path).length > 0)"
+replace = "  const changed = paths"
+
+[[plant]]
+name = "file drop: a short name the console would change too is typed"
+meant = "types nothing into a Codex window for a path its console would change and that has no short name it takes, and says why in the app’s words"
+runs = ["page-drop"]
+
+[[plant.edit]]
+file = "app/ui/core/file-drop.js"
+find = "    if (untakeable(found.short).length > 0) {"
+replace = "    if (false) {"
+
+[[plant]]
+name = "file drop: a path the console would change and that has no short name is typed all the same"
+meant = "types nothing into a Codex window for a path its console would change and that has no short name it takes, and says why in the app’s words"
+runs = ["page-drop"]
+
+[[plant.edit]]
+file = "app/ui/core/file-drop.js"
+find = "    if (typeof found?.short !== 'string') {"
+replace = "    if (found === undefined) {"
+
+[[plant]]
+name = "file drop: why a short name could not be used is not said in the app's words"
+meant = "types nothing into a Codex window for a path its console would change and that has no short name it takes, and says why in the app’s words"
+runs = ["page-drop"]
+
+[[plant.edit]]
+file = "app/ui/core/file-drop.js"
+find = "      return { refused: path, why: found?.error ?? 'the app did not answer for its short name' }"
+replace = "      return { refused: path, why: 'Windows keeps no short name for it' }"
+
+[[plant]]
+name = "file drop: what a key-reading window cannot take is named without its code point"
+meant = "types nothing into a Codex window for a path its console would change and that has no short name it takes, and says why in the app’s words"
+runs = ["page-drop"]
+
+[[plant.edit]]
+file = "app/ui/core/file-drop.js"
+find = "        `${character} (U+${character.codePointAt(0).toString(16).toUpperCase().padStart(4, '0')})`,"
+replace = "        `${character}`,"
+
+[[plant]]
+name = "file drop: a letter is taken for a character a key-reading window cannot take"
+meant = "is nothing of a path of ASCII and letters, which reaches it as it is, quoted or not"
+runs = ["quoting"]
+
+[[plant.edit]]
+file = "app/ui/core/file-drop.js"
+find = '''      character > '\x7f' && !(/\p{L}/u.test(character) && consoleText(character) === character),'''
+replace = '''      character > '\x7f','''
+
+[[plant]]
+name = "file drop: a symbol the page leaves as it is is taken for one the console carries"
+meant = "is a symbol the page leaves as it is too, which the console drops all the same"
+runs = ["quoting"]
+
+[[plant.edit]]
+file = "app/ui/core/file-drop.js"
+find = '''      character > '\x7f' && !(/\p{L}/u.test(character) && consoleText(character) === character),'''
+replace = '''      consoleText(character) !== character,'''
+
+[[plant]]
+name = "file drop: letters written otherwise only together are taken as they are"
+meant = "is what would be written otherwise: a mark that joins a letter, a letter of another form, letters joined"
+runs = ["quoting"]
+
+[[plant.edit]]
+file = "app/ui/core/file-drop.js"
+find = '''  if (lost.length === 0 && consoleText(path) !== path) {
+    return characters.filter((character) => character > '\x7f')
+  }
+'''
+replace = ""
+
+# --- the system, and where the app says the drop is ---
+
+[[plant]]
+name = "file drop: Windows is not told by its user agent"
+meant = "types the paths of the files dropped on a window, each quoted if it has a space, as the human’s paste is typed"
+runs = ["page-drop"]
+
+[[plant.edit]]
+file = "app/ui/core/file-drop.js"
+find = "const WINDOWS = /Windows/.test(globalThis.navigator?.userAgent ?? '')"
+replace = "const WINDOWS = false"
+
+[[plant]]
+name = "file drop: every system is Windows"
+meant = "types the paths of the files dropped on a window, each as one word of the shell, as the human’s paste is typed"
+runs = ["page-drop"]
+
+[[plant.edit]]
+file = "app/ui/core/file-drop.js"
+find = "const WINDOWS = /Windows/.test(globalThis.navigator?.userAgent ?? '')"
+replace = "const WINDOWS = true"
+
+[[plant]]
+name = "file drop: a Mac's place is divided by the display's scale"
+meant = "is in the page’s pixels already on a Mac, whatever the display’s scale"
+runs = ["quoting", "page-drop"]
+
+[[plant.edit]]
+file = "app/ui/core/file-drop.js"
+find = "const scale = windows ? ratio : 1"
+replace = "const scale = ratio"
+
+[[plant]]
+name = "file drop: Windows' place is not divided by the display's scale"
+meant = "is in device pixels on Windows, which the display’s scale divides into the page’s"
+runs = ["quoting", "page-drop"]
+
+[[plant.edit]]
+file = "app/ui/core/file-drop.js"
+find = "const scale = windows ? ratio : 1"
+replace = "const scale = 1"
+
+[[plant]]
+name = "file drop: only the across of a place is divided by the display's scale"
+meant = "is in device pixels on Windows, which the display’s scale divides into the page’s"
+runs = ["quoting"]
+
+[[plant.edit]]
+file = "app/ui/core/file-drop.js"
+find = "return { x: x / scale, y: y / scale }"
+replace = "return { x: x / scale, y }"
+
+[[plant]]
+name = "file drop: the display's scale is never read"
+meant = "goes to the window under the pointer, whose place Windows says in device pixels"
+runs = ["page-drop"]
+
+[[plant.edit]]
+file = "app/ui/core/file-drop.js"
+find = "ratio: globalThis.devicePixelRatio ?? 1"
+replace = "ratio: 1"
+
+# --- the events ---
+
+[[plant]]
+name = "file drop: a drag that has entered over a window is not marked until it moves"
+meant = "marks the window a drop would go to, from the enter to the leave or the drop"
+runs = ["page-drop"]
+
+[[plant.edit]]
+file = "app/ui/core/file-drop.js"
+find = '''    carrying = payload.paths.length > 0
+    if (carrying) dock.markDrop(at(payload.position))'''
+replace = '''    carrying = payload.paths.length > 0'''
+
+[[plant]]
+name = "file drop: a drag that carries no file is marked and typed as if it did"
+meant = "marks nothing and types nothing for a drag that carries no file"
+runs = ["page-drop"]
+
+[[plant.edit]]
+file = "app/ui/core/file-drop.js"
+find = "carrying = payload.paths.length > 0"
+replace = "carrying = true"
+
+[[plant]]
+name = "file drop: a drag moved over another window leaves the mark where it was"
+meant = "marks the window a drop would go to, from the enter to the leave or the drop"
+runs = ["page-drop"]
+
+[[plant.edit]]
+file = "app/ui/core/file-drop.js"
+find = '''  await listen('tauri://drag-over', ({ payload }) => {
+    if (carrying) dock.markDrop(at(payload.position))
+  })'''
+replace = '''  await listen('tauri://drag-over', () => {})'''
+
+[[plant]]
+name = "file drop: the leave does not take the mark away"
+meant = "marks the window a drop would go to, from the enter to the leave or the drop"
+runs = ["page-drop"]
+
+[[plant.edit]]
+file = "app/ui/core/file-drop.js"
+find = '''  await listen('tauri://drag-leave', () => {
+    carrying = false
+    dock.markDrop(null)
+  })'''
+replace = '''  await listen('tauri://drag-leave', () => {
+    carrying = false
+  })'''
+
+[[plant]]
+name = "file drop: a drag that has left is still taken for one over the window"
+meant = "marks the window a drop would go to, from the enter to the leave or the drop"
+runs = ["page-drop"]
+
+[[plant.edit]]
+file = "app/ui/core/file-drop.js"
+find = '''  await listen('tauri://drag-leave', () => {
+    carrying = false
+    dock.markDrop(null)
+  })'''
+replace = '''  await listen('tauri://drag-leave', () => {
+    dock.markDrop(null)
+  })'''
+
+[[plant]]
+name = "file drop: the drop does not take the mark away"
+meant = "marks the window a drop would go to, from the enter to the leave or the drop"
+runs = ["page-drop"]
+
+[[plant.edit]]
+file = "app/ui/core/file-drop.js"
+find = '''    dock.markDrop(null)
+    if (payload.paths.length === 0) return'''
+replace = '''    if (payload.paths.length === 0) return'''
+
+[[plant]]
+name = "file drop: a drag that has dropped is still taken for one over the window"
+meant = "marks the window a drop would go to, from the enter to the leave or the drop"
+runs = ["page-drop"]
+
+[[plant.edit]]
+file = "app/ui/core/file-drop.js"
+find = '''  await listen('file-drop', ({ payload }) => {
+    carrying = false'''
+replace = '''  await listen('file-drop', ({ payload }) => {'''
+
+[[plant]]
+name = "file drop: the drop ends the drag before the dock has said where it went"
+meant = "types nothing where a window ended under the file, and says so; nothing where none did"
+runs = ["page-drop"]
+
+[[plant.edit]]
+file = "app/ui/core/file-drop.js"
+find = '''    const target = dock.dropTarget(at(payload.position))
+    dock.markDrop(null)'''
+replace = '''    dock.markDrop(null)
+    const target = dock.dropTarget(at(payload.position))'''
+
+[[plant]]
+name = "file drop: a drop that carries no file types an empty paste"
+meant = "marks nothing and types nothing for a drag that carries no file"
+runs = ["page-drop"]
+
+[[plant.edit]]
+file = "app/ui/core/file-drop.js"
+find = '''    if (payload.paths.length === 0) return
+'''
+replace = ""
+
+[[plant]]
+name = "file drop: the drops are typed as they come, one past another waiting for its short names"
+meant = "types the paths of the drops in the order they came, one waiting for the short names of the one before"
+runs = ["page-drop"]
+
+[[plant.edit]]
+file = "app/ui/core/file-drop.js"
+find = "    typing = typing.then(dropped).catch(report)"
+replace = "    typing = dropped().catch(report)"
+
+[[plant]]
+name = "file drop: the page listens for Tauri's drop, which carries no number, not the app's"
+meant = "types the paths of the files dropped on a window, each as one word of the shell, as the human’s paste is typed"
+runs = ["page-drop"]
+
+[[plant.edit]]
+file = "app/ui/core/file-drop.js"
+find = "await listen('file-drop'"
+replace = "await listen('tauri://drag-drop'"
+
+[[plant]]
+name = "file drop: the page asks of each drop by the number of the last one it heard"
+meant = "types every drop that came while one waited for its short names, each looked up as the drop it is"
+runs = ["page-drop"]
+
+[[plant.edit]]
+file = "app/ui/core/file-drop.js"
+find = "  let carrying = false"
+replace = '''  let carrying = false
+  let lastId = null'''
+
+[[plant.edit]]
+file = "app/ui/core/file-drop.js"
+find = '''    const asOf = acts
+'''
+replace = '''    lastId = payload.id
+    const asOf = acts
+'''
+
+[[plant.edit]]
+file = "app/ui/core/file-drop.js"
+find = "    const dropped = () => type(target, payload, { invoke, focus, dock, report, still })"
+replace = "    const dropped = () => type(target, { ...payload, id: lastId }, { invoke, focus, dock, report, still })"
+
+[[plant]]
+name = "file drop: the page does not listen for the app's drops at all"
+meant = "types the paths of the files dropped on a window, each as one word of the shell, as the human’s paste is typed"
+runs = ["page-drop"]
+
+[[plant.edit]]
+file = "app/ui/core/app.js"
+find = "      await listenForFileDrops({"
+replace = "      void ({"
+
+[[plant]]
+name = "file drop: the page listens for the app's drops twice, and types each drop twice"
+meant = "hears each event of the app with one listener, as the app keeps every one it is given"
+runs = ["page-listeners", "page-drop"]
+
+[[plant.edit]]
+file = "app/ui/core/app.js"
+find = "      // A file dropped on a terminal window types its path there."
+replace = '''      await listenForFileDrops({ listen, invoke, focus: () => {}, dock: terminals, report })
+      // A file dropped on a terminal window types its path there.'''
+
+# --- the window under the pointer ---
+
+[[plant]]
+name = "file drop: the window under the pointer is found by the boxes of the cards, not by what is drawn there"
+meant = "does nothing outside a window: on the board, the projects, the dock’s own head, or under a dialog"
+runs = ["page-drop"]
+
+[[plant.edit]]
+file = "app/ui/core/terminals.js"
+find = '''    return document.elementFromPoint(x, y)?.closest('.terminal-card') ?? null'''
+replace = '''    const inside = (box) => x >= box.left && x <= box.right && y >= box.top && y <= box.bottom
+    return (
+      [...document.querySelectorAll('.terminal-card')].find((card) =>
+        inside(card.getBoundingClientRect()),
+      ) ?? null
+    )'''
+
+[[plant]]
+name = "file drop: the window under the pointer is found with the place's two numbers the wrong way round"
+meant = "goes to the window under the pointer, whose place a Mac says in points, not in device pixels"
+runs = ["page-drop"]
+
+[[plant.edit]]
+file = "app/ui/core/terminals.js"
+find = "document.elementFromPoint(x, y)"
+replace = "document.elementFromPoint(y, x)"
+
+[[plant]]
+name = "file drop: a drop where there is no window goes to the first"
+meant = "does nothing outside a window: on the board, the projects, the dock’s own head, or under a dialog"
+runs = ["page-drop"]
+
+[[plant.edit]]
+file = "app/ui/core/terminals.js"
+find = "    return [...this.#cards.values()].find((entry) => entry.card === card)"
+replace = "    return [...this.#cards.values()].find((entry) => entry.card === card) ?? [...this.#cards.values()][0]"
+
+[[plant]]
+name = "file drop: a drop on the head of a window, its name and its buttons, is not the window's"
+meant = "goes to the window under the pointer, whose place a Mac says in points, not in device pixels"
+runs = ["page-drop"]
+
+[[plant.edit]]
+file = "app/ui/core/terminals.js"
+find = '''    return document.elementFromPoint(x, y)?.closest('.terminal-card') ?? null'''
+replace = '''    return document.elementFromPoint(x, y)?.closest('.terminal-host')?.parentElement ?? null'''
+
+[[plant]]
+name = "file drop: a window that is not running is not said so"
+meant = "types nothing where a window is not running, and says so; the others still take a drop"
+runs = ["page-drop"]
+
+[[plant.edit]]
+file = "app/ui/core/terminals.js"
+find = "    if (card !== null) return `${laneName(this.#windowless.participant)}'s window is not running`"
+replace = "    if (card !== null) return null"
+
+[[plant]]
+name = "file drop: the words of a drop meant for a window that has none are not the page's"
+meant = "types nothing where a window is not running, and says so; the others still take a drop"
+runs = ["page-drop"]
+
+[[plant.edit]]
+file = "app/ui/core/file-drop.js"
+find = "    report(`Nothing was typed: ${target.missed}.`)"
+replace = "    report(`Nothing typed: ${target.missed}.`)"
+
+[[plant]]
+name = "file drop: a window that ended under the file is not remembered, and a drop where it was says nothing"
+meant = "types nothing where a window ended under the file, and says so; nothing where none did"
+runs = ["page-drop"]
+
+[[plant.edit]]
+file = "app/ui/core/terminals.js"
+find = "      if (entry.card.dataset.drop === 'true') {"
+replace = "      if (entry.card.dataset.drop === 'never') {"
+
+[[plant]]
+name = "file drop: a drop anywhere, once a window ended under the file, is said to have been on it"
+meant = "types nothing where a window ended under the file, and says so; nothing where none did"
+runs = ["page-drop"]
+
+[[plant.edit]]
+file = "app/ui/core/terminals.js"
+find = "    const there = box && x >= box.left && x < box.right && y >= box.top && y < box.bottom"
+replace = "    const there = box !== undefined"
+
+[[plant]]
+name = "file drop: a window that ended under one drag is still said to have closed under the next"
+meant = "types nothing where a window ended under the file, and says so; nothing where none did"
+runs = ["page-drop"]
+
+[[plant.edit]]
+file = "app/ui/core/terminals.js"
+find = "    if (point === null) this.#gone = null"
+replace = ""
+
+[[plant]]
+name = "file drop: the words of a window that ended under the file are not the page's"
+meant = "types nothing where a window ended under the file, and says so; nothing where none did"
+runs = ["page-drop"]
+
+[[plant.edit]]
+file = "app/ui/core/terminals.js"
+find = "'s window has closed"
+replace = "'s window is gone"
+
+[[plant]]
+name = "file drop: a window that closed while its short names were read is typed into all the same"
+meant = "types nothing into a window that closed while the short names were read, and says so"
+runs = ["page-drop"]
+
+[[plant.edit]]
+file = "app/ui/core/terminals.js"
+find = '''    if (emulator === null) return false
+'''
+replace = ""
+
+# --- the paste, the keyboard after it, and the app's window in front ---
+
+[[plant]]
+name = "file drop: the window dropped on does not take the keyboard"
+meant = "gives the keyboard to the window it went to, so what the human types next follows the path"
+runs = ["page-drop"]
+
+[[plant.edit]]
+file = "app/ui/core/terminals.js"
+find = "    if (focus) emulator.terminal?.focus()"
+replace = ""
+
+[[plant]]
+name = "file drop: the window dropped on takes the keyboard though the human went on elsewhere"
+meant = "types a drop typed after the human acted into the window it was dropped on, and takes no focus"
+runs = ["page-drop"]
+
+[[plant.edit]]
+file = "app/ui/core/terminals.js"
+find = "    if (focus) emulator.terminal?.focus()"
+replace = "    emulator.terminal?.focus()"
+
+[[plant]]
+name = "file drop: a drop typed after the human acted takes the keyboard and the front"
+meant = "types a drop typed after the human acted into the window it was dropped on, and takes no focus"
+runs = ["page-drop"]
+
+[[plant.edit]]
+file = "app/ui/core/file-drop.js"
+find = "  const focused = still()"
+replace = "  const focused = true"
+
+[[plant]]
+name = "file drop: a click after the drop is not counted as the human acting"
+meant = "types a drop typed after the human acted into the window it was dropped on, and takes no focus"
+runs = ["page-drop"]
+
+[[plant.edit]]
+file = "app/ui/core/file-drop.js"
+find = "  for (const name of ['pointerdown', 'keydown'])"
+replace = "  for (const name of ['keydown'])"
+
+[[plant]]
+name = "file drop: a key pressed after the drop is not counted as the human acting"
+meant = "types a drop typed after the human acted into the window it was dropped on, and takes no focus"
+runs = ["page-drop"]
+
+[[plant.edit]]
+file = "app/ui/core/file-drop.js"
+find = "  for (const name of ['pointerdown', 'keydown'])"
+replace = "  for (const name of ['pointerdown'])"
+
+[[plant]]
+name = "file drop: the app's window left after the drop is not counted as the human acting"
+meant = "types a drop typed after the human acted into the window it was dropped on, and takes no focus"
+runs = ["page-drop"]
+
+[[plant.edit]]
+file = "app/ui/core/file-drop.js"
+find = "  for (const name of ['focus', 'blur'])"
+replace = "  for (const name of ['focus'])"
+
+[[plant]]
+name = "file drop: the paths are typed past the emulator, as keys with no markers and no console text"
+meant = "types the paths of the files dropped on a window, each as one word of the shell, as the human’s paste is typed"
+runs = ["page-drop"]
+
+[[plant.edit]]
+file = "app/ui/core/terminals.js"
+find = "    emulator.paste(text)"
+replace = "    void this.#link.input(pane, text)"
+
+[[plant]]
+name = "file drop: the paths are typed as keys through the dock's input, with no markers"
+meant = "types the paths of the files dropped on a window, each as one word of the shell, as the human’s paste is typed"
+runs = ["page-drop"]
+
+[[plant.edit]]
+file = "app/ui/core/terminals.js"
+find = "    emulator.paste(text)"
+replace = "    void this.input(pane, text)"
+
+[[plant]]
+name = "file drop: the paths are typed a second time, as an emulator's reply"
+meant = "types the paths of the files dropped on a window, each as one word of the shell, as the human’s paste is typed"
+runs = ["page-drop"]
+
+[[plant.edit]]
+file = "app/ui/core/terminals.js"
+find = "    emulator.paste(text)"
+replace = '''    emulator.paste(text)
+    void this.#link.reply(pane, text)'''
+
+[[plant]]
+name = "file drop: the app's window is not brought in front on Windows, and the keys stay with the program the file came from"
+meant = "types the paths of the files dropped on a window, each quoted if it has a space, as the human’s paste is typed"
+runs = ["page-drop"]
+
+[[plant.edit]]
+file = "app/ui/core/file-drop.js"
+find = '''  if (WINDOWS && focused) await focus(id)
+}'''
+replace = "}"
+
+[[plant]]
+name = "file drop: the app's window is brought in front on a Mac too"
+meant = "types the paths of the files dropped on a window, each as one word of the shell, as the human’s paste is typed"
+runs = ["page-drop"]
+
+[[plant.edit]]
+file = "app/ui/core/file-drop.js"
+find = "  if (WINDOWS && focused) await focus(id)"
+replace = "  if (focused) await focus(id)"
+
+[[plant]]
+name = "file drop: the app is asked to come in front with no drop named"
+meant = "types a path into a Devin window by its short name where its console would change the long one"
+runs = ["page-drop"]
+
+[[plant.edit]]
+file = "app/ui/core/file-drop.js"
+find = "  if (WINDOWS && focused) await focus(id)"
+replace = "  if (WINDOWS && focused) await focus()"
+
+[[plant]]
+name = "file drop: the app's window is brought in front though nothing was typed"
+meant = "types nothing into a Codex window for a path its console would change and that has no short name it takes, and says why in the app’s words"
+runs = ["page-drop"]
+
+[[plant.edit]]
+file = "app/ui/core/file-drop.js"
+find = "  const typed = target.readsKeys ? await keyed(id, paths, invoke) : { paths }"
+replace = '''  if (WINDOWS) await focus(id)
+  const typed = target.readsKeys ? await keyed(id, paths, invoke) : { paths }'''
+
+[[plant]]
+name = "file drop: the page's way of bringing the app's window in front does nothing"
+meant = "types the paths of the files dropped on a window, each quoted if it has a space, as the human’s paste is typed"
+runs = ["page-drop"]
+
+[[plant.edit]]
+file = "app/ui/core/app.js"
+find = "        focus: (id) => invoke('focus_after_drop', { id }),"
+replace = "        focus: () => {},"
+
+[[plant]]
+name = "file drop: the page asks the app to come in front naming no drop"
+meant = "types a path into a Devin window by its short name where its console would change the long one"
+runs = ["page-drop"]
+
+[[plant.edit]]
+file = "app/ui/core/app.js"
+find = "        focus: (id) => invoke('focus_after_drop', { id }),"
+replace = "        focus: () => invoke('focus_after_drop'),"
+
+[[plant]]
+name = "file drop: the page may bring the app's window in front at will"
+meant = "lets it do nothing more of the window for a drop: the app brings it in front, once, itself"
+runs = ["quoting"]
+
+[[plant.edit]]
+file = "app/src-tauri/capabilities/default.json"
+find = '''    "core:window:allow-set-position",
+'''
+replace = '''    "core:window:allow-set-position",
+    "core:window:allow-set-focus",
+'''
+
+[[plant]]
+name = "file drop: the mark stays on the window it left, and moves on to the next"
+meant = "marks the window a drop would go to, from the enter to the leave or the drop"
+runs = ["page-drop"]
+
+[[plant.edit]]
+file = "app/ui/core/terminals.js"
+find = "      else delete entry.card.dataset.drop"
+replace = "      else if (point === null) delete entry.card.dataset.drop"
+
+# --- the emulator ---
+
+[[plant]]
+name = "file drop: the emulator writes the paths on its screen instead of typing them"
+meant = "types the paths of the files dropped on a window, each as one word of the shell, as the human’s paste is typed"
+runs = ["page-drop"]
+
+[[plant.edit]]
+file = "app/ui/term.js"
+find = "    this.terminal.paste(text)"
+replace = "    this.terminal.write(text)"
+
+[[plant]]
+name = "file drop: the emulator types the paths as keys, with no markers"
+meant = "types the paths of the files dropped on a window, each as one word of the shell, as the human’s paste is typed"
+runs = ["page-drop"]
+
+[[plant.edit]]
+file = "app/ui/term.js"
+find = "    this.terminal.paste(text)"
+replace = "    this.terminal.input(text, true)"
+
+[[plant]]
+name = "file drop: the emulator puts the markers round the paths whether or not the program asked for them"
+meant = "types them with no markers where the program asked for none, as the human’s paste does"
+runs = ["page-drop"]
+
+[[plant.edit]]
+file = "app/ui/term.js"
+find = "    this.terminal.paste(text)"
+replace = '''    this.terminal.input(`\x1b[200~${text}\x1b[201~`, true)'''
+
+# --- the mark ---
+
+[[plant]]
+name = "file drop: the mark has no rule in the page's styles"
+meant = "marks the window a drop would go to, from the enter to the leave or the drop"
+runs = ["page-drop"]
+
+[[plant.edit]]
+file = "app/ui/page.css"
+find = '''.terminal-card[data-drop="true"] {'''
+replace = '''.terminal-card[data-dropped="true"] {'''
+
+[[plant]]
+name = "file drop: the mark's tint stops the pointer, which a stuck mark would keep from the window"
+meant = "marks the window a drop would go to, from the enter to the leave or the drop"
+runs = ["page-drop"]
+
+[[plant.edit]]
+file = "app/ui/page.css"
+find = '''  background: rgba(99, 199, 178, .14);
+  pointer-events: none;'''
+replace = '''  background: rgba(99, 199, 178, .14);'''
+
+[[plant]]
+name = "file drop: the mark's tint covers what the card is not the box of"
+meant = "marks the window a drop would go to, from the enter to the leave or the drop"
+runs = ["page-drop"]
+
+[[plant.edit]]
+file = "app/ui/page.css"
+find = '''.terminal-card[data-drop="true"] {
+  position: relative;
+'''
+replace = '''.terminal-card[data-drop="true"] {
+'''
+
+[[plant]]
+name = "file drop: the mark is not the app's seafoam"
+meant = "marks the window a drop would go to, from the enter to the leave or the drop"
+runs = ["page-drop"]
+
+[[plant.edit]]
+file = "app/ui/page.css"
+find = "box-shadow: 0 0 0 2px var(--seafoam), 0 0 16px rgba(99, 199, 178, .5);"
+replace = "box-shadow: 0 0 0 2px var(--amber), 0 0 16px rgba(231, 185, 104, .5);"
+
+# --- the app: what it hears of a drop, and for whom it looks up ---
+
+[[plant]]
+name = "file drop: a path that was never dropped is looked up for the page"
+meant = "the_page_is_answered_for_the_paths_of_the_drop_it_names_and_no_other"
+runs = ["app-test-file-drop"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/file_drop.rs"
+find = "    if !dropped.iter().any(|one| one == path) {"
+replace = "    if false {"
+
+[[plant]]
+name = "file drop: the drag that enters the window is taken for a drop"
+meant = "the_page_is_answered_for_the_paths_of_the_drop_it_names_and_no_other"
+runs = ["app-test-file-drop"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/file_drop.rs"
+find = "    let WindowEvent::DragDrop(DragDropEvent::Drop { paths, position }) = event else {"
+replace = "    let WindowEvent::DragDrop(DragDropEvent::Drop { paths, position } | DragDropEvent::Enter { paths, position }) = event else {"
+
+[[plant]]
+name = "file drop: a lookup is answered for the paths of every drop kept, not the one it names"
+meant = "the_page_is_answered_for_the_paths_of_the_drop_it_names_and_no_other"
+runs = ["app-test-file-drop"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/file_drop.rs"
+find = '''        let heard = drops.kept.iter().find(|heard| heard.id == id)?;
+        Some(heard.paths.clone())'''
+replace = '''        drops.kept.iter().find(|heard| heard.id == id)?;
+        Some(drops.kept.iter().flat_map(|heard| heard.paths.clone()).collect())'''
+
+[[plant]]
+name = "file drop: the app keeps the last drop alone, and a drop waiting for its lookup loses its paths"
+meant = "the_page_is_answered_for_the_paths_of_the_drop_it_names_and_no_other"
+runs = ["app-test-file-drop"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/file_drop.rs"
+find = "        if drops.kept.len() == PENDING {"
+replace = "        if !drops.kept.is_empty() {"
+
+[[plant]]
+name = "file drop: the app keeps every drop, and never lets the oldest go"
+meant = "the_app_keeps_the_last_drops_for_the_page_and_lets_the_oldest_go"
+runs = ["app-test-file-drop"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/file_drop.rs"
+find = "        if drops.kept.len() == PENDING {"
+replace = "        if drops.kept.len() == usize::MAX {"
+
+[[plant]]
+name = "file drop: a drop of no file is kept, and told by a number"
+meant = "a_drop_is_told_to_the_page_with_its_number_its_paths_and_where_it_was"
+runs = ["app-test-file-drop"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/file_drop.rs"
+find = '''        if paths.is_empty() {
+            return (None, paths);
+        }
+'''
+replace = ""
+
+[[plant]]
+name = "file drop: the page is not told of a drop"
+meant = "a_drop_is_told_to_the_page_with_its_number_its_paths_and_where_it_was"
+runs = ["app-test-file-drop"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/file_drop.rs"
+find = '''    let _ = window.emit_to(
+        EventTarget::labeled(MAIN),
+        DROP_EVENT,
+        told(id, &paths, position),
+    );'''
+replace = "    let _ = (id, paths, position);"
+
+[[plant]]
+name = "file drop: the page is told a drop at another place, its two numbers the wrong way round"
+meant = "a_drop_is_told_to_the_page_with_its_number_its_paths_and_where_it_was"
+runs = ["app-test-file-drop"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/file_drop.rs"
+find = '''    json!({"id": id, "paths": paths, "position": {"x": position.x, "y": position.y}})'''
+replace = '''    json!({"id": id, "paths": paths, "position": {"x": position.y, "y": position.x}})'''
+
+[[plant]]
+name = "file drop: the app is built without hearing a drop on its window"
+meant = "a_drop_is_told_to_the_page_with_its_number_its_paths_and_where_it_was"
+runs = ["app-test-file-drop"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/lib.rs"
+find = '''        .on_window_event(file_drop::hear)
+'''
+replace = ""
+
+[[plant]]
+name = "file drop: the app is built keeping no drop for the page to ask of"
+meant = "a_drop_is_told_to_the_page_with_its_number_its_paths_and_where_it_was"
+runs = ["app-test-file-drop"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/lib.rs"
+find = '''        .manage(file_drop::Dropped::default())
+'''
+replace = ""
+
+[[plant]]
+name = "file drop: the app is built with no command the page may ask"
+meant = "the_page_is_answered_for_the_paths_of_the_drop_it_names_and_no_other"
+runs = ["app-test-file-drop"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/lib.rs"
+find = '''        .on_window_event(file_drop::hear)
+        .invoke_handler(page_commands())'''
+replace = '''        .on_window_event(file_drop::hear)'''
+
+[[plant]]
+name = "file drop: a lookup refused while another runs does not say the app is busy"
+meant = "the_page_asks_at_most_a_bounded_batch_and_one_lookup_at_a_time"
+runs = ["app-test-file-drop"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/file_drop.rs"
+find = '''            return json!({"ok":false,"busy":true,"error":"another lookup of short names is running"});'''
+replace = '''            return json!({"ok":false,"error":"another lookup of short names is running"});'''
+
+[[plant]]
+name = "file drop: a lookup gives its turn back once no one waits for it, while Windows still reads"
+meant = "a_lookup_no_one_waits_for_any_more_keeps_its_turn_until_it_ends_then_gives_it_back"
+runs = ["app-test-file-drop"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/file_drop.rs"
+find = '''        tauri::async_runtime::spawn_blocking(move || {
+            let answered = answer(&paths, &dropped, &short_name);
+            drop(turn);
+            answered
+        })'''
+replace = '''        let _turn = turn;
+        tauri::async_runtime::spawn_blocking(move || answer(&paths, &dropped, &short_name))'''
+
+[[plant]]
+name = "file drop: the page does not ask again for a lookup the app was busy for"
+meant = "types a path whose short names the app would not look up while another lookup ran, once it can"
+runs = ["page-drop"]
+
+[[plant.edit]]
+file = "app/ui/core/file-drop.js"
+find = "    if (answer?.busy !== true || waited >= within) return answer"
+replace = "    return answer"
+
+[[plant]]
+name = "file drop: the page asks again for ever while the app is busy"
+meant = "is given up after a while, the app’s refusal its answer"
+runs = ["quoting"]
+
+[[plant.edit]]
+file = "app/ui/core/file-drop.js"
+find = "    if (answer?.busy !== true || waited >= within) return answer"
+replace = "    if (answer?.busy !== true) return answer"
+
+[[plant]]
+name = "file drop: a drop on another window of the app is heard as one on the page's"
+meant = "a_drop_on_another_window_of_the_app_is_not_heard"
+runs = ["app-test-file-drop"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/file_drop.rs"
+find = '''    if window.label() != MAIN {
+        return;
+    }
+'''
+replace = ""
+
+[[plant]]
+name = "file drop: the page may ask more short names at once than the bound"
+meant = "the_page_asks_at_most_a_bounded_batch_and_one_lookup_at_a_time"
+runs = ["app-test-file-drop"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/file_drop.rs"
+find = "    if paths.len() > MOST {"
+replace = "    if paths.len() > MOST * 2 {"
+
+[[plant]]
+name = "file drop: two lookups run at once"
+meant = "the_page_asks_at_most_a_bounded_batch_and_one_lookup_at_a_time"
+runs = ["app-test-file-drop"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/file_drop.rs"
+find = "        (!self.0.busy.swap(true, Ordering::AcqRel)).then(|| Turn(self.clone()))"
+replace = "        Some(Turn(self.clone()))"
+
+[[plant]]
+name = "file drop: a lookup's turn is never given up"
+meant = "the_page_asks_at_most_a_bounded_batch_and_one_lookup_at_a_time"
+runs = ["app-test-file-drop"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/file_drop.rs"
+find = "        self.0 .0.busy.store(false, Ordering::Release);"
+replace = ""
+
+[[plant]]
+name = "file drop: a path with a control character, a NUL among them, is looked up"
+meant = "a_path_that_is_no_whole_path_to_a_file_is_refused_though_it_was_dropped"
+runs = ["app-test-file-drop"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/file_drop.rs"
+find = '''    if path.chars().any(|c| c < ' ' || c == '\u{7f}') {'''
+replace = "    if false {"
+
+[[plant]]
+name = "file drop: a path longer than any Windows path is looked up"
+meant = "a_path_that_is_no_whole_path_to_a_file_is_refused_though_it_was_dropped"
+runs = ["app-test-file-drop"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/file_drop.rs"
+find = "    if path.encode_utf16().count() > LONGEST {"
+replace = "    if path.encode_utf16().count() > LONGEST * 2 {"
+
+[[plant]]
+name = "file drop: a relative path is looked up"
+meant = "a_path_that_is_no_whole_path_to_a_file_is_refused_though_it_was_dropped"
+runs = ["app-test-file-drop"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/file_drop.rs"
+find = "    rooted.then(|| &path[3..])"
+replace = "    Some(if rooted { &path[3..] } else { path })"
+
+[[plant]]
+name = "file drop: a device's path is looked up"
+meant = "a_path_that_is_no_whole_path_to_a_file_is_refused_though_it_was_dropped"
+runs = ["app-test-file-drop"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/file_drop.rs"
+find = '''        .filter(|server| !matches!(*server, "" | "." | "?"))?;'''
+replace = '''        .filter(|server| !server.is_empty())?;'''
+
+[[plant]]
+name = "file drop: a name Windows takes for a device is looked up"
+meant = "a_path_that_is_no_whole_path_to_a_file_is_refused_though_it_was_dropped"
+runs = ["app-test-file-drop"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/file_drop.rs"
+find = "        if is_device(name) {"
+replace = "        if false {"
+
+[[plant]]
+name = "file drop: a path through a dot or a dot-dot is looked up"
+meant = "a_path_that_is_no_whole_path_to_a_file_is_refused_though_it_was_dropped"
+runs = ["app-test-file-drop"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/file_drop.rs"
+find = '''        if name.is_empty() || name == "." || name == ".." {'''
+replace = "        if name.is_empty() {"
+
+[[plant]]
+name = "file drop: a name with a character no Windows name has is looked up"
+meant = "a_path_that_is_no_whole_path_to_a_file_is_refused_though_it_was_dropped"
+runs = ["app-test-file-drop"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/file_drop.rs"
+find = '''        if name.contains(['<', '>', ':', '"', '|', '?', '*', '/']) {'''
+replace = "        if false {"
+
+[[plant]]
+name = "file drop: a path past the old limit is asked in its old form"
+meant = "a_path_past_the_old_limit_is_asked_in_its_long_form_and_answered_in_its_old_one_where_it_fits"
+runs = ["app-test-file-drop"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/file_drop.rs"
+find = '''    if path.starts_with(r"\\?\") || path.encode_utf16().count() <= OLD_LONGEST {'''
+replace = "    if true {"
+
+[[plant]]
+name = "file drop: a share's long form is written as a drive's"
+meant = "a_path_past_the_old_limit_is_asked_in_its_long_form_and_answered_in_its_old_one_where_it_fits"
+runs = ["app-test-file-drop"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/file_drop.rs"
+find = '''        Some(share) => format!(r"\\?\UNC\{share}"),'''
+replace = '''        Some(share) => format!(r"\\?\{share}"),'''
+
+[[plant]]
+name = "file drop: a short name answered in the long form the app added stays in it"
+meant = "a_path_past_the_old_limit_is_asked_in_its_long_form_and_answered_in_its_old_one_where_it_fits"
+runs = ["app-test-file-drop"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/file_drop.rs"
+find = "    if !added {"
+replace = "    if true {"
+
+[[plant]]
+name = "file drop: a folder that is not there is not said apart from a file that is not"
+meant = "each_way_windows_fails_to_answer_is_said_in_words_of_its_own"
+runs = ["app-test-file-drop"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/file_drop.rs"
+find = '''        2 | 3 => "it is not there any more".to_owned(),'''
+replace = '''        2 => "it is not there any more".to_owned(),'''
+
+[[plant]]
+name = "file drop: access refused is said as another error"
+meant = "each_way_windows_fails_to_answer_is_said_in_words_of_its_own"
+runs = ["app-test-file-drop"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/file_drop.rs"
+find = '''        5 => "Windows refused access to it".to_owned(),'''
+replace = ""
+
+[[plant]]
+name = "file drop: a share that does not answer is said as another error"
+meant = "each_way_windows_fails_to_answer_is_said_in_words_of_its_own"
+runs = ["app-test-file-drop"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/file_drop.rs"
+find = "        51 | 53 | 59 | 64 | 65 | 67 | 121 | 1203 | 1222 | 1231 | 1232 | 2250 => {"
+replace = "        51 | 59 | 64 | 65 | 67 | 121 | 1203 | 1222 | 1231 | 1232 | 2250 => {"
+
+# --- the app: its window in front after a drop ---
+
+[[plant]]
+name = "file drop: the app's window comes in front with no drop, or whatever is in front"
+meant = "the_app_comes_in_front_once_for_a_drop_and_only_from_the_window_the_file_came_from"
+runs = ["app-test-file-drop"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/file_drop.rs"
+find = "    from.is_some() && from == now"
+replace = "    from == now"
+
+[[plant]]
+name = "file drop: the app's window comes in front for a drop as often as the page asks"
+meant = "the_app_comes_in_front_once_for_a_drop_and_only_from_the_window_the_file_came_from"
+runs = ["app-test-file-drop"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/file_drop.rs"
+find = "        heard.from.take()"
+replace = "        heard.from"
+
+[[plant]]
+name = "file drop: the app comes in front for the window the last drop came from, whichever drop the page names"
+meant = "the_app_comes_in_front_once_for_a_drop_and_only_from_the_window_the_file_came_from"
+runs = ["app-test-file-drop"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/file_drop.rs"
+find = "        let heard = drops.kept.iter_mut().find(|heard| heard.id == id)?;"
+replace = "        let heard = drops.kept.iter_mut().last()?;"
+
+[[plant]]
+name = "file drop: the page may not ask the app for short names"
+meant = "the_page_is_answered_for_the_paths_of_the_drop_it_names_and_no_other"
+runs = ["app-test-file-drop"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/lib.rs"
+find = '''        file_drop::short_paths,
+'''
+replace = ""
+
+[[plant]]
+name = "file drop: the page may not ask the app to come in front after a drop"
+meant = "off_windows_the_app_never_comes_in_front_for_a_drop"
+runs = ["app-test-file-drop"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/lib.rs"
+find = '''        file_drop::focus_after_drop,
+'''
+replace = ""

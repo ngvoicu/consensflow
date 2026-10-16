@@ -12,6 +12,7 @@ pub(super) fn scenario() -> Scenario {
         id: "complex-launch",
         title: "A launch: research, pages, a hard call, a sign-off",
         fixture: "site",
+        uncommitted: None,
         prompt: join(&[
             "Lansăm site-ul luna viitoare și vreau trei lucruri deodată. Unu: o pagină nouă „Legislație”",
             "în română și engleză, din content/legislatie-ro.md, terminată și tradusă (secțiunile lipsă sunt",

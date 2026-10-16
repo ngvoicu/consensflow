@@ -3,15 +3,20 @@ import { element } from '../dom.js'
 /**
  * The markdown agents write, as the page reads it. Inside a line: bold,
  * italic, `code` and links. How a line starts makes it a heading, a quote,
- * a list item or a table row, and fences hold code. What it finds comes out
- * as text, never as markup: the elements are made here, and every word in
- * them is set as text.
+ * a list item (a task, with its box ticked or not) or a table row; a line of
+ * three dashes is a rule, and fences hold code. What it finds comes out as
+ * text, never as markup: the elements are made here, and every word in them
+ * is set as text.
  */
 
-/** A line that opens or closes code. */
-const FENCE = /^\s*(`{3,}|~{3,})/
+/** A line that opens or closes code, and the words after its marks (`mermaid`). */
+const FENCE = /^\s*(`{3,}|~{3,})\s*([^`\s]*)/
 /** A heading's marks: one to six #, before its words. */
-const HEADING = /^\s*#{1,6}\s+/
+const HEADING = /^\s*(#{1,6})\s+/
+/** A rule: three or more of one of -, * or _, and nothing else but spaces. */
+const RULE_LINE = /^\s*([-*_])(?:\s*\1){2,}\s*$/
+/** The box a task's words start with, ticked or not. */
+const TASK = /^\[([ xX])\](?:\s+|$)/
 /** A quote's mark. */
 const QUOTE = /^\s*>\s?/
 /** A list item: its indent, its mark (-, * or +, or a number), and its words. */
@@ -32,11 +37,17 @@ const LINK = /!?\[([^[\]]*)\]\(((?:[^()\s]|\([^()\s]*\))*)(?:\s+"[^"]*")?\)/y
 /**
  * A body as the page draws it: paragraphs, a line break where the agent
  * broke a line; headings as bold lines; lists, nested by their indent;
- * tables, quotes and fenced code. A link is its words, where it leads on
- * hover: nothing on the page follows it.
+ * tables, quotes, rules and fenced code. A link is its words, where it leads
+ * on hover: nothing on the page follows it.
+ *
+ * A reader of whole documents (the specs viewer) says more in `options`:
+ * `levels` draws each heading as the heading it is (`h1` to `h6`); `link(href)`
+ * is what a link does when it is followed, or null where it goes nowhere, and
+ * a link with somewhere to go is a button; `fence(lang, code)` draws fenced
+ * code of its own (a diagram), or says null for the page's.
  */
-export function render(text) {
-  return blocks(text.split(/\r?\n/)).map(draw)
+export function render(text, options = {}) {
+  return blocks(text.split(/\r?\n/)).map((block) => draw(block, options))
 }
 
 /**
@@ -51,6 +62,7 @@ export function preview(text) {
       code = !code
       continue
     }
+    if (!code && RULE_LINE.test(line)) continue
     const said = (code ? line : plain(spans(bare(line)))).trim()
     if (said !== '') return said
   }
@@ -63,22 +75,39 @@ function bare(line) {
   return text.trimStart().startsWith('|') ? cells(text).join(' · ') : text
 }
 
-/** A table row's cells, without the pipes around and between them; `\|` is a pipe in a cell. */
+/**
+ * A table row's cells, without the pipes around and between them; `\|` is a pipe in a cell,
+ * kept as it is written for the cell's words to read. The row is read once: a cell of a hundred
+ * thousand `\|` costs what its length does, not that again for each pipe.
+ */
 function cells(row) {
+  const inner = row.trim().replace(/^\|/, '').replace(/\|$/, '')
   const found = []
-  for (const piece of row.trim().replace(/^\|/, '').replace(/\|$/, '').split('|')) {
-    if (found.at(-1)?.endsWith('\\')) found[found.length - 1] += `|${piece}`
-    else found.push(piece)
+  let from = 0
+  for (let at = inner.indexOf('|'); at !== -1; at = inner.indexOf('|', at + 1)) {
+    if (inner[at - 1] === '\\') continue
+    found.push(inner.slice(from, at))
+    from = at + 1
   }
+  found.push(inner.slice(from))
   return found.map((cell) => cell.trim())
 }
 
 /**
- * The blocks `lines` make, in order, each read by the first of its kinds
- * that starts at its line: a paragraph is what none of the others is.
+ * How deep quotes and lists nest: a line of `- - - …` or `> > > …` past it is
+ * read as words, not as a list in a list in a list, which would draw nothing a
+ * human reads and run the page out of stack.
  */
-function blocks(lines) {
+const MAX_NESTING = 32
+
+/**
+ * The blocks `lines` make, in order, each read by the first of its kinds
+ * that starts at its line: a paragraph is what none of the others is. They
+ * are `depth` quotes and lists deep.
+ */
+function blocks(lines, depth = 0) {
   const found = []
+  const nests = depth < MAX_NESTING
   for (let at = 0; at < lines.length; ) {
     if (lines[at].trim() === '') {
       at += 1
@@ -87,8 +116,9 @@ function blocks(lines) {
     const [block, next] =
       fencedAt(lines, at) ??
       headingAt(lines, at) ??
-      quoteAt(lines, at) ??
-      listAt(lines, at) ??
+      (nests ? quoteAt(lines, at, depth) : null) ??
+      ruleAt(lines, at) ??
+      (nests ? listAt(lines, at, depth) : null) ??
       tableAt(lines, at) ??
       paragraphAt(lines, at)
     found.push(block)
@@ -105,10 +135,10 @@ function blocks(lines) {
 function fencedAt(lines, at) {
   const fence = FENCE.exec(lines[at])
   if (fence === null) return null
-  const [, marks] = fence
+  const [, marks, lang] = fence
   let end = at + 1
   while (end < lines.length && !closesFence(lines[end], marks)) end += 1
-  return [{ code: lines.slice(at + 1, end).join('\n') }, end + 1]
+  return [{ code: lines.slice(at + 1, end).join('\n'), lang: lang.toLowerCase() }, end + 1]
 }
 
 /** Whether `line` closes a fence of `marks`: as many of its marks or more, and nothing else. */
@@ -117,26 +147,35 @@ function closesFence(line, marks) {
   return bare.length >= marks.length && bare === marks[0].repeat(bare.length)
 }
 
-/** A heading, its words without its marks. */
+/** A heading, its words without its marks, and its level: how many marks it had. */
 function headingAt(lines, at) {
-  return HEADING.test(lines[at])
-    ? [{ heading: lines[at].replace(HEADING, '').trim() }, at + 1]
-    : null
+  const marks = HEADING.exec(lines[at])
+  return marks === null
+    ? null
+    : [{ heading: lines[at].replace(HEADING, '').trim(), level: marks[1].length }, at + 1]
 }
 
-/** The lines of a quote, without its marks, read as blocks of their own. */
-function quoteAt(lines, at) {
+/** A rule across the page. */
+function ruleAt(lines, at) {
+  return RULE_LINE.test(lines[at]) ? [{ rule: true }, at + 1] : null
+}
+
+/** The lines of a quote, without its marks, read as blocks of their own, one level deeper. */
+function quoteAt(lines, at, depth) {
   const own = []
   for (; at < lines.length && QUOTE.test(lines[at]); at += 1) own.push(lines[at].replace(QUOTE, ''))
-  return own.length === 0 ? null : [{ quote: blocks(own) }, at]
+  return own.length === 0 ? null : [{ quote: blocks(own, depth + 1) }, at]
 }
 
 /**
  * A list. Each item is its line and every line after it indented past its
  * mark, read as blocks of their own, so a list nests by its indent. Items
  * of one kind at one indent are one list, blank lines between them or not.
+ * An item whose words start with a box (`[ ]`, `[x]`) is a task, done or
+ * not (`done`; null for an item that is no task). What is in an item is one
+ * level deeper.
  */
-function listAt(lines, at) {
+function listAt(lines, at, depth) {
   const first = ITEM.exec(lines[at])
   if (first === null) return null
   const indent = first[1].length
@@ -145,14 +184,16 @@ function listAt(lines, at) {
   for (let item = first; ; ) {
     // Its lines lose as much indent as its mark took, so what nests under it starts the line.
     const width = item[1].length + item[2].length + 1
-    const own = [item[3]]
+    const box = TASK.exec(item[3])
+    const done = box === null ? null : box[1] !== ' '
+    const own = [box === null ? item[3] : item[3].slice(box[0].length)]
     at += 1
     let next = filled(lines, at)
     while (next < lines.length && indentOf(lines[next]) > indent) {
       for (; at <= next; at += 1) own.push(lines[at].slice(Math.min(indentOf(lines[at]), width)))
       next = filled(lines, at)
     }
-    items.push(blocks(own))
+    items.push({ parts: blocks(own, depth + 1), done })
     item = ITEM.exec(lines[next] ?? '')
     if (item === null || item[1].length !== indent || /\d/.test(item[2]) !== ordered) break
     at = next
@@ -186,7 +227,8 @@ function paragraphAt(lines, at) {
 
 /** Whether the line at `at` starts a block other than a paragraph, which ends one. */
 const startsBlock = (lines, at) =>
-  [FENCE, HEADING, QUOTE, ITEM].some((form) => form.test(lines[at])) || startsTable(lines, at)
+  [FENCE, HEADING, QUOTE, RULE_LINE, ITEM].some((form) => form.test(lines[at])) ||
+  startsTable(lines, at)
 
 /** The first line from `at` on that is not blank; past the end when none is. */
 function filled(lines, at) {
@@ -196,39 +238,56 @@ function filled(lines, at) {
 
 const indentOf = (line) => line.length - line.trimStart().length
 
-/** A block as elements. */
-function draw(block) {
+/** A block as elements, as `options` says (see `render`). */
+function draw(block, options) {
   if ('code' in block) {
+    const own = options.fence?.(block.lang, block.code)
+    if (own) return own
     const pre = element('pre')
     pre.append(element('code', null, block.code))
     return pre
   }
   if ('heading' in block) {
-    const heading = element('p', 'md-heading')
-    heading.append(...nodes(spans(block.heading)))
+    const heading = element(options.levels ? `h${block.level}` : 'p', 'md-heading')
+    heading.append(...nodes(spans(block.heading), options))
     return heading
   }
   if ('quote' in block) {
     const quote = element('blockquote')
-    quote.append(...block.quote.map(draw))
+    quote.append(...block.quote.map((inner) => draw(inner, options)))
     return quote
   }
-  if ('items' in block) return drawList(block)
-  if ('rows' in block) return drawTable(block.rows)
+  if ('rule' in block) return element('hr')
+  if ('items' in block) return drawList(block, options)
+  if ('rows' in block) return drawTable(block.rows, options)
   const paragraph = element('p')
-  paragraph.append(...lineNodes(block.paragraph))
+  paragraph.append(...lineNodes(block.paragraph, options))
   return paragraph
 }
 
-/** A list, read tight: an item's first paragraph is its line. */
-function drawList({ items, ordered, start }) {
+/**
+ * A list, read tight: an item's first paragraph is its line. A task's box is
+ * shown ticked or not, and cannot be changed here.
+ */
+function drawList({ items, ordered, start }, options) {
   const list = element(ordered ? 'ol' : 'ul')
   if (ordered && start !== 1) list.start = start
-  for (const parts of items) {
+  for (const { parts, done } of items) {
     const [first, ...rest] = parts
+    const drawn = (inner) => draw(inner, options)
     const item = element('li')
+    if (done !== null) {
+      item.className = 'md-task'
+      const box = element('input')
+      box.type = 'checkbox'
+      box.checked = done
+      box.disabled = true
+      item.append(box)
+    }
     item.append(
-      ...(first?.paragraph ? [...lineNodes(first.paragraph), ...rest.map(draw)] : parts.map(draw)),
+      ...(first?.paragraph
+        ? [...lineNodes(first.paragraph, options), ...rest.map(drawn)]
+        : parts.map(drawn)),
     )
     list.append(item)
   }
@@ -236,14 +295,14 @@ function drawList({ items, ordered, start }) {
 }
 
 /** A table, its first row its head, in a frame that scrolls sideways when the table is wider. */
-function drawTable([head, ...rows]) {
+function drawTable([head, ...rows], options) {
   const table = element('table')
   const top = element('thead')
-  top.append(tableRow('th', head))
+  top.append(tableRow('th', head, options))
   table.append(top)
   if (rows.length > 0) {
     const body = element('tbody')
-    body.append(...rows.map((row) => tableRow('td', row)))
+    body.append(...rows.map((row) => tableRow('td', row, options)))
     table.append(body)
   }
   const frame = element('div', 'md-table')
@@ -252,27 +311,42 @@ function drawTable([head, ...rows]) {
 }
 
 /** A table row, its cells `th` or `td`. */
-function tableRow(tag, row) {
+function tableRow(tag, row, options) {
   const node = element('tr')
   for (const text of row) {
     const cell = element(tag)
-    cell.append(...nodes(spans(text)))
+    cell.append(...nodes(spans(text), options))
     node.append(cell)
   }
   return node
 }
 
 /** A paragraph's lines as nodes, a line break between each. */
-const lineNodes = (lines) =>
-  lines.flatMap((line, at) => [...(at === 0 ? [] : [element('br')]), ...nodes(spans(line.trim()))])
+const lineNodes = (lines, options) =>
+  lines.flatMap((line, at) => [
+    ...(at === 0 ? [] : [element('br')]),
+    ...nodes(spans(line.trim()), options),
+  ])
 
-/** Spans as nodes: text as text, and the rest as the element that marks it. */
-function nodes(found) {
+/**
+ * Spans as nodes: text as text, and the rest as the element that marks it. A
+ * link `options.link` gives somewhere to go is a button that goes there.
+ */
+function nodes(found, options = {}) {
   return found.map((span) => {
     if ('text' in span) return span.text
     if ('code' in span) return element('code', null, span.code)
+    const follow = 'link' in span ? options.link?.(span.href) : null
+    if (follow) {
+      const link = element('button', 'md-link')
+      link.type = 'button'
+      link.title = span.href
+      link.append(...nodes(span.link, options))
+      link.addEventListener('click', follow)
+      return link
+    }
     const node = element('strong' in span ? 'strong' : 'em' in span ? 'em' : 'span')
-    node.append(...nodes(span.strong ?? span.em ?? span.link))
+    node.append(...nodes(span.strong ?? span.em ?? span.link, options))
     if ('link' in span) node.title = span.href
     return node
   })

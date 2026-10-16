@@ -6,6 +6,9 @@
 //!
 //! `SHELL` is absent on purpose, as in the packaged smoke: the app asks the
 //! login shell for its PATH when it has one and would replace the box's with it.
+//! The system's folders of programs the daemon puts after it are the box's own
+//! too (`CONSENSFLOW_TOOL_FOLDERS`), a folder that is never made, and not
+//! Homebrew's of the machine.
 
 use std::ffi::OsString;
 use std::fs;
@@ -135,6 +138,10 @@ impl Sandbox {
             (
                 "PATH",
                 format!("{}:/usr/bin:/bin:/usr/sbin:/sbin", self.bin.display()).into(),
+            ),
+            (
+                "CONSENSFLOW_TOOL_FOLDERS",
+                self.root.join("system-bin").into(),
             ),
             ("HOME", self.home.clone().into()),
             ("TMPDIR", self.root.clone().into()),

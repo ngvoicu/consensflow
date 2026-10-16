@@ -72,8 +72,10 @@ mod macos {
             (4, 0),
             "{ending:?}"
         );
+        // The ending looks twice, `SETTLE` apart, before it asks: the grace is what
+        // comes after that.
         assert!(
-            closing.elapsed() >= GRACE,
+            closing.elapsed() >= SETTLE + GRACE,
             "the command that ignores the request was given the grace: {:?}",
             closing.elapsed()
         );

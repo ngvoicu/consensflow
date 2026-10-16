@@ -27,6 +27,7 @@ fn answering(answers: Vec<Answer>, fallback: &str) -> Scenario {
         id: "answering",
         title: "",
         fixture: "site",
+        uncommitted: None,
         prompt: String::new(),
         follow_ups: Vec::new(),
         answers,

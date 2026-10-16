@@ -82,6 +82,10 @@ rusqlite = { version = "0.40", features = ["bundled"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 # The system's own trust in a feed's certificate, as the platform keeps it.
 rustls-platform-verifier = "0.7"
+# A folder's names opened through the folder above them (`openat`), with no
+# unsafe of ours: the specs viewer reads nothing a link leads to. Already in the
+# build, through tempfile.
+rustix = { version = "1", features = ["fs"] }
 serde = { version = "1.0", features = ["derive"] }
 # Objects keep their keys in the order written, as JavaScript's do: JSON
 # that Node wrote reads back, and goes out again, as Node had it.

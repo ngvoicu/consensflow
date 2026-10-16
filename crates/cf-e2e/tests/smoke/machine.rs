@@ -7,7 +7,10 @@
 //! it has one and REPLACES the child's with the answer, which would hand it the
 //! real machine's harnesses. With no `SHELL` that lookup returns nothing and the
 //! PATH built here is the one the app uses: the isolation is the absence, so do
-//! not add `SHELL` back.
+//! not add `SHELL` back. The daemon puts the system's own folders of programs
+//! after it (Homebrew's, on a Mac), and looks for a harness there last, which
+//! would hand it the real machine's harnesses too: the machine names a folder
+//! of its own for them (`CONSENSFLOW_TOOL_FOLDERS`), and puts nothing there.
 //!
 //! A machine is a folder, kept: a failed smoke leaves it behind on purpose (the
 //! harness, its pid file, the state root and the app's own launchers are the
@@ -113,6 +116,10 @@ impl Machine {
         let own = |path: &Path| path.as_os_str().to_owned();
         vec![
             ("PATH", self.path().into()),
+            (
+                "CONSENSFLOW_TOOL_FOLDERS",
+                own(&self.root.join("system-bin")),
+            ),
             ("HOME", own(&self.home)),
             ("TMPDIR", own(&self.root)),
             ("CONSENSFLOW_HOME", own(&self.state)),
@@ -212,6 +219,7 @@ mod tests {
             names,
             [
                 "PATH",
+                "CONSENSFLOW_TOOL_FOLDERS",
                 "HOME",
                 "TMPDIR",
                 "CONSENSFLOW_HOME",
@@ -236,6 +244,7 @@ mod tests {
         let root = machine.root.display().to_string();
         // Everything of the machine's is under its folder, but the system's own programs.
         for name in [
+            "CONSENSFLOW_TOOL_FOLDERS",
             "HOME",
             "TMPDIR",
             "CONSENSFLOW_HOME",

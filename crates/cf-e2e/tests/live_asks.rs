@@ -202,7 +202,7 @@ fn guarded(seen: &Seen) -> Check {
 #[test]
 #[ignore = "opt-in: spends the machine's quota on two windows of Claude Code; cargo xtask live asks (npm run live:asks)"]
 fn claude_stops_on_a_removal_whose_path_a_variable_makes_and_runs_the_guarded_one() -> Result {
-    let log = Log::new("live asks");
+    let log = Log::begin("live asks")?;
     // What a window is opened on is the harness code's to say: built before anything is spent.
     ask::prepare()?;
     let claude = log.found(Harness::Claude)?;
@@ -375,10 +375,11 @@ mod tests {
         let rig = Rig::start(Config::new(FAKE_AGENT))?;
         let home = rig.var("HOME").unwrap_or_default().to_owned();
         let install = Installed::at(Harness::Claude, FAKE_AGENT, &home);
+        let log = Log::new("live asks test");
         let window = |pane: &str| {
             Open::new(&rig, &install, "asks", pane)
                 .without_trust()
-                .open()
+                .open(&log)
         };
         let (quiet, ran) = (window("asks-quiet")?, window("asks-ran")?);
 

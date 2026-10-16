@@ -135,6 +135,10 @@ pub(crate) struct WindowPart {
     pub(crate) retiring: bool,
     /// Its exit is the engine's own (`close_own`): a chief's closes no project.
     pub(crate) own_exit: bool,
+    /// Why the engine closes it, where the pause note of the task it was working
+    /// on is to say more than that it closed: with its project, when the chief's
+    /// window closed by itself.
+    pub(crate) closed_with: Option<String>,
     /// The human opened it (Show): it stays open.
     pub(crate) pinned: bool,
     /// The human hid it since: it closes once free and its turn settled.
@@ -179,6 +183,7 @@ impl Default for WindowPart {
             token: None,
             retiring: false,
             own_exit: false,
+            closed_with: None,
             pinned: false,
             hidden: false,
             settled: false,

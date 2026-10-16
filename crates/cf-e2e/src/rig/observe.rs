@@ -84,10 +84,29 @@ impl Rig {
         events_of(&text.unwrap_or_default())
     }
 
-    /// What the rig's stand-in `opencode` ([`Config::opencode_2`](super::Config::opencode_2))
-    /// was asked so far, the arguments of each time it was started, oldest first:
-    /// nothing where it never was, or the rig has none.
+    /// What the rig's stand-in `opencode` ([`Config::opencode`](super::Config::opencode),
+    /// [`Config::opencode_2`](super::Config::opencode_2)) was asked so far, the
+    /// arguments of each time it was started, oldest first: nothing where it never
+    /// was, or the rig has none.
     pub fn opencode_asked(&self) -> Vec<Vec<String>> {
+        self.opencode_lines()
+            .into_iter()
+            .filter_map(|line| serde_json::from_value(line).ok())
+            .collect()
+    }
+
+    /// The requests the rig's stand-in OpenCode 1.x ([`Config::opencode`](super::Config::opencode))
+    /// was sent so far on the servers it ran, oldest first: each its `method`, its
+    /// `target` (the path and query) and its `body`, as text.
+    pub fn opencode_requests(&self) -> Vec<Value> {
+        self.opencode_lines()
+            .into_iter()
+            .filter(Value::is_object)
+            .collect()
+    }
+
+    /// The lines of what the stand-in `opencode` wrote down, each as the JSON it is.
+    fn opencode_lines(&self) -> Vec<Value> {
         let text = files::read_finished_lines(&self.root.join("opencode.jsonl"));
         text.unwrap_or_default()
             .lines()

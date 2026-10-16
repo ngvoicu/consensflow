@@ -13,6 +13,7 @@ pub(super) fn scenario() -> Scenario {
         id: "round-trip",
         title: "A task out, a question back, an answer, a result, a review",
         fixture: "site",
+        uncommitted: None,
         prompt: join(&[
             "Un test de funcționare, te rog, fără să mă întrebi pe mine nimic. Pune o singură sarcină",
             "unui worker: înainte de a scrie ceva, să te întrebe pe tine (cu cf ask) ce culoare să aibă",
