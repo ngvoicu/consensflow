@@ -69,6 +69,10 @@ impl Runner for Nothing {
     fn stopped(&mut self) -> bool {
         false
     }
+
+    fn state(&mut self) -> String {
+        panic!("nothing was to be run, and the state was asked for");
+    }
 }
 
 /// A checkout with the family `demo` of two plants and the file they plant.

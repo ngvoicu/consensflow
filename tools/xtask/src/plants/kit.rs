@@ -34,9 +34,13 @@
 //! replace = "(Takes::Nothing, Some(_)) if false => {"
 //! ```
 //!
-//! The runs are tried in order until one fails, and the plant is caught by the
-//! tests that failed; `meant` is the test it was written for, and the report
-//! says when another caught it. The edits of a plant are made one after the
+//! The runs are tried in order until one decides. `meant` is the test the plant
+//! was written for: a run whose failure names it catches the plant, where that run
+//! passes without it; one whose failure names only other tests goes on to the next
+//! run, and where none names it the plant is MISSED-BY-MEANT. A failure that names
+//! no test (a command that says only its status) is a catch by the run itself,
+//! which the report says is not by `meant` (the driver tells how each is
+//! confirmed). The edits of a plant are made one after the
 //! other, each on the text the one before left. Text with a newline in it is best
 //! written as TOML's multi-line literal string, `'''`, which holds it as it is
 //! (a newline right after the opening quotes is not part of it).

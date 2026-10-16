@@ -16,6 +16,9 @@ struct Fake<A: FnMut(&[String]) -> Answer> {
     answer: A,
     ran: Vec<String>,
     stops: VecDeque<bool>,
+    /// The file whose text is the state of the checkout, where a test changes it; else
+    /// the state never changes.
+    state_of: Option<PathBuf>,
 }
 
 impl<A: FnMut(&[String]) -> Answer> Fake<A> {
@@ -24,6 +27,7 @@ impl<A: FnMut(&[String]) -> Answer> Fake<A> {
             answer,
             ran: Vec::new(),
             stops: VecDeque::new(),
+            state_of: None,
         }
     }
 }
@@ -37,20 +41,52 @@ impl<A: FnMut(&[String]) -> Answer> Runner for Fake<A> {
     fn stopped(&mut self) -> bool {
         self.stops.pop_front().unwrap_or(false)
     }
+
+    fn state(&mut self) -> String {
+        self.state_of.as_ref().map_or_else(String::new, |file| {
+            fs::read_to_string(file).unwrap_or_default()
+        })
+    }
 }
 
+/// A run of `cargo test -p x` that exited with `code` having written `output`.
 fn ended(code: i32, output: &str) -> Answer {
+    ended_by(&["cargo", "test", "-p", "x"], code, output)
+}
+
+/// A run of `command` that exited with `code` having written `output`.
+fn ended_by(command: &[&str], code: i32, output: &str) -> Answer {
     Ok(Execution::Ended(Ran {
-        command: vec!["cargo".into(), "test".into(), "-p".into(), "x".into()],
+        command: command.iter().map(|word| (*word).to_owned()).collect(),
         code: Some(code),
         hung: false,
         output: output.to_owned(),
     }))
 }
 
+/// What libtest writes of a run in which the tests `names` failed: each as it ended,
+/// what it printed, and the list it ends with.
+fn libtest_failed(names: &[&str]) -> String {
+    let ended: String = names
+        .iter()
+        .map(|name| format!("test {name} ... FAILED\n"))
+        .collect();
+    let printed: String = names
+        .iter()
+        .map(|name| format!("---- {name} stdout ----\nthe plant is here\n\n"))
+        .collect();
+    let listed: String = names.iter().map(|name| format!("    {name}\n")).collect();
+    format!(
+        "running {} tests\n{ended}\nfailures:\n\n{printed}\nfailures:\n{listed}\n\
+         test result: FAILED. 0 passed; {} failed; 0 ignored; 0 measured; 0 filtered out\n",
+        names.len(),
+        names.len()
+    )
+}
+
 /// A run in which the test `name` failed.
 fn fails(name: &str) -> Answer {
-    ended(101, &format!("running 1 test\ntest {name} ... FAILED\n"))
+    ended(101, &libtest_failed(&[name]))
 }
 
 /// A run in which every test passed.
@@ -58,6 +94,23 @@ fn passes() -> Answer {
     ended(
         0,
         "running 2 tests\ntest a ... ok\ntest b ... ok\n\ntest result: ok. 2 passed; 0 failed\n",
+    )
+}
+
+/// A run that failed and named no test, as a smoke that says no more than its status.
+fn fails_unnamed() -> Answer {
+    ended(1, "the smoke: the app did not answer\n")
+}
+
+/// The words of the build that comes before a run that builds the native `cf`.
+const PREFLIGHT_WORDS: &str = "cargo build --release --locked --offline \
+    --message-format=json-render-diagnostics -p cf --bin cf -p cf-panes --bin consensflow-bridge";
+
+/// What cargo says of a build, in its structured words.
+fn built(success: bool) -> Answer {
+    ended(
+        if success { 0 } else { 101 },
+        &format!("{{\"reason\":\"build-finished\",\"success\":{success}}}\n"),
     )
 }
 
@@ -76,6 +129,20 @@ fn checkout() -> (tempfile::TempDir, Context) {
 
 fn text(context: &Context, file: &str) -> String {
     fs::read_to_string(context.path(file)).unwrap()
+}
+
+/// Whether a plant is in the sources: a file of `checkout` is not as it wrote it.
+fn planted(context: &Context) -> bool {
+    text(context, "src/a.rs") != "one\ntwo\n" || text(context, "src/b.rs") != "three\n"
+}
+
+/// A run that fails the test `name` with a plant in the sources, and passes without one.
+fn catches(context: &Context, name: &str) -> Answer {
+    if planted(context) {
+        fails(name)
+    } else {
+        passes()
+    }
 }
 
 /// A plant that makes `edits`, tried by `runs` (each a program and whether it builds).
@@ -148,11 +215,12 @@ fn a_plant_is_in_the_sources_while_its_runs_go_and_back_as_it_was_once_one_has_f
     let mut seen = Vec::new();
     let mut runner = Fake::new(|_| {
         seen.push(text(&context, "src/a.rs"));
-        fails("m::the_test")
+        catches(&context, "m::the_test")
     });
     let (status, said) = go(&context, &family, &mut runner);
     assert_eq!(status.unwrap(), 0);
-    assert_eq!(seen, ["ONE\ntwo\n"]);
+    // Planted once, failing the test it was meant for; then once with the plant put back, passing.
+    assert_eq!(seen, ["ONE\ntwo\n", "one\ntwo\n"]);
     assert_eq!(text(&context, "src/a.rs"), "one\ntwo\n");
     let lines: Vec<_> = said.lines().collect();
     assert!(
@@ -182,12 +250,130 @@ fn the_runs_of_a_plant_go_in_order_until_one_fails() {
         upper("p: two", &[("fourth", false), ("fifth", false)]),
     ]);
     let mut runner = Fake::new(|command| match command[0].as_str() {
-        "second" | "fourth" => fails("m::the_test"),
+        "second" | "fourth" => catches(&context, "m::the_test"),
         _ => passes(),
     });
     let (status, _) = go(&context, &family, &mut runner);
     assert_eq!(status.unwrap(), 0);
-    assert_eq!(runner.ran, ["first", "second", "fourth"]);
+    // Each run that failed the meant test, once without its plant; the second plant's
+    // command is another, and is run so too.
+    assert_eq!(
+        runner.ran,
+        ["first", "second", "second", "fourth", "fourth"]
+    );
+}
+
+#[test]
+fn a_failure_that_names_only_tests_the_plant_was_not_meant_for_is_missed_by_meant() {
+    let (_folder, context) = checkout();
+    let family = family(vec![upper(
+        "p: one",
+        &[("first", false), ("second", false)],
+    )]);
+    let mut runner = Fake::new(|command| match command[0].as_str() {
+        "first" if planted(&context) => ended(101, &libtest_failed(&["m::other", "m::another"])),
+        _ => passes(),
+    });
+    let (status, said) = go(&context, &family, &mut runner);
+    assert_eq!(status.unwrap(), 1);
+    // The next run is tried for the meant test; nothing is run without the plant.
+    assert_eq!(runner.ran, ["first", "second"]);
+    assert!(
+        said.contains(
+            "MISSED-BY-MEANT  p: one (0 s) by m::other (+1), not by the_test\n    \
+             failed: m::other\n    failed: m::another\n"
+        ),
+        "{said}"
+    );
+    assert!(!said.contains("CAUGHT"), "{said}");
+    assert!(said.ends_with("0 of 1 plants caught\n"), "{said}");
+    assert!(!planted(&context));
+}
+
+#[test]
+fn a_test_whose_name_holds_the_meant_one_is_not_it() {
+    let (_folder, context) = checkout();
+    let family = family(vec![upper("p: one", &[("first", false)])]);
+    let mut runner = Fake::new(|_| {
+        if planted(&context) {
+            ended(
+                101,
+                &libtest_failed(&["m::not_the_test", "m::the_test_too", "the_tests::x"]),
+            )
+        } else {
+            passes()
+        }
+    });
+    let (status, said) = go(&context, &family, &mut runner);
+    assert_eq!(status.unwrap(), 1);
+    assert_eq!(runner.ran, ["first"]);
+    assert!(
+        said.contains("MISSED-BY-MEANT  p: one (0 s) by m::not_the_test (+2), not by the_test\n"),
+        "{said}"
+    );
+}
+
+#[test]
+fn a_test_that_printed_the_meant_one_failed_is_no_catch_by_it() {
+    let (_folder, context) = checkout();
+    let family = family(vec![upper("p: one", &[("first", false)])]);
+    // The meant test passed; the other failed, and printed that the meant one did.
+    let printed = "running 2 tests\ntest m::the_test ... ok\ntest m::other ... FAILED\n\n\
+                   failures:\n\n---- m::other stdout ----\ntest m::the_test ... FAILED\n\n\
+                   failures:\n    m::other\n\ntest result: FAILED. 1 passed; 1 failed\n";
+    let mut runner = Fake::new(|_| {
+        if planted(&context) {
+            ended(101, printed)
+        } else {
+            passes()
+        }
+    });
+    let (status, said) = go(&context, &family, &mut runner);
+    assert_eq!(status.unwrap(), 1);
+    assert!(
+        said.contains("MISSED-BY-MEANT  p: one (0 s) by m::other, not by the_test\n"),
+        "{said}"
+    );
+}
+
+#[test]
+fn a_plant_whose_meant_test_fails_in_a_later_run_is_caught_there() {
+    let (_folder, context) = checkout();
+    let family = family(vec![upper(
+        "p: one",
+        &[("first", false), ("second", false)],
+    )]);
+    let mut runner = Fake::new(|command| match command[0].as_str() {
+        "first" => catches(&context, "m::other"),
+        _ => catches(&context, "m::the_test"),
+    });
+    let (status, said) = go(&context, &family, &mut runner);
+    assert_eq!(status.unwrap(), 0);
+    assert_eq!(runner.ran, ["first", "second", "second"]);
+    assert!(said.contains("CAUGHT           p: one ("), "{said}");
+    assert!(said.contains(" s) by m::the_test\n"), "{said}");
+}
+
+#[test]
+fn a_failure_that_names_no_test_is_run_so_again_and_its_command_twice_without_the_plant() {
+    let (_folder, context) = checkout();
+    let family = family(vec![upper("p: one", &[("smoke", false)])]);
+    let mut runner = Fake::new(|_| {
+        if planted(&context) {
+            fails_unnamed()
+        } else {
+            ended(0, "the smoke passed\n")
+        }
+    });
+    let (status, said) = go(&context, &family, &mut runner);
+    assert_eq!(status.unwrap(), 0);
+    assert_eq!(runner.ran, ["smoke"; 4]);
+    assert!(
+        said.contains(
+            "CAUGHT           p: one (0 s) by test -p x: ended with 1, not by the_test\n"
+        ),
+        "{said}"
+    );
 }
 
 #[test]
@@ -244,6 +430,505 @@ fn a_plant_that_does_not_build_or_does_not_end_is_no_catch_and_says_what_happene
 }
 
 #[test]
+fn a_run_that_fails_twice_without_the_plant_too_leaves_its_plants_not_run_and_is_known() {
+    let (_folder, context) = checkout();
+    let family = family(vec![
+        upper("p: one", &[("page", false)]),
+        plant("p: two", &[("src/b.rs", "three", "3")], &[("page", false)]),
+    ]);
+    // A suite whose program cannot load what it needs: it fails before any test, plant or none.
+    let mut runner = Fake::new(|_| {
+        ended(
+            1,
+            "Error: Cannot find module '@playwright/test'\n  code: 'MODULE_NOT_FOUND'\n",
+        )
+    });
+    let (status, said) = go(&context, &family, &mut runner);
+    assert_eq!(status.unwrap(), 1);
+    assert_eq!(
+        runner.ran,
+        ["page", "page", "page", "page"],
+        "twice with the first plant, twice without it; the second plant is not planted"
+    );
+    for name in ["p: one", "p: two"] {
+        assert!(
+            said.contains(&format!("NOT RUN          {name} (")),
+            "{said}"
+        );
+    }
+    assert!(
+        said.contains("    page fails without the plant too, twice, so it tells nothing of it:\n"),
+        "{said}"
+    );
+    assert!(said.contains("code: 'MODULE_NOT_FOUND'"), "{said}");
+    assert!(!said.contains("CAUGHT"), "{said}");
+    assert!(said.ends_with("0 of 2 plants caught\n"), "{said}");
+    assert!(!planted(&context));
+}
+
+#[test]
+fn a_command_that_passed_without_a_plant_is_known_and_not_run_so_again() {
+    let (_folder, context) = checkout();
+    let family = family(vec![
+        upper("p: one", &[("first", false)]),
+        plant("p: two", &[("src/b.rs", "three", "3")], &[("first", false)]),
+        upper("p: three", &[("smoke", false)]),
+        plant(
+            "p: four",
+            &[("src/b.rs", "three", "3")],
+            &[("smoke", false)],
+        ),
+    ]);
+    let mut runner = Fake::new(|command| match command[0].as_str() {
+        "smoke" if planted(&context) => fails_unnamed(),
+        "smoke" => ended(0, "the smoke passed\n"),
+        _ => catches(&context, "m::the_test"),
+    });
+    let (status, said) = go(&context, &family, &mut runner);
+    assert_eq!(status.unwrap(), 0);
+    assert_eq!(
+        runner.ran,
+        [["first"; 3].as_slice(), &["smoke"; 6]].concat(),
+        "once with each plant and once without the first, where the meant test failed; twice \
+         with each plant and twice without the first, where the failure named no test"
+    );
+    assert!(said.ends_with("4 of 4 plants caught\n"), "{said}");
+}
+
+#[test]
+fn a_command_known_to_pass_once_is_run_once_more_where_a_catch_needs_two() {
+    let (_folder, context) = checkout();
+    let family = family(vec![
+        upper("p: named", &[("first", false)]),
+        plant(
+            "p: unnamed",
+            &[("src/b.rs", "three", "3")],
+            &[("first", false)],
+        ),
+    ]);
+    let mut runner = Fake::new(|_| {
+        if text(&context, "src/b.rs") != "three\n" {
+            fails_unnamed()
+        } else {
+            catches(&context, "m::the_test")
+        }
+    });
+    let (status, said) = go(&context, &family, &mut runner);
+    assert_eq!(status.unwrap(), 0);
+    // The first plant: once with it, once without. The second: twice with it, and once more
+    // without, the command having passed once.
+    assert_eq!(runner.ran, ["first"; 5]);
+    assert!(said.ends_with("2 of 2 plants caught\n"), "{said}");
+}
+
+#[test]
+fn a_command_that_passed_without_a_plant_is_known_so_only_in_the_state_it_ran_in() {
+    let (_folder, context) = checkout();
+    fs::write(context.path("fixture.txt"), "kept\n").unwrap();
+    let family = family(vec![
+        upper("p: one", &[("first", false)]),
+        plant("p: two", &[("src/b.rs", "three", "3")], &[("first", false)]),
+    ]);
+    // A fixture the first run without a plant changes on its way: the meant test fails
+    // from then on, plant or none.
+    let mut runner = Fake::new(|_| {
+        if planted(&context) || text(&context, "fixture.txt") == "broken\n" {
+            return fails("m::the_test");
+        }
+        fs::write(context.path("fixture.txt"), "broken\n").unwrap();
+        passes()
+    });
+    runner.state_of = Some(context.path("fixture.txt"));
+    let (status, said) = go(&context, &family, &mut runner);
+    assert_eq!(status.unwrap(), 1);
+    // The second plant's command is run without it again, in the state the fixture left.
+    assert_eq!(runner.ran, ["first"; 5]);
+    assert!(said.contains("CAUGHT           p: one ("), "{said}");
+    assert!(said.contains("NOT RUN          p: two ("), "{said}");
+}
+
+#[test]
+fn what_a_plant_needs_first_or_a_build_again_of_cf_has_every_command_run_again_without_a_plant() {
+    let (_folder, context) = checkout();
+    let mut needs = plant(
+        "p: needs",
+        &[("src/b.rs", "three", "3")],
+        &[("first", false)],
+    );
+    needs.prepare = vec![vec!["prepare".into()]];
+    let family = family(vec![
+        upper("p: one", &[("first", false)]),
+        needs,
+        upper("p: builds", &[("first", true)]),
+        plant(
+            "p: after",
+            &[("src/b.rs", "three", "3")],
+            &[("first", false)],
+        ),
+    ]);
+    let mut runner = Fake::new(|command| match command[0].as_str() {
+        "prepare" | "rebuild-cf" => ended(0, ""),
+        "cargo" => built(true),
+        _ => catches(&context, "m::the_test"),
+    });
+    let (status, said) = go(&context, &family, &mut runner);
+    assert_eq!(status.unwrap(), 0, "{said}");
+    assert_eq!(
+        runner.ran,
+        [
+            "first",
+            "first",
+            // What the plant needs first is done: the command is run without it again.
+            "prepare",
+            "first",
+            "first",
+            // Known to pass, until the native cf is built again.
+            PREFLIGHT_WORDS,
+            "first",
+            "rebuild-cf",
+            "first",
+            "first",
+        ]
+    );
+}
+
+/// A runner that answers the runs of `command` in turn by `answers`: `true` fails naming
+/// no test, `false` passes.
+fn in_turn(answers: &[bool]) -> impl FnMut(&[String]) -> Answer + '_ {
+    let mut next = answers.iter();
+    move |_| match next.next() {
+        Some(true) => fails_unnamed(),
+        Some(false) => passes(),
+        None => panic!("asked once more than the test answers"),
+    }
+}
+
+#[test]
+fn a_run_that_fails_the_meant_test_and_whose_command_fails_once_without_the_plant_is_unstable() {
+    let (_folder, context) = checkout();
+    let family = family(vec![upper("p: one", &[("first", false)])]);
+    // With the plant, the meant test failed; without it, the command failed, then passed.
+    let mut answers = [fails("m::the_test"), fails("m::the_test"), passes()].into_iter();
+    let mut runner = Fake::new(|_| answers.next().expect("one answer more"));
+    let (status, said) = go(&context, &family, &mut runner);
+    assert_eq!(status.unwrap(), 1);
+    assert_eq!(runner.ran, ["first"; 3]);
+    assert!(
+        said.contains(
+            "UNSTABLE         p: one (0 s)\n    first failed without the plant, then passed:\n"
+        ),
+        "{said}"
+    );
+}
+
+#[test]
+fn a_run_that_fails_with_the_plant_only_once_in_two_is_unstable_neither_caught_nor_missed() {
+    let (_folder, context) = checkout();
+    let family = family(vec![upper("p: one", &[("first", false)])]);
+    let mut runner = Fake::new(in_turn(&[true, false]));
+    let (status, said) = go(&context, &family, &mut runner);
+    assert_eq!(status.unwrap(), 1);
+    assert_eq!(runner.ran, ["first", "first"]);
+    assert!(
+        said.contains(
+            "UNSTABLE         p: one (0 s)\n    first failed with the plant, then passed\n"
+        ),
+        "{said}"
+    );
+    assert!(
+        said.ends_with("0 of 1 plants caught, 1 unstable\n"),
+        "{said}"
+    );
+    assert!(!planted(&context));
+}
+
+#[test]
+fn a_run_that_passes_without_the_plant_once_in_two_is_unstable_and_measured_again_for_the_next() {
+    let (_folder, context) = checkout();
+    let family = family(vec![
+        upper("p: one", &[("first", false)]),
+        upper("p: two", &[("first", false)]),
+    ]);
+    // Twice with the first plant, then without it: passed, then failed. The second plant's
+    // command is not known, and is run without it twice more: passed both times.
+    let answers = [true, true, false, true, true, true, false, false];
+    let mut runner = Fake::new(in_turn(&answers));
+    let (status, said) = go(&context, &family, &mut runner);
+    assert_eq!(status.unwrap(), 1);
+    assert_eq!(runner.ran.len(), answers.len());
+    assert!(
+        said.contains(
+            "UNSTABLE         p: one (0 s)\n    first passed without the plant, then failed:\n"
+        ),
+        "{said}"
+    );
+    assert!(said.contains("CAUGHT           p: two ("), "{said}");
+    assert!(
+        said.ends_with("1 of 2 plants caught, 1 unstable\n"),
+        "{said}"
+    );
+}
+
+#[test]
+fn a_run_that_fails_without_the_plant_is_run_so_again_before_it_is_known_to_fail() {
+    let (_folder, context) = checkout();
+    let family = family(vec![upper("p: one", &[("first", false)])]);
+    // Twice with the plant; without it, failed, then passed: unstable, not NOT RUN.
+    let mut runner = Fake::new(in_turn(&[true, true, true, false]));
+    let (status, said) = go(&context, &family, &mut runner);
+    assert_eq!(status.unwrap(), 1);
+    assert!(
+        said.contains(
+            "UNSTABLE         p: one (0 s)\n    first failed without the plant, then passed:\n"
+        ),
+        "{said}"
+    );
+}
+
+#[test]
+fn a_failed_test_said_by_a_run_that_exited_with_success_is_no_catch() {
+    let (_folder, context) = checkout();
+    let family = family(vec![upper("p: one", &[("first", false)])]);
+    // A test that passes, and prints a report it holds as a fixture.
+    let mut runner = Fake::new(|_| {
+        ended(
+            0,
+            "running 1 test\ntest a::prints ... ok\n  1 failed\n    a.spec.mjs:1:1 › example \ntest b::c ... FAILED\n",
+        )
+    });
+    let (status, said) = go(&context, &family, &mut runner);
+    assert_eq!(status.unwrap(), 1);
+    assert!(said.contains("MISSED           p: one ("), "{said}");
+}
+
+#[test]
+fn a_run_that_could_not_load_a_module_of_its_own_is_broken_whatever_test_failed_beside_it() {
+    let (_folder, context) = checkout();
+    let family = family(vec![
+        upper("p: node", &[("node", false)]),
+        upper("p: awaited", &[("awaited", false)]),
+        upper("p: page", &[("page", false)]),
+    ]);
+    let node = ["node", "--test", "tests/a.test.mjs", "tests/b.test.mjs"];
+    let mut runner = Fake::new(|command| {
+        match command[0].as_str() {
+        // The test the plant was meant for failed, and a test file failed whole as its
+        // import did not parse, which Node's module loader says.
+        "node" => ended_by(
+            &node,
+            1,
+            "SyntaxError: Unexpected end of input\n    \
+             at compileSourceTextModule (node:internal/modules/esm/utils:355:16)\n\
+             ✖ tests/a.test.mjs (29ms)\n✖ the_test holds (1ms)\nℹ tests 2\n\n✖ failing tests:\n\n\
+             test at tests/a.test.mjs:1:1\n✖ tests/a.test.mjs (29ms)\n  'test failed'\n\n\
+             test at tests/b.test.mjs:3:1\n✖ the_test holds (1ms)\n  Error: no\n",
+        ),
+        // A file that threw after a top-level `await`, before it had a test: no loader's
+        // frame in its stack, and no test ran.
+        "awaited" => ended_by(
+            &node,
+            1,
+            "Error: thrown after an await\n    at file:///checkout/tests/a.test.mjs:4:7\n\n\
+             ✖ tests/a.test.mjs (32ms)\nℹ tests 1\nℹ pass 0\nℹ fail 1\n\n✖ failing tests:\n\n\
+             test at tests/a.test.mjs:1:1\n✖ tests/a.test.mjs (32ms)\n  'test failed'\n",
+        ),
+        // As Playwright 1.63 says a spec it could not import.
+        _ => ended_by(
+            &["node", "app/node_modules/@playwright/test/cli.js", "test", "a.spec.mjs"],
+            1,
+            "Error: Cannot find module './a.mjs'\n    at eval (<anonymous>:1:1)\n\
+             Error: No tests found.\nMake sure that arguments are regular expressions matching test files.\n",
+        ),
+    }
+    });
+    let (status, said) = go(&context, &family, &mut runner);
+    assert_eq!(status.unwrap(), 1);
+    assert_eq!(runner.ran, ["node", "awaited", "page"], "none is run again");
+    assert!(
+        said.contains("BROKEN           p: node (0 s)\n    the test file tests/a.test.mjs could not be loaded\n"),
+        "{said}"
+    );
+    assert!(
+        said.contains(
+            "BROKEN           p: awaited (0 s)\n    the test file tests/a.test.mjs ran no test\n"
+        ),
+        "{said}"
+    );
+    assert!(
+        said.contains("BROKEN           p: page (0 s)\n    Playwright: Error: No tests found.\n"),
+        "{said}"
+    );
+    assert!(said.ends_with("0 of 3 plants caught\n"), "{said}");
+}
+
+#[test]
+fn a_node_test_file_the_plant_ended_after_tests_of_it_ran_is_a_catch_confirmed_as_one_that_names_no_test(
+) {
+    let (_folder, context) = checkout();
+    let family = family(vec![upper("p: crash", &[("node", false)])]);
+    // As Node 26 says a file whose third test called `process.exit(3)` after a wait: the
+    // two before it passed, then the file failed whole, with no loader's error.
+    let node = ["node", "--test", "tests/late.test.mjs"];
+    let crashed = "✔ passes first (0.3ms)\n✔ passes second (0.04ms)\n✖ tests/late.test.mjs (88.8ms)\n\
+                   ℹ tests 3\nℹ pass 2\nℹ fail 1\n\n✖ failing tests:\n\n\
+                   test at tests/late.test.mjs:1:1\n✖ tests/late.test.mjs (88.8ms)\n  'test failed'\n";
+    let mut runner = Fake::new(|_| {
+        if planted(&context) {
+            ended_by(&node, 1, crashed)
+        } else {
+            ended_by(&node, 0, "✔ passes first (0.3ms)\nℹ tests 3\nℹ pass 3\n")
+        }
+    });
+    let (status, said) = go(&context, &family, &mut runner);
+    assert_eq!(status.unwrap(), 0);
+    assert_eq!(runner.ran, ["node"; 4]);
+    assert!(
+        said.contains("CAUGHT           p: crash (0 s) by tests/late.test.mjs, not by the_test\n"),
+        "{said}"
+    );
+}
+
+#[test]
+fn a_build_cargo_says_failed_does_not_compile_whatever_test_failed_and_one_it_says_built_does() {
+    let (_folder, context) = checkout();
+    let family = family(vec![
+        upper("p: broken", &[("broken", false)]),
+        upper("p: quoted", &[("quoted", false)]),
+    ]);
+    let mut runner = Fake::new(|command| {
+        match (command[0].as_str(), planted(&context)) {
+        ("broken", _) => ended(
+            101,
+            "{\"reason\":\"build-finished\",\"success\":false}\ntest a::fails ... FAILED\n",
+        ),
+        // A test that fails, quoting a broken build, where cargo says the build was made.
+        ("quoted", true) => ended(
+            101,
+            &format!(
+                "{{\"reason\":\"build-finished\",\"success\":true}}\n{}error: could not compile `x`\n",
+                libtest_failed(&["m::the_test"])
+            ),
+        ),
+        _ => passes(),
+    }
+    });
+    let (status, said) = go(&context, &family, &mut runner);
+    assert_eq!(status.unwrap(), 1);
+    assert!(said.contains("DOES NOT COMPILE p: broken ("), "{said}");
+    assert!(said.contains("CAUGHT           p: quoted ("), "{said}");
+}
+
+#[test]
+fn a_run_whose_tests_build_cf_is_built_from_the_plant_first_and_a_build_cargo_says_failed_does_not_compile(
+) {
+    let (_folder, context) = checkout();
+    let family = family(vec![upper("p: one", &[("rig", true)])]);
+    let mut runner = Fake::new(|command| match command[0].as_str() {
+        "cargo" => built(!planted(&context)),
+        "rebuild-cf" => ended(0, ""),
+        // The rig's tests, which would fail with the build, and name the meant test.
+        _ => fails("rig::the_test"),
+    });
+    let (status, said) = go(&context, &family, &mut runner);
+    assert_eq!(status.unwrap(), 1);
+    assert_eq!(
+        runner.ran,
+        [PREFLIGHT_WORDS, "rebuild-cf"],
+        "built from the plant, which puts nothing in bin/, and the native cf built again once \
+         it is put back; the rig is never run"
+    );
+    assert!(said.contains("DOES NOT COMPILE p: one ("), "{said}");
+}
+
+#[test]
+fn a_build_before_the_rig_that_ends_otherwise_than_cargo_saying_it_failed_is_not_built_or_hung() {
+    let (_folder, context) = checkout();
+    let family = family(vec![
+        upper("p: locked", &[("rig", true)]),
+        upper("p: slow", &[("rig", true)]),
+    ]);
+    let mut builds = 0;
+    let mut runner = Fake::new(|command| match command[0].as_str() {
+        "cargo" => {
+            builds += 1;
+            if builds == 1 {
+                // Built, then something after the build failed, which says nothing structured.
+                return ended(
+                    101,
+                    "{\"reason\":\"build-finished\",\"success\":true}\nerror: failed to sign\n",
+                );
+            }
+            Ok(Execution::Ended(Ran {
+                command: PREFLIGHT.map(String::from).to_vec(),
+                code: None,
+                hung: true,
+                output: String::new(),
+            }))
+        }
+        "rebuild-cf" => ended(0, ""),
+        _ => fails("rig::the_test"),
+    });
+    let (status, said) = go(&context, &family, &mut runner);
+    assert_eq!(status.unwrap(), 1);
+    assert!(said.contains("NOT BUILT        p: locked ("), "{said}");
+    assert!(said.contains("error: failed to sign"), "{said}");
+    assert!(said.contains("HUNG             p: slow ("), "{said}");
+    assert!(
+        said.contains(&format!("    {PREFLIGHT_WORDS} did not end in 600 s\n")),
+        "{said}"
+    );
+    assert!(!said.contains("CAUGHT"), "{said}");
+    assert!(said.ends_with("0 of 2 plants caught\n"), "{said}");
+}
+
+#[test]
+fn a_stop_between_the_build_before_the_rig_and_the_rig_puts_everything_back_and_installs_nothing() {
+    let (_folder, context) = checkout();
+    let family = family(vec![upper("p: one", &[("rig", true)])]);
+    let mut runner = Fake::new(|command| match command[0].as_str() {
+        "cargo" => built(true),
+        _ => Ok(Execution::Stopped),
+    });
+    let (status, said) = go(&context, &family, &mut runner);
+    assert_eq!(status.unwrap(), 130);
+    // The build from the plant is cargo's own, into its build folder: no `build-cf`, so
+    // nothing of the plant is in bin/ to be built again.
+    assert_eq!(runner.ran, [PREFLIGHT_WORDS, "rig"]);
+    assert!(
+        said.ends_with("stopped: every file is as it was\n"),
+        "{said}"
+    );
+    assert!(!planted(&context));
+}
+
+#[test]
+fn a_command_that_cannot_be_started_leaves_its_plant_not_run_and_the_others_go_on() {
+    let (_folder, context) = checkout();
+    let family = family(vec![
+        upper("p: one", &[("missing", false)]),
+        upper("p: two", &[("second", false)]),
+    ]);
+    let mut runner = Fake::new(|command| match command[0].as_str() {
+        "missing" => Err(Error::Process(crate::process::Failure::NotFound {
+            program: "missing".into(),
+        })),
+        _ => catches(&context, "m::the_test"),
+    });
+    let (status, said) = go(&context, &family, &mut runner);
+    assert_eq!(status.unwrap(), 1);
+    assert_eq!(runner.ran, ["missing", "second", "second"]);
+    assert!(
+        said.contains(
+            "NOT RUN          p: one (0 s)\n    missing could not be started: `missing` was not found"
+        ),
+        "{said}"
+    );
+    assert!(said.contains("CAUGHT           p: two ("), "{said}");
+    assert!(said.ends_with("1 of 2 plants caught\n"), "{said}");
+    assert!(!planted(&context));
+}
+
+#[test]
 fn a_plant_that_does_not_apply_is_named_and_counted_and_the_others_go_on() {
     let (_folder, context) = checkout();
     let family = family(vec![
@@ -255,12 +940,11 @@ fn a_plant_that_does_not_apply_is_named_and_counted_and_the_others_go_on() {
         plant("p: twice", &[("src/a.rs", "o", "0")], &[("first", false)]),
         upper("p: fine", &[("second", false)]),
     ]);
-    let mut runner = Fake::new(|_| fails("m::the_test"));
+    let mut runner = Fake::new(|_| catches(&context, "m::the_test"));
     let (status, said) = go(&context, &family, &mut runner);
     assert_eq!(status.unwrap(), 1);
     assert_eq!(
-        runner.ran,
-        ["second"],
+        runner.ran, ["second"; 2],
         "a plant that does not apply runs nothing"
     );
     assert!(
@@ -296,13 +980,13 @@ fn what_a_plant_takes_as_given_is_looked_for_before_anything_is_run() {
     fs::write(context.path("target/built.app"), "").unwrap();
     let mut runner = Fake::new(|command| match command[0].as_str() {
         "prepare" => ended(0, ""),
-        _ => fails("m::the_test"),
+        _ => catches(&context, "m::the_test"),
     });
     let (status, _) = go(&context, &family, &mut runner);
     assert_eq!(status.unwrap(), 0);
     assert_eq!(
         runner.ran,
-        ["prepare", "first"],
+        ["prepare", "first", "first"],
         "what is to be done first is done first"
     );
 }
@@ -338,38 +1022,50 @@ fn the_native_cf_is_built_again_after_a_plant_whose_runs_built_it_from_planted_s
     ]);
     let mut seen = Vec::new();
     let mut runner = Fake::new(|command| {
-        if command[0] == "rebuild-cf" {
+        if command[0] == "rebuild-cf" || command[0] == "cargo" {
             // What it builds from is what the sources are.
-            seen.push(text(&context, "src/a.rs"));
-            return ended(0, "");
+            seen.push((command[0].clone(), text(&context, "src/a.rs")));
+            return built(true);
         }
-        fails("m::the_test")
+        catches(&context, "m::the_test")
     });
     let (status, _) = go(&context, &family, &mut runner);
     assert_eq!(status.unwrap(), 0);
-    assert_eq!(
-        runner.ran,
-        [
-            "first",
-            "third",
-            "rebuild-cf",
-            "fourth",
-            "rebuild-cf",
-            "fifth"
-        ]
-    );
-    assert_eq!(seen, ["one\ntwo\n", "one\ntwo\n"]);
+    // A run that builds is built from the plant first, by cargo alone, and the native cf
+    // built again once it is back.
+    let two = |run: &str| [run; 2].map(String::from).to_vec();
+    let builds = |run: &str| {
+        let mut runs = vec![PREFLIGHT_WORDS.to_owned()];
+        runs.extend(two(run));
+        runs.push("rebuild-cf".to_owned());
+        runs
+    };
+    let expected: Vec<String> = [
+        two("first"),
+        builds("third"),
+        builds("fourth"),
+        two("fifth"),
+    ]
+    .concat();
+    assert_eq!(runner.ran, expected);
+    let planted_then_back = [("cargo", "ONE\ntwo\n"), ("rebuild-cf", "one\ntwo\n")];
+    let expected_seen: Vec<(String, String)> = [planted_then_back, planted_then_back]
+        .concat()
+        .into_iter()
+        .map(|(program, source)| (program.to_owned(), source.to_owned()))
+        .collect();
+    assert_eq!(seen, expected_seen);
 }
 
 #[test]
 fn a_build_that_cannot_be_made_again_is_said_and_counted() {
     let (_folder, context) = checkout();
     let family = family(vec![upper("p: one", &[("first", true)])]);
-    let mut runner = Fake::new(|command| {
-        if command[0] == "rebuild-cf" {
-            return ended(1, "error: the build is broken\n");
-        }
-        fails("m::the_test")
+    let mut runner = Fake::new(|command| match command[0].as_str() {
+        // Built from the plant; not again once it is back.
+        "cargo" => built(true),
+        "rebuild-cf" => ended(1, "error: the build is broken\n"),
+        _ => catches(&context, "m::the_test"),
     });
     let (status, said) = go(&context, &family, &mut runner);
     assert_eq!(status.unwrap(), 1);

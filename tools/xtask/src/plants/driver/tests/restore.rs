@@ -5,16 +5,17 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::time::{Duration, SystemTime};
 
 use super::*;
-use crate::process;
 
 #[test]
-fn a_plant_is_put_back_when_a_command_cannot_be_started_and_its_copies_are_kept() {
+fn a_plant_is_put_back_when_a_run_ends_in_an_error_and_its_copies_are_kept() {
     let (_folder, context) = checkout();
     let family = family(vec![upper("p: one", &[("first", false)])]);
     let mut runner = Fake::new(|_| {
-        Err(Error::Process(process::Failure::NotFound {
-            program: "cargo".into(),
-        }))
+        Err(Error::Files {
+            what: "read what was written by",
+            path: PathBuf::from("first"),
+            cause: std::io::Error::other("the pipe broke"),
+        })
     });
     let chosen: Vec<&Plant> = family.plants.iter().collect();
     let mut out = Vec::new();
@@ -97,13 +98,13 @@ fn a_stop_during_a_run_ends_the_run_with_130_after_putting_the_plant_back_and_be
         seen.push(text(&context, "src/b.rs"));
         match command[0].as_str() {
             "second" => Ok(Execution::Stopped),
-            _ => fails("m::the_test"),
+            _ => catches(&context, "m::the_test"),
         }
     });
     let (status, said) = go(&context, &family, &mut runner);
     assert_eq!(status.unwrap(), 130);
-    assert_eq!(runner.ran, ["first", "second"]);
-    assert_eq!(seen, ["three\n", "THREE\n"]);
+    assert_eq!(runner.ran, ["first", "first", "second"]);
+    assert_eq!(seen, ["three\n", "three\n", "THREE\n"]);
     assert_eq!(text(&context, "src/b.rs"), "three\n");
     assert!(said.contains("CAUGHT           p: one ("), "{said}");
     assert!(
@@ -120,12 +121,37 @@ fn a_stop_that_comes_between_plants_ends_the_run_before_the_next_is_planted() {
         upper("p: one", &[("first", false)]),
         upper("p: two", &[("second", false)]),
     ]);
-    let mut runner = Fake::new(|_| fails("m::the_test"));
+    let mut runner = Fake::new(|_| catches(&context, "m::the_test"));
     runner.stops = VecDeque::from([false, true]);
     let (status, said) = go(&context, &family, &mut runner);
     assert_eq!(status.unwrap(), 130);
-    assert_eq!(runner.ran, ["first"]);
+    assert_eq!(runner.ran, ["first"; 2]);
     assert!(!said.contains("p: two"), "{said}");
+}
+
+#[test]
+fn a_stop_during_the_run_without_the_plant_ends_the_run_with_130_and_every_file_back() {
+    let (_folder, context) = checkout();
+    let family = family(vec![
+        upper("p: one", &[("first", false)]),
+        upper("p: two", &[("second", false)]),
+    ]);
+    let mut runner = Fake::new(|_| {
+        if planted(&context) {
+            fails("m::the_test")
+        } else {
+            Ok(Execution::Stopped)
+        }
+    });
+    let (status, said) = go(&context, &family, &mut runner);
+    assert_eq!(status.unwrap(), 130);
+    assert_eq!(runner.ran, ["first", "first"]);
+    assert_eq!(text(&context, "src/a.rs"), "one\ntwo\n");
+    assert!(!said.contains("CAUGHT"), "{said}");
+    assert!(
+        said.ends_with("stopped: every file is as it was\n"),
+        "{said}"
+    );
 }
 
 #[test]
