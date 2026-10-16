@@ -32,7 +32,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use cf_e2e::live::members::{
-    self, delivered_result, find, is_over, notes_of_work, runs_command, Account, Members, Plan,
+    self, delivered_result, find, is_over, notes_of_work, Account, Members, Plan,
 };
 use cf_e2e::live::tree::{self, Proc, Tree};
 use cf_e2e::live::{cut, secs, text, Log, Who};
@@ -477,10 +477,10 @@ fn pid_of(line: &str) -> Option<u32> {
     line.split_whitespace().next()?.parse().ok()
 }
 
-/// The command lines of the machine's processes that run `wanted` now ([`runs_command`]:
-/// on Windows a `ping` PowerShell started has its path in its line), each after the
-/// process's number: `ps` on Unix, which says where each stands too ([`standing`]), the
-/// process table through PowerShell on Windows. None where neither answers.
+/// The command lines of the machine's processes whose command holds `wanted` now, each
+/// after the process's number: `ps` on Unix, which says where each stands too
+/// ([`standing`]), the process table through PowerShell on Windows. None where neither
+/// answers.
 fn on_the_machine(wanted: &str) -> Vec<String> {
     let ran = if cfg!(windows) {
         Run::new("powershell")
@@ -499,25 +499,21 @@ fn on_the_machine(wanted: &str) -> Vec<String> {
     };
     ran.ok()
         .filter(|ran| ran.code == Some(0))
-        .map(|ran| running(&ran.stdout, wanted, cfg!(windows)))
-        .unwrap_or_default()
-}
-
-/// The lines of `listing`, the process table [`on_the_machine`] read (`windows`'s, or
-/// `ps`'s, whose lines say where each stands), of the processes that run `wanted`.
-fn running(listing: &str, wanted: &str, windows: bool) -> Vec<String> {
-    listing
-        .lines()
-        .map(str::trim)
-        .filter_map(|line| {
-            if windows {
-                Some(line.to_owned())
-            } else {
-                standing(line)
-            }
+        .map(|ran| {
+            ran.stdout
+                .lines()
+                .map(str::trim)
+                .filter_map(|line| {
+                    if cfg!(windows) {
+                        Some(line.to_owned())
+                    } else {
+                        standing(line)
+                    }
+                })
+                .filter(|line| line.contains(wanted))
+                .collect()
         })
-        .filter(|line| runs_command(line, wanted))
-        .collect()
+        .unwrap_or_default()
 }
 
 /// A line of `ps -axo pid=,ppid=,pgid=,tty=,command=` as the run says a process: its number

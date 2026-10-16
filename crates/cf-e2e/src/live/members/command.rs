@@ -68,28 +68,34 @@ pub fn quiet_command(seconds: u64, windows: bool) -> String {
     }
 }
 
-/// Whether the command line `line`, as a process list or the host's tree gives it, runs
-/// `command` (a program, then its words): it holds the command as it was told, as a
-/// shell's line does (`/bin/sh -c sleep 119`), or holds the program named by its path,
-/// quoted or not, with an `.exe` and in any case, then the words: Windows' PowerShell
-/// starts a program it finds on the `PATH` so, and the line of a `ping -n 120 127.0.0.1`
+/// Whether the command line `line`, as a process list or the host's tree gives it, ends
+/// by running `command` (a program, then its words): its last words are the program, as
+/// told or named by a path, quoted or not, with or without `.exe` and in any case, then
+/// exactly the command's words and nothing after them. A shell's line that ends with the
+/// command runs it too (`/bin/sh -c "$0" "$@" sleep 119`). Windows' PowerShell starts a
+/// program it finds on the `PATH` by its path, and the line of a `ping -n 120 127.0.0.1`
 /// it ran is `"C:\WINDOWS\System32\PING.EXE" -n 120 127.0.0.1` (zeewin, 2026-10-16).
 pub fn runs_command(line: &str, command: &str) -> bool {
-    if line.contains(command) {
-        return true;
+    let line = line.trim_end();
+    match command.split_once(' ') {
+        Some((program, words)) => line
+            .strip_suffix(words)
+            .and_then(|before| before.strip_suffix(' '))
+            .is_some_and(|before| ends_with_program(before, program)),
+        None => ends_with_program(line, command),
     }
-    let Some((program, words)) = command.split_once(' ') else {
-        return false;
-    };
-    line.match_indices(&format!(" {words}"))
-        .any(|(at, _)| ends_with_program(&line[..at], program))
 }
 
-/// Whether `before`, a command line up to a word, ends with the program `program`, named
-/// bare or by a path, quoted or not, with or without `.exe`, in any case.
+/// Whether `before`, a command line up to a word, ends with the program `program` as a
+/// word of its own: named bare or by a path, quoted or not, with or without `.exe`, in
+/// any case.
 fn ends_with_program(before: &str, program: &str) -> bool {
     let named = match before.strip_suffix('"') {
-        Some(quoted) => quoted.rsplit('"').next().unwrap_or(quoted),
+        // A quoted path is a word of its own where its opening quote begins one.
+        Some(quoted) => match quoted.rsplit_once('"') {
+            Some((ahead, named)) if ahead.is_empty() || ahead.ends_with(' ') => named,
+            _ => return false,
+        },
         None => before.rsplit(' ').next().unwrap_or(before),
     };
     let file = named.rsplit(['/', '\\']).next().unwrap_or(named);
@@ -213,6 +219,40 @@ mod tests {
         ));
         assert!(!runs_command(r"C:\tools\noping.exe -n 120 127.0.0.1", ping));
         assert!(!runs_command("-n 120 127.0.0.1", ping));
+    }
+
+    #[test]
+    fn a_line_runs_the_command_only_in_whole_words_and_only_to_its_end() {
+        let (sleep, ping) = ("sleep 119", "ping -n 120 127.0.0.1");
+        assert!(runs_command("sleep 119", sleep));
+        assert!(runs_command("sleep 119  ", sleep), "spaces after the line");
+        // A program whose name only ends in the command's, as told or by a path.
+        assert!(!runs_command("nosleep 119", sleep));
+        assert!(!runs_command("/usr/bin/nosleep 119", sleep));
+        assert!(!runs_command(
+            r#""C:\tools\noping.exe" -n 120 127.0.0.1"#,
+            ping
+        ));
+        // A quoted path whose quote does not begin a word of its own.
+        assert!(!runs_command(
+            r#"x"C:\WINDOWS\System32\PING.EXE" -n 120 127.0.0.1"#,
+            ping
+        ));
+        // A word that only begins with the command's last one.
+        assert!(!runs_command("sleep 1190", sleep));
+        assert!(!runs_command("ping -n 120 127.0.0.10", ping));
+        assert!(!runs_command(
+            r#""C:\WINDOWS\System32\PING.EXE" -n 120 127.0.0.10"#,
+            ping
+        ));
+        // More words after the command's.
+        assert!(!runs_command("sleep 119 30", sleep));
+        assert!(!runs_command("ping -n 120 127.0.0.1 -4", ping));
+        // A file name that only begins with the program's, or with `.exe` and more.
+        assert!(!runs_command("sleepy 119", sleep));
+        assert!(!runs_command(r"C:\x\ping.exe.bak -n 120 127.0.0.1", ping));
+        // The words apart from the program by more than the one space it was told with.
+        assert!(!runs_command("sleep  119", sleep));
     }
 
     #[test]

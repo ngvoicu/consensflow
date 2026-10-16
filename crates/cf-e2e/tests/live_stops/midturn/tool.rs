@@ -409,6 +409,11 @@ mod tests {
         assert!(!ping.runs_in(r#""C:\WINDOWS\System32\PING.EXE" -n 61 127.0.0.1"#));
         assert!(!ping.runs_in("tracert -n 120 127.0.0.1"));
         assert!(!sleep.runs_in("sleep 61"));
+        // Nor is what the old ` sleep 119)` refused: a longer name, a longer word, more words.
+        assert!(!sleep.runs_in("nosleep 119"));
+        assert!(!sleep.runs_in("sleep 1190"));
+        assert!(!sleep.runs_in("sleep 119 30"));
+        assert!(!ping.runs_in(r#""C:\WINDOWS\System32\PING.EXE" -n 120 127.0.0.10"#));
         // A case that saw it some other way names no process.
         assert_eq!(
             seen_in_tree("T-1: its replies are on its screen; its activity: working"),
