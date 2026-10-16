@@ -234,11 +234,6 @@ impl Window for FakeWindow {
 
     /// Not written down: the JavaScript fake was never asked, so the Node
     /// traces have no such call.
-    fn took(&self) -> bool {
-        self.fake.of_launch(&self.launch, |agent| agent.took)
-    }
-
-    /// Not written down either, for the same reason.
     fn held(&self) -> bool {
         self.fake.of_launch(&self.launch, |agent| agent.held)
     }

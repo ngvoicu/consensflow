@@ -35,9 +35,9 @@ pub(crate) struct Delivering {
     /// It is the chief's first message, a handoff most often, or what a launch put
     /// ahead of it (the replacement of the role): never given up for being slow.
     pub(crate) chief: bool,
-    /// The harness's own queue took it.
+    /// The harness's own queue took it, as it said at the hand-over.
     pub(crate) queued: bool,
-    /// Its harness held it in a turn it went into (`Window::held`): never pasted
+    /// Its harness held it in a turn it is in (`Window::held`): never pasted
     /// again while it does, and from that turn's end its record has a whole
     /// arrival window of rest, however long ago it was handed over.
     pub(crate) held: bool,

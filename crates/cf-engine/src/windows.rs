@@ -122,10 +122,12 @@ pub(crate) struct WindowPart {
     pub(crate) harness: String,
     pub(crate) pane: Option<Pane>,
     pub(crate) opening: Option<Opening>,
-    /// A launch of its window is under way: from before it asks its harness
-    /// anything to its window open, or given up. The exit of an earlier window,
-    /// settled meanwhile, is none of its business (`in_flight`).
-    pub(crate) launching: bool,
+    /// How many times a window was asked for it, counted as its window is asked for
+    /// ([`Dispatcher::open_soon`]) and as each launch begins, before either waits on
+    /// anything. The exit of an earlier window that read its record with no window
+    /// open compares the count it began with: a window asked for meanwhile, up, on its
+    /// way or given up, is no business of that exit's (`in_flight`).
+    pub(crate) launches: u64,
     pub(crate) launch_id: Option<LaunchId>,
     /// The window's token, for its `cf`.
     pub(crate) token: Option<String>,
@@ -163,26 +165,6 @@ pub(crate) struct WindowPart {
     pub(crate) activity: Activity,
 }
 
-/// A window marked `launching` while its launch is under way, and no more once
-/// this goes, however the launch ends (a panic in it is contained, and the
-/// participant's next exit is to be its own).
-struct Launching<'a>(&'a Record);
-
-impl<'a> Launching<'a> {
-    fn mark(record: &'a Record) -> Self {
-        record.window.borrow_mut().launching = true;
-        Self(record)
-    }
-}
-
-impl Drop for Launching<'_> {
-    fn drop(&mut self) {
-        if let Ok(mut window) = self.0.window.try_borrow_mut() {
-            window.launching = false;
-        }
-    }
-}
-
 impl Default for WindowPart {
     fn default() -> Self {
         Self {
@@ -192,7 +174,7 @@ impl Default for WindowPart {
             harness: String::new(),
             pane: None,
             opening: None,
-            launching: false,
+            launches: 0,
             launch_id: None,
             token: None,
             retiring: false,
@@ -378,11 +360,11 @@ impl Dispatcher {
     /// conversation its harness holds nothing of opens afresh, and has no role to
     /// be told ([`Dispatcher::conversation_to_go_on_with`]). One that does not come
     /// up says why ([`Dispatcher::launch_failed`]); a participant forgotten while
-    /// its launch waits gets nothing more under its ids. The window is marked
-    /// `launching` throughout: its preparation waits on its harness, and an earlier
-    /// window's exit that reads its record meanwhile is to see a window on its way
-    /// (a review of 2026-10-16: the exit of a session's window paused the task the
-    /// window the human opened again was being prepared for).
+    /// its launch waits gets nothing more under its ids. It is counted before
+    /// anything ([`WindowPart::launches`]): its preparation waits on its harness, and
+    /// an earlier window's exit that reads its record meanwhile is to see a window on
+    /// its way (a review of 2026-10-16: the exit of a session's window paused the task
+    /// the window the human opened again was being prepared for).
     pub(crate) async fn launch(
         self: &Rc<Self>,
         record: &Rc<Record>,
@@ -390,19 +372,7 @@ impl Dispatcher {
         participant: &ParticipantView,
         message: Option<MessageView>,
     ) -> Result<(), EngineError> {
-        let _launching = Launching::mark(record);
-        self.launch_marked(record, project, participant, message)
-            .await
-    }
-
-    /// [`Dispatcher::launch`], its window marked `launching`.
-    async fn launch_marked(
-        self: &Rc<Self>,
-        record: &Rc<Record>,
-        project: &ProjectView,
-        participant: &ParticipantView,
-        message: Option<MessageView>,
-    ) -> Result<(), EngineError> {
+        record.window.borrow_mut().launches += 1;
         let harness = participant.harness.clone().unwrap_or_default();
         // A role the window took before it closed, though its arrival was never
         // seen, is what the conversation was told: the ledger learns it first.

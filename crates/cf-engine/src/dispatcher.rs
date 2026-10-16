@@ -715,35 +715,34 @@ impl Dispatcher {
         } else {
             closed
         };
+        let first = delivering
+            .as_ref()
+            .filter(|delivering| delivering.launch)
+            .map(|delivering| delivering.message);
         let project = match delivering {
             None => project,
             Some(delivering) => {
-                let on = self.conversation_on(record.id)?;
+                let launches = record.window.borrow().launches;
                 // A paste its harness's record shows it took is confirmed (`in_flight`).
                 let (this, told) = (Rc::clone(self), because.clone());
-                let read = self
-                    .settle_gone(delivering, move |delivering| {
-                        // A chief's first message (a handoff, most often) waits for its next window.
-                        if delivering.chief {
-                            this.give_back(delivering, &told)
-                        } else {
-                            let retry = !delivering.launch;
-                            this.settle_failure(delivering, &told, retry)
-                        }
-                    })
-                    .await?;
-                if !read {
-                    project
-                } else {
-                    // The record was read with no window open: a participant that moved
-                    // on meanwhile settles nothing more of this exit, and one that did not
-                    // goes on with its project as it is now.
-                    match self.project_of(record.id)? {
-                        Some(now) if self.still_as_it_went(&record, on)? => now,
-                        _ => {
-                            self.changed();
-                            return Ok(());
-                        }
+                self.settle_gone(delivering, move |delivering| {
+                    // A chief's first message (a handoff, most often) waits for its next window.
+                    if delivering.chief {
+                        this.give_back(delivering, &told)
+                    } else {
+                        let retry = !delivering.launch;
+                        this.settle_failure(delivering, &told, retry)
+                    }
+                })
+                .await?;
+                // The record may have been read with no window open: a participant that
+                // moved on meanwhile settles nothing more of this exit, and one that did
+                // not goes on with its project as it is now.
+                match self.project_of(record.id)? {
+                    Some(now) if self.still_as_it_went(&record, launches) => now,
+                    _ => {
+                        self.changed();
+                        return Ok(());
                     }
                 }
             }
@@ -763,8 +762,18 @@ impl Dispatcher {
                     .borrow_mut()
                     .set_project_state(project.id, "suspended")?;
                 // The human closed nothing: a chief that went before its first
-                // message showed says why, where the host said.
-                if at_launch && shown.is_known() {
+                // message showed says why, where the host said. One whose record
+                // shows it came up, and went as any chief's window may.
+                let came_up = match first {
+                    Some(first) => self
+                        .seams
+                        .ledger
+                        .borrow()
+                        .message(first)?
+                        .is_some_and(|message| message.state == "delivered"),
+                    None => false,
+                };
+                if at_launch && !came_up && shown.is_known() {
                     self.tell_chief_closed(&project, &because)?;
                 }
                 let others: Vec<ParticipantView> = project
@@ -1177,6 +1186,9 @@ impl Dispatcher {
     /// `role_change`).
     pub(crate) async fn open_soon(self: &Rc<Self>, participant: i64, coming: Option<Coming>) {
         let record = self.record_of(participant);
+        // Asked for now, before anything is waited on: an earlier window's exit that
+        // ends meanwhile settles nothing more (`still_as_it_went`).
+        record.window.borrow_mut().launches += 1;
         let (this, held) = (Rc::clone(self), Rc::clone(&record));
         let work = async move {
             let project = this.project_of(participant)?;

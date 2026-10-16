@@ -3,15 +3,15 @@
 //! when the agent runs it, a step or a turn on) is waited for, never pasted again
 //! for a record that is late: only the window's rest counts towards the arrival
 //! window, so the turns the window goes through are no time the record had to show
-//! the message. And a harness that says its own queue holds the message
-//! (`Window::took`) is waited for as one that queued it itself is. A paste into a
+//! the message. A paste into a
 //! window that stayed at rest and that the record never shows is still tried
 //! again (`deliveries`), whatever turns the window went through since: the wait is
 //! bounded by the window's rest, and nothing a window does stops the queue behind it.
 //! However often the window goes into a turn, a paste its record never showed is
 //! pasted again at the first rest past half an hour from its hand-over. A window
-//! whose harness says it holds the paste in the turn it went into (`Window::held`)
-//! is in that turn, however at rest it reads, as long as the harness says so, and
+//! whose harness says the paste is in a turn it is in (`Window::held`: the turn it
+//! went into, or the one the harness began with it) is in that turn, however at rest
+//! it reads, as long as the harness says so, and
 //! the paste never goes again meanwhile, however old: once that turn ends, its
 //! record has a whole arrival window of rest.
 //! The one more Enter a paste is given (`deliveries`) is pressed in the first arrival
@@ -304,40 +304,6 @@ fn pastes_a_lost_paste_again_after_a_turn_of_its_windows_own_and_the_queue_behin
     for (text, note) in items.iter().zip([&first, &second]) {
         assert_eq!(text.matches(&marker_of(note.id)).count(), 1, "{text}");
     }
-}
-
-#[test]
-fn waits_on_a_message_the_harness_says_its_queue_holds_whatever_its_window_does_and_its_record_shows(
-) {
-    let context = Context::new();
-    let project = holding(&context);
-    let pasted = counting(&context);
-    let note = context.note(project, "zeus", "chief", "hello");
-    context.pass().unwrap();
-    assert_eq!(pasted.get(), 1);
-
-    // The harness has said nothing of it, and the window is at rest: a paste to
-    // be tried again. Then its queue says it has it (Devin's wire log shows its TUI
-    // put the message to its agent), and the window stays at rest, for minutes.
-    context.adapter.with("chief", |agent| agent.took = true);
-    context.pass().unwrap();
-    for _ in 0..10 {
-        context.advance(ARRIVAL_MS);
-        context.pass().unwrap();
-    }
-    let waiting = context.message(note.id);
-    assert_eq!(
-        (waiting.state.as_str(), waiting.attempts),
-        ("delivering", 1),
-        "still on its way, not tried again"
-    );
-    assert_eq!(pasted.get(), 1, "not pasted again");
-
-    // The harness runs it, and its record shows it.
-    shows(&context, "chief", &waiting);
-    context.pass().unwrap();
-    assert_eq!(context.message(note.id).state, "delivered");
-    assert_eq!(pasted.get(), 1);
 }
 
 /// The report of 2026-10-15 (B5): a result went into a Devin chief's window twice. A

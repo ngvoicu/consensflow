@@ -40,6 +40,11 @@
 //!   window counts no rest meanwhile, and the paste never goes again while it is held.
 //! - The first paste's record never comes: Devin's TUI dropped the paste
 //!   (`FAKE_DEVIN_DROP`), and the daemon pastes it again after its minute at rest.
+//! - The same, and the human asks the chief why the result is still queued, quoting its
+//!   header (the reviews of 2026-10-16): the daemon took the words for Devin's word that
+//!   its agent had the paste, and waited for its record for good. Words that quote a
+//!   header are no paste, and a word that a paste is in a turn lasts that turn: the
+//!   result goes again after the human's turn and the daemon's minute.
 //!
 //! What proves it is the daemon's own word for its pastes (`delivery.begun`,
 //! `delivery.retried`): a second copy would be read by the chief after the turns before it,
@@ -407,6 +412,75 @@ fn two_results_for_a_devin_chief_whose_tui_dropped_the_first_paste_go_in_once_ea
         "{retried:?}"
     );
     each_went_in_once_whole_and_apart(&rig, ids, [2, 1])?;
+    rig.close()?;
+    Ok(())
+}
+
+#[test]
+fn a_result_whose_paste_devins_tui_dropped_goes_again_after_the_humans_words_that_quote_its_header(
+) -> Outcome {
+    let rig = Rig::start(a_rig("2000", "5000").var("FAKE_DEVIN_DROP", FIRST.words))?;
+    let (project, tier) = a_project(&rig)?;
+    give(&rig, &project, &tier, FIRST, 2)?;
+    rig.wait_for("the first result to be made", secs(120), || {
+        Ok(result_of(&project, FIRST)?.is_some())
+    })?;
+    let first = id_of(&project, FIRST)?;
+    rig.wait_for("the first result to be pasted", secs(60), || {
+        Ok(!of_message(&rig.events(), "delivery.begun", first).is_empty())
+    })?;
+    // The human asks why it is still queued, quoting its header as the window shows it:
+    // on Windows, as the console carries it to Devin.
+    let sender = result_of(&project, FIRST)?
+        .and_then(|result| result["sender"].as_str().map(str::to_owned))
+        .ok_or_else(|| Error::Daemon("the result has no sender".to_owned()))?;
+    let mark = if cfg!(windows) { "|" } else { "·" };
+    let header = format!(
+        "{HEADER}{first} {mark} T-{} {mark} result from @{sender}]",
+        FIRST.task
+    );
+    rig.tell_within(
+        project.id(),
+        &format!("Why is \"{header}\" still queued?"),
+        secs(50),
+    )?;
+    // The human's turn, and the daemon's minute of the window's rest after it: the
+    // paste goes again, and its record shows it.
+    rig.wait_for("the dropped paste to go again", secs(240), || {
+        Ok(of_message(&rig.events(), "delivery.begun", first).len() >= 2)
+    })?;
+    rig.wait_for("the result to be confirmed", secs(180), || {
+        Ok(!of_message(&rig.events(), "delivery.confirmed", first).is_empty())
+    })?;
+    until_still(&store_of(&rig), STILL)?;
+
+    let events = rig.events();
+    let retried = of_message(&events, "delivery.retried", first);
+    assert_eq!(
+        (
+            of_message(&events, "delivery.begun", first).len(),
+            retried.len()
+        ),
+        (2, 1),
+        "pasted twice, the dropped paste and once again: {retried:?}"
+    );
+    assert!(
+        retried[0]["data"]["reason"]
+            .as_str()
+            .is_some_and(|reason| reason.starts_with("the harness record never showed it")),
+        "{retried:?}"
+    );
+    let marker = format!("{HEADER}{first} ");
+    let pastes: Vec<Message> = devin_store::messages(&store_of(&rig))?
+        .into_iter()
+        .filter(|message| message.role == "user" && message.text.starts_with(&marker))
+        .collect();
+    assert_eq!(pastes.len(), 1, "given once: {pastes:?}");
+    assert!(
+        pastes[0].text.contains(FIRST.words) && pastes[0].text.contains("cf task accept T-1"),
+        "whole: {:?}",
+        pastes[0].text
+    );
     rig.close()?;
     Ok(())
 }

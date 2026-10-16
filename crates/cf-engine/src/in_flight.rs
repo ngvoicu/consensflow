@@ -33,23 +33,44 @@ impl Dispatcher {
     /// ended. One that arrived ([`Dispatcher::arrived`]) is confirmed; any other goes
     /// back to its queue with its attempt, as does one whose record cannot be read.
     /// What a message's paste carried goes with it either way (the ledger keeps the
-    /// set of a carrier on its way when it is opened).
+    /// set of a carrier on its way when it is opened). Each is settled apart: one that
+    /// fails is written down, the first is the start's answer, and the rest are settled
+    /// all the same (the reviews of 2026-10-16: one brief's failure left the next on its
+    /// way, with no window to watch it, and its task queued for good).
     pub(crate) async fn settle_in_flight(self: &Rc<Self>) -> Result<(), EngineError> {
         // No door lives through a start: what one claimed is the ledger's again.
         self.seams.ledger.borrow_mut().release_all_claims()?;
         let messages = self.seams.ledger.borrow().in_flight()?;
+        let mut failed = None;
         for message in messages {
-            match self.arrived(&message).await? {
-                None => {
-                    self.seams.ledger.borrow_mut().retry_delivery(
-                        message.id,
-                        "the daemon stopped before it arrived",
-                        true,
-                    )?;
+            if let Err(cause) = self.settle_one_in_flight(&message).await {
+                match failed {
+                    None => failed = Some(cause),
+                    Some(_) => self.write_down(&cause),
                 }
-                Some(item) => {
-                    self.confirm_delivered(&message, &json!({ "item": item }))?;
-                }
+            }
+        }
+        failed.map_or(Ok(()), Err)
+    }
+
+    /// One message on its way at the start, settled by what showed of it. The message
+    /// is read again once the record is: one that is on its way no more (its task
+    /// cancelled meanwhile, as the human may while the start reads) is left as it is.
+    async fn settle_one_in_flight(&self, message: &MessageView) -> Result<(), EngineError> {
+        let arrived = self.arrived(message).await?;
+        let Some(message) = self.still_delivering(message.id)? else {
+            return Ok(());
+        };
+        match arrived {
+            None => {
+                self.seams.ledger.borrow_mut().retry_delivery(
+                    message.id,
+                    "the daemon stopped before it arrived",
+                    true,
+                )?;
+            }
+            Some(item) => {
+                self.confirm_delivered(&message, &json!({ "item": item }))?;
             }
         }
         Ok(())
@@ -58,30 +79,33 @@ impl Dispatcher {
     /// The paste `delivering` was on its way into a window that went: its program
     /// ended, or the window closed while its harness took it. One that arrived
     /// ([`Dispatcher::arrived`]) is confirmed; any other is settled by `otherwise`, as
-    /// it was before the window's record was asked. A launch's first message, and what
-    /// a chief's launch put ahead of its queue, are `otherwise`'s alone: the window
-    /// they began goes on with them by their launch's own rules. The message is read
+    /// it was before the window's record was asked. So are the chief's first messages
+    /// (its handoff, and what its launch put ahead of its queue), which `otherwise`
+    /// gives back to wait for its next window, on the same conversation: one its
+    /// record shows went there was given again (a review of 2026-10-16: a Codex chief
+    /// that recorded its handoff and closed before a look was given it twice). A
+    /// member's launch's first message is `otherwise`'s alone: it fails with the
+    /// launch, and is never pasted again. The message is read
     /// again once the record is: one that is on its way no more (its task cancelled
     /// meanwhile, or taken back) is left as it is, and the window's end goes on (a
     /// review of 2026-10-16: a confirm of a message cancelled meanwhile failed, and the
     /// chief's exit with it, which left the project open and its windows running).
-    /// Whether it read the record: what the participant is may have moved on
-    /// meanwhile ([`Dispatcher::still_as_it_went`]).
+    /// What the participant is may have moved on meanwhile
+    /// ([`Dispatcher::still_as_it_went`]).
     pub(crate) async fn settle_gone(
         self: &Rc<Self>,
         delivering: Delivering,
         otherwise: impl FnOnce(Delivering) -> Result<(), EngineError>,
-    ) -> Result<bool, EngineError> {
-        if delivering.launch || delivering.chief {
-            otherwise(delivering)?;
-            return Ok(false);
+    ) -> Result<(), EngineError> {
+        if delivering.launch && !delivering.chief {
+            return otherwise(delivering);
         }
         let Some(message) = self.still_delivering(delivering.message)? else {
-            return Ok(false);
+            return Ok(());
         };
         let arrived = self.arrived(&message).await?;
         let Some(message) = self.still_delivering(message.id)? else {
-            return Ok(true);
+            return Ok(());
         };
         match arrived {
             Some(item) => {
@@ -90,7 +114,7 @@ impl Dispatcher {
             }
             None => otherwise(delivering)?,
         }
-        Ok(true)
+        Ok(())
     }
 
     /// The message `id` as the ledger has it, while it is on its way.
@@ -99,37 +123,19 @@ impl Dispatcher {
         Ok(message.filter(|found| found.state == "delivering"))
     }
 
-    /// The conversation a participant is on, which the record of a window that
-    /// went is read for.
-    pub(crate) fn conversation_on(&self, participant: i64) -> Result<Option<i64>, EngineError> {
-        let conversation = self
-            .seams
-            .ledger
-            .borrow()
-            .current_conversation(participant)?;
-        Ok(conversation.map(|conversation| conversation.id))
-    }
-
     /// Whether the participant of a window that went is still as the window left it
-    /// once its record was read with no window open: kept, with no window opened for
-    /// it since, nor one being launched, which a reopening is from before it asks
-    /// its harness (`launching`), and on the conversation `on` it was on. Meanwhile
-    /// the human may have switched the chief, whose project the old window's exit
-    /// then suspended, its workers' windows closed, or opened a session's window
-    /// again, whose task the old one's exit then paused (the reviews of 2026-10-16).
-    pub(crate) fn still_as_it_went(
-        &self,
-        record: &Rc<Record>,
-        on: Option<i64>,
-    ) -> Result<bool, EngineError> {
-        let opened = {
-            let window = record.window.borrow();
-            window.pane.is_some() || window.opening.is_some() || window.launching
-        };
-        if opened || self.forgotten(record) {
-            return Ok(false);
-        }
-        Ok(self.conversation_on(record.id)? == on)
+    /// once its record was read with no window open: kept, with no window asked for
+    /// it since the exit began, which counted `launches` then (the window part's
+    /// count). Meanwhile the human may have switched the chief, whose new window's
+    /// launch begins with the switch, and whose project the old window's exit then
+    /// suspended, its workers' windows closed; or opened a session's window again,
+    /// whose task the old one's exit then paused (the reviews of 2026-10-16); or
+    /// closed the project and resumed it, whose chief the Resume brings back as the
+    /// old exit suspends it, so the chief runs in a project that is suspended (a review
+    /// of 2026-10-16: a window asked for and not yet launched, its Resume reading
+    /// whether the turn was cut, is counted too).
+    pub(crate) fn still_as_it_went(&self, record: &Rc<Record>, launches: u64) -> bool {
+        record.window.borrow().launches == launches && !self.forgotten(record)
     }
 
     /// The item that proves `message` reached its recipient's window: the first that

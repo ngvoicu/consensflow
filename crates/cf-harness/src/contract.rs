@@ -247,20 +247,12 @@ pub trait Window {
     ) -> Work<'a, Result<Admission, String>>;
     /// What the window's harness says of it now.
     fn observe(&self) -> Work<'_, Result<Observed, String>>;
-    /// Whether the harness says, after the hand-over, that its own queue holds
-    /// the message last handed to it: it took the paste, and its record shows
-    /// it when it gets to it, however long that is. A harness that says so at
-    /// the hand-over ([`Admission::Admitted`]'s `queued`) needs no answer here;
-    /// one that can say it only later, by what it writes (Devin's wire log),
-    /// does. The engine asks at each look until the answer is yes.
-    fn took(&self) -> bool {
-        false
-    }
-    /// Whether the message last handed to the window went into a turn the harness
-    /// was in, which it is in still: a harness that holds what it is given in a turn
-    /// and runs it when the turn ends (Devin) shows it then, however long the turn
-    /// says nothing that would read as work. It is no word that the harness has the
-    /// message: only that its record has had no time to show it.
+    /// Whether the message last handed to the window is in a turn the harness is in
+    /// still: one it went into, which a harness that holds what it is given in a turn
+    /// runs it after (Devin), or the one the harness began with it. Its record shows
+    /// it when the turn ends, however long the turn says nothing that would read as
+    /// work: until then, its record has had no time to show it. Once the turn ends,
+    /// its record has the whole wait any record has.
     fn held(&self) -> bool {
         false
     }

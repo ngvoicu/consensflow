@@ -11,7 +11,9 @@
 # - the turn in front says nothing for two and a half minutes, as a Devin resumed after a cut sat at
 #   "Thinking" (B1 of the same report): more than the daemon's minute of the window's rest goes by
 #   before the record shows the first result (3.0.4 pasted it again);
-# - Devin's TUI dropped the first paste, and the daemon pastes it again after its minute at rest.
+# - Devin's TUI dropped the first paste, and the daemon pastes it again after its minute at rest;
+# - the same, and the human's words quote its header (the reviews of 2026-10-16): they are no paste of
+#   it, and it goes again after the human's turn and the daemon's minute.
 #
 # What stands against a second paste there: the engine counts the arrival window in the window's
 # rest (`notes-twice.toml`), and a window whose harness says the paste went into a turn it is in still
@@ -21,8 +23,9 @@
 # `crates/cf-engine/tests/dispatcher/slow_records.rs`). Devin's adapter says so from its wire log: a
 # paste made while a prompt of its TUI was asked is held as long as a prompt is, and so is one a prompt
 # read after it was put to the agent ahead of (it began while the window was found ready, the reviews
-# of 2026-10-16), and a prompt of a conversation the window no longer shows is none (`cf-harness`'s
-# `devin::wire_log`). The cases build
+# of 2026-10-16), and so is one its TUI put to the agent in a prompt of its own, whose words begin with
+# the paste's line, for that prompt's turn and no longer; a prompt of a conversation the window no
+# longer shows is none (`cf-harness`'s `devin::wire_log`). The cases build
 # the native `cf` from the sources as they are planted, so their plants say `builds`. One plant takes
 # a rule out, or puts it wrong; a test fails.
 #
@@ -35,6 +38,7 @@ rig-regression-results-late = ["cargo", "test", "--offline", "-p", "cf-e2e", "--
 rig-regression-results-at-work = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_result_delivered_twice_to_a_devin_chief::two_results_for_a_devin_chief_at_work_when"]
 rig-regression-results-silent = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_result_delivered_twice_to_a_devin_chief::two_results_for_a_devin_chief_whose_turn_says_nothing"]
 rig-regression-results-dropped = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_result_delivered_twice_to_a_devin_chief::two_results_for_a_devin_chief_whose_tui_dropped"]
+rig-regression-results-quoted = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_result_delivered_twice_to_a_devin_chief::a_result_whose_paste_devins_tui_dropped"]
 
 # The cases of the rig, each a version's shape.
 
@@ -125,20 +129,20 @@ find = "        let overdue = waited > RECONCILE_MS && at_rest && !held && !deli
 replace = "        let overdue = waited > RECONCILE_MS && at_rest && !held;"
 
 [[plant]]
-name = "results twice: a held paste is the harness's queue's for good"
+name = "results twice: a held paste is held for good, past the turn it was held in (the reviews of 2026-10-16)"
 meant = "never_pastes_again_a_paste_held_in_a_turn_however_long_and_gives_its_record_a_window_when_it_ends"
 runs = ["engine-slow-records"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/arrival.rs"
-find = "        if self.took(record) {"
-replace = "        if self.took(record) || self.held(record) {"
+find = "        let held = self.held(record);"
+replace = "        let held = self.held(record) || delivering.held;"
 
 # Devin's adapter: what its wire log says of a paste.
 
 [[plant]]
 name = "results twice: a paste made while a prompt is asked is not held"
-meant = "a_message_pasted_while_a_prompt_is_asked_is_held_until_no_prompt_is_and_is_no_word_that_the_agent_has_it"
+meant = "a_message_pasted_while_a_prompt_is_asked_is_held_until_no_prompt_is_and_in_its_own_prompts_turn_and_no_other_after_it"
 runs = ["harness-devin"]
 
 [[plant.edit]]
@@ -147,18 +151,8 @@ find = "        state.into_a_turn = !state.asked.is_empty();"
 replace = "        state.into_a_turn = false;"
 
 [[plant]]
-name = "results twice: every paste is held, whether a prompt is asked or not"
-meant = "a_message_pasted_while_a_prompt_is_asked_is_held_until_no_prompt_is_and_is_no_word_that_the_agent_has_it"
-runs = ["harness-devin"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/devin/wire_log.rs"
-find = "        state.into_a_turn = !state.asked.is_empty();"
-replace = "        state.into_a_turn = true;"
-
-[[plant]]
 name = "results twice: a paste is held in the next turn after the one it went into ended"
-meant = "a_message_pasted_while_a_prompt_is_asked_is_held_until_no_prompt_is_and_is_no_word_that_the_agent_has_it"
+meant = "a_message_pasted_while_a_prompt_is_asked_is_held_until_no_prompt_is_and_in_its_own_prompts_turn_and_no_other_after_it"
 runs = ["harness-devin"]
 
 [[plant.edit]]
@@ -170,14 +164,60 @@ find = '''
 replace = ""
 
 [[plant]]
-name = "results twice: a held paste is the agent's own, as one its TUI named is"
-meant = "a_message_pasted_while_a_prompt_is_asked_is_held_until_no_prompt_is_and_is_no_word_that_the_agent_has_it"
+name = "results twice: a paste the TUI put to its agent is held for good, past the turn of its own prompt"
+meant = "a_message_pasted_while_a_prompt_is_asked_is_held_until_no_prompt_is_and_in_its_own_prompts_turn_and_no_other_after_it"
 runs = ["harness-devin"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/devin/wire_log.rs"
-find = "            sent: self.sent,"
-replace = "            sent: self.sent || self.into_a_turn,"
+find = "            held: self.into_a_turn && !self.asked.is_empty(),"
+replace = "            held: self.sent || self.into_a_turn && !self.asked.is_empty(),"
+
+[[plant]]
+name = "results twice: the TUI's prompt of a paste holds it in no turn"
+meant = "the_message_last_pasted_is_held_in_the_turn_of_the_tuis_prompt_whose_words_begin_with_it_until_that_turn_ends"
+runs = ["harness-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/wire_log.rs"
+find = "            if self.expected.is_some() && (pasted || !self.sent) {"
+replace = "            if self.expected.is_some() && !self.sent {"
+
+[[plant]]
+name = "results twice: words that quote a paste's line anywhere are its paste (round 5, the reviews of 2026-10-16)"
+meant = "a_prompt_that_quotes_the_header_of_a_paste_devin_dropped_holds_it_for_no_longer_than_its_own_turn"
+runs = ["harness-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/wire_log.rs"
+find = "        Value::String(words) => words.trim_start().starts_with(text),"
+replace = "        Value::String(words) => words.contains(text),"
+
+[[plant]]
+name = "results twice: words that begin with a paste's line after a blank line are its paste"
+meant = "a_prompt_that_quotes_the_header_of_a_paste_devin_dropped_holds_it_for_no_longer_than_its_own_turn"
+runs = ["harness-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/wire_log.rs"
+find = "        Value::String(words) => words.trim_start().starts_with(text),"
+replace = "        Value::String(words) => words.lines().any(|line| line.starts_with(text)),"
+
+[[plant]]
+name = "results twice: round 5's rule put back, the human's words that quote the header of a paste Devin dropped are Devin's word for good that it has the paste, and it never goes again (the reviews of 2026-10-16)"
+meant = "a_result_whose_paste_devins_tui_dropped_goes_again_after_the_humans_words_that_quote_its_header"
+runs = ["rig-regression-results-quoted"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/wire_log.rs"
+find = "        Value::String(words) => words.trim_start().starts_with(text),"
+replace = "        Value::String(words) => words.contains(text),"
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/wire_log.rs"
+find = "            held: self.into_a_turn && !self.asked.is_empty(),"
+replace = "            held: self.sent || self.into_a_turn && !self.asked.is_empty(),"
 
 [[plant]]
 name = "results twice: a prompt of the conversation the window showed is a turn of the one it shows now"
@@ -200,19 +240,19 @@ runs = ["harness-devin"]
 [[plant.edit]]
 file = "crates/cf-harness/src/devin/wire_log.rs"
 find = '''
-            if self.expected.is_some() && !self.sent {
+            if self.expected.is_some() && (pasted || !self.sent) {
                 self.into_a_turn = true;
             }'''
 replace = ""
 
 [[plant]]
 name = "results twice: a paste the TUI put to its agent is held in the turn of a prompt that came after it"
-meant = "a_message_pasted_while_a_prompt_is_asked_is_held_until_no_prompt_is_and_is_no_word_that_the_agent_has_it"
+meant = "a_message_pasted_while_a_prompt_is_asked_is_held_until_no_prompt_is_and_in_its_own_prompts_turn_and_no_other_after_it"
 runs = ["harness-devin"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/devin/wire_log.rs"
-find = "            if self.expected.is_some() && !self.sent {"
+find = "            if self.expected.is_some() && (pasted || !self.sent) {"
 replace = "            if self.expected.is_some() {"
 
 [[plant]]
@@ -222,5 +262,5 @@ runs = ["harness-devin"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/devin/wire_log.rs"
-find = "            if self.expected.is_some() && !self.sent {"
-replace = "            if !self.sent {"
+find = "            if self.expected.is_some() && (pasted || !self.sent) {"
+replace = "            if pasted || !self.sent {"

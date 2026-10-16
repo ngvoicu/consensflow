@@ -137,10 +137,17 @@ impl Records for FakeRecords {
     /// fake has no record of it. Asked where Node's dispatcher asked nothing, so
     /// it is no call of the adapter in a trace.
     fn turn_cut<'a>(&'a self, harness: Harness, session: &'a str) -> Work<'a, Option<bool>> {
-        let cut = self
-            .adapters
-            .fake(harness.kind())
-            .and_then(|fake| fake.cut_of(session));
-        Box::pin(async move { cut })
+        let Some(fake) = self.adapters.fake(harness.kind()) else {
+            return Box::pin(async { None });
+        };
+        let wrapped = fake.cut_holds.wrap(&json!([session]));
+        // Read when asked, or once the test lets a held ask go.
+        let early = (!matches!(wrapped, Wrapped::Held { .. })).then(|| fake.cut_of(session));
+        Box::pin(async move {
+            wrapped.before().await;
+            let cut = early.unwrap_or_else(|| fake.cut_of(session));
+            wrapped.after().await;
+            cut
+        })
     }
 }

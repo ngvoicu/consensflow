@@ -19,7 +19,7 @@ use cf_engine::testing::{Answer, Context, Gate};
 use cf_engine::SwitchWhen;
 use cf_harness::records::Role;
 
-use crate::chiefs::{chief_of, to, with_codex};
+use crate::chiefs::{chief_of, handoffs_of, to, with_codex};
 use crate::fixtures::Tiers;
 
 /// How many messages the window of `handle` that is open now was given that say
@@ -107,6 +107,180 @@ fn a_chiefs_window_that_ends_closes_the_project_whatever_became_of_its_paste_whi
         "the chief's exit closes the project"
     );
     assert!(context.host.killed().contains(&zeus), "and its windows");
+}
+
+/// A review of 2026-10-16: the human closed the project as the chief's window ended
+/// with a paste on its way, whose record was being read, and resumed it at once. The
+/// Resume read whether the chief's turn had been cut, the chief's window not yet
+/// launched, as the old window's exit ended: the exit took the project for one its
+/// chief had left by itself, and suspended it, and the Resume opened the chief all the
+/// same, which ran in a project that was suspended.
+#[test]
+fn a_chiefs_window_that_ends_leaves_the_project_the_human_closed_and_resumed_while_its_record_was_read(
+) {
+    let context = Context::new();
+    let (project, _, looking, exiting) = the_chiefs_window_ends_as_its_record_is_read(&context);
+    context.close_project(project).unwrap();
+    let session = context.adapter.agent("chief").native;
+    let cutting = context
+        .adapter
+        .cut_holds
+        .hold(move |asked| asked[0] == session.as_str());
+    context.resume_project(project).unwrap();
+    looking.open();
+    context.settle();
+    exiting.take().unwrap();
+    cutting.open();
+    context.settle();
+    context.pass().unwrap();
+    assert_eq!(
+        context.project(project).state,
+        "open",
+        "the old window's exit closes nothing of the project the human resumed"
+    );
+    let chief = context.host.last("chief").unwrap().pane;
+    assert!(
+        !context.host.killed().contains(&chief),
+        "the chief's window the Resume opened runs"
+    );
+    assert_eq!(
+        context.host.opened().len(),
+        3,
+        "the chief's, zeus's, and the chief's again"
+    );
+}
+
+/// A member's launch's first message, whose window goes before a look confirmed it,
+/// fails with the launch whatever its record shows, and is never pasted again: no
+/// conversation is given it twice (the reviews of 2026-10-16 asked). Only the chief's
+/// first messages go back to wait for its next window, so only those are settled by
+/// the record.
+#[test]
+fn fails_the_brief_of_a_members_launch_whose_window_goes_whatever_its_record_shows() {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    tiers.open();
+    context.pass().unwrap();
+    let brief = context.ledger.borrow().in_flight().unwrap().remove(0);
+    assert_eq!(brief.kind, "task");
+    assert_eq!(
+        given_saying(&context, "zeus", "Write the parser"),
+        1,
+        "its record shows it"
+    );
+    let (host, session) = (Rc::clone(&context.host), brief.recipient.clone());
+    context.run(async move { host.exit(&session).await });
+    assert_eq!(context.message(brief.id).state, "failed");
+    assert_eq!(tiers.task(1).task.state, "failed");
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    let launches = context
+        .adapter
+        .prepared()
+        .iter()
+        .filter(|launch| {
+            launch["message"]
+                .as_str()
+                .is_some_and(|message| message.contains("Write the parser"))
+        })
+        .count();
+    assert_eq!(launches, 1, "never given again");
+}
+
+/// The human cancels T-1 while the old window's record is read, which withdraws the
+/// question on its way, and a pass launches the chief's window again for what waits
+/// for it, its harness asked: the old window's exit is none of the window on its way.
+#[test]
+fn a_chiefs_window_that_ends_leaves_the_project_to_the_window_a_pass_launches_while_its_record_is_read(
+) {
+    let context = Context::new();
+    let (project, question, looking, exiting) =
+        the_chiefs_window_ends_as_its_record_is_read(&context);
+    context
+        .ledger
+        .borrow_mut()
+        .cancel_task(project, 1, "human")
+        .unwrap();
+    assert_eq!(context.message(question).state, "cancelled");
+    context.note(project, "zeus", "chief", "And another thing");
+    let preparing = context.adapter.prepare_holds.hold(|_| true);
+    context.pass().unwrap();
+    assert_eq!(
+        context.dispatcher.pane(context.id(project, "chief")),
+        None,
+        "its harness is asked"
+    );
+    looking.open();
+    context.settle();
+    exiting.take().unwrap();
+    assert_eq!(
+        context.project(project).state,
+        "open",
+        "the old window's exit closes nothing of the window on its way"
+    );
+    preparing.open();
+    context.settle();
+    let chief = context.host.last("chief").unwrap().pane;
+    assert_eq!(
+        context.dispatcher.pane(context.id(project, "chief")),
+        Some(chief)
+    );
+}
+
+/// A review of 2026-10-16: the Codex chief the human switched to took its handoff, which
+/// its record shows on the conversation its window began, and its window ended before a
+/// look confirmed it. The handoff went back to its queue, and the Resume gave it again,
+/// into the same conversation.
+#[test]
+fn confirms_a_chiefs_handoff_its_harness_recorded_when_its_window_ends_before_a_look_and_never_gives_it_again(
+) {
+    let context = with_codex();
+    let project = context.with_staff(&["zeus"]).id;
+    context.pass().unwrap();
+    context.adapter.answer("chief", "Hello");
+    context.pass().unwrap();
+    context
+        .switch_chief(project, to("codex", "astraeus"), SwitchWhen::Now, false)
+        .unwrap();
+    let handoff = handoffs_of(&context, project).remove(0);
+    assert_eq!(context.message(handoff.id).state, "delivering");
+    let session = context.codex.agent("chief").native;
+
+    // It crashes, as the host says.
+    context
+        .host
+        .exits_showing(Some(1), None, Some(&["panicked"]));
+    the_chiefs_window_ends(&context);
+    assert_eq!(context.project(project).state, "suspended");
+    let human = context.id(project, "human");
+    let told: Vec<String> = context
+        .inbox(human)
+        .into_iter()
+        .map(|message| message.body)
+        .filter(|body| body.contains("resume it to try again"))
+        .collect();
+    assert_eq!(
+        told,
+        Vec::<String>::new(),
+        "it came up: no launch that failed"
+    );
+    let confirmed = context.message(handoff.id);
+    assert_eq!(
+        (confirmed.state.as_str(), confirmed.attempts),
+        ("delivered", 1),
+        "its record shows it: the conversation holds it"
+    );
+    context.resume_project(project).unwrap();
+    context.pass().unwrap();
+    let launch = context.codex.prepared().pop().unwrap();
+    assert_eq!(launch["resume"], session.as_str(), "the same conversation");
+    assert!(
+        !launch["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("You are the chief now")),
+        "not given the handoff again: {launch}"
+    );
 }
 
 #[test]

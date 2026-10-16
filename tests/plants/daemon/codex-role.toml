@@ -601,12 +601,14 @@ runs = ["engine-role-change"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/in_flight.rs"
-find = '''                    self.confirm_delivered(&message, &json!({ "item": item }))?;
+find = '''                self.confirm_delivered(&message, &json!({ "item": item }))?;
+            }
 '''
-replace = '''                    self.seams
-                        .ledger
-                        .borrow_mut()
-                        .confirm_delivery(message.id, Some(&json!({ "item": item })))?;
+replace = '''                self.seams
+                    .ledger
+                    .borrow_mut()
+                    .confirm_delivery(message.id, Some(&json!({ "item": item })))?;
+            }
 '''
 
 [[plant]]
@@ -815,7 +817,7 @@ find = '''        let written = answers_to_the_task(&items[start + 1..], &replac
 replace = '''        let _ = &replacements;
         let written: Vec<_> = items[start + 1..]
             .iter()
-            .filter(|item| item.role == Role::Assistant)
+            .filter(|item| item.role == cf_harness::records::Role::Assistant)
             .collect();'''
 
 # Where this meets the ending of what a turn left running (a worker's answer is its task's
@@ -1125,7 +1127,7 @@ find = '''                of_the_role =
             }'''
 replace = '''                of_the_role = replacements
                     .iter()
-                    .any(|message| item.text.contains(&marker_of(*message)));
+                    .any(|message| item.text.contains(&crate::delivery_text::marker_of(*message)));
             }'''
 
 [[plant]]

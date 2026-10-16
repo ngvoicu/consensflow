@@ -164,6 +164,15 @@ const CUT_CHIEF: &str = "the window closes as its harness takes the paste, which
 /// for it, and it is confirmed where the record shows it (`in_flight`, 2026-10-16).
 const TAKEN_AS_IT_WENT: &str = "the window goes with a paste on its way into it that its harness took and its record shows: the record is read (`record`) and the paste confirmed, where Node gave it back to its queue to be pasted again into the conversation that held it";
 
+/// What the engine does with the chief's first message (a handoff, most often) on its
+/// way into a chief's window that went: the window's record is read for it too, and it
+/// goes back to its queue only where the record does not show it (a review of
+/// 2026-10-16: a Codex chief that recorded its handoff was given it again).
+const CHIEF_FIRST_READ: &str = "the chief's window goes with its first message on its way, which its record does not show: the record is read first (`record`), where Node gave the message back to its queue unread";
+
+/// The same, where the record shows it.
+const CHIEF_FIRST_TAKEN: &str = "the human closes the project as the chief's handoff, which no look confirmed, shows in its record: the record is read (`record`) and the handoff confirmed, and the Resume brings the chief back on its conversation without it, where Node gave it back to its queue and the Resume gave it again into the conversation that held it";
+
 /// What the engine says in a hold note, where Node's said the task goes on at
 /// the reset.
 const HOLD_WORDS: &str = "the note that T-1 is held says the member may be back before its reset and the task then goes on by itself (`, or sooner if its account has quota again; it goes on by itself.`), where Node's says it goes on at the reset (`; it goes on by itself then.`)";
@@ -322,6 +331,22 @@ const DEPARTED: &[(&str, &str)] = &[
     (
         "lets go of its participant: its next step runs, the failure is written down, and an operation waiting on it ends",
         TAKEN_AS_IT_WENT,
+    ),
+    (
+        "gives the new chief its handoff again when its first window closes before showing it",
+        CHIEF_FIRST_READ,
+    ),
+    (
+        "notices a chief window that exits before its open is answered",
+        CHIEF_FIRST_READ,
+    ),
+    (
+        "replaces a handoff still on its way, and Resume of a closed project brings the chief back with the handoff it had not shown",
+        CHIEF_FIRST_READ,
+    ),
+    (
+        "answers New project, Switch chief, Resume and a session’s Open once the ledger has the change; the window opens after",
+        CHIEF_FIRST_TAKEN,
     ),
     (
         "closes a window only once the paste its harness is taking is over, and that message goes again",

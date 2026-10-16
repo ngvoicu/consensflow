@@ -8,11 +8,14 @@
 # against a second paste of a message the window has:
 #
 # - the engine counts the arrival window in the time the window is at rest, its turns no part of it,
-#   and a harness that says its own queue holds the message (`Window::took`) is waited for as one that
-#   queued it itself is;
+#   and a harness that says at the hand-over that its own queue holds the message (OpenCode, Pi) is
+#   waited for as one that queued it itself is;
 # - Devin's window reads busy from the prompt its TUI puts to its agent, before the agent's first
 #   word, for a gap and no longer, until the turn ends or the request is answered;
-# - Devin's own queue holds a message once a request of its TUI holds the first line of what was pasted.
+# - Devin holds a message in the turn of the prompt its TUI puts to its agent with the words pasted,
+#   the first line of what was pasted beginning them, for as long as that prompt is asked (the reviews
+#   of 2026-10-16: a request that held the line anywhere was Devin's word for good that its queue had
+#   the message, and the human's words that quoted the header of a paste Devin dropped gave it).
 #
 # The one more Enter a paste is given (`deliveries`) stays what it was: once, in the first arrival
 # window only, however long the record is waited for after it.
@@ -27,6 +30,7 @@
 [run]
 engine-slow-records = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "slow_records"]
 harness-devin = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "devin::"]
+engine-deliveries = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "deliveries::"]
 rig-regression-devin-notes = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "devin_notes_twice::"]
 
 [[plant]]
@@ -66,13 +70,13 @@ find = "        if observed.settled && observed.waiting.is_none() && !held {"
 replace = "        if observed.settled && !held {"
 
 [[plant]]
-name = "notes twice: a message the harness says its own queue holds is tried again all the same"
-meant = "waits_on_a_message_the_harness_says_its_queue_holds_whatever_its_window_does_and_its_record_shows"
-runs = ["engine-slow-records"]
+name = "notes twice: a message the harness said at the hand-over its own queue holds is tried again all the same"
+meant = "waits_on_a_message_a_harness_queued_itself_and_re_sends_only_a_paste_the_record_never_showed"
+runs = ["engine-deliveries"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/arrival.rs"
-find = "        if self.took(record) {"
+find = "        if delivering.queued {"
 replace = "        if false {"
 
 [[plant]]
@@ -169,8 +173,8 @@ find = '        if method == "session/prompt" && session.is_some() && session ==
 replace = '        if method == "session/prompt" {'
 
 [[plant]]
-name = "notes twice: the log is never told the message about to be pasted, so its queue is never told to hold it"
-meant = "a_message_pasted_is_the_agents_own_when_a_request_of_its_tui_holds_the_line_that_begins_it"
+name = "notes twice: the log is never told the message about to be pasted, so no turn is ever said to hold it"
+meant = "a_message_pasted_is_held_in_the_turn_of_the_tuis_prompt_its_line_begins_and_no_longer"
 runs = ["harness-devin"]
 
 [[plant.edit]]
@@ -179,13 +183,13 @@ find = "            self.wire.expect(first.unwrap_or_default());"
 replace = ""
 
 [[plant]]
-name = "notes twice: Devin's queue is never said to hold a message"
-meant = "a_message_pasted_is_the_agents_own_when_a_request_of_its_tui_holds_the_line_that_begins_it"
+name = "notes twice: Devin's window never says a paste is in a turn"
+meant = "a_message_pasted_is_held_in_the_turn_of_the_tuis_prompt_its_line_begins_and_no_longer"
 runs = ["harness-devin"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/devin/adapter.rs"
-find = "            .is_ok_and(|wire| wire.sent)"
+find = "            .is_ok_and(|wire| wire.held)"
 replace = "            .is_ok_and(|_| false)"
 
 [[plant]]

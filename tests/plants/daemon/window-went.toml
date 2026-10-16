@@ -2,11 +2,13 @@
 # before): its program ended after its harness took the paste and before a look confirmed it, or the
 # window closed as the paste was handed over. Where the harness's record shows the paste, the
 # conversation that goes on holds it: it is confirmed, as a start settles what was in flight
-# (`cf-engine`'s `in_flight`); else it goes again, as it did. A launch's first message, and what a
-# chief's launch put ahead of its queue, keep their launch's rules. The record is read with no window
-# open, and what changed meanwhile is read again after it (the reviews of 2026-10-16): a message no
-# longer on its way is left as it is, and a participant that moved on (a window opened for it, its
-# conversation switched) settles nothing more of the exit.
+# (`cf-engine`'s `in_flight`); else it goes again, as it did. So are the chief's first messages, which
+# go back to wait for its next window (the reviews of 2026-10-16: a Codex chief's recorded handoff was
+# given again); a member's launch's first message fails with its launch, and is never pasted again.
+# The record is read with no window open, and what changed meanwhile is read again after it (the
+# reviews of 2026-10-16): a message no longer on its way is left as it is, and a participant that moved
+# on (a window asked for it since the exit began, counted as it is asked for and as its launch begins;
+# its conversation switched) settles nothing more of the exit.
 #
 # The cases are `crates/cf-e2e/tests/regressions/a_result_pasted_again_after_its_window_went.rs` (a
 # Devin chief, the stand-in, whose window ends as its agent takes a worker's result, and the human's
@@ -30,8 +32,8 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-engine/src/in_flight.rs"
-find = "        if delivering.launch || delivering.chief {"
-replace = "        if delivering.launch || delivering.chief || !delivering.launch {"
+find = "        if delivering.launch && !delivering.chief {"
+replace = "        if true {"
 
 [[plant]]
 name = "window went: a window that ends with a paste its harness recorded has it given back"
@@ -41,17 +43,16 @@ runs = ["engine-dispatcher-window-went"]
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
 find = '''
-                let read = self
-                    .settle_gone(delivering, move |delivering| {
-                        // A chief's first message (a handoff, most often) waits for its next window.
-                        if delivering.chief {
-                            this.give_back(delivering, &told)
-                        } else {
-                            let retry = !delivering.launch;
-                            this.settle_failure(delivering, &told, retry)
-                        }
-                    })
-                    .await?;'''
+                self.settle_gone(delivering, move |delivering| {
+                    // A chief's first message (a handoff, most often) waits for its next window.
+                    if delivering.chief {
+                        this.give_back(delivering, &told)
+                    } else {
+                        let retry = !delivering.launch;
+                        this.settle_failure(delivering, &told, retry)
+                    }
+                })
+                .await?;'''
 replace = '''
                 let _ = (&this, &told);
                 // A chief's first message (a handoff, most often) waits for its next window.
@@ -60,8 +61,7 @@ replace = '''
                 } else {
                     let retry = !delivering.launch;
                     self.settle_failure(delivering, &because, retry)?;
-                }
-                let read = false;'''
+                }'''
 
 [[plant]]
 name = "window went: a window that closes as its harness takes a paste its record shows has it given back"
@@ -103,13 +103,23 @@ replace = '''
             }'''
 
 [[plant]]
-name = "window went: a launch's first message and a chief's first messages are settled by their window's record as it goes"
-meant = "gives_the_new_chief_its_handoff_again_when_its_first_window_closes_before_showing_it"
-runs = ["engine-dispatcher"]
+name = "window went: a chief's first message its record shows is given back as its window goes, and given again into the conversation that holds it (the reviews of 2026-10-16)"
+meant = "confirms_a_chiefs_handoff_its_harness_recorded_when_its_window_ends_before_a_look_and_never_gives_it_again"
+runs = ["engine-dispatcher-window-went"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/in_flight.rs"
-find = "        if delivering.launch || delivering.chief {"
+find = "        if delivering.launch && !delivering.chief {"
+replace = "        if delivering.launch || delivering.chief {"
+
+[[plant]]
+name = "window went: a member's launch's first message is settled by its window's record as it goes, not failed with its launch"
+meant = "fails_the_brief_of_a_members_launch_whose_window_goes_whatever_its_record_shows"
+runs = ["engine-dispatcher-window-went"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/in_flight.rs"
+find = "        if delivering.launch && !delivering.chief {"
 replace = "        if false {"
 
 [[plant]]
@@ -122,7 +132,7 @@ file = "crates/cf-engine/src/in_flight.rs"
 find = '''
         let arrived = self.arrived(&message).await?;
         let Some(message) = self.still_delivering(message.id)? else {
-            return Ok(true);
+            return Ok(());
         };'''
 replace = '''
         let arrived = self.arrived(&message).await?;'''
@@ -134,18 +144,8 @@ runs = ["engine-dispatcher-window-went"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
-find = "                        Some(now) if self.still_as_it_went(&record, on)? => now,"
-replace = "                        Some(now) => now,"
-
-[[plant]]
-name = "window went: a chief switched to while the old window's record was read, whose window is not up yet, is taken for the chief that went"
-meant = "a_chiefs_window_that_ends_leaves_the_chief_the_human_switched_to_while_its_record_was_read_whose_window_is_not_up"
-runs = ["engine-dispatcher-window-went"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/in_flight.rs"
-find = "        Ok(self.conversation_on(record.id)? == on)"
-replace = "        Ok(on == on)"
+find = "                    Some(now) if self.still_as_it_went(&record, launches) => now,"
+replace = "                    Some(now) => now,"
 
 [[plant]]
 name = "window went: a window the human opened again while the old one's record was read is taken for the one that went, and its task stalled"
@@ -154,25 +154,46 @@ runs = ["engine-dispatcher-window-went"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/in_flight.rs"
-find = "        if opened || self.forgotten(record) {"
-replace = "        if !opened && self.forgotten(record) {"
+find = "        record.window.borrow().launches == launches && !self.forgotten(record)"
+replace = "        !self.forgotten(record)"
 
 [[plant]]
-name = "window went: a window still prepared, its harness asked, is none to the old window's exit, which pauses the task it is for (the reviews of 2026-10-16)"
-meant = "a_sessions_window_that_ends_leaves_its_task_to_the_window_still_prepared_for_it_when_its_record_is_read"
+name = "window went: a window asked for while the old one's record is read is counted only once its launch begins, and the old window's exit suspends the project the human closed and resumed meanwhile (the reviews of 2026-10-16)"
+meant = "a_chiefs_window_that_ends_leaves_the_project_the_human_closed_and_resumed_while_its_record_was_read"
+runs = ["engine-dispatcher-window-went"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''
+        // ends meanwhile settles nothing more (`still_as_it_went`).
+        record.window.borrow_mut().launches += 1;'''
+replace = '''
+        // ends meanwhile settles nothing more (`still_as_it_went`).'''
+
+[[plant]]
+name = "window went: a launch a pass begins while the old window's record is read is none to the old window's exit, which suspends the project it is for"
+meant = "a_chiefs_window_that_ends_leaves_the_project_to_the_window_a_pass_launches_while_its_record_is_read"
 runs = ["engine-dispatcher-window-went"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
-find = "        record.window.borrow_mut().launching = true;"
-replace = "        record.window.borrow_mut().launching = false;"
+find = '''
+        record.window.borrow_mut().launches += 1;
+        let harness'''
+replace = '''
+        let harness'''
 
 [[plant]]
-name = "window went: the exit a launch settles of its own window, no record read, is taken for one the window moved on from"
-meant = "notices_a_chief_window_that_exits_before_its_open_is_answered"
-runs = ["engine-dispatcher"]
+name = "window went: the exit counts the windows asked for once its record is read, and takes one asked for meanwhile for its own"
+meant = "a_chiefs_window_that_ends_leaves_the_project_the_human_closed_and_resumed_while_its_record_was_read"
+runs = ["engine-dispatcher-window-went"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
-find = "                if !read {"
-replace = "                if false && !read {"
+find = '''
+                    Some(now) if self.still_as_it_went(&record, launches) => now,'''
+replace = '''
+                    Some(now) if self.still_as_it_went(&record, record.window.borrow().launches) => {
+                        let _ = launches;
+                        now
+                    }'''
