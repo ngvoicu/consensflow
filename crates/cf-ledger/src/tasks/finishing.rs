@@ -14,7 +14,7 @@ use serde_json::json;
 use super::{
     carrier_body, delivery_body, own_steps, require_on_board, require_task_state, task_by_id,
 };
-use crate::messages::{fold, leave_pause_notes, tell_sent_back, Dropped};
+use crate::messages::{fold, leave_pause_notes, tell_sent_back, told_waiting, Dropped};
 use crate::model::{
     self, require_active, sql_list, LedgerError, ACTIVE_TASK_STATES, FINISHED_TASK_STATES,
     MAX_BODY, MEMBER_ROLES,
@@ -25,7 +25,11 @@ use crate::store::Store;
 use crate::views::{ParticipantRow, TaskRow};
 
 /// The assignee's answer finishes the task and is queued for whoever asked for
-/// it; the chief's own step is finished by its word (`own_steps`).
+/// it; the chief's own step is finished by its word (`own_steps`). While words
+/// told to its window are on their way to it (`told_waiting`), the answer is to
+/// a task without them and is refused, whoever gives it (Astra's look at round
+/// 4, 2026-10-16: a worker's `cf task done` finished the task before the words
+/// came, and they never did).
 pub(crate) fn record_result(
     store: &mut Store,
     project_id: i64,
@@ -39,6 +43,17 @@ pub(crate) fn record_result(
             return own_steps::finish(store, project_id, &task, body);
         }
         require_task_state(&task, &ACTIVE_TASK_STATES, "record a result for")?;
+        if let Some(assignee) = task.assignee_id {
+            if told_waiting(store, assignee, task.id)? {
+                return Err(LedgerError::refused_with(
+                    "words-on-their-way",
+                    format!(
+                        "T-{number} has words on their way to you: run cf task done again once you have read them"
+                    ),
+                    409,
+                ));
+            }
+        }
         let message_id = queue(
             store,
             project_id,

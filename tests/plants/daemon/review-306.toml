@@ -15,7 +15,10 @@
 #   (`is_told`); a resume keeps the order they were told in (`fold`, `adopt`); words whose last paste
 #   fails while the task is paused are kept for its resume, and nobody hears of a failure
 #   (`kept_for_resume`, the engine's `fail_delivery`; tests `told_kept.rs`, the engine's
-#   `queued_tells`).
+#   `queued_tells`);
+# - B3, Astra's look at round 4: a `cf task done` while told words are on their way to the window is
+#   refused until it has them (`record_result` in `crates/cf-ledger/src/tasks/finishing.rs`; test
+#   `told_edges.rs`).
 #
 # Each plant takes one fix out again. The names begin with `review 306`, so
 # `npm run plants:daemon -- "review 306"` runs them.
@@ -23,6 +26,7 @@
 [run]
 ledger-self-steps = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "self_steps::"]
 ledger-told-kept = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "told_kept::"]
+ledger-told-edges = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "told_edges::"]
 engine-own-steps = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "own_steps::"]
 engine-queued-tells = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "queued_tells::"]
 cf-brief-checks = ["cargo", "test", "--offline", "-p", "cf", "--test", "brief_file_checks"]
@@ -233,3 +237,13 @@ runs = ["engine-queued-tells"]
 file = "crates/cf-engine/src/deliveries.rs"
 find = "        if settled.state != \"failed\" {"
 replace = "        if false && settled.state != \"failed\" {"
+
+[[plant]]
+name = "review 306: a done while told words are on their way finishes the task without them"
+meant = "a_done_while_told_words_are_on_their_way_is_refused_until_the_window_has_them"
+runs = ["ledger-told-edges"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = "            if told_waiting(store, assignee, task.id)? {"
+replace = "            if false && told_waiting(store, assignee, task.id)? {"

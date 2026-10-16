@@ -62,6 +62,57 @@ fn told_words_that_never_reach_the_window_fail_their_task_and_its_answer_is_no_r
 }
 
 #[test]
+fn a_done_while_told_words_are_on_their_way_is_refused_until_the_window_has_them() {
+    let refusal = |task: i64| {
+        format!("T-{task} has words on their way to you: run cf task done again once you have read them")
+    };
+    let mut w = world();
+    let (task, _, brief) = queued(&mut w);
+    w.begin(brief);
+    let told = tell(&mut w, task, "Use the v2 grammar");
+    w.confirm(brief);
+    // Queued for the window, then being pasted.
+    for paste in [false, true] {
+        if paste {
+            w.begin(told.id);
+        }
+        let refused = w
+            .ledger
+            .record_result(w.project, task, "Parser done")
+            .unwrap_err();
+        assert_eq!(refused.code(), Some("words-on-their-way"));
+        assert_eq!(refused.to_string(), refusal(task));
+        assert_eq!(w.state(task), "working", "the task waits for them");
+    }
+    w.confirm(told.id);
+    w.ledger
+        .record_result(w.project, task, "Parser done")
+        .expect("the window has them");
+    assert_eq!(w.state(task), "done");
+
+    // Held for the human.
+    let mut w = gated_world();
+    let (task, _, brief) = queued(&mut w);
+    w.ledger.approve_message(brief, "human").expect("passed on");
+    w.begin(brief);
+    let told = tell(&mut w, task, "Use the v2 grammar");
+    w.confirm(brief);
+    assert_eq!(w.states(&[told.id]), ["gated"]);
+    let refused = w
+        .ledger
+        .record_result(w.project, task, "Parser done")
+        .unwrap_err();
+    assert_eq!(refused.to_string(), refusal(task));
+    w.ledger
+        .approve_message(told.id, "human")
+        .expect("passed on");
+    w.deliver(told.id);
+    w.ledger
+        .record_result(w.project, task, "Parser done")
+        .expect("the window has them");
+}
+
+#[test]
 fn told_words_a_window_took_back_are_kept_for_it_again_and_the_resume_carries_them() {
     let mut w = world();
     let (task, _, brief) = queued(&mut w);

@@ -4,7 +4,8 @@
 //! an answer. While the brief waits for its paste, they ride in it, after the
 //! brief (`carrying`); once the brief is on its way (a launch has begun), they go
 //! in as the window's next message, and what the window answers is its task's
-//! result only once it has had them ([`told_waiting`]). Several go in the order
+//! result only once it has had them ([`told_waiting`]): its `cf task done` is
+//! refused till then. Several go in the order
 //! they were told, whatever order the human passes them on in
 //! ([`behind_held_words`]); words that will never reach the window fail their
 //! task ([`fail_for`]), as a brief that never does fails it, but for words whose
@@ -108,7 +109,8 @@ pub(crate) fn tell_queued(
 
 /// Whether words told to a window about its task are still on their way to it:
 /// queued, held for the human, or being pasted. The window's answer is not the
-/// task's result until they are in.
+/// task's result until they are in, whether read from it or given by its
+/// `cf task done` (`record_result`).
 pub(crate) fn told_waiting(
     store: &Store,
     participant_id: i64,
