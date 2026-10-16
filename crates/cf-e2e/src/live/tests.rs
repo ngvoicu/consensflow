@@ -56,6 +56,81 @@ fn every_live_test_is_ignored_unless_asked_for() {
     assert!(live_files > 0, "no live test file in {}", folder.display());
 }
 
+/// The live tests whose windows run agents of their own, not the models of
+/// [`agents`]: the catalog's agents named (`live_agent.rs`), and the catalog's
+/// image designer (`live_designer.rs`).
+const OWN_AGENTS: [&str; 2] = ["live_agent.rs", "live_designer.rs"];
+
+/// A run that does not begin with `Log::begin` takes a `--models` that no window
+/// could be asked for as far as its first window, and says nowhere what its
+/// harnesses ran on; one of agents of its own that does not begin with
+/// `Log::own_agents` takes a `--models` it never reads without a word.
+#[test]
+fn every_live_run_on_the_shared_models_begins_by_reading_them_and_the_others_do_not() {
+    let folder = crate::checkout::path("crates/cf-e2e/tests");
+    let mut begun = 0;
+    for entry in fs::read_dir(&folder).unwrap() {
+        let file = entry.unwrap().path();
+        let name = file.file_name().unwrap().to_string_lossy().into_owned();
+        if !name.starts_with("live_") || !name.ends_with(".rs") {
+            continue;
+        }
+        let source = fs::read_to_string(&file).unwrap();
+        let live = source.split("#[cfg(test)]").next().unwrap();
+        if OWN_AGENTS.contains(&name.as_str()) {
+            assert!(
+                !live.contains("Log::begin("),
+                "{name} runs agents of its own"
+            );
+            assert!(
+                live.contains("Log::own_agents(") && !live.contains("Log::new("),
+                "{name}: its run does not begin with Log::own_agents, which refuses --models"
+            );
+            continue;
+        }
+        begun += 1;
+        assert!(
+            live.contains("Log::begin("),
+            "{name}: its run does not begin with Log::begin"
+        );
+        assert!(
+            !live.contains("Log::new("),
+            "{name}: a run of it is a Log::new, which reads no --models"
+        );
+    }
+    assert!(begun > 0, "no live test file in {}", folder.display());
+}
+
+#[test]
+fn a_run_of_agents_of_its_own_given_models_says_it_reads_none_and_what_to_ask_instead() {
+    assert_eq!(
+        not_asked_for_models("live agent", "use --agent", None, None),
+        Ok(())
+    );
+    assert_eq!(
+        not_asked_for_models(
+            "live agent",
+            "use --agent",
+            Some("claude=claude-opus-5-5"),
+            None
+        ),
+        Err(
+            "live agent runs agents of its own, each on the model and effort it has, and reads \
+             no --models or --claude-model: --models claude=claude-opus-5-5 would be run on \
+             nothing; use --agent"
+                .to_owned()
+        )
+    );
+    let claude = not_asked_for_models("live designer", "it runs pygmalion", None, Some("x"));
+    assert!(
+        claude.as_ref().is_err_and(|refused| refused
+            .contains("--claude-model x would be run on nothing; it runs pygmalion")),
+        "{claude:?}"
+    );
+    // The run that is given neither begins.
+    assert!(Log::own_agents("live agent", "use --agent").is_ok());
+}
+
 #[test]
 fn a_test_that_is_not_ignored_is_found_wherever_it_is_in_the_file_before_its_unit_tests() {
     let source = "\

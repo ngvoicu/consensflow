@@ -210,8 +210,11 @@ fn carries_the_models_verified_live_on_2026_08_21_newest_of_each_family() {
 fn carries_opencode_zen_only_where_the_account_can_actually_reach_it() {
     // Zen lists 102 models on models.dev and offers 7 through the CLI, because
     // this account has no Zen credential. Only reachable ids belong here, and
-    // both of these were probed. pi has no Zen provider at all, so these rows
-    // are opencode-only by necessity, not by preference.
+    // each of these was probed: Nemotron 3.5 Super VL answered on the Mac and
+    // on zeewin on 2026-10-16, and its `xhigh` is the ceiling Zen's models.dev
+    // entry lists, not a level a run proved (OpenCode validates no variant).
+    // pi has no Zen provider at all, so these rows are opencode-only by
+    // necessity, not by preference.
     let catalog = catalog();
     let mut zen: Vec<&str> = listed(&catalog, Harness::Opencode)
         .iter()
@@ -224,6 +227,7 @@ fn carries_opencode_zen_only_where_the_account_can_actually_reach_it() {
         [
             "opencode/muse-spark-1.3-contributor-free",
             "opencode/nemotron-3-ultra-free",
+            "opencode/nemotron-3.5-super-vl-free",
         ]
     );
     assert_eq!(

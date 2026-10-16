@@ -1,8 +1,10 @@
 import { expect, test } from '@playwright/test'
 
-import { serveUi } from './serve-ui.mjs'
+import { refusedByPolicy, serveUi } from './serve-ui.mjs'
 
 let ui
+/** What the app's policy refused in the test running: nothing the page does is refused. */
+let refused
 
 test.setTimeout(12_000)
 
@@ -11,6 +13,14 @@ test.beforeAll(async () => {
 })
 
 test.afterAll(() => ui?.close())
+
+test.beforeEach(({ page }) => {
+  refused = refusedByPolicy(page)
+})
+
+test.afterEach(() => {
+  expect(refused, "the app's policy refuses nothing the page does").toEqual([])
+})
 
 function updateSnapshot(overrides = {}) {
   return {

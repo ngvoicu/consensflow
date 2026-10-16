@@ -1,0 +1,153 @@
+<!--
+  A SPEC.html as specmint-core-html forges one, from references/html-template.html:
+  the assets at ../assets/, the regions, the tasks' state in data-status.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Checkout Flow — SPEC</title>
+  <link rel="stylesheet" href="../assets/spec-styles.css">
+  <script src="../assets/spec-runtime.js" defer></script>
+  <!-- region:meta -->
+  <script type="application/json" id="spec-meta">{"id":"checkout-flow","title":"Checkout Flow","status":"active","created":"2026-10-06","updated":"2026-10-14","priority":"high","tags":["payments"],"mockup-fidelity":"wireframe"}</script>
+  <!-- endregion:meta -->
+</head>
+<body>
+<div class="page">
+
+  <!-- region:toc -->
+  <nav class="toc" data-toc aria-label="Spec sections">
+    <h4>Sections</h4>
+    <ol>
+      <li><a href="#overview">Overview</a></li>
+      <li><a href="#acceptance">Acceptance Criteria</a></li>
+      <li><a href="#architecture">Architecture</a></li>
+      <li><a href="#phases">Phases &amp; Tasks</a></li>
+      <li><a href="#decisions">Decision Log</a></li>
+    </ol>
+  </nav>
+  <!-- endregion:toc -->
+
+  <main class="content">
+
+    <!-- region:header -->
+    <header class="spec-header" id="spec-header">
+      <div class="spec-header__top">
+        <div>
+          <h1 class="spec-header__title">Checkout Flow</h1>
+          <div class="spec-header__id">checkout-flow</div>
+        </div>
+        <div class="spec-header__chips">
+          <span class="pill pill--in-progress">Active</span>
+        </div>
+      </div>
+      <dl class="spec-header__meta">
+        <div><dt>Created</dt><dd>2026-10-06</dd></div>
+        <div><dt>Updated</dt><dd>2026-10-14</dd></div>
+        <div><dt>Tags</dt><dd><span class="chip">payments</span></dd></div>
+        <div><dt>Mockup fidelity</dt><dd>wireframe</dd></div>
+      </dl>
+      <div class="scorecard">
+        <div class="scorecard__cell"><div class="scorecard__label">Tasks</div><div class="scorecard__value"><span data-progress-target="spec-total">0/0</span></div><div class="scorecard__sub"><span data-progress-target="spec-pct">0%</span> complete</div></div>
+        <div class="scorecard__cell"><div class="scorecard__label">Phases</div><div class="scorecard__value"><span data-progress-target="phases-done">0</span> / <span data-progress-target="phases-total">0</span></div><div class="scorecard__sub">done</div></div>
+        <div class="scorecard__cell"><div class="scorecard__label">Acceptance</div><div class="scorecard__value"><span data-progress-target="ac-done">0</span> / <span data-progress-target="ac-total">0</span></div><div class="scorecard__sub">criteria met</div></div>
+        <div class="scorecard__cell"><div class="scorecard__label">Blockers</div><div class="scorecard__value"><span data-progress-target="blockers">0</span></div><div class="scorecard__sub">open</div></div>
+      </div>
+    </header>
+    <!-- endregion:header -->
+
+    <!-- region:overview -->
+    <section class="section" id="overview">
+      <div class="section__header"><h2 class="section__title">Overview</h2></div>
+      <p>One page from cart to paid: the address, the card and the order's total, with
+        the card handled by the payment provider's own fields.</p>
+    </section>
+    <!-- endregion:overview -->
+
+    <!-- region:acceptance -->
+    <section class="section" id="acceptance">
+      <div class="section__header">
+        <h2 class="section__title">Acceptance Criteria</h2>
+        <span class="pill pill--accent pill--no-dot"><span data-progress-target="ac-done">0</span>/<span data-progress-target="ac-total">0</span></span>
+      </div>
+      <span class="progress progress--strip mb-3" data-progress-bar="ac" aria-hidden="true"></span>
+      <ul class="ac-list">
+        <li class="ac-item" id="ac-1" data-ac="1" data-status="completed">
+          <span class="ac-text">A cart of one item checks out in one page</span>
+        </li>
+        <li class="ac-item" id="ac-2" data-ac="2" data-status="pending">
+          <span class="ac-text">A declined card keeps the address the buyer typed</span>
+        </li>
+      </ul>
+    </section>
+    <!-- endregion:acceptance -->
+
+    <!-- region:architecture -->
+    <section class="section" id="architecture">
+      <div class="section__header"><h2 class="section__title">Architecture</h2></div>
+      <figure class="diagram">
+        <div class="diagram__label">Checkout</div>
+<pre class="mermaid">
+flowchart LR
+  Cart --> Address --> Card --> Paid
+</pre>
+      </figure>
+    </section>
+    <!-- endregion:architecture -->
+
+    <!-- region:phases -->
+    <section class="section" id="phases">
+      <div class="section__header">
+        <h2 class="section__title">Phases &amp; Tasks</h2>
+        <span class="pill pill--accent pill--no-dot"><span data-progress-target="spec-total">0/0</span> tasks</span>
+      </div>
+      <div class="phases">
+
+        <details class="phase" open data-phase="1" data-status="in-progress">
+          <summary class="phase__header">
+            <span class="phase__index">Phase 1</span>
+            <h3 class="phase__title">The page</h3>
+            <span class="pill pill--in-progress">In progress</span>
+            <span class="phase__progress"><span data-progress-target="phase-1-total">0/0</span></span>
+          </summary>
+          <div class="phase__body">
+            <span class="progress progress--strip mb-3" data-progress-bar="phase-1" aria-hidden="true"></span>
+            <ul class="task-list">
+              <li class="task" id="task-CHK-01" data-task="CHK-01" data-status="completed">
+                <span class="task__code">CHK-01</span>
+                <span class="task__text">The cart summary in <code>src/checkout/Summary.tsx</code></span>
+              </li>
+              <li class="task" id="task-CHK-02" data-task="CHK-02" data-status="completed">
+                <span class="task__code">CHK-02</span>
+                <span class="task__text">The address form</span>
+              </li>
+              <li class="task" id="task-CHK-03" data-task="CHK-03" data-status="pending">
+                <span class="task__code">CHK-03</span>
+                <span class="task__text">The provider's card fields</span>
+              </li>
+            </ul>
+          </div>
+        </details>
+
+      </div>
+    </section>
+    <!-- endregion:phases -->
+
+    <!-- region:decisions -->
+    <section class="section" id="decisions">
+      <div class="section__header"><h2 class="section__title">Decision Log</h2></div>
+      <table class="log-table">
+        <thead><tr><th>Date</th><th>Decision</th><th>Rationale</th></tr></thead>
+        <tbody>
+          <tr><td class="log-table__date">2026-10-07</td><td>One page, not three steps</td><td>The interview: buyers left at step two</td></tr>
+        </tbody>
+      </table>
+    </section>
+    <!-- endregion:decisions -->
+
+  </main>
+</div>
+</body>
+</html>

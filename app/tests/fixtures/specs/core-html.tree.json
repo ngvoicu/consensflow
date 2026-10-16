@@ -1,0 +1,49 @@
+[
+  {
+    "name": "assets",
+    "path": "assets",
+    "entries": [
+      {
+        "name": "spec-runtime.js",
+        "path": "assets/spec-runtime.js",
+        "size": 35527
+      },
+      {
+        "name": "spec-styles.css",
+        "path": "assets/spec-styles.css",
+        "size": 51709
+      }
+    ]
+  },
+  {
+    "name": "checkout-flow",
+    "path": "checkout-flow",
+    "entries": [
+      {
+        "name": "SPEC.html",
+        "path": "checkout-flow/SPEC.html",
+        "size": 6964
+      },
+      {
+        "name": "interview-01.md",
+        "path": "checkout-flow/interview-01.md",
+        "size": 90
+      },
+      {
+        "name": "mockup-cart.html",
+        "path": "checkout-flow/mockup-cart.html",
+        "size": 428
+      },
+      {
+        "name": "research-01.md",
+        "path": "checkout-flow/research-01.md",
+        "size": 143
+      }
+    ]
+  },
+  {
+    "name": "registry.md",
+    "path": "registry.md",
+    "size": 198
+  }
+]

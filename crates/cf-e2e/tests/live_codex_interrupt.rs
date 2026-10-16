@@ -8,8 +8,9 @@
 //! answer whose turn has already ended: it learns that from `turn/completed` or an
 //! idle `thread/status/changed` for the question's thread (the receipt and stop
 //! design, §2.7). Without either, an answer given after the human's own interrupt
-//! would be taken and lost. This starts the installed Codex's app-server on a cheap
-//! model, with the question tool on as a member's window has it, asks for a
+//! would be taken and lost. This starts the installed Codex's app-server on the
+//! run's model of Codex (its cheap one, unless `--models codex=…` names another),
+//! with the question tool on as a member's window has it, asks for a
 //! question, interrupts the turn once it arrives, and says what Codex sent in the
 //! next 20 seconds: the turn's end and its status, the thread's status, and whether
 //! the pending question was resolved (`serverRequest/resolved`). The thread is
@@ -140,17 +141,24 @@ fn say(said: &Said, interrupted_at: Duration) -> Account {
     case
 }
 
-/// The `app-server` Codex is started as: the question tool on, the cheap model,
-/// and every MCP server of the human's shut out.
-fn app_server_words(codex: &str, model: &str, isolation: Vec<String>) -> Vec<String> {
+/// The `app-server` Codex is started as: the question tool on, the run's model of
+/// Codex ([`agents::model`]) and its effort where it has one, as a window is
+/// given it, and every MCP server of the human's shut out.
+fn app_server_words(codex: &str, model: &agents::Model, isolation: Vec<String>) -> Vec<String> {
     let mut words = vec![codex.to_owned(), "app-server".to_owned()];
     words.extend(QUESTION_TOOL.map(str::to_owned));
     words.extend([
         "-c".to_owned(),
         "suppress_unstable_features_warning=true".to_owned(),
         "-c".to_owned(),
-        format!("model={}", Value::String(model.to_owned())),
+        format!("model={}", Value::String(model.name.clone())),
     ]);
+    if let Some(effort) = &model.effort {
+        words.extend([
+            "-c".to_owned(),
+            format!("model_reasoning_effort={}", Value::String(effort.clone())),
+        ]);
+    }
     words.extend(isolation);
     words
 }
@@ -169,11 +177,12 @@ fn never_asked(version: &str, model: &str, within: Duration) -> Error {
 #[test]
 #[ignore = "opt-in: spends the machine's quota on a Codex turn; cargo xtask live codex-interrupt (npm run live:codex-interrupt)"]
 fn an_interrupted_question_ends_the_turn_or_idles_the_thread_in_what_codex_says() -> Result {
-    let log = Log::new("live codex-interrupt");
+    let log = Log::begin("live codex-interrupt")?;
     ask::prepare()?;
     let install = cf_e2e::live::codex()?;
     let version = install.version();
-    let model = agents::cheap(Harness::Codex).0;
+    let asked = agents::model(Harness::Codex);
+    let model = asked.name.as_str();
     log.say(format!(
         "codex is {} ({version}); its login is read from {}",
         install.command().display(),
@@ -197,13 +206,14 @@ fn an_interrupted_question_ends_the_turn_or_idles_the_thread_in_what_codex_says(
         .filter_map(|name| Some((name.to_owned(), own_var(name)?)))
         .collect();
     let argv = ask::program(
-        &app_server_words(&install.command().to_string_lossy(), model, flags),
+        &app_server_words(&install.command().to_string_lossy(), &asked, flags),
         &env,
     )?;
     let (program, args) = argv
         .split_first()
         .ok_or_else(|| Error::Daemon("Codex's app-server has no command line".to_owned()))?;
     let server = AppServer::start(Run::new(program).args(args).cwd(&folder).inheriting_env())?;
+    log.launched(&agents::agent_on(&asked));
 
     server.request(
         "initialize",
@@ -275,7 +285,7 @@ fn an_interrupted_question_ends_the_turn_or_idles_the_thread_in_what_codex_says(
         case.held(),
         "Codex said that the turn ended or that the thread went idle",
     )];
-    report::verdict(&checks)
+    report::conclude(&log, "what the check came to", &checks)
 }
 
 #[cfg(test)]
@@ -419,7 +429,7 @@ mod tests {
     ) {
         let words = app_server_words(
             "/bin/codex",
-            "gpt-5.6-luna",
+            &agents::model(Harness::Codex),
             vec!["-c".to_owned(), "mcp_servers.a.enabled=false".to_owned()],
         );
         assert_eq!(
@@ -435,6 +445,20 @@ mod tests {
                 "model=\"gpt-5.6-luna\"",
                 "-c",
                 "mcp_servers.a.enabled=false",
+            ]
+        );
+    }
+
+    #[test]
+    fn the_app_server_runs_on_the_model_and_the_effort_the_run_names_for_codex() {
+        let models = agents::parse(Some("codex=gpt-6.1-sol:high"), None).unwrap();
+        let words = app_server_words("/bin/codex", models.of(Harness::Codex), Vec::new());
+        assert_eq!(
+            words[7..],
+            [
+                "model=\"gpt-6.1-sol\"",
+                "-c",
+                "model_reasoning_effort=\"high\""
             ]
         );
     }
