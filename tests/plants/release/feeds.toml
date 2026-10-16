@@ -8,7 +8,7 @@
 
 [[plant]]
 name = "feeds: the bridge is taken for a later release"
-meant = "moves_the_bridge_to_the_new_feed_and_the_old_feed"
+meant = "moves_the_bridge_to_the_new_feed_and_the_old_feed_of_the_channel_in_use_the_new_first"
 runs = ["feeds"]
 
 [[plant.edit]]
@@ -33,7 +33,7 @@ replace = "if order == Ordering::Less && false {"
 
 [[plant]]
 name = "feeds: a later release moves the old feeds too"
-meant = "moves_a_later_release_to_the_new_feeds_only"
+meant = "moves_a_later_release_to_the_new_feeds_only_no_old_feed_is_so_much_as_named"
 runs = ["feeds"]
 
 [[plant.edit]]
@@ -67,7 +67,7 @@ replace = "                let _ = refusal;"
 
 [[plant]]
 name = "feeds: the bridge's archive is asked to be served, not to be the one published"
-meant = "refuses_a_bridge_archive_that_serves_junk"
+meant = "refuses_a_bridge_archive_that_serves_junk_though_its_address_answers"
 runs = ["feeds"]
 
 [[plant.edit]]
@@ -77,7 +77,7 @@ replace = "Ok(got) if got != *wanted && false => problems.push(format!("
 
 [[plant]]
 name = "feeds: the bridge's Windows files are not asked for"
-meant = "refuses_the_bridges_windows_installer_or_portable_that_is_gone"
+meant = "refuses_the_bridges_windows_installer_or_portable_that_is_gone_or_serves_junk"
 runs = ["feeds"]
 
 [[plant.edit]]
@@ -87,7 +87,7 @@ replace = "vec![&self.archive]"
 
 [[plant]]
 name = "feeds: the bridge is not looked for after the release is published"
-meant = "finds_the_bridge_not_carried_to_the_old_feed"
+meant = "finds_the_bridge_not_carried_to_the_old_feed_it_still_serves_the_release_before"
 runs = ["feeds"]
 
 [[plant.edit]]
@@ -107,7 +107,7 @@ replace = "Ok(Role::Later) => Vec::new(),"
 
 [[plant]]
 name = "feeds: only the archive of the release is held to the file built"
-meant = "finds_a_file_of_the_release_that_does_not_download_as_the_one_built"
+meant = "finds_a_file_of_the_release_that_does_not_download_as_the_one_built_whichever_it_is"
 runs = ["feeds"]
 
 [[plant.edit]]
@@ -135,7 +135,7 @@ replace = '''
 
 [[plant]]
 name = "feeds: the old feed of a channel not in use may not be absent"
-meant = "lets_the_old_feed_of_a_channel_not_in_use_be_absent"
+meant = "lets_the_old_feed_of_a_channel_not_in_use_be_absent_and_finds_it_serving_this_release"
 runs = ["feeds"]
 
 [[plant.edit]]
@@ -155,7 +155,7 @@ replace = "a.cmp(b)"
 
 [[plant]]
 name = "feeds: the bridge's latest.json is not asked to name the bridge"
-meant = "refuses_a_bridge_whose_latest_json_names_another_release"
+meant = "refuses_a_bridge_whose_latest_json_names_another_release_or_an_archive_elsewhere"
 runs = ["feeds"]
 
 [[plant.edit]]
@@ -181,7 +181,7 @@ replace = "if false {"
 
 [[plant]]
 name = "feeds: a missing SHA256SUMS is let pass"
-meant = "refuses_where_sha256sums_is_gone"
+meant = "refuses_where_sha256sums_is_gone_or_lists_no_file_the_old_apps_need"
 runs = ["feeds"]
 
 [[plant.edit]]
@@ -199,7 +199,7 @@ replace = '''
 # No feed is moved backward: the comparison of what a feed names with the release run, planted wrong.
 [[plant]]
 name = "feeds: no feed is ever taken for one that names a later release (asked of the rule)"
-meant = "says_which_release_a_feed_names_where_that_one_is_after_a_given_release"
+meant = "says_which_release_a_feed_names_where_that_one_is_after_a_given_release_and_none_where_it_is_not"
 runs = ["feeds"]
 
 [[plant.edit]]
@@ -209,7 +209,7 @@ replace = "named_release(body).filter(|named| named > version && false)"
 
 [[plant]]
 name = "feeds: no feed is ever taken for one that names a later release (a run again, end to end)"
-meant = "leaves_feed_alpha_at_alpha_82_when_alpha_81"
+meant = "leaves_feed_alpha_at_alpha_82_when_alpha_81s_failed_publish_is_run_again_and_finishes_what_is_left"
 runs = ["publish"]
 
 [[plant.edit]]
@@ -219,7 +219,7 @@ replace = "named_release(body).filter(|named| named > version && false)"
 
 [[plant]]
 name = "feeds: every feed that names a release is taken for one that names a later release (asked of the rule)"
-meant = "says_which_release_a_feed_names_where_that_one_is_after_a_given_release"
+meant = "says_which_release_a_feed_names_where_that_one_is_after_a_given_release_and_none_where_it_is_not"
 runs = ["feeds"]
 
 [[plant.edit]]
@@ -229,7 +229,7 @@ replace = "named_release(body).filter(|named| named > version || true)"
 
 [[plant]]
 name = "feeds: every feed that names a release is taken for one that names a later release (a run again, end to end)"
-meant = "leaves_feed_alpha_at_alpha_82_when_alpha_81"
+meant = "leaves_feed_alpha_at_alpha_82_when_alpha_81s_failed_publish_is_run_again_and_finishes_what_is_left"
 runs = ["publish"]
 
 [[plant.edit]]
@@ -239,7 +239,7 @@ replace = "named_release(body).filter(|named| named > version || true)"
 
 [[plant]]
 name = "feeds: the comparison is reversed: an earlier release is taken for a later one (asked of the rule)"
-meant = "says_which_release_a_feed_names_where_that_one_is_after_a_given_release"
+meant = "says_which_release_a_feed_names_where_that_one_is_after_a_given_release_and_none_where_it_is_not"
 runs = ["feeds"]
 
 [[plant.edit]]
@@ -249,7 +249,7 @@ replace = "named_release(body).filter(|named| named < version)"
 
 [[plant]]
 name = "feeds: the comparison is reversed: an earlier release is taken for a later one (a run again, end to end)"
-meant = "leaves_feed_alpha_at_alpha_82_when_alpha_81"
+meant = "leaves_feed_alpha_at_alpha_82_when_alpha_81s_failed_publish_is_run_again_and_finishes_what_is_left"
 runs = ["publish"]
 
 [[plant.edit]]
@@ -259,7 +259,7 @@ replace = "named_release(body).filter(|named| named < version)"
 
 [[plant]]
 name = "feeds: the very same release is taken for a later one (asked of the rule)"
-meant = "says_which_release_a_feed_names_where_that_one_is_after_a_given_release"
+meant = "says_which_release_a_feed_names_where_that_one_is_after_a_given_release_and_none_where_it_is_not"
 runs = ["feeds"]
 
 [[plant.edit]]
@@ -269,7 +269,7 @@ replace = "named_release(body).filter(|named| named >= version)"
 
 [[plant]]
 name = "feeds: the very same release is taken for a later one (a run again, end to end)"
-meant = "for_equal_is_not_later"
+meant = "moves_a_feed_that_names_this_very_release_with_other_bytes_for_equal_is_not_later"
 runs = ["publish"]
 
 [[plant.edit]]
@@ -279,7 +279,7 @@ replace = "named_release(body).filter(|named| named >= version)"
 
 [[plant]]
 name = "feeds: a version that is not a semantic one is compared all the same"
-meant = "moves_a_feed_whose_latest_json_names_a_version_that_is_not_a_semantic_one"
+meant = "moves_a_feed_whose_latest_json_names_a_version_that_is_not_a_semantic_one_it_names_no_release"
 runs = ["publish"]
 
 [[plant.edit]]
@@ -289,7 +289,7 @@ replace = 'Version::parse(document.get("version")?.as_str()?).ok().or_else(|| Ve
 
 [[plant]]
 name = "feeds: what is not a latest.json is taken for one that names a later release"
-meant = "moves_a_feed_whose_latest_json_is_not_a_latest_json"
+meant = "moves_a_feed_whose_latest_json_is_not_a_latest_json_it_names_no_release"
 runs = ["publish"]
 
 [[plant.edit]]
@@ -300,7 +300,7 @@ replace = 'let document: Value = serde_json::from_slice(body).unwrap_or_else(|_|
 # What the check accepts of a feed that a run left alone.
 [[plant]]
 name = "feeds: the check does not accept a feed left at a later release"
-meant = "accepts_a_new_feed_that_names_a_later_release"
+meant = "accepts_a_new_feed_that_names_a_later_release_which_a_run_of_this_release_left_alone_and_does_not_wait_for_it"
 runs = ["feeds"]
 
 [[plant.edit]]
@@ -331,7 +331,7 @@ replace = "Ok(body) => body,"
 # What the check holds a feed to that the publisher left a record of: that it did not go back.
 [[plant]]
 name = "feeds: the check does not look at what a feed named before (asked of the check)"
-meant = "an_earlier_release_than_it_did_when_the_publisher_read_it"
+meant = "does_not_approve_a_feed_that_names_an_earlier_release_than_it_did_when_the_publisher_read_it"
 runs = ["feeds"]
 
 [[plant.edit]]
@@ -341,7 +341,7 @@ replace = "if false {"
 
 [[plant]]
 name = "feeds: the check does not look at what a feed named before (a run again, end to end)"
-meant = "leaves_feed_alpha_at_alpha_82_when_alpha_81"
+meant = "leaves_feed_alpha_at_alpha_82_when_alpha_81s_failed_publish_is_run_again_and_finishes_what_is_left"
 runs = ["publish"]
 
 [[plant.edit]]
@@ -351,7 +351,7 @@ replace = "if false {"
 
 [[plant]]
 name = "feeds: a feed that is as it was is taken for one that went backward (asked of the check)"
-meant = "an_earlier_release_than_it_did_when_the_publisher_read_it"
+meant = "does_not_approve_a_feed_that_names_an_earlier_release_than_it_did_when_the_publisher_read_it"
 runs = ["feeds"]
 
 [[plant.edit]]
@@ -361,7 +361,7 @@ replace = "if now <= *was {"
 
 [[plant]]
 name = "feeds: a feed that is as it was is taken for one that went backward (a run again, end to end)"
-meant = "leaves_feed_alpha_at_alpha_82_when_alpha_81"
+meant = "leaves_feed_alpha_at_alpha_82_when_alpha_81s_failed_publish_is_run_again_and_finishes_what_is_left"
 runs = ["publish"]
 
 [[plant.edit]]
@@ -371,7 +371,7 @@ replace = "if now <= *was {"
 
 [[plant]]
 name = "feeds: a feed that moved forward is taken for one that went backward (asked of the check)"
-meant = "an_earlier_release_than_it_did_when_the_publisher_read_it"
+meant = "does_not_approve_a_feed_that_names_an_earlier_release_than_it_did_when_the_publisher_read_it"
 runs = ["feeds"]
 
 [[plant.edit]]
@@ -381,7 +381,7 @@ replace = "if now > *was {"
 
 [[plant]]
 name = "feeds: a feed that moved forward is taken for one that went backward (a run again, end to end)"
-meant = "leaves_feed_alpha_at_alpha_82_when_alpha_81"
+meant = "leaves_feed_alpha_at_alpha_82_when_alpha_81s_failed_publish_is_run_again_and_finishes_what_is_left"
 runs = ["publish"]
 
 [[plant.edit]]
@@ -391,7 +391,7 @@ replace = "if now > *was {"
 
 [[plant]]
 name = "feeds: a record is trusted whatever it holds"
-meant = "an_earlier_release_than_it_did_when_the_publisher_read_it"
+meant = "does_not_approve_a_feed_that_names_an_earlier_release_than_it_did_when_the_publisher_read_it"
 runs = ["feeds"]
 
 [[plant.edit]]
@@ -401,7 +401,7 @@ replace = '.filter_map(|(feed, named)| Some((feed, Version::parse(named.as_str()
 
 [[plant]]
 name = "feeds: a feed that names a later release is waited for as if it were served stale"
-meant = "and_does_not_wait_for_it"
+meant = "accepts_a_new_feed_that_names_a_later_release_which_a_run_of_this_release_left_alone_and_does_not_wait_for_it"
 runs = ["feeds"]
 
 [[plant.edit]]

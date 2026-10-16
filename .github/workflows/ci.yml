@@ -82,6 +82,9 @@ jobs:
       # minutes on Windows' (2026-10-06), the step 9 to 15. The black-box suites
       # of crates/cf-e2e ran above, each with a limit of its own; what is left
       # of that crate is its support and the stand-in agents' own tests.
+      # nextest runs a plant's `cargo test` (tools/xtask's plants), and the plants'
+      # own tests run it: built once, then the cache's (~/.cargo/bin).
+      - run: cargo install cargo-nextest --version 0.9.148 --locked
       - run: cargo test --workspace --exclude app --exclude cf-e2e
         timeout-minutes: 25
       - run: cargo test -p cf-e2e --lib --bins

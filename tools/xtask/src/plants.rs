@@ -12,15 +12,20 @@
 //! ```
 //!
 //! A plant that stops applying (the text it replaces was changed) is an error to
-//! mend, not a pass. One that does not compile, and one that makes a run wait for
-//! ever (a run is ended at the time its family gives it), count as missed. The
-//! status is 1 if any plant is missed or does not apply, and 130 if the run was
-//! stopped. A word that no plant's name holds is refused: a filter that picks
-//! nothing would otherwise pass.
+//! mend, not a pass. A plant is caught only where the test it was meant for fails
+//! with it, as the run's reporter writes it to a report of its own, never as the
+//! run prints it; everything else counts as not caught, and says why (the driver
+//! tells the verdicts). The status is 1 if any plant is not caught or does not
+//! apply, and 130 if the run was stopped. A word that no plant's name holds is
+//! refused: a filter that picks nothing would otherwise pass. A `cargo test` of a
+//! plant's runs is run under nextest (`cargo install cargo-nextest --locked --root
+//! app/src-tauri/target/tools`); `cargo xtask plants-log` is cargo's target runner
+//! while a run is a suite of xtask's.
 //!
 //! The modules: [`kit`] (what a plant is, and the data), [`driver`] (planting,
-//! putting back, the trial of one plant), [`runs`] (the commands, and what they
-//! wrote, and what ends a run early: `crate::stops`) and [`report`] (what is said).
+//! putting back, the trial of one plant), [`runs`] (the commands, the reports their
+//! tests write, and what ends a run early: `crate::stops`) and [`report`] (what is
+//! said).
 
 mod driver;
 mod kit;
@@ -40,12 +45,20 @@ use runs::{Execute, Runner};
 const ABOUT: &str = "Plant the bugs of a family one at a time and check that a test fails for each one (a family of tests/plants)";
 const USAGE: &str = "<family> [words in a plant's name…] [--check]";
 
-pub const COMMANDS: &[Command] = &[Command {
-    words: &["plants"],
-    about: ABOUT,
-    usage: USAGE,
-    run: Run::Native(run),
-}];
+pub const COMMANDS: &[Command] = &[
+    Command {
+        words: &["plants"],
+        about: ABOUT,
+        usage: USAGE,
+        run: Run::Native(run),
+    },
+    Command {
+        words: &["plants-log"],
+        about: "Run a test binary with libtest logging each test's result to a file (cargo's target runner while a plant's run is a suite of xtask's)",
+        usage: "<folder> <test binary> [its words…]",
+        run: Run::Native(runs::log),
+    },
+];
 
 /// Why the plants could not be read, planted or put back.
 #[derive(Debug, thiserror::Error)]

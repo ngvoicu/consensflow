@@ -2,14 +2,14 @@
 //! (`Judged`), and how its command does without the plant (`CleanRuns`, which
 //! remembers how often a command passed, and one that failed twice).
 //!
-//! Where the run's failure names the test the plant was meant for (`cargo test`,
-//! `node --test` and Playwright name the tests that failed), the plant is caught
-//! once its command passes without it, once; where it names only other tests, it
-//! is MISSED-BY-MEANT. Where it names no test (a command that says no more than its
-//! status, a test binary that died), nothing can be attributed: the run is run so
-//! again and must fail again, and the command must pass twice without the plant.
-//! A command that fails without the plant is always run again once before it is
-//! taken to fail; one that passes once and fails once is unstable.
+//! Where the run's report names the test the plant was meant for among those that
+//! failed, the plant is caught once its command passes without it, once; where it
+//! names only other tests, it is MISSED-BY-MEANT. Where it names no test (a command
+//! that says no more than its status, a test binary that died, a run with no
+//! report), nothing can be attributed: the run is run so again and must fail again,
+//! and the command must pass twice without the plant. A command that fails without
+//! the plant is always run again once before it is taken to fail; one that passes
+//! once and fails once is unstable.
 
 use std::collections::HashMap;
 
@@ -21,21 +21,21 @@ use super::super::Error;
 pub(super) enum Judged {
     Passed(Ran),
     Caught(Ran, Vec<String>),
-    /// Whatever else ends the trial: it did not build, a module of it could not be
-    /// loaded, it did not end.
+    /// Whatever else ends the trial: it was ended (out of time, or for writing more
+    /// than a run may), it did not build, no test of it could see the plant.
     Not(Verdict, Ran),
 }
 
 impl Judged {
     pub(super) fn of(ran: Ran) -> Self {
+        if ran.hung || ran.overflowed {
+            return Self::Not(Verdict::Hung, ran);
+        }
         if !ran.compiled() {
             return Self::Not(Verdict::DoesNotCompile, ran);
         }
         if ran.broken().is_some() {
             return Self::Not(Verdict::Broken, ran);
-        }
-        if ran.hung {
-            return Self::Not(Verdict::Hung, ran);
         }
         let caught = ran.caught();
         if caught.is_empty() {
@@ -51,7 +51,8 @@ impl Judged {
             Self::Passed(_) => "passed",
             Self::Caught(..) => "failed",
             Self::Not(Verdict::DoesNotCompile, _) => "did not build",
-            Self::Not(Verdict::Broken, _) => "could not load a module of its own",
+            Self::Not(Verdict::Broken, _) => "ran no test that could see it",
+            Self::Not(_, ran) if ran.overflowed => "wrote more than a run may",
             Self::Not(..) => "did not end",
         }
     }

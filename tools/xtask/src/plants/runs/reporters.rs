@@ -1,239 +1,198 @@
-//! What each reporter says of a run, read from its own lines of results alone: what
-//! a test prints may say anything, a result line of another test or reporter too.
+//! Who reports a run's tests, how its command is run so that the report lands in a
+//! file of the run's own, and what that file says (`results`): attribution reads it
+//! alone, never what the run printed.
 //!
-//! - libtest (`cargo test`, and the `cargo xtask` suites that run it): the list each
-//!   test binary ends with, `failures:`, each failed test indented by four, a blank
-//!   line and `test result: FAILED.`. Its `test <name> ... FAILED` as each test ends
-//!   is not read: with `--nocapture` it is among what the tests print, and what a
-//!   failed test printed is shown before that list. (Its own structured report,
-//!   `--format json`, wants `-Z unstable-options`, which a stable toolchain refuses.)
-//! - `node --test`: its spec report's list of the failed tests at its end, after
-//!   `✖ failing tests:`, each `test at <where>` and then `✖ <name> (<time>)`, which
-//!   what a test printed never follows; its TAP report's result lines,
-//!   `not ok <n> - <name>` at any depth, out of the `---` … `...` blocks that hold
-//!   why each failed, what a test printed being a `#` comment there. How many tests
-//!   it ran is its summary's last count (`ℹ tests <n>`, `# tests <n>`), where a test
-//!   file that failed whole is counted as one.
-//! - Playwright: the last list of its summary, under `<n> failed`.
+//! - `cargo test …` runs under nextest (`cargo nextest run`, the same arguments),
+//!   which runs each test in a process of its own and writes a JUnit report: no
+//!   test's output can pass for another's result. Its exit status says that the
+//!   build failed (101), or that no test was there to run (4).
+//! - `cargo xtask …` runs a suite of xtask's, which starts `cargo test` itself:
+//!   cargo starts each test binary through `cargo xtask plants-log` (its target
+//!   runner), which asks libtest to write its log (`--logfile`) for the binary.
+//!   libtest warns that `--logfile` is deprecated: once it is gone, these runs say
+//!   nothing of their tests, and their failures are no catch by a test's name.
+//! - `node --test …` writes a JUnit report beside the report it prints.
+//! - Playwright's CLI writes its JSON report beside the list it prints.
+//! - Anything else says no more than its exit status.
 
-/// Who reports a run's tests.
+use std::ffi::OsString;
+use std::fs;
+use std::path::{Path, PathBuf};
+
+use super::results::{self, Results};
+
+/// The profile of nextest the plants' runs use, which the run's own config file says.
+const NEXTEST_PROFILE: &str = "plants";
+
+/// Who reports the tests of a command.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Reporter {
+    Nextest,
     Libtest,
     Node,
     Playwright,
+    Status,
 }
 
-/// A test a reporter says failed, and where it is written, where the reporter says so.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct Failed {
-    pub name: String,
-    pub location: Option<String>,
+/// How a command is started for its report to land in the run's folder.
+pub(super) struct Setup {
+    /// Its words, the program first: `cargo-nextest` for nextest, the command's own else.
+    pub words: Vec<String>,
+    /// What its environment holds more than the runner's.
+    pub env: Vec<(OsString, OsString)>,
 }
 
 impl Reporter {
-    /// Who reports the tests of `command`: Playwright where its program is what
-    /// `node` runs, Node where `node` runs anything else (`--test`), libtest else.
+    /// Who reports the tests of `command`.
     pub(super) fn of(command: &[String]) -> Self {
         match command {
+            [cargo, test, ..] if cargo == "cargo" && test == "test" => Self::Nextest,
+            [cargo, xtask, ..] if cargo == "cargo" && xtask == "xtask" => Self::Libtest,
             [node, rest @ ..] if node == "node" || node.ends_with("node.exe") => {
                 if rest.iter().any(|word| word.contains("playwright")) {
                     Self::Playwright
-                } else {
+                } else if rest.iter().any(|word| word == "--test") {
                     Self::Node
+                } else {
+                    Self::Status
                 }
             }
-            _ => Self::Libtest,
+            _ => Self::Status,
         }
     }
 
-    /// The tests `output` says failed, each once, in the order it says them.
-    pub(super) fn failed(self, output: &str) -> Vec<Failed> {
-        let failed = match self {
-            Self::Libtest => libtest(output),
-            Self::Node if output.starts_with("TAP version") => tap(output),
-            Self::Node => spec(output),
-            Self::Playwright => playwright(output),
+    /// How `command` is started for its report to land in `dir`: nextest is
+    /// `nextest`, and cargo's target runner `runner`, where they are needed.
+    pub(super) fn setup(
+        self,
+        command: &[String],
+        dir: &Path,
+        nextest: &str,
+        runner: Option<(&str, &str)>,
+    ) -> Result<Setup, std::io::Error> {
+        let words = |words: Vec<String>| Setup {
+            words,
+            env: Vec::new(),
         };
-        let mut once: Vec<Failed> = Vec::new();
-        for test in failed {
-            if !once.iter().any(|seen| seen.name == test.name) {
-                once.push(test);
+        Ok(match self {
+            Self::Nextest => {
+                let config = dir.join("nextest.toml");
+                fs::write(&config, nextest_config(dir))?;
+                words(
+                    [
+                        nextest.to_owned(),
+                        "nextest".to_owned(),
+                        "run".to_owned(),
+                        "--profile".to_owned(),
+                        NEXTEST_PROFILE.to_owned(),
+                        "--config-file".to_owned(),
+                        config.display().to_string(),
+                    ]
+                    .into_iter()
+                    .chain(command.iter().skip(2).cloned())
+                    .collect(),
+                )
             }
-        }
-        once
-    }
-}
-
-/// How many tests Node says it ran, by the last count of its summary.
-pub(super) fn node_counted(output: &str) -> Option<usize> {
-    output.lines().rev().find_map(|line| {
-        line.strip_prefix("ℹ tests ")
-            .or_else(|| line.strip_prefix("# tests "))
-            .and_then(|count| count.trim().parse().ok())
-    })
-}
-
-/// The tests of each list libtest ends a test binary's run with.
-fn libtest(output: &str) -> Vec<Failed> {
-    let lines: Vec<&str> = output.lines().collect();
-    let mut failed = Vec::new();
-    for (at, line) in lines.iter().enumerate() {
-        if !line.starts_with("test result: FAILED.") {
-            continue;
-        }
-        let Some(blank) = at.checked_sub(1).filter(|&blank| lines[blank].is_empty()) else {
-            continue;
-        };
-        let mut first = blank;
-        while first > 0 && listed(lines[first - 1]).is_some() {
-            first -= 1;
-        }
-        if first < blank && first > 0 && lines[first - 1] == "failures:" {
-            failed.extend(lines[first..blank].iter().filter_map(|line| {
-                listed(line).map(|name| Failed {
-                    name: name.to_owned(),
-                    location: None,
-                })
-            }));
-        }
-    }
-    failed
-}
-
-/// `    <name>`, a test of libtest's list.
-fn listed(line: &str) -> Option<&str> {
-    line.strip_prefix("    ")
-        .filter(|name| !name.is_empty() && !name.starts_with(' '))
-}
-
-/// The tests of the list Node's spec report ends with.
-fn spec(output: &str) -> Vec<Failed> {
-    let lines: Vec<&str> = output.lines().collect();
-    let Some(heading) = lines.iter().rposition(|line| *line == "✖ failing tests:") else {
-        return Vec::new();
-    };
-    let mut failed = Vec::new();
-    let mut location = None;
-    for line in &lines[heading + 1..] {
-        if let Some(at) = line.strip_prefix("test at ") {
-            location = Some(at.to_owned());
-        } else if let Some(name) = location.as_ref().and_then(|_| timed(line)) {
-            failed.push(Failed {
-                name: name.to_owned(),
-                location: location.take(),
-            });
-        }
-    }
-    failed
-}
-
-/// `✖ <name> (<n>ms)`, as Node's spec report says a test failed.
-fn timed(line: &str) -> Option<&str> {
-    let rest = line.strip_prefix("✖ ")?.strip_suffix("ms)")?;
-    let open = rest.rfind(" (")?;
-    let time = &rest[open + 2..];
-    let number = time.starts_with(|c: char| c.is_ascii_digit())
-        && time.chars().all(|c| c.is_ascii_digit() || c == '.');
-    (number && open > 0).then(|| &rest[..open])
-}
-
-/// The result lines of Node's TAP report that say a test failed, at any depth, with
-/// where each is written as the block under it says.
-fn tap(output: &str) -> Vec<Failed> {
-    let mut failed: Vec<Failed> = Vec::new();
-    // The depth of the `---` of a block open now, and whether it is a failure's.
-    let mut block: Option<(usize, bool)> = None;
-    let mut last_failed = false;
-    for line in output.lines() {
-        let depth = line.len() - line.trim_start_matches(' ').len();
-        let text = &line[depth..];
-        if let Some((open, of_failure)) = block {
-            if depth == open && text == "..." {
-                block = None;
-            } else if let (true, true, Some(at)) =
-                (of_failure, depth == open, text.strip_prefix("location: "))
-            {
-                if let Some(test) = failed.last_mut() {
-                    test.location = Some(at.trim_matches('\'').to_owned());
-                }
-            }
-            continue;
-        }
-        if text == "---" {
-            block = Some((depth, last_failed));
-            continue;
-        }
-        last_failed = false;
-        if depth % 4 != 0 {
-            continue;
-        }
-        if let Some(name) = not_ok(text) {
-            failed.push(Failed {
-                name: name.to_owned(),
-                location: None,
-            });
-            last_failed = true;
-        }
-    }
-    failed
-}
-
-/// `not ok <n> - <name>`, as the TAP report says a test failed.
-fn not_ok(line: &str) -> Option<&str> {
-    let rest = line.strip_prefix("not ok ")?;
-    let digits = rest.chars().take_while(char::is_ascii_digit).count();
-    let name = rest[digits..].strip_prefix(" - ").filter(|_| digits > 0)?;
-    (!name.is_empty()).then_some(name)
-}
-
-/// The tests of the last list of Playwright's summary.
-fn playwright(output: &str) -> Vec<Failed> {
-    let lines: Vec<&str> = output.lines().collect();
-    let Some(heading) = lines.iter().rposition(|line| failed_heading(line)) else {
-        return Vec::new();
-    };
-    lines[heading + 1..]
-        .iter()
-        .map_while(|line| playwright_name(line))
-        .map(|name| Failed {
-            name: name.to_owned(),
-            location: None,
+            Self::Libtest => Setup {
+                words: command.to_vec(),
+                env: runner
+                    .map(|(name, own)| {
+                        let value = format!("{own} plants-log {}", dir.display());
+                        (OsString::from(name), OsString::from(value))
+                    })
+                    .into_iter()
+                    .collect(),
+            },
+            Self::Node => words(node_words(command, &dir.join("junit.xml"))),
+            Self::Playwright => Setup {
+                words: playwright_words(command),
+                env: vec![(
+                    OsString::from("PLAYWRIGHT_JSON_OUTPUT_FILE"),
+                    dir.join("report.json").into_os_string(),
+                )],
+            },
+            Self::Status => words(command.to_vec()),
         })
-        .collect()
-}
+    }
 
-/// `  <n> failed`, the heading of the tests Playwright's summary says failed.
-fn failed_heading(line: &str) -> bool {
-    line.trim()
-        .strip_suffix(" failed")
-        .is_some_and(|count| !count.is_empty() && count.chars().all(|c| c.is_ascii_digit()))
-}
-
-/// `    <file>:<line>:<column> › <describe> › <title>`, a test of Playwright's summary,
-/// after any project before the file, and any rule it draws after the title (`───`):
-/// named from the title of its first group on.
-fn playwright_name(line: &str) -> Option<&str> {
-    let mut rest = line
-        .strip_prefix("    ")?
-        .trim_end_matches(|c: char| c == '─' || c.is_whitespace());
-    loop {
-        let (segment, after) = rest.split_once(" › ")?;
-        if is_location(segment) {
-            return (!after.is_empty()).then_some(after);
+    /// What the report in `dir` says the run's tests did: none where it wrote none.
+    pub(super) fn results(self, dir: &Path) -> Option<Result<Results, String>> {
+        let read = |path: PathBuf| fs::read_to_string(path).ok();
+        match self {
+            Self::Nextest => read(dir.join(NEXTEST_PROFILE).join("junit.xml"))
+                .map(|xml| results::junit(&xml, false)),
+            Self::Libtest => {
+                let mut logs: Vec<PathBuf> = fs::read_dir(dir)
+                    .ok()?
+                    .flatten()
+                    .map(|entry| entry.path())
+                    .filter(|path| path.extension().is_some_and(|extension| extension == "log"))
+                    .collect();
+                logs.sort();
+                let logs: Vec<String> = logs.into_iter().filter_map(read).collect();
+                (!logs.is_empty()).then(|| Ok(results::libtest_logs(&logs)))
+            }
+            Self::Node => read(dir.join("junit.xml")).map(|xml| results::junit(&xml, true)),
+            Self::Playwright => {
+                read(dir.join("report.json")).map(|json| results::playwright(&json))
+            }
+            Self::Status => None,
         }
-        rest = after;
     }
 }
 
-/// `<file>:<line>:<column>`, where a Playwright test is written.
-fn is_location(segment: &str) -> bool {
-    let mut parts = segment.rsplitn(3, ':');
-    let (Some(column), Some(line), Some(file)) = (parts.next(), parts.next(), parts.next()) else {
-        return false;
-    };
-    !file.is_empty()
-        && [column, line]
-            .iter()
-            .all(|number| !number.is_empty() && number.chars().all(|c| c.is_ascii_digit()))
+/// nextest's config for a run whose report lands in `dir`: every test run once, all
+/// of them whatever fails, and the JUnit report at `<dir>/plants/junit.xml`.
+fn nextest_config(dir: &Path) -> String {
+    let store = dir.display().to_string().replace('\\', "/");
+    format!(
+        "[store]\ndir = \"{store}\"\n\n[profile.{NEXTEST_PROFILE}]\nretries = 0\nfail-fast = false\n\n\
+         [profile.{NEXTEST_PROFILE}.junit]\npath = \"junit.xml\"\n"
+    )
 }
+
+/// The words of a `node --test` that also writes its JUnit report to `junit`: the
+/// report it prints is the one the command asked for, the spec report where none.
+fn node_words(command: &[String], junit: &Path) -> Vec<String> {
+    let reporter = |word: &String| {
+        word.starts_with("--test-reporter=") || word.starts_with("--test-reporter-destination=")
+    };
+    let printed = command
+        .iter()
+        .find_map(|word| word.strip_prefix("--test-reporter="))
+        .unwrap_or("spec");
+    let mut words = vec![command[0].clone()];
+    words.extend([
+        format!("--test-reporter={printed}"),
+        "--test-reporter-destination=stdout".to_owned(),
+        "--test-reporter=junit".to_owned(),
+        format!("--test-reporter-destination={}", junit.display()),
+    ]);
+    words.extend(
+        command
+            .iter()
+            .skip(1)
+            .filter(|word| !reporter(word))
+            .cloned(),
+    );
+    words
+}
+
+/// The words of a Playwright run that also writes its JSON report: the list it
+/// prints and the JSON report, whatever reporter the command named.
+fn playwright_words(command: &[String]) -> Vec<String> {
+    let mut words: Vec<String> = command
+        .iter()
+        .filter(|word| !word.starts_with("--reporter="))
+        .cloned()
+        .collect();
+    let test = words
+        .iter()
+        .position(|word| word == "test")
+        .map_or(words.len(), |at| at + 1);
+    words.insert(test, "--reporter=list,json".to_owned());
+    words
+}
+
+#[cfg(test)]
+mod tests;
