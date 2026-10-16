@@ -79,6 +79,7 @@ fn trip(id: &'static str, title: &'static str, how: &str) -> Scenario {
         id,
         title,
         fixture: "questions",
+        uncommitted: None,
         prompt: join(&[
             "Un test de funcționare pentru întrebări, fără să mă întrebi pe mine nimic. Pune pe board",
             "trei sarcini, toate --tier standard, și scrie în fiecare brief exact ce să te întrebe și",

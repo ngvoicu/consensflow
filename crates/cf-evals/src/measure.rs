@@ -1,7 +1,9 @@
 //! What a chief did, read from the ledger of a finished eval run: the tasks it put
 //! on the board and how many ran side by side, what it asked and told the human,
 //! the advice and reviews it asked for, the edits it made with its own hands, its
-//! last words, and which files of the fixture the run changed or added.
+//! last words, which files of the fixture the run changed or added (and deleted,
+//! for a scenario that counts them), and what the files a scenario reads hold at
+//! the end, beside what the run saw of them before.
 //!
 //! The ledger file is read with SQLite and no ledger's code, whichever daemon wrote
 //! it: the board is one of the things a run checks, so it cannot be what the tasks
@@ -20,6 +22,7 @@ mod metrics;
 mod plumbing;
 mod sentences;
 
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use rusqlite::{Connection, OpenFlags};
@@ -28,10 +31,10 @@ use board::TaskRow;
 
 pub use chief::{chief_open_question, devin_chief_questions, devin_data, on_windows, OpenQuestion};
 pub(crate) use copy::on_copy;
-pub use files::changed;
+pub use files::{begun, changed, ended, gone, read};
 pub use metrics::{
-    owner_questions_value, Check, LongestResult, MemberQuestions, Metrics, Note, OwnerQuestions,
-    Plumbing, ProjectRef, Task,
+    owner_questions_value, Check, FileRead, LongestResult, MemberQuestions, Metrics, Note,
+    OwnerQuestions, Plumbing, ProjectRef, Task,
 };
 pub use plumbing::mechanics;
 pub use sentences::{count_questions, owner_questions, question_sentences};
@@ -50,6 +53,12 @@ pub struct Options<'a> {
     pub files: Option<(&'a Path, &'a Path)>,
     /// How many question dialogs of the chief's harness the owner answered.
     pub pickers: i64,
+    /// What the run saw of the files the scenario reads whole
+    /// ([`crate::scenarios::Scenario::reads`]): the measure reads their end.
+    pub read: Option<&'a BTreeMap<String, FileRead>>,
+    /// Whether the scenario counts the files of the fixture the run deleted
+    /// ([`crate::scenarios::Scenario::counts_gone_files`]).
+    pub gone: bool,
 }
 
 /// The numbers of the ledger `file`, closed by the daemon.
@@ -113,6 +122,14 @@ pub fn measure(file: &Path, options: &Options) -> Result<Metrics> {
         files_changed: match options.files {
             Some((fixture, workspace)) => changed(fixture, workspace)?,
             None => Vec::new(),
+        },
+        files_gone: match options.files {
+            Some((fixture, workspace)) if options.gone => Some(gone(fixture, workspace)?),
+            _ => None,
+        },
+        files_read: match (options.files, options.read) {
+            (Some((_, workspace)), Some(seen)) => ended(workspace, seen)?,
+            _ => BTreeMap::new(),
         },
         project,
         chief: chief.handle,

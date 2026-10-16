@@ -541,9 +541,11 @@ fn a_window_opened_without_the_daemon_is_never_opened_on_an_opencode_effort_it_w
     Ok(())
 }
 
-/// What `--models` names for OpenCode that the catalog has no row of: OpenCode
-/// Zen's free Nemotron 3.5 Super VL (the owner's, 2026-10-16), at an effort.
-const NOT_IN_THE_CATALOG: &str = "opencode=opencode/nemotron-3.5-super-vl-free:high";
+/// A model of OpenCode's that the catalog has no row of, which `--models` names at
+/// an effort. (It was the owner's Nemotron 3.5 Super VL until the catalog took it
+/// as Buri, 2026-10-16; the case holds that it is in no row of the catalog.)
+const MODEL: &str = "opencode/stand-in-no-catalog-row-free";
+const MODEL_ID: &str = "stand-in-no-catalog-row-free";
 
 /// The daemon's launch of a member's OpenCode window, as the stand-in OpenCode
 /// was asked it: the launch on a conversation (`--session`).
@@ -568,7 +570,14 @@ fn first_message(rig: &Rig) -> Option<serde_json::Value> {
 #[test]
 fn a_task_for_a_member_on_a_model_the_flag_names_and_the_catalog_has_not_is_launched_on_it(
 ) -> Outcome {
-    let models = agents::parse(Some(NOT_IN_THE_CATALOG), None)?;
+    let presets = std::fs::read_to_string(cf_e2e::checkout::path(
+        "crates/cf-catalog/data/presets.json",
+    ))?;
+    assert!(
+        !presets.contains(&format!("\"{MODEL}\"")),
+        "the catalog has {MODEL}: the case needs a model it has not"
+    );
+    let models = agents::parse(Some(&format!("opencode={MODEL}:high")), None)?;
     let row = agents::row_on(models.of(Harness::OpenCode), "light");
     // The daemon takes the row as the live suites write it: a member of the human's
     // own, which needs a model and no catalog entry; the run's report says it.
@@ -576,15 +585,15 @@ fn a_task_for_a_member_on_a_model_the_flag_names_and_the_catalog_has_not_is_laun
     let log = Log::begin("live members")?;
     agents::write_roster(&rig, &[members::stand_in_chief(), row], &log)?;
     assert_eq!(
-        log.ran_on().as_deref(),
-        Some("the windows ran on: opencode opencode/nemotron-3.5-super-vl-free, effort high")
+        log.ran_on(),
+        Some(format!("the windows ran on: opencode {MODEL}, effort high"))
     );
     let project = cf_e2e::rig::Project::open(&rig, "chief", json!({}))?;
     let added = project.add_member(&agents::id(Harness::OpenCode))?;
     assert_eq!(added["member"]["agent"], "live-opencode", "{added}");
     rig.tell(
         project.id(),
-        "DISPATCH --tier light Reply with exactly: NEMOTRON",
+        "DISPATCH --tier light Reply with exactly: UNCATALOGUED",
     )?;
     // The window the daemon launched for the task: on that model.
     rig.wait_for("the daemon to launch the member's window", secs(30), || {
@@ -592,9 +601,7 @@ fn a_task_for_a_member_on_a_model_the_flag_names_and_the_catalog_has_not_is_laun
     })?;
     let launch = window_launch(&rig).unwrap_or_default();
     assert!(
-        launch
-            .windows(2)
-            .any(|pair| pair == ["--model", "opencode/nemotron-3.5-super-vl-free"]),
+        launch.windows(2).any(|pair| pair == ["--model", MODEL]),
         "{launch:?}"
     );
     // Its first message, which carries the model and the effort OpenCode runs it on.
@@ -606,7 +613,7 @@ fn a_task_for_a_member_on_a_model_the_flag_names_and_the_catalog_has_not_is_laun
     let message = first_message(&rig).unwrap_or_default();
     assert_eq!(
         message["model"],
-        json!({ "providerID": "opencode", "modelID": "nemotron-3.5-super-vl-free" }),
+        json!({ "providerID": "opencode", "modelID": MODEL_ID }),
         "{message}"
     );
     assert_eq!(message["variant"], "high", "{message}");

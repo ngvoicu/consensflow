@@ -642,6 +642,50 @@ mod tests {
         );
     }
 
+    /// A run can name any agent of the product's catalog by its model and effort:
+    /// Buri, OpenCode Zen's free Nemotron 3.5 Super VL at xhigh, among them.
+    #[test]
+    fn every_agent_of_the_catalog_can_be_named_by_its_model_and_effort() {
+        let presets: Value = serde_json::from_str(
+            &std::fs::read_to_string(crate::checkout::path("crates/cf-catalog/data/presets.json"))
+                .unwrap(),
+        )
+        .unwrap();
+        let presets = presets["presets"].as_array().unwrap();
+        assert!(presets.len() > 100, "{}", presets.len());
+        for preset in presets {
+            let kind = preset["kind"].as_str().unwrap();
+            let harness = Harness::ALL
+                .into_iter()
+                .find(|harness| harness.kind() == kind)
+                .unwrap_or_else(|| panic!("no harness runs {kind}"));
+            let model = preset["model"].as_str().unwrap();
+            let effort = preset["effort"].as_str().or(preset["thinking"].as_str());
+            let piece = match effort {
+                Some(effort) => format!("{}={model}:{effort}", harness.name()),
+                None => format!("{}={model}", harness.name()),
+            };
+            let named = parse(Some(&piece), None).unwrap_or_else(|refused| panic!("{refused}"));
+            assert_eq!(
+                (
+                    named.of(harness).name.as_str(),
+                    named.of(harness).effort.as_deref()
+                ),
+                (model, effort),
+                "{piece}"
+            );
+        }
+        let buri = parse(
+            Some("opencode=opencode/nemotron-3.5-super-vl-free:xhigh"),
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            agent_on(buri.of(Harness::OpenCode)),
+            json!({ "kind": "opencode", "model": "opencode/nemotron-3.5-super-vl-free", "effort": "xhigh" })
+        );
+    }
+
     #[test]
     fn the_efforts_a_harness_takes_are_the_ones_the_products_catalog_has() {
         let catalog =

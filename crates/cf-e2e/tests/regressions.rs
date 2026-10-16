@@ -34,6 +34,10 @@ mod a_command_that_never_exits_held_a_workers_result;
 #[cfg(unix)]
 #[path = "regressions/claude_status_line_taken_for_background_work.rs"]
 mod claude_status_line_taken_for_background_work;
+// The stand-in Codex is a script, so Unix's; and the Finder's PATH is a Mac's.
+#[cfg(unix)]
+#[path = "regressions/codex_in_homebrew_taken_for_not_installed.rs"]
+mod codex_in_homebrew_taken_for_not_installed;
 // The stand-in Codex is a script, so Unix's: Windows has no window of it to resume.
 #[cfg(unix)]
 #[path = "regressions/codex_role_on_resume.rs"]
@@ -42,6 +46,8 @@ mod codex_role_on_resume;
 mod devin_notes_twice;
 #[path = "regressions/devin_pause.rs"]
 mod devin_pause;
+#[path = "regressions/devin_window_closed_mid_task.rs"]
+mod devin_window_closed_mid_task;
 #[path = "regressions/follow_up_refused_behind_a_waiting_follow_up.rs"]
 mod follow_up_refused_behind_a_waiting_follow_up;
 #[path = "regressions/idle_compaction_read_as_a_cut_turn.rs"]

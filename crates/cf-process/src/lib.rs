@@ -27,5 +27,5 @@ pub use execute::{execute, Failed, Limits};
 pub use job::with_required;
 pub use memory::{megabytes, rss};
 pub use runnable::{pane_argv, runnable, Run};
-pub use search::{find_in, on_path};
+pub use search::{find_in, on_path, on_search_path};
 pub use terminate::{terminate, Ending};

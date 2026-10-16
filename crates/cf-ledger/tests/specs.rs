@@ -11,7 +11,7 @@ use cf_ledger::{
     migrate, open_ledger, Ledger, NewChief, NewProject, Options, ProjectView, SpecsChange,
     MIGRATIONS,
 };
-use cf_proto::specs::{SpecsSetting, Variant};
+use cf_proto::specs::{AppSpecs, SpecsSetting, Variant};
 use rusqlite::Connection;
 use serde_json::{json, Value};
 
@@ -63,15 +63,36 @@ fn a_project_that_never_said_anything_of_specs_reads_as_it_always_did() {
         written.get("specs").is_none(),
         "a project that never said it has no `specs` key: {written}"
     );
-    assert_eq!(app.specs_setting(false), None);
+    assert_eq!(app.specs_setting(&app_says(false)), None);
     assert_eq!(
-        app.specs_setting(true),
+        app.specs_setting(&app_says(true)),
         Some(SpecsSetting {
             folder: ".specs".into(),
             variant: Variant::Core
         }),
         "following the app's default, with the folder and the variant that are none"
     );
+    let app_names = AppSpecs {
+        on: true,
+        folder: Some("docs/specs".into()),
+        variant: Some(Variant::TddHtml),
+    };
+    assert_eq!(
+        app.specs_setting(&app_names),
+        Some(SpecsSetting {
+            folder: "docs/specs".into(),
+            variant: Variant::TddHtml
+        }),
+        "a project that names none uses the folder and the variant the app names"
+    );
+}
+
+/// What the human says for every project when they name no folder and no variant.
+fn app_says(on: bool) -> AppSpecs {
+    AppSpecs {
+        on,
+        ..AppSpecs::default()
+    }
 }
 
 #[test]
@@ -152,7 +173,7 @@ fn the_project_s_word_and_the_app_s_default_resolve_in_every_combination() {
         };
         let view = ledger.set_specs(app.id, &change).expect("set");
         assert_eq!(
-            view.specs_setting(default),
+            view.specs_setting(&app_says(default)),
             given.then(|| SpecsSetting {
                 folder: "plans".into(),
                 variant: Variant::Tdd
@@ -181,13 +202,13 @@ fn what_one_project_says_is_never_another_s() {
         .expect("set the second");
     let read = |id| ledger.project(id).expect("read").expect("the project");
     assert_eq!(
-        read(first.id).specs_setting(false),
+        read(first.id).specs_setting(&app_says(false)),
         Some(SpecsSetting {
             folder: ".specs".into(),
             variant: Variant::CoreHtml
         })
     );
-    assert_eq!(read(second.id).specs_setting(true), None);
+    assert_eq!(read(second.id).specs_setting(&app_says(true)), None);
     assert_eq!(events_of(&ledger, first.id, "project.specs").len(), 1);
     assert_eq!(events_of(&ledger, second.id, "project.specs").len(), 1);
 }
@@ -231,7 +252,9 @@ fn a_folder_that_leaves_the_project_and_a_variant_that_is_none_of_the_four_are_r
     }
     let still = ledger.project(app.id).expect("read").expect("the project");
     assert_eq!(
-        still.specs_setting(false).map(|setting| setting.folder),
+        still
+            .specs_setting(&app_says(false))
+            .map(|setting| setting.folder),
         Some("plans".to_owned()),
         "what was said before stays"
     );

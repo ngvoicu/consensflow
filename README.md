@@ -62,6 +62,12 @@ first time one of its windows opens.
 **Settings → Agents** lists ready-made agents (a harness, a model and an
 effort) and lets you define your own with any model your harness accepts.
 
+**Settings → Specs** says whether a chief plans big work as specs in every
+project that doesn't say otherwise, in which folder and with which variant of
+Specmint, and shows the Specmint version ConsensFlow brings and what each
+variant is. A project's own Specs settings win, and what it leaves out follows
+what is set here.
+
 ## Install
 
 Download the latest version from

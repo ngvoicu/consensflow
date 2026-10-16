@@ -1,7 +1,10 @@
 //! Where a command is on this machine's PATH, as Windows or Unix looks for
 //! one, and whether to look as Windows does: on Windows itself, or wherever
-//! the environment says it is Windows's (the tests of a Windows layout).
+//! the environment says it is Windows's (the tests of a Windows layout). Which
+//! PATH: the one what is started runs on, or, for a harness's CLI, the one the
+//! environment was given.
 
+use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -30,18 +33,27 @@ fn candidate_names(command: &str, env: &Env) -> Vec<String> {
         .collect()
 }
 
-/// Where `command` resolves on `env`'s PATH, as an absolute path: the pane
-/// host refuses a relative one, and a PATH may hold relative folders.
+/// Where `command` resolves on `env`'s PATH, the one what it starts runs on,
+/// as an absolute path: the pane host refuses a relative one, and a PATH may
+/// hold relative folders. Where a program something needs is found (the Node
+/// an npm shim runs on): a daemon's has the system's folders after it.
 pub fn on_path(command: &str, env: &Env) -> Option<PathBuf> {
-    let separator = if cfg!(windows) { ';' } else { ':' };
-    let path = env.os("PATH")?.to_string_lossy().into_owned();
-    find_in(
-        command,
-        path.split(separator)
-            .filter(|folder| !folder.is_empty())
-            .map(PathBuf::from),
-        env,
-    )
+    on(command, env.os("PATH"), env)
+}
+
+/// Where `command` resolves on the PATH `env` was given
+/// ([`Env::search_path`]), before a daemon put the system's folders after it:
+/// where a harness's CLI is looked for first, the places under the home and
+/// those folders coming after it (`cf-harness`'s detection, and it alone).
+pub fn on_search_path(command: &str, env: &Env) -> Option<PathBuf> {
+    on(command, env.search_path(), env)
+}
+
+/// Where `command` resolves on `path`, read as the system reads a PATH
+/// (`split_paths`: Windows takes a folder in double quotes whole, `;` and all).
+fn on(command: &str, path: Option<&OsStr>, env: &Env) -> Option<PathBuf> {
+    let folders = std::env::split_paths(path?).filter(|folder| !folder.as_os_str().is_empty());
+    find_in(command, folders, env)
 }
 
 /// The first of `folders` that holds `command` as a file this user can start,
@@ -117,6 +129,49 @@ mod tests {
         assert_eq!(on_path("node", &env), Some(runs.join("node")));
         assert_eq!(on_path("codex", &env), None);
         assert_eq!(on_path("node", &Env::default()), None);
+    }
+
+    /// What a daemon runs has the system's folders after its PATH. A program it
+    /// needs (Node, for an npm shim) is found on that PATH, the one it runs on;
+    /// a harness is looked for on the PATH it was given, so the system's folders
+    /// stay the last place one is found (the reviews of 2026-10-16).
+    #[cfg(unix)]
+    #[test]
+    fn a_program_is_found_on_the_path_it_runs_on_and_a_harness_on_the_one_given() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let (own, homebrew) = (dir.path().join("own"), dir.path().join("homebrew"));
+        fs::create_dir_all(&own).unwrap();
+        fs::create_dir_all(&homebrew).unwrap();
+        fs::write(homebrew.join("codex"), "").unwrap();
+        fs::set_permissions(homebrew.join("codex"), fs::Permissions::from_mode(0o755)).unwrap();
+        let running = Env::from_vars([
+            ("PATH", own.as_os_str()),
+            (cf_base::env::TOOL_FOLDERS, homebrew.as_os_str()),
+        ])
+        .with_tool_folders_on_path();
+        assert!(running
+            .os("PATH")
+            .is_some_and(|path| std::env::split_paths(path).any(|folder| folder == homebrew)));
+        assert_eq!(on_path("codex", &running), Some(homebrew.join("codex")));
+        assert_eq!(on_search_path("codex", &running), None);
+    }
+
+    /// Windows takes a PATH's folder in double quotes whole, `;` and all, and a
+    /// program in it is found (the reviews of 2026-10-16: the folders were the
+    /// pieces between the `;`s, quotes and all).
+    #[cfg(windows)]
+    #[test]
+    fn a_quoted_folder_holding_a_semicolon_is_one_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let (pinned, other) = (dir.path().join("tools;pinned"), dir.path().join("other"));
+        fs::create_dir_all(&pinned).unwrap();
+        fs::create_dir_all(&other).unwrap();
+        fs::write(pinned.join("pi.exe"), "").unwrap();
+        let path = format!("\"{}\";{}", pinned.display(), other.display());
+        let env = Env::from_vars([("PATH", path.as_str())]);
+        assert_eq!(on_path("pi", &env), Some(pinned.join("pi.exe")));
+        assert_eq!(on_search_path("pi", &env), Some(pinned.join("pi.exe")));
     }
 
     #[cfg(unix)]

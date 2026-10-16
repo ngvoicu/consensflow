@@ -4,6 +4,7 @@ use std::path::Path;
 use super::*;
 
 mod npm_global;
+mod tool_folders;
 
 /// A file at `path` this user can start, holding `text`.
 fn startable_with(path: &Path, text: &str) {

@@ -13,6 +13,7 @@ fn ends_quietly_and_well_when_its_reader_has_gone() {
     let ran = Command::new(env!("CARGO_BIN_EXE_cf"))
         .arg("help")
         .env("CONSENSFLOW_TOKEN", "tok")
+        .env("CONSENSFLOW_TOOL_FOLDERS", "")
         .env_remove("CONSENSFLOW_URL")
         .stdout(writer)
         .stderr(Stdio::piped())

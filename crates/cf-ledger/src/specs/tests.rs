@@ -2,79 +2,19 @@ use serde_json::json;
 
 use super::*;
 
-fn folder(text: &str) -> Result<Option<String>, String> {
-    folder_of(text).map_err(|refused| refused.to_string())
-}
-
+/// The folder a request says, as the project keeps it: the checks are
+/// `cf_proto::specs::check`'s, which holds them to every folder a person can type.
 #[test]
-fn a_folder_is_kept_as_the_project_s_own_in_slashes() {
-    for (given, kept) in [
-        (".specs", ".specs"),
-        ("docs/specs", "docs/specs"),
-        ("./docs/specs/", "docs/specs"),
-        ("docs//specs", "docs/specs"),
-        (r"docs\specs", "docs/specs"),
-        ("  plans  ", "plans"),
-        ("a/./b", "a/b"),
-        ("..specs", "..specs"),
-        ("café/планы", "café/планы"),
-    ] {
-        assert_eq!(folder(given), Ok(Some(kept.to_owned())), "{given:?}");
-    }
-}
-
-#[test]
-fn a_blank_folder_is_none_and_the_project_keeps_the_default() {
-    for blank in ["", "   ", "\t "] {
-        assert_eq!(folder(blank), Ok(None), "{blank:?}");
-    }
-}
-
-#[test]
-fn a_folder_that_leaves_the_project_is_refused() {
-    for (given, why) in [
-        ("/etc", "it is relative to the project, not absolute"),
-        (r"\etc", "it is relative to the project, not absolute"),
-        (
-            "//server/share",
-            "it is relative to the project, not absolute",
-        ),
-        (
-            r"\\server\share",
-            "it is relative to the project, not absolute",
-        ),
-        ("C:/specs", "it is relative to the project, not absolute"),
-        (r"c:\specs", "it is relative to the project, not absolute"),
-        ("C:specs", "it is relative to the project, not absolute"),
-        ("docs/a:b", "its name has no `:`"),
-        ("x:y", "it is relative to the project, not absolute"),
-        ("1:y", "its name has no `:`"),
-        ("..", "it stays inside it, with no `..`"),
-        ("../specs", "it stays inside it, with no `..`"),
-        ("docs/../../specs", "it stays inside it, with no `..`"),
-        (r"docs\..\specs", "it stays inside it, with no `..`"),
-        ("docs/..", "it stays inside it, with no `..`"),
-        (".", "it is a folder of the project's, not its own"),
-        ("./", "it is a folder of the project's, not its own"),
-        ("././", "it is a folder of the project's, not its own"),
-        ("a\nb", "its name has no control characters"),
-        ("a\0b", "its name has no control characters"),
-    ] {
-        assert_eq!(
-            folder(given),
-            Err(format!(
-                "the specs folder is a folder inside the project: {why}"
-            )),
-            "{given:?}"
-        );
-    }
-    let long = "x".repeat(FOLDER_MAX + 1);
-    assert!(folder(&long)
-        .unwrap_err()
-        .ends_with("at most 200 characters"));
+fn a_folder_is_kept_as_the_project_s_own_in_slashes_and_a_blank_one_is_none() {
+    let folder = |text: &str| SpecsChange::from_json(&json!({ "folder": text })).map(|c| c.folder);
     assert_eq!(
-        folder(&"x".repeat(FOLDER_MAX)),
-        Ok(Some("x".repeat(FOLDER_MAX)))
+        folder("./docs//specs/").unwrap(),
+        Some("docs/specs".to_owned())
+    );
+    assert_eq!(folder("  ").unwrap(), None);
+    assert_eq!(
+        folder("../elsewhere").unwrap_err().to_string(),
+        "the specs folder is a folder inside the project: it stays inside it, with no `..`"
     );
 }
 

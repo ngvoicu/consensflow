@@ -51,10 +51,11 @@ fn closes_the_project_when_its_chief_window_closes_by_itself_as_close_does() {
         (task().task.state.clone(), task().task.assignee.clone()),
         ("paused".to_owned(), Some(session))
     );
+    // The note says the worker's window went with the project, which its own crash would not.
     let note = task().messages.into_iter().find(|m| m.kind == "note");
     assert_match(
         &note.unwrap().body,
-        r"^T-1 is paused: @zeus-amber-pine's window closed\.",
+        r"^T-1 is paused: @zeus-amber-pine's window closed with the project when @chief's window closed\. Resume it with",
     );
     context.pass().unwrap();
     assert_eq!(
@@ -66,6 +67,74 @@ fn closes_the_project_when_its_chief_window_closes_by_itself_as_close_does() {
         context.close(),
         SUITES,
         "closes the project when its chief window closes by itself, as Close does: every window goes and the work in them pauses",
+    );
+}
+
+/// The chief's harness crashed: the work of the windows that went with the project is
+/// paused with how the chief's window ended and what it showed last (the report of
+/// 2026-10-15, B2: a pause that said "window closed" and no more could be either window's).
+#[test]
+fn the_work_that_goes_with_a_chief_window_that_crashed_says_how_the_chief_window_ended() {
+    let context = Context::new();
+    let project = context.with_tiers(&["zeus", "diana"]);
+    context.pool_task(project.id, "worker", "Write the parser");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let task = || context.task(project.id, 1);
+    assert_eq!(task().task.state, "working");
+    context
+        .host
+        .exits_showing(Some(0xC000_0409), None, Some(&["fatal runtime error"]));
+    context.exit("chief");
+
+    assert_eq!(task().task.state, "paused");
+    let note = task().messages.into_iter().find(|m| m.kind == "note");
+    assert_eq!(
+        note.unwrap().body,
+        "T-1 is paused: @zeus-amber-pine's window closed with the project when @chief's window \
+         closed (exit code 0xC0000409); its screen ended with: \"fatal runtime error\". \
+         Resume it with: cf task resume T-1 \"…\"; its window comes back on its own conversation."
+    );
+}
+
+/// The human's Close is theirs: its pauses say the window closed, as they did, and
+/// nothing of how the kill ended its program, which the host says while the kill is
+/// answered.
+#[test]
+fn the_work_of_a_project_the_human_closed_says_only_that_its_window_closed() {
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    context.pool_task(project.id, "worker", "Parser");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    context
+        .host
+        .exits_showing(Some(1), Some("Terminated: 15"), Some(&["Terminated"]));
+    context.close_project(project.id).unwrap();
+    let task = context.task(project.id, 1);
+    let note = task.messages.into_iter().find(|m| m.kind == "note");
+    assert_match(
+        &note.unwrap().body,
+        r"^T-1 is paused: @zeus-amber-pine's window closed\. Resume it with",
+    );
+}
+
+/// The human's Close of a window whose program the host could not end says that, though
+/// it says nothing of how the kill ended a program that went.
+#[test]
+fn the_work_of_a_project_the_human_closed_says_its_program_could_not_be_ended_where_it_could_not() {
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    context.pool_task(project.id, "worker", "Parser");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    context.host.exits_with_a_survivor(4242);
+    context.close_project(project.id).unwrap();
+    let task = context.task(project.id, 1);
+    let note = task.messages.into_iter().find(|m| m.kind == "note");
+    assert_match(
+        &note.unwrap().body,
+        r"^T-1 is paused: @zeus-amber-pine's window closed, but its program \(process 4242\) could not be ended and may still run\. Resume it with",
     );
 }
 

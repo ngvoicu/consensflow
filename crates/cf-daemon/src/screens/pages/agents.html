@@ -153,7 +153,6 @@ if (window.parent !== window) {
   </div>
   <p class="tier-guide">The work tier is what a task finds an agent by.</p>
   <label class="own-harness"><input type="checkbox" name="ownHarnessOnly"> Claude and OpenAI models only on their own harnesses: hidden on Pi and OpenCode</label>
-  <label class="own-harness"><input type="checkbox" name="specs"> Plan big work as specs in every project that does not say otherwise: its chief writes them with Specmint and puts each phase on the board (a project's own settings win; a change reaches a chief when it next starts)</label>
   <div id="agents"></div>
   </section>
 
@@ -448,19 +447,18 @@ function renderLists() { if (LAST !== null) renderAgents(LAST); }
     refresh();
   };
   // A preference, kept with the roster: the whole app follows it. The list of
-  // agents is read again where the preference changes what it shows.
-  for (const [name, reshapesAgents] of [['ownHarnessOnly', true], ['specs', false]]) {
-    document.querySelector(`[name=${name}]`).addEventListener('change', async event => {
-      const wanted = event.target.checked;
-      const res = await fetch('/api/preferences', { method: 'POST', headers: { ...headers, 'content-type': 'application/json' }, body: JSON.stringify({ [name]: wanted }) });
-      if (!res.ok) {
-        event.target.checked = !wanted;
-        document.querySelector('#roster-note').textContent = (await res.json().catch(() => ({}))).error ?? 'The preference was not saved.';
-        return;
-      }
-      if (reshapesAgents) refreshAgents();
-    });
-  }
+  // agents is read again, since the preference changes what it shows. (What the
+  // app says of specs is in Settings, under Specs.)
+  document.querySelector('[name=ownHarnessOnly]').addEventListener('change', async event => {
+    const wanted = event.target.checked;
+    const res = await fetch('/api/preferences', { method: 'POST', headers: { ...headers, 'content-type': 'application/json' }, body: JSON.stringify({ ownHarnessOnly: wanted }) });
+    if (!res.ok) {
+      event.target.checked = !wanted;
+      document.querySelector('#roster-note').textContent = (await res.json().catch(() => ({}))).error ?? 'The preference was not saved.';
+      return;
+    }
+    refreshAgents();
+  });
 }
 
 // The last roster payload, so filtering the catalog re-renders without a fetch.
@@ -472,7 +470,6 @@ async function load() {
   if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error ?? 'Could not refresh agents. Reopen this screen to try again.');
   LAST = await response.json();
   document.querySelector('[name=ownHarnessOnly]').checked = LAST.preferences?.ownHarnessOnly === true;
-  document.querySelector('[name=specs]').checked = LAST.preferences?.specs === true;
   renderLists();
   renderForm(LAST);
 }

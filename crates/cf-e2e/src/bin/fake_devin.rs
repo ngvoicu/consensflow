@@ -28,7 +28,8 @@
 //! A turn can leave a command running (`BACKGROUND <seconds> <words>`: `command`):
 //! its agent runs it as a tool once it has thought, answers, and the turn ends; the
 //! command goes on saying what it prints on the wire for as long as it runs, as a
-//! tool does whose turn has ended.
+//! tool does whose turn has ended. And a turn can end the window's program under it
+//! (`EXIT <code> <words>`: `crash`), as a harness that crashes does.
 //!
 //! The terminal and the signals are the other stand-in's own (`fake_agent/`).
 
@@ -38,6 +39,8 @@
 mod args;
 #[path = "fake_devin/command.rs"]
 mod command;
+#[path = "fake_devin/crash.rs"]
+mod crash;
 #[path = "fake_devin/escapes.rs"]
 mod escapes;
 #[path = "fake_agent/signals.rs"]

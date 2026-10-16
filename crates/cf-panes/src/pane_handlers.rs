@@ -17,7 +17,7 @@ use crate::arbiter::{InputArbiter, OutputClock};
 use crate::ended::Ended;
 use crate::input_queue::{wait_for_input_blocking, InputError, InputQueue};
 use crate::output_hub::OutputHub;
-use crate::pty::{validate_drop_env, PaneEnvironment, PaneKey, PaneTable, StreamedPane};
+use crate::pty::{validate_drop_env, Handed, PaneEnvironment, PaneKey, PaneTable, StreamedPane};
 use crate::screen::PaneScreen;
 use crate::validation::{pane_key, validate_input, validate_seq, validate_size, INVALID_BODY};
 use cf_bridge::{Bridge, BridgeBuilder};
@@ -314,9 +314,23 @@ pub fn register_pane_handlers(
     });
 }
 
-/// A pane's output, on to the page and into its screen, and its end:
-/// `pane.exit`, which says how the program ended and what the screen showed
-/// last, after which a pane whose program has gone leaves the table.
+/// What a test is told at the moment a `pane.exit` is handed to the bridge, which
+/// sends it later: the pane it is of. A test of the order of the end of a program and
+/// the daemon's word of it watches this, not when the word arrives.
+#[cfg(test)]
+pub(crate) static EXIT_HANDED: std::sync::Mutex<Option<ExitHanded>> = std::sync::Mutex::new(None);
+
+/// What [`EXIT_HANDED`] holds.
+#[cfg(test)]
+pub(crate) type ExitHanded = Box<dyn Fn(&PaneKey) + Send>;
+
+/// A pane's output, on to the page and into its screen, and its end, which is
+/// for good (`pty`'s `output_end`): `pane.exit`, which says how the program
+/// ended and what the screen showed last, once the program is proven gone (one
+/// that outlived its output, on Windows a console host that died, is ended first),
+/// or names it as one that could not be ended; for the daemon forgets a window it
+/// is told has closed and may open another on its conversation. And the pane
+/// leaves the table.
 fn stream_to_page(
     streamed: StreamedPane,
     bridge: Bridge,
@@ -328,10 +342,10 @@ fn stream_to_page(
     thread::spawn(move || {
         let StreamedPane {
             key,
+            pid,
             output: stream,
             screen,
             ended,
-            ..
         } = streamed;
         for message in stream {
             printed.note();
@@ -342,20 +356,36 @@ fn stream_to_page(
         // What the program left running goes with the exit, before the close
         // that follows ends it.
         let background = panes.left_running_at_exit(&key, &ended);
-        let _ = bridge.event("pane.exit", exit_body(&key, &screen, status, background));
-        if matches!(panes.retire_exited(&key), Ok(true)) {
+        let told = |handed: Handed| {
+            // How it ended by itself, where that came after the output did; not the
+            // host's own end of it.
+            let status = status.or_else(|| (!handed.ended_by_host).then(|| ended.get()).flatten());
+            let exit = exit_body(&key, &screen, status, background, handed.survivor);
+            #[cfg(test)]
+            if let Some(handed) = EXIT_HANDED
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .as_ref()
+            {
+                handed(&key);
+            }
+            let _ = bridge.event("pane.exit", exit);
+        };
+        if matches!(panes.output_ended(&key, &ended, pid, told), Ok(true)) {
             inputs.retire(&key);
         }
     });
 }
 
 /// `pane.exit`'s body: the pane, how its program ended where that was read,
-/// the last lines its screen showed, and what it left running.
+/// the last lines its screen showed, what it left running, and the program
+/// where it could not be proven gone.
 fn exit_body(
     key: &PaneKey,
     screen: &PaneScreen,
     ended: Option<Ended>,
     background: Vec<BackgroundProcess>,
+    survivor: Option<u32>,
 ) -> Value {
     let exit = PaneExit {
         id: key.id.clone(),
@@ -364,6 +394,7 @@ fn exit_body(
         signal: ended.and_then(|ended| ended.signal),
         tail: Some(screen.tail(TAIL_LINES)),
         background,
+        survivor,
     };
     serde_json::to_value(&exit).unwrap_or_else(|_| json!({"id":key.id,"generation":key.generation}))
 }
@@ -402,6 +433,10 @@ fn validate_open_request(request: &OpenRequest) -> Result<PaneKey, String> {
     validate_size(request.size.cols, request.size.rows)?;
     Ok(key)
 }
+
+#[cfg(test)]
+#[cfg(windows)]
+mod windows_tests;
 
 #[cfg(test)]
 mod tests {

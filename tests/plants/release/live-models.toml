@@ -15,9 +15,11 @@
 # No harness is run: the tests of the support, of the suites that start a window of their own
 # (Codex's app-server, resume-cut's Claude) and of xtask's words catch each plant.
 #
-# A live agent need not be in the catalog (the owner's Nemotron 3.5 Super VL, OpenCode Zen's free
-# `opencode/nemotron-3.5-super-vl-free`, which the catalog has no row of, 2026-10-16): the roster
+# A live agent need not be in the catalog (asked for the owner's Nemotron 3.5 Super VL,
+# 2026-10-16, which the catalog has since taken as Buri; every row of the catalog can be named,
+# which `every_agent_of_the_catalog_can_be_named_by_its_model_and_effort` holds): the roster
 # keeps a row of the human's own on any model, and the live suites' rows are such rows. The rig case
+# (on a model the case holds is in no row of the catalog)
 # `live_members::a_task_for_a_member_on_a_model_the_flag_names_…` holds it end to end: the flag's
 # row, written as the suites write it, is taken by the real daemon as a member, and a task given it
 # has the daemon launch the member's window on a stand-in OpenCode 1.x (`fake-opencode-1`; not
@@ -128,6 +130,16 @@ runs = ["e2e-live"]
 file = "crates/cf-e2e/src/live/agents.rs"
 find = '        Harness::Codex => &["minimal", "low", "medium", "high", "xhigh", "max", "ultra"],'
 replace = '        Harness::Codex => &["minimal", "low", "medium", "high", "xhigh", "max"],'
+
+[[plant]]
+name = "live models: OpenCode takes no xhigh, so Buri cannot be named"
+meant = "every_agent_of_the_catalog_can_be_named_by_its_model_and_effort"
+runs = ["e2e-live"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/agents.rs"
+find = '        Harness::OpenCode => &["minimal", "low", "medium", "high", "xhigh", "max"],'
+replace = '        Harness::OpenCode => &["minimal", "low", "medium", "high", "max"],'
 
 # --claude-model beside it.
 

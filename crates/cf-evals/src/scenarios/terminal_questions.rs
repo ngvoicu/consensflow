@@ -15,6 +15,7 @@ pub(super) fn scenario() -> Scenario {
         id: "terminal-questions",
         title: "The chief asks the owner in its terminal, and the answer reaches the work",
         fixture: "site",
+        uncommitted: None,
         prompt: join(&[
             "Vreau pe site o pagină nouă, pentru cariere. Înainte să pornești ceva, întreabă-mă două",
             "lucruri, fără să ghicești: cum se numește fișierul paginii și în ce limbă o facem întâi,",

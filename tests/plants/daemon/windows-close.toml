@@ -1,0 +1,387 @@
+# A worker's window that closed in the middle of its task (the owner's report of 2026-10-15,
+# B2, ConsensFlow 3.0.3 or 3.0.4 on their Windows machine: T-18 paused, "window closed", its
+# worker very likely a Devin, and no logs). Which way the window ended is not known; what is
+# ConsensFlow's stands in 3.0.5, each held by tests:
+#
+# - the pause note of a task whose window ended under it says how the window's program ended
+#   and what its screen showed last, as far as the pane host said, and what the close ended
+#   between the two (`crates/cf-engine/src/dispatcher.rs`, `shown.rs`): the next report shows
+#   the cause;
+# - a screen whose lines name a secret is quoted not at all, in a pause note and a launch's
+#   failure alike: the note says its lines were left out, and keeps the exit code (the lead's
+#   decision of 2026-10-16; `shown/secret.rs`). A password, `pwd`, an API or private key, a
+#   credential is named anywhere in a name, whatever its case or split (`PassWord`,
+#   `MYSQL_PWD`), and API keys in the plural (round 5); a secret, a token, auth, bearer only as
+#   a word or a part of a name, never as a piece of a word such as `author`; blanks are nothing
+#   but what parts words;
+# - a Windows status (a crash, a console's Ctrl+C) is written as Windows writes it, in hex;
+# - the work of the windows that go with a project when its chief's window closes by itself
+#   says so, with how the chief's window ended and what it showed last: a worker's own crash
+#   and its chief's read the same before;
+# - a window the engine closed itself (the human's Close, the chief's) says nothing of how the
+#   kill ended its program, which the host says while the kill is answered;
+# - the late exit of a window the engine closed itself pauses nothing its session was given
+#   meanwhile: what was given waits, queued, for the next window (held already; the plant shows
+#   the test would see it otherwise);
+# - a window's output ends only for good (`crates/cf-panes/src/pty/output_end.rs`): on Unix not
+#   while its program runs, for a terminal it let go of may be opened again; the reader asks
+#   whether the program has gone on a schedule of its own, whatever it reads, for a helper the
+#   program left can hold the terminal silent (Sol's sequence) or write to it without a pause
+#   (round 3); once the program has gone, what the terminal still has is read before the output
+#   ends (Astra's race), for a second at most; on Windows when its console host has gone;
+# - the daemon is told a window closed only on proof that its program has gone (its status
+#   read, or the system's word that it was reaped): a pane out of the table is none, for a close
+#   takes it out before it has ended its programs. A program that outlived its output is ended
+#   as a close ends one, on a thread of its own, and the proof is waited for until a bound of
+#   thirty seconds and no longer (a close waits for the exit with no bound: round 5); then the
+#   daemon is told the program could not be ended (`survivor`), and the note says it may still
+#   run. Nothing refuses a window of the same name (round 5: a registry of such programs could
+#   refuse one for ever, and forgot them on a restart).
+#
+# The case of the rig is `crates/cf-e2e/tests/regressions/devin_window_closed_mid_task.rs`: the
+# real daemon and pane host on a stand-in Devin that ends its program with the code 3 in the
+# middle of its task, after its last words. Its run builds the native `cf` from the sources as
+# they are planted, so its plant says `builds`. One plant takes one rule out; a test fails.
+#
+# **Windows.** The handoff of a window whose console host died is held on Windows by the test
+# of the pane handlers (`pane_handlers::windows_tests`), which ends the host of a pane whose
+# program let go of its console and asks whether the program runs at the moment the host hands
+# `pane.exit` to the bridge (`EXIT_HANDED`). The three plants of the handoff (`windows close: a
+# program that outlived`, `the daemon is told before`, `the host tells`) are caught by it on
+# zeewin, and on a Mac by the tests of the table and of the headless helper:
+# `cargo xtask windows --host zeewin -- cargo xtask plants daemon "windows close: the host
+# tells"`, and so on for the other two.
+#
+# Every name holds `windows close`, so `npm run plants:daemon -- "windows close"` runs them all.
+
+[run]
+engine-shown = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "shown::"]
+engine-windows = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "windows::"]
+engine-closing = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "closing::"]
+engine-unstarted = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "unstarted::"]
+engine-window-closes = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "window_closes::"]
+headless-reopened = ["cargo", "test", "--offline", "-p", "cf-panes", "--test", "headless", "a_program_that_lets_go_of_its_terminal_and_opens_it_again_is_read_on_and_not_ended"]
+headless-orphan = ["cargo", "test", "--offline", "-p", "cf-panes", "--test", "headless", "a_program_that_exits_while_an_orphan_holds_its_terminal_is_told_closed"]
+headless-orphan-writes = ["cargo", "test", "--offline", "-p", "cf-panes", "--test", "headless", "a_program_that_exits_while_an_orphan_writes_on_to_its_terminal_is_told_closed"]
+headless-cleans-up = ["cargo", "test", "--offline", "-p", "cf-panes", "--test", "headless", "a_window_closed_while_its_program_cleans_up_is_told_closed_once_the_program_has_gone"]
+panes-output-end = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "pty::output_end::"]
+panes-handlers-windows = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "pane_handlers::windows_tests::"]
+rig-regression-devin-window-closed = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "devin_window_closed_mid_task::"]
+
+[[plant]]
+name = "windows close: the pause note of a window that ended under its task says only that it closed"
+meant = "a_devin_window_that_ends_in_the_middle_of_its_task_pauses_it_with_how_it_ended_and_what_it_showed_last"
+runs = ["rig-regression-devin-window-closed", "engine-windows"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "                    shown.after_with(&closed, &besides)"
+replace = '                    format!("{closed}{besides}")'
+
+[[plant]]
+name = "windows close: a screen whose lines name a secret is quoted"
+meant = "a_screen_that_names_a_secret_is_quoted_not_at_all_and_its_code_is_said"
+runs = ["engine-shown", "engine-windows", "engine-unstarted"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown.rs"
+find = "if tail.iter().any(|line| names_a_secret(line)) {"
+replace = "if false && tail.iter().any(|line| names_a_secret(line)) {"
+
+[[plant]]
+name = "windows close: a secret's name is found as a piece of a word"
+meant = "a_word_a_secret_s_name_is_a_piece_of_names_none"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/secret.rs"
+find = "|| words.iter().any(|word| WORDS.contains(&word.as_str()))"
+replace = "|| WORDS.iter().any(|word| line.to_lowercase().contains(word))"
+
+[[plant]]
+name = "windows close: a password's or a key's name is found only as a word"
+meant = "a_password_or_a_key_named_anywhere_in_a_name_or_in_the_plural_is_named"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/secret.rs"
+find = "names_of(line).any(|name| ANYWHERE.iter().any(|word| name.contains(word)))"
+replace = "words.iter().any(|word| ANYWHERE.contains(&word.as_str()))"
+
+[[plant]]
+name = "windows close: pwd names no secret"
+meant = "a_password_or_a_key_named_anywhere_in_a_name_or_in_the_plural_is_named"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/secret.rs"
+find = '    "pwd",'
+replace = '    "passwd",'
+
+[[plant]]
+name = "windows close: API keys and private keys in the plural name no key"
+meant = "a_password_or_a_key_named_anywhere_in_a_name_or_in_the_plural_is_named"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/secret.rs"
+find = '    ("api", "keys"),'
+replace = '    ("api", "key"),'
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/secret.rs"
+find = '    ("private", "keys"),'
+replace = '    ("private", "key"),'
+
+[[plant]]
+name = "windows close: an API key's name is found with no more than one blank in it"
+meant = "the_third_reviews_lines_are_left_out_or_quoted_by_their_words"
+runs = ["engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/secret.rs"
+find = '''
+        || words
+            .windows(2)
+            .any(|pair| PAIRS.contains(&(pair[0].as_str(), pair[1].as_str())))'''
+replace = '''
+        || ["api key", "api_key", "api-key", "private key", "private_key", "private-key"]
+            .iter()
+            .any(|pair| line.to_lowercase().contains(pair))'''
+
+[[plant]]
+name = "windows close: a Windows status is written in decimal"
+meant = "a_windows_status_is_written_as_windows_writes_it_and_a_program_s_own_code_as_it_is"
+runs = ["engine-shown", "engine-windows"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown.rs"
+find = "const STATUS_CODES: u32 = 0x8000_0000;"
+replace = "const STATUS_CODES: u32 = u32::MAX;"
+
+[[plant]]
+name = "windows close: the work that goes with a chief's window says only that its window closed"
+meant = "the_work_that_goes_with_a_chief_window_that_crashed_says_how_the_chief_window_ended"
+runs = ["engine-closing"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "self.close_windows(&others, Some(&shown.after(&with)))"
+replace = "self.close_windows(&others, None)"
+
+[[plant]]
+name = "windows close: a window the engine closed quotes how the kill ended its program"
+meant = "the_work_of_a_project_the_human_closed_says_only_that_its_window_closed"
+runs = ["engine-closing"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "let because = if own {"
+replace = "let because = if own && false {"
+
+[[plant]]
+name = "windows close: the late exit of a window the engine closed pauses its session's queued task"
+meant = "closed_with_its_task_done_and_its_exit_late_pauses_nothing_its_session_is_given_meanwhile"
+runs = ["engine-window-closes"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "let task = self.seams.ledger.borrow().active_task(record.id, false)?;"
+replace = "let task = self.seams.ledger.borrow().active_task(record.id, true)?;"
+
+[[plant]]
+name = "windows close: a note says nothing of a program the host could not end"
+meant = "a_worker_window_whose_program_could_not_be_ended_says_so_in_its_pause_note"
+runs = ["engine-windows", "engine-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown.rs"
+find = "if let Some(outlived) = self.outlived() {"
+replace = "if let Some(outlived) = self.outlived().filter(|_| false) {"
+
+[[plant]]
+name = "windows close: the human's Close says nothing of a program the host could not end"
+meant = "the_work_of_a_project_the_human_closed_says_its_program_could_not_be_ended_where_it_could_not"
+runs = ["engine-closing"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "let outlived = shown.outlived().unwrap_or_default();"
+replace = "let outlived = String::new();"
+
+# Round 4's words, of the registry that refused a window of the name.
+[[plant]]
+name = "windows close: a note says no window opens beside a program the host could not end"
+meant = "a_program_the_host_could_not_end_is_said_and_its_screen_after_it"
+runs = ["engine-shown", "engine-windows", "engine-closing"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown.rs"
+find = '''            ", but {program} could not be ended and may still run"'''
+replace = '''            ", but {program} could not be ended and may still run: no window opens on its \
+             conversation until it has gone"'''
+
+[[plant]]
+name = "windows close: an end of the output is taken for the window's while its program runs"
+meant = "a_program_that_lets_go_of_its_terminal_and_opens_it_again_is_read_on_and_not_ended"
+runs = ["headless-reopened", "panes-output-end"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/output_end.rs"
+find = "_ if self.ending.is_some() => return Got::End,"
+replace = "_ => return Got::End,"
+
+[[plant]]
+name = "windows close: the reader waits on a silent terminal without asking whether the program has gone"
+meant = "a_program_that_exits_while_an_orphan_holds_its_terminal_is_told_closed"
+runs = ["headless-orphan", "panes-output-end"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/output_end.rs"
+find = "if self.ending.is_none() && self.asked.elapsed() >= LOOK {"
+replace = "if false {"
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/output_end.rs"
+find = "                LOOK.saturating_sub(self.asked.elapsed())"
+replace = "                Duration::from_secs(3600)"
+
+# Round 3's reader: it asked only once the terminal had said nothing for a while.
+[[plant]]
+name = "windows close: the reader asks whether the program has gone only when the terminal is quiet"
+meant = "a_program_that_exits_while_an_orphan_writes_on_to_its_terminal_is_told_closed"
+runs = ["headless-orphan-writes", "panes-output-end"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/output_end.rs"
+find = "if self.ending.is_none() && self.asked.elapsed() >= LOOK {"
+replace = "if false {"
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/output_end.rs"
+find = "                LOOK.saturating_sub(self.asked.elapsed())"
+replace = "                LOOK"
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/output_end.rs"
+find = '''
+                if self.ending.is_some() {
+                    return Got::End;
+                }
+                continue;'''
+replace = '''
+                if self.ending.is_some() {
+                    return Got::End;
+                }
+                self.ask(false);
+                continue;'''
+
+[[plant]]
+name = "windows close: what the terminal has once the program has gone is dropped"
+meant = "what_a_program_says_after_an_end_of_its_output_and_before_it_is_seen_gone_is_read"
+runs = ["panes-output-end"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/output_end.rs"
+find = "const DRAIN: Duration = Duration::from_secs(1);"
+replace = "const DRAIN: Duration = Duration::ZERO;"
+
+[[plant]]
+name = "windows close: a pane out of the table is taken for proof that its program has gone"
+meant = "a_window_closed_while_its_program_cleans_up_is_told_closed_once_the_program_has_gone"
+runs = ["headless-cleans-up"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/output_end.rs"
+find = '''
+                if let Some(pane) = panes.get_mut(key) {
+                    let _ = has_exited(pane);
+                }'''
+replace = '''
+                if let Some(pane) = panes.get_mut(key) {
+                    let _ = has_exited(pane);
+                } else {
+                    return true;
+                }'''
+
+[[plant]]
+name = "windows close: a program not proven gone in the bound is told as one that has"
+meant = "a_program_not_proven_gone_in_the_bound_is_named_and_a_window_of_its_name_opens"
+runs = ["panes-output-end"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/output_end.rs"
+find = "let survivor = (!proven).then(|| pid.unwrap_or_default());"
+replace = "let survivor = (!proven && false).then(|| pid.unwrap_or_default());"
+
+# Round 4's: the end of the output ended the program by a kill, which waits for the exit.
+[[plant]]
+name = "windows close: the end of an output waits on the close it makes"
+meant = "a_program_the_close_has_not_ended_by_the_bound_is_named_then_and_its_close_goes_on"
+runs = ["panes-output-end"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/output_end.rs"
+find = "let _ = self.kill_detached(key);"
+replace = "let _ = self.kill(key);"
+
+# The registry's refusal, by another way: a window of the name is refused while the close of
+# one before has not read the end of its program.
+[[plant]]
+name = "windows close: a window is refused while the close of one before goes on"
+meant = "a_program_the_close_has_not_ended_by_the_bound_is_named_then_and_its_close_goes_on"
+runs = ["panes-output-end"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty.rs"
+find = "if panes.contains_key(&key) {"
+replace = "if panes.contains_key(&key) || self.teardown.counts().0 > 0 {"
+
+[[plant]]
+name = "windows close: a program that outlived its output for good is left running"
+meant = "a_program_whose_console_host_died_is_ended_and_gone_before_the_daemon_hears_its_window_closed"
+runs = ["panes-handlers-windows", "panes-output-end"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/output_end.rs"
+find = "let _ = self.kill_detached(key);"
+replace = "let _ = key;"
+
+[[plant]]
+name = "windows close: the daemon is told before a program that outlived its output is gone"
+meant = "a_program_whose_console_host_died_is_ended_and_gone_before_the_daemon_hears_its_window_closed"
+runs = ["panes-handlers-windows", "panes-output-end"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/output_end.rs"
+find = "        let mut proven = self.proven_within(key, slot, EXIT_GRACE.min(bound));"
+replace = '''        tell(Handed {
+            survivor: None,
+            ended_by_host: false,
+        });
+        let mut proven = self.proven_within(key, slot, EXIT_GRACE.min(bound));'''
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/output_end.rs"
+find = '''
+        tell(Handed {
+            survivor,
+            ended_by_host,
+        });'''
+replace = '''
+        let _ = (survivor, ended_by_host);'''
+
+[[plant]]
+name = "windows close: the host tells the daemon and retires the pane as it did, by retire_exited"
+meant = "a_program_whose_console_host_died_is_ended_and_gone_before_the_daemon_hears_its_window_closed"
+runs = ["panes-handlers-windows", "headless-cleans-up"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pane_handlers.rs"
+find = "        if matches!(panes.output_ended(&key, &ended, pid, told), Ok(true)) {"
+replace = '''        told(Handed {
+            survivor: None,
+            ended_by_host: false,
+        });
+        if matches!(panes.retire_exited(&key), Ok(true)) {'''

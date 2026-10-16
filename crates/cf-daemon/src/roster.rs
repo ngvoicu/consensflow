@@ -9,6 +9,7 @@ use cf_base::refusal::Refusal;
 use cf_catalog::{AgentRow, AgentView, Catalog, Harness, Roster};
 use cf_engine::seams::SavedAgent;
 use cf_ledger::{Ledger, TierChange};
+use cf_proto::specs::AppSpecs;
 use serde_json::Value;
 
 use crate::api::context::AgentRows;
@@ -75,13 +76,12 @@ impl cf_engine::seams::Roster for Agents {
         }))
     }
 
-    /// The choice the file keeps, read as it is now: off where it says nothing,
-    /// and where it cannot be read (a launch reads the saved agent from the same
-    /// file, and is refused first).
-    fn specs_by_default(&self) -> bool {
-        self.roster()
-            .preferences()
-            .is_ok_and(|preferences| preferences.specs)
+    /// What the file keeps of specs for every project, read as it is now: off,
+    /// naming no folder and no variant, where it says nothing, and where it
+    /// cannot be read (a launch reads the saved agent from the same file, and is
+    /// refused first).
+    fn app_specs(&self) -> AppSpecs {
+        self.roster().app_specs().unwrap_or_default()
     }
 }
 

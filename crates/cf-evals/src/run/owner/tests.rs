@@ -9,6 +9,7 @@ fn scenario(nudge: Option<&'static str>, follow_ups: Vec<FollowUp>) -> Scenario 
         id: "owner",
         title: "",
         fixture: "site",
+        uncommitted: None,
         prompt: String::new(),
         follow_ups,
         answers: Vec::new(),
