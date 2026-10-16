@@ -168,15 +168,7 @@ pub(crate) fn leave_pause_notes(
 ) -> Result<(), LedgerError> {
     let reason = format!("T-{} {why}", task.number);
     let mut warnings: Vec<String> = Vec::new();
-    let mut warn_of = |body: &str| {
-        let pause = read(body)
-            .into_iter()
-            .flatten()
-            .find(|paused| paused.number == task.number);
-        if let Some(pause) = pause.filter(|pause| pause.because.contains(MAY_STILL_RUN)) {
-            warnings.push(pause.because);
-        }
-    };
+    let mut warn_of = |body: &str| warnings.extend(warning_in(body, task.number));
     // Whatever note of its own is queued for the requester about the task: a
     // stall's, a hold's, a refusal's, each says something about the pause. A
     // pause leaves what is queued for the task as it is, so one written
@@ -225,6 +217,48 @@ pub(crate) fn leave_pause_notes(
             set(store, id, task.project_id, &paused)?;
         }
     }
+    say_again(store, task, why, warnings)
+}
+
+/// What a pause note says of task `number` that is a warning: that its window's
+/// program may still run. None where the note does not name the task, or names it
+/// with no such words.
+fn warning_in(body: &str, number: i64) -> Option<String> {
+    read(body)?
+        .into_iter()
+        .find(|paused| paused.number == number)
+        .map(|paused| paused.because)
+        .filter(|because| because.contains(MAY_STILL_RUN))
+}
+
+/// The warnings the pause notes of `task` alone still queued for its requester
+/// say, for an operation that withdraws them before it leaves its pause notes
+/// ([`leave_pause_notes`]): a cancel takes every message of its task back first
+/// (both reviews of 2026-10-16, round 3).
+pub(crate) fn warnings_queued(store: &Store, task: &TaskRow) -> Result<Vec<String>, LedgerError> {
+    let bodies: Vec<String> = store
+        .db
+        .prepare(
+            "SELECT body FROM message
+             WHERE kind = 'note' AND sender_id IS NULL AND state = 'queued'
+               AND recipient_id = ? AND task_id = ? ORDER BY id",
+        )?
+        .query_map(params![task.requester_id, task.id], |row| row.get(0))?
+        .collect::<rusqlite::Result<_>>()?;
+    Ok(bodies
+        .iter()
+        .filter_map(|body| warning_in(body, task.number))
+        .collect())
+}
+
+/// Says each of `warnings` again to the task's requester, as what came before
+/// `why`, in a note of its own that no wait of the task's takes back.
+pub(crate) fn say_again(
+    store: &mut Store,
+    task: &TaskRow,
+    why: &str,
+    warnings: Vec<String>,
+) -> Result<(), LedgerError> {
     let requester = store.participant_row(task.requester_id)?.handle;
     for because in warnings {
         send(

@@ -62,6 +62,14 @@ pub(crate) struct DeliveryPart {
 }
 
 impl Dispatcher {
+    /// Whether the record's project is open now, as a delivery asks after each wait:
+    /// a closed project's window is handed nothing.
+    fn in_open_project(&self, record: &Record) -> Result<bool, EngineError> {
+        Ok(self
+            .project_of(record.id)?
+            .is_some_and(|project| project.state == "open"))
+    }
+
     /// Hands `message` to a window that is idle. A participant forgotten
     /// while its delivery waits (it left, or its project was deleted) is
     /// handed nothing, and what its harness did with the message settles
@@ -81,6 +89,11 @@ impl Dispatcher {
             .await
             .map_err(|error| EngineError::said("not-ready", error))?;
         if self.forgotten(record) {
+            return Ok(());
+        }
+        // A project closed while the window got ready gives it nothing: the message
+        // waits, queued, for the Resume (both reviews of 2026-10-16, round 3).
+        if !self.in_open_project(record)? {
             return Ok(());
         }
         // Withdrawn, or overtaken, while the window got ready (its task cancelled
@@ -125,6 +138,15 @@ impl Dispatcher {
         let text = delivery_text(&begun.message, &begun.carried);
         // A turn begins with this message: what the window's tree runs now came before it.
         self.mark_turn(record, &pane).await;
+        // Closed meanwhile: nothing is handed over, and the message is queued again.
+        if !self.in_open_project(record)? {
+            self.seams.ledger.borrow_mut().retry_delivery(
+                message.id,
+                "its project was closed before it was pasted",
+                true,
+            )?;
+            return Ok(());
+        }
         let outcome = match returning(window.deliver(host, &pane, &text)).await {
             Ok(admission) => admission,
             // An adapter that failed never handed it over, and its error must show.

@@ -8,9 +8,12 @@
 use std::rc::Rc;
 
 use cf_engine::testing::{Context, Gate, Restarted};
+use cf_engine::SwitchWhen;
+use cf_harness::contract::Readiness;
 use cf_ledger::{MessageView, RESUME_WORDS};
 use serde_json::Value;
 
+use crate::chiefs::{to, with_codex};
 use crate::fixtures::{assert_match, finished, given, native_of, Tiers};
 
 /// What a worker the quit or the Close cut in T-1 is told, and what the chief is told.
@@ -473,9 +476,22 @@ fn a_chief_window_the_close_could_not_close_is_given_nothing_while_closed_and_ne
     let refused = context.finish(closing).unwrap_err();
     assert_match(&refused.to_string(), "@chief's window would not close");
     context.host.refuse_kills.set(false);
+    *context.adapter.ready.borrow_mut() = Some(Rc::new(|| Ok(Readiness::Ready)));
+    let asked = || {
+        context
+            .recorder
+            .calls("adapter:claude-code", &["ready"])
+            .len()
+    };
+    let before = asked();
     for _ in 0..3 {
         context.pass().unwrap();
     }
+    assert_eq!(
+        asked(),
+        before,
+        "a closed project's window is not even asked whether it is ready"
+    );
 
     context.resume_project(project).unwrap();
     for _ in 0..3 {
@@ -534,6 +550,243 @@ fn a_resume_keeps_for_the_chief_the_word_that_a_program_the_close_could_not_end_
             ("delivered".to_owned(), warning(1, "zeus-amber-pine")),
             ("queued".to_owned(), warning(2, "diana-brisk-birch")),
         ]
+    );
+}
+
+/// Both reviews of 2026-10-16, round 3: a Resume that comes while the Close still
+/// waits for a kill waits for the Close to end, every kill answered, before it reads
+/// what the Close paused; here the kill of a window that crashed meanwhile is refused.
+#[test]
+fn a_resume_that_comes_while_the_close_waits_for_a_refused_kill_leaves_the_crashed_window_s_task_paused(
+) {
+    let context = Context::new();
+    let tiers = at_work(&context);
+    let project = tiers.project.id;
+    let zeus = context.host.last("zeus").expect("its window").pane;
+    let answer = Gate::default();
+    *context.host.hold_kill.borrow_mut() = Some((zeus.generation, answer.clone()));
+    let closing = context.begin_close_project(project);
+    context.settle();
+    context.exit("zeus");
+    // The human resumes before the Close is over; then zeus's kill fails.
+    let resuming = context.begin_resume_project(project);
+    context.settle();
+    context.host.refuse_kills.set(true);
+    answer.open();
+    let _ = context.finish(closing);
+    context.host.refuse_kills.set(false);
+    context.finish(resuming).unwrap();
+
+    assert_eq!(
+        [tiers.task(1).task.state, tiers.task(2).task.state],
+        ["paused", "working"],
+        "the window that crashed is the chief's to resume"
+    );
+}
+
+/// The same, with the other timing: the kill the Close still waits for is taken
+/// after the human resumed, and the task it pauses goes on with that Resume.
+#[test]
+fn a_resume_that_comes_while_the_close_waits_for_a_kill_resumes_the_task_that_kill_pauses() {
+    let context = Context::new();
+    let tiers = at_work(&context);
+    let project = tiers.project.id;
+    let zeus = context.host.last("zeus").expect("its window").pane;
+    let answer = Gate::default();
+    *context.host.hold_kill.borrow_mut() = Some((zeus.generation, answer.clone()));
+    let closing = context.begin_close_project(project);
+    context.settle();
+    let resuming = context.begin_resume_project(project);
+    context.settle();
+    answer.open();
+    context.finish(closing).unwrap();
+    context.finish(resuming).unwrap();
+
+    assert_eq!(
+        [tiers.task(1).task.state, tiers.task(2).task.state],
+        ["working", "working"],
+        "both went with the Close, and come back with the Resume"
+    );
+    assert_eq!(context.project(project).state, "open");
+}
+
+/// The same, of the Close the chief's window makes when it ends by itself: the
+/// Resume waits for the kills of its workers' windows.
+#[test]
+fn a_resume_that_comes_while_the_chief_window_s_close_waits_for_a_kill_resumes_the_task_that_kill_pauses(
+) {
+    let context = Context::new();
+    let tiers = at_work(&context);
+    let project = tiers.project.id;
+    let zeus = context.host.last("zeus").expect("its window").pane;
+    let answer = Gate::default();
+    *context.host.hold_kill.borrow_mut() = Some((zeus.generation, answer.clone()));
+    let exiting = context.begin_exit("chief");
+    context.settle();
+    assert_eq!(context.project(project).state, "suspended");
+    let resuming = context.begin_resume_project(project);
+    context.settle();
+    answer.open();
+    context.finish(exiting);
+    context.finish(resuming).unwrap();
+
+    assert_eq!(
+        [tiers.task(1).task.state, tiers.task(2).task.state],
+        ["working", "working"]
+    );
+}
+
+/// The same as the delivery that waits for its window, with the project closed
+/// while the host takes the word that its turn begins, the last wait before the paste.
+#[test]
+fn a_delivery_whose_paste_is_about_to_go_while_the_project_closes_goes_back_to_its_queue() {
+    let context = Context::new();
+    let tiers = at_work(&context);
+    let project = tiers.project.id;
+    let waiting = context.note(project, "human", "chief", "Any news?");
+    let marking = context.background.hold_marks();
+    context.pass().unwrap();
+    let closing = context.begin_close_project(project);
+    context.settle();
+    marking.open();
+    context.finish(closing).unwrap();
+
+    assert_eq!(context.message(waiting.id).state, "queued");
+    assert!(
+        given(&context, "chief")
+            .iter()
+            .all(|text| !text.contains("Any news?")),
+        "nothing pasted"
+    );
+}
+
+/// Both reviews of 2026-10-16, round 3: a delivery begun before the Close that
+/// waited for its window to be ready pasted after the project was suspended.
+#[test]
+fn a_delivery_that_waits_for_its_window_while_the_project_closes_is_not_pasted_and_waits_for_the_resume(
+) {
+    let context = Context::new();
+    let tiers = at_work(&context);
+    let project = tiers.project.id;
+    let waiting = context.note(project, "human", "chief", "Any news?");
+    *context.adapter.ready.borrow_mut() = Some(Rc::new(|| Ok(Readiness::Ready)));
+    let readying = context.adapter.ready_holds.hold(|_| true);
+    context.pass().unwrap();
+    let closing = context.begin_close_project(project);
+    context.settle();
+    readying.open();
+    context.finish(closing).unwrap();
+
+    let waiting = context.message(waiting.id);
+    assert_eq!(
+        (waiting.state.as_str(), waiting.reason.as_deref()),
+        ("queued", None),
+        "never begun"
+    );
+    assert!(
+        given(&context, "chief")
+            .iter()
+            .all(|text| !text.contains("Any news?")),
+        "nothing pasted"
+    );
+}
+
+/// Both reviews of 2026-10-16, round 3: a Switch chief that waits for the chief's
+/// turn to end, in a project closed meanwhile whose Close could not close the chief's
+/// window, waits for the Resume: the note asking for the handoff is not pasted.
+#[test]
+fn a_switch_waiting_for_the_chief_s_turn_in_a_closed_project_waits_for_the_resume() {
+    let context = with_codex();
+    let project = context.with_staff(&["zeus"]);
+    context.pass().unwrap();
+    context.adapter.busy("chief");
+    context
+        .switch_chief(project.id, to("codex", "astraeus"), SwitchWhen::Turn, true)
+        .unwrap();
+    context.host.refuse_kills.set(true);
+    assert!(
+        context.close_project(project.id).is_err(),
+        "its windows stay"
+    );
+    context.host.refuse_kills.set(false);
+    context.adapter.answer("chief", "Done.");
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+
+    let asked = context
+        .inbox(context.id(project.id, "chief"))
+        .into_iter()
+        .find(|message| message.body.contains("Write down where things stand"))
+        .expect("the note asking for the handoff");
+    assert_eq!(asked.state, "queued", "it waits for the Resume");
+}
+
+/// The same, of a switch asked with no note: once the chief's turn is over it would
+/// go, closing the chief's window and opening the new chief's in a closed project.
+#[test]
+fn a_switch_with_no_note_waiting_for_the_chief_s_turn_in_a_closed_project_opens_no_window() {
+    let context = with_codex();
+    let project = context.with_staff(&["zeus"]);
+    context.pass().unwrap();
+    context.adapter.busy("chief");
+    context
+        .switch_chief(project.id, to("codex", "astraeus"), SwitchWhen::Turn, false)
+        .unwrap();
+    context.host.refuse_kills.set(true);
+    assert!(
+        context.close_project(project.id).is_err(),
+        "its windows stay"
+    );
+    context.host.refuse_kills.set(false);
+    context.adapter.answer("chief", "Done.");
+    let windows = context.host.opened().len();
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+
+    assert_eq!(context.host.opened().len(), windows, "no window opens");
+    assert!(
+        context
+            .dispatcher
+            .pending_switch(context.id(project.id, "chief"))
+            .is_some(),
+        "the switch waits for the Resume"
+    );
+}
+
+/// The same, of a chief out of quota, whose switch goes as soon as it is asked:
+/// in a closed project it waits for the Resume too, and no window opens for it.
+#[test]
+fn a_switch_of_a_chief_out_of_quota_in_a_closed_project_waits_for_the_resume() {
+    let context = with_codex();
+    let project = context.with_staff(&["zeus"]);
+    context.pass().unwrap();
+    context.adapter.busy("chief");
+    context
+        .switch_chief(project.id, to("codex", "astraeus"), SwitchWhen::Turn, false)
+        .unwrap();
+    let chief = context.id(project.id, "chief");
+    context
+        .ledger
+        .borrow_mut()
+        .mark_out(chief, "2099-01-01T00:00:00.000Z", "out of quota")
+        .unwrap();
+    context.host.refuse_kills.set(true);
+    assert!(
+        context.close_project(project.id).is_err(),
+        "its windows stay"
+    );
+    context.host.refuse_kills.set(false);
+    let windows = context.host.opened().len();
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+
+    assert_eq!(context.host.opened().len(), windows, "no window opens");
+    assert!(
+        context.dispatcher.pending_switch(chief).is_some(),
+        "the switch waits"
     );
 }
 

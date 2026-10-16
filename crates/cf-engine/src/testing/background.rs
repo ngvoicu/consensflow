@@ -53,6 +53,8 @@ pub struct FakeBackground {
     unanswered: Cell<usize>,
     /// An ending waits for this gate before it ends anything.
     hold: RefCell<Option<Gate>>,
+    /// The word that a turn begins waits for this gate before it is taken.
+    mark_hold: RefCell<Option<Gate>>,
 }
 
 /// `commands` as the processes a host lists, numbered from `first`.
@@ -126,6 +128,14 @@ impl FakeBackground {
         self.unanswered.set(times);
     }
 
+    /// The host takes its time over the word that a turn begins: it is not taken
+    /// until the gate is opened.
+    pub fn hold_marks(&self) -> Gate {
+        let gate = Gate::default();
+        *self.mark_hold.borrow_mut() = Some(gate.clone());
+        gate
+    }
+
     /// The host takes its time over an ending, as it does over the grace it gives
     /// the work: it ends nothing until the gate is opened.
     pub fn hold_endings(&self) -> Gate {
@@ -189,7 +199,12 @@ impl BackgroundWork for FakeBackground {
             servers,
             harness: harness.to_owned(),
         });
-        Box::pin(async {})
+        let held = self.mark_hold.borrow().clone();
+        Box::pin(async move {
+            if let Some(gate) = held {
+                gate.wait().await;
+            }
+        })
     }
 
     fn end<'a>(&'a self, pane: &'a Pane) -> Work<'a, Option<Ending>> {

@@ -223,7 +223,10 @@ impl Dispatcher {
         observed: &Observed,
         idle: bool,
     ) -> Result<(), EngineError> {
-        if !idle {
+        // A closed project's switch waits for the Resume: its window is given nothing
+        // meanwhile, the note that asks for the handoff among it (both reviews of
+        // 2026-10-16, round 3).
+        if !idle || project.state != "open" {
             return Ok(());
         }
         let Some(pending) = record.pending_switch.borrow().clone() else {

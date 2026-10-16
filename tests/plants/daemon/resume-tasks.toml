@@ -322,8 +322,8 @@ runs = ["ledger-suspended", "engine-resume-tasks"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/pauses.rs"
-find = "        if let Some(pause) = pause.filter(|pause| pause.because.contains(MAY_STILL_RUN)) {"
-replace = "        if let Some(pause) = pause.filter(|_| false) {"
+find = "        .filter(|because| because.contains(MAY_STILL_RUN))"
+replace = "        .filter(|_| false)"
 
 [[plant]]
 name = "resume tasks: the warning that a program may still run is kept from a note of one task only"
@@ -357,3 +357,109 @@ runs = ["engine-resume-tasks"]
 file = "crates/cf-engine/src/dispatcher.rs"
 find = "        if idle && project.state == \"open\" {"
 replace = "        if idle {"
+
+# --- the reviews of 2026-10-16, round 3 ---
+
+[[plant]]
+name = "resume tasks: a Resume that comes while the Close waits for a kill overtakes it"
+meant = "a_resume_that_comes_while_the_close_waits_for_a_refused_kill_leaves_the_crashed_window_s_task_paused"
+runs = ["engine-resume-tasks"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/resume.rs"
+find = "        self.closings.ended(project).await;"
+replace = ""
+
+[[plant]]
+name = "resume tasks: the human's Close is over for a Resume before its kills are answered"
+meant = "a_resume_that_comes_while_the_close_waits_for_a_kill_resumes_the_task_that_kill_pauses"
+runs = ["engine-resume-tasks"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''
+    ) -> Result<Option<ProjectView>, EngineError> {
+        let _closing = self.closings.begin(project);'''
+replace = '''
+    ) -> Result<Option<ProjectView>, EngineError> {
+        drop(self.closings.begin(project));'''
+
+[[plant]]
+name = "resume tasks: the Close the chief's window makes is none a Resume waits for"
+meant = "a_resume_that_comes_while_the_chief_window_s_close_waits_for_a_kill_resumes_the_task_that_kill_pauses"
+runs = ["engine-resume-tasks"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "                let _closing = self.closings.begin(project.id);"
+replace = ""
+
+[[plant]]
+name = "resume tasks: a Close that ends leaves the Resume that waits for it waiting"
+meant = "a_resume_that_comes_while_the_close_waits_for_a_kill_resumes_the_task_that_kill_pauses"
+runs = ["engine-resume-tasks"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/resume.rs"
+find = '''
+            if *count == 0 {
+                under_way.remove(&self.project);
+            }'''
+replace = ""
+
+[[plant]]
+name = "resume tasks: a cancel keeps no warning that a program may still run"
+meant = "a_cancel_withdraws_the_pause_note_and_keeps_the_word_that_a_program_may_still_run"
+runs = ["ledger-suspended"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = "    let warnings = warnings_queued(store, &task)?;"
+replace = "    let warnings = Vec::new();"
+
+[[plant]]
+name = "resume tasks: a delivery that waited for its window goes into a closed project's"
+meant = "a_delivery_that_waits_for_its_window_while_the_project_closes_is_not_pasted_and_waits_for_the_resume"
+runs = ["engine-resume-tasks"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''
+        if !self.in_open_project(record)? {
+            return Ok(());
+        }'''
+replace = ""
+
+[[plant]]
+name = "resume tasks: a paste about to go goes into a closed project's window"
+meant = "a_delivery_whose_paste_is_about_to_go_while_the_project_closes_goes_back_to_its_queue"
+runs = ["engine-resume-tasks"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''
+        if !self.in_open_project(record)? {
+            self.seams.ledger.borrow_mut().retry_delivery('''
+replace = '''
+        if false {
+            self.seams.ledger.borrow_mut().retry_delivery('''
+
+[[plant]]
+name = "resume tasks: a switch that waited for the chief's turn goes in a closed project"
+meant = "a_switch_with_no_note_waiting_for_the_chief_s_turn_in_a_closed_project_opens_no_window"
+runs = ["engine-resume-tasks"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/chief_switch.rs"
+find = '        if !idle || project.state != "open" {'
+replace = "        if !idle {"
+
+[[plant]]
+name = "resume tasks: the switch of a chief out of quota goes in a closed project"
+meant = "a_switch_of_a_chief_out_of_quota_in_a_closed_project_waits_for_the_resume"
+runs = ["engine-resume-tasks"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '        if let Some(to) = pending.filter(|_| project.state == "open") {'
+replace = "        if let Some(to) = pending {"

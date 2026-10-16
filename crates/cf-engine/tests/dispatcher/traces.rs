@@ -248,6 +248,10 @@ const DEPARTED: &[(&str, &str)] = &[
         CLOSE_RESUMED,
     ),
     (
+        "opens the chief again when the human resumes a project that is still closing",
+        "the human resumes the project while its Close still waits for its windows' kills: the Resume waits for the Close to end, every kill answered, and opens the chief after it, where Node's Resume opened the project while the Close went on (both reviews of 2026-10-16, round 3)",
+    ),
+    (
         "fails the Close that made its exit, which nothing logs: the exit it settles is its own",
         "the human resumes the project the Close suspended: T-1, which the Close paused, is at work again in the same write, and its window comes back after the chief's, told its turn was cut, where Node leaves T-1 paused for the chief to resume; and when the chief's next window closes by itself, the note that T-1 is paused says the worker's window went with the project (`@zeus's window closed with the project when @chief's window closed`), where Node's says `@zeus's window closed`, as a worker's own crash does (the report of 2026-10-15, B2)",
     ),

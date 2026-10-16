@@ -12,7 +12,7 @@ use rusqlite::params;
 use serde_json::json;
 
 use super::{carrier_body, delivery_body, require_on_board, require_task_state, task_by_id};
-use crate::messages::{fold, leave_pause_notes, tell_sent_back};
+use crate::messages::{fold, leave_pause_notes, say_again, tell_sent_back, warnings_queued};
 use crate::model::{
     self, require_active, sql_list, LedgerError, ACTIVE_TASK_STATES, FINISHED_TASK_STATES,
     MAX_BODY, MEMBER_ROLES,
@@ -294,6 +294,8 @@ pub(crate) fn call_off(
             .exists(params![task.id, assignee.id])?,
         _ => false,
     };
+    // A warning its pause notes say is kept before they go with the rest.
+    let warnings = warnings_queued(store, &task)?;
     store.db.execute(
         "UPDATE message SET state = 'cancelled', reason = ?
        WHERE task_id = ? AND state IN ('queued', 'delivering', 'gated')",
@@ -301,6 +303,7 @@ pub(crate) fn call_off(
     )?;
     // A note of several that names it, still queued, names it no more.
     leave_pause_notes(store, &task, "cancelled")?;
+    say_again(store, &task, "cancelled", warnings)?;
     store.move_task(&task, "cancelled", json!({ "by": by }))?;
     release_ready(store, project_id)?;
     Ok((task, assignee.filter(|_| began)))

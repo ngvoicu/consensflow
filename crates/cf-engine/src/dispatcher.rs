@@ -40,7 +40,7 @@ use cf_proto::trace::{TraceLine, Traced, WindowEvent};
 use crate::background::quote;
 use crate::chief_switch::SwitchTo;
 use crate::record::Record;
-use crate::resume::Coming;
+use crate::resume::{Closings, Coming};
 use crate::runtime::{all, begin, returning, Begun, LocalWork};
 use crate::scheduler::SchedulerState;
 use crate::seams::{EngineError, Seams};
@@ -94,6 +94,8 @@ pub struct Dispatcher {
     pub(crate) scheduler: SchedulerState,
     /// What the bursts of stalls under way keep (`stalls`).
     pub(crate) stalls: StallsState,
+    /// The Closes under way, which a Resume waits for (`resume`).
+    pub(crate) closings: Closings,
 }
 
 impl Dispatcher {
@@ -107,6 +109,7 @@ impl Dispatcher {
             windows: WindowsState::default(),
             scheduler: SchedulerState::default(),
             stalls: StallsState::default(),
+            closings: Closings::default(),
         })
     }
 
@@ -214,6 +217,7 @@ impl Dispatcher {
         self: &Rc<Self>,
         project: i64,
     ) -> Result<Option<ProjectView>, EngineError> {
+        let _closing = self.closings.begin(project);
         let suspended = self
             .seams
             .ledger
@@ -738,6 +742,7 @@ impl Dispatcher {
             // is tried again (`settle_exited_launch`).
             let own = record.window.borrow().own_exit;
             if project.state == "open" && !own && !launch_owed {
+                let _closing = self.closings.begin(project.id);
                 self.seams
                     .ledger
                     .borrow_mut()
@@ -1025,7 +1030,8 @@ impl Dispatcher {
             .borrow()
             .as_ref()
             .map(|pending| pending.to.clone());
-        if let Some(to) = pending {
+        // A closed project's switch waits for the Resume, as `await_switch`'s does.
+        if let Some(to) = pending.filter(|_| project.state == "open") {
             return self.perform_switch(project, participant, record, to).await;
         }
         let until = owner.out_until.clone().unwrap_or_default();

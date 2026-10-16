@@ -30,7 +30,11 @@
 //! rest with its task at work for good, and one told that was at rest only looks
 //! again.
 
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::future::{poll_fn, Future};
 use std::rc::Rc;
+use std::task::{Poll, Waker};
 
 use cf_ledger::{
     ConversationView, MessageView, NewNote, ParticipantView, ProjectView, RESUME_WORDS,
@@ -40,6 +44,64 @@ use crate::dispatcher::Dispatcher;
 use crate::handoff::is_handoff;
 use crate::runtime::returning;
 use crate::seams::EngineError;
+
+/// The Closes under way, by project (the human's, and the one the chief's window
+/// ending makes): a Resume of a project waits for its Closes to end, every kill
+/// answered, before it reads which tasks they paused. A Resume that overtook a Close
+/// resumed a task whose crash a refused kill would have left paused, and left paused
+/// one whose kill came after it (both reviews of 2026-10-16, round 3). A Close waits
+/// for nothing without a bound: each kill has the pane host's deadline.
+#[derive(Default)]
+pub(crate) struct Closings {
+    under_way: RefCell<HashMap<i64, usize>>,
+    waiting: RefCell<Vec<Waker>>,
+}
+
+/// A Close under way. Dropping it ends it, however its work ends.
+pub(crate) struct Closing<'a> {
+    closings: &'a Closings,
+    project: i64,
+}
+
+impl Closings {
+    /// A Close of `project` begins.
+    pub(crate) fn begin(&self, project: i64) -> Closing<'_> {
+        *self.under_way.borrow_mut().entry(project).or_default() += 1;
+        Closing {
+            closings: self,
+            project,
+        }
+    }
+
+    /// Ready once no Close of `project` is under way: at once where none is.
+    fn ended(&self, project: i64) -> impl Future<Output = ()> + '_ {
+        poll_fn(move |cx| {
+            if self.under_way.borrow().contains_key(&project) {
+                self.waiting.borrow_mut().push(cx.waker().clone());
+                Poll::Pending
+            } else {
+                Poll::Ready(())
+            }
+        })
+    }
+}
+
+impl Drop for Closing<'_> {
+    fn drop(&mut self) {
+        let mut under_way = self.closings.under_way.borrow_mut();
+        if let Some(count) = under_way.get_mut(&self.project) {
+            *count -= 1;
+            if *count == 0 {
+                under_way.remove(&self.project);
+            }
+        }
+        drop(under_way);
+        let waiting = std::mem::take(&mut *self.closings.waiting.borrow_mut());
+        for waker in waiting {
+            waker.wake();
+        }
+    }
+}
 
 /// A window the human's Resume brings back, as far as telling it its turn was
 /// cut goes.
@@ -108,11 +170,13 @@ impl Dispatcher {
     /// paused at work again (the ledger's write), and its chief comes back on its
     /// conversation, and then each member with a task at work or waiting, on its
     /// own. A window comes up apart from this call, and what waits for it is
-    /// delivered once it is up.
+    /// delivered once it is up. A Close of the project still under way ends
+    /// first ([`Closings`]): the Resume answers once it has resumed.
     pub async fn resume_project(
         self: &Rc<Self>,
         project: i64,
     ) -> Result<Option<ProjectView>, EngineError> {
+        self.closings.ended(project).await;
         let resumed = self
             .seams
             .ledger

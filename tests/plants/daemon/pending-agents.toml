@@ -297,12 +297,12 @@ runs = ["engine-dispatcher-switching-agents"]
 [[plant.edit]]
 file = "crates/cf-engine/src/chief_switch.rs"
 find = '''
-        if !idle {
+        if !idle || project.state != "open" {
             return Ok(());
         }
         let Some(pending) = record.pending_switch.borrow().clone() else {'''
 replace = '''
-        if !idle || observed.agents_pending() {
+        if !idle || project.state != "open" || observed.agents_pending() {
             return Ok(());
         }
         let Some(pending) = record.pending_switch.borrow().clone() else {'''

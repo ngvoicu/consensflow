@@ -41,7 +41,9 @@ pub(crate) use delivery::{
 pub(crate) use gate::{approve_message, decline_message, mark_read};
 pub(crate) use holds::{note_hold, tell_goes_on};
 pub use pauses::MAY_STILL_RUN;
-pub(crate) use pauses::{join_pause_note, leave_pause_notes, note_pause};
+pub(crate) use pauses::{
+    join_pause_note, leave_pause_notes, note_pause, say_again, warnings_queued,
+};
 pub use receipt::Read;
 pub(crate) use receipt::{
     claim_answer, door_born_closed, receive_read, reconcile, release_all_claims, release_claims,

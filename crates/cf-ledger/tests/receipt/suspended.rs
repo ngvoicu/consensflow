@@ -351,6 +351,39 @@ fn the_resume_withdraws_the_pause_note_and_keeps_the_word_that_a_program_may_sti
     );
 }
 
+/// Both reviews of 2026-10-16, round 3: a cancel withdrew the note of a pause that
+/// said its window's program may still run, before the warning was kept from it.
+#[test]
+fn a_cancel_withdraws_the_pause_note_and_keeps_the_word_that_a_program_may_still_run() {
+    let mut w = world();
+    let cancelled = at_work(&mut w, "zeus");
+    let outlived =
+        "@zeus's window closed, but its program (process 4242) could not be ended and may still run";
+    closed_with(&mut w, &[cancelled], outlived);
+    let note = w
+        .ledger
+        .note_pause(w.project, "chief", cancelled, outlived)
+        .expect("the chief is told");
+
+    w.ledger
+        .cancel_task(w.project, cancelled, "human")
+        .expect("called off");
+
+    assert_eq!(w.message(note.id).state, "cancelled", "the pause note goes");
+    let kept: Vec<String> = w
+        .ledger
+        .inbox(w.id("chief"), 100)
+        .expect("the chief's inbox")
+        .into_iter()
+        .filter(|message| message.state == "queued" && message.body.contains(" Before that, "))
+        .map(|message| message.body)
+        .collect();
+    assert_eq!(
+        kept,
+        [format!("T-{cancelled} cancelled. Before that, {outlived}.")]
+    );
+}
+
 #[test]
 fn a_ledger_from_before_the_mark_keeps_every_paused_task_paused_through_a_resume() {
     const AT: &str = "2026-10-15T00:00:00.000Z";
