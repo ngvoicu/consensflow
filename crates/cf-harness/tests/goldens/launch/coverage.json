@@ -15,6 +15,6 @@
     "codex": { "darwin": 109, "win32": 109, "held": "tests/launch/scenarios.rs" },
     "opencode": { "darwin": 158, "win32": 158, "held": "tests/launch/scenarios.rs" },
     "pi": { "darwin": 62, "win32": 62, "held": "tests/launch/scenarios.rs" },
-    "devin": { "darwin": 136, "win32": 136, "held": "tests/launch/scenarios.rs" }
+    "devin": { "darwin": 139, "win32": 139, "held": "tests/launch/scenarios.rs" }
   }
 }

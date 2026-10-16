@@ -30,6 +30,7 @@ mod board;
 mod chief;
 mod closing;
 mod command;
+mod descent;
 mod door;
 mod leftovers;
 mod plan;
@@ -59,6 +60,9 @@ pub use board::{
     last_result, notes_of_work, session_of, MemberWindow, Paused,
 };
 pub use command::{quiet_command, shown, LongCommand};
+pub use descent::{
+    descending_from, end_chosen, holding, Ended, Identity, Machine, Running, ThisMachine,
+};
 pub use door::{judge, moves, ms_of, waited_then_worked, Finding, Judged, Seen};
 pub use plan::{
     member, member_as, question_brief, stand_in_chief, stand_in_question_brief, stand_in_worker,
@@ -336,6 +340,14 @@ impl Members {
             activity: lane["activity"].clone(),
             lane,
         })
+    }
+
+    /// Which process the program of `window` is, as the pane host opened it for the
+    /// daemon: read once, as the host answered the open, and kept
+    /// ([`Rig::window_process`]). What descends from it is the window's own tree, and
+    /// nothing does once it has gone, whatever has its number since.
+    pub fn window_process(&self, window: &MemberWindow) -> Option<Identity> {
+        self.rig.window_process(&window.pane)
     }
 
     /// Every `pane.open` the daemon made for the windows of the member `agent`,

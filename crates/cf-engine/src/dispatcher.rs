@@ -969,10 +969,10 @@ impl Dispatcher {
                 return Ok(());
             }
         }
-        let idle = record.delivery.borrow().delivering.is_none()
+        let free = record.delivery.borrow().delivering.is_none()
             && observed.settled
-            && observed.waiting.is_none()
-            && !drawing;
+            && observed.waiting.is_none();
+        let idle = free && !drawing;
         if record.pending_switch.borrow().is_some() {
             return self
                 .await_switch(project, participant, record, &observed, idle)
@@ -989,6 +989,17 @@ impl Dispatcher {
                 let (this, held) = (Rc::clone(self), Rc::clone(record));
                 self.act(record, async move { this.deliver(&held, next).await })
                     .await;
+            }
+        } else if free && self.ready_while_drawing(record) {
+            // Nothing goes into a window that has not drawn, but one whose readiness
+            // has a bound of its own is asked, and given up where it says it never
+            // will be fit (`give_up_unfit_drawing`).
+            if let Some(next) = self.next_in_line(record)? {
+                let (this, held) = (Rc::clone(self), Rc::clone(record));
+                self.act(record, async move {
+                    this.give_up_unfit_drawing(&held, next).await
+                })
+                .await;
             }
         }
         Ok(())

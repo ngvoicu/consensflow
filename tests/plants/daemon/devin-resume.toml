@@ -1,0 +1,729 @@
+# A resumed Devin window in full permission (the field report B1 of 2026-10-15,
+# ConsensFlow 3.0.4 on Windows: a Devin worker resumed after the app's quit had every
+# write, shell and `cf` call come back "Tool execution was rejected: User skipped this
+# tool call"). Devin's `--resume` of a session the quit cut in its first turn drops
+# `--permission-mode dangerous` and comes up in its normal mode, where a prompt file's
+# calls are refused and a pasted turn's wait at a dialog. The fix: a resumed window's
+# first message goes behind `/bypass` (the Devin adapter's `first_message`); no Devin
+# window is ready for a delivery while its wire says the normal mode, and it is given
+# `/bypass` once drawn (`ready`, by the mode the wire log reads); one still in that mode
+# after its time is unfit for work, and the engine gives its launch up on the board
+# (`give_up_unfit`).
+#
+# The case of the regressions is `crates/cf-e2e/tests/regressions/
+# a_resumed_devin_worker_skipped_every_call.rs`: the real daemon and pane host on the
+# stand-in Devin, which does what Devin 3000.11.92 did; its run builds the native `cf`
+# from the sources as they are planted, so its plants say `builds`. The other plants run
+# the adapter's, the wire log's, the launch goldens' and the engine's tests. One plant
+# takes one rule out; a test of it fails.
+#
+# Every name holds `devin resume`, so `npm run plants:daemon -- "devin resume"` runs them all.
+
+[run]
+# The Devin adapter's own tests, and its wire log's.
+harness-lib-devin = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "devin::"]
+# The launch goldens, each harness's scenarios played.
+harness-launch-scenarios = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "scenarios::"]
+# A window that says it never will be ready, in the engine.
+engine-dispatcher-unfit = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "unfit::"]
+# B1's case, found by the start of its module's name.
+rig-regression-resumed-devin = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_resumed_devin_worker_skipped_every_call::"]
+# A member's launch that was to say its role first, in the engine.
+engine-dispatcher-role-launch = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "role_change::launch::"]
+# The stand-in Devin resumed in its normal mode, its readiness the product's own.
+rig-live-member-readiness = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "live_member::a_window_cut_in_its_first_turn"]
+# The live checks' own support: the launch without the owner's hooks, and the machine's processes.
+e2e-lib-window = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::window::"]
+# How the live checks find and end their window's command: through the pane host's seam,
+# and through the real pane host on the stand-in Devin.
+e2e-lib-command = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::members::command::"]
+e2e-lib-descent = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::members::descent::"]
+# The readiness relay of the live checks, and the live suite's own rules.
+e2e-lib-ask-readiness = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::ask::readiness::"]
+live-suite-units = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_devin_resume"]
+rig-live-member-work = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "live_member::the_check_ends"]
+# The other live suites that ended what a window ran by a mark (round 6): what each now
+# chooses to end, of a window's own tree.
+live-finish-leaving = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_finish", "leaving::tests::"]
+# Round 7: the window's process, read as the pane host answers its open, and kept.
+e2e-lib-rig = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "rig::"]
+live-stops-stuck = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_stops", "stuck::"]
+
+[[plant]]
+name = "devin resume: a resumed worker is given the note that its turn was cut without /bypass (B1)"
+meant = "a_devin_worker_cut_in_its_first_turn_and_resumed_goes_on_with_its_calls_running"
+runs = ["rig-regression-resumed-devin"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/adapter.rs"
+find = '''        format!("{BYPASS} {text}")'''
+replace = '''        text.clone()'''
+
+[[plant]]
+name = "devin resume: the adapter puts no /bypass before a resumed window's first message"
+meant = "a_resumed_windows_first_message_goes_behind_bypass_and_a_new_windows_does_not"
+runs = ["harness-lib-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/adapter.rs"
+find = '''        format!("{BYPASS} {text}")'''
+replace = '''        text.clone()'''
+
+[[plant]]
+name = "devin resume: a window whose wire says the normal mode is ready for work"
+meant = "a_window_in_the_normal_mode_is_given_bypass_once_drawn_and_is_ready_when_the_wire_says_it_changed"
+runs = ["harness-lib-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/adapter.rs"
+find = '''    mode == Some(NORMAL)'''
+replace = '''    false && mode == Some(NORMAL)'''
+
+[[plant]]
+name = "devin resume: the goldens of a window resumed in the normal mode play it ready"
+meant = "every_scenario_plays_as_node_played_it"
+runs = ["harness-launch-scenarios"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/adapter.rs"
+find = '''    mode == Some(NORMAL)'''
+replace = '''    false && mode == Some(NORMAL)'''
+
+[[plant]]
+name = "devin resume: /bypass is pasted into a window that has not drawn its screen"
+meant = "a_window_in_the_normal_mode_is_given_bypass_once_drawn_and_is_ready_when_the_wire_says_it_changed"
+runs = ["harness-lib-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/adapter.rs"
+find = '''        if drawn && due {'''
+replace = '''        if due {'''
+
+[[plant]]
+name = "devin resume: /bypass is never pasted again while the wire says the normal mode"
+meant = "while_the_wire_says_the_normal_mode_enter_goes_in_again_before_bypass_is_pasted_again"
+runs = ["harness-lib-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/adapter.rs"
+find = '''            .is_none_or(|last| now - last >= BYPASS_AGAIN_MS);'''
+replace = '''            .is_none();'''
+
+# Round 4 (Astra and Sol on the fix): an Enter goes in before /bypass is pasted again, as
+# the engine's Enter again for a delivery has it, or a missed Enter makes /bypass/bypass.
+[[plant]]
+name = "devin resume: /bypass is pasted again with no Enter before it"
+meant = "while_the_wire_says_the_normal_mode_enter_goes_in_again_before_bypass_is_pasted_again"
+runs = ["harness-lib-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/adapter.rs"
+find = '''            if switch.pasted.is_some() && switch.entered.is_none() {'''
+replace = '''            if false {'''
+
+[[plant]]
+name = "devin resume: an Enter the host did not take counts as pressed"
+meant = "an_enter_the_host_did_not_take_is_pressed_again_at_the_next_look"
+runs = ["harness-lib-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/adapter.rs"
+find = '''                if pane::write_keys(host, pane, &[ENTER]).await.is_ok() {'''
+replace = '''                if pane::write_keys(host, pane, &[ENTER]).await.is_ok() || true {'''
+
+# The window as it is once the host answered the look at its screen: what the human did
+# meanwhile is what it is.
+[[plant]]
+name = "devin resume: the mode read before the look at the screen decides"
+meant = "what_the_human_did_while_the_screen_was_looked_at_is_what_the_window_is"
+runs = ["harness-lib-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/adapter.rs"
+find = '''            if wants_bypass(now.mode.as_deref()) {'''
+replace = '''            if wants_bypass(said.mode.as_deref()) {'''
+
+[[plant]]
+name = "devin resume: a turn begun while the screen was looked at is given /bypass"
+meant = "what_the_human_did_while_the_screen_was_looked_at_is_what_the_window_is"
+runs = ["harness-lib-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/adapter.rs"
+find = '''            if now.prompts > since {'''
+replace = '''            if false {'''
+
+# Round 5 (Astra 4): a prompt already on the wire at readiness's first read, read since
+# the engine's look found the window at rest.
+[[plant]]
+name = "devin resume: a turn begun before readiness's first read is given /bypass"
+meant = "a_turn_begun_after_the_engines_look_found_the_window_at_rest_holds_it_though_its_prompt_was_there_at_the_first_read"
+runs = ["harness-lib-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/adapter.rs"
+find = '''            let since = self.looked.get().unwrap_or(said.prompts);'''
+replace = '''            let since = said.prompts;'''
+
+[[plant]]
+name = "devin resume: another conversation opened while the screen was looked at is not seen"
+meant = "what_the_human_did_while_the_screen_was_looked_at_is_what_the_window_is"
+runs = ["harness-lib-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/adapter.rs"
+find = '''            if let Some(held) = self.shows_another(&now) {'''
+replace = '''            if let Some(held) = None::<Held> {'''
+
+[[plant]]
+name = "devin resume: a conversation the window is followed to inherits the time of the one before"
+meant = "a_conversation_the_window_is_followed_to_has_its_own_time_to_leave_the_normal_mode"
+runs = ["harness-lib-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/adapter.rs"
+find = '''        if known.as_deref() != Some(session) {'''
+replace = '''        if false {'''
+
+# A wire log replaced: read again from its start, the mode of the one before forgotten.
+[[plant]]
+name = "devin resume: a log replaced keeps the mode of the one before"
+meant = "a_log_replaced_by_one_as_long_says_the_mode_the_new_one_says_and_no_mode_of_the_old_one"
+runs = ["harness-lib-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/wire_log.rs"
+find = '''            state.mode = None;'''
+replace = ""
+
+[[plant]]
+name = "devin resume: a log written to is never read again to see it holds what was read"
+meant = "a_log_that_holds_other_bytes_than_were_read_was_replaced_whether_it_grew_or_not"
+runs = ["harness-lib-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/wire_log.rs"
+find = '''        if modified.is_some() && modified == self.modified {'''
+replace = '''        if modified.is_some() {'''
+
+# Round 5 (Astra and Sol): a log rewritten past its first kilobyte and grown kept its
+# old mode; and a log another file was renamed over is told by which file it is.
+[[plant]]
+name = "devin resume: a log rewritten and grown is the one read before"
+meant = "a_log_rewritten_past_its_first_kilobyte_and_grown_says_the_mode_the_rewrite_says"
+runs = ["harness-lib-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/wire_log.rs"
+find = '''        Ok(hash_of(file, self.offset)? != self.read.finish())'''
+replace = '''        Ok(hash_of(file, self.offset)? != self.read.finish() && size == self.offset)'''
+
+[[plant]]
+name = "devin resume: a log another file was renamed over is the one read before"
+meant = "a_log_another_file_was_renamed_over_is_read_from_its_start_whatever_its_size_and_time"
+runs = ["harness-lib-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/wire_log.rs"
+find = '''        if size < self.offset || identity != self.identity {'''
+replace = '''        if size < self.offset {'''
+
+[[plant]]
+name = "devin resume: an emptied log keeps its offset"
+meant = "a_log_emptied_was_replaced_so_one_written_again_is_read_from_its_start"
+runs = ["harness-lib-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/wire_log.rs"
+find = '''            state.offset = 0;'''
+replace = ""
+
+# A window that never draws: asked before it draws where its harness bounds its readiness.
+[[plant]]
+name = "devin resume: a Devin window is asked whether it is ready only once it has drawn"
+meant = "a_window_that_never_draws_is_asked_as_it_draws_and_its_time_runs_all_the_same"
+runs = ["harness-lib-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/adapter.rs"
+find = '''    fn ready_while_drawing(&self) -> bool {
+        true
+    }'''
+replace = '''    fn ready_while_drawing(&self) -> bool {
+        false
+    }'''
+
+[[plant]]
+name = "devin resume: the engine never asks a window that has not drawn"
+meant = "a_window_that_never_draws_and_says_it_never_will_be_fit_is_given_up_where_its_harness_bounds_its_readiness"
+runs = ["engine-dispatcher-unfit"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''        } else if free && self.ready_while_drawing(record) {'''
+replace = '''        } else if false && free && self.ready_while_drawing(record) {'''
+
+# An unfit member whose launch was to say its role first (Astra 1): the follow-up the role
+# went ahead of fails, and no launch follows.
+[[plant]]
+name = "devin resume: an unfit member that was to say its role fails the note of the role, and is launched for again"
+meant = "a_members_window_unfit_for_work_before_the_role_was_told_fails_the_follow_up_it_went_ahead_of_once_and_no_launch_follows"
+runs = ["engine-dispatcher-role-launch"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/unstarted.rs"
+find = '''        if self.owed(record)?.is_some() {'''
+replace = '''        if false && self.owed(record)?.is_some() {'''
+
+# A chief that stays unfit (Sol 5): its count of failures goes until a window is ready.
+[[plant]]
+name = "devin resume: a chief's count of failures is cleared as its window starts"
+meant = "a_chief_whose_windows_stay_unfit_is_tried_again_ever_more_slowly_and_the_human_is_told_once_until_one_is_ready"
+runs = ["engine-dispatcher-unfit"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '''        // ([`Dispatcher::came_up`]).'''
+replace = '''        // ([`Dispatcher::came_up`]).
+        record.window.borrow_mut().relaunch = None;'''
+
+[[plant]]
+name = "devin resume: a chief's count of failures is never cleared by a window ready for work"
+meant = "a_chief_whose_windows_stay_unfit_is_tried_again_ever_more_slowly_and_the_human_is_told_once_until_one_is_ready"
+runs = ["engine-dispatcher-unfit"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '''        if record.delivery.borrow().prelude.is_none() {'''
+replace = '''        if false && record.delivery.borrow().prelude.is_none() {'''
+
+# The rig's readiness check drives the product's own (Astra and Sol): one that pasted the
+# command itself passed whatever the product did.
+[[plant]]
+name = "devin resume: the daemon's readiness pastes no /bypass"
+meant = "a_window_cut_in_its_first_turn_comes_back_in_the_normal_mode_and_the_daemons_readiness_switches_it"
+runs = ["rig-live-member-readiness"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/adapter.rs"
+find = '''                    channel::send(host, pane, self.wire.path(), session.as_deref(), BYPASS).await;'''
+replace = '''                    channel::send(host, pane, self.wire.path(), session.as_deref().filter(|_| false), BYPASS).await;'''
+
+# The diagnostic launch without the owner's hooks (Sol 6): hook by hook, not entry by entry.
+[[plant]]
+name = "devin resume: an owner's hook that says the words of ConsensFlow's stays in a launch without the owner's"
+meant = "only_the_hooks_consensflow_added_stay_when_a_launch_is_to_have_none_of_the_owners"
+runs = ["e2e-lib-window"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/window/open.rs"
+find = '''        entries.retain(|entry| ours.contains(entry));'''
+replace = '''        entries.retain(|entry| ours.contains(entry) || entry.to_string().contains(" hook devin"));'''
+
+# The live check finds and ends its window's command among what descends from the
+# window's own process: a check that ended every process whose command line held the
+# mark ended the worker that ran it, whose brief quoted the mark (2026-10-16), and found
+# nothing on Windows, which has no `ps` (zeewin, 2026-10-16: every case failed at its
+# setup while Devin ran the command). The plants take the old way back; the outsider of
+# each test holds a mark of its own, which nothing else on the machine says.
+[[plant]]
+name = "devin resume: the check ends every process that says the mark, outside the window too"
+meant = "the_check_ends_the_command_its_window_runs_and_nothing_outside_the_window_that_says_the_same"
+runs = ["rig-live-member-work", "e2e-lib-command"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/command.rs"
+find = '''        Ok(holding(&machine.processes()?, window, self.mark))'''
+replace = '''        Ok(machine.processes()?.into_iter().filter(|process| process.command.contains(self.mark)).collect())'''
+
+[[plant]]
+name = "devin resume: the check finds the command by the mark across the machine"
+meant = "a_process_outside_the_window_that_holds_the_mark_runs_on_and_the_windows_own_command_is_ended"
+runs = ["e2e-lib-command"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/command.rs"
+find = '''        Ok(descending_from(&machine.processes()?, window)'''
+replace = '''        Ok(machine.processes()?.into_iter().chain(descending_from(&machine.processes()?, window))'''
+
+# Round 5 (Astra and Sol, P1): a process is known by its number and when it began. A
+# check that went by numbers alone could end a process that took a number the tree had,
+# or take for the tree's one whose parent's number the window's program had taken since.
+[[plant]]
+name = "devin resume: a process that names the window's number and began before it is taken for its child"
+meant = "what_descends_from_a_process_is_what_it_started_and_began_after_it_and_not_itself"
+runs = ["e2e-lib-descent"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/descent.rs"
+find = '''                && process.identity.started >= parent.started
+'''
+replace = ""
+
+[[plant]]
+name = "devin resume: the window's number is taken for the window it was"
+meant = "what_descends_from_a_process_is_what_it_started_and_began_after_it_and_not_itself"
+runs = ["e2e-lib-descent"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/descent.rs"
+find = '''    if !all.iter().any(|process| process.identity == root) {'''
+replace = '''    if false {'''
+
+[[plant]]
+name = "devin resume: a process is ended by the number chosen, whichever process has it now"
+meant = "a_process_is_ended_only_while_it_is_still_the_one_chosen_and_what_could_not_be_ended_is_said"
+runs = ["e2e-lib-descent"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/descent.rs"
+find = '''        Ok(Some(started)) if started == identity.started => match held.end() {'''
+replace = '''        Ok(Some(_)) => match held.end() {'''
+
+# Round 5 (Astra, P1): Windows' process table is read as JSON, where a command line of
+# many lines is one string; read as lines, an argument made up a process of the window.
+[[plant]]
+name = "devin resume: Windows' process table is read as lines"
+meant = "windows_process_table_is_read_as_json_and_a_command_line_of_many_lines_is_one_process"
+runs = ["e2e-lib-descent"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/descent.rs"
+find = '''}} }} | ConvertTo-Json -Compress"'''
+replace = '''}} }} | ForEach-Object {{ \"$($_.pid) $($_.ppid) $($_.command)\" }}"'''
+
+[[plant]]
+name = "devin resume: a command line of many lines is read to its first"
+meant = "windows_process_table_is_read_as_json_and_a_command_line_of_many_lines_is_one_process"
+runs = ["e2e-lib-descent"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/descent.rs"
+find = '''                command: entry["command"].as_str().unwrap_or_default().to_owned(),'''
+replace = '''                command: entry["command"].as_str().unwrap_or_default().lines().next().unwrap_or_default().to_owned(),'''
+
+# Round 5 (Astra 5): the relay waits on the helper only until its deadline.
+[[plant]]
+name = "devin resume: the relay waits on a stalled helper for ever"
+meant = "a_helper_that_stalls_is_ended_at_its_deadline_and_the_question_fails"
+runs = ["e2e-lib-ask-readiness"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/ask/readiness.rs"
+find = '''        let line = match read.recv_timeout(left) {'''
+replace = '''        let line = match read.recv().map_err(|_| std::sync::mpsc::RecvTimeoutError::Disconnected) {'''
+
+# Round 5 (zeewin's after-note): an ask is made only once the window has been at rest for
+# a while. Round 6 (the lead): the long command ends by itself in a minute, and a run of it
+# is waited for: an interrupt for it cancelled the turn of the ask (after-note's shell ask).
+[[plant]]
+name = "devin resume: an ask goes in while the long command runs"
+meant = "an_ask_waits_for_a_run_of_the_long_command_to_end_by_itself_and_the_window_to_be_still"
+runs = ["live-suite-units"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_devin_resume/back.rs"
+find = '''    !running && still >= STILL'''
+replace = '''    still >= STILL'''
+
+[[plant]]
+name = "devin resume: an ask goes in as soon as the window looks at rest"
+meant = "an_ask_waits_for_a_run_of_the_long_command_to_end_by_itself_and_the_window_to_be_still"
+runs = ["live-suite-units"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_devin_resume/back.rs"
+find = '''    !running && still >= STILL'''
+replace = '''    !running'''
+
+[[plant]]
+name = "devin resume: the long command runs five minutes, past the time of an ask"
+meant = "the_long_command_runs_long_enough_to_be_cut_in_and_ends_in_the_time_of_an_ask"
+runs = ["live-suite-units"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_devin_resume.rs"
+find = '''LongCommand::lasting("cf-devin-resume-long-command", 60)'''
+replace = '''LongCommand::new("cf-devin-resume-long-command")'''
+
+[[plant]]
+name = "devin resume: each look at a run of the long command again is said to be a run of its own"
+meant = "a_window_that_ran_the_long_command_again_is_said_to_have_and_how_often_and_nothing_ends_it"
+runs = ["live-suite-units"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_devin_resume/again.rs"
+find = '''            (false, true) => {'''
+replace = '''            (_, true) => {'''
+
+# Round 6 (the lead): no live suite ends a process by a mark across the machine. A guard
+# reads the live checks, their support and their suites for a signal or a program that
+# ends processes; the plants put the old way back, in a suite and in the support.
+[[plant]]
+name = "devin resume: a live suite ends what says its mark across the machine again"
+meant = "no_live_check_ends_a_process_but_through_the_descent"
+runs = ["e2e-lib-descent"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_stops/stuck.rs"
+find = '''    for problem in end_chosen(&chosen).problems() {'''
+replace = '''    for found in cf_e2e::live::claude::processes_with(SCRIPT).unwrap_or_default() {
+        let _ = cf_e2e::process::signal(found.pid, cf_e2e::process::Signal::Kill);
+    }
+    for problem in end_chosen(&chosen).problems() {'''
+
+[[plant]]
+name = "devin resume: the long command can end what says its mark across the machine again"
+meant = "no_live_check_ends_a_process_but_through_the_descent"
+runs = ["e2e-lib-descent"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/command.rs"
+find = '''    /// Ends its processes in the window whose own process is `window`, and what they'''
+replace = '''    /// Ends every process that says its mark.
+    pub fn end(&self) {
+        for found in processes_with(self.mark).unwrap_or_default() {
+            let _ = crate::process::signal(found.pid, crate::process::Signal::Kill);
+        }
+    }
+
+    /// Ends its processes in the window whose own process is `window`, and what they'''
+
+# `live_finish`'s leaving: what the run ends at its end is what it saw of the command in
+# the worker's window, and the jobs the rig's stand-in wrote it started. Round 7 (Astra and
+# Sol on round 6): a job is the process of its number that holds its own file, taken once.
+[[plant]]
+name = "devin resume: the leaving run takes the process of a job's number for the job, whatever its command line"
+meant = "a_stand_in_job_is_taken_by_its_own_file_at_the_first_look_and_its_number_never_again"
+runs = ["live-finish-leaving"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_finish/leaving.rs"
+find = '''                process.identity.pid == *pid && process.command.contains(file.as_str())'''
+replace = '''                process.identity.pid == *pid'''
+
+[[plant]]
+name = "devin resume: the leaving run takes a job's number again at a later look"
+meant = "a_stand_in_job_is_taken_by_its_own_file_at_the_first_look_and_its_number_never_again"
+runs = ["live-finish-leaving"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_finish/leaving.rs"
+find = '''            if self.jobs.contains(file) {'''
+replace = '''            if false {'''
+
+# Round 7 (Astra on round 6): what the turn left is looked for whatever came of the task.
+[[plant]]
+name = "devin resume: the leaving run looks for what a turn left only once its task is done"
+meant = "what_a_task_left_is_looked_for_whatever_came_of_it"
+runs = ["live-finish-leaving"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_finish/leaving.rs"
+find = '''    left.escaped = on_the_machine();'''
+replace = '''    if left.state == "done" {
+        left.escaped = on_the_machine();
+    }'''
+
+# Round 7 (Astra and Sol on round 6): a failure that leaves a process running is said in the
+# case's verdict, never dropped.
+[[plant]]
+name = "devin resume: a process that could not be ended is taken for one that had gone"
+meant = "a_process_is_ended_only_while_it_is_still_the_one_chosen_and_what_could_not_be_ended_is_said"
+runs = ["e2e-lib-descent"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/descent.rs"
+find = '''            Outcome::Failed(why) => said.failed.push((process.clone(), why)),'''
+replace = '''            Outcome::Failed(_) => said.gone.push(process.clone()),'''
+
+[[plant]]
+name = "devin resume: the leaving run says nothing of the looks at the machine that failed"
+meant = "what_could_not_be_ended_or_looked_for_is_a_problem_of_the_run"
+runs = ["live-finish-leaving"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_finish/leaving.rs"
+find = '''        if let Some(first) = self.failed.first() {'''
+replace = '''        if let Some(first) = self.failed.first().filter(|_| false) {'''
+
+[[plant]]
+name = "devin resume: the stuck case says nothing of what still runs after its end"
+meant = "what_still_runs_after_its_end_or_could_not_be_looked_at_is_a_problem_of_the_case"
+runs = ["live-stops-stuck"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_stops/stuck.rs"
+find = '''        Ok(still) if still.is_empty() => None,'''
+replace = '''        _ if true => None,'''
+
+# Round 7 (Astra and Sol on round 6): the window's process is read once, as the pane host
+# answers its open, and kept; a later look never reads its number again.
+[[plant]]
+name = "devin resume: a window's process is read again by its number at each look"
+meant = "a_windows_process_is_the_one_read_as_the_host_answered_its_open_and_never_read_again"
+runs = ["e2e-lib-rig"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/mod.rs"
+find = '''        .and_then(|root| root.identity)'''
+replace = '''        .and_then(|root| root.identity)
+        .and_then(|kept| {
+            <crate::live::members::ThisMachine as crate::live::members::Machine>::identity(
+                &crate::live::members::ThisMachine,
+                kept.pid,
+            )
+            .ok()
+            .flatten()
+        })'''
+
+[[plant]]
+name = "devin resume: the rig reads no process of a window as the host answers its open"
+meant = "a_windows_process_is_read_as_the_host_answers_its_open_and_kept"
+runs = ["e2e-lib-rig"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/route.rs"
+find = '''        let root = root_of(&frame, |pid| ThisMachine.identity(pid).ok().flatten());'''
+replace = '''        let root = root_of(&frame, |_| None);'''
+
+# Round 7 (Astra and Sol on round 6): when a process began is read where it is held, to the
+# microsecond on macOS and to the 100 ns on Windows' handle, and a listed process whose
+# number changed hands is not listed.
+[[plant]]
+name = "devin resume: a Mac says when a process began to the second"
+meant = "a_mac_says_when_a_process_began_to_the_microsecond"
+runs = ["e2e-lib-descent"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/descent/native.rs"
+find = '''        seconds * 1_000_000 + micros'''
+replace = '''        seconds * 1_000_000 + micros * 0'''
+
+[[plant]]
+name = "devin resume: a Mac lists a process whose parent changed since ps listed it"
+meant = "a_mac_lists_a_process_with_when_it_began_to_the_microsecond_and_not_one_whose_number_changed_hands"
+runs = ["e2e-lib-descent"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/descent.rs"
+find = '''            if bsd.ppid != process.ppid {'''
+replace = '''            if false {'''
+
+[[plant]]
+name = "devin resume: Windows lists a process whose handle says another creation time than its table"
+meant = "windows_lists_a_process_with_its_handles_creation_time_and_not_one_whose_number_changed_hands"
+runs = ["e2e-lib-descent"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/descent.rs"
+find = '''            Ok(Some(created)) if created.abs_diff(process.identity.started) < TABLE_GRAIN => {'''
+replace = '''            Ok(Some(created)) => {'''
+
+# Round 7 (Astra and Sol on round 6): the guard refuses the machine's own end and a `kill`
+# program started by its name.
+[[plant]]
+name = "devin resume: the guard lets a check call the machine's own end"
+meant = "no_live_check_ends_a_process_but_through_the_descent"
+runs = ["e2e-lib-descent"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/descent/tests.rs"
+find = '''            "ThisMachine.end(",'''
+replace = ""
+
+[[plant]]
+name = "devin resume: the guard lets a check start a kill program"
+meant = "no_live_check_ends_a_process_but_through_the_descent"
+runs = ["e2e-lib-descent"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/descent/tests.rs"
+find = '''    program.is_match(code)'''
+replace = '''    (program.is_match(code) && false)'''
+
+# `live_stops`' stuck: the command is chosen in the window's own tree, and known from then
+# on by which process it is.
+[[plant]]
+name = "devin resume: the stuck case chooses the command across the machine"
+meant = "the_command_is_chosen_in_the_window_and_known_by_which_process_it_is_wherever_it_goes"
+runs = ["live-stops-stuck"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_stops/stuck.rs"
+find = '''        for one in of_the_command(&descending_from(all, own)) {'''
+replace = '''        for one in of_the_command(all).into_iter().chain(of_the_command(&descending_from(all, own))) {'''
+
+[[plant]]
+name = "devin resume: the stuck case knows a process of the command by its number alone"
+meant = "the_command_is_chosen_in_the_window_and_known_by_which_process_it_is_wherever_it_goes"
+runs = ["live-stops-stuck"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_stops/stuck.rs"
+find = '''        .filter(|one| chosen.iter().any(|known| known.identity == one.identity))'''
+replace = '''        .filter(|one| chosen.iter().any(|known| known.identity.pid == one.identity.pid))'''
+
+[[plant]]
+name = "devin resume: a window left in the normal mode waits for ever"
+meant = "a_window_still_in_the_normal_mode_when_its_time_is_up_is_unfit_for_work_and_says_why"
+runs = ["harness-lib-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/adapter.rs"
+find = '''        if now - since >= BYPASS_WITHIN_MS {'''
+replace = '''        if false && now - since >= BYPASS_WITHIN_MS {'''
+
+[[plant]]
+name = "devin resume: the mode of a conversation's configuration is not read"
+meant = "a_record_says_the_mode_its_conversation_is_in_by_its_configuration_or_its_change"
+runs = ["harness-lib-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/wire.rs"
+find = '''            .get("currentValue")?'''
+replace = '''            .get("value")?'''
+
+[[plant]]
+name = "devin resume: a change of the mode is not read"
+meant = "a_record_says_the_mode_its_conversation_is_in_by_its_configuration_or_its_change"
+runs = ["harness-lib-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/wire.rs"
+find = '''        "current_mode_update" => update.get("currentModeId")?.as_str(),'''
+replace = '''        "current_mode_update" => None,'''
+
+[[plant]]
+name = "devin resume: another conversation keeps the mode of the one before"
+meant = "another_conversations_mode_is_none_of_the_shown_ones_and_a_new_one_is_in_its_own"
+runs = ["harness-lib-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/wire_log.rs"
+find = '''            if self.shown.as_deref() != Some(shown) {
+                self.mode = None;
+            }'''
+replace = ""
+
+[[plant]]
+name = "devin resume: a window unfit for work is held, and nothing is said on the board"
+meant = "a_members_window_unfit_for_work_closes_and_the_message_it_was_to_be_given_fails_with_why"
+runs = ["engine-dispatcher-unfit"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''            Readiness::Unfit(why) => return self.give_up_unfit(record, &message, &why).await,'''
+replace = '''            Readiness::Unfit(why) => Some(Held::Because(why)),'''
+
+[[plant]]
+name = "devin resume: a chief's window unfit for work is left open"
+meant = "a_chief_whose_window_is_unfit_for_work_closes_without_its_project_and_the_human_is_told_once"
+runs = ["engine-dispatcher-unfit"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/unstarted.rs"
+find = '''                Some(pane) => self.close_own(record, pane).await?,'''
+replace = '''                Some(_) => true,'''

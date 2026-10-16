@@ -43,6 +43,7 @@
     "live:stops": "cargo xtask live stops",
     "live:input-box": "cargo xtask live input-box",
     "live:resume-cut": "cargo xtask live resume-cut",
+    "live:devin-resume": "cargo xtask live devin-resume",
     "live:resume-fresh": "cargo xtask live resume-fresh",
     "live:restart-cut": "cargo xtask live restart-cut",
     "live:door": "cargo xtask live door",

@@ -21,9 +21,9 @@
 //! ([`Rig::screen`]), what the daemon wrote as it went ([`Rig::events`]) and the
 //! keys it pressed, and when ([`Rig::presses`]).
 //!
-//! On Unix a process that is none of any window's runs beside them (`stranger`), and
-//! a rig that ends with it gone fails: the pane host ends a window's own and nothing of
-//! the machine's.
+//! A process that is none of any window's runs beside them (`stranger`), and a rig
+//! that finds it ended by something else when it ends fails: the pane host ends a
+//! window's own and nothing of the machine's.
 
 mod forget;
 mod install;
@@ -33,7 +33,6 @@ mod observe;
 mod project;
 mod report;
 mod route;
-#[cfg(unix)]
 mod stranger;
 mod wait;
 
@@ -45,6 +44,7 @@ use serde_json::Value;
 
 use crate::daemon::Daemon;
 use crate::daemon_log::StartLine;
+use crate::live::members::Identity;
 use crate::process::{self, Ran, Run, Sink, Spawned};
 use crate::{cf, checkout, files, wire, Error, Result};
 
@@ -56,7 +56,6 @@ pub(crate) use observe::events_of;
 
 use forget::Forget;
 use route::Shared;
-#[cfg(unix)]
 use stranger::Stranger;
 
 /// How long the daemon or the pane host has to answer a request of the case's.
@@ -80,6 +79,7 @@ pub struct Config {
     stand_in: PathBuf,
     vars: Vec<(String, String)>,
     unset: Vec<String>,
+    first: Vec<PathBuf>,
     path: Vec<PathBuf>,
     existing_root: Option<PathBuf>,
     daemon: Option<PathBuf>,
@@ -99,6 +99,7 @@ impl Config {
             stand_in: stand_in.into(),
             vars: Vec::new(),
             unset: Vec::new(),
+            first: Vec::new(),
             path: Vec::new(),
             existing_root: None,
             daemon: None,
@@ -197,6 +198,17 @@ impl Config {
         self
     }
 
+    /// With the folder `dir` on that `PATH` right after the folder of the stand-in
+    /// `claude`, before the folders [`Config::also_on_path`] adds and the system's:
+    /// for a program of a case's own that is found before the machine's of its
+    /// name (a stand-in `cf`, where the machine has the real one beside the
+    /// folders of its harnesses).
+    #[must_use]
+    pub fn first_on_path(mut self, dir: impl Into<PathBuf>) -> Self {
+        self.first.push(dir.into());
+        self
+    }
+
     /// On the home a rig before it ran on, as the app's restart is: the roster
     /// that rig had is kept, and its projects are the daemon's to resume. The
     /// rig removes that home when it is closed.
@@ -243,8 +255,7 @@ pub struct Rig {
     shared: Arc<Shared>,
     daemon: Daemon,
     host: Spawned,
-    /// A process none of the windows' is, which has to run still when they are ended.
-    #[cfg(unix)]
+    /// A process none of the windows' is, which nothing may have ended when they are.
     stranger: Stranger,
     /// What the rig takes away of the machine's own Claude folder when it
     /// ends, where its stand-ins write there ([`Config::stand_ins_write_in`]).
@@ -354,6 +365,14 @@ impl Rig {
             Ok(find().is_some())
         })?;
         find().ok_or_else(|| Error::Daemon(format!("the window {id} was opened, and is gone")))
+    }
+
+    /// Which process the pane host opened the program of the window `pane` (`id`,
+    /// `generation`) as: the `pid` of its answer to that `pane.open`, read once as the
+    /// answer passed and kept ([`route::Root`]). None until it answered, or where it said
+    /// none, or the process had gone by the time it was read.
+    pub fn window_process(&self, pane: &Value) -> Option<Identity> {
+        window_process_in(&self.shared.seen().roots, pane)
     }
 
     /// Every `pane.exit` the pane host told so far, in order: which window
@@ -509,11 +528,11 @@ impl Rig {
             )));
         }
         // What the pane host ended, it ended as the windows' own: a process that is
-        // none of theirs, started beside it, runs on.
-        #[cfg(unix)]
-        if !self.stranger.runs() {
+        // none of theirs, started beside it, was ended by nothing (it may have left
+        // of itself, which is no end the pane host gave it).
+        if let Some(how) = self.stranger.ended_by_another() {
             return Err(Error::Daemon(format!(
-                "a process that is none of any window's was ended with them{}",
+                "a process that is none of any window's was ended with them ({how}){}",
                 self.what_they_said()
             )));
         }
@@ -558,6 +577,18 @@ impl Drop for Rig {
     }
 }
 
+/// The process the pane host said, among the windows it answered the open of (`roots`),
+/// it opened the program of the window `pane` (`id`, `generation`) as: as it was read
+/// then, the last where it answered more than once. It is never read again: the number may
+/// be another process's by now.
+fn window_process_in(roots: &[route::Root], pane: &Value) -> Option<Identity> {
+    roots
+        .iter()
+        .rev()
+        .find(|root| root.id == pane["id"] && root.generation == pane["generation"])
+        .and_then(|root| root.identity)
+}
+
 /// The records of the conversation `session` that the stand-in agent wrote
 /// under the Claude config folder `config`, whole ones only.
 fn recorded(config: &str, session: &str) -> String {
@@ -571,6 +602,38 @@ fn recorded(config: &str, session: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_windows_process_is_the_one_read_as_the_host_answered_its_open_and_never_read_again() {
+        use serde_json::json;
+        let root = |id: &str, generation: u64, identity: Option<Identity>| route::Root {
+            id: json!(id),
+            generation: json!(generation),
+            identity,
+        };
+        // The window p1-zeus's first process was this test's number, begun long before this
+        // test: it has gone, and the number is this test's process now. A look that read the
+        // number again took this process for the window's (Astra and Sol on round 6).
+        let gone = Identity {
+            pid: std::process::id(),
+            started: 1,
+        };
+        let other = Identity {
+            pid: 200,
+            started: 20,
+        };
+        let roots = [
+            root("p1-zeus", 1, Some(gone)),
+            root("p1-zeus", 2, Some(other)),
+            root("p1-hera", 1, None),
+        ];
+        let pane = |id: &str, generation: u64| json!({ "id": id, "generation": generation });
+        assert_eq!(window_process_in(&roots, &pane("p1-zeus", 1)), Some(gone));
+        assert_eq!(window_process_in(&roots, &pane("p1-zeus", 2)), Some(other));
+        // A host that said no process of it, and a window it never answered the open of.
+        assert_eq!(window_process_in(&roots, &pane("p1-hera", 1)), None);
+        assert_eq!(window_process_in(&roots, &pane("p1-zeus", 3)), None);
+    }
 
     #[test]
     fn a_conversation_is_read_a_whole_record_at_a_time_while_the_agent_is_still_writing_it() {

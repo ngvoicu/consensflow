@@ -11,6 +11,7 @@
 
 mod adapter;
 mod adapters;
+pub mod ask;
 mod background;
 mod context;
 mod executor;

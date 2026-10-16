@@ -23,7 +23,9 @@
 //! - [`trace`] reads what the daemon wrote as it went (its event file).
 //! - [`ask`] asks the harness code of the product what a test needs of it (its
 //!   own record of a conversation, a window's command line, the text a window
-//!   takes), through the test binary `harness-ask`.
+//!   takes, a member's Devin launch whole), through the test binary `harness-ask`.
+//! - [`calls`] is the stand-in `cf` of a window that has no daemon to reach, and
+//!   what it wrote down of the calls it was given.
 //! - [`members`] is the rig of the checks that play the chief with its token and
 //!   run real members.
 //! - [`tree`] says what a worker's turn left running: the processes its window's
@@ -48,6 +50,7 @@
 
 pub mod agents;
 pub mod ask;
+pub mod calls;
 pub mod claude;
 pub mod cleanup;
 pub mod codex;

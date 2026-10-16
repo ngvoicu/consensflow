@@ -104,13 +104,51 @@ pub fn run(who: Who, plan: &Plan, stand_in: &Path, log: &Log) -> Result<Finished
     };
     let mut case = Account::new();
     let ran = chief.steps(&mut case);
-    // What the busy command left running is not left.
-    LongCommand::new(MARK).end();
+    // What the busy command left running in the chief's window is not left: what
+    // descends from the window's own process, and nothing outside it. What could not be
+    // ended is a failure of the run, whatever else came of it.
+    let left = end_busy_command(&members);
     let closed = members.close();
-    ran?;
+    if let Err(failed) = ran {
+        let mut finished = Finished::failed(&failed);
+        for problem in left {
+            finished.case.fail(problem);
+        }
+        return Ok(finished);
+    }
+    for problem in left {
+        case.fail(problem);
+    }
     case.closed(closed);
     let summary = format!("{} checks", case.lines().len());
     Ok(Finished { case, summary })
+}
+
+/// Ends what the chief's window runs of the busy command: what may still run of it, as
+/// failures of the run, a process that could not be ended or a window that could not be
+/// read.
+fn end_busy_command(members: &Members) -> Vec<String> {
+    let window = match members.window_of("chief") {
+        Ok(window) => window,
+        Err(failed) => {
+            return vec![format!(
+                "the chief's window could not be read, and what it ran of the busy command may still run: {failed}"
+            )]
+        }
+    };
+    let Some(own) = window.and_then(|window| members.window_process(&window)) else {
+        return Vec::new();
+    };
+    match LongCommand::new(MARK).end_in(own) {
+        Ok(ended) => ended
+            .problems()
+            .into_iter()
+            .map(|problem| format!("the busy command: {problem}"))
+            .collect(),
+        Err(failed) => vec![format!(
+            "what the chief's window ran of the busy command could not be read, and may still run: {failed}"
+        )],
+    }
 }
 
 /// The chief of the run, and what is read of it.
