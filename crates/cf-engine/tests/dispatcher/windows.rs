@@ -74,6 +74,117 @@ fn pauses_the_task_and_tells_the_requester_when_the_worker_window_closes_mid_tas
     );
 }
 
+/// A worker's window that ends by itself in the middle of its task (its harness
+/// crashed, or exited) is paused with how it ended and what its screen showed last,
+/// as far as the host said: the field report of 2026-10-15 (B2, a Devin worker on
+/// Windows) had only "window closed", and nothing to tell its cause by.
+#[test]
+fn a_worker_window_that_ends_mid_task_says_how_it_ended_and_what_it_showed_in_the_pause_note() {
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    context.give(project.id, "zeus", "Parser");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    context.host.exits_showing(
+        Some(0xC000_0005),
+        None,
+        Some(&[
+            "Reading src/parser.rs",
+            "thread 'main' panicked at src/tui.rs:88",
+        ]),
+    );
+    context.exit("zeus");
+
+    let task = context.task(project.id, 1);
+    assert_eq!(task.task.state, "paused");
+    let note = task.messages.iter().find(|m| m.kind == "note").unwrap();
+    assert_eq!(
+        note.body,
+        "T-1 is paused: @zeus's window closed (exit code 0xC0000005); its screen ended with: \
+         \"Reading src/parser.rs / thread 'main' panicked at src/tui.rs:88\". \
+         Resume it with: cf task resume T-1 \"…\"; its window comes back on its own conversation."
+    );
+}
+
+/// A screen that names a secret puts none of its lines in the pause note, which goes to
+/// the board, the chief's window and the log: a passphrase of words is no token, and
+/// both reviews of 2026-10-16 found the masker let one syntax after another through.
+/// How the window ended is said all the same.
+#[test]
+fn a_screen_that_names_a_secret_puts_none_of_its_lines_in_the_pause_note() {
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    context.give(project.id, "zeus", "Parser");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    context.host.exits_showing(
+        Some(1),
+        None,
+        Some(&[
+            "password: correct horse battery staple",
+            "export API_KEY='red green blue'",
+            "panicked at src/main.rs:4",
+        ]),
+    );
+    context.exit("zeus");
+
+    let task = context.task(project.id, 1);
+    let note = task.messages.iter().find(|m| m.kind == "note").unwrap();
+    assert_eq!(
+        note.body,
+        "T-1 is paused: @zeus's window closed (exit code 1); its last screen lines named a \
+         secret, so they are left out. \
+         Resume it with: cf task resume T-1 \"…\"; its window comes back on its own conversation."
+    );
+}
+
+/// A window whose program the host could not end in its bound: the pause note says so in
+/// place of how it ended, and that it may still run: a resume opens its window beside it,
+/// which nothing refuses.
+#[test]
+fn a_worker_window_whose_program_could_not_be_ended_says_so_in_its_pause_note() {
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    context.give(project.id, "zeus", "Parser");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    context
+        .host
+        .exits_showing(None, None, Some(&["cleaning up"]));
+    context.host.exits_with_a_survivor(4242);
+    context.exit("zeus");
+
+    let task = context.task(project.id, 1);
+    assert_eq!(task.task.state, "paused");
+    let note = task.messages.iter().find(|m| m.kind == "note").unwrap();
+    assert_eq!(
+        note.body,
+        "T-1 is paused: @zeus's window closed, but its program (process 4242) could not be \
+         ended and may still run; its screen ended with: \"cleaning up\". Resume it with: cf \
+         task resume T-1 \"…\"; its window comes back on its own conversation."
+    );
+}
+
+/// What the close ended goes between how the window ended and its screen.
+#[test]
+fn a_worker_window_that_ends_mid_task_with_work_running_says_both() {
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    context.give(project.id, "zeus", "Parser");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    context.host.exits_showing(Some(1), None, Some(&["Killed"]));
+    context.host.exits_leaving(&["npm test -- --watch"]);
+    context.exit("zeus");
+
+    let task = context.task(project.id, 1);
+    let note = task.messages.iter().find(|m| m.kind == "note").unwrap();
+    assert_match(
+        &note.body,
+        r#"^T-1 is paused: @zeus's window closed \(exit code 1\) with background work still running: npm test -- --watch; its screen ended with: "Killed"\. Resume it with"#,
+    );
+}
+
 #[test]
 fn brings_a_tell_to_a_task_whose_window_is_gone_on_that_windows_own_conversation_still_paused() {
     let context = Context::new();

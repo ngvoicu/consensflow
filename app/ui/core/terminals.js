@@ -7,6 +7,8 @@ import { consoleText } from './console-text.js'
 /** The windows that read key presses on Windows, where the console drops a non-ASCII mark. */
 const KEY_READERS = new Set(['devin', 'codex'])
 const WINDOWS = /Windows/.test(globalThis.navigator?.userAgent ?? '')
+/** Whether a window on `harness` gets what is typed into it through Windows' console. */
+const readsKeys = (harness) => WINDOWS && KEY_READERS.has(harness)
 
 /** A session in `#showing`: its project's id and its handle. */
 const showingKey = (project, handle) => `${project}:${handle}`
@@ -61,6 +63,11 @@ export class TerminalsView {
   #onHideTerminal
   /** The chief's card while its window is down, made the first time it is: its head alone. */
   #windowless = null
+  /**
+   * The window that ended under a file being dragged, by its name and where
+   * its card was, until the drag ends: a drop there says the window went.
+   */
+  #gone = null
   /** The card last brought into view: a redraw scrolls only when it changes. */
   #shownKey = null
   /** The number the next card to come into the dock takes: the dock keeps its cards in that order. */
@@ -116,14 +123,83 @@ export class TerminalsView {
   }
 
   /**
+   * A file is dragged over the page at `point` (in the page's pixels; null
+   * once the drag has ended): the running window under it shows that a drop
+   * goes there, and no other does. Where there is none (the board, a dialog,
+   * the chief's card while its window is down), none shows it.
+   */
+  markDrop(point) {
+    if (point === null) this.#gone = null
+    const over = point === null ? undefined : this.#windowOf(this.#cardAt(point))
+    for (const entry of this.#cards.values()) {
+      if (entry === over) entry.card.dataset.drop = 'true'
+      else delete entry.card.dataset.drop
+    }
+  }
+
+  /**
+   * The running window a file dropped at `point` goes to: its pane, its name,
+   * and whether it reads key presses through Windows' console. With no window
+   * there, `{ missed }` says why where the drop was meant for one (the chief's
+   * card while its window is down, the place of a window that ended under the
+   * file); anywhere else on the page, null.
+   */
+  dropTarget(point) {
+    const card = this.#cardAt(point)
+    const entry = this.#windowOf(card)
+    if (entry !== undefined) {
+      const name = laneName(entry.participant)
+      return { pane: entry.pane, name, readsKeys: readsKeys(entry.harness) }
+    }
+    const missed = this.#missed(card, point)
+    return missed === null ? null : { missed }
+  }
+
+  /**
+   * Types `text` into the window of `pane` as a paste, by the xterm `paste`
+   * that the human's takes, so the program gets the markers it asked for and
+   * the keys go on the way any paste goes (`#typed`); with `focus`, the
+   * keyboard is the window's after it, so what the human types next follows.
+   * False where the window has closed since, and nothing is typed.
+   */
+  pasteInto(pane, text, { focus }) {
+    const emulator = this.#registry.get(pane)
+    if (emulator === null) return false
+    emulator.paste(text)
+    if (focus) emulator.terminal?.focus()
+    return true
+  }
+
+  /**
+   * Why a drop at `point` that no window takes was meant for one, or null:
+   * on a card, which with no window is the chief's while its window is down,
+   * or where the window that ended under the file was.
+   */
+  #missed(card, { x, y }) {
+    if (card !== null) return `${laneName(this.#windowless.participant)}'s window is not running`
+    const box = this.#gone?.box
+    const there = box && x >= box.left && x < box.right && y >= box.top && y < box.bottom
+    return there ? `${this.#gone.name}'s window has closed` : null
+  }
+
+  /** The card at `point`, in the page's pixels, whatever is drawn over it: none under a dialog. */
+  #cardAt({ x, y }) {
+    return document.elementFromPoint(x, y)?.closest('.terminal-card') ?? null
+  }
+
+  /** The entry of the window `card` is the card of; none for another card, or none. */
+  #windowOf(card) {
+    return [...this.#cards.values()].find((entry) => entry.card === card)
+  }
+
+  /**
    * What the human typed, as the window can take it: on Windows a Devin or
    * Codex window reads key presses, and the console drops every non-ASCII
    * mark among them, so there those go in ASCII, as ConsensFlow's own
    * messages to Devin do (console-text.js).
    */
   #typed(pane, data) {
-    const harness = this.#cards.get(paneKey(pane))?.harness
-    return WINDOWS && KEY_READERS.has(harness) ? consoleText(data) : data
+    return readsKeys(this.#cards.get(paneKey(pane))?.harness) ? consoleText(data) : data
   }
 
   /**
@@ -297,11 +373,16 @@ export class TerminalsView {
 
   /**
    * A window over for good: its card and emulator go, and its pane never
-   * gets them again. Its session's next window waits to be shown.
+   * gets them again. Its session's next window waits to be shown. One that
+   * ends under a file being dragged leaves its name and its place to `#gone`.
    */
   #retire(key) {
     const entry = this.#cards.get(key)
     if (entry !== undefined) {
+      if (entry.card.dataset.drop === 'true') {
+        const box = entry.card.getBoundingClientRect()
+        this.#gone = { name: laneName(entry.participant), box }
+      }
       entry.card.remove()
       this.#showing.delete(showingKey(entry.project, entry.handle))
     }

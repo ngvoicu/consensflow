@@ -271,7 +271,30 @@ async function open(page, data = model()) {
   await page.addInitScript((data) => {
     window.__calls = []
     window.__model = data
+    // Every listener of each event, as the app keeps them: one registered twice hears it
+    // twice. `__listeners.get(name)` says the event to all of them.
+    window.__handlers = new Map()
     window.__listeners = new Map()
+    // The drops the app keeps for the page to ask of, by their numbers, as file_drop.rs keeps
+    // them: the last 16, the first numbered 1. `__drop` is a drop on the app's window, which
+    // the app tells the page of (`file-drop`); a drop of no file is told with no number.
+    window.__drops = new Map()
+    window.__dropped = 0
+    window.__busyLookups = data.busyLookups ?? 0
+    window.__drop = (paths, position) => {
+      let id = null
+      if (paths.length > 0) {
+        window.__dropped += 1
+        id = window.__dropped
+        window.__drops.set(id, paths)
+        if (window.__drops.size > 16) window.__drops.delete(window.__drops.keys().next().value)
+      }
+      window.__listeners.get('file-drop')({
+        event: 'file-drop',
+        id: 0,
+        payload: { id, paths, position },
+      })
+    }
     // How long an operation takes to answer, in ms, set by a test while it runs:
     // the real core answers when it can, and a page that assumes at once races.
     window.__delay = {}
@@ -490,6 +513,35 @@ async function open(page, data = model()) {
       if (command === 'pane_input_enqueue' || command === 'pane_reply_enqueue')
         return { ok: true, ticket: 't' }
       if (command.startsWith('update_')) return { ok: false, error: 'not in this test' }
+      // The short names Windows keeps for the paths of the drop numbered `id`, as a test says
+      // them (`shortNames`, by a path's long name: `{ short }`, or `{ error }` in the app's
+      // words), or none; held as a daemon operation is. As the app does, only for the paths of
+      // that drop, and only for a drop it keeps.
+      if (command === 'short_paths') {
+        const held = window.__hold.short_paths
+        if (held !== undefined) {
+          delete window.__hold.short_paths
+          await held
+        }
+        const dropped = window.__drops.get(args.id)
+        if (dropped === undefined) {
+          return { ok: false, error: 'it is not one of the last 16 drops the app heard' }
+        }
+        // Another lookup runs (a page's before a reload, reading a share far away) for
+        // as many asks as the test says (`busyLookups`).
+        if (window.__busyLookups > 0) {
+          window.__busyLookups -= 1
+          return { ok: false, busy: true, error: 'another lookup of short names is running' }
+        }
+        const none = { error: 'Windows keeps no short name for it' }
+        const notDropped = { error: 'it was not dropped on the app' }
+        return {
+          ok: true,
+          paths: args.paths.map((path) =>
+            dropped.includes(path) ? (data.shortNames?.[path] ?? none) : notDropped,
+          ),
+        }
+      }
       return { ok: true }
     }
     class Channel {
@@ -502,8 +554,13 @@ async function open(page, data = model()) {
       event: {
         listen: async (name, handler) => {
           window.__calls.push(['listen', { name }])
-          window.__listeners.set(name, handler)
-          return () => window.__listeners.delete(name)
+          const all = window.__handlers.get(name) ?? []
+          all.push(handler)
+          window.__handlers.set(name, all)
+          window.__listeners.set(name, (event) => {
+            for (const each of [...all]) each(event)
+          })
+          return () => all.splice(all.indexOf(handler), 1)
         },
       },
       dialog: { open: async () => '/work/fresh' },
@@ -8259,4 +8316,728 @@ test('says so when the page runs outside ConsensFlow, and never reads as ready',
   await expect(page.locator('#status')).toHaveText('ConsensFlow is not running this page.')
   await expect(page.locator('body')).toHaveAttribute('data-ready', 'false')
   await expect(page.locator('#project-title')).toHaveText('No project')
+})
+
+// A file dropped on a terminal window types its path there, as a terminal does (2026-10-15).
+// Tauri catches a drop over the whole window, so the page is told in four events of its own
+// (enter, over, leave, drop), each with the paths and where the pointer is. These tests say them
+// as the app does, in the places each system says them in (a Mac's in points, Windows' in device
+// pixels), on a display twice as dense as the page, with the programs in real terminals.
+const MAC_AGENT =
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15'
+const WINDOWS_AGENT =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36 Edg/140.0'
+
+/** The app's event `name`, said to the page as Tauri says it. */
+const emitted = (page, name, payload = null) =>
+  page.evaluate(
+    ([name, payload]) => window.__listeners.get(name)({ event: name, id: 0, payload }),
+    [name, payload],
+  )
+
+/**
+ * Files dragged over the window: each event as Tauri emits it, and the drop as the app does
+ * (`__drop`, with its number), `position` as the system says it.
+ */
+const dragged = {
+  enter: (page, paths, position) => emitted(page, 'tauri://drag-enter', { paths, position }),
+  over: (page, position) => emitted(page, 'tauri://drag-over', { position }),
+  leave: (page) => emitted(page, 'tauri://drag-leave'),
+  drop: (page, paths, position) =>
+    page.evaluate(([paths, position]) => window.__drop(paths, position), [paths, position]),
+}
+
+/** A place in the page's pixels, as a system that counts `factor` of them to a pixel says it. */
+const told = ({ x, y }, factor = 1) => ({ x: x * factor, y: y * factor })
+
+/** The middle of `locator`, in the page's pixels. */
+async function centreOf(locator) {
+  const box = await locator.boundingBox()
+  return { x: box.x + box.width / 2, y: box.y + box.height / 2 }
+}
+
+/** The middle of the dock's card of `handle`, in the page's pixels. */
+const middleOf = (page, handle) =>
+  centreOf(page.locator(`#stage .terminal-card[data-handle="${handle}"]`))
+
+/** harbour's chief and zeus in real terminals side by side: the board folded away, the window wide. */
+async function sideBySide(page, data = model()) {
+  await page.setViewportSize({ width: 1600, height: 900 })
+  await open(page, { ...data, realTerminals: true })
+  await page.getByRole('button', { name: 'Hide board' }).click()
+  await expect(page.getByRole('region', { name: 'Board' })).toBeHidden()
+  await expect.poll(() => docked(page)).toEqual(['chief', 'zeus'])
+}
+
+const CHIEF_PANE = { id: 'p1-chief', generation: 5 }
+
+/** The program in `pane` turns bracketed paste on or off, as a harness does when it starts and ends. */
+async function bracketedPaste(page, pane, on) {
+  const seq = ((await acked(page, pane.id)).at(-1) ?? 0) + 1
+  const bytes = [...new TextEncoder().encode(`\x1b[?2004${on ? 'h' : 'l'}`)]
+  await page.evaluate((message) => window.__output.onmessage(message), { ...pane, seq, bytes })
+  await expect.poll(() => acked(page, pane.id)).toContain(seq)
+}
+
+/** What the page typed into pane `id`, as text: one entry for each message it sent the pane host. */
+const typedInto = (page, id) =>
+  page.evaluate(
+    (id) =>
+      window.__calls
+        .filter(([command, args]) => command === 'pane_input_enqueue' && args.id === id)
+        .map(([, args]) => new TextDecoder().decode(new Uint8Array(args.bytes))),
+    id,
+  )
+
+/**
+ * The commands the page sent from the call numbered `from` on, less the sizes and the
+ * acknowledgements that the layout and the output cause.
+ */
+const sentSince = (page, from) =>
+  page.evaluate(
+    (from) =>
+      window.__calls
+        .slice(from)
+        .map(([command]) => command)
+        .filter((command) => command !== 'pane_resize' && command !== 'pane_ack'),
+    from,
+  )
+
+/** The human pastes `text` into the terminal of `handle`: the paste event the browser fires at its keyboard field. */
+const humanPaste = (page, handle, text) =>
+  page.evaluate(
+    ([handle, text]) => {
+      const keyboard = document.querySelector(
+        `#stage .terminal-card[data-handle="${handle}"] .xterm-helper-textarea`,
+      )
+      const clipboardData = new DataTransfer()
+      clipboardData.setData('text/plain', text)
+      keyboard.dispatchEvent(
+        new ClipboardEvent('paste', { clipboardData, bubbles: true, cancelable: true }),
+      )
+    },
+    [handle, text],
+  )
+
+/** The handles of the dock's cards that show a drop goes to them. */
+const marked = (page) =>
+  page
+    .locator('#stage .terminal-card[data-drop="true"]')
+    .evaluateAll((cards) => cards.map((card) => card.dataset.handle))
+
+/** The handle of the dock's card at `point`, whatever is drawn there: null where there is none. */
+const cardAt = (page, { x, y }) =>
+  page.evaluate(
+    ([x, y]) => document.elementFromPoint(x, y)?.closest('.terminal-card')?.dataset.handle ?? null,
+    [x, y],
+  )
+
+/** From now on, every line the status line says, in order: the same words said twice are two. */
+const hearStatus = (page) =>
+  page.evaluate(() => {
+    window.__said = []
+    new MutationObserver((records) => {
+      for (const { addedNodes } of records) {
+        for (const node of addedNodes) window.__said.push(node.textContent)
+      }
+    }).observe(document.querySelector('#status'), { childList: true })
+  })
+
+/** What the status line said since `hearStatus`. */
+const heard = (page) => page.evaluate(() => window.__said)
+
+test.describe('file drop on a Mac', () => {
+  test.use({ userAgent: MAC_AGENT, deviceScaleFactor: 2 })
+
+  const PATHS = [
+    '/Users/me/Desktop/Screenshot 2026-10-15 at 10.30.00\u202fAM (2).png',
+    "/Users/me/it's here/$HOME & [x]*.txt",
+    '/Users/me/plain.txt',
+  ]
+  const WORDS =
+    "/Users/me/Desktop/Screenshot\\ 2026-10-15\\ at\\ 10.30.00\u202fAM\\ \\(2\\).png /Users/me/it\\'s\\ here/\\$HOME\\ \\&\\ \\[x\\]\\*.txt /Users/me/plain.txt"
+
+  test('types the paths of the files dropped on a window, each as one word of the shell, as the human’s paste is typed', async ({
+    page,
+  }) => {
+    await sideBySide(page)
+    await bracketedPaste(page, CHIEF_PANE, true)
+    const before = await page.evaluate(() => window.__calls.length)
+    await dragged.drop(page, PATHS, await middleOf(page, 'chief'))
+    // Between the markers the program asked for, as one message, and nothing in the other window.
+    await expect.poll(() => typedInto(page, 'p1-chief')).toEqual([`\x1b[200~${WORDS}\x1b[201~`])
+    expect(await typedInto(page, 'p1-zeus')).toEqual([])
+    // The pane host is sent those words and nothing else: no reply, nothing for the daemon, and
+    // the app's window is left where a Mac puts it.
+    await expect
+      .poll(() => sentSince(page, before))
+      .toEqual(['pane_input_enqueue', 'pane_input_wait'])
+    // The human's paste of the same words gives the same bytes.
+    await humanPaste(page, 'chief', WORDS)
+    await expect.poll(async () => (await typedInto(page, 'p1-chief')).length).toBe(2)
+    const [dropped, pasted] = await typedInto(page, 'p1-chief')
+    expect(dropped).toBe(pasted)
+  })
+
+  test('types them with no markers where the program asked for none, as the human’s paste does', async ({
+    page,
+  }) => {
+    await sideBySide(page)
+    await dragged.drop(page, PATHS, await middleOf(page, 'chief'))
+    await expect.poll(() => typedInto(page, 'p1-chief')).toEqual([WORDS])
+    await humanPaste(page, 'chief', WORDS)
+    await expect.poll(() => typedInto(page, 'p1-chief')).toEqual([WORDS, WORDS])
+    // Asked for and then given up again, the markers go.
+    await bracketedPaste(page, CHIEF_PANE, true)
+    await bracketedPaste(page, CHIEF_PANE, false)
+    await dragged.drop(page, ['/a b/c.png'], await middleOf(page, 'chief'))
+    await expect.poll(async () => (await typedInto(page, 'p1-chief')).at(-1)).toBe('/a\\ b/c.png')
+  })
+
+  test('goes to the window under the pointer, whose place a Mac says in points, not in device pixels', async ({
+    page,
+  }) => {
+    await sideBySide(page)
+    const [chief, zeus] = [await middleOf(page, 'chief'), await middleOf(page, 'zeus')]
+    // Halved, zeus's place is in the chief's window: a Mac's points are the page's pixels already.
+    expect(await cardAt(page, told(zeus, 0.5))).toBe('chief')
+    await dragged.drop(page, ['/a/zeus.png'], told(zeus))
+    await expect.poll(() => typedInto(page, 'p1-zeus')).toEqual(['/a/zeus.png'])
+    await dragged.drop(page, ['/a/chief.png'], told(chief))
+    await expect.poll(() => typedInto(page, 'p1-chief')).toEqual(['/a/chief.png'])
+    expect(await typedInto(page, 'p1-zeus')).toEqual(['/a/zeus.png'])
+    // The head of a window is the window's too: its name and its buttons are on the card.
+    const head = page.locator('#stage .terminal-card[data-handle="zeus"] .terminal-head')
+    await dragged.drop(page, ['/a/head.png'], told(await centreOf(head)))
+    await expect.poll(() => typedInto(page, 'p1-zeus')).toEqual(['/a/zeus.png', '/a/head.png'])
+  })
+
+  test('types a path into a Devin window as it is: only Windows’ console changes what it takes', async ({
+    page,
+  }) => {
+    const data = model()
+    data.boards[1].lanes.find((lane) => lane.participant.handle === 'chief').participant.harness =
+      'devin'
+    await sideBySide(page, data)
+    await dragged.drop(page, ['/Users/me/a — b.png'], await middleOf(page, 'chief'))
+    await expect.poll(() => typedInto(page, 'p1-chief')).toEqual(['/Users/me/a\\ —\\ b.png'])
+    expect(await page.evaluate(() => window.__calls.some(([c]) => c === 'short_paths'))).toBe(false)
+  })
+
+  test('types nothing for a file whose name holds a control character, a line break, a tab or a delete, and names it', async ({
+    page,
+  }) => {
+    await sideBySide(page)
+    await hearStatus(page)
+    const chief = await middleOf(page, 'chief')
+    for (const path of ['/Users/me/a\nb.png', '/Users/me/a\tb.png', '/Users/me/a\x7fb.png']) {
+      await dragged.drop(page, ['/c d', path], chief)
+    }
+    await expect
+      .poll(() => heard(page))
+      .toEqual(
+        ['/Users/me/a␊b.png', '/Users/me/a␉b.png', '/Users/me/a␡b.png'].map(
+          (shown) =>
+            `Nothing was typed: the name of ${shown} holds a control character, which no window can take.`,
+        ),
+      )
+    expect(await typedInto(page, 'p1-chief')).toEqual([])
+  })
+
+  test('gives the keyboard to the window it went to, so what the human types next follows the path', async ({
+    page,
+  }) => {
+    await sideBySide(page)
+    await page.locator('#stage .terminal-card[data-handle="chief"] .xterm-helper-textarea').focus()
+    await expect.poll(() => typingIn(page)).toBe('chief')
+    await dragged.drop(page, ['/a/zeus.png'], await middleOf(page, 'zeus'))
+    await expect.poll(() => typingIn(page)).toBe('zeus')
+  })
+
+  test('does nothing outside a window: on the board, the projects, the dock’s own head, or under a dialog', async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1000, height: 700 })
+    await open(page, { ...model(), realTerminals: true })
+    await expect.poll(() => docked(page)).toEqual(['chief', 'zeus'])
+    const paths = ['/a/b.png']
+    const elsewhere = [
+      await centreOf(page.getByRole('region', { name: 'Board' })),
+      await centreOf(page.getByTestId('projects')),
+      await centreOf(page.locator('.dock-head')),
+    ]
+    for (const place of elsewhere) {
+      expect(await cardAt(page, place)).toBeNull()
+      await dragged.enter(page, paths, told(place))
+      expect(await marked(page)).toEqual([])
+      await dragged.drop(page, paths, told(place))
+    }
+    // Under a dialog, with the chief's window drawn behind it: a place the dialog covers, and a
+    // place on its backdrop, which cover the window all the same.
+    const chief = page.locator('#stage .terminal-card[data-handle="chief"]')
+    await page.getByRole('button', { name: 'Settings', exact: true }).click()
+    const dialog = page.getByRole('dialog', { name: 'Settings', exact: true })
+    await expect(dialog).toBeVisible()
+    const [card, over] = [await chief.boundingBox(), await dialog.boundingBox()]
+    const left = Math.max(card.x, over.x)
+    const right = Math.min(card.x + card.width, over.x + over.width)
+    const top = Math.max(card.y, over.y)
+    const bottom = Math.min(card.y + card.height, over.y + over.height)
+    expect(right - left, 'the dialog covers part of the chief’s window').toBeGreaterThan(20)
+    const covered = { x: (left + right) / 2, y: (top + bottom) / 2 }
+    const backdrop = { x: card.x + card.width - 8, y: card.y + card.height - 8 }
+    for (const place of [covered, backdrop]) {
+      expect(await cardAt(page, place)).toBeNull()
+      await dragged.enter(page, paths, told(place))
+      expect(await marked(page)).toEqual([])
+      await dragged.drop(page, paths, told(place))
+    }
+    expect(await typedInto(page, 'p1-chief')).toEqual([])
+    expect(await typedInto(page, 'p1-zeus')).toEqual([])
+    await expect(page.locator('#status')).toHaveText('')
+  })
+
+  test('types nothing where a window is not running, and says so; the others still take a drop', async ({
+    page,
+  }) => {
+    const data = model()
+    // The chief's window is down: its card is there, with no terminal.
+    const chief = data.boards[1].lanes.find((lane) => lane.participant.handle === 'chief')
+    Object.assign(chief, { activity: { state: 'closed' }, pane: null })
+    await sideBySide(page, data)
+    await expect(
+      page.locator('#stage .terminal-card[data-handle="chief"] .terminal-host'),
+    ).toHaveCount(0)
+    const place = await middleOf(page, 'chief')
+    // No window, so nothing to show a drop goes there.
+    await dragged.enter(page, ['/a/b.png'], told(place))
+    expect(await marked(page)).toEqual([])
+    await dragged.drop(page, ['/a/b.png'], told(place))
+    await expect(page.locator('#status')).toHaveText(
+      "Nothing was typed: Chief of Staff's window is not running.",
+    )
+    await expect(page.locator('#status')).toHaveAttribute('data-tone', 'error')
+    expect(await typedInto(page, 'p1-zeus')).toEqual([])
+    // The window beside it takes a drop as ever.
+    await dragged.drop(page, ['/a/zeus.png'], await middleOf(page, 'zeus'))
+    await expect.poll(() => typedInto(page, 'p1-zeus')).toEqual(['/a/zeus.png'])
+  })
+
+  test('types nothing where a window ended under the file, and says so; nothing where none did', async ({
+    page,
+  }) => {
+    await sideBySide(page)
+    await hearStatus(page)
+    /** zeus's window ends, or comes up again as its `generation`. */
+    const zeusWindow = (generation) =>
+      changed(
+        page,
+        (generation) => {
+          const lane = window.__model.boards[1].lanes.find((l) => l.participant.handle === 'zeus')
+          Object.assign(
+            lane,
+            generation === null
+              ? { activity: { state: 'closed' }, pane: null }
+              : { activity: { state: 'idle' }, pane: { id: 'p1-zeus', generation } },
+          )
+        },
+        generation,
+      )
+    const zeus = await middleOf(page, 'zeus')
+    await dragged.enter(page, ['/a/b.png'], told(zeus))
+    expect(await marked(page)).toEqual(['zeus'])
+    // Its window ends: its card goes, and the dock has nothing there.
+    await zeusWindow(null)
+    await expect.poll(() => docked(page)).toEqual(['chief'])
+    expect(await cardAt(page, zeus)).toBeNull()
+    await dragged.over(page, told(zeus))
+    expect(await marked(page)).toEqual([])
+    // Dropped where it was: nothing is typed, and the status line says the window went.
+    await dragged.drop(page, ['/a/b.png'], told(zeus))
+    const went = "Nothing was typed: @zeus's window has closed."
+    await expect.poll(() => heard(page)).toEqual([went])
+    await expect(page.locator('#status')).toHaveAttribute('data-tone', 'error')
+    // The next drag, dropped there with no window ending under it, says nothing.
+    await dragged.enter(page, ['/a/b.png'], told(zeus))
+    await dragged.drop(page, ['/a/b.png'], told(zeus))
+    // Nor does a drop elsewhere, though a window ended under the file before it moved on.
+    await zeusWindow(8)
+    await expect.poll(() => docked(page)).toEqual(['chief', 'zeus'])
+    await dragged.enter(page, ['/a/b.png'], told(await middleOf(page, 'zeus')))
+    expect(await marked(page)).toEqual(['zeus'])
+    await zeusWindow(null)
+    await expect.poll(() => docked(page)).toEqual(['chief'])
+    const head = told(await centreOf(page.locator('.dock-head')))
+    await dragged.over(page, head)
+    await dragged.drop(page, ['/a/b.png'], head)
+    expect(await heard(page)).toEqual([went])
+    expect(await typedInto(page, 'p1-zeus')).toEqual([])
+    expect(await typedInto(page, 'p1-chief')).toEqual([])
+  })
+
+  test('types nothing on a closed project’s dock, though an open one’s windows live on off screen', async ({
+    page,
+  }) => {
+    await open(page, { ...model(), realTerminals: true })
+    await expect.poll(() => docked(page)).toEqual(['chief', 'zeus'])
+    await hearStatus(page)
+    await chooseProject(page, 'foundry')
+    const stage = page.getByRole('region', { name: 'Terminals' })
+    await expect(stage).toHaveText('No terminal is open yet.')
+    const place = await centreOf(stage)
+    expect(await cardAt(page, place)).toBeNull()
+    await dragged.enter(page, ['/a/b.png'], told(place))
+    await dragged.drop(page, ['/a/b.png'], told(place))
+    expect(await typedInto(page, 'p1-chief')).toEqual([])
+    expect(await typedInto(page, 'p1-zeus')).toEqual([])
+    expect(await heard(page)).toEqual([])
+  })
+
+  test('marks the window a drop would go to, from the enter to the leave or the drop', async ({
+    page,
+  }) => {
+    await sideBySide(page)
+    const [chief, zeus] = [await middleOf(page, 'chief'), await middleOf(page, 'zeus')]
+    const cards = ['chief', 'zeus'].map((name) =>
+      page.locator(`#stage .terminal-card[data-handle="${name}"]`),
+    )
+    const ring = /rgb\(99, 199, 178\)/
+    expect(await marked(page)).toEqual([])
+    await expect(cards[0]).toHaveCSS('box-shadow', 'none')
+    // Entered over the chief's window: it shows, and its ring is the app's own seafoam.
+    await dragged.enter(page, ['/a/b.png'], told(chief))
+    expect(await marked(page)).toEqual(['chief'])
+    await expect(cards[0]).toHaveCSS('box-shadow', ring)
+    await expect(cards[1]).toHaveCSS('box-shadow', 'none')
+    // Its tint covers the whole card, and lets the pointer through.
+    const tint = await cards[0].evaluate((card) => {
+      const style = getComputedStyle(card, '::after')
+      return {
+        pointer: style.pointerEvents,
+        size: [Number.parseFloat(style.width), Number.parseFloat(style.height)],
+        card: [card.clientWidth, card.clientHeight],
+      }
+    })
+    expect(tint.pointer).toBe('none')
+    expect(Math.abs(tint.size[0] - tint.card[0])).toBeLessThan(1)
+    expect(Math.abs(tint.size[1] - tint.card[1])).toBeLessThan(1)
+    // Moved over zeus's: the mark moves with it, and is on one window at a time.
+    await dragged.over(page, told(zeus))
+    expect(await marked(page)).toEqual(['zeus'])
+    await expect(cards[0]).toHaveCSS('box-shadow', 'none')
+    await expect(cards[1]).toHaveCSS('box-shadow', ring)
+    // Over the dock's head, which is no window: no mark.
+    await dragged.over(page, told(await centreOf(page.locator('.dock-head'))))
+    expect(await marked(page)).toEqual([])
+    // Back over a window, then gone from the app's window: the mark goes with the leave.
+    await dragged.over(page, told(chief))
+    expect(await marked(page)).toEqual(['chief'])
+    await dragged.leave(page)
+    expect(await marked(page)).toEqual([])
+    // An over that follows the leave, with nothing entered, marks nothing.
+    await dragged.over(page, told(chief))
+    expect(await marked(page)).toEqual([])
+    // The mark goes with a drop too, which no leave comes before.
+    await dragged.enter(page, ['/a/b.png'], told(zeus))
+    expect(await marked(page)).toEqual(['zeus'])
+    await dragged.drop(page, ['/a/b.png'], told(zeus))
+    expect(await marked(page)).toEqual([])
+    await expect(cards[1]).toHaveCSS('box-shadow', 'none')
+    // So does one that follows the drop.
+    await dragged.over(page, told(zeus))
+    expect(await marked(page)).toEqual([])
+  })
+
+  test('marks nothing and types nothing for a drag that carries no file', async ({ page }) => {
+    await sideBySide(page)
+    const chief = await middleOf(page, 'chief')
+    await dragged.enter(page, [], told(chief))
+    await dragged.over(page, told(chief))
+    expect(await marked(page)).toEqual([])
+    await dragged.drop(page, [], told(chief))
+    expect(await typedInto(page, 'p1-chief')).toEqual([])
+    // Not even the markers of an empty paste.
+    await bracketedPaste(page, CHIEF_PANE, true)
+    await dragged.drop(page, [], told(chief))
+    expect(await typedInto(page, 'p1-chief')).toEqual([])
+  })
+})
+
+test.describe('file drop on Windows', () => {
+  test.use({ userAgent: WINDOWS_AGENT, deviceScaleFactor: 2 })
+
+  const PATHS = [
+    'C:\\Users\\me\\My Pictures\\a b.png',
+    'C:\\Users\\me\\plain.txt',
+    '\\\\server\\share\\x y (2).txt',
+  ]
+  const WORDS =
+    '"C:\\Users\\me\\My Pictures\\a b.png" C:\\Users\\me\\plain.txt "\\\\server\\share\\x y (2).txt"'
+
+  test('types the paths of the files dropped on a window, each quoted if it has a space, as the human’s paste is typed', async ({
+    page,
+  }) => {
+    await sideBySide(page)
+    await bracketedPaste(page, CHIEF_PANE, true)
+    const before = await page.evaluate(() => window.__calls.length)
+    await dragged.drop(page, PATHS, told(await middleOf(page, 'chief'), 2))
+    await expect.poll(() => typedInto(page, 'p1-chief')).toEqual([`\x1b[200~${WORDS}\x1b[201~`])
+    // The app's window comes in front, so the keys pressed next go to it and not to Explorer.
+    await expect
+      .poll(async () => (await sentSince(page, before)).sort())
+      .toEqual(['focus_after_drop', 'pane_input_enqueue', 'pane_input_wait'])
+    await humanPaste(page, 'chief', WORDS)
+    await expect.poll(async () => (await typedInto(page, 'p1-chief')).length).toBe(2)
+    const [dropped, pasted] = await typedInto(page, 'p1-chief')
+    expect(dropped).toBe(pasted)
+  })
+
+  test('goes to the window under the pointer, whose place Windows says in device pixels', async ({
+    page,
+  }) => {
+    await sideBySide(page)
+    const [chief, zeus] = [await middleOf(page, 'chief'), await middleOf(page, 'zeus')]
+    // As it is said, zeus's place is outside the page: it takes the display's scale to bring it in.
+    expect(await cardAt(page, told(zeus, 2))).toBeNull()
+    await dragged.drop(page, ['C:\\a\\zeus.png'], told(zeus, 2))
+    await expect.poll(() => typedInto(page, 'p1-zeus')).toEqual(['C:\\a\\zeus.png'])
+    await dragged.enter(page, ['C:\\a\\chief.png'], told(chief, 2))
+    expect(await marked(page)).toEqual(['chief'])
+    await dragged.drop(page, ['C:\\a\\chief.png'], told(chief, 2))
+    await expect.poll(() => typedInto(page, 'p1-chief')).toEqual(['C:\\a\\chief.png'])
+    expect(await typedInto(page, 'p1-zeus')).toEqual(['C:\\a\\zeus.png'])
+  })
+
+  /** harbour with its chief on `harness`, the short names Windows keeps as `shortNames` says. */
+  const chiefOn = (harness, shortNames = {}) => {
+    const data = model()
+    data.boards[1].lanes.find((lane) => lane.participant.handle === 'chief').participant.harness =
+      harness
+    return { ...data, shortNames }
+  }
+  const DASHED = 'C:\\Users\\me\\a — b “c”.png'
+  const ALIASED = { [DASHED]: { short: 'C:\\Users\\me\\A-BC~1.PNG' } }
+  /** The paths the page asked the short names of, each time it asked. */
+  const askedShort = (page) =>
+    page.evaluate(() =>
+      window.__calls.filter(([command]) => command === 'short_paths').map(([, args]) => args.paths),
+    )
+  /** The number of the drop the page asked `command` of, and the paths where it named some, each time it asked. */
+  const askedOf = (page, command) =>
+    page.evaluate(
+      (command) =>
+        window.__calls
+          .filter(([asked]) => asked === command)
+          .map(([, args]) => (args?.paths === undefined ? args?.id : [args.id, args.paths])),
+      command,
+    )
+  /** How many times the page asked the app to come in front after a drop. */
+  const focusAsked = (page) =>
+    page.evaluate(() => window.__calls.filter(([c]) => c === 'focus_after_drop').length)
+
+  test('types a path into a Devin window by its short name where its console would change the long one', async ({
+    page,
+  }) => {
+    await sideBySide(page, chiefOn('devin', ALIASED))
+    const paths = [DASHED, 'C:\\Users\\me\\My Pictures\\plain.txt', 'C:\\Users\\me\\résumé.txt']
+    await dragged.drop(page, paths, told(await middleOf(page, 'chief'), 2))
+    // The others as they are: ASCII and letters reach it whole. Only the one is asked for.
+    await expect
+      .poll(() => typedInto(page, 'p1-chief'))
+      .toEqual([
+        'C:\\Users\\me\\A-BC~1.PNG "C:\\Users\\me\\My Pictures\\plain.txt" C:\\Users\\me\\résumé.txt',
+      ])
+    expect(await askedShort(page)).toEqual([[DASHED]])
+    // The human did nothing meanwhile: the window has the keyboard, and the app comes in front.
+    await expect.poll(() => typingIn(page)).toBe('chief')
+    await expect.poll(() => focusAsked(page)).toBe(1)
+    // Both asked of the drop by the number the app told it by.
+    expect(await askedOf(page, 'short_paths')).toEqual([[1, [DASHED]]])
+    expect(await askedOf(page, 'focus_after_drop')).toEqual([1])
+    // A human paste into it still goes in the ASCII its console takes.
+    await humanPaste(page, 'chief', 'a — b')
+    await expect.poll(async () => (await typedInto(page, 'p1-chief')).at(-1)).toBe('a -- b')
+  })
+
+  test('types nothing into a Codex window for a path its console would change and that has no short name it takes, and says why in the app’s words', async ({
+    page,
+  }) => {
+    const NBSP = 'C:\\Users\\me\\x\u202fy.png'
+    const SHARED = '\\\\server\\share\\a — b.png'
+    // A volume that keeps no short names (the stand-in's answer where it is told none), an
+    // alias that still holds what the console drops, and a share that did not answer.
+    const answered = {
+      [NBSP]: { short: 'C:\\Users\\me\\X\u202fY~1.PNG' },
+      [SHARED]: { error: 'its network share did not answer' },
+    }
+    await sideBySide(page, chiefOn('codex', answered))
+    await hearStatus(page)
+    const chief = told(await middleOf(page, 'chief'), 2)
+    await dragged.drop(page, ['C:\\Users\\me\\plain.txt', DASHED], chief)
+    await dragged.drop(page, [NBSP], chief)
+    await dragged.drop(page, [SHARED], chief)
+    const cannot = "Nothing was typed: Chief of Staff's window cannot take"
+    await expect
+      .poll(() => heard(page))
+      .toEqual([
+        `${cannot} — (U+2014), “ (U+201C), ” (U+201D) of ${DASHED}, and Windows keeps no short name for it.`,
+        `${cannot} \u202f (U+202F) of ${NBSP}, and its short name holds them too.`,
+        `${cannot} — (U+2014) of ${SHARED}, and its network share did not answer.`,
+      ])
+    await expect(page.locator('#status')).toHaveAttribute('data-tone', 'error')
+    expect(await typedInto(page, 'p1-chief')).toEqual([])
+    expect(await focusAsked(page)).toBe(0)
+  })
+
+  test('types a drop typed after the human acted into the window it was dropped on, and takes no focus', async ({
+    page,
+  }) => {
+    await sideBySide(page, chiefOn('devin', ALIASED))
+    const chief = told(await middleOf(page, 'chief'), 2)
+    const zeusKeys = page.locator(
+      '#stage .terminal-card[data-handle="zeus"] .xterm-helper-textarea',
+    )
+    // What the human may do while the short names are read: click another window, press a
+    // key, or leave the app's window for another program.
+    const acts = [
+      [
+        'a click on another window',
+        () => page.locator('#stage .terminal-card[data-handle="zeus"] .terminal-host').click(),
+      ],
+      ['a key pressed', () => page.keyboard.press('Shift')],
+      ['the app left', () => page.evaluate(() => window.dispatchEvent(new Event('blur')))],
+    ]
+    for (const [at, [name, act]] of acts.entries()) {
+      await zeusKeys.focus()
+      await hold(page, 'short_paths')
+      await dragged.drop(page, [DASHED], chief)
+      await expect.poll(() => askedShort(page)).toHaveLength(at + 1)
+      await act()
+      await letGo(page, 'short_paths')
+      await expect.poll(() => typedInto(page, 'p1-chief'), name).toHaveLength(at + 1)
+      expect(await typingIn(page), name).toBe('zeus')
+    }
+    expect(await focusAsked(page)).toBe(0)
+  })
+
+  test('types the paths of the drops in the order they came, one waiting for the short names of the one before', async ({
+    page,
+  }) => {
+    await sideBySide(page, chiefOn('devin', ALIASED))
+    await hold(page, 'short_paths')
+    const chief = told(await middleOf(page, 'chief'), 2)
+    await dragged.drop(page, [DASHED], chief)
+    await dragged.drop(page, ['C:\\Users\\me\\second.png'], chief)
+    await page.waitForTimeout(100)
+    expect(await typedInto(page, 'p1-chief')).toEqual([])
+    await letGo(page, 'short_paths')
+    await expect
+      .poll(() => typedInto(page, 'p1-chief'))
+      .toEqual(['C:\\Users\\me\\A-BC~1.PNG', 'C:\\Users\\me\\second.png'])
+  })
+
+  test('types every drop that came while one waited for its short names, each looked up as the drop it is', async ({
+    page,
+  }) => {
+    const B = 'C:\\Users\\me\\b — 2.png'
+    const C = 'C:\\Users\\me\\c — 3.png'
+    const data = chiefOn('devin', {
+      ...ALIASED,
+      [B]: { short: 'C:\\Users\\me\\B-2~1.PNG' },
+      [C]: { short: 'C:\\Users\\me\\C-3~1.PNG' },
+    })
+    data.boards[1].lanes.find((lane) => lane.participant.handle === 'zeus').participant.harness =
+      'devin'
+    await sideBySide(page, data)
+    await hearStatus(page)
+    const chief = told(await middleOf(page, 'chief'), 2)
+    const zeus = told(await middleOf(page, 'zeus'), 2)
+    // The first drop's short names are slow to come (a share far away); meanwhile one more
+    // file is dropped on zeus, and another on the chief.
+    await hold(page, 'short_paths')
+    await dragged.drop(page, [DASHED], chief)
+    await expect.poll(() => askedShort(page)).toHaveLength(1)
+    await dragged.drop(page, [B], zeus)
+    await dragged.drop(page, [C], chief)
+    await letGo(page, 'short_paths')
+    await expect
+      .poll(() => typedInto(page, 'p1-chief'))
+      .toEqual(['C:\\Users\\me\\A-BC~1.PNG', 'C:\\Users\\me\\C-3~1.PNG'])
+    await expect.poll(() => typedInto(page, 'p1-zeus')).toEqual(['C:\\Users\\me\\B-2~1.PNG'])
+    expect(await askedOf(page, 'short_paths')).toEqual([
+      [1, [DASHED]],
+      [2, [B]],
+      [3, [C]],
+    ])
+    expect(await heard(page)).toEqual([])
+  })
+
+  test('types a path whose short names the app would not look up while another lookup ran, once it can', async ({
+    page,
+  }) => {
+    // A page before a reload left a lookup reading a share far away: the app is busy
+    // with it for the first two asks.
+    await sideBySide(page, { ...chiefOn('devin', ALIASED), busyLookups: 2 })
+    await hearStatus(page)
+    await dragged.drop(page, [DASHED], told(await middleOf(page, 'chief'), 2))
+    await expect.poll(() => typedInto(page, 'p1-chief')).toEqual(['C:\\Users\\me\\A-BC~1.PNG'])
+    expect(await askedShort(page)).toEqual([[DASHED], [DASHED], [DASHED]])
+    expect(await heard(page)).toEqual([])
+  })
+
+  test('types nothing into a window that closed while the short names were read, and says so', async ({
+    page,
+  }) => {
+    await sideBySide(page, chiefOn('devin', ALIASED))
+    await hearStatus(page)
+    await hold(page, 'short_paths')
+    await dragged.drop(page, [DASHED], told(await middleOf(page, 'chief'), 2))
+    await expect.poll(() => askedShort(page)).toEqual([[DASHED]])
+    await changed(page, () => {
+      const chief = window.__model.boards[1].lanes.find((l) => l.participant.handle === 'chief')
+      Object.assign(chief, { activity: { state: 'closed' }, pane: null })
+    })
+    await expect(
+      page.locator('#stage .terminal-card[data-handle="chief"] .terminal-host'),
+    ).toHaveCount(0)
+    await letGo(page, 'short_paths')
+    await expect
+      .poll(() => heard(page))
+      .toEqual(["Nothing was typed: Chief of Staff's window has closed."])
+    expect(await typedInto(page, 'p1-chief')).toEqual([])
+  })
+
+  test('types nothing for a path with a control character, which no Windows name holds, and names it', async ({
+    page,
+  }) => {
+    await sideBySide(page)
+    await hearStatus(page)
+    await dragged.drop(page, ['C:\\Users\\me\\a\tb.txt'], told(await middleOf(page, 'chief'), 2))
+    await expect
+      .poll(() => heard(page))
+      .toEqual([
+        'Nothing was typed: the name of C:\\Users\\me\\a\u2409b.txt holds a control character, which no window can take.',
+      ])
+    expect(await typedInto(page, 'p1-chief')).toEqual([])
+    expect(await focusAsked(page)).toBe(0)
+  })
+})
+
+test('hears each event of the app with one listener, as the app keeps every one it is given', async ({
+  page,
+}) => {
+  await open(page)
+  const listeners = await page.evaluate(() =>
+    Object.fromEntries([...window.__handlers].map(([name, all]) => [name, all.length])),
+  )
+  expect(listeners).toEqual({
+    'state-changed': 1,
+    'daemon-status': 1,
+    'tauri://drag-enter': 1,
+    'tauri://drag-over': 1,
+    'tauri://drag-leave': 1,
+    'file-drop': 1,
+    'update-state-changed': 1,
+    'check-updates': 1,
+  })
 })

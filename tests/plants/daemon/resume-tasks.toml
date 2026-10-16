@@ -71,11 +71,8 @@ runs = ["engine-resume-tasks"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
-find = '''
-                let own = record.window.borrow().own_exit;
-                self.stall(&project, &thread.task, &because, own)?;'''
-replace = '''
-                self.stall(&project, &thread.task, &because, true)?;'''
+find = "                self.stall(&project, &thread.task, &because, own)?;"
+replace = "                self.stall(&project, &thread.task, &because, true)?;"
 
 [[plant]]
 name = "resume tasks: the ledger marks the pause of a window ConsensFlow closed in an open project too"

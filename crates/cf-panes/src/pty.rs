@@ -15,12 +15,14 @@ use crate::screen::PaneScreen;
 mod close;
 #[cfg(test)]
 mod keys;
+mod output_end;
 #[cfg(all(any(test, feature = "test-support"), unix))]
 mod sentinel;
 mod turn;
 
 pub use close::CLOSE_GRACE;
 use close::{ask_all_to_exit, terminate, terminate_asked, terminate_detached};
+pub(crate) use output_end::Handed;
 #[cfg(all(any(test, feature = "test-support"), unix))]
 pub use sentinel::Sentinel;
 
@@ -620,7 +622,7 @@ impl PaneTable {
             size,
         )?;
         let flow = Arc::new(OutputFlow::new(backlog_bytes));
-        let (pid, screen, ended) = {
+        let (pid, screen, ended, terminal) = {
             let mut panes = self.lock_panes()?;
             let pane = panes
                 .get_mut(&key)
@@ -630,14 +632,29 @@ impl PaneTable {
                 pane.child.process_id(),
                 Arc::clone(&pane.screen),
                 Arc::clone(&pane.ended),
+                terminal_of(pane),
             )
+        };
+        let terminal = match terminal {
+            Ok(terminal) => terminal,
+            Err(error) => {
+                let _ = self.kill(&key);
+                return Err(error);
+            }
         };
         #[cfg(windows)]
         self.watch_exit(&key)?;
 
         let (sender, output) = mpsc::channel();
         let output_key = key.clone();
-        std::thread::spawn(move || stream_output(output_key, reader, flow, sender));
+        let (table, watched, slot) = (Arc::downgrade(self), key.clone(), Arc::clone(&ended));
+        let gone = Box::new(move |at_an_end| {
+            table
+                .upgrade()
+                .is_none_or(|table| table.program_gone(&watched, &slot, at_an_end))
+        });
+        let read = output_end::Output::new(reader, terminal, gone);
+        std::thread::spawn(move || stream_output(output_key, read, flow, sender));
         Ok(StreamedPane {
             key,
             pid,
@@ -786,6 +803,34 @@ impl PaneTable {
         self.tear_down(panes, pane, told)
     }
 
+    /// [`PaneTable::kill`], with the close on a thread of its own: the pane is out of the
+    /// table when this returns, and its programs' end comes into its slot when the close
+    /// has read it. The end of an output a program outlived waits on that for as long as
+    /// its bound allows (`output_end`): a kill waits for the exit with no bound, and a
+    /// Windows program that waits on I/O it cannot cancel is not gone when it is
+    /// terminated, so neither `pane.exit` nor the word that the program could not be
+    /// ended came (both reviews of round 4).
+    pub(super) fn kill_detached(&self, key: &PaneKey) -> Result<(), PaneError> {
+        let mut panes = self.lock_panes()?;
+        let Some(pane) = panes.remove(key) else {
+            return Ok(());
+        };
+        self.teardown.begin();
+        drop(panes);
+        let (teardown, grace) = (Arc::clone(&self.teardown), self.close_grace);
+        let ender = Arc::clone(&teardown);
+        std::thread::Builder::new()
+            .name("consensflow-pty-ender".to_string())
+            .spawn(move || {
+                let _ = end_pane(pane, &ender, grace, true);
+            })
+            .map(|_| ())
+            .map_err(|error| {
+                teardown.resolve(false);
+                PaneError::Io(error)
+            })
+    }
+
     /// A pane whose program has ended leaves the table by a kill's rules:
     /// what the harness left running ends with it, its master goes and its
     /// child is reaped, and a write still in progress hands the exit to the
@@ -794,9 +839,10 @@ impl PaneTable {
     /// master, a zombie child and the update blocked until the app quit.
     ///
     /// `true` once the pane is out of the table (now, or already); `false`
-    /// while its program still runs, so the pane stays for a `pane.kill`. The
-    /// output ends a moment before the exit can be read, so it looks again
-    /// for a while before it says so.
+    /// while its program still runs, so the pane stays for a kill (the one that
+    /// follows the end of an output its program outlived:
+    /// [`PaneTable::output_ended`]). The output ends a moment before the exit can
+    /// be read, so it looks again for a while before it says so.
     pub(crate) fn retire_exited(&self, key: &PaneKey) -> Result<bool, PaneError> {
         self.retire_exited_within(key, EXIT_GRACE)
     }
@@ -828,24 +874,12 @@ impl PaneTable {
     fn tear_down(
         &self,
         panes: MutexGuard<'_, HashMap<PaneKey, Pane>>,
-        mut pane: Pane,
+        pane: Pane,
         told: bool,
     ) -> Result<(), PaneError> {
         self.teardown.begin();
         drop(panes);
-        close_output(&pane);
-        // What the close ends is what the window leaves running: the exit it
-        // sends says so, and by then the processes are gone.
-        if told {
-            pane.keep_background();
-        }
-        if pane.active_writes.load(Ordering::Acquire) == 0 {
-            let result = terminate(&mut pane, self.close_grace);
-            self.teardown.resolve(result.is_ok());
-            result
-        } else {
-            terminate_detached(pane, Arc::clone(&self.teardown), self.close_grace)
-        }
+        end_pane(pane, &self.teardown, self.close_grace, told)
     }
 
     /// The built-in ConPTY keeps a pane's output open after its program exits
@@ -1103,9 +1137,12 @@ impl Drop for PaneTable {
     }
 }
 
+/// A pane's output, read until it has ended for good ([`output_end::Output`]: on Unix,
+/// not while the program runs, for a terminal it let go of may be opened again), and sent
+/// on as it comes, within what the flow allows.
 fn stream_output(
     key: PaneKey,
-    mut reader: Box<dyn Read + Send>,
+    mut output: output_end::Output,
     flow: Arc<OutputFlow>,
     sender: mpsc::Sender<PaneOutput>,
 ) {
@@ -1113,37 +1150,77 @@ fn stream_output(
 
     while let Some(allowance) = flow.read_allowance() {
         let mut bytes = vec![0; allowance.min(MAX_CHUNK_BYTES)];
-        match reader.read(&mut bytes) {
-            Ok(0) | Err(_) => break,
-            Ok(byte_count) => {
-                bytes.truncate(byte_count);
-                let Some(seq) = flow.record(byte_count) else {
-                    break;
-                };
-                if sender
-                    .send(PaneOutput {
-                        key: key.clone(),
-                        seq,
-                        bytes,
-                    })
-                    .is_err()
-                {
-                    break;
-                }
-            }
+        let output_end::Got::Bytes(byte_count) = output.read(&mut bytes) else {
+            break;
+        };
+        bytes.truncate(byte_count);
+        let Some(seq) = flow.record(byte_count) else {
+            break;
+        };
+        if sender
+            .send(PaneOutput {
+                key: key.clone(),
+                seq,
+                bytes,
+            })
+            .is_err()
+        {
+            break;
         }
     }
     let mut discarded = [0; MAX_CHUNK_BYTES];
-    while reader
-        .read(&mut discarded)
-        .is_ok_and(|byte_count| byte_count > 0)
-    {}
+    while let output_end::Got::Bytes(_) = output.read(&mut discarded) {}
     flow.close();
+}
+
+/// A descriptor of the pane's terminal of the output's own, which it asks whether there
+/// is anything to read (Unix); none is needed elsewhere.
+#[cfg(unix)]
+fn terminal_of(pane: &Pane) -> Result<output_end::Terminal, PaneError> {
+    use std::os::fd::BorrowedFd;
+
+    let fd = pane
+        .master
+        .as_raw_fd()
+        .ok_or_else(|| PaneError::Pty("the terminal has no descriptor".to_owned()))?;
+    // SAFETY: the master's descriptor, open for as long as the pane holds it, which it
+    // does while the table's lock is held; a copy of it is taken, which the output owns.
+    let borrowed = unsafe { BorrowedFd::borrow_raw(fd) };
+    Ok(borrowed.try_clone_to_owned()?)
+}
+
+#[cfg(not(unix))]
+fn terminal_of(_pane: &Pane) -> Result<output_end::Terminal, PaneError> {
+    Ok(output_end::Terminal)
 }
 
 fn close_output(pane: &Pane) {
     if let Some(flow) = &pane.output_flow {
         flow.close();
+    }
+}
+
+/// Ends a pane just taken out of the table, whose teardown is counted in `teardown`:
+/// its programs are given `grace` and what is left of them is killed. `told`: whether
+/// what the window leaves running is kept for the exit that is sent.
+fn end_pane(
+    mut pane: Pane,
+    teardown: &Arc<Teardown>,
+    grace: Duration,
+    told: bool,
+) -> Result<(), PaneError> {
+    close_output(&pane);
+    // What the close ends is what the window leaves running: the exit it
+    // sends says so, and by then the processes are gone.
+    if told {
+        pane.keep_background();
+    }
+    if pane.active_writes.load(Ordering::Acquire) == 0 {
+        let result = terminate(&mut pane, grace);
+        teardown.resolve(result.is_ok());
+        result
+    } else {
+        terminate_detached(pane, Arc::clone(teardown), grace)
     }
 }
 
@@ -1161,7 +1238,8 @@ fn already_reaped(_error: &io::Error) -> bool {
 }
 
 /// Whether the pane's program has exited. The status that says so is kept
-/// ([`EndedSlot`]) for whoever tells how the program ended.
+/// ([`EndedSlot`]) for whoever tells how the program ended, and so is the
+/// system's word that it was reaped elsewhere: either is the proof it has gone.
 fn has_exited(pane: &mut Pane) -> Result<bool, PaneError> {
     match pane.child.try_wait() {
         Ok(Some(status)) => {
@@ -1169,7 +1247,10 @@ fn has_exited(pane: &mut Pane) -> Result<bool, PaneError> {
             Ok(true)
         }
         Ok(None) => Ok(false),
-        Err(error) if already_reaped(&error) => Ok(true),
+        Err(error) if already_reaped(&error) => {
+            pane.ended.mark_reaped();
+            Ok(true)
+        }
         Err(error) => Err(PaneError::Io(error)),
     }
 }
@@ -1180,7 +1261,10 @@ fn wait_for_exit(pane: &mut Pane) -> Result<(), PaneError> {
             pane.ended.record(&status);
             Ok(())
         }
-        Err(error) if already_reaped(&error) => Ok(()),
+        Err(error) if already_reaped(&error) => {
+            pane.ended.mark_reaped();
+            Ok(())
+        }
         Err(error) => Err(PaneError::Io(error)),
     }
 }

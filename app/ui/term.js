@@ -26,6 +26,7 @@ const shortcutLetter = (event) =>
  * @typedef {object} Emulator
  * @property {(bytes: Uint8Array) => Promise<void>} write
  * @property {(callback: (data: string) => void) => {dispose: () => void}} onData
+ * @property {(text: string) => void} paste
  * @property {() => void} dispose
  */
 
@@ -109,6 +110,15 @@ export class XtermEmulator {
   onData(callback) {
     this.humanListeners.add(callback)
     return { dispose: () => this.humanListeners.delete(callback) }
+  }
+
+  /**
+   * Types `text` as a paste: xterm's own, which the human's paste event takes
+   * too, so it reaches `onData` as theirs does, between the markers where
+   * the program asked for them.
+   */
+  paste(text) {
+    this.terminal.paste(text)
   }
 
   /** Take the host's size: the first at once, a later one once it holds still. */
