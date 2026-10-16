@@ -11,7 +11,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use super::script::SYNCED;
+use super::script::{sweep_script, SWEEP, SYNCED};
 use super::Error;
 use crate::context::Context;
 use crate::process::{self, Invocation};
@@ -46,15 +46,21 @@ fn kept(listing: &str, exists: impl Fn(&str) -> bool) -> Result<Vec<String>, Err
     Ok(files)
 }
 
-/// Packs `files` (and the list of them) into `tree.tgz` in `scratch`, and answers where it is.
+/// Packs `files`, the list of them and the sweep that removes from the copy what
+/// the list does not name ([`sweep_script`]) into `tree.tgz` in `scratch`, and
+/// answers where it is.
 ///
-/// The list is a file of the checkout while `tar` reads it, for it names its
-/// files from the checkout's root; it is taken away when the tarball is made, or
-/// when that fails.
+/// The list and the sweep are files of the checkout while `tar` reads them, for it
+/// names its files from the checkout's root; they are taken away when the tarball
+/// is made, or when that fails.
 pub fn pack(context: &Context, files: &[String], scratch: &Path) -> Result<PathBuf, Error> {
     let names = scratch.join("files");
     let tarball = scratch.join("tree.tgz");
-    let named: Vec<&str> = files.iter().map(String::as_str).chain([SYNCED]).collect();
+    let named: Vec<&str> = files
+        .iter()
+        .map(String::as_str)
+        .chain([SYNCED, SWEEP])
+        .collect();
     fs::write(&names, named.join("\0")).map_err(Error::files("write", &names))?;
     let tar = tar(context, scratch, &names);
     let made = {
@@ -81,23 +87,30 @@ fn tar(context: &Context, scratch: &Path, names: &Path) -> Invocation {
         .var("COPYFILE_DISABLE", "1")
 }
 
-/// The list of what goes over, as a file of the checkout: taken away when it is dropped.
-struct Listed(PathBuf);
+/// The list of what goes over and the sweep, as files of the checkout: taken away
+/// when it is dropped.
+struct Listed(Vec<PathBuf>);
 
 impl Listed {
     fn write(root: &Path, files: &[String]) -> Result<Self, Error> {
-        let path = root.join(SYNCED);
-        let mut text = files.join("\n");
-        text.push('\n');
-        fs::write(&path, text).map_err(Error::files("write", &path))?;
-        Ok(Self(path))
+        let mut listed = Self(Vec::new());
+        let mut list = files.join("\n");
+        list.push('\n');
+        for (name, text) in [(SYNCED, list), (SWEEP, sweep_script())] {
+            let path = root.join(name);
+            fs::write(&path, text).map_err(Error::files("write", &path))?;
+            listed.0.push(path);
+        }
+        Ok(listed)
     }
 }
 
 impl Drop for Listed {
     fn drop(&mut self) {
-        // Gone already, or not to be taken away: nothing more to be done about it.
-        let _ = fs::remove_file(&self.0);
+        for path in &self.0 {
+            // Gone already, or not to be taken away: nothing more to be done about it.
+            let _ = fs::remove_file(path);
+        }
     }
 }
 
