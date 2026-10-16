@@ -9,7 +9,7 @@
     "prepare:app": "npm run bundle:ui && npm run prepare-sidecar",
     "smoke:windows": "node scripts/windows-smoke.mjs",
     "portable": "cargo xtask portable pack",
-    "test:ui": "npm run bundle:ui && playwright test tests/core-page.spec.mjs tests/updates.spec.mjs tests/harnesses.spec.mjs",
+    "test:ui": "npm run bundle:ui && playwright test tests/core-page.spec.mjs tests/updates.spec.mjs tests/harnesses.spec.mjs tests/specs-viewer.spec.mjs",
     "build": "tauri build",
     "dev": "tauri dev"
   },
@@ -23,6 +23,7 @@
     "@tauri-apps/plugin-dialog": "^2.7.3",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
-    "esbuild": "^0.25.10"
+    "esbuild": "^0.25.10",
+    "mermaid": "11.17.2"
   }
 }

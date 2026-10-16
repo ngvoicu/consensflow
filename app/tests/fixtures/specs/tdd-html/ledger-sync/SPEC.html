@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ledger Sync — SPEC</title>
+  <link rel="stylesheet" href="../assets/spec-styles.css">
+  <script src="../assets/spec-runtime.js" defer></script>
+  <!-- region:meta -->
+  <script type="application/json" id="spec-meta">{"id":"ledger-sync","title":"Ledger Sync","status":"active","created":"2026-10-11","updated":"2026-10-15","priority":"medium","tags":["sync","tdd"],"mockup-fidelity":"none"}</script>
+  <!-- endregion:meta -->
+</head>
+<body>
+<div class="page">
+  <main class="content">
+
+    <!-- region:header -->
+    <header class="spec-header" id="spec-header">
+      <div class="spec-header__top">
+        <div>
+          <h1 class="spec-header__title">Ledger Sync</h1>
+          <div class="spec-header__id">ledger-sync</div>
+        </div>
+        <div class="spec-header__chips"><span class="pill pill--in-progress">Active</span></div>
+      </div>
+      <div class="scorecard">
+        <div class="scorecard__cell"><div class="scorecard__label">Tasks</div><div class="scorecard__value"><span data-progress-target="spec-total">0/0</span></div><div class="scorecard__sub"><span data-progress-target="spec-pct">0%</span> complete</div></div>
+      </div>
+    </header>
+    <!-- endregion:header -->
+
+    <!-- region:phases -->
+    <section class="section" id="phases">
+      <div class="section__header"><h2 class="section__title">Phases &amp; Tasks</h2></div>
+      <div class="phases">
+        <details class="phase" open data-phase="1" data-status="in-progress">
+          <summary class="phase__header">
+            <span class="phase__index">Phase 1</span>
+            <h3 class="phase__title">Pull</h3>
+            <span class="pill pill--in-progress">In progress</span>
+            <span class="phase__progress"><span data-progress-target="phase-1-total">0/0</span></span>
+          </summary>
+          <div class="phase__body">
+            <ul class="task-list">
+              <li class="task-pair">
+                <ol class="task-list" style="margin:0;">
+                  <li class="task task--test" id="task-TEST-LS-01" data-task="TEST-LS-01" data-status="completed">
+                    <span class="task__code">TEST-LS-01</span>
+                    <span class="task__text">Write tests for pulling a page of entries</span>
+                    <span class="task__rgr task__rgr--red">RED</span>
+                  </li>
+                  <li class="task task--impl" id="task-IMPL-LS-02" data-task="IMPL-LS-02" data-status="pending">
+                    <span class="task__code">IMPL-LS-02</span>
+                    <span class="task__text">Implement the pull in <code>src/sync/pull.ts</code> &rarr; satisfies <code>[TEST-LS-01]</code>.</span>
+                  </li>
+                </ol>
+              </li>
+            </ul>
+          </div>
+        </details>
+      </div>
+    </section>
+    <!-- endregion:phases -->
+
+    <!-- region:tdd-log -->
+    <section class="section" id="tdd-log">
+      <div class="section__header"><h2 class="section__title">TDD Log</h2></div>
+    </section>
+    <!-- endregion:tdd-log -->
+
+  </main>
+</div>
+</body>
+</html>

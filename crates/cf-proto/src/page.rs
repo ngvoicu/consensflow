@@ -54,12 +54,23 @@ pub enum PageOperation {
     SpecsGet,
     /// The human's word on specs for every project: each part given is kept.
     SpecsSet,
+    /// What a project's specs folder holds, for the specs viewer: its files
+    /// and folders, read and never written.
+    SpecsTree,
+    /// One file of a project's specs folder, for the specs viewer, read and
+    /// never written.
+    SpecsFile,
+    /// Whether a project's specs folder holds a file: the board's Specs button.
+    SpecsPresent,
+    /// An HTML file of a project's specs folder, opened in the browser,
+    /// outside ConsensFlow.
+    SpecsOpen,
 }
 
 impl PageOperation {
     /// Every operation, in the order Node's page listed them, then those this
     /// build added, in the order it added them.
-    pub const ALL: [PageOperation; 35] = [
+    pub const ALL: [PageOperation; 39] = [
         Self::ProjectsList,
         Self::ProjectOpen,
         Self::ProjectResume,
@@ -95,6 +106,10 @@ impl PageOperation {
         Self::ProjectDescribe,
         Self::SpecsGet,
         Self::SpecsSet,
+        Self::SpecsTree,
+        Self::SpecsFile,
+        Self::SpecsPresent,
+        Self::SpecsOpen,
     ];
 
     /// The name the page, the app and the bridge say it by (`project.open`).
@@ -135,6 +150,10 @@ impl PageOperation {
             Self::ProjectDescribe => "project.describe",
             Self::SpecsGet => "specs.get",
             Self::SpecsSet => "specs.set",
+            Self::SpecsTree => "specs.tree",
+            Self::SpecsFile => "specs.file",
+            Self::SpecsPresent => "specs.present",
+            Self::SpecsOpen => "specs.open",
         }
     }
 
@@ -157,6 +176,10 @@ impl PageOperation {
                 | Self::StaffLast
                 | Self::BoardGet
                 | Self::InboxGet
+                | Self::SpecsTree
+                | Self::SpecsFile
+                | Self::SpecsPresent
+                | Self::SpecsOpen
                 | Self::TaskGet
                 | Self::TaskTranscript
                 | Self::WakeUpGet
@@ -189,7 +212,7 @@ mod tests {
             .unwrap();
         let mut forwarded: Vec<&str> = list.split('"').skip(1).step_by(2).collect();
         let mut named: Vec<&str> = PageOperation::ALL.map(PageOperation::as_str).to_vec();
-        assert_eq!(named.len(), 35);
+        assert_eq!(named.len(), 39);
         forwarded.sort_unstable();
         named.sort_unstable();
         assert_eq!(named, forwarded);
@@ -244,7 +267,7 @@ mod tests {
             "message.approve",
             "message.decline",
         ];
-        const ADDED: [&str; 7] = [
+        const ADDED: [&str; 11] = [
             "wakeup.get",
             "wakeup.set",
             "project.specs",
@@ -252,6 +275,10 @@ mod tests {
             "project.describe",
             "specs.get",
             "specs.set",
+            "specs.tree",
+            "specs.file",
+            "specs.present",
+            "specs.open",
         ];
         let listed: Vec<&str> = PageOperation::ALL.map(PageOperation::as_str).to_vec();
         assert_eq!(listed[..RECORDED.len()], RECORDED);
@@ -277,6 +304,10 @@ mod tests {
                 "task.transcript",
                 "wakeup.get",
                 "specs.get",
+                "specs.tree",
+                "specs.file",
+                "specs.present",
+                "specs.open",
             ]
         );
     }

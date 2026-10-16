@@ -795,7 +795,11 @@ The handle line is the first line the daemon prints for the app: JSON, key order
     "project.rename",
     "project.describe",
     "specs.get",
-    "specs.set"
+    "specs.set",
+    "specs.tree",
+    "specs.file",
+    "specs.present",
+    "specs.open"
   ],
   "ping": "{\"ok\":true}"
 }

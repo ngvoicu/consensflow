@@ -1,0 +1,39 @@
+[
+  {
+    "name": "assets",
+    "path": "assets",
+    "entries": [
+      {
+        "name": "spec-runtime.js",
+        "path": "assets/spec-runtime.js",
+        "size": 35527
+      },
+      {
+        "name": "spec-styles.css",
+        "path": "assets/spec-styles.css",
+        "size": 51709
+      }
+    ]
+  },
+  {
+    "name": "ledger-sync",
+    "path": "ledger-sync",
+    "entries": [
+      {
+        "name": "SPEC.html",
+        "path": "ledger-sync/SPEC.html",
+        "size": 3216
+      },
+      {
+        "name": "research-01.md",
+        "path": "ledger-sync/research-01.md",
+        "size": 133
+      }
+    ]
+  },
+  {
+    "name": "registry.md",
+    "path": "registry.md",
+    "size": 196
+  }
+]

@@ -32,4 +32,21 @@ await copyFile(
   join(VENDOR, 'xterm.css'),
 )
 
-process.stdout.write('ui: xterm 6 and addon-fit bundled locally\n')
+// Mermaid, for the diagrams of a project's specs: one file the specs viewer imports only when
+// it draws one, so the page loads without it and draws offline.
+await build({
+  bundle: true,
+  format: 'esm',
+  logLevel: 'warning',
+  minify: true,
+  outfile: join(VENDOR, 'mermaid.js'),
+  platform: 'browser',
+  stdin: {
+    contents: "export { default } from 'mermaid'",
+    resolveDir: APP,
+    sourcefile: 'mermaid-entry.js',
+  },
+  target: ['safari15'],
+})
+
+process.stdout.write('ui: xterm 6, addon-fit and mermaid 11 bundled locally\n')

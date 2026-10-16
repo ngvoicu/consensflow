@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>A mockup that opens the app in its frame</title></head>
+<body>
+<p id="here">This page moves its own frame to the app's own page once it has loaded: no policy stops a
+  frame moving itself. In ConsensFlow the viewer takes the frame away and says so; were it not to, the
+  app's page would show here without Tauri (no __TAURI_INTERNALS__ in a frame), saying it is not run by
+  ConsensFlow.</p>
+<script>
+  const app = navigator.userAgent.includes('Windows')
+    ? 'http://tauri.localhost/index.html'
+    : 'tauri://localhost/index.html'
+  addEventListener('load', () => setTimeout(() => {
+    location.href = app
+  }, 200))
+</script>
+</body>
+</html>
