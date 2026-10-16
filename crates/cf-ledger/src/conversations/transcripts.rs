@@ -5,7 +5,7 @@ use std::collections::HashMap;
 
 use cf_base::time;
 use cf_proto::ledger::{HistoryItem, TaskTranscript, TranscriptItem};
-use rusqlite::{params, OptionalExtension};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::Value;
 
 use super::known_conversation;
@@ -71,7 +71,7 @@ pub(crate) fn copy_transcript(
                 .get("at")
                 .and_then(Value::as_str)
                 .filter(|at| time::parse(at).is_some());
-            written += upsert.execute(params![
+            let changed = upsert.execute(params![
                 conversation_id,
                 id,
                 from + index,
@@ -82,9 +82,89 @@ pub(crate) fn copy_transcript(
                 copied_at,
                 i64::from(item.get("compaction") == Some(&Value::Bool(true))),
             ])?;
+            if changed > 0 {
+                write_parts(&store.db, conversation_id, id, &text)?;
+            }
+            written += changed;
         }
         Ok(written)
     })
+}
+
+/// The parts of a text longer than one ([`TRANSCRIPT_ITEM_MAX`] characters
+/// each, the last fewer), or none for a text no longer than that.
+fn parts_of(text: &str) -> Vec<&str> {
+    let starts: Vec<usize> = text
+        .char_indices()
+        .step_by(TRANSCRIPT_ITEM_MAX)
+        .map(|(at, _)| at)
+        .collect();
+    if starts.len() < 2 {
+        return Vec::new();
+    }
+    let ends = starts.iter().skip(1).copied().chain([text.len()]);
+    starts
+        .iter()
+        .zip(ends)
+        .map(|(&start, end)| &text[start..end])
+        .collect()
+}
+
+/// Keeps item `item_id`'s text in parts as well, where it is longer than one,
+/// so that a reader of a long item reads a part of it and no more: each part
+/// that changed is written, and the parts past the text's last are taken away
+/// (all of them from a text no longer than a part).
+fn write_parts(
+    db: &Connection,
+    conversation_id: i64,
+    item_id: &str,
+    text: &str,
+) -> rusqlite::Result<()> {
+    let parts = parts_of(text);
+    let mut write = db.prepare_cached(
+        "INSERT INTO transcript_part (conversation_id, item_id, part, text) VALUES (?, ?, ?, ?)
+       ON CONFLICT (conversation_id, item_id, part) DO UPDATE SET text = excluded.text
+         WHERE transcript_part.text != excluded.text",
+    )?;
+    for (part, piece) in (0_i64..).zip(&parts) {
+        write.execute(params![conversation_id, item_id, part, piece])?;
+    }
+    db.prepare_cached(
+        "DELETE FROM transcript_part WHERE conversation_id = ? AND item_id = ? AND part >= ?",
+    )?
+    .execute(params![
+        conversation_id,
+        item_id,
+        i64::try_from(parts.len()).unwrap_or(i64::MAX)
+    ])?;
+    Ok(())
+}
+
+/// Splits into parts every item copied before the copy kept long items in
+/// parts too: what migration 0019 does past its SQL, once. Only a text of
+/// more bytes than a part's characters can be longer than a part, and only
+/// those are read, one at a time.
+pub(crate) fn split_copied(db: &Connection) -> rusqlite::Result<()> {
+    let long = db
+        .prepare("SELECT rowid FROM transcript WHERE octet_length(text) > ?")?
+        .query_map(
+            [i64::try_from(TRANSCRIPT_ITEM_MAX).unwrap_or(i64::MAX)],
+            |row| row.get::<_, i64>(0),
+        )?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let mut read =
+        db.prepare("SELECT conversation_id, item_id, text FROM transcript WHERE rowid = ?")?;
+    for row in long {
+        let (conversation_id, item_id, text) = read.query_row([row], |row| {
+            Ok((
+                row.get::<_, i64>("conversation_id")?,
+                row.get::<_, String>("item_id")?,
+                row.get::<_, String>("text")?,
+            ))
+        })?;
+        write_parts(db, conversation_id, &item_id, &text)?;
+    }
+    Ok(())
 }
 
 /// The items of a conversation's copy, in order.

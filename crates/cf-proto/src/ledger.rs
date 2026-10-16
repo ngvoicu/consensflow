@@ -194,7 +194,8 @@ pub enum ConversationEnd {
 
 /// A participant's conversation as the history viewer heads it: the agent it
 /// ran on and what ended it where the ledger knows them, and how many of its
-/// items are tools' outputs.
+/// items are tools' outputs, counted so far and no further (`more_tools`: that
+/// many, or more).
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ParticipantConversation {
@@ -203,17 +204,25 @@ pub struct ParticipantConversation {
     pub agent: Option<String>,
     pub ended_by: Option<ConversationEnd>,
     pub tools: usize,
+    pub more_tools: bool,
 }
 
-/// Where an item stands in a participant's history, in the order the viewer
-/// reads it: its conversation, its place there, and the row the ledger keeps
-/// it in. The row never changes; the place changes only with the item's text,
-/// and can repeat in a conversation whose record shrank and was copied again.
+/// Where an entry stands in a participant's history, in the order the viewer
+/// reads it: its conversation, and the row the ledger keeps its item in, which
+/// never changes, so that items stand in the order they were first copied
+/// whatever is copied again; row 0 is the conversation's heading, before its
+/// items. A search that stopped inside a long item says how many of its parts
+/// it went through (`part`, none where it went through the item whole).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HistoryKey {
     pub conversation: i64,
-    pub seq: i64,
     pub row: i64,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub part: usize,
+}
+
+fn is_zero(part: &usize) -> bool {
+    *part == 0
 }
 
 /// Where a read of a participant's history begins, and which way it goes.
@@ -244,22 +253,45 @@ pub struct HistoryRow {
     pub cut: Option<TextCut>,
 }
 
-/// How much of the history a read went through: rows, and the bytes of their texts.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct Scanned {
-    pub rows: usize,
-    pub bytes: usize,
+/// What a read of the history takes, in the order it goes: an item, or the
+/// heading of a conversation that shows none (its key's row is 0), which a
+/// page shows in its place.
+#[derive(Debug, Clone, PartialEq)]
+pub enum HistoryEntry {
+    Heading(HistoryKey),
+    Item(HistoryRow),
 }
 
-/// One read of a participant's history: its conversations, all of them, the
-/// rows read in the order the read went, where the next read that way goes on
-/// (none: there is no more that way), whether the read stopped at the most a
-/// read goes through, and how much it went through.
+impl HistoryEntry {
+    /// Where the entry stands.
+    pub fn key(&self) -> HistoryKey {
+        match self {
+            Self::Heading(key) => *key,
+            Self::Item(row) => row.key,
+        }
+    }
+}
+
+/// How much of the history a read went through: the conversations it came
+/// to, the rows it read, the bytes of text it read of them, and the steps
+/// SQLite's machine took for it all.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Scanned {
+    pub conversations: usize,
+    pub rows: usize,
+    pub bytes: usize,
+    pub steps: usize,
+}
+
+/// One read of a participant's history: the conversations it took an entry
+/// of, headed, in the order it went; its entries, in that order; where the
+/// next read that way goes on (none: there is no more that way); whether the
+/// read stopped at the most a read goes through; and how much it went through.
 #[derive(Debug, Clone, PartialEq)]
 pub struct HistoryRead {
     pub participant: i64,
     pub conversations: Vec<ParticipantConversation>,
-    pub rows: Vec<HistoryRow>,
+    pub entries: Vec<HistoryEntry>,
     pub resume: Option<HistoryKey>,
     pub bounded: bool,
     pub scanned: Scanned,
@@ -703,6 +735,27 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&ends).unwrap(),
             r#"[{"by":"switch","harness":"codex","agent":"maia"},{"by":"window","resumed":true},{"by":"fresh"}]"#
+        );
+    }
+
+    #[test]
+    fn a_place_says_the_part_a_search_stopped_at_inside_an_item_and_no_part_elsewhere() {
+        let inside = HistoryKey {
+            conversation: 4,
+            row: 90,
+            part: 3,
+        };
+        let said = serde_json::to_string(&inside).unwrap();
+        assert_eq!(said, r#"{"conversation":4,"row":90,"part":3}"#);
+        assert_eq!(serde_json::from_str::<HistoryKey>(&said).unwrap(), inside);
+        let whole = HistoryKey { part: 0, ..inside };
+        assert_eq!(
+            serde_json::to_string(&whole).unwrap(),
+            r#"{"conversation":4,"row":90}"#
+        );
+        assert_eq!(
+            serde_json::from_str::<HistoryKey>(r#"{"conversation":4,"row":90}"#).unwrap(),
+            whole
         );
     }
 }

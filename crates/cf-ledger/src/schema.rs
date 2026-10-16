@@ -3,7 +3,9 @@
 //! list's length. A migration is SQL run inside one transaction, and it is
 //! never edited once it has shipped: a change is a new file at the end. The
 //! files are the JavaScript's strings byte for byte (a test there holds them
-//! equal while both exist), and each is pinned here by its SHA-256.
+//! equal while both exist), and each is pinned here by its SHA-256. What SQL
+//! cannot do of a migration is done in the same transaction, after it
+//! ([`after`]).
 
 use rusqlite::Connection;
 use serde_json::json;
@@ -63,6 +65,7 @@ pub fn migrate(db: &Connection, migrations: &[&str]) -> Result<(), LedgerError> 
             db.execute_batch("BEGIN IMMEDIATE")?;
             let step = (|| {
                 db.execute_batch(migration)?;
+                after(db, from + 1)?;
                 db.execute_batch(&format!("PRAGMA user_version = {}", from + 1))?;
                 let broken = db
                     .prepare("PRAGMA foreign_key_check")?
@@ -97,6 +100,16 @@ pub fn migrate(db: &Connection, migrations: &[&str]) -> Result<(), LedgerError> 
     migrated
 }
 
+/// What the migration to `version` does past its SQL: 0019 splits the long
+/// items copied before it into the parts its table keeps, which needs each
+/// text read once, whole, where SQL's own functions would read it once a part.
+fn after(db: &Connection, version: usize) -> Result<(), LedgerError> {
+    if version == 19 {
+        crate::conversations::split_copied(db)?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -128,7 +141,7 @@ mod tests {
             "33053c05edf05fb28fdfed70def7dd9a93d28763f1b444651d24beeba1654352",
             "d73267cfa36e7769831bc565137149029fdc90c32342e6438816e01db5c68c63",
             "63715a099a8464bb97a304c1c7623cada58ade9effb5418625d6df27da26f2b1",
-            "3547f8aa39d42ddc4f38d6ad1eadf9d46c2a50bbe950346a04b35364ab713688",
+            "e3f2933bbf82506b9b31debcc8126d9c8f2047d0ceaced9b78bf2e22c848223f",
         ];
         for (at, (sql, shipped)) in MIGRATIONS.iter().zip(SHIPPED).enumerate() {
             let hash: String = Sha256::digest(sql.as_bytes())

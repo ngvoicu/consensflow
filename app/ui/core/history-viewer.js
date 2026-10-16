@@ -190,8 +190,11 @@ function drawConversation(conversation, whole) {
   const ended = endedWords(conversation)
   if (ended) about.push(ended)
   if (conversation.toolsLeftOut > 0) {
-    const outputs = conversation.toolsLeftOut === 1 ? 'output' : 'outputs'
-    about.push(`${conversation.toolsLeftOut} tool ${outputs} left out`)
+    // Counted so far and no further: that many, or more.
+    const more = conversation.moreToolsLeftOut === true
+    const outputs = conversation.toolsLeftOut === 1 && !more ? 'output' : 'outputs'
+    const count = more ? `${conversation.toolsLeftOut} or more` : conversation.toolsLeftOut
+    about.push(`${count} tool ${outputs} left out`)
   }
   section.append(heading, element('p', 'history-about', about.join(' · ')))
   const list = element('ol', 'transcript history-items')

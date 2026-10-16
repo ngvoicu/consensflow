@@ -8,8 +8,8 @@ use cf_base::refusal::Refusal;
 use cf_engine::handoff::{whole_history_page, WholeHistoryPage};
 use cf_ledger::{HistoryFrom, PAGE_BYTES};
 use cf_proto::ledger::{
-    ConversationEnd, ConversationView, HistoryItem, HistoryKey, HistoryRead, HistoryRow,
-    MessageView, ParticipantConversation, Scanned, TextCut,
+    ConversationEnd, ConversationView, HistoryEntry, HistoryItem, HistoryKey, HistoryRead,
+    HistoryRow, MessageView, ParticipantConversation, Scanned, TextCut,
 };
 use serde_json::json;
 
@@ -43,17 +43,18 @@ fn heading(
         agent: Some(agent.to_owned()),
         ended_by,
         tools,
+        more_tools: false,
     }
 }
 
-/// An item of conversation `conversation` at place `seq`: a role (`summary`, a
-/// compaction's) and its text.
+/// An item of conversation `conversation`, the `seq`th copied: a role
+/// (`summary`, a compaction's) and its text.
 fn row(conversation: i64, seq: i64, role: &str, text: &str) -> HistoryRow {
     HistoryRow {
         key: HistoryKey {
             conversation,
-            seq,
             row: conversation * 100 + seq,
+            part: 0,
         },
         item: HistoryItem {
             id: format!("{conversation}-{seq}"),
@@ -67,20 +68,39 @@ fn row(conversation: i64, seq: i64, role: &str, text: &str) -> HistoryRow {
     }
 }
 
-/// A read of the ledger's that gave `rows`, and goes on from `resume`.
-fn read(
+/// A read of the ledger's that gave `entries`, and goes on from `resume`.
+fn read_entries(
     conversations: Vec<ParticipantConversation>,
-    rows: Vec<HistoryRow>,
+    entries: Vec<HistoryEntry>,
     resume: Option<HistoryKey>,
 ) -> HistoryRead {
     HistoryRead {
         participant: 2,
         conversations,
-        rows,
+        entries,
         resume,
         bounded: false,
         scanned: Scanned::default(),
     }
+}
+
+/// A read of the ledger's that gave the items `rows`, and goes on from `resume`.
+fn read(
+    conversations: Vec<ParticipantConversation>,
+    rows: Vec<HistoryRow>,
+    resume: Option<HistoryKey>,
+) -> HistoryRead {
+    let entries = rows.into_iter().map(HistoryEntry::Item).collect();
+    read_entries(conversations, entries, resume)
+}
+
+/// The heading of conversation `conversation`, as a read takes it in place of its items.
+fn heading_entry(conversation: i64) -> HistoryEntry {
+    HistoryEntry::Heading(HistoryKey {
+        conversation,
+        row: 0,
+        part: 0,
+    })
 }
 
 fn switched() -> Option<ConversationEnd> {
@@ -90,8 +110,8 @@ fn switched() -> Option<ConversationEnd> {
     })
 }
 
-fn page(read: &HistoryRead, from: HistoryFrom, searching: bool) -> WholeHistoryPage {
-    whole_history_page(read, from, searching, &messages).unwrap()
+fn page(read: &HistoryRead, from: HistoryFrom) -> WholeHistoryPage {
+    whole_history_page(read, from, &messages).unwrap()
 }
 
 /// The ids of a page's items, in order.
@@ -116,16 +136,17 @@ fn heads_each_conversation_with_its_harness_agent_times_and_end_and_the_current_
         heading(3, "codex", "maia", None, 1),
     ];
     // The most recent page, newest first as the ledger reads it: the current
-    // conversation holds a tool's output alone, left out.
-    let rows = vec![
-        row(2, 0, "assistant", "Shipped"),
-        row(1, 1, "summary", "This session is being continued"),
-        row(1, 0, "user", "Ship it"),
+    // conversation holds a tool's output alone, left out, so its heading is
+    // taken in place of its items.
+    let entries = vec![
+        heading_entry(3),
+        HistoryEntry::Item(row(2, 0, "assistant", "Shipped")),
+        HistoryEntry::Item(row(1, 1, "summary", "This session is being continued")),
+        HistoryEntry::Item(row(1, 0, "user", "Ship it")),
     ];
     let shown = serde_json::to_value(page(
-        &read(conversations, rows, None),
+        &read_entries(conversations, entries, None),
         HistoryFrom::Newest,
-        false,
     ))
     .unwrap();
     assert_eq!(
@@ -181,7 +202,6 @@ fn says_a_delivery_to_this_participant_in_its_line_and_leaves_any_other_header_a
     let shown = page(
         &read(vec![heading(1, "pi", "chief", None, 0)], rows, None),
         HistoryFrom::Newest,
-        false,
     );
     let items = &shown.conversations[0].items;
     let line = "· m-5: @zeus's result on T-1 (cf task get T-1)";
@@ -214,7 +234,7 @@ fn takes_rows_while_a_frame_has_room_and_says_where_the_next_pages_go_on_from() 
         rows.clone(),
         resume,
     );
-    let newest = page(&all, HistoryFrom::Newest, false);
+    let newest = page(&all, HistoryFrom::Newest);
     assert_eq!(ids(&newest), ["1-3", "1-4"]);
     assert!(
         serde_json::to_vec(&json!({ "ok": true, "history": newest }))
@@ -229,14 +249,14 @@ fn takes_rows_while_a_frame_has_room_and_says_where_the_next_pages_go_on_from() 
     );
     assert_eq!(newest.newer, None, "the most recent");
     // A page read before a place goes back to it; one read after goes on from where the read stopped.
-    let before = page(&all, HistoryFrom::Before(rows[0].key), false);
+    let before = page(&all, HistoryFrom::Before(rows[0].key));
     assert_eq!(before.newer, Some(rows[0].key));
     let some = read(
         vec![heading(1, "pi", "chief", None, 0)],
         rows[3..].to_vec(),
         None,
     );
-    let after = page(&some, HistoryFrom::After(rows[2].key), false);
+    let after = page(&some, HistoryFrom::After(rows[2].key));
     assert_eq!((after.older, after.newer), (Some(rows[3].key), None));
 }
 
@@ -252,16 +272,48 @@ fn counts_each_conversation_s_heading_against_the_frame_as_well_as_its_items() {
         .map(|n| row(n, 0, "assistant", "ok"))
         .collect();
     let resume = rows.last().map(|row| row.key);
-    let shown = page(
-        &read(conversations, rows, resume),
-        HistoryFrom::Newest,
-        false,
-    );
+    let shown = page(&read(conversations, rows, resume), HistoryFrom::Newest);
     let size = serde_json::to_vec(&json!({ "ok": true, "history": shown }))
         .unwrap()
         .len();
     assert!(size <= PAGE_BYTES, "{size} bytes");
     assert!(ids(&shown).len() < 3_000, "the rest are older pages'");
+}
+
+#[test]
+fn counts_the_heading_of_a_conversation_that_shows_no_item_against_the_frame_and_goes_on_past_it() {
+    // The reviewers' case: 10,000 conversations of tools' outputs alone, left
+    // out, each a heading and nothing more. Their headings fill a frame, and
+    // the next page goes on from the oldest one shown.
+    let conversations: Vec<ParticipantConversation> = (1..=10_000)
+        .map(|n| heading(n, "codex", "maia", Some(ConversationEnd::Fresh), 3))
+        .collect();
+    let entries: Vec<HistoryEntry> = (1..=10_000).rev().map(heading_entry).collect();
+    let resume = entries.last().map(HistoryEntry::key);
+    let shown = page(
+        &read_entries(conversations, entries, resume),
+        HistoryFrom::Newest,
+    );
+    let size = serde_json::to_vec(&json!({ "ok": true, "history": shown }))
+        .unwrap()
+        .len();
+    assert!(size <= PAGE_BYTES, "{size} bytes");
+    let headed = shown.conversations.len();
+    assert!(headed > 100 && headed < 10_000, "{headed} headings");
+    assert!(shown
+        .conversations
+        .iter()
+        .all(|conversation| conversation.items.is_empty()));
+    let oldest = shown.conversations[0].id;
+    assert_eq!(
+        shown.older,
+        Some(HistoryKey {
+            conversation: oldest,
+            row: 0,
+            part: 0
+        }),
+        "on from the oldest heading shown"
+    );
 }
 
 #[test]
@@ -275,12 +327,12 @@ fn a_search_shows_the_conversations_it_found_in_and_says_where_it_stopped_short(
         vec![row(1, 3, "user", "Run the PARSER tests")],
         Some(HistoryKey {
             conversation: 1,
-            seq: 1,
             row: 101,
+            part: 0,
         }),
     );
     stopped.bounded = true;
-    let found = page(&stopped, HistoryFrom::Newest, true);
+    let found = page(&stopped, HistoryFrom::Newest);
     assert_eq!(
         found.conversations.len(),
         1,
@@ -313,7 +365,6 @@ fn a_part_of_a_long_item_shows_as_the_read_cut_it_and_a_delivery_only_from_its_s
             None,
         ),
         HistoryFrom::Newest,
-        false,
     );
     let items = &shown.conversations[0].items;
     assert!(items[1].delivery.is_some());

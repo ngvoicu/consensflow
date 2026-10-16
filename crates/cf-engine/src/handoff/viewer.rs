@@ -4,19 +4,23 @@
 //! the ledger knows, and the items copied of it, a page at a time.
 //!
 //! A page is one read of the ledger's ([`HistoryRead`]), as much as one frame
-//! of the app's bridge carries ([`PAGE_BYTES`]). It goes on from a place, the
-//! oldest item shown or the newest, that does not move under it, so a page
-//! never repeats an item another showed nor skips one, whatever is added or
-//! grows meanwhile. A delivery ConsensFlow made to this participant says its
-//! outcome in one line, as `cf history` says it; its whole text is there too,
-//! for the page to open on a click. A long item shows a part, and is read whole
-//! a part at a time.
+//! of the app's bridge carries ([`PAGE_BYTES`]), each conversation's heading
+//! counted with its items. It goes on from a place, the oldest entry shown or
+//! the newest, that does not move under it, so a page never repeats an item
+//! another showed nor skips one, whatever is added, grows or is copied again
+//! meanwhile; a conversation that shows no item is an entry of its own, its
+//! heading. A delivery ConsensFlow made to this participant says its outcome in
+//! one line, as `cf history` says it; its whole text is there too, for the page
+//! to open on a click. A long item shows a part, and is read whole a part at a
+//! time.
+
+use std::collections::HashMap;
 
 use cf_base::refusal::Refusal;
 use cf_base::text::utf16_len;
 use cf_ledger::{
-    ConversationEnd, HistoryFrom, HistoryKey, HistoryRead, HistoryRow, ParticipantConversation,
-    TextCut, PAGE_BYTES,
+    ConversationEnd, HistoryEntry, HistoryFrom, HistoryKey, HistoryRead, HistoryRow,
+    ParticipantConversation, TextCut, PAGE_BYTES,
 };
 use serde::Serialize;
 
@@ -54,8 +58,11 @@ pub struct ShownConversation {
     pub ended_at: Option<String>,
     /// What ended it, where the ledger knows.
     pub ended_by: Option<ConversationEnd>,
-    /// How many of its tools' outputs are left out: all of them, unless asked for.
+    /// How many of its tools' outputs are left out: all of them, unless asked
+    /// for, counted so far and no further (`more_tools_left_out`: that many, or more).
     pub tools_left_out: usize,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub more_tools_left_out: bool,
     pub items: Vec<ShownItem>,
 }
 
@@ -87,44 +94,48 @@ pub struct Delivery {
     pub at: usize,
 }
 
-/// The page of `read`, the ledger's read from `from` (a search's, if
-/// `searching`). Its rows are taken in the order the read went while the page
-/// has room for them, the first always. `message` gives a message a delivery
-/// names, where it is one this participant was sent or sent: a header that
-/// names any other is the item's text, as it is. Without a search, a
-/// conversation the page's span holds that shows no item (the one going on
-/// now, with nothing copied yet) shows its heading alone.
+/// The page of `read`, the ledger's read from `from`. Its entries are taken in
+/// the order the read went while the page has room for them and for the
+/// heading of each conversation they are of, the first always; a heading the
+/// read took in place of a conversation's items (one that shows none, as the
+/// one going on now with nothing copied yet) shows alone. `message` gives a
+/// message a delivery names, where it is one this participant was sent or
+/// sent: a header that names any other is the item's text, as it is.
 pub fn whole_history_page(
     read: &HistoryRead,
     from: HistoryFrom,
-    searching: bool,
     message: Lookup<'_>,
 ) -> Result<WholeHistoryPage, Refusal> {
-    let heading = |id: i64| {
-        read.conversations
-            .iter()
-            .find(|conversation| conversation.conversation.id == id)
-    };
-    let mut taken: Vec<(HistoryKey, ShownItem)> = Vec::new();
+    let headings: HashMap<i64, &ParticipantConversation> = read
+        .conversations
+        .iter()
+        .map(|conversation| (conversation.conversation.id, conversation))
+        .collect();
+    let heading = |id: i64| headings.get(&id).copied();
+    let mut taken: Vec<(HistoryKey, Option<ShownItem>)> = Vec::new();
     let mut used = 0;
-    for row in &read.rows {
-        let item = shown(row, message)?;
+    for entry in &read.entries {
+        let key = entry.key();
+        let item = match entry {
+            HistoryEntry::Item(row) => Some(shown(row, message)?),
+            HistoryEntry::Heading(_) => None,
+        };
         let heads = taken
             .last()
-            .is_none_or(|(key, _)| key.conversation != row.key.conversation);
+            .is_none_or(|(taken, _)| taken.conversation != key.conversation);
         let headed = if heads {
-            heading(row.key.conversation).map_or(0, |conversation| bytes(&head(conversation)) + 1)
+            heading(key.conversation).map_or(0, |conversation| bytes(&head(conversation)) + 1)
         } else {
             0
         };
-        let cost = bytes(&item) + 1 + headed;
+        let cost = item.as_ref().map_or(0, |item| bytes(item) + 1) + headed;
         if !taken.is_empty() && used + cost > HISTORY_ROOM {
             break;
         }
         used += cost;
-        taken.push((row.key, item));
+        taken.push((key, item));
     }
-    let trimmed = taken.len() < read.rows.len();
+    let trimmed = taken.len() < read.entries.len();
     // Where the next page each way goes on from: past the last row taken where
     // the page was full, else where the read stopped; and back from the first.
     let last_taken = taken.last().map(|(key, _)| *key);
@@ -138,32 +149,21 @@ pub fn whole_history_page(
     if !matches!(from, HistoryFrom::After(_)) {
         taken.reverse();
     }
-    // Without a search, every conversation between the oldest shown and the
-    // newest, and past them where nothing is older or newer.
-    let low = match (older, taken.first()) {
-        (None, _) | (_, None) => i64::MIN,
-        (Some(_), Some((key, _))) => key.conversation,
-    };
-    let high = match (newer, taken.last()) {
-        (None, _) | (_, None) => i64::MAX,
-        (Some(_), Some((key, _))) => key.conversation,
-    };
+    // Oldest first, each conversation with its entries on the page.
     let mut conversations: Vec<ShownConversation> = Vec::new();
-    for conversation in &read.conversations {
-        let id = conversation.conversation.id;
-        let items: Vec<ShownItem> = taken
-            .iter()
-            .filter(|(key, _)| key.conversation == id)
-            .map(|(_, item)| item.clone())
-            .collect();
-        let spanned = !searching && low <= id && id <= high;
-        if items.is_empty() && !spanned {
-            continue;
+    for (key, item) in taken {
+        if conversations
+            .last()
+            .is_none_or(|shown| shown.id != key.conversation)
+        {
+            let Some(conversation) = heading(key.conversation) else {
+                continue;
+            };
+            conversations.push(head(conversation));
         }
-        conversations.push(ShownConversation {
-            items,
-            ..head(conversation)
-        });
+        if let (Some(shown), Some(item)) = (conversations.last_mut(), item) {
+            shown.items.push(item);
+        }
     }
     Ok(WholeHistoryPage {
         conversations,
@@ -184,6 +184,7 @@ fn head(conversation: &ParticipantConversation) -> ShownConversation {
         ended_at: view.ended_at.clone(),
         ended_by: conversation.ended_by.clone(),
         tools_left_out: conversation.tools,
+        more_tools_left_out: conversation.more_tools,
         items: Vec::new(),
     }
 }

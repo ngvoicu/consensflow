@@ -7,20 +7,25 @@
 
 #![allow(clippy::expect_used)]
 
+#[path = "whole_history/bounds.rs"]
+mod bounds;
+#[path = "whole_history/headings.rs"]
+mod headings;
 #[path = "whole_history/reads.rs"]
 mod reads;
 
 use cf_ledger::{
-    open_ledger, ChiefSwitch, HistoryAsk, HistoryFrom, HistoryItem, Ledger, LedgerError, NewChief,
-    NewMember, NewProject, Options, ParticipantConversation, ProjectView, HISTORY_SCAN_BYTES,
+    open_ledger, ChiefSwitch, HistoryAsk, HistoryEntry, HistoryFrom, HistoryItem, HistoryRead,
+    Ledger, LedgerError, NewChief, NewMember, NewProject, Options, ParticipantConversation,
+    ProjectView, HISTORY_SCAN_BYTES,
 };
 use serde_json::{json, Value};
 
 /// A conversation, headed, and its items.
 type Conversation = (ParticipantConversation, Vec<HistoryItem>);
 
-/// Everything of `handle`'s history, the tools' outputs too, read a row at a
-/// time from the most recent back (each read's room takes its first row
+/// Everything of `handle`'s history, the tools' outputs too, read an entry at
+/// a time from the most recent back (each read's room takes its first entry
 /// alone), and set out by conversation, oldest first.
 fn everything(
     ledger: &Ledger,
@@ -34,29 +39,42 @@ fn everything(
         room: 1,
         scan: HISTORY_SCAN_BYTES,
     };
-    let mut rows = Vec::new();
-    // A history of these tests is a few rows: a read that never ends is a fault.
+    // Newest first, as the reads go.
+    let mut shown: Vec<Conversation> = Vec::new();
+    // A history of these tests is a few entries: a read that never ends is a fault.
     for _ in 0..100 {
-        let read = ledger.read_history(project, handle, &ask)?;
-        rows.extend(read.rows);
-        let Some(resume) = read.resume else {
-            let mut shown: Vec<Conversation> = read
-                .conversations
-                .into_iter()
-                .map(|conversation| (conversation, Vec::new()))
-                .collect();
-            for row in rows.into_iter().rev() {
-                let (_, items) = shown
-                    .iter_mut()
-                    .find(|(conversation, _)| conversation.conversation.id == row.key.conversation)
-                    .expect("its conversation");
+        let HistoryRead {
+            conversations,
+            entries,
+            resume,
+            ..
+        } = ledger.read_history(project, handle, &ask)?;
+        for entry in entries {
+            let id = entry.key().conversation;
+            if shown
+                .last()
+                .is_none_or(|(conversation, _)| conversation.conversation.id != id)
+            {
+                let heading = conversations
+                    .iter()
+                    .find(|conversation| conversation.conversation.id == id)
+                    .expect("its heading");
+                shown.push((heading.clone(), Vec::new()));
+            }
+            if let (HistoryEntry::Item(row), Some((_, items))) = (entry, shown.last_mut()) {
                 items.push(row.item);
+            }
+        }
+        let Some(resume) = resume else {
+            shown.reverse();
+            for (_, items) in &mut shown {
+                items.reverse();
             }
             return Ok(shown);
         };
         ask.from = HistoryFrom::Before(resume);
     }
-    panic!("no end after 100 reads: {} rows", rows.len());
+    panic!("no end after 100 reads: {} conversations", shown.len());
 }
 
 fn ledger_in(dir: &tempfile::TempDir) -> Ledger {

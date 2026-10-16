@@ -164,7 +164,14 @@ async fn reads_a_participant_s_whole_history_for_the_viewer_and_writes_and_wakes
                 .borrow()
                 .read_history(harbour, "chief", &ask_all)
                 .unwrap();
-            let started = |at: usize| read.conversations[at].conversation.started_at.clone();
+            let heading = |id: i64| {
+                read.conversations
+                    .iter()
+                    .find(|heading| heading.conversation.id == id)
+                    .unwrap()
+                    .conversation
+                    .clone()
+            };
             let logged = rig.kit.ledger.borrow().events(harbour, 0, 500).unwrap().len();
 
             let answer = ask(&app, "history.get", json!({ "project": harbour, "handle": "chief" })).await;
@@ -177,8 +184,8 @@ async fn reads_a_participant_s_whole_history_for_the_viewer_and_writes_and_wakes
                         "conversations": [
                             {
                                 "id": first.id, "harness": "claude-code", "agent": "ares",
-                                "startedAt": started(0),
-                                "endedAt": read.conversations[0].conversation.ended_at,
+                                "startedAt": heading(first.id).started_at,
+                                "endedAt": heading(first.id).ended_at,
                                 "endedBy": { "by": "switch", "harness": "codex", "agent": "maia" },
                                 "toolsLeftOut": 1,
                                 "items": [
@@ -199,7 +206,7 @@ async fn reads_a_participant_s_whole_history_for_the_viewer_and_writes_and_wakes
                             },
                             {
                                 "id": second.id, "harness": "codex", "agent": "maia",
-                                "startedAt": started(1),
+                                "startedAt": heading(second.id).started_at,
                                 "endedAt": null, "endedBy": null,
                                 "toolsLeftOut": 0,
                                 "items": [
@@ -225,7 +232,7 @@ async fn reads_a_participant_s_whole_history_for_the_viewer_and_writes_and_wakes
             assert_eq!(tools["history"]["conversations"][0]["items"][0]["text"], "ok 12 passed");
             // A page from a place a page said (before Codex's first item); never
             // before and after at once.
-            let place = serde_json::to_value(read.rows[0].key).unwrap();
+            let place = serde_json::to_value(read.entries[0].key()).unwrap();
             assert_eq!(place["conversation"], second.id);
             let before = ask(
                 &app,
@@ -236,7 +243,11 @@ async fn reads_a_participant_s_whole_history_for_the_viewer_and_writes_and_wakes
             assert_eq!(before["history"]["conversations"].as_array().unwrap().len(), 1, "{before}");
             // Newer goes on after the newest item that page shows, the chief's last on Claude.
             assert_eq!(before["history"]["newer"]["conversation"], first.id);
-            assert_eq!(before["history"]["newer"]["seq"], 5);
+            assert_eq!(
+                before["history"]["newer"],
+                serde_json::to_value(read.entries[1].key()).unwrap(),
+                "u-5's place"
+            );
             assert_eq!(
                 ask(&app, "history.get", json!({ "project": harbour, "handle": "chief", "before": place, "after": place })).await,
                 json!({ "ok": false, "error": "a page is before a place or after one, not both" })
@@ -309,6 +320,58 @@ async fn reads_a_long_item_whole_a_part_at_a_time_and_only_its_participant_s() {
                 json!({ "ok": false, "error": format!("no item long in zeus's conversation {}", conversation.id) })
             );
             assert_eq!(rig.kicks.get(), 0);
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn pages_through_thousands_of_conversations_that_show_no_item_each_reply_held_whole() {
+    // The reviewers' case: 10,000 conversations of tools' outputs alone, the
+    // tools left out, each shown as its heading. Each reply fits a frame and
+    // says where the next goes on, and every heading comes once.
+    LocalSet::new()
+        .run_until(async {
+            let rig = rig();
+            let (daemon, app) = bridge_pair_over(&rig.spawn);
+            register(&daemon, &rig.page, &rig.spawn);
+            let harbour = project(&rig, "harbour");
+            let chief = chief_of(&rig, harbour);
+            for at in 0..10_000 {
+                let conversation = rig
+                    .kit
+                    .ledger
+                    .borrow_mut()
+                    .start_conversation(chief, "claude-code")
+                    .unwrap();
+                rig.kit
+                    .ledger
+                    .borrow_mut()
+                    .copy_transcript(
+                        conversation.id,
+                        &[item(&format!("t-{at}"), "tool", "ok")],
+                        0,
+                    )
+                    .unwrap();
+            }
+            let mut headed = Vec::new();
+            let mut asked = json!({ "project": harbour, "handle": "chief" });
+            for _ in 0..20 {
+                let answer = ask(&app, "history.get", asked.clone()).await;
+                let said = answer.to_string();
+                assert_eq!(answer["ok"], true, "{}", &said[..said.len().min(200)]);
+                assert!(said.len() <= PAGE_BYTES);
+                for conversation in answer["history"]["conversations"].as_array().unwrap() {
+                    assert_eq!(conversation["toolsLeftOut"], 1);
+                    headed.push(conversation["id"].as_i64().unwrap());
+                }
+                let older = &answer["history"]["older"];
+                if older.is_null() {
+                    break;
+                }
+                asked = json!({ "project": harbour, "handle": "chief", "before": older });
+            }
+            let once: std::collections::HashSet<i64> = headed.iter().copied().collect();
+            assert_eq!((headed.len(), once.len()), (10_000, 10_000));
         })
         .await;
 }

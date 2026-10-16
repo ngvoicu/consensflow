@@ -50,11 +50,10 @@ const participant = (id, handle, role, extra = {}) => ({
 /** What an XSS would look like, were text ever taken as markup. */
 const HOSTILE = '<img src=x onerror="window.__pwned=1"><script>window.__pwned=2</script>'
 
-/** Item `id` of conversation `conversation`, at place `seq` there. */
-const item = (conversation, seq, id, role, text, extra = {}) => ({
+/** Item `id` of conversation `conversation`, the `n`th copied there. */
+const item = (conversation, n, id, role, text, extra = {}) => ({
   conversation,
-  seq,
-  row: conversation * 100 + seq,
+  row: conversation * 100 + n,
   id,
   role,
   text,
@@ -182,8 +181,8 @@ async function open(page, data = model()) {
     window.__model = data
     window.__listeners = new Map()
     const answer = (value) => JSON.parse(JSON.stringify({ ok: true, ...value }))
-    const order = (a, b) => a.conversation - b.conversation || a.seq - b.seq || a.row - b.row
-    const placeOf = (it) => it && { conversation: it.conversation, seq: it.seq, row: it.row }
+    const order = (a, b) => a.conversation - b.conversation || a.row - b.row
+    const placeOf = (it) => it && { conversation: it.conversation, row: it.row }
     const operations = {
       'projects.list': () => answer({ projects: data.projects }),
       'agents.list': () => answer({ agents: [], missing: [] }),
@@ -216,20 +215,24 @@ async function open(page, data = model()) {
           older = rest.length > size ? placeOf(items[0]) : null
           newer = before ? (placeOf(items.at(-1)) ?? before) : null
         }
-        if (find && model.partial) older = { conversation: 1, seq: 0, row: 100 }
+        if (find && model.partial) older = { conversation: 1, row: 0 }
         const last = items.at(-1)?.conversation ?? -Infinity
+        // The tools' outputs a heading counts, so far as the model says it counts them.
+        const counted = model.toolsCounted ?? Infinity
         const conversations = history.conversations
-          .map((conversation) => ({
-            ...conversation,
-            toolsLeftOut: tools
-              ? 0
-              : history.items.filter(
-                  (it) => it.conversation === conversation.id && it.role === 'tool',
-                ).length,
-            items: items
-              .filter((it) => it.conversation === conversation.id)
-              .map(({ conversation: _, seq: __, row: ___, ...shownItem }) => shownItem),
-          }))
+          .map((conversation) => {
+            const count = history.items.filter(
+              (it) => it.conversation === conversation.id && it.role === 'tool',
+            ).length
+            return {
+              ...conversation,
+              toolsLeftOut: tools ? 0 : Math.min(count, counted),
+              ...(!tools && count >= counted ? { moreToolsLeftOut: true } : {}),
+              items: items
+                .filter((it) => it.conversation === conversation.id)
+                .map(({ conversation: _, row: __, ...shownItem }) => shownItem),
+            }
+          })
           .filter(
             (conversation) =>
               conversation.items.length > 0 || (!find && newer === null && conversation.id > last),
@@ -424,6 +427,13 @@ test.describe('the history viewer', () => {
       'ended when a window opened on a fresh conversation',
       'ended (the ledger does not say why)',
     ])
+    // A heading counts the tools' outputs so far, and says when there may be more.
+    await viewer.getByRole('button', { name: 'Close' }).click()
+    await page.evaluate(() => {
+      window.__model.toolsCounted = 1
+    })
+    await openChief(page)
+    expect((await headings(viewer))[0][1]).toMatch(/ · 1 or more tool outputs left out$/)
   })
 
   test("labels items as the task drawer does, a compaction's summary as one, and shows every text as text", async ({
@@ -487,7 +497,7 @@ test.describe('the history viewer', () => {
     // Meanwhile the chief says more: a page already read is not moved by it.
     await page.evaluate(() => {
       const { items } = window.__model.histories.chief
-      items.push({ ...items.at(-1), seq: 3, row: 203, id: 'a-6', text: 'And more.' })
+      items.push({ ...items.at(-1), row: 203, id: 'a-6', text: 'And more.' })
     })
     await older.click()
     await expect(status).toHaveText('Earlier items')
@@ -511,9 +521,9 @@ test.describe('the history viewer', () => {
     const places = (await asked(page)).map(({ before, after }) => ({ before, after }))
     expect(places).toEqual([
       { before: undefined, after: undefined },
-      { before: { conversation: 1, seq: 4, row: 104 }, after: undefined },
-      { before: undefined, after: { conversation: 1, seq: 2, row: 102 } },
-      { before: undefined, after: { conversation: 2, seq: 2, row: 202 } },
+      { before: { conversation: 1, row: 104 }, after: undefined },
+      { before: undefined, after: { conversation: 1, row: 102 } },
+      { before: undefined, after: { conversation: 2, row: 202 } },
     ])
   })
 
@@ -562,7 +572,7 @@ test.describe('the history viewer', () => {
       handle: 'chief',
       tools: false,
       find: 'zzz',
-      before: { conversation: 1, seq: 0, row: 100 },
+      before: { conversation: 1, row: 0 },
     })
   })
 

@@ -12,11 +12,18 @@
 # reach; pages that repeat or skip items as the history moves; and a read that goes through the
 # whole history for a page.
 #
+# The third round (the reviews of 95e02eaa) answers five more, each with plants that put its bug
+# back: pages ordered by an item's place in its record, which a copy made again moves, so an item
+# comes twice; a read whose work grows with what the history holds beside the page (every heading,
+# the whole log, every tool's output counted, the left-out rows walked); a search that reads one
+# long item past its bound; a part that reads its whole item; and headings that overflow a frame.
+#
 # Its rig plant builds the native `cf` from the sources as they are planted, so it says `builds`.
 # Every name begins `session viewer`, so `npm run plants:daemon -- "session viewer"` runs them all.
 
 [run]
 viewer-ledger-history = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "whole_history"]
+viewer-ledger-long = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "long_items"]
 viewer-ledger-wake-ups = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "wake_ups", "moved::"]
 viewer-ledger-held-apart = ["cargo", "test", "--offline", "-p", "cf-ledger", "--features", "test-support", "--lib", "testing::compaction"]
 viewer-engine-text = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "text"]
@@ -24,6 +31,7 @@ viewer-engine-copy = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", 
 viewer-harness-claude = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::record::tests::compaction"]
 viewer-daemon-page = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "page::tests::history"]
 viewer-proto-page = ["cargo", "test", "--offline", "-p", "cf-proto", "--lib", "page::"]
+viewer-proto-ledger = ["cargo", "test", "--offline", "-p", "cf-proto", "--lib", "ledger::"]
 viewer-rig = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "whole_history_across_a_compaction_and_a_switch::"]
 # The viewer in the browser Playwright keeps, by its parts.
 viewer-ui-button = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/history-viewer.spec.mjs", "-g", "the History button"]
@@ -81,8 +89,8 @@ runs = ["viewer-ledger-history"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/conversations/history.rs"
-find = "WHERE participant_id = ? ORDER BY id"
-replace = "WHERE participant_id = ? AND ended_at IS NOT NULL ORDER BY id"
+find = "       WHERE participant_id = ?1 AND id < ?2 ORDER BY id DESC LIMIT 1\""
+replace = "       WHERE participant_id = ?1 AND ended_at IS NOT NULL AND id < ?2 ORDER BY id DESC LIMIT 1\""
 
 [[plant]]
 name = "session viewer: a /resume to the participant's own earlier conversation reads as a /clear"
@@ -91,8 +99,8 @@ runs = ["viewer-ledger-history"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/conversations/history.rs"
-find = "ConversationEnd::Window { resumed: seen }"
-replace = "ConversationEnd::Window { resumed: false }"
+find = "        Ok(Some(ConversationEnd::Window { resumed }))"
+replace = "        Ok(Some(ConversationEnd::Window { resumed: resumed && false }))"
 
 [[plant]]
 name = "session viewer: every conversation of the chief is said to have run on the agent it has now"
@@ -101,8 +109,8 @@ runs = ["viewer-ledger-history"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/conversations/history.rs"
-find = "                Some(from) => from.clone(),"
-replace = "                Some(_) => now.map(str::to_owned),"
+find = '''            Some((_, data)) => text(&data["from"]["agent"]),'''
+replace = "            Some(_) => participant.agent.clone(),"
 
 [[plant]]
 name = "session viewer: the chief's switches are read into a member's history"
@@ -111,8 +119,23 @@ runs = ["viewer-ledger-history"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/conversations/history.rs"
-find = '''.filter(|(kind, _)| chief || kind != "chief.switched")'''
-replace = ".filter(|_| true)"
+find = '''        let switched = match first.filter(|_| participant.role == "chief") {'''
+replace = "        let switched = match first {"
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/history.rs"
+find = '''        let switched = if self.participant.role == "chief" {'''
+replace = "        let switched = if true {"
+
+[[plant]]
+name = "session viewer: a heading's end is told by the event after the conversation first began, not after it last did"
+meant = "every_heading_says_what_the_whole_log_says_of_its_conversation"
+runs = ["viewer-ledger-history"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/history.rs"
+find = '''            Some(_) => match self.activation(id, "ORDER BY id DESC")? {'''
+replace = '''            Some(_) => match self.activation(id, "ORDER BY id")? {'''
 
 [[plant]]
 name = "session viewer: the players of Node's recordings keep the column of the mark in the transcript's rows"
@@ -125,7 +148,31 @@ find = '''        .chain(compaction::COLUMNS)
 '''
 replace = ""
 
-# Round 2, P2 3: pages that repeat or skip items as the history moves.
+[[plant]]
+name = "session viewer: the players of Node's recordings keep the table of a long item's parts in what they compare"
+meant = "takes_the_table_and_the_indexes_migration_0019_made_out_of_a_dump_and_nothing_else"
+runs = ["viewer-ledger-held-apart"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/testing.rs"
+find = '''    for table in compaction::made("TABLE") {
+        tables.remove(table);
+    }
+'''
+replace = ""
+
+[[plant]]
+name = "session viewer: the players of Node's recordings keep the indexes of migration 0019 in the schema they compare"
+meant = "takes_the_table_and_the_indexes_migration_0019_made_out_of_a_dump_and_nothing_else"
+runs = ["viewer-ledger-held-apart"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/testing.rs"
+find = '''        !compaction::made("TABLE")
+            .chain(compaction::made("INDEX"))'''
+replace = '''        !compaction::made("TABLE")'''
+
+# Round 2, P2 3, and round 3, P2 1: pages that repeat or skip items as the history moves.
 
 [[plant]]
 name = "session viewer: a page before a place reads its conversation from the newest again, repeating what was shown"
@@ -134,20 +181,18 @@ runs = ["viewer-ledger-history"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/conversations/history.rs"
-find = "            Some(key) if key.conversation == id => (key.seq, key.row),"
-replace = "            Some(key) if key.conversation == id => (i64::MAX, key.row),"
+find = "            Some(place) => (place.row, place.part > 0),"
+replace = "            Some(place) => (place.row - place.row + i64::MAX, place.part > 0),"
 
 [[plant]]
-name = "session viewer: a place is its item's place in its conversation alone, and an item that repeats it is skipped"
-meant = "an_item_whose_place_repeats_another_s_is_neither_repeated_nor_skipped"
+name = "session viewer: pages go in the order of the items' places in their record, which a copy made again moves, so an item comes twice"
+meant = "a_record_that_shrank_copied_again_with_a_shown_item_changed_repeats_nothing_and_skips_nothing"
 runs = ["viewer-ledger-history"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/conversations/history.rs"
-find = '''            "SELECT {ROW_FIELDS}, text FROM transcript
-       WHERE conversation_id = ?1 AND (seq, rowid) {} (?2, ?3){}'''
-replace = '''            "SELECT {ROW_FIELDS}, text FROM transcript
-       WHERE conversation_id = ?1 AND seq {} ?2 AND ?3 = ?3{}'''
+find = '''       WHERE conversation_id = ?1{} AND rowid {}{} ?2 ORDER BY rowid {}",'''
+replace = '''       WHERE conversation_id = ?1{} AND seq {}{} COALESCE((SELECT seq FROM transcript WHERE rowid = ?2), ?2) ORDER BY seq {}",'''
 
 [[plant]]
 name = "session viewer: older goes on from past what was read, not from the oldest item shown, and skips what did not fit"
@@ -189,7 +234,7 @@ file = "app/ui/core/history-viewer.js"
 find = "    this.#older.disabled = older === null"
 replace = "    this.#older.disabled = true"
 
-# Round 2, P2 4: a read that goes through the whole history.
+# Round 2, P2 4, and round 3, P2 2: a read that goes through more than its page.
 
 [[plant]]
 name = "session viewer: a read goes on past a full page, through the whole history"
@@ -198,8 +243,18 @@ runs = ["viewer-ledger-history"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/conversations/history.rs"
-find = "        if !self.rows.is_empty() && self.used + cost > room {"
-replace = "        if false && !self.rows.is_empty() && self.used + cost > room {"
+find = "        if !self.entries.is_empty() && self.used + cost > self.room {"
+replace = "        if false && !self.entries.is_empty() && self.used + cost > self.room {"
+
+[[plant]]
+name = "session viewer: an item is read before the page knows it has room for it"
+meant = "a_read_goes_through_a_page_and_no_more_and_never_through_a_tool_s_text_it_leaves_out"
+runs = ["viewer-ledger-history"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/history.rs"
+find = "        if !self.entries.is_empty() && self.used + reading + ROW_SLACK > self.room {"
+replace = "        if false && !self.entries.is_empty() && self.used + reading + ROW_SLACK > self.room {"
 
 [[plant]]
 name = "session viewer: a read with the tools left out reads their rows and their texts all the same"
@@ -208,22 +263,96 @@ runs = ["viewer-ledger-history"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/conversations/history.rs"
-find = '''       WHERE conversation_id = ?1 AND (seq, rowid) {} (?2, ?3){}
-       ORDER BY seq {order}, rowid {order}",
-            if newest_first { "<" } else { ">" },
-            if ask.tools { "" } else { " AND role != 'tool'" },
-            order = if newest_first { "DESC" } else { "ASC" },
-        );
-        let mut statement = store.db.prepare_cached(&sql)?;
-        let mut rows = statement.query(params![id, bound.0, bound.1])?;'''
-replace = '''       WHERE conversation_id = ?1 AND (seq, rowid) {} (?2, ?3){}
-       ORDER BY seq {order}, rowid {order}",
-            if newest_first { "<" } else { ">" },
-            "",
-            order = if newest_first { "DESC" } else { "ASC" },
-        );
-        let mut statement = store.db.prepare_cached(&sql)?;
-        let mut rows = statement.query(params![id, bound.0, bound.1])?;'''
+find = '''            if self.tools {
+                "transcript_copied_index"
+            } else {
+                "transcript_said_index"
+            },
+            if self.tools {
+                ""
+            } else {
+                " AND role != 'tool'"
+            },'''
+replace = '''            "transcript_copied_index",
+            "",'''
+
+[[plant]]
+name = "session viewer: a read with the tools left out walks their rows to the ones it shows, uncharged"
+meant = "a_page_takes_the_same_steps_beside_2_000_conversations_and_100_000_tools_outputs_left_out"
+runs = ["viewer-ledger-history"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/history.rs"
+find = '''                "transcript_said_index"'''
+replace = '''                "transcript_copied_index"'''
+
+[[plant]]
+name = "session viewer: a heading counts every tool's output of its conversation"
+meant = "a_page_takes_the_same_steps_beside_2_000_conversations_and_100_000_tools_outputs_left_out"
+runs = ["viewer-ledger-history"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/history.rs"
+find = "         WHERE conversation_id = ?1 AND role = 'tool' LIMIT ?2)\","
+replace = "         WHERE conversation_id = ?1 AND role = 'tool' AND ?2 = ?2)\","
+
+[[plant]]
+name = "session viewer: a heading that counted its tools' outputs so far says there are no more"
+meant = "a_page_takes_the_same_steps_beside_2_000_conversations_and_100_000_tools_outputs_left_out"
+runs = ["viewer-ledger-history"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/history.rs"
+find = "            more_tools: tools >= TOOLS_COUNTED,"
+replace = "            more_tools: tools > TOOLS_COUNTED,"
+
+[[plant]]
+name = "session viewer: a heading's count of tools' outputs says nothing of there being more"
+meant = "heads each conversation"
+runs = ["viewer-ui-headings"]
+
+[[plant.edit]]
+file = "app/ui/core/history-viewer.js"
+find = "    const more = conversation.moreToolsLeftOut === true"
+replace = "    const more = false"
+
+[[plant]]
+name = "session viewer: a place a page said without a part is refused, so no page goes on from it"
+meant = "a_place_says_the_part_a_search_stopped_at_inside_an_item_and_no_part_elsewhere"
+runs = ["viewer-proto-ledger"]
+
+[[plant.edit]]
+file = "crates/cf-proto/src/ledger.rs"
+find = '''    #[serde(default, skip_serializing_if = "is_zero")]
+    pub part: usize,'''
+replace = '''    #[serde(skip_serializing_if = "is_zero")]
+    pub part: usize,'''
+
+[[plant]]
+name = "session viewer: a heading is told by reading the project's log from its start"
+meant = "a_page_takes_the_same_steps_beside_2_000_conversations_and_100_000_tools_outputs_left_out"
+runs = ["viewer-ledger-history"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/history.rs"
+find = '''                "SELECT id FROM event INDEXED BY event_activation_index
+       WHERE kind IN ('conversation.started', 'conversation.followed')
+         AND json_extract(data, '$.conversation') = ?1 {order} LIMIT 1"'''
+replace = '''                "SELECT id FROM event NOT INDEXED
+       WHERE kind IN ('conversation.started', 'conversation.followed')
+         AND json_extract(data, '$.conversation') = ?1 {order} LIMIT 1"'''
+
+[[plant]]
+name = "session viewer: the read finds the participant's conversations by going through every conversation in the ledger"
+meant = "a_page_takes_the_same_steps_beside_2_000_conversations_and_100_000_tools_outputs_left_out"
+runs = ["viewer-ledger-history"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/history.rs"
+find = '''            "SELECT * FROM conversation INDEXED BY conversation_participant_index
+       WHERE participant_id = ?1 AND id < ?2 ORDER BY id DESC LIMIT 1"'''
+replace = '''            "SELECT * FROM conversation NOT INDEXED
+       WHERE participant_id = ?1 AND id < ?2 ORDER BY id DESC LIMIT 1"'''
 
 [[plant]]
 name = "session viewer: a search goes through the whole history in one read"
@@ -232,12 +361,8 @@ runs = ["viewer-ledger-history"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/conversations/history.rs"
-find = '''                self.resume = Some(key);
-            }
-            if self.scanned.bytes >= ask.scan {'''
-replace = '''                self.resume = Some(key);
-            }
-            if false && self.scanned.bytes >= ask.scan {'''
+find = "        if gone + more > self.scan {"
+replace = "        if false && gone + more > self.scan {"
 
 [[plant]]
 name = "session viewer: a search that stops at its bound without a find says nowhere to go on from, and Older never reaches it"
@@ -246,11 +371,10 @@ runs = ["viewer-ledger-history"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/conversations/history.rs"
-find = '''            } else {
-                self.resume = Some(key);
-            }'''
-replace = '''            } else {
-            }'''
+find = '''            self.resume = Some(key);
+            return Ok(true);'''
+replace = '''            let _ = key;
+            return Ok(true);'''
 
 [[plant]]
 name = "session viewer: a search folds ASCII alone, as SQLite's own lower and LIKE do"
@@ -272,7 +396,66 @@ file = "app/ui/core/history-viewer.js"
 find = "        none = history.partial"
 replace = "        none = false"
 
-# Round 2, P2 2: a long item cut out of reach.
+# Round 3, P2 3: a search that reads one long item past its bound.
+
+[[plant]]
+name = "session viewer: a search goes through a long item's parts past its bound"
+meant = "a_search_inside_an_item_longer_than_its_bound_stops_at_the_bound_and_goes_on_inside_the_item"
+runs = ["viewer-ledger-history"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/history.rs"
+find = '''            if !self.may(bytes) {
+                // Stopped inside the item'''
+replace = '''            if false && !self.may(bytes) {
+                // Stopped inside the item'''
+
+[[plant]]
+name = "session viewer: a search that stops inside a long item goes on past the rest of it"
+meant = "a_search_inside_an_item_longer_than_its_bound_stops_at_the_bound_and_goes_on_inside_the_item"
+runs = ["viewer-ledger-history"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/history.rs"
+find = "                    self.resume = Some(HistoryKey { part, ..met.key });"
+replace = "                    self.resume = Some(met.key);"
+
+[[plant]]
+name = "session viewer: a search misses words where one part of a long item ends and the next begins"
+meant = "words_where_one_part_ends_and_the_next_begins_are_found"
+runs = ["viewer-ledger-history"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/history.rs"
+find = '''            let tail = previous
+                .as_deref()
+                .map_or("", |before| last_chars(before, reach));'''
+replace = '''            let tail = previous.as_deref().map_or("", |_| "");'''
+
+[[plant]]
+name = "session viewer: a search that went through a long item and found nothing says nowhere past it to go on from"
+meant = "a_search_goes_through_no_more_than_its_bound_and_older_goes_on_from_there_to_what_it_finds"
+runs = ["viewer-ledger-history"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/history.rs"
+find = '''        self.resume = Some(met.key);
+        Ok(true)
+    }'''
+replace = '''        Ok(true)
+    }'''
+
+[[plant]]
+name = "session viewer: a search reads every item whole, a long one too"
+meant = "a_search_inside_an_item_longer_than_its_bound_stops_at_the_bound_and_goes_on_inside_the_item"
+runs = ["viewer-ledger-history"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/history.rs"
+find = "        if self.part_bytes(&met, 0)?.is_none() {"
+replace = "        if self.part_bytes(&met, 0)?.is_none() || true {"
+
+# Round 2, P2 2, and round 3, P2 4: a long item, a part at a time.
 
 [[plant]]
 name = "session viewer: a search shows a long item's first part, not the part that holds its words"
@@ -281,10 +464,9 @@ runs = ["viewer-ledger-history"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/conversations/history.rs"
-find = '''        let at = needle
-            .and_then(|needle| first_match(&text, needle))
-            .unwrap_or(0);'''
-replace = '''        let at: usize = needle.map_or(0, |_| 0);'''
+find = "                let row = self.long_row(met, shown, from)?;"
+replace = '''                let first = self.read_part(&met, 0)?;
+                let row = self.long_row(met, first, 0)?;'''
 
 [[plant]]
 name = "session viewer: every part of a long item is its first"
@@ -293,8 +475,79 @@ runs = ["viewer-ledger-history"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/conversations/history.rs"
-find = "    let part = chars(&text, from, HISTORY_PART);"
-replace = "    let part = chars(&text, 0, HISTORY_PART);"
+find = "        let index = from / HISTORY_PART;"
+replace = "        let index = from * 0;"
+
+[[plant]]
+name = "session viewer: history.part reads the whole item for each part"
+meant = "reading_a_24_mib_item_whole_a_part_at_a_time_reads_each_part_alone"
+runs = ["viewer-ledger-history"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/history.rs"
+find = '''    if long {
+        let index'''
+replace = '''    if false && long {
+        let index'''
+
+[[plant]]
+name = "session viewer: a page reads a long item's time from its row, past the whole of its text"
+meant = "reading_a_24_mib_item_whole_a_part_at_a_time_reads_each_part_alone"
+runs = ["viewer-ledger-history"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/history.rs"
+find = "                \"SELECT complete, at, compaction FROM transcript INDEXED BY transcript_item_index"
+replace = "                \"SELECT complete, at, compaction FROM transcript INDEXED BY sqlite_autoindex_transcript_1"
+
+[[plant]]
+name = "session viewer: the copy keeps no parts of a long item"
+meant = "a_long_item_shows_a_part_its_first_or_where_a_search_found_and_reads_whole_a_part_at_a_time"
+runs = ["viewer-ledger-history"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/transcripts.rs"
+find = '''            if changed > 0 {
+                write_parts('''
+replace = '''            if changed > 0 && false {
+                write_parts('''
+
+[[plant]]
+name = "session viewer: the parts past the end of a text that shrank are left behind"
+meant = "a_long_item_that_shrinks_and_grows_is_read_as_it_is_now"
+runs = ["viewer-ledger-history"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/transcripts.rs"
+find = '''        "DELETE FROM transcript_part WHERE conversation_id = ? AND item_id = ? AND part >= ?",'''
+replace = '''        "DELETE FROM transcript_part WHERE conversation_id = ? AND item_id = ? AND part >= ? + 1000000",'''
+
+[[plant]]
+name = "session viewer: the long items a ledger copied before the parts' table are never split"
+meant = "a_populated_version_18_ledger_has_its_long_items_split_into_parts_in_migration_19"
+runs = ["viewer-ledger-long"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/schema.rs"
+find = "    if version == 19 {"
+replace = "    if version == 0 {"
+
+[[plant]]
+name = "session viewer: the split of the long items copied before the parts' table counts their bytes as characters"
+meant = "a_populated_version_18_ledger_has_its_long_items_split_into_parts_in_migration_19"
+runs = ["viewer-ledger-long"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/transcripts.rs"
+find = '''    let starts: Vec<usize> = text
+        .char_indices()
+        .step_by(TRANSCRIPT_ITEM_MAX)
+        .map(|(at, _)| at)
+        .collect();'''
+replace = '''    let starts: Vec<usize> = (0..text.len())
+        .step_by(TRANSCRIPT_ITEM_MAX)
+        .filter(|at| text.is_char_boundary(*at))
+        .collect();'''
 
 [[plant]]
 name = "session viewer: a part of any participant's item is read for another"
@@ -348,8 +601,55 @@ runs = ["viewer-engine-text"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/handoff/viewer.rs"
-find = "            heading(row.key.conversation).map_or(0, |conversation| bytes(&head(conversation)) + 1)"
-replace = "            heading(row.key.conversation).map_or(0, |_| 0)"
+find = "            heading(key.conversation).map_or(0, |conversation| bytes(&head(conversation)) + 1)"
+replace = "            heading(key.conversation).map_or(0, |_| 0)"
+
+[[plant]]
+name = "session viewer: a page counts no heading of a conversation that shows no item, and outgrows a frame"
+meant = "counts_the_heading_of_a_conversation_that_shows_no_item_against_the_frame_and_goes_on_past_it"
+runs = ["viewer-engine-text"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/handoff/viewer.rs"
+find = "        let cost = item.as_ref().map_or(0, |item| bytes(item) + 1) + headed;"
+replace = "        let cost = item.as_ref().map_or(0, |item| bytes(item) + 1 + headed);"
+
+[[plant]]
+name = "session viewer: a read takes the headings of the conversations it comes to without counting them against the page"
+meant = "headings_fill_a_page_as_items_do_and_the_next_page_goes_on_past_them_each_once"
+runs = ["viewer-ledger-history"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/history.rs"
+find = "            .map_or(0, |heading| json_len(heading) + ROW_SLACK);"
+replace = "            .map_or(0, |_| 0);"
+
+[[plant]]
+name = "session viewer: a page of headings says nowhere new to go on from, and Older shows them again"
+meant = "headings_fill_a_page_as_items_do_and_the_next_page_goes_on_past_them_each_once"
+runs = ["viewer-ledger-history"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/history.rs"
+find = "        self.resume = Some(entry.key());"
+replace = '''        if let HistoryEntry::Item(row) = &entry {
+            self.resume = Some(row.key);
+        }'''
+
+[[plant]]
+name = "session viewer: history.get's replies of headings alone outgrow a frame and are refused as too large"
+meant = "pages_through_thousands_of_conversations_that_show_no_item_each_reply_held_whole"
+runs = ["viewer-daemon-page"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/handoff/viewer.rs"
+find = "        let cost = item.as_ref().map_or(0, |item| bytes(item) + 1) + headed;"
+replace = "        let cost = item.as_ref().map_or(0, |item| bytes(item) + 1 + headed);"
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/history.rs"
+find = "            .map_or(0, |heading| json_len(heading) + ROW_SLACK);"
+replace = "            .map_or(0, |_| 0);"
 
 [[plant]]
 name = "session viewer: a compaction's summary or an agent's quote of a header is shown as a delivery"
@@ -373,13 +673,14 @@ replace = "    let header = delivered(&item.text).filter(|_| !said);"
 
 [[plant]]
 name = "session viewer: a search heads conversations it found nothing in"
-meant = "a_search_shows_the_conversations_it_found_in_and_says_where_it_stopped_short"
-runs = ["viewer-engine-text"]
+meant = "a_search_heads_only_the_conversations_it_found_its_words_in_and_a_page_heads_one_with_nothing"
+runs = ["viewer-ledger-history"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/handoff/viewer.rs"
-find = "        let spanned = !searching && low <= id && id <= high;"
-replace = "        let spanned = low <= id && id <= high;"
+file = "crates/cf-ledger/src/conversations/history.rs"
+find = "        } else if !any && within.is_none() {"
+replace = '''        }
+        if !any && within.is_none() {'''
 
 [[plant]]
 name = "session viewer: the engine copies a compaction's summary as the user's item its reading writes"

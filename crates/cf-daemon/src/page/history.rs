@@ -5,8 +5,10 @@
 //!
 //! A read is the ledger's, on the daemon's own thread: the ledger holds its
 //! file alone (`locking_mode = EXCLUSIVE`, one connection), so no other thread
-//! could read it. Each read is bounded instead: a page, and at most
-//! [`HISTORY_SCAN_BYTES`] of text gone through.
+//! could read it. Each read is bounded instead, whatever the history's size or
+//! one item's: a page, headings and all, and at most [`HISTORY_SCAN_BYTES`]
+//! gone through, each conversation and row it comes to charged; a part is one
+//! part read.
 
 use cf_base::refusal::Refusal;
 use cf_engine::handoff::{whole_history_page, HISTORY_ROOM};
@@ -58,10 +60,7 @@ pub(super) async fn get(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
                     || found.sender.as_deref() == Some(handle.as_ref()))
         }))
     };
-    one(
-        "history",
-        whole_history_page(&read, from, find.is_some(), &message)?,
-    )
+    one("history", whole_history_page(&read, from, &message)?)
 }
 
 /// `history.part`: the part of item `item` of conversation `conversation`,

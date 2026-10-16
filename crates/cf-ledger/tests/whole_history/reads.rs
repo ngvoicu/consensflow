@@ -1,24 +1,25 @@
 //! How a read of the history goes: from a place that does not move, so the
-//! pages never repeat or skip an item, whatever is added or grows meanwhile;
-//! through a page and no more, and never through a tool's text it leaves out;
-//! a search through no more than its bound, and on from where it stopped until
-//! it finds; and a long item a part at a time, each part the participant's own.
+//! pages never repeat or skip an item, whatever is added, grows or is copied
+//! again meanwhile; through a page and no more, and never through a tool's
+//! text it leaves out; a search through no more than its bound, inside a long
+//! item too, and on from where it stopped until it finds; and a long item a
+//! part at a time, each part read alone and the participant's own.
 
 use std::time::Instant;
 
 use cf_ledger::{
-    HistoryAsk, HistoryFrom, HistoryRead, Ledger, NewMember, HISTORY_PART, HISTORY_SCAN_BYTES,
-    PAGE_BYTES,
+    HistoryAsk, HistoryEntry, HistoryFrom, HistoryRead, Ledger, NewMember, HISTORY_PART,
+    HISTORY_SCAN_BYTES, PAGE_BYTES,
 };
 use serde_json::{json, Value};
 
 use super::{id_of, item, ledger_in, project};
 
 /// A page's room, as the viewer asks: the frame, less what the page says besides.
-const ROOM: usize = PAGE_BYTES - 1_024;
+pub(super) const ROOM: usize = PAGE_BYTES - 1_024;
 
 /// A project whose chief has one conversation: the ledger, the project and the conversation.
-fn chief(dir: &tempfile::TempDir) -> (Ledger, i64, i64) {
+pub(super) fn chief(dir: &tempfile::TempDir) -> (Ledger, i64, i64) {
     let mut ledger = ledger_in(dir);
     let project = project(&mut ledger);
     let conversation = ledger
@@ -27,7 +28,12 @@ fn chief(dir: &tempfile::TempDir) -> (Ledger, i64, i64) {
     (ledger, project.id, conversation.id)
 }
 
-fn ask(from: HistoryFrom, find: Option<&str>, tools: bool, room: usize) -> HistoryAsk<'_> {
+pub(super) fn ask(
+    from: HistoryFrom,
+    find: Option<&str>,
+    tools: bool,
+    room: usize,
+) -> HistoryAsk<'_> {
     HistoryAsk {
         from,
         find,
@@ -38,8 +44,14 @@ fn ask(from: HistoryFrom, find: Option<&str>, tools: bool, room: usize) -> Histo
 }
 
 /// The ids of the items a read gave, in the order it gave them.
-fn ids(read: &HistoryRead) -> Vec<String> {
-    read.rows.iter().map(|row| row.item.id.clone()).collect()
+pub(super) fn ids(read: &HistoryRead) -> Vec<String> {
+    read.entries
+        .iter()
+        .filter_map(|entry| match entry {
+            HistoryEntry::Item(row) => Some(row.item.id.clone()),
+            HistoryEntry::Heading(_) => None,
+        })
+        .collect()
 }
 
 /// Every page older than `first`, each read from where the one before stopped:
@@ -121,18 +133,53 @@ fn pages_go_on_from_the_oldest_item_shown_whatever_is_added_or_grows_meanwhile()
 }
 
 #[test]
-fn an_item_whose_place_repeats_another_s_is_neither_repeated_nor_skipped() {
+fn a_record_that_shrank_copied_again_with_a_shown_item_changed_repeats_nothing_and_skips_nothing() {
+    // The reviewers' case: the most recent page shows the newest items; the
+    // window's record shrinks (a resumed window rewrote it) and is copied again
+    // from its start, the newest item changed and now first, so that its place
+    // in the record is the oldest; Older then goes on.
+    let dir = tempfile::tempdir().expect("a folder");
+    let (mut ledger, project, conversation) = chief(&dir);
+    ledger
+        .copy_transcript(conversation, &items(21, 100), 0)
+        .expect("copied");
+    let first = ledger
+        .read_history(
+            project,
+            "chief",
+            &ask(HistoryFrom::Newest, None, false, 8 * 760),
+        )
+        .expect("read");
+    let shown = ids(&first);
+    assert_eq!(shown.first().map(String::as_str), Some("i-20"));
+    assert!(shown.len() > 2 && shown.len() < 21, "{shown:?}");
+    let mut rewritten = items(21, 100);
+    rewritten[20]["text"] = json!("i-20, changed");
+    let newest = rewritten.remove(20);
+    ledger
+        .copy_transcript(conversation, &[newest], 0)
+        .expect("copied again");
+    let rest = older(&ledger, project, &first, None, 30);
+    let mut every: Vec<String> = shown.into_iter().chain(rest).collect();
+    every.reverse();
+    let expected: Vec<String> = (0..21).map(|at| format!("i-{at}")).collect();
+    assert_eq!(every, expected, "each item once, where it was first copied");
+}
+
+#[test]
+fn an_item_copied_into_another_s_place_stands_where_it_was_first_copied_neither_repeated_nor_skipped(
+) {
     let dir = tempfile::tempdir().expect("a folder");
     let (mut ledger, project, conversation) = chief(&dir);
     ledger
         .copy_transcript(conversation, &items(4, 10), 0)
         .expect("copied");
     // A record that shrank, copied again from its second item: `x` takes the
-    // place `i-1` has, which keeps it, its text unchanged.
+    // place `i-1` has, which keeps it, its text unchanged. `x` was copied last.
     ledger
         .copy_transcript(conversation, &[item("x", "user", "in i-1's place")], 1)
         .expect("copied");
-    // A room that takes one row: a page between every two items.
+    // A room that takes one entry: a page between every two items.
     let first = ledger
         .read_history(project, "chief", &ask(HistoryFrom::Newest, None, false, 1))
         .expect("read");
@@ -151,7 +198,7 @@ fn an_item_whose_place_repeats_another_s_is_neither_repeated_nor_skipped() {
         seen.extend(ids(&read));
         resume = read.resume;
     }
-    assert_eq!(seen, ["i-3", "i-2", "x", "i-1", "i-0"]);
+    assert_eq!(seen, ["x", "i-3", "i-2", "i-1", "i-0"]);
     // And the other way, after each place.
     let oldest = ledger
         .read_history(
@@ -160,10 +207,10 @@ fn an_item_whose_place_repeats_another_s_is_neither_repeated_nor_skipped() {
             &ask(HistoryFrom::Newest, None, false, ROOM),
         )
         .expect("read")
-        .rows
+        .entries
         .last()
         .expect("the oldest")
-        .key;
+        .key();
     let mut after = vec!["i-0".to_owned()];
     let mut place = Some(oldest);
     for _ in 0..10 {
@@ -178,7 +225,7 @@ fn an_item_whose_place_repeats_another_s_is_neither_repeated_nor_skipped() {
         after.extend(ids(&read));
         place = read.resume;
     }
-    assert_eq!(after, ["i-0", "i-1", "x", "i-2", "i-3"]);
+    assert_eq!(after, ["i-0", "i-1", "i-2", "i-3", "x"]);
 }
 
 #[test]
@@ -205,13 +252,20 @@ fn a_read_goes_through_a_page_and_no_more_and_never_through_a_tool_s_text_it_lea
             &ask(HistoryFrom::Newest, None, false, ROOM),
         )
         .expect("read");
-    assert_eq!(without.rows.len(), 500, "the user's items all fit");
+    assert_eq!(ids(&without).len(), 500, "the user's items all fit");
     assert_eq!(
         (without.scanned.rows, without.scanned.bytes),
         (500, 500 * 100),
         "no tool's row, nor its text"
     );
-    assert_eq!(without.conversations[0].tools, 500, "and they are counted");
+    assert_eq!(
+        (
+            without.conversations[0].tools,
+            without.conversations[0].more_tools
+        ),
+        (500, false),
+        "and they are counted"
+    );
     let with = ledger
         .read_history(
             project,
@@ -219,22 +273,38 @@ fn a_read_goes_through_a_page_and_no_more_and_never_through_a_tool_s_text_it_lea
             &ask(HistoryFrom::Newest, None, true, ROOM),
         )
         .expect("read");
-    assert!(with.scanned.rows < 20, "{:?}", with.scanned);
-    assert!(
-        with.scanned.bytes < ROOM + 100_000,
-        "a page and one item more at most: {:?}",
-        with.scanned
+    assert!(with.scanned.rows < 40, "{:?}", with.scanned);
+    let shown: usize = with
+        .entries
+        .iter()
+        .map(|entry| match entry {
+            HistoryEntry::Item(row) => row.item.text.len(),
+            HistoryEntry::Heading(_) => 0,
+        })
+        .sum();
+    assert_eq!(
+        with.scanned.bytes, shown,
+        "the text it shows and no more: an item the page has no room for is not read"
     );
     assert!(with.resume.is_some());
 }
 
 #[test]
 fn a_search_goes_through_no_more_than_its_bound_and_older_goes_on_from_there_to_what_it_finds() {
+    // Items of a part or less, each read whole; and items of two parts, each
+    // read a part at a time.
+    search_to_the_bound(400, 50_000);
+    search_to_the_bound(300, HISTORY_PART + 6_000);
+}
+
+/// The oldest item holds the words, in a case of its own; `count` items of
+/// `size` bytes come after it, more than one search goes through. A search
+/// stops at its bound, and Older goes on from there to the words.
+fn search_to_the_bound(count: usize, size: usize) {
     let dir = tempfile::tempdir().expect("a folder");
     let (mut ledger, project, conversation) = chief(&dir);
-    // The oldest item holds the words, in a case of its own; 200 items of 100 KB come after it.
     let mut copied = vec![item("found", "user", "Ünïcode says Héllo")];
-    copied.extend((1..=200).map(|at| item(&format!("i-{at}"), "user", &"x".repeat(100_000))));
+    copied.extend((1..=count).map(|at| item(&format!("i-{at}"), "user", &"x".repeat(size))));
     ledger
         .copy_transcript(conversation, &copied, 0)
         .expect("copied");
@@ -247,17 +317,68 @@ fn a_search_goes_through_no_more_than_its_bound_and_older_goes_on_from_there_to_
         )
         .expect("read");
     assert!(
-        first.rows.is_empty() && first.bounded,
+        first.entries.is_empty() && first.bounded,
         "{:?}",
         first.scanned
     );
     assert!(
-        first.scanned.bytes >= HISTORY_SCAN_BYTES
-            && first.scanned.bytes < HISTORY_SCAN_BYTES + 100_000,
-        "{:?}",
+        first.scanned.bytes <= HISTORY_SCAN_BYTES
+            && first.scanned.bytes > HISTORY_SCAN_BYTES - 200_000,
+        "to its bound and never past it: {:?}",
         first.scanned
     );
     assert_eq!(older(&ledger, project, &first, find, 5), ["found"]);
+}
+
+#[test]
+fn a_search_inside_an_item_longer_than_its_bound_stops_at_the_bound_and_goes_on_inside_the_item() {
+    // The reviewers' item: 24 MiB of an agent's words, the words at its very end.
+    let dir = tempfile::tempdir().expect("a folder");
+    let (mut ledger, project, conversation) = chief(&dir);
+    let whole = format!("{} the NEEDLE", "w".repeat(24 * 1024 * 1024));
+    ledger
+        .copy_transcript(
+            conversation,
+            &[
+                item("before", "user", "Write it all out"),
+                item("long", "assistant", &whole),
+            ],
+            0,
+        )
+        .expect("copied");
+    let find = Some("needle");
+    let first = ledger
+        .read_history(
+            project,
+            "chief",
+            &ask(HistoryFrom::Newest, find, false, ROOM),
+        )
+        .expect("read");
+    assert!(first.entries.is_empty() && first.bounded);
+    assert!(
+        first.scanned.bytes <= HISTORY_SCAN_BYTES,
+        "never past its bound, whatever one item's size: {:?}",
+        first.scanned
+    );
+    let inside = first.resume.expect("a place inside the item");
+    assert!(inside.part > 0, "{inside:?}");
+    let found = ledger
+        .read_history(
+            project,
+            "chief",
+            &ask(HistoryFrom::Before(inside), find, false, ROOM),
+        )
+        .expect("read");
+    assert_eq!(ids(&found), ["long"]);
+    assert!(found.scanned.bytes <= HISTORY_SCAN_BYTES);
+    let HistoryEntry::Item(row) = &found.entries[0] else {
+        panic!("an item");
+    };
+    assert!(row.item.text.ends_with("the NEEDLE"));
+    assert_eq!(row.cut.expect("a part").bytes, whole.len());
+    // And on past it, to the item before.
+    let rest = older(&ledger, project, &found, find, 5);
+    assert!(rest.is_empty(), "{rest:?}");
 }
 
 #[test]
@@ -278,11 +399,14 @@ fn a_long_item_shows_a_part_its_first_or_where_a_search_found_and_reads_whole_a_
             &ask(HistoryFrom::Newest, None, false, ROOM),
         )
         .expect("read");
-    let row = &read.rows[0];
+    let HistoryEntry::Item(row) = &read.entries[0] else {
+        panic!("an item");
+    };
     let cut = row.cut.expect("a part");
     assert_eq!((cut.from, cut.bytes), (0, whole.len()));
     assert_eq!(row.item.text.chars().count(), HISTORY_PART);
     assert!(whole.starts_with(&row.item.text));
+    assert!(row.item.complete && row.item.at.is_none() && row.item.role == "assistant");
     // A search shows the part where it found its words.
     let found = ledger
         .read_history(
@@ -291,7 +415,9 @@ fn a_long_item_shows_a_part_its_first_or_where_a_search_found_and_reads_whole_a_
             &ask(HistoryFrom::Newest, Some("needle"), false, ROOM),
         )
         .expect("read");
-    let row = &found.rows[0];
+    let HistoryEntry::Item(row) = &found.entries[0] else {
+        panic!("an item");
+    };
     assert!(row.cut.expect("a part").from > 0);
     assert!(
         row.item.text.ends_with("the NEEDLE"),
@@ -331,87 +457,187 @@ fn a_long_item_shows_a_part_its_first_or_where_a_search_found_and_reads_whole_a_
     assert!(refused.to_string().contains("no item long"), "{refused}");
 }
 
-/// What a page takes for a chief of 50,000 items and 200 MB of text, in five
-/// conversations, two items in five tools' outputs. The daemon reads on its
-/// own thread (the ledger holds its file alone, one connection), so this is
-/// how long it waits while the page is read. Run in release:
-/// `cargo test --release -p cf-ledger --test whole_history -- --ignored --nocapture`.
 #[test]
-#[ignore = "builds a 200 MB ledger; run by hand, in release"]
-fn a_page_of_a_long_history_takes_what_a_page_takes() {
+fn a_search_heads_only_the_conversations_it_found_its_words_in_and_a_page_heads_one_with_nothing() {
     let dir = tempfile::tempdir().expect("a folder");
-    let mut ledger = ledger_in(&dir);
-    let project = project(&mut ledger);
-    let chief = id_of(&project, "chief");
-    let started = Instant::now();
-    let mut conversations = Vec::new();
-    for _ in 0..5 {
-        let conversation = ledger
-            .start_conversation(chief, "claude-code")
-            .expect("a conversation")
-            .id;
-        conversations.push(conversation);
-        for batch in 0..10 {
-            let copied: Vec<Value> = (0..1_000)
-                .map(|at| {
-                    let n = batch * 1_000 + at;
-                    if n % 5 < 2 {
-                        item(
-                            &format!("t-{n}"),
-                            "tool",
-                            &format!("{n} {}", "t".repeat(8_000)),
-                        )
-                    } else {
-                        item(
-                            &format!("i-{n}"),
-                            "user",
-                            &format!("{n} word {}", "w".repeat(1_320)),
-                        )
-                    }
-                })
-                .collect();
-            ledger
-                .copy_transcript(conversation, &copied, i64::from(batch) * 1_000)
-                .expect("copied");
-        }
-    }
-    println!("built: 50,000 items in {:?}", started.elapsed());
-    let time = |what: &str, ask: HistoryAsk<'_>| {
-        let started = Instant::now();
-        let read = ledger
-            .read_history(project.id, "chief", &ask)
-            .expect("read");
-        let took = started.elapsed();
-        println!(
-            "{what}: {took:?}, {} rows shown, {} rows and {} bytes gone through",
-            read.rows.len(),
-            read.scanned.rows,
-            read.scanned.bytes
-        );
-        assert!(took.as_millis() < 1_000, "{what} took {took:?}");
-        read
-    };
-    let newest = time(
-        "newest, tools off",
-        ask(HistoryFrom::Newest, None, false, ROOM),
-    );
-    time(
-        "newest, tools on",
-        ask(HistoryFrom::Newest, None, true, ROOM),
-    );
-    let middle = newest.resume.expect("more");
-    time("older", ask(HistoryFrom::Before(middle), None, false, ROOM));
-    time(
-        "a word in no item",
-        ask(HistoryFrom::Newest, Some("nowhere"), false, ROOM),
-    );
-    time(
-        "a word in every item",
-        ask(HistoryFrom::Newest, Some("WORD"), false, ROOM),
-    );
-    let started = Instant::now();
+    let (mut ledger, project, conversation) = chief(&dir);
     ledger
-        .read_history_part(project.id, "chief", conversations[0], "i-2", 0)
-        .expect("a part");
-    println!("a part: {:?}", started.elapsed());
+        .copy_transcript(conversation, &[item("found", "user", "the alpha")], 0)
+        .expect("copied");
+    let chief = ledger
+        .read_history(
+            project,
+            "chief",
+            &ask(HistoryFrom::Newest, None, false, ROOM),
+        )
+        .expect("read")
+        .conversations[0]
+        .conversation
+        .participant_id;
+    // The window opens fresh: the one going on now holds nothing yet.
+    let now = ledger
+        .start_conversation(chief, "claude-code")
+        .expect("a conversation");
+    let found = ledger
+        .read_history(
+            project,
+            "chief",
+            &ask(HistoryFrom::Newest, Some("ALPHA"), false, ROOM),
+        )
+        .expect("read");
+    assert_eq!(ids(&found), ["found"]);
+    assert_eq!(
+        found.entries.len(),
+        1,
+        "no heading of the one it found nothing in"
+    );
+    let page = ledger
+        .read_history(
+            project,
+            "chief",
+            &ask(HistoryFrom::Newest, None, false, ROOM),
+        )
+        .expect("read");
+    assert_eq!(
+        page.entries.first().map(HistoryEntry::key),
+        Some(cf_ledger::HistoryKey {
+            conversation: now.id,
+            row: 0,
+            part: 0
+        }),
+        "a page heads the one with nothing in its place"
+    );
+}
+
+#[test]
+fn words_where_one_part_ends_and_the_next_begins_are_found() {
+    let dir = tempfile::tempdir().expect("a folder");
+    let (mut ledger, project, conversation) = chief(&dir);
+    // "Needle" begins four characters before the first part's end.
+    let whole = format!(
+        "{}Needle{}",
+        "a".repeat(HISTORY_PART - 4),
+        "b".repeat(HISTORY_PART)
+    );
+    ledger
+        .copy_transcript(conversation, &[item("long", "assistant", &whole)], 0)
+        .expect("copied");
+    let found = ledger
+        .read_history(
+            project,
+            "chief",
+            &ask(HistoryFrom::Newest, Some("NEEDLE"), false, ROOM),
+        )
+        .expect("read");
+    let HistoryEntry::Item(row) = &found.entries[0] else {
+        panic!("found");
+    };
+    assert!(row.item.text.contains("Needle"));
+    assert_eq!(row.cut.expect("a part").from, HISTORY_PART - 4 - 2_000);
+}
+
+#[test]
+fn a_long_item_that_shrinks_and_grows_is_read_as_it_is_now() {
+    let dir = tempfile::tempdir().expect("a folder");
+    let (mut ledger, project, conversation) = chief(&dir);
+    // Written over three looks: three parts and more, then less than one, then two and a bit.
+    for (length, letter) in [
+        (HISTORY_PART * 3 + 5, "a"),
+        (10, "b"),
+        (HISTORY_PART * 2 + 1, "c"),
+    ] {
+        let whole = letter.repeat(length);
+        ledger
+            .copy_transcript(conversation, &[item("w", "assistant", &whole)], 0)
+            .expect("copied");
+        let mut read = String::new();
+        let mut from = Some(0);
+        for _ in 0..10 {
+            let Some(at) = from else { break };
+            let got = ledger
+                .read_history_part(project, "chief", conversation, "w", at)
+                .expect("a part");
+            read.push_str(&got.text);
+            from = got.next;
+        }
+        assert_eq!(read, whole, "{length}");
+    }
+}
+
+#[test]
+fn reading_a_24_mib_item_whole_a_part_at_a_time_reads_each_part_alone() {
+    // The reviewers' item: 24 MiB, about 394 parts. Read whole for each part,
+    // as the second round did, it was read 394 times over: tens of seconds.
+    let dir = tempfile::tempdir().expect("a folder");
+    let (mut ledger, project, conversation) = chief(&dir);
+    // Each with its time, which its row holds past the whole of its text: an
+    // item of two parts, and in the next conversation the long one.
+    let timed = |id: &str, text: &str| {
+        let mut timed = item(id, "assistant", text);
+        timed["at"] = json!("2026-10-16T09:30:00.000Z");
+        timed
+    };
+    ledger
+        .copy_transcript(
+            conversation,
+            &[timed("two", &"b".repeat(HISTORY_PART + 1))],
+            0,
+        )
+        .expect("copied");
+    let chief = ledger
+        .read_history(project, "chief", &ask(HistoryFrom::Newest, None, false, 1))
+        .expect("read")
+        .conversations[0]
+        .conversation
+        .participant_id;
+    let conversation = ledger
+        .start_conversation(chief, "claude-code")
+        .expect("a conversation")
+        .id;
+    let whole = "a".repeat(24 * 1024 * 1024);
+    ledger
+        .copy_transcript(conversation, &[timed("long", &whole)], 0)
+        .expect("copied");
+    let started = Instant::now();
+    let mut parts = 0;
+    let mut bytes = 0;
+    let mut from = Some(0);
+    while let Some(at) = from {
+        let part = ledger
+            .read_history_part(project, "chief", conversation, "long", at)
+            .expect("a part");
+        parts += 1;
+        bytes += part.text.len();
+        from = part.next;
+        assert!(parts < 1_000, "no end");
+    }
+    let took = started.elapsed();
+    assert_eq!((parts, bytes), (394, whole.len()));
+    assert!(took.as_secs() < 5, "{parts} parts took {took:?}");
+    // A page that shows the long one's first part takes what a page that
+    // shows the other's does: its fields are read from where they are held
+    // apart, never from past the whole of its text.
+    let long_page = ledger
+        .read_history(project, "chief", &ask(HistoryFrom::Newest, None, false, 1))
+        .expect("read");
+    let two_parts = HistoryFrom::Before(long_page.resume.expect("the one before"));
+    let pages = |from: HistoryFrom| {
+        let started = Instant::now();
+        for _ in 0..200 {
+            let read = ledger
+                .read_history(project, "chief", &ask(from, None, false, 1))
+                .expect("read");
+            assert_eq!(read.entries.len(), 1);
+        }
+        started.elapsed()
+    };
+    // Each once to warm up, then each timed.
+    pages(two_parts);
+    pages(HistoryFrom::Newest);
+    let two = pages(two_parts);
+    let long = pages(HistoryFrom::Newest);
+    assert!(
+        long < two * 2,
+        "200 pages of the long item took {long:?}, of the two parts' {two:?}"
+    );
 }
