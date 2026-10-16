@@ -179,6 +179,178 @@ fn a_task_the_suspension_paused_that_moved_since_is_no_longer_its_to_resume() {
     assert_eq!(w.state(number), "paused", "the human's pause is the last");
 }
 
+/// The session task `number` was given to.
+fn session_of(w: &World, number: i64) -> String {
+    w.ledger
+        .task(w.project, number)
+        .expect("a read")
+        .expect("the task")
+        .task
+        .assignee
+        .expect("its session")
+}
+
+/// The human's Close: the project is suspended, and the window of each of `numbers`
+/// closes with it.
+fn closed_with(w: &mut World, numbers: &[i64], because: &str) {
+    w.ledger
+        .set_project_state(w.project, "suspended")
+        .expect("closed");
+    for number in numbers {
+        w.ledger
+            .pause_with_project(w.project, *number, because)
+            .expect("paused with the project");
+    }
+}
+
+/// The mark a task's row holds, as the file has it: whether the Resume of its
+/// project is to resume it.
+fn mark_of(w: &mut World, number: i64) -> i64 {
+    let mark = std::cell::Cell::new(-1);
+    w.edit(|db| {
+        mark.set(
+            db.query_row(
+                "SELECT paused_with_project FROM task WHERE number = ?",
+                [number],
+                |row| row.get(0),
+            )
+            .expect("its mark"),
+        );
+    });
+    mark.get()
+}
+
+#[test]
+fn a_tell_that_lands_after_the_close_takes_its_pause_over_and_the_resume_leaves_it_paused() {
+    let mut w = world();
+    let told = at_work(&mut w, "zeus");
+    let other = at_work(&mut w, "diana");
+    closed_with(&mut w, &[told, other], CLOSED);
+    // The chief's `cf tell`, sent as the Close began, lands after it.
+    let session = session_of(&w, told);
+    w.tell(&session, told, "Stop: the schema changed");
+
+    w.ledger
+        .set_project_state(w.project, "open")
+        .expect("resumed");
+
+    assert_eq!(
+        [w.state(told), w.state(other)],
+        ["paused", "working"],
+        "the tell made the pause the chief's"
+    );
+}
+
+#[test]
+fn a_pause_by_the_chief_or_the_human_of_a_task_the_close_paused_takes_the_pause_over() {
+    let mut w = world();
+    let by_chief = at_work(&mut w, "zeus");
+    let by_human = at_work(&mut w, "diana");
+    let other = at_work(&mut w, "zeus");
+    closed_with(&mut w, &[by_chief, by_human, other], CLOSED);
+    // Their pauses, sent as the Close began, land after it.
+    w.ledger
+        .pause_task(w.project, by_chief, Some("chief"), None)
+        .expect("the chief's pause is taken");
+    w.ledger
+        .pause_task(w.project, by_human, Some("human"), None)
+        .expect("the human's pause is taken");
+    // A task paused by someone else is theirs already: pausing it again is refused, as it was.
+    let again = w
+        .ledger
+        .pause_task(w.project, by_chief, Some("chief"), None)
+        .expect_err("paused already");
+    assert_eq!(again.code(), Some("invalid-transition"));
+
+    w.ledger
+        .set_project_state(w.project, "open")
+        .expect("resumed");
+
+    assert_eq!(
+        [w.state(by_chief), w.state(by_human), w.state(other)],
+        ["paused", "paused", "working"]
+    );
+}
+
+#[test]
+fn a_task_the_close_paused_that_someone_takes_from_its_session_keeps_no_mark() {
+    let mut w = world();
+    let reassigned = at_work(&mut w, "zeus");
+    let ended = at_work(&mut w, "diana");
+    closed_with(&mut w, &[reassigned, ended], CLOSED);
+    // The human gives one to another member of its tier; the chief resumes the other,
+    // whose session ended, and it goes back to the board for its tier.
+    w.ledger
+        .release_task(w.project, reassigned, "by @human")
+        .expect("taken back to the board");
+    let session = session_of(&w, ended);
+    w.ledger
+        .end_session(w.project, &session, "human")
+        .expect("its session ends");
+    w.resume(ended, "Go on");
+    assert_eq!([w.state(reassigned), w.state(ended)], ["open", "open"]);
+
+    assert_eq!(
+        [mark_of(&mut w, reassigned), mark_of(&mut w, ended)],
+        [0, 0],
+        "taken over: no Resume of the project is theirs to resume"
+    );
+}
+
+#[test]
+fn the_resume_withdraws_the_pause_note_and_keeps_the_word_that_a_program_may_still_run() {
+    let mut w = world();
+    let alone = at_work(&mut w, "zeus");
+    let joined = at_work(&mut w, "diana");
+    let gone = at_work(&mut w, "zeus");
+    let outlived = |who: &str| {
+        format!(
+            "@{who}'s window closed, but its program (process 4242) could not be ended and may still run"
+        )
+    };
+    closed_with(&mut w, &[alone], &outlived("zeus"));
+    closed_with(&mut w, &[joined], &outlived("diana"));
+    closed_with(&mut w, &[gone], CLOSED);
+    // One note of its own, and one note of two, as a burst of stalls joins them.
+    let own = w
+        .ledger
+        .note_pause(w.project, "chief", alone, &outlived("zeus"))
+        .expect("the chief is told");
+    let several = w
+        .ledger
+        .note_pause(w.project, "chief", joined, &outlived("diana"))
+        .expect("the chief is told");
+    w.ledger
+        .join_pause_note(several.id, gone, CLOSED)
+        .expect("joined")
+        .expect("the note takes it");
+
+    w.ledger
+        .set_project_state(w.project, "open")
+        .expect("resumed");
+
+    for note in [&own, &several] {
+        assert_eq!(w.message(note.id).state, "cancelled", "the pause note goes");
+    }
+    let kept: Vec<String> = w
+        .ledger
+        .inbox(w.id("chief"), 100)
+        .expect("the chief's inbox")
+        .into_iter()
+        .rev()
+        .filter(|message| message.state == "queued" && message.body.contains("may still run"))
+        .map(|message| message.body)
+        .collect();
+    assert_eq!(
+        kept,
+        [
+            format!("T-{alone} resumed. Before that, {}.", outlived("zeus")),
+            format!("T-{joined} resumed. Before that, {}.", outlived("diana")),
+        ],
+        "the warning stays for the chief, from a note of its own or of several, and only for the tasks it was said of"
+    );
+}
+
 #[test]
 fn a_ledger_from_before_the_mark_keeps_every_paused_task_paused_through_a_resume() {
     const AT: &str = "2026-10-15T00:00:00.000Z";

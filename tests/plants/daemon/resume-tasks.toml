@@ -220,3 +220,140 @@ file = "crates/cf-ledger/src/testing.rs"
 find = '''
                     .replace(paused_with_project::COLUMN_LINES, "")'''
 replace = ""
+
+# --- the reviews of 2026-10-16 (GPT-6-Astra and GPT-6.1-Sol) ---
+
+[[plant]]
+name = "resume tasks: a tell that lands after the Close leaves the Close's mark"
+meant = "a_tell_that_lands_after_the_close_takes_its_pause_over_and_the_resume_leaves_it_paused"
+runs = ["ledger-suspended"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages.rs"
+find = "                take_over_pause(store, &task, from)?;"
+replace = ""
+
+[[plant]]
+name = "resume tasks: a pause by the chief or the human of a task the Close paused is refused"
+meant = "a_pause_by_the_chief_or_the_human_of_a_task_the_close_paused_takes_the_pause_over"
+runs = ["ledger-suspended"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = "            Some(author) => take_over_pause(store, &task, &author.handle)?,"
+replace = "            Some(_) => false,"
+
+[[plant]]
+name = "resume tasks: a pause of a task paused any other way is taken for a takeover"
+meant = "a_pause_by_the_chief_or_the_human_of_a_task_the_close_paused_takes_the_pause_over"
+runs = ["ledger-suspended"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = "         WHERE id = ? AND state = 'paused' AND paused_with_project = 1\","
+replace = "         WHERE id = ? AND state = 'paused'\","
+
+[[plant]]
+name = "resume tasks: a task the Close paused that is taken back to the board keeps its mark"
+meant = "a_task_the_close_paused_that_someone_takes_from_its_session_keeps_no_mark"
+runs = ["ledger-suspended"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/giving.rs"
+find = "           taken_from_id = COALESCE(?, taken_from_id), paused_with_project = 0"
+replace = "           taken_from_id = COALESCE(?, taken_from_id)"
+
+[[plant]]
+name = "resume tasks: a task the Close paused that its chief resumes after its session ended keeps its mark"
+meant = "a_task_the_close_paused_that_someone_takes_from_its_session_keeps_no_mark"
+runs = ["ledger-suspended"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = '''
+                "UPDATE task SET assignee_id = NULL, state = 'open', body = ?, updated_at = ?,
+             paused_with_project = 0
+           WHERE id = ?",'''
+replace = '''
+                "UPDATE task SET assignee_id = NULL, state = 'open', body = ?, updated_at = ?
+           WHERE id = ?",'''
+
+[[plant]]
+name = "resume tasks: a refused kill leaves the mark an exit made while it was answered"
+meant = "a_window_that_ends_by_itself_while_its_kill_is_answered_and_whose_kill_fails_leaves_its_task_paused"
+runs = ["engine-resume-tasks"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '''
+                if let Some((project, number)) = paused {
+                    self.seams
+                        .ledger
+                        .borrow_mut()
+                        .unmark_pause(project, number)?;
+                }'''
+replace = '''
+                let _ = paused;'''
+
+[[plant]]
+name = "resume tasks: an exit told while the kill is answered is not remembered for the answer"
+meant = "a_window_that_ends_by_itself_while_its_kill_is_answered_and_whose_kill_fails_leaves_its_task_paused"
+runs = ["engine-resume-tasks"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "                    killing.paused = Some((project.id, thread.task.number));"
+replace = "                    let _ = killing;"
+
+[[plant]]
+name = "resume tasks: the ledger keeps the mark a refused kill takes back"
+meant = "a_window_that_ends_by_itself_while_its_kill_is_answered_and_whose_kill_fails_leaves_its_task_paused"
+runs = ["engine-resume-tasks"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = "            \"UPDATE task SET paused_with_project = 0 WHERE id = ? AND state = 'paused'\","
+replace = "            \"UPDATE task SET paused_with_project = paused_with_project WHERE id = ? AND state = 'paused'\","
+
+[[plant]]
+name = "resume tasks: the Resume withdraws the warning that a program may still run with the pause note"
+meant = "the_resume_withdraws_the_pause_note_and_keeps_the_word_that_a_program_may_still_run"
+runs = ["ledger-suspended", "engine-resume-tasks"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/pauses.rs"
+find = "        if let Some(pause) = pause.filter(|pause| pause.because.contains(MAY_STILL_RUN)) {"
+replace = "        if let Some(pause) = pause.filter(|_| false) {"
+
+[[plant]]
+name = "resume tasks: the warning that a program may still run is kept from a note of one task only"
+meant = "the_resume_withdraws_the_pause_note_and_keeps_the_word_that_a_program_may_still_run"
+runs = ["ledger-suspended"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/pauses.rs"
+find = '''
+        warn_of(&body);
+        if paused.is_empty() {'''
+replace = '''
+        if paused.is_empty() {'''
+
+[[plant]]
+name = "resume tasks: the engine says a program may still run in words other than the ledger keeps"
+meant = "a_resume_keeps_for_the_chief_the_word_that_a_program_the_close_could_not_end_may_still_run"
+runs = ["engine-resume-tasks"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown.rs"
+find = '''        Some(format!(", but {program} {MAY_STILL_RUN}"))'''
+replace = '''        Some(format!(", but {program} could not be ended and may run on"))'''
+
+[[plant]]
+name = "resume tasks: a closed project's window that the Close could not close is given what waits for it"
+meant = "a_chief_window_the_close_could_not_close_is_given_nothing_while_closed_and_never_the_news_that_the_work_is_paused"
+runs = ["engine-resume-tasks"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "        if idle && project.state == \"open\" {"
+replace = "        if idle {"

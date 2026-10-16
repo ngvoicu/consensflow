@@ -28,7 +28,7 @@ use crate::model::{self, require_active, LedgerError, MAX_BODY};
 use crate::questions::{render_choices, render_questions, require_choices, require_questions};
 use crate::queue::{queue, send, withdraw, Queued, Sent};
 use crate::store::Store;
-use crate::tasks::pause_task;
+use crate::tasks::{pause_task, take_over_pause};
 use crate::views::{message_view, TaskRow, MESSAGE_SELECT};
 
 pub(crate) use again::tell_sent_back;
@@ -40,6 +40,7 @@ pub(crate) use delivery::{
 };
 pub(crate) use gate::{approve_message, decline_message, mark_read};
 pub(crate) use holds::{note_hold, tell_goes_on};
+pub use pauses::MAY_STILL_RUN;
 pub(crate) use pauses::{join_pause_note, leave_pause_notes, note_pause};
 pub use receipt::Read;
 pub(crate) use receipt::{
@@ -130,7 +131,12 @@ pub(crate) fn ask(
                     404,
                 ));
             };
-            if store.task_row(project_id, number)?.state != "paused" {
+            // A task paused already is paused for the tell all the same: one its
+            // project's suspension paused is the teller's from now on.
+            let task = store.task_row(project_id, number)?;
+            if task.state == "paused" {
+                take_over_pause(store, &task, from)?;
+            } else {
                 pause_task(store, project_id, number, Some(from), None)?;
             }
         }

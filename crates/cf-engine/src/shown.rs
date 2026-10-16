@@ -35,6 +35,7 @@ mod secret;
 #[cfg(test)]
 mod tests;
 
+use cf_ledger::MAY_STILL_RUN;
 use cf_proto::panes::{BackgroundProcess, PaneExit, SnapshotTail};
 use serde_json::Value;
 
@@ -79,15 +80,15 @@ impl Shown {
     }
 
     /// What a note says of a window's program the host could not end, after the word that
-    /// its window closed: the program may still run. None where it has gone.
+    /// its window closed: the program may still run, in the ledger's words of it, by which
+    /// a pause note that goes leaves the warning behind ([`MAY_STILL_RUN`]). None where it
+    /// has gone.
     pub(crate) fn outlived(&self) -> Option<String> {
         let program = match self.survivor? {
             0 => "its program".to_owned(),
             pid => format!("its program (process {pid})"),
         };
-        Some(format!(
-            ", but {program} could not be ended and may still run"
-        ))
+        Some(format!(", but {program} {MAY_STILL_RUN}"))
     }
 
     /// What the window left running when it closed, which its close ended: the

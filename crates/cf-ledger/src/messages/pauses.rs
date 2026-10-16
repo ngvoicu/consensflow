@@ -11,6 +11,11 @@
 //! and stays as it was. The same goes for the other notes of a task's wait that
 //! ConsensFlow writes (a hold's, a release's, that it waits for a free member):
 //! they go when the task moves on, whichever way it does.
+//!
+//! But for a warning: a pause whose words say that its window's program could
+//! not be ended and may still run ([`MAY_STILL_RUN`]) warns of a program that
+//! outlives the pause, and whoever is told next opens a window beside it. When
+//! its note goes, the warning stays, in a note of its own.
 
 use cf_proto::ledger::MessageView;
 use rusqlite::params;
@@ -27,6 +32,11 @@ struct Paused {
     number: i64,
     because: String,
 }
+
+/// What the words of a pause say of a window's program the pane host could not
+/// end, after naming the program: the engine writes them into the pause, and a
+/// pause that says them is one whose warning stays when its note goes.
+pub const MAY_STILL_RUN: &str = "could not be ended and may still run";
 
 /// What follows the one task a note names.
 const ONE_TAIL: &str = "; its window comes back on its own conversation.";
@@ -148,25 +158,46 @@ pub(crate) fn join_pause_note(
 /// of it and has not been given yet is withdrawn, if it was told of the task
 /// alone, or loses the task if it was told of several. What it was given
 /// stays. Only ConsensFlow's own notes, still queued, are looked at: whatever
-/// else was said of the task is not about its wait.
+/// else was said of the task is not about its wait. A pause that said its
+/// window's program may still run is said again, as what came before (`why`),
+/// in a note of its own that no wait of the task's takes back.
 pub(crate) fn leave_pause_notes(
-    store: &Store,
+    store: &mut Store,
     task: &TaskRow,
     why: &str,
 ) -> Result<(), LedgerError> {
     let reason = format!("T-{} {why}", task.number);
+    let mut warnings: Vec<String> = Vec::new();
+    let mut warn_of = |body: &str| {
+        let pause = read(body)
+            .into_iter()
+            .flatten()
+            .find(|paused| paused.number == task.number);
+        if let Some(pause) = pause.filter(|pause| pause.because.contains(MAY_STILL_RUN)) {
+            warnings.push(pause.because);
+        }
+    };
     // Whatever note of its own is queued for the requester about the task: a
     // stall's, a hold's, a refusal's, each says something about the pause. A
     // pause leaves what is queued for the task as it is, so one written
     // before the pause goes with the rest. All but the news that the task went
     // on after a hold: that corrects what its requester was given, and a pause
     // that comes after it does not take it back.
-    store.db.execute(
-        "UPDATE message SET state = 'cancelled', reason = ?
+    let withdrawn: Vec<String> = store
+        .db
+        .prepare(
+            "UPDATE message SET state = 'cancelled', reason = ?
        WHERE task_id = ? AND recipient_id = ? AND sender_id IS NULL AND kind = 'note'
-         AND state = 'queued' AND body != ?",
-        params![reason, task.id, task.requester_id, goes_on(task.number)],
-    )?;
+         AND state = 'queued' AND body != ? RETURNING body",
+        )?
+        .query_map(
+            params![reason, task.id, task.requester_id, goes_on(task.number)],
+            |row| row.get(0),
+        )?
+        .collect::<rusqlite::Result<_>>()?;
+    for body in &withdrawn {
+        warn_of(body);
+    }
     let several = store
         .db
         .prepare(
@@ -187,11 +218,25 @@ pub(crate) fn leave_pause_notes(
         if paused.len() == before {
             continue;
         }
+        warn_of(&body);
         if paused.is_empty() {
             withdraw(store, id, &reason)?;
         } else {
             set(store, id, task.project_id, &paused)?;
         }
+    }
+    let requester = store.participant_row(task.requester_id)?.handle;
+    for because in warnings {
+        send(
+            store,
+            task.project_id,
+            &Sent {
+                to: &requester,
+                body: &format!("T-{} {why}. Before that, {because}.", task.number),
+                kind: "note",
+                ..Sent::default()
+            },
+        )?;
     }
     Ok(())
 }

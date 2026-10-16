@@ -7,7 +7,7 @@
 
 use std::rc::Rc;
 
-use cf_engine::testing::{Context, Restarted};
+use cf_engine::testing::{Context, Gate, Restarted};
 use cf_ledger::{MessageView, RESUME_WORDS};
 use serde_json::Value;
 
@@ -418,6 +418,122 @@ fn a_window_the_close_could_not_close_that_then_closes_by_itself_leaves_its_task
         [tiers.task(1).task.state, tiers.task(2).task.state],
         ["paused", "working"],
         "a window that closed by itself is the chief's to resume"
+    );
+}
+
+/// Both reviews of 2026-10-16: a worker's harness that crashes while the Close
+/// waits for the answer to its window's kill, and whose kill then fails, closed by
+/// itself; only an exit the kill made is the Close's.
+#[test]
+fn a_window_that_ends_by_itself_while_its_kill_is_answered_and_whose_kill_fails_leaves_its_task_paused(
+) {
+    let context = Context::new();
+    let tiers = at_work(&context);
+    let project = tiers.project.id;
+    let zeus = context.host.last("zeus").expect("its window").pane;
+    let answer = Gate::default();
+    *context.host.hold_kill.borrow_mut() = Some((zeus.generation, answer.clone()));
+    let closing = context.begin_close_project(project);
+    context.settle();
+    // Zeus's harness crashes while its kill waits; then the kill fails.
+    context.exit("zeus");
+    context.host.refuse_kills.set(true);
+    answer.open();
+    let refused = context.finish(closing).unwrap_err();
+    assert_match(&refused.to_string(), "would not close");
+    context.host.refuse_kills.set(false);
+
+    context.resume_project(project).unwrap();
+
+    assert_eq!(
+        [tiers.task(1).task.state, tiers.task(2).task.state],
+        ["paused", "working"],
+        "a window that closed by itself is the chief's to resume"
+    );
+}
+
+/// Sol's review of 2026-10-16: a Close that could not close the chief's window
+/// leaves it open while the project is closed, and a pass that stepped it gave it
+/// the note that the work is paused, which then reached it after the Resume had the
+/// work at work again. A closed project gives no window anything: what waits for one
+/// waits for the Resume, which withdraws that note in the write that opens the project.
+#[test]
+fn a_chief_window_the_close_could_not_close_is_given_nothing_while_closed_and_never_the_news_that_the_work_is_paused(
+) {
+    let context = Context::new();
+    let tiers = at_work(&context);
+    let project = tiers.project.id;
+    let chief = context.host.last("chief").expect("its window").pane;
+    let answer = Gate::default();
+    *context.host.hold_kill.borrow_mut() = Some((chief.generation, answer.clone()));
+    let closing = context.begin_close_project(project);
+    context.settle();
+    context.host.refuse_kills.set(true);
+    answer.open();
+    let refused = context.finish(closing).unwrap_err();
+    assert_match(&refused.to_string(), "@chief's window would not close");
+    context.host.refuse_kills.set(false);
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+
+    context.resume_project(project).unwrap();
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+
+    assert_eq!(
+        [tiers.task(1).task.state, tiers.task(2).task.state],
+        ["working", "working"]
+    );
+    assert!(
+        given(&context, "chief")
+            .iter()
+            .all(|text| !text.contains(" is paused: ")),
+        "the chief was given: {:?}",
+        given(&context, "chief")
+    );
+}
+
+/// Astra's review of 2026-10-16: the Resume withdrew the note that the work is
+/// paused, and with it the warning that the program of a window the Close could
+/// not end may still run, beside which the window that comes back opens.
+#[test]
+fn a_resume_keeps_for_the_chief_the_word_that_a_program_the_close_could_not_end_may_still_run() {
+    let context = Context::new();
+    let tiers = at_work(&context);
+    let project = tiers.project.id;
+    context.host.exits_with_a_survivor(4242);
+
+    closed_and_resumed(&context, project);
+    for _ in 0..4 {
+        context.pass().unwrap();
+    }
+
+    let given = given(&context, "chief");
+    assert!(
+        given.iter().all(|text| !text.contains(" is paused: ")),
+        "{given:?}"
+    );
+    // The first is in its window, and the next waits for its turn to end.
+    let told: Vec<(String, String)> = context
+        .inbox(tiers.id("chief"))
+        .into_iter()
+        .rev()
+        .filter(|message| message.body.contains(" resumed. Before that, "))
+        .map(|message| (message.state, message.body))
+        .collect();
+    let warning = |number: i64, handle: &str| {
+        format!(
+            "T-{number} resumed. Before that, @{handle}'s window closed, but its program (process 4242) could not be ended and may still run."
+        )
+    };
+    assert_eq!(
+        told,
+        [
+            ("delivered".to_owned(), warning(1, "zeus-amber-pine")),
+            ("queued".to_owned(), warning(2, "diana-brisk-birch")),
+        ]
     );
 }
 

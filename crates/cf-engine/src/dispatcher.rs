@@ -798,6 +798,11 @@ impl Dispatcher {
                     shown.after_with(&closed, &besides)
                 };
                 self.stall(&project, &thread.task, &because, own)?;
+                // Told while the engine's kill waits for its answer, which decides
+                // whether this exit was the kill's (`close_own`).
+                if let Some(killing) = record.window.borrow_mut().killing.as_mut() {
+                    killing.paused = Some((project.id, thread.task.number));
+                }
             } else {
                 self.tell_left_running(&project, &participant, left)?;
             }
@@ -982,7 +987,12 @@ impl Dispatcher {
                 .await_switch(project, participant, record, &observed, idle)
                 .await;
         }
-        if idle {
+        // A closed project's window that its Close could not close is given nothing
+        // until the Resume, as no closed project is: what waits for it is the Resume's
+        // to settle first (Sol's review of 2026-10-16: the note that the work was
+        // paused went into the chief's window and reached it after the Resume had
+        // the work at work again).
+        if idle && project.state == "open" {
             // A chief at rest may be due a wake-up: queued here, it is the next
             // message of its queue, delivered by the rules of every message.
             if participant.role == "chief" {

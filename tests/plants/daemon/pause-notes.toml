@@ -95,8 +95,8 @@ runs = ["pause-notes-ledger"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/pauses.rs"
-find = '''         AND state = 'queued' AND body != ?",'''
-replace = '         AND body != ?",'
+find = '''         AND state = 'queued' AND body != ? RETURNING body",'''
+replace = '         AND body != ? RETURNING body",'
 
 [[plant]]
 name = "pause notes: a resume leaves a note of several naming the task"

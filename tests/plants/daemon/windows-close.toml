@@ -218,9 +218,10 @@ runs = ["engine-shown", "engine-windows", "engine-closing"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/shown.rs"
-find = '''            ", but {program} could not be ended and may still run"'''
-replace = '''            ", but {program} could not be ended and may still run: no window opens on its \
-             conversation until it has gone"'''
+find = '''        Some(format!(", but {program} {MAY_STILL_RUN}"))'''
+replace = '''        Some(format!(
+            ", but {program} {MAY_STILL_RUN}: no window opens on its conversation until it has gone"
+        ))'''
 
 [[plant]]
 name = "windows close: an end of the output is taken for the window's while its program runs"

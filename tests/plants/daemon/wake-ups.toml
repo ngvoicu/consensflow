@@ -316,7 +316,7 @@ runs = ["engine-wake-ups"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
-find = '''        if idle {
+find = '''        if idle && project.state == "open" {
             // A chief at rest may be due a wake-up: queued here, it is the next
             // message of its queue, delivered by the rules of every message.
             if participant.role == "chief" {
@@ -326,7 +326,7 @@ find = '''        if idle {
 replace = '''        if participant.role == "chief" {
             self.queue_wake_up_if_due(project, participant)?;
         }
-        if idle {
+        if idle && project.state == "open" {
             let next = self.next_in_line(record)?;'''
 
 [[plant]]
@@ -532,7 +532,7 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
-find = '''        if idle {
+find = '''        if idle && project.state == "open" {
             // A chief at rest may be due a wake-up: queued here, it is the next
             // message of its queue, delivered by the rules of every message.
             if participant.role == "chief" {
@@ -542,7 +542,7 @@ find = '''        if idle {
 replace = '''        if participant.role == "chief" {
             self.queue_wake_up_if_due(project, participant)?;
         }
-        if idle {
+        if idle && project.state == "open" {
             let next = self.next_in_line(record)?;'''
 
 [[plant]]

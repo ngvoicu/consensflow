@@ -102,6 +102,16 @@ pub(crate) struct Opening {
     pub(crate) exited: Option<Shown>,
 }
 
+/// The engine's own kill of a window, on its way, and the task (its project and
+/// number) whose pause an exit that came before the kill's answer marked as the
+/// suspension's (the host's close waits for the program to end, and tells the
+/// exit as it ends): the mark stands if the kill was taken, and goes if it was
+/// refused, for that exit was the window's own (`kill_and_settle`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct Killing {
+    pub(crate) paused: Option<(i64, i64)>,
+}
+
 /// The chief's window failing to start, tried again ever more slowly: how
 /// often it failed, and when it may be tried next.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -129,6 +139,8 @@ pub(crate) struct WindowPart {
     pub(crate) retiring: bool,
     /// Its exit is the engine's own (`close_own`): a chief's closes no project.
     pub(crate) own_exit: bool,
+    /// The engine's own kill of it waits for the host's answer.
+    pub(crate) killing: Option<Killing>,
     /// Why the engine closes it, where the pause note of the task it was working
     /// on is to say more than that it closed: with its project, when the chief's
     /// window closed by itself.
@@ -176,6 +188,7 @@ impl Default for WindowPart {
             token: None,
             retiring: false,
             own_exit: false,
+            killing: None,
             closed_with: None,
             pinned: false,
             hidden: false,
@@ -1115,6 +1128,16 @@ impl Dispatcher {
     /// host refused stays as it was, and no exit is made up for it. An exit
     /// that cannot be settled fails the close, which is the caller's to hear
     /// (the host's own exit event, with no caller, is told to the log).
+    ///
+    /// An exit the host tells before the kill is answered is settled as it comes,
+    /// as the engine's own; where it paused the window's task as the suspension's,
+    /// the kill's answer decides: a kill that was refused takes the mark back, for
+    /// that exit was the window's own ([`Killing`]; both reviews of 2026-10-16: a
+    /// worker that crashed while its Close's kill was pending, and whose kill then
+    /// failed, was taken for one the Close closed, and its task went on with the
+    /// Resume). An exit that comes with a kill that was taken is the kill's: the
+    /// host, asked to end the window, says it has ended, and no proof it sends
+    /// tells a program that ended by itself in that moment from one it ended.
     pub(crate) async fn close_own(
         self: &Rc<Self>,
         record: &Rc<Record>,
@@ -1131,9 +1154,25 @@ impl Dispatcher {
         record: &Rc<Record>,
         pane: &Pane,
     ) -> Result<bool, EngineError> {
-        let retiring = record.window.borrow().retiring;
-        if !retiring && !self.kill(record, pane).await? {
-            return Ok(false);
+        if !record.window.borrow().retiring {
+            record.window.borrow_mut().killing = Some(Killing::default());
+            let killed = self.kill(record, pane).await;
+            let paused = record
+                .window
+                .borrow_mut()
+                .killing
+                .take()
+                .and_then(|killing| killing.paused);
+            if !matches!(killed, Ok(true)) {
+                // Refused: an exit that came meanwhile was the window's own.
+                if let Some((project, number)) = paused {
+                    self.seams
+                        .ledger
+                        .borrow_mut()
+                        .unmark_pause(project, number)?;
+                }
+                return killed;
+            }
         }
         let open = record.window.borrow().pane.as_ref() == Some(pane);
         if open {

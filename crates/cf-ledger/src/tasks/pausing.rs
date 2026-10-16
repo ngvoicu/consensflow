@@ -78,8 +78,16 @@ fn pause_task_as(
             .map(|by| store.participant_by_handle(project_id, by))
             .transpose()?;
         let task = store.task_row(project_id, number)?;
+        // A pause of the chief's or the human's that lands on a task its project's
+        // suspension paused (sent as the Close began) takes that pause over.
+        let taken = match &author {
+            Some(author) => take_over_pause(store, &task, &author.handle)?,
+            None => false,
+        };
         let pausable = [&["open", "queued"], &ACTIVE_TASK_STATES[..]].concat();
-        require_task_state(&task, &pausable, "pause")?;
+        if !taken {
+            require_task_state(&task, &pausable, "pause")?;
+        }
         if let Some(assignee) = task.assignee_id {
             if store.participant_row(assignee)?.role == "chief" {
                 return Err(LedgerError::refused_with(
@@ -106,14 +114,60 @@ fn pause_task_as(
             )?;
             release_carried(store, task.id)?;
         }
-        let mut detail = Map::new();
-        detail.insert("by".into(), json!(by));
-        if let Some(because) = because {
-            detail.insert("because".into(), json!(because));
+        if !taken {
+            let mut detail = Map::new();
+            detail.insert("by".into(), json!(by));
+            if let Some(because) = because {
+                detail.insert("because".into(), json!(because));
+            }
+            pause(store, &task, detail, with_project)?;
         }
-        pause(store, &task, detail, with_project)?;
         task_by_id(store, task.id)
     })
+}
+
+/// The window of a task the engine paused with its project ended by itself after
+/// all: its exit came while the engine's kill of it waited for its answer, and the
+/// kill was refused. The task stays paused, as any whose window closed by itself,
+/// and no Resume of its project resumes it.
+pub(crate) fn unmark_pause(
+    store: &mut Store,
+    project_id: i64,
+    number: i64,
+) -> Result<(), LedgerError> {
+    store.write(|store| {
+        let task = store.task_row(project_id, number)?;
+        store.db.execute(
+            "UPDATE task SET paused_with_project = 0 WHERE id = ? AND state = 'paused'",
+            [task.id],
+        )?;
+        Ok(())
+    })
+}
+
+/// The chief or the human (`by`) takes over the pause of a task its project's
+/// suspension paused: their tell or their pause, sent as the Close began, lands
+/// after it. The task stays paused, and the pause is theirs from then on: no
+/// Resume of its project resumes it. Whether there was such a pause to take; a
+/// task paused any other way is theirs to resume already, and is left alone.
+pub(crate) fn take_over_pause(
+    store: &mut Store,
+    task: &TaskRow,
+    by: &str,
+) -> Result<bool, LedgerError> {
+    let taken = store.db.execute(
+        "UPDATE task SET paused_with_project = 0
+         WHERE id = ? AND state = 'paused' AND paused_with_project = 1",
+        [task.id],
+    )? > 0;
+    if taken {
+        store.log(
+            task.project_id,
+            "task.pause-taken",
+            json!({ "task": task.number, "by": by }),
+        )?;
+    }
+    Ok(taken)
 }
 
 /// The move to paused, which is a stop of its own: the task counts it, so two
@@ -425,8 +479,10 @@ pub(crate) fn resume_task(
             }
             let carried = transfer(store, &task, &assignee, &delivery_body(&task))?;
             let at = store.at();
+            // Taken from its session: no Resume of its project is to resume it.
             store.db.execute(
-                "UPDATE task SET assignee_id = NULL, state = 'open', body = ?, updated_at = ?
+                "UPDATE task SET assignee_id = NULL, state = 'open', body = ?, updated_at = ?,
+             paused_with_project = 0
            WHERE id = ?",
                 params![
                     format!(
