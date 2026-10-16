@@ -36,8 +36,8 @@ use std::thread::sleep;
 use std::time::{Duration, Instant};
 
 use cf_e2e::live::members::{
-    find, member, member_as, stand_in_chief, stand_in_worker, Account, LongCommand, Members, Plan,
-    STAND_IN_WORKER,
+    end_chosen, find, member, member_as, stand_in_chief, stand_in_worker, Account, LongCommand,
+    Members, Plan, Running, ThisMachine, STAND_IN_WORKER,
 };
 use cf_e2e::live::report::{self, Check};
 use cf_e2e::live::{self, ask, seconds, Harness, Log};
@@ -147,6 +147,27 @@ fn worker_plan(worker: Harness) -> Plan {
     Plan::new("restart-cut-worker", stand_in_chief()).with(member(worker))
 }
 
+/// The long command's processes in the window of `who` (the chief, or a member's
+/// agent), with what they started: what descends from the window's own process and
+/// holds the command's mark. None while the window has no process. A process outside
+/// the window is none of it, whatever its command line says.
+fn in_window(members: &Members, who: &str) -> Result<Vec<Running>> {
+    let own = members
+        .window_of(who)?
+        .and_then(|window| members.window_process(&window));
+    match own {
+        Some(own) => LONG.chosen_in(&ThisMachine, own),
+        None => Ok(Vec::new()),
+    }
+}
+
+/// Ends what the window of `who` runs of the long command: a command it starts again
+/// is the long one. Each process is ended only while it is still the one chosen.
+fn end_in_window(members: &Members, who: &str) -> Result<()> {
+    end_chosen(&ThisMachine, &in_window(members, who)?);
+    Ok(())
+}
+
 /// The states a lane was read in, each with when it was first read, as a line:
 /// `idle from +0.0 s → working from +2.5 s`.
 fn reads(samples: &[(String, Instant)], from: Instant) -> String {
@@ -229,7 +250,7 @@ fn drive_chief(mut members: Members, log: &Log) -> Result<Account> {
         "the chief inside its command",
         WORK,
         Duration::from_millis(200),
-        || Ok((!LONG.named()?.is_empty()).then_some(())),
+        || Ok((!in_window(&members, "chief")?.is_empty()).then_some(())),
     )?;
     if at_command.is_none() {
         case.fail(format!(
@@ -245,10 +266,13 @@ fn drive_chief(mut members: Members, log: &Log) -> Result<Account> {
         state_of(&members.lane("chief")?)
     ));
 
-    // The app's quit, and the app started again: it waits for the human.
+    // The app's quit, and the app started again: it waits for the human. What the
+    // window ran of the command is chosen while it is the window's, and what the quit
+    // left of it is ended after.
     let quit_at = Instant::now();
+    let left = in_window(&members, "chief")?;
     let members = members.restart(log)?;
-    LONG.end();
+    end_chosen(&ThisMachine, &left);
     case.say(format!(
         "quit and started again in {} s",
         seconds(i64::try_from(quit_at.elapsed().as_millis()).unwrap_or(i64::MAX))
@@ -264,7 +288,7 @@ fn drive_chief(mut members: Members, log: &Log) -> Result<Account> {
         LOOK,
         || {
             // A command it starts again is the long one: it is ended.
-            LONG.end();
+            end_in_window(&members, "chief")?;
             Ok(notes_saying(&members, "chief", CHIEF_CUT)?
                 .into_iter()
                 .find(|note| note["state"] == "delivered"))
@@ -288,7 +312,7 @@ fn drive_chief(mut members: Members, log: &Log) -> Result<Account> {
         IDLE,
         LOOK,
         || {
-            LONG.end();
+            end_in_window(&members, "chief")?;
             let state = state_of(&members.lane("chief")?);
             if samples.last().is_none_or(|(last, _)| *last != state) {
                 samples.push((state.clone(), Instant::now()));
@@ -340,6 +364,7 @@ fn drive_chief(mut members: Members, log: &Log) -> Result<Account> {
         "the chief's screen: {}",
         members.tail(lane["pane"]["id"].as_str().unwrap_or_default())
     ));
+    end_in_window(&members, "chief")?;
     case.closed(members.close());
     Ok(case)
 }
@@ -359,7 +384,7 @@ fn drive_worker(mut members: Members, agent: &str, log: &Log) -> Result<Account>
         "the worker inside its command",
         WORK,
         Duration::from_millis(200),
-        || Ok((!LONG.named()?.is_empty()).then_some(())),
+        || Ok((!in_window(&members, agent)?.is_empty()).then_some(())),
     )?;
     if at_command.is_none() {
         case.fail(format!(
@@ -381,9 +406,12 @@ fn drive_worker(mut members: Members, agent: &str, log: &Log) -> Result<Account>
     ));
 
     // The app's quit, and the app started again: it waits for the human, and the task is as it was.
+    // What the window ran of the command is chosen while it is the window's, and what the
+    // quit left of it is ended after.
     let quit_at = Instant::now();
+    let left = in_window(&members, agent)?;
     let members = members.restart(log)?;
-    LONG.end();
+    end_chosen(&ThisMachine, &left);
     case.say(format!(
         "quit and started again in {} s",
         seconds(i64::try_from(quit_at.elapsed().as_millis()).unwrap_or(i64::MAX))
@@ -409,7 +437,7 @@ fn drive_worker(mut members: Members, agent: &str, log: &Log) -> Result<Account>
         LOOK,
         || {
             // A command it starts again is the long one: it is ended.
-            LONG.end();
+            end_in_window(&members, agent)?;
             Ok(notes_saying(&members, &handle, &words)?
                 .into_iter()
                 .find(|note| note["state"] == "delivered"))
@@ -432,7 +460,7 @@ fn drive_worker(mut members: Members, agent: &str, log: &Log) -> Result<Account>
         DELIVERED,
         LOOK,
         || {
-            LONG.end();
+            end_in_window(&members, agent)?;
             Ok(result_for(&members, number)?.filter(|result| result["state"] == "delivered"))
         },
     )?;
@@ -454,16 +482,17 @@ fn drive_worker(mut members: Members, agent: &str, log: &Log) -> Result<Account>
     );
     let told_once = notes_saying(&members, &handle, &words)?.len() == 1;
     case.check("told once", told_once, "one note, not more");
+    end_in_window(&members, agent)?;
     case.closed(members.close());
     Ok(case)
 }
 
 /// Runs the check on `plan`, `drive` its case: what the case saw, which holds when
-/// every check of it did.
+/// every check of it did. A case ends what its window runs of the command, in the
+/// window's own tree, before it closes the project; one that fails on the way leaves it
+/// to end by itself, in five minutes.
 fn run(plan: &Plan, log: &Log, drive: impl FnOnce(Members) -> Result<Account>) -> Account {
     let opened = Members::open(plan, Path::new(FAKE_AGENT), log).and_then(drive);
-    // What the window was inside is ended for good, whatever came of the run.
-    LONG.end();
     opened.unwrap_or_else(|failed| {
         let mut case = Account::new();
         case.fail(failed);

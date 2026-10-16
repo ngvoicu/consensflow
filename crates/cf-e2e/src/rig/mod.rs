@@ -17,9 +17,9 @@
 //! ([`Rig::screen`]), what the daemon wrote as it went ([`Rig::events`]) and the
 //! keys it pressed, and when ([`Rig::presses`]).
 //!
-//! On Unix a process that is none of any window's runs beside them (`stranger`), and
-//! a rig that ends with it gone fails: the pane host ends a window's own and nothing of
-//! the machine's.
+//! A process that is none of any window's runs beside them (`stranger`), and a rig
+//! that finds it ended by something else when it ends fails: the pane host ends a
+//! window's own and nothing of the machine's.
 
 mod forget;
 mod install;
@@ -29,7 +29,6 @@ mod observe;
 mod project;
 mod report;
 mod route;
-#[cfg(unix)]
 mod stranger;
 mod wait;
 
@@ -52,7 +51,6 @@ pub(crate) use observe::events_of;
 
 use forget::Forget;
 use route::Shared;
-#[cfg(unix)]
 use stranger::Stranger;
 
 /// How long the daemon or the pane host has to answer a request of the case's.
@@ -210,8 +208,7 @@ pub struct Rig {
     shared: Arc<Shared>,
     daemon: Daemon,
     host: Spawned,
-    /// A process none of the windows' is, which has to run still when they are ended.
-    #[cfg(unix)]
+    /// A process none of the windows' is, which nothing may have ended when they are.
     stranger: Stranger,
     /// What the rig takes away of the machine's own Claude folder when it
     /// ends, where its stand-ins write there ([`Config::stand_ins_write_in`]).
@@ -321,6 +318,13 @@ impl Rig {
             Ok(find().is_some())
         })?;
         find().ok_or_else(|| Error::Daemon(format!("the window {id} was opened, and is gone")))
+    }
+
+    /// The process the pane host opened the program of the window `pane` (`id`,
+    /// `generation`) as, for the daemon: the `pid` of its answer to that `pane.open`.
+    /// None until it answered, or where it said none.
+    pub fn window_process(&self, pane: &Value) -> Option<u32> {
+        window_process_in(&self.shared.seen().host, pane)
     }
 
     /// Every `pane.exit` the pane host told so far, in order: which window
@@ -476,11 +480,11 @@ impl Rig {
             )));
         }
         // What the pane host ended, it ended as the windows' own: a process that is
-        // none of theirs, started beside it, runs on.
-        #[cfg(unix)]
-        if !self.stranger.runs() {
+        // none of theirs, started beside it, was ended by nothing (it may have left
+        // of itself, which is no end the pane host gave it).
+        if let Some(how) = self.stranger.ended_by_another() {
             return Err(Error::Daemon(format!(
-                "a process that is none of any window's was ended with them{}",
+                "a process that is none of any window's was ended with them ({how}){}",
                 self.what_they_said()
             )));
         }
@@ -525,6 +529,23 @@ impl Drop for Rig {
     }
 }
 
+/// The process the pane host said, among the frames it wrote (`frames`), it opened the
+/// program of the window `pane` (`id`, `generation`) as: the `pid` of its answer to the
+/// `pane.open` of that window, the last where it answered more than once.
+fn window_process_in(frames: &[Value], pane: &Value) -> Option<u32> {
+    frames
+        .iter()
+        .rev()
+        .find(|frame| {
+            frame["kind"] == "res"
+                && frame["op"] == "pane.open"
+                && frame["body"]["id"] == pane["id"]
+                && frame["body"]["generation"] == pane["generation"]
+        })
+        .and_then(|frame| frame["body"]["pid"].as_u64())
+        .and_then(|pid| u32::try_from(pid).ok())
+}
+
 /// The records of the conversation `session` that the stand-in agent wrote
 /// under the Claude config folder `config`, whole ones only.
 fn recorded(config: &str, session: &str) -> String {
@@ -538,6 +559,30 @@ fn recorded(config: &str, session: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_windows_process_is_the_pid_of_the_hosts_answer_to_its_open() {
+        use serde_json::json;
+        let answer = |id: &str, generation: u64, pid: Option<u32>| {
+            let mut body = json!({ "ok": true, "id": id, "generation": generation });
+            if let Some(pid) = pid {
+                body["pid"] = json!(pid);
+            }
+            json!({ "v": 1, "id": "n-3", "kind": "res", "op": "pane.open", "body": body })
+        };
+        let frames = [
+            answer("p1-zeus", 1, Some(100)),
+            json!({ "v": 1, "id": "n-4", "kind": "res", "op": "pane.snapshot", "body": { "id": "p1-zeus", "generation": 2, "pid": 7 } }),
+            answer("p1-zeus", 2, Some(200)),
+            answer("p1-hera", 1, None),
+        ];
+        let pane = |id: &str, generation: u64| json!({ "id": id, "generation": generation });
+        assert_eq!(window_process_in(&frames, &pane("p1-zeus", 1)), Some(100));
+        assert_eq!(window_process_in(&frames, &pane("p1-zeus", 2)), Some(200));
+        // A host that said no process of it, and a window it never answered the open of.
+        assert_eq!(window_process_in(&frames, &pane("p1-hera", 1)), None);
+        assert_eq!(window_process_in(&frames, &pane("p1-zeus", 3)), None);
+    }
 
     #[test]
     fn a_conversation_is_read_a_whole_record_at_a_time_while_the_agent_is_still_writing_it() {

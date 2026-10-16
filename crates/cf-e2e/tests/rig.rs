@@ -44,9 +44,9 @@
 //! wake-up calls, which nudge a chief at rest; its two cases wait out a real
 //! minute each, the least a wake-up may wait. So is `described`: a project the
 //! human renames and writes a line under, which are in the event file and which no
-//! window is told of. So is `stranger` (Unix's): the rig keeps a process that is
-//! none of any window's beside them, which every case that ends a window holds the
-//! pane host to leaving running.)
+//! window is told of. So is `stranger`: the rig keeps a process that is none of any
+//! window's beside them, which every case that ends a window holds the pane host to
+//! leaving as it was, and whose end of its own is no end the pane host gave it.)
 //!
 //! The cases take turns ([`cf_e2e::serial`]): each starts a daemon and a pane
 //! host of its own, with windows in real terminals, and the waits are timed.
@@ -104,7 +104,6 @@ mod stand_in_codex;
 mod stand_ins;
 #[path = "rig/start_suspended.rs"]
 mod start_suspended;
-#[cfg(unix)]
 #[path = "rig/stranger.rs"]
 mod stranger;
 #[path = "rig/waiting_notes.rs"]

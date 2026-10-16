@@ -11,6 +11,7 @@ use tempfile::TempDir;
 use super::*;
 use crate::testing::EPOCH_MS;
 
+mod modes;
 mod prompts;
 
 const MINUTE: i64 = 60_000;
@@ -142,21 +143,54 @@ fn a_log_that_shrank_was_replaced_and_is_read_from_its_start_with_nothing_carrie
 }
 
 #[test]
-fn a_log_emptied_keeps_its_offset_so_one_written_again_is_read_on_from_where_the_old_one_ended() {
+fn a_log_emptied_was_replaced_so_one_written_again_is_read_from_its_start() {
     let log = Log::new();
     log.write(&shows("native-a"));
     assert_eq!(log.shown().as_deref(), Some("native-a"));
-    let offset = log.wire.state.borrow().offset;
     log.write("");
+    assert_eq!(
+        log.shown().as_deref(),
+        Some("native-a"),
+        "it said nothing new"
+    );
+    assert_eq!(log.wire.state.borrow().offset, 0);
+    // Longer than the old log by a byte: read whole, where Node read that byte alone
+    // (Astra on the B1 fix).
+    log.write(&shows("native-bb"));
+    assert_eq!(log.shown().as_deref(), Some("native-bb"));
+}
+
+#[test]
+fn a_log_that_holds_other_bytes_than_were_read_was_replaced_whether_it_grew_or_not() {
+    // Another log as long as the one read, or longer: what it begins with is not what was
+    // read, and it is read from its start.
+    let log = Log::new();
+    log.write(&shows("native-a"));
     assert_eq!(log.shown().as_deref(), Some("native-a"));
+    log.write(&format!("{}{}", shows("native-b"), says("hello")));
+    assert_eq!(log.shown().as_deref(), Some("native-b"));
+    // One rewritten at its size past its first kilobyte: written to, and what it holds
+    // is not what was read.
+    let log = Log::new();
+    let first = says(&"x".repeat(2_048));
+    log.write(&format!("{first}{}", shows("native-a")));
+    assert_eq!(log.shown().as_deref(), Some("native-a"));
+    log.write(&format!("{first}{}", shows("native-b")));
+    // Later than the look found it, whatever the file system's clock.
+    let file = fs::File::options()
+        .write(true)
+        .open(log.wire.path())
+        .unwrap();
+    let written = file.metadata().unwrap().modified().unwrap();
+    file.set_modified(written + std::time::Duration::from_secs(5))
+        .unwrap();
+    assert_eq!(log.shown().as_deref(), Some("native-b"));
+    // Looked at again unchanged, it is the same log.
+    assert_eq!(log.shown().as_deref(), Some("native-b"));
     assert_eq!(
         log.wire.state.borrow().offset,
-        offset,
-        "nothing was read, so the offset stays"
+        fs::metadata(log.wire.path()).unwrap().len()
     );
-    // Longer than the old log by a byte: only that byte is read.
-    log.write(&shows("native-bb"));
-    assert_eq!(log.shown().as_deref(), Some("native-a"));
 }
 
 #[test]

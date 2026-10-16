@@ -1,7 +1,8 @@
 //! What the check says to a window, and the words it looks for in what comes
 //! back: the shape of the messages the daemon gives a member, the role a member's
 //! session starts with, and the words of Devin's own that tell a tool call was not
-//! run.
+//! run. The note a resumed window is told its turn was cut is the engine's own
+//! (`live::ask::cut_note`), not a copy of it.
 
 use serde_json::Value;
 
@@ -48,18 +49,6 @@ pub fn delivery(message: u32, task: u32, kind: &str, from: &str, body: &str) -> 
 /// arrived: the space after the number keeps m-1 from being found in m-12.
 pub fn marker_of(message: u32) -> String {
     format!("[ConsensFlow m-{message} ")
-}
-
-/// What a member is told when the quit cut its turn (`cf-engine`'s `resume`: the
-/// note the human's Resume writes for a window with a task in hand).
-pub fn cut_note(message: u32, task: u32) -> String {
-    delivery(
-        message,
-        task,
-        "note",
-        "ConsensFlow",
-        &format!("ConsensFlow quit while you were working on T-{task}. Go on where you stopped."),
-    )
 }
 
 /// What a launch's config says, as a line: the names of its keys, and for its
@@ -139,14 +128,6 @@ mod tests {
         assert_eq!(marker_of(10), "[ConsensFlow m-10 ");
         // The number's end is in the marker: m-1 is not found in m-12.
         assert!(!delivery(12, 1, "note", "@chief", "x").contains(&marker_of(1)));
-    }
-
-    #[test]
-    fn the_note_a_cut_member_is_told_is_the_one_the_resume_writes() {
-        assert_eq!(
-            cut_note(2, 7),
-            "[ConsensFlow m-2 · T-7 · note from ConsensFlow]\nConsensFlow quit while you were working on T-7. Go on where you stopped."
-        );
     }
 
     #[test]

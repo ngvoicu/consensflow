@@ -90,6 +90,8 @@ rig-background-pause = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", 
 rig-background-grace = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "background_work::a_job_that_ignores"]
 # The process the rig keeps outside its windows, which it finds still running when it closes.
 rig-stranger = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "stranger::"]
+# How the rig tells the stranger's own end from one it was given.
+e2e-lib-stranger = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "rig::stranger::"]
 # T-15's shape: a command that never exits, and the final answer of the worker that left it.
 regression-never-exits = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_command_that_never_exits"]
 # The same of a Devin worker whose command goes on reporting on its wire after its turn ended (zeewin, 2026-10-14).
@@ -205,7 +207,7 @@ runs = ["engine-dispatcher-background"]
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
 find = '''
-        let idle = record.delivery.borrow().delivering.is_none()
+        let free = record.delivery.borrow().delivering.is_none()
             && observed.settled'''
 replace = '''
         if participant.role == "chief" && observed.settled {
@@ -214,7 +216,7 @@ replace = '''
                 self.seams.background.end(&pane).await;
             }
         }
-        let idle = record.delivery.borrow().delivering.is_none()
+        let free = record.delivery.borrow().delivering.is_none()
             && observed.settled'''
 
 [[plant]]
@@ -1203,8 +1205,32 @@ runs = ["rig-stranger"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/rig/mod.rs"
-find = '        if !self.stranger.runs() {'
-replace = '        if false && !self.stranger.runs() {'
+find = '        if let Some(how) = self.stranger.ended_by_another() {'
+replace = '        if let Some(how) = self.stranger.ended_by_another().filter(|_| false) {'
+
+# A stranger that slept ten minutes ran out by itself under a live suite, and the rig
+# took that for an end the pane host gave it (2026-10-15): its own end is no such end.
+[[plant]]
+name = "background rig: a stranger that left of itself is taken for one ended with the windows"
+meant = "a_stranger_that_left_of_itself_is_not_taken_for_one_ended_with_the_windows"
+runs = ["rig-stranger"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/stranger.rs"
+find = '        given(status.code(), signal, self.released)'
+replace = '        given(status.code(), signal, self.released).or(Some(format!("{status}")))'
+
+# An end a job gave it can say 0 on Windows (Astra on the B1 fix): any end before the rig
+# ended its input was given, whatever its code.
+[[plant]]
+name = "background rig: a stranger that ended with 0 before its input ended is taken for one that left of itself"
+meant = "any_end_before_its_input_ended_was_given_whatever_its_code"
+runs = ["e2e-lib-stranger"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/stranger.rs"
+find = '    if !released {'
+replace = '    if false && !released {'
 
 # What an ending names of what the bound refuses: the turn's work the chain of processes
 # proved and nothing shows is the window's is not signalled, and is not dropped: the chief is

@@ -1,7 +1,8 @@
 //! What the pane host ends, when a rig ends it, is the windows' own and nothing of the
 //! machine's: the rig keeps a process that is none of any window's beside them, and a rig
-//! that closes with it gone fails (Unix's). Every case that ends a window holds the pane
-//! host to that; this holds the check itself.
+//! that closes with it ended by something else fails. Every case that ends a window holds
+//! the pane host to that; this holds the check itself: an end given is told, and an end
+//! of the stranger's own (which a rig that lives long must not take for one given) is not.
 
 use cf_e2e::process::{is_alive, signal, Signal};
 
@@ -32,5 +33,17 @@ fn a_rig_that_finds_the_process_that_is_none_of_any_windows_ended_says_so_when_i
             .is_some_and(|said| said.contains("none of any window's was ended")),
         "{told:?}"
     );
+    Ok(())
+}
+
+/// A stranger that slept ten minutes ran out by itself under a live suite, and the rig
+/// took it for one the pane host ended (2026-10-15): one that left of itself is no end
+/// the pane host gave it.
+#[test]
+fn a_stranger_that_left_of_itself_is_not_taken_for_one_ended_with_the_windows() -> Outcome {
+    let mut rig = crate::rig()?;
+    assert!(rig.stranger_leaves(secs(10))?, "it left of itself");
+
+    rig.close()?;
     Ok(())
 }

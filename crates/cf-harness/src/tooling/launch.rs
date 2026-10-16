@@ -51,6 +51,35 @@ pub(super) fn devin_launch(question: &Value) -> Result<Value, String> {
     prepared(question, &services)
 }
 
+/// What the daemon's readiness reads of a Devin window's wire log (the question's
+/// `wire`): the conversation it shows, the mode that conversation is in, and the
+/// command the window is given before it is ready for work, where it is given one
+/// (`/bypass`, where the wire says the normal mode).
+pub(super) fn devin_ready(question: &Value) -> Result<Value, String> {
+    let read = crate::devin::wire_readiness(Path::new(text(question, "wire")?))?;
+    Ok(json!({ "shown": read.shown, "mode": read.mode, "command": read.command }))
+}
+
+/// The hooks ConsensFlow adds to the owner's in a Devin launch (`member`: a member's,
+/// whose question tool is answered from the board; else the chief's), its session hook
+/// run by the question's `cf`: each event with the entries added, as the launch's config
+/// has them written.
+pub(super) fn devin_hooks(question: &Value) -> Result<Value, String> {
+    let cf = bundle_of(Path::new(text(question, "cf")?)).pane_cf;
+    let member = question
+        .get("member")
+        .and_then(Value::as_bool)
+        .ok_or("the question does not say whether the launch is a member's")?;
+    let mut hooks = Map::new();
+    for (event, entry) in crate::devin::added_hooks(&cf, member) {
+        hooks.insert(
+            event.to_owned(),
+            json!(entry.into_iter().collect::<Vec<_>>()),
+        );
+    }
+    Ok(Value::Object(hooks))
+}
+
 /// The launch the question names, prepared by Devin's adapter over `services`.
 fn prepared(question: &Value, services: &Services) -> Result<Value, String> {
     let id = LaunchId::new(text(question, "launch")?)

@@ -1,25 +1,28 @@
-//! What each place Devin says anything in says of a tool call that did not run and of a
-//! permission: the window's screen, Devin's store, and the wire log of the launch (the
-//! TUI's words to its agent, and its agent's). A window is watched by looking at the
-//! three, each read on from where the last look left it, and what is new is noted as
-//! a sighting with the last thing the check did before it ([`Trail`]).
+//! What each place Devin says anything in says of a tool call that did not run, of a
+//! permission, and of the mode its session is in: the window's screen (with the marks
+//! Devin's terminal puts on its output, [`Marks`]), Devin's store, and the wire log of
+//! the launch (what its agent tells the TUI: [`crate::wire`]). A window is watched by
+//! looking at the three, each read on from where the last look left it, and what is new
+//! is noted as a sighting with the last thing the check did before it ([`Trail`]).
 
 use std::collections::HashSet;
 use std::path::PathBuf;
+use std::time::Duration;
 
 use cf_e2e::devin_store::{self, Message};
 use cf_e2e::files;
 use cf_e2e::live::members::squash;
 use cf_e2e::live::window::Window;
-use serde_json::Value;
 
+use crate::states::Marks;
 use crate::tools::in_messages;
 use crate::trail::{Sighting, Trail};
+use crate::wire::{in_wire, Modes, WireState};
 use crate::words::find_markers;
 
 /// How much of what was seen a line quotes, and how much of a screen that holds a
 /// window still.
-const EXCERPT: usize = 170;
+pub const EXCERPT: usize = 170;
 const STALLED: usize = 420;
 
 /// What a place said: the words, and what is quoted of them.
@@ -45,34 +48,6 @@ pub fn in_text(text: &str) -> Vec<Said> {
         .collect()
 }
 
-/// What a record of the wire says: the markers it holds, a request for a
-/// permission (its method names one), and the answer to a request that was asked
-/// (a record of the same id with a result or an error). `asked` holds the ids of the
-/// requests not answered yet.
-pub fn in_wire(line: &str, asked: &mut HashSet<String>) -> Vec<Said> {
-    let mut said = in_text(line);
-    let Ok(record) = serde_json::from_str::<Value>(line) else {
-        return said;
-    };
-    let id = record.get("id").map(Value::to_string);
-    let asks = record["method"]
-        .as_str()
-        .is_some_and(|method| method.to_ascii_lowercase().contains("permission"));
-    if asks {
-        asked.extend(id);
-        said.push(("permission request".to_owned(), squash(line, EXCERPT)));
-    } else if let Some(id) = id.filter(|id| asked.contains(id)) {
-        if let Some(answer) = record.get("result").or_else(|| record.get("error")) {
-            asked.remove(&id);
-            said.push((
-                "permission answered".to_owned(),
-                squash(&answer.to_string(), EXCERPT),
-            ));
-        }
-    }
-    said
-}
-
 /// What a window is watched by: its screen as it prints, the messages of its
 /// session in Devin's store and the wire log of the launch, each read on from where
 /// the last look left it.
@@ -82,9 +57,16 @@ pub struct Watch {
     /// How much of the screen was read, in characters, and of the wire, in bytes.
     mark: usize,
     offset: usize,
-    asked: HashSet<String>,
+    state: WireState,
     seen: HashSet<String>,
     pub sightings: Vec<Sighting>,
+    /// What Devin's terminal said it was doing, as it changed.
+    pub marks: Marks,
+    /// What the wire said of the session's config and mode, as it changed.
+    pub modes: Modes,
+    /// The mode the wire last said the session is in, and the first it said.
+    pub mode: Option<String>,
+    pub first_mode: Option<String>,
 }
 
 impl Watch {
@@ -96,10 +78,20 @@ impl Watch {
             wire,
             mark: window.mark(),
             offset: 0,
-            asked: HashSet::new(),
+            state: WireState::default(),
             seen: HashSet::new(),
             sightings: Vec::new(),
+            marks: Marks::default(),
+            modes: Modes::default(),
+            mode: None,
+            first_mode: None,
         }
+    }
+
+    /// How many prompts the TUI put to its agent so far, as its wire says: each a turn
+    /// begun.
+    pub fn prompts(&self) -> usize {
+        self.state.prompts
     }
 
     /// The messages of the window's session as the store has them now: none while
@@ -116,6 +108,7 @@ impl Watch {
     pub fn look(&mut self, window: &Window, trail: &Trail) {
         let printed = window.screen_after(self.mark);
         self.mark += printed.chars().count();
+        self.marks.feed(&printed, trail.at());
         for (saw, excerpt) in in_text(&printed) {
             self.note("screen", saw, excerpt, trail);
         }
@@ -124,7 +117,7 @@ impl Watch {
                 self.note("store", saw, excerpt, trail);
             }
         }
-        for (saw, excerpt) in self.wired() {
+        for (saw, excerpt) in self.wired(trail.at()) {
             self.note("wire", saw, excerpt, trail);
         }
     }
@@ -143,9 +136,9 @@ impl Watch {
         }
     }
 
-    /// What the wire log says that is new: the records written whole since the last
-    /// look.
-    fn wired(&mut self) -> Vec<Said> {
+    /// What the wire log says that is new, at `at`: the records written whole since the
+    /// last look. What it says of the config and the mode is kept, and the rest is given.
+    fn wired(&mut self, at: Duration) -> Vec<Said> {
         let Some(file) = &self.wire else {
             return Vec::new();
         };
@@ -158,10 +151,19 @@ impl Watch {
             return Vec::new();
         };
         self.offset += end + 1;
-        String::from_utf8_lossy(&fresh[..end])
-            .lines()
-            .flat_map(|line| in_wire(line, &mut self.asked))
-            .collect()
+        let mut said = Vec::new();
+        for line in String::from_utf8_lossy(&fresh[..end]).lines() {
+            let wired = in_wire(line, &mut self.state);
+            if let Some(config) = wired.config {
+                self.modes.note(at, config);
+            }
+            if let Some(mode) = wired.mode {
+                self.first_mode.get_or_insert_with(|| mode.clone());
+                self.mode = Some(mode);
+            }
+            said.extend(wired.said);
+        }
+        said
     }
 
     fn note(&mut self, source: &'static str, saw: String, excerpt: String, trail: &Trail) {
@@ -178,7 +180,7 @@ impl Watch {
 
 #[cfg(test)]
 mod tests {
-    use serde_json::json;
+    use serde_json::{json, Value};
 
     use super::*;
 
@@ -189,10 +191,18 @@ mod tests {
             wire: Some(folder.join("wire.jsonl")),
             mark: 0,
             offset: 0,
-            asked: HashSet::new(),
+            state: WireState::default(),
             seen: HashSet::new(),
             sightings: Vec::new(),
+            marks: Marks::default(),
+            modes: Modes::default(),
+            mode: None,
+            first_mode: None,
         }
+    }
+
+    fn at(seconds: u64) -> Duration {
+        Duration::from_secs(seconds)
     }
 
     #[test]
@@ -213,42 +223,6 @@ mod tests {
             "é".repeat(300)
         );
         assert_eq!(in_text(&long).len(), 1);
-    }
-
-    #[test]
-    fn the_wire_says_a_permission_was_asked_and_how_it_was_answered_by_the_id_of_the_request() {
-        let mut asked = HashSet::new();
-        let request = json!({
-            "id": 7, "method": "session/request_permission",
-            "params": { "toolCall": { "title": "run_command" },
-                        "options": [{ "optionId": "allow" }, { "optionId": "reject" }] },
-        })
-        .to_string();
-        let said = in_wire(&request, &mut asked);
-        assert_eq!(said.len(), 1);
-        assert_eq!(said[0].0, "permission request");
-        assert!(said[0].1.contains("run_command"), "{said:?}");
-        assert_eq!(asked.len(), 1);
-        // Another record is no answer; the record of the same id is.
-        let other = json!({ "id": 8, "result": { "ok": true } }).to_string();
-        assert!(in_wire(&other, &mut asked).is_empty());
-        let answer = json!({
-            "id": 7, "result": { "outcome": { "outcome": "selected", "optionId": "reject" } },
-        })
-        .to_string();
-        let said = in_wire(&answer, &mut asked);
-        assert_eq!(said.len(), 1);
-        assert_eq!(said[0].0, "permission answered");
-        assert!(said[0].1.contains("reject"), "{said:?}");
-        assert!(asked.is_empty());
-        // A wire with no word of a permission in it says nothing, and a line that is
-        // no JSON is read for the markers alone.
-        let chunk = json!({ "update": { "sessionUpdate": "agent_message_chunk" } }).to_string();
-        assert!(in_wire(&chunk, &mut asked).is_empty());
-        assert_eq!(
-            in_wire("not json: User skipped this tool call", &mut asked).len(),
-            1
-        );
     }
 
     #[test]
@@ -284,15 +258,55 @@ mod tests {
         let folder = tempfile::tempdir().unwrap();
         let file = folder.path().join("wire.jsonl");
         let mut watch = bare_watch(folder.path());
-        assert!(watch.wired().is_empty(), "no wire yet");
+        assert!(watch.wired(at(1)).is_empty(), "no wire yet");
         let ask = json!({ "id": 1, "method": "session/request_permission" }).to_string();
         files::write(&file, format!("{ask}\n{{\"id\":1,\"res")).unwrap();
-        assert_eq!(watch.wired().len(), 1);
+        assert_eq!(watch.wired(at(2)).len(), 1);
         // The half record is finished and read at the next look, once.
         files::write(&file, format!("{ask}\n{{\"id\":1,\"result\":{{}}}}\n")).unwrap();
-        let said = watch.wired();
+        let said = watch.wired(at(3));
         assert_eq!(said.len(), 1);
         assert_eq!(said[0].0, "permission answered");
-        assert!(watch.wired().is_empty());
+        assert!(watch.wired(at(4)).is_empty());
+    }
+
+    #[test]
+    fn the_modes_the_wire_said_are_kept_with_when_and_the_last_one_is_the_mode() {
+        let folder = tempfile::tempdir().unwrap();
+        let file = folder.path().join("wire.jsonl");
+        let mut watch = bare_watch(folder.path());
+        let line = |value: Value| format!("{value}\n");
+        let config = |mode: &str| {
+            line(json!({ "update": { "sessionUpdate": "config_option_update",
+                "configOptions": [{ "id": "mode", "currentValue": mode }] } }))
+        };
+        files::write(&file, format!("{}{}", config("normal"), config("normal"))).unwrap();
+        assert!(watch.wired(at(1)).is_empty());
+        assert_eq!(watch.mode.as_deref(), Some("normal"));
+        assert_eq!(watch.first_mode.as_deref(), Some("normal"));
+        assert_eq!(watch.modes.len(), 1);
+        files::write(
+            &file,
+            format!(
+                "{}{}{}",
+                config("normal"),
+                config("normal"),
+                config("bypass")
+            ),
+        )
+        .unwrap();
+        assert!(watch.wired(at(5)).is_empty());
+        assert_eq!(watch.mode.as_deref(), Some("bypass"));
+        assert_eq!(
+            watch.first_mode.as_deref(),
+            Some("normal"),
+            "the first stays"
+        );
+        assert_eq!(
+            watch.modes.since(0),
+            "mode=normal +1.0 s, mode=bypass +5.0 s"
+        );
+        assert_eq!(watch.modes.since(1), "mode=bypass +5.0 s");
+        assert_eq!(watch.modes.since(7), "no word of a config or a mode");
     }
 }

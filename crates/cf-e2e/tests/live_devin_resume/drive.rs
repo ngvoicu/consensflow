@@ -1,9 +1,10 @@
 //! One case, step by step: a member's Devin window opened as the daemon opens one,
 //! cut as the app's quit cuts it (`pane.kill`, which the pane host does to each window
 //! as the app quits), opened again on its conversation as the daemon opens it after
-//! the quit (`--resume`, the launch the adapter prepares, with the note that its turn
-//! was cut where the case gives it one), and then asked to write, edit and run `cf`.
-//! What each step saw is said as it came; what Devin does is the result, and the case
+//! the quit (`--resume`, the launch the adapter prepares, with the note the engine
+//! writes that its turn was cut where the case gives it one), brought back as the
+//! case has it ([`crate::back`]), and then asked to write, edit and run `cf`. What
+//! each step saw is said as it came; what Devin does is the result, and the case
 //! holds as long as it could be run.
 
 use std::path::{Path, PathBuf};
@@ -11,20 +12,24 @@ use std::thread::sleep;
 use std::time::{Duration, Instant};
 
 use cf_e2e::devin_store;
+use cf_e2e::live::ask::{self, Interrupt};
 use cf_e2e::live::machine::live_folder_in;
-use cf_e2e::live::members::{squash, Account};
-use cf_e2e::live::window::{Member, Open, Window, READY};
+use cf_e2e::live::members::{squash, Account, Identity, ThisMachine};
+use cf_e2e::live::window::{Member, Open, Window};
 use cf_e2e::live::{keep_requested, secs, until, Installed, Log};
 use cf_e2e::rig::Rig;
-use cf_e2e::{files, Result};
+use cf_e2e::{files, Error, Result};
 use serde_json::Value;
 
-use crate::asks::{deliver, holds, put, Ask, Place, TASK};
-use crate::case::{Case, NOTE};
+use crate::asks::{holds, put, Ask, Place};
+use crate::back;
+use crate::case::{Case, Cut, SECOND};
+use crate::life::Life;
 use crate::outcome::{sightings_said, summary, turn_line, Outcome};
-use crate::scene::{reading, tail, Scene};
-use crate::words::{config_summary, cut_note, marker_of, ROLE};
-use crate::{FOLDER, LONG, SETTLE, WATCH, WORK};
+use crate::scene::Scene;
+use crate::turn::{reading, tail, Turn};
+use crate::words::{config_summary, marker_of};
+use crate::{FOLDER, LONG, WORK};
 
 /// The number of the first ask, and so of the others after it.
 const FIRST_ASK: u32 = 10;
@@ -37,12 +42,29 @@ pub struct Run<'a> {
     /// The folder of the stand-in `cf`, whose log says what ran.
     pub calls: &'a Path,
     pub log: &'a Log,
+    /// What is left of the case's time.
+    pub life: Life,
+    /// The keys that interrupt a turn, as the adapter says them.
+    pub interrupt: Interrupt,
 }
 
-/// What a case came to: what it saw, and the asks it made.
+/// What a case came to: what it saw, the mode the window opened again had (from the
+/// first the wire said to the last), and the asks it made.
 pub struct Done {
     pub account: Account,
+    pub mode: String,
     pub outcomes: Vec<Outcome>,
+}
+
+impl Done {
+    /// A case that has seen nothing yet.
+    pub fn new() -> Self {
+        Self {
+            account: Account::new(),
+            mode: "-".to_owned(),
+            outcomes: Vec::new(),
+        }
+    }
 }
 
 impl Run<'_> {
@@ -81,8 +103,14 @@ impl Run<'_> {
     }
 
     /// A scene of `window`, watched in Devin's store and the wire log of its launch.
-    fn scene<'w>(&'w self, window: &'w Window<'w>) -> Scene<'w> {
-        Scene::new(self.rig, window, self.store(), wire_of(window.argv()))
+    pub fn scene<'w>(&'w self, window: &'w Window<'w>) -> Scene<'w> {
+        Scene::new(
+            self.rig,
+            window,
+            self.store(),
+            wire_of(window.argv()),
+            self.life,
+        )
     }
 }
 
@@ -106,17 +134,27 @@ fn launch_line(window: &Window) -> String {
     format!("{}; {config}", squash(&argv.join(" "), 420))
 }
 
-/// Whether a process of the machine has the long command's mark in its command line.
-fn command_running() -> bool {
-    LONG.named().is_ok_and(|found| !found.is_empty())
+/// Which process the program of the window of `scene` is, read as the window opened:
+/// what descends from it is the window's own tree.
+fn window_process(scene: &Scene) -> Result<Identity> {
+    scene.own.ok_or_else(|| {
+        Error::Daemon(
+            "the window's process could not be told: the pane host said none, or the machine knew none of its number"
+                .to_owned(),
+        )
+    })
 }
 
-/// Ends the long command if the window started it again, and counts it.
-fn end_long(restarts: &mut u32) {
-    if command_running() {
-        LONG.end();
-        *restarts += 1;
-    }
+/// Whether the window of `scene` runs the long command: a process that descends from the
+/// window's own and holds the command's mark. A process outside the window that holds it
+/// (an editor, the worker that runs the check) is none of it. The check looked among all
+/// of the machine's before, with `ps`, which Windows has none of, so no case could run
+/// there (zeewin, 2026-10-16), and which found the worker whose brief quoted the mark.
+/// Nothing of the command is ended: it ends by itself ([`crate::LONG`]).
+pub fn command_running(scene: &Scene) -> Result<bool> {
+    Ok(!LONG
+        .in_window(&ThisMachine, window_process(scene)?)?
+        .is_empty())
 }
 
 /// A tag for this run of the case, which makes the names of its files its own.
@@ -129,19 +167,22 @@ fn new_tag() -> String {
 /// that never came to rest where it was to be cut or asked, cannot be, and what
 /// Devin does with the rest is the result.
 pub fn run(run: &Run, case: Case) -> Done {
-    let mut done = Done {
-        account: Account::new(),
-        outcomes: Vec::new(),
-    };
+    let mut done = Done::new();
     let folder = format!("{FOLDER}-{}", case.name());
     let home = run.rig.var("HOME").unwrap_or_default();
     match live_folder_in(Path::new(home), &folder) {
         Ok(workspace) => {
+            // Its windows go with it, and their pane host ends what is theirs as each closes.
             let outcome = drive(run, case, &folder, &workspace, &mut done);
-            // What a killed window leaves running is ended for good, whatever came of the case.
-            LONG.end();
             if let Err(failed) = outcome {
                 done.account.fail(failed);
+            }
+            // A wait that was cut short by the case's clock says nothing of Devin: the case
+            // could not be run to its end.
+            if run.life.over() {
+                done.account.fail(
+                    "the case ran out of its time (a rig that lives past ten minutes is read as one that lost the process the pane host is to leave be): what it saw is cut short",
+                );
             }
             // What the case made, and the launches' files with the copies of the owner's
             // config, go with it, unless the run is to be looked at.
@@ -163,8 +204,12 @@ fn drive(run: &Run, case: Case, folder: &str, workspace: &Path, done: &mut Done)
         tag: &tag,
     };
     // The window, as the daemon opens a member's: its task is in its prompt file.
-    let first = Member::new("worker", ROLE).first_message(&case.first_message(&tag));
-    let cut = run.window(folder, folder, first, None)?;
+    let cut = run.window(
+        folder,
+        folder,
+        case.member(Some(case.first_message(&tag))),
+        None,
+    )?;
     run.log
         .say(format!("{}: its window is open, on its task", case.name()));
     done.account.say(format!("opened: {}", launch_line(&cut)));
@@ -178,11 +223,14 @@ fn drive(run: &Run, case: Case, folder: &str, workspace: &Path, done: &mut Done)
     };
     drop(scene);
 
-    // The daemon that starts again: the window on the conversation, as it opens it.
+    // The daemon that starts again: the window on the conversation, as it opens it,
+    // with the note the engine writes for it.
+    let (message, task) = Case::note_of();
+    let note = ask::cut_note(message, &[task])?;
     let again = run.window(
         folder,
         &format!("{folder}-again"),
-        case.member_again(),
+        case.member_again(&note),
         Some(&session),
     )?;
     run.log
@@ -190,38 +238,60 @@ fn drive(run: &Run, case: Case, folder: &str, workspace: &Path, done: &mut Done)
     done.account
         .say(format!("opened again: {}", launch_line(&again)));
     let mut scene = run.scene(&again);
-    let mut restarts = 0;
-    come_back(case, &mut scene, &mut restarts, &mut done.account)?;
-    if !at_rest(&mut scene, &mut restarts, &mut done.account) {
-        return Ok(());
-    }
-    ask_all(run, case, &mut scene, &place, done)
+    let came = back::come_back(run, case, &mut scene, &mut done.account);
+    let outcome = match came {
+        Ok(true) => ask_all(run, case, &mut scene, &place, done),
+        Ok(false) => Ok(()),
+        Err(failed) => Err(failed),
+    };
+    done.mode = scene.mode_over_time();
+    // A window that is held by a dialog is told what the app's interrupt does to it.
+    back::release(run, &mut scene, &mut done.account);
+    outcome
 }
 
 /// The window's first turn: a file written with its shell, and then, where it is cut
-/// inside a command, the long one running. Whether it could be had.
+/// inside a command, the long one running (in its second turn, after a first that
+/// ended, where the case has it so). Whether it could be had.
 fn first_turn(case: Case, scene: &mut Scene, place: &Place, said: &mut Account) -> Result<bool> {
     let window = scene.window;
-    if case.in_command() {
-        let started = Instant::now();
-        let running = until(WORK, Duration::from_millis(500), || {
-            scene.look();
-            let _ = window.record();
-            (command_running() || window.closed()).then_some(())
-        });
-        if running.is_none() || window.closed() {
-            said.fail(format!(
-                "the long command was never run in {} s: {}",
-                secs(started.elapsed()),
-                window.tail()
-            ));
-            return Ok(false);
-        }
-    } else {
+    if case.cut != Cut::InFirstTurn {
         let turn = scene.wait_turn(&marker_of(1), WORK, |_, _, _| Ok(()))?;
         if !turn.ended {
             said.fail(turn_line("its first turn did not end", &turn));
             return Ok(false);
+        }
+    }
+    if case.cut == Cut::InSecondTurn {
+        let text = window.given(&Case::second_message())?;
+        scene.paste(&text, format!("paste m-{SECOND}"))?;
+    }
+    if case.in_command() {
+        let started = Instant::now();
+        let running = until(scene.life.cap(WORK), Duration::from_millis(500), || {
+            scene.look();
+            let _ = window.record();
+            match command_running(scene) {
+                Ok(false) if !window.closed() => None,
+                looked => Some(looked),
+            }
+        });
+        match running {
+            Some(Ok(true)) if !window.closed() => {}
+            Some(Err(failed)) => {
+                said.fail(format!(
+                    "the long command could not be looked for: {failed}"
+                ));
+                return Ok(false);
+            }
+            _ => {
+                said.fail(format!(
+                    "the long command was never run in {} s: {}",
+                    secs(started.elapsed()),
+                    scene.rows()
+                ));
+                return Ok(false);
+            }
         }
     }
     let tag = place.tag;
@@ -234,6 +304,11 @@ fn first_turn(case: Case, scene: &mut Scene, place: &Place, said: &mut Account) 
         "before the cut its shell {}: {}",
         if wrote.ran { "ran" } else { "did NOT run" },
         wrote.saw
+    ));
+    said.say(format!(
+        "before the cut: {}; its terminal said: {}",
+        scene.mode_line(),
+        scene.watch.marks.since(0)
     ));
     Ok(true)
 }
@@ -250,7 +325,7 @@ fn quit(case: Case, scene: &mut Scene, said: &mut Account) -> Option<String> {
     scene.look();
     let _ = window.record();
     let Some(session) = window.session() else {
-        said.fail(format!("no conversation was recorded: {}", window.tail()));
+        said.fail(format!("no conversation was recorded: {}", scene.rows()));
         return None;
     };
     let before = scene.watch.sightings.len();
@@ -258,7 +333,6 @@ fn quit(case: Case, scene: &mut Scene, said: &mut Account) -> Option<String> {
     until(Duration::from_secs(30), Duration::from_millis(100), || {
         window.closed().then_some(())
     });
-    LONG.end();
     sleep(Duration::from_secs(1));
     let record = window.record();
     said.say(format!(
@@ -273,100 +347,18 @@ fn quit(case: Case, scene: &mut Scene, said: &mut Account) -> Option<String> {
     Some(session)
 }
 
-/// The window opened again: what it does by itself (it is watched for a while), or
-/// with the note that its turn was cut, which is its first message in its prompt file
-/// or is pasted into it, as the case has it. What came of it is said.
-fn come_back(case: Case, scene: &mut Scene, restarts: &mut u32, said: &mut Account) -> Result<()> {
-    let window = scene.window;
-    let before = window.recorded().len();
-    if case == Case::AfterNote {
-        let turn = scene.wait_turn(&marker_of(NOTE), SETTLE, |_, _, _| {
-            end_long(restarts);
-            Ok(())
-        })?;
-        said.say(turn_line(
-            "its first message was the note, in its prompt file",
-            &turn,
-        ));
-    } else {
-        let opened = Instant::now();
-        let drew = window.still(READY);
-        said.say(format!(
-            "the window {} {} s after it opened",
-            if drew {
-                "drew its screen"
-            } else {
-                "did not hold still"
-            },
-            secs(opened.elapsed())
-        ));
-        let watched = Instant::now();
-        while watched.elapsed() < WATCH {
-            sleep(Duration::from_millis(500));
-            scene.look();
-            end_long(restarts);
-        }
-        said.say(format!(
-            "watched {} s: its screen: {}",
-            WATCH.as_secs(),
-            window.tail()
-        ));
-    }
-    let record = window.record();
-    said.say(format!(
-        "its record: {} → {} items; {}",
-        before,
-        record.as_ref().map_or(0, |record| record.items.len()),
-        reading(record.as_ref())
-    ));
-    if case == Case::AfterNotePasted {
-        let text = window.given(&cut_note(NOTE, TASK))?;
-        let turn = deliver(scene, NOTE, &text, SETTLE, |_| {
-            end_long(restarts);
-            Ok(())
-        })?;
-        said.say(turn_line("the note, pasted", &turn));
-        said.say(format!("what we did to it: {}", scene.trail.since(0)));
-    }
-    if *restarts > 0 {
-        said.say(format!(
-            "it ran the long command again {restarts} time(s), and each was ended"
-        ));
-    }
-    said.say(format!(
-        "coming back: {}",
-        sightings_said(&scene.watch.sightings)
-    ));
-    Ok(())
+/// Whether the window may be asked again once the wait for this ask is over: its turn
+/// ended, or the check ended it (the app's interrupt, for a dialog nobody answered). Any
+/// other turn that did not end holds the window.
+fn free_after(turn: &Turn) -> bool {
+    turn.ended || turn.dialog.is_some()
 }
 
-/// Waits for the window to come to rest after it came back: it has printed nothing
-/// for a while, and the long command is not running (it is ended where the window
-/// started it again). Whether it did; if it did not, the case made no ask, and says why.
-fn at_rest(scene: &mut Scene, restarts: &mut u32, said: &mut Account) -> bool {
-    let window = scene.window;
-    let rested = until(SETTLE, Duration::from_millis(500), || {
-        scene.look();
-        end_long(restarts);
-        (scene.quiet() || window.closed()).then_some(())
-    });
-    if rested.is_none() || window.closed() {
-        said.say(format!(
-            "no ask was made: the window {}: {}",
-            if window.closed() {
-                "ended"
-            } else {
-                "never came to rest"
-            },
-            window.tail()
-        ));
-        return false;
-    }
-    true
-}
-
-/// The asks, one at a time while the window comes to rest after each: what each
-/// came to is said, and a window that is held on one is asked no more.
+/// The asks, one at a time, each once the window has come to rest with nothing of the
+/// long command running (a run of it waited for to end by itself: [`back::settled`]):
+/// what each came to is said. A window held by a dialog nobody answered is let go as the
+/// human's Stop lets it go (the app's interrupt is pressed into it) and asked the next; a
+/// window that is held on an ask otherwise, or never comes to rest, is asked no more.
 fn ask_all(run: &Run, case: Case, scene: &mut Scene, place: &Place, done: &mut Done) -> Result<()> {
     let mut held = false;
     for (at, ask) in Ask::ALL.into_iter().enumerate() {
@@ -377,6 +369,25 @@ fn ask_all(run: &Run, case: Case, scene: &mut Scene, place: &Place, done: &mut D
             ));
             continue;
         }
+        // The first ask comes once the window that was brought back has come to rest.
+        if at > 0 {
+            let (rested, reruns) = back::settled(scene);
+            if reruns > 0 {
+                done.account.say(format!(
+                    "before ask {} it ran the long command again {reruns} time(s), and each was let run to its end",
+                    ask.name()
+                ));
+            }
+            if !rested {
+                done.account.say(format!(
+                    "ask {} was not made: the window did not come to rest: {}",
+                    ask.name(),
+                    scene.rows()
+                ));
+                held = true;
+                continue;
+            }
+        }
         let number = FIRST_ASK + u32::try_from(at).unwrap_or_default();
         run.log
             .say(format!("{}: asking it for {}", case.name(), ask.name()));
@@ -384,11 +395,17 @@ fn ask_all(run: &Run, case: Case, scene: &mut Scene, place: &Place, done: &mut D
         for line in outcome.lines() {
             done.account.say(line);
         }
-        held = !outcome.turn.ended;
+        if !outcome.turn.ended && outcome.turn.dialog.is_some() {
+            back::release(run, scene, &mut done.account);
+        }
+        held = !free_after(&outcome.turn);
         done.outcomes.push(outcome);
     }
-    done.account
-        .say(format!("its screen at the end: {}", scene.window.tail()));
+    done.account.say(format!(
+        "at the end: {}; its screen: {}",
+        scene.mode_line(),
+        scene.rows()
+    ));
     done.account.say(summary(&done.outcomes));
     Ok(())
 }
@@ -417,6 +434,34 @@ mod tests {
         assert_eq!(wire_of(&words(&["/bin/devin", "--model", "m"])), None);
         // A config named last has no file after it.
         assert_eq!(wire_of(&words(&["/bin/devin", "--config"])), None);
+    }
+
+    #[test]
+    fn the_asks_go_on_once_the_turn_ended_or_the_check_let_a_dialog_go() {
+        let turn = Turn {
+            arrived: true,
+            ended: false,
+            closed: false,
+            took: Duration::from_secs(40),
+            held: None,
+            dialog: None,
+        };
+        // A turn that ended frees the window, and so does one the app's interrupt
+        // cancelled for a dialog: the next ask waits for the window to come to rest
+        // (`back::settled`).
+        let ended = Turn {
+            ended: true,
+            ..turn.clone()
+        };
+        let dialog = Turn {
+            dialog: Some("blocked on permission".to_owned()),
+            ..turn.clone()
+        };
+        for free in [ended, dialog] {
+            assert!(free_after(&free));
+        }
+        // One that did not end, and the check did nothing about, holds it.
+        assert!(!free_after(&turn));
     }
 
     #[test]

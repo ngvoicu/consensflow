@@ -25,7 +25,7 @@ use std::time::Duration;
 
 use cf_e2e::live::ask::{self, Item};
 use cf_e2e::live::members::{
-    self, find, Account, LongCommand, Members, Plan, BENCH_BRIEF, STAND_IN_WORKER,
+    self, find, Account, LongCommand, Members, Plan, ThisMachine, BENCH_BRIEF, STAND_IN_WORKER,
 };
 use cf_e2e::live::{text, Log, Who};
 use cf_e2e::Result;
@@ -104,8 +104,16 @@ pub fn run(who: Who, plan: &Plan, stand_in: &Path, log: &Log) -> Result<Finished
     };
     let mut case = Account::new();
     let ran = chief.steps(&mut case);
-    // What the busy command left running is not left.
-    LongCommand::new(MARK).end();
+    // What the busy command left running in the chief's window is not left: what
+    // descends from the window's own process, and nothing outside it.
+    let own = members
+        .window_of("chief")
+        .ok()
+        .flatten()
+        .and_then(|window| members.window_process(&window));
+    if let Some(own) = own {
+        let _ = LongCommand::new(MARK).end_in(&ThisMachine, own);
+    }
     let closed = members.close();
     ran?;
     case.closed(closed);

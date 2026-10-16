@@ -71,6 +71,22 @@ once, with the reason here and in the commit.
   six that say a count of none (−1, `"0"`, `null`) are Node's still. No look was
   added or taken, so the counts in `../records/main.rs` stand.
 
+- **A Devin wire log replaced** (2026-10-16, Astra's and Sol's reviews of the fix of
+  the field report B1). Node took a wire log that shrank for one replaced and read it
+  from its start, and any other for the one it had read: one as long as the last was
+  read as nothing new, and one emptied kept the old offset, so what was written in it
+  next was read from where the old one ended. Since a window's readiness reads the
+  permission mode from it, a configuration rewritten from `bypass` to `normal` at its
+  size was read as `bypass`. The Rust reader takes a log that shrank, that begins
+  with other bytes than the ones it read, or that was written to and did not grow,
+  for another, and reads it from its start, the mode of the one before forgotten
+  (`devin/wire_log.rs`). `launch/` moved for it in one step of each of two
+  scenarios, in both platforms' recordings, which now carry a `kept` difference
+  there: `devin: a wire log replaced by one of the same size is not seen to change`,
+  step 5, and `devin: a wire log emptied and written again is read on from where
+  the old one ended`, step 7, where Node's answer is the window at rest and Rust's
+  the window switched to the conversation the new log names.
+
 ## The launch scenarios
 
 A scenario of `launch/scenarios.<platform>.json` is data, and the Rust player

@@ -7,8 +7,8 @@ use cf_e2e::live::secs;
 
 use crate::asks::{Ask, Proof};
 use crate::case::Case;
-use crate::scene::Turn;
 use crate::trail::Sighting;
+use crate::turn::Turn;
 
 /// How many sightings of an ask the report lists.
 const LISTED: usize = 6;
@@ -26,6 +26,11 @@ pub struct Outcome {
     pub sightings: Vec<Sighting>,
     /// What the check did to the window for it.
     pub keys: String,
+    /// What the window's terminal said it was doing while the ask was waited for.
+    pub states: String,
+    /// Where the window ran the long command again in the turn of the ask: what the check
+    /// did about it.
+    pub again: Option<String>,
 }
 
 impl Outcome {
@@ -47,6 +52,8 @@ impl Outcome {
             format!("its turn ended in {took} s")
         } else if turn.closed {
             format!("its window ended in {took} s: {held}")
+        } else if let Some(dialog) = &turn.dialog {
+            format!("its turn did not end in {took} s: the window is {dialog}; {held}")
         } else if turn.arrived {
             format!("its turn did not end in {took} s: {held}")
         } else {
@@ -73,6 +80,8 @@ impl Outcome {
             },
             self.keys
         ));
+        lines.push(format!("  its terminal said: {}", self.states));
+        lines.extend(self.again.iter().map(|again| format!("  {again}")));
         if self.sightings.is_empty() {
             lines.push("  no word of a permission or of a call that was not run".to_owned());
         }
@@ -111,7 +120,7 @@ pub fn sightings_said(sightings: &[Sighting]) -> String {
 /// How a message and its turn went, as a line.
 pub fn turn_line(what: &str, turn: &Turn) -> String {
     format!(
-        "{what}: it {}, and its turn {} in {} s{}",
+        "{what}: it {}, and its turn {} in {} s{}{}",
         if turn.arrived {
             "showed in its record"
         } else {
@@ -119,51 +128,65 @@ pub fn turn_line(what: &str, turn: &Turn) -> String {
         },
         if turn.ended { "ended" } else { "did NOT end" },
         secs(turn.took),
+        turn.dialog
+            .as_ref()
+            .map_or_else(String::new, |dialog| format!("; the window is {dialog}")),
         turn.held
             .as_ref()
             .map_or_else(String::new, |held| format!("; it was held: {held}"))
     )
 }
 
-/// What the asks came to: how many calls ran, and where the first refusal was seen.
+/// What the asks came to: how many calls ran, how many were held by a dialog nobody
+/// answered, and where the first refusal was seen.
 pub fn summary(outcomes: &[Outcome]) -> String {
     let ran = outcomes.iter().filter(|outcome| outcome.ran()).count();
     let skipped = outcomes.iter().filter(|outcome| outcome.skipped()).count();
+    let held = outcomes
+        .iter()
+        .filter(|outcome| outcome.turn.dialog.is_some())
+        .count();
     let first = outcomes
         .iter()
         .flat_map(|outcome| outcome.sightings.iter())
         .find(|sighting| sighting.is_skip());
     format!(
-        "summary: {ran} of {} calls ran; {skipped} came back skipped{}",
+        "summary: {ran} of {} calls ran; {skipped} came back skipped; {held} held by a permission dialog{}",
         outcomes.len(),
         first.map_or_else(String::new, |sighting| format!(
-            "; the first was seen {}",
+            "; the first skip was seen {}",
             sighting.line()
         ))
     )
 }
 
-/// What the window was let do in a case, as a row of the table that ends the run:
-/// each ask with whether its call ran, was skipped, or did not run; `-` for one that
-/// was not made.
-pub fn matrix_row(case: Case, outcomes: &[Outcome]) -> String {
-    let cells: Vec<String> = Ask::ALL
-        .iter()
-        .map(|ask| {
-            let state =
-                outcomes
-                    .iter()
-                    .find(|outcome| outcome.ask == *ask)
-                    .map_or("-", |outcome| match (outcome.ran(), outcome.skipped()) {
-                        (true, false) => "ran",
-                        (true, true) => "ran (a skip was seen)",
-                        (false, true) => "SKIPPED",
-                        (false, false) => "NOT run",
-                    });
-            format!("{} {state}", ask.name())
-        })
-        .collect();
-    format!("{:<18} {}", case.name(), cells.join(", "))
+/// What the window was let do in a case, as a row of the table that ends the run: the
+/// mode the window opened again had (`mode`), and each ask with whether its call ran,
+/// was skipped, was held by a permission dialog nobody answered, or did not run; `-`
+/// for one that was not made.
+pub fn matrix_row(case: Case, mode: &str, outcomes: &[Outcome]) -> String {
+    let cells: Vec<String> =
+        Ask::ALL
+            .iter()
+            .map(|ask| {
+                let state = outcomes.iter().find(|outcome| outcome.ask == *ask).map_or(
+                    "-",
+                    |outcome| match (
+                        outcome.ran(),
+                        outcome.skipped(),
+                        outcome.turn.dialog.is_some(),
+                    ) {
+                        (true, false, _) => "ran",
+                        (true, true, _) => "ran (a skip was seen)",
+                        (false, true, _) => "SKIPPED",
+                        (false, false, true) => "HELD by a dialog",
+                        (false, false, false) => "NOT run",
+                    },
+                );
+                format!("{} {state}", ask.name())
+            })
+            .collect();
+    format!("{:<24} {:<16} {}", case.name(), mode, cells.join(", "))
 }
 
 #[cfg(test)]
@@ -196,6 +219,7 @@ mod tests {
             closed: false,
             took: Duration::from_millis(14_200),
             held: None,
+            dialog: None,
         }
     }
 
@@ -208,6 +232,8 @@ mod tests {
             tools: vec!["run_command answered (exit 0)".to_owned()],
             sightings,
             keys: "paste m-10 (141 chars) +0.0 s".to_owned(),
+            states: "working (Thinking) +0.5 s, done +8.0 s".to_owned(),
+            again: None,
         }
     }
 
@@ -225,6 +251,7 @@ mod tests {
             [
                 "ask shell (m-10): the call RAN: shell-ab12.txt holds \"ran-ab12\"; its turn ended in 14.2 s",
                 "  Devin's record: run_command answered (exit 0); what we did to the window: paste m-10 (141 chars) +0.0 s",
+                "  its terminal said: working (Thinking) +0.5 s, done +8.0 s",
                 "  no word of a permission or of a call that was not run",
             ]
         );
@@ -240,6 +267,7 @@ mod tests {
             closed: false,
             took: Duration::from_secs(180),
             held: Some("the window last printed 170 s ago".to_owned()),
+            dialog: None,
         };
         let skipped = outcome(
             Ask::Shell,
@@ -254,12 +282,61 @@ mod tests {
             "ask shell (m-10): the call did NOT run: shell-ab12.txt is not there; its turn did not end in 180.0 s: the window last printed 170 s ago"
         );
         assert_eq!(
-            lines[2],
+            lines[3],
             "  seen: store \"User skipped this tool call\" at +12.3 s, after Enter again for m-10 +10.4 s: tool: Tool execution was rejected"
         );
         // Six are listed and the rest counted.
-        assert_eq!(lines.len(), 2 + LISTED + 1);
+        assert_eq!(lines.len(), 3 + LISTED + 1);
         assert_eq!(lines.last().map(String::as_str), Some("  and 2 more"));
+    }
+
+    #[test]
+    fn an_ask_whose_window_ran_the_long_command_again_says_so_and_what_was_done_about_it() {
+        let mut asked = outcome(
+            Ask::Shell,
+            proof(true, "shell-ab12.txt holds \"ran-ab12\""),
+            vec![],
+            ended(),
+        );
+        asked.again = Some(
+            "it ran the long command again, and its turn was ended with the app's interrupt after 10.0 s"
+                .to_owned(),
+        );
+        let lines = asked.lines();
+        assert_eq!(
+            lines[3],
+            "  it ran the long command again, and its turn was ended with the app's interrupt after 10.0 s"
+        );
+        assert_eq!(lines.len(), 5);
+    }
+
+    #[test]
+    fn a_turn_held_by_a_dialog_nobody_answered_says_what_the_terminal_said_it_waited_for() {
+        let held = Turn {
+            ended: false,
+            took: Duration::from_millis(31_000),
+            held: Some("the window last printed 0 s ago".to_owned()),
+            dialog: Some("blocked on permission (Running command) since +54.9 s".to_owned()),
+            ..ended()
+        };
+        let asked = outcome(
+            Ask::Shell,
+            proof(false, "shell-ab12.txt is not there"),
+            vec![],
+            held.clone(),
+        );
+        assert_eq!(
+            asked.lines()[0],
+            "ask shell (m-10): the call did NOT run: shell-ab12.txt is not there; its turn did not end in 31.0 s: the window is blocked on permission (Running command) since +54.9 s; the window last printed 0 s ago"
+        );
+        assert_eq!(
+            turn_line("the note, pasted", &held),
+            "the note, pasted: it showed in its record, and its turn did NOT end in 31.0 s; the window is blocked on permission (Running command) since +54.9 s; it was held: the window last printed 0 s ago"
+        );
+        assert_eq!(
+            summary(&[asked]),
+            "summary: 0 of 1 calls ran; 0 came back skipped; 1 held by a permission dialog"
+        );
     }
 
     #[test]
@@ -276,10 +353,10 @@ mod tests {
         let asked = outcome(Ask::Shell, proof(false, "x"), seen, ended());
         let lines = asked.lines();
         assert!(
-            lines[2].starts_with("  seen: store \"User skipped this tool call\" at +12.3 s"),
+            lines[3].starts_with("  seen: store \"User skipped this tool call\" at +12.3 s"),
             "{lines:?}"
         );
-        assert!(lines[3].contains("\"stalled screen\""), "{lines:?}");
+        assert!(lines[4].contains("\"stalled screen\""), "{lines:?}");
         assert_eq!(lines.last().map(String::as_str), Some("  and 2 more"));
     }
 
@@ -291,6 +368,7 @@ mod tests {
             closed: false,
             took: Duration::from_secs(180),
             held: Some("held".to_owned()),
+            dialog: None,
         };
         let said = |turn: Turn| outcome(Ask::Cf, proof(false, "x"), vec![], turn).turn_said();
         assert_eq!(
@@ -342,7 +420,7 @@ mod tests {
     ) {
         assert_eq!(
             summary(&[]),
-            "summary: 0 of 0 calls ran; 0 came back skipped"
+            "summary: 0 of 0 calls ran; 0 came back skipped; 0 held by a permission dialog"
         );
         let all = [
             outcome(Ask::Shell, proof(true, ""), vec![], ended()),
@@ -351,7 +429,7 @@ mod tests {
         ];
         let said = summary(&all);
         assert!(
-            said.starts_with("summary: 1 of 3 calls ran; 1 came back skipped; the first was seen store \"User skipped this tool call\" at +12.3 s, after Enter again for m-10"),
+            said.starts_with("summary: 1 of 3 calls ran; 1 came back skipped; 0 held by a permission dialog; the first skip was seen store \"User skipped this tool call\" at +12.3 s, after Enter again for m-10"),
             "{said}"
         );
     }
@@ -366,12 +444,26 @@ mod tests {
             outcome(Ask::Cf, proof(false, ""), vec![], ended()),
         ];
         assert_eq!(
-            matrix_row(Case::MidTool, &outcomes),
-            "mid-tool           shell ran, write SKIPPED, edit ran (a skip was seen), cf NOT run"
+            matrix_row(Case::ALL[1], "normal", &outcomes),
+            "mid-tool                 normal           shell ran, write SKIPPED, edit ran (a skip was seen), cf NOT run"
         );
         assert_eq!(
-            matrix_row(Case::AtRest, &outcomes[..1]),
-            "at-rest            shell ran, write -, edit -, cf -"
+            matrix_row(Case::ALL[0], "bypass", &outcomes[..1]),
+            "at-rest                  bypass           shell ran, write -, edit -, cf -"
+        );
+        // An ask whose turn a dialog held is told as that, and not as a call that did not run.
+        let held = Turn {
+            ended: false,
+            dialog: Some("blocked on permission".to_owned()),
+            ..ended()
+        };
+        assert_eq!(
+            matrix_row(
+                Case::ALL[1],
+                "normal → bypass",
+                &[outcome(Ask::Shell, proof(false, ""), vec![], held)]
+            ),
+            "mid-tool                 normal → bypass  shell HELD by a dialog, write -, edit -, cf -"
         );
     }
 }

@@ -3,7 +3,8 @@
 //! `--config` is the owner's with ConsensFlow's hooks, its first message is in a
 //! prompt file, and its launch adds the variables that name its wire log and its
 //! role. The adapter writes the launch's files as it prepares it, under the
-//! ConsensFlow home the environment names.
+//! ConsensFlow home the environment names. And what the daemon's readiness makes of
+//! such a window: the mode its wire log says, and what the window is given first.
 
 use std::path::Path;
 
@@ -11,6 +12,35 @@ use serde_json::{json, Value};
 
 use super::{env_object, question, start_of, Start};
 use crate::{Error, Result};
+
+/// What the daemon's readiness reads of a Devin window's wire log.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DevinReady {
+    /// The conversation the window shows, once the log said.
+    pub shown: Option<String>,
+    /// The permission mode it is in, once the log said.
+    pub mode: Option<String>,
+    /// What the window is given before it is ready for work, where it is given one.
+    pub command: Option<String>,
+}
+
+/// What the daemon's readiness reads of the Devin window whose wire log is `wire`.
+pub fn devin_ready(wire: &Path) -> Result<DevinReady> {
+    let answer = question(&json!({ "op": "devin_ready", "wire": wire }))?;
+    let text = |name: &str| answer[name].as_str().map(str::to_owned);
+    Ok(DevinReady {
+        shown: text("shown"),
+        mode: text("mode"),
+        command: text("command"),
+    })
+}
+
+/// The hooks ConsensFlow adds to the owner's in a Devin launch (`member`'s, or the
+/// chief's), its session hook run by `cf`: each event with the entries added, as the
+/// launch's config has them written.
+pub fn devin_hooks(cf: &Path, member: bool) -> Result<Value> {
+    question(&json!({ "op": "devin_hooks", "cf": cf, "member": member }))
+}
 
 /// What the adapter is asked to prepare a member's Devin window from.
 #[derive(Debug, Clone, Copy)]

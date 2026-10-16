@@ -18,8 +18,10 @@
 //!   and that shell ended, so no chain of processes that run leads from it to a shell the
 //!   harness started, and the host ends only what such a chain proves the turn's. The run
 //!   then looks again once the window has closed, and says whether the window's close
-//!   found it (it ends what its tree finds) or it runs on, and ends what still runs, so
-//!   that a run leaves nothing of its own on the machine;
+//!   found it (it ends what its tree finds) or it runs on, and ends what it saw of the
+//!   command in the window's own tree and the jobs the rig's stand-in wrote it started
+//!   ([`choose`]): never a process by what its command line says, so a command a harness
+//!   detached before any look saw it runs on until its seconds are out;
 //! - the command is gone once the task is done;
 //! - and the chief was told, in the note beside the result, that the turn left work
 //!   and that it was ended: a note that says part of what the host proved the turn's still
@@ -32,11 +34,13 @@ use std::path::Path;
 use std::time::Duration;
 
 use cf_e2e::live::members::{
-    self, delivered_result, find, is_over, notes_of_work, Account, Members, Plan,
+    self, delivered_result, end_chosen, find, holding, is_over, notes_of_work, Account, Identity,
+    Machine, Members, Plan, Running, ThisMachine,
 };
 use cf_e2e::live::tree::{self, Proc, Tree};
 use cf_e2e::live::{cut, secs, text, Log, Who};
-use cf_e2e::process::{is_alive, signal, Run, Signal};
+use cf_e2e::process::{is_alive, Run};
+use cf_e2e::rig::Job;
 use cf_e2e::Result as Fallible;
 
 use crate::check::{
@@ -354,9 +358,18 @@ fn observe(
     let mut began: Option<Duration> = None;
     let mut pane: Option<String> = None;
     let mut progress = Progress::default();
+    // What the run ends of the command at its end, once it has seen what came of it: what
+    // it saw of it in the worker's window, each process by which it is ([`choose`]).
+    let mut chosen: Vec<Running> = Vec::new();
     let ended = find(log, "the worker's task to end", WORK, LOOK, || {
         let thread = members.task(number)?;
         let lane = members.lane(agent)?;
+        let own = members
+            .window_in(lane.clone())
+            .and_then(|window| members.window_process(&window));
+        if let Ok(all) = ThisMachine.processes() {
+            choose(&mut chosen, &all, own, &running_jobs(members), wanted);
+        }
         let listing = (!lane["pane"].is_null()).then(|| tree::read(members.rig(), &lane["pane"]));
         progress.say(log, progress_line(number, &thread, &lane, listing.as_ref()));
         left.state = text(&thread["state"]);
@@ -417,12 +430,14 @@ fn observe(
         )?;
     }
     // A command that escaped the ending is the window's close's to find, or nobody's: what
-    // still runs once the window has closed is said, and then ended, so that a run leaves
-    // nothing of its own on the machine.
+    // still runs once the window has closed is said, and then what the run saw of it in the
+    // window is ended, so that a run leaves nothing it can tell its own on the machine. A
+    // command a harness detached before any look saw it in the window runs on, and ends by
+    // itself when its seconds are out: nothing is ended by what its command line says.
     if !left.escaped.is_empty() && exit.is_some() {
         left.after_close = Some(on_the_machine(wanted));
     }
-    end_what_runs_on(wanted);
+    end_chosen(&ThisMachine, &chosen);
 
     let verdict = judge(&left);
     case.say(format!(
@@ -460,21 +475,44 @@ fn observe(
     })
 }
 
-/// Ends what runs the command now, so that a run leaves nothing of its own on the machine.
-/// What is ended is what the machine shows running it at this moment, by its command line:
-/// a number that an earlier look found, and another process took, is not ended.
-fn end_what_runs_on(wanted: &str) {
-    for pid in on_the_machine(wanted)
+/// Adds to `chosen` what of the command the run ends at its end, as the machine lists its
+/// processes now (`all`): what descends from the worker's window's own process `own` and
+/// holds `wanted`, with what it started ([`holding`]); and the processes of the rig's
+/// stand-in jobs that run (`jobs`, the numbers the jobs wrote themselves: one the stand-in
+/// detached has no window to descend from), where the process of the number is the job
+/// still (its command line holds `wanted` too). Each by which process it is, so that one
+/// whose number another takes later is not ended ([`end_chosen`]); a process outside the
+/// window that no job of the rig's wrote is none of it, whatever its command line says.
+fn choose(
+    chosen: &mut Vec<Running>,
+    all: &[Running],
+    own: Option<Identity>,
+    jobs: &[u32],
+    wanted: &str,
+) {
+    let in_window = own.map(|own| holding(all, own, wanted)).unwrap_or_default();
+    let of_jobs = all
         .iter()
-        .filter_map(|line| pid_of(line))
-    {
-        let _ = signal(pid, Signal::Kill);
+        .filter(|process| jobs.contains(&process.identity.pid) && process.command.contains(wanted))
+        .cloned();
+    for one in in_window.into_iter().chain(of_jobs) {
+        if !chosen.iter().any(|known| known.identity == one.identity) {
+            chosen.push(one);
+        }
     }
 }
 
-/// The process a line of [`on_the_machine`] is of: the number it begins with.
-fn pid_of(line: &str) -> Option<u32> {
-    line.split_whitespace().next()?.parse().ok()
+/// The processes of the jobs the rig's stand-in agents started that run: those that have
+/// written their process and neither that they ran to their end nor that they were asked
+/// to end. None where the windows are a harness's.
+fn running_jobs(members: &Members) -> Vec<u32> {
+    members
+        .rig()
+        .jobs("job")
+        .iter()
+        .filter(|job| !job.finished() && !job.released())
+        .map(Job::pid)
+        .collect()
 }
 
 /// The command lines of the machine's processes whose command holds `wanted` now, each

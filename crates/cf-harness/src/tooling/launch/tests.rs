@@ -171,12 +171,38 @@ fn the_config_has_the_hook_that_gives_a_session_its_role_and_a_members_question_
 }
 
 #[test]
+fn the_hooks_consensflow_adds_are_said_as_the_launchs_config_has_them_written() {
+    // A check that kept a launch's hooks to ConsensFlow's by a word in their command kept
+    // an owner's hook that said the word (Sol on the B1 fix, the second look): it keeps
+    // the entries the launch added, as written, which this says.
+    let home = Home::new(DEVIN);
+    home.launch(json!({})).unwrap();
+    let config = home.config();
+    let cf = home.at(&["bundle", "bin", "cf"]);
+    let added = answer(&json!({ "op": "devin_hooks", "cf": cf, "member": true })).unwrap();
+    assert_eq!(added, config["hooks"]);
+    let chief = answer(&json!({ "op": "devin_hooks", "cf": cf, "member": false })).unwrap();
+    assert_eq!(
+        chief,
+        json!({ "SessionStart": config["hooks"]["SessionStart"], "PreToolUse": [] })
+    );
+    assert_eq!(
+        answer(&json!({ "op": "devin_hooks", "cf": cf }))
+            .err()
+            .as_deref(),
+        Some("the question does not say whether the launch is a member's")
+    );
+}
+
+#[test]
 fn a_chiefs_question_tool_is_left_to_devins_own_dialog() {
     let home = Home::new(DEVIN);
     home.launch(json!({ "role": "chief" })).unwrap();
     assert_eq!(home.config()["hooks"]["PreToolUse"], json!([]));
 }
 
+/// The note goes behind `/bypass`, which brings back in full permission a Devin that
+/// resumed the session in its normal mode (B1, 2026-10-15).
 #[test]
 fn a_resumed_launch_names_its_session_and_a_note_it_is_given_goes_in_a_prompt_file() {
     let note = "[ConsensFlow m-2 · T-1 · note from ConsensFlow]\nGo on where you stopped.";
@@ -199,7 +225,10 @@ fn a_resumed_launch_names_its_session_and_a_note_it_is_given_goes_in_a_prompt_fi
         args[args.len() - 2..],
         ["--prompt-file", &shown(&folder.join("prompt.txt"))]
     );
-    assert_eq!(fs::read_to_string(folder.join("prompt.txt")).unwrap(), note);
+    assert_eq!(
+        fs::read_to_string(folder.join("prompt.txt")).unwrap(),
+        format!("/bypass {note}")
+    );
     assert_eq!(launched["session"], "mild-coin");
 }
 

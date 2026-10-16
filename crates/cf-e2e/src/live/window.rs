@@ -75,6 +75,8 @@ pub struct Window<'r> {
     harness: Harness,
     kind: String,
     id: String,
+    /// Its program's process, as the pane host said it opened it.
+    pid: Option<u32>,
     workspace: PathBuf,
     argv: Vec<String>,
     session: RefCell<Option<String>>,
@@ -93,6 +95,12 @@ impl Window<'_> {
     /// Its id, which is its pane's.
     pub fn id(&self) -> &str {
         &self.id
+    }
+
+    /// Its program's process, as the pane host said it opened it (`pane.open`'s `pid`):
+    /// what descends from it is the window's own tree. None where the host did not say.
+    pub fn pid(&self) -> Option<u32> {
+        self.pid
     }
 
     /// Its pane, as the pane host takes it in a request.

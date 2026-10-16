@@ -15,7 +15,7 @@ use super::super::machine::{live_folder_in, Harness, Installed, ISOLATION};
 use super::super::{list, Log};
 use super::{trust_claude, Window};
 use crate::rig::Rig;
-use crate::{cf, Error, Result};
+use crate::{cf, files, Error, Result};
 
 /// The launch the live windows' settings are written for: one id, so each is
 /// written over the last.
@@ -100,6 +100,7 @@ pub struct Member {
     role: String,
     instructions: String,
     message: Option<String>,
+    alone: bool,
 }
 
 impl Member {
@@ -110,7 +111,22 @@ impl Member {
             role: role.to_owned(),
             instructions: instructions.to_owned(),
             message: None,
+            alone: false,
         }
+    }
+
+    /// With none of the owner's own hooks in the copy of their config that the launch
+    /// runs with, but the ones ConsensFlow adds: for a check that asks whether what a
+    /// window does is the harness's, and not a hook's of the machine's.
+    #[must_use]
+    pub fn without_the_owners_hooks(mut self) -> Self {
+        self.alone = true;
+        self
+    }
+
+    /// Whether the launch has none of the owner's hooks.
+    pub fn is_alone(&self) -> bool {
+        self.alone
     }
 
     /// With `message` the window's first, which its launch puts in a prompt file:
@@ -251,6 +267,9 @@ impl<'a> Open<'a> {
                 cf: cf::binary()?,
                 env,
             })?;
+            if member.alone {
+                keep_only_consensflows_hooks(&start.args, cf::binary()?)?;
+            }
             let program = start.command.clone();
             return Ok((start, program));
         }
@@ -345,6 +364,9 @@ impl<'a> Open<'a> {
             harness,
             kind,
             id: self.id.clone(),
+            pid: opened["pid"]
+                .as_u64()
+                .and_then(|pid| u32::try_from(pid).ok()),
             workspace,
             argv,
             session: RefCell::new(session),
@@ -354,6 +376,46 @@ impl<'a> Open<'a> {
             killed: Cell::new(false),
         })
     }
+}
+
+/// Takes every hook entry that is not one ConsensFlow added out of the hooks of `config`:
+/// what is kept is what `added` says the launch added (each event with its entries, as
+/// the launch's config has them written), and an event that has none left goes. A hook
+/// is not ConsensFlow's for what its command says: one kept by a word in its command was
+/// an owner's that said the word, and could refuse a call (Sol on the B1 fix, the second
+/// look). Only the launch's copy of the owner's config is handled, which the adapter
+/// wrote for it: the owner's own is never touched.
+pub(super) fn consensflows_hooks_of(config: &mut Value, added: &Value) {
+    // `config["hooks"]` on a config that has none would make it one that has a null.
+    let Some(events) = config.get_mut("hooks").and_then(Value::as_object_mut) else {
+        return;
+    };
+    events.retain(|event, entries| {
+        let Some(entries) = entries.as_array_mut() else {
+            return false;
+        };
+        let ours = added[event.as_str()]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        entries.retain(|entry| ours.contains(entry));
+        !entries.is_empty()
+    });
+}
+
+/// [`consensflows_hooks_of`] for the copy of the config a member's launch is opened with
+/// (the file the word after `--config` names), its session hook run by `cf`.
+fn keep_only_consensflows_hooks(args: &[String], cf: &Path) -> Result<()> {
+    let file = args
+        .iter()
+        .position(|word| word == "--config")
+        .and_then(|at| args.get(at + 1))
+        .ok_or_else(|| Error::Daemon("the launch has no config of its own".to_owned()))?;
+    let path = Path::new(file);
+    let mut config: Value = serde_json::from_str(&files::read_string(path)?)
+        .map_err(|failed| Error::Daemon(format!("the launch's config is no JSON: {failed}")))?;
+    consensflows_hooks_of(&mut config, &ask::devin_hooks(cf, true)?);
+    files::write(path, config.to_string())
 }
 
 /// The environment a harness is asked where its records are with, for a window in

@@ -21,9 +21,11 @@ use cf_e2e::live::members::squash;
 use cf_e2e::{files, Result};
 use serde_json::Value;
 
+use crate::again::Again;
 use crate::outcome::Outcome;
-use crate::scene::{Scene, Turn, QUIET_MS};
+use crate::scene::{Scene, QUIET_MS};
 use crate::tools::{called, tools_after, Called};
+use crate::turn::Turn;
 use crate::words::{delivery, marker_of};
 
 /// The task every message of the check is about.
@@ -230,13 +232,20 @@ pub fn deliver(
 
 /// Asks the window the `ask` as message `number` ([`deliver`]): what came of it. A
 /// turn that does not end is the result, not a failure, and the window's screen is in
-/// it.
+/// it. A window that goes on with the task it was cut in, and runs the long command
+/// again in the turn of the ask, is let run it to its end, and its turn goes on to the
+/// ask ([`Again`]); it is said to have.
 pub fn put(scene: &mut Scene, place: &Place, ask: Ask, number: u32) -> Result<Outcome> {
     ask.prepare(place)?;
     let body = delivery(number, TASK, "note", "@chief", &ask.body(place.tag));
     let text = scene.window.given(&body)?;
-    let (keys, seen) = (scene.trail.len(), scene.watch.sightings.len());
-    let turn = deliver(scene, number, &text, ASKED, |_| Ok(()))?;
+    let (keys, seen, said) = (
+        scene.trail.len(),
+        scene.watch.sightings.len(),
+        scene.watch.marks.len(),
+    );
+    let mut again = Again::default();
+    let turn = deliver(scene, number, &text, ASKED, |scene| again.look(scene))?;
     let messages = scene.watch.messages(scene.window);
     Ok(Outcome {
         ask,
@@ -246,6 +255,8 @@ pub fn put(scene: &mut Scene, place: &Place, ask: Ask, number: u32) -> Result<Ou
         tools: tools_after(&messages, &marker_of(number)),
         sightings: scene.watch.sightings[seen..].to_vec(),
         keys: scene.trail.since(keys),
+        states: scene.watch.marks.since(said),
+        again: again.said(),
     })
 }
 

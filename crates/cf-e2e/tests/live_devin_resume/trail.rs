@@ -46,6 +46,11 @@ impl Trail {
         self.steps.len()
     }
 
+    /// When the last step was taken, where there was one.
+    pub fn last_at(&self) -> Option<Duration> {
+        self.steps.last().map(|(at, _)| *at)
+    }
+
     /// The steps after the first `from`, as a line, each with its time.
     pub fn since(&self, from: usize) -> String {
         let steps: Vec<String> = self
@@ -124,6 +129,8 @@ mod tests {
             ],
         };
         assert_eq!(trail.len(), 2);
+        assert_eq!(trail.last_at(), Some(ms(10_400)));
+        assert_eq!(Trail::new().last_at(), None);
         assert_eq!(
             trail.since(0),
             "paste m-10 (80 chars) +0.1 s, Enter again +10.4 s"
