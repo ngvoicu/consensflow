@@ -5,14 +5,18 @@ import { chromium, expect, test } from '@playwright/test'
 
 import { tempEnv } from '../../tests/helpers.mjs'
 import { addAgent, agentsServer } from './agents-server.mjs'
-import { serveUi } from './serve-ui.mjs'
+import { refusedByPolicy, serveUi } from './serve-ui.mjs'
 
 /**
  * The board page (TEST-BDC-13), against a stand-in for the app:
  * `daemon_request` answers from an in-page model and records every call, the way
- * the Rust app forwards the page's requests to the core.
+ * the Rust app forwards the page's requests to the core. The page is served
+ * under the app's own Content-Security-Policy, and each test is held to the
+ * policy refusing nothing the page does.
  */
 let ui
+/** What the app's policy refused in the test running. */
+let refused
 
 test.setTimeout(15_000)
 
@@ -21,6 +25,14 @@ test.beforeAll(async () => {
 })
 
 test.afterAll(() => ui?.close())
+
+test.beforeEach(({ page }) => {
+  refused = refusedByPolicy(page)
+})
+
+test.afterEach(() => {
+  expect(refused, "the app's policy refuses nothing the page does").toEqual([])
+})
 
 const at = (minutesAgo) => new Date(Date.now() - minutesAgo * 60_000).toISOString()
 const MEMBER = ['worker', 'advisor', 'reviewer', 'tester']
@@ -4939,6 +4951,7 @@ test('project menu: a right-click on a project opens its menu beside the pointer
     'Rename…',
     'Description…',
     'Project settings…',
+    'Specs…',
   ])
   await expect(projectMenu(page)).toHaveAccessibleName('foundry')
   await expect(itemNamed(page, 'Rename…')).toBeFocused()
@@ -5014,12 +5027,16 @@ test('project menu: Shift+F10 and the context-menu key open it on the project th
   await page.keyboard.press('ArrowDown')
   await expect(itemNamed(page, 'Project settings…')).toBeFocused()
   await page.keyboard.press('ArrowDown')
+  await expect(itemNamed(page, 'Specs…')).toBeFocused()
+  await page.keyboard.press('ArrowDown')
   await expect(itemNamed(page, 'Rename…')).toBeFocused()
   await page.keyboard.press('ArrowUp')
-  await expect(itemNamed(page, 'Project settings…')).toBeFocused()
+  await expect(itemNamed(page, 'Specs…')).toBeFocused()
   await page.keyboard.press('Home')
   await expect(itemNamed(page, 'Rename…')).toBeFocused()
   await page.keyboard.press('End')
+  await expect(itemNamed(page, 'Specs…')).toBeFocused()
+  await page.keyboard.press('ArrowUp')
   await expect(itemNamed(page, 'Project settings…')).toBeFocused()
   await page.keyboard.press('ArrowUp')
   await expect(itemNamed(page, 'Description…')).toBeFocused()
@@ -5581,6 +5598,7 @@ test('project menu: a closed project has Project settings… to open as an open 
     'Rename…',
     'Description…',
     'Project settings…',
+    'Specs…',
   ])
   await expect(itemNamed(page, 'Project settings…')).toBeEnabled()
   await expect(itemNamed(page, 'Rename…')).toBeFocused()
@@ -5589,8 +5607,12 @@ test('project menu: a closed project has Project settings… to open as an open 
   await page.keyboard.press('ArrowDown')
   await expect(itemNamed(page, 'Project settings…')).toBeFocused()
   await page.keyboard.press('ArrowDown')
+  await expect(itemNamed(page, 'Specs…')).toBeFocused()
+  await page.keyboard.press('ArrowDown')
   await expect(itemNamed(page, 'Rename…')).toBeFocused()
   await page.keyboard.press('End')
+  await expect(itemNamed(page, 'Specs…')).toBeFocused()
+  await page.keyboard.press('ArrowUp')
   await expect(itemNamed(page, 'Project settings…')).toBeFocused()
   // Chosen, it shows foundry, as it does for any project the board does not show, and opens
   // the dialog on it.

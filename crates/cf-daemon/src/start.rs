@@ -442,6 +442,7 @@ async fn run(
         engine: Rc::new(Rc::clone(&dispatcher)),
         env: env.clone(),
         kick: Rc::clone(&kick),
+        specs: page::Specs::new(),
     });
     page::register(&bridge, &page, &spawn);
     let exiting = Rc::clone(&dispatcher);

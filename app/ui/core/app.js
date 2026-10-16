@@ -5,6 +5,7 @@ import { NewProjectDialog, ProjectSettingsDialog, SwitchChiefDialog } from './di
 import { Layout } from './layout.js'
 import { ProjectMenu } from './project-menu.js'
 import { SpecsSettings } from './specs-settings.js'
+import { SpecsViewer } from './specs-viewer.js'
 import { TerminalsView } from './terminals.js'
 
 /**
@@ -28,6 +29,7 @@ const projectList = $('#projects')
 const projectTitle = $('#project-title')
 const projectDirectory = $('#project-directory')
 const inboxButton = $('#inbox-button')
+const specsButton = $('#specs-button')
 const projectSettingsButton = $('#project-settings-button')
 const boardRoot = $('#board')
 const stage = $('#stage')
@@ -44,6 +46,10 @@ const state = {
   selected: null,
   board: null,
   inbox: NO_NOTES,
+  // Whether a project's specs folder holds a file (`{ project, present }`), read after its board
+  // and never waited for: whether Specs shows. The daemon stops at the first file, and remembers
+  // it for a moment.
+  specsPresent: null,
   agents: [],
   /** What the app says of specs for every project and the Specmint it bundles, as last read. */
   specs: null,
@@ -406,6 +412,7 @@ async function refresh() {
       }
       state.board = board
       state.inbox = inbox
+      if (selected !== null) void readPresence(selected)
       terminals.reconcile(
         [board, ...others].filter((read) => read !== null),
         new Set(open.map((project) => project.id)),
@@ -427,6 +434,32 @@ async function refresh() {
   return refreshing
 }
 
+/** Each read of whether a specs folder holds a file is numbered: only the last asked is shown. */
+let presenceReads = 0
+/** The read asked for again once the daemon no longer answers it from memory. */
+let presenceAgain = null
+
+/**
+ * Whether the specs folder of project `project` holds a file, which shows the Specs button: read
+ * apart from the board, which never waits for it (a folder on a drive that does not answer would
+ * hold the board, its inbox and its windows until the daemon gave up on it), and shown when it
+ * comes, for the project the board still shows. A folder that cannot be read shows no button. An
+ * answer the daemon gave from memory says when it reads the folder again: it is asked once more
+ * then, so the button never keeps what the folder said before a spec was written.
+ */
+async function readPresence(project) {
+  const read = ++presenceReads
+  clearTimeout(presenceAgain)
+  presenceAgain = null
+  const said = await daemon('specs.present', { project }).catch(() => ({ present: false }))
+  if (read !== presenceReads || state.board?.project.id !== project) return
+  state.specsPresent = { project, present: said.present === true }
+  specsButton.hidden = !state.specsPresent.present
+  if (typeof said.readAgainIn === 'number') {
+    presenceAgain = setTimeout(() => void readPresence(project), said.readAgainIn + 50)
+  }
+}
+
 function render() {
   renderProjects()
   // Everything here is the board's, under the project it was read for.
@@ -443,6 +476,13 @@ function render() {
   const suspended = project?.state === 'suspended'
   main.dataset.suspended = String(suspended)
   projectSettingsButton.disabled = project === null
+  // Specs shows while the project's specs folder holds a file: from the board's first read after
+  // the chief writes its first spec, open or closed, specs on or off (`readPresence`).
+  specsButton.hidden = !(
+    project !== null &&
+    state.specsPresent?.project === project.id &&
+    state.specsPresent.present
+  )
   const lanes = state.board?.lanes ?? []
   if (!lanes.some((lane) => lane.participant.handle === state.focus)) state.focus = 'chief'
   if (state.board === null) {
@@ -599,8 +639,8 @@ function renderProjects() {
 
 // A right-click on a project (or the context-menu key, or Shift+F10, on the one the
 // keyboard is on) opens its menu: rename it, write a line under its name, or open its
-// Project settings (the project is shown first, if the board shows another). An open
-// menu follows each refresh; with its project gone and no other in the list, the
+// Project settings or its specs (the project is shown first, if the board shows another).
+// An open menu follows each refresh; with its project gone and no other in the list, the
 // keyboard goes to New project.
 const projectMenu = new ProjectMenu(
   {
@@ -609,6 +649,7 @@ const projectMenu = new ProjectMenu(
     rename: $('#rename-dialog'),
     describe: $('#describe-dialog'),
     settings: $('#project-settings-dialog'),
+    specs: $('#specs-viewer-dialog'),
     fallback: $('#new-project'),
   },
   {
@@ -617,8 +658,27 @@ const projectMenu = new ProjectMenu(
     act,
     note,
     openSettings: (id) => act(() => openSettings(id)),
+    openSpecs: (id) => openSpecs(id),
   },
 )
+
+// The specs viewer: the specs folder of the project asked for, read through the daemon. The
+// button asks for the project the board shows; the menu for its own, shown first.
+const specsViewer = new SpecsViewer($('#specs-viewer-dialog'), { daemon })
+specsButton.addEventListener('click', () => {
+  const { project } = state.board
+  void specsViewer.open(project.id, project.name)
+})
+
+/** The specs viewer on project `id`, which is shown first if it is not. */
+async function openSpecs(id) {
+  try {
+    if (!(await showProject(id))) return
+    await specsViewer.open(id, state.board.project.name)
+  } catch (cause) {
+    report(cause)
+  }
+}
 
 // The notes are in For you, at the top of the board: a folded board unfolds for them.
 inboxButton.addEventListener('click', () => {

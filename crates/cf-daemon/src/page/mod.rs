@@ -7,8 +7,9 @@
 //! concern has a module of its own: [`projects`], [`staff`] (the agents and the
 //! staff), [`sessions`], [`board`] (and the inbox), [`tasks`], [`messages`],
 //! [`specs`] (what a project says of them), [`app_specs`] (what the app says of
-//! them for every project, and the Specmint it bundles) and [`wake_ups`] (the
-//! human's wake-up calls).
+//! them for every project, and the Specmint it bundles), [`viewer`] (what its
+//! specs folder holds, for the specs viewer) and [`wake_ups`] (the human's
+//! wake-up calls).
 //! What they stand on is [`Page`] and the engine they call ([`Engine`]), a
 //! small trait of what Node's page called on the dispatcher and its five
 //! projections, which the dispatcher is; the saved agents are read from the
@@ -41,6 +42,7 @@ mod sessions;
 mod specs;
 mod staff;
 mod tasks;
+mod viewer;
 mod wake_ups;
 
 use std::cell::RefCell;
@@ -55,19 +57,22 @@ use futures_util::future::LocalBoxFuture;
 use serde_json::{json, Map, Value};
 
 pub use engine::Engine;
+pub use viewer::{Opener, Specs};
 
 use crate::errors::contain;
 use crate::seams::DaemonSpawn;
 
 /// What the page's operations are given: the ledger (borrowed for one call
 /// at a time, never across a wait), the engine, the daemon's environment
-/// (which finds the saved agents and the harnesses), and the kick.
+/// (which finds the saved agents and the harnesses), the kick, and what the
+/// specs viewer is given (its opener, and what it remembers).
 pub struct Page {
     pub ledger: Rc<RefCell<Ledger>>,
     pub engine: Rc<dyn Engine>,
     pub env: Env,
     /// Wakes the dispatcher: what the loop kick does.
     pub kick: Rc<dyn Fn()>,
+    pub specs: Specs,
 }
 
 /// What an operation serves: the fields of its answer, which follow `ok: true`,

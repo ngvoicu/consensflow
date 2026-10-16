@@ -19,6 +19,7 @@
       </div>
       <span class="spacer"></span>
       <button class="quiet-button" id="inbox-button" type="button">Inbox</button>
+      <button class="quiet-button" id="specs-button" type="button" aria-controls="specs-viewer-dialog" hidden>Specs</button>
       <button class="quiet-button" id="project-settings-button" type="button">Project settings</button>
       <button class="primary-button" id="new-project" type="button">New project</button>
       <button class="icon-button" id="settings-button" type="button" aria-label="Settings" title="Settings">
@@ -61,6 +62,7 @@
     <li role="none"><button type="button" role="menuitem" data-action="rename">Rename…</button></li>
     <li role="none"><button type="button" role="menuitem" data-action="describe">Description…</button></li>
     <li role="none"><button type="button" role="menuitem" data-action="settings">Project settings…</button></li>
+    <li role="none"><button type="button" role="menuitem" data-action="specs">Specs…</button></li>
   </ul>
   <dialog id="rename-dialog" class="settings" aria-labelledby="rename-title">
     <form class="dialog-form">
@@ -133,6 +135,25 @@
   </dialog>
   <dialog id="harnesses-dialog" class="screen" aria-label="Harnesses">
     <iframe title="Harnesses" sandbox="allow-forms allow-same-origin allow-scripts" referrerpolicy="no-referrer"></iframe>
+    <form class="dialog-actions" method="dialog">
+      <button class="quiet-button" type="submit" autofocus>Close</button>
+    </form>
+  </dialog>
+  <!-- The specs viewer (core/specs-viewer.js): the project's specs folder, read through the
+       daemon, its tree on the left and the file chosen on the right. -->
+  <dialog id="specs-viewer-dialog" class="screen specs-viewer" aria-labelledby="specs-viewer-title">
+    <header class="specs-head">
+      <h2 class="specs-title" id="specs-viewer-title">Specs</h2>
+      <span class="specs-folder"></span>
+      <span class="spacer"></span>
+      <button class="quiet-button" type="button" name="specs-refresh">Refresh</button>
+    </header>
+    <p class="specs-hint">HTML specs and mockups open in your browser, outside ConsensFlow.</p>
+    <p class="specs-cut" role="status" hidden></p>
+    <div class="specs-body">
+      <nav class="specs-tree" aria-label="The specs folder"></nav>
+      <section class="specs-file" aria-label="The file chosen"></section>
+    </div>
     <form class="dialog-actions" method="dialog">
       <button class="quiet-button" type="submit" autofocus>Close</button>
     </form>
