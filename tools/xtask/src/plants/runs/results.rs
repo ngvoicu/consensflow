@@ -5,18 +5,23 @@
 //! - nextest's JUnit report: a `<testcase>` for each test, failed where it holds a
 //!   `<failure>` or an `<error>`, and by its test binary (`classname`).
 //! - Node's report, which the plants' own reporter of Node's tests writes
-//!   (`reporters/node.mjs`): a line of JSON for each test that ended, named by its
-//!   own title and those of the tests it is in, and whether its own code failed;
-//!   then a line that the run ended. A test file that failed whole is a test named
-//!   by its path.
-//! - Playwright's JSON report: every test of every suite and its status
-//!   (`unexpected` is a failure), named from its first group on; the errors that
-//!   came outside every test (`errors`).
+//!   (`reporters/node.mjs`): a line of JSON for each test registered that ended,
+//!   named by its own title and those of the tests it is in, and how it ended; then
+//!   a line that the run ended. A test file that failed whole is a test named by
+//!   its path, which the line says it is.
+//! - Playwright's JSON report: every test of every suite and its status in each
+//!   project it ran in (`unexpected` is a failure), named from its first group on,
+//!   one test however many projects ran it; the errors that came outside every test
+//!   (`errors`).
 //!
 //! A report is whole or it is an error: one cut short (no end to its root, or no
 //! last line) says nothing of the tests it did not get to. A test that was skipped,
 //! or marked to do (Node runs a test to do, and it may fail), neither failed nor
-//! passed: it is left out.
+//! passed: it is left out; so is a test of Node's that ended for what is not its
+//! own code (cancelled by its parent, aborted, its hook failed).
+//!
+//! Each test of `Results` is one test registered: two of a name and place are two
+//! tests, which the name cannot tell apart.
 
 use quick_xml::events::{BytesStart, Event};
 use quick_xml::Reader;
@@ -39,24 +44,10 @@ pub struct Test {
     pub at: String,
     /// The file it is written in, where the reporter says (Node).
     pub file: Option<String>,
+    /// Whether it is a test file Node says ended whole, as a test of its own named
+    /// by its path: none of the file's tests, nor a test of it.
+    pub whole: bool,
     pub failed: bool,
-}
-
-impl Test {
-    /// Whether this is a test file Node says ended whole, as a test of its own:
-    /// named by its path, which is the file it says it is in.
-    pub fn is_whole_file(&self) -> bool {
-        self.file
-            .as_ref()
-            .is_some_and(|file| file.ends_with(self.name.as_str()) && is_test_file(&self.name))
-    }
-}
-
-/// Whether `name` is named as a test file is: a path to a script.
-fn is_test_file(name: &str) -> bool {
-    [".mjs", ".cjs", ".js", ".mts", ".cts", ".ts"]
-        .iter()
-        .any(|extension| name.ends_with(extension))
 }
 
 impl Results {
@@ -77,12 +68,12 @@ impl Results {
     pub fn files_that_ran_none(&self) -> Vec<&str> {
         self.tests
             .iter()
-            .filter(|whole| whole.is_whole_file() && whole.failed)
+            .filter(|whole| whole.whole && whole.failed)
             .filter(|whole| {
                 !self
                     .tests
                     .iter()
-                    .any(|test| !test.is_whole_file() && test.file == whole.file)
+                    .any(|test| !test.whole && test.file == whole.file)
             })
             .map(|whole| whole.name.as_str())
             .collect()
@@ -151,6 +142,7 @@ fn testcase(element: &BytesStart<'_>) -> Result<Test, String> {
         name: attribute("name")?.ok_or("a <testcase> with no name")?,
         at: attribute("classname")?.unwrap_or_default(),
         file: None,
+        whole: false,
         failed: false,
     })
 }
@@ -167,9 +159,21 @@ struct NodeLine {
     line: Option<u64>,
     column: Option<u64>,
     #[serde(default)]
-    failed: bool,
-    #[serde(default)]
-    skipped: bool,
+    whole: bool,
+    ended: Option<Ended>,
+}
+
+/// How a test of Node's ended, as the plants' reporter says.
+#[derive(Deserialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+enum Ended {
+    Passed,
+    /// Its own code failed.
+    Failed,
+    Skipped,
+    Todo,
+    /// It ended for what is not its own code.
+    Cancelled,
 }
 
 /// The tests of the report of the plants' reporter of Node's tests, each named by
@@ -180,20 +184,23 @@ pub fn node(report: &str) -> Result<Results, String> {
     for (number, text) in report.lines().enumerate() {
         let read: NodeLine =
             serde_json::from_str(text).map_err(|cause| format!("line {}: {cause}", number + 1))?;
-        if ended || (read.end != read.path.is_empty()) {
+        let test = !read.end && !read.path.is_empty() && read.ended.is_some();
+        let end = read.end && read.path.is_empty() && read.ended.is_none();
+        if ended || !(test || end) {
             return Err(format!("line {}: not a test, nor the end", number + 1));
         }
         ended = read.end;
-        if read.end || read.skipped {
+        let Some(how @ (Ended::Passed | Ended::Failed)) = read.ended else {
             continue;
-        }
+        };
         let file = read.file.unwrap_or_default();
         let place = |at: Option<u64>| at.map(|at| at.to_string()).unwrap_or_default();
         tests.push(Test {
             name: read.path.join(" › "),
             at: format!("{file}:{}:{}", place(read.line), place(read.column)),
             file: Some(file),
-            failed: read.failed,
+            whole: read.whole,
+            failed: how == Ended::Failed,
         });
     }
     if !ended {
@@ -235,7 +242,9 @@ pub fn playwright(json: &str) -> Result<Results, String> {
 }
 
 /// The tests of a suite of Playwright's report and of the suites in it, each named
-/// by `groups` (the titles of the suites around it, the file's left out) and its own.
+/// by `groups` (the titles of the suites around it, the file's left out) and its own:
+/// one test for each spec, which failed where it failed in a project, and is left
+/// out where it was skipped in every project it was given to.
 fn suite(suite: &serde_json::Value, groups: &[String], tests: &mut Vec<Test>) {
     for spec in suite["specs"].as_array().into_iter().flatten() {
         let title = spec["title"].as_str().unwrap_or_default();
@@ -251,18 +260,23 @@ fn suite(suite: &serde_json::Value, groups: &[String], tests: &mut Vec<Test>) {
             spec["line"],
             spec["column"]
         );
-        for test in spec["tests"].as_array().into_iter().flatten() {
-            let status = test["status"].as_str().unwrap_or_default();
-            if status == "skipped" {
-                continue;
-            }
-            tests.push(Test {
-                name: name.clone(),
-                at: at.clone(),
-                file: None,
-                failed: status == "unexpected",
-            });
+        let statuses: Vec<&str> = spec["tests"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|test| test["status"].as_str().unwrap_or_default())
+            .filter(|status| *status != "skipped")
+            .collect();
+        if statuses.is_empty() {
+            continue;
         }
+        tests.push(Test {
+            name,
+            at,
+            file: None,
+            whole: false,
+            failed: statuses.contains(&"unexpected"),
+        });
     }
     for inner in suite["suites"].as_array().into_iter().flatten() {
         let mut deeper = groups.to_vec();

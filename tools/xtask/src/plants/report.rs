@@ -180,12 +180,27 @@ pub fn tail(output: &str, count: usize) -> &str {
         .map_or(output, |(at, _)| &output[at..])
 }
 
-/// How many plants were caught of those chosen, and how many were unstable, where any were.
-pub fn totals(caught: usize, chosen: usize, unstable: usize) -> String {
-    match unstable {
-        0 => format!("{caught} of {chosen} plants caught"),
-        _ => format!("{caught} of {chosen} plants caught, {unstable} unstable"),
+/// How many plants were caught of those chosen and run here, how many were unstable,
+/// and how many were for other systems and skipped, where any were.
+pub fn totals(caught: usize, run: usize, unstable: usize, skipped: usize) -> String {
+    let mut said = format!("{caught} of {run} plants caught");
+    if unstable > 0 {
+        said.push_str(&format!(", {unstable} unstable"));
     }
+    if skipped > 0 {
+        said.push_str(&format!(", {skipped} skipped (platform)"));
+    }
+    said
+}
+
+/// The line of a plant for systems other than `here`, which is not run: neither caught
+/// nor missed.
+pub fn skipped(name: &str, platforms: &[String], here: &str) -> String {
+    format!(
+        "{:<16} {name}: for {}, and this is {here}",
+        "SKIPPED (platform)",
+        platforms.join(", ")
+    )
 }
 
 #[cfg(test)]

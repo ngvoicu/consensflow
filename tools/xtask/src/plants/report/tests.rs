@@ -187,7 +187,15 @@ fn the_tail_of_a_text_is_its_last_characters_whole() {
 }
 
 #[test]
-fn the_count_says_how_many_of_those_chosen_were_caught_and_how_many_were_unstable() {
-    assert_eq!(totals(14, 15, 0), "14 of 15 plants caught");
-    assert_eq!(totals(13, 15, 2), "13 of 15 plants caught, 2 unstable");
+fn the_count_says_how_many_of_those_chosen_were_caught_and_how_many_were_unstable_or_skipped() {
+    assert_eq!(totals(14, 15, 0, 0), "14 of 15 plants caught");
+    assert_eq!(totals(13, 15, 2, 0), "13 of 15 plants caught, 2 unstable");
+    assert_eq!(
+        totals(71, 71, 0, 2),
+        "71 of 71 plants caught, 2 skipped (platform)"
+    );
+    assert_eq!(
+        skipped("a Mac says when", &["macos".into()], "windows"),
+        "SKIPPED (platform) a Mac says when: for macos, and this is windows"
+    );
 }

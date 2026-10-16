@@ -60,14 +60,14 @@ fn a_file_that_is_not_as_it_was_after_it_is_put_back_is_said_with_where_its_copy
     let (_folder, context) = checkout();
     let copy = context.path("copy");
     fs::write(&copy, "not what it was").unwrap();
-    let mut planting = Planting {
+    fs::write(context.path("src/a.rs"), "ONE\ntwo\n").unwrap();
+    let planting = Planting {
         copies: vec![Copy {
             path: context.path("src/a.rs"),
             copy: copy.clone(),
             original: b"one\ntwo\n".to_vec(),
             planted: "ONE\ntwo\n".into(),
         }],
-        restored: false,
     };
     let said = planting.restore().unwrap_err();
     assert_eq!(
@@ -79,7 +79,82 @@ fn a_file_that_is_not_as_it_was_after_it_is_put_back_is_said_with_where_its_copy
         )
     );
     // What it was is not in the copy, so what is written there is all there is.
-    assert!(!planting.restored);
+    assert_eq!(text(&context, "src/a.rs"), "not what it was");
+}
+
+#[test]
+fn a_file_that_cannot_be_put_back_leaves_none_of_the_others_planted_and_each_is_said() {
+    let (_folder, context) = checkout();
+    fs::write(context.path("src/c.rs"), "five\n").unwrap();
+    let saved = tempfile::tempdir().unwrap();
+    let three = plant(
+        "p",
+        &[
+            ("src/a.rs", "one", "1"),
+            ("src/b.rs", "three", "3"),
+            ("src/c.rs", "five", "5"),
+        ],
+        &[("x", false)],
+    );
+    let planting = Planting::make(saved.path(), three.planted(&context).unwrap()).unwrap();
+    // A run made the first file a folder: it cannot be written, and the others can.
+    fs::remove_file(context.path("src/a.rs")).unwrap();
+    fs::create_dir(context.path("src/a.rs")).unwrap();
+    let said = planting.restore().unwrap_err().to_string();
+    assert!(
+        said.starts_with(&format!(
+            "could not put back {}: ",
+            context.path("src/a.rs").display()
+        )),
+        "{said}"
+    );
+    assert_eq!(text(&context, "src/b.rs"), "three\n");
+    assert_eq!(text(&context, "src/c.rs"), "five\n");
+    // Two that cannot: both are said.
+    fs::write(context.path("src/b.rs"), "3\n").unwrap();
+    fs::remove_file(context.path("src/c.rs")).unwrap();
+    fs::create_dir(context.path("src/c.rs")).unwrap();
+    let said = planting.restore().unwrap_err().to_string();
+    assert!(
+        said.starts_with("2 files of a plant are not as they were:\n"),
+        "{said}"
+    );
+    for path in ["src/a.rs", "src/c.rs"] {
+        assert!(
+            said.contains(&format!(
+                "could not put back {}: ",
+                context.path(path).display()
+            )),
+            "{said}"
+        );
+    }
+    assert_eq!(text(&context, "src/b.rs"), "three\n");
+    // Once it can be, dropped, the plant is put back whole.
+    fs::remove_dir(context.path("src/a.rs")).unwrap();
+    fs::remove_dir(context.path("src/c.rs")).unwrap();
+    drop(planting);
+    assert_eq!(text(&context, "src/a.rs"), "one\ntwo\n");
+    assert_eq!(text(&context, "src/c.rs"), "five\n");
+}
+
+#[test]
+fn what_a_run_without_the_plant_writes_into_a_file_it_touches_is_put_back_at_the_end() {
+    // A command that, run without the plant to confirm a catch, writes the planted file
+    // again (a fixture it makes, from what it holds): the plant's end puts it back.
+    let (_folder, context) = checkout();
+    let family = family(vec![upper("p: one", &[("regenerates", false)])]);
+    let mut runner = Fake::new(|_| {
+        if planted(&context) {
+            fails("m::the_test")
+        } else {
+            fs::write(context.path("src/a.rs"), "made again\n").unwrap();
+            passes()
+        }
+    });
+    let (status, said) = go(&context, &family, &mut runner);
+    assert_eq!(status.unwrap(), 0, "{said}");
+    assert_eq!(runner.ran, ["regenerates", "regenerates"]);
+    assert_eq!(text(&context, "src/a.rs"), "one\ntwo\n");
 }
 
 #[test]
@@ -168,7 +243,7 @@ fn every_file_of_a_plant_is_copied_in_the_order_it_names_them_and_every_one_goes
         ],
         &[("x", false)],
     );
-    let mut planting = Planting::make(saved.path(), family.planted(&context).unwrap()).unwrap();
+    let planting = Planting::make(saved.path(), family.planted(&context).unwrap()).unwrap();
     assert_eq!(text(&context, "src/b.rs"), "III\n");
     assert_eq!(text(&context, "src/a.rs"), "1\ntwo\n");
     assert_eq!(
@@ -201,7 +276,7 @@ fn a_file_put_back_is_no_older_than_the_plant_made_in_it_so_that_what_was_built_
         .unwrap();
     let saved = tempfile::tempdir().unwrap();
     let plant = plant("p", &[("src/a.rs", "one", "1")], &[("x", false)]);
-    let mut planting = Planting::make(saved.path(), plant.planted(&context).unwrap()).unwrap();
+    let planting = Planting::make(saved.path(), plant.planted(&context).unwrap()).unwrap();
     let planted = fs::metadata(&path).unwrap().modified().unwrap();
     planting.restore().unwrap();
     let restored = fs::metadata(&path).unwrap().modified().unwrap();

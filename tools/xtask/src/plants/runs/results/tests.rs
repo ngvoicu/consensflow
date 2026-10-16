@@ -102,34 +102,51 @@ fn a_test_failed_where_its_report_holds_a_failure_and_never_for_what_it_printed(
     );
 }
 
-/// What the plants' reporter of Node's tests wrote under Node 26.8.1 (2026-10-16) for
-/// three test files, the checkout's path cut to `/checkout/`:
+/// What the plants' reporter of Node's tests wrote under Node 26.8.1 (2026-10-16), its
+/// tests run in Node's process (`--test-isolation=none`), for four test files, the
+/// checkout's path cut to `/checkout/`:
+/// - `broken.test.mjs`, whose test passed before the file threw after an `await`,
+///   which Node does not say in one process;
 /// - `cases.test.mjs`: a test to do that fails; a test skipped; a parent test that
 ///   fails after its subtest passed; a parent whose subtest fails; a group; a test
 ///   named `says &quot;hi&quot;` that fails and one named `says "hi"` that passes; a
 ///   name of two lines; a title in two groups, the second inside another and failing,
-///   printing a line of this report that names `says "hi"` failed;
+///   printing a line of this report that names `says "hi"` failed; a test to do and a
+///   test skipped, each with an empty reason, that fail; a subtest its parent cancelled
+///   by throwing while it waited; a test aborted by its signal; a test out of its time;
+///   a loop that registers one title in one place twice, the second failing; a subtest
+///   that a helper module registers, failing;
 /// - `empty.test.mjs`, which loads and holds no test;
-/// - `broken.test.mjs`, whose test passed before the file threw after an `await`.
-const NODE: &str = r#"{"path":["before it throws"],"file":"/checkout/tests/broken.test.mjs","line":3,"column":1,"failed":false,"skipped":false}
-{"path":["tests/broken.test.mjs"],"file":"/checkout/tests/broken.test.mjs","line":1,"column":1,"failed":true,"skipped":false}
-{"path":["a todo that fails"],"file":"/checkout/tests/cases.test.mjs","line":3,"column":1,"failed":true,"skipped":true}
-{"path":["a skip"],"file":"/checkout/tests/cases.test.mjs","line":7,"column":1,"failed":false,"skipped":true}
-{"path":["a parent that fails itself","its child passes"],"file":"/checkout/tests/cases.test.mjs","line":10,"column":11,"failed":false,"skipped":false}
-{"path":["a parent that fails itself"],"file":"/checkout/tests/cases.test.mjs","line":9,"column":1,"failed":true,"skipped":false}
-{"path":["a parent whose child fails","its failing child"],"file":"/checkout/tests/cases.test.mjs","line":15,"column":11,"failed":true,"skipped":false}
-{"path":["a parent whose child fails"],"file":"/checkout/tests/cases.test.mjs","line":14,"column":1,"failed":false,"skipped":false}
-{"path":["a group","passes inside"],"file":"/checkout/tests/cases.test.mjs","line":21,"column":3,"failed":false,"skipped":false}
-{"path":["a group"],"file":"/checkout/tests/cases.test.mjs","line":20,"column":1,"failed":false,"skipped":false}
-{"path":["says &quot;hi&quot;"],"file":"/checkout/tests/cases.test.mjs","line":24,"column":1,"failed":true,"skipped":false}
-{"path":["says \"hi\""],"file":"/checkout/tests/cases.test.mjs","line":28,"column":1,"failed":false,"skipped":false}
-{"path":["two\nlines"],"file":"/checkout/tests/cases.test.mjs","line":30,"column":1,"failed":false,"skipped":false}
-{"path":["first group","same title"],"file":"/checkout/tests/cases.test.mjs","line":33,"column":3,"failed":false,"skipped":false}
-{"path":["first group"],"file":"/checkout/tests/cases.test.mjs","line":32,"column":1,"failed":false,"skipped":false}
-{"path":["second group","inner","same title"],"file":"/checkout/tests/cases.test.mjs","line":38,"column":5,"failed":true,"skipped":false}
-{"path":["second group","inner"],"file":"/checkout/tests/cases.test.mjs","line":37,"column":3,"failed":false,"skipped":false}
-{"path":["second group"],"file":"/checkout/tests/cases.test.mjs","line":36,"column":1,"failed":false,"skipped":false}
-{"path":["tests/empty.test.mjs"],"file":"/checkout/tests/empty.test.mjs","line":1,"column":1,"failed":false,"skipped":false}
+/// - `missing.test.mjs`, which imports a module that is not there.
+const NODE: &str = r#"{"path":["before it throws"],"file":"/checkout/tests/broken.test.mjs","line":3,"column":1,"whole":false,"ended":"passed"}
+{"path":["a todo that fails"],"file":"/checkout/tests/cases.test.mjs","line":5,"column":1,"whole":false,"ended":"todo"}
+{"path":["a skip"],"file":"/checkout/tests/cases.test.mjs","line":9,"column":1,"whole":false,"ended":"skipped"}
+{"path":["a parent that fails itself","its child passes"],"file":"/checkout/tests/cases.test.mjs","line":12,"column":11,"whole":false,"ended":"passed"}
+{"path":["a parent that fails itself"],"file":"/checkout/tests/cases.test.mjs","line":11,"column":1,"whole":false,"ended":"failed"}
+{"path":["a parent whose child fails","its failing child"],"file":"/checkout/tests/cases.test.mjs","line":17,"column":11,"whole":false,"ended":"failed"}
+{"path":["a parent whose child fails"],"file":"/checkout/tests/cases.test.mjs","line":16,"column":1,"whole":false,"ended":"passed"}
+{"path":["a group","passes inside"],"file":"/checkout/tests/cases.test.mjs","line":23,"column":3,"whole":false,"ended":"passed"}
+{"path":["a group"],"file":"/checkout/tests/cases.test.mjs","line":22,"column":1,"whole":false,"ended":"passed"}
+{"path":["says &quot;hi&quot;"],"file":"/checkout/tests/cases.test.mjs","line":26,"column":1,"whole":false,"ended":"failed"}
+{"path":["says \"hi\""],"file":"/checkout/tests/cases.test.mjs","line":30,"column":1,"whole":false,"ended":"passed"}
+{"path":["two\nlines"],"file":"/checkout/tests/cases.test.mjs","line":32,"column":1,"whole":false,"ended":"passed"}
+{"path":["first group","same title"],"file":"/checkout/tests/cases.test.mjs","line":35,"column":3,"whole":false,"ended":"passed"}
+{"path":["first group"],"file":"/checkout/tests/cases.test.mjs","line":34,"column":1,"whole":false,"ended":"passed"}
+{"path":["second group","inner","same title"],"file":"/checkout/tests/cases.test.mjs","line":40,"column":5,"whole":false,"ended":"failed"}
+{"path":["second group","inner"],"file":"/checkout/tests/cases.test.mjs","line":39,"column":3,"whole":false,"ended":"passed"}
+{"path":["second group"],"file":"/checkout/tests/cases.test.mjs","line":38,"column":1,"whole":false,"ended":"passed"}
+{"path":["a todo of no reason that fails"],"file":"/checkout/tests/cases.test.mjs","line":47,"column":1,"whole":false,"ended":"todo"}
+{"path":["a skip of no reason that fails"],"file":"/checkout/tests/cases.test.mjs","line":51,"column":1,"whole":false,"ended":"skipped"}
+{"path":["a parent that throws while its child waits","a child its parent cancelled"],"file":"/checkout/tests/cases.test.mjs","line":56,"column":5,"whole":false,"ended":"cancelled"}
+{"path":["a parent that throws while its child waits"],"file":"/checkout/tests/cases.test.mjs","line":55,"column":1,"whole":false,"ended":"failed"}
+{"path":["aborted"],"file":"/checkout/tests/cases.test.mjs","line":62,"column":1,"whole":false,"ended":"cancelled"}
+{"path":["out of its time"],"file":"/checkout/tests/cases.test.mjs","line":64,"column":1,"whole":false,"ended":"failed"}
+{"path":["registered twice"],"file":"/checkout/tests/cases.test.mjs","line":67,"column":3,"whole":false,"ended":"passed"}
+{"path":["registered twice"],"file":"/checkout/tests/cases.test.mjs","line":67,"column":3,"whole":false,"ended":"failed"}
+{"path":["the parent of a helper’s child","a child a helper registers"],"file":"/checkout/tests/helper.mjs","line":2,"column":12,"whole":false,"ended":"failed"}
+{"path":["the parent of a helper’s child"],"file":"/checkout/tests/cases.test.mjs","line":72,"column":1,"whole":false,"ended":"passed"}
+{"path":["tests/empty.test.mjs"],"file":"/checkout/tests/empty.test.mjs","line":1,"column":1,"whole":true,"ended":"passed"}
+{"path":["tests/missing.test.mjs"],"file":"/checkout/tests/missing.test.mjs","line":1,"column":1,"whole":true,"ended":"failed"}
 {"end":true}
 "#;
 
@@ -140,7 +157,6 @@ fn node_names_a_test_by_the_titles_it_is_in_and_its_own_exactly_and_a_failure_by
         said(&read.tests),
         [
             ("before it throws", false),
-            ("tests/broken.test.mjs", true),
             // A test to do, failed or not, and a test skipped are neither.
             ("a parent that fails itself › its child passes", false),
             // A parent's own failure is its own; a parent whose subtest failed did not.
@@ -158,22 +174,45 @@ fn node_names_a_test_by_the_titles_it_is_in_and_its_own_exactly_and_a_failure_by
             ("second group › inner › same title", true),
             ("second group › inner", false),
             ("second group", false),
+            // A test to do or skipped for no reason is neither; a test its parent
+            // cancelled, or that was aborted, ended for what is not its own code; a test
+            // out of its time failed.
+            ("a parent that throws while its child waits", true),
+            ("out of its time", true),
+            // Registered twice in one place, a test is two.
+            ("registered twice", false),
+            ("registered twice", true),
+            // A subtest is named by the test it is in, wherever it was registered.
+            (
+                "the parent of a helper’s child › a child a helper registers",
+                true
+            ),
+            ("the parent of a helper’s child", false),
             ("tests/empty.test.mjs", false),
+            ("tests/missing.test.mjs", true),
         ]
     );
     assert_eq!(
         names(&read.failed()),
         [
-            "tests/broken.test.mjs",
             "a parent that fails itself",
             "a parent whose child fails › its failing child",
             "says &quot;hi&quot;",
             "second group › inner › same title",
+            "a parent that throws while its child waits",
+            "out of its time",
+            "registered twice",
+            "the parent of a helper’s child › a child a helper registers",
+            "tests/missing.test.mjs",
         ]
     );
-    // Each test is told from another of its name by its place.
-    assert_eq!(read.tests[11].at, "/checkout/tests/cases.test.mjs:33:3");
-    assert_eq!(read.tests[13].at, "/checkout/tests/cases.test.mjs:38:5");
+    // Each test is told from another of its name by its place, which a test registered
+    // twice shares.
+    assert_eq!(read.tests[10].at, "/checkout/tests/cases.test.mjs:35:3");
+    assert_eq!(read.tests[12].at, "/checkout/tests/cases.test.mjs:40:5");
+    assert_eq!(read.tests[17].at, "/checkout/tests/cases.test.mjs:67:3");
+    assert_eq!(read.tests[18].at, read.tests[17].at);
+    assert_eq!(read.tests[19].at, "/checkout/tests/helper.mjs:2:12");
     assert_eq!(
         read.tests[0].file.as_deref(),
         Some("/checkout/tests/broken.test.mjs")
@@ -184,10 +223,15 @@ fn node_names_a_test_by_the_titles_it_is_in_and_its_own_exactly_and_a_failure_by
 #[test]
 fn a_node_test_file_ran_no_test_where_it_failed_whole_and_its_own_tests_are_none() {
     let read = node(NODE).unwrap();
-    // The broken file ran a test before it threw; the empty file did not fail.
-    assert!(read.tests[1].is_whole_file());
-    assert!(read.tests[16].is_whole_file());
-    assert!(read.files_that_ran_none().is_empty());
+    // The file that threw after its test is not said at all; the empty file did not fail.
+    let whole: Vec<&str> = read
+        .tests
+        .iter()
+        .filter(|test| test.whole)
+        .map(|test| test.name.as_str())
+        .collect();
+    assert_eq!(whole, ["tests/empty.test.mjs", "tests/missing.test.mjs"]);
+    assert_eq!(read.files_that_ran_none(), ["tests/missing.test.mjs"]);
     let alone = |lines: &[&str]| {
         let mut report = lines.join("\n");
         report.push_str("\n{\"end\":true}\n");
@@ -197,21 +241,20 @@ fn a_node_test_file_ran_no_test_where_it_failed_whole_and_its_own_tests_are_none
     // passed and one that threw after a top-level `await`, before it had a test; the
     // checkout's path cut to `/checkout/`. The other file's test is none of its own.
     let two = alone(&[
-        r#"{"path":["passes in another file"],"file":"/checkout/tests/passes.test.mjs","line":3,"column":1,"failed":false,"skipped":false}"#,
-        r#"{"path":["tests/tla.test.mjs"],"file":"/checkout/tests/tla.test.mjs","line":1,"column":1,"failed":true,"skipped":false}"#,
+        r#"{"path":["passes in another file"],"file":"/checkout/tests/passes.test.mjs","line":3,"column":1,"whole":false,"ended":"passed"}"#,
+        r#"{"path":["tests/tla.test.mjs"],"file":"/checkout/tests/tla.test.mjs","line":1,"column":1,"whole":true,"ended":"failed"}"#,
     ]);
     assert_eq!(two.files_that_ran_none(), ["tests/tla.test.mjs"]);
-    let broken = r#"{"path":["tests/broken.test.mjs"],"file":"/checkout/tests/broken.test.mjs","line":1,"column":1,"failed":true,"skipped":false}"#;
-    let empty = r#"{"path":["tests/empty.test.mjs"],"file":"/checkout/tests/empty.test.mjs","line":1,"column":1,"failed":false,"skipped":false}"#;
-    assert_eq!(
-        alone(&[broken]).files_that_ran_none(),
-        ["tests/broken.test.mjs"]
-    );
-    assert!(alone(&[empty]).files_that_ran_none().is_empty());
-    // A test of its own named as a file is, in a file of another name, is a test.
-    let named = r#"{"path":["config.mjs"],"file":"/checkout/tests/a.test.mjs","line":1,"column":1,"failed":true,"skipped":false}"#;
+    // A file that failed whole after a test of its own ran ran a test.
+    let after = alone(&[
+        r#"{"path":["ran first"],"file":"/checkout/tests/a.test.mjs","line":3,"column":1,"whole":false,"ended":"passed"}"#,
+        r#"{"path":["tests/a.test.mjs"],"file":"/checkout/tests/a.test.mjs","line":1,"column":1,"whole":true,"ended":"failed"}"#,
+    ]);
+    assert!(after.files_that_ran_none().is_empty());
+    // A test of its own named as a file is, which the reporter does not say is one, is a test.
+    let named = r#"{"path":["tests/a.test.mjs"],"file":"/checkout/tests/a.test.mjs","line":1,"column":1,"whole":false,"ended":"failed"}"#;
     let named = alone(&[named]);
-    assert!(!named.tests[0].is_whole_file());
+    assert!(!named.tests[0].whole);
     assert!(named.files_that_ran_none().is_empty());
 }
 
@@ -229,7 +272,13 @@ fn a_report_of_node_s_that_is_cut_short_or_is_not_one_is_an_error() {
         format!("not json\n{ended}"),
         format!("{{}}\n{ended}"),
         "{\"path\":[\"a\"],\"end\":true}\n".to_owned(),
-        format!("{{\"path\":[\"a\"],\"more\":1}}\n{ended}"),
+        "{\"ended\":\"passed\",\"end\":true}\n".to_owned(),
+        format!("{{\"path\":[\"a\"]}}\n{ended}"),
+        format!("{{\"path\":[],\"ended\":\"failed\"}}\n{ended}"),
+        format!("{{\"path\":[\"a\"],\"ended\":\"lost\"}}\n{ended}"),
+        format!("{{\"path\":[\"a\"],\"ended\":\"passed\",\"more\":1}}\n{ended}"),
+        // A line of the reporter of round 3, which said no more than failed and skipped.
+        format!("{{\"path\":[\"a\"],\"failed\":true,\"skipped\":false}}\n{ended}"),
     ] {
         assert!(node(&wrong).is_err(), "{wrong}");
     }
@@ -371,17 +420,36 @@ fn playwright_says_each_test_named_from_its_first_group_on_and_whether_it_failed
         said(&read.tests),
         [
             ("another fails", true),
-            ("a group › the meant one", false),
-            // A test that failed and then passed, run again, is no failure.
+            // The same test, run in two projects, is one test; in the second it failed and
+            // then passed, run again, which is no failure.
             ("a group › the meant one", false),
         ]
     );
     assert_eq!(names(&read.failed()), ["another fails"]);
     assert!(read.outside.is_empty(), "{:?}", read.outside);
-    // The same test, run in two projects, is one test in one place.
     assert_eq!(read.tests[0].at, "prints.spec.mjs:11:1");
     assert_eq!(read.tests[1].at, "prints.spec.mjs:4:3");
-    assert_eq!(read.tests[2].at, read.tests[1].at);
+    // A test failed where it failed in one project of those it ran in; one skipped in
+    // every project is left out.
+    let projects = |statuses: &[&str]| {
+        let tests: Vec<String> = statuses
+            .iter()
+            .map(|status| format!(r#"{{ "results": [], "status": "{status}" }}"#))
+            .collect();
+        let json = format!(
+            r#"{{ "suites": [{{ "title": "a.spec.mjs", "specs": [{{ "title": "t", "file": "a.spec.mjs", "line": 1, "column": 1, "tests": [{}] }}] }}], "errors": [] }}"#,
+            tests.join(", ")
+        );
+        said(&playwright(&json).unwrap().tests)
+            .into_iter()
+            .map(|(name, failed)| (name.to_owned(), failed))
+            .collect::<Vec<_>>()
+    };
+    let t = |failed| vec![("t".to_owned(), failed)];
+    assert_eq!(projects(&["expected", "unexpected"]), t(true));
+    assert_eq!(projects(&["unexpected", "skipped"]), t(true));
+    assert_eq!(projects(&["skipped", "expected"]), t(false));
+    assert_eq!(projects(&["skipped", "skipped"]), []);
 }
 
 #[test]

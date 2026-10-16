@@ -16,6 +16,10 @@ use crate::execute::{command_line, hide_window, read_both, Read, FORCE_AFTER};
 use crate::group::{lead, Group};
 use crate::{Ender, Ending, Limits, Run};
 
+/// How often a program asked to end is looked at for whether it has.
+#[cfg(unix)]
+const ENDED_EVERY: std::time::Duration = std::time::Duration::from_millis(10);
+
 /// What a program that ended with 0 wrote: `execFile`'s `{ stdout, stderr }`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Captured {
@@ -146,13 +150,30 @@ pub async fn capture(
             // and the group it leads with it.
             drop((stdout, stderr));
             group.end(Ending::Asked);
-            tokio::select! {
+            // Once the program has ended at the ask, or its time to has run
+            // out, whatever is left of the group it leads is forced to end: a
+            // child that took no notice of the ask would go on after the
+            // answer. The program is not waited for until then, so that its
+            // id, and its group's, name no other.
+            #[cfg(unix)]
+            let status = {
+                let until = tokio::time::Instant::now() + FORCE_AFTER;
+                while !group.ended() && tokio::time::Instant::now() < until {
+                    tokio::time::sleep(ENDED_EVERY).await;
+                }
+                group.end(Ending::Forced);
+                child.wait().await
+            };
+            // Windows ended the whole tree at the ask.
+            #[cfg(not(unix))]
+            let status = tokio::select! {
                 status = child.wait() => status,
                 () = tokio::time::sleep(FORCE_AFTER) => {
                     group.end(Ending::Forced);
                     child.wait().await
                 }
-            }
+            };
+            status
         }
     };
 

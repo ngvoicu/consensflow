@@ -70,7 +70,7 @@ impl Runner for Nothing {
         false
     }
 
-    fn state(&mut self) -> String {
+    fn state(&mut self) -> Option<String> {
         panic!("nothing was to be run, and the state was asked for");
     }
 }

@@ -12,6 +12,11 @@
 //! command in hand the same way and is told to the driver, which puts the sources
 //! back. A run that writes more than `OUTPUT_LIMIT` to a stream is ended for it.
 //!
+//! A run of the tests of `cf-e2e` is preceded by the release builds of the
+//! programs they run, from the sources as they are, with the plant or without it
+//! (`CF_E2E_PROGRAMS`), and its tests are told where those are (`CF_E2E_BUILT`) and
+//! build nothing; a build that does not succeed ends the run, with no test run.
+//!
 //! `cargo xtask …` that is no suite of tests is this xtask itself, started as the
 //! program it is. Cargo would first build again the xtask it starts, and that is
 //! the one running the plants: stale as soon as a plant has touched what xtask is
@@ -61,6 +66,46 @@ const RUNS: &str = "app/src-tauri/target/plants-runs";
 /// Where the workspace's tools are installed (`cargo install --root`).
 const TOOLS: &str = "app/src-tauri/target/tools";
 
+/// Where a release build lands, from the checkout's root (`.cargo/config.toml`).
+const RELEASE: &str = "app/src-tauri/target/release";
+
+/// The variable that tells the tests of `cf-e2e` the folder the programs they run
+/// were built in before the run (crates/cf-e2e/src/cf.rs, `BUILT`).
+const CF_E2E_BUILT: &str = "CF_E2E_BUILT";
+
+/// The release builds of the programs the tests of `cf-e2e` run, each as the rig
+/// makes it (crates/cf-e2e/src/cf.rs; `build-cf` builds `cf` so too): `cf`, then
+/// the pane host, apart. Built in one, cargo gives `cf` the features the two take
+/// between them, another `cf`, and builds `cf-daemon` and `cf` again each time one
+/// way follows the other (2026-10-16). They install nothing, and say in cargo's
+/// structured words whether they built.
+pub const CF_E2E_PROGRAMS: [[&str; 10]; 2] = [
+    [
+        "cargo",
+        "build",
+        "--release",
+        "--locked",
+        "--offline",
+        "--message-format=json-render-diagnostics",
+        "-p",
+        "cf",
+        "--bin",
+        "cf",
+    ],
+    [
+        "cargo",
+        "build",
+        "--release",
+        "--locked",
+        "--offline",
+        "--message-format=json-render-diagnostics",
+        "-p",
+        "cf-panes",
+        "--bin",
+        "consensflow-bridge",
+    ],
+];
+
 /// The status nextest ends with where the build failed.
 const NEXTEST_BUILD_FAILED: i32 = 101;
 
@@ -107,7 +152,8 @@ pub trait Runner {
     /// What the checkout is now, as far as a command's run can tell: the same text
     /// where nothing of it changed, whatever wrote it, and another where it cannot be
     /// told. How a command did without a plant is known in the state it ran in alone.
-    fn state(&mut self) -> String;
+    /// `None` is a stop, heard while it was asked.
+    fn state(&mut self) -> Option<String>;
 }
 
 impl Ran {
@@ -180,9 +226,7 @@ impl Ran {
     /// Whether the run's failure names a test of its own, which a plant can be
     /// attributed by: a test file that failed whole names none.
     pub fn names_tests(&self) -> bool {
-        self.tests()
-            .iter()
-            .any(|test| test.failed && !test.is_whole_file())
+        self.tests().iter().any(|test| test.failed && !test.whole)
     }
 
     /// Every test the run's report says ran, failed or not: none where it has no
@@ -264,6 +308,8 @@ pub struct Execute {
     stops: Stops,
     /// How many states could not be told, each told apart from every other.
     untold: u64,
+    /// The builds before a run of cf-e2e's tests (`CF_E2E_PROGRAMS`).
+    programs: Vec<Vec<String>>,
 }
 
 impl Execute {
@@ -298,6 +344,8 @@ impl Execute {
                 .env
                 .iter()
                 .filter(|(name, _)| *name != OsStr::new(NODE_TEST_CONTEXT))
+                // Only a run of cf-e2e's tests is told where its programs were built.
+                .filter(|(name, _)| *name != OsStr::new(CF_E2E_BUILT))
                 .filter(|(name, _)| !colour.contains(name))
                 .map(|(name, value)| (name.to_owned(), value.to_owned()))
                 .chain([
@@ -318,19 +366,25 @@ impl Execute {
             },
             stops,
             untold: 0,
+            programs: CF_E2E_PROGRAMS
+                .iter()
+                .map(|build| build.iter().map(|word| (*word).to_owned()).collect())
+                .collect(),
         }
     }
 
-    /// What `git` says to `words` in the checkout, where it says it and succeeds.
-    fn git(&mut self, words: &[&str]) -> Option<String> {
+    /// What `git` says to `words` in the checkout, where it says it and succeeds: the
+    /// outer `None` is a stop, heard while it ran, which is the driver's to hear.
+    fn git(&mut self, words: &[&str]) -> Option<Option<String>> {
         let command: Vec<String> = ["git"]
             .iter()
             .chain(words)
             .map(|word| (*word).to_owned())
             .collect();
         match self.run(&command) {
-            Ok(Execution::Ended(ran)) if ran.code == Some(0) => Some(ran.output),
-            _ => None,
+            Ok(Execution::Stopped) => None,
+            Ok(Execution::Ended(ran)) if ran.code == Some(0) => Some(Some(ran.output)),
+            _ => Some(None),
         }
     }
 
@@ -366,6 +420,42 @@ impl Execute {
         .into())
     }
 
+    /// Builds the programs the tests of `cf-e2e` run (`CF_E2E_PROGRAMS`), before a run
+    /// of `command`: the folder they are in; or, where a build did not succeed, how
+    /// the run ends: stopped; the build itself, where its time ran out; else as
+    /// `command` with the build's status and words and no test run, which a build
+    /// cargo says failed is one that did not build.
+    fn programs(&mut self, command: &[String]) -> Result<Result<PathBuf, Execution>, Error> {
+        for words in self.programs.clone() {
+            let ran = match self.run(&words)? {
+                Execution::Stopped => return Ok(Err(Execution::Stopped)),
+                Execution::Ended(ran) if ran.code == Some(0) => continue,
+                // Ended for its time or its output, it is said as the build it is.
+                Execution::Ended(ran) if ran.hung || ran.overflowed => {
+                    return Ok(Err(Execution::Ended(ran)))
+                }
+                Execution::Ended(ran) => ran,
+            };
+            let code = if ran.build_finished() == Some(false) {
+                Some(NEXTEST_BUILD_FAILED)
+            } else {
+                ran.code
+            };
+            return Ok(Err(Execution::Ended(Ran {
+                command: command.to_vec(),
+                code,
+                hung: ran.hung,
+                overflowed: ran.overflowed,
+                output: ran.output,
+                report: Some(Err(format!(
+                    "{} did not succeed, and no test was run",
+                    words.join(" ")
+                ))),
+            })));
+        }
+        Ok(Ok(self.checkout.root.join(RELEASE)))
+    }
+
     /// The program to start for `invocation`, and its words: `cargo xtask` is this xtask.
     fn start(&self, invocation: &Invocation) -> Result<Run, Error> {
         let (program, args): (OsString, &[OsString]) = match invocation.args.as_slice() {
@@ -392,9 +482,32 @@ impl Execute {
     }
 }
 
+/// Why `command` cannot be run in the checkout `context`, if it cannot: an option of
+/// `cargo test` that nextest has no word for (`reporters`).
+pub fn refused(command: &[String], context: &Context) -> Option<String> {
+    Reporter::of(command).refused(command, context)
+}
+
 impl Runner for Execute {
     fn run(&mut self, command: &[String]) -> Result<Execution, Error> {
         let reporter = Reporter::of(command);
+        if let Some(why) = reporter.refused(command, &self.checkout) {
+            return Err(process::Failure::Refused {
+                program: command.join(" "),
+                cause: std::io::Error::other(why),
+            }
+            .into());
+        }
+        // The programs the tests of cf-e2e run, built once for the run, before it: each
+        // of its tests is a process of its own, which would build them for itself.
+        let built = if reporter.runs_cf_e2e(command, &self.checkout) {
+            match self.programs(command)? {
+                Ok(folder) => Some(folder),
+                Err(ended) => return Ok(ended),
+            }
+        } else {
+            None
+        };
         // A folder of the run's own, gone with it, for a reporter that writes one.
         let folder = match reporter {
             Reporter::Status => None,
@@ -412,6 +525,10 @@ impl Runner for Execute {
         let invocation = reporter
             .setup(command, dir, &self.checkout, &nextest)
             .map_err(Error::files("write the config of a run in", dir))?;
+        let invocation = match built {
+            Some(folder) => invocation.var(CF_E2E_BUILT, folder),
+            None => invocation,
+        };
         let run = self.start(&invocation)?;
         // The environment, with the variables the invocation sets or takes away.
         let given = |name: &OsStr| invocation.vars.iter().any(|(set, _)| set == name);
@@ -469,13 +586,14 @@ impl Runner for Execute {
     /// The commit the checkout is at, what git says of it beyond that (every file
     /// changed, added or untracked, ignored ones aside), and the bytes of each such
     /// file, hashed: a file put back as it was is the state it was. Where git says
-    /// nothing (no checkout of git's, a stop), a state of its own each time.
-    fn state(&mut self) -> String {
-        let head = self.git(&["rev-parse", "HEAD"]);
-        let status = self.git(&["status", "--porcelain=v1", "-z", "--untracked-files=all"]);
+    /// nothing (no checkout of git's), a state of its own each time; a stop heard
+    /// while git is asked is none.
+    fn state(&mut self) -> Option<String> {
+        let head = self.git(&["rev-parse", "HEAD"])?;
+        let status = self.git(&["status", "--porcelain=v1", "-z", "--untracked-files=all"])?;
         let (Some(head), Some(status)) = (head, status) else {
             self.untold += 1;
-            return format!("untold {}", self.untold);
+            return Some(format!("untold {}", self.untold));
         };
         let mut hasher = DefaultHasher::new();
         head.hash(&mut hasher);
@@ -485,7 +603,7 @@ impl Runner for Execute {
                 .ok()
                 .hash(&mut hasher);
         }
-        format!("{:016x}", hasher.finish())
+        Some(format!("{:016x}", hasher.finish()))
     }
 }
 

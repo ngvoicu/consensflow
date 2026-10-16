@@ -188,6 +188,34 @@ fn a_tree_that_ignores_being_asked_is_forced_whole_a_moment_later() {
 
 #[cfg(unix)]
 #[test]
+fn a_child_that_ignores_being_asked_is_forced_though_its_parent_ended_at_the_ask() {
+    // The parent ends at the ask; the child it started takes no notice of it, and
+    // would go on after the capture answered (a command of the plants' runner whose
+    // child goes on writing the sources once they are put back, 2026-10-16).
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("pids");
+    let run = shell(&format!(
+        "trap 'exit 0' TERM; (trap '' TERM; exec sleep 60) & printf '%s %s\\n' \"$$\" \"$!\" > '{}'; wait",
+        file.display()
+    ));
+    let limits = Limits {
+        timeout: Duration::from_millis(1500),
+        max_buffer: 1024,
+    };
+    // What the parent said is the answer: it ended with 0 at the ask.
+    let answered = run_now(&run, None, limits);
+    assert!(answered.is_ok(), "{answered:?}");
+    let pids = pids_in(&file, 2).expect("written long before its time ran out");
+    let _left = Survivors(pids.clone());
+    assert!(gone(pids[0]), "the parent, ended at the ask");
+    assert!(
+        gone_within(pids[1], Duration::from_secs(1)),
+        "the child that took no notice of the ask, forced once its time to end ran out"
+    );
+}
+
+#[cfg(unix)]
+#[test]
 fn a_capture_that_ended_on_its_own_leaves_nothing_for_its_ender_to_end() {
     // The parent lets its child go from every stream and ends at once, so the
     // capture is answered. Its ender is held on, as the daemon's registry

@@ -209,6 +209,7 @@ fn node_writes_the_plants_report_to_the_run_beside_the_report_it_prints() {
             report
         ),
         [
+            "--test-isolation=none",
             "--test-reporter=spec",
             "--test-reporter-destination=stdout",
             &format!("--test-reporter={reporter}"),
@@ -231,6 +232,7 @@ fn node_writes_the_plants_report_to_the_run_beside_the_report_it_prints() {
             report
         ),
         [
+            "--test-isolation=none",
             "--test-reporter=tap",
             "--test-reporter-destination=stdout",
             &format!("--test-reporter={reporter}"),
@@ -239,6 +241,41 @@ fn node_writes_the_plants_report_to_the_run_beside_the_report_it_prints() {
             "tests/a.test.mjs",
         ]
     );
+    // The tests run in Node's own process whatever isolation the command asks for, in
+    // either way of giving an option its value; the report it names first is printed.
+    for asked in [
+        &["--test-isolation=process", "--test-reporter", "dot"][..],
+        &["--test-isolation", "process", "--test-reporter=dot"],
+        &[
+            "--experimental-test-isolation=process",
+            "--test-reporter=dot",
+        ],
+        &[
+            "--test-reporter=dot",
+            "--test-reporter-destination",
+            "out.txt",
+            "--test-reporter=tap",
+        ],
+    ] {
+        let command: Vec<&str> = ["node", "--test"]
+            .into_iter()
+            .chain(asked.iter().copied())
+            .chain(["tests/a.test.mjs"])
+            .collect();
+        assert_eq!(
+            node_words(&words(&command), reporter, report),
+            [
+                "--test-isolation=none",
+                "--test-reporter=dot",
+                "--test-reporter-destination=stdout",
+                &format!("--test-reporter={reporter}"),
+                &format!("--test-reporter-destination={}", report.display()),
+                "--test",
+                "tests/a.test.mjs",
+            ],
+            "{command:?}"
+        );
+    }
     // The reporter is written into the run's folder, and named from the checkout's root.
     let root = tempfile::tempdir().unwrap();
     let dir = root.path().join("app/src-tauri/target/plants-runs/run-7");
@@ -335,7 +372,7 @@ fn each_report_is_read_from_where_its_runner_wrote_it_and_one_that_is_not_there_
     .unwrap();
     fs::write(
         dir.path().join("node.jsonl"),
-        "{\"path\":[\"node\"],\"file\":\"/a.test.mjs\",\"line\":1,\"column\":1,\"failed\":true,\"skipped\":false}\n{\"end\":true}\n",
+        "{\"path\":[\"node\"],\"file\":\"/a.test.mjs\",\"line\":1,\"column\":1,\"whole\":false,\"ended\":\"failed\"}\n{\"end\":true}\n",
     )
     .unwrap();
     fs::write(
@@ -375,7 +412,7 @@ fn each_report_is_read_from_where_its_runner_wrote_it_and_one_that_is_not_there_
 }
 
 #[test]
-fn the_tests_of_cf_e2e_run_one_at_a_time_and_every_other_s_beside_each_other() {
+fn a_run_of_cf_e2e_s_tests_is_told_from_another_and_every_run_s_tests_run_beside_each_other() {
     let names = |line: &[&str]| names_cf_e2e(&line.iter().map(OsString::from).collect::<Vec<_>>());
     assert!(names(&[
         "test",
@@ -391,9 +428,11 @@ fn the_tests_of_cf_e2e_run_one_at_a_time_and_every_other_s_beside_each_other() {
     assert!(!names(&["test", "-p", "cf-engine", "--test", "cf-e2e"]));
     assert!(!names(&["test", "-p", "cf", "--", "-p", "cf-e2e"]));
     assert!(!names(&["test", "--offline", "--", "file_drop"]));
-    // The suites of xtask's that are tests of cf-e2e name it.
+    // The suites of xtask's that are tests of cf-e2e name it; none is run one test at a
+    // time.
     let dir = tempfile::tempdir().unwrap();
-    for (suite, one) in [
+    let context = checkout(Path::new("/checkout"));
+    for (suite, cf_e2e) in [
         (&["cargo", "xtask", "test", "clis", "--offline"][..], true),
         (&["cargo", "xtask", "app", "test", "file_drop"], false),
         (
@@ -409,20 +448,140 @@ fn the_tests_of_cf_e2e_run_one_at_a_time_and_every_other_s_beside_each_other() {
             true,
         ),
         (&["cargo", "test", "--offline", "-p", "cf", "--lib"], false),
+        (&["node", "--test", "-p", "cf-e2e"], false),
     ] {
-        Reporter::Nextest
-            .setup(
-                &words(suite),
-                dir.path(),
-                &checkout(Path::new("/checkout")),
-                "",
-            )
-            .unwrap();
-        let config = fs::read_to_string(dir.path().join("nextest.toml")).unwrap();
-        assert_eq!(config.contains("\ntest-threads = 1\n"), one, "{suite:?}");
+        let reporter = Reporter::of(&words(suite));
+        assert_eq!(
+            reporter.runs_cf_e2e(&words(suite), &context),
+            cf_e2e,
+            "{suite:?}"
+        );
+        if reporter == Reporter::Nextest {
+            reporter
+                .setup(&words(suite), dir.path(), &context, "")
+                .unwrap();
+            let config = fs::read_to_string(dir.path().join("nextest.toml")).unwrap();
+            assert!(!config.contains("test-threads"), "{suite:?}: {config}");
+        }
     }
-    assert!(nextest_config(dir.path(), true)
-        .contains("[profile.plants]\nretries = 0\nfail-fast = false\ntest-threads = 1\n\n"));
+}
+
+#[test]
+fn each_option_of_cargo_test_is_given_to_nextest_as_it_names_what_cargo_means_or_refused() {
+    let given = |line: &[&str]| -> Result<Vec<String>, String> {
+        let args: Vec<OsString> = ["test"].iter().chain(line).map(OsString::from).collect();
+        nextest_words(&args).map(|words| {
+            words
+                .iter()
+                .map(|word| word.to_string_lossy().into_owned())
+                .collect()
+        })
+    };
+    // As they are: nextest's options of these names are cargo's.
+    let same = [
+        "--offline",
+        "-p",
+        "x",
+        "--package=y",
+        "-pz",
+        "--lib",
+        "--test",
+        "rig",
+        "--features",
+        "local",
+        "-Flocal",
+        "--target-dir",
+        "t",
+        "--no-fail-fast",
+        "--release",
+        "a::",
+        "--",
+        "--skip",
+        "b",
+        "--profile",
+        "-j",
+    ];
+    assert_eq!(given(&same).unwrap(), same);
+    // As nextest names what cargo means: a profile of cargo's, jobs that build, cargo's
+    // own output; and a short name nextest has not.
+    for (cargo, nextest) in [
+        (
+            &["--profile", "release"][..],
+            &["--cargo-profile", "release"][..],
+        ),
+        (&["--profile=release"], &["--cargo-profile", "release"]),
+        (&["-j", "8"], &["--build-jobs", "8"]),
+        (&["-j8"], &["--build-jobs", "8"]),
+        (&["--jobs=8"], &["--build-jobs", "8"]),
+        (&["-v"], &["--cargo-verbose"]),
+        (&["-vv"], &["--cargo-verbose"]),
+        (&["--verbose"], &["--cargo-verbose"]),
+        (&["-q"], &["--cargo-quiet"]),
+        (
+            &["--message-format", "json"],
+            &["--cargo-message-format", "json"],
+        ),
+        (
+            &["-m", "a/Cargo.toml"],
+            &["--manifest-path", "a/Cargo.toml"],
+        ),
+    ] {
+        assert_eq!(given(cargo).unwrap(), nextest, "{cargo:?}");
+    }
+    // Refused, and why.
+    for (cargo, why) in [
+        (&["--doc"][..], "cargo test --doc: nextest runs no doctest"),
+        (
+            &["--no-run"],
+            "cargo test --no-run: it runs no test, which no plant can be caught by",
+        ),
+        (
+            &["-Z", "unstable-options"],
+            "cargo test -Z: nextest takes no unstable flag of cargo's",
+        ),
+        (&["--help"], "cargo test --help: it runs no test"),
+        (
+            &["--frobnicate"],
+            "cargo test --frobnicate: no option of cargo test",
+        ),
+        (&["-x"], "cargo test -x: no option of cargo test"),
+        (&["-qv"], "cargo test -qv: write each short option apart"),
+        (&["--lib=x"], "cargo test --lib=x: --lib takes no value"),
+        (
+            &["--features"],
+            "cargo test --features: --features is given no value",
+        ),
+        (
+            &["-p", "--lib"],
+            "cargo test -p: --package is given no value",
+        ),
+    ] {
+        assert_eq!(given(cargo).unwrap_err(), why, "{cargo:?}");
+    }
+    // A command so refused is no run at all, and a suite of xtask's is read for it too.
+    let context = checkout(Path::new("/checkout"));
+    assert_eq!(
+        Reporter::Nextest
+            .refused(&words(&["cargo", "test", "--doc"]), &context)
+            .as_deref(),
+        Some("cargo test --doc: nextest runs no doctest")
+    );
+    assert!(Reporter::Nextest
+        .refused(
+            &words(&["cargo", "xtask", "test", "clis", "--no-run"]),
+            &context
+        )
+        .is_some());
+    assert!(Reporter::Nextest
+        .refused(
+            &words(&["cargo", "xtask", "test", "clis", "--profile", "release"]),
+            &context
+        )
+        .is_none());
+    assert_eq!(
+        Reporter::Node.refused(&words(&["node", "--test", "--doc"]), &context),
+        None
+    );
 }
 
 #[test]
@@ -463,10 +622,9 @@ fn nextest_is_given_none_of_the_variables_of_its_own_that_this_run_was_given() {
 
 #[test]
 fn the_folder_of_nextest_s_store_is_written_with_forward_slashes() {
-    let config = nextest_config(
-        Path::new(r"C:\checkout\app\src-tauri\target\plants-runs\run-1"),
-        false,
-    );
+    let config = nextest_config(Path::new(
+        r"C:\checkout\app\src-tauri\target\plants-runs\run-1",
+    ));
     assert!(
         config
             .starts_with("[store]\ndir = \"C:/checkout/app/src-tauri/target/plants-runs/run-1\"\n"),

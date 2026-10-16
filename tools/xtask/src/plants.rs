@@ -84,12 +84,21 @@ pub enum Error {
     /// A file that was planted is not as it was once put back.
     #[error("{} is not as it was: its copy is {}", path.display(), copy.display())]
     NotRestored { path: PathBuf, copy: PathBuf },
+    /// Files that were planted that could not be put back, each as it failed.
+    #[error("{} files of a plant are not as they were:\n{}", .0.len(), lines(.0))]
+    Unrestored(Vec<Error>),
     /// A word that no plant's name holds.
     #[error("no plant of {family} has a name that holds `{word}`")]
     NoName { word: String, family: String },
     /// A command that could not be started.
     #[error(transparent)]
     Process(#[from] process::Failure),
+}
+
+/// Each of `errors`, a line each.
+fn lines(errors: &[Error]) -> String {
+    let each: Vec<String> = errors.iter().map(ToString::to_string).collect();
+    each.join("\n")
 }
 
 impl Error {

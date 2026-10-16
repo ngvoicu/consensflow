@@ -105,8 +105,9 @@ impl Judged {
 
 /// Whether the meant test is among those `ran` says failed: none where it is not;
 /// else, where the meant name stands for more than one test of the report (two
-/// tests of one name in two places, which the name cannot tell apart), why it is
-/// not taken for the one that failed.
+/// tests of one name in two places, or two registered in one place, as a loop
+/// registers them: the name cannot tell them apart), why it is not taken for the
+/// one that failed. Each test of the report is one registered (`results`).
 fn meant_in(ran: &Ran, meant: &str) -> Option<Result<(), String>> {
     let named: Vec<_> = ran
         .tests()
@@ -116,22 +117,16 @@ fn meant_in(ran: &Ran, meant: &str) -> Option<Result<(), String>> {
     if !named.iter().any(|test| test.failed) {
         return None;
     }
-    let mut places: Vec<(&str, &str)> = Vec::new();
-    for test in &named {
-        if !places.contains(&(test.name.as_str(), test.at.as_str())) {
-            places.push((test.name.as_str(), test.at.as_str()));
-        }
-    }
-    if places.len() == 1 {
+    if named.len() == 1 {
         return Some(Ok(()));
     }
-    let each: Vec<String> = places
+    let each: Vec<String> = named
         .iter()
-        .map(|(name, at)| format!("{name} ({at})"))
+        .map(|test| format!("{} ({})", test.name, test.at))
         .collect();
     Some(Err(format!(
         "the meant name {meant} stands for {} tests of {}, so none of them is taken for it: {}",
-        places.len(),
+        named.len(),
         ran.command.join(" "),
         each.join(", ")
     )))
@@ -187,7 +182,10 @@ impl CleanRuns {
         passes: usize,
         runner: &mut dyn Runner,
     ) -> Result<Option<Clean>, Error> {
-        let key = (command.to_vec(), runner.state());
+        let Some(state) = runner.state() else {
+            return Ok(None);
+        };
+        let key = (command.to_vec(), state);
         let mut passed = match self.0.get(&key) {
             Some(Known::Fails(said)) => return Ok(Some(Clean::Fails(said.clone()))),
             Some(Known::Passed(passed)) => *passed,

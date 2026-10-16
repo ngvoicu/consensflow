@@ -4,9 +4,12 @@
 //! Every file a plant touches is first copied to a folder outside the checkout,
 //! and is put back from that copy, byte for byte, whatever the runs came to: an
 //! error, a panic and a stop (which [`Runner::stopped`] and a command ended by one
-//! tell) all put the files back. Only a kill past that leaves the copies where they
-//! are, in the folder the run says first. The plants are never run in parallel:
-//! the sources are changed under them.
+//! tell) all put the files back. Putting back makes each file as it was, whatever
+//! came of the others (each that could not be is said), and is done again at the
+//! end of the plant: what a run without the plant wrote into a file it touches is
+//! put back too. Only a kill past that leaves the copies where they are, in the
+//! folder the run says first. The plants are never run in parallel: the sources
+//! are changed under them.
 //!
 //! A file is put back by writing its bytes, never by copying the file: a system
 //! that copies a file's times with it (macOS and Windows do) would give the source
@@ -40,8 +43,8 @@
 //! that passes once without the plant and fails once, or a run that fails with it
 //! once only, is UNSTABLE, neither caught nor missed. A run that could not load a
 //! module of its own is BROKEN. A run whose tests build the native `cf` and the
-//! pane host (the rig's) is preceded by their release build from the plant, which
-//! installs nothing (`PREFLIGHT`): a plant that breaks it DOES NOT COMPILE, where
+//! pane host (the rig's) is preceded by their release builds from the plant, which
+//! install nothing (`preflight`): a plant that breaks one DOES NOT COMPILE, where
 //! cargo's own status says the build failed; a build that ends otherwise is NOT
 //! BUILT, or HUNG where its time ran out. A run that did not build, or was BROKEN,
 //! is run once the plant is put back, and is NOT RUN where it fails so too. Where no
@@ -59,7 +62,7 @@ use std::time::Instant;
 use self::confirm::{unstarted, Clean, CleanRuns, Judged};
 use super::kit::{Family, Plant, Planted};
 use super::report::{self, Verdict};
-use super::runs::{Execution, Ran, Runner};
+use super::runs::{Execution, Ran, Runner, CF_E2E_PROGRAMS};
 use super::Error;
 use crate::context::Context;
 use crate::dispatch::Failure;
@@ -67,31 +70,9 @@ use crate::dispatch::Failure;
 /// The status of a run that was stopped, as a program ends that a signal stops.
 const STOPPED: i32 = 130;
 
-/// What a run whose tests build the native `cf` and the pane host is preceded by,
-/// with the plant in: the release build of the two that the rig makes
-/// (crates/cf-e2e), which puts nothing in `bin/` (that is `build-cf`'s), and says
-/// in cargo's structured words whether it built.
-const PREFLIGHT: [&str; 14] = [
-    "cargo",
-    "build",
-    "--release",
-    "--locked",
-    "--offline",
-    "--message-format=json-render-diagnostics",
-    "-p",
-    "cf",
-    "--bin",
-    "cf",
-    "-p",
-    "cf-panes",
-    "--bin",
-    "consensflow-bridge",
-];
-
 /// The files of a plant in the checkout while its runs go, and how they go back.
 struct Planting {
     copies: Vec<Copy>,
-    restored: bool,
 }
 
 struct Copy {
@@ -102,13 +83,30 @@ struct Copy {
     planted: String,
 }
 
+impl Copy {
+    /// Writes the file's bytes from its copy where it is not as it was before the
+    /// plant (one that is is left as it is, its times too), and says if it is not as it
+    /// was once written.
+    fn put_back(&self) -> Result<(), Error> {
+        if fs::read(&self.path).is_ok_and(|now| now == self.original) {
+            return Ok(());
+        }
+        let saved = fs::read(&self.copy).map_err(Error::files("read the copy of", &self.path))?;
+        fs::write(&self.path, saved).map_err(Error::files("put back", &self.path))?;
+        if fs::read(&self.path).map_err(Error::files("read", &self.path))? != self.original {
+            return Err(Error::NotRestored {
+                path: self.path.clone(),
+                copy: self.copy.clone(),
+            });
+        }
+        Ok(())
+    }
+}
+
 impl Planting {
     /// Copies each file of `files` into `saved` and writes the plant in its place.
     fn make(saved: &Path, files: Vec<Planted>) -> Result<Self, Error> {
-        let mut planting = Self {
-            copies: Vec::new(),
-            restored: false,
-        };
+        let mut planting = Self { copies: Vec::new() };
         for (index, file) in files.into_iter().enumerate() {
             let copy = saved.join(format!("{index}-{}", file.file.replace('/', "_")));
             fs::write(&copy, &file.original).map_err(Error::files("write a copy at", &copy))?;
@@ -124,52 +122,40 @@ impl Planting {
         Ok(planting)
     }
 
-    /// Writes the plant again where it was put back, for the runs after the one that
-    /// put it back to run its command without it.
-    fn replant(&mut self) -> Result<(), Error> {
-        if !self.restored {
-            return Ok(());
-        }
-        // From here the files are put back again, even if a write is what fails.
-        self.restored = false;
+    /// Writes the plant again in each file where it is not, for the runs after one
+    /// whose command was run without it.
+    fn replant(&self) -> Result<(), Error> {
         for copy in &self.copies {
+            if fs::read(&copy.path).is_ok_and(|now| now == copy.planted.as_bytes()) {
+                continue;
+            }
             fs::write(&copy.path, &copy.planted).map_err(Error::files("write", &copy.path))?;
         }
         Ok(())
     }
 
-    /// Puts every file back from its copy, and says if one is not as it was; once.
-    fn restore(&mut self) -> Result<(), Error> {
-        if self.restored {
-            return Ok(());
+    /// Puts every file back from its copy where it is not as it was before the
+    /// plant, whatever made it so (the plant, or what a run wrote, a run without the
+    /// plant too), each whatever came of another; and says each that could not be.
+    fn restore(&self) -> Result<(), Error> {
+        let mut unrestored: Vec<Error> = self
+            .copies
+            .iter()
+            .filter_map(|copy| copy.put_back().err())
+            .collect();
+        match unrestored.len() {
+            0 => Ok(()),
+            1 => Err(unrestored.remove(0)),
+            _ => Err(Error::Unrestored(unrestored)),
         }
-        for Copy {
-            path,
-            copy,
-            original,
-            ..
-        } in &self.copies
-        {
-            let saved = fs::read(copy).map_err(Error::files("read the copy of", path))?;
-            fs::write(path, saved).map_err(Error::files("put back", path))?;
-            if fs::read(path).map_err(Error::files("read", path))? != *original {
-                return Err(Error::NotRestored {
-                    path: path.clone(),
-                    copy: copy.clone(),
-                });
-            }
-        }
-        self.restored = true;
-        Ok(())
     }
 }
 
 impl Drop for Planting {
-    /// A plant still in the sources, as a panic unwinds: put back, as well as can be.
+    /// What is not put back yet (a panic unwinding, an error that ended the trial, a
+    /// file that could not be put back before): put back, as well as can be.
     fn drop(&mut self) {
-        if !self.restored {
-            let _ = self.restore();
-        }
+        let _ = self.restore();
     }
 }
 
@@ -317,9 +303,12 @@ fn trial(
         Err(unapplied) => return Ok(Some(Trial::unapplied(unapplied.to_string()))),
     };
     // The state before the plant is the one its runs are known without it in.
-    let unplanted = runner.state();
-    let mut planting = Planting::make(saved, files)?;
-    let ended = tried(plant, runner, built, clean, &unplanted, &mut planting)?;
+    let Some(unplanted) = runner.state() else {
+        return Ok(None);
+    };
+    let planting = Planting::make(saved, files)?;
+    let ended = tried(plant, runner, built, clean, &unplanted, &planting)?;
+    // Whatever a run without the plant wrote into its files since they were put back.
     planting.restore()?;
     match ended {
         Ended::Stopped => Ok(None),
@@ -327,29 +316,34 @@ fn trial(
     }
 }
 
-/// The build before a run whose tests build the native `cf`, with the plant in
-/// (`PREFLIGHT`): `None` where it built, else how the trial ends.
+/// The builds before a run whose tests build the native `cf`, with the plant in: the
+/// release builds of `cf` and the pane host that the rig makes (`CF_E2E_PROGRAMS`),
+/// which put nothing in `bin/` (that is `build-cf`'s). `None` where they built, else
+/// how the trial ends, by the first that did not.
 fn preflight(runner: &mut dyn Runner) -> Result<Option<Ended>, Error> {
-    let words: Vec<String> = PREFLIGHT.iter().map(|word| (*word).to_owned()).collect();
-    let ran = match planted_run(&words, runner)? {
-        None => return Ok(Some(Ended::Stopped)),
-        Some(Err(said)) => return Ok(Some(Ended::Trial(Box::new(Trial::not_run(said))))),
-        Some(Ok(ran)) => ran,
-    };
-    let verdict = if ran.hung {
-        Verdict::Hung
-    } else if ran.build_finished() == Some(false) {
-        Verdict::DoesNotCompile
-    } else if ran.code == Some(0) {
-        return Ok(None);
-    } else {
-        Verdict::NotBuilt
-    };
-    Ok(Some(Ended::Trial(Box::new(Trial::of(
-        verdict,
-        ran,
-        Vec::new(),
-    )))))
+    for build in CF_E2E_PROGRAMS {
+        let words: Vec<String> = build.iter().map(|word| (*word).to_owned()).collect();
+        let ran = match planted_run(&words, runner)? {
+            None => return Ok(Some(Ended::Stopped)),
+            Some(Err(said)) => return Ok(Some(Ended::Trial(Box::new(Trial::not_run(said))))),
+            Some(Ok(ran)) => ran,
+        };
+        let verdict = if ran.hung {
+            Verdict::Hung
+        } else if ran.build_finished() == Some(false) {
+            Verdict::DoesNotCompile
+        } else if ran.code == Some(0) {
+            continue;
+        } else {
+            Verdict::NotBuilt
+        };
+        return Ok(Some(Ended::Trial(Box::new(Trial::of(
+            verdict,
+            ran,
+            Vec::new(),
+        )))));
+    }
+    Ok(None)
 }
 
 /// What a run that told nothing of the plant ends as, by how its command did without
@@ -397,7 +391,14 @@ fn settled(
 ) -> Result<Option<Vec<Trial>>, Error> {
     // Where a run with the plant changed the checkout, how a command does without it
     // would be told of another.
-    let moved = told.iter().any(|told| told.unsure.is_some()) && runner.state() != unplanted;
+    let moved = if told.iter().any(|told| told.unsure.is_some()) {
+        let Some(state) = runner.state() else {
+            return Ok(None);
+        };
+        state != unplanted
+    } else {
+        false
+    };
     let mut settled = Vec::new();
     for Told { trial, unsure } in told {
         let Some(command) = unsure.filter(|_| !moved) else {
@@ -414,9 +415,13 @@ fn settled(
 
 /// Where the checkout, its plant put back, is not as it was before the plant: a run
 /// with the plant changed it (a fixture it mended, a file it wrote), and how the
-/// command does without the plant would be told of another checkout.
+/// command does without the plant would be told of another checkout. A stop heard
+/// while the state is asked ends the trial.
 fn moved(runner: &mut dyn Runner, unplanted: &str, command: &[String]) -> Option<Ended> {
-    (runner.state() != unplanted).then(|| {
+    let Some(state) = runner.state() else {
+        return Some(Ended::Stopped);
+    };
+    (state != unplanted).then(|| {
         Ended::Trial(Box::new(Trial::unstable(format!(
             "{} changed the checkout: once the plant is put back, it is not as it was before it",
             command.join(" ")
@@ -437,7 +442,7 @@ fn tried(
     built: &mut bool,
     clean: &mut CleanRuns,
     unplanted: &str,
-    planting: &mut Planting,
+    planting: &Planting,
 ) -> Result<Ended, Error> {
     let mut last = None;
     // The last run that failed naming only tests the plant was not meant for, and the
@@ -711,8 +716,12 @@ fn stopped(saved: &Path, out: &mut dyn Write) -> Result<i32, Failure> {
     Ok(STOPPED)
 }
 
+/// The system this runs on, as a plant's `platforms` names it.
+const HERE: &str = std::env::consts::OS;
+
 /// Plants each of `plants` in turn and says how each ended: the status is 0 where
-/// every one was caught.
+/// every one run was caught. One for other systems than this one is said SKIPPED
+/// (platform), and is neither run nor counted.
 pub fn run(
     context: &Context,
     family: &Family,
@@ -736,9 +745,19 @@ pub fn run(
     let mut clean = CleanRuns::default();
     let mut wrong = 0;
     let mut unstable = 0;
+    let mut skipped = 0;
     for plant in plants {
         if runner.stopped() {
             return stopped(&saved, out);
+        }
+        if !plant.runs_on(HERE) {
+            skipped += 1;
+            writeln!(
+                out,
+                "{}",
+                report::skipped(&plant.name, &plant.platforms, HERE)
+            )?;
+            continue;
         }
         let started = Instant::now();
         let Some(trial) = trial(plant, context, &saved, runner, &mut built, &mut clean)? else {
@@ -762,8 +781,9 @@ pub fn run(
         }
     }
     let _ = fs::remove_dir_all(&saved);
-    let caught = plants.len().saturating_sub(wrong);
-    writeln!(out, "{}", report::totals(caught, plants.len(), unstable))?;
+    let run = plants.len() - skipped;
+    let caught = run.saturating_sub(wrong);
+    writeln!(out, "{}", report::totals(caught, run, unstable, skipped))?;
     Ok(i32::from(wrong != 0))
 }
 
@@ -787,7 +807,10 @@ fn entity(meant: &str) -> Option<&str> {
 
 /// Whether each of `plants` applies, which plants nothing: the status is 0 where
 /// every one does. The commands a plant needs first are run. A meant name that holds
-/// an XML entity is refused.
+/// an XML entity is refused, and so is a run that cannot be run as it is written (an
+/// option of `cargo test` that nextest has no word for). A plant for other systems is
+/// said SKIPPED (platform), its names checked (the table's data was), nothing of it
+/// prepared or applied.
 pub fn check(
     context: &Context,
     plants: &[&Plant],
@@ -795,6 +818,7 @@ pub fn check(
     out: &mut dyn Write,
 ) -> Result<i32, Failure> {
     let mut unapplied = 0;
+    let mut skipped = 0;
     for plant in plants {
         if let Some(entity) = entity(&plant.meant) {
             unapplied += 1;
@@ -802,6 +826,25 @@ pub fn check(
                 out,
                 "{}: its meant name holds {entity}, a report's escape and no part of a test's name: write the name as the test does",
                 plant.name
+            )?;
+            continue;
+        }
+        let refused = plant
+            .runs
+            .iter()
+            .find_map(|run| super::runs::refused(&run.command, context));
+        if let Some(why) = refused {
+            unapplied += 1;
+            writeln!(out, "{}: {why}", plant.name)?;
+            continue;
+        }
+        // What it needs first may be of its own system, and what it plants of that one.
+        if !plant.runs_on(HERE) {
+            skipped += 1;
+            writeln!(
+                out,
+                "{}",
+                report::skipped(&plant.name, &plant.platforms, HERE)
             )?;
             continue;
         }
@@ -815,17 +858,17 @@ pub fn check(
             writeln!(out, "{cause}")?;
         }
     }
-    if unapplied == 0 {
-        writeln!(out, "{} plants apply", plants.len())?;
-        return Ok(0);
+    let checked = plants.len() - skipped;
+    let mut said = if unapplied == 0 {
+        format!("{checked} plants apply")
+    } else {
+        format!("{} of {checked} plants apply", checked - unapplied)
+    };
+    if skipped > 0 {
+        said.push_str(&format!(", {skipped} skipped (platform)"));
     }
-    writeln!(
-        out,
-        "{} of {} plants apply",
-        plants.len() - unapplied,
-        plants.len()
-    )?;
-    Ok(1)
+    writeln!(out, "{said}")?;
+    Ok(i32::from(unapplied != 0))
 }
 
 #[cfg(test)]

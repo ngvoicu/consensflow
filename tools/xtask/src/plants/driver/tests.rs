@@ -20,6 +20,10 @@ struct Fake<A: FnMut(&[String]) -> Answer> {
     /// The file whose text is the state of the checkout, where a test changes it; else
     /// the state never changes.
     state_of: Option<PathBuf>,
+    /// Whether a stop is heard as the state is asked, each time in turn.
+    stops_in_state: VecDeque<bool>,
+    /// How many times the state was asked.
+    states: usize,
 }
 
 impl<A: FnMut(&[String]) -> Answer> Fake<A> {
@@ -29,6 +33,8 @@ impl<A: FnMut(&[String]) -> Answer> Fake<A> {
             ran: Vec::new(),
             stops: VecDeque::new(),
             state_of: None,
+            stops_in_state: VecDeque::new(),
+            states: 0,
         }
     }
 }
@@ -43,10 +49,14 @@ impl<A: FnMut(&[String]) -> Answer> Runner for Fake<A> {
         self.stops.pop_front().unwrap_or(false)
     }
 
-    fn state(&mut self) -> String {
-        self.state_of.as_ref().map_or_else(String::new, |file| {
+    fn state(&mut self) -> Option<String> {
+        self.states += 1;
+        if self.stops_in_state.pop_front().unwrap_or(false) {
+            return None;
+        }
+        Some(self.state_of.as_ref().map_or_else(String::new, |file| {
             fs::read_to_string(file).unwrap_or_default()
-        })
+        }))
     }
 }
 
@@ -91,6 +101,7 @@ fn report(tests: &[(&str, bool)]) -> Results {
                 name: (*name).to_owned(),
                 at: "x".into(),
                 file: None,
+                whole: false,
                 failed: *failed,
             })
             .collect(),
@@ -154,9 +165,13 @@ fn fails_unnamed() -> Answer {
     ended(1, "the smoke: the app did not answer\n")
 }
 
-/// The words of the build that comes before a run that builds the native `cf`.
-const PREFLIGHT_WORDS: &str = "cargo build --release --locked --offline \
-    --message-format=json-render-diagnostics -p cf --bin cf -p cf-panes --bin consensflow-bridge";
+/// The words of the builds that come before a run that builds the native `cf`: `cf`,
+/// then the pane host.
+const PREFLIGHT_WORDS: [&str; 2] = [
+    "cargo build --release --locked --offline --message-format=json-render-diagnostics -p cf --bin cf",
+    "cargo build --release --locked --offline --message-format=json-render-diagnostics \
+     -p cf-panes --bin consensflow-bridge",
+];
 
 /// What cargo says of a build, in its structured words.
 fn built(success: bool) -> Answer {
@@ -213,6 +228,7 @@ fn plant(name: &str, edits: &[(&str, &str, &str)], runs: &[(&str, bool)]) -> Pla
         builds: false,
         prepare: Vec::new(),
         requires: Vec::new(),
+        platforms: Vec::new(),
         edits: edits
             .iter()
             .map(|(file, find, replace)| Edit {
@@ -823,7 +839,8 @@ fn what_a_plant_needs_first_or_a_build_again_of_cf_has_every_command_run_again_w
             "first",
             "first",
             // Known to pass, until the native cf is built again.
-            PREFLIGHT_WORDS,
+            PREFLIGHT_WORDS[0],
+            PREFLIGHT_WORDS[1],
             "first",
             "rebuild-cf",
             "first",
@@ -975,12 +992,14 @@ fn a_failed_test_said_by_a_run_that_exited_with_success_is_no_catch() {
     assert!(said.contains("MISSED           p: one ("), "{said}");
 }
 
-/// A test of Node's: its name, the file it is in, and whether it failed.
+/// A test of Node's: its name, the file it is in, and whether it failed; one named by
+/// the path of its file is the file, ended whole.
 fn node_test(name: &str, file: &str, failed: bool) -> Test {
     Test {
         name: name.to_owned(),
         at: format!("{file}:1:1"),
         file: Some(file.to_owned()),
+        whole: file.ends_with(name),
         failed,
     }
 }
@@ -1145,9 +1164,9 @@ fn a_run_whose_tests_build_cf_is_built_from_the_plant_first_and_a_build_cargo_sa
     assert_eq!(status.unwrap(), 1);
     assert_eq!(
         runner.ran,
-        [PREFLIGHT_WORDS, "rebuild-cf"],
+        [PREFLIGHT_WORDS[0], "rebuild-cf"],
         "built from the plant, which puts nothing in bin/, and the native cf built again once \
-         it is put back; the rig is never run"
+         it is put back; the pane host and the rig are never run"
     );
     assert!(said.contains("DOES NOT COMPILE p: one ("), "{said}");
 }
@@ -1170,7 +1189,7 @@ fn a_build_before_the_rig_that_ends_otherwise_than_cargo_saying_it_failed_is_not
                     "{\"reason\":\"build-finished\",\"success\":true}\nerror: failed to sign\n",
                 );
             }
-            let words: Vec<&str> = PREFLIGHT.to_vec();
+            let words: Vec<&str> = CF_E2E_PROGRAMS[0].to_vec();
             Ok(Execution::Ended(Ran {
                 hung: true,
                 ..Ran::new(&words, None, "", None)
@@ -1185,7 +1204,10 @@ fn a_build_before_the_rig_that_ends_otherwise_than_cargo_saying_it_failed_is_not
     assert!(said.contains("error: failed to sign"), "{said}");
     assert!(said.contains("HUNG             p: slow ("), "{said}");
     assert!(
-        said.contains(&format!("    {PREFLIGHT_WORDS} did not end in 600 s\n")),
+        said.contains(&format!(
+            "    {} did not end in 600 s\n",
+            PREFLIGHT_WORDS[0]
+        )),
         "{said}"
     );
     assert!(!said.contains("CAUGHT"), "{said}");
@@ -1204,12 +1226,37 @@ fn a_stop_between_the_build_before_the_rig_and_the_rig_puts_everything_back_and_
     assert_eq!(status.unwrap(), 130);
     // The build from the plant is cargo's own, into its build folder: no `build-cf`, so
     // nothing of the plant is in bin/ to be built again.
-    assert_eq!(runner.ran, [PREFLIGHT_WORDS, "rig"]);
+    assert_eq!(runner.ran, [PREFLIGHT_WORDS[0], PREFLIGHT_WORDS[1], "rig"]);
     assert!(
         said.ends_with("stopped: every file is as it was\n"),
         "{said}"
     );
     assert!(!planted(&context));
+}
+
+#[test]
+fn a_stop_heard_while_the_state_of_the_checkout_is_asked_stops_the_run_with_every_file_back() {
+    // The state is asked before the plant, once it is put back, and before its command
+    // is run without it; a stop heard at any of them is the end of the run.
+    for (at, ran) in [(1, &[][..]), (2, &["fails"][..]), (3, &["fails"][..])] {
+        let (_folder, context) = checkout();
+        let family = family(vec![
+            upper("p: one", &[("fails", false)]),
+            upper("p: two", &[("fails", false)]),
+        ]);
+        let mut runner = Fake::new(|_| catches(&context, "the_test"));
+        runner.stops_in_state = (1..=at).map(|asked| asked == at).collect();
+        let (status, said) = go(&context, &family, &mut runner);
+        assert_eq!(status.unwrap(), 130, "{at}: {said}");
+        assert_eq!(runner.ran, ran, "{at}: nothing is run after the stop");
+        assert_eq!(runner.states, at, "{at}");
+        assert!(
+            said.ends_with("stopped: every file is as it was\n"),
+            "{at}: {said}"
+        );
+        assert!(!said.contains("p: two"), "{at}: {said}");
+        assert!(!planted(&context), "{at}");
+    }
 }
 
 #[test]
@@ -1346,7 +1393,7 @@ fn the_native_cf_is_built_again_after_a_plant_whose_runs_built_it_from_planted_s
     // built again once it is back.
     let two = |run: &str| [run; 2].map(String::from).to_vec();
     let builds = |run: &str| {
-        let mut runs = vec![PREFLIGHT_WORDS.to_owned()];
+        let mut runs = PREFLIGHT_WORDS.map(String::from).to_vec();
         runs.extend(two(run));
         runs.push("rebuild-cf".to_owned());
         runs
@@ -1359,7 +1406,12 @@ fn the_native_cf_is_built_again_after_a_plant_whose_runs_built_it_from_planted_s
     ]
     .concat();
     assert_eq!(runner.ran, expected);
-    let planted_then_back = [("cargo", "ONE\ntwo\n"), ("rebuild-cf", "one\ntwo\n")];
+    // Both builds before the run, `cf` and the pane host, from the plant.
+    let planted_then_back = [
+        ("cargo", "ONE\ntwo\n"),
+        ("cargo", "ONE\ntwo\n"),
+        ("rebuild-cf", "one\ntwo\n"),
+    ];
     let expected_seen: Vec<(String, String)> = [planted_then_back, planted_then_back]
         .concat()
         .into_iter()
@@ -1475,6 +1527,88 @@ fn to_check_refuses_a_meant_name_that_holds_an_xml_entity() {
         "p: quoted: its meant name holds &quot;, a report's escape and no part of a test's name: write the name as the test does\n\
          p: numbered: its meant name holds &#34;, a report's escape and no part of a test's name: write the name as the test does\n\
          1 of 3 plants apply\n"
+    );
+    assert!(runner.ran.is_empty());
+}
+
+/// A system that is not this one, as a plant's `platforms` names it.
+fn elsewhere() -> String {
+    if HERE == "windows" {
+        "macos"
+    } else {
+        "windows"
+    }
+    .to_owned()
+}
+
+#[test]
+fn a_plant_for_another_system_is_skipped_neither_caught_nor_missed_and_not_checked() {
+    let (_folder, context) = checkout();
+    let mut other = upper("p: elsewhere", &[("first", false)]);
+    other.platforms = vec![elsewhere()];
+    let mut here = upper("p: here", &[("first", false)]);
+    here.platforms = vec![HERE.to_owned(), elsewhere()];
+    let family = family(vec![
+        other.clone(),
+        here.clone(),
+        upper("p: every", &[("first", false)]),
+    ]);
+    let mut runner = Fake::new(|_| catches(&context, "m::the_test"));
+    let (status, said) = go(&context, &family, &mut runner);
+    assert_eq!(status.unwrap(), 0, "{said}");
+    assert!(
+        said.contains(&format!(
+            "SKIPPED (platform) p: elsewhere: for {}, and this is {HERE}\n",
+            elsewhere()
+        )),
+        "{said}"
+    );
+    assert!(said.contains("CAUGHT           p: here ("), "{said}");
+    assert!(said.contains("CAUGHT           p: every ("), "{said}");
+    assert!(
+        said.ends_with("2 of 2 plants caught, 1 skipped (platform)\n"),
+        "{said}"
+    );
+    // Each run with the plant, and once without it: nothing of the one skipped.
+    assert_eq!(runner.ran, ["first"; 3]);
+    // To check it is to say it: what it needs first is not run, nor is it planted.
+    let mut needs = other;
+    needs.prepare = vec![vec!["prepare".into()]];
+    needs.edits[0].find = "not there".into();
+    let mut runner = Fake::new(|_| passes());
+    let (status, said) = checked(&context, &[needs, here], &mut runner);
+    assert_eq!(status, 0, "{said}");
+    assert!(
+        said.ends_with("1 plants apply, 1 skipped (platform)\n"),
+        "{said}"
+    );
+    assert!(runner.ran.is_empty());
+}
+
+#[test]
+fn to_check_refuses_a_run_with_an_option_of_cargo_test_that_nextest_has_no_word_for() {
+    let (_folder, context) = checkout();
+    let run_by = |name: &str, command: &[&str]| {
+        let mut plant = upper(name, &[("first", false)]);
+        plant.runs.push(Run {
+            command: command.iter().map(|word| (*word).to_owned()).collect(),
+            builds: false,
+        });
+        plant
+    };
+    let plants = [
+        run_by("p: doc", &["cargo", "test", "-p", "x", "--doc"]),
+        run_by(
+            "p: profile",
+            &["cargo", "test", "-p", "x", "--profile", "release"],
+        ),
+    ];
+    let mut runner = Fake::new(|_| passes());
+    let (status, said) = checked(&context, &plants, &mut runner);
+    assert_eq!(status, 1);
+    assert_eq!(
+        said,
+        "p: doc: cargo test --doc: nextest runs no doctest\n1 of 2 plants apply\n"
     );
     assert!(runner.ran.is_empty());
 }
@@ -1729,6 +1863,7 @@ fn placed(code: i32, tests: &[(&str, &str, bool)]) -> Answer {
                     name: (*name).into(),
                     at: (*at).into(),
                     file: Some("/checkout/tests/a.test.mjs".into()),
+                    whole: false,
                     failed: *failed,
                 })
                 .collect(),
@@ -1778,28 +1913,34 @@ fn a_meant_name_that_stands_for_two_tests_of_a_report_is_no_catch_and_says_so() 
     let (status, said, ran) = runner_for("another › the_test");
     assert_eq!(status, 0, "{said}");
     assert_eq!(ran, ["node", "node"]);
-    // One test in one place, run twice (in two of Playwright's projects), is one test.
+    // A name registered twice in one place (a loop of `test('the_test', …)`) is two
+    // tests, one passing and one failing; named whole, it is still two. (One test run
+    // in two of Playwright's projects is one test of its report: `results`.)
     let (_folder, context) = checkout();
     let mut runner = Fake::new(|_| {
         let with = planted(&context);
         placed(
             i32::from(with),
             &[
-                ("g › the_test", "a.spec.mjs:4:3", with),
-                ("g › the_test", "a.spec.mjs:4:3", false),
+                ("g › the_test", "/checkout/tests/a.test.mjs:4:3", false),
+                ("g › the_test", "/checkout/tests/a.test.mjs:4:3", with),
             ],
         )
     });
-    let (status, said) = go(
-        &context,
-        &family_of(upper("p: two", &[("page", false)])),
-        &mut runner,
-    );
-    assert_eq!(status.unwrap(), 0, "{said}");
+    let mut plant = upper("p: two", &[("node", false)]);
+    plant.meant = "g › the_test".into();
+    let (status, said) = go(&context, &family_of(plant), &mut runner);
+    assert_eq!(status.unwrap(), 1, "{said}");
     assert!(
-        said.contains("CAUGHT           p: two (0 s) by g › the_test\n"),
+        said.contains(
+            "MISSED-BY-MEANT  p: two (0 s) by g › the_test\n    failed: g › the_test\n    \
+             the meant name g › the_test stands for 2 tests of node --test tests/a.test.mjs, so \
+             none of them is taken for it: g › the_test (/checkout/tests/a.test.mjs:4:3), g › \
+             the_test (/checkout/tests/a.test.mjs:4:3)\n"
+        ),
         "{said}"
     );
+    assert_eq!(runner.ran, ["node"], "nothing is run without the plant");
 }
 
 #[test]

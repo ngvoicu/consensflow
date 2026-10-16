@@ -67,6 +67,33 @@ impl Group {
         }
     }
 
+    /// Whether the program has ended, asked without waiting for it: it is not
+    /// reaped, and so its pid and its group's id are still its own. Not where it
+    /// cannot be told.
+    #[cfg(unix)]
+    pub(crate) fn ended(&self) -> bool {
+        let Some(pid) = self.pid.and_then(|pid| libc::id_t::try_from(pid).ok()) else {
+            return false;
+        };
+        if self.exited.get() {
+            return false;
+        }
+        #[allow(unsafe_code)]
+        // SAFETY: waitid writes only the siginfo_t it is given, ours and zeroed;
+        // WNOHANG returns at once, and WNOWAIT leaves the program to be reaped by
+        // the wait for it.
+        unsafe {
+            let mut info: libc::siginfo_t = std::mem::zeroed();
+            let asked = libc::waitid(
+                libc::P_PID,
+                pid,
+                &mut info,
+                libc::WEXITED | libc::WNOHANG | libc::WNOWAIT,
+            );
+            asked == 0 && info.si_pid() != 0
+        }
+    }
+
     /// The program has been waited for: nothing is sent to its pid, nor to
     /// its group's id, after this.
     pub(crate) fn release(&self) {
