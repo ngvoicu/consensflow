@@ -2,6 +2,7 @@ import { button, element, redraw } from '../dom.js'
 import { initializeUpdates } from '../updates.js'
 import { BoardView, TaskDrawer } from './board.js'
 import { NewProjectDialog, ProjectSettingsDialog, SwitchChiefDialog } from './dialogs.js'
+import { listenForFileDrops } from './file-drop.js'
 import { Layout } from './layout.js'
 import { ProjectMenu } from './project-menu.js'
 import { SpecsSettings } from './specs-settings.js'
@@ -788,6 +789,14 @@ async function start() {
         }, 50)
       })
       await listen('daemon-status', (event) => daemonStatus(event.payload))
+      // A file dropped on a terminal window types its path there.
+      await listenForFileDrops({
+        listen,
+        invoke,
+        focus: (id) => invoke('focus_after_drop', { id }),
+        dock: terminals,
+        report,
+      })
     } catch (cause) {
       report(cause)
     }
