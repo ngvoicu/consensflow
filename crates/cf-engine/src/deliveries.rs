@@ -298,17 +298,25 @@ impl Dispatcher {
     /// whoever gave it hears why; so do words told to the window while its
     /// task waits on it (`is_told`): an answer the window gave without them is
     /// no result. Whoever waits on any other kind would wait forever, so the
-    /// human hears, once, what it was, for whom and why.
+    /// human hears, once, what it was, for whom and why. What the ledger kept
+    /// for a resume, or withdrew, did not fail, and nobody hears of it.
     fn fail_delivery(&self, message: &MessageView, because: &str) -> Result<(), EngineError> {
-        self.seams
+        let settled = self
+            .seams
             .ledger
             .borrow_mut()
             .fail_delivery(message.id, because)?;
+        if settled.state != "failed" {
+            return Ok(());
+        }
         let project = self.known_project(message.project_id)?;
-        let fails = message.kind == "task" || is_told(message);
-        if let Some(number) = message.task_number.filter(|_| fails) {
+        if let Some(number) = message.task_number {
             let task = self.seams.ledger.borrow().task(project.id, number)?;
-            if let Some(thread) = task.filter(|thread| thread.task.state == "failed") {
+            let failed = task.filter(|thread| {
+                thread.task.state == "failed"
+                    && (message.kind == "task" || is_told(message, thread.task.assignee.as_deref()))
+            });
+            if let Some(thread) = failed {
                 let because = if message.kind == "task" {
                     because.to_owned()
                 } else {

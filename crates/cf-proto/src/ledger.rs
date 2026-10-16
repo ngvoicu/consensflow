@@ -183,8 +183,17 @@ pub struct TranscriptItem {
 /// What a task's windows wrote: how many items in all, and the last ones asked for.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct TaskTranscript {
+    /// Whether the task reached a window: one whose brief reached none has no
+    /// transcript of its own. Said only when it did not, which Node never said.
+    #[serde(skip_serializing_if = "did")]
+    pub reached: bool,
     pub total: usize,
     pub items: Vec<TranscriptItem>,
+}
+
+/// Whether what a field says happened: such a field is left unsaid.
+fn did(happened: &bool) -> bool {
+    *happened
 }
 
 /// What the chief ran on before the latest Switch chief.

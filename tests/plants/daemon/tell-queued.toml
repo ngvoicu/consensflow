@@ -227,8 +227,8 @@ runs = ["engine-queued-tells"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
-find = "        let fails = message.kind == \"task\" || is_told(message);"
-replace = "        let fails = message.kind == \"task\";"
+find = "                    && (message.kind == \"task\" || is_told(message, thread.task.assignee.as_deref()))"
+replace = "                    && message.kind == \"task\""
 
 [[plant]]
 name = "tell queued: told words a window took back at a pause stay delivered, as 3.0.5 left all but a brief"
@@ -237,7 +237,7 @@ runs = ["engine-queued-tells"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/taken_back.rs"
-find = "            (message.kind == \"task\" || is_told(message))"
+find = "            (message.kind == \"task\" || is_told(message, assignee.as_deref()))"
 replace = "            message.kind == \"task\""
 
 [[plant]]
@@ -246,9 +246,9 @@ meant = "told_words_a_window_took_back_are_kept_for_it_again_and_the_resume_carr
 runs = ["ledger-told-edges"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/messages/delivery.rs"
-find = "        if !(message.kind == \"task\" || is_told(&message)) || carried_by.is_some() {"
-replace = "        if message.kind != \"task\" || carried_by.is_some() {"
+file = "crates/cf-ledger/src/messages/taken_back.rs"
+find = "        if !(message.kind == \"task\" || is_told(&message, assignee.as_deref()))"
+replace = "        if message.kind != \"task\""
 
 [[plant]]
 name = "tell queued: told words passed on by the human go ahead of older ones still held"

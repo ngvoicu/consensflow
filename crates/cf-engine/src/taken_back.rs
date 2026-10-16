@@ -41,8 +41,14 @@ impl Dispatcher {
             .ledger
             .borrow()
             .last_pasted(participant.id, stop.task_id)?;
+        let task = self
+            .seams
+            .ledger
+            .borrow()
+            .task(participant.project_id, stop.number)?;
+        let assignee = task.and_then(|thread| thread.task.assignee);
         let Some(message) = latest.filter(|message| {
-            (message.kind == "task" || is_told(message))
+            (message.kind == "task" || is_told(message, assignee.as_deref()))
                 && turn.is_some_and(|turn| turn.text.contains(&marker_of(message.id)))
         }) else {
             return Ok(());

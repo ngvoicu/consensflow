@@ -4,13 +4,16 @@
 //! word, whenever it is at it (the field report of 2026-10-15, B4: `cf task
 //! done` was refused while the brief was still on its way back, and the chief's
 //! own result came back to it to accept). A task the human gives the chief is
-//! no such step: its result is the human's to decide.
+//! no such step: its result is the human's to decide. What of a step was on its
+//! way to the chief when it was finished goes no further once its paste is
+//! refused or tried again ([`withdrawn_late`]).
 
-use cf_proto::ledger::TaskMoved;
+use cf_proto::ledger::{MessageView, TaskMoved};
 use rusqlite::params;
 use serde_json::json;
 
 use super::{release_ready, require_task_state, task_by_id, task_row_by_id};
+use crate::messages::cancel_message;
 use crate::model::{LedgerError, HELD_TASK_STATES};
 use crate::queue::{queue, Queued};
 use crate::store::Store;
@@ -22,6 +25,34 @@ pub(super) fn is_own_step(store: &Store, task: &TaskRow) -> Result<bool, LedgerE
         return Ok(false);
     }
     Ok(store.participant_row(task.requester_id)?.role == "chief")
+}
+
+/// Why what of the step `task` had not reached its chief, `chief`, goes no further.
+fn done_before(task: &TaskRow, chief: &str) -> String {
+    format!("T-{} was done before it came back to @{chief}", task.number)
+}
+
+/// `message`, a task message for `task` whose paste was refused or is tried
+/// again: when `task` is the chief's own step and was finished while the paste
+/// was under way (the finish withdraws only what had not set out), it goes no
+/// further, withdrawn in the finish's words, at the refusal or the retry,
+/// whichever comes first (the second review, 2026-10-16: a retry queued the
+/// brief again, and the chief's window was given it for a step accepted).
+/// Whether it was withdrawn.
+pub(crate) fn withdrawn_late(
+    store: &mut Store,
+    message: &MessageView,
+    task: &TaskRow,
+) -> Result<bool, LedgerError> {
+    if message.kind != "task"
+        || HELD_TASK_STATES.contains(&task.state.as_str())
+        || !is_own_step(store, task)?
+    {
+        return Ok(false);
+    }
+    let chief = store.participant_row(task.requester_id)?;
+    cancel_message(store, message.id, &done_before(task, &chief.handle))?;
+    Ok(true)
 }
 
 /// The chief finishes its own step with `body`, queued for it (its brief on
@@ -41,14 +72,7 @@ pub(super) fn finish(
     store.db.execute(
         "UPDATE message SET state = 'cancelled', reason = ?
          WHERE task_id = ? AND recipient_id = ? AND state IN ('queued', 'gated')",
-        params![
-            format!(
-                "T-{} was done before it came back to @{}",
-                task.number, chief.handle
-            ),
-            task.id,
-            chief.id
-        ],
+        params![done_before(task, &chief.handle), task.id, chief.id],
     )?;
     let message_id = queue(
         store,

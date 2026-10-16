@@ -1,0 +1,235 @@
+# The second review of 3.0.6's field work (GPT-6-Astra and GPT-6.1-Sol, 2026-10-16), each finding
+# fixed with a test that failed on the code it read:
+#
+# - B4: a brief of the chief's own step being pasted when the step is done goes no further at the
+#   refusal or the retry, in the finish's words (`withdrawn_late` in
+#   `crates/cf-ledger/src/tasks/own_steps.rs`; tests `self_steps.rs`, the engine's `own_steps`);
+# - B6: `--file` names its file by its bytes, reads only a file of its own, never a link, a pipe, a
+#   device or a folder, no further than the board takes, and takes no `--file` with no name; the
+#   reply and the refusals show a control character escaped (`crates/cf/src/board/brief.rs`; tests
+#   `crates/cf/tests/brief_file_checks.rs`, the brief's own);
+# - B7: a task whose brief reached no window has no transcript of its own, and says so
+#   (`crates/cf-ledger/src/conversations/transcripts.rs`, the route's `pages`, `cf`'s `transcript`;
+#   tests the route's `own_steps`, `crates/cf/tests/transcript_pages.rs`);
+# - B3: told words are a note to the task's own window, and a note to anyone else fails nothing
+#   (`is_told`); a resume keeps the order they were told in (`fold`, `adopt`); words whose last paste
+#   fails while the task is paused are kept for its resume, and nobody hears of a failure
+#   (`kept_for_resume`, the engine's `fail_delivery`; tests `told_kept.rs`, the engine's
+#   `queued_tells`).
+#
+# Each plant takes one fix out again. The names begin with `review 306`, so
+# `npm run plants:daemon -- "review 306"` runs them.
+
+[run]
+ledger-self-steps = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "self_steps::"]
+ledger-told-kept = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "told_kept::"]
+engine-own-steps = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "own_steps::"]
+engine-queued-tells = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "queued_tells::"]
+cf-brief-checks = ["cargo", "test", "--offline", "-p", "cf", "--test", "brief_file_checks"]
+cf-lib-brief = ["cargo", "test", "--offline", "-p", "cf", "--lib", "board::brief"]
+cf-transcript-pages = ["cargo", "test", "--offline", "-p", "cf", "--test", "transcript_pages"]
+daemon-own-steps = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "routes::task::tests::own_steps"]
+
+# B4: a brief on its way when the chief's own step is done.
+
+[[plant]]
+name = "review 306: a retry queues the brief of a step done while it was pasted"
+meant = "a_brief_on_its_way_when_the_step_was_done_goes_no_further_whether_its_paste_is_refused_or_given_back"
+runs = ["ledger-self-steps", "engine-own-steps"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = "            if withdrawn_late(store, &message, &task)? {"
+replace = "            if false && withdrawn_late(store, &message, &task)? {"
+
+[[plant]]
+name = "review 306: a brief given up for a step done while it was pasted fails, not withdrawn"
+meant = "a_brief_on_its_way_when_the_step_was_done_goes_no_further_whether_its_paste_is_refused_or_given_back"
+runs = ["ledger-self-steps"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = '''
+            if withdrawn_late(store, &message, &task)?
+                ||'''
+replace = '''
+            if (false && withdrawn_late(store, &message, &task)?)
+                ||'''
+
+[[plant]]
+name = "review 306: no brief of the chief's own step is withdrawn late, whatever became of the step"
+meant = "a_brief_being_pasted_when_the_chief_finished_its_step_is_withdrawn_at_the_refusal_and_never_pasted"
+runs = ["engine-own-steps", "ledger-self-steps"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/own_steps.rs"
+find = "    if message.kind != \"task\""
+replace = "    if true || message.kind != \"task\""
+
+# B6: the file a brief is read from.
+
+[[plant]]
+name = "review 306: --file names its file by the text its name reads as"
+meant = "a_file_is_named_by_its_bytes_never_by_a_name_that_reads_the_same"
+runs = ["cf-brief-checks"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/brief.rs"
+find = "    let path = Path::new(name);"
+replace = '''
+    let lossy = std::path::PathBuf::from(name.to_string_lossy().into_owned());
+    let path = lossy.as_path();'''
+
+[[plant]]
+name = "review 306: --file follows a link"
+meant = "a_link_a_device_or_a_folder_is_refused_by_what_the_open_file_is_and_nothing_is_posted"
+runs = ["cf-brief-checks"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/brief.rs"
+find = "libc::O_NOFOLLOW | libc::O_NONBLOCK"
+replace = "libc::O_NONBLOCK"
+
+[[plant]]
+name = "review 306: --file waits for a writer of a pipe"
+meant = "a_pipe_no_one_writes_is_refused_at_once_and_never_waited_for"
+runs = ["cf-brief-checks"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/brief.rs"
+find = "libc::O_NOFOLLOW | libc::O_NONBLOCK"
+replace = "libc::O_NOFOLLOW"
+
+[[plant]]
+name = "review 306: --file reads whatever it opened, a device or a folder"
+meant = "a_link_a_device_or_a_folder_is_refused_by_what_the_open_file_is_and_nothing_is_posted"
+runs = ["cf-brief-checks"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/brief.rs"
+find = "    Ok(if kind.is_file() {"
+replace = "    Ok(if true || kind.is_file() {"
+
+[[plant]]
+name = "review 306: --file reads a file longer than the board takes"
+meant = "a_file_is_read_as_far_as_the_board_takes_and_one_longer_is_refused_unread"
+runs = ["cf-brief-checks"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/brief.rs"
+find = "    if bytes.len() > MOST_READ {"
+replace = "    if bytes.len() > MOST_READ + 1 {"
+
+[[plant]]
+name = "review 306: a --file with no name is passed over for the words beside it"
+meant = "a_file_flag_with_no_name_is_written_wrong_whatever_stands_beside_it"
+runs = ["cf-brief-checks"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/brief.rs"
+find = "    if !words.given(FILE) {"
+replace = "    if words.value(FILE).is_none() {"
+
+[[plant]]
+name = "review 306: the reply shows the words' control characters raw"
+meant = "a_character_that_would_redraw_the_terminal_is_shown_escaped"
+runs = ["cf-lib-brief", "cf-brief-checks"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/brief.rs"
+find = "        escaped(&last)"
+replace = "        last"
+
+[[plant]]
+name = "review 306: a refusal shows the file's name raw"
+meant = "the_reply_and_a_refusal_show_a_control_character_escaped_never_raw"
+runs = ["cf-brief-checks"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/brief.rs"
+find = "    let shown = escaped(&path.to_string_lossy());"
+replace = "    let shown = path.to_string_lossy();"
+
+# B7: the transcript of a task whose brief reached no window.
+
+[[plant]]
+name = "review 306: a task whose brief reached no window is given the window's whole copy"
+meant = "a_step_done_before_its_brief_came_back_has_no_transcript_and_the_chiefs_other_work_is_not_its"
+runs = ["daemon-own-steps"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/transcripts.rs"
+find = "        return Ok(delivered.then_some(copied));"
+replace = "        return Ok(Some(copied));"
+
+[[plant]]
+name = "review 306: a page of a task that reached no window does not say so"
+meant = "a_step_done_before_its_brief_came_back_has_no_transcript_and_the_chiefs_other_work_is_not_its"
+runs = ["daemon-own-steps"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/task/pages.rs"
+find = "        if !transcript.reached {"
+replace = "        if false && !transcript.reached {"
+
+[[plant]]
+name = "review 306: cf says nothing of a task whose brief reached no window"
+meant = "a_task_whose_brief_reached_no_window_is_said_to_have_no_transcript_of_its_own"
+runs = ["cf-transcript-pages"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/transcript.rs"
+find = "    let reached = copy.value().get(\"reached\") != Some(&Value::Bool(false));"
+replace = "    let reached = true || copy.value().get(\"reached\") != Some(&Value::Bool(false));"
+
+# B3: words told to a task's window.
+
+[[plant]]
+name = "review 306: a worker's note to the chief is told words of its task"
+meant = "a_workers_note_to_the_chief_that_never_arrives_fails_nothing_of_its_task"
+runs = ["ledger-told-kept", "engine-queued-tells"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/told.rs"
+find = "        && assignee == Some(message.recipient.as_str())"
+replace = "        && (true || assignee == Some(message.recipient.as_str()))"
+
+[[plant]]
+name = "review 306: a resume carries newer words past older ones the human holds"
+meant = "a_resume_keeps_the_order_the_words_were_told_in_whatever_order_the_human_passes_them_on_in"
+runs = ["ledger-told-kept"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/carrying.rs"
+find = "AND m.id != ?3 AND NOT {}"
+replace = "AND m.id != ?3 AND NOT ({} AND 0)"
+
+[[plant]]
+name = "review 306: words held behind others stay behind when those join a waiting resume"
+meant = "a_resume_keeps_the_order_the_words_were_told_in_whatever_order_the_human_passes_them_on_in"
+runs = ["ledger-told-kept"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/carrying.rs"
+find = "                 AND f.state = 'queued' AND f.carried_by IS NULL AND {} AND NOT {})\","
+replace = "                 AND f.state = 'queued' AND f.carried_by IS NULL AND {} AND NOT {} AND 0)\","
+
+[[plant]]
+name = "review 306: words whose last paste fails while the task is paused are given up"
+meant = "told_words_whose_last_paste_fails_while_the_task_is_paused_are_kept_for_its_resume"
+runs = ["ledger-told-kept", "engine-queued-tells"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/told.rs"
+find = "    if task.state != \"paused\" || !is_told(message, assignee_of(store, task)?.as_deref()) {"
+replace = "    if true || task.state != \"paused\" || !is_told(message, assignee_of(store, task)?.as_deref()) {"
+
+[[plant]]
+name = "review 306: the engine tells of a failure the ledger kept for a resume"
+meant = "words_whose_last_paste_fails_while_the_human_pauses_are_kept_for_the_resume_and_no_failure_is_told"
+runs = ["engine-queued-tells"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = "        if settled.state != \"failed\" {"
+replace = "        if false && settled.state != \"failed\" {"

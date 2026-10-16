@@ -5,6 +5,7 @@
 //! than a harness shows its model (`cut`) says nothing.
 
 use std::cell::Cell;
+use std::ffi::OsString;
 use std::io::{self, Write};
 use std::rc::Rc;
 
@@ -67,7 +68,7 @@ struct Ran {
 fn cf_with(words: &[&str], json: bool, replies: Vec<Reply>, fails: Option<io::ErrorKind>) -> Ran {
     let api = scripted(replies);
     let board = Board::new(Some(&api.url), "tok");
-    let words: Vec<String> = words.iter().map(|word| (*word).to_owned()).collect();
+    let words: Vec<OsString> = words.iter().map(OsString::from).collect();
     let mut out = Output::new(&api);
     out.fails = fails;
     let mut err = Vec::new();

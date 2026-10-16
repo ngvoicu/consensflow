@@ -97,7 +97,9 @@ struct Copied {
 /// What the windows that had a task wrote: the copied items of each window
 /// the task was given to, in the order it was (a reassigned task's first
 /// window, then the one that took it), whole, the last `limit` of them (all
-/// of them when no limit is given). `cf task get --transcript` reads it.
+/// of them when no limit is given). `cf task get --transcript` reads it. A
+/// task whose brief reached no window has no transcript of its own, and says
+/// so (`reached`): what its window wrote was another task's.
 pub(crate) fn transcript(
     store: &Store,
     project_id: i64,
@@ -105,7 +107,7 @@ pub(crate) fn transcript(
     limit: Option<usize>,
 ) -> Result<TaskTranscript, LedgerError> {
     let task = store.task_row(project_id, number)?;
-    let mut windows = store
+    let windows = store
         .db
         .prepare(
             "SELECT recipient_id FROM message WHERE task_id = ? AND kind = 'task'
@@ -113,16 +115,18 @@ pub(crate) fn transcript(
         )?
         .query_map([task.id], |row| row.get::<_, i64>("recipient_id"))?
         .collect::<rusqlite::Result<Vec<_>>>()?;
-    if windows.is_empty() {
-        windows.extend(task.assignee_id);
-    }
     let mut rows = Vec::new();
+    let mut reached = false;
     for participant_id in windows {
-        rows.extend(part_of(store, task.id, participant_id)?);
+        if let Some(part) = part_of(store, task.id, participant_id)? {
+            reached = true;
+            rows.extend(part);
+        }
     }
     let total = rows.len();
     let first = limit.map_or(0, |limit| total.saturating_sub(limit));
     Ok(TaskTranscript {
+        reached,
         total,
         items: rows
             .into_iter()
@@ -144,8 +148,15 @@ pub(crate) fn transcript(
 /// given with --after): each task message that arrived in it (a brief, a
 /// resume, a reopen), known by its header, turns the window to that task
 /// until the next one does. A copy that shows none of the task's headers is
-/// the task's whole.
-fn part_of(store: &Store, task_id: i64, participant_id: i64) -> Result<Vec<Copied>, LedgerError> {
+/// the task's whole where a task message of it was delivered there, and none
+/// where none was: the task never reached that window, and what it wrote was
+/// for others (the second review, 2026-10-16: the chief's own step, done before
+/// its brief came back, was shown the chief's whole conversation).
+fn part_of(
+    store: &Store,
+    task_id: i64,
+    participant_id: i64,
+) -> Result<Option<Vec<Copied>>, LedgerError> {
     let copied = store
         .db
         .prepare(
@@ -190,13 +201,22 @@ fn part_of(store: &Store, task_id: i64, participant_id: i64) -> Result<Vec<Copie
         part.push(current == Some(task_id));
     }
     if !shown {
-        return Ok(copied);
+        let delivered = store
+            .db
+            .prepare(
+                "SELECT 1 FROM message WHERE task_id = ? AND recipient_id = ? AND kind = 'task'
+                   AND state IN ('delivered', 'read')",
+            )?
+            .exists(params![task_id, participant_id])?;
+        return Ok(delivered.then_some(copied));
     }
-    Ok(copied
-        .into_iter()
-        .zip(part)
-        .filter_map(|(row, in_part)| in_part.then_some(row))
-        .collect())
+    Ok(Some(
+        copied
+            .into_iter()
+            .zip(part)
+            .filter_map(|(row, in_part)| in_part.then_some(row))
+            .collect(),
+    ))
 }
 
 /// The message a delivery's header names: the first `[ConsensFlow m-` in

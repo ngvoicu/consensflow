@@ -3,9 +3,11 @@
 //! 2026-10-16: `cf task done` was refused while the step's brief was on its way
 //! back to the chief, and the chief's own result came back to it to accept). The
 //! step is done whenever the chief is at it, queued or working; a brief not yet
-//! given is withdrawn; its words are its result, received as written, and it is
-//! accepted at once, so what needs it goes on. A task the human gives the chief
-//! is no such step: its result is the human's to decide.
+//! given is withdrawn, and one on its way goes no further once its paste is
+//! refused or given back (the second review, 2026-10-16); its words are its
+//! result, received as written, and it is accepted at once, so what needs it
+//! goes on. A task the human gives the chief is no such step: its result is the
+//! human's to decide.
 
 use cf_ledger::NewTask;
 
@@ -136,6 +138,48 @@ fn a_chiefs_own_step_at_work_is_done_and_accepted_and_one_still_waiting_on_the_b
         "the brief it had stays"
     );
     assert_eq!(waiting_for_the_chief(&w), Vec::<Option<i64>>::new());
+}
+
+#[test]
+fn a_brief_on_its_way_when_the_step_was_done_goes_no_further_whether_its_paste_is_refused_or_given_back(
+) {
+    for settled in ["tried again", "given up", "given back"] {
+        let mut w = world();
+        let parser = parser_done(&mut w);
+        let own = for_the_chief(&mut w, "chief", &[parser], "Check the parser");
+        w.ledger
+            .accept_task(w.project, parser, "chief")
+            .expect("accepted");
+        let brief = w.next("chief").expect("the step's brief");
+        w.begin(brief);
+        w.ledger
+            .record_result(w.project, own, "Checked: it holds")
+            .expect("done by its word");
+        assert_eq!(
+            w.message(brief).state,
+            "delivering",
+            "{settled}: its paste is under way, which the finish leaves to it"
+        );
+        let refused = "refused by the window";
+        let answer = match settled {
+            "tried again" => w.ledger.retry_delivery(brief, refused, false),
+            "given up" => w.ledger.fail_delivery(brief, refused),
+            _ => w
+                .ledger
+                .retry_delivery(brief, "the window went before it landed", true),
+        }
+        .expect("settled");
+        assert_eq!(
+            (answer.state.as_str(), answer.reason.as_deref()),
+            (
+                "cancelled",
+                Some(format!("T-{own} was done before it came back to @chief").as_str())
+            ),
+            "{settled}: withdrawn, in the finish's words"
+        );
+        assert_eq!(w.next("chief"), None, "{settled}: never given it again");
+        assert_eq!(w.state(own), "accepted");
+    }
 }
 
 #[test]

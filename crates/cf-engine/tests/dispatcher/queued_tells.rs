@@ -3,15 +3,19 @@
 //! brief, once each: in the brief's own paste while it waits, or as the window's
 //! next message once a launch has begun with the brief, and then the window's
 //! answer to the brief is no result until it has had them. Words that never
-//! reach the window fail the task; words the window took back go in again with
-//! the words that resume it; and words in the first message of a launch called
-//! off before its window opened are said to have gone with it. None of these
-//! tests is held to a Node recording: Node refused the tell.
+//! reach the window fail the task, but for words whose last paste fails while
+//! the task is paused, which are kept for its resume (the second review,
+//! 2026-10-16); words the window took back go in again with the words that
+//! resume it; and words in the first message of a launch called off before its
+//! window opened are said to have gone with it. None of these tests is held to
+//! a Node recording: Node refused the tell.
 
 use cf_engine::delivery_text::marker_of;
 use cf_engine::testing::Context;
+use cf_ledger::NewNote;
 
 use crate::fixtures::{assert_match, given, last_message, notes, Tiers};
+use crate::work_in_flight::looks_at;
 
 /// The chief tells the window of T-`number`, still queued, `body`: the id of the
 /// note that keeps the words.
@@ -180,6 +184,116 @@ fn words_the_window_took_back_at_a_pause_go_in_again_with_the_words_that_resume_
     assert_eq!(thread.task.state, "done");
     let result = thread.messages.iter().find(|m| m.kind == "result").unwrap();
     assert_eq!(result.body, "Parser done, on the v2 grammar");
+}
+
+#[test]
+fn words_whose_last_paste_fails_while_the_human_pauses_are_kept_for_the_resume_and_no_failure_is_told(
+) {
+    let context = Context::new();
+    let (tiers, session, told) = told_on_its_way(&context);
+    let project = tiers.project.id;
+    context.adapter.answer("zeus", "Parser done");
+    context.adapter.with("zeus", |agent| agent.admit = false);
+    // Two pastes refused, each tried again.
+    for _ in 0..10 {
+        let words = context.message(told);
+        if words.attempts == 2 && words.state == "queued" {
+            break;
+        }
+        context.pass().unwrap();
+    }
+    assert_eq!(context.message(told).attempts, 2);
+    // The last is under way when the human pauses the task, and is refused.
+    let launch = context.adapter.agent("zeus").launch;
+    let held = context.adapter.deliver_holds.hold(looks_at(launch));
+    context.pass().unwrap();
+    assert_eq!(context.message(told).state, "delivering");
+    context.human_pause(project, 1);
+    held.open();
+    context.settle();
+    let kept = context.message(told);
+    assert_eq!(
+        (kept.state.as_str(), kept.reason.as_deref()),
+        ("queued", Some("kept for T-1's resume: refused by the test")),
+        "never given up"
+    );
+    assert_eq!(tiers.task(1).task.state, "paused");
+    assert!(
+        !tiers
+            .notes("human")
+            .iter()
+            .any(|note| note.contains("did not reach")),
+        "{:?}",
+        tiers.notes("human")
+    );
+    assert!(
+        !tiers
+            .notes("chief")
+            .iter()
+            .any(|note| note.contains("failed")),
+        "{:?}",
+        tiers.notes("chief")
+    );
+
+    context.adapter.with("zeus", |agent| agent.admit = true);
+    context.resume_task(project, 1, "Carry on");
+    context.pass().unwrap();
+    assert_match(
+        given(&context, &session).last().unwrap(),
+        &format!(
+            r"^\[ConsensFlow m-\d+ · T-1 · task from @chief\]\n\(kept for you: note m-{told} from @chief\)\nUse the v2 grammar\n\nResumed: Carry on$"
+        ),
+    );
+}
+
+#[test]
+fn a_workers_note_to_the_chief_that_never_arrives_fails_nothing_and_the_human_hears_of_it_once() {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    let project = tiers.project.id;
+    tiers.open_body("Parser");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(tiers.task(1).task.state, "working");
+    let session = tiers.assignee(1);
+    context.adapter.with("chief", |agent| agent.admit = false);
+    let note = context
+        .ledger
+        .borrow_mut()
+        .note(
+            project,
+            &NewNote {
+                from: Some(session.clone()),
+                to: "chief".to_owned(),
+                task: Some(1),
+                body: "Halfway there".to_owned(),
+            },
+        )
+        .unwrap()
+        .id;
+    for _ in 0..5 {
+        context.pass().unwrap();
+    }
+    assert_eq!(context.message(note).state, "failed");
+    assert_eq!(
+        tiers.task(1).task.state,
+        "working",
+        "words to the chief are no words for the task's window"
+    );
+    assert_eq!(
+        tiers.notes("human"),
+        [format!(
+            "m-{note}, a note from @{session} on T-1, did not reach @chief: refused by the test."
+        )]
+    );
+    assert!(
+        !tiers
+            .notes("chief")
+            .iter()
+            .any(|said| said.contains("T-1 failed")),
+        "{:?}",
+        tiers.notes("chief")
+    );
 }
 
 #[test]

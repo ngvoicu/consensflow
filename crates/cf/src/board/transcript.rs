@@ -5,6 +5,7 @@
 //! case, as `cf history` reads the chief's history (the field report of
 //! 2026-10-15, B7: `--last 400` never reached the window that overwrote a file).
 //! A search shows each long item around the words it found, not from its start.
+//! A task whose brief reached no window has no transcript, and `cf` says so.
 
 use cf_base::js;
 use cf_base::text::{utf16_len, utf16_prefix};
@@ -90,7 +91,11 @@ pub(super) fn read(
     let copy = board.get(&path)?;
     let listed = copy.list(copy.value().get("items"), "items")?;
     let at = |field: &str| copy.value().get(field).and_then(Value::as_u64);
+    let reached = copy.value().get("reached") != Some(&Value::Bool(false));
     let text = match asked {
+        _ if !reached => {
+            "Its brief has not reached a window, so it has no transcript of its own.".to_owned()
+        }
         Asked::Last(_) if at("total") == Some(0) => {
             "Its window has written nothing yet.".to_owned()
         }

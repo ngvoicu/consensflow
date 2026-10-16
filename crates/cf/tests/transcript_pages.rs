@@ -2,8 +2,9 @@
 //! read past its newest items, fifty to a page from the newest, searched in any
 //! case (the field report of 2026-10-15, B7: `--last 400` never reached the
 //! window that overwrote a file). Each page says where it is among them and how
-//! to read the one before. The commands are run as a window runs them, against an
-//! API that writes down what it is asked.
+//! to read the one before; a task whose brief reached no window has none of its
+//! own, and is said to (the second review, 2026-10-16). The commands are run as
+//! a window runs them, against an API that writes down what it is asked.
 
 // The tests' own helpers: a failure in one is the test's.
 #![allow(clippy::expect_used)]
@@ -120,6 +121,37 @@ fn a_search_says_how_many_items_say_its_words_and_shows_a_long_one_around_them()
         printed,
         "T-3 [done] @zeus ← @chief: Parser\n\nNothing its window did says \"overwrote\".\n"
     );
+}
+
+#[test]
+fn a_task_whose_brief_reached_no_window_is_said_to_have_no_transcript_of_its_own() {
+    for (args, answer) in [
+        (
+            vec!["--transcript"],
+            json!({ "reached": false, "total": 0, "items": [] }),
+        ),
+        (
+            vec!["--transcript", "--page", "1"],
+            json!({ "reached": false, "total": 0, "page": 0, "pages": 0, "items": [] }),
+        ),
+        (
+            vec!["--transcript", "--find", "parser"],
+            json!({ "reached": false, "total": 0, "found": 0, "page": 0, "pages": 0, "items": [] }),
+        ),
+    ] {
+        let api = scripted(vec![reply(200, task()), reply(200, answer)]);
+        let words: Vec<&str> = ["task", "get", "T-3"]
+            .into_iter()
+            .chain(args.iter().copied())
+            .collect();
+        let (code, printed, _) = window(&api, &words);
+        assert_eq!(code, Some(0), "{args:?}");
+        assert_eq!(
+            printed,
+            "T-3 [done] @zeus ← @chief: Parser\n\nIts brief has not reached a window, so it has no transcript of its own.\n",
+            "{args:?}"
+        );
+    }
 }
 
 #[test]

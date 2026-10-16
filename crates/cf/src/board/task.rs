@@ -1,5 +1,6 @@
 //! `cf task …`: work put on the board, read from it, and moved along it.
 
+use std::ffi::OsString;
 use std::io::Read;
 
 use cf_base::js;
@@ -43,7 +44,13 @@ const GET: Shape = Shape {
 /// The commands that move a task, which stands first among their words.
 const MOVES: [&str; 6] = ["done", "accept", "cancel", "reopen", "pause", "resume"];
 
-pub fn command(words: &[String], board: &Board, input: &mut dyn Read) -> Result<Said, Failure> {
+/// `cf task` with `words`, the last of those `given` spells as the system gave them.
+pub fn command(
+    words: &[String],
+    given: &[OsString],
+    board: &Board,
+    input: &mut dyn Read,
+) -> Result<Said, Failure> {
     let (action, rest) = match words.split_first() {
         Some((action, rest)) => (Some(action.as_str()), rest),
         None => (None, words),
@@ -53,7 +60,7 @@ pub fn command(words: &[String], board: &Board, input: &mut dyn Read) -> Result<
             let usage = task_usage();
             return Ok(Said::new(json!({ "usage": usage }), usage));
         }
-        Some("add") => return add(rest, board, input),
+        Some("add") => return add(rest, given, board, input),
         Some("list") | None => return board_list(rest, board),
         Some(_) => {}
     }
@@ -71,9 +78,14 @@ pub fn command(words: &[String], board: &Board, input: &mut dyn Read) -> Result<
     let number = task_number(rest.first().map(String::as_str))?;
     match action {
         Some("get") => get(number, rest.get(1..).unwrap_or_default(), board),
-        Some(action) if MOVES.contains(&action) => {
-            moved(action, number, rest.get(1..).unwrap_or_default(), board, input)
-        }
+        Some(action) if MOVES.contains(&action) => moved(
+            action,
+            number,
+            rest.get(1..).unwrap_or_default(),
+            given,
+            board,
+            input,
+        ),
         other => Err(Failure::Usage(format!(
             "unknown task command {}: use add, list, get, done, accept, reopen, cancel, pause or resume",
             quoted(other.unwrap_or_default())
@@ -90,7 +102,12 @@ fn shape_of(verb: &str) -> Shape {
     }
 }
 
-fn add(rest: &[String], board: &Board, input: &mut dyn Read) -> Result<Said, Failure> {
+fn add(
+    rest: &[String],
+    given: &[OsString],
+    board: &Board,
+    input: &mut dyn Read,
+) -> Result<Said, Failure> {
     let words = split(rest, ADD);
     if words.asks_for_help() {
         return Ok(help_of(&["task", "add"]));
@@ -114,7 +131,7 @@ fn add(rest: &[String], board: &Board, input: &mut dyn Read) -> Result<Said, Fai
     if tier.is_none() && after.is_none() && !mine && !words.on("--design") {
         return Err(Failure::Usage(ADD_USAGE.into()));
     }
-    let brief = require_text(brief::brief_of(&words, input)?, ADD_USAGE)?;
+    let brief = require_text(brief::brief_of(&words, given, input)?, ADD_USAGE)?;
     let sent = brief::sent(&brief);
 
     let mut body = Map::new();
@@ -286,13 +303,14 @@ fn moved(
     action: &str,
     number: u64,
     rest: &[String],
+    given: &[OsString],
     board: &Board,
     input: &mut dyn Read,
 ) -> Result<Said, Failure> {
     let briefed = matches!(action, "reopen" | "resume");
     let words = split(rest, shape_of(action));
     let text = if briefed {
-        brief::brief_of(&words, input)?
+        brief::brief_of(&words, given, input)?
     } else {
         text_of(words.text, input)?
     };
@@ -414,9 +432,11 @@ mod tests {
     /// What `cf task add words…` posted and printed, the board answering with `answer`.
     fn added(words: &[&str], answer: &Value) -> (Option<Value>, String) {
         let api = scripted(vec![reply(201, answer.clone())]);
+        let given: Vec<OsString> = words.iter().map(OsString::from).collect();
         let words: Vec<String> = words.iter().map(|word| (*word).to_owned()).collect();
         let said = add(
             &words,
+            &given,
             &Board::new(Some(&api.url), "tok"),
             &mut std::io::empty(),
         )

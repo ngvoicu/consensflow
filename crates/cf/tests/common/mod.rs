@@ -5,13 +5,15 @@
 // The tests' own helper: a failure in it is the test's.
 #![allow(clippy::expect_used)]
 
+use std::ffi::OsStr;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
-/// `cf args` with `env` added and `input` on its standard input.
+/// `cf args` with `env` added and `input` on its standard input. An argument
+/// is given as the system takes it, text or not.
 #[allow(dead_code)] // Each test file takes what it needs of this.
-pub fn cf<S: AsRef<str>>(args: &[S], env: &[(&str, &str)], input: &str) -> Output {
+pub fn cf<S: AsRef<OsStr>>(args: &[S], env: &[(&str, &str)], input: &str) -> Output {
     cf_at(Path::new(env!("CARGO_BIN_EXE_cf")), args, env, input)
 }
 
@@ -38,7 +40,7 @@ pub fn plain(path: PathBuf) -> PathBuf {
 /// on its standard input. The home is a folder of this run's own unless the
 /// case names one: the machine's own `~/.consensflow` is nobody's to write in.
 #[allow(clippy::disallowed_methods)] // The tests start cf themselves.
-pub fn cf_at<S: AsRef<str>>(
+pub fn cf_at<S: AsRef<OsStr>>(
     program: &Path,
     args: &[S],
     env: &[(&str, &str)],

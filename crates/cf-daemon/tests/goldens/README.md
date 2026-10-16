@@ -38,6 +38,13 @@ recordings in four ways, none of them by recording again.
   reply has a last line saying how many characters it sent and how they end, in
   `cf-board-004`, `-008`, `-009`, `-011`, `-014` to `-017`, `-020`, `-021` and `-022`:
   changed by hand, those lines alone, each written as `cf` writes it of the run's words.
+- The second review of that work (2026-10-16): a task whose brief reached no window has
+  no transcript of its own, and the board and `cf task get --transcript` say so, in
+  `cf-board-015` (a task cancelled before any window had it): changed by hand, that
+  answer's `"reached": false` and the line `cf` prints of it alone. The page
+  traces whose drawer showed such a task the whole copy of the window its brief waited
+  for (`core-page-024`, `-025` and `corners-page-008`) depart instead, as `../page/`
+  names them.
 - Every trace that holds a database says `userVersion: 11` and a role check and a pool
   check without the tester, as Node's ledger had them (migration 0012 added the
   tester). They are not rewritten: the player holds the database this ledger left to

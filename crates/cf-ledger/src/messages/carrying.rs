@@ -18,7 +18,7 @@ use serde_json::json;
 use super::delivery::cancel_message;
 use super::messages;
 use super::receipt::reconcile;
-use super::told::behind_held_words;
+use super::told::{behind_held_words, told};
 use crate::model::LedgerError;
 use crate::store::Store;
 use crate::tasks::RESUME_WORDS;
@@ -63,6 +63,9 @@ pub(crate) fn carried(store: &Store, carrier: i64) -> Result<Vec<MessageView>, L
 ///   two of them say what one does;
 /// - what is not kept stays where it is: a tell, a row still held at the gate,
 ///   and a row in flight;
+/// - words told to the window behind older ones the human still holds stay
+///   too (`told`), and follow those in once they are passed on (`adopt`): a
+///   resume keeps the order they were told in (the second review, 2026-10-16);
 /// - what Node's window read at once with no proof it arrived, after the
 ///   task was last paused, was read by a door that was dead by then, and is
 ///   kept again first.
@@ -86,10 +89,11 @@ pub(crate) fn fold(
     let taken = ids(
         store,
         &format!(
-            "SELECT id FROM message WHERE {KEPT} AND id != ?3
-               AND (carried_by IS NULL
-                    OR carried_by IN (SELECT id FROM message WHERE state != 'delivering'))
-             ORDER BY id"
+            "SELECT m.id FROM message m WHERE {KEPT} AND m.id != ?3 AND NOT {}
+               AND (m.carried_by IS NULL
+                    OR m.carried_by IN (SELECT id FROM message WHERE state != 'delivering'))
+             ORDER BY m.id",
+            behind_held_words("m")
         ),
         params![task.id, recipient, carrier],
     )?;
@@ -148,7 +152,9 @@ fn requeue_unreceived_reads(
 /// - one that already carries rows brings them along, so the set stays flat;
 /// - one in flight adopts nothing;
 /// - words told to the window wait behind older ones the human still holds
-///   (`told`), and join nothing ahead of them.
+///   (`told`), and join nothing ahead of them; the words told after a row that
+///   joins, that wait on their own and are held behind nothing now, follow it
+///   in, so the paste says them after it.
 pub(crate) fn adopt(store: &mut Store, id: i64) -> Result<(), LedgerError> {
     let adopted: Option<i64> = store
         .db
@@ -165,12 +171,24 @@ pub(crate) fn adopt(store: &mut Store, id: i64) -> Result<(), LedgerError> {
         .query_map([id], |row| row.get(0))?
         .next()
         .transpose()?;
-    if let Some(carrier) = adopted {
-        store.db.execute(
-            "UPDATE message SET carried_by = ?1 WHERE id = ?2 OR carried_by = ?2",
-            params![carrier, id],
-        )?;
-    }
+    let Some(carrier) = adopted else {
+        return Ok(());
+    };
+    store.db.execute(
+        "UPDATE message SET carried_by = ?1 WHERE id = ?2 OR carried_by = ?2",
+        params![carrier, id],
+    )?;
+    store.db.execute(
+        &format!(
+            "UPDATE message SET carried_by = ?1 WHERE id IN (
+               SELECT f.id FROM message f JOIN message m ON m.id = ?2
+               WHERE f.task_id = m.task_id AND f.recipient_id = m.recipient_id AND f.id > m.id
+                 AND f.state = 'queued' AND f.carried_by IS NULL AND {} AND NOT {})",
+            told("f"),
+            behind_held_words("f")
+        ),
+        params![carrier, id],
+    )?;
     Ok(())
 }
 

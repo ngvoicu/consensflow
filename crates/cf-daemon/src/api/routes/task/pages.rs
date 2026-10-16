@@ -34,11 +34,16 @@ impl<'a> Asked<'a> {
 
     /// The answer: the copy's `total` items, how many hold the words (`found`,
     /// with a search), the `page` and the `pages` there are, and the page's
-    /// `items`. A transcript with nothing to show is page 0 of 0, whatever was
-    /// asked; a page that is none of these is refused, as `cf history` refuses
-    /// one, in words that say how many there are.
+    /// `items`, with `reached` as the last items say it. A transcript with
+    /// nothing to show is page 0 of 0, whatever was asked; a page that is none
+    /// of these is refused, as `cf history` refuses one, in words that say how
+    /// many there are.
     pub(super) fn answer(&self, transcript: TaskTranscript) -> Result<Value, Failure> {
         let total = transcript.total;
+        let mut answer = Map::new();
+        if !transcript.reached {
+            answer.insert("reached".to_owned(), json!(false));
+        }
         let found: Vec<_> = match self.find {
             None => transcript.items,
             Some(find) => {
@@ -52,7 +57,6 @@ impl<'a> Asked<'a> {
         };
         let count = found.len();
         let pages = count.div_ceil(PER_PAGE);
-        let mut answer = Map::new();
         answer.insert("total".to_owned(), json!(total));
         if self.find.is_some() {
             answer.insert("found".to_owned(), json!(count));

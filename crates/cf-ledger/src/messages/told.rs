@@ -7,7 +7,9 @@
 //! result only once it has had them ([`told_waiting`]). Several go in the order
 //! they were told, whatever order the human passes them on in
 //! ([`behind_held_words`]); words that will never reach the window fail their
-//! task ([`fail_for`]), as a brief that never does fails it.
+//! task ([`fail_for`]), as a brief that never does fails it, but for words whose
+//! last paste failed while the task was paused, which the resume carries
+//! ([`kept_for_resume`]).
 //!
 //! Told words are a note with a sender, about the task, for its window: no other
 //! note a member's window is given has one (ConsensFlow's own have none). They go
@@ -20,7 +22,7 @@ use cf_proto::ledger::MessageView;
 use rusqlite::params;
 use serde_json::json;
 
-use super::carrying::carried_into;
+use super::carrying::{adopt, carried_into};
 use super::{message_task, messages};
 use crate::model::{self, LedgerError, HELD_TASK_STATES, MAX_BODY, MEMBER_ROLES};
 use crate::queue::{send, Sent};
@@ -34,9 +36,22 @@ pub(super) fn told(alias: &str) -> String {
     format!("{alias}.kind = 'note' AND {alias}.sender_id IS NOT NULL AND {alias}.urgent = 0")
 }
 
-/// Whether `message` is told words.
-pub fn is_told(message: &MessageView) -> bool {
-    message.kind == "note" && message.sender.is_some() && !message.urgent
+/// Whether `message` is told words to the window of its task, whose assignee is
+/// `assignee` (a handle): a note from a participant, never urgent, to that
+/// window. A note about the task to anyone else (a worker's to the chief) is
+/// none, and never fails the task (the second review, 2026-10-16).
+pub fn is_told(message: &MessageView, assignee: Option<&str>) -> bool {
+    message.kind == "note"
+        && message.sender.is_some()
+        && !message.urgent
+        && assignee == Some(message.recipient.as_str())
+}
+
+/// The handle of `task`'s assignee, if it has one: what [`is_told`] is told.
+pub(super) fn assignee_of(store: &Store, task: &TaskRow) -> Result<Option<String>, LedgerError> {
+    task.assignee_id
+        .map(|id| store.participant_row(id).map(|row| row.handle))
+        .transpose()
 }
 
 /// Whether the message `alias` of a query, told words, waits behind older words
@@ -118,11 +133,43 @@ pub(super) fn fail_for(
     message: &MessageView,
     task: &TaskRow,
 ) -> Result<(), LedgerError> {
-    if !is_told(message) || !HELD_TASK_STATES.contains(&task.state.as_str()) {
+    if !HELD_TASK_STATES.contains(&task.state.as_str())
+        || !is_told(message, assignee_of(store, task)?.as_deref())
+    {
         return Ok(());
     }
     store.move_task(task, "failed", json!({ "told": message.id }))?;
     release_ready(store, task.project_id)
+}
+
+/// Told words `message` whose last paste failed, `reason` why, while their task
+/// was paused: they are kept for the window, as a pause keeps what was kept for
+/// it, and the words that resume the task carry them (the second review,
+/// 2026-10-16: they were given up, and the window resumed without them). They
+/// keep the attempts they had. Whether they were kept.
+pub(super) fn kept_for_resume(
+    store: &mut Store,
+    message: &MessageView,
+    task: &TaskRow,
+    reason: &str,
+) -> Result<bool, LedgerError> {
+    if task.state != "paused" || !is_told(message, assignee_of(store, task)?.as_deref()) {
+        return Ok(false);
+    }
+    store.db.execute(
+        "UPDATE message SET state = 'queued', reason = ?, carried_by = NULL WHERE id = ?",
+        params![
+            format!("kept for T-{}'s resume: {reason}", task.number),
+            message.id
+        ],
+    )?;
+    store.log(
+        message.project_id,
+        "delivery.kept",
+        json!({ "message": message.id, "reason": reason }),
+    )?;
+    adopt(store, message.id)?;
+    Ok(true)
 }
 
 /// The words told to T-`number`'s windows that no window ever had, oldest first:

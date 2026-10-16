@@ -74,12 +74,14 @@ replace = "const POLL_WAIT: Duration = Duration::from_secs(21);"
 [[plant]]
 name = "players: cf asks for a transcript of ten items whatever it was asked for"
 meant = "every_run_of_cf_against_the_api_prints_what_it_printed_against_node"
-runs = ["daemon-api"]
+# The one recorded run that asks for other than ten, `cf-board-001`'s `--last 2`, is in a
+# trace that departs from Node's (at its `--last 0`): the board's own test holds it.
+runs = ["daemon-api", "cf-lib-board"]
 
 [[plant.edit]]
-file = "crates/cf/src/board/task.rs"
-find = 'let transcript = format!("/api/tasks/{number}/transcript?last={last}");'
-replace = 'let transcript = format!("/api/tasks/{number}/transcript?last=10");'
+file = "crates/cf/src/board/transcript.rs"
+find = 'Asked::Last(last) => format!("/api/tasks/{number}/transcript?last={last}"),'
+replace = 'Asked::Last(_) => format!("/api/tasks/{number}/transcript?last=10"),'
 
 [[plant]]
 name = "players: cf writes the body of a task with its text first"

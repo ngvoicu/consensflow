@@ -14,6 +14,7 @@ mod transcript;
 mod usage;
 mod words;
 
+use std::ffi::OsString;
 use std::io::{self, Read, Write};
 
 use cf_board::{Board, BoardError};
@@ -115,22 +116,28 @@ fn help_of(path: &[&str]) -> Said {
     Said::new(json!({ "usage": usage }), usage)
 }
 
-/// Runs the command in `words` against `board`, reading a `-` text from
-/// `input`, answering with the API's JSON when `json` asks: the exit code.
-/// Only a failure to write `out` or `err` is an error. The answers an output
-/// carried whole are acknowledged to the board once all of it is written, and
-/// not when it was not: a read is not a receipt. Nor when the output is one
-/// that a harness may cut before its model reads it (`cut`): what was
-/// printed is measured, the text or the JSON, whichever it was.
+/// Runs the command in `given`, its words as the system gave them, against
+/// `board`, reading a `-` text from `input`, answering with the API's JSON when
+/// `json` asks: the exit code. Only a failure to write `out` or `err` is an
+/// error. The answers an output carried whole are acknowledged to the board
+/// once all of it is written, and not when it was not: a read is not a
+/// receipt. Nor when the output is one that a harness may cut before its model
+/// reads it (`cut`): what was printed is measured, the text or the JSON,
+/// whichever it was. The words are read as text, what is none replaced; a file
+/// a brief is read from is named by its word as it was given (`brief`).
 pub fn run(
-    words: &[String],
+    given: &[OsString],
     json: bool,
     board: &Board,
     input: &mut dyn Read,
     out: &mut dyn Write,
     err: &mut dyn Write,
 ) -> io::Result<u8> {
-    match command(words, board, input) {
+    let words: Vec<String> = given
+        .iter()
+        .map(|word| word.to_string_lossy().into_owned())
+        .collect();
+    match command(&words, given, board, input) {
         Ok(Said { data, text, wrote }) => {
             let printed = if json {
                 let data = cf_base::json::js_order(data);
@@ -156,18 +163,24 @@ pub fn run(
     }
 }
 
-fn command(words: &[String], board: &Board, input: &mut dyn Read) -> Result<Said, Failure> {
+/// The command in `words`, which `given` spells as the system gave them.
+fn command(
+    words: &[String],
+    given: &[OsString],
+    board: &Board,
+    input: &mut dyn Read,
+) -> Result<Said, Failure> {
     let (verb, rest) = match words.split_first() {
         Some((verb, rest)) => (verb.as_str(), rest),
         None => ("help", words),
     };
     match verb {
         "help" | "--help" | "-h" => Ok(Said::new(json!({ "usage": usage() }), usage().to_string())),
-        "task" => task::command(rest, board, input),
+        "task" => task::command(rest, given, board, input),
         "inbox" => inbox(rest, board),
         "note" => note(rest, board, input),
         "ask" => ask(rest, board, input),
-        "tell" => tell(rest, board, input),
+        "tell" => tell(rest, given, board, input),
         "answer" => answer(rest, board, input),
         "staff" => staff(rest, board),
         "history" => history(rest, board),
@@ -262,14 +275,19 @@ fn ask(rest: &[String], board: &Board, input: &mut dyn Read) -> Result<Said, Fai
     Ok(Said::new(message, text))
 }
 
-fn tell(rest: &[String], board: &Board, input: &mut dyn Read) -> Result<Said, Failure> {
+fn tell(
+    rest: &[String],
+    given: &[OsString],
+    board: &Board,
+    input: &mut dyn Read,
+) -> Result<Said, Failure> {
     let words = split(rest, TELL);
     if words.asks_for_help() {
         return Ok(help_of(&["tell"]));
     }
     let number = task_number(rest.first().map(String::as_str))?;
     let what = require_text(
-        brief::brief_of(&words, input)?,
+        brief::brief_of(&words, given, input)?,
         "cf tell T-<n> \"what to put to its window now\"",
     )?;
     let sent = brief::sent(&what);

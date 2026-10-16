@@ -113,8 +113,8 @@ runs = ["cf-brief-file"]
 
 [[plant.edit]]
 file = "crates/cf/src/board/brief.rs"
-find = "    let Some(path) = words.value(FILE) else {"
-replace = "    let Some(path) = words.value(\"--no-such-flag\") else {"
+find = "    if !words.given(FILE) {"
+replace = "    if !words.given(\"--no-such-flag\") {"
 
 [[plant]]
 name = "briefs: --file is no flag of reopen and resume"
