@@ -46,6 +46,8 @@ mod codex_role_on_resume;
 mod devin_notes_twice;
 #[path = "regressions/devin_pause.rs"]
 mod devin_pause;
+#[path = "regressions/devin_window_closed_mid_task.rs"]
+mod devin_window_closed_mid_task;
 #[path = "regressions/follow_up_refused_behind_a_waiting_follow_up.rs"]
 mod follow_up_refused_behind_a_waiting_follow_up;
 #[path = "regressions/idle_compaction_read_as_a_cut_turn.rs"]

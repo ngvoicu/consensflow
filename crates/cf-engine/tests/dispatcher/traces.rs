@@ -183,6 +183,10 @@ const STALL_LEFT: &str = "the human reassigns T-1 while the note that T-1 is pau
 /// requester it did.
 const DEPARTED: &[(&str, &str)] = &[
     (
+        "closes the project when its chief window closes by itself, as Close does: every window goes and the work in them pauses",
+        "the chief's window closes by itself and the worker's goes with the project: the note that T-1 is paused says so (`@zeus-amber-pine's window closed with the project when @chief's window closed`), where Node's says `@zeus-amber-pine's window closed`, as a worker's own crash does (the report of 2026-10-15, B2)",
+    ),
+    (
         "tells the requester once when nobody of the tier is free, and assigns when one frees up",
         "the daemon gives T-3 to @zeus while the note that T-3 waits for a free standard worker, which the chief had not been given, is queued: the note is withdrawn (`T-3 was taken by @zeus`), where Node leaves it queued to be pasted after the task was taken",
     ),
