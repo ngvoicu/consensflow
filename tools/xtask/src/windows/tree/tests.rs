@@ -228,56 +228,78 @@ fn a_name_git_wrote_that_is_no_text_is_refused_and_one_that_is_not_there_is_left
 }
 
 /// The checkout's own `app/.gitignore`, read as it is now.
-#[cfg(unix)]
 fn app_gitignore() -> String {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../app/.gitignore");
     fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
 }
 
-/// A worker's tree has `app/.cache` and `app/src-tauri/resources` as links into the main
-/// checkout, which hold what the main checkout staged: the checkout's `app/.gitignore`
-/// keeps them from the run, as it keeps the folders they are in the main checkout, and
-/// leaves every other file of `app` to go.
-#[cfg(unix)]
-#[test]
-fn the_staged_folders_go_neither_as_folders_nor_as_a_workers_links_into_the_main_checkout() {
-    let main = tempfile::tempdir().unwrap();
-    write(main.path(), "cache/conpty.zip", "package");
-    write(main.path(), "resources/cli/bin/cf.exe", "cf");
+/// A checkout of `app` under the checkout's own `app/.gitignore`, with a new file in it.
+fn app_checkout() -> (tempfile::TempDir, Context) {
     let (dir, context) = checkout(&[
         ("app/.gitignore", &app_gitignore()),
         ("app/package.json", "{}"),
         ("app/src-tauri/tauri.conf.json", "{}"),
     ]);
     write(dir.path(), "app/new.txt", "not added yet");
+    (dir, context)
+}
+
+/// What goes of [`app_checkout`] where the staged folders do not.
+const APP_LISTED: [&str; 4] = [
+    "app/.gitignore",
+    "app/new.txt",
+    "app/package.json",
+    "app/src-tauri/tauri.conf.json",
+];
+
+/// The checkout's `app/.gitignore` keeps `app/.cache` and `app/src-tauri/resources` from
+/// the run whatever they are: the main checkout's folders, with what was staged in them,
+/// or anything else of those names, as a worker's links to them are to git, which looks
+/// at a link and not at what it points at (a pattern that ends in `/` matches a folder
+/// only). A link is a plain file here, which every system makes: worker trees, and their
+/// links into the main checkout, are the Mac's, and Windows makes a link only with a
+/// privilege (the links themselves: the next test, on Unix). Every other file of `app`
+/// goes.
+#[test]
+fn the_staged_folders_go_neither_as_the_main_checkouts_folders_nor_as_anything_else_of_their_names()
+{
+    let (dir, context) = app_checkout();
+    write(dir.path(), "app/.cache/conpty.zip", "package");
+    write(dir.path(), "app/src-tauri/resources/cli/bin/cf.exe", "cf");
+    assert_eq!(sorted(files(&context).unwrap()), APP_LISTED);
+    // In a worker's tree they are no folders.
+    let (dir, context) = app_checkout();
+    write(dir.path(), "app/.cache", "where a worker has a link");
+    write(
+        dir.path(),
+        "app/src-tauri/resources",
+        "where a worker has a link",
+    );
+    assert_eq!(sorted(files(&context).unwrap()), APP_LISTED);
+    // A file of another folder of that name is the tree's.
+    write(dir.path(), "app/ui/.cache", "a file of the page's");
+    assert!(files(&context)
+        .unwrap()
+        .contains(&"app/ui/.cache".to_owned()));
+}
+
+/// A worker's tree as it is on the Mac: `app/.cache` and `app/src-tauri/resources` are
+/// links into the main checkout, which hold what the main checkout staged, and they do
+/// not go.
+#[cfg(unix)]
+#[test]
+fn a_workers_links_into_the_main_checkouts_staged_folders_do_not_go() {
+    let main = tempfile::tempdir().unwrap();
+    write(main.path(), "cache/conpty.zip", "package");
+    write(main.path(), "resources/cli/bin/cf.exe", "cf");
+    let (dir, context) = app_checkout();
     std::os::unix::fs::symlink(main.path().join("cache"), dir.path().join("app/.cache")).unwrap();
     std::os::unix::fs::symlink(
         main.path().join("resources"),
         dir.path().join("app/src-tauri/resources"),
     )
     .unwrap();
-    let listed = [
-        "app/.gitignore",
-        "app/new.txt",
-        "app/package.json",
-        "app/src-tauri/tauri.conf.json",
-    ];
-    assert_eq!(sorted(files(&context).unwrap()), listed);
-    // The main checkout's own: the folders, with what was staged in them.
-    let (dir, context) = checkout(&[
-        ("app/.gitignore", &app_gitignore()),
-        ("app/package.json", "{}"),
-        ("app/src-tauri/tauri.conf.json", "{}"),
-    ]);
-    write(dir.path(), "app/new.txt", "not added yet");
-    write(dir.path(), "app/.cache/conpty.zip", "package");
-    write(dir.path(), "app/src-tauri/resources/cli/bin/cf.exe", "cf");
-    assert_eq!(sorted(files(&context).unwrap()), listed);
-    // A file of another folder of that name is the tree's.
-    write(dir.path(), "app/ui/.cache", "a file of the page's");
-    assert!(files(&context)
-        .unwrap()
-        .contains(&"app/ui/.cache".to_owned()));
+    assert_eq!(sorted(files(&context).unwrap()), APP_LISTED);
 }
 
 #[cfg(unix)]

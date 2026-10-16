@@ -10,7 +10,10 @@
 #   asks before it takes a folder, which stopped a run), says each removal, and what it could not
 #   remove ends the run, said.
 # - A worker's tree's links `app/.cache` and `app/src-tauri/resources` (into the main checkout) do
-#   not go: `app/.gitignore` names them as files too.
+#   not go: `app/.gitignore` names them as files too. Worker trees and their links are the Mac's,
+#   and Windows makes a link only with a privilege, so the test that catches these plants on every
+#   system puts a plain file where the link is, which is what git sees of a link; the links
+#   themselves are tried on Unix.
 #
 # The tests are xtask's library's (`windows::`), which read the scripts' text and pack a tree in a
 # repository made for each test; on Windows one runs the sweep in the machine's PowerShell too.
@@ -141,7 +144,7 @@ replace = "if ($false) { Exit-Run 1 }"
 
 [[plant]]
 name = "windows runner: a worker's link app/.cache goes"
-meant = "the_staged_folders_go_neither_as_folders_nor_as_a_workers_links_into_the_main_checkout"
+meant = "the_staged_folders_go_neither_as_the_main_checkouts_folders_nor_as_anything_else_of_their_names"
 runs = ["xtask-lib-windows"]
 
 [[plant.edit]]
@@ -151,7 +154,7 @@ replace = "\n"
 
 [[plant]]
 name = "windows runner: a worker's link app/src-tauri/resources goes"
-meant = "the_staged_folders_go_neither_as_folders_nor_as_a_workers_links_into_the_main_checkout"
+meant = "the_staged_folders_go_neither_as_the_main_checkouts_folders_nor_as_anything_else_of_their_names"
 runs = ["xtask-lib-windows"]
 
 [[plant.edit]]
