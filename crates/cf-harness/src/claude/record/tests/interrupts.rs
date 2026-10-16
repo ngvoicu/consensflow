@@ -13,6 +13,10 @@ use crate::shared::record::reading::Role;
 
 const MARKER: &str = "[Request interrupted by user]";
 
+/// The error result Claude writes of a call the user stopped.
+const REJECTED: &str =
+    "The user doesn't want to proceed with this tool use. The tool use was rejected.";
+
 /// The records of a live run (`cargo xtask scrub-transcript` made them), for
 /// the session of these tests.
 fn live(name: &str) -> Vec<Value> {
@@ -33,8 +37,13 @@ fn live(name: &str) -> Vec<Value> {
 
 /// What one look at the records of a live run reads.
 fn read(name: &str) -> Record {
+    looked_at(&live(name))
+}
+
+/// What one look at a transcript of `records` reads.
+fn looked_at(records: &[Value]) -> Record {
     let mut stage = Stage::new();
-    stage.write(&live(name));
+    stage.write(records);
     match &*stage.reader.look(&Options::default(), 0) {
         Reading::Known(record) => record.clone(),
         Reading::Unknown(reason) => panic!("unknown: {reason}"),
@@ -186,10 +195,7 @@ fn a_turn_the_daemon_interrupted_ends_on_the_marker_whether_the_window_had_writt
             "u3",
             json!("a2"),
             json!([having(
-                tool_result(
-                    json!("t1"),
-                    json!("The user doesn't want to proceed with this tool use. The tool use was rejected.")
-                ),
+                tool_result(json!("t1"), json!(REJECTED)),
                 json!({ "is_error": true })
             )]),
         )
@@ -203,17 +209,28 @@ fn a_turn_the_daemon_interrupted_ends_on_the_marker_whether_the_window_had_writt
         )
     };
     let cases = [
-        ("no word of the answer", vec![stopped("u2")]),
-        ("a part of the answer", vec![part(), stopped("a2")]),
+        ("no word of the answer", vec![stopped("u2")], vec![]),
+        ("a part of the answer", vec![part(), stopped("a2")], vec![]),
         (
             "a call it had begun",
             vec![calling(), refused(), for_tool_use("u3")],
+            vec![("t1", REJECTED)],
         ),
     ];
-    for (name, after) in cases {
+    for (name, after, tools) in cases {
         let mut records = vec![hello(), answer("a1", "u1"), started()];
         records.extend(after);
-        assert_eq!(settlement_of(&records), Settlement::Settled, "{name}");
+        let record = looked_at(&records);
+        assert_eq!(record.settlement, Settlement::Settled, "{name}");
+        // The error result is read as the tool's, and closes the call: the marker
+        // after it clears what is open, so only the item tells it was read.
+        let read: Vec<(&str, &str)> = record
+            .items
+            .iter()
+            .filter(|item| item.role == Role::Tool)
+            .map(|item| (&*item.id, &*item.text))
+            .collect();
+        assert_eq!(read, tools, "{name}");
     }
 }
 
