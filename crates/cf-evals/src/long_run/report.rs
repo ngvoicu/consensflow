@@ -9,11 +9,11 @@
 //! evidence never passes. Only a run with neither is `PASS`. What it keeps and says has
 //! what looks like a key or a token hidden: the breaks are kept so
 //! ([`super::invariants::Keeper`]), the timeline is told so, and what a disruption
-//! said is hidden here.
+//! said is hidden here; and it is written where every text leaves the run
+//! ([`super::edge::Edge::keep`]), which hides it again.
 
 use std::path::{Path, PathBuf};
 
-use cf_e2e::files;
 use serde_json::{json, Value};
 
 use super::disruptions::{Schedule, State};
@@ -21,8 +21,8 @@ use super::invariants::{Break, Unjudged, INVARIANTS};
 use super::options::Options;
 use super::staff::{Found, LeftOut};
 use super::timeline::Timeline;
+use crate::clock;
 use crate::plan::Staff;
-use crate::{clock, Error, Result};
 
 /// How a run whose budget was spent ended, as its report says it.
 pub const TIME_UP: &str = "time ran out";
@@ -436,18 +436,6 @@ pub fn file_name(started: i64, chief: &str, staff: &[String]) -> String {
         clock::stamp(at),
         staff.join("-")
     )
-}
-
-/// Keeps the report `value` and its Markdown `text` in `folder`, as `<name>.json`
-/// and `<name>.md`: where each is.
-pub fn keep(folder: &Path, name: &str, value: &Value, text: &str) -> Result<(PathBuf, PathBuf)> {
-    let json_file = folder.join(format!("{name}.json"));
-    let text_file = folder.join(format!("{name}.md"));
-    let pretty = serde_json::to_string_pretty(value)
-        .map_err(|cause| Error::Refused(format!("the report is no JSON: {cause}")))?;
-    files::write(&json_file, format!("{pretty}\n"))?;
-    files::write(&text_file, text)?;
-    Ok((json_file, text_file))
 }
 
 #[cfg(test)]

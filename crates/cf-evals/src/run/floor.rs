@@ -12,8 +12,15 @@ use serde_json::{json, Value};
 
 use crate::Result;
 
-/// What a run passes each line through before it says or keeps it.
-type Masking = Box<dyn Fn(&str) -> String>;
+/// What a run passes the rows of a window's screen through before it shows them.
+type ScreenMask = Box<dyn Fn(&[String]) -> Vec<String>>;
+
+/// What a run passes each line through before it says or keeps it, and the rows of a
+/// window's screen before it shows them.
+struct Masking {
+    line: Box<dyn Fn(&str) -> String>,
+    screen: ScreenMask,
+}
 
 /// A run that speaks, and keeps what it said.
 pub struct Floor<'o> {
@@ -34,21 +41,40 @@ impl<'o> Floor<'o> {
         }
     }
 
-    /// From now on, every thing the run notes is passed through `mask` before it is
-    /// said or kept: a run that hides what looks like a key or a token in what it says
-    /// as it goes (the long run's), whatever says it (a wait that gave up and shows a
-    /// window's screen among them). What it says as it is ([`Floor::say`]: where its
-    /// report is, the report masked already) is its own.
-    pub fn masking(&mut self, mask: impl Fn(&str) -> String + 'static) {
-        self.mask = Some(Box::new(mask));
+    /// A run beginning now, which speaks on `out`, every line it notes or says passed
+    /// through `mask` before it is said or kept, and the rows of a window's screen it
+    /// shows through `screen` first (a screen's rows masked as one text): a run that
+    /// hides what looks like a key or a token in all it says (the long run's), whatever
+    /// says it (a wait that gave up and shows a window's screen among them).
+    pub fn masked(
+        out: &'o mut dyn Write,
+        mask: impl Fn(&str) -> String + 'static,
+        screen: impl Fn(&[String]) -> Vec<String> + 'static,
+    ) -> Self {
+        Self {
+            mask: Some(Masking {
+                line: Box::new(mask),
+                screen: Box::new(screen),
+            }),
+            ..Self::new(out)
+        }
     }
 
-    /// `line` as it is noted: through the run's mask, where it has one.
+    /// `line` as it is said: through the run's mask, where it has one.
     fn shown(&self, line: impl Display) -> String {
         let line = line.to_string();
         match &self.mask {
-            Some(mask) => mask(&line),
+            Some(mask) => (mask.line)(&line),
             None => line,
+        }
+    }
+
+    /// The rows of a window's screen, `rows`, as the run shows them: through its
+    /// screen's mask, where it has one.
+    pub fn screen(&self, rows: &[String]) -> Vec<String> {
+        match &self.mask {
+            Some(mask) => (mask.screen)(rows),
+            None => rows.to_vec(),
         }
     }
 
@@ -71,8 +97,9 @@ impl<'o> Floor<'o> {
         Ok(())
     }
 
-    /// Says `text` as it is, a line.
+    /// Says `text` as it is, a line (through the run's mask, where it has one).
     pub fn say(&mut self, text: impl Display) -> Result {
+        let text = self.shown(text);
         Ok(writeln!(self.out, "{text}")?)
     }
 
@@ -155,15 +182,21 @@ mod tests {
     }
 
     #[test]
-    fn a_run_that_masks_says_and_keeps_each_thing_it_notes_through_its_mask() {
+    fn a_run_that_masks_says_and_keeps_each_line_through_its_mask_and_shows_a_screen_through_its_own(
+    ) {
         let mut said = Vec::new();
-        let mut floor = Floor::new(&mut said);
-        floor.masking(|line: &str| line.replace("hunter2", "[masked]"));
+        let mut floor = Floor::masked(
+            &mut said,
+            |line: &str| line.replace("hunter2", "[masked]"),
+            |rows: &[String]| vec![rows.join("")],
+        );
+        let rows = ["$ export DB_PASSWORD=".to_owned(), "hunter2".to_owned()];
+        assert_eq!(floor.screen(&rows), ["$ export DB_PASSWORD=hunter2"]);
+        assert_eq!(Floor::new(&mut Vec::new()).screen(&rows), rows);
         floor
             .note("gave up waiting: its screen: password hunter2")
             .unwrap();
-        // What it says as it is (where its report is) is its own.
-        floor.say("report: /tmp/kept-hunter2.json").unwrap();
+        floor.say("the report holds hunter2").unwrap();
         assert_eq!(
             floor.log(),
             json!([{ "at": 0, "line": "gave up waiting: its screen: password [masked]" }])
@@ -171,7 +204,7 @@ mod tests {
         let said = String::from_utf8(said).unwrap();
         assert_eq!(
             said,
-            "  [0s] gave up waiting: its screen: password [masked]\nreport: /tmp/kept-hunter2.json\n"
+            "  [0s] gave up waiting: its screen: password [masked]\nthe report holds [masked]\n"
         );
     }
 

@@ -87,6 +87,7 @@ impl Rig {
             #[cfg(unix)]
             stranger,
             forget: config.stand_in_records.map(Forget::new),
+            masker: config.masker,
             keep_root: false,
             closed: false,
             _turn: turn,

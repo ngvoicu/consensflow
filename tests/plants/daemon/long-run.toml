@@ -49,6 +49,8 @@ e2e-lib-last-word = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "a_l
 e2e-lib-process = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "process::"]
 # A harness's version, as the run's setup asks it.
 e2e-lib-machine = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::machine"]
+# What the rig says of itself when it is dropped unclosed, through its owner's masker.
+e2e-lib-report = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "rig::report"]
 
 # 1 (A1)
 
@@ -376,7 +378,7 @@ runs = ["evals-lib-long-run"]
 [[plant.edit]]
 file = "crates/cf-evals/src/long_run/conduct.rs"
 find = '''
-        self.unjudged(floor, look.at, invariants::unjudged(&look));
+        self.unjudged(floor, look.at, invariants::unjudged(&look, settings));
         self.last = Some(look);'''
 replace = '''
         self.last = Some(look);'''
@@ -432,6 +434,50 @@ runs = ["evals-long-run"]
 file = "crates/cf-evals/src/long_run/invariants/order.rs"
 find = "    if codex && answer.iter().any(|item| item.complete) {"
 replace = "    if codex && answer.is_empty() {"
+
+[[plant]]
+name = "long run 4: a result whose turn the copy of its worker's conversation does not hold is skipped, and a wrong result whose rows were lost passes"
+meant = "a_result_whose_turn_the_copy_does_not_hold_is_unresolved_never_skipped"
+runs = ["evals-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/invariants/order.rs"
+find = '''
+            None => format!(
+                "is not in the copy of @{handle}'s conversation, which holds no answer of the agent's after its last prompt"
+            ),'''
+replace = '''
+            None => continue,'''
+
+[[plant]]
+name = "long run 4: a result whose turn says nothing after its last tool call is skipped"
+meant = "a_result_whose_turn_the_copy_does_not_hold_is_unresolved_never_skipped"
+runs = ["evals-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/invariants/order.rs"
+find = "            Some(turn) if plain(&answer_and_progress(turn, codex).0).is_empty() => format!("
+replace = "            Some(turn) if turn.is_empty() && plain(&answer_and_progress(turn, codex).0).is_empty() => format!("
+
+[[plant]]
+name = "long run 4: what a look cannot judge of a result's turn is never said, and a run passes on turns it never saw"
+meant = "a_result_whose_turn_the_copy_does_not_hold_is_unresolved_never_skipped"
+runs = ["evals-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/invariants.rs"
+find = "    found.extend(order::unanswered_results(look, settings));"
+replace = "    let _ = order::unanswered_results;"
+
+[[plant]]
+name = "long run 4: a result too young for the copy of its turn to have been made is said unresolved at once"
+meant = "a_result_whose_turn_the_copy_does_not_hold_is_unresolved_never_skipped"
+runs = ["evals-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/invariants/order.rs"
+find = "            (look.at - at >= young).then_some((result, worker, at))"
+replace = "            (look.at - at >= young.min(0)).then_some((result, worker, at))"
 
 # 5 (A5)
 
@@ -519,8 +565,8 @@ runs = ["evals-lib-long-run"]
 
 [[plant.edit]]
 file = "crates/cf-evals/src/long_run/tracker.rs"
-find = "        self.follow(owner, ended, || {"
-replace = "        self.follow(owner, &ended[..0], || {"
+find = "        for process in ended {"
+replace = "        for process in &ended[..0] {"
 
 [[plant]]
 name = "long run 6: what only an exit names is asked who it is at the next look, and a number taken since is bound and killed (P1)"
@@ -529,10 +575,13 @@ runs = ["evals-lib-long-run"]
 
 [[plant.edit]]
 file = "crates/cf-evals/src/long_run/tracker.rs"
-find = "        self.follow(owner, ended, || {"
+find = """
+                .or_insert_with(|| Tracked::new(process, owner, Tracked::from_an_exit()));
+            tracked.listed = Some(at);"""
 replace = """
-        self.follow(owner, ended, || Identity::Asking);
-        self.follow(owner, &[], || {"""
+                .or_insert_with(|| Tracked::new(process, owner, Identity::Asking));
+            tracked.listed = Some(at);
+            self.shown.insert(process.pid);"""
 
 [[plant]]
 name = "long run 6: a tree a look took before its window's exit brings the window's processes back, and a leak is never checked"
@@ -542,17 +591,11 @@ runs = ["evals-lib-long-run"]
 [[plant.edit]]
 file = "crates/cf-evals/src/long_run/tracker.rs"
 find = """
-                .get(&process.pid)
-                .is_some_and(|tracked| tracked.owner == *owner)"""
+                    if tracked.gone.is_some() {
+                        continue;
+                    }"""
 replace = """
-                .get_mut(&process.pid)
-                .is_some_and(|tracked| {
-                    let own = tracked.owner == *owner;
-                    if own {
-                        tracked.gone = None;
-                    }
-                    own
-                })"""
+                    tracked.gone = None;"""
 
 [[plant]]
 name = "long run 6: a number Windows gave again to a later process is taken for the one it was, and the user's program is killed"
@@ -561,8 +604,8 @@ runs = ["evals-lib-long-run"]
 
 [[plant.edit]]
 file = "crates/cf-evals/src/long_run/tracker.rs"
-find = "                    if began == *now_said {"
-replace = "                    if !began.is_empty() {"
+find = "    if known == now {"
+replace = "    if !known.is_empty() {"
 
 [[plant]]
 name = "long run 6: a process whose identity was never taken is taken at the check for what has its number, and that is killed (P1)"
@@ -585,13 +628,13 @@ replace = """
 
 [[plant]]
 name = "long run 6: a later look's answer binds an identity the look that saw the process could not take, and a number taken since is killed (P1)"
-meant = "an_identity_is_taken_by_the_look_that_saw_the_process_or_never"
+meant = "an_identity_is_taken_only_by_the_look_that_saw_its_window_show_the_process"
 runs = ["evals-lib-long-run"]
 
 [[plant.edit]]
 file = "crates/cf-evals/src/long_run/tracker.rs"
-find = "            .filter(|(_, tracked)| tracked.identity == Identity::Asking)"
-replace = "            .filter(|(_, tracked)| !matches!(tracked.identity, Identity::Began(_)))"
+find = "                Identity::Never(_) => {}"
+replace = "                Identity::Never(_) => tracked.identity = Identity::Began(began.clone()),"
 
 [[plant]]
 name = "long run 6: a process the system names as begun after the look saw its number is taken for the one the look saw (P1, Windows)"
@@ -600,8 +643,8 @@ runs = ["evals-lib-long-run"]
 
 [[plant.edit]]
 file = "crates/cf-evals/src/long_run/tracker.rs"
-find = "                        if processes::began_at(began).is_some_and(|began| began > shown_at) =>"
-replace = "                        if processes::began_at(began).is_some_and(|began| began > i64::MAX) =>"
+find = "            let after = processes::began_at(began).is_some_and(|began| began > shown_at);"
+replace = "            let after = processes::began_at(began).is_some_and(|began| began > i64::MAX);"
 
 [[plant]]
 name = "long run 6: Windows's creation time is read as no moment, and a number given again within the asking is bound (P1)"
@@ -621,12 +664,14 @@ runs = ["evals-lib-long-run"]
 [[plant.edit]]
 file = "crates/cf-evals/src/long_run/tracker.rs"
 find = """
-                    None => {
-                        self.tracked.remove(&pid);
-                        continue;
-                    }"""
+            let Some(began) = said.get(&pid) else {
+                self.tracked.remove(&pid);
+                continue;
+            };"""
 replace = """
-                    None => continue,"""
+            let Some(began) = said.get(&pid) else {
+                continue;
+            };"""
 
 [[plant]]
 name = "long run 6: a number another window has now keeps the identity of the process it had, and that window's leftover is never found"
@@ -635,24 +680,8 @@ runs = ["evals-lib-long-run"]
 
 [[plant.edit]]
 file = "crates/cf-evals/src/long_run/tracker.rs"
-find = """
-            self.tracked.insert(
-                process.pid,
-                Tracked {
-                    command: process.command.clone(),
-                    owner: owner.clone(),
-                    identity: new(),"""
-replace = """
-            let identity = self
-                .tracked
-                .get(&process.pid)
-                .map_or_else(&new, |old| old.identity.clone());
-            self.tracked.insert(
-                process.pid,
-                Tracked {
-                    command: process.command.clone(),
-                    owner: owner.clone(),
-                    identity,"""
+find = "                Some(tracked) if tracked.owner == *owner => {"
+replace = "                Some(tracked) => {"
 
 [[plant]]
 name = "long run 6: a look whose asking failed leaves its processes to be asked again, and a number taken since is bound (P1)"
@@ -827,6 +856,145 @@ runs = ["evals-lib-long-run"]
 file = "crates/cf-evals/src/long_run/watcher.rs"
 find = "        self.take_exits(&last.exits, &last.kills);"
 replace = "        let _ = last;"
+
+[[plant]]
+name = "long run 6: a number its window shows again is not asked who it is, and a child begun under the number of the window's ended child is taken for that one"
+meant = "a_number_its_window_shows_again_begun_at_another_time_is_a_new_process_known_by_it"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/tracker.rs"
+find = '''
+                    tracked.command.clone_from(&process.command);
+                }'''
+replace = '''
+                    tracked.command.clone_from(&process.command);
+                    continue;
+                }'''
+
+[[plant]]
+name = "long run 6: a process the look knew is known so for ever, whatever began under its number in the same window since"
+meant = "a_number_its_window_shows_again_begun_at_another_time_is_a_new_process_known_by_it"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/tracker.rs"
+find = "                Identity::Began(known) if known == began => {}"
+replace = "                Identity::Began(_) => {}"
+
+[[plant]]
+name = "long run 6: a process begun as the look took the trees, under the number of the window's known child, is forgotten, and it may be the one the tree showed"
+meant = "a_number_its_window_shows_again_begun_at_another_time_is_a_new_process_known_by_it"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/tracker.rs"
+find = "                Identity::Asking | Identity::Began(_) if after => {"
+replace = '''
+                Identity::Began(_) if after => {
+                    self.tracked.remove(&pid);
+                }
+                Identity::Asking if after => {'''
+
+[[plant]]
+name = "long run 6: a process begun before its window's exit listed its number, under the number of a child the look knew, is taken for another's"
+meant = "a_number_its_windows_exit_listed_holding_a_process_begun_since_is_judged_by_when"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/tracker.rs"
+find = "        Some(began) if began <= listed => Under::Its,"
+replace = "        Some(began) if began <= listed => Under::Another,"
+
+[[plant]]
+name = "long run 6: a process the system says began to the second alone, under a number its window's exit listed, is taken for another's"
+meant = "a_number_its_windows_exit_listed_holding_a_process_begun_since_is_judged_by_when"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/tracker.rs"
+find = "        None => Under::Untold,"
+replace = "        None => Under::Another,"
+
+[[plant]]
+name = "long run 6: the tracker keeps no word of the numbers a window's exit listed, and a child begun since under a known number is lost"
+meant = "a_number_its_windows_exit_listed_holding_a_process_begun_since_is_judged_by_when"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/tracker.rs"
+find = "            tracked.listed = Some(at);"
+replace = "            tracked.listed = None;"
+
+[[plant]]
+name = "long run 6: processes the pane host does not name are no gap once the look takes the window's exit too"
+meant = "processes_the_pane_host_does_not_name_are_a_gap_whether_or_not_the_window_exited"
+runs = ["evals-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/invariants/windows.rs"
+find = "        if window.background_total > window.background.len() {"
+replace = "        if window.background_total > window.background.len() && !exited {"
+
+[[plant]]
+name = "long run 6: an exit that names as many processes as the host names at most is taken to name them all"
+meant = "processes_the_pane_host_does_not_name_are_a_gap_whether_or_not_the_window_exited"
+runs = ["evals-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/invariants/windows.rs"
+find = "        .filter(|exit| exit.ended.len() >= NAMED)"
+replace = "        .filter(|exit| exit.ended.len() > NAMED)"
+
+[[plant]]
+name = "long run 6: a crash is held against the task's assignee now, and one whose task went to another before the look passes"
+meant = "a_crash_is_held_against_whoever_had_the_task_when_the_window_exited"
+runs = ["evals-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/invariants/windows.rs"
+find = "        .filter(|task| match holder_at(look, task.number, at) {"
+replace = "        .filter(|task| match holder_at(look, task.number, at).filter(|_| false) {"
+
+[[plant]]
+name = "long run 6: whom a task was created or opened for is not read from the log, and a crash falls to the assignee now"
+meant = "a_crash_is_held_against_whoever_had_the_task_when_the_window_exited"
+runs = ["evals-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/invariants/windows.rs"
+find = '''            "task.created" | "task.opened" => holder = Some(named(&event.data["to"])),'''
+replace = '''            "task.created" | "task.opened" => {}'''
+
+[[plant]]
+name = "long run 6: an assignment in the log gives the task to no one, and the crash of the session it went to is not held against it"
+meant = "a_crash_is_held_against_whoever_had_the_task_when_the_window_exited"
+runs = ["evals-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/invariants/windows.rs"
+find = '''            "task.assigned" => holder = Some(named(&event.data["assignee"])),'''
+replace = '''            "task.assigned" => {}'''
+
+[[plant]]
+name = "long run 6: an assignment moves a task to no state, and a window that ends before it takes the task up crashed at work"
+meant = "a_crash_is_held_against_whoever_had_the_task_when_the_window_exited"
+runs = ["evals-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/invariants/windows.rs"
+find = '''const MOVES: [&str; 3] = ["task.state", "task.assigned", "task.released"];'''
+replace = '''const MOVES: [&str; 3] = ["task.state", "task.state", "task.released"];'''
+
+[[plant]]
+name = "long run 6: a release moves a task to no state, and a window that ends after its task went back to the board crashed at work"
+meant = "a_crash_is_held_against_whoever_had_the_task_when_the_window_exited"
+runs = ["evals-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/invariants/windows.rs"
+find = '''const MOVES: [&str; 3] = ["task.state", "task.assigned", "task.released"];'''
+replace = '''const MOVES: [&str; 3] = ["task.state", "task.assigned", "task.state"];'''
 
 # 7 (B5)
 
@@ -1340,8 +1508,8 @@ runs = ["evals-lib-long-run"]
 
 [[plant.edit]]
 file = "crates/cf-evals/src/long_run/mask.rs"
-find = '''const DOUBLE: &str = r#"(?:[^"\\\n]|\\.)"#;'''
-replace = '''const DOUBLE: &str = r#"(?:[^"\\\n ]|\\.)"#;'''
+find = '''const DOUBLE: &str = r#"(?:[^"\\]|\\(?s:.))"#;'''
+replace = '''const DOUBLE: &str = r#"(?:[^"\\ ]|\\(?s:.))"#;'''
 
 [[plant]]
 name = "long run: a value JSON escaped is read to the first escaped quote, and the end of a password that holds one is kept"
@@ -1350,8 +1518,8 @@ runs = ["evals-lib-long-run"]
 
 [[plant.edit]]
 file = "crates/cf-evals/src/long_run/mask.rs"
-find = '''const ESCAPED: &str = r#"(?:[^"\\\n]|\\[^"\\\n]|\\\\(?:\\.|[^"\\\n]))"#;'''
-replace = '''const ESCAPED: &str = r#"(?:[^"\\\n]|\\[^"\n])"#;'''
+find = '''const ESCAPED: &str = r#"(?:[^"\\]|\\[^"\\]|\\\\(?:\\(?s:.)|[^"\\]))"#;'''
+replace = '''const ESCAPED: &str = r#"(?:[^"\\]|\\[^"])"#;'''
 
 [[plant]]
 name = "long run: a secret's value whose quote never closes (a command the pane host cut) is kept whole"
@@ -1360,8 +1528,8 @@ runs = ["evals-lib-long-run"]
 
 [[plant.edit]]
 file = "crates/cf-evals/src/long_run/mask.rs"
-find = '''            r#"|"({double_on}+)\\?\z"#,'''
-replace = '''            r#"|"({double_on}+)\\?\z(?:never)"#,'''
+find = '''            r#"|"({double}+)\\?\z"#,'''
+replace = '''            r#"|"({double}+)\\?\z(?:never)"#,'''
 
 [[plant]]
 name = "long run: a value JSON escaped whose quote never closes is kept whole"
@@ -1370,8 +1538,8 @@ runs = ["evals-lib-long-run"]
 
 [[plant.edit]]
 file = "crates/cf-evals/src/long_run/mask.rs"
-find = '''            r#"|\\"({escaped_on}+)\\?\z"#,'''
-replace = '''            r#"|\\"({escaped_on}+)\\?\z(?:never)"#,'''
+find = '''            r#"|\\"({escaped}+)\\?\z"#,'''
+replace = '''            r#"|\\"({escaped}+)\\?\z(?:never)"#,'''
 
 [[plant]]
 name = "long run: what a wait that gave up says of the chief's screen is said and kept as it was, a password on it and all"
@@ -1390,8 +1558,8 @@ runs = ["evals-lib-long-run"]
 
 [[plant.edit]]
 file = "crates/cf-evals/src/long_run/conduct.rs"
-find = "        masked_floor(floor, &self.timeline.names);"
-replace = "        let _ = masked_floor;"
+find = "        self.edge.knows(&self.timeline.names);"
+replace = "        let _ = &self.timeline.names;"
 
 [[plant]]
 name = "long run: a text is cut before it is masked, and a secret whose end is past the cut is kept whole"
@@ -1504,16 +1672,6 @@ find = "            .map(|error| self.timeline.masked(error))"
 replace = "            .map(str::to_owned)"
 
 [[plant]]
-name = "long run: what a disruption did is said on the console with a token in it"
-meant = "a_disruption_whose_effect_was_not_seen_is_failed_and_a_break_of_the_tenth_with_its_evidence"
-runs = ["evals-lib-long-run"]
-
-[[plant.edit]]
-file = "crates/cf-evals/src/long_run/conduct.rs"
-find = "                floor.note(self.timeline.masked(&said))?;"
-replace = "                floor.note(&said)?;"
-
-[[plant]]
 name = "long run 6: a window running more processes than the pane host names is no gap, and a run that cannot follow them passes"
 meant = "a_tree_the_pane_host_could_not_say_twice_and_processes_it_does_not_name_are_gaps"
 runs = ["evals-long-run"]
@@ -1530,7 +1688,7 @@ runs = ["evals-long-run"]
 
 [[plant.edit]]
 file = "crates/cf-evals/src/long_run/invariants/windows.rs"
-find = "        if let Some(why) = &window.tree_unread {"
+find = "        if let Some(why) = window.tree_unread.as_ref().filter(|_| !exited) {"
 replace = "        if let Some(why) = window.tree_unread.as_ref().filter(|_| false) {"
 
 [[plant]]
@@ -1647,6 +1805,255 @@ file = "crates/cf-evals/src/long_run/timeline.rs"
 find = '        "project.wake_up" => Some(format!('
 replace = '        "project.wake_up.never" => Some(format!('
 
+# The edge: the one place every text the run prints, logs or keeps leaves it, and a screen masked
+# as one text
+
+[[plant]]
+name = "long run: the report's Markdown is kept as it was, a password in it and all"
+meant = "the_report_is_kept_through_the_edge_each_text_of_it_and_a_screen_as_one_text"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/edge.rs"
+find = "        files::write(&text_file, self.shown(text))?;"
+replace = "        files::write(&text_file, text)?;"
+
+[[plant]]
+name = "long run: the report's JSON is kept as it was, every text of it"
+meant = "the_report_is_kept_through_the_edge_each_text_of_it_and_a_screen_as_one_text"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/edge.rs"
+find = "        let shown = masked(value, &self.names());"
+replace = "        let shown = value.clone();"
+
+[[plant]]
+name = "long run: a window's screen in the report is masked row by row, and a value on the row after its name is kept"
+meant = "the_report_is_kept_through_the_edge_each_text_of_it_and_a_screen_as_one_text"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/edge.rs"
+find = '''                        .filter(|_| name == "screen")'''
+replace = '''                        .filter(|_| name == "never")'''
+
+[[plant]]
+name = "long run: what stopped the run leaves it as it was, and cf-evals writes a password it held on its error output"
+meant = "what_stopped_the_run_leaves_through_the_edge_a_usage_a_usage_still"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/edge.rs"
+find = "            other => Error::Refused(self.shown(&other.to_string())),"
+replace = "            other => other,"
+
+[[plant]]
+name = "long run: words the run does not take leave it as they were, a token given as a flag's value and all"
+meant = "what_stopped_the_run_leaves_through_the_edge_a_usage_a_usage_still"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/edge.rs"
+find = "            Error::Usage(said) => Error::Usage(self.shown(&said)),"
+replace = "            Error::Usage(said) => Error::Usage(said),"
+
+[[plant]]
+name = "long run: what stops the run is not mapped by its edge, and a setup failure's output reaches the error output whole"
+meant = "what_stops_the_long_run_is_written_on_the_error_output_with_a_secret_hidden"
+runs = ["evals-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/conduct.rs"
+find = "    run(words, out, &edge).map_err(|failed| edge.failure(failed))"
+replace = "    run(words, out, &edge)"
+
+[[plant]]
+name = "long run: the console says what it says as it is, where the report is and all"
+meant = "the_console_says_and_keeps_through_the_edge_what_the_run_notes_and_says"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/run/floor.rs"
+find = "        let text = self.shown(text);"
+replace = "        let text = text.to_string();"
+
+[[plant]]
+name = "long run: the edge gives the console no mask for its lines"
+meant = "the_console_says_and_keeps_through_the_edge_what_the_run_notes_and_says"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/edge.rs"
+find = "            move |line| edge.shown(line),"
+replace = "            move |line| line.to_owned(),"
+
+[[plant]]
+name = "long run: the console shows a window's screen row by row, and a value on the row after its name is said"
+meant = "the_console_says_and_keeps_through_the_edge_what_the_run_notes_and_says"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/edge.rs"
+find = "            move |screen| rows.screen(screen),"
+replace = "            move |screen| screen.iter().map(|row| rows.shown(row)).collect(),"
+
+[[plant]]
+name = "long run: the chief's screen a wait that gave up shows is joined before it is masked, and a value on the row after its name is said"
+meant = "nothing_of_the_long_run_writes_around_its_edge"
+runs = ["evals-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/run/chief.rs"
+find = '''        let shown = floor.screen(&shown).join(" ⏎ ");'''
+replace = '''        let shown = shown.join(" ⏎ ");'''
+
+[[plant]]
+name = "long run: the rig is given a copy of the names the run knew when it started, and a window's id it learned later is hidden in what the rig says"
+meant = "what_the_rig_says_of_itself_goes_through_the_edge_with_the_names_known_by_then"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/edge.rs"
+find = '''
+        let edge = self.clone();
+        Masker::new(move |text| edge.shown(text))'''
+replace = '''
+        let names = self.names();
+        Masker::new(move |text| mask(text, &names))'''
+
+[[plant]]
+name = "long run: the edge learns none of the names a look shows, and the run's own handles are hidden"
+meant = "a_text_leaves_with_a_key_hidden_and_the_runs_names_shown"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/edge.rs"
+find = "            .extend(names);"
+replace = "            .extend(&Names::default());"
+
+[[plant]]
+name = "long run: where the report is kept is said with its folders and its name hidden"
+meant = "the_report_is_kept_through_the_edge_each_text_of_it_and_a_screen_as_one_text"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/edge.rs"
+find = "        self.knows_files(&[&json_file, &text_file]);"
+replace = "        let _ = Self::knows_files;"
+
+[[plant]]
+name = "long run: the run's rig is given no masker, and what it says of itself dropped unclosed is said as it is"
+meant = "what_stops_the_run_and_what_its_rig_says_leave_through_the_edge"
+runs = ["evals-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/setup.rs"
+find = "        .masked_by(masker);"
+replace = '''
+        ;
+    drop(masker);'''
+
+[[plant]]
+name = "long run: the run speaks on a console of its own, around its edge"
+meant = "nothing_of_the_long_run_writes_around_its_edge"
+runs = ["evals-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/conduct.rs"
+find = "    let mut floor = edge.floor(out);"
+replace = "    let mut floor = crate::run::floor::Floor::new(out);"
+
+[[plant]]
+name = "long run: a break's screen is masked row by row, and a value on the row after its name is kept and said"
+meant = "what_looks_like_a_key_or_a_token_is_hidden_before_a_break_is_kept"
+runs = ["evals-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/invariants.rs"
+find = "            found.evidence.screen = screen(&found.evidence.screen, names);"
+replace = "            found.evidence.screen = found.evidence.screen.iter().map(|line| mask(line, names)).collect();"
+
+[[plant]]
+name = "long run: a secret's value in double quotes ends at a line break, and a password that holds one is kept"
+meant = "a_secret_value_in_quotes_that_holds_a_line_break_is_hidden_whole"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/mask.rs"
+find = '''const DOUBLE: &str = r#"(?:[^"\\]|\\(?s:.))"#;'''
+replace = '''const DOUBLE: &str = r#"(?:[^"\\\n]|\\(?s:.))"#;'''
+
+[[plant]]
+name = "long run: a secret's value in single quotes ends at a line break, and a password that holds one is kept"
+meant = "a_secret_value_in_quotes_that_holds_a_line_break_is_hidden_whole"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/mask.rs"
+find = '''const SINGLE: &str = r"(?:[^'\\]|\\(?s:.))";'''
+replace = '''const SINGLE: &str = r"(?:[^'\\\n]|\\(?s:.))";'''
+
+[[plant]]
+name = "long run: a value JSON escaped ends at a line break, and a password that holds one is kept"
+meant = "a_secret_value_in_quotes_that_holds_a_line_break_is_hidden_whole"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/mask.rs"
+find = '''const ESCAPED: &str = r#"(?:[^"\\]|\\[^"\\]|\\\\(?:\\(?s:.)|[^"\\]))"#;'''
+replace = '''const ESCAPED: &str = r#"(?:[^"\\\n]|\\[^"\\]|\\\\(?:\\(?s:.)|[^"\\]))"#;'''
+
+[[plant]]
+name = "long run: a screen's rows the terminal wrapped are read as lines of their own, and a token the wrap cut is kept in part"
+meant = "a_screen_is_masked_as_one_text_its_wrapped_rows_joined"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/mask.rs"
+find = "        if !(widest >= WRAPS_AT && row.chars().count() == widest) {"
+replace = "        if true {"
+
+[[plant]]
+name = "long run: a screen's rows are masked each alone, and a value on the row after its name is kept"
+meant = "a_screen_is_masked_as_one_text_its_wrapped_rows_joined"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/mask.rs"
+find = "    let hidden = spans(&joined, names);"
+replace = "    let hidden: Vec<std::ops::Range<usize>> = Vec::new();"
+
+[[plant]]
+name = "long run: a row a secret runs on into is marked masked again, its own words after it hidden"
+meant = "a_screen_is_masked_as_one_text_its_wrapped_rows_joined"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/mask.rs"
+find = "                if span.start >= place.start {"
+replace = "                if span.end > 0 {"
+
+[[plant]]
+name = "long run: a screen masked as one text hides the run's own names on it"
+meant = "a_screen_is_masked_as_one_text_its_wrapped_rows_joined"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/mask.rs"
+find = "                && !(rule.names_shown && names.holds(secret.as_str()))"
+replace = "                && !(rule.names_shown && names.holds(secret.as_str()) && false)"
+
+[[plant]]
+name = "long run: two rules that find the same secret on a screen each mark it, and the row says it masked twice"
+meant = "a_screen_is_masked_as_one_text_its_wrapped_rows_joined"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/mask.rs"
+find = "            Some(last) if span.start <= last.end => last.end = last.end.max(span.end),"
+replace = "            Some(last) if false => last.end = last.end.max(span.end),"
+
 # What the run stands on in crates/cf-e2e
 
 [[plant]]
@@ -1753,3 +2160,43 @@ runs = ["fake-devin-store"]
 file = "crates/cf-e2e/src/bin/fake_devin/store.rs"
 find = "                if failure.code == rusqlite::ErrorCode::DatabaseBusy"
 replace = "                if failure.code == rusqlite::ErrorCode::DatabaseBusy && false"
+
+[[plant]]
+name = "long run: the rig says what it says of itself as it is, whatever masker its owner gave it"
+meant = "what_a_rig_says_of_itself_goes_through_its_owners_masker_and_as_it_is_without_one"
+runs = ["e2e-lib-report"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/report.rs"
+find = "        Some(masker) => masker.shown(&report),"
+replace = "        Some(_) => report,"
+
+[[plant]]
+name = "long run: a rig's configuration keeps no masker it is given"
+meant = "what_a_rig_says_of_itself_goes_through_its_owners_masker_and_as_it_is_without_one"
+runs = ["e2e-lib-report"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/mod.rs"
+find = "        self.masker = Some(masker);"
+replace = "        let _ = masker;"
+
+[[plant]]
+name = "long run: a rig starts with no masker, whatever its configuration was given"
+meant = "what_stops_the_run_and_what_its_rig_says_leave_through_the_edge"
+runs = ["evals-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/launch.rs"
+find = "            masker: config.masker,"
+replace = "            masker: None,"
+
+[[plant]]
+name = "long run: a rig dropped unclosed says what it says of itself around its owner's masker"
+meant = "what_stops_the_run_and_what_its_rig_says_leave_through_the_edge"
+runs = ["evals-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/report.rs"
+find = "told(rig.masker.as_ref(), report)"
+replace = "told(None, report)"

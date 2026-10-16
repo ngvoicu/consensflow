@@ -117,6 +117,74 @@ fn a_window_that_closed_by_itself_while_its_task_was_at_work_breaks_the_sixth() 
 }
 
 #[test]
+fn a_crash_is_held_against_whoever_had_the_task_when_the_window_exited() {
+    // T-18 was given to the worker, whose window crashed at 10:05 while it worked;
+    // T-18 went to another worker a second later, who holds it now.
+    let scene = Scene::new(&[("long-worker", "devin"), ("long-devin-2", "devin")]);
+    scene.task(18, 4, "working", &t(5, 1));
+    scene.event(
+        &t(0, 30),
+        "task.created",
+        &json!({ "task": 18, "from": "chief", "to": "long-worker" }),
+    );
+    scene.event(
+        &t(1, 0),
+        "task.state",
+        &json!({ "task": 18, "from": "queued", "to": "working" }),
+    );
+    scene.event(
+        &t(5, 1),
+        "task.assigned",
+        &json!({ "task": 18, "from": "working", "to": "queued", "assignee": "long-devin-2" }),
+    );
+    let mut look = scene.look(ms(6, 0));
+    look.windows.exits.push(exit(ClosedBy::Itself));
+    let breaks = found(&look, 6);
+    assert_eq!(breaks.len(), 1, "{breaks:?}");
+    assert_eq!(
+        breaks[0].said,
+        "@long-worker's window closed by itself while T-18 was at work"
+    );
+    // The worker it went to after had it not when the window closed.
+    let other = |minute, second| Exit {
+        handle: "long-devin-2".to_owned(),
+        pane: "p1-long-devin-2-1".to_owned(),
+        at: cf_evals::clock::millis(&t(minute, second)).unwrap(),
+        ..exit(ClosedBy::Itself)
+    };
+    let mut look = scene.look(ms(6, 0));
+    look.windows.exits.push(other(5, 0));
+    assert!(found(&look, 6).is_empty());
+    // It took T-18 up at 10:05:10: its window's crash after is held against it, and one
+    // before, while T-18 was queued for it, is no crash at work.
+    scene.event(
+        &t(5, 10),
+        "task.state",
+        &json!({ "task": 18, "from": "queued", "to": "working" }),
+    );
+    let mut look = scene.look(ms(6, 0));
+    look.windows.exits.push(other(5, 30));
+    let breaks = found(&look, 6);
+    assert_eq!(breaks.len(), 1, "{breaks:?}");
+    assert_eq!(
+        breaks[0].said,
+        "@long-devin-2's window closed by itself while T-18 was at work"
+    );
+    let mut look = scene.look(ms(6, 0));
+    look.windows.exits.push(other(5, 5));
+    assert!(found(&look, 6).is_empty());
+    // Released to the board at 10:05:40: a crash after is no crash at work.
+    scene.event(
+        &t(5, 40),
+        "task.released",
+        &json!({ "task": 18, "from": "working", "to": "open" }),
+    );
+    let mut look = scene.look(ms(6, 0));
+    look.windows.exits.push(other(5, 50));
+    assert!(found(&look, 6).is_empty());
+}
+
+#[test]
 fn a_process_left_when_its_window_is_gone_breaks_the_sixth() {
     let scene = Scene::new(&[]);
     let mut look = scene.look(ms(6, 0));
@@ -185,7 +253,7 @@ fn a_tree_the_pane_host_could_not_say_twice_and_processes_it_does_not_name_are_g
         .collect();
     many.background_total = 21;
     look.windows.open.push(many);
-    let gaps = unjudged(&look);
+    let gaps = unjudged(&look, &Default::default());
     assert_eq!(
         gaps.iter().map(|gap| gap.key.as_str()).collect::<Vec<_>>(),
         [
@@ -202,7 +270,11 @@ fn a_tree_the_pane_host_could_not_say_twice_and_processes_it_does_not_name_are_g
     assert_eq!(kept.len(), 1, "{kept:?}");
     assert_eq!(kept[0].key, "6:unnamed:p1-long-claude-2-1:3");
     look.at = ms(5, 10);
-    let kept = keeper.keep_unjudged(look.at, unjudged(&look), &Names::default());
+    let kept = keeper.keep_unjudged(
+        look.at,
+        unjudged(&look, &Default::default()),
+        &Names::default(),
+    );
     assert_eq!(kept.len(), 1, "{kept:?}");
     assert!(
         kept[0].said.contains("could not be read"),
@@ -217,7 +289,50 @@ fn a_tree_the_pane_host_could_not_say_twice_and_processes_it_does_not_name_are_g
     gone.tree_unread = Some("(the host said: no such pane)".to_owned());
     look.windows.open.push(gone);
     look.windows.exits.push(exit(ClosedBy::Daemon));
-    assert!(unjudged(&look).is_empty());
+    assert!(unjudged(&look, &Default::default()).is_empty());
+}
+
+#[test]
+fn processes_the_pane_host_does_not_name_are_a_gap_whether_or_not_the_window_exited() {
+    // A look saw 17 processes in the worker's window, and took its exit in the same
+    // look: the exit names 16 too, and the seventeenth is followed by nothing.
+    let scene = Scene::new(&[("long-worker", "claude-code")]);
+    let mut look = scene.look(ms(5, 0));
+    let named: Vec<Process> = (0..16)
+        .map(|n| Process {
+            pid: 9000 + n,
+            command: "node worker.mjs".to_owned(),
+        })
+        .collect();
+    let mut many = window("long-worker", true, true);
+    many.background = named.clone();
+    many.background_total = 17;
+    look.windows.open.push(many);
+    look.windows.exits.push(Exit {
+        ended: named,
+        ..exit(ClosedBy::Daemon)
+    });
+    let keys: Vec<String> = unjudged(&look, &Default::default())
+        .into_iter()
+        .map(|gap| gap.key)
+        .collect();
+    assert_eq!(
+        keys,
+        [
+            "6:unnamed:p1-long-worker-1:3",
+            "6:exit-unnamed:p1-long-worker-1:3"
+        ]
+    );
+    // An exit that names fewer than the host names at most named them all.
+    let mut look = scene.look(ms(5, 0));
+    look.windows.exits.push(Exit {
+        ended: vec![Process {
+            pid: 9001,
+            command: "node worker.mjs".to_owned(),
+        }],
+        ..exit(ClosedBy::Daemon)
+    });
+    assert!(unjudged(&look, &Default::default()).is_empty());
 }
 
 #[test]

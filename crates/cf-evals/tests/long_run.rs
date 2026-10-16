@@ -14,6 +14,8 @@ mod support;
 // file beside it, where each would be a suite of its own.
 #[path = "long_run/deliveries.rs"]
 mod deliveries;
+#[path = "long_run/edge.rs"]
+mod edge;
 #[path = "long_run/end.rs"]
 mod end;
 #[path = "long_run/field.rs"]

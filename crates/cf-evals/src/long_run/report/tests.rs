@@ -345,7 +345,7 @@ fn a_run_whose_time_ran_out_fails_whatever_it_found() {
 }
 
 #[test]
-fn a_report_is_named_by_when_it_began_its_chief_and_its_staff_and_kept_as_json_and_markdown() {
+fn a_report_is_named_by_when_it_began_its_chief_and_its_staff() {
     assert_eq!(
         file_name(
             STARTED,
@@ -354,16 +354,4 @@ fn a_report_is_named_by_when_it_began_its_chief_and_its_staff_and_kept_as_json_a
         ),
         "2026-10-11T10-00-00-000Z-long-chief-claude-staff-claude-devin"
     );
-    let folder = tempfile::tempdir().unwrap();
-    let (json_file, text_file) = keep(
-        &folder.path().join("long"),
-        "run",
-        &json!({ "verdict": "PASS" }),
-        "# PASS\n",
-    )
-    .unwrap();
-    assert!(files::read_string(&json_file)
-        .unwrap()
-        .contains("\"verdict\": \"PASS\""));
-    assert_eq!(files::read_string(&text_file).unwrap(), "# PASS\n");
 }

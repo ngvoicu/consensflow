@@ -176,10 +176,12 @@ impl<'r> Chief<'r> {
                 .collect();
             format!(" started ({whole} characters) as {};", words.join(" "))
         });
+        // The screen's rows through the run's screen mask first, as one text: a secret's
+        // name may end one row and its value begin the next.
+        let shown = floor.screen(&shown).join(" ⏎ ");
         floor.note(format!(
-            "gave up waiting for {what}: chief {};{started} its screen: {}",
+            "gave up waiting for {what}: chief {};{started} its screen: {shown}",
             serde_json::to_string(&lane["activity"]).unwrap_or_else(|_| "null".to_owned()),
-            shown.join(" ⏎ ")
         ))
     }
 

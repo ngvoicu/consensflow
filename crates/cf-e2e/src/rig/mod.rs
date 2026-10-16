@@ -88,6 +88,31 @@ pub struct Config {
     codex: Option<PathBuf>,
     devin: Option<PathBuf>,
     opencode_2: Option<PathBuf>,
+    masker: Option<Masker>,
+}
+
+/// What a rig passes what it says of itself through, where its owner gives it one
+/// ([`Config::masked_by`]): a run that hides what looks like a key or a token in all
+/// it says. A rig with none says it as it is.
+#[derive(Clone)]
+pub struct Masker(std::sync::Arc<dyn Fn(&str) -> String + Send + Sync>);
+
+impl Masker {
+    /// A masker that passes each text through `mask`.
+    pub fn new(mask: impl Fn(&str) -> String + Send + Sync + 'static) -> Self {
+        Self(std::sync::Arc::new(mask))
+    }
+
+    /// `text` as it is said.
+    pub fn shown(&self, text: &str) -> String {
+        (self.0)(text)
+    }
+}
+
+impl std::fmt::Debug for Masker {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("Masker")
+    }
 }
 
 impl Config {
@@ -105,7 +130,18 @@ impl Config {
             codex: None,
             devin: None,
             opencode_2: None,
+            masker: None,
         }
+    }
+
+    /// With what the rig says of itself, when a case leaves it unclosed (its windows'
+    /// screens, the programs' error output, the daemon's log), passed through
+    /// `masker` first: for an owner that hides what looks like a key or a token in all
+    /// it says (the long run of the evals). Every other rig says it as it is.
+    #[must_use]
+    pub fn masked_by(mut self, masker: Masker) -> Self {
+        self.masker = Some(masker);
+        self
     }
 
     /// With `stand_in`, the stand-in Codex (the `fake-codex` binary of this crate),
@@ -234,6 +270,8 @@ pub struct Rig {
     /// What the rig takes away of the machine's own Claude folder when it
     /// ends, where its stand-ins write there ([`Config::stand_ins_write_in`]).
     forget: Option<Forget>,
+    /// What it passes what it says of itself through ([`Config::masked_by`]).
+    masker: Option<Masker>,
     /// Whether the home is left when the rig ends: it is not, unless a rig is
     /// to resume on it or a case asked to keep it ([`Rig::keep_home`]).
     keep_root: bool,

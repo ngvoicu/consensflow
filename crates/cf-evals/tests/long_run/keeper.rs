@@ -73,6 +73,8 @@ fn what_looks_like_a_key_or_a_token_is_hidden_before_a_break_is_kept() {
         ],
         screen: vec![
             "$ export GITHUB_TOKEN=ghp_abcdefghijklmnopqrstuvwxyz0123456789".to_owned(),
+            "$ export DB_PASSWORD=".to_owned(),
+            "\"correct horse battery staple\"".to_owned(),
             "Allow this edit? (y/n)".to_owned(),
         ],
         record: vec![r#"{"password": "correct horse battery staple"}"#.to_owned()],
@@ -89,7 +91,12 @@ fn what_looks_like_a_key_or_a_token_is_hidden_before_a_break_is_kept() {
     );
     assert_eq!(
         kept.evidence.screen,
-        ["$ export GITHUB_TOKEN=[masked]", "Allow this edit? (y/n)"]
+        [
+            "$ export GITHUB_TOKEN=[masked]",
+            "$ export DB_PASSWORD=",
+            "\"[masked]\"",
+            "Allow this edit? (y/n)"
+        ]
     );
     assert_eq!(kept.evidence.record, [r#"{"password": "[masked]"}"#]);
     assert_eq!(keeper.breaks[0], *kept, "kept as said");

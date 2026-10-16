@@ -293,12 +293,37 @@ pub(super) fn say(rig: &Rig) {
     if !stray.is_empty() {
         report.push_str(&format!("lines that are no frame: {stray:?}\n"));
     }
-    let _ = std::io::stderr().write_all(report.as_bytes());
+    let _ = std::io::stderr().write_all(told(rig.masker.as_ref(), report).as_bytes());
+}
+
+/// What the rig says of itself, `report`, as it is said: through its owner's masker
+/// where it was given one, else as it is.
+fn told(masker: Option<&super::Masker>, report: String) -> String {
+    match masker {
+        Some(masker) => masker.shown(&report),
+        None => report,
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn what_a_rig_says_of_itself_goes_through_its_owners_masker_and_as_it_is_without_one() {
+        let report = "--- p1-chief: export DB_PASSWORD=hunter2\n".to_owned();
+        let masker = crate::rig::Masker::new(|text| text.replace("hunter2", "[masked]"));
+        assert_eq!(
+            told(Some(&masker), report.clone()),
+            "--- p1-chief: export DB_PASSWORD=[masked]\n"
+        );
+        assert_eq!(told(None, report.clone()), report);
+        // Given by the owner on the rig's configuration, and carried with it.
+        let config = crate::rig::Config::new("/bin/stand-in").masked_by(masker);
+        let carried = config.clone().masker.unwrap();
+        assert_eq!(carried.shown("hunter2"), "[masked]");
+        assert_eq!(format!("{carried:?}"), "Masker");
+    }
 
     #[test]
     fn control_sequences_are_stripped_and_the_text_between_them_is_left() {

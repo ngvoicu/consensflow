@@ -88,6 +88,17 @@ impl Names {
         self.0.extend(panes.cloned());
     }
 
+    /// `name` is one of the run's from now: a file it keeps, by its name or a folder of
+    /// its path.
+    pub fn insert(&mut self, name: impl Into<String>) {
+        self.0.insert(name.into());
+    }
+
+    /// `other`'s names, added.
+    pub fn extend(&mut self, other: &Names) {
+        self.0.extend(other.0.iter().cloned());
+    }
+
     /// Whether `found` is one of the run's names.
     fn holds(&self, found: &str) -> bool {
         self.0.contains(found)
@@ -154,39 +165,34 @@ const NAMED: &str = r#"[A-Za-z0-9_.-]*(?:\\?["'])?\s*[:=]\s*"#;
 /// One character of a value in quotes that JSON escaped (`\"…\"`), as JSON wrote it:
 /// a plain one, an escape of JSON's (`\n`, `é`), or an escape the value had of
 /// its own, written with its backslash escaped (`\\\"` is the value's `\"`, which
-/// does not end it). Then the same, the value's line not ending it.
-const ESCAPED: &str = r#"(?:[^"\\\n]|\\[^"\\\n]|\\\\(?:\\.|[^"\\\n]))"#;
-const ESCAPED_ON: &str = r#"(?:[^"\\]|\\[^"\\]|\\\\(?:\\(?s:.)|[^"\\]))"#;
+/// does not end it). A line break is a character of the value like any other.
+const ESCAPED: &str = r#"(?:[^"\\]|\\[^"\\]|\\\\(?:\\(?s:.)|[^"\\]))"#;
 
 /// One character of a value in double quotes, or in single quotes: a plain one, or
-/// one its backslash escapes (an escaped quote is part of the value). Then the same,
-/// the value's line not ending it.
-const DOUBLE: &str = r#"(?:[^"\\\n]|\\.)"#;
-const DOUBLE_ON: &str = r#"(?:[^"\\]|\\(?s:.))"#;
-const SINGLE: &str = r"(?:[^'\\\n]|\\.)";
-const SINGLE_ON: &str = r"(?:[^'\\]|\\(?s:.))";
+/// one its backslash escapes (an escaped quote is part of the value). A line break is
+/// a character of the value like any other: a value in quotes ends at its quote.
+const DOUBLE: &str = r#"(?:[^"\\]|\\(?s:.))"#;
+const SINGLE: &str = r"(?:[^'\\]|\\(?s:.))";
 
 /// A secret name's value of `least` characters or more, each shape a group of its
 /// own: in quotes JSON escaped, in double quotes, in single quotes (each to its
-/// closing quote); then in one of those quotes that never closes, which is the value
-/// to the end of the text (a backslash the text was cut after with it); then bare.
+/// closing quote, whatever lines it spans); then in one of those quotes that never
+/// closes, which is the value to the end of the text (a backslash the text was cut
+/// after with it); then bare.
 fn quoted(least: usize) -> String {
     format!(
         concat!(
             r#"(?:\\"({escaped}{{{least},}})\\""#,
             r#"|"({double}{{{least},}})""#,
             r"|'({single}{{{least},}})'",
-            r#"|\\"({escaped_on}+)\\?\z"#,
-            r#"|"({double_on}+)\\?\z"#,
-            r"|'({single_on}+)\\?\z",
+            r#"|\\"({escaped}+)\\?\z"#,
+            r#"|"({double}+)\\?\z"#,
+            r"|'({single}+)\\?\z",
             r#"|([^\s"',;]{{{least},}}))"#,
         ),
         escaped = ESCAPED,
         double = DOUBLE,
         single = SINGLE,
-        escaped_on = ESCAPED_ON,
-        double_on = DOUBLE_ON,
-        single_on = SINGLE_ON,
         least = least,
     )
 }
@@ -263,6 +269,85 @@ pub fn mask(text: &str, names: &Names) -> String {
 /// evidence, a record's entry or the timeline keeps of a long text.
 pub fn cut(text: &str, most: usize, names: &Names) -> String {
     crate::js::first(&mask(text, names), most)
+}
+
+/// How wide a row is before it is taken for one the terminal wrapped, where it is
+/// the screen's widest: every window of a run is as wide (the daemon's `pane.open`
+/// asks no size, the pane host's default is 80 by 24, and nothing resizes a window).
+const WRAPS_AT: usize = 80;
+
+/// The rows of a screen masked as one text: a secret's name may end one row and its
+/// value begin the next (`DB_PASSWORD=` / `"correct horse battery staple"`), and a
+/// terminal wraps a long line at its width, a token run across two rows. The rows are
+/// joined as they were drawn (a row as wide as the screen's widest, of [`WRAPS_AT`]
+/// characters or more, runs on into the next as the terminal wrapped it; any other
+/// ends its line), what is to be hidden is found in the whole, and each row keeps its
+/// own part of it: `[masked]` where a secret begins, nothing of it in the rows it runs
+/// on into. Then each row is masked as a text of its own too. Rows joined may hide a
+/// little more than either would alone, and never less.
+pub fn screen(rows: &[String], names: &Names) -> Vec<String> {
+    let widest = rows
+        .iter()
+        .map(|row| row.chars().count())
+        .max()
+        .unwrap_or(0);
+    let mut joined = String::new();
+    let mut places = Vec::new();
+    for row in rows {
+        let start = joined.len();
+        joined.push_str(row);
+        places.push(start..joined.len());
+        if !(widest >= WRAPS_AT && row.chars().count() == widest) {
+            joined.push('\n');
+        }
+    }
+    let hidden = spans(&joined, names);
+    places
+        .into_iter()
+        .map(|place| {
+            let mut shown = String::new();
+            let mut at = place.start;
+            for span in hidden
+                .iter()
+                .filter(|span| span.start < place.end && span.end > place.start)
+            {
+                shown.push_str(&joined[at..span.start.max(at)]);
+                if span.start >= place.start {
+                    shown.push_str(MASK);
+                }
+                at = span.end.min(place.end);
+            }
+            shown.push_str(&joined[at..place.end]);
+            mask(&shown, names)
+        })
+        .collect()
+}
+
+/// Where in `text` each rule finds a secret to hide (the run's `names` shown), every
+/// rule read against the whole text: the stretches, in order, those that meet made one.
+fn spans(text: &str, names: &Names) -> Vec<std::ops::Range<usize>> {
+    let mut found: Vec<std::ops::Range<usize>> = Vec::new();
+    for rule in RULES.iter() {
+        for matched in rule.pattern.captures_iter(text) {
+            let Some(secret) = rule.secret.iter().find_map(|group| matched.get(*group)) else {
+                continue;
+            };
+            if (rule.is_secret)(secret.as_str())
+                && !(rule.names_shown && names.holds(secret.as_str()))
+            {
+                found.push(secret.range());
+            }
+        }
+    }
+    found.sort_by_key(|span| span.start);
+    let mut merged: Vec<std::ops::Range<usize>> = Vec::new();
+    for span in found {
+        match merged.last_mut() {
+            Some(last) if span.start <= last.end => last.end = last.end.max(span.end),
+            _ => merged.push(span),
+        }
+    }
+    merged
 }
 
 /// What replaces a match of `rule`: the match with its secret hidden, or the match
@@ -409,6 +494,80 @@ mod tests {
             hidden.contains(r#""error":"password=\"[masked]\"""#),
             "{hidden}"
         );
+    }
+
+    #[test]
+    fn a_secret_value_in_quotes_that_holds_a_line_break_is_hidden_whole() {
+        for (text, hidden) in [
+            (
+                "DB_PASSWORD=\"correct horse\nbattery staple\"",
+                "DB_PASSWORD=\"[masked]\"",
+            ),
+            // In a failure of many lines, what follows the value is kept.
+            (
+                "the daemon said:\npassword: 'correct horse\nbattery staple' was refused\nand went on",
+                "the daemon said:\npassword: '[masked]' was refused\nand went on",
+            ),
+            // In quotes JSON escaped.
+            (
+                "{\"error\":\"password=\\\"correct horse\nbattery staple\\\" refused\"}",
+                "{\"error\":\"password=\\\"[masked]\\\" refused\"}",
+            ),
+        ] {
+            assert_eq!(masked(text), hidden, "{text}");
+        }
+    }
+
+    #[test]
+    fn a_screen_is_masked_as_one_text_its_wrapped_rows_joined() {
+        // The terminal wrapped the line right after the secret's name.
+        let rows: Vec<String> = [
+            "$ export DB_PASSWORD=",
+            "\"correct horse battery staple\"",
+            "$ ",
+        ]
+        .map(str::to_owned)
+        .to_vec();
+        assert_eq!(
+            screen(&rows, &Names::default()),
+            ["$ export DB_PASSWORD=", "\"[masked]\"", "$ "]
+        );
+        // A token the wrap cut in two, the first row as wide as the terminal: hidden in
+        // both rows.
+        let wrapped = format!("{}deploy with ghp_abcdefghij", " ".repeat(54));
+        assert_eq!(wrapped.chars().count(), 80);
+        let rows = vec![wrapped.clone(), "klmnopqrstuvwxyz0123456789 now".to_owned()];
+        assert_eq!(
+            screen(&rows, &Names::default()),
+            [
+                format!("{}deploy with [masked]", " ".repeat(54)),
+                " now".to_owned()
+            ]
+        );
+        // A row that ends its line is no wrap: the next row's words are its own.
+        let rows: Vec<String> = [
+            "$ export GITHUB_TOKEN=ghp_abcdefghijklmnopqrstuvwxyz0123456789",
+            "Allow this edit? (y/n)",
+        ]
+        .map(str::to_owned)
+        .to_vec();
+        assert_eq!(
+            screen(&rows, &Names::default()),
+            ["$ export GITHUB_TOKEN=[masked]", "Allow this edit? (y/n)"]
+        );
+        // Rows with nothing to hide are as they were, and each row's own secret too.
+        let rows: Vec<String> = ["all 61 tests pass", "token=abcd1234efgh done"]
+            .map(str::to_owned)
+            .to_vec();
+        assert_eq!(
+            screen(&rows, &Names::default()),
+            ["all 61 tests pass", "token=[masked] done"]
+        );
+        // The run's own names on a screen are shown.
+        let mut names = Names::default();
+        names.insert("p1-long-claude-1-olive-valley");
+        let rows = vec!["window p1-long-claude-1-olive-valley exited".to_owned()];
+        assert_eq!(screen(&rows, &names), rows);
     }
 
     #[test]

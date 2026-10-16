@@ -18,7 +18,7 @@ const ENDED: &str =
 /// What the look could not judge of the third: the keys of the notices the log ties
 /// to no result.
 fn unbound(look: &Look) -> Vec<String> {
-    invariants::unjudged(look)
+    invariants::unjudged(look, &Default::default())
         .into_iter()
         .filter(|open| open.invariant == 3)
         .map(|open| open.key)
@@ -137,7 +137,7 @@ fn a_notice_after_a_result_and_a_send_back_is_unresolved_however_near_the_next_r
             "not cleared by the result after"
         );
     }
-    let said = &invariants::unjudged(&scene.look(ms(6, 0)))[0].said;
+    let said = &invariants::unjudged(&scene.look(ms(6, 0)), &Default::default())[0].said;
     assert_eq!(
         said,
         "T-14's ended notice m-101 came after its result m-100 and after T-14 was sent back: whether it is that result's, late, or the next attempt's own, the log does not say"
@@ -211,6 +211,99 @@ fn a_notices_row_is_masked_whole_before_it_is_cut() {
     let row = &kept[0].evidence.rows[0];
     assert!(!row.contains("horse"), "{row}");
     assert!(row.contains("password=\"[masked]\""), "{row}");
+}
+
+/// What the look could not judge of the fourth, by key and words.
+fn unanswered(look: &Look) -> Vec<(String, String)> {
+    invariants::unjudged(look, &Default::default())
+        .into_iter()
+        .filter(|open| open.invariant == 4)
+        .map(|open| (open.key, open.said))
+        .collect()
+}
+
+#[test]
+fn a_result_whose_turn_the_copy_does_not_hold_is_unresolved_never_skipped() {
+    // No copy of the worker's conversation at all.
+    let scene = Scene::new(&[("long-worker", "claude-code")]);
+    let task = task(&scene);
+    scene.message(
+        131,
+        (CHIEF, Some(3)),
+        "result",
+        Some(task),
+        "Done.",
+        &t(2, 0),
+    );
+    let look = scene.look(ms(4, 0));
+    assert!(found(&look, 4).is_empty());
+    let open = unanswered(&look);
+    assert_eq!(open.len(), 1, "{open:?}");
+    assert_eq!(open[0].0, "4:m-131");
+    assert_eq!(
+        open[0].1,
+        "m-131's turn is not in the copy of @long-worker's conversation, which holds no answer of the agent's after its last prompt: whether it is the turn's final answer cannot be judged"
+    );
+    // Too young to judge: the copy is made a moment after.
+    assert!(unanswered(&scene.look(ms(2, 30))).is_empty());
+    // A copy that holds the prompt and a tool's item alone.
+    let conversation = scene.conversation(3, "claude-code", "s-worker");
+    scene.item(
+        conversation,
+        0,
+        "user",
+        "[ConsensFlow m-120 · T-14 · task from @chief]\nRun them",
+        true,
+        &t(0, 0),
+    );
+    scene.item(conversation, 1, "tool", "61 tests pass", true, &t(0, 30));
+    assert_eq!(unanswered(&scene.look(ms(4, 0))).len(), 1);
+    // One whose turn says nothing after its last tool call.
+    let scene = Scene::new(&[("long-worker", "claude-code")]);
+    let task = self::task(&scene);
+    scene.message(
+        131,
+        (CHIEF, Some(3)),
+        "result",
+        Some(task),
+        "Done.",
+        &t(2, 0),
+    );
+    let conversation = scene.conversation(3, "claude-code", "s-worker");
+    scene.item(
+        conversation,
+        0,
+        "user",
+        "[ConsensFlow m-120 · T-14 · task from @chief]\nRun them",
+        true,
+        &t(0, 0),
+    );
+    scene.item(
+        conversation,
+        1,
+        "assistant",
+        "Running the tests.",
+        false,
+        &t(0, 10),
+    );
+    scene.item(conversation, 2, "tool", "61 tests pass", true, &t(0, 30));
+    let open = unanswered(&scene.look(ms(4, 0)));
+    assert!(
+        open[0].1.contains("says nothing after its last tool call"),
+        "{open:?}"
+    );
+    // A turn with its final answer is judged, and unresolved in nothing.
+    let scene = Scene::new(&[("long-worker", "claude-code")]);
+    let (task, _) = worked(&scene);
+    scene.message(
+        131,
+        (CHIEF, Some(3)),
+        "result",
+        Some(task),
+        "Rounding is half-even now, with a test; 61 tests pass.",
+        &t(1, 30),
+    );
+    assert!(unanswered(&scene.look(ms(4, 0))).is_empty());
 }
 
 /// The worker's conversation for T-14: its brief, two lines of progress each

@@ -57,6 +57,10 @@ fn says_skipped(line: &str) -> bool {
 /// The states a task is at work in, whose window must not close by itself.
 const AT_WORK: [&str; 2] = ["working", "waiting"];
 
+/// What the log says moved a task to the state its `to` names: a move of its own, an
+/// assignment (to `queued`) and a release (to `open`).
+const MOVES: [&str; 3] = ["task.state", "task.assigned", "task.released"];
+
 /// 6: an open window with no process or no host, a window that closed by itself
 /// mid-task, a stranger, and what the watch could not judge of the run's processes.
 pub fn processes(look: &Look) -> Vec<Break> {
@@ -188,18 +192,20 @@ pub fn processes(look: &Look) -> Vec<Break> {
     found
 }
 
-/// 6, unseen: each open window (whose exit the look has not taken) whose tree the
-/// pane host could not say, and each whose tree runs more than the host names.
+/// 6, unseen: each open window whose tree the pane host could not say (and whose exit
+/// the look has not taken: a window that closed as its tree was asked for is no gap,
+/// its exit listing what its close ended); each window whose tree runs more than the
+/// host names, whether or not its exit was taken; and each exit that names as many
+/// processes as the host names at most ([`NAMED`]), which may have ended more.
 pub fn gaps(look: &Look) -> Vec<Unjudged> {
     let mut found = Vec::new();
-    for window in look.windows.open.iter().filter(|window| {
-        !look
+    for window in &look.windows.open {
+        let exited = look
             .windows
             .exits
             .iter()
-            .any(|exit| exit.pane == window.pane && exit.generation == window.generation)
-    }) {
-        if let Some(why) = &window.tree_unread {
+            .any(|exit| exit.pane == window.pane && exit.generation == window.generation);
+        if let Some(why) = window.tree_unread.as_ref().filter(|_| !exited) {
             found.push(Unjudged {
                 twice: true,
                 ..Unjudged::new(
@@ -226,8 +232,30 @@ pub fn gaps(look: &Look) -> Vec<Unjudged> {
             ));
         }
     }
+    for exit in look
+        .windows
+        .exits
+        .iter()
+        .filter(|exit| exit.ended.len() >= NAMED)
+    {
+        found.push(Unjudged::new(
+            6,
+            format!("6:exit-unnamed:{}:{}", exit.pane, exit.generation),
+            format!(
+                "@{}'s window {} exited naming {} processes its close ended, as many as the pane host names: it may have ended more, which are not followed, so whether one outlives the window is not known",
+                exit.handle,
+                exit.pane,
+                exit.ended.len()
+            ),
+        ));
+    }
     found
 }
+
+/// How many of a window's processes the pane host names at most, in a tree it says
+/// and in an exit (`cf_proto::panes::BACKGROUND_PROCESSES`, the product's): a tree
+/// says how many there are besides, an exit does not.
+const NAMED: usize = 16;
 
 /// 8: a tool call skipped, in a record or on a screen, and a dialog that has
 /// waited too long.
@@ -326,24 +354,30 @@ pub fn skipped_or_waiting(look: &Look, settings: &Settings) -> Vec<Break> {
     found
 }
 
-/// The tasks of `handle`'s that were at work at `at`, by number: the log's last word
-/// on each by then (`task.state`), or where it has none the task's state now.
+/// The tasks `handle` held that were at work at `at`, by number: whom each was given
+/// to by then, by the log ([`holder_at`]; the task's assignee now, where the log says
+/// no assignment of it), and the log's last word on its state by then ([`MOVES`]; the
+/// task's state now, where it has none). A task given to another since is still the
+/// one the window held when it closed, and one given to it is at work once it moved
+/// on from `queued`.
 fn at_work_at(look: &Look, handle: &str, at: i64) -> Vec<i64> {
-    let Some(worker) = look.ledger.by_handle(handle) else {
-        return Vec::new();
-    };
+    let worker = look.ledger.by_handle(handle).map(|worker| worker.id);
     look.ledger
         .tasks
         .iter()
-        .filter(|task| task.assignee == Some(worker.id))
+        .filter(|task| match holder_at(look, task.number, at) {
+            Some(holder) => holder.as_deref() == Some(handle),
+            None => task.assignee.is_some() && task.assignee == worker,
+        })
         .filter(|task| {
             let said = look
                 .ledger
-                .events_of("task.state")
-                .into_iter()
+                .events
+                .iter()
                 .rev()
                 .find(|event| {
-                    event.data["task"].as_i64() == Some(task.number)
+                    MOVES.contains(&event.kind.as_str())
+                        && event.data["task"].as_i64() == Some(task.number)
                         && clock::millis(&event.at).is_some_and(|when| when <= at)
                 })
                 .map(|event| event.data["to"].as_str().unwrap_or_default().to_owned());
@@ -351,4 +385,25 @@ fn at_work_at(look: &Look, handle: &str, at: i64) -> Vec<i64> {
         })
         .map(|task| task.number)
         .collect()
+}
+
+/// Whom T-`number` was given to at `at`, by the handle the log names, as the last of
+/// its assignments by then says: `task.created` and `task.opened` name whom it was
+/// given to (none, given to a tier), and `task.assigned` the session it went to. (A
+/// release leaves the task `open`, which its state says.) None where the log says no
+/// assignment of it at all.
+fn holder_at(look: &Look, number: i64, at: i64) -> Option<Option<String>> {
+    let named = |value: &serde_json::Value| value.as_str().map(str::to_owned);
+    let mut holder = None;
+    for event in look.ledger.events.iter().filter(|event| {
+        event.data["task"].as_i64() == Some(number)
+            && clock::millis(&event.at).is_some_and(|when| when <= at)
+    }) {
+        match event.kind.as_str() {
+            "task.created" | "task.opened" => holder = Some(named(&event.data["to"])),
+            "task.assigned" => holder = Some(named(&event.data["assignee"])),
+            _ => {}
+        }
+    }
+    holder
 }

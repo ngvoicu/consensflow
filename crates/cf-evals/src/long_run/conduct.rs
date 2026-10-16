@@ -12,7 +12,8 @@
 //! of the run's processes the close left (said, and left running), and to the end
 //! within the budget; and the report is kept. A ledger the app left that cannot be read
 //! fails the run: nothing is held on an earlier copy of it. Everything the run says
-//! and keeps goes through its masking first, the run's own names shown.
+//! and keeps, and what stops it, leaves it through its edge ([`Edge`]), the run's own
+//! names shown.
 
 use std::io::Write;
 use std::path::PathBuf;
@@ -22,13 +23,14 @@ use std::time::{Duration, Instant};
 use cf_e2e::rig::Project;
 
 use super::disruptions::{Choice, Schedule};
+use super::edge::Edge;
 use super::invariants::{self, end, Break, Keeper, Settings, Unjudged, EFFECT};
 use super::ledger::Ledger;
 use super::look::{Look, Windows};
-use super::mask::{cut, mask, Names};
+use super::mask::cut;
 use super::options::Options;
 use super::play::{self, Outcome, Stagehand, Watch, With};
-use super::report::{file_name, keep, ChiefKept, Kept, TIME_UP};
+use super::report::{file_name, ChiefKept, Kept, TIME_UP};
 use super::setup::{self, Cast};
 use super::stage::{self, Stage};
 use super::timeline::Timeline;
@@ -67,18 +69,20 @@ struct Going {
     deadline: i64,
     /// Why the ledger the app left could not be read, where it could not.
     final_unread: Option<String>,
+    /// Where all the run says and keeps leaves it.
+    edge: Edge,
 }
 
 impl Going {
     /// A look, held to the invariants with `settings`: what changed told, each break
     /// found recorded and said, and what could not be judged said. It is the last look
-    /// then. What the run says from then is masked with the names it has seen.
+    /// then. The names it shows are the run's from then, shown wherever it says them.
     fn hold(&mut self, floor: &mut Floor, settings: &Settings, look: Look) {
         self.timeline.changes(self.last.as_ref(), &look);
-        masked_floor(floor, &self.timeline.names);
+        self.edge.knows(&self.timeline.names);
         let found = invariants::check(&look, settings);
         self.record(floor, look.at, found);
-        self.unjudged(floor, look.at, invariants::unjudged(&look));
+        self.unjudged(floor, look.at, invariants::unjudged(&look, settings));
         self.last = Some(look);
     }
 
@@ -111,7 +115,7 @@ impl Going {
         let flag = disruption.flag();
         match outcome {
             Outcome::Played(said) => {
-                floor.note(self.timeline.masked(&said))?;
+                floor.note(&said)?;
                 self.schedule
                     .played(disruption, at, format!("{how}: {said}"));
                 self.timeline
@@ -127,10 +131,7 @@ impl Going {
                 }
             }
             Outcome::Failed { said, evidence } => {
-                floor.note(format!(
-                    "{flag} had no effect: {}",
-                    self.timeline.masked(&said)
-                ))?;
+                floor.note(format!("{flag} had no effect: {said}"))?;
                 self.schedule
                     .failed(disruption, at, format!("{how}: {said}"));
                 self.timeline
@@ -144,10 +145,7 @@ impl Going {
                 self.record(floor, now(), vec![found]);
             }
             Outcome::Missed(why) => {
-                floor.note(format!(
-                    "{flag} missed its moment: {}",
-                    self.timeline.masked(&why)
-                ))?;
+                floor.note(format!("{flag} missed its moment: {why}"))?;
                 self.timeline.add(
                     now(),
                     "disruption",
@@ -202,15 +200,21 @@ impl Watch for Watching<'_, '_> {
     }
 }
 
-/// `long`: the run, and its report; the status is 0 when it held.
+/// `long`: the run, and its report; the status is 0 when it held. What stops it
+/// leaves it through its edge, as all it says does.
 pub fn command(words: &[String], out: &mut dyn Write) -> Result<i32> {
+    let edge = Edge::default();
+    run(words, out, &edge).map_err(|failed| edge.failure(failed))
+}
+
+/// The run of `command`, all it says and keeps leaving through `edge`.
+fn run(words: &[String], out: &mut dyn Write, edge: &Edge) -> Result<i32> {
     let options = Options::of(words)?;
     // The harness code of the product is asked as a process (the trust of the
     // workspace, a console's text): built before anything is spent.
     cf_e2e::live::ask::prepare()?;
     let cast = Cast::of(&options)?;
-    let mut floor = Floor::new(out);
-    masked_floor(&mut floor, &Names::default());
+    let mut floor = edge.floor(out);
     for left in &cast.left {
         floor.say(format!("left out: {} ({})", left.name, left.why))?;
     }
@@ -222,7 +226,7 @@ pub fn command(words: &[String], out: &mut dyn Write) -> Result<i32> {
             found.command.display()
         ))?;
     }
-    let opened = setup::open(&options, &cast, &mut floor)?;
+    let opened = setup::open(&options, &cast, &mut floor, edge.masker())?;
     let daemon = opened.daemon.clone();
     let mut stage = Stage::new(opened.rig, opened.config, opened.project, opened.claude);
     let started = now();
@@ -239,6 +243,7 @@ pub fn command(words: &[String], out: &mut dyn Write) -> Result<i32> {
         ending: String::new(),
         deadline: started + millis(options.budget),
         final_unread: None,
+        edge: edge.clone(),
     };
     for planned in &run.schedule.planned {
         if let super::disruptions::State::Impossible(why) = &planned.state {
@@ -252,7 +257,7 @@ pub fn command(words: &[String], out: &mut dyn Write) -> Result<i32> {
     let conducted = conduct(&options, &cast, &scenario, &mut stage, &mut floor, &mut run);
     let error = conducted.err().map(|failed| failed.to_string());
     if let Some(error) = &error {
-        floor.note(format!("the run stopped: {}", run.timeline.masked(error)))?;
+        floor.note(format!("the run stopped: {error}"))?;
         if run.ending.is_empty() {
             run.ending = STOPPED.to_owned();
         }
@@ -287,7 +292,7 @@ pub fn command(words: &[String], out: &mut dyn Write) -> Result<i32> {
         log: floor.log(),
     };
     let name = file_name(started, &options.chief, &cast.names);
-    let (json, markdown) = keep(&options.reports, &name, &kept.value(), &kept.markdown())?;
+    let (json, markdown) = edge.keep(&options.reports, &name, &kept.value(), &kept.markdown())?;
     for line in kept.say(&json, &markdown) {
         floor.say(line)?;
     }
@@ -390,7 +395,8 @@ fn finish(
     }
     run.record(floor, at, after.found);
     if let Some(look) = after.look {
-        run.unjudged(floor, look.at, invariants::unjudged(&look));
+        let found = invariants::unjudged(&look, &final_settings(settings));
+        run.unjudged(floor, look.at, found);
         run.last = Some(look);
     }
     let why = match run.ending.as_str() {
@@ -498,12 +504,6 @@ fn final_breaks(look: &Look, settings: &Settings, why: &str, deadline: i64) -> V
     found
 }
 
-/// What `floor` says and keeps from now, masked with the run's `names` shown.
-fn masked_floor(floor: &mut Floor, names: &Names) {
-    let names = names.clone();
-    floor.masking(move |line| mask(line, &names));
-}
-
 /// The run from the ask to its end.
 fn conduct(
     options: &Options,
@@ -548,10 +548,7 @@ fn conduct(
             }
             Err(failure) => {
                 failed += 1;
-                floor.note(format!(
-                    "a look failed ({failed} in a row): {}",
-                    run.timeline.masked(&failure.to_string())
-                ))?;
+                floor.note(format!("a look failed ({failed} in a row): {failure}"))?;
                 if failed >= FAILED_LOOKS {
                     return Err(failure);
                 }

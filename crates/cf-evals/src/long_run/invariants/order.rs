@@ -144,23 +144,29 @@ fn whose<'l>(ledger: &'l Ledger, task: i64, number: i64, notice: &Message) -> Wh
     }
 }
 
+/// The results a worker wrote that are old enough to be judged against the copy of
+/// its conversation (`settings.young`): each with its worker and when it was written.
+fn settled_results<'l>(
+    look: &'l Look,
+    settings: &Settings,
+) -> impl Iterator<Item = (&'l Message, i64, i64)> + 'l {
+    let young = settings.young;
+    look.ledger
+        .messages
+        .iter()
+        .filter(|message| message.kind == "result")
+        .filter_map(move |result| {
+            let (worker, at) = (result.sender?, clock::millis(&result.created_at)?);
+            (look.at - at >= young).then_some((result, worker, at))
+        })
+}
+
 /// 4: a result that holds a line of the progress of its turn the final answer does
 /// not hold too, or not the whole of the turn's final answer.
 pub fn final_answer(look: &Look, settings: &Settings) -> Vec<Break> {
     let names = Names::of(look);
     let mut found = Vec::new();
-    for result in look
-        .ledger
-        .messages
-        .iter()
-        .filter(|message| message.kind == "result")
-    {
-        let (Some(worker), Some(at)) = (result.sender, clock::millis(&result.created_at)) else {
-            continue;
-        };
-        if look.at - at < settings.young {
-            continue;
-        }
+    for (result, worker, at) in settled_results(look, settings) {
         let items = look.items_by(worker, at);
         let Some(turn) = last_turn(&items) else {
             continue;
@@ -203,6 +209,39 @@ pub fn final_answer(look: &Look, settings: &Settings) -> Vec<Break> {
                 record: lines_of(turn, 8, &names),
             }),
         );
+    }
+    found
+}
+
+/// 4, unresolved: a result whose turn the copy of its worker's conversation does not
+/// hold (none, or prompts and tools' items alone), or holds with nothing said after its
+/// last tool call: what its final answer was, the result cannot be held to.
+pub fn unanswered_results(look: &Look, settings: &Settings) -> Vec<Unjudged> {
+    let mut found = Vec::new();
+    for (result, worker, at) in settled_results(look, settings) {
+        let items = look.items_by(worker, at);
+        let codex = look
+            .ledger
+            .participant(worker)
+            .is_some_and(|who| who.harness.as_deref() == Some("codex"));
+        let handle = look.ledger.handle(worker);
+        let missing = match last_turn(&items) {
+            None => format!(
+                "is not in the copy of @{handle}'s conversation, which holds no answer of the agent's after its last prompt"
+            ),
+            Some(turn) if plain(&answer_and_progress(turn, codex).0).is_empty() => format!(
+                "says nothing after its last tool call in the copy of @{handle}'s conversation"
+            ),
+            Some(_) => continue,
+        };
+        found.push(Unjudged::new(
+            4,
+            format!("4:m-{}", result.id),
+            format!(
+                "m-{}'s turn {missing}: whether it is the turn's final answer cannot be judged",
+                result.id
+            ),
+        ));
     }
     found
 }

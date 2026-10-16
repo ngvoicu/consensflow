@@ -59,7 +59,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde_json::{json, Value};
 
 use super::look::Look;
-use super::mask::{mask, Names};
+use super::mask::{mask, screen, Names};
 
 pub use end::end;
 
@@ -229,10 +229,13 @@ pub fn check(look: &Look, settings: &Settings) -> Vec<Break> {
     found
 }
 
-/// What one look holds that the checks cannot judge: the ended notices the log ties
-/// to no result (3), and what the watch could not see of an open window's tree (6).
-pub fn unjudged(look: &Look) -> Vec<Unjudged> {
+/// What one look holds that the checks cannot judge, with `settings`: the ended
+/// notices the log ties to no result (3), the results whose turn the copy of their
+/// worker's conversation does not hold (4), and what the watch could not see of a
+/// window's tree (6).
+pub fn unjudged(look: &Look, settings: &Settings) -> Vec<Unjudged> {
     let mut found = order::unbound_notices(look);
+    found.extend(order::unanswered_results(look, settings));
     found.extend(windows::gaps(look));
     found
 }
@@ -274,15 +277,13 @@ impl Keeper {
             }
             found.at = at;
             found.said = mask(&found.said, names);
-            for lines in [
-                &mut found.evidence.rows,
-                &mut found.evidence.screen,
-                &mut found.evidence.record,
-            ] {
+            for lines in [&mut found.evidence.rows, &mut found.evidence.record] {
                 for line in lines.iter_mut() {
                     *line = mask(line, names);
                 }
             }
+            // A screen is one text, its wrapped rows joined.
+            found.evidence.screen = screen(&found.evidence.screen, names);
             self.recorded.insert(found.key.clone());
             self.breaks.push(found.clone());
             now.push(found);

@@ -55,12 +55,9 @@ fn a_process_still_there_a_grace_after_its_window_went_is_a_stranger_said_once()
     );
     assert_eq!(new, [10, 11], "the numbers whose identity the look asks");
     known(&mut tracker, &[10, 11]);
-    assert!(
-        tracker
-            .saw(&a, &[process(10, "node dev-server.mjs")])
-            .is_empty(),
-        "asked once"
-    );
+    // Asked at every look that shows it, and the same process still.
+    assert_eq!(tracker.saw(&a, &[process(10, "node dev-server.mjs")]), [10]);
+    known(&mut tracker, &[10]);
     tracker.saw(&window("p1-b", 1), &[process(20, "npm test")]);
     known(&mut tracker, &[20]);
     assert!(tracker.due(1_000_000).is_empty(), "nothing went yet");
@@ -166,6 +163,85 @@ fn a_process_the_system_says_began_after_the_look_saw_its_number_is_never_known(
         Ok(&BTreeMap::from([(11, ticks(shown_at - 4_000))])),
     );
     assert_eq!(began(&tracker, 11), Some(ticks(shown_at - 4_000).as_str()));
+}
+
+#[test]
+fn a_number_its_window_shows_again_begun_at_another_time_is_a_new_process_known_by_it() {
+    // Child A of the window ended; child B, of the same window and generation, has its
+    // number now. B is known by when it began, and found by it once the window went.
+    let mut tracker = Tracker::default();
+    let a = window("p1-a", 1);
+    tracker.saw(&a, &[process(10, "npm test")]);
+    tracker.identify(0, Ok(&BTreeMap::from([(10, "began A".to_owned())])));
+    tracker.saw(&a, &[process(10, "node serve.mjs")]);
+    tracker.identify(0, Ok(&BTreeMap::from([(10, "began B".to_owned())])));
+    assert_eq!(began(&tracker, 10), Some("began B"));
+    tracker.gone(&a, 1_000, &[]);
+    let found = tracker.strangers(1_001 + GRACE, &BTreeMap::from([(10, "began B".to_owned())]));
+    assert_eq!(leftovers(&found), [10]);
+    assert_eq!(found.leftovers[0].process.command, "node serve.mjs");
+    // One the system says began after the look began taking the trees may be another,
+    // given the number since, or the one the tree showed a moment after: it is never
+    // known, and unresolved where its number is there at the end.
+    let shown_at = 1_760_522_400_000_i64;
+    let ticks = |at: i64| ((at + 11_644_473_600_000) * 10_000).to_string();
+    let mut tracker = Tracker::default();
+    tracker.saw(&a, &[process(11, "npm test")]);
+    tracker.identify(
+        shown_at,
+        Ok(&BTreeMap::from([(11, ticks(shown_at - 9_000))])),
+    );
+    tracker.saw(&a, &[process(11, "npm test")]);
+    tracker.identify(
+        shown_at + 2_000,
+        Ok(&BTreeMap::from([(11, ticks(shown_at + 5_000))])),
+    );
+    assert_eq!(began(&tracker, 11), None);
+    tracker.gone(&a, shown_at + 3_000, &[]);
+    let found = tracker.strangers(
+        shown_at + 3_001 + GRACE,
+        &BTreeMap::from([(11, ticks(shown_at + 5_000))]),
+    );
+    assert!(found.leftovers.is_empty(), "{found:?}");
+    assert!(found.unresolved[0]
+        .why
+        .contains("began after the look saw it"));
+}
+
+#[test]
+fn a_number_its_windows_exit_listed_holding_a_process_begun_since_is_judged_by_when() {
+    // The look knew A under 10; the window's exit listed 10 at `exit`, and the system
+    // says the process there now began at another time than A.
+    let exit = 1_760_522_400_000_i64;
+    let ticks = |at: i64| ((at + 11_644_473_600_000) * 10_000).to_string();
+    let a = window("p1-a", 1);
+    let followed = |tracker: &mut Tracker| {
+        tracker.saw(&a, &[process(10, "npm test")]);
+        tracker.identify(
+            exit - 30_000,
+            Ok(&BTreeMap::from([(10, ticks(exit - 60_000))])),
+        );
+        tracker.gone(&a, exit, &[process(10, "node serve.mjs")]);
+    };
+    // Begun before the exit listed the number: the window's own, a stranger.
+    let mut tracker = Tracker::default();
+    followed(&mut tracker);
+    let now = BTreeMap::from([(10, ticks(exit - 5_000))]);
+    assert_eq!(leftovers(&tracker.strangers(exit + 1 + GRACE, &now)), [10]);
+    // Begun after: another's, given the number since.
+    let mut tracker = Tracker::default();
+    followed(&mut tracker);
+    let now = BTreeMap::from([(10, ticks(exit + 5_000))]);
+    assert_eq!(tracker.strangers(exit + 1 + GRACE, &now), Found::default());
+    // Said to the second alone: unresolved.
+    let mut tracker = Tracker::default();
+    followed(&mut tracker);
+    let now = BTreeMap::from([(10, "Fri Oct 16 00:29:15 2026".to_owned())]);
+    let found = tracker.strangers(exit + 1 + GRACE, &now);
+    assert!(found.leftovers.is_empty());
+    assert!(found.unresolved[0]
+        .why
+        .contains("its window's exit listed the number"));
 }
 
 #[test]

@@ -8,7 +8,7 @@
 use std::path::PathBuf;
 
 use cf_e2e::live::{self, agents, Harness, Installed};
-use cf_e2e::rig::{Config, Rig};
+use cf_e2e::rig::{Config, Masker, Rig};
 use serde_json::{json, Value};
 
 use super::options::Options;
@@ -113,7 +113,7 @@ pub struct Opened {
 /// workspace, trusted by Claude where Claude is of the run, the roster written,
 /// the project opened with the staff, specs on and wake-up calls every
 /// `options.wake_minutes`.
-pub fn open(options: &Options, cast: &Cast, floor: &mut Floor) -> Result<Opened> {
+pub fn open(options: &Options, cast: &Cast, floor: &mut Floor, masker: Masker) -> Result<Opened> {
     let machine = Machine::of(&cast.crew)?;
     let wrappers = wrappers::write(&machine, &cast.crew, &cast.chief)?;
     let workspace = workspace::fresh(&machine, &options.fixture)?;
@@ -121,7 +121,11 @@ pub fn open(options: &Options, cast: &Cast, floor: &mut Floor) -> Result<Opened>
         .claude
         .clone()
         .unwrap_or_else(|| machine.bin().join("claude"));
-    let config = machine.rig(&cast.crew, &cast.chief, &stand_in);
+    // What the rig says of itself, dropped unclosed, leaves through the run's edge;
+    // the rig started again on a restart is given the same.
+    let config = machine
+        .rig(&cast.crew, &cast.chief, &stand_in)
+        .masked_by(masker);
     let rig = Rig::start(config.clone())?;
     let daemon = daemon_of(&rig);
     floor.say(format!("daemon: {daemon}"))?;

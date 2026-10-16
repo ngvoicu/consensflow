@@ -90,6 +90,7 @@ fn going() -> Going {
         ending: String::new(),
         deadline: at(59, 0),
         final_unread: None,
+        edge: Edge::default(),
     }
 }
 
@@ -98,8 +99,8 @@ fn a_disruption_whose_effect_was_not_seen_is_failed_and_a_break_of_the_tenth_wit
     use crate::long_run::disruptions::State;
     use crate::long_run::invariants::Evidence;
     let mut said = Vec::new();
-    let mut floor = Floor::new(&mut said);
     let mut run = going();
+    let mut floor = run.edge.floor(&mut said);
     let evidence = Evidence {
         rows: vec!["@chief: \"long-claude-1\" \"working\", window {\"generation\":4}".to_owned()],
         ..Evidence::default()
@@ -203,8 +204,8 @@ fn a_notice_the_log_ties_to_no_result_is_said_unresolved_once_and_is_no_break() 
         0,
     ));
     let mut said = Vec::new();
-    let mut floor = Floor::new(&mut said);
     let mut run = going();
+    let mut floor = run.edge.floor(&mut said);
     for minute in [2, 3] {
         let look = Look {
             at: at(minute, 0),
@@ -214,11 +215,12 @@ fn a_notice_the_log_ties_to_no_result_is_said_unresolved_once_and_is_no_break() 
         run.hold(&mut floor, &Settings::default(), look);
     }
     assert!(run.keeper.breaks.is_empty(), "{:?}", run.keeper.breaks);
+    // (The result m-100 has no turn in this ledger's copy, which is unresolved too.)
     let unresolved: Vec<&str> = run
         .timeline
         .moments
         .iter()
-        .filter(|moment| moment.kind == "unresolved")
+        .filter(|moment| moment.kind == "unresolved" && moment.text.starts_with("3: "))
         .map(|moment| moment.text.as_str())
         .collect();
     assert_eq!(unresolved.len(), 1, "{unresolved:?}");
@@ -238,10 +240,10 @@ fn a_notice_the_log_ties_to_no_result_is_said_unresolved_once_and_is_no_break() 
 fn what_the_run_says_is_masked_whatever_says_it_its_own_names_shown() {
     // A wait for the chief that gave up says the chief's screen and how its window was
     // started (`Chief::gave_up`, on the run's floor): a password there is hidden before
-    // it is said or kept, and the run's names are shown.
+    // it is said or kept, and the names a look showed are shown.
     let mut said = Vec::new();
-    let mut floor = Floor::new(&mut said);
     let mut run = going();
+    let mut floor = run.edge.floor(&mut said);
     let mut seen = ledger("working");
     seen.project = Some(crate::long_run::ledger::Project {
         id: 1,
