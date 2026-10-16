@@ -72,8 +72,10 @@ mod macos {
             (4, 0),
             "{ending:?}"
         );
+        // The ending looks twice, `SETTLE` apart, before it asks: the grace is what
+        // comes after that.
         assert!(
-            closing.elapsed() >= GRACE,
+            closing.elapsed() >= SETTLE + GRACE,
             "the command that ignores the request was given the grace: {:?}",
             closing.elapsed()
         );
@@ -210,11 +212,16 @@ mod macos {
         kill(pid["job"]);
     }
 
+    /// The handler runs in the grace, and has to start its job and write its number
+    /// before the grace is over: a grace of its own, wider than [`GRACE`], which a loaded
+    /// runner outran (CI's macOS on 00d4d57a, the number never written). The ending waits
+    /// all of it, since the handler waits for its job.
     #[test]
     fn what_a_command_asked_to_end_started_while_it_was_given_the_grace_is_ended_with_it() {
+        const HANDLER_GRACE: Duration = Duration::from_secs(5);
         let _serial = serial_pty_test();
         let mut outsider = Sentinel::start();
-        let table = Arc::new(PaneTable::closing_within(GRACE));
+        let table = Arc::new(PaneTable::closing_within(HANDLER_GRACE));
         let child = scratch("child");
         let env = HashMap::from([("CHILD".to_owned(), child.display().to_string())]);
         let (pane, pid) = started(&table, SPAWNER, Servers::InGroup, None, &env);

@@ -30,9 +30,10 @@ portable-pty.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 
-# Only the macOS process tree (src/process_tree.rs) and the pane table's macOS
-# tests call libc.
-[target.'cfg(target_os = "macos")'.dependencies]
+# The macOS process tree (src/process_tree.rs), the pane table's macOS tests, and a
+# window's output on Unix, which asks its terminal whether it has anything to read
+# (src/pty/output_end.rs), call libc.
+[target.'cfg(unix)'.dependencies]
 libc.workspace = true
 
 [target.'cfg(windows)'.dependencies]
@@ -44,6 +45,11 @@ windows-sys = { workspace = true, features = [
     "Win32_System_Kernel",
     "Win32_System_Threading",
 ] }
+
+# The Windows test of a console host that died finds the pane's host among the test's
+# own children (src/pty/output_end/tests.rs).
+[target.'cfg(windows)'.dev-dependencies]
+windows-sys = { workspace = true, features = ["Win32_System_Diagnostics_ToolHelp"] }
 
 [lints]
 workspace = true

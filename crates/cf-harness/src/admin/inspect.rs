@@ -35,9 +35,7 @@ pub(super) async fn inspect(
         return row;
     };
     row.version = ask_version(inner, &path).await;
-    if harness == Harness::Devin {
-        row.setup = Some(setup(row.version.value()));
-    }
+    row.setup = setup(harness, row.version.value());
     let source = release_source(harness, &path, &inner.env);
     row.distribution = source
         .distribution
@@ -47,15 +45,16 @@ pub(super) async fn inspect(
     row.update = match inner.latest.latest(harness, &source).await {
         Ok(value) => {
             let comparison = newer(row.version.value(), &value);
+            let offered = offers(harness, row.setup.as_ref(), &value);
             let release = Release {
                 value,
                 source: source.url,
                 command,
             };
             match comparison {
-                None => Update::Unknown(release),
-                Some(true) => Update::Available(release),
+                Some(true) if offered => Update::Available(release),
                 Some(false) => Update::Current(release),
+                _ => Update::Unknown(release),
             }
         }
         Err(reason) => Update::Error { reason, command },
@@ -97,8 +96,34 @@ async fn ask_version(inner: &Inner, path: &str) -> Version {
     }
 }
 
+/// What the CLI's `version` says of whether a window can be opened on it:
+/// Devin's always does, and OpenCode's only where it is one ConsensFlow does
+/// not support yet. No other CLI has a setup.
+fn setup(harness: Harness, version: Option<&str>) -> Option<Setup> {
+    match harness {
+        Harness::Devin => Some(devin_setup(version)),
+        Harness::Opencode if version.is_some_and(opencode::unsupported_version) => {
+            Some(Setup::NotSupportedYet {
+                reason: format!("{}.", opencode::not_supported()),
+            })
+        }
+        _ => None,
+    }
+}
+
+/// Whether the release `release` of `harness` is offered as an update to its
+/// CLI, whose setup is `setup`. None is to a CLI no window is opened on, and
+/// none is of a release no window would be opened on either: OpenCode's feed
+/// says its latest is a 2 since 2.0, and the human who went back to the last
+/// 1.x is not offered the way to the 2 again.
+fn offers(harness: Harness, setup: Option<&Setup>, release: &str) -> bool {
+    let held_back = matches!(setup, Some(Setup::NotSupportedYet { .. }))
+        || (harness == Harness::Opencode && opencode::unsupported_version(release));
+    !held_back
+}
+
 /// Whether the Devin that said `version` is new enough to open a window on.
-fn setup(version: Option<&str>) -> Setup {
+fn devin_setup(version: Option<&str>) -> Setup {
     if version.is_some_and(devin::supported_version) {
         return Setup::Ready;
     }

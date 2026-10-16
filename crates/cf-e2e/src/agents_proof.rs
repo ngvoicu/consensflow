@@ -39,7 +39,7 @@ pub const PRESENT: [&str; 9] = [
 ];
 
 /// What the Agents screen no longer has.
-pub const GONE: [&str; 15] = [
+pub const GONE: [&str; 17] = [
     "id=\"catalog-section\"",
     "Agent library",
     "Your agents",
@@ -55,6 +55,9 @@ pub const GONE: [&str; 15] = [
     "benchmark",
     "Artificial Analysis",
     "AA ",
+    // What the app says of specs is Settings' own (Specs), not the Agents screen's.
+    "name=\"specs\"",
+    "Plan big work as specs",
 ];
 
 /// The daemon to hold to the proof.

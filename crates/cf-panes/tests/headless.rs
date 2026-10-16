@@ -1064,6 +1064,300 @@ fn a_window_ends_when_its_program_exits_while_a_background_child_holds_its_termi
     helper.close_input_and_wait();
 }
 
+/// A program that lets go of its terminal and opens it again: it takes the terminal
+/// from everything that has it, itself included (`revoke`, which is what macOS does
+/// to a terminal whose controlling process exits), ignoring the hangup that sends, so
+/// the terminal's output ends; and two seconds later it opens the terminal again by its
+/// name and goes on, as a program that resets its terminal while its work goes on does.
+#[cfg(target_os = "macos")]
+const OPENS_ITS_TERMINAL_AGAIN: &str = "exec /usr/bin/python3 -c '
+import ctypes, os, signal, time
+signal.signal(signal.SIGHUP, signal.SIG_IGN)
+name = os.ttyname(0)
+print(\"PROGRAM %d END\" % os.getpid(), flush=True)
+libc = ctypes.CDLL(None, use_errno=True)
+if libc.revoke(name.encode()) != 0:
+    raise OSError(ctypes.get_errno(), \"revoke\")
+time.sleep(2)
+again = os.open(name, os.O_RDWR | os.O_NOCTTY)
+while True:
+    os.write(again, b\"BACK\\r\\n\")
+    time.sleep(1)
+'";
+
+/// A window whose program lets go of its terminal and opens it again is read on: the
+/// end of its output while the program runs is no end of the window, which is neither
+/// told closed nor ended. Both reviews of 2026-10-16 reproduced it: the reader stopped at
+/// the first end, the daemon was told the window closed, and the program was killed five
+/// seconds later, though it went on writing to its terminal.
+#[cfg(target_os = "macos")]
+#[test]
+fn a_program_that_lets_go_of_its_terminal_and_opens_it_again_is_read_on_and_not_ended() {
+    let _pty_guard = serial_headless_test();
+    let mut helper = Headless::spawn();
+    let mut events = Vec::new();
+    let opened = helper.request(
+        "pane.open",
+        open_body(OPENS_ITS_TERMINAL_AGAIN, 1024),
+        &mut events,
+    );
+    assert_eq!(opened["ok"], true, "{opened}");
+    let pane_id = opened["id"].as_str().expect("opened pane id").to_string();
+    let generation = opened["generation"].as_u64().expect("opened generation");
+    let printed = output_until(&helper, &mut events, &pane_id, generation, b" END");
+    let printed = String::from_utf8_lossy(&printed);
+    let program = printed
+        .trim()
+        .trim_start_matches("PROGRAM ")
+        .trim_end_matches(" END")
+        .parse::<i32>()
+        .unwrap_or_else(|_| panic!("the program's pid: {printed}"));
+
+    // Ten seconds: past the reopen, the wait for an exit code and the look for an exit
+    // that a window told closed is given before its program is ended.
+    let mut back = Vec::new();
+    let until = Instant::now() + Duration::from_secs(10);
+    while Instant::now() < until {
+        let left = until.saturating_duration_since(Instant::now());
+        let Ok(frame) = helper.receive_timeout(left) else {
+            break;
+        };
+        if let Some((_, bytes)) = output_bytes(&frame, &pane_id, generation) {
+            back.extend(bytes);
+        }
+        events.push(frame);
+    }
+    let told_closed = events
+        .iter()
+        .any(|event| event["op"] == "pane.exit" && event["body"]["id"] == pane_id.as_str());
+    let runs = process_exists(program);
+    // Whatever came of it, the program is the test's to end.
+    kill_process_group(program);
+    assert!(
+        !told_closed,
+        "the window was told closed while its program ran"
+    );
+    assert!(runs, "the program was ended while it ran");
+    assert!(
+        String::from_utf8_lossy(&back).matches("BACK").count() >= 3,
+        "what it wrote to its terminal opened again was not read: {:?}",
+        String::from_utf8_lossy(&back)
+    );
+    helper.close_input_and_wait();
+}
+
+/// Sol's sequence (the second review of 2026-10-16): the program lets go of its terminal
+/// (the output ends) while a helper it started in a session of its own waits; the program
+/// exits, and the helper, the moment it is an orphan, opens the terminal again and holds
+/// it, saying nothing. The helper outlives it.
+#[cfg(target_os = "macos")]
+const EXITS_WHILE_AN_ORPHAN_HOLDS_ITS_TERMINAL: &str = "exec /usr/bin/python3 -c '
+import ctypes, os, signal, time
+signal.signal(signal.SIGHUP, signal.SIG_IGN)
+name = os.ttyname(0)
+program = os.getpid()
+helper = os.fork()
+if helper == 0:
+    os.setsid()
+    while os.getppid() == program:
+        time.sleep(0.001)
+    os.open(name, os.O_RDWR | os.O_NOCTTY)
+    time.sleep(30)
+    os._exit(0)
+print(\"PROGRAM %d HELPER %d END\" % (program, helper), flush=True)
+libc = ctypes.CDLL(None, use_errno=True)
+libc.revoke(name.encode())
+time.sleep(2)
+os._exit(4)
+'";
+
+/// The window is told closed when its program exits, though a helper it left holds its
+/// terminal with nothing to say: the reader that waited for the terminal to come back
+/// blocked on the helper's silence for ever, and no `pane.exit` was sent (Sol, the second
+/// review of 2026-10-16, reproduced it on macOS).
+#[cfg(target_os = "macos")]
+#[test]
+fn a_program_that_exits_while_an_orphan_holds_its_terminal_is_told_closed() {
+    let _pty_guard = serial_headless_test();
+    let mut helper = Headless::spawn();
+    let mut events = Vec::new();
+    let opened = helper.request(
+        "pane.open",
+        open_body(EXITS_WHILE_AN_ORPHAN_HOLDS_ITS_TERMINAL, 1024),
+        &mut events,
+    );
+    assert_eq!(opened["ok"], true, "{opened}");
+    let pane_id = opened["id"].as_str().expect("opened pane id").to_string();
+    let generation = opened["generation"].as_u64().expect("opened generation");
+    let printed = output_until(&helper, &mut events, &pane_id, generation, b" END");
+    let printed = String::from_utf8_lossy(&printed);
+    let numbers: Vec<i32> = printed
+        .split_whitespace()
+        .filter_map(|word| word.parse().ok())
+        .collect();
+    let [_, orphan] = numbers[..] else {
+        panic!("the program's and its helper's numbers: {printed}")
+    };
+
+    let until = Instant::now() + Duration::from_secs(15);
+    let mut exit = None;
+    while exit.is_none() && Instant::now() < until {
+        let left = until.saturating_duration_since(Instant::now());
+        let Ok(frame) = helper.receive_timeout(left) else {
+            break;
+        };
+        if frame["op"] == "pane.exit" && frame["body"]["id"] == pane_id.as_str() {
+            exit = Some(frame["body"].clone());
+        }
+    }
+    // The helper is the test's to end, whatever came of it.
+    kill_process_group(orphan);
+    let exit = exit.expect("no pane.exit for a program that exited");
+    assert_eq!(exit["exitCode"], 4, "{exit}");
+    helper.close_input_and_wait();
+}
+
+/// The pane's `pane.exit` from the frames that come within `wait`, and whether the process
+/// `pid` was still there when it came.
+#[cfg(target_os = "macos")]
+fn exit_and_whether(
+    helper: &Headless,
+    pane_id: &str,
+    pid: i32,
+    wait: Duration,
+) -> Option<(Value, bool)> {
+    let until = Instant::now() + wait;
+    loop {
+        let left = until.saturating_duration_since(Instant::now());
+        let frame = helper.receive_timeout(left).ok()?;
+        if frame["op"] == "pane.exit" && frame["body"]["id"] == pane_id {
+            return Some((frame["body"].clone(), process_exists(pid)));
+        }
+    }
+}
+
+/// A program that lets go of its terminal while a helper it started in a session of its
+/// own opens it again and writes a byte to it every twenty milliseconds, for as long as
+/// it is let; the program exits a moment later, and the helper, an orphan, writes on.
+#[cfg(target_os = "macos")]
+const EXITS_WHILE_AN_ORPHAN_WRITES_ON: &str = "exec /usr/bin/python3 -c '
+import ctypes, os, signal, time
+signal.signal(signal.SIGHUP, signal.SIG_IGN)
+name = os.ttyname(0)
+helper = os.fork()
+if helper == 0:
+    os.setsid()
+    time.sleep(0.5)
+    again = os.open(name, os.O_RDWR | os.O_NOCTTY)
+    for _ in range(1500):
+        os.write(again, b\".\")
+        time.sleep(0.02)
+    os._exit(0)
+print(\"PROGRAM %d HELPER %d END\" % (os.getpid(), helper), flush=True)
+ctypes.CDLL(None).revoke(name.encode())
+time.sleep(1.5)
+os._exit(4)
+'";
+
+/// The window is told closed when its program exits, though an orphan it left writes to
+/// its terminal without a pause: the reader asked whether the program had gone only when
+/// nothing came to read, and never asked (both reviews of round 3 reproduced it).
+#[cfg(target_os = "macos")]
+#[test]
+fn a_program_that_exits_while_an_orphan_writes_on_to_its_terminal_is_told_closed() {
+    let _pty_guard = serial_headless_test();
+    let mut helper = Headless::spawn();
+    let mut events = Vec::new();
+    let opened = helper.request(
+        "pane.open",
+        open_body(EXITS_WHILE_AN_ORPHAN_WRITES_ON, 1 << 20),
+        &mut events,
+    );
+    assert_eq!(opened["ok"], true, "{opened}");
+    let pane_id = opened["id"].as_str().expect("opened pane id").to_string();
+    let generation = opened["generation"].as_u64().expect("opened generation");
+    let printed = output_until(&helper, &mut events, &pane_id, generation, b" END");
+    let printed = String::from_utf8_lossy(&printed);
+    let numbers: Vec<i32> = printed
+        .split_whitespace()
+        .filter_map(|word| word.parse().ok())
+        .collect();
+    let [program, orphan] = numbers[..] else {
+        panic!("the program's and its helper's numbers: {printed}")
+    };
+
+    let exit = exit_and_whether(&helper, &pane_id, program, Duration::from_secs(15));
+    // The helper is the test's to end, whatever came of it.
+    kill_process_group(orphan);
+    let (exit, _) = exit.expect("no pane.exit for a program that exited");
+    assert_eq!(exit["exitCode"], 4, "{exit}");
+    helper.close_input_and_wait();
+}
+
+/// A program that ignores the request to end, and, asked, lets go of its terminal and
+/// cleans up for six seconds before it exits.
+#[cfg(target_os = "macos")]
+const CLEANS_UP_FOR_SIX_SECONDS: &str = "exec /usr/bin/python3 -c '
+import ctypes, os, signal, time
+name = os.ttyname(0)
+def clean_up(number, frame):
+    ctypes.CDLL(None).revoke(name.encode())
+    time.sleep(6)
+    os._exit(7)
+signal.signal(signal.SIGHUP, signal.SIG_IGN)
+signal.signal(signal.SIGTERM, clean_up)
+print(\"PROGRAM %d END\" % os.getpid(), flush=True)
+time.sleep(1000)
+'";
+
+/// The daemon is told a window closed only on proof that its program has gone: a close
+/// takes the pane out of the table before it has ended its programs, and a program that
+/// ignored the request, let go of its terminal and cleaned up through six seconds of the
+/// close's grace was told gone after one, while it ran (both reviews of round 3).
+#[cfg(target_os = "macos")]
+#[test]
+fn a_window_closed_while_its_program_cleans_up_is_told_closed_once_the_program_has_gone() {
+    let _pty_guard = serial_headless_test();
+    let mut helper = Headless::spawn();
+    let mut events = Vec::new();
+    let opened = helper.request(
+        "pane.open",
+        open_body(CLEANS_UP_FOR_SIX_SECONDS, 1 << 20),
+        &mut events,
+    );
+    assert_eq!(opened["ok"], true, "{opened}");
+    let pane_id = opened["id"].as_str().expect("opened pane id").to_string();
+    let generation = opened["generation"].as_u64().expect("opened generation");
+    let printed = output_until(&helper, &mut events, &pane_id, generation, b" END");
+    let printed = String::from_utf8_lossy(&printed);
+    let program = printed
+        .split_whitespace()
+        .find_map(|word| word.parse::<i32>().ok())
+        .unwrap_or_else(|| panic!("the program's number: {printed}"));
+
+    let asked = Instant::now();
+    helper.send_request("pane.kill", json!({"id":pane_id,"generation":generation}));
+    let exit = exit_and_whether(&helper, &pane_id, program, Duration::from_secs(30));
+    // Whatever came of it, the program's cleanup is over before the test is.
+    let over = Instant::now() + Duration::from_secs(8);
+    while process_exists(program) && Instant::now() < over {
+        thread::sleep(Duration::from_millis(50));
+    }
+    let (exit, ran_when_told) = exit.expect("no pane.exit for the window closed");
+    assert!(
+        !ran_when_told,
+        "the window was told closed after {:?}, while its program cleaned up",
+        asked.elapsed()
+    );
+    assert!(
+        asked.elapsed() >= Duration::from_secs(5),
+        "{:?}",
+        asked.elapsed()
+    );
+    assert_eq!(exit["exitCode"], 7, "{exit}");
+    helper.close_input_and_wait();
+}
+
 #[test]
 fn product_bridge_contract_forwards_a_natural_pane_exit() {
     let _pty_guard = serial_headless_test();

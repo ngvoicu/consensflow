@@ -36,6 +36,10 @@ mod a_resumed_devin_worker_skipped_every_call;
 #[cfg(unix)]
 #[path = "regressions/claude_status_line_taken_for_background_work.rs"]
 mod claude_status_line_taken_for_background_work;
+// The stand-in Codex is a script, so Unix's; and the Finder's PATH is a Mac's.
+#[cfg(unix)]
+#[path = "regressions/codex_in_homebrew_taken_for_not_installed.rs"]
+mod codex_in_homebrew_taken_for_not_installed;
 // The stand-in Codex is a script, so Unix's: Windows has no window of it to resume.
 #[cfg(unix)]
 #[path = "regressions/codex_role_on_resume.rs"]
@@ -44,6 +48,8 @@ mod codex_role_on_resume;
 mod devin_notes_twice;
 #[path = "regressions/devin_pause.rs"]
 mod devin_pause;
+#[path = "regressions/devin_window_closed_mid_task.rs"]
+mod devin_window_closed_mid_task;
 #[path = "regressions/follow_up_refused_behind_a_waiting_follow_up.rs"]
 mod follow_up_refused_behind_a_waiting_follow_up;
 #[path = "regressions/idle_compaction_read_as_a_cut_turn.rs"]
@@ -53,6 +59,8 @@ mod idle_compaction_read_as_a_cut_turn;
 #[cfg(unix)]
 #[path = "regressions/mcp_servers_held_a_workers_result.rs"]
 mod mcp_servers_held_a_workers_result;
+#[path = "regressions/opencode_updated_itself_to_2.rs"]
+mod opencode_updated_itself_to_2;
 #[path = "regressions/resume_of_a_chief_with_no_turn.rs"]
 mod resume_of_a_chief_with_no_turn;
 #[path = "regressions/resume_of_a_turn_the_daemon_never_copied.rs"]
@@ -71,6 +79,10 @@ const FAKE_AGENT: &str = env!("CARGO_BIN_EXE_fake-agent");
 
 /// The stand-in for Devin, which the windows of Devin's agents run.
 const FAKE_DEVIN: &str = env!("CARGO_BIN_EXE_fake-devin");
+
+/// The stand-in for the `opencode` of a machine whose OpenCode has updated itself
+/// to 2, which the daemon asks its version of before it opens a window on it.
+const FAKE_OPENCODE_2: &str = env!("CARGO_BIN_EXE_fake-opencode-2");
 
 /// The stand-in for Codex, which the windows of Codex's agents run.
 #[cfg(unix)]

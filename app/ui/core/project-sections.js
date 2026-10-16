@@ -23,13 +23,15 @@ export class ProjectSections {
   /**
    * Puts the sections where `mount` is. `page` is what Project settings'
    * sections save through: the project the dialog is for, the daemon, and how a
-   * change is run and told (`WakeUpCalls` and `SpecsGroup` say which).
+   * change is run and told (`WakeUpCalls` and `SpecsGroup` say which). `app()` is
+   * what the daemon last said of the app's specs and the Specmint it bundles,
+   * which the Specs section says what following the app means by.
    */
-  constructor(mount, page = null) {
+  constructor(mount, page = null, app = () => null) {
     const sections = document.querySelector('#project-sections').content.cloneNode(true)
     this.#gate = sections.querySelector('[name="gate"]')
     this.#wakeUp = new WakeUpCalls(sections.querySelector('.wakeup-section'), page)
-    this.#specs = new SpecsGroup(sections.querySelector('.project-specs'), page)
+    this.#specs = new SpecsGroup(sections.querySelector('.project-specs'), page, app)
     // What only a saved project has (a Save, and when a change reaches the chief) is not in New project.
     for (const live of sections.querySelectorAll('[data-live]')) live.hidden = page === null
     mount.replaceWith(sections)

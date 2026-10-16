@@ -71,6 +71,43 @@ once, with the reason here and in the commit.
   six that say a count of none (−1, `"0"`, `null`) are Node's still. No look was
   added or taken, so the counts in `../records/main.rs` stand.
 
+- **An OpenCode 2, and an OpenCode that updates itself** (2026-10-15, the
+  owner's OpenCode updated itself to 2.0.29, and the live suites `approval`,
+  `specs` and `resume-fresh` waited for ever for the chief's window to read
+  idle, while `finish` never saw the worker's window). OpenCode 2 replaced what
+  a window is launched with (`--port`, `--hostname` and `--model` are gone, and
+  one shared service stands where each window's server was), so a window opened
+  on it never reaches ConsensFlow's plugin; and a 1.x updates itself to the
+  latest release when it starts, which is how the owner met it. Node's adapter
+  never asked OpenCode its version and never told a window not to update. The
+  Rust adapter asks `--version` first, as Devin's does (once as the file is on
+  disk), and refuses an OpenCode whose major version is 2 or more before the
+  plugin, the role, a port or a server is made, in words that say what to do: an
+  OpenCode that cannot be asked, or says no version, goes on as it did. The
+  window's `OPENCODE_CONFIG_CONTENT` ends with `"autoupdate":false`, unless the
+  configuration the human set names an `autoupdate` of its own (null is none).
+  `launch/` moved for both, in both platforms' recordings, in 157 of the 158
+  OpenCode scenarios (the one that did not is the OpenCode that is not
+  installed, which finds no program to ask). Each of the 161 prepares that find
+  one gained a `ran` of `opencode --version`, after its `fetches` and before its
+  `spawned` (the stand-ins answer nothing: the question fails, and the launch
+  goes on), and every `OPENCODE_CONFIG_CONTENT` the records hold gained
+  `"autoupdate":false` at its end: 192 on macOS and 193 on Windows, which are the
+  answers of the prepares (124 and 125) and the environments of the throwaway
+  `serve` each fresh window makes its conversation on (68). Nothing else of them
+  moved: with the `ran` and the `autoupdate` taken out, each of the 157 reads as
+  the recording before the change did, and the other 352 scenarios (the other
+  harnesses', and the OpenCode that is not installed) are as they were, byte for
+  byte. `admin/` carries a `kept` difference in the six OpenCode scenarios (five on
+  Windows) whose stand-in says `5.0.x`, which is an OpenCode of 2 or more: 12
+  steps (10), where the Harnesses screen now says the OpenCode is not supported
+  yet (a `setup` of `not-supported-yet`) and its newer release is `unknown`, not
+  an update `available`. Node's stand-ins said `5.0.x` for every CLI they stood
+  for, whatever its own versions are. An OpenCode of 1.x is likewise offered no
+  update to a release of 2 or more, which npm's `latest` is since 2.0; no
+  recording has one (the feed of the one 1.x scenario is offline), so none moved
+  for it.
+
 - **A Devin wire log replaced** (2026-10-16, Astra's and Sol's reviews of the fix of
   the field report B1). Node took a wire log that shrank for one replaced and read it
   from its start, and any other for the one it had read: one as long as the last was

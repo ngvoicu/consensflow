@@ -6,6 +6,12 @@
 //! instructions, each once. The skills folder of ConsensFlow's own copy of
 //! Specmint, where the chief is given one, goes after the role's.
 //!
+//! The window is also told not to update itself (`"autoupdate": false`), as
+//! Devin's is: OpenCode updates itself to the latest release when it starts,
+//! which is how a working 1.x became the 2 that no window opens on (`version`).
+//! A configuration the human set that names an `autoupdate` keeps it, whatever
+//! it is: on updates the human's word is the last, and a null is none.
+//!
 //! Kept from Node on purpose:
 //! - a configuration that is no JSON, or is nested past 127 levels, is
 //!   refused in a sentence of this module's own, where V8 threw its
@@ -26,10 +32,10 @@ use crate::shared::paths::set;
 use crate::shared::role::write_role;
 
 /// The `OPENCODE_CONFIG_CONTENT` a window of `role` runs with: what the
-/// environment names (nothing, `{}`) with the role added, and the skills
-/// folder `specmint` of a copy of Specmint that is kept for the window. The
-/// role's text is written first, so a configuration that is refused leaves it
-/// in its launch's folder, as it did in Node.
+/// environment names (nothing, `{}`) with the role added, the skills
+/// folder `specmint` of a copy of Specmint that is kept for the window, and
+/// its own updates off. The role's text is written first, so a configuration
+/// that is refused leaves it in its launch's folder, as it did in Node.
 pub(super) fn configure(
     env: &Env,
     launch: &LaunchId,
@@ -42,12 +48,23 @@ pub(super) fn configure(
     let current = set(env, "OPENCODE_CONFIG_CONTENT");
     let mut folders = vec![skills.as_str()];
     folders.extend(specmint.as_deref());
-    merged(current.as_deref().unwrap_or("{}"), &folders, &written.file)
+    let mut configuration = merged(current.as_deref().unwrap_or("{}"), &folders, &written.file)?;
+    not_to_update(&mut configuration);
+    Ok(js::stringify(&Value::Object(configuration)))
+}
+
+/// Tells the window not to update itself, unless the configuration names an
+/// `autoupdate` already: any value but null is the human's word, and null is
+/// none, as it is for the skill paths.
+fn not_to_update(configuration: &mut Map<String, Value>) {
+    if configuration.get("autoupdate").is_none_or(Value::is_null) {
+        configuration.insert("autoupdate".to_owned(), Value::Bool(false));
+    }
 }
 
 /// `current`, a configuration, with the `skills` folders among the paths its
 /// skills are looked for in and `file` among its instructions.
-fn merged(current: &str, skills: &[&str], file: &str) -> Result<String, String> {
+fn merged(current: &str, skills: &[&str], file: &str) -> Result<Map<String, Value>, String> {
     let parsed = from_slice_lossy(current.as_bytes())
         .map_err(|_| "OpenCode process configuration must be JSON".to_owned())?;
     let Value::Object(mut configuration) = parsed else {
@@ -69,7 +86,7 @@ fn merged(current: &str, skills: &[&str], file: &str) -> Result<String, String> 
         "OpenCode instructions must be an array of paths",
     )?;
     configuration.insert("instructions".to_owned(), once(instructions, &[file]));
-    Ok(js::stringify(&Value::Object(configuration)))
+    Ok(configuration)
 }
 
 /// The paths a list of them holds, none where it is not there, or `refused`

@@ -114,6 +114,7 @@ pub(crate) fn wants_bypass(mode: Option<&str>) -> bool {
 /// What the readiness of a window reads of its wire log: the conversation it shows,
 /// the mode that conversation is in, and the command the window is given before it is
 /// ready, where it is given one.
+#[cfg(any(test, feature = "test-support"))]
 pub(crate) struct WireReadiness {
     pub(crate) shown: Option<String>,
     pub(crate) mode: Option<String>,
@@ -123,6 +124,7 @@ pub(crate) struct WireReadiness {
 /// What the readiness of a window reads of the wire log `wire` now. For the live tests
 /// (`tooling`), which open Devin's windows themselves and ask whether the daemon would
 /// have one switched.
+#[cfg(any(test, feature = "test-support"))]
 pub(crate) fn wire_readiness(wire: &std::path::Path) -> Result<WireReadiness, String> {
     let said = WireLog::new(&wire.to_string_lossy(), jiff::tz::TimeZone::UTC).read(0)?;
     let command = wants_bypass(said.mode.as_deref()).then_some(BYPASS);
@@ -137,6 +139,7 @@ pub(crate) fn wire_readiness(wire: &std::path::Path) -> Result<WireReadiness, St
 /// `session`, as the adapter makes one for the daemon (`prepare`). For the live tests
 /// (`tooling`), which open Devin's windows themselves and drive the window's readiness
 /// as the engine does.
+#[cfg(any(test, feature = "test-support"))]
 pub(crate) fn window_on(services: &Services, wire: &str, session: &str) -> Rc<dyn Window> {
     Rc::new(DevinWindow::new(
         services,

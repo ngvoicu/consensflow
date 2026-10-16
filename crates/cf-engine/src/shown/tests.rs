@@ -6,10 +6,14 @@ use serde_json::json;
 
 use super::*;
 
+/// A screen that names no secret: a model the account cannot use.
 const PI: [&str; 2] = [
-    "No API key found for the selected model.",
-    "Use /login to log into a provider.",
+    "Model gpt-9 is not available on your plan.",
+    "Run /model to choose another one.",
 ];
+
+/// What a note says in place of a quote of lines that name a secret.
+const LEFT_OUT: &str = "its last screen lines named a secret, so they are left out";
 
 fn shown(code: Option<u32>, signal: Option<&str>, tail: Option<&[&str]>) -> Shown {
     Shown {
@@ -17,6 +21,7 @@ fn shown(code: Option<u32>, signal: Option<&str>, tail: Option<&[&str]>) -> Show
         signal: signal.map(str::to_owned),
         tail: tail.map(|lines| lines.iter().map(|line| (*line).to_owned()).collect()),
         background: Vec::new(),
+        survivor: None,
     }
 }
 
@@ -25,7 +30,7 @@ fn a_window_that_closed_says_its_code_and_what_its_screen_ended_with() {
     assert_eq!(
         shown(Some(3), None, Some(&PI)).after("@zeus's window closed"),
         "@zeus's window closed (exit code 3); its screen ended with: \
-         \"No API key found for the selected model. / Use /login to log into a provider.\""
+         \"Model gpt-9 is not available on your plan. / Run /model to choose another one.\""
     );
 }
 
@@ -34,8 +39,198 @@ fn a_window_that_never_showed_its_message_has_a_screen_and_no_code() {
     assert_eq!(
         shown(None, None, Some(&PI)).after("the window never showed its first message"),
         "the window never showed its first message; its screen ended with: \
-         \"No API key found for the selected model. / Use /login to log into a provider.\""
+         \"Model gpt-9 is not available on your plan. / Run /model to choose another one.\""
     );
+}
+
+/// Every credential both reviews of 2026-10-16 found the masker let through, and every
+/// diagnostic they found it hid: where a line names a secret-like word, the note quotes
+/// none of the lines, and says so; how the program ended is said all the same.
+#[test]
+fn a_screen_that_names_a_secret_is_quoted_not_at_all_and_its_code_is_said() {
+    let screens: [&[&str]; 13] = [
+        // Round 1.
+        &[r#"DB_PASSWORD="alpha bravo charlie""#],
+        &[r#"DB_PASSWORD="correct horse battery staple""#],
+        &["DB_PASSWORD='red green blue'"],
+        // Round 2: what the quoted rule left.
+        &["password: a b"],
+        &["password: correct horse battery staple"],
+        &["password: 'it''s a secret'"],
+        &["password: 'alpha''bravo charlie'"],
+        &[r#"PASSWORD="alpha bravo\"#],
+        // A value that goes on over a line keeps no name on the line it ends on.
+        &[r#"DB_PASSWORD="alpha"#, r#"bravo charlie""#],
+        // Round 2: what the quoted rule hid that names one.
+        &[r#"Invalid token: "expired""#],
+        &[r#"private_key_path: "/tmp/id_rsa""#],
+        &[r#"SyntaxError: unexpected token: "}""#],
+        // An identifier, a header, and the word in a sentence above the last line.
+        &["Authorization: Bearer abc", "exited", "bye"],
+    ];
+    for screen in screens {
+        let said = shown(Some(1), None, Some(screen)).after("@zeus's window closed");
+        assert_eq!(
+            said,
+            format!("@zeus's window closed (exit code 1); {LEFT_OUT}"),
+            "{screen:?}"
+        );
+    }
+    // A Windows crash code, and no code at all.
+    assert_eq!(
+        shown(Some(0xC000_0005), None, Some(&["API_KEY=x"])).after("gone"),
+        format!("gone (exit code 0xC0000005); {LEFT_OUT}")
+    );
+    assert_eq!(
+        shown(None, None, Some(&["No API key found"])).after("gone"),
+        format!("gone; {LEFT_OUT}")
+    );
+}
+
+/// A line is looked at for the words in any case, as a word or inside a name, and every
+/// line the host sent is, not only those the quote would keep.
+#[test]
+fn the_words_are_found_in_any_case_inside_a_name_and_on_any_line_the_host_sent() {
+    for line in [
+        "PASSWD=x",
+        "passphrase",
+        "client_secret",
+        "AccessToken",
+        "apiKey",
+        "api key",
+        "API-KEY",
+        "PrivateKey",
+        "private key",
+        "credentials.json",
+        "OAuth",
+        "BEARER",
+    ] {
+        assert!(names_a_secret(line), "{line}");
+    }
+    let mut tail = vec!["export DB_PASSWORD=x".to_owned()];
+    tail.extend((1..=10).map(|number| format!("line {number}")));
+    let said = Shown {
+        tail: Some(tail),
+        ..Shown::default()
+    }
+    .after("gone");
+    assert_eq!(said, format!("gone; {LEFT_OUT}"));
+}
+
+/// The third review's: blanks between the words of a key's name hide nothing (a look that
+/// allowed one let `API    key: abcdefghijklmno` through, and the quote, which makes the
+/// blanks one, showed the value whole); the names of a secret given in the forms a
+/// screen writes them in are found; and a word a secret's name is a piece of is no
+/// secret, its screen quoted.
+#[test]
+fn the_third_reviews_lines_are_left_out_or_quoted_by_their_words() {
+    for screen in [
+        "API    key: abcdefghijklmno",
+        "DB_PASSWORD=x",
+        "OAuth: refresh failed",
+        "Authorization: Basic xyz",
+        "apiKey = abc",
+        "x-api-key: abc",
+    ] {
+        assert_eq!(
+            shown(Some(1), None, Some(&[screen])).after("gone"),
+            format!("gone (exit code 1); {LEFT_OUT}"),
+            "{screen}"
+        );
+    }
+    for screen in [
+        "TypeError: author is undefined at src/author.ts:42",
+        "Author identity unknown",
+        "panicked at src/author.rs:7",
+        "the secretary of the build",
+    ] {
+        assert_eq!(
+            shown(Some(1), None, Some(&[screen])).after("gone"),
+            format!("gone (exit code 1); its screen ended with: \"{screen}\""),
+            "{screen}"
+        );
+    }
+}
+
+/// The fourth reviews': a password's name in a name of any case or split, and API keys in
+/// the plural, named nothing, and the masker misses short words, so each value was quoted
+/// whole. They are left out; `secretary`, `tokenizer` and `author`, which hold a secret's
+/// word as a piece, are quoted still.
+#[test]
+fn the_fourth_reviews_lines_are_left_out_and_the_pieces_of_words_quoted() {
+    for screen in [
+        "DB_PWD=red green blue",
+        "API keys: abcdefghijklmno",
+        "MYSQL_PWD=\"red green blue\"",
+        "PassWord=\"alpha bravo charlie\"",
+        "dbPassword: alpha bravo charlie",
+    ] {
+        assert_eq!(
+            shown(Some(1), None, Some(&[screen])).after("gone"),
+            format!("gone (exit code 1); {LEFT_OUT}"),
+            "{screen}"
+        );
+    }
+    for screen in [
+        "the secretary of the build",
+        "the tokenizer failed",
+        "TypeError: author is undefined",
+    ] {
+        assert_eq!(
+            shown(Some(1), None, Some(&[screen])).after("gone"),
+            format!("gone (exit code 1); its screen ended with: \"{screen}\""),
+            "{screen}"
+        );
+    }
+}
+
+/// A program the host could not end is said in place of how it ended: it may still run.
+/// Nothing is said to wait for it, for nothing does (the host's registry of such programs
+/// is gone, round 5).
+#[test]
+fn a_program_the_host_could_not_end_is_said_and_its_screen_after_it() {
+    let survived = Shown {
+        survivor: Some(4242),
+        ..shown(Some(1), None, Some(&["cleaning up"]))
+    };
+    assert_eq!(
+        survived.after("@zeus's window closed"),
+        "@zeus's window closed, but its program (process 4242) could not be ended and may \
+         still run; its screen ended with: \"cleaning up\""
+    );
+    let unnumbered = Shown {
+        survivor: Some(0),
+        ..Shown::default()
+    };
+    assert_eq!(
+        unnumbered.after("gone"),
+        "gone, but its program could not be ended and may still run"
+    );
+    assert!(unnumbered.is_known());
+}
+
+/// A screen with no such word is quoted as before, the reviews' diagnostics among them,
+/// masked as the masker always has (a `key` name's long value is hidden: `key_file`'s).
+#[test]
+fn a_screen_that_names_no_secret_is_quoted_as_before() {
+    for (screen, after) in [
+        (r#"key = "Escape""#, r#""key = 'Escape'""#),
+        (
+            r#"const monkey = "banana";"#,
+            r#""const monkey = 'banana';""#,
+        ),
+        (
+            r#"key_file: "/home/alice/.ssh/id_ed25519""#,
+            r#""key_file: '[masked]'" (1 key- or token-like string masked)"#,
+        ),
+        ("codex: command not found", r#""codex: command not found""#),
+    ] {
+        assert_eq!(
+            shown(Some(127), None, Some(&[screen])).after("gone"),
+            format!("gone (exit code 127); its screen ended with: {after}"),
+            "{screen}"
+        );
+    }
 }
 
 #[test]
@@ -43,6 +238,41 @@ fn a_program_a_signal_ended_is_said_by_the_signal_and_not_the_code_it_was_given(
     assert_eq!(
         shown(Some(1), Some("Hangup: 1"), Some(&["bye"])).after("@zeus's window closed"),
         "@zeus's window closed (ended by signal Hangup: 1); its screen ended with: \"bye\""
+    );
+}
+
+#[test]
+fn a_windows_status_is_written_as_windows_writes_it_and_a_program_s_own_code_as_it_is() {
+    assert_eq!(
+        shown(Some(0xC000_013A), None, None).after("@zeus's window closed"),
+        "@zeus's window closed (exit code 0xC000013A)"
+    );
+    assert_eq!(
+        shown(Some(0x8000_0003), None, None).after("gone"),
+        "gone (exit code 0x80000003)"
+    );
+    assert_eq!(
+        shown(Some(0x7FFF_FFFF), None, None).after("gone"),
+        "gone (exit code 2147483647)"
+    );
+}
+
+#[test]
+fn what_else_is_said_goes_between_how_the_program_ended_and_its_screen() {
+    let besides = " with background work still running: sleep 9";
+    assert_eq!(
+        shown(Some(3), None, Some(&["panicked"])).after_with("@zeus's window closed", besides),
+        "@zeus's window closed (exit code 3) with background work still running: sleep 9; \
+         its screen ended with: \"panicked\""
+    );
+    // A host that said nothing leaves it as it was said.
+    assert_eq!(
+        Shown::default().after_with("@zeus's window closed", besides),
+        "@zeus's window closed with background work still running: sleep 9"
+    );
+    assert_eq!(
+        shown(Some(3), None, Some(&["panicked"])).after_with("gone", ""),
+        shown(Some(3), None, Some(&["panicked"])).after("gone")
     );
 }
 
@@ -136,22 +366,22 @@ fn a_key_looking_string_is_masked_and_the_note_counts_what_it_hid() {
         Some(1),
         None,
         Some(&[
-            "Invalid API key: sk-ant-api03-AbCdEfGhIjKlMnOpQrStUv",
-            "OPENAI_API_KEY=abcd1234efgh set in the environment",
+            "request with sk-ant-api03-AbCdEfGhIjKlMnOpQrStUv was refused",
+            "id 0123456789abcdef0123456789abcdef in the log",
         ]),
     )
     .after("the window closed");
     assert_eq!(
         said,
         "the window closed (exit code 1); its screen ended with: \
-         \"Invalid API key: [masked] / OPENAI_API_KEY=[masked] set in the environment\" \
+         \"request with [masked] was refused / id [masked] in the log\" \
          (2 key- or token-like strings masked)"
     );
-    assert!(!said.contains("AbCdEf") && !said.contains("abcd1234"));
+    assert!(!said.contains("AbCdEf") && !said.contains("0123456789abcdef"));
     let one = shown(
         None,
         None,
-        Some(&["token ghp_abcdefghijklmnopqrstuvwxyz0123456789"]),
+        Some(&["cloned with ghp_abcdefghijklmnopqrstuvwxyz0123456789"]),
     )
     .after("gone");
     assert!(

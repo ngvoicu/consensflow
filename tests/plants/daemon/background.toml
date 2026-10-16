@@ -395,8 +395,8 @@ runs = ["engine-dispatcher-background"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
-find = '                let because = if left.is_empty() {'
-replace = '                let because = if true {'
+find = '                let besides = if left.is_empty() {'
+replace = '                let besides = if true {'
 
 # What the daemon makes of the host's answer to an ending, and how long it waits for it.
 
@@ -929,6 +929,7 @@ file = "crates/cf-panes/src/pane_handlers.rs"
 find = '''
         tail: Some(screen.tail(TAIL_LINES)),
         background,
+        survivor,
     };'''
 replace = '''
         tail: Some(screen.tail(TAIL_LINES)),
@@ -936,6 +937,7 @@ replace = '''
             let _ = background;
             Vec::new()
         },
+        survivor,
     };'''
 
 [[plant]]
@@ -1774,6 +1776,7 @@ file = "crates/cf-panes/src/pane_handlers.rs"
 find = '''
         tail: Some(screen.tail(TAIL_LINES)),
         background,
+        survivor,
     };'''
 replace = '''
         tail: Some(screen.tail(TAIL_LINES)),
@@ -1781,6 +1784,7 @@ replace = '''
             let _ = background;
             Vec::new()
         },
+        survivor,
     };'''
 
 [[plant]]

@@ -50,7 +50,7 @@ Install the ones you want to use, and sign in to each once in a terminal:
 | ----------- | ------------------------------------------------ |
 | Claude Code | `npm install -g @anthropic-ai/claude-code`, or Anthropic's installer |
 | Codex       | `npm install -g @openai/codex`, or its own installer |
-| OpenCode    | `npm install -g opencode-ai`, or its own installer |
+| OpenCode    | `npm install -g opencode-ai@1`, or its own installer (version 1.x: OpenCode 2 is not supported yet) |
 | Pi          | `npm install -g @earendil-works/pi-coding-agent`, or its own installer |
 | Devin       | Devin's own CLI installer (version 3000.10.21 or later) |
 
@@ -61,6 +61,12 @@ first time one of its windows opens.
 
 **Settings → Agents** lists ready-made agents (a harness, a model and an
 effort) and lets you define your own with any model your harness accepts.
+
+**Settings → Specs** says whether a chief plans big work as specs in every
+project that doesn't say otherwise, in which folder and with which variant of
+Specmint, and shows the Specmint version ConsensFlow brings and what each
+variant is. A project's own Specs settings win, and what it leaves out follows
+what is set here.
 
 ## Install
 

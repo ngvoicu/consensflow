@@ -413,6 +413,7 @@ fn a_window_s_cf_ui_is_the_board_and_never_the_daemon() {
         .env("CONSENSFLOW_TOKEN", "a-windows-token")
         .env("CONSENSFLOW_URL", "http://127.0.0.1:9")
         .env("CONSENSFLOW_HOME", root.home())
+        .env("CONSENSFLOW_TOOL_FOLDERS", "")
         .env("HOME", root.dir.path())
         .stdin(std::process::Stdio::null())
         .output()
@@ -430,6 +431,7 @@ fn a_daemon_that_cannot_start_says_why_in_cf_s_words_and_exits_1() {
         .args(["ui", "--json", "--no-open"])
         .env_clear()
         .env("CONSENSFLOW_HOME", root.home())
+        .env("CONSENSFLOW_TOOL_FOLDERS", "")
         .env("HOME", root.dir.path())
         .stdin(std::process::Stdio::piped())
         .output()
@@ -456,6 +458,7 @@ fn an_option_cf_ui_does_not_know_is_refused_as_node_refuses_it() {
     let ran = std::process::Command::new(env!("CARGO_BIN_EXE_cf"))
         .args(["ui", "--foo"])
         .env_clear()
+        .env("CONSENSFLOW_TOOL_FOLDERS", "")
         .stdin(std::process::Stdio::null())
         .output()
         .expect("cf runs");

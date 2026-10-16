@@ -17,6 +17,7 @@ fn a_message_is_answered_with_the_word_it_asks_for_and_otherwise_acknowledged_by
             work: Duration::ZERO,
             background: None,
             file: None,
+            crash: None,
             answer: "WORKER_OK".to_owned()
         }
     );
@@ -44,8 +45,19 @@ fn a_sleep_line_works_that_long_before_it_does_what_the_words_after_it_say() {
             work: Duration::from_secs(120),
             background: None,
             file: None,
+            crash: None,
             answer: "T5_DONE".to_owned()
         }
+    );
+    // A turn that works, and then ends its window's program.
+    let crashing = plan_of("SLEEP 10 EXIT 3 fatal: gone", quick);
+    assert_eq!(crashing.work, Duration::from_secs(10));
+    assert_eq!(
+        crashing.crash,
+        Some(Crash {
+            code: 3,
+            words: "fatal: gone".to_owned()
+        })
     );
     // A line that is no sleep is no wait.
     assert_eq!(plan_of("say SLEEP 5 x", quick).work, Duration::ZERO);
@@ -65,6 +77,7 @@ fn a_file_line_has_the_turns_tool_make_the_file_and_a_turn_that_goes_on_takes_no
             work: Duration::from_secs(600),
             background: None,
             file: Some("made.txt".to_owned()),
+            crash: None,
             answer: "DONE".to_owned()
         }
     );
@@ -102,6 +115,7 @@ fn a_background_line_leaves_a_command_running_that_long_and_does_what_the_words_
             work: Duration::ZERO,
             background: Some(600),
             file: None,
+            crash: None,
             answer: "LEFT_IT".to_owned()
         }
     );

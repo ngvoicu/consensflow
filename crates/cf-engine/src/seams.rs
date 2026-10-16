@@ -14,6 +14,7 @@ use cf_harness::contract::{Adapter, Agent, LaunchId, Pane, Records, Work};
 use cf_harness::seams::Time;
 use cf_ledger::{Ledger, LedgerError, ParticipantView, ProjectView};
 use cf_proto::panes::{Ending, Servers};
+use cf_proto::specs::AppSpecs;
 use cf_proto::trace::TraceLine;
 
 use crate::host::EngineHost;
@@ -114,13 +115,14 @@ impl SavedAgent {
 pub trait Roster {
     fn agent(&self, name: &str) -> Result<Option<SavedAgent>, Refusal>;
 
-    /// Whether the human turned specs on for every project, as the agents file
-    /// keeps the choice (the app's setting a project may say otherwise of):
-    /// asked at a chief's launch whose project says nothing of its own. Off
-    /// where the file says nothing, or cannot be read: the launch asked for a
-    /// saved agent from the same file already.
-    fn specs_by_default(&self) -> bool {
-        false
+    /// What the human says of specs for every project, as the agents file keeps
+    /// it (the app's setting a project may say otherwise of): whether they are
+    /// on, and the folder and the variant a project uses when it names none.
+    /// Asked at the launch of a chief whose project does not say specs are off.
+    /// Off, and naming neither, where the file says nothing or cannot be read:
+    /// the launch asked for a saved agent from the same file already.
+    fn app_specs(&self) -> AppSpecs {
+        AppSpecs::default()
     }
 }
 

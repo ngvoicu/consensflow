@@ -76,6 +76,7 @@ struct ExitSays {
     signal: Option<String>,
     tail: Option<Vec<String>>,
     background: Vec<BackgroundProcess>,
+    survivor: Option<u32>,
 }
 
 impl FakeHost {
@@ -109,6 +110,12 @@ impl FakeHost {
         says.code = code;
         says.signal = signal.map(str::to_owned);
         says.tail = tail.map(|lines| lines.iter().map(|line| (*line).to_owned()).collect());
+    }
+
+    /// What every exit from now on says of the window's program: that the host
+    /// could not prove it gone, by its number.
+    pub fn exits_with_a_survivor(&self, pid: u32) {
+        self.exit_says.borrow_mut().survivor = Some(pid);
     }
 
     /// What every exit from now on says its window left running when it
@@ -178,6 +185,7 @@ impl FakeHost {
             signal: says.signal,
             tail: says.tail,
             background: says.background,
+            survivor: says.survivor,
         };
         for engine in engines {
             if let Some(rest) = engine.pane_exited(exit.clone()) {

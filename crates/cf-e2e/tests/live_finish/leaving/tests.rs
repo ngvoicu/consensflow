@@ -89,8 +89,15 @@ fn a_command_the_host_never_listed_that_still_runs_on_the_machine_escaped_and_fa
 
 #[test]
 fn the_command_of_a_harness_is_found_by_the_command_and_the_stand_ins_job_by_its_words() {
-    // The rig's stand-in starts a job of its own, whose command line holds the seconds too.
-    assert!(wanted(Who::Harness(Harness::Pi)).ends_with(&SECONDS.to_string()));
+    // A harness's is the command itself, as this machine's shells know it: on Windows a
+    // ping, whose seconds are not its last word (zeewin, round 7). The rig's stand-in starts
+    // a job of its own, whose command line holds the seconds too.
+    let harness = if cfg!(windows) {
+        format!("ping -n {SECONDS} 127.0.0.1")
+    } else {
+        format!("sleep {SECONDS}")
+    };
+    assert_eq!(wanted(Who::Harness(Harness::Pi)), harness);
     assert_eq!(wanted(Who::StandIn), format!("--background-job {SECONDS}"));
 }
 

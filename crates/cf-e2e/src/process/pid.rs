@@ -128,6 +128,27 @@ const STARTED_LIMIT: std::time::Duration = std::time::Duration::from_secs(120);
 /// to be none ([`STARTED_LIMIT`]).
 #[cfg(windows)]
 pub fn started(pid: u32) -> Option<String> {
+    // On GitHub's runner a PowerShell asked of a process that ran said nothing once,
+    // and the next one asked answered (2026-10-15): one that says nothing is asked
+    // again while the process is there.
+    for _ in 0..STARTED_TRIES {
+        if let Some(said) = asked_when_started(pid) {
+            return Some(said);
+        }
+        if !is_alive(pid) {
+            return None;
+        }
+    }
+    None
+}
+
+/// How many PowerShells [`started`] asks of a process that is there.
+#[cfg(windows)]
+const STARTED_TRIES: usize = 3;
+
+/// What one PowerShell says of when the process `pid` began, or none.
+#[cfg(windows)]
+fn asked_when_started(pid: u32) -> Option<String> {
     let script = format!("(Get-Process -Id {pid} -ErrorAction Stop).StartTime.ToFileTimeUtc()");
     let ran = Run::new("powershell")
         .args(["-NoProfile", "-NonInteractive", "-Command", &script])

@@ -6,13 +6,18 @@ use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::path::PathBuf;
 
+use cf_base::env::TOOL_FOLDERS;
 use cf_process::{pane_argv, runnable, Run};
 
 use super::*;
 
-/// What npm writes as the `.cmd` of a global package: its last line runs node
-/// on the package's script, `%dp0%` being the shim's own folder.
-const NPM_SHIM: &str = "@ECHO off\r\nSETLOCAL\r\nCALL :find_dp0\r\nendLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & \"%_prog%\"  \"%dp0%\\node_modules\\@earendil-works\\pi-coding-agent\\dist\\cli.js\" %*\r\n";
+/// What npm writes as the `.cmd` of a global package whose script is `script`,
+/// from the shim's own folder (`%dp0%`): its last line runs node on it.
+fn npm_shim(script: &str) -> String {
+    format!(
+        "@ECHO off\r\nSETLOCAL\r\nCALL :find_dp0\r\nendLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & \"%_prog%\"  \"%dp0%\\{script}\" %*\r\n"
+    )
+}
 
 /// A path as text.
 fn text(path: &Path) -> String {
@@ -77,18 +82,32 @@ impl Machine {
     }
 }
 
-/// Pi as `npm install -g` leaves it in `folder`: its `.cmd` shim, and the
-/// script that shim runs, which prints the arguments it was given. Returns the
-/// shim and the script.
-fn install_pi(folder: &Path) -> (PathBuf, PathBuf) {
-    let script = ["node_modules", "@earendil-works", "pi-coding-agent", "dist"]
+/// `command` as `npm install -g` leaves it in `folder`: its `.cmd` shim, and the
+/// script that shim runs (`script`, its path from the folder), which prints the
+/// arguments it was given. Returns the shim and the script.
+fn install(folder: &Path, command: &str, script: &[&str]) -> (PathBuf, PathBuf) {
+    let shim = folder.join(format!("{command}.cmd"));
+    startable_with(&shim, &npm_shim(&script.join("\\")));
+    let script = script
         .iter()
-        .fold(folder.to_path_buf(), |path, part| path.join(part))
-        .join("cli.js");
-    startable_with(&script, "printf 'pi %s\\n' \"$*\"\n");
-    let shim = folder.join("pi.cmd");
-    startable_with(&shim, NPM_SHIM);
+        .fold(folder.to_path_buf(), |path, part| path.join(part));
+    startable_with(&script, &format!("printf '{command} %s\\n' \"$*\"\n"));
     (shim, script)
+}
+
+/// Pi as `npm install -g` leaves it in `folder` (see [`install`]).
+fn install_pi(folder: &Path) -> (PathBuf, PathBuf) {
+    install(
+        folder,
+        "pi",
+        &[
+            "node_modules",
+            "@earendil-works",
+            "pi-coding-agent",
+            "dist",
+            "cli.js",
+        ],
+    )
 }
 
 #[test]
@@ -273,6 +292,37 @@ mod started {
         assert_eq!(
             runnable(&shim, &args, &env),
             started(machine.npm().join("node.exe"))
+        );
+    }
+
+    /// The reviews' case (2026-10-16): Claude Code as npm installs it, on a
+    /// machine whose one Node is in a folder of the system's, which the daemon
+    /// runs what it starts with (`CONSENSFLOW_TOOL_FOLDERS`). Detection finds
+    /// the shim, and the shim runs on that Node: a program a harness needs is
+    /// looked for on the PATH its window runs on, not on the one detection
+    /// begins with.
+    #[test]
+    fn a_shim_runs_on_a_node_only_in_the_systems_folder_the_daemon_runs_with() {
+        let machine = Machine::new();
+        let tools = machine.root.path().join("tools");
+        startable(&tools.join("node.exe"));
+        let named = text(&tools);
+        let env = machine
+            .env(&[(TOOL_FOLDERS, Some(named.as_str()))])
+            .with_tool_folders_on_path();
+        let (shim, script) = install(
+            &machine.npm(),
+            "claude",
+            &["node_modules", "@anthropic-ai", "claude-code", "cli.js"],
+        );
+        assert_eq!(harness_path(Harness::Claude, &env), Some(shim.clone()));
+        let run = runnable(&shim, &[OsString::from("--version")], &env);
+        assert_eq!(
+            run.map(|run| (run.program, run.args)),
+            Ok((
+                tools.join("node.exe"),
+                vec![script.into_os_string(), "--version".into()]
+            ))
         );
     }
 

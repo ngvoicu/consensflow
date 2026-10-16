@@ -185,11 +185,12 @@ struct Ran {
 }
 
 /// The binary run as the case says, in `root`: with exactly the environment the
-/// case gives.
+/// case gives, and no folder of the system's programs, which Node's never had.
 fn spawn(case: &Value, root: &Path, names: &Names) -> (Output, Option<String>) {
     let name = plain(&root.to_string_lossy());
     let mut command = Command::new(&names.cf);
     command.env_clear();
+    command.env("CONSENSFLOW_TOOL_FOLDERS", "");
     for (variable, value) in case["env"].as_object().unwrap() {
         command.env(variable, value.as_str().unwrap().replace("$ROOT", &name));
     }

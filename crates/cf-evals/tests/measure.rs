@@ -13,6 +13,8 @@ mod support;
 // file beside it, where each would be a suite of its own.
 #[path = "measure/chief.rs"]
 mod chief;
+#[path = "measure/files.rs"]
+mod files;
 #[path = "measure/open.rs"]
 mod open;
 #[path = "measure/parallel.rs"]

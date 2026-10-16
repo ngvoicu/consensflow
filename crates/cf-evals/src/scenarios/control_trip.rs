@@ -12,6 +12,7 @@ pub(super) fn scenario() -> Scenario {
         id: "control-trip",
         title: "Tell, answer, resume, a follow-up to the same window",
         fixture: "site",
+        uncommitted: None,
         prompt: join(&[
             "Un test de funcționare, te rog, fără să mă întrebi nimic pe mine. Pașii, în ordine:",
             "(1) Pune o sarcină unui worker: să ruleze întâi comanda `sleep 90`, apoi să scrie în fișierul",
