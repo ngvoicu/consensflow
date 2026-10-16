@@ -11,7 +11,9 @@ use cf_proto::ledger::{TaskMoved, TaskView};
 use rusqlite::params;
 use serde_json::json;
 
-use super::{carrier_body, delivery_body, require_on_board, require_task_state, task_by_id};
+use super::{
+    carrier_body, delivery_body, own_steps, require_on_board, require_task_state, task_by_id,
+};
 use crate::messages::{fold, leave_pause_notes, tell_sent_back, Dropped};
 use crate::model::{
     self, require_active, sql_list, LedgerError, ACTIVE_TASK_STATES, FINISHED_TASK_STATES,
@@ -22,7 +24,8 @@ use crate::staff::{bring_back, can_continue, has_task_in_hand, require_free, Giv
 use crate::store::Store;
 use crate::views::{ParticipantRow, TaskRow};
 
-/// The assignee's answer finishes the task and is queued for whoever asked for it.
+/// The assignee's answer finishes the task and is queued for whoever asked for
+/// it; the chief's own step is finished by its word (`own_steps`).
 pub(crate) fn record_result(
     store: &mut Store,
     project_id: i64,
@@ -32,6 +35,9 @@ pub(crate) fn record_result(
     model::require_text(body, "body", MAX_BODY)?;
     store.write(|store| {
         let task = store.task_row(project_id, number)?;
+        if own_steps::is_own_step(store, &task)? {
+            return own_steps::finish(store, project_id, &task, body);
+        }
         require_task_state(&task, &ACTIVE_TASK_STATES, "record a result for")?;
         let message_id = queue(
             store,

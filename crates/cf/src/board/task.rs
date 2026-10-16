@@ -3,29 +3,40 @@
 use std::io::Read;
 
 use cf_base::js;
-use cf_base::text::{utf16_len, utf16_prefix};
 use cf_board::Board;
 use serde_json::{json, Map, Value};
 
 use super::lines::{a_pool, message_line, numbers, task_head, task_line, tasks, waiting_answers};
 use super::usage::{task_usage, ADD_USAGE};
-use super::words::{quoted, require_text, split, task_number, task_numbers, Shape, Split};
+use super::words::{quoted, require_text, split, task_number, task_numbers, Shape};
+use super::{brief, transcript};
 use super::{help_of, text_of, Failure, Said};
-
-/// How much of one transcript item `cf task get --transcript` shows, in UTF-16 units.
-const ITEM_CHARS: usize = 600;
 
 /// The flags of `cf task add`.
 const ADD: Shape = Shape {
     switches: &["--self", "--advice", "--review", "--test", "--design"],
-    valued: &["--tier", "--purpose", "--after", "--needs", "--before"],
+    valued: &[
+        "--tier",
+        "--purpose",
+        "--after",
+        "--needs",
+        "--before",
+        brief::FILE,
+    ],
     leading: 0,
+};
+
+/// The flags of `cf task reopen` and `cf task resume`, which give the window
+/// words of their own.
+const BRIEFED: Shape = Shape {
+    valued: &[brief::FILE],
+    ..Shape::TEXT
 };
 
 /// The flags of `cf task get`, which stand after its task.
 const GET: Shape = Shape {
     switches: &["--transcript"],
-    valued: &["--last"],
+    valued: &["--last", "--page", "--find"],
     leading: 0,
 };
 
@@ -51,7 +62,7 @@ pub fn command(words: &[String], board: &Board, input: &mut dyn Read) -> Result<
     if let Some(verb) = action.filter(|action| *action == "get" || MOVES.contains(action)) {
         let shape = Shape {
             leading: 1,
-            ..if verb == "get" { GET } else { Shape::TEXT }
+            ..shape_of(verb)
         };
         if split(rest, shape).asks_for_help() {
             return Ok(help_of(&["task", verb]));
@@ -67,6 +78,15 @@ pub fn command(words: &[String], board: &Board, input: &mut dyn Read) -> Result<
             "unknown task command {}: use add, list, get, done, accept, reopen, cancel, pause or resume",
             quoted(other.unwrap_or_default())
         ))),
+    }
+}
+
+/// The flags of the task command `verb`, after its task.
+fn shape_of(verb: &str) -> Shape {
+    match verb {
+        "get" => GET,
+        "reopen" | "resume" => BRIEFED,
+        _ => Shape::TEXT,
     }
 }
 
@@ -94,7 +114,8 @@ fn add(rest: &[String], board: &Board, input: &mut dyn Read) -> Result<Said, Fai
     if tier.is_none() && after.is_none() && !mine && !words.on("--design") {
         return Err(Failure::Usage(ADD_USAGE.into()));
     }
-    let brief = require_text(text_of(words.text.clone(), input)?, ADD_USAGE)?;
+    let brief = require_text(brief::brief_of(&words, input)?, ADD_USAGE)?;
+    let sent = brief::sent(&brief);
 
     let mut body = Map::new();
     if mine {
@@ -178,7 +199,7 @@ fn add(rest: &[String], board: &Board, input: &mut dyn Read) -> Result<Said, Fai
             a_pool(pool, tier.as_ref())
         )
     };
-    Ok(Said::new(created.into_value(), text))
+    Ok(Said::new(created.into_value(), format!("{text}\n{sent}")))
 }
 
 /// Whether a task no lane has waits for a member to take it: a task paused or
@@ -232,15 +253,15 @@ fn board_list(rest: &[String], board: &Board) -> Result<Said, Failure> {
 /// with the command is said before the board is asked anything.
 fn get(number: u64, rest: &[String], board: &Board) -> Result<Said, Failure> {
     let words = split(rest, GET);
-    let last = if words.on("--transcript") {
-        Some(items_asked(&words)?)
+    let asked = if words.on("--transcript") {
+        Some(transcript::asked(&words)?)
     } else {
         None
     };
     let path = format!("/api/tasks/{number}");
     let mut answer = board.get(&path)?;
     let task = answer.take("task")?;
-    let Some(last) = last else {
+    let Some(asked) = asked else {
         let messages = answer.list(task.get("messages"), "messages")?;
         let thread = messages
             .iter()
@@ -257,58 +278,8 @@ fn get(number: u64, rest: &[String], board: &Board) -> Result<Said, Failure> {
         let answers = waiting_answers(messages);
         return Ok(Said::new(task, text).having_written("task", answers));
     };
-    let transcript = format!("/api/tasks/{number}/transcript?last={last}");
-    let copy = board.get(&transcript)?;
-    let listed = copy.list(copy.value().get("items"), "items")?;
-    let total = copy.value().get("total");
-    let text = if total.and_then(Value::as_f64) == Some(0.0) {
-        "Its window has written nothing yet.".to_string()
-    } else {
-        let shown = listed
-            .iter()
-            .map(|item| {
-                let role = match item.get("role").and_then(Value::as_str) {
-                    Some("user") => "Sent to the window".into(),
-                    Some("assistant") => "The agent".into(),
-                    Some("tool") => "Tool output".into(),
-                    Some("custom") => "Note".into(),
-                    _ => js::text(item.get("role")),
-                };
-                let writing = if js::truthy(item.get("complete")) {
-                    ""
-                } else {
-                    " · still writing"
-                };
-                format!(
-                    "[{role}{writing}]\n{}",
-                    clip(&js::text(item.get("text")), ITEM_CHARS)
-                )
-            })
-            .collect::<Vec<_>>()
-            .join("\n\n");
-        format!(
-            "What its window did, the last {} of {} items:\n\n{shown}",
-            listed.len(),
-            js::text(total)
-        )
-    };
-    let text = format!("{}\n\n{text}", task_head(&task));
-    let mut data = Map::new();
-    data.insert("task".into(), task);
-    if let Value::Object(copy) = copy.into_value() {
-        data.extend(copy);
-    }
-    Ok(Said::new(Value::Object(data), text))
-}
-
-/// How many items of the transcript `--last` asks for: a whole number of one
-/// or more, as JavaScript reads it; ten when it is not given.
-fn items_asked(words: &Split) -> Result<f64, Failure> {
-    let last = words.value("--last").map_or(10.0, js::number);
-    if last.fract() != 0.0 || !last.is_finite() || last < 1.0 {
-        return Err(Failure::Usage("--last takes a number of items".into()));
-    }
-    Ok(last)
+    let head = task_head(&task);
+    transcript::read(number, task, head, &asked, board)
 }
 
 fn moved(
@@ -318,7 +289,13 @@ fn moved(
     board: &Board,
     input: &mut dyn Read,
 ) -> Result<Said, Failure> {
-    let text = text_of(split(rest, Shape::TEXT).text, input)?;
+    let briefed = matches!(action, "reopen" | "resume");
+    let words = split(rest, shape_of(action));
+    let text = if briefed {
+        brief::brief_of(&words, input)?
+    } else {
+        text_of(words.text, input)?
+    };
     if matches!(action, "done" | "reopen" | "resume") && js::trim(&text).is_empty() {
         let what = match action {
             "done" => "your result",
@@ -329,6 +306,12 @@ fn moved(
             "cf task {action} T-{number} \"{what}\""
         )));
     }
+    // What the words that send a window on say of themselves.
+    let sent = if briefed {
+        format!("\n{}", brief::sent(&text))
+    } else {
+        String::new()
+    };
     let mut body = Map::new();
     if !text.is_empty() {
         body.insert("body".into(), text.into());
@@ -350,9 +333,13 @@ fn moved(
             a_pool(task.get("pool"), task.get("tier"))
         ),
         "resume" => format!("T-{number} resumes in @{} with your words.", js::text(task.get("assignee"))),
+        // The chief's own step is accepted with its words: nothing comes back to decide.
+        "done" if task.get("state").and_then(Value::as_str) == Some("accepted") => format!(
+            "T-{number} is done and accepted: it was your own step, so nothing waits for your decision, and what needed it goes on."
+        ),
         _ => format!("{}{dropped}", task_line(&task)),
     };
-    Ok(Said::new(task, said))
+    Ok(Said::new(task, format!("{said}{sent}")))
 }
 
 /// What a cancel says of the messages `ids`, the words you told the task's
@@ -369,15 +356,6 @@ fn went_with_it(ids: &[Value]) -> String {
             "\nWhat you told its window, {}, went with it: it never had them.",
             several.join(", ")
         ),
-    }
-}
-
-/// `text` cut to `units` UTF-16 units, with an ellipsis when it was longer.
-fn clip(text: &str, units: usize) -> String {
-    if utf16_len(text) > units {
-        format!("{}…", utf16_prefix(text, units))
-    } else {
-        text.to_string()
     }
 }
 
@@ -461,7 +439,7 @@ mod tests {
         );
         assert_eq!(
             said,
-            "T-3 is on the board for a standard tester; the first free one gets it, and its result arrives in your inbox."
+            "T-3 is on the board for a standard tester; the first free one gets it, and its result arrives in your inbox.\nSent: 7 characters, ending \"Run T-2\"."
         );
         // Beside the others, and with none of them it is a plain task.
         let (posted, _) = added(

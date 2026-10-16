@@ -99,6 +99,7 @@ const BOARD: [(&[&str], &str); 17] = [
         concat!(
             "  cf task get T-3                   one task and its whole thread\n",
             "  cf task get T-3 --transcript      what its window did so far (the last 10 items; --last 30 for more)\n",
+            "                                    --page 2 for older ones, 50 a page; --find \"…\" for those that say it\n",
         ),
     ),
     (

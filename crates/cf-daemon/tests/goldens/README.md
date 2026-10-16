@@ -32,6 +32,12 @@ recordings in four ways, none of them by recording again.
 - `cf tell`'s usage has a third line, for a task still queued (the field report of
   2026-10-15: a tell to a queued task waits for its window), in `cf-board-028` and
   `-029`: changed by hand, that line alone.
+- The owner's decisions of 2026-10-16 on the same report: the usage has a line for the
+  transcript's `--page` and `--find`, and its tail the lines of `--file`, in `cf-board-028`
+  and `-029`; and every run of `cf task add`, `reopen`, `resume` and `tell` that printed a
+  reply has a last line saying how many characters it sent and how they end, in
+  `cf-board-004`, `-008`, `-009`, `-011`, `-014` to `-017`, `-020`, `-021` and `-022`:
+  changed by hand, those lines alone, each written as `cf` writes it of the run's words.
 - Every trace that holds a database says `userVersion: 11` and a role check and a pool
   check without the tester, as Node's ledger had them (migration 0012 added the
   tester). They are not rewritten: the player holds the database this ledger left to

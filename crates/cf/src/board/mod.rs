@@ -6,9 +6,11 @@
 //! with its usage and asks the board nothing: it tells the word from text by
 //! what else the command was given (`words::Split::asks_for_help`).
 
+mod brief;
 mod cut;
 mod lines;
 mod task;
+mod transcript;
 mod usage;
 mod words;
 
@@ -26,6 +28,12 @@ use words::{message_id, quoted, require_text, split, task_number, Shape};
 const NOTE: Shape = Shape {
     switches: &["--human"],
     ..Shape::TEXT
+};
+
+/// The flags of `cf tell`, which names its task first.
+const TELL: Shape = Shape {
+    valued: &[brief::FILE],
+    ..Shape::NUMBERED
 };
 
 /// The flags of `cf history`.
@@ -255,15 +263,16 @@ fn ask(rest: &[String], board: &Board, input: &mut dyn Read) -> Result<Said, Fai
 }
 
 fn tell(rest: &[String], board: &Board, input: &mut dyn Read) -> Result<Said, Failure> {
-    let words = split(rest, Shape::NUMBERED);
+    let words = split(rest, TELL);
     if words.asks_for_help() {
         return Ok(help_of(&["tell"]));
     }
     let number = task_number(rest.first().map(String::as_str))?;
     let what = require_text(
-        text_of(words.text, input)?,
+        brief::brief_of(&words, input)?,
         "cf tell T-<n> \"what to put to its window now\"",
     )?;
+    let sent = brief::sent(&what);
     let message = posted(board, &format!("/api/tasks/{number}/tell"), body_of(what))?;
     let (id, window) = (
         js::text(message.get("id")),
@@ -279,7 +288,7 @@ fn tell(rest: &[String], board: &Board, input: &mut dyn Read) -> Result<Said, Fa
             "T-{number} is paused and m-{id} put to @{window}; its answer arrives as a message. Then: cf task resume T-{number} \"…\""
         )
     };
-    Ok(Said::new(message, text))
+    Ok(Said::new(message, format!("{text}\n{sent}")))
 }
 
 fn answer(rest: &[String], board: &Board, input: &mut dyn Read) -> Result<Said, Failure> {
@@ -396,6 +405,7 @@ fn whoami(rest: &[String], board: &Board) -> Result<Said, Failure> {
 /// in a quoted heredoc (`cf task add --tier standard - <<'BRIEF'`) reaches
 /// the board as written, where the shell would run the backticks and `$( )`
 /// of a double-quoted one. The final newline is the heredoc's, not the text's.
+/// The commands that give a window work take a file as well (`brief`).
 fn text_of(text: String, input: &mut dyn Read) -> Result<String, Failure> {
     if text != "-" {
         return Ok(text);

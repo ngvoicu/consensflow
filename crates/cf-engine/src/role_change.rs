@@ -74,7 +74,7 @@
 //! ([`prelude`]).
 //!
 //! A role too long for one message (more than 16,000 units: a staff of more than
-//! 43 rows with specs on, 72 without, two roles to a row, on the real text) is
+//! 41 rows with specs on, 69 without, two roles to a row, on the real text) is
 //! delivered cut to its opening, with the way to read the rest (`cf inbox read`).
 //! That is a role told in part: it is not recorded as told, and the human has a
 //! line on the board that says so. The role is said again at every Resume, and
@@ -104,13 +104,13 @@
 //! a staff whose rows hold two roles each, Windows paths for the skill and for
 //! `cf`, 190 units before the role for what the harness says of it), the word as
 //! Windows quotes it (each of the role's 48 quotes is two more than JSON has it)
-//! comes to 14,122 units for 1 staff row, 15,313 for 25 and 16,313 for 45, about
+//! comes to 14,250 units for 1 staff row, 15,441 for 25 and 16,441 for 45, about
 //! 50 a row. With some 400 units for the rest of the line (the two programs'
-//! paths, the flags, the thread's id, the model) a staff of 360 rows is the most
+//! paths, the flags, the thread's id, the model) a staff of 358 rows is the most
 //! it holds. What Codex's own instructions hold (the human's own, which begin the
 //! developer instructions) is in none of that: 2,500 units of them are some 2,700
-//! on the line, and the most is then 307 rows. Without specs the role is 1,422
-//! units shorter at 25 rows, and the most is 388. (When the note was the
+//! on the line, and the most is then 305 rows. Without specs the role is 1,422
+//! units shorter at 25 rows, and the most is 386. (When the note was the
 //! launch's first message the role was on the line twice, and a staff of 25 with
 //! 2,500 units of Codex's own instructions was over the limit.) A test holds
 //! these numbers to the real text.

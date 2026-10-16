@@ -10,7 +10,10 @@
 //! received when `cf` says it wrote it whole (`POST /api/answers/read`), not
 //! when the thread was served. What the human has not passed on is not for an
 //! agent to read: the thread leaves out a gated message, and the brief is
-//! not given while it waits at the gate.
+//! not given while it waits at the gate. The transcript is read a page at a
+//! time and searched as well (`pages`).
+
+mod pages;
 
 use cf_base::js;
 use cf_ledger::{NewQuestion, TaskThread, TaskView};
@@ -19,6 +22,7 @@ use serde_json::{json, Map, Value};
 
 use super::{Answer, Caller, Context, Failure, Request, TaskAction};
 use crate::api::views::{value, MessageSummary, TaskSummary};
+use pages::Asked;
 
 /// A task in one of these states has a window a `tell` reaches and stops.
 const WINDOWED: [&str; 3] = ["working", "waiting", "paused"];
@@ -27,8 +31,9 @@ const WINDOWED: [&str; 3] = ["working", "waiting", "paused"];
 /// coming up.
 const QUEUED: &str = "queued";
 
-/// The most items of a transcript one request may ask for.
-const MOST_ITEMS: f64 = 50.0;
+/// The most items of a transcript one request may ask for: a page's.
+#[allow(clippy::cast_precision_loss)]
+const MOST_ITEMS: f64 = pages::PER_PAGE as f64;
 
 /// How many it gives when it is asked for none that is a number.
 const DEFAULT_ITEMS: f64 = 10.0;
@@ -122,8 +127,8 @@ fn brief_waits_at_the_gate(task: &TaskThread) -> bool {
     held
 }
 
-/// What the task's window did so far, from ConsensFlow's own copy: the last
-/// items, for whoever gave the task.
+/// What the task's window did so far, from ConsensFlow's own copy, for whoever
+/// gave the task: the last items, or a page of them, searched or not (`pages`).
 fn transcript(
     context: &Context,
     caller: &Caller,
@@ -140,12 +145,16 @@ fn transcript(
             ),
         ));
     }
+    let (project, number) = (caller.project.id, task.task.number);
+    if let Some(asked) = Asked::of(request.param("page"), request.param("find")) {
+        let whole = context.ledger.borrow().transcript(project, number, None)?;
+        return Ok(Answer::ok(asked.answer(whole)?));
+    }
     let last = items_of(request.param("last"));
-    let transcript =
-        context
-            .ledger
-            .borrow()
-            .transcript(caller.project.id, task.task.number, Some(last))?;
+    let transcript = context
+        .ledger
+        .borrow()
+        .transcript(project, number, Some(last))?;
     Ok(Answer::ok(value(&transcript)?))
 }
 

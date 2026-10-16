@@ -2,11 +2,12 @@
 //! to a participant by name, or opened for a pool and tier of the staff and
 //! assigned by the daemon, or taken back to the board (`giving`); paused, held
 //! and resumed (`pausing`); finished with a result and accepted, sent back,
-//! cancelled, failed, and deleted from the board by the human (`finishing`);
-//! and read with their threads.
+//! cancelled, failed, and deleted from the board by the human (`finishing`),
+//! the chief's own step by its word (`own_steps`); and read with their threads.
 
 mod finishing;
 mod giving;
+mod own_steps;
 mod pausing;
 
 use cf_proto::ledger::{TaskThread, TaskView};

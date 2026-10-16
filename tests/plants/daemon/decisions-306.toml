@@ -1,0 +1,315 @@
+# The owner's decisions of 2026-10-16 on the field report of 2026-10-15, for 3.0.6:
+#
+# - B4, the chief's own step (`cf task add --self`): `cf task done` takes it queued or at work,
+#   withdraws a brief not yet given, and accepts it with the words, so what needs it goes on
+#   (`crates/cf-ledger/src/tasks/own_steps.rs`; tests `crates/cf-ledger/tests/receipt/self_steps.rs`,
+#   `crates/cf/tests/own_step.rs`);
+# - B6, a brief a shell cut: `--file <path>` on `cf task add`, `reopen`, `resume` and `tell`, and the
+#   reply's line of how many characters went and how they end (`crates/cf/src/board/brief.rs`;
+#   tests `crates/cf/tests/brief_from_a_file.rs`, `brief_from_stdin.rs`, the brief's own);
+# - B7, the transcript's depth: `--page` and `--find` (`crates/cf-daemon/src/api/routes/task/pages.rs`,
+#   `crates/cf/src/board/transcript.rs`; tests `routes::task::tests::depth`,
+#   `crates/cf/tests/transcript_pages.rs`, the transcript's own).
+#
+# Each plant takes one of them out again. The names begin with `own steps`, `briefs` or
+# `transcript pages`, so `npm run plants:daemon -- "own steps" briefs "transcript pages"` runs them.
+
+[run]
+ledger-self-steps = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "self_steps::"]
+cf-own-step = ["cargo", "test", "--offline", "-p", "cf", "--test", "own_step"]
+cf-brief-file = ["cargo", "test", "--offline", "-p", "cf", "--test", "brief_from_a_file"]
+cf-brief-stdin = ["cargo", "test", "--offline", "-p", "cf", "--test", "brief_from_stdin"]
+cf-brief-tell = ["cargo", "test", "--offline", "-p", "cf", "--test", "tell"]
+cf-lib-brief = ["cargo", "test", "--offline", "-p", "cf", "--lib", "board::brief"]
+cf-lib-transcript = ["cargo", "test", "--offline", "-p", "cf", "--lib", "board::transcript"]
+cf-transcript-pages = ["cargo", "test", "--offline", "-p", "cf", "--test", "transcript_pages"]
+cf-help-pages = ["cargo", "test", "--offline", "-p", "cf", "--test", "help"]
+cf-board-goldens-306 = ["cargo", "test", "--offline", "-p", "cf", "--test", "board_goldens"]
+engine-chief-text = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "text", "goldens_roles"]
+daemon-depth = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "routes::task::tests::depth"]
+
+# B4: the chief's own step.
+
+[[plant]]
+name = "own steps: done is refused while the chief's own step is queued, as 3.0.5 refused it"
+meant = "a_chiefs_own_step_is_done_by_its_word_while_its_brief_is_still_on_its_way_and_is_accepted_at_once"
+runs = ["ledger-self-steps"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = "        if own_steps::is_own_step(store, &task)? {"
+replace = "        if false && own_steps::is_own_step(store, &task)? {"
+
+[[plant]]
+name = "own steps: the brief not yet given stays on its way back to the chief"
+meant = "a_chiefs_own_step_is_done_by_its_word_while_its_brief_is_still_on_its_way_and_is_accepted_at_once"
+runs = ["ledger-self-steps"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/own_steps.rs"
+find = "         WHERE task_id = ? AND recipient_id = ? AND state IN ('queued', 'gated')\","
+replace = "         WHERE task_id = ? AND recipient_id = ? AND state IN ('queued', 'gated') AND 1 = 0\","
+
+[[plant]]
+name = "own steps: the chief's own result comes back to it to be pasted"
+meant = "a_chiefs_own_step_is_done_by_its_word_while_its_brief_is_still_on_its_way_and_is_accepted_at_once"
+runs = ["ledger-self-steps"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/own_steps.rs"
+find = "            from_window: true,"
+replace = ""
+
+[[plant]]
+name = "own steps: the chief's own step is done and waits for the chief to accept it"
+meant = "a_chiefs_own_step_is_done_by_its_word_while_its_brief_is_still_on_its_way_and_is_accepted_at_once"
+runs = ["ledger-self-steps"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/own_steps.rs"
+find = '''
+    store.move_task(
+        &done,
+        "accepted",
+        json!({ "by": chief.handle, "own": true }),
+    )?;'''
+replace = '''
+    let _ = (&done, json!({ "by": chief.handle, "own": true }));'''
+
+[[plant]]
+name = "own steps: a task the human gives the chief is taken for the chief's own"
+meant = "a_task_the_human_gives_the_chief_puts_its_result_to_the_human_as_it_always_did"
+runs = ["ledger-self-steps"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/own_steps.rs"
+find = '''
+    if task.assignee_id != Some(task.requester_id) {
+        return Ok(false);
+    }
+    Ok(store.participant_row(task.requester_id)?.role == "chief")'''
+replace = '''
+    let Some(assignee) = task.assignee_id else {
+        return Ok(false);
+    };
+    Ok(store.participant_row(assignee)?.role == "chief")'''
+
+[[plant]]
+name = "own steps: cf says the chief's own step's line, not that nothing waits for its decision"
+meant = "the_chiefs_own_step_done_says_it_is_accepted_and_another_task_says_its_line"
+runs = ["cf-own-step"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/task.rs"
+find = "        \"done\" if task.get(\"state\").and_then(Value::as_str) == Some(\"accepted\") => format!("
+replace = "        \"done\" if task.get(\"state\").and_then(Value::as_str) == Some(\"never\") => format!("
+
+# B6: a brief a shell cut.
+
+[[plant]]
+name = "briefs: --file is not read"
+meant = "a_brief_from_a_file_is_posted_whole_as_written_and_the_reply_says_how_it_ends"
+runs = ["cf-brief-file"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/brief.rs"
+find = "    let Some(path) = words.value(FILE) else {"
+replace = "    let Some(path) = words.value(\"--no-such-flag\") else {"
+
+[[plant]]
+name = "briefs: --file is no flag of reopen and resume"
+meant = "the_words_that_resume_reopen_or_tell_come_from_a_file_too_and_a_windows_line_ending_is_dropped"
+runs = ["cf-brief-file"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/task.rs"
+find = "        \"reopen\" | \"resume\" => BRIEFED,"
+replace = "        \"never\" => BRIEFED,"
+
+[[plant]]
+name = "briefs: a file's Windows line ending is taken for the text's"
+meant = "the_words_that_resume_reopen_or_tell_come_from_a_file_too_and_a_windows_line_ending_is_dropped"
+runs = ["cf-brief-file"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/brief.rs"
+find = "        .strip_suffix(\"\\r\\n\")"
+replace = "        .strip_suffix(\"\\r\\r\\n\")"
+
+[[plant]]
+name = "briefs: a file named beside words of their own is read and the words dropped"
+meant = "a_file_beside_words_of_their_own_is_written_wrong_and_one_that_cannot_be_read_fails"
+runs = ["cf-brief-file"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/brief.rs"
+find = "    if !words.text.is_empty() {"
+replace = "    if false && !words.text.is_empty() {"
+
+[[plant]]
+name = "briefs: a task added says nothing of the brief it sent"
+meant = "a_brief_cut_in_the_middle_of_a_fence_is_posted_as_given_and_the_reply_shows_where_it_ends"
+runs = ["cf-brief-stdin"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/task.rs"
+find = "    Ok(Said::new(created.into_value(), format!(\"{text}\\n{sent}\")))"
+replace = "    Ok(Said::new(created.into_value(), format!(\"{text}{}\", &sent[..0])))"
+
+[[plant]]
+name = "briefs: a tell says nothing of the words it sent"
+meant = "a_tell_to_a_queued_task_says_the_words_wait_for_its_window_and_nothing_is_paused"
+runs = ["cf-brief-tell"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/mod.rs"
+find = "    Ok(Said::new(message, format!(\"{text}\\n{sent}\")))"
+replace = "    Ok(Said::new(message, format!(\"{text}{}\", &sent[..0])))"
+
+[[plant]]
+name = "briefs: a resume or a reopening says nothing of the words it sent"
+meant = "the_words_that_resume_reopen_or_tell_come_from_a_file_too_and_a_windows_line_ending_is_dropped"
+runs = ["cf-brief-file"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/task.rs"
+find = "    let sent = if briefed {"
+replace = "    let sent = if false && briefed {"
+
+[[plant]]
+name = "briefs: a last word longer than the reply shows is shown whole"
+meant = "characters_are_counted_as_people_count_them_and_a_long_last_word_is_cut"
+runs = ["cf-lib-brief"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/brief.rs"
+find = "    if shown > MOST_SHOWN {"
+replace = "    if false && shown > MOST_SHOWN {"
+
+[[plant]]
+name = "briefs: cf's help says nothing of --file"
+meant = "every_case_but_the_departed_asks_says_and_exits_as_node_did"
+runs = ["cf-board-goldens-306"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/usage.txt"
+find = '''
+A long one is surest in a file, which no shell cuts (task add, reopen, resume and tell):
+  cf task add --tier standard --file brief.md
+Those four say how many characters went and how the text ends: see that it is all there.'''
+replace = ""
+
+[[plant]]
+name = "briefs: the chief is not told to pass a long brief as a file"
+meant = "every_role_is_given_the_text_node_gave_it_or_refused_as_node_refused_it"
+runs = ["engine-chief-text"]
+
+[[plant.edit]]
+file = "skill/core/chief.md"
+find = '''
+
+Write a long brief to a file with your file tool and pass it with `--file brief.md` instead: a shell can cut a long heredoc.'''
+replace = ""
+
+# B7: the transcript's depth.
+
+[[plant]]
+name = "transcript pages: every page is the newest fifty"
+meant = "a_page_reaches_back_fifty_items_at_a_time_from_the_newest"
+runs = ["daemon-depth"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/task/pages.rs"
+find = "        let end = count - (number - 1) * PER_PAGE;"
+replace = "        let end = count - (number - number) * PER_PAGE;"
+
+[[plant]]
+name = "transcript pages: a search keeps every item"
+meant = "a_search_keeps_the_items_that_say_its_words_in_any_case_and_pages_them"
+runs = ["daemon-depth"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/task/pages.rs"
+find = "                    .filter(|item| item.text.to_lowercase().contains(&needle))"
+replace = "                    .filter(|item| !needle.is_empty() || item.text.is_empty())"
+
+[[plant]]
+name = "transcript pages: a search looks for its words in their own case"
+meant = "a_search_keeps_the_items_that_say_its_words_in_any_case_and_pages_them"
+runs = ["daemon-depth"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/task/pages.rs"
+find = "                let needle = find.to_lowercase();"
+replace = "                let needle = find.to_owned();"
+
+[[plant]]
+name = "transcript pages: a page past the last is not refused"
+meant = "a_page_reaches_back_fifty_items_at_a_time_from_the_newest"
+runs = ["daemon-depth"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/task/pages.rs"
+find = "        if !in_range {"
+replace = "        if false && !in_range {"
+
+[[plant]]
+name = "transcript pages: cf asks for page 1 whatever page it was given"
+meant = "a_page_says_where_it_is_among_them_and_how_to_read_the_one_before"
+runs = ["cf-transcript-pages"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/transcript.rs"
+find = "            query.append_pair(\"page\", &page.to_string());"
+replace = "            query.append_pair(\"page\", if *page > 0 { \"1\" } else { \"0\" });"
+
+[[plant]]
+name = "transcript pages: cf names the same page for the older ones"
+meant = "a_page_says_where_it_is_among_them_and_how_to_read_the_one_before"
+runs = ["cf-transcript-pages"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/transcript.rs"
+find = "                page + 1"
+replace = "                page"
+
+[[plant]]
+name = "transcript pages: --last is taken beside --page and --find"
+meant = "the_last_items_and_a_page_are_one_or_the_other_and_a_page_is_a_number_from_one"
+runs = ["cf-transcript-pages"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/transcript.rs"
+find = "    if words.value(\"--last\").is_some() {"
+replace = "    if false && words.value(\"--last\").is_some() {"
+
+[[plant]]
+name = "transcript pages: a search shows a long item from its start, not around the words"
+meant = "a_search_says_how_many_items_say_its_words_and_shows_a_long_one_around_them"
+runs = ["cf-transcript-pages"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/transcript.rs"
+find = "                Some(find) => clip_around(&text, find, ITEM_CHARS),"
+replace = "                Some(_) => clip(&text, ITEM_CHARS),"
+
+[[plant]]
+name = "transcript pages: the excerpt begins at the start of a long item"
+meant = "a_search_shows_a_long_item_around_the_words_it_found_in_any_case"
+runs = ["cf-lib-transcript"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/transcript.rs"
+find = "    let starts = text[..found].chars().count().saturating_sub(BEFORE_FOUND);"
+replace = "    let starts = text[..found].chars().count() * 0;"
+
+[[plant]]
+name = "transcript pages: cf's help says nothing of --page and --find"
+meant = "every_board_command_answers_help_with_its_usage_and_asks_the_board_nothing"
+runs = ["cf-help-pages"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/usage.txt"
+find = '''
+                                    --page 2 for older ones, 50 a page; --find "…" for those that say it'''
+replace = ""

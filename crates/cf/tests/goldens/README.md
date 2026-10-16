@@ -35,6 +35,19 @@ of `board.json` that hold the usage (`cf task --help` among them, which prints t
 that go on from the commands), as `crates/cf/src/board/usage.txt` has it, and to the
 daemon's traces of the same words.
 
+## The usage and the replies of 3.0.6's field reports
+
+The owner's decisions of 2026-10-16 on the field report of 2026-10-15 moved `board.json`
+in three ways, each made by hand:
+
+- the transcript's entry in the usage has a line for `--page` and `--find` (B7), and its
+  tail says that `--file` reads a long text from a file, which no shell cuts, and that the
+  four commands that take one say how it ends (B6): the six prints that hold the usage,
+  `cf task --help` among them, where the `--file` example follows the heredoc's;
+- the reply of each case that gives a window words (`cf task add`, `resume`, `tell`: ten
+  cases) has a last line, `Sent: <n> characters, ending "<its last words>".` (B6);
+- the daemon's traces of the same commands were changed with them.
+
 ## Two cases changed by hand after Node
 
 In `cli.darwin.json` and `cli.win32.json`, the cases `unknown command: -h`
