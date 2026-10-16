@@ -39,9 +39,10 @@ pub const HISTORY_ROOM: usize = PAGE_BYTES - 1_024;
 
 /// The most characters a page shows of a text that is no item's text: an
 /// item's id, its time, a conversation's harness, agent and times, and what
-/// ended it. The ledger keeps each within as many ([`cf_ledger::FIELD_MAX`]);
-/// a longer one, which no ledger gives, shows that many and "…".
-pub const SHOWN_FIELD: usize = cf_ledger::FIELD_MAX;
+/// ended it. The ledger gives none longer (an id as a page shows it is
+/// [`cf_ledger::ID_SHOWN`] characters and "…", a name [`cf_ledger::FIELD_MAX`]
+/// bytes); a longer one shows that many and "…".
+pub const SHOWN_FIELD: usize = 256;
 
 /// A message's opening by its id, in this project and this participant's
 /// only: what a delivery's line is said from. A line may name any number, and

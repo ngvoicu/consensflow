@@ -1,23 +1,20 @@
-//! What migration 0019 added, which Node's ledger never had: the columns of
-//! the `transcript` table that mark a compaction's summary and count an
-//! item's copies, and the text SQLite wrote for them into the table's schema;
-//! and the table that keeps a long item in parts and the indexes the history
-//! viewer reads through, each a table or an index of its own. The players of
+//! What migration 0019 added, which Node's ledger never had: the column of
+//! the `transcript` table that marks a compaction's summary, and the text
+//! SQLite wrote for it into the table's schema; and the tables that hold what
+//! the history viewer reads of each item and keep a long item in parts, and the
+//! indexes it reads through, each a table or an index of its own. The players of
 //! Node's recordings take them out of what this ledger left
 //! ([`super::hold_apart_what_node_never_writes`] for the rows and
 //! [`super::hold_apart_what_node_never_had_in_its_schema`] for the schema), so
 //! that what the two wrote in everything else is compared.
 
-/// The columns migration 0019 added to `transcript`, which Node's copies never
-/// had: whether an item is the summary a compaction wrote, and which copy of
-/// the item a row holds.
-pub(super) const COLUMNS: [(&str, &str); 2] =
-    [("transcript", "compaction"), ("transcript", "revision")];
+/// The column migration 0019 added to `transcript`, which Node's copies never
+/// had: whether an item is the summary a compaction wrote.
+pub(super) const COLUMNS: [(&str, &str); 1] = [("transcript", "compaction")];
 
-/// What SQLite wrote into the text of the `transcript` table for those
-/// columns, as migration 0019 added them one after the other, with the text
-/// each was added with.
-pub(super) const COLUMN_LINES: &str = ", compaction INTEGER NOT NULL DEFAULT 0 CONSTRAINT transcript_compaction_check CHECK (compaction IN (0, 1)), revision INTEGER NOT NULL DEFAULT 0";
+/// What SQLite wrote into the text of the `transcript` table for that column,
+/// with the text migration 0019 added it with.
+pub(super) const COLUMN_LINES: &str = ", compaction INTEGER NOT NULL DEFAULT 0 CONSTRAINT transcript_compaction_check CHECK (compaction IN (0, 1))";
 
 /// The tables (`"TABLE"`) or indexes (`"INDEX"`) migration 0019 made, by the
 /// names it gave them, as its lines say them (`CREATE INDEX name ON …`).
@@ -42,12 +39,11 @@ mod tests {
     };
 
     #[test]
-    fn takes_the_compaction_and_revision_columns_and_their_values_out_of_the_transcript_table_and_nothing_else(
-    ) {
+    fn takes_the_compaction_column_and_its_values_out_of_the_transcript_table_and_nothing_else() {
         let mut tables = json!({
             "transcript": {
-                "columns": ["item_id", "role", "compaction", "revision"],
-                "rows": [["'u1'", "'user'", "0", "0"], ["'s1'", "'user'", "1", "3"]],
+                "columns": ["item_id", "role", "compaction"],
+                "rows": [["'u1'", "'user'", "0"], ["'s1'", "'user'", "1"]],
             },
             "message": { "columns": ["id", "compaction"], "rows": [["1", "'kept'"]] },
         });
@@ -101,7 +97,7 @@ mod tests {
     }
 
     #[test]
-    fn takes_the_table_and_the_indexes_migration_0019_made_out_of_a_dump_and_nothing_else() {
+    fn takes_the_tables_and_the_indexes_migration_0019_made_out_of_a_dump_and_nothing_else() {
         use crate::schema::{migrate, MIGRATIONS};
         let names = |migrations: &[&str]| -> Vec<String> {
             let db = rusqlite::Connection::open_in_memory().unwrap();
@@ -133,6 +129,7 @@ mod tests {
         assert_eq!(left, before);
         let mut tables = json!({
             "transcript_part": { "columns": ["text"], "rows": [["'a part'"]] },
+            "transcript_head": { "columns": ["id_shown"], "rows": [["'u1'"]] },
             "transcript": { "columns": ["text"], "rows": [["'kept'"]] },
         });
         hold_apart_what_node_never_writes(tables.as_object_mut().unwrap());

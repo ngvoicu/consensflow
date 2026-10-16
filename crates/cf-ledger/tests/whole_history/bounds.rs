@@ -310,12 +310,13 @@ fn a_page_of_a_long_history_takes_what_a_page_takes() {
         let Scanned {
             conversations,
             rows,
+            parts,
             bytes,
             fields,
             steps,
         } = read.scanned;
         println!(
-            "{what}: {took:?}, {} entries; {conversations} conversations, {rows} rows, {bytes} bytes of text and {fields} of fields, {steps} steps gone through",
+            "{what}: {took:?}, {} entries; {conversations} conversations, {rows} rows, {parts} part lookups, {bytes} bytes of text and {fields} of fields, {steps} steps gone through",
             read.entries.len(),
         );
         assert!(took.as_millis() < 1_000, "{what} took {took:?}");

@@ -6,46 +6,33 @@
 -- it was read then. One column added in place, as 0017 added its own: nothing of
 -- the transcript's rows moves. The column is one line: the test players that
 -- hold a database this ledger left to what Node's did read the line to know what
--- Node's schema never had. So is the next.
+-- Node's schema never had.
   ALTER TABLE transcript ADD COLUMN compaction INTEGER NOT NULL DEFAULT 0 CONSTRAINT transcript_compaction_check CHECK (compaction IN (0, 1));
--- Which copy of its item a row holds: the copy that writes the item again
--- changed makes it the next, so that a reader of a long item's parts knows
--- they are of one copy. An item copied before this column is at its first.
-  ALTER TABLE transcript ADD COLUMN revision INTEGER NOT NULL DEFAULT 0;
 
 -- Every field the history viewer reads but an item's text has a ceiling, which
 -- each write keeps (`conversations::FIELD_MAX`, `HEADING_EVENT_MAX`): what an
--- older build wrote past it is cut here, once, before the indexes below are
--- built on it, and never fails on what it finds. An item's time longer than 256
--- characters is none, as the copy keeps a time it does not read; a
--- conversation's times, cut to 256; its harness too, and its native session
--- none, so that no two are made one; an item's id and a longer native session
--- after this SQL (`schema::after`). Each of these is read only where its size
--- says it is long, never past an item's text to find out.
-  UPDATE transcript SET at = NULL
-    WHERE CASE WHEN octet_length(at) > 256 THEN length(at) > 256 END;
-  UPDATE conversation SET harness = substr(harness, 1, 255) || '…', native_session = NULL
-    WHERE CASE WHEN octet_length(harness) > 256 THEN length(harness) > 256 END;
-  UPDATE conversation SET started_at = substr(started_at, 1, 255) || '…'
-    WHERE CASE WHEN octet_length(started_at) > 256 THEN length(started_at) > 256 END;
-  UPDATE conversation SET ended_at = substr(ended_at, 1, 255) || '…'
-    WHERE CASE WHEN octet_length(ended_at) > 256 THEN length(ended_at) > 256 END;
--- An event a heading reads whose data is longer than 4,096 bytes is written as
--- what a heading reads of it, and the size it was: the conversation's id where
--- it is a whole number, and each name where it is text no longer than 256
--- characters; none where its data is no JSON.
+-- older build wrote past one is brought within it here, once, never failing on
+-- what it finds; each is measured in bytes, never by `length()`, which stops at
+-- a NUL. An event a heading reads whose data is longer than 4,096 bytes is
+-- written as what a heading reads of it, and the size it was: the
+-- conversation's id where it is a whole number, and each name where JSON writes
+-- it, its quotes too, in 258 bytes or fewer (so that a switch's four names and
+-- its keys are 1,200 bytes at most); none where its data is no JSON. It is done
+-- before the indexes of the log are built on it. The times, harnesses and
+-- agents of the conversations and participants are brought within theirs past
+-- this SQL (`schema::after`), where a cut can keep to a character.
   UPDATE event SET data = json_object(
       'conversation', CASE WHEN json_valid(data) THEN CASE WHEN json_type(data, '$.conversation') = 'integer' THEN json_extract(data, '$.conversation') END END,
-      'participant', CASE WHEN json_valid(data) THEN CASE WHEN json_type(data, '$.participant') = 'text' THEN CASE WHEN length(json_extract(data, '$.participant')) <= 256 THEN json_extract(data, '$.participant') END END END,
+      'participant', CASE WHEN json_valid(data) THEN CASE WHEN json_type(data, '$.participant') = 'text' THEN CASE WHEN octet_length(json_quote(json_extract(data, '$.participant'))) <= 258 THEN json_extract(data, '$.participant') END END END,
       'cutFromBytes', octet_length(data))
     WHERE kind IN ('conversation.started', 'conversation.followed', 'conversation.ended') AND octet_length(data) > 4096;
   UPDATE event SET data = json_object(
       'from', json_object(
-        'harness', CASE WHEN json_valid(data) THEN CASE WHEN json_type(data, '$.from.harness') = 'text' THEN CASE WHEN length(json_extract(data, '$.from.harness')) <= 256 THEN json_extract(data, '$.from.harness') END END END,
-        'agent', CASE WHEN json_valid(data) THEN CASE WHEN json_type(data, '$.from.agent') = 'text' THEN CASE WHEN length(json_extract(data, '$.from.agent')) <= 256 THEN json_extract(data, '$.from.agent') END END END),
+        'harness', CASE WHEN json_valid(data) THEN CASE WHEN json_type(data, '$.from.harness') = 'text' THEN CASE WHEN octet_length(json_quote(json_extract(data, '$.from.harness'))) <= 258 THEN json_extract(data, '$.from.harness') END END END,
+        'agent', CASE WHEN json_valid(data) THEN CASE WHEN json_type(data, '$.from.agent') = 'text' THEN CASE WHEN octet_length(json_quote(json_extract(data, '$.from.agent'))) <= 258 THEN json_extract(data, '$.from.agent') END END END),
       'to', json_object(
-        'harness', CASE WHEN json_valid(data) THEN CASE WHEN json_type(data, '$.to.harness') = 'text' THEN CASE WHEN length(json_extract(data, '$.to.harness')) <= 256 THEN json_extract(data, '$.to.harness') END END END,
-        'agent', CASE WHEN json_valid(data) THEN CASE WHEN json_type(data, '$.to.agent') = 'text' THEN CASE WHEN length(json_extract(data, '$.to.agent')) <= 256 THEN json_extract(data, '$.to.agent') END END END),
+        'harness', CASE WHEN json_valid(data) THEN CASE WHEN json_type(data, '$.to.harness') = 'text' THEN CASE WHEN octet_length(json_quote(json_extract(data, '$.to.harness'))) <= 258 THEN json_extract(data, '$.to.harness') END END END,
+        'agent', CASE WHEN json_valid(data) THEN CASE WHEN json_type(data, '$.to.agent') = 'text' THEN CASE WHEN octet_length(json_quote(json_extract(data, '$.to.agent'))) <= 258 THEN json_extract(data, '$.to.agent') END END END),
       'cut', CASE WHEN json_valid(data) THEN CASE json_type(data, '$.cut') WHEN 'true' THEN json('true') WHEN 'false' THEN json('false') END END,
       'cutFromBytes', octet_length(data))
     WHERE kind = 'chief.switched' AND octet_length(data) > 4096;
@@ -61,9 +48,6 @@
   CREATE INDEX transcript_copied_index ON transcript (conversation_id);
   CREATE INDEX transcript_said_index ON transcript (conversation_id) WHERE role != 'tool';
   CREATE INDEX transcript_tool_index ON transcript (conversation_id) WHERE role = 'tool';
--- An item's fields that its row holds after its text, which a long item's row
--- holds only past the whole of its text.
-  CREATE INDEX transcript_item_index ON transcript (conversation_id, item_id, complete, at, compaction, revision);
 -- What the log says of a conversation, as each heading says it: where it began
 -- or a window went to it, and where it ended; where each of a participant's
 -- began or was gone to; and the chief's switches. An event an older build
@@ -74,17 +58,40 @@
   CREATE INDEX event_participant_index ON event (project_id, CASE WHEN json_valid(data) THEN json_extract(data, '$.participant') END) WHERE kind IN ('conversation.started', 'conversation.followed');
   CREATE INDEX event_switch_index ON event (project_id) WHERE kind = 'chief.switched';
 
+-- What the viewer reads of each item besides its text, by the item's row: the
+-- item's id as a page shows it (its first 256 characters, and "…" where it is
+-- longer; the id itself is the item's identity, kept whole in its row), whether
+-- it is complete, its time, whether it is a compaction's summary, and which
+-- copy of it the row holds (the copy that writes the item again changed makes
+-- it the next, so that a reader of a long item's parts knows they are of one
+-- copy). A row holds these past the whole of its text, which an item's can run
+-- to megabytes, and SQLite indexes no row by its id: so they are held here,
+-- where each is short. The copy writes them with the row, and is its only
+-- writer but this migration, which writes them for the items copied before it
+-- (`schema::after`). A row's id is its own for as long as the row is: nothing
+-- rebuilds the table, and no build runs VACUUM.
+  CREATE TABLE transcript_head (
+    item INTEGER PRIMARY KEY,
+    conversation_id INTEGER NOT NULL,
+    id_shown TEXT NOT NULL,
+    complete INTEGER NOT NULL,
+    at TEXT,
+    compaction INTEGER NOT NULL,
+    revision INTEGER NOT NULL DEFAULT 0,
+    CONSTRAINT transcript_head_conversation_fk FOREIGN KEY (conversation_id)
+      REFERENCES conversation (id) ON DELETE CASCADE
+  ) STRICT;
+
 -- An item longer than a part (64,000 characters; the human's words, an
 -- agent's, are copied whole and can run to megabytes) is kept in parts as well,
--- each part a row, so that the viewer reads a part and no more. The copy writes
--- them; the long items copied before this table are split once, when this
--- migration runs (`schema::after`).
+-- each part a row of its item's, so that the viewer reads a part and no more.
+-- The copy writes them; the long items copied before this table are split
+-- once, when this migration runs (`schema::after`).
   CREATE TABLE transcript_part (
-    conversation_id INTEGER NOT NULL,
-    item_id TEXT NOT NULL,
+    item INTEGER NOT NULL,
     part INTEGER NOT NULL,
     text TEXT NOT NULL,
-    CONSTRAINT transcript_part_pk PRIMARY KEY (conversation_id, item_id, part),
-    CONSTRAINT transcript_part_item_fk FOREIGN KEY (conversation_id, item_id)
-      REFERENCES transcript (conversation_id, item_id) ON DELETE CASCADE
+    CONSTRAINT transcript_part_pk PRIMARY KEY (item, part),
+    CONSTRAINT transcript_part_item_fk FOREIGN KEY (item)
+      REFERENCES transcript_head (item) ON DELETE CASCADE
   ) STRICT;

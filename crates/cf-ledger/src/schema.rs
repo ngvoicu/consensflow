@@ -100,18 +100,20 @@ pub fn migrate(db: &Connection, migrations: &[&str]) -> Result<(), LedgerError> 
     migrated
 }
 
-/// What the migration to `version` does past its SQL: 0019 cuts the items'
-/// ids and the conversations' native sessions an older build wrote past their
-/// ceilings, as the copy and a binding keep them within (a hash of a long id,
-/// a count of a session's characters, as JavaScript counts them), then splits
-/// the long items copied before it into the parts its table keeps, by the ids
-/// as they are cut: that needs each text read once, whole, where SQL's own
-/// functions would read it once a part.
+/// What the migration to `version` does past its SQL: 0019 writes the head of
+/// each item copied before it (what the history viewer reads of it besides its
+/// text, its time kept as a store keeps one), splits the long ones into the
+/// parts its table keeps, which needs each text read once, whole, where SQL's
+/// own functions would read it once a part; and brings within their ceilings
+/// the native sessions, harnesses, agents and times an older build wrote past
+/// them, measured in bytes and cut at a character, which SQL's `length()` and
+/// `substr()` count only to a NUL.
 fn after(db: &Connection, version: usize) -> Result<(), LedgerError> {
     if version == 19 {
-        crate::conversations::cut_copied(db)?;
-        crate::conversations::cut_sessions(db)?;
+        crate::conversations::head_copied(db)?;
         crate::conversations::split_copied(db)?;
+        crate::conversations::cut_sessions(db)?;
+        crate::conversations::fields_within(db)?;
     }
     Ok(())
 }
@@ -147,7 +149,7 @@ mod tests {
             "33053c05edf05fb28fdfed70def7dd9a93d28763f1b444651d24beeba1654352",
             "d73267cfa36e7769831bc565137149029fdc90c32342e6438816e01db5c68c63",
             "63715a099a8464bb97a304c1c7623cada58ade9effb5418625d6df27da26f2b1",
-            "c6ede37cb2efbce59eddac9270e28d781a50358d824303c297c837a455555e48",
+            "fe46376d853d6d374d63af360b2177223692a983248d66383a7aa591408aa580",
         ];
         for (at, (sql, shipped)) in MIGRATIONS.iter().zip(SHIPPED).enumerate() {
             let hash: String = Sha256::digest(sql.as_bytes())

@@ -421,10 +421,11 @@ async fn an_item_s_id_however_long_is_shown_cut_and_its_page_fits_a_frame() {
             assert!(said.len() <= PAGE_BYTES, "{} bytes", said.len());
             let shown = &answer["history"]["conversations"][0]["items"][0];
             assert_eq!(shown["text"], "ok");
-            // As the copy keeps it: its first characters and its hash, as many as a field holds.
-            let id = shown["id"].as_str().unwrap();
-            assert!(id.starts_with(&format!("{}…", "i".repeat(223))), "{id}");
-            assert_eq!(id.chars().count(), cf_ledger::FIELD_MAX);
+            // As a page shows it: its first characters, and "…"; the id is kept whole.
+            assert_eq!(
+                shown["id"],
+                format!("{}…", "i".repeat(cf_ledger::ID_SHOWN))
+            );
             // Its text is read by its place, never by its id.
             let part = ask(
                 &app,

@@ -9,7 +9,9 @@ mod history;
 mod transcripts;
 
 use cf_base::text::utf16_len;
+use cf_base::time;
 use cf_proto::ledger::ConversationView;
+use rusqlite::types::ValueRef;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::json;
 
@@ -25,16 +27,22 @@ pub use history::{
 };
 pub use transcripts::TRANSCRIPT_ITEM_MAX;
 pub(crate) use transcripts::{
-    copied_item_with, copy_transcript, cut_copied, split_copied, transcript, typed_since,
+    copied_item_with, copy_transcript, head_copied, split_copied, transcript, typed_since,
 };
 
-/// The most characters a field of the history holds that is no item's text:
-/// an item's id and its time, and a conversation's harness and times. A
-/// harness's own ids are tens of characters, a time thirty, a harness's kind
-/// eleven. The copy keeps a longer id as one this long that is still its own
-/// (`copy_transcript`) and a longer time as none, as a time it does not read;
-/// migration 0019 cuts what an older build wrote past it, once, the same way.
+/// The most bytes a name the history reads holds: a conversation's harness, a
+/// participant's agent (a harness's kind is eleven, an agent's id 64 at most at
+/// every write), and a conversation's time that is no time. Migration 0019 cuts
+/// what an older build wrote longer to it, at a character, with "…". A time the
+/// history reads is kept as a store keeps one wherever it is written
+/// ([`time::canonical`], a few dozen bytes), never cut.
 pub const FIELD_MAX: usize = 256;
+
+/// The most characters of an item's id a page shows (`id_shown`, in migration
+/// 0019's `transcript_head`): a longer one shows those and "…". An id is an
+/// item's identity, kept whole where it is stored and matched: a harness's own
+/// are tens of characters, and none is bounded.
+pub const ID_SHOWN: usize = 256;
 
 /// The most characters (as JavaScript counts them) a conversation's native
 /// session holds: a harness's session ids are tens. A longer one is refused
@@ -142,6 +150,81 @@ pub(crate) fn cut_sessions(db: &Connection) -> rusqlite::Result<()> {
         }
     }
     Ok(())
+}
+
+/// Brings within their ceilings, once, what an older build wrote of each
+/// conversation and participant past them: what migration 0019 does past its
+/// SQL, measuring each in bytes as it reads. A conversation's harness longer
+/// than [`FIELD_MAX`] is cut to it ([`cut_to`]), and its native session is none,
+/// so that two are never made one; its times are kept as a store keeps one
+/// ([`time::canonical`]), and one that is no time is cut as a harness is, as
+/// the conversation began, and ended, all the same. A participant's agent is
+/// cut as a harness is; the time it is out until is kept as a store keeps one,
+/// none where it is no time (which says it is not out, as before).
+pub(crate) fn fields_within(db: &Connection) -> rusqlite::Result<()> {
+    let text = |value: ValueRef<'_>| match value {
+        ValueRef::Text(bytes) => Some(crate::openings::text_of(bytes)),
+        _ => None,
+    };
+    let time_kept =
+        |given: &str| time::canonical(given).unwrap_or_else(|| cut_to(given, FIELD_MAX));
+    let mut conversations = Vec::new();
+    let mut rows = db.prepare("SELECT id, harness, started_at, ended_at FROM conversation")?;
+    let mut found = rows.query([])?;
+    while let Some(row) = found.next()? {
+        let (harness, started, ended) = (
+            text(row.get_ref(1)?).unwrap_or_default(),
+            text(row.get_ref(2)?).unwrap_or_default(),
+            text(row.get_ref(3)?),
+        );
+        let kept = (
+            cut_to(&harness, FIELD_MAX),
+            time_kept(&started),
+            ended.as_deref().map(time_kept),
+        );
+        if (&kept.0, &kept.1, &kept.2) != (&harness, &started, &ended) {
+            conversations.push((row.get::<_, i64>(0)?, harness.len() > FIELD_MAX, kept));
+        }
+    }
+    let mut keep = db.prepare(
+        "UPDATE conversation SET harness = ?2, started_at = ?3, ended_at = ?4,
+           native_session = CASE WHEN ?5 THEN NULL ELSE native_session END
+         WHERE id = ?1",
+    )?;
+    for (id, cut, (harness, started, ended)) in conversations {
+        keep.execute(params![id, harness, started, ended, cut])?;
+    }
+    let mut participants = Vec::new();
+    let mut rows = db.prepare("SELECT id, agent, out_until FROM participant")?;
+    let mut found = rows.query([])?;
+    while let Some(row) = found.next()? {
+        let (agent, until) = (text(row.get_ref(1)?), text(row.get_ref(2)?));
+        let kept = (
+            agent.as_deref().map(|agent| cut_to(agent, FIELD_MAX)),
+            until.as_deref().and_then(time::canonical),
+        );
+        if (&kept.0, &kept.1) != (&agent, &until) {
+            participants.push((row.get::<_, i64>(0)?, kept));
+        }
+    }
+    let mut keep = db.prepare("UPDATE participant SET agent = ?2, out_until = ?3 WHERE id = ?1")?;
+    for (id, (agent, until)) in participants {
+        keep.execute(params![id, agent, until])?;
+    }
+    Ok(())
+}
+
+/// `text` within `most` bytes: as it is, where it is no longer; else as much of
+/// it as `most` holds with "…" after it, cut where a character ends.
+pub(crate) fn cut_to(text: &str, most: usize) -> String {
+    if text.len() <= most {
+        return text.to_owned();
+    }
+    let mut end = most.saturating_sub('…'.len_utf8());
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}…", &text[..end])
 }
 
 /// The role text a conversation was last given (migration 0016): none where it

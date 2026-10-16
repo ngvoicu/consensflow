@@ -153,6 +153,52 @@ fn confirms_a_message_whose_header_the_copy_of_its_window_already_shows() {
 }
 
 #[test]
+fn confirms_a_message_by_the_whole_id_the_harness_gave_the_item_that_shows_it_however_long() {
+    // The reviewers' sequence: an item's id of 300 characters, which the copy
+    // once cut where it kept it, so that the receipt named an id the harness
+    // never gave. The copy keeps it whole, and the receipt names it.
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    let chief = context.id(project.id, "chief");
+    context.pass().unwrap();
+    context.adapter.with("chief", |agent| agent.arrive = false);
+    let note = context.note(project.id, "zeus", "chief", "Shown");
+    context.pass().unwrap();
+    let mut shown = context
+        .adapter
+        .item(Role::User, &delivery_text(&context.message(note.id), &[]));
+    let long = "r".repeat(300);
+    shown.id = std::sync::Arc::from(long.as_str());
+    let conversation = context
+        .ledger
+        .borrow()
+        .current_conversation(chief)
+        .unwrap()
+        .unwrap();
+    let written = serde_json::to_value(&shown).unwrap();
+    context
+        .ledger
+        .borrow_mut()
+        .copy_transcript(conversation.id, &[written], 0)
+        .unwrap();
+    let marker = format!("m-{}", note.id);
+    assert_eq!(
+        context
+            .ledger
+            .borrow()
+            .copied_item_with(chief, &marker)
+            .unwrap(),
+        Some(long.clone())
+    );
+
+    context.ledger.borrow_mut().suspend_for_restart().unwrap();
+    context.make().settle_after_restart().unwrap();
+    let settled = context.message(note.id);
+    assert_eq!(settled.state, "delivered");
+    assert_eq!(settled.receipt, json!({ "item": long }));
+}
+
+#[test]
 fn opens_a_members_session_again_on_its_own_conversation_with_the_brief_it_was_opened_for() {
     let context = Context::new();
     let project = context.with_tiers(&["zeus", "diana"]);

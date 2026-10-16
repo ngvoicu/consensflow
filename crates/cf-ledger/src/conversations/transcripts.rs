@@ -1,16 +1,14 @@
 //! The copy ConsensFlow keeps of each conversation, item by item, and what
 //! the windows that had a task wrote.
 
-use std::borrow::Cow;
 use std::collections::HashMap;
 
 use cf_base::time;
 use cf_proto::ledger::{HistoryItem, TaskTranscript, TranscriptItem};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::Value;
-use sha2::{Digest, Sha256};
 
-use super::{known_conversation, FIELD_MAX};
+use super::{known_conversation, ID_SHOWN};
 use crate::model::{cut, LedgerError};
 use crate::openings::text_of;
 use crate::store::Store;
@@ -25,20 +23,19 @@ const TRANSCRIPT_ROLES: [&str; 4] = ["user", "assistant", "tool", "custom"];
 /// The header every delivery opens with, naming its message: `[ConsensFlow m-12 `.
 const HEADER: &str = "[ConsensFlow m-";
 
-/// How many hexadecimal digits of its hash end an id the copy cut ([`kept_id`]).
-const ID_HASH: usize = 32;
-
 /// The copy of a window's conversation, one row per item as the harness's
 /// own record has them: what is new is added, and an item still being
 /// written is brought up to date. `from` is the position of the first item
 /// given, so a caller may pass only the tail. An item is read as the
-/// harness's record wrote it: one with no id is passed over, and a role or
-/// a time it does not know is `custom`, or none. An id or a time longer than
-/// [`FIELD_MAX`] characters is kept within it: the id as [`kept_id`] says, the
-/// time as none. An item that says it is a
+/// harness's record wrote it: one with no id is passed over, and its id, its
+/// identity, is kept whole however long; a role it does not know is `custom`;
+/// its time is kept as a store keeps one ([`time::canonical`]), none where it
+/// is no time. An item that says it is a
 /// compaction's summary (`compaction: true`) is marked so when it is first
-/// copied; one copied before the mark stays as it was. An item written again
-/// changed is its next revision. How many rows changed.
+/// copied; one copied before the mark stays as it was. What the history viewer
+/// reads of an item besides its text is written with its row ([`write_head`]),
+/// and its text in parts where it is long ([`write_parts`]); an item written
+/// again changed is its next revision. How many rows changed.
 pub(crate) fn copy_transcript(
     store: &mut Store,
     conversation_id: i64,
@@ -53,8 +50,9 @@ pub(crate) fn copy_transcript(
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (conversation_id, item_id) DO UPDATE
          SET seq = excluded.seq, text = excluded.text, complete = excluded.complete,
-             at = excluded.at, copied_at = excluded.copied_at, revision = transcript.revision + 1
-         WHERE transcript.text != excluded.text OR transcript.complete != excluded.complete",
+             at = excluded.at, copied_at = excluded.copied_at
+         WHERE transcript.text != excluded.text OR transcript.complete != excluded.complete
+       RETURNING rowid, compaction",
         )?;
         let mut written = 0;
         for (index, item) in (0_i64..).zip(items) {
@@ -65,7 +63,6 @@ pub(crate) fn copy_transcript(
             else {
                 continue;
             };
-            let id = kept_id(id);
             let text = item.get("text").and_then(Value::as_str).unwrap_or_default();
             let role = item
                 .get("role")
@@ -77,94 +74,130 @@ pub(crate) fn copy_transcript(
             } else {
                 text.to_string()
             };
+            let complete = item.get("complete") != Some(&Value::Bool(false));
             let at = item
                 .get("at")
                 .and_then(Value::as_str)
-                .filter(|at| within(at) && time::parse(at).is_some());
-            let changed = upsert.execute(params![
-                conversation_id,
-                id,
-                from + index,
-                role,
-                text,
-                i64::from(item.get("complete") != Some(&Value::Bool(false))),
-                at,
-                copied_at,
-                i64::from(item.get("compaction") == Some(&Value::Bool(true))),
-            ])?;
-            if changed > 0 {
-                write_parts(&store.db, conversation_id, &id, &text)?;
-            }
-            written += changed;
+                .and_then(time::canonical);
+            let changed = upsert
+                .query_row(
+                    params![
+                        conversation_id,
+                        id,
+                        from + index,
+                        role,
+                        text,
+                        i64::from(complete),
+                        at,
+                        copied_at,
+                        i64::from(item.get("compaction") == Some(&Value::Bool(true))),
+                    ],
+                    |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
+                )
+                .optional()?;
+            let Some((row, compaction)) = changed else {
+                continue;
+            };
+            write_head(
+                &store.db,
+                &Head {
+                    item: row,
+                    conversation_id,
+                    id_shown: shown_id(id),
+                    complete,
+                    at,
+                    compaction,
+                },
+            )?;
+            write_parts(&store.db, row, &text)?;
+            written += 1;
         }
         Ok(written)
     })
 }
 
-/// Whether `text` is no longer than [`FIELD_MAX`] characters.
-fn within(text: &str) -> bool {
-    text.chars().nth(FIELD_MAX).is_none()
+/// What the history viewer reads of the item at row `item` besides its text,
+/// as migration 0019's `transcript_head` holds it.
+struct Head {
+    item: i64,
+    conversation_id: i64,
+    id_shown: String,
+    complete: bool,
+    at: Option<String>,
+    compaction: i64,
 }
 
-/// An item's id as the copy keeps it: as it is, where it is no longer than
-/// [`FIELD_MAX`] characters; else its first characters, "…" and the first
-/// [`ID_HASH`] hexadecimal digits of the SHA-256 of the whole of it,
-/// [`FIELD_MAX`] characters in all. The same id is kept the same each time it
-/// is copied, so a copy made again finds its row; two that begin alike are
-/// kept apart.
-fn kept_id(id: &str) -> Cow<'_, str> {
-    if within(id) {
-        return Cow::Borrowed(id);
-    }
-    Cow::Owned(marked(id, id.as_bytes(), 0))
-}
-
-/// Id `id` cut as [`kept_id`] cuts one, its hash of `whole` (its bytes), and
-/// of `count` too where that is not 0.
-fn marked(id: &str, whole: &[u8], count: u32) -> String {
-    let mut hash = Sha256::new();
-    hash.update(whole);
-    if count > 0 {
-        hash.update(count.to_le_bytes());
-    }
-    let digits: String = hash
-        .finalize()
-        .iter()
-        .take(ID_HASH / 2)
-        .map(|byte| format!("{byte:02x}"))
-        .collect();
-    let head: String = id.chars().take(FIELD_MAX - 1 - ID_HASH).collect();
-    format!("{head}…{digits}")
-}
-
-/// Cuts each id of an item an older build copied longer than [`FIELD_MAX`]
-/// characters to the one the copy keeps of it ([`kept_id`]): what migration
-/// 0019 does past its SQL, before it splits the long items into parts, which
-/// name their item by its id. An id that is no UTF-8 is cut as it reads, its
-/// hash of its bytes as they are. Where another of the conversation's items
-/// holds that id already, as only an id written to be one could, its hash is
-/// of the id and a count, the first that none holds.
-pub(crate) fn cut_copied(db: &Connection) -> rusqlite::Result<()> {
-    let long = db
-        .prepare("SELECT rowid FROM transcript WHERE octet_length(item_id) > ?")?
-        .query_map([i64::try_from(FIELD_MAX).unwrap_or(i64::MAX)], |row| {
-            row.get::<_, i64>(0)
-        })?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
-    let mut read = db.prepare("SELECT item_id FROM transcript WHERE rowid = ?")?;
-    let mut write = db.prepare("UPDATE OR IGNORE transcript SET item_id = ?2 WHERE rowid = ?1")?;
-    for row in long {
-        let whole = read.query_row([row], |found| Ok(found.get_ref(0)?.as_bytes()?.to_vec()))?;
-        let id = text_of(&whole);
-        if within(&id) {
-            continue;
-        }
-        let mut count = 0;
-        while write.execute(params![row, marked(&id, &whole, count)])? == 0 {
-            count += 1;
-        }
-    }
+/// Writes `head`, with its row: its id as a page shows it and its mark of a
+/// compaction's summary as they were when it was first copied, which they stay;
+/// whether it is complete and its time as they are now; and the next revision
+/// of it where it was written before.
+fn write_head(db: &Connection, head: &Head) -> rusqlite::Result<()> {
+    db.prepare_cached(
+        "INSERT INTO transcript_head (item, conversation_id, id_shown, complete, at, compaction)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT (item) DO UPDATE
+         SET complete = excluded.complete, at = excluded.at, revision = transcript_head.revision + 1",
+    )?
+    .execute(params![
+        head.item,
+        head.conversation_id,
+        head.id_shown,
+        i64::from(head.complete),
+        head.at,
+        head.compaction
+    ])?;
     Ok(())
+}
+
+/// An item's id as a page shows it: whole, where it is no longer than
+/// [`ID_SHOWN`] characters; else its first [`ID_SHOWN`] characters and "…".
+fn shown_id(id: &str) -> String {
+    match id.char_indices().nth(ID_SHOWN) {
+        Some((end, _)) => format!("{}…", &id[..end]),
+        None => id.to_owned(),
+    }
+}
+
+/// Writes the head of every item copied before the copy wrote heads, from its
+/// row: what migration 0019 does past its SQL, before it splits the long items
+/// into parts, which hang from their heads. Its time is kept as a store keeps
+/// one, and written back to its row where that is not how it was written: as
+/// the copy writes it, none where it is no time. An id or a time that is no
+/// UTF-8 (which no build writes) is read as it reads, U+FFFD for what is none.
+/// How many rows' times were written back.
+pub(crate) fn head_copied(db: &Connection) -> rusqlite::Result<usize> {
+    let mut heads = db.prepare(
+        "SELECT rowid, conversation_id, item_id, complete, at, compaction FROM transcript",
+    )?;
+    let mut rows = heads.query([])?;
+    let mut retimed = Vec::new();
+    while let Some(row) = rows.next()? {
+        let item: i64 = row.get(0)?;
+        let given = match row.get_ref(4)? {
+            rusqlite::types::ValueRef::Text(at) => Some(text_of(at)),
+            _ => None,
+        };
+        let at = given.as_deref().and_then(time::canonical);
+        if at != given {
+            retimed.push((item, at.clone()));
+        }
+        write_head(
+            db,
+            &Head {
+                item,
+                conversation_id: row.get(1)?,
+                id_shown: shown_id(&text_of(row.get_ref(2)?.as_bytes()?)),
+                complete: row.get::<_, i64>(3)? == 1,
+                at,
+                compaction: row.get(5)?,
+            },
+        )?;
+    }
+    let mut retime = db.prepare("UPDATE transcript SET at = ?2 WHERE rowid = ?1")?;
+    for (item, at) in &retimed {
+        retime.execute(params![item, at])?;
+    }
+    Ok(retimed.len())
 }
 
 /// The parts of a text longer than one ([`TRANSCRIPT_ITEM_MAX`] characters
@@ -186,43 +219,34 @@ fn parts_of(text: &str) -> Vec<&str> {
         .collect()
 }
 
-/// Keeps item `item_id`'s text in parts as well, where it is longer than one,
-/// so that a reader of a long item reads a part of it and no more: each part
-/// that changed is written, and the parts past the text's last are taken away
-/// (all of them from a text no longer than a part).
-fn write_parts(
-    db: &Connection,
-    conversation_id: i64,
-    item_id: &str,
-    text: &str,
-) -> rusqlite::Result<()> {
+/// Keeps the text of the item at row `item` in parts as well, where it is
+/// longer than one, so that a reader of a long item reads a part of it and no
+/// more: each part that changed is written, and the parts past the text's last
+/// are taken away (all of them from a text no longer than a part).
+fn write_parts(db: &Connection, item: i64, text: &str) -> rusqlite::Result<()> {
     let parts = parts_of(text);
     let mut write = db.prepare_cached(
-        "INSERT INTO transcript_part (conversation_id, item_id, part, text) VALUES (?, ?, ?, ?)
-       ON CONFLICT (conversation_id, item_id, part) DO UPDATE SET text = excluded.text
+        "INSERT INTO transcript_part (item, part, text) VALUES (?, ?, ?)
+       ON CONFLICT (item, part) DO UPDATE SET text = excluded.text
          WHERE transcript_part.text != excluded.text",
     )?;
     for (part, piece) in (0_i64..).zip(&parts) {
-        write.execute(params![conversation_id, item_id, part, piece])?;
+        write.execute(params![item, part, piece])?;
     }
-    db.prepare_cached(
-        "DELETE FROM transcript_part WHERE conversation_id = ? AND item_id = ? AND part >= ?",
-    )?
-    .execute(params![
-        conversation_id,
-        item_id,
-        i64::try_from(parts.len()).unwrap_or(i64::MAX)
-    ])?;
+    db.prepare_cached("DELETE FROM transcript_part WHERE item = ? AND part >= ?")?
+        .execute(params![
+            item,
+            i64::try_from(parts.len()).unwrap_or(i64::MAX)
+        ])?;
     Ok(())
 }
 
 /// Splits into parts every item copied before the copy kept long items in
-/// parts too: what migration 0019 does past its SQL, once. Only a text of
-/// more bytes than a part's characters can be longer than a part, and only
-/// those are read, one at a time. Each part is written by its item's row, so
-/// the item's id is kept as it was; and a text that is no UTF-8 (neither
-/// Node's ledger nor this one writes one, each writing its language's own
-/// strings) is split as it reads, U+FFFD for what is none, never refused.
+/// parts too: what migration 0019 does past its SQL, once, after it wrote their
+/// heads. Only a text of more bytes than a part's characters can be longer than
+/// a part, and only those are read, one at a time. A text that is no UTF-8
+/// (neither Node's ledger nor this one writes one, each writing its language's
+/// own strings) is split as it reads, U+FFFD for what is none, never refused.
 pub(crate) fn split_copied(db: &Connection) -> rusqlite::Result<()> {
     let long = db
         .prepare("SELECT rowid FROM transcript WHERE octet_length(text) > ?")?
@@ -232,10 +256,8 @@ pub(crate) fn split_copied(db: &Connection) -> rusqlite::Result<()> {
         )?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     let mut read = db.prepare("SELECT text FROM transcript WHERE rowid = ?")?;
-    let mut write = db.prepare(
-        "INSERT INTO transcript_part (conversation_id, item_id, part, text)
-       SELECT conversation_id, item_id, ?2, ?3 FROM transcript WHERE rowid = ?1",
-    )?;
+    let mut write =
+        db.prepare("INSERT INTO transcript_part (item, part, text) VALUES (?, ?, ?)")?;
     for row in long {
         let text = read.query_row([row], |found| Ok(text_of(found.get_ref(0)?.as_bytes()?)))?;
         for (part, piece) in (0_i64..).zip(parts_of(&text)) {

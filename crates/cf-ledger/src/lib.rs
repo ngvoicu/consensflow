@@ -50,7 +50,8 @@ pub use cf_proto::ledger::{
 pub use cf_proto::wake_ups::WakeUpView;
 pub use conversations::{
     ChiefSwitch, HistoryAsk, FIELD_MAX, HEADING_EVENT_MAX, HISTORY_FIND_MAX, HISTORY_PART,
-    HISTORY_SCAN_BYTES, MESSAGE_OPENING, NATIVE_SESSION_MAX, OPENING_COST, TRANSCRIPT_ITEM_MAX,
+    HISTORY_SCAN_BYTES, ID_SHOWN, MESSAGE_OPENING, NATIVE_SESSION_MAX, OPENING_COST,
+    TRANSCRIPT_ITEM_MAX,
 };
 #[cfg(feature = "test-support")]
 pub use ledger::Watcher;

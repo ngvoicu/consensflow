@@ -10,14 +10,17 @@ use rusqlite::{params, Connection};
 
 const AT: &str = "2026-10-16T12:00:00.000Z";
 
-/// The parts kept of item `item`, in order.
+/// The parts kept of item `item`, in order, by its row.
 fn parts(db: &Connection, item: &str) -> Vec<String> {
-    db.prepare("SELECT text FROM transcript_part WHERE item_id = ? ORDER BY part")
-        .expect("a query")
-        .query_map([item], |row| row.get(0))
-        .expect("the parts")
-        .collect::<rusqlite::Result<_>>()
-        .expect("each part")
+    db.prepare(
+        "SELECT p.text FROM transcript_part p JOIN transcript t ON t.rowid = p.item
+         WHERE t.item_id = ? ORDER BY p.part",
+    )
+    .expect("a query")
+    .query_map([item], |row| row.get(0))
+    .expect("the parts")
+    .collect::<rusqlite::Result<_>>()
+    .expect("each part")
 }
 
 #[test]
@@ -68,9 +71,11 @@ fn a_populated_version_18_ledger_has_its_long_items_split_into_parts_in_migratio
 
 /// What migration 19 takes on a ledger of 200 MB of items of 4 KB, 100 long
 /// ones of 1 MB and one of 24 MiB, and a log of 200,000 events of the kinds
-/// its indexes read, each JSON checked as it is indexed, with fields past their
-/// ceilings to cut (ids, times, events, native sessions): what a ledger pays
-/// once, at its first open by this build. Run in release:
+/// its indexes read, each JSON checked as it is indexed, every item's head
+/// written, with fields past their ceilings to bring within them (times of a
+/// mebibyte and times with an offset, events, native sessions, and a harness,
+/// times and an agent of a NUL and a mebibyte) and ids of a kilobyte kept
+/// whole: what a ledger pays once, at its first open by this build. Run in release:
 /// `cargo test --release -p cf-ledger --test long_items -- --ignored --nocapture`.
 #[test]
 #[ignore = "builds a 330 MB ledger; run by hand, in release"]
@@ -100,16 +105,22 @@ fn migration_19_splits_a_long_history_s_long_items_in_what_one_read_of_each_take
     let long = "l".repeat(1_000_000);
     let longest = "a".repeat(24 * 1024 * 1024);
     // Past the fields' ceilings, as an older build could have left them: one
-    // item in fifty of an id of a kilobyte, ten of a time of a mebibyte.
+    // item in fifty of an id of a kilobyte, ten of a time of a mebibyte, one
+    // in a hundred of a time with an offset.
     let long_id = "x".repeat(1_000);
     let long_time = format!("2026-10-16T12:00:00.{}Z", "0".repeat(1 << 20));
+    let offset = "2026-10-16T14:00:00.000+02:00";
     for seq in 0_i64..50_000 {
         let id = if seq % 50 == 0 {
             format!("i-{seq}-{long_id}")
         } else {
             format!("i-{seq}")
         };
-        let at = if seq < 10 { long_time.as_str() } else { AT };
+        let at = match seq {
+            0..10 => long_time.as_str(),
+            _ if seq % 100 == 1 => offset,
+            _ => AT,
+        };
         copy.execute(params![id, seq, short, at, AT])
             .expect("copied");
     }
@@ -150,6 +161,19 @@ fn migration_19_splits_a_long_history_s_long_items_in_what_one_read_of_each_take
         )
         .expect("a conversation");
     }
+    // The NUL and the mebibyte, in the first conversation's harness and times
+    // and in the chief's agent and the time it is out until.
+    let nul = format!("x\u{0}{}", "y".repeat(1 << 20));
+    db.execute(
+        "UPDATE conversation SET harness = ?1, started_at = ?1, ended_at = ?1 WHERE id = 1",
+        [&nul],
+    )
+    .expect("long fields");
+    db.execute(
+        "UPDATE participant SET agent = ?1, out_until = ?1 WHERE id = 2",
+        [&nul],
+    )
+    .expect("long fields");
     db.execute_batch("COMMIT").expect("committed");
     println!("built: {:?}", started.elapsed());
     let started = std::time::Instant::now();
@@ -159,17 +183,27 @@ fn migration_19_splits_a_long_history_s_long_items_in_what_one_read_of_each_take
         .query_row("SELECT COUNT(*) FROM transcript_part", [], |row| row.get(0))
         .expect("the parts");
     assert_eq!(kept, 100 * 16 + 394);
-    // Each field within its ceiling.
-    let cut: (i64, i64, i64, i64) = db
+    // Each id whole, and each field within its ceiling: the long times and
+    // those with an offset written back as a store keeps a time.
+    let kept: Vec<i64> = db
         .query_row(
-            "SELECT (SELECT max(length(item_id)) FROM transcript),
-                    (SELECT COUNT(*) FROM transcript WHERE at IS NULL),
+            "SELECT (SELECT max(octet_length(item_id)) FROM transcript),
+                    (SELECT max(octet_length(id_shown)) FROM transcript_head),
+                    (SELECT COUNT(*) FROM transcript_head),
+                    (SELECT max(octet_length(at)) FROM transcript),
+                    (SELECT COUNT(*) FROM transcript WHERE at = '2026-10-16T12:00:00.000Z'),
                     (SELECT COUNT(*) FROM conversation WHERE native_session IS NULL),
+                    (SELECT max(octet_length(harness) + octet_length(started_at) + octet_length(ended_at)) FROM conversation),
+                    (SELECT octet_length(agent) + ifnull(octet_length(out_until), 0) FROM participant),
                     (SELECT max(octet_length(data)) FROM event)",
             [],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            |row| (0..9).map(|at| row.get(at)).collect(),
         )
         .expect("the fields");
-    assert_eq!((cut.0, cut.1, cut.2), (256, 10, 101));
-    assert!(cut.3 <= 4_096, "{cut:?}");
+    assert_eq!(kept[..3], [1_008, 256 + 3, 50_101]);
+    assert_eq!(kept[3], 24);
+    assert_eq!(kept[4], 50_101, "every time as a store keeps one");
+    assert_eq!(kept[5], 101);
+    assert!(kept[6] <= 3 * 256 && kept[7] <= 256, "{kept:?}");
+    assert!(kept[8] <= 4_096, "{kept:?}");
 }

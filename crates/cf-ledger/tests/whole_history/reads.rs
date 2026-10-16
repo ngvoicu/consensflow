@@ -408,7 +408,8 @@ fn every_read_moves_however_little_it_may_go_through_and_older_reaches_the_oldes
     let project = project(&mut ledger);
     let chief = id_of(&project, "chief");
     // A conversation of a tool's output alone; one of short items and a long
-    // one of four parts, its words in its last; and the one going on now.
+    // one of four parts of characters of four bytes, its words in its last
+    // (the reviewers' widest parts); and the one going on now.
     let conversation = |ledger: &mut Ledger, items: &[Value]| {
         let id = ledger
             .start_conversation(chief, "claude-code")
@@ -418,7 +419,7 @@ fn every_read_moves_however_little_it_may_go_through_and_older_reaches_the_oldes
         id
     };
     let tools = conversation(&mut ledger, &[item("t-0", "tool", "ok")]);
-    let long = format!("{} the NEEDLE", "a".repeat(HISTORY_PART * 3));
+    let long = format!("{} the NEEDLE", "🙂".repeat(HISTORY_PART * 3));
     conversation(
         &mut ledger,
         &[
@@ -444,8 +445,10 @@ fn every_read_moves_however_little_it_may_go_through_and_older_reaches_the_oldes
                     },
                 )
                 .expect("a read");
+            // One part at most, 256,000 bytes of these, and the end of the
+            // one before it read by itself, 8,000 bytes at most.
             assert!(
-                read.scanned.bytes <= 2 * HISTORY_PART,
+                read.scanned.bytes <= 4 * HISTORY_PART + 8_000,
                 "a part and the end of the one before at most: {:?}",
                 read.scanned
             );

@@ -276,13 +276,16 @@ impl HistoryEntry {
 }
 
 /// How much of the history a read went through: the conversations it came
-/// to, the rows it read, the bytes of text it read of them, the bytes of the
-/// conversations' fields, the items' ids and times, and the data of the events
-/// the headings read (`fields`), and the steps SQLite's machine took for it all.
+/// to, the rows it read, the lookups of parts of a long item's text it made
+/// (`parts`), the bytes of text it read of them, the bytes of the
+/// conversations' fields, the items' ids as a page shows them and their times,
+/// and the data of the events the headings read (`fields`), and the steps
+/// SQLite's machine took for it all.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Scanned {
     pub conversations: usize,
     pub rows: usize,
+    pub parts: usize,
     pub bytes: usize,
     pub fields: usize,
     pub steps: usize,

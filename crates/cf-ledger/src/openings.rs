@@ -26,6 +26,27 @@ pub(crate) fn opening_of(
     Ok(text_of(&bytes[..end]))
 }
 
+/// The last `most` bytes of column `column` of row `row` of table `table`, as
+/// text: a character they cut short at their start is left out.
+pub(crate) fn tail_of(
+    db: &Connection,
+    table: &CStr,
+    column: &CStr,
+    row: i64,
+    most: usize,
+) -> rusqlite::Result<String> {
+    let blob = db.blob_open(MAIN_DB, table, column, row, true)?;
+    let start = blob.len().saturating_sub(most);
+    let mut bytes = vec![0; blob.len() - start];
+    let read = blob.read_at(&mut bytes, start)?;
+    bytes.truncate(read);
+    let cut_short = bytes
+        .iter()
+        .take_while(|byte| *byte & 0b1100_0000 == 0b1000_0000)
+        .count();
+    Ok(text_of(&bytes[cut_short..]))
+}
+
 /// A text's `bytes` as text: what is no UTF-8 in them (which no build writes,
 /// each writing its language's own strings) is U+FFFD, never refused.
 pub(crate) fn text_of(bytes: &[u8]) -> String {
@@ -56,5 +77,21 @@ mod tests {
         assert_eq!(opening_of(&db, c"t", c"body", 1, 2).unwrap(), "é");
         assert_eq!(opening_of(&db, c"t", c"body", 1, 1).unwrap(), "");
         assert!(opening_of(&db, c"t", c"body", 2, 4).is_err(), "no row 2");
+    }
+
+    #[test]
+    fn reads_the_last_bytes_of_a_value_and_never_loads_it_whole_a_character_cut_short_left_out() {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE t (id INTEGER PRIMARY KEY, body TEXT NOT NULL) STRICT")
+            .unwrap();
+        // Characters of three bytes: four bytes from the end cut one short.
+        let body = format!("{}ab", "€".repeat(100_000));
+        db.execute("INSERT INTO t VALUES (1, ?)", [&body]).unwrap();
+        db.set_limit(rusqlite::limits::Limit::SQLITE_LIMIT_LENGTH, 50_000)
+            .unwrap();
+        assert_eq!(tail_of(&db, c"t", c"body", 1, 8).unwrap(), "€€ab");
+        assert_eq!(tail_of(&db, c"t", c"body", 1, 2).unwrap(), "ab");
+        assert_eq!(tail_of(&db, c"t", c"body", 1, 4).unwrap(), "ab");
+        assert!(tail_of(&db, c"t", c"body", 2, 4).is_err(), "no row 2");
     }
 }
