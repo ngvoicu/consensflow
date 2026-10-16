@@ -788,6 +788,21 @@ details.drawer-section > summary:focus-visible { outline: 2px solid var(--seafoa
   overflow: hidden;
 }
 .terminal-card[data-focused="true"] { border-color: var(--seafoam); }
+/* A file dragged over a window: dropping it types its path there. A ring
+   and a tint over the whole card, the terminal's black too, that the pointer
+   passes through. */
+.terminal-card[data-drop="true"] {
+  position: relative;
+  border-color: var(--seafoam);
+  box-shadow: 0 0 0 2px var(--seafoam), 0 0 16px rgba(99, 199, 178, .5);
+}
+.terminal-card[data-drop="true"]::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: rgba(99, 199, 178, .14);
+  pointer-events: none;
+}
 .terminal-head {
   display: flex;
   align-items: center;
