@@ -25,7 +25,7 @@ mod viewer;
 use cf_base::js;
 use cf_base::refusal::Refusal;
 use cf_proto::ledger::{
-    ChiefConversation, ChiefOpenWork, MessageView, ParticipantView, SwitchedFrom,
+    ChiefConversation, ChiefOpenWork, MessageOpening, MessageView, ParticipantView, SwitchedFrom,
 };
 use serde::Serialize;
 
@@ -33,7 +33,8 @@ use entries::entries_of;
 use pages::paginate;
 use text::{defuse, delivered, first_line, name_of, Shown};
 pub use viewer::{
-    whole_history_page, Delivery, ShownConversation, ShownItem, WholeHistoryPage, HISTORY_ROOM,
+    whole_history_page, Delivery, Openings, ShownConversation, ShownItem, WholeHistoryPage,
+    HISTORY_ROOM, SHOWN_FIELD,
 };
 
 /// How ConsensFlow's handoff to a chief the human switched in begins.
@@ -51,11 +52,50 @@ pub type Lookup<'a> = &'a dyn Fn(i64) -> Result<Option<MessageView>, Refusal>;
 
 /// Whether a message is ConsensFlow's handoff, under either title.
 pub fn is_handoff(message: &MessageView) -> bool {
-    message.kind == "note"
-        && message.sender.is_none()
-        && [HANDOFF_TITLE, LEAD_HANDOFF_TITLE]
-            .iter()
-            .any(|title| message.body.starts_with(title))
+    Gist::from(message).is_handoff()
+}
+
+/// What a delivery's line says of the message it names: who sent it, what it
+/// was and on which task, and its body, or as much of the body as opens it
+/// (the line says the body's first line, and whether it opens as a handoff).
+struct Gist<'a> {
+    sender: Option<&'a str>,
+    kind: &'a str,
+    task_number: Option<i64>,
+    body: &'a str,
+}
+
+impl Gist<'_> {
+    /// Whether the message is ConsensFlow's handoff, under either title.
+    fn is_handoff(&self) -> bool {
+        self.kind == "note"
+            && self.sender.is_none()
+            && [HANDOFF_TITLE, LEAD_HANDOFF_TITLE]
+                .iter()
+                .any(|title| self.body.starts_with(title))
+    }
+}
+
+impl<'a> From<&'a MessageView> for Gist<'a> {
+    fn from(message: &'a MessageView) -> Self {
+        Gist {
+            sender: message.sender.as_deref(),
+            kind: &message.kind,
+            task_number: message.task_number,
+            body: &message.body,
+        }
+    }
+}
+
+impl<'a> From<&'a MessageOpening> for Gist<'a> {
+    fn from(message: &'a MessageOpening) -> Self {
+        Gist {
+            sender: message.sender.as_deref(),
+            kind: &message.kind,
+            task_number: message.task_number,
+            body: &message.opening,
+        }
+    }
 }
 
 /// What a handoff is written from.

@@ -8,7 +8,10 @@
 use std::collections::HashSet;
 use std::time::Instant;
 
-use cf_ledger::{HistoryAsk, HistoryEntry, HistoryFrom, HistoryRead, Ledger, NewMember, Scanned};
+use cf_ledger::{
+    HistoryAsk, HistoryEntry, HistoryFrom, HistoryRead, Ledger, MessageOpening, NewMember, NewNote,
+    Scanned, HISTORY_ID_SHOWN, MESSAGE_OPENING,
+};
 use serde_json::Value;
 
 use super::reads::{ask, ids, ROOM};
@@ -114,6 +117,167 @@ fn a_page_takes_the_same_steps_beside_2_000_conversations_and_100_000_tools_outp
         beside.steps < alone.steps + 1_000,
         "the steps grew with what the page leaves out: {alone:?} {beside:?}"
     );
+}
+
+#[test]
+fn a_read_never_loads_the_role_a_conversation_was_given() {
+    let dir = tempfile::tempdir().expect("a folder");
+    let mut ledger = ledger_in(&dir);
+    let project = project(&mut ledger);
+    let chief = id_of(&project, "chief");
+    // The first instructions of a harness that keeps them, as long as a chief's: 12 KB.
+    let role = "Read the board before anything else.\n".repeat(330);
+    for _ in 0..50 {
+        let conversation = ledger
+            .start_conversation(chief, "claude-code")
+            .expect("a conversation");
+        ledger
+            .set_conversation_role_text(conversation.id, &role)
+            .expect("given its role");
+    }
+    // A read that loaded one value as long as the role whole would fail.
+    ledger.limit_value_length(8_000).expect("held");
+    let page = ledger
+        .read_history(
+            project.id,
+            "chief",
+            &ask(HistoryFrom::Newest, None, false, ROOM),
+        )
+        .expect("a page");
+    assert_eq!(page.entries.len(), 50);
+    let searched = ledger
+        .read_history(
+            project.id,
+            "chief",
+            &ask(HistoryFrom::Newest, Some("nowhere"), false, ROOM),
+        )
+        .expect("a search");
+    assert_eq!(
+        (searched.scanned.conversations, searched.resume),
+        (50, None)
+    );
+}
+
+#[test]
+fn a_heading_s_long_fields_and_an_item_s_long_id_are_charged_as_what_they_are() {
+    let dir = tempfile::tempdir().expect("a folder");
+    let mut ledger = ledger_in(&dir);
+    let project = project(&mut ledger);
+    let chief = id_of(&project, "chief");
+    for _ in 0..20 {
+        ledger
+            .start_conversation(chief, "claude-code")
+            .expect("a conversation");
+    }
+    // Conversations of native sessions of 10 KB each, as no build of today
+    // binds (512 characters at most) and an older one may have, holding
+    // nothing: a search that may go through 100,000 bytes reaches as many as
+    // that pays for.
+    ledger.close().expect("closed");
+    let db = rusqlite::Connection::open(dir.path().join("consensflow.db")).expect("the file");
+    db.execute(
+        "UPDATE conversation SET native_session = id || '-' || ?",
+        ["s".repeat(10_000)],
+    )
+    .expect("long sessions");
+    drop(db);
+    let mut ledger = ledger_in(&dir);
+    let bounded = |ledger: &Ledger, scan: usize| {
+        ledger
+            .read_history(
+                project.id,
+                "chief",
+                &HistoryAsk {
+                    scan,
+                    ..ask(HistoryFrom::Newest, Some("nowhere"), false, ROOM)
+                },
+            )
+            .expect("a search")
+    };
+    let read = bounded(&ledger, 100_000);
+    assert!(read.bounded, "{:?}", read.scanned);
+    assert!(read.scanned.conversations <= 10, "{:?}", read.scanned);
+    // Items of ids of 100 KB each: each read no further than a page shows of
+    // it, and that charged; none loaded whole.
+    let now = ledger
+        .start_conversation(chief, "claude-code")
+        .expect("a conversation");
+    let items: Vec<Value> = (0..20)
+        .map(|at| item(&format!("{at:02}{}", "i".repeat(100_000)), "user", "x"))
+        .collect();
+    ledger.copy_transcript(now.id, &items, 0).expect("copied");
+    ledger.limit_value_length(50_000).expect("held");
+    let read = ledger
+        .read_history(
+            project.id,
+            "chief",
+            &ask(HistoryFrom::Newest, None, false, ROOM),
+        )
+        .expect("a page");
+    assert_eq!(
+        ids(&read)[0],
+        format!("19{}…", "i".repeat(HISTORY_ID_SHOWN - 2))
+    );
+    assert_eq!(read.scanned.rows, 20);
+    let headings: usize = read
+        .conversations
+        .iter()
+        .map(|heading| {
+            let view = &heading.conversation;
+            view.harness.len()
+                + view.native_session.as_ref().map_or(0, String::len)
+                + view.started_at.len()
+                + view.ended_at.as_ref().map_or(0, String::len)
+        })
+        .sum();
+    assert_eq!(
+        (read.scanned.conversations, read.scanned.fields),
+        (21, headings + 20 * 4 * (HISTORY_ID_SHOWN + 1)),
+        "each heading's fields, and each id's first bytes"
+    );
+}
+
+#[test]
+fn a_message_s_opening_is_its_first_bytes_cut_at_a_character_and_its_body_is_never_loaded_whole() {
+    let dir = tempfile::tempdir().expect("a folder");
+    let mut ledger = ledger_in(&dir);
+    let project = project(&mut ledger);
+    // A megabyte, a character of four bytes across where the opening ends.
+    let before = format!("{}x", "é".repeat(MESSAGE_OPENING / 2 - 2));
+    let body = format!("{before}{}", "🙂".repeat(250_000));
+    let note = ledger
+        .note(
+            project.id,
+            &NewNote {
+                from: Some("human".into()),
+                to: "chief".into(),
+                body,
+                task: None,
+            },
+        )
+        .expect("a note");
+    // A read that loaded the body whole would fail.
+    ledger.limit_value_length(64 * 1024).expect("held");
+    let opening = ledger
+        .message_opening(note.id)
+        .expect("read")
+        .expect("there");
+    assert_eq!(
+        opening,
+        MessageOpening {
+            id: note.id,
+            project_id: project.id,
+            recipient_id: id_of(&project, "chief"),
+            sender: Some("human".into()),
+            kind: "note".into(),
+            task_number: None,
+            opening: before,
+        }
+    );
+    assert!(ledger
+        .message_opening(note.id + 1_000)
+        .expect("read")
+        .is_none());
 }
 
 #[test]
@@ -226,10 +390,11 @@ fn a_page_of_a_long_history_takes_what_a_page_takes() {
             conversations,
             rows,
             bytes,
+            fields,
             steps,
         } = read.scanned;
         println!(
-            "{what}: {took:?}, {} entries; {conversations} conversations, {rows} rows, {bytes} bytes, {steps} steps gone through",
+            "{what}: {took:?}, {} entries; {conversations} conversations, {rows} rows, {bytes} bytes of text and {fields} of fields, {steps} steps gone through",
             read.entries.len(),
         );
         assert!(took.as_millis() < 1_000, "{what} took {took:?}");
@@ -277,9 +442,10 @@ fn a_page_of_a_long_history_takes_what_a_page_takes() {
         "a page of the 10,000 conversations of tools' outputs, headings alone",
         ask(HistoryFrom::Before(oldest_big), None, false, ROOM),
     );
+    let long_row = first.entries[0].key().row;
     let started = Instant::now();
     let last = ledger
-        .read_history_part(project, "chief", newest, "long", 393 * 64_000)
+        .read_history_part(project, "chief", newest, long_row, 393 * 64_000)
         .expect("a part");
     println!(
         "the 24 MiB item's last part: {:?} ({} bytes)",
@@ -291,7 +457,7 @@ fn a_page_of_a_long_history_takes_what_a_page_takes() {
     let mut from = Some(0);
     while let Some(at) = from {
         from = ledger
-            .read_history_part(project, "chief", newest, "long", at)
+            .read_history_part(project, "chief", newest, long_row, at)
             .expect("a part")
             .next;
         parts += 1;

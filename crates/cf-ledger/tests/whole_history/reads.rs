@@ -54,6 +54,26 @@ pub(super) fn ids(read: &HistoryRead) -> Vec<String> {
         .collect()
 }
 
+/// The row the chief's item `id` stands at, as a page says it: found on the
+/// pages read back from the most recent, an entry a page.
+pub(super) fn row_of(ledger: &Ledger, project: i64, id: &str) -> i64 {
+    let mut from = HistoryFrom::Newest;
+    for _ in 0..100 {
+        let read = ledger
+            .read_history(project, "chief", &ask(from, None, true, 1))
+            .expect("read");
+        for entry in &read.entries {
+            if let HistoryEntry::Item(row) = entry {
+                if row.item.id == id {
+                    return row.key.row;
+                }
+            }
+        }
+        from = HistoryFrom::Before(read.resume.expect("the item, before the end"));
+    }
+    panic!("no item {id} in 100 entries");
+}
+
 /// Every page older than `first`, each read from where the one before stopped:
 /// the ids of their items, newest first. A read that never gets to the end is
 /// stopped at `most` reads.
@@ -424,13 +444,14 @@ fn a_long_item_shows_a_part_its_first_or_where_a_search_found_and_reads_whole_a_
         "{}",
         &row.item.text[..40]
     );
-    // The whole of it, a part at a time.
+    // The whole of it, a part at a time, by its place.
+    let place = row_of(&ledger, project, "long");
     let mut read_whole = String::new();
     let mut from = Some(0);
     for _ in 0..10 {
         let Some(at) = from else { break };
         let part = ledger
-            .read_history_part(project, "chief", conversation, "long", at)
+            .read_history_part(project, "chief", conversation, place, at)
             .expect("a part");
         assert_eq!(part.from, at);
         read_whole.push_str(&part.text);
@@ -452,9 +473,14 @@ fn a_long_item_shows_a_part_its_first_or_where_a_search_found_and_reads_whole_a_
         )
         .expect("a member");
     let refused = ledger
-        .read_history_part(project, "zeus", conversation, "long", 0)
+        .read_history_part(project, "zeus", conversation, place, 0)
         .expect_err("not zeus's");
-    assert!(refused.to_string().contains("no item long"), "{refused}");
+    assert!(
+        refused
+            .to_string()
+            .contains(&format!("no item at row {place} of zeus's")),
+        "{refused}"
+    );
 }
 
 #[test]
@@ -537,6 +563,81 @@ fn words_where_one_part_ends_and_the_next_begins_are_found() {
 }
 
 #[test]
+fn a_search_holds_at_most_1_000_characters_and_a_phrase_that_long_is_found_across_two_parts() {
+    const MOST: usize = 1_000;
+    let dir = tempfile::tempdir().expect("a folder");
+    let (mut ledger, project, conversation) = chief(&dir);
+    let phrase: String = (0..MOST)
+        .map(|at| char::from(b'a' + u8::try_from(at % 26).expect("a letter")))
+        .collect();
+    // The phrase begins ten characters before the first part's end.
+    let whole = format!(
+        "{}{phrase}{}",
+        "-".repeat(HISTORY_PART - 10),
+        "-".repeat(HISTORY_PART)
+    );
+    ledger
+        .copy_transcript(conversation, &[item("long", "assistant", &whole)], 0)
+        .expect("copied");
+    let search = |find: &str| {
+        ledger.read_history(
+            project,
+            "chief",
+            &ask(HistoryFrom::Newest, Some(find), false, ROOM),
+        )
+    };
+    let found = search(&phrase.to_uppercase()).expect("a search");
+    assert_eq!(ids(&found), ["long"]);
+    // One character more is refused, in the words the viewer shows; so is
+    // the reviewers' phrase, which spans three parts.
+    for longer in [
+        format!("{phrase}z"),
+        format!("B{}D", "c".repeat(HISTORY_PART)),
+    ] {
+        let refused = search(&longer).expect_err("too long a search");
+        assert!(
+            refused.to_string().contains("at most 1,000 characters"),
+            "{refused}"
+        );
+    }
+}
+
+#[test]
+fn each_part_says_which_copy_of_its_item_it_is_of_and_a_copy_written_again_changed_is_the_next() {
+    let dir = tempfile::tempdir().expect("a folder");
+    let (mut ledger, project, conversation) = chief(&dir);
+    let copy = |ledger: &mut Ledger, id: &str, text: &str| {
+        ledger
+            .copy_transcript(conversation, &[item(id, "assistant", text)], 0)
+            .expect("copied");
+    };
+    let revision = |ledger: &Ledger, place: i64, from: usize| {
+        ledger
+            .read_history_part(project, "chief", conversation, place, from)
+            .expect("a part")
+            .revision
+    };
+    let first = "a".repeat(HISTORY_PART * 2 + 5);
+    copy(&mut ledger, "long", &first);
+    let long = row_of(&ledger, project, "long");
+    let at_first = revision(&ledger, long, 0);
+    // Copied again as it was, it is the copy it was; written again changed,
+    // the next, at every part.
+    copy(&mut ledger, "long", &first);
+    assert_eq!(revision(&ledger, long, HISTORY_PART), at_first);
+    copy(&mut ledger, "long", &"b".repeat(HISTORY_PART * 2 + 5));
+    assert_eq!(revision(&ledger, long, 0), at_first + 1);
+    assert_eq!(revision(&ledger, long, HISTORY_PART), at_first + 1);
+    // An item shorter than a part too: one that grows past a part as it is
+    // read is no part of the copy read before.
+    copy(&mut ledger, "short", "ok");
+    let short = row_of(&ledger, project, "short");
+    let short_first = revision(&ledger, short, 0);
+    copy(&mut ledger, "short", &"c".repeat(HISTORY_PART + 1));
+    assert_eq!(revision(&ledger, short, HISTORY_PART), short_first + 1);
+}
+
+#[test]
 fn a_long_item_that_shrinks_and_grows_is_read_as_it_is_now() {
     let dir = tempfile::tempdir().expect("a folder");
     let (mut ledger, project, conversation) = chief(&dir);
@@ -550,12 +651,13 @@ fn a_long_item_that_shrinks_and_grows_is_read_as_it_is_now() {
         ledger
             .copy_transcript(conversation, &[item("w", "assistant", &whole)], 0)
             .expect("copied");
+        let place = row_of(&ledger, project, "w");
         let mut read = String::new();
         let mut from = Some(0);
         for _ in 0..10 {
             let Some(at) = from else { break };
             let got = ledger
-                .read_history_part(project, "chief", conversation, "w", at)
+                .read_history_part(project, "chief", conversation, place, at)
                 .expect("a part");
             read.push_str(&got.text);
             from = got.next;
@@ -598,13 +700,14 @@ fn reading_a_24_mib_item_whole_a_part_at_a_time_reads_each_part_alone() {
     ledger
         .copy_transcript(conversation, &[timed("long", &whole)], 0)
         .expect("copied");
+    let place = row_of(&ledger, project, "long");
     let started = Instant::now();
     let mut parts = 0;
     let mut bytes = 0;
     let mut from = Some(0);
     while let Some(at) = from {
         let part = ledger
-            .read_history_part(project, "chief", conversation, "long", at)
+            .read_history_part(project, "chief", conversation, place, at)
             .expect("a part");
         parts += 1;
         bytes += part.text.len();

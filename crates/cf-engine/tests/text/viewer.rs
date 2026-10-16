@@ -1,24 +1,35 @@
 //! The history viewer's pages (the History button on a window's head): one
 //! read of the ledger's, taken while a frame of the app's bridge has room, set
 //! out by conversation with their headings, and the places the next pages go
-//! on from; a delivery to this participant said in one line, any other header
-//! left as text; a long item's part as the read cut it.
+//! on from; a delivery to this participant said in one line from its
+//! message's opening, each opening charged; any other header left as text; a
+//! long item's part as the read cut it; and the first entry within a page too,
+//! whatever it holds.
+
+use std::cell::Cell;
 
 use cf_base::refusal::Refusal;
-use cf_engine::handoff::{whole_history_page, WholeHistoryPage};
-use cf_ledger::{HistoryFrom, PAGE_BYTES};
+use cf_engine::handoff::{whole_history_page, WholeHistoryPage, SHOWN_FIELD};
+use cf_ledger::{HistoryFrom, HISTORY_PART, HISTORY_SCAN_BYTES, OPENING_COST, PAGE_BYTES};
 use cf_proto::ledger::{
     ConversationEnd, ConversationView, HistoryEntry, HistoryItem, HistoryKey, HistoryRead,
-    HistoryRow, MessageView, ParticipantConversation, Scanned, TextCut,
+    HistoryRow, MessageOpening, ParticipantConversation, Scanned, TextCut,
 };
 use serde_json::json;
 
-use super::support::message;
-
-/// The messages this participant was sent or sent, as the daemon looks them up
-/// for it: m-5 is its, and any other number names none of its.
-fn messages(id: i64) -> Result<Option<MessageView>, Refusal> {
-    Ok((id == 5).then(|| message(5, "result", Some("zeus"), Some(1), "Parser done")))
+/// The openings of the messages this participant was sent or sent, as the
+/// daemon looks them up for it: m-5 is its, and any other number names none
+/// of its.
+fn openings(id: i64) -> Result<Option<MessageOpening>, Refusal> {
+    Ok((id == 5).then(|| MessageOpening {
+        id: 5,
+        project_id: 1,
+        recipient_id: 2,
+        sender: Some("zeus".into()),
+        kind: "result".into(),
+        task_number: Some(1),
+        opening: "Parser done".into(),
+    }))
 }
 
 /// Conversation `n` of the chief, on `harness` and `agent`; `ended_by` none for the current one.
@@ -81,6 +92,7 @@ fn read_entries(
         resume,
         bounded: false,
         scanned: Scanned::default(),
+        charged: 0,
     }
 }
 
@@ -111,7 +123,7 @@ fn switched() -> Option<ConversationEnd> {
 }
 
 fn page(read: &HistoryRead, from: HistoryFrom) -> WholeHistoryPage {
-    whole_history_page(read, from, &messages).unwrap()
+    whole_history_page(read, from, &openings, HISTORY_SCAN_BYTES).unwrap()
 }
 
 /// The ids of a page's items, in order.
@@ -159,8 +171,8 @@ fn heads_each_conversation_with_its_harness_agent_times_and_end_and_the_current_
                     "endedBy": { "by": "switch", "harness": "codex", "agent": "maia" },
                     "toolsLeftOut": 0,
                     "items": [
-                        { "id": "1-0", "role": "user", "text": "Ship it", "complete": true, "at": "2026-10-11T10:00:00.000Z" },
-                        { "id": "1-1", "role": "user", "text": "This session is being continued", "complete": true, "at": "2026-10-11T10:01:00.000Z", "compaction": true },
+                        { "row": 100, "id": "1-0", "role": "user", "text": "Ship it", "complete": true, "at": "2026-10-11T10:00:00.000Z" },
+                        { "row": 101, "id": "1-1", "role": "user", "text": "This session is being continued", "complete": true, "at": "2026-10-11T10:01:00.000Z", "compaction": true },
                     ],
                 },
                 {
@@ -169,7 +181,7 @@ fn heads_each_conversation_with_its_harness_agent_times_and_end_and_the_current_
                     "endedBy": { "by": "window", "resumed": false },
                     "toolsLeftOut": 0,
                     "items": [
-                        { "id": "2-0", "role": "assistant", "text": "Shipped", "complete": true, "at": "2026-10-12T10:00:00.000Z" },
+                        { "row": 200, "id": "2-0", "role": "assistant", "text": "Shipped", "complete": true, "at": "2026-10-12T10:00:00.000Z" },
                     ],
                 },
                 {
@@ -381,4 +393,76 @@ fn a_part_of_a_long_item_shows_as_the_read_cut_it_and_a_delivery_only_from_its_s
     );
     let said = serde_json::to_value(&items[0]).unwrap();
     assert_eq!(said["cut"], json!({ "from": 70_000, "bytes": 900_000 }));
+}
+
+#[test]
+fn charges_each_delivery_s_opening_against_what_the_read_left_and_ends_the_page_before_one_that_does_not_fit(
+) {
+    let header = "[ConsensFlow m-5 · T-1 · result from @zeus]\nParser done";
+    // Newest first: three deliveries, a word between two of them.
+    let rows = vec![
+        row(1, 3, "user", header),
+        row(1, 2, "user", "a word"),
+        row(1, 1, "user", header),
+        row(1, 0, "user", header),
+    ];
+    let all = read(vec![heading(1, "pi", "chief", None, 0)], rows.clone(), None);
+    let looked = Cell::new(0);
+    let counted = |id: i64| {
+        looked.set(looked.get() + 1);
+        openings(id)
+    };
+    // What the read left pays for two openings: the third ends the page before it.
+    let shown = whole_history_page(&all, HistoryFrom::Newest, &counted, 2 * OPENING_COST).unwrap();
+    assert_eq!(ids(&shown), ["1-1", "1-2", "1-3"]);
+    assert_eq!(looked.get(), 2);
+    assert_eq!(shown.older, Some(rows[2].key), "on from the oldest shown");
+    assert!(!shown.partial);
+    // The first entry's is read whatever is left: the read leaves room for it.
+    let first = whole_history_page(&all, HistoryFrom::Newest, &counted, 0).unwrap();
+    assert_eq!(ids(&first), ["1-3"]);
+    assert!(first.conversations[0].items[0].delivery.is_some());
+    assert_eq!(looked.get(), 3);
+}
+
+#[test]
+fn the_first_entry_fits_a_page_whatever_its_item_and_its_conversation_hold() {
+    // The reviewers' case and more: an id of a mebibyte, and as long a time,
+    // harness, agent, times and end; a text a part long, each character one
+    // that JSON writes in six bytes.
+    let huge = "h".repeat(1 << 20);
+    let mut conversation = heading(
+        1,
+        &huge,
+        &huge,
+        Some(ConversationEnd::Switch {
+            harness: huge.clone(),
+            agent: Some(huge.clone()),
+        }),
+        0,
+    );
+    conversation.conversation.started_at = huge.clone();
+    let mut first = row(1, 0, "user", &"\u{0}".repeat(HISTORY_PART));
+    first.item.id = huge.clone();
+    first.item.at = Some(huge.clone());
+    let shown = page(
+        &read(vec![conversation], vec![first], None),
+        HistoryFrom::Newest,
+    );
+    let size = serde_json::to_vec(&json!({ "ok": true, "history": shown }))
+        .unwrap()
+        .len();
+    assert!(size <= PAGE_BYTES, "{size} bytes");
+    let item = &shown.conversations[0].items[0];
+    assert_eq!(
+        item.text.chars().count(),
+        HISTORY_PART,
+        "its text as the read gave it"
+    );
+    let cut = format!("{}…", "h".repeat(SHOWN_FIELD));
+    assert_eq!(
+        (item.id.as_str(), item.at.as_deref()),
+        (cut.as_str(), Some(cut.as_str()))
+    );
+    assert_eq!(shown.conversations[0].agent.as_deref(), Some(cut.as_str()));
 }

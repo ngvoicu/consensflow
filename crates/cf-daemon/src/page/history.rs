@@ -7,12 +7,15 @@
 //! file alone (`locking_mode = EXCLUSIVE`, one connection), so no other thread
 //! could read it. Each read is bounded instead, whatever the history's size or
 //! one item's: a page, headings and all, and at most [`HISTORY_SCAN_BYTES`]
-//! gone through, each conversation and row it comes to charged; a part is one
-//! part read.
+//! gone through, each conversation and row it comes to charged, and each
+//! message a delivery's line is said from, as far as its opening; a part is
+//! one part read.
 
 use cf_base::refusal::Refusal;
 use cf_engine::handoff::{whole_history_page, HISTORY_ROOM};
-use cf_ledger::{HistoryAsk, HistoryFrom, HistoryKey, MessageView, HISTORY_SCAN_BYTES};
+use cf_ledger::{
+    HistoryAsk, HistoryFrom, HistoryKey, MessageOpening, HISTORY_SCAN_BYTES, OPENING_COST,
+};
 use serde_json::Value;
 
 use super::body::{one, Body, Fields, Said};
@@ -20,9 +23,10 @@ use super::Page;
 
 /// `history.get`: a page of the history of participant `handle`: the most
 /// recent, or the one before `before` or after `after` (a place a page said);
-/// only the items that hold `find` (in any case) where it is given, and the
-/// tools' outputs where `tools` is true. A delivery's line names a message
-/// this participant was sent or sent, and no other.
+/// only the items that hold `find` (in any case, 1,000 characters at most)
+/// where it is given, and the tools' outputs where `tools` is true. A
+/// delivery's line names a message this participant was sent or sent, and no
+/// other.
 pub(super) async fn get(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
     let project = body.whole("project")?;
     let handle = body.text("handle");
@@ -45,14 +49,15 @@ pub(super) async fn get(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
         find,
         tools: body.get("tools") == Some(&Value::Bool(true)),
         room: HISTORY_ROOM,
-        scan: HISTORY_SCAN_BYTES,
+        // One opening less: the page says the first entry's delivery always.
+        scan: HISTORY_SCAN_BYTES - OPENING_COST,
     };
     let read = page.ledger.borrow().read_history(project, &handle, &ask)?;
-    let message = |id: i64| -> Result<Option<MessageView>, Refusal> {
+    let opening = |id: i64| -> Result<Option<MessageOpening>, Refusal> {
         let found = page
             .ledger
             .borrow()
-            .message(id)
+            .message_opening(id)
             .map_err(|failed| Refusal::with_status("internal", failed.to_string(), 500))?;
         Ok(found.filter(|found| {
             found.project_id == project
@@ -60,11 +65,13 @@ pub(super) async fn get(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
                     || found.sender.as_deref() == Some(handle.as_ref()))
         }))
     };
-    one("history", whole_history_page(&read, from, &message)?)
+    let left = HISTORY_SCAN_BYTES.saturating_sub(read.charged);
+    one("history", whole_history_page(&read, from, &opening, left)?)
 }
 
-/// `history.part`: the part of item `item` of conversation `conversation`,
-/// participant `handle`'s, from character `from` (its start where none is given).
+/// `history.part`: the part of the item at `row` of conversation
+/// `conversation` (the place a page shows it at), participant `handle`'s, from
+/// character `from` (its start where none is given), with the item's revision.
 pub(super) async fn part(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
     let from = match body.get("from") {
         None | Some(Value::Null) => 0,
@@ -77,7 +84,7 @@ pub(super) async fn part(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
         body.whole("project")?,
         &body.text("handle"),
         body.whole("conversation")?,
-        &body.text("item"),
+        body.whole("row")?,
         from,
     )?;
     one("part", part)

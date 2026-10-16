@@ -11,6 +11,8 @@
 mod bounds;
 #[path = "whole_history/headings.rs"]
 mod headings;
+#[path = "whole_history/old_logs.rs"]
+mod old_logs;
 #[path = "whole_history/reads.rs"]
 mod reads;
 

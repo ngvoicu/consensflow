@@ -2,6 +2,12 @@ import { button, element } from '../dom.js'
 import { itemLabel, laneName } from './board.js'
 import { HARNESS_NAMES } from './dialogs.js'
 
+/** The most characters a search holds: the daemon refuses more. */
+const FIND_MOST = 1_000
+
+/** How many times an item copied again as it is read whole is read again from its start. */
+const READS_OF_A_CHANGING_ITEM = 3
+
 /**
  * The history viewer: everything ConsensFlow keeps of a participant's
  * conversations, from the History button on its window's head (the chief's, a
@@ -19,9 +25,11 @@ import { HARNESS_NAMES } from './dialogs.js'
  * oldest item shown and Newer from the newest, so no page repeats or skips an
  * item, whatever comes or grows meanwhile. A search keeps the items that hold
  * its words in any case, and says where it stopped when it went through as
- * much as one read may; Show tool output adds the tools' outputs. A long item
- * shows a part (from its start, or where the search found it), and is read
- * whole on asking, a part at a time. Everything shows as text, never as markup.
+ * much as one read may; it holds 1,000 characters at most, as the daemon does,
+ * and says so of a longer one. Show tool output adds the tools' outputs. A
+ * long item shows a part (from its start, or where the search found it), and
+ * is read whole on asking, a part at a time by its place, every part of one
+ * copy of it. Everything shows as text, never as markup.
  */
 export class HistoryViewer {
   #dialog
@@ -107,6 +115,17 @@ export class HistoryViewer {
     if (shown === null) return
     const read = ++this.#reads
     const find = this.#find.value.trim()
+    const characters = [...find].length
+    if (characters > FIND_MOST) {
+      this.#body.replaceChildren(
+        element(
+          'p',
+          'history-note',
+          `A search holds at most 1,000 characters; this one has ${characters.toLocaleString('en')}.`,
+        ),
+      )
+      return
+    }
     const asked = {
       project: shown.project,
       handle: shown.handle,
@@ -157,23 +176,34 @@ export class HistoryViewer {
     )
   }
 
-  /** The whole text of item `item` of conversation `conversation`, read a part at a time. */
+  /**
+   * The whole text of item `item` of conversation `conversation`, read a part at a time by
+   * its place. Every part is of one copy of it: a part of another (the item was copied
+   * again meanwhile) reads it again from its start, so no text of two copies is shown;
+   * after three reads it changed in, the viewer says so.
+   */
   async #whole(conversation, item) {
     const { project, handle } = this.#shown
-    let text = ''
-    let from = 0
-    while (from !== null) {
-      const { part } = await this.#page.daemon('history.part', {
-        project,
-        handle,
-        conversation,
-        item: item.id,
-        from,
-      })
-      text += part.text
-      from = part.next
+    for (let tries = 0; tries < READS_OF_A_CHANGING_ITEM; tries += 1) {
+      let text = ''
+      let from = 0
+      let revision = null
+      while (from !== null) {
+        const { part } = await this.#page.daemon('history.part', {
+          project,
+          handle,
+          conversation,
+          row: item.row,
+          from,
+        })
+        revision ??= part.revision
+        if (part.revision !== revision) break
+        text += part.text
+        from = part.next
+      }
+      if (from === null) return text
     }
-    return text
+    throw new Error('It changed each time it was read: show it again to read it as it is now.')
   }
 }
 

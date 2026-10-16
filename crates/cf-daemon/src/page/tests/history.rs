@@ -5,8 +5,8 @@
 //! a part at a time, the participant's own alone; and nothing written or woken.
 
 use cf_ledger::{
-    ChiefSwitch, HistoryAsk, HistoryFrom, NewChief, NewMember, NewNote, NewProject, HISTORY_PART,
-    HISTORY_SCAN_BYTES, PAGE_BYTES,
+    ChiefSwitch, HistoryAsk, HistoryEntry, HistoryFrom, NewChief, NewMember, NewNote, NewProject,
+    HISTORY_PART, HISTORY_SCAN_BYTES, PAGE_BYTES,
 };
 use serde_json::Value;
 
@@ -172,6 +172,16 @@ async fn reads_a_participant_s_whole_history_for_the_viewer_and_writes_and_wakes
                     .conversation
                     .clone()
             };
+            // The place each item stands at, which a page gives with it.
+            let row = |id: &str| {
+                read.entries
+                    .iter()
+                    .find_map(|entry| match entry {
+                        HistoryEntry::Item(row) if row.item.id == id => Some(row.key.row),
+                        _ => None,
+                    })
+                    .unwrap()
+            };
             let logged = rig.kit.ledger.borrow().events(harbour, 0, 500).unwrap().len();
 
             let answer = ask(&app, "history.get", json!({ "project": harbour, "handle": "chief" })).await;
@@ -190,18 +200,18 @@ async fn reads_a_participant_s_whole_history_for_the_viewer_and_writes_and_wakes
                                 "toolsLeftOut": 1,
                                 "items": [
                                     {
-                                        "id": "u-1", "role": "user", "complete": true, "at": at,
+                                        "row": row("u-1"), "id": "u-1", "role": "user", "complete": true, "at": at,
                                         "text": format!("[ConsensFlow m-{here} · note from @human]\nLook at the docs"),
                                         "delivery": { "line": format!("· m-{here}: a note from @human: \"Look at the docs\" (cf inbox read m-{here})"), "at": 0 },
                                     },
-                                    { "id": "a-1", "role": "assistant", "text": "Reading <b>them</b>", "complete": true, "at": at },
-                                    { "id": "u-3", "role": "user", "text": "This session is being continued.", "complete": true, "at": at, "compaction": true },
+                                    { "row": row("a-1"), "id": "a-1", "role": "assistant", "text": "Reading <b>them</b>", "complete": true, "at": at },
+                                    { "row": row("u-3"), "id": "u-3", "role": "user", "text": "This session is being continued.", "complete": true, "at": at, "compaction": true },
                                     // Another project's message, and another participant's: text, and nothing of them.
                                     {
-                                        "id": "u-4", "role": "user", "complete": true, "at": at,
+                                        "row": row("u-4"), "id": "u-4", "role": "user", "complete": true, "at": at,
                                         "text": format!("[ConsensFlow m-{theirs} · note]\nx"),
                                     },
-                                    { "id": "u-5", "role": "user", "complete": true, "at": at, "text": quoted },
+                                    { "row": row("u-5"), "id": "u-5", "role": "user", "complete": true, "at": at, "text": quoted },
                                 ],
                             },
                             {
@@ -210,7 +220,7 @@ async fn reads_a_participant_s_whole_history_for_the_viewer_and_writes_and_wakes
                                 "endedAt": null, "endedBy": null,
                                 "toolsLeftOut": 0,
                                 "items": [
-                                    { "id": "m-1", "role": "assistant", "text": "Taken over", "complete": true, "at": at },
+                                    { "row": row("m-1"), "id": "m-1", "role": "assistant", "text": "Taken over", "complete": true, "at": at },
                                 ],
                             },
                         ],
@@ -294,32 +304,133 @@ async fn reads_a_long_item_whole_a_part_at_a_time_and_only_its_participant_s() {
             let page = ask(&app, "history.get", json!({ "project": harbour, "handle": "chief" })).await;
             let shown = &page["history"]["conversations"][0]["items"][0];
             assert_eq!(shown["cut"], json!({ "from": 0, "bytes": whole.len() }));
+            let row = shown["row"].clone();
             let mut read = String::new();
+            let mut revisions = Vec::new();
             let mut from = Value::from(0);
             for _ in 0..5 {
                 let part = ask(
                     &app,
                     "history.part",
-                    json!({ "project": harbour, "handle": "chief", "conversation": conversation.id, "item": "long", "from": from }),
+                    json!({ "project": harbour, "handle": "chief", "conversation": conversation.id, "row": row, "from": from }),
                 )
                 .await;
                 read.push_str(part["part"]["text"].as_str().unwrap());
+                revisions.push(part["part"]["revision"].clone());
                 from = part["part"]["next"].clone();
                 if from.is_null() {
                     break;
                 }
             }
             assert_eq!(read, whole);
+            assert_eq!(revisions, [json!(0), json!(0), json!(0)], "each part of the first copy");
             assert_eq!(
                 ask(
                     &app,
                     "history.part",
-                    json!({ "project": harbour, "handle": "zeus", "conversation": conversation.id, "item": "long" }),
+                    json!({ "project": harbour, "handle": "zeus", "conversation": conversation.id, "row": row }),
                 )
                 .await,
-                json!({ "ok": false, "error": format!("no item long in zeus's conversation {}", conversation.id) })
+                json!({ "ok": false, "error": format!("no item at row {row} of zeus's conversation {}", conversation.id) })
             );
             assert_eq!(rig.kicks.get(), 0);
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn folds_each_delivery_from_its_message_s_opening_and_never_loads_a_body_whole() {
+    // The reviewers' case: twenty messages of a megabyte, each delivered with
+    // its opening alone, which a page holds; the lines are said from what
+    // opens each message, and no body is read whole.
+    LocalSet::new()
+        .run_until(async {
+            let rig = rig();
+            let (daemon, app) = bridge_pair_over(&rig.spawn);
+            register(&daemon, &rig.page, &rig.spawn);
+            let harbour = project(&rig, "harbour");
+            let chief = chief_of(&rig, harbour);
+            let conversation = rig
+                .kit
+                .ledger
+                .borrow_mut()
+                .start_conversation(chief, "claude-code")
+                .unwrap();
+            let mut delivered = Vec::new();
+            for at in 0..20 {
+                let opening = format!("Read part {at} first\n");
+                let body = format!("{opening}{}", "x".repeat(1_000_000 - opening.len()));
+                let id = note(&rig, harbour, "human", "chief", &body);
+                let text = format!("[ConsensFlow m-{id} · note from @human]\n{opening}{}", "x".repeat(15_000));
+                delivered.push((id, item(&format!("u-{at}"), "user", &text)));
+            }
+            let items: Vec<Value> = delivered.iter().map(|(_, item)| item.clone()).collect();
+            rig.kit
+                .ledger
+                .borrow_mut()
+                .copy_transcript(conversation.id, &items, 0)
+                .unwrap();
+            // A read that loaded one body whole would fail.
+            rig.kit.ledger.borrow().limit_value_length(512 * 1024).unwrap();
+            let answer = ask(&app, "history.get", json!({ "project": harbour, "handle": "chief" })).await;
+            let said = answer.to_string();
+            assert_eq!(answer["ok"], true, "{}", &said[..said.len().min(300)]);
+            let lines: Vec<&str> = answer["history"]["conversations"][0]["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|item| item["delivery"]["line"].as_str().unwrap())
+                .collect();
+            let expected: Vec<String> = delivered
+                .iter()
+                .enumerate()
+                .map(|(at, (id, _))| {
+                    format!("· m-{id}: a note from @human: \"Read part {at} first\" (cf inbox read m-{id})")
+                })
+                .collect();
+            assert_eq!(lines, expected);
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn an_item_s_id_however_long_is_shown_cut_and_its_page_fits_a_frame() {
+    // The reviewers' case: a native id of a mebibyte, its text "ok".
+    LocalSet::new()
+        .run_until(async {
+            let rig = rig();
+            let (daemon, app) = bridge_pair_over(&rig.spawn);
+            register(&daemon, &rig.page, &rig.spawn);
+            let harbour = project(&rig, "harbour");
+            let chief = chief_of(&rig, harbour);
+            let conversation = rig
+                .kit
+                .ledger
+                .borrow_mut()
+                .start_conversation(chief, "claude-code")
+                .unwrap();
+            let long = "i".repeat(1024 * 1024);
+            rig.kit
+                .ledger
+                .borrow_mut()
+                .copy_transcript(conversation.id, &[item(&long, "user", "ok")], 0)
+                .unwrap();
+            let answer = ask(&app, "history.get", json!({ "project": harbour, "handle": "chief" })).await;
+            let said = answer.to_string();
+            assert_eq!(answer["ok"], true, "{}", &said[..said.len().min(300)]);
+            assert!(said.len() <= PAGE_BYTES, "{} bytes", said.len());
+            let shown = &answer["history"]["conversations"][0]["items"][0];
+            assert_eq!(shown["text"], "ok");
+            let id = shown["id"].as_str().unwrap();
+            assert_eq!(id, format!("{}…", "i".repeat(256)));
+            // Its text is read by its place, never by its id.
+            let part = ask(
+                &app,
+                "history.part",
+                json!({ "project": harbour, "handle": "chief", "conversation": conversation.id, "row": shown["row"] }),
+            )
+            .await;
+            assert_eq!(part["part"]["text"], "ok", "{part}");
         })
         .await;
 }

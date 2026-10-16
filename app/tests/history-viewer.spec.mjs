@@ -230,7 +230,7 @@ async function open(page, data = model()) {
               ...(!tools && count >= counted ? { moreToolsLeftOut: true } : {}),
               items: items
                 .filter((it) => it.conversation === conversation.id)
-                .map(({ conversation: _, row: __, ...shownItem }) => shownItem),
+                .map(({ conversation: _, ...shownItem }) => shownItem),
             }
           })
           .filter(
@@ -241,18 +241,29 @@ async function open(page, data = model()) {
           history: { conversations, older, newer, partial: !!(find && model.partial) },
         })
       },
-      // A long item's text, a part at a time, as the daemon reads it.
-      'history.part': ({ item: id, from }) => {
-        const parts = window.__model.parts[id]
+      // A long item's text, a part at a time, as the daemon reads it, by the item's
+      // place, with the revision the copy made of it. An item the model says is copied
+      // again as it is read (`copies`) is, once a part: the next copy is read, the last kept.
+      'history.part': ({ conversation, row, from }) => {
+        const model = window.__model
+        const it = Object.values(model.histories)
+          .flatMap((history) => history.items)
+          .find((it) => it.conversation === conversation && it.row === row)
+        if (!it) return { ok: false, error: `no item at ${conversation}:${row}` }
+        const copies = model.copies?.[it.id]
+        const { revision, parts } =
+          copies?.length > 1
+            ? copies.shift()
+            : (copies?.[0] ?? { revision: 1, parts: model.parts[it.id] })
         let at = 0
         for (const [index, text] of parts.entries()) {
           if (at === from) {
             const next = index + 1 < parts.length ? at + text.length : null
-            return answer({ part: { text, from, next } })
+            return answer({ part: { text, from, next, revision } })
           }
           at += text.length
         }
-        return { ok: false, error: `no part of ${id} from ${from}` }
+        return { ok: false, error: `no part of ${it.id} from ${from}` }
       },
     }
     const invoke = async (command, args = {}) => {
@@ -606,7 +617,7 @@ test.describe('the history viewer', () => {
       project: 1,
       handle: 'zeus-amber-pine',
       conversation: 7,
-      item: 'w-2',
+      row: 701,
       from: 0,
     })
     // A search shows the part where it found its words, and says from where.
@@ -615,6 +626,72 @@ test.describe('the history viewer', () => {
     })
     await viewer.getByRole('button', { name: 'Refresh' }).click()
     await expect(viewer.locator('.history-cut')).toContainText('… from character 5001')
+  })
+
+  test('reads a long item again from its start when it is copied again meanwhile, and says so when it keeps changing', async ({
+    page,
+  }) => {
+    const data = model()
+    const first = ['The first part', ' and the rest, ', 'to its end.']
+    // The new copy's every part differs, its first as long as the old copy's.
+    const grown = ['The FIRST part', ' grown, ', 'and now ends.']
+    // Copied again once its first part is read: the second part is the new copy's.
+    data.copies = {
+      'w-2': [
+        { revision: 1, parts: first },
+        { revision: 2, parts: grown },
+      ],
+    }
+    await open(page, data)
+    const viewer = await openSession(page)
+    const long = viewer.locator('.history-item').filter({ hasText: 'The first part' })
+    await long.getByRole('button', { name: 'Show the whole item (684 KB)' }).click()
+    const whole = viewer.locator('.history-item').filter({ hasText: 'now ends.' })
+    await expect(whole.locator('.transcript-body')).toHaveText(
+      'The FIRST part grown, and now ends.',
+    )
+    // Never a text of two copies: the second copy is read again from its start.
+    expect((await asked(page, 'history.part')).map(({ from }) => from)).toEqual([0, 14, 0, 14, 22])
+    // An item copied again at every part, as one still being written fast may be:
+    // three reads, then the viewer says so and may be asked again.
+    await page.evaluate((first) => {
+      window.__model.copies['w-2'] = Array.from({ length: 20 }, (_, at) => ({
+        revision: 10 + at,
+        parts: first,
+      }))
+    }, first)
+    await viewer.getByRole('button', { name: 'Refresh' }).click()
+    const again = viewer.locator('.history-item').filter({ hasText: 'The first part' })
+    const button = again.getByRole('button', { name: 'Show the whole item (684 KB)' })
+    await button.click()
+    await expect(again.locator('.history-refusal')).toHaveText(
+      'It changed each time it was read: show it again to read it as it is now.',
+    )
+    await expect(button).toBeEnabled()
+    expect((await asked(page, 'history.part')).length).toBe(5 + 6)
+  })
+
+  test('holds a search to 1,000 characters, and says so of a longer one', async ({ page }) => {
+    await open(page)
+    const viewer = await openChief(page)
+    const find = viewer.getByRole('searchbox', { name: 'Find in the history' })
+    await expect(find).toHaveAttribute('maxlength', '1000')
+    const searches = async () => (await asked(page)).filter((asking) => asking.find).length
+    // A longer one put in the box past its bound, as a paste or a script may.
+    await find.evaluate((input) => {
+      input.value = 'a'.repeat(1_001)
+    })
+    await find.press('Enter')
+    await expect(viewer.locator('.history-note')).toHaveText(
+      'A search holds at most 1,000 characters; this one has 1,001.',
+    )
+    expect(await searches()).toBe(0)
+    await find.fill('🙂'.repeat(500))
+    await find.press('Enter')
+    await expect(viewer.locator('.history-note')).toHaveText(
+      `Nothing in Chief of Staff's history holds "${'🙂'.repeat(500)}".`,
+    )
+    expect(await searches()).toBe(1)
   })
 
   test("says the daemon's refusal in its words, and draws in the app's theme", async ({ page }) => {

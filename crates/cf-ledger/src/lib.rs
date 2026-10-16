@@ -22,6 +22,7 @@ mod messages;
 /// the parsers a caller reading JSON (the API, the page) checks a request with.
 pub mod model;
 mod names;
+mod openings;
 mod page_reads;
 mod projects;
 mod questions;
@@ -41,14 +42,15 @@ pub use cf_proto::ledger::{
     Begun, Board, Candidate, ChiefConversation, ChiefOpenWork, Claim, ConversationEnd,
     ConversationView, Cut, DeletedProject, EventView, HeldTask, HistoryEntry, HistoryFrom,
     HistoryItem, HistoryKey, HistoryRead, HistoryRow, Lane, LastSwitch, LatestMessages,
-    LatestTranscript, MemberView, MessageView, ParticipantConversation, ParticipantView,
-    ProjectView, Question, QuestionOption, RemovedMember, Resume, Scanned, StaffMember, Stop,
-    TaskCard, TaskCreated, TaskMoved, TaskReleased, TaskThatFits, TaskThread, TaskTranscript,
-    TaskView, TextCut, TextPart, TierChange,
+    LatestTranscript, MemberView, MessageOpening, MessageView, ParticipantConversation,
+    ParticipantView, ProjectView, Question, QuestionOption, RemovedMember, Resume, Scanned,
+    StaffMember, Stop, TaskCard, TaskCreated, TaskMoved, TaskReleased, TaskThatFits, TaskThread,
+    TaskTranscript, TaskView, TextCut, TextPart, TierChange,
 };
 pub use cf_proto::wake_ups::WakeUpView;
 pub use conversations::{
-    ChiefSwitch, HistoryAsk, HISTORY_PART, HISTORY_SCAN_BYTES, TRANSCRIPT_ITEM_MAX,
+    ChiefSwitch, HistoryAsk, HISTORY_FIND_MAX, HISTORY_ID_SHOWN, HISTORY_PART, HISTORY_SCAN_BYTES,
+    MESSAGE_OPENING, OPENING_COST, TRANSCRIPT_ITEM_MAX,
 };
 #[cfg(feature = "test-support")]
 pub use ledger::Watcher;

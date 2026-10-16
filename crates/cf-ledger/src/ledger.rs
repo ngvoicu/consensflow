@@ -139,6 +139,19 @@ impl Ledger {
             None => Ok(()),
         }
     }
+
+    /// Holds each value SQLite makes or loads whole to `bytes` at most
+    /// (`SQLITE_LIMIT_LENGTH`): a read that loads a longer value whole fails,
+    /// "string or blob too big", where one that reads only its size, the
+    /// values before it in its row or its first bytes goes on. What a test
+    /// proves a read never loads a long value by.
+    pub fn limit_value_length(&self, bytes: usize) -> Result<(), LedgerError> {
+        self.store.db.set_limit(
+            rusqlite::limits::Limit::SQLITE_LIMIT_LENGTH,
+            i32::try_from(bytes).unwrap_or(i32::MAX),
+        )?;
+        Ok(())
+    }
 }
 
 impl Ledger {

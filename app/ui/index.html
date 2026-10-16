@@ -170,7 +170,7 @@
     <p class="history-hint">Not stored: tool calls and thinking.</p>
     <div class="history-bar">
       <form class="history-search" role="search">
-        <input type="search" name="history-find" placeholder="Find in the history" aria-label="Find in the history">
+        <input type="search" name="history-find" maxlength="1000" placeholder="Find in the history" aria-label="Find in the history" title="A search holds at most 1,000 characters">
         <button class="quiet-button" type="submit">Find</button>
       </form>
       <label class="history-switch"><input type="checkbox" name="history-tools"> Show tool output</label>

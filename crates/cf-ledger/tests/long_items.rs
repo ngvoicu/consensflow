@@ -67,8 +67,9 @@ fn a_populated_version_18_ledger_has_its_long_items_split_into_parts_in_migratio
 }
 
 /// What migration 19 takes on a ledger of 200 MB of items of 4 KB, 100 long
-/// ones of 1 MB and one of 24 MiB: what a ledger pays once, at its first open
-/// by this build. Run in release:
+/// ones of 1 MB and one of 24 MiB, and a log of 200,000 events of the kinds
+/// its indexes read, each JSON checked as it is indexed: what a ledger pays
+/// once, at its first open by this build. Run in release:
 /// `cargo test --release -p cf-ledger --test long_items -- --ignored --nocapture`.
 #[test]
 #[ignore = "builds a 330 MB ledger; run by hand, in release"]
@@ -108,6 +109,22 @@ fn migration_19_splits_a_long_history_s_long_items_in_what_one_read_of_each_take
     copy.execute(params!["longest", 50_100_i64, longest, AT, AT])
         .expect("copied");
     drop(copy);
+    let mut log = db
+        .prepare("INSERT INTO event (project_id, at, kind, data) VALUES (1, ?, ?, ?)")
+        .expect("a log");
+    let kinds = [
+        "conversation.started",
+        "conversation.followed",
+        "conversation.ended",
+        "chief.switched",
+    ];
+    for at in 0_i64..200_000 {
+        let kind = kinds[usize::try_from(at % 4).expect("a kind")];
+        let data =
+            format!(r#"{{"conversation": {at}, "participant": "chief", "harness": "codex"}}"#);
+        log.execute(params![AT, kind, data]).expect("logged");
+    }
+    drop(log);
     db.execute_batch("COMMIT").expect("committed");
     println!("built: {:?}", started.elapsed());
     let started = std::time::Instant::now();

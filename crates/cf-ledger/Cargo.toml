@@ -9,15 +9,19 @@ publish = false
 [dependencies]
 cf-base.workspace = true
 cf-proto.workspace = true
-rusqlite.workspace = true
+# A message's opening is read through SQLite's incremental blob reads, its
+# first bytes alone (`Ledger::message_opening`).
+rusqlite = { workspace = true, features = ["blob"] }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 
 [features]
 # What the engine's tests watch of the ledger: each read of `projects` and
-# `next_delivery`, which a test counts or fails ([`Ledger::watch`]).
-test-support = []
+# `next_delivery`, which a test counts or fails ([`Ledger::watch`]); and the
+# most of one value SQLite loads, which a test lowers to prove a read never
+# loads a long one ([`Ledger::limit_value_length`]).
+test-support = ["rusqlite/limits"]
 
 [dev-dependencies]
 base64.workspace = true

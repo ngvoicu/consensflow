@@ -1,8 +1,9 @@
 //! A participant's whole history, as the history viewer reads it, a page at a
 //! time: every conversation it had, the current one too, headed with the agent
 //! it ran on and what ended it as far as the ledger's log says, and the items
-//! copied of them, read in order from where the viewer is (`read_history`); and
-//! a long item's text, a part at a time (`read_history_part`).
+//! copied of them, read in order from where the viewer is (`read_history`); a
+//! long item's text, a part at a time (`read_history_part`); and the opening
+//! of a message a delivery names, for its line (`message_opening`).
 //!
 //! What a read costs is bounded, whatever the size of the history or of one
 //! item in it. It reaches what it reads through the indexes of migration 0019
@@ -10,22 +11,31 @@
 //! order they were first copied, from a place a copy made again never moves
 //! ([`HistoryKey`]), until the page is full ([`HistoryAsk::room`], the headings
 //! with the items) or the read has gone through as much as one may
-//! ([`HistoryAsk::scan`]): each conversation it comes to, each row, and each
-//! byte of text is charged before it is read. A tool's output is not even come
-//! to when the tools are left out; a heading is a few lookups of the log, and
-//! counts the tools' outputs only so far; and a long item is read a part at a
-//! time, from the parts its copy keeps, never whole.
+//! ([`HistoryAsk::scan`]): each conversation it comes to and its heading's
+//! fields, each row and its item's id, and each byte of text is charged before
+//! it is read. A tool's output is not even come to when the tools are left
+//! out; a heading is a few lookups of the log, and counts the tools' outputs
+//! only so far; a long item is read a part at a time, from the parts its copy
+//! keeps, never whole, and so is a long id, of which the page shows the first
+//! characters. No value is loaded whole that may be long and is not shown: a
+//! conversation's role, a message's body.
+//!
+//! An event an older build wrote whose data is no JSON, or holds no whole
+//! number where a conversation's id is, says nothing of any conversation here,
+//! as the indexes of the log read it.
 
 use cf_proto::ledger::{
     ConversationEnd, ConversationView, HistoryEntry, HistoryFrom, HistoryItem, HistoryKey,
-    HistoryRead, HistoryRow, ParticipantConversation, Scanned, TextCut, TextPart,
+    HistoryRead, HistoryRow, MessageOpening, ParticipantConversation, Scanned, TextCut, TextPart,
 };
+use rusqlite::types::ValueRef;
 use rusqlite::{params, OptionalExtension, Params, Row, Statement, StatementStatus};
 use serde_json::Value;
 
 use crate::model::LedgerError;
+use crate::openings::{opening_of, text_of};
 use crate::store::Store;
-use crate::views::{conversation_view, ParticipantRow};
+use crate::views::ParticipantRow;
 
 /// The most of an item's text a page shows, and a part holds: in characters,
 /// as many as a tool's output is copied of, which a frame always carries. An
@@ -38,13 +48,68 @@ pub const HISTORY_PART: usize = crate::conversations::TRANSCRIPT_ITEM_MAX;
 /// one goes on from it.
 pub const HISTORY_SCAN_BYTES: usize = 16 * 1024 * 1024;
 
-/// What a read is charged for each conversation it comes to, besides its rows:
-/// finding it, and what its heading takes (the lookups of the log, and the
-/// count of its tools' outputs).
+/// The most characters a search holds. A phrase no longer than a part and one
+/// character spans two parts at most, so each part searched with the end of
+/// the one before finds it wherever it is; this is far below that, and a
+/// search for more is refused, never searched short.
+pub const HISTORY_FIND_MAX: usize = 1_000;
+
+/// The most characters of an item's id a page shows; a longer id shows those,
+/// and "…". A harness's own ids are tens of characters, and none is bounded.
+pub const HISTORY_ID_SHOWN: usize = 256;
+
+/// The most bytes of an id a read takes: as many as [`HISTORY_ID_SHOWN`]
+/// characters and one more can be. An id no longer comes with its row's read;
+/// a longer one is read alone, as far as this.
+const ID_READ: usize = 4 * (HISTORY_ID_SHOWN + 1);
+
+/// The most of a message's body its delivery's line reads: the line says its
+/// first line, cut at 160 characters, which this holds behind any blank lines
+/// a body could reasonably open with.
+pub const MESSAGE_OPENING: usize = 4_096;
+
+/// What reading a message's opening is charged, of what a read of the history
+/// may go through: the opening's bytes, and the lookups of its row as a row's.
+pub const OPENING_COST: usize = MESSAGE_OPENING + ROW_COST;
+
+/// The most of a switch's data a heading reads: the harness and the agent the
+/// chief was switched from and to. Data longer than this, which no build
+/// writes, is not read, and says nothing.
+const SWITCH_READ: usize = 4_096;
+
+/// What a read is charged for each conversation it comes to, besides its rows
+/// and its heading's fields: finding it, and what its heading takes (the
+/// lookups of the log, the switch's data, and the count of its tools' outputs).
 const CONVERSATION_COST: usize = 4_096;
 
-/// What a read is charged for each row it comes to, besides its text.
+/// What a read is charged for each row it comes to, besides its text and its id.
 const ROW_COST: usize = 256;
+
+/// What the log says a conversation is, as the indexes of 0019 read it: none
+/// where the event's data is no JSON. A lookup says it so, word for word, for
+/// SQLite to find it in the index.
+const CONVERSATION_OF: &str =
+    "CASE WHEN json_valid(data) THEN json_extract(data, '$.conversation') END";
+
+/// What the log says a participant is, as the index of 0019 reads it.
+const PARTICIPANT_OF: &str =
+    "CASE WHEN json_valid(data) THEN json_extract(data, '$.participant') END";
+
+/// The parts of the item at row `?2` of conversation `?1`, by its row: its id,
+/// which can be long, is never read out to look them up.
+const OF_THE_ROW: &str =
+    "conversation_id = ?1 AND item_id = (SELECT item_id FROM transcript WHERE rowid = ?2)";
+
+/// The fields of the long item at row `?2` of conversation `?1` that its row
+/// holds after its text, from the index that holds them: its row holds them
+/// only past the whole of its text.
+const LONG_ITEM_FIELDS: &str =
+    "SELECT complete, at, compaction FROM transcript INDEXED BY transcript_item_index
+       WHERE conversation_id = ?1 AND item_id = (SELECT item_id FROM transcript WHERE rowid = ?2)";
+
+/// The revision of the long item at row `?2` of conversation `?1`, as its fields.
+const LONG_ITEM_REVISION: &str = "SELECT revision FROM transcript INDEXED BY transcript_item_index
+       WHERE conversation_id = ?1 AND item_id = (SELECT item_id FROM transcript WHERE rowid = ?2)";
 
 /// How many of a conversation's tools' outputs its heading counts, at most.
 const TOOLS_COUNTED: usize = 1_000;
@@ -71,8 +136,9 @@ pub struct HistoryAsk<'a> {
 
 /// One read of participant `handle`'s history, as [`HistoryAsk`] says: the
 /// entries in the order the read went (newest first, unless it reads after a
-/// place), and the conversations it took an entry of, headed. Nothing is
-/// written.
+/// place), and the conversations it took an entry of, headed. An item's id is
+/// as a page shows it ([`HISTORY_ID_SHOWN`]). A search for more than
+/// [`HISTORY_FIND_MAX`] characters is refused. Nothing is written.
 pub(crate) fn read_history(
     store: &Store,
     project_id: i64,
@@ -80,6 +146,14 @@ pub(crate) fn read_history(
     ask: &HistoryAsk<'_>,
 ) -> Result<HistoryRead, LedgerError> {
     let participant = store.participant_by_handle(project_id, handle)?;
+    let asked = ask.find.map_or(0, |find| find.chars().count());
+    if asked > HISTORY_FIND_MAX {
+        return Err(LedgerError::refused_with(
+            "invalid-text",
+            format!("a search holds at most 1,000 characters; this one has {asked}"),
+            400,
+        ));
+    }
     let (newest_first, from) = match ask.from {
         HistoryFrom::Newest => (true, None),
         HistoryFrom::Before(key) => (true, Some(key)),
@@ -111,7 +185,6 @@ pub(crate) fn read_history(
         let Some(conversation) = read.next_conversation(past)? else {
             break;
         };
-        read.scanned.conversations += 1;
         past = conversation.id;
         let within = from.filter(|key| key.conversation == conversation.id);
         read.conversation(&conversation, within)?;
@@ -122,6 +195,7 @@ pub(crate) fn read_history(
     let more = read.full || read.bounded;
     Ok(HistoryRead {
         participant: participant.id,
+        charged: read.charged(),
         conversations: read.conversations,
         entries: read.entries,
         resume: if more { read.resume } else { None },
@@ -151,7 +225,8 @@ struct Reading<'a> {
 }
 
 /// A row as a read comes to it, before it reads any of its text: where it
-/// stands, its item's id and role, and its text's size in bytes.
+/// stands, its item's id as a page shows it and its role, and its text's size
+/// in bytes.
 struct Met {
     key: HistoryKey,
     item_id: String,
@@ -160,12 +235,18 @@ struct Met {
 }
 
 impl Reading<'_> {
+    /// What the read has been charged so far.
+    fn charged(&self) -> usize {
+        self.scanned.bytes
+            + self.scanned.fields
+            + self.scanned.rows * ROW_COST
+            + self.scanned.conversations * CONVERSATION_COST
+    }
+
     /// Whether the read may go through `more` (as it is charged) and stay
     /// within its bound; where it may not, it is bounded.
     fn may(&mut self, more: usize) -> bool {
-        let gone = self.scanned.bytes
-            + self.scanned.rows * ROW_COST
-            + self.scanned.conversations * CONVERSATION_COST;
+        let gone = self.charged();
         if gone + more > self.scan {
             self.bounded = true;
         }
@@ -186,16 +267,49 @@ impl Reading<'_> {
         Ok(found?)
     }
 
-    /// The participant's conversation next to `past` the way the read goes.
+    /// The participant's conversation next to `past` the way the read goes,
+    /// its heading's fields charged before they are read, and nothing else of
+    /// its row: not the role it was given, which can be long. None where there
+    /// is no more, or the read may not go through it.
     fn next_conversation(&mut self, past: i64) -> Result<Option<ConversationView>, LedgerError> {
         let sql = if self.newest_first {
-            "SELECT * FROM conversation INDEXED BY conversation_participant_index
+            "SELECT id, octet_length(harness) + ifnull(octet_length(native_session), 0)
+         + octet_length(started_at) + ifnull(octet_length(ended_at), 0)
+       FROM conversation INDEXED BY conversation_participant_index
        WHERE participant_id = ?1 AND id < ?2 ORDER BY id DESC LIMIT 1"
         } else {
-            "SELECT * FROM conversation INDEXED BY conversation_participant_index
+            "SELECT id, octet_length(harness) + ifnull(octet_length(native_session), 0)
+         + octet_length(started_at) + ifnull(octet_length(ended_at), 0)
+       FROM conversation INDEXED BY conversation_participant_index
        WHERE participant_id = ?1 AND id > ?2 ORDER BY id LIMIT 1"
         };
-        self.one(sql, params![self.participant.id, past], conversation_view)
+        let participant_id = self.participant.id;
+        let Some((id, bytes)) = self.one(sql, params![participant_id, past], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?))
+        })?
+        else {
+            return Ok(None);
+        };
+        let bytes = bytes.unsigned_abs() as usize;
+        if !self.may(CONVERSATION_COST + bytes) {
+            return Ok(None);
+        }
+        self.scanned.conversations += 1;
+        self.scanned.fields += bytes;
+        self.one(
+            "SELECT harness, native_session, started_at, ended_at FROM conversation WHERE id = ?1",
+            [id],
+            |row| {
+                Ok(ConversationView {
+                    id,
+                    participant_id,
+                    harness: row.get("harness")?,
+                    native_session: row.get("native_session")?,
+                    started_at: row.get("started_at")?,
+                    ended_at: row.get("ended_at")?,
+                })
+            },
+        )
     }
 
     /// Goes through `conversation` from `within`, the place the read began at
@@ -214,8 +328,10 @@ impl Reading<'_> {
             None if self.newest_first => (i64::MAX, false),
             None => (0, false),
         };
+        // An id no longer than the read takes of one comes with its row.
         let sql = format!(
-            "SELECT rowid AS row_id, item_id, role, octet_length(text) AS bytes
+            "SELECT rowid AS row_id, role, octet_length(text) AS bytes, octet_length(item_id) AS id_bytes,
+         CASE WHEN octet_length(item_id) <= {ID_READ} THEN item_id END AS item_id
        FROM transcript INDEXED BY {}
        WHERE conversation_id = ?1{} AND rowid {}{} ?2 ORDER BY rowid {}",
             if self.tools {
@@ -238,19 +354,23 @@ impl Reading<'_> {
         statement.reset_status(StatementStatus::VmStep);
         let mut rows = statement.query(params![id, bound])?;
         let mut any = false;
-        while self.may(ROW_COST) {
+        while self.may(ROW_COST + ID_READ) {
             let Some(row) = rows.next()? else {
                 break;
             };
             self.scanned.rows += 1;
             any = true;
+            let key = HistoryKey {
+                conversation: id,
+                row: row.get("row_id")?,
+                part: 0,
+            };
+            let id_bytes = row.get::<_, i64>("id_bytes")?.unsigned_abs() as usize;
+            let given = text_or_none(row.get_ref("item_id")?);
+            self.scanned.fields += id_bytes.min(ID_READ);
             let met = Met {
-                key: HistoryKey {
-                    conversation: id,
-                    row: row.get("row_id")?,
-                    part: 0,
-                },
-                item_id: row.get("item_id")?,
+                key,
+                item_id: shown_id(store, key.row, given)?,
                 role: row.get("role")?,
                 bytes: row.get::<_, i64>("bytes")?.unsigned_abs() as usize,
             };
@@ -378,9 +498,11 @@ impl Reading<'_> {
             return Ok(None);
         }
         let found = self.one(
-            "SELECT octet_length(text) FROM transcript_part
-       WHERE conversation_id = ?1 AND item_id = ?2 AND part = ?3",
-            params![met.key.conversation, met.item_id, number(part)],
+            &format!(
+                "SELECT octet_length(text) FROM transcript_part
+       WHERE {OF_THE_ROW} AND part = ?3"
+            ),
+            params![met.key.conversation, met.key.row, number(part)],
             |row| row.get::<_, i64>(0),
         )?;
         Ok(found.map(|bytes| bytes.unsigned_abs() as usize))
@@ -390,9 +512,11 @@ impl Reading<'_> {
     fn read_part(&mut self, met: &Met, part: usize) -> Result<String, LedgerError> {
         let text = self
             .one(
-                "SELECT text FROM transcript_part
-       WHERE conversation_id = ?1 AND item_id = ?2 AND part = ?3",
-                params![met.key.conversation, met.item_id, number(part)],
+                &format!(
+                    "SELECT text FROM transcript_part
+       WHERE {OF_THE_ROW} AND part = ?3"
+                ),
+                params![met.key.conversation, met.key.row, number(part)],
                 |row| row.get::<_, String>(0),
             )?
             .unwrap_or_default();
@@ -410,7 +534,7 @@ impl Reading<'_> {
                     Ok(HistoryItem {
                         id: met.item_id,
                         role: met.role,
-                        text: row.get("text")?,
+                        text: text_of(row.get_ref("text")?.as_bytes()?),
                         complete: row.get::<_, i64>("complete")? == 1,
                         at: row.get("at")?,
                         compaction: row.get::<_, i64>("compaction")? == 1,
@@ -432,9 +556,8 @@ impl Reading<'_> {
     fn long_row(&mut self, met: Met, text: String, from: usize) -> Result<HistoryRow, LedgerError> {
         let (complete, at, compaction) = self
             .one(
-                "SELECT complete, at, compaction FROM transcript INDEXED BY transcript_item_index
-       WHERE conversation_id = ?1 AND item_id = ?2",
-                params![met.key.conversation, met.item_id],
+                LONG_ITEM_FIELDS,
+                params![met.key.conversation, met.key.row],
                 |row| {
                     Ok((
                         row.get::<_, i64>("complete")? == 1,
@@ -553,21 +676,26 @@ impl Reading<'_> {
             &format!(
                 "SELECT id FROM event INDEXED BY event_activation_index
        WHERE kind IN ('conversation.started', 'conversation.followed')
-         AND json_extract(data, '$.conversation') = ?1 {order} LIMIT 1"
+         AND {CONVERSATION_OF} = ?1 {order} LIMIT 1"
             ),
             [id],
             |row| row.get(0),
         )
     }
 
-    /// The first Switch chief of the project after event `after`, and what it says.
+    /// The first Switch chief of the project after event `after`, and what it
+    /// says: nothing (null) where its data is no JSON, or longer than a
+    /// switch's ([`SWITCH_READ`]), which is not read.
     fn switch_after(&mut self, after: i64) -> Result<Option<(i64, Value)>, LedgerError> {
         self.one(
-            "SELECT id, data FROM event INDEXED BY event_switch_index
-       WHERE kind = 'chief.switched' AND project_id = ?1 AND id > ?2 ORDER BY id LIMIT 1",
+            &format!(
+                "SELECT id, CASE WHEN octet_length(data) <= {SWITCH_READ} THEN data END AS data
+       FROM event INDEXED BY event_switch_index
+       WHERE kind = 'chief.switched' AND project_id = ?1 AND id > ?2 ORDER BY id LIMIT 1"
+            ),
             params![self.participant.project_id, after],
             |row| {
-                let data: String = row.get("data")?;
+                let data = text_or_none(row.get_ref("data")?).unwrap_or_default();
                 Ok((
                     row.get("id")?,
                     serde_json::from_str(&data).unwrap_or(Value::Null),
@@ -584,9 +712,11 @@ impl Reading<'_> {
     /// not (`/clear`, `/new`, or a `/resume` of a session the ledger never saw).
     fn what_ended(&mut self, id: i64, last: i64) -> Result<Option<ConversationEnd>, LedgerError> {
         let ended: Option<i64> = self.one(
-            "SELECT id FROM event INDEXED BY event_ended_index
-       WHERE kind = 'conversation.ended' AND json_extract(data, '$.conversation') = ?1 AND id > ?2
-       ORDER BY id LIMIT 1",
+            &format!(
+                "SELECT id FROM event INDEXED BY event_ended_index
+       WHERE kind = 'conversation.ended' AND {CONVERSATION_OF} = ?1 AND id > ?2
+       ORDER BY id LIMIT 1"
+            ),
             params![id, last],
             |row| row.get(0),
         )?;
@@ -595,14 +725,23 @@ impl Reading<'_> {
         } else {
             None
         };
+        // Where it went: a conversation the log names by a whole number, or none.
         let went: Option<(i64, String, Option<i64>)> = self.one(
-            "SELECT id, kind, json_extract(data, '$.conversation') FROM event
+            &format!(
+                "SELECT id, kind, {CONVERSATION_OF} FROM event
          INDEXED BY event_participant_index
        WHERE kind IN ('conversation.started', 'conversation.followed')
-         AND project_id = ?1 AND json_extract(data, '$.participant') = ?2 AND id > ?3
-       ORDER BY id LIMIT 1",
+         AND project_id = ?1 AND {PARTICIPANT_OF} = ?2 AND id > ?3
+       ORDER BY id LIMIT 1"
+            ),
             params![self.participant.project_id, self.participant.handle, last],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            |row| {
+                let to = match row.get_ref(2)? {
+                    ValueRef::Integer(to) => Some(to),
+                    _ => None,
+                };
+                Ok((row.get(0)?, row.get(1)?, to))
+            },
         )?;
         let first = [
             ended,
@@ -631,9 +770,11 @@ impl Reading<'_> {
         let resumed = match to {
             Some(to) => self
                 .one(
-                    "SELECT id FROM event INDEXED BY event_activation_index
+                    &format!(
+                        "SELECT id FROM event INDEXED BY event_activation_index
        WHERE kind IN ('conversation.started', 'conversation.followed')
-         AND json_extract(data, '$.conversation') = ?1 AND id < ?2 LIMIT 1",
+         AND {CONVERSATION_OF} = ?1 AND id < ?2 LIMIT 1"
+                    ),
                     params![to, at],
                     |row| row.get::<_, i64>(0),
                 )?
@@ -675,17 +816,18 @@ fn around(previous: Option<&str>, text: &str, part: usize, at: usize) -> (usize,
     (from, chars(&joined, from - start, HISTORY_PART).to_owned())
 }
 
-/// The part of item `item` of conversation `conversation`, the participant
-/// `handle`'s, from character `from` to the end of the part its copy keeps it
-/// in (or of its text, where it is no longer than a part), and where the next
-/// begins: what one part is, and read alone. An item that is not the
+/// The part of the item at row `row` of conversation `conversation`, the
+/// participant `handle`'s, from character `from` to the end of the part its
+/// copy keeps it in (or of its text, where it is no longer than a part), where
+/// the next begins, and the item's revision: what one part is, and read alone,
+/// by the item's place and never by its id. An item that is not the
 /// participant's is refused as one that is not there.
 pub(crate) fn read_history_part(
     store: &Store,
     project_id: i64,
     handle: &str,
     conversation: i64,
-    item: &str,
+    row: i64,
     from: usize,
 ) -> Result<TextPart, LedgerError> {
     let participant = store.participant_by_handle(project_id, handle)?;
@@ -693,55 +835,59 @@ pub(crate) fn read_history_part(
         .db
         .query_row(
             "SELECT octet_length(t.text) FROM transcript t JOIN conversation c ON c.id = t.conversation_id
-       WHERE c.participant_id = ? AND t.conversation_id = ? AND t.item_id = ?",
-            params![participant.id, conversation, item],
+       WHERE c.participant_id = ? AND t.conversation_id = ? AND t.rowid = ?",
+            params![participant.id, conversation, row],
             |row| row.get(0),
         )
         .optional()?
         .ok_or_else(|| {
             LedgerError::refused_with(
                 "unknown-item",
-                format!("no item {item} in {handle}'s conversation {conversation}"),
+                format!("no item at row {row} of {handle}'s conversation {conversation}"),
                 404,
             )
         })?;
     let part_of = |part: usize| -> Result<Option<String>, LedgerError> {
         Ok(store
             .db
-            .prepare_cached(
-                "SELECT text FROM transcript_part WHERE conversation_id = ? AND item_id = ? AND part = ?",
-            )?
-            .query_row(params![conversation, item, number(part)], |row| {
-                row.get(0)
+            .prepare_cached(&format!(
+                "SELECT text FROM transcript_part WHERE {OF_THE_ROW} AND part = ?3"
+            ))?
+            .query_row(params![conversation, row, number(part)], |found| {
+                found.get(0)
             })
             .optional()?)
     };
-    let long = bytes.unsigned_abs() as usize > HISTORY_PART
-        && store
+    let kept = |part: usize| -> Result<bool, LedgerError> {
+        Ok(store
             .db
-            .prepare_cached(
-                "SELECT 1 FROM transcript_part WHERE conversation_id = ? AND item_id = ? AND part = 0",
-            )?
-            .exists(params![conversation, item])?;
+            .prepare_cached(&format!(
+                "SELECT 1 FROM transcript_part WHERE {OF_THE_ROW} AND part = ?3"
+            ))?
+            .exists(params![conversation, row, number(part)])?)
+    };
+    let long = bytes.unsigned_abs() as usize > HISTORY_PART && kept(0)?;
     if long {
         let index = from / HISTORY_PART;
         let text = part_of(index)?.unwrap_or_default();
-        let next = store
+        let next = kept(index + 1)?;
+        // Its revision from the index that holds it, never from its row, which
+        // holds it past the whole of its text.
+        let revision = store
             .db
-            .prepare_cached(
-                "SELECT 1 FROM transcript_part WHERE conversation_id = ? AND item_id = ? AND part = ?",
-            )?
-            .exists(params![conversation, item, number(index + 1)])?;
+            .prepare_cached(LONG_ITEM_REVISION)?
+            .query_row(params![conversation, row], |found| found.get(0))?;
         return Ok(TextPart {
             text: chars(&text, from % HISTORY_PART, HISTORY_PART).to_owned(),
             from,
             next: next.then_some((index + 1) * HISTORY_PART),
+            revision,
         });
     }
-    let text: String = store.db.query_row(
-        "SELECT text FROM transcript WHERE conversation_id = ? AND item_id = ?",
-        params![conversation, item],
-        |row| row.get(0),
+    let (text, revision) = store.db.query_row(
+        "SELECT text, revision FROM transcript WHERE rowid = ?",
+        [row],
+        |found| Ok((text_of(found.get_ref(0)?.as_bytes()?), found.get(1)?)),
     )?;
     let part = chars(&text, from, HISTORY_PART);
     let next = from + part.chars().count();
@@ -749,7 +895,65 @@ pub(crate) fn read_history_part(
         text: part.to_owned(),
         from,
         next: (next < text.chars().count()).then_some(next),
+        revision,
     })
+}
+
+/// Message `id`, as far as a delivery's line names it: the fields its row
+/// holds before its body, and the first [`MESSAGE_OPENING`] bytes of the body
+/// alone, read through SQLite's incremental blob reads, so that however long
+/// the body is no more of it is read.
+pub(crate) fn message_opening(
+    store: &Store,
+    id: i64,
+) -> Result<Option<MessageOpening>, LedgerError> {
+    let Some(mut opening) = store
+        .db
+        .prepare_cached(
+            "SELECT m.project_id, m.recipient_id, s.handle AS sender, m.kind, t.number AS task_number
+       FROM message m LEFT JOIN participant s ON s.id = m.sender_id LEFT JOIN task t ON t.id = m.task_id
+       WHERE m.id = ?",
+        )?
+        .query_row([id], |row| {
+            Ok(MessageOpening {
+                id,
+                project_id: row.get("project_id")?,
+                recipient_id: row.get("recipient_id")?,
+                sender: row.get("sender")?,
+                kind: row.get("kind")?,
+                task_number: row.get("task_number")?,
+                opening: String::new(),
+            })
+        })
+        .optional()?
+    else {
+        return Ok(None);
+    };
+    opening.opening = opening_of(&store.db, c"message", c"body", id, MESSAGE_OPENING)?;
+    Ok(Some(opening))
+}
+
+/// Item `row`'s id as a page shows it: [`HISTORY_ID_SHOWN`] characters at most
+/// and "…" past them. It is the id `given` with the row, where that was no
+/// longer than [`ID_READ`] bytes; else the first of them read alone, which
+/// hold more characters than a page shows.
+fn shown_id(store: &Store, row: i64, given: Option<String>) -> Result<String, LedgerError> {
+    let id = match given {
+        Some(id) => id,
+        None => opening_of(&store.db, c"transcript", c"item_id", row, ID_READ)?,
+    };
+    Ok(match id.char_indices().nth(HISTORY_ID_SHOWN) {
+        Some((end, _)) => format!("{}…", &id[..end]),
+        None => id,
+    })
+}
+
+/// A text value as text, U+FFFD for what is no UTF-8 in it; none for null.
+fn text_or_none(value: ValueRef<'_>) -> Option<String> {
+    match value {
+        ValueRef::Text(bytes) => Some(text_of(bytes)),
+        _ => None,
+    }
 }
 
 /// `count` characters of `text` from character `from` (fewer at its end).
@@ -792,4 +996,29 @@ fn first_match(text: &str, needle: &str) -> Option<usize> {
         }
     }
     lowered.find(needle).map(|at| came_from[at])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_long_item_s_fields_and_revision_are_read_from_their_index_alone_never_past_its_text() {
+        let db = rusqlite::Connection::open_in_memory().unwrap();
+        crate::schema::migrate(&db, &crate::schema::MIGRATIONS).unwrap();
+        for sql in [LONG_ITEM_FIELDS, LONG_ITEM_REVISION] {
+            let plan: Vec<String> = db
+                .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
+                .unwrap()
+                .query_map(params![1, 1], |row| row.get(3))
+                .unwrap()
+                .map(Result::unwrap)
+                .collect();
+            assert!(
+                plan.iter()
+                    .any(|step| step.contains("USING COVERING INDEX transcript_item_index")),
+                "{sql}: {plan:?}"
+            );
+        }
+    }
 }

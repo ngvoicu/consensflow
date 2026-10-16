@@ -3,10 +3,10 @@
 
 use cf_base::js;
 use cf_base::refusal::Refusal;
-use cf_proto::ledger::{ChiefConversation, HistoryItem, MessageView};
+use cf_proto::ledger::{ChiefConversation, HistoryItem};
 
 use super::text::{defuse, delivered, first_line, name_of, Shown};
-use super::{is_handoff, Lookup};
+use super::{Gist, Lookup};
 
 /// Past this a number is no id the ledger could hold: 2^63.
 const BEYOND_IDS: f64 = 9_223_372_036_854_775_808.0;
@@ -104,42 +104,37 @@ fn render(
 /// A delivery as one line: what it was, and what came of it. `digits` are the
 /// id the header names, read as `Number(digits)` was.
 fn delivery_line(digits: &str, message: Lookup<'_>) -> Result<String, Refusal> {
-    let (id, found) = named_message(digits, message)?;
-    Ok(match found {
-        Some(m) => outcome_line(&id, &m),
-        None => format!("· m-{id}: a message ConsensFlow delivered (no longer on record)"),
-    })
-}
-
-/// The message a delivery's header names by `digits`, read as `Number(digits)`
-/// was: its id as a line writes it, and the message where `message` gives it.
-pub(super) fn named_message(
-    digits: &str,
-    message: Lookup<'_>,
-) -> Result<(String, Option<MessageView>), Refusal> {
-    let number = js::number(digits);
-    let id = js::number_text(number);
-    // No other number is the id of a message, and none of them has a line.
-    let ledger_id = (number.fract() == 0.0 && number < BEYOND_IDS).then_some(number as i64);
+    let (id, ledger_id) = message_id(digits);
     let found = match ledger_id {
         Some(ledger_id) => message(ledger_id)?,
         None => None,
     };
-    Ok((id, found))
+    Ok(match found {
+        Some(m) => outcome_line(&id, &Gist::from(&m)),
+        None => format!("· m-{id}: a message ConsensFlow delivered (no longer on record)"),
+    })
+}
+
+/// The id a delivery's header names by `digits`, read as `Number(digits)`
+/// was: as a line writes it, and as the ledger holds one, where it could be one.
+pub(super) fn message_id(digits: &str) -> (String, Option<i64>) {
+    let number = js::number(digits);
+    // No other number is the id of a message, and none of them has a line.
+    let ledger_id = (number.fract() == 0.0 && number < BEYOND_IDS).then_some(number as i64);
+    (js::number_text(number), ledger_id)
 }
 
 /// A delivered message `m`, named `id`, as one line: what it was, and what came of it.
-pub(super) fn outcome_line(id: &str, m: &MessageView) -> String {
+pub(super) fn outcome_line(id: &str, m: &Gist<'_>) -> String {
     let from = m
         .sender
-        .as_ref()
         .map_or_else(|| "ConsensFlow".to_owned(), |sender| format!("@{sender}"));
     let on = m
         .task_number
         .map_or_else(String::new, |number| format!(" on T-{number}"));
     let task = Shown(&m.task_number);
-    let gist = || defuse(&first_line(&m.body, 160));
-    match m.kind.as_str() {
+    let gist = || defuse(&first_line(m.body, 160));
+    match m.kind {
         "result" => format!("· m-{id}: {from}'s result{on} (cf task get T-{task})"),
         "question" => {
             format!(
@@ -149,7 +144,7 @@ pub(super) fn outcome_line(id: &str, m: &MessageView) -> String {
         }
         "task" => format!("· m-{id}: {from} gave the chief T-{task}: \"{}\"", gist()),
         "answer" => format!("· m-{id}: {from} answered{on}: \"{}\"", gist()),
-        _ if is_handoff(m) => format!("· m-{id}: the handoff that brought this chief in"),
+        _ if m.is_handoff() => format!("· m-{id}: the handoff that brought this chief in"),
         _ => format!(
             "· m-{id}: a note from {from}{on}: \"{}\" (cf inbox read m-{id})",
             gist()

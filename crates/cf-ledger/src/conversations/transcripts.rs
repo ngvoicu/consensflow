@@ -29,7 +29,8 @@ const HEADER: &str = "[ConsensFlow m-";
 /// harness's record wrote it: one with no id is passed over, and a role or
 /// a time it does not know is `custom`, or none. An item that says it is a
 /// compaction's summary (`compaction: true`) is marked so when it is first
-/// copied; one copied before the mark stays as it was. How many rows changed.
+/// copied; one copied before the mark stays as it was. An item written again
+/// changed is its next revision. How many rows changed.
 pub(crate) fn copy_transcript(
     store: &mut Store,
     conversation_id: i64,
@@ -44,7 +45,7 @@ pub(crate) fn copy_transcript(
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (conversation_id, item_id) DO UPDATE
          SET seq = excluded.seq, text = excluded.text, complete = excluded.complete,
-             at = excluded.at, copied_at = excluded.copied_at
+             at = excluded.at, copied_at = excluded.copied_at, revision = transcript.revision + 1
          WHERE transcript.text != excluded.text OR transcript.complete != excluded.complete",
         )?;
         let mut written = 0;
@@ -143,7 +144,10 @@ fn write_parts(
 /// Splits into parts every item copied before the copy kept long items in
 /// parts too: what migration 0019 does past its SQL, once. Only a text of
 /// more bytes than a part's characters can be longer than a part, and only
-/// those are read, one at a time.
+/// those are read, one at a time. Each part is written by its item's row, so
+/// the item's id is kept as it was; and a text that is no UTF-8 (neither
+/// Node's ledger nor this one writes one, each writing its language's own
+/// strings) is split as it reads, U+FFFD for what is none, never refused.
 pub(crate) fn split_copied(db: &Connection) -> rusqlite::Result<()> {
     let long = db
         .prepare("SELECT rowid FROM transcript WHERE octet_length(text) > ?")?
@@ -152,17 +156,18 @@ pub(crate) fn split_copied(db: &Connection) -> rusqlite::Result<()> {
             |row| row.get::<_, i64>(0),
         )?
         .collect::<rusqlite::Result<Vec<_>>>()?;
-    let mut read =
-        db.prepare("SELECT conversation_id, item_id, text FROM transcript WHERE rowid = ?")?;
+    let mut read = db.prepare("SELECT text FROM transcript WHERE rowid = ?")?;
+    let mut write = db.prepare(
+        "INSERT INTO transcript_part (conversation_id, item_id, part, text)
+       SELECT conversation_id, item_id, ?2, ?3 FROM transcript WHERE rowid = ?1",
+    )?;
     for row in long {
-        let (conversation_id, item_id, text) = read.query_row([row], |row| {
-            Ok((
-                row.get::<_, i64>("conversation_id")?,
-                row.get::<_, String>("item_id")?,
-                row.get::<_, String>("text")?,
-            ))
+        let text = read.query_row([row], |found| {
+            Ok(crate::openings::text_of(found.get_ref(0)?.as_bytes()?))
         })?;
-        write_parts(db, conversation_id, &item_id, &text)?;
+        for (part, piece) in (0_i64..).zip(parts_of(&text)) {
+            write.execute(params![row, part, piece])?;
+        }
     }
     Ok(())
 }

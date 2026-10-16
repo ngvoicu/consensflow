@@ -273,20 +273,24 @@ impl HistoryEntry {
 }
 
 /// How much of the history a read went through: the conversations it came
-/// to, the rows it read, the bytes of text it read of them, and the steps
-/// SQLite's machine took for it all.
+/// to, the rows it read, the bytes of text it read of them, the bytes of the
+/// conversations' fields and the items' ids it read with them (`fields`), and
+/// the steps SQLite's machine took for it all.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Scanned {
     pub conversations: usize,
     pub rows: usize,
     pub bytes: usize,
+    pub fields: usize,
     pub steps: usize,
 }
 
 /// One read of a participant's history: the conversations it took an entry
 /// of, headed, in the order it went; its entries, in that order; where the
 /// next read that way goes on (none: there is no more that way); whether the
-/// read stopped at the most a read goes through; and how much it went through.
+/// read stopped at the most a read goes through; how much it went through,
+/// and what that was charged of the most it may go through (`charged`, in
+/// bytes), which what a page reads besides is charged against too.
 #[derive(Debug, Clone, PartialEq)]
 pub struct HistoryRead {
     pub participant: i64,
@@ -295,15 +299,34 @@ pub struct HistoryRead {
     pub resume: Option<HistoryKey>,
     pub bounded: bool,
     pub scanned: Scanned,
+    pub charged: usize,
 }
 
-/// A part of an item's text: from which character, and where the next part
-/// begins (none: this is its last).
+/// A part of an item's text: from which character, where the next part
+/// begins (none: this is its last), and which copy of the item it is of
+/// (`revision`: the copy writes the item again changed as the next), so that a
+/// reader of every part knows they are of one copy.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct TextPart {
     pub text: String,
     pub from: usize,
     pub next: Option<usize>,
+    pub revision: i64,
+}
+
+/// A message as far as a delivery's line names it, read no further than its
+/// opening: the project, who it was to and from, what it was and on which
+/// task, and the first bytes of its body (`opening`, cut at a character),
+/// where its first words are.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MessageOpening {
+    pub id: i64,
+    pub project_id: i64,
+    pub recipient_id: i64,
+    pub sender: Option<String>,
+    pub kind: String,
+    pub task_number: Option<i64>,
+    pub opening: String,
 }
 
 /// One item a task's windows wrote, and the conversation it is from.

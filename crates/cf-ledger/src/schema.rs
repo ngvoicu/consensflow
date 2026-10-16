@@ -141,7 +141,7 @@ mod tests {
             "33053c05edf05fb28fdfed70def7dd9a93d28763f1b444651d24beeba1654352",
             "d73267cfa36e7769831bc565137149029fdc90c32342e6438816e01db5c68c63",
             "63715a099a8464bb97a304c1c7623cada58ade9effb5418625d6df27da26f2b1",
-            "e3f2933bbf82506b9b31debcc8126d9c8f2047d0ceaced9b78bf2e22c848223f",
+            "9c54f5b7282369a3479649be443a28f75f11667b2562b21915c0565efc620ff9",
         ];
         for (at, (sql, shipped)) in MIGRATIONS.iter().zip(SHIPPED).enumerate() {
             let hash: String = Sha256::digest(sql.as_bytes())
