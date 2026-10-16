@@ -1,0 +1,225 @@
+# The work a Close paused goes on with the human's Resume (Gabriel, 2026-10-16: "on resume tasks
+# should resume, right?"). The engine pauses the task of a window it closed itself, and in a
+# suspended project the ledger marks that pause (`paused_with_project`, migration 0019): the
+# human's Close and the chief's window ending close every window of the project so. The write
+# that opens the project again has each marked task at work again (waiting, where its window's
+# question is unanswered), withdraws the note that told the chief it was paused, and leaves a
+# task whose session left; the chief's window opens first, then each window with work, on its
+# own conversation, told its turn was cut in words that say only that ConsensFlow stopped. Every
+# other pause stays: the human's, the chief's, a window that closed by itself, a hold, and any a
+# ledger made before the mark. The case on the rig is
+# `crates/cf-e2e/tests/regressions/tasks_left_paused_by_a_close_and_resume.rs`, which builds the
+# native `cf` from the sources as planted, so its plants say `builds`.
+#
+# Every name holds `resume tasks`, so `npm run plants:daemon -- "resume tasks"` runs them all.
+
+[run]
+# The ledger's tests of the pauses a suspension makes and its Resume ends.
+ledger-suspended = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "suspended::"]
+# What the players of Node's recordings hold apart of what only this ledger writes.
+ledger-testing-mark = ["cargo", "test", "--offline", "-p", "cf-ledger", "--lib", "testing::"]
+# The engine's tests of a start, a Close and the human's Resume, on the fake windows.
+engine-resume-tasks = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "resume::"]
+# The owner's shape on the rig: two tasks at work and one the human paused, closed and resumed.
+rig-regression-resume-tasks = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "tasks_left_paused_by_a_close_and_resume::"]
+
+# --- the Resume, as main had it ---
+
+[[plant]]
+name = "resume tasks: the human's Resume leaves the work the Close paused paused, as 3.0.4 did (the rig)"
+meant = "a_close_and_a_resume_bring_back_the_tasks_the_close_paused_in_their_own_windows_and_a_task_the_human_paused_stays_paused"
+runs = ["rig-regression-resume-tasks"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects.rs"
+find = '''
+            if state == "open" {
+                resume_with_project(store, id)?;
+            }'''
+replace = ""
+
+[[plant]]
+name = "resume tasks: the human's Resume leaves the work the Close paused paused, as 3.0.4 did"
+meant = "the_resume_of_a_project_has_the_work_its_suspension_paused_at_work_again_and_no_other_pause"
+runs = ["ledger-suspended", "engine-resume-tasks"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/projects.rs"
+find = '''
+            if state == "open" {
+                resume_with_project(store, id)?;
+            }'''
+replace = ""
+
+# --- the mark ---
+
+[[plant]]
+name = "resume tasks: the engine never marks the pause of a window it closed with the project"
+meant = "a_resume_after_a_close_brings_back_the_chief_first_and_then_the_work_the_close_paused_and_not_a_task_the_human_paused"
+runs = ["engine-resume-tasks"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "                self.stall(&project, &thread.task, &because, own)?;"
+replace = "                self.stall(&project, &thread.task, &because, false)?;"
+
+[[plant]]
+name = "resume tasks: a window that closed by itself in a suspended project is taken for one the Close closed"
+meant = "a_window_the_close_could_not_close_that_then_closes_by_itself_leaves_its_task_paused"
+runs = ["engine-resume-tasks"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''
+                let own = record.window.borrow().own_exit;
+                self.stall(&project, &thread.task, &because, own)?;'''
+replace = '''
+                self.stall(&project, &thread.task, &because, true)?;'''
+
+[[plant]]
+name = "resume tasks: the ledger marks the pause of a window ConsensFlow closed in an open project too"
+meant = "the_resume_of_a_project_has_the_work_its_suspension_paused_at_work_again_and_no_other_pause"
+runs = ["ledger-suspended"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = "             WHERE id = ? AND (SELECT state FROM project WHERE id = task.project_id) = 'suspended'\","
+replace = "             WHERE id = ?\","
+
+[[plant]]
+name = "resume tasks: a move of the task leaves the mark, so a later pause is taken for the suspension's"
+meant = "a_task_the_suspension_paused_that_moved_since_is_no_longer_its_to_resume"
+runs = ["ledger-suspended"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/store.rs"
+find = "held_until = NULL, paused_with_project = 0"
+replace = "held_until = NULL"
+
+[[plant]]
+name = "resume tasks: the migration marks every task a ledger before it paused"
+meant = "a_ledger_from_before_the_mark_keeps_every_paused_task_paused_through_a_resume"
+runs = ["ledger-suspended"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0019.sql"
+find = "paused_with_project INTEGER NOT NULL DEFAULT 0 CONSTRAINT"
+replace = "paused_with_project INTEGER NOT NULL DEFAULT 1 CONSTRAINT"
+
+# --- what the Resume does with each task ---
+
+[[plant]]
+name = "resume tasks: the Resume leaves the note that told the chief the task was paused"
+meant = "the_resume_of_a_project_has_the_work_its_suspension_paused_at_work_again_and_no_other_pause"
+runs = ["ledger-suspended"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = '''
+        let task = store.task_row(project_id, number)?;
+        leave_pause_notes(store, &task, "resumed")?;
+        store.move_task('''
+replace = '''
+        let task = store.task_row(project_id, number)?;
+        store.move_task('''
+
+[[plant]]
+name = "resume tasks: the Resume has a task at work whose window's question is unanswered"
+meant = "a_task_the_suspension_paused_while_its_window_waited_for_an_answer_waits_again"
+runs = ["ledger-suspended"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = '''
+        reconcile(store, task.id)?;
+    }
+    Ok(())'''
+replace = '''
+    }
+    Ok(())'''
+
+[[plant]]
+name = "resume tasks: the Resume has a task at work whose session left while the project was closed"
+meant = "a_task_the_close_paused_whose_session_left_meanwhile_stays_paused_for_the_chief"
+runs = ["engine-resume-tasks"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = '''
+               AND p.left_at IS NULL'''
+replace = ""
+
+# --- the order and the words ---
+
+[[plant]]
+name = "resume tasks: the Resume opens the windows with work before the chief's"
+meant = "a_resume_after_a_close_brings_back_the_chief_first_and_then_the_work_the_close_paused_and_not_a_task_the_human_paused"
+runs = ["engine-resume-tasks"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/resume.rs"
+find = '''
+        if let Some(chief) = resumed.participants.iter().find(|p| p.role == "chief") {
+            // The human asks for the chief now: a chief that failed before is tried at once.
+            self.record_of(chief.id).window.borrow_mut().relaunch = None;
+            self.open_soon(chief.id, Some(Coming::Chief)).await;
+        }
+        for (participant, tasks) in at_work {
+            self.open_soon(participant, Some(Coming::Member(tasks)))
+                .await;
+        }'''
+replace = '''
+        for (participant, tasks) in at_work {
+            self.open_soon(participant, Some(Coming::Member(tasks)))
+                .await;
+        }
+        if let Some(chief) = resumed.participants.iter().find(|p| p.role == "chief") {
+            // The human asks for the chief now: a chief that failed before is tried at once.
+            self.record_of(chief.id).window.borrow_mut().relaunch = None;
+            self.open_soon(chief.id, Some(Coming::Chief)).await;
+        }'''
+
+[[plant]]
+name = "resume tasks: a member the Close cut is told that ConsensFlow quit"
+meant = "a_resume_after_a_close_brings_back_the_chief_first_and_then_the_work_the_close_paused_and_not_a_task_the_human_paused"
+runs = ["engine-resume-tasks"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/resume.rs"
+find = '''"ConsensFlow stopped while you were working on {}. {RESUME_WORDS}",'''
+replace = '''"ConsensFlow quit while you were working on {}. {RESUME_WORDS}",'''
+
+[[plant]]
+name = "resume tasks: a cut note an earlier build left queued in its words is not known, and the window is told twice"
+meant = "a_cut_note_an_earlier_build_left_queued_in_its_words_is_the_one_the_window_is_given"
+runs = ["engine-resume-tasks"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/resume.rs"
+find = '''"ConsensFlow quit while you were working on {}. {RESUME_WORDS}",'''
+replace = '''"ConsensFlow quit while you worked on {}. {RESUME_WORDS}",'''
+
+# --- the players of Node's recordings ---
+
+[[plant]]
+name = "resume tasks: the players keep the mark's column in the rows of the task table"
+meant = "takes_the_mark_column_and_its_values_out_of_the_task_table_and_nothing_else"
+runs = ["ledger-testing-mark"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/testing.rs"
+find = '''
+        .chain(paused_with_project::COLUMNS)'''
+replace = ""
+
+[[plant]]
+name = "resume tasks: the players keep the mark's column in the text of the task table"
+meant = "takes_the_column_out_of_the_text_sqlite_wrote_for_the_task_table_and_of_no_other"
+runs = ["ledger-testing-mark"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/testing.rs"
+find = '''
+                    .replace(paused_with_project::COLUMN_LINES, "")'''
+replace = ""

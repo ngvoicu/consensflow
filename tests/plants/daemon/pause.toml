@@ -17,11 +17,11 @@ runs = ["ledger-receipt"]
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/pausing.rs"
 find = '''
-        pause(store, &task, detail)?;
+        pause(store, &task, detail, false)?;
         store.db.execute(
             "UPDATE task SET held_until = ? WHERE id = ?",'''
 replace = '''
-        pause(store, &task, detail)?;
+        pause(store, &task, detail, false)?;
         store.db.execute(
             "UPDATE message SET state = 'cancelled', reason = 'held' WHERE task_id = ? AND state IN ('queued', 'gated')",
             [task.id],

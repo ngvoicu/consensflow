@@ -10,13 +10,21 @@
 //! opens its window afresh ([`Dispatcher::conversation_to_go_on_with`]), with the
 //! role it has now, and no note says a role that changed (`role_change`). What
 //! waits is delivered by the usual rules as they come up: a member with no task
-//! in hand opens when it is next given work, and a task that is paused, by the
-//! human or by the system, stays so until it is resumed.
+//! in hand opens when it is next given work.
 //!
-//! A window whose turn the quit cut is told so, once: the harness's record of
-//! its conversation, read before its window opens, has a turn with no end, and
-//! a note from ConsensFlow is the first thing the window is given, with what
-//! waits for it after. A window at rest when the app quit is given no note. Where
+//! The work a quit leaves at work comes back so; the work the project's own
+//! suspension paused (the human's Close, or the chief's window ending, closes
+//! every window of it) comes back the same way: the ledger's write that opens
+//! the project has those tasks at work again, before the chief's window is
+//! opened, so the chief comes first and is never given the note that they were
+//! paused (`cf_ledger`'s `set_project_state`). A task paused for any other reason
+//! (the human's or the chief's pause, a window that closed by itself, a hold)
+//! stays so until it is resumed.
+//!
+//! A window whose turn the quit or the Close cut is told so, once: the harness's
+//! record of its conversation, read before its window opens, has a turn with no
+//! end, and a note from ConsensFlow is the first thing the window is given, with
+//! what waits for it after. A window at rest when the app quit is given no note. Where
 //! the record cannot tell (Devin's, with no window open), a member with a task
 //! in hand is told all the same: a member whose cut turn goes untold reads at
 //! rest with its task at work for good, and one told that was at rest only looks
@@ -44,9 +52,8 @@ pub(crate) enum Coming {
 
 impl Coming {
     /// What the window is told when its turn was cut. A member is told what it
-    /// was working on. The chief came back by the human's Resume, not by a quit
-    /// alone (a Close cuts it too), so its words say only that ConsensFlow
-    /// stopped.
+    /// was working on. Each came back by the human's Resume, not by a quit alone
+    /// (a Close cuts a turn too), so the words say only that ConsensFlow stopped.
     fn words(&self) -> String {
         match self {
             Coming::Chief => {
@@ -54,13 +61,23 @@ impl Coming {
                     .to_owned()
             }
             Coming::Member(tasks) => {
-                let tasks: Vec<String> = tasks.iter().map(|number| format!("T-{number}")).collect();
                 format!(
-                    "ConsensFlow quit while you were working on {}. {RESUME_WORDS}",
-                    tasks.join(", ")
+                    "ConsensFlow stopped while you were working on {}. {RESUME_WORDS}",
+                    named(tasks)
                 )
             }
         }
+    }
+
+    /// Whether `body` is the note that tells the window its turn was cut: these
+    /// words, or a member's as builds before 3.0.5 wrote them, which a ledger may
+    /// still hold queued for a window that never came.
+    fn told_in(&self, body: &str) -> bool {
+        body == self.words()
+            || matches!(self, Coming::Member(tasks) if body == format!(
+                "ConsensFlow quit while you were working on {}. {RESUME_WORDS}",
+                named(tasks)
+            ))
     }
 
     /// The task the note is about: a member's first, the chief's none.
@@ -72,6 +89,12 @@ impl Coming {
     }
 }
 
+/// The tasks a member's note names, as it names them.
+fn named(tasks: &[i64]) -> String {
+    let tasks: Vec<String> = tasks.iter().map(|number| format!("T-{number}")).collect();
+    tasks.join(", ")
+}
+
 impl Dispatcher {
     /// Once, at start: what was on its way into a window when the previous
     /// process ended is settled. Nothing else of the projects that were open
@@ -81,10 +104,11 @@ impl Dispatcher {
         returning(self.settle_in_flight()).await
     }
 
-    /// The human's Resume: the project is open, and its chief comes back on its
-    /// conversation, and so does each member with a task at work or waiting,
-    /// on its own. A window comes up apart from this call, and what waits for
-    /// it is delivered once it is up.
+    /// The human's Resume: the project is open, with the tasks its suspension
+    /// paused at work again (the ledger's write), and its chief comes back on its
+    /// conversation, and then each member with a task at work or waiting, on its
+    /// own. A window comes up apart from this call, and what waits for it is
+    /// delivered once it is up.
     pub async fn resume_project(
         self: &Rc<Self>,
         project: i64,
@@ -194,7 +218,7 @@ impl Dispatcher {
             message.sender.is_none()
                 && message.kind == "note"
                 && message.state == "queued"
-                && message.body == words
+                && coming.told_in(&message.body)
         });
         if told.is_some() {
             return Ok(told);

@@ -177,6 +177,8 @@ impl Store {
     /// A task moves to another state, and the log says so (`task.state`),
     /// `detail` after the move. A member leaving, a delivery and a decision
     /// all move tasks, so the move lives here, under every concern that makes one.
+    /// A move ends a hold, and the mark that a project's suspension paused the
+    /// task: the pause that sets either sets it after the move.
     pub(crate) fn move_task(
         &mut self,
         task: &TaskRow,
@@ -196,7 +198,8 @@ impl Store {
     ) -> Result<(), LedgerError> {
         let at = self.at();
         self.db.execute(
-            "UPDATE task SET state = ?, updated_at = ?, held_until = NULL WHERE id = ?",
+            "UPDATE task SET state = ?, updated_at = ?, held_until = NULL, paused_with_project = 0
+             WHERE id = ?",
             params![to, at, task.id],
         )?;
         let mut data = json!({ "task": task.number, "from": task.state, "to": to });

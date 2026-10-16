@@ -359,7 +359,7 @@ fn the_words_a_window_gives_a_replacement_of_its_role_are_no_answer_to_its_task(
         answers(&[
             user(&replacement),
             assistant("Understood."),
-            user("ConsensFlow quit while you were working on T-1."),
+            user("ConsensFlow stopped while you were working on T-1."),
             assistant("Parser done"),
         ]),
         ["Parser done"]

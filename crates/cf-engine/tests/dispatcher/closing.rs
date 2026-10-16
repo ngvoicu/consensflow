@@ -6,7 +6,7 @@
 use cf_engine::testing::{Context, Gate};
 use cf_harness::contract::Pane;
 use cf_proto::trace::{Traced, WindowEvent};
-use serde_json::json;
+use serde_json::{json, Value};
 
 use crate::fixtures::assert_match;
 use crate::traces::held_to;
@@ -182,7 +182,7 @@ fn closes_a_project() {
     assert_eq!(
         (task.state.as_str(), task.assignee.as_deref()),
         ("paused", Some("zeus-amber-pine")),
-        "the work waits, with its session, for the chief to resume it"
+        "the work waits, with its session, for the Resume"
     );
     context.pass().unwrap();
     assert_eq!(
@@ -191,20 +191,28 @@ fn closes_a_project() {
         "nothing reopens while suspended"
     );
 
-    context.resume_project(project.id).unwrap();
-    let resumed = context.adapter.prepared().pop().unwrap();
-    assert_eq!(resumed["resume"], json!(chief_native));
     let zeus_native = native("zeus-amber-pine");
-    context.resume_task(project.id, 1, "Go on");
-    context.pass().unwrap();
-    let back = context.adapter.prepared().pop().unwrap();
+    context.resume_project(project.id).unwrap();
+    assert_eq!(context.task(project.id, 1).task.state, "working");
+    let launched: Vec<(Value, Value)> = context
+        .adapter
+        .prepared()
+        .iter()
+        .skip(2)
+        .map(|launch| {
+            (
+                launch["participant"]["handle"].clone(),
+                launch["resume"].clone(),
+            )
+        })
+        .collect();
     assert_eq!(
-        (
-            back["participant"]["handle"].clone(),
-            back["resume"].clone()
-        ),
-        (json!("zeus-amber-pine"), json!(zeus_native)),
-        "the same session of zeus, on its own conversation"
+        launched,
+        [
+            (json!("chief"), json!(chief_native)),
+            (json!("zeus-amber-pine"), json!(zeus_native)),
+        ],
+        "the chief first, then the same session of zeus, each on its own conversation"
     );
     held_to(
         context.close(),

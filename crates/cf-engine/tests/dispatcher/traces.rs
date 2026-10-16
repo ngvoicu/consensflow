@@ -48,7 +48,8 @@
 //! member may be back before its reset, and the requester is told when the
 //! task goes on; a result the chief decides on before it is given it is
 //! withdrawn, not pasted after the decision; a window that did not come up is
-//! asked what it shows before it is closed), is named in [`DEPARTED`], with
+//! asked what it shows before it is closed; the human's Resume of a project has
+//! the work its Close paused at work again), is named in [`DEPARTED`], with
 //! what it does that Node does not. It is held to a trace of its own, recorded
 //! from the engine (`tests/departures/`, `npm run departures`), and fails when
 //! Node's trace is the engine's again, so the departure is taken off once Node
@@ -167,6 +168,10 @@ const HOLD_WORDS: &str = "the note that T-1 is held says the member may be back 
 /// requester was given the hold note.
 const HOLD_THEN_GOES_ON: &str = "the note that T-1 is held says the member may be back before its reset and the task then goes on by itself, where Node's says it goes on at the reset; and when the daemon resumes T-1, the chief, who was given that note, is told `T-1 goes on: its account has quota again.`, where Node tells it nothing";
 
+/// What the engine does when the human resumes a project whose Close paused its
+/// work (Gabriel, 2026-10-16: "on resume tasks should resume").
+const CLOSE_RESUMED: &str = "the human resumes the project the Close suspended: T-1, which the Close paused, is at work again in the same write, and its window comes back after the chief's on its own conversation, told its turn was cut, with the note that T-1 is paused, which the chief had not been given, withdrawn (`T-1 resumed`), where Node leaves T-1 paused for the chief to resume and the note queued for the chief";
+
 /// What the engine does when the human reassigns a paused task whose stall
 /// has been told to its requester in a note not yet given.
 const STALL_LEFT: &str = "the human reassigns T-1 while the note that T-1 is paused is still queued for the chief: the note is withdrawn (`T-1 was taken back`), where Node pastes it into the chief's window";
@@ -236,7 +241,11 @@ const DEPARTED: &[(&str, &str)] = &[
     ),
     (
         "closes a project: its windows go, work in them pauses, and Resume brings the chief back",
-        "the chief resumes T-1 before its window came back to take the note that T-1 is paused: the note is withdrawn, where Node pastes it into the window",
+        CLOSE_RESUMED,
+    ),
+    (
+        "fails the Close that made its exit, which nothing logs: the exit it settles is its own",
+        CLOSE_RESUMED,
     ),
     (
         "keeps a held task paused, its hold cleared, when its session was deleted before the hold ended, and tells its requester once while every other task goes on",

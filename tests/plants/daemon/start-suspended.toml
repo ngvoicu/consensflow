@@ -213,8 +213,8 @@ find = '''matches!(task.state.as_str(), "working" | "waiting")'''
 replace = '''matches!(task.state.as_str(), "working" | "waiting" | "paused")'''
 
 [[plant]]
-name = "start suspended: a Resume opens the window of a task a Close paused"
-meant = "a_resume_after_a_close_brings_back_the_chief_alone_and_the_tasks_the_close_paused_wait_for_it"
+name = "start suspended: a Resume after a Close opens the window of a task the chief paused"
+meant = "the_chiefs_pause_and_its_tell_stay_paused_through_a_close_and_a_resume"
 runs = ["engine-resume"]
 
 [[plant.edit]]

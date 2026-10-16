@@ -74,6 +74,19 @@ impl Ledger {
         tasks::pause_task(&mut self.store, project_id, number, by, because)
     }
 
+    /// ConsensFlow pauses a worker's task whose window it closed itself; in a
+    /// suspended project, the human's Resume of the project resumes it.
+    pub fn pause_with_project(
+        &mut self,
+        project_id: i64,
+        number: i64,
+        because: &str,
+    ) -> Result<TaskView, LedgerError> {
+        #[cfg(feature = "test-support")]
+        self.watched("pause_task", Some(number))?;
+        tasks::pause_with_project(&mut self.store, project_id, number, because)
+    }
+
     /// The daemon holds a task while its member is out of quota, until `until`.
     pub fn hold_task(
         &mut self,

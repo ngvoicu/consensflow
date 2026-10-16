@@ -763,7 +763,12 @@ impl Dispatcher {
                         quote(left)
                     )
                 };
-                self.stall(&project, &thread.task, &because)?;
+                // A window the engine closed itself: in a suspended project it closed
+                // with the project (the human's Close, or the chief's window ending),
+                // and the ledger marks the pause for the human's Resume to end. One
+                // that closed by itself stays paused.
+                let own = record.window.borrow().own_exit;
+                self.stall(&project, &thread.task, &because, own)?;
             } else {
                 self.tell_left_running(&project, &participant, left)?;
             }
@@ -823,7 +828,7 @@ impl Dispatcher {
             .active_task(participant.id, false)?;
         if let Some(thread) = task {
             let because = format!("@{}'s window is gone", participant.handle);
-            self.stall(project, &thread.task, &because)?;
+            self.stall(project, &thread.task, &because, false)?;
             self.changed();
         }
         Ok(())
