@@ -4,7 +4,9 @@
 //! - A line `DISPATCH --tier standard <task>` (or `DISPATCH --review --tier
 //!   standard <task>`, and `--test` the same) runs `cf task add` with those
 //!   words and the task (`\n` in it becomes a line break), with this window's
-//!   own token, the way a chief hands out work.
+//!   own token, the way a chief hands out work. Each such line of a message is
+//!   run, in order, so that one turn puts several tasks on the board at once, as
+//!   a chief does that plans (the long run's stand-in chief).
 //! - A line `CF <words>` runs any other `cf` with those words as they stand
 //!   (`CF task cancel T-3`), and `CF <words> :: <text>` with the text, spaces
 //!   and all, as one last word (`CF tell T-1 :: Stop now`): the chief's own
@@ -316,16 +318,21 @@ pub fn reply_to(text: &str, window: &Window) -> Result<Reply, String> {
         ];
         return Ok(Reply::Text(format!("replied: {}", run_cf(&words))));
     }
-    if let Some(dispatch) = pattern::once(
-        &DISPATCH,
-        r"(?m)^DISPATCH ((?:(?:--(?:advice|review|test|design|self)|--\S+ \S+) )+)(.+)$",
+    let dispatched: Vec<String> = dispatches(
+        text,
+        pattern::once(
+            &DISPATCH,
+            r"(?m)^DISPATCH ((?:(?:--(?:advice|review|test|design|self)|--\S+ \S+) )+)(.+)$",
+        ),
     )
-    .captures(text)
-    {
-        let mut words = vec!["task".to_owned(), "add".to_owned()];
-        words.extend(dispatch[1].trim().split(' ').map(str::to_owned));
-        words.push(dispatch[2].replace("\\n", "\n"));
-        return Ok(Reply::Text(format!("dispatched: {}", run_cf(&words))));
+    .iter()
+    .map(|words| run_cf(words))
+    .collect();
+    if !dispatched.is_empty() {
+        return Ok(Reply::Text(format!(
+            "dispatched: {}",
+            dispatched.join(" | ")
+        )));
     }
     if let Some(verb) = pattern::once(&VERB, r"(?m)^CF (.+)$").captures(text) {
         let mut parts = verb[1].split(" :: ");
@@ -351,6 +358,20 @@ pub fn reply_to(text: &str, window: &Window) -> Result<Reply, String> {
         "noted: {}",
         text.split('\n').next().unwrap_or_default()
     )))
+}
+
+/// The words of `cf task add` each `DISPATCH` line of `text` asks for, in the
+/// order of the lines (`line` is the pattern of one): its flags, and its task with
+/// each `\n` a line break.
+fn dispatches(text: &str, line: &Regex) -> Vec<Vec<String>> {
+    line.captures_iter(text)
+        .map(|dispatch| {
+            let mut words = vec!["task".to_owned(), "add".to_owned()];
+            words.extend(dispatch[1].trim().split(' ').map(str::to_owned));
+            words.push(dispatch[2].replace("\\n", "\n"));
+            words
+        })
+        .collect()
 }
 
 /// Whether the provider refuses this window the message `text`: it says
@@ -565,5 +586,29 @@ mod tests {
             ask_through_hook(&window, &json!([])).unwrap(),
             "unanswered (exit 2): no way"
         );
+    }
+
+    #[test]
+    fn each_dispatch_line_of_a_message_is_a_task_added_in_the_order_of_the_lines() {
+        let line = Regex::new(
+            r"(?m)^DISPATCH ((?:(?:--(?:advice|review|test|design|self)|--\S+ \S+) )+)(.+)$",
+        )
+        .unwrap();
+        let text = "The plan.\nDISPATCH --tier complex JOB 60 SLEEP 30 Build\\nit\nnot a line: DISPATCH --tier light no\nDISPATCH --review --tier light Look at it";
+        let words: Vec<Vec<String>> = dispatches(text, &line);
+        assert_eq!(
+            words,
+            [
+                vec![
+                    "task",
+                    "add",
+                    "--tier",
+                    "complex",
+                    "JOB 60 SLEEP 30 Build\nit"
+                ],
+                vec!["task", "add", "--review", "--tier", "light", "Look at it"],
+            ]
+        );
+        assert!(dispatches("DISPATCH nothing", &line).is_empty());
     }
 }

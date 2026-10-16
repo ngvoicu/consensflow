@@ -5,12 +5,14 @@
 use cf_e2e::live::{Harness, Installed};
 use serde_json::json;
 
+use super::super::options::Options;
 use super::*;
 use crate::plan::chief_environment;
 
-fn options(line: &str) -> Options {
+/// Who the windows of a run of `line` are.
+fn options(line: &str) -> Crew {
     let words: Vec<String> = line.split_whitespace().map(str::to_owned).collect();
-    Options::of(&words).unwrap()
+    Options::of(&words).unwrap().crew()
 }
 
 fn strings(words: &[&str]) -> Vec<String> {

@@ -157,3 +157,174 @@ a score).
 one-line card that names no board (`nocard`), and as its harness alone
 without ConsensFlow (`bare`, which finds the chief's session in the
 harness's own store).
+
+## The long run
+
+```sh
+cargo xtask eval long                                     # two hours: a Claude chief, every harness on the staff
+cargo xtask eval long --chief devin --hours 3 --every-min 15
+cargo xtask eval long --staff claude,devin --restart --devin-cut   # those two disruptions alone
+cargo xtask eval long --quiet                             # no disruption
+cargo xtask windows --host zeewin --build -- cargo xtask eval long --chief devin
+```
+
+(`npm run eval:long` is the same, with the flags after a `--`.)
+
+A real project worked for hours by a chief and a staff of every harness, with
+ConsensFlow held to ten invariants the whole time. The serious bugs of 3.0.3 and
+3.0.4 came from long runs on real projects (the field reports of 2026-10-15, in the
+brain): a task left working after its worker finished, an unfinished turn taken
+for the result while a background job ran, a job ended mid-edit with its notice
+after the result, a result holding every progress line, a false "turn was cut"
+after an idle compaction, a resumed Devin that could not write, windows closing
+mid-task, a result delivered twice. The owner found each; this finds them first.
+**It spends real quota on every harness, for hours.** The code is
+`crates/cf-evals/src/long_run/`, built in release.
+
+**The project** is `evals/fixtures/long-run/` (ledgerline): a small bookkeeping
+library with a report site, a test suite and a build that each take minutes on
+purpose (`scripts/pace.mjs`), a dev server that never exits, three planted bugs
+(`docs/bugs.md`), and three phases of work (`docs/requirements.md`). The owner's
+ask (`long_run/ask.rs`) has the chief plan the phases as a spec (specs are on) and
+put long work on the board in the shapes the field broke on: the dev server started
+with Claude Code's `run_in_background`, a long build in the foreground that Devin
+moves to the background, a reading of every file that grows a window's context. The
+chief asks the owner one question (answered), gets a follow-up once the phases are
+done, and wake-up calls every `--wake-min` minutes. Tasks reach a harness by tier:
+Claude Code's members are `complex`, Devin's `light`, the rest `standard`.
+
+**The staff** is `--staff` (every harness unless it names fewer), each harness on
+the models it has here (`--models claude=a+b,...`; the defaults are in
+`long_run/staff.rs`): a worker for each model, and an advisor and a reviewer. A
+harness the machine has not, and an OpenCode of 2 or more, is left out, and the run
+says which and why. The chief is `--chief`, on `--model` as in the evals.
+
+**The disruptions** come one at a time, each `--every-min` minutes after the one
+before was played, at the first look whose moment makes the shape real: a task
+paused and resumed (`--pause`); a worker's window killed mid-task (`--kill`, B2);
+`/compact` typed into the idle chief (`--compact`, A5 with the restart after it,
+and only into a chief that is Claude Code at its moment); the app quit and started
+again with a worker mid-tool (`--restart`); the chief switched while the staff work
+and a job runs (`--switch`, to `--switch-to`); the same quit with a Devin worker
+(`--devin-cut`, B1); the project suspended and resumed (`--suspend`). Naming some
+plays those alone; `--quiet` plays none. One that the staff cannot play is said so
+at the start; one whose moment never came fails the run. A disruption is played
+only once its effect is seen (the paused task paused and on again, the killed
+window's task paused, a compaction boundary in the chief's own record that is new
+since the keys, the project open again with its chief's window, the Devin worker's
+window opened again after its cut, the chief's new window on the agent it was
+switched to, the tasks a Close paused out of `paused` once the owner resumed them);
+one whose effect is not seen within four minutes, or whose ask was refused, is a
+break of the tenth invariant, with the board's rows and the window's screen. The
+restart after a compaction waits for a chief whose record still ends in it (A5's
+shape); one played at a moment that lacked it is said so, and fails the run. The
+run signals only what it started itself, through the handle it holds (the rig's
+daemon and pane host, its own programs), and never a process by its number: the
+killed window is ended by the pane host, which holds that window's handle
+(`pane.kill`, as the app would ask), and the daemon, which asked nothing, sees it end
+as a crash ends one. A test holds that no line of the long run sends a signal by a
+number or runs a program that ends processes. The watch goes on while a disruption
+waits.
+
+**The watch** never steers. Every `--look-sec` seconds it reads the ledger (a copy,
+with SQLite), the pane host's windows (each window's process, its screen, what its
+turn left running), the windows that exited (at the time the pane host told it), the
+daemon's trace, and each Claude Code window's own record as it grows (read as the
+product reads it: a turn ends at its root `turn_duration` or a stop hook's summary
+that let it, not at its answer; a message waiting in Claude Code's queue is a turn
+not over, a removal or a `popAll` naming it as the product names it, its envelope's
+attributes set aside; a prompt Claude Code wrote after the answer it began is no new
+turn), and holds:
+
+1. no task working whose window has neither run a turn nor held a job for
+   `--idle-min` minutes (A1); a long turn, or a long stop hook, is no fault, nor
+   are the background agents the last turn's own boundary counted (3.0.5 holds such
+   a task working);
+2. no task done while its Claude Code job still runs (a job whose end is written
+   within `--settle-sec` after the result had ended, which is also how old a result
+   is before it is judged while the app runs), unless it was finished at
+   someone's word: ConsensFlow's note `T-14 is finished at @chief's word: what it
+   said last is its result.` before the result (A2);
+3. an "ended" notice never after its own result (A3), which result is a notice's
+   being the task log's word alone, never how near the two were written: a notice
+   no result came before holds; one after a result, the task having begun no attempt
+   since, is that result's and breaks; one after a result and a send-back may be that
+   result's, late, or the next attempt's own, and is **unresolved**: no break, said
+   once in the timeline, and no run that holds one passes;
+4. a result is the last turn's final answer, whole, with no progress line in it the
+   answer does not say too; Codex's commentary is no part of it (A4);
+5. no "turn was cut" for a turn the record shows at rest, an idle compaction being
+   no turn (A5);
+6. every window the board shows open has its process, none closes by itself
+   mid-task, and no process outlives its window (B2, strangers, and what is left
+   once the app has closed: each said with what is known of it, and left running,
+   for the run did not start it). A process is known by when it began, taken only by
+   the look that saw it under its window, in that look's one asking, and is said by
+   it: where that asking failed, or named a process that began after the look
+   (Windows says the moment), or the process was first known from a window's exit
+   (which names a number and a command, nothing that ties the number to a process),
+   it is never known. A process never known, or that the system could not be asked
+   of, is unresolved where its number is there when it is judged, and a break. So is
+   a close of the app whose pane host's last word was not read to its end in time.
+   What the watch could not see of an open window's tree is a gap: a tree the pane
+   host could not say at two looks in a row, and the processes past the 16 it names
+   (the product's cap, which the eval does not raise), which are not followed. A gap
+   is no break, and no run with one passes;
+7. no message delivered twice or joined to another, whatever the white space of its
+   header; a header is a quote only inside the words of the message that quotes it
+   (B5);
+8. no tool call comes back "User skipped this tool call" (in any case; a screen
+   line that says it alone, and not in a quote), and no dialog waits `--dialog-min`
+   minutes in a window still open (B1);
+9. the project reaches its end within `--hours`: every task accepted, cancelled or
+   failed, and the chief's report to the owner, both before the deadline;
+10. a disruption has its effect.
+
+A break is recorded when it is found, once, with its evidence: the ledger's rows,
+the window's screen, the record's lines, with what looks like a key or a token in
+them hidden as the product hides it (a secret's value in quotes, whole, a quote
+escaped in it and all, and in quotes escaped themselves, as a refusal's JSON holds
+it, its escapes read to its real end; a value whose quote never closes, as a command
+the pane host cut at 512 characters, to the end of the text; the run's own handles
+and window ids, read from the ledger and the windows, shown, and nothing else shaped
+like them), each text masked whole before it is cut short; so are the timeline,
+everything the run notes on its output and in its log (a wait for the chief that gave
+up and shows its screen among them), what stopped it and each harness's version line.
+A version command that leaves a process holding its output is read for 5 s after it
+ends, and the version line says so.
+After the budget or the quiet, the run waits while the newest result is younger than
+`--settle-sec` (the app still running to tell a job's end), the app is closed (its
+pane host read to its last word) and the project as it left it (its ledger, and any
+process of the run still there, said and left running) is held to the invariants once
+more, every result judged however young, a job's end told within `--settle-sec`
+after its result still counting. A ledger the app left that cannot be read fails the
+run: nothing is held on an earlier copy of it, only what the close left of the run's
+processes. The report (`evals/reports/long/`) is a
+JSON file and a Markdown one: the verdict and why, each harness with its version and
+each member's model, the invariants, the disruptions and when each was played, every
+break with its evidence, and the timeline of the tasks, the windows, the owner's
+words, the wake-up calls, the chief's switch, the disruptions, the breaks and what
+a check could not judge (`unresolved`). The
+run says the Markdown last, on its output: a run on zeewin keeps its files in the
+build folder there (`%USERPROFILE%\consensflow-build\evals\reports\long\`) and
+brings the report back in what it says. The run fails (`FAIL`) when an invariant
+broke, a disruption was not played or was played without the shape it is for, its
+time ran out, or it could not be run to its end. One that did not fail and holds
+what the watch could not judge (an unresolved notice, a gap) is `UNRESOLVED`, each
+listed in why and in the report; only a run with neither is `PASS`. It ends sooner
+than `--hours` when the project is done. On `main` before the turn-end work lands, every
+job a worker's turn leaves that the daemon ends breaks 3 (its "ended" notice comes
+after the result: the dry run shows it each time), and a Claude Code
+`run_in_background` job its worker said it would wait for breaks 2 as well: that is
+the test working.
+
+Its checks are held without a harness (`cargo xtask check`): ledgers and records
+made for each invariant, a case that breaks it and one that holds
+(`crates/cf-evals/tests/long_run.rs`), and the field's shapes as recorded ledgers
+(`tests/fixtures/ledgers/field-*.sql`). The plants of `tests/plants/daemon/long-run.toml`
+are bugs of the watch, each caught (`npm run plants:daemon -- "long run"`). The whole
+run on the stand-ins, which spends nothing: `cargo test -p cf-evals --test
+long_dry_run -- --ignored --nocapture` (about fifteen minutes, on a budget of half
+an hour; it plays every
+disruption, the stand-in compacting at `/compact` as Claude Code does, and keeps its
+report).

@@ -73,6 +73,22 @@ fn a_harness_says_its_version_by_the_word_it_is_asked_with_and_unknown_when_it_s
     assert_eq!(gone.version(), "unknown");
 }
 
+#[cfg(unix)]
+#[test]
+fn a_harness_whose_version_leaves_a_process_holding_its_output_says_it_and_holds_nothing() {
+    use std::os::unix::fs::PermissionsExt;
+    // A wrapper that says its version and leaves an updater in the background, which
+    // holds its output for twenty seconds.
+    let folder = tempfile::tempdir().unwrap();
+    let wrapper = folder.path().join("pi");
+    std::fs::write(&wrapper, "#!/bin/sh\necho 0.71.2\nsleep 20 &\n").unwrap();
+    std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let started = std::time::Instant::now();
+    let said = Installed::at(Harness::Pi, &wrapper, "home").version();
+    assert!(started.elapsed() < std::time::Duration::from_secs(15));
+    assert_eq!(said, "0.71.2 (a process it left held its output open)");
+}
+
 #[test]
 fn the_harnesses_are_named_as_a_command_line_and_the_roster_name_them() {
     let names: Vec<_> = Harness::ALL.iter().map(|harness| harness.name()).collect();

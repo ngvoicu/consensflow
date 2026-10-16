@@ -44,23 +44,39 @@ pub(super) struct Press {
     pub at_ms: i64,
 }
 
-/// What the frames showed so far.
+/// What the frames showed so far. A frame is kept for what a case reads of it and
+/// no more: a long run's windows print for hours, and every frame kept whole (a
+/// window's output is a list of numbers, one to a byte) would hold gigabytes.
 #[derive(Debug, Default)]
 pub(super) struct Seen {
-    /// Every frame the daemon wrote, in order, and every frame the pane host
-    /// wrote.
-    pub daemon: Vec<Value>,
-    pub host: Vec<Value>,
+    /// How many frames the daemon wrote, and how many the pane host wrote.
+    pub daemon: usize,
+    pub host: usize,
     /// The body of each `pane.open` the daemon asked, in order.
     pub opened: Vec<Value>,
+    /// The `pane.open` requests the pane host has not answered yet, by the
+    /// request's id: the window each is for.
+    opening: HashMap<String, Value>,
+    /// The process each window was opened on, as the pane host answered its
+    /// `pane.open`: `{ id, generation, pid }`, in the order they were answered.
+    pub pids: Vec<Value>,
+    /// The body of each `pane.kill` the daemon asked, in order: the windows it
+    /// closed itself.
+    pub kills: Vec<Value>,
     /// Every key the daemon pressed into a window, in order.
     pub presses: Vec<Press>,
     /// Everything each pane printed, by the pane's id.
     pub printed: HashMap<String, Vec<u8>>,
     /// The body of each `pane.exit` the pane host told.
     pub exits: Vec<Value>,
+    /// When the rig saw each of `exits`, in milliseconds since the epoch: a
+    /// window's end as the host told it, not when a case next looked.
+    pub exit_times: Vec<i64>,
     /// Lines a program wrote that are no frame, which a failure shows.
     pub stray: Vec<String>,
+    /// Whether the pane host's output has ended: every frame it wrote, its last
+    /// exits among them, has been read.
+    pub host_ended: bool,
 }
 
 /// What the routers share with the case.
@@ -98,9 +114,16 @@ impl Shared {
         let id = frame["id"].as_str().unwrap_or_default();
         {
             let mut seen = self.seen();
-            seen.daemon.push(frame.clone());
+            seen.daemon += 1;
             if frame["kind"] == "req" && frame["op"] == "pane.open" {
                 seen.opened.push(frame["body"].clone());
+                seen.opening.insert(
+                    id.to_owned(),
+                    json!({ "id": frame["body"]["id"], "generation": frame["body"]["generation"] }),
+                );
+            }
+            if frame["kind"] == "req" && frame["op"] == "pane.kill" {
+                seen.kills.push(frame["body"].clone());
             }
             if frame["kind"] == "req" && frame["op"] == "pane.input" {
                 if let Some(bytes) = bytes_of(&frame["body"]["bytes"]) {
@@ -132,7 +155,15 @@ impl Shared {
         let mut reply = None;
         {
             let mut seen = self.seen();
-            seen.host.push(frame.clone());
+            seen.host += 1;
+            if frame["kind"] == "res" {
+                if let Some(mut window) = seen.opening.remove(id) {
+                    if let Some(pid) = frame["body"]["pid"].as_u64() {
+                        window["pid"] = json!(pid);
+                        seen.pids.push(window);
+                    }
+                }
+            }
             if frame["op"] == "pane.output" {
                 if let Some(bytes) = bytes_of(&frame["body"]["bytes"]) {
                     let pane = frame["body"]["id"].as_str().unwrap_or_default().to_owned();
@@ -151,6 +182,8 @@ impl Shared {
             }
             if frame["op"] == "pane.exit" {
                 seen.exits.push(frame["body"].clone());
+                seen.exit_times
+                    .push(jiff::Timestamp::now().as_millisecond());
             }
         }
         if let Some(body) = reply {
@@ -220,8 +253,54 @@ mod tests {
             open
         );
         let seen = shared.seen();
-        assert_eq!(seen.daemon.len(), 1);
+        assert_eq!(seen.daemon, 1);
         assert_eq!(seen.opened, [json!({"id": "p1-chief", "argv": ["x"]})]);
+    }
+
+    #[test]
+    fn the_process_a_window_was_opened_on_and_the_windows_the_daemon_closed_are_kept() {
+        let shared = Shared::default();
+        let (host, _host_lines, daemon, _daemon_lines) = sinks();
+        let open = |frame: &str, pane: &str| {
+            json!({
+                "v": 1, "id": frame, "kind": "req", "op": "pane.open",
+                "body": {"id": pane, "generation": 2, "argv": ["claude"]},
+            })
+            .to_string()
+        };
+        shared.route_daemon(&open("d-7", "p1-worker-a"), &host);
+        shared.route_daemon(&open("d-8", "p1-worker-b"), &host);
+        // The host answers the second first, and the first with no process (it failed).
+        let answer = |frame: &str, body: Value| {
+            json!({ "v": 1, "id": frame, "kind": "res", "op": "pane.open", "body": body })
+                .to_string()
+        };
+        shared.route_host(
+            &answer(
+                "d-8",
+                json!({"ok": true, "id": "p1-worker-b", "generation": 2, "pid": 4242}),
+            ),
+            &host,
+            &daemon,
+        );
+        shared.route_host(
+            &answer("d-7", json!({"ok": false, "error": "no such program"})),
+            &host,
+            &daemon,
+        );
+        let kill = json!({
+            "v": 1, "id": "d-9", "kind": "req", "op": "pane.kill",
+            "body": {"id": "p1-worker-b", "generation": 2},
+        });
+        shared.route_daemon(&kill.to_string(), &host);
+        let seen = shared.seen();
+        assert_eq!(
+            seen.pids,
+            [json!({"id": "p1-worker-b", "generation": 2, "pid": 4242})]
+        );
+        assert!(seen.opening.is_empty(), "every open was answered");
+        assert_eq!(seen.kills, [json!({"id": "p1-worker-b", "generation": 2})]);
+        assert_eq!((seen.daemon, seen.host), (3, 2));
     }
 
     #[test]
@@ -321,15 +400,20 @@ mod tests {
             "v": 1, "id": "e-3", "kind": "evt", "op": "pane.exit",
             "body": {"id": "p1-chief", "generation": 5, "code": 0},
         });
+        let before = jiff::Timestamp::now().as_millisecond();
         shared.route_host(&exit.to_string(), &host, &daemon);
+        let after = jiff::Timestamp::now().as_millisecond();
         {
             let seen = shared.seen();
+            // When the host told it, which a look that comes later reads.
+            assert_eq!(seen.exit_times.len(), 1);
+            assert!((before..=after).contains(&seen.exit_times[0]));
             assert_eq!(seen.printed["p1-chief"], [104, 105, 0x1b, 91, 54, 110, 33]);
             assert_eq!(
                 seen.exits,
                 [json!({"id": "p1-chief", "generation": 5, "code": 0})]
             );
-            assert_eq!(seen.host.len(), 3);
+            assert_eq!(seen.host, 3);
         }
         // The page's reply to the query goes to the pane host, as a request of the rig's.
         let reply: Value =

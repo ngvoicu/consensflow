@@ -12,11 +12,15 @@ use serde_json::{json, Value};
 
 use crate::Result;
 
+/// What a run passes each line through before it says or keeps it.
+type Masking = Box<dyn Fn(&str) -> String>;
+
 /// A run that speaks, and keeps what it said.
 pub struct Floor<'o> {
     out: &'o mut dyn Write,
     started: Instant,
     log: Vec<(u64, String)>,
+    mask: Option<Masking>,
 }
 
 impl<'o> Floor<'o> {
@@ -26,6 +30,25 @@ impl<'o> Floor<'o> {
             out,
             started: Instant::now(),
             log: Vec::new(),
+            mask: None,
+        }
+    }
+
+    /// From now on, every thing the run notes is passed through `mask` before it is
+    /// said or kept: a run that hides what looks like a key or a token in what it says
+    /// as it goes (the long run's), whatever says it (a wait that gave up and shows a
+    /// window's screen among them). What it says as it is ([`Floor::say`]: where its
+    /// report is, the report masked already) is its own.
+    pub fn masking(&mut self, mask: impl Fn(&str) -> String + 'static) {
+        self.mask = Some(Box::new(mask));
+    }
+
+    /// `line` as it is noted: through the run's mask, where it has one.
+    fn shown(&self, line: impl Display) -> String {
+        let line = line.to_string();
+        match &self.mask {
+            Some(mask) => mask(&line),
+            None => line,
         }
     }
 
@@ -42,7 +65,7 @@ impl<'o> Floor<'o> {
     /// Says `line` as a thing the run did, with the seconds since it began, and
     /// keeps it for the report: `  [12s] chief idle; tasks T-1:working`.
     pub fn note(&mut self, line: impl Display) -> Result {
-        let (at, line) = (self.seconds(), line.to_string());
+        let (at, line) = (self.seconds(), self.shown(line));
         writeln!(self.out, "  [{at}s] {line}")?;
         self.log.push((at, line));
         Ok(())
@@ -128,6 +151,27 @@ mod tests {
             "  [0s] chief (claude) ready; typing the prompt\n\
              daemon: native (rust 3.0.1)\n\
              \x20 [0s] quiet: the run is over\n"
+        );
+    }
+
+    #[test]
+    fn a_run_that_masks_says_and_keeps_each_thing_it_notes_through_its_mask() {
+        let mut said = Vec::new();
+        let mut floor = Floor::new(&mut said);
+        floor.masking(|line: &str| line.replace("hunter2", "[masked]"));
+        floor
+            .note("gave up waiting: its screen: password hunter2")
+            .unwrap();
+        // What it says as it is (where its report is) is its own.
+        floor.say("report: /tmp/kept-hunter2.json").unwrap();
+        assert_eq!(
+            floor.log(),
+            json!([{ "at": 0, "line": "gave up waiting: its screen: password [masked]" }])
+        );
+        let said = String::from_utf8(said).unwrap();
+        assert_eq!(
+            said,
+            "  [0s] gave up waiting: its screen: password [masked]\nreport: /tmp/kept-hunter2.json\n"
         );
     }
 

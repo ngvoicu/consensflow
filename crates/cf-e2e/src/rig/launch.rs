@@ -197,15 +197,19 @@ fn route(
         );
     }
     let routed = Arc::clone(&shared);
-    let ended = to_daemon.clone();
+    let (ended, told) = (to_daemon.clone(), Arc::clone(&shared));
     wire::read_each(
         host_output,
         move |line| {
             routed.route_host(&line, &to_host, &to_daemon);
             true
         },
-        // The pane host is gone: the daemon's end of it is too.
-        move || ended.end(),
+        // The pane host is gone: the daemon's end of it is too, and every frame it
+        // wrote is in.
+        move || {
+            told.seen().host_ended = true;
+            ended.end();
+        },
     );
     Ok(shared)
 }

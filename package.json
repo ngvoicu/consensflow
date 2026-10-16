@@ -15,6 +15,7 @@
     "check": "npm run lint && npm test",
     "eval": "cargo xtask eval",
     "eval:summary": "cargo xtask eval summary",
+    "eval:long": "cargo xtask eval long",
     "watch": "cargo xtask watch",
     "eval:windows": "cargo xtask windows-matrix",
     "test:integration": "cargo xtask test integration",

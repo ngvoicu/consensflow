@@ -43,7 +43,8 @@
 //! human renames and writes a line under, which are in the event file and which no
 //! window is told of. So is `stranger` (Unix's): the rig keeps a process that is
 //! none of any window's beside them, which every case that ends a window holds the
-//! pane host to leaving running.)
+//! pane host to leaving running. So is `last_exits`: the exits the pane host tells
+//! as a rig closes, which the long run of the evals reads after the close.)
 //!
 //! The cases take turns ([`cf_e2e::serial`]): each starts a daemon and a pane
 //! host of its own, with windows in real terminals, and the waits are timed.
@@ -80,6 +81,8 @@ mod decided_result;
 mod described;
 #[path = "rig/help.rs"]
 mod help;
+#[path = "rig/last_exits.rs"]
+mod last_exits;
 #[path = "rig/live_base.rs"]
 mod live_base;
 #[path = "rig/live_members.rs"]

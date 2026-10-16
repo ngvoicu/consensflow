@@ -65,6 +65,10 @@ const EXIT: Duration = Duration::from_secs(5);
 /// How long a process a window started has to be gone once the pane host is.
 const GONE: Duration = Duration::from_secs(3);
 
+/// How long the router is given to read what the pane host wrote last, once the
+/// host has gone.
+const LAST_FRAMES: Duration = Duration::from_secs(10);
+
 /// How long a window's first frame is waited for by default.
 pub const OPEN: Duration = Duration::from_secs(10);
 
@@ -195,6 +199,19 @@ impl Config {
     }
 }
 
+/// What a rig that closed leaves: its root, kept, and the last word of the pane
+/// host on its windows, read to its end: every exit it told, those since a case last
+/// asked among them. (The host tells none of the windows it reaps as it shuts down:
+/// its panes' threads send `pane.exit` after its bridge has closed.)
+#[derive(Debug, Clone, PartialEq)]
+pub struct Last {
+    pub root: PathBuf,
+    /// Every `pane.exit` the host told, with when the rig saw it ([`Rig::timed_exits`]).
+    pub exits: Vec<(Value, i64)>,
+    /// Every `pane.kill` the daemon asked ([`Rig::kills`]).
+    pub kills: Vec<Value>,
+}
+
 /// A process a window's stand-in agent started, as it wrote it down.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Started {
@@ -294,8 +311,8 @@ impl Rig {
         let seen = self.shared.seen();
         format!(
             "; daemon frames={} host frames={}; daemon stderr={} host stderr={}",
-            seen.daemon.len(),
-            seen.host.len(),
+            seen.daemon,
+            seen.host,
             self.daemon.errors().trim(),
             self.host.errors().trim()
         )
@@ -329,6 +346,32 @@ impl Rig {
     /// its screen showed (`tail`).
     pub fn exits(&self) -> Vec<Value> {
         self.shared.seen().exits.clone()
+    }
+
+    /// Every `pane.exit` the pane host told so far, each with when the rig saw it,
+    /// in milliseconds since the epoch: when the window ended, which a case that
+    /// looks every few seconds would otherwise put at its next look.
+    pub fn timed_exits(&self) -> Vec<(Value, i64)> {
+        let seen = self.shared.seen();
+        seen.exits
+            .iter()
+            .cloned()
+            .zip(seen.exit_times.iter().copied())
+            .collect()
+    }
+
+    /// The process each window was opened on, as the pane host answered the
+    /// daemon's `pane.open`: `{ id, generation, pid }`, in the order the host
+    /// answered (a window it could not open has none).
+    pub fn window_pids(&self) -> Vec<Value> {
+        self.shared.seen().pids.clone()
+    }
+
+    /// Every `pane.kill` the daemon asked of the pane host so far, in order: the
+    /// windows it closed itself (`id`, `generation`). A window that exited with
+    /// none asked of it ended by itself, or by someone else's hand.
+    pub fn kills(&self) -> Vec<Value> {
+        self.shared.seen().kills.clone()
     }
 
     /// How many times the daemon pressed the key `bytes` into the window `id`
@@ -462,6 +505,19 @@ impl Rig {
         Ok(self.root.clone())
     }
 
+    /// [`Rig::close_keeping_the_root_within`], with what the pane host said last of
+    /// its windows, read to the end of its output: every exit it told, which a case
+    /// that took the exits before the close may not have seen yet (a process a
+    /// window's close ended, named in its `pane.exit` and nowhere before). Where the
+    /// router has not read to the end of the host's output a few seconds after the
+    /// host ended, [`Error::Unread`], with what it had read.
+    pub fn close_with_the_last_exits_within(mut self, within: Duration) -> Result<Last> {
+        self.keep_root = true;
+        // The host ends, and the router reads what it wrote to its end after it.
+        self.shutdown(within)?;
+        last_word(&self.shared, self.root.clone(), LAST_FRAMES)
+    }
+
     fn shutdown(&mut self, exit: Duration) -> Result<()> {
         if self.closed {
             return Ok(());
@@ -526,6 +582,36 @@ impl Drop for Rig {
     }
 }
 
+/// The last word of the pane host the routers of `shared` read, once its output has
+/// ended, waited for up to `within`; the rig's root is `root`. Where it has not ended
+/// by then, [`Error::Unread`] with what was read so far: an exit the host tells after
+/// is none of it.
+fn last_word(shared: &Shared, root: PathBuf, within: Duration) -> Result<Last> {
+    let ended = wait::until(within, || shared.seen().host_ended);
+    let seen = shared.seen();
+    let last = Last {
+        root,
+        exits: seen
+            .exits
+            .iter()
+            .cloned()
+            .zip(seen.exit_times.iter().copied())
+            .collect(),
+        kills: seen.kills.clone(),
+    };
+    if ended {
+        return Ok(last);
+    }
+    Err(Error::Unread {
+        said: format!(
+            "the pane host's output had not ended {} s after the host did: what it told after is not read (host frames={})",
+            within.as_secs(),
+            seen.host
+        ),
+        last: Box::new(last),
+    })
+}
+
 /// The records of the conversation `session` that the stand-in agent wrote
 /// under the Claude config folder `config`, whole ones only.
 fn recorded(config: &str, session: &str) -> String {
@@ -557,5 +643,40 @@ mod tests {
         assert_eq!(recorded(&config, "s-1"), whole);
         // A conversation nothing has been written of is nothing.
         assert_eq!(recorded(&config, "s-2"), "");
+    }
+
+    #[test]
+    fn a_last_word_not_read_to_its_end_in_time_is_an_error_that_holds_what_was_read() {
+        let shared = Arc::new(Shared::default());
+        let root = PathBuf::from("/nowhere");
+        {
+            let mut seen = shared.seen();
+            seen.exits
+                .push(serde_json::json!({ "id": "p1-chief", "generation": 1 }));
+            seen.exit_times.push(1_000);
+        }
+        // The host's last exit comes late: after the wait for its output's end.
+        let late = Arc::clone(&shared);
+        let telling = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(600));
+            let mut seen = late.seen();
+            seen.exits
+                .push(serde_json::json!({ "id": "p1-worker", "generation": 2 }));
+            seen.exit_times.push(2_000);
+            seen.host_ended = true;
+        });
+        let Err(Error::Unread { said, last }) =
+            last_word(&shared, root.clone(), Duration::from_millis(100))
+        else {
+            panic!("the output had not ended, and it was taken for the whole");
+        };
+        assert!(said.contains("had not ended"), "{said}");
+        assert_eq!(last.exits.len(), 1, "what was read: {:?}", last.exits);
+        assert_eq!(last.root, root);
+        // Waited for long enough, the last word holds the late exit.
+        telling.join().unwrap();
+        let whole = last_word(&shared, root, Duration::from_secs(5)).unwrap();
+        assert_eq!(whole.exits.len(), 2);
+        assert_eq!(whole.exits[1].1, 2_000);
     }
 }

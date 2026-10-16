@@ -26,6 +26,34 @@ fn said(failed: rusqlite::Error) -> String {
     format!("Devin's store: {failed}")
 }
 
+/// How long the making of the store is tried again while another window makes it.
+const MAKING: Duration = Duration::from_secs(5);
+
+/// The store made in `db`, in WAL mode with its tables, if it is not. Windows that
+/// make it at the same moment (two workers given their tasks together) find it
+/// locked, and SQLite calls no busy handler for the change of a new file into WAL
+/// mode: each is tried again a moment later, for up to [`MAKING`].
+fn made(db: &Connection) -> rusqlite::Result<()> {
+    let begun = std::time::Instant::now();
+    loop {
+        let tried = db.execute_batch(
+            "PRAGMA journal_mode = WAL;
+             CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, main_chain_id TEXT);
+             CREATE TABLE IF NOT EXISTS message_nodes (row_id INTEGER PRIMARY KEY, session_id TEXT,
+               node_id TEXT, parent_node_id TEXT, chat_message TEXT, created_at TEXT);",
+        );
+        match tried {
+            Err(rusqlite::Error::SqliteFailure(failure, _))
+                if failure.code == rusqlite::ErrorCode::DatabaseBusy
+                    && begun.elapsed() < MAKING =>
+            {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            tried => return tried,
+        }
+    }
+}
+
 impl Store {
     /// The store in `file` (made, with its folder, where it is not there), on the
     /// session `session`: a new one, or the one that is there, which goes on from
@@ -36,13 +64,7 @@ impl Store {
         }
         let db = Connection::open(file).map_err(said)?;
         db.busy_timeout(Duration::from_secs(5)).map_err(said)?;
-        db.execute_batch(
-            "PRAGMA journal_mode = WAL;
-             CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, main_chain_id TEXT);
-             CREATE TABLE IF NOT EXISTS message_nodes (row_id INTEGER PRIMARY KEY, session_id TEXT,
-               node_id TEXT, parent_node_id TEXT, chat_message TEXT, created_at TEXT);",
-        )
-        .map_err(said)?;
+        made(&db).map_err(said)?;
         db.execute(
             "INSERT OR IGNORE INTO sessions (id, main_chain_id) VALUES (?, NULL)",
             [session],
@@ -244,5 +266,66 @@ mod tests {
             .query_row("SELECT count(*) FROM message_nodes", [], |row| row.get(0))
             .unwrap();
         assert_eq!(seen, 2);
+    }
+
+    #[test]
+    fn a_store_another_window_holds_while_it_makes_it_is_made_once_that_window_lets_go() {
+        let folder = tempfile::tempdir().unwrap();
+        let file = folder.path().join("sessions.db");
+        let holder = Connection::open(&file).unwrap();
+        holder.execute_batch("BEGIN EXCLUSIVE").unwrap();
+        // No busy handler: SQLite calls none for the change of a new file into WAL mode,
+        // which is what the windows of the dry run met.
+        let maker = Connection::open(&file).unwrap();
+        maker.busy_timeout(Duration::ZERO).unwrap();
+        let letting_go = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(200));
+            holder.execute_batch("COMMIT").unwrap();
+        });
+        let begun = std::time::Instant::now();
+        made(&maker).unwrap();
+        assert!(
+            begun.elapsed() >= Duration::from_millis(150),
+            "it waited for the holder"
+        );
+        letting_go.join().unwrap();
+        let tables: i64 = maker
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE name IN ('sessions', 'message_nodes')",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(tables, 2);
+    }
+
+    #[test]
+    fn windows_that_make_the_store_at_the_same_moment_each_open_it() {
+        // The long run's two Devin workers were given their tasks in the same moment,
+        // and the second window died on "database is locked" (dry run, 2026-10-15).
+        // The race is the scheduler's to lose: one run of twenty rounds once met it in
+        // none of them, so there are enough rounds that one meets it.
+        for round in 0..200 {
+            let folder = tempfile::tempdir().unwrap();
+            let file = folder.path().join("cli").join("sessions.db");
+            let start = std::sync::Arc::new(std::sync::Barrier::new(6));
+            let opened: Vec<Result<(), String>> = (0..6)
+                .map(|window| {
+                    let (file, start) = (file.clone(), std::sync::Arc::clone(&start));
+                    std::thread::spawn(move || {
+                        start.wait();
+                        let mut store = Store::open(&file, &format!("session-{window}"))?;
+                        store.user("hello", "client-1")
+                    })
+                })
+                .collect::<Vec<_>>()
+                .into_iter()
+                .map(|thread| thread.join().unwrap())
+                .collect();
+            assert!(
+                opened.iter().all(Result::is_ok),
+                "round {round}: {opened:?}"
+            );
+        }
     }
 }

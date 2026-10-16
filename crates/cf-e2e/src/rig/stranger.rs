@@ -10,8 +10,12 @@ use super::Rig;
 use crate::process::{Run, Spawned};
 use crate::Result;
 
-/// What it runs: a sleep far longer than any case.
-const SLEEP: &str = "exec sleep 600";
+/// What it runs: a sleep far longer than any case, and than any long run of the evals
+/// (`crates/cf-evals`, hours on one rig): a day. Ten minutes, as it was, ended by itself
+/// in the long run's dry run, and its close then read as a window's having ended it.
+/// Until the stranger that lives as long as the rig (`cat` on a pipe the rig holds,
+/// `wt/devin-resume`) is merged, which takes this away: a run past a day is not held.
+pub(super) const SLEEP: &str = "exec sleep 86400";
 
 impl Rig {
     /// The process id of the process that is none of any window's, which the rig keeps
@@ -21,7 +25,9 @@ impl Rig {
     }
 }
 
-/// The stranger a rig keeps. It is ended with the rig, if nothing ended it first.
+/// The stranger a rig keeps. It is ended with the rig, if nothing ended it first,
+/// through the handle the rig holds of it (its `Child`, when it is dropped): never by
+/// its number.
 #[derive(Debug)]
 pub(super) struct Stranger(Spawned);
 
@@ -47,7 +53,7 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
-    use crate::process::{group_of, is_alive, Signal};
+    use crate::process::{group_of, is_alive};
     use crate::rig::wait;
 
     #[test]
@@ -59,11 +65,32 @@ mod tests {
         assert_eq!(group_of(id), Some(id), "it is none of the tests' group");
         assert_ne!(group_of(id), group_of(std::process::id()));
 
-        stranger.0.signal(Signal::Kill);
+        // Ended through the handle held of it, as the rig's drop ends it.
+        stranger.0.kill();
 
         assert!(
             wait::until(Duration::from_secs(5), || !stranger.runs()),
             "it was ended, and says so"
         );
+    }
+
+    #[test]
+    fn a_stranger_dropped_is_ended_through_its_handle() {
+        let stranger = Stranger::start().unwrap();
+        let id = stranger.0.id();
+        assert!(is_alive(id));
+        drop(stranger);
+        assert!(!is_alive(id), "the rig's own child goes with it");
+    }
+
+    #[test]
+    fn a_stranger_outlives_the_longest_run_a_rig_is_kept_for() {
+        let seconds: u64 = SLEEP
+            .strip_prefix("exec sleep ")
+            .and_then(|seconds| seconds.parse().ok())
+            .unwrap();
+        // The long run's budget is hours; a stranger that ends by itself before the
+        // rig does fails the rig's close as if a window had ended it.
+        assert!(seconds >= 24 * 3600, "{SLEEP}");
     }
 }

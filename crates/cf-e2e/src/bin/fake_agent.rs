@@ -32,7 +32,9 @@
 //! its work is done, so that a case can do something while the turn is still open
 //! in the record: quit the app, as a human may at any moment. A turn that runs a
 //! command (`RUN`, in `tool`) works until the command ends, and Escape stops it
-//! and, as the line says, the command with it or not.
+//! and, as the line says, the command with it or not. `/compact` typed alone
+//! compacts the conversation as Claude Code does while idle: its boundary and its
+//! summary in the record, and no turn.
 //!
 //! It is the program of the suites that stands in a window, so it reads the
 //! environment a window is given and runs `cf` as an agent does, both through
@@ -272,13 +274,53 @@ fn hooks_of(text: &str) -> Option<Duration> {
         .map(Duration::from_secs)
 }
 
+/// What the user types to have the conversation compacted.
+const COMPACT: &str = "/compact";
+
+/// What a compaction writes as the summary of the conversation before it.
+const COMPACT_SUMMARY: &str =
+    "This session is being continued from a previous conversation that ran out of context.";
+
 /// One message: the window works on it and is idle again once it is answered
-/// or an Escape stopped it.
+/// or an Escape stopped it. `/compact` typed alone is no message: the window
+/// compacts its conversation as Claude Code does while idle, writing the
+/// `compact_boundary` and the summary (`isCompactSummary`), and no turn (the long
+/// run's compaction, which its watch finds in the record).
 fn take_turn(records: &mut Records, pid: u32, window: &Window, text: &str) -> Result<(), String> {
+    if text.trim() == COMPACT {
+        return compact(records, pid);
+    }
     window.stop.begin();
     let done = turn(records, pid, window, text);
     window.stop.end();
     done
+}
+
+/// The conversation compacted while idle: busy while it compacts, then the two
+/// records Claude Code writes of it, and idle again.
+fn compact(records: &mut Records, pid: u32) -> Result<(), String> {
+    let failed = |cause: io::Error| cause.to_string();
+    records.status(pid, "busy").map_err(failed)?;
+    for record in compaction_records() {
+        records.append(pid, record).map_err(failed)?;
+    }
+    records.status(pid, "idle").map_err(failed)
+}
+
+/// What Claude Code writes of a compaction while idle, as the product's reader
+/// is tested with (`cf-harness`'s `record/tests/compaction.rs`).
+fn compaction_records() -> [serde_json::Value; 2] {
+    [
+        json!({
+            "type": "system", "subtype": "compact_boundary", "parentUuid": null,
+            "content": "Conversation compacted", "isMeta": false, "level": "info",
+            "compactMetadata": { "trigger": "manual" },
+        }),
+        json!({
+            "type": "user", "isCompactSummary": true, "isVisibleInTranscriptOnly": true,
+            "message": { "role": "user", "content": COMPACT_SUMMARY },
+        }),
+    ]
 }
 
 /// A turn: the window is busy (not in the hooks of its prompt, where Claude's
@@ -425,6 +467,29 @@ mod tests {
         ] {
             assert_eq!(hooks_of(text), None, "{text}");
         }
+    }
+
+    #[test]
+    fn a_compaction_writes_its_boundary_and_the_summary_in_claudes_shape_and_no_turn() {
+        let config = tempfile::tempdir().unwrap();
+        let mut records = Records::new(config.path(), "s", 7).unwrap();
+        compact(&mut records, 7).unwrap();
+        let written: Vec<serde_json::Value> =
+            std::fs::read_to_string(config.path().join("projects/integration/s.jsonl"))
+                .unwrap()
+                .lines()
+                .map(|line| serde_json::from_str(line).unwrap())
+                .collect();
+        assert_eq!(written.len(), 2);
+        assert_eq!(
+            (&written[0]["type"], &written[0]["subtype"]),
+            (&json!("system"), &json!("compact_boundary"))
+        );
+        assert_eq!(written[1]["isCompactSummary"], true);
+        assert!(written.iter().all(|record| record["type"] != "assistant"));
+        let status: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(records.status_file()).unwrap()).unwrap();
+        assert_eq!(status["status"], "idle");
     }
 
     #[test]

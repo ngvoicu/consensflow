@@ -1,0 +1,528 @@
+//! The run's last look, taken once the app has closed: what the close left of the
+//! run's processes, and what the app wrote as it closed, are held to the invariants.
+
+use super::*;
+use crate::long_run::disruptions::{Disruption, Target, NO_IDLE_COMPACTION};
+use crate::long_run::ledger::{Conversation, Item, Message, Participant, Task};
+use crate::long_run::look::{Process, Stranger, Unread};
+use crate::long_run::record::Record;
+
+/// The choice of `disruption` at a `how` moment, lacking nothing.
+fn choice(disruption: Disruption, how: &'static str) -> Choice {
+    Choice {
+        disruption,
+        target: Target::Project,
+        how,
+        lacks: None,
+    }
+}
+
+/// 10:mm:ss of 2026-10-15 in milliseconds.
+fn at(minute: u32, second: u32) -> i64 {
+    crate::clock::millis(&format!("2026-10-15T10:{minute:02}:{second:02}.000Z")).unwrap()
+}
+
+fn iso(minute: u32, second: u32) -> String {
+    format!("2026-10-15T10:{minute:02}:{second:02}.000Z")
+}
+
+/// A ledger with the human, the chief and a worker, and T-14 of the worker in `state`.
+fn ledger(state: &str) -> Ledger {
+    let someone = |id: i64, handle: &str, role: &str| Participant {
+        id,
+        handle: handle.to_owned(),
+        role: role.to_owned(),
+        harness: (role != "human").then(|| "claude-code".to_owned()),
+        agent: None,
+    };
+    Ledger {
+        participants: vec![
+            someone(1, "human", "human"),
+            someone(2, "chief", "chief"),
+            someone(3, "long-worker", "worker"),
+        ],
+        tasks: vec![Task {
+            id: 40,
+            number: 14,
+            title: "Run the mutations".to_owned(),
+            state: state.to_owned(),
+            assignee: Some(3),
+            requester: 2,
+            updated_at: iso(2, 0),
+            deleted: false,
+        }],
+        ..Ledger::default()
+    }
+}
+
+fn message(
+    id: i64,
+    sender: Option<i64>,
+    kind: &str,
+    body: &str,
+    minute: u32,
+    second: u32,
+) -> Message {
+    Message {
+        id,
+        recipient: 2,
+        sender,
+        kind: kind.to_owned(),
+        task: Some(40),
+        body: body.to_owned(),
+        state: "delivered".to_owned(),
+        created_at: iso(minute, second),
+    }
+}
+
+/// A run with every disruption waiting, due a minute apart.
+fn going() -> Going {
+    Going {
+        keeper: Keeper::default(),
+        timeline: Timeline::new(at(0, 0)),
+        schedule: Schedule::new(
+            &Disruption::ALL,
+            Duration::from_secs(60),
+            "claude",
+            &["claude".to_owned(), "devin".to_owned()],
+        ),
+        last: None,
+        ending: String::new(),
+        deadline: at(59, 0),
+        final_unread: None,
+    }
+}
+
+#[test]
+fn a_disruption_whose_effect_was_not_seen_is_failed_and_a_break_of_the_tenth_with_its_evidence() {
+    use crate::long_run::disruptions::State;
+    use crate::long_run::invariants::Evidence;
+    let mut said = Vec::new();
+    let mut floor = Floor::new(&mut said);
+    let mut run = going();
+    let evidence = Evidence {
+        rows: vec!["@chief: \"long-claude-1\" \"working\", window {\"generation\":4}".to_owned()],
+        ..Evidence::default()
+    };
+    run.came_of(
+        &mut floor,
+        &choice(Disruption::Pause, "strict"),
+        Duration::from_secs(70),
+        Outcome::Failed {
+            said: "T-3 never read paused after the owner's pause".to_owned(),
+            evidence: evidence.clone(),
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        run.schedule.planned[0].state,
+        State::Failed {
+            at: Duration::from_secs(70),
+            said: "strict: T-3 never read paused after the owner's pause".to_owned()
+        }
+    );
+    assert_eq!(run.keeper.breaks.len(), 1);
+    let found = &run.keeper.breaks[0];
+    assert_eq!((found.invariant, found.key.as_str()), (10, "10:pause"));
+    assert_eq!(
+        found.said,
+        "pause: T-3 never read paused after the owner's pause"
+    );
+    assert_eq!(found.evidence, evidence);
+    // The next is due the interval after it.
+    assert_eq!(run.schedule.planned[1].due, Duration::from_secs(130));
+
+    // Played: no break. Missed: it waits, and its moment is looked for again.
+    run.came_of(
+        &mut floor,
+        &choice(Disruption::Kill, "loose"),
+        Duration::from_secs(140),
+        Outcome::Missed("@x has no window to kill".to_owned()),
+    )
+    .unwrap();
+    assert_eq!(run.schedule.planned[1].state, State::Waiting);
+    run.came_of(
+        &mut floor,
+        &choice(Disruption::Kill, "strict"),
+        Duration::from_secs(150),
+        Outcome::Played(
+            "@x's window killed (its screen said token=abcd1234efgh, and more)".to_owned(),
+        ),
+    )
+    .unwrap();
+    assert!(matches!(
+        run.schedule.planned[1].state,
+        State::Played { .. }
+    ));
+    assert_eq!(run.keeper.breaks.len(), 1);
+    // A restart played at a moment that lacked A5's shape is kept so, and said.
+    run.came_of(
+        &mut floor,
+        &Choice {
+            lacks: Some(NO_IDLE_COMPACTION),
+            ..choice(Disruption::Restart, "loose")
+        },
+        Duration::from_secs(400),
+        Outcome::Played("the app quit and started again".to_owned()),
+    )
+    .unwrap();
+    assert_eq!(
+        run.schedule.planned[3].lacked.as_deref(),
+        Some(NO_IDLE_COMPACTION)
+    );
+    // What a disruption said is said on the console with a token in it hidden.
+    drop(floor);
+    let printed = String::from_utf8(said).unwrap();
+    assert!(
+        printed.contains("token=[masked], and more") && !printed.contains("abcd1234efgh"),
+        "{printed}"
+    );
+}
+
+#[test]
+fn a_notice_the_log_ties_to_no_result_is_said_unresolved_once_and_is_no_break() {
+    // The result m-100, T-14 sent back, and an ended notice after: the old attempt's,
+    // late, or the next attempt's own. Said in the timeline, at every look still
+    // unresolved, and said once.
+    let mut ledger = ledger("working");
+    ledger
+        .messages
+        .push(message(100, Some(3), "result", "First round.", 0, 30));
+    ledger.events.push(crate::long_run::ledger::Event {
+        id: 1,
+        at: iso(0, 40),
+        kind: "task.state".to_owned(),
+        data: serde_json::json!({ "task": 14, "from": "done", "to": "working" }),
+    });
+    ledger.messages.push(message(
+        101,
+        None,
+        "note",
+        "T-14's turn left background work running. Ended: npx stryker run.",
+        1,
+        0,
+    ));
+    let mut said = Vec::new();
+    let mut floor = Floor::new(&mut said);
+    let mut run = going();
+    for minute in [2, 3] {
+        let look = Look {
+            at: at(minute, 0),
+            ledger: ledger.clone(),
+            ..Look::default()
+        };
+        run.hold(&mut floor, &Settings::default(), look);
+    }
+    assert!(run.keeper.breaks.is_empty(), "{:?}", run.keeper.breaks);
+    let unresolved: Vec<&str> = run
+        .timeline
+        .moments
+        .iter()
+        .filter(|moment| moment.kind == "unresolved")
+        .map(|moment| moment.text.as_str())
+        .collect();
+    assert_eq!(unresolved.len(), 1, "{unresolved:?}");
+    assert!(
+        unresolved[0].starts_with(
+            "3: T-14's ended notice m-101 came after its result m-100 and after T-14 was sent back"
+        ),
+        "{}",
+        unresolved[0]
+    );
+    drop(floor);
+    let printed = String::from_utf8(said).unwrap();
+    assert!(printed.contains("UNRESOLVED 3: "), "{printed}");
+}
+
+#[test]
+fn what_the_run_says_is_masked_whatever_says_it_its_own_names_shown() {
+    // A wait for the chief that gave up says the chief's screen and how its window was
+    // started (`Chief::gave_up`, on the run's floor): a password there is hidden before
+    // it is said or kept, and the run's names are shown.
+    let mut said = Vec::new();
+    let mut floor = Floor::new(&mut said);
+    let mut run = going();
+    let mut seen = ledger("working");
+    seen.project = Some(crate::long_run::ledger::Project {
+        id: 1,
+        name: "ledgerline".to_owned(),
+        state: "open".to_owned(),
+    });
+    seen.participants[2].handle = "long-claude-1-olive-valley".to_owned();
+    run.hold(
+        &mut floor,
+        &Settings::default(),
+        Look {
+            at: at(1, 0),
+            ledger: seen,
+            ..Look::default()
+        },
+    );
+    floor
+        .note("gave up waiting for the chief to be ready: chief null; its screen: export DB_PASSWORD=hunter2hunter ⏎ p1-long-claude-1-olive-valley")
+        .unwrap();
+    let log = floor.log();
+    drop(floor);
+    let printed = String::from_utf8(said).unwrap();
+    assert!(!printed.contains("hunter2hunter"), "{printed}");
+    assert!(
+        printed.contains("DB_PASSWORD=[masked] ⏎ p1-long-claude-1-olive-valley"),
+        "{printed}"
+    );
+    assert!(!log.to_string().contains("hunter2hunter"));
+}
+
+#[test]
+fn what_the_close_left_of_the_runs_processes_is_a_break_of_the_last_look() {
+    let mut last = Look {
+        at: at(5, 0),
+        ledger: ledger("accepted"),
+        ..Look::default()
+    };
+    last.records.insert(9, Record::default());
+    let left = [Stranger {
+        process: Process {
+            pid: 7777,
+            command: "node scripts/longrun-dev-server.mjs".to_owned(),
+        },
+        pane: "p1-long-worker-1".to_owned(),
+        since: at(6, 0),
+        began: "Fri Oct 16 00:29:15 2026".to_owned(),
+    }];
+    // And the close whose host's last word was not read to its end.
+    let windows = Windows {
+        strangers: left.to_vec(),
+        unread: vec![Unread {
+            at: at(6, 10),
+            why: "the pane host's output had not ended 10 s after the host did".to_owned(),
+        }],
+        ..Windows::default()
+    };
+    let after = after_close(
+        at(6, 20),
+        Ok(ledger("accepted")),
+        windows,
+        Some(&last),
+        (&Settings::default(), "the project is done", at(30, 0)),
+    );
+    let look = after.look.as_ref().unwrap();
+    assert!(look.windows.open.is_empty());
+    assert_eq!(look.records.len(), 1, "the last look's records");
+    assert_eq!(after.unread, None);
+    let found = after.found;
+    assert!(
+        found.iter().any(|found| found.key == "6:stranger:7777"),
+        "{found:?}"
+    );
+    let unread = found
+        .iter()
+        .find(|found| found.key == format!("6:unread:{}", at(6, 10)))
+        .unwrap_or_else(|| panic!("{found:?}"));
+    assert!(
+        unread.said.contains("last word was not read to its end")
+            && unread
+                .said
+                .ends_with("(the pane host's output had not ended 10 s after the host did)"),
+        "{}",
+        unread.said
+    );
+}
+
+#[test]
+fn a_ledger_the_app_left_that_cannot_be_read_fails_the_run_and_no_earlier_copy_is_held() {
+    // The last look saw a clean ledger; the app's close left one that cannot be read.
+    let last = Look {
+        at: at(5, 0),
+        ledger: ledger("accepted"),
+        ..Look::default()
+    };
+    let windows = Windows {
+        strangers: vec![Stranger {
+            process: Process {
+                pid: 7777,
+                command: "node scripts/longrun-dev-server.mjs".to_owned(),
+            },
+            pane: "p1-long-worker-1".to_owned(),
+            since: at(6, 0),
+            began: "Fri Oct 16 00:29:15 2026".to_owned(),
+        }],
+        ..Windows::default()
+    };
+    let after = after_close(
+        at(6, 20),
+        Err(crate::Error::Refused("file is not a database".to_owned())),
+        windows,
+        Some(&last),
+        (&Settings::default(), "the project is done", at(30, 0)),
+    );
+    assert!(after.look.is_none(), "no look on the earlier ledger");
+    assert_eq!(
+        after.unread.as_deref(),
+        Some("the ledger the app left could not be read: file is not a database")
+    );
+    // What the close left of the run's processes needs no ledger, and is held.
+    let keys: Vec<&str> = after.found.iter().map(|found| found.key.as_str()).collect();
+    assert_eq!(keys, ["6:stranger:7777"]);
+}
+
+#[test]
+fn the_last_look_lets_a_jobs_end_be_told_within_the_settle_time_of_its_result() {
+    // A Claude Code worker's job b33m, started at 10:01; the result at 10:02, and the
+    // job's end told at 10:02:05, as it ended with the result. The app closed at
+    // 10:02:10: the job had ended by the result, which A2 holds.
+    let mut closed = ledger("done");
+    closed.conversations.push(Conversation {
+        id: 9,
+        participant: 3,
+        harness: "claude-code".to_owned(),
+        session: None,
+        ended_at: None,
+    });
+    for (seq, role, text, minute, second) in [
+        (0, "user", "[ConsensFlow m-120 · T-14 · task from @chief]\nRun them", 0, 30),
+        (1, "tool", "Command running in background with ID: b33m.", 1, 0),
+        (2, "assistant", "The mutation run is going.", 1, 30),
+        (
+            3,
+            "user",
+            "<task-notification>\n<task-id>b33m</task-id>\n<status>completed</status>\n</task-notification>",
+            2,
+            5,
+        ),
+    ] {
+        closed.items.push(Item {
+            conversation: 9,
+            id: format!("i-{seq}"),
+            seq,
+            role: role.to_owned(),
+            text: text.to_owned(),
+            complete: true,
+            at: Some(iso(minute, second)),
+            copied_at: iso(minute, second),
+        });
+    }
+    closed.messages.push(message(
+        131,
+        Some(3),
+        "result",
+        "The mutation run is going.",
+        2,
+        0,
+    ));
+    let look = Look {
+        at: at(2, 10),
+        ledger: closed,
+        ..Look::default()
+    };
+    let found = final_breaks(
+        &look,
+        &Settings::default(),
+        "the project is done",
+        at(30, 0),
+    );
+    assert!(!found.iter().any(|found| found.invariant == 2), "{found:?}");
+    // Told past the settle time, it is the end of a job that ran on.
+    let mut late = look.clone();
+    late.ledger.items[3].at = Some(iso(3, 30));
+    late.at = at(3, 40);
+    let found = final_breaks(
+        &late,
+        &Settings::default(),
+        "the project is done",
+        at(30, 0),
+    );
+    assert!(
+        found.iter().any(|found| found.key == "2:m-131"),
+        "{found:?}"
+    );
+}
+
+#[test]
+fn the_run_waits_while_the_newest_result_is_younger_than_the_settle_time() {
+    let mut look = Look {
+        at: at(5, 0),
+        ledger: ledger("done"),
+        ..Look::default()
+    };
+    assert_eq!(settle_left(&look, 60_000, at(5, 0)), 0, "no result");
+    look.ledger
+        .messages
+        .push(message(131, Some(3), "result", "Done.", 4, 40));
+    look.ledger
+        .messages
+        .push(message(120, Some(3), "result", "First go.", 1, 0));
+    assert_eq!(settle_left(&look, 60_000, at(5, 0)), 40_000);
+    assert_eq!(settle_left(&look, 60_000, at(6, 0)), 0);
+    assert_eq!(settle_left(&look, 60_000, at(4, 0)), 60_000, "never more");
+}
+
+#[test]
+fn what_the_app_wrote_as_it_closed_is_held_in_the_last_look() {
+    // The last look while the app ran saw the result alone; the app wrote the ended
+    // notice as it closed, after the result. The result, a moment old, is not the
+    // worker's final answer.
+    let mut running = ledger("done");
+    running.conversations.push(Conversation {
+        id: 9,
+        participant: 3,
+        harness: "claude-code".to_owned(),
+        session: None,
+        ended_at: None,
+    });
+    for (seq, role, text, second) in [
+        (
+            0,
+            "user",
+            "[ConsensFlow m-120 · T-14 · task from @chief]\nRun them",
+            0,
+        ),
+        (1, "assistant", "Mutations: 41 killed, 3 survived.", 50),
+    ] {
+        running.items.push(Item {
+            conversation: 9,
+            id: format!("i-{seq}"),
+            seq,
+            role: role.to_owned(),
+            text: text.to_owned(),
+            complete: role == "assistant",
+            at: Some(iso(2, second)),
+            copied_at: iso(2, second),
+        });
+    }
+    running
+        .messages
+        .push(message(131, Some(3), "result", "Done.", 3, 0));
+    let last = Look {
+        at: at(2, 30),
+        ledger: running.clone(),
+        ..Look::default()
+    };
+    let mut closed = running;
+    closed.messages.push(message(
+        132,
+        None,
+        "note",
+        "T-14's turn left background work running. Ended: npx stryker run.",
+        3,
+        1,
+    ));
+    // Taken ten seconds after the result: the closed ledger is all it will be, and
+    // a result is judged however young.
+    let look = closed_look(at(3, 10), closed, Windows::default(), Some(&last));
+    let found = final_breaks(
+        &look,
+        &Settings::default(),
+        "the project is done",
+        at(30, 0),
+    );
+    assert!(
+        found.iter().any(|found| found.key == "3:m-132"),
+        "{found:?}"
+    );
+    assert!(
+        found.iter().any(|found| found.key == "4:m-131"),
+        "{found:?}"
+    );
+    // And the end, which the project of this ledger did not reach.
+    assert!(found.iter().any(|found| found.key == "9:end"), "{found:?}");
+}

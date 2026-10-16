@@ -1,0 +1,16 @@
+{
+  "name": "ledgerline",
+  "version": "0.4.0",
+  "private": true,
+  "type": "module",
+  "description": "A small bookkeeping library, the report site it builds, and a dev server that serves it.",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "node scripts/longrun-build.mjs",
+    "test": "node --test --test-concurrency=1",
+    "dev": "node scripts/longrun-dev-server.mjs",
+    "export": "node scripts/export.mjs"
+  }
+}
