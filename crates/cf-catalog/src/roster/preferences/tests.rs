@@ -3,6 +3,7 @@ use crate::roster::agent_row::AgentRow;
 use crate::roster::document::load_document;
 use crate::roster::testing::file_with;
 use crate::Catalog;
+use cf_base::js;
 use serde_json::json;
 use tempfile::tempdir;
 
@@ -91,19 +92,22 @@ fn kept_after(text: &str, patch: Value) -> (Result<Preferences, String>, Value) 
 }
 
 #[test]
-fn the_choice_set_leaves_the_app_s_specs_as_the_file_has_them_and_drops_what_this_build_does_not_know(
-) {
-    let file = r#"{"preferences":{"ownHarnessOnly":false,"colour":"green","specs":true,"specsFolder":"docs/specs","specsVariant":"tdd-html"}}"#;
-    let (set, kept) = kept_after(file, json!({ "ownHarnessOnly": true }));
-    assert_eq!(set, Ok(ON));
+fn the_choice_set_leaves_the_app_s_specs_as_the_file_has_them_and_keeps_what_a_later_build_kept() {
+    let file = r#"{"preferences":{"colour":"green","ownHarnessOnly":false,"specs":true},"specsDefaults":{"folder":"docs/specs","variant":"tdd-html"}}"#;
+    let (_home, path) = file_with(file.as_bytes());
     assert_eq!(
-        kept,
-        json!({
-            "ownHarnessOnly": true,
-            "specs": true,
-            "specsFolder": "docs/specs",
-            "specsVariant": "tdd-html",
-        })
+        set_preferences(&path, Some(&json!({ "ownHarnessOnly": true }))),
+        Ok(ON)
+    );
+    let after: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    // Its own keys first, as Node and 3.0.4 wrote them; a later build's after them, as they were.
+    assert_eq!(
+        js::stringify(&after["preferences"]),
+        r#"{"ownHarnessOnly":true,"specs":true,"colour":"green"}"#
+    );
+    assert_eq!(
+        after["specsDefaults"],
+        json!({ "folder": "docs/specs", "variant": "tdd-html" })
     );
     // A patch that names none changes nothing, and still writes the whole set.
     let (set, kept) = kept_after(r#"{"preferences":{"specs":true}}"#, json!({}));

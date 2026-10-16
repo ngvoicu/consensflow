@@ -200,19 +200,15 @@ fn the_human_s_choice_of_specs_for_every_project_is_read_from_the_file_at_each_l
     std::fs::write(&file, document.to_string()).unwrap();
     assert_eq!(by_default(), says(true, None, None));
     // The folder and the variant every project uses come through the same file.
-    document["preferences"] = json!({
-        "ownHarnessOnly": false,
-        "specs": true,
-        "specsFolder": "docs/specs",
-        "specsVariant": "tdd-html",
-    });
+    document["specsDefaults"] = json!({ "folder": "docs/specs", "variant": "tdd-html" });
     std::fs::write(&file, document.to_string()).unwrap();
     assert_eq!(
         by_default(),
         says(true, Some("docs/specs"), Some(Variant::TddHtml))
     );
     // Named while specs are off, they wait for the day they are on.
-    document["preferences"] = json!({ "specsFolder": "plans", "specsVariant": "core-html" });
+    document["preferences"] = json!({ "ownHarnessOnly": false });
+    document["specsDefaults"] = json!({ "folder": "plans", "variant": "core-html" });
     std::fs::write(&file, document.to_string()).unwrap();
     assert_eq!(
         by_default(),
@@ -220,8 +216,8 @@ fn the_human_s_choice_of_specs_for_every_project_is_read_from_the_file_at_each_l
     );
     // Anything but true is off, a folder or variant it cannot have is none, and
     // so is a file that cannot be read.
-    document["preferences"] =
-        json!({ "specs": "yes", "specsFolder": "../outside", "specsVariant": "html" });
+    document["preferences"] = json!({ "specs": "yes" });
+    document["specsDefaults"] = json!({ "folder": "../outside", "variant": "html" });
     std::fs::write(&file, document.to_string()).unwrap();
     assert_eq!(by_default(), AppSpecs::default());
     std::fs::write(&file, "{ not json").unwrap();

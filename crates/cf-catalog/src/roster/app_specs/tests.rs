@@ -5,6 +5,8 @@ use super::*;
 use crate::roster::testing::file_with;
 use crate::{Catalog, Roster};
 
+mod released;
+
 fn read(text: &str) -> AppSpecs {
     let (_home, path) = file_with(text.as_bytes());
     app_specs_of(&load_document(&path).unwrap())
@@ -19,12 +21,23 @@ fn says(on: bool, folder: Option<&str>, variant: Option<Variant>) -> AppSpecs {
     }
 }
 
-/// What a set of `said` answers on a file that holds `text`, and the file's `preferences` after.
-fn set_on(text: &str, said: Value) -> (Result<AppSpecs, String>, Value) {
+/// The file at `path`, read back.
+fn file_at(path: &Path) -> Value {
+    serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap()
+}
+
+/// What the file keeps of the human's choices: its `preferences`, and the
+/// folder and the variant every project uses (`specsDefaults`), `null` where
+/// it has none.
+fn choices_in(file: &Value) -> (Value, Value) {
+    (file["preferences"].clone(), file[DEFAULTS].clone())
+}
+
+/// What a set of `said` answers on a file that holds `text`, and what the file keeps after.
+fn set_on(text: &str, said: Value) -> (Result<AppSpecs, String>, (Value, Value)) {
     let (_home, path) = file_with(text.as_bytes());
     let set = set_app_specs(&path, &said).map_err(|refusal| refusal.message);
-    let kept: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
-    (set, kept["preferences"].clone())
+    (set, choices_in(&file_at(&path)))
 }
 
 #[test]
@@ -35,6 +48,9 @@ fn a_file_that_says_nothing_of_them_is_off_and_names_no_folder_or_variant() {
         r#"{"preferences":{"ownHarnessOnly":true}}"#,
         r#"{"preferences":null}"#,
         r#"{"preferences":[true]}"#,
+        r#"{"specsDefaults":{}}"#,
+        r#"{"specsDefaults":null}"#,
+        r#"{"specsDefaults":"docs"}"#,
     ] {
         assert_eq!(read(text), AppSpecs::default(), "{text}");
     }
@@ -50,7 +66,7 @@ fn each_part_is_read_apart_and_only_true_itself_turns_them_on() {
         says(true, None, None)
     );
     assert_eq!(
-        read(r#"{"preferences":{"specsFolder":"docs/specs","specsVariant":"tdd-html"}}"#),
+        read(r#"{"specsDefaults":{"folder":"docs/specs","variant":"tdd-html"}}"#),
         says(false, Some("docs/specs"), Some(Variant::TddHtml)),
         "named while off, they wait for the day they are on"
     );
@@ -58,6 +74,33 @@ fn each_part_is_read_apart_and_only_true_itself_turns_them_on() {
         let text = format!(r#"{{"preferences":{{"specs":{other}}}}}"#);
         assert!(!read(&text).on, "{other}");
     }
+}
+
+#[test]
+fn where_an_earlier_build_of_this_one_kept_them_they_are_read_unless_specs_defaults_says_them() {
+    // An earlier build kept them in `preferences`.
+    assert_eq!(
+        read(r#"{"preferences":{"specs":true,"specsFolder":"plans","specsVariant":"tdd"}}"#),
+        says(true, Some("plans"), Some(Variant::Tdd))
+    );
+    // `specsDefaults` says the part it says; the other is the earlier place's.
+    assert_eq!(
+        read(
+            r#"{"preferences":{"specsFolder":"plans","specsVariant":"tdd"},"specsDefaults":{"variant":"core-html"}}"#
+        ),
+        says(false, Some("plans"), Some(Variant::CoreHtml))
+    );
+    // A write moves them where they are kept now, and takes them out of `preferences`.
+    let (set, (preferences, defaults)) = set_on(
+        r#"{"preferences":{"ownHarnessOnly":true,"specs":true,"specsFolder":"plans","specsVariant":"tdd"}}"#,
+        json!({ "on": true }),
+    );
+    assert_eq!(set, Ok(says(true, Some("plans"), Some(Variant::Tdd))));
+    assert_eq!(
+        preferences,
+        json!({ "ownHarnessOnly": true, "specs": true })
+    );
+    assert_eq!(defaults, json!({ "folder": "plans", "variant": "tdd" }));
 }
 
 #[test]
@@ -74,8 +117,12 @@ fn a_folder_or_a_variant_a_file_edited_by_hand_cannot_have_is_read_as_none() {
         "null",
         r#"["docs"]"#,
     ] {
-        let text = format!(r#"{{"preferences":{{"specsFolder":{folder}}}}}"#);
-        assert_eq!(read(&text).folder, None, "{folder}");
+        for text in [
+            format!(r#"{{"specsDefaults":{{"folder":{folder}}}}}"#),
+            format!(r#"{{"preferences":{{"specsFolder":{folder}}}}}"#),
+        ] {
+            assert_eq!(read(&text).folder, None, "{text}");
+        }
     }
     for variant in [
         r#""Core""#,
@@ -85,12 +132,16 @@ fn a_folder_or_a_variant_a_file_edited_by_hand_cannot_have_is_read_as_none() {
         "null",
         r#"["core"]"#,
     ] {
-        let text = format!(r#"{{"preferences":{{"specsVariant":{variant}}}}}"#);
-        assert_eq!(read(&text).variant, None, "{variant}");
+        for text in [
+            format!(r#"{{"specsDefaults":{{"variant":{variant}}}}}"#),
+            format!(r#"{{"preferences":{{"specsVariant":{variant}}}}}"#),
+        ] {
+            assert_eq!(read(&text).variant, None, "{text}");
+        }
     }
     // A folder written by hand in another way is read as the project would keep it.
     assert_eq!(
-        read(r#"{"preferences":{"specsFolder":".\\docs\\specs\\"}}"#).folder,
+        read(r#"{"specsDefaults":{"folder":".\\docs\\specs\\"}}"#).folder,
         Some("docs/specs".to_owned())
     );
 }
@@ -105,15 +156,13 @@ fn each_part_said_is_kept_only_where_it_says_something_and_the_roster_s_choice_s
     assert_eq!(set, Ok(named.clone()));
     assert_eq!(
         kept,
-        json!({
-            "ownHarnessOnly": true,
-            "specs": true,
-            "specsFolder": "docs/specs",
-            "specsVariant": "core-html",
-        }),
-        "the folder as a project keeps its own, after the roster's choice"
+        (
+            json!({ "ownHarnessOnly": true, "specs": true }),
+            json!({ "folder": "docs/specs", "variant": "core-html" })
+        ),
+        "the folder as a project keeps its own, the two under a key of their own"
     );
-    let file = r#"{"preferences":{"ownHarnessOnly":true,"specs":true,"specsFolder":"docs/specs","specsVariant":"core-html"}}"#;
+    let file = r#"{"preferences":{"ownHarnessOnly":true,"specs":true},"specsDefaults":{"folder":"docs/specs","variant":"core-html"}}"#;
     // A part said alone leaves the others.
     let (set, _) = set_on(file, json!({ "variant": "tdd" }));
     assert_eq!(set, Ok(says(true, Some("docs/specs"), Some(Variant::Tdd))));
@@ -125,9 +174,12 @@ fn each_part_said_is_kept_only_where_it_says_something_and_the_roster_s_choice_s
     );
     assert_eq!(
         kept,
-        json!({ "ownHarnessOnly": true, "specsFolder": "docs/specs", "specsVariant": "core-html" })
+        (
+            json!({ "ownHarnessOnly": true }),
+            json!({ "folder": "docs/specs", "variant": "core-html" })
+        )
     );
-    // `null`, and a blank folder, name none again.
+    // `null`, and a blank folder, name none again, and where neither is named the key goes.
     for said in [
         json!({ "folder": null, "variant": null }),
         json!({ "folder": "   ", "variant": null }),
@@ -136,38 +188,41 @@ fn each_part_said_is_kept_only_where_it_says_something_and_the_roster_s_choice_s
         assert_eq!(set, Ok(says(true, None, None)), "{said}");
         assert_eq!(
             kept,
-            json!({ "ownHarnessOnly": true, "specs": true }),
+            (
+                json!({ "ownHarnessOnly": true, "specs": true }),
+                Value::Null
+            ),
             "{said}"
         );
     }
     // Nothing said changes nothing, and the whole is still written; a file is made where there is none.
-    let (set, kept) = set_on(file, json!({}));
+    let (set, (_, defaults)) = set_on(file, json!({}));
     assert_eq!(set, Ok(named));
-    assert_eq!(kept["specsFolder"], "docs/specs");
+    assert_eq!(defaults["folder"], "docs/specs");
     let home = tempdir().unwrap();
     let path = home.path().join("agents.json");
     assert_eq!(
         set_app_specs(&path, &json!({ "on": true })),
         Ok(says(true, None, None))
     );
-    let made: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
     assert_eq!(
-        made["preferences"],
-        json!({ "ownHarnessOnly": false, "specs": true })
+        choices_in(&file_at(&path)),
+        (
+            json!({ "ownHarnessOnly": false, "specs": true }),
+            Value::Null
+        )
     );
 }
 
 #[test]
 fn a_part_refused_is_said_in_a_project_s_words_with_its_own_code_and_keeps_nothing() {
-    let file =
-        r#"{"preferences":{"ownHarnessOnly":false,"specsFolder":"plans","specsVariant":"tdd"}}"#;
+    let file = r#"{"preferences":{"ownHarnessOnly":false},"specsDefaults":{"folder":"plans","variant":"tdd"}}"#;
     let refused = |said: Value| {
         let (_home, path) = file_with(file.as_bytes());
         let refusal = set_app_specs(&path, &said).unwrap_err();
-        let kept: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
         assert_eq!(
-            kept["preferences"],
-            json!({ "ownHarnessOnly": false, "specsFolder": "plans", "specsVariant": "tdd" }),
+            std::fs::read_to_string(&path).unwrap(),
+            file,
             "{said}: the file is as it was"
         );
         (refusal.code, refusal.message)
@@ -221,6 +276,89 @@ fn a_part_refused_is_said_in_a_project_s_words_with_its_own_code_and_keeps_nothi
     assert_eq!(
         refused(json!({ "on": true, "folder": "docs", "variant": "full" })).0,
         "preference-specs-variant"
+    );
+}
+
+#[test]
+fn what_a_later_build_keeps_in_preferences_and_beside_the_defaults_survives_every_write_of_this_one(
+) {
+    let file = r#"{"preferences":{"ownHarnessOnly":true,"colour":"green","specs":true,"later":{"x":1}},"specsDefaults":{"folder":"plans","mode":"strict"},"elsewhere":[1]}"#;
+    let catalog = Catalog::bundled().unwrap();
+    for write in ["the app's specs", "the roster's choice"] {
+        let (_home, path) = file_with(file.as_bytes());
+        let roster = Roster::new(&catalog, path.clone());
+        match write {
+            "the app's specs" => {
+                roster.set_app_specs(&json!({ "variant": "tdd" })).unwrap();
+            }
+            _ => {
+                roster
+                    .set_preferences(Some(&json!({ "ownHarnessOnly": false })))
+                    .unwrap();
+            }
+        }
+        let after = file_at(&path);
+        let (preferences, defaults) = choices_in(&after);
+        assert_eq!(preferences["colour"], "green", "{write}");
+        assert_eq!(preferences["later"], json!({ "x": 1 }), "{write}");
+        assert_eq!(defaults["mode"], "strict", "{write}");
+        assert_eq!(defaults["folder"], "plans", "{write}");
+        assert_eq!(after["elsewhere"], json!([1]), "{write}");
+        // This build's own keys come first, as Node and 3.0.4 wrote them; a later build's after.
+        let keys: Vec<&str> = preferences
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        assert_eq!(
+            keys,
+            ["ownHarnessOnly", "specs", "colour", "later"],
+            "{write}"
+        );
+    }
+}
+
+#[test]
+fn a_file_this_build_wrote_keeps_the_defaults_once_the_released_3_0_4_has_saved_it() {
+    let home = tempdir().unwrap();
+    let path = home.path().join("agents.json");
+    let catalog = Catalog::bundled().unwrap();
+    let roster = Roster::new(&catalog, path.clone());
+    let set = roster
+        .set_app_specs(&json!({ "on": true, "folder": "docs/specs", "variant": "tdd" }))
+        .unwrap();
+    // 3.0.4 reads the switch where it always did.
+    assert_eq!(
+        released::preferences_of(&load_document(&path).unwrap()),
+        released::Choices {
+            own_harness_only: false,
+            specs: true
+        }
+    );
+    // The human keeps to the harnesses' own models in 3.0.4, which saves its two choices.
+    released::set_preferences(&path, Some(&json!({ "ownHarnessOnly": true }))).unwrap();
+    assert_eq!(roster.app_specs().unwrap(), set);
+    assert_eq!(
+        choices_in(&file_at(&path)),
+        (
+            json!({ "ownHarnessOnly": true, "specs": true }),
+            json!({ "folder": "docs/specs", "variant": "tdd" })
+        )
+    );
+    // 3.0.4 turns specs off for every project: the folder and the variant wait for the day they are on.
+    released::set_preferences(&path, Some(&json!({ "specs": false }))).unwrap();
+    assert_eq!(
+        roster.app_specs().unwrap(),
+        says(false, Some("docs/specs"), Some(Variant::Tdd))
+    );
+    // And this build writes again what 3.0.4 left.
+    roster
+        .set_preferences(Some(&json!({ "ownHarnessOnly": false })))
+        .unwrap();
+    assert_eq!(
+        roster.app_specs().unwrap(),
+        says(false, Some("docs/specs"), Some(Variant::Tdd))
     );
 }
 

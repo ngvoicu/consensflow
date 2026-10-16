@@ -51,6 +51,14 @@ impl Document {
         self.fields.insert(key.to_owned(), value);
     }
 
+    /// `key` taken out of the file, every other key in its place.
+    pub(crate) fn remove(&mut self, key: &str) {
+        self.fields = std::mem::take(&mut self.fields)
+            .into_iter()
+            .filter(|(field, _)| field != key)
+            .collect();
+    }
+
     /// The rows, in the file's order.
     pub(crate) fn agents(&self) -> &[AgentRow] {
         &self.rows

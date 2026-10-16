@@ -92,9 +92,12 @@ async function readAgents() {
 /**
  * What the app says of specs for every project (whether, the folder and the variant, and what a
  * project that names none then uses) and the Specmint it bundles, read again: each dialog that
- * shows them reads as it opens, and Settings' Specs hands the page what a change answered.
+ * shows them reads as it opens, and Settings' Specs hands the page what a change answered. Read
+ * once the saves Settings' Specs asked for are answered: the app asks each on a worker of its own,
+ * and a read that overtook a save would leave the page an older answer than the save's.
  */
 async function readSpecs() {
+  await specsSettings.settled()
   state.specs = await daemon('specs.get')
 }
 

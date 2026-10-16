@@ -4488,6 +4488,106 @@ test('Settings, Specs: what the human changes while a save is on its way is kept
   await expect(specs.on).not.toBeChecked()
 })
 
+/** The stand-in daemon refuses every save of the app's specs in `words`, or none for `null`. */
+const refuseSpecs = (page, words) =>
+  page.evaluate((words) => {
+    window.__model.specsAppRefusal = words
+  }, words)
+
+test('Settings, Specs: one save at a time, each with the control as it is when it is asked, so what is kept and what is shown agree however the daemon answers', async ({
+  page,
+}) => {
+  await open(page)
+  const specs = await openSpecsSettings(page)
+  // The variant's save waits on the daemon; the human chooses twice more and turns specs on.
+  await hold(page, 'specs.set')
+  await specs.variant.selectOption('tdd')
+  await expect.poll(() => calls(page, 'specs.set')).toEqual([{ variant: 'tdd' }])
+  await specs.variant.selectOption('core-html')
+  await specs.variant.selectOption('tdd-html')
+  await specs.on.check()
+  // Nothing more is asked while one is on its way: an answer to a later one could come first,
+  // and the earlier one be kept after it.
+  expect(await calls(page, 'specs.set')).toEqual([{ variant: 'tdd' }])
+  await letGo(page, 'specs.set')
+  await expect.poll(() => answers(page, 'specs.set')).toBe(3)
+  // Then each control once, as it is by then.
+  expect(await calls(page, 'specs.set')).toEqual([
+    { variant: 'tdd' },
+    { variant: 'tdd-html' },
+    { on: true },
+  ])
+  // What is kept is the human's last word, and the dialog shows it.
+  expect(await page.evaluate(() => window.__model.specsApp)).toEqual({
+    on: true,
+    variant: 'tdd-html',
+  })
+  await expect(specs.variant).toHaveValue('tdd-html')
+  await expect(specs.on).toBeChecked()
+  // The page's copy is the newest answer: a refusal now draws the controls from it as kept.
+  await refuseSpecs(page, 'the specs folder is a folder inside the project: it is text')
+  await specs.folder.fill('../x')
+  await specs.folder.press('Enter')
+  await expect(specs.refusal).toBeVisible()
+  await expect(specs.on).toBeChecked()
+  await expect(specs.variant).toHaveValue('tdd-html')
+  await refuseSpecs(page, null)
+  // Opened again while a save is on its way, it reads what is kept once that one is answered.
+  await hold(page, 'specs.set')
+  await specs.on.uncheck()
+  await expect.poll(() => calls(page, 'specs.set')).toHaveLength(5)
+  await specs.close.click()
+  const reads = await calls(page, 'specs.get')
+  await page.getByRole('button', { name: 'Settings', exact: true }).click()
+  await page
+    .getByRole('dialog', { name: 'Settings', exact: true })
+    .getByRole('button', { name: 'Specs' })
+    .click()
+  expect(await calls(page, 'specs.get')).toEqual(reads)
+  await letGo(page, 'specs.set')
+  await expect(specs.dialog).toBeVisible()
+  expect((await calls(page, 'specs.get')).length).toBe(reads.length + 1)
+  await expect(specs.on).not.toBeChecked()
+})
+
+test('Settings, Specs: a folder the daemon refused stays as typed, with why, while the other controls are saved, until a save of it is kept or the dialog opens again', async ({
+  page,
+}) => {
+  await open(page)
+  const specs = await openSpecsSettings(page)
+  const words = 'the specs folder is a folder inside the project: it stays inside it, with no `..`'
+  await refuseSpecs(page, words)
+  await specs.folder.fill('../elsewhere')
+  await specs.folder.press('Enter')
+  await expect(specs.refusal).toHaveText(words)
+  await refuseSpecs(page, null)
+  // The box and the variant are saved, and their answers leave the folder and its refusal.
+  await specs.on.check()
+  await expect.poll(() => answers(page, 'specs.set')).toBe(2)
+  await expect(specs.folder).toHaveValue('../elsewhere')
+  await expect(specs.refusal).toHaveText(words)
+  await specs.variant.selectOption('tdd')
+  await expect.poll(() => answers(page, 'specs.set')).toBe(3)
+  await expect(specs.folder).toHaveValue('../elsewhere')
+  await expect(specs.refusal).toHaveText(words)
+  // Mended, a save of it is kept, and the refusal goes.
+  await specs.folder.fill('docs')
+  await specs.folder.press('Enter')
+  await expect.poll(() => answers(page, 'specs.set')).toBe(4)
+  await expect(specs.refusal).toBeHidden()
+  await expect(specs.folder).toHaveValue('docs')
+  // One refused and left in the dialog is gone when it opens again: it shows what is kept.
+  await refuseSpecs(page, words)
+  await specs.folder.fill('../again')
+  await specs.folder.press('Enter')
+  await expect(specs.refusal).toHaveText(words)
+  await specs.close.click()
+  await refuseSpecs(page, null)
+  const again = await openSpecsSettings(page)
+  await expect(again.folder).toHaveValue('docs')
+  await expect(again.refusal).toBeHidden()
+})
+
 test('Settings, Specs: a change the daemon refuses once the dialog is shut is said on the status line', async ({
   page,
 }) => {

@@ -268,17 +268,18 @@ async fn the_app_s_specs_kept_beside_the_choice_are_neither_said_nor_taken_by_th
     let rig = Rig::new(&[]);
     let file = rig.roster_file();
     std::fs::create_dir_all(file.parent().unwrap()).unwrap();
-    let specs = json!({ "specs": true, "specsFolder": "docs/specs", "specsVariant": "tdd-html" });
-    let mut document = json!({ "schemaVersion": 1, "agents": [] });
-    document["preferences"] = json!({ "ownHarnessOnly": false });
-    document["preferences"]
-        .as_object_mut()
-        .unwrap()
-        .extend(specs.as_object().unwrap().clone());
+    let defaults = json!({ "folder": "docs/specs", "variant": "tdd-html" });
+    let document = json!({
+        "schemaVersion": 1,
+        "agents": [],
+        "preferences": { "ownHarnessOnly": false, "specs": true },
+        "specsDefaults": defaults,
+    });
     std::fs::write(&file, document.to_string()).unwrap();
     let kept = || {
         let text = roster_text(&rig).unwrap();
-        serde_json::from_str::<Value>(&text).unwrap()["preferences"].clone()
+        let file = serde_json::from_str::<Value>(&text).unwrap();
+        (file["preferences"].clone(), file["specsDefaults"].clone())
     };
     let before = kept();
     // The list the Agents screen reads says the one choice about the roster.
@@ -304,9 +305,10 @@ async fn the_app_s_specs_kept_beside_the_choice_are_neither_said_nor_taken_by_th
         set(r#"{"ownHarnessOnly":true}"#).await,
         (200, json!({ "preferences": { "ownHarnessOnly": true } }))
     );
-    let mut after = specs.clone();
-    after["ownHarnessOnly"] = json!(true);
-    assert_eq!(kept(), after);
+    assert_eq!(
+        kept(),
+        (json!({ "ownHarnessOnly": true, "specs": true }), defaults)
+    );
     let (_, listed) = the_app_asks(&rig, Method::GET, "/api/agents", "").await;
     assert_eq!(listed["preferences"], json!({ "ownHarnessOnly": true }));
     assert_eq!(

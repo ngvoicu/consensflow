@@ -38,10 +38,20 @@ fn held(preferences: Option<Value>) -> Held {
 }
 
 impl Held {
+    /// The agents file as it is now.
+    fn file(&self) -> Value {
+        let file = std::fs::read(self.home.path().join("agents.json")).unwrap();
+        serde_json::from_slice::<Value>(&file).unwrap()
+    }
+
     /// What the agents file keeps of the human's choices.
     fn kept(&self) -> Value {
-        let file = std::fs::read(self.home.path().join("agents.json")).unwrap();
-        serde_json::from_slice::<Value>(&file).unwrap()["preferences"].clone()
+        self.file()["preferences"].clone()
+    }
+
+    /// The folder and the variant every project uses, as the file keeps them.
+    fn defaults(&self) -> Value {
+        self.file()["specsDefaults"].clone()
     }
 }
 
@@ -99,12 +109,11 @@ async fn each_part_the_human_says_is_kept_in_the_agents_file_beside_their_other_
             );
             assert_eq!(
                 held.kept(),
-                json!({
-                    "ownHarnessOnly": true,
-                    "specs": true,
-                    "specsFolder": "docs/specs",
-                    "specsVariant": "tdd-html",
-                })
+                json!({ "ownHarnessOnly": true, "specs": true })
+            );
+            assert_eq!(
+                held.defaults(),
+                json!({ "folder": "docs/specs", "variant": "tdd-html" })
             );
             // Read again, it is what is kept; a change wakes the dispatcher once each.
             let read = ask(&held.app, "specs.get", json!({})).await;
@@ -131,10 +140,8 @@ async fn each_part_the_human_says_is_kept_in_the_agents_file_beside_their_other_
                 json!({ "on": false, "variant": "tdd" }),
                 "{blanked}"
             );
-            assert_eq!(
-                held.kept(),
-                json!({ "ownHarnessOnly": true, "specsVariant": "tdd" })
-            );
+            assert_eq!(held.kept(), json!({ "ownHarnessOnly": true }));
+            assert_eq!(held.defaults(), json!({ "variant": "tdd" }));
         })
         .await;
 }

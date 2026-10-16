@@ -5,8 +5,10 @@
 # project, the folder and the variant a project uses unless it names its own, and the Specmint the
 # build bundles (its version, and each variant's name, commit and what it is), all read from the
 # bundled files by the daemon and never typed into the page. They are kept in the agents file beside
-# the human's choice about the roster and are no choice about it: the page alone says them
-# (`specs.get`, `specs.set`), and the screens' list and route neither say nor take them. A project
+# the human's choice about the roster, where the released 3.0.4 that shares the file leaves them
+# (the switch as `preferences.specs`, the folder and the variant under `specsDefaults`), and are no
+# choice about it: the page alone says them (`specs.get`, `specs.set`, one save at a time), and the
+# screens' list and route neither say nor take them. A project
 # that names no folder or variant uses the app's, else `.specs` and `core`, where the chief's launch,
 # its role text and its skill are given them (`ProjectView::specs_setting`); a project's own Specs
 # section says what following means. One plant takes one rule out; a test of it fails. The tests are
@@ -25,6 +27,8 @@ settings-proto = ["cargo", "test", "--offline", "-p", "cf-proto", "--lib", "spec
 settings-proto-page = ["cargo", "test", "--offline", "-p", "cf-proto", "--lib", "page::"]
 settings-ledger = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "specs"]
 settings-catalog = ["cargo", "test", "--offline", "-p", "cf-catalog", "--lib", "roster::"]
+# Node's recorded roster, whose files this build leaves as Node did but for a later build's keys.
+settings-catalog-goldens = ["cargo", "test", "--offline", "-p", "cf-catalog", "--test", "roster_goldens"]
 settings-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "specs::"]
 settings-harness = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "specmint::bundled"]
 settings-daemon-roster = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "roster::"]
@@ -169,8 +173,8 @@ runs = ["settings-catalog", "settings-daemon-roster"]
 
 [[plant.edit]]
 file = "crates/cf-catalog/src/roster/app_specs.rs"
-find = '        folder: text("specsFolder").and_then(|folder| check::folder(folder).ok().flatten()),'
-replace = '        folder: text("specsFolder").map(str::to_owned),'
+find = '        folder: text("folder", EARLIER[0]).and_then(|folder| check::folder(folder).ok().flatten()),'
+replace = '        folder: text("folder", EARLIER[0]).map(str::to_owned),'
 
 [[plant]]
 name = "specs settings: the variant the agents file names is never read"
@@ -179,7 +183,7 @@ runs = ["settings-catalog", "settings-daemon-roster"]
 
 [[plant.edit]]
 file = "crates/cf-catalog/src/roster/app_specs.rs"
-find = '        variant: text("specsVariant").and_then(Variant::from_name),'
+find = '        variant: text("variant", EARLIER[1]).and_then(Variant::from_name),'
 replace = "        variant: None,"
 
 [[plant]]
@@ -194,7 +198,7 @@ replace = "    let preferences = cf_proto::agents::Preferences { own_harness_onl
 
 [[plant]]
 name = "specs settings: a set of the roster's choice drops the app's specs from the file"
-meant = "the_choice_set_leaves_the_app_s_specs_as_the_file_has_them_and_drops_what_this_build_does_not_know"
+meant = "the_choice_set_leaves_the_app_s_specs_as_the_file_has_them_and_keeps_what_a_later_build_kept"
 runs = ["settings-catalog", "settings-daemon-route"]
 
 [[plant.edit]]
@@ -218,10 +222,10 @@ meant = "each_part_said_is_kept_only_where_it_says_something_and_the_roster_s_ch
 runs = ["settings-catalog", "settings-daemon-page"]
 
 [[plant.edit]]
-file = "crates/cf-catalog/src/roster/preferences.rs"
+file = "crates/cf-catalog/src/roster/app_specs.rs"
 find = '''    if let Some(variant) = app.variant {
-        kept.insert(
-            "specsVariant".to_owned(),
+        defaults.insert(
+            "variant".to_owned(),
             Value::String(variant.as_str().to_owned()),
         );
     }
@@ -230,17 +234,17 @@ replace = ""
 
 [[plant]]
 name = "specs settings: the folder is written to the agents file whatever it is, as null where none"
-meant = "the_choice_set_leaves_the_app_s_specs_as_the_file_has_them_and_drops_what_this_build_does_not_know"
+meant = "each_part_said_is_kept_only_where_it_says_something_and_the_roster_s_choice_stays"
 runs = ["settings-catalog"]
 
 [[plant.edit]]
-file = "crates/cf-catalog/src/roster/preferences.rs"
+file = "crates/cf-catalog/src/roster/app_specs.rs"
 find = '''    if let Some(folder) = &app.folder {
-        kept.insert("specsFolder".to_owned(), Value::String(folder.clone()));
+        defaults.insert("folder".to_owned(), Value::String(folder.clone()));
     }
 '''
-replace = '''    kept.insert(
-        "specsFolder".to_owned(),
+replace = '''    defaults.insert(
+        "folder".to_owned(),
         app.folder.clone().map_or(Value::Null, Value::String),
     );
 '''
@@ -467,7 +471,7 @@ runs = ["settings-page-dialog"]
 
 [[plant.edit]]
 file = "app/ui/core/specs-settings.js"
-find = '''    if (folder.trim() === this.#kept) return
+find = '''    if (this.#edits[name] === this.#asked[name]) return
 '''
 replace = ""
 
@@ -478,7 +482,7 @@ runs = ["settings-page-dialog"]
 
 [[plant.edit]]
 file = "app/ui/core/specs-settings.js"
-find = '''    this.#kept = folder.trim()
+find = '''    this.#asked[name] = this.#edits[name]
 '''
 replace = ""
 
@@ -500,8 +504,8 @@ runs = ["settings-page-dialog"]
 
 [[plant.edit]]
 file = "app/ui/core/specs-settings.js"
-find = "      this.#page.setSpecs(await this.#page.daemon('specs.set', part))"
-replace = "      await this.#page.daemon('specs.set', part)"
+find = "      this.#page.setSpecs(await this.#page.daemon('specs.set', { [name]: value }))"
+replace = "      await this.#page.daemon('specs.set', { [name]: value })"
 
 [[plant]]
 name = "specs settings: a folder the daemon refuses is wiped from the field"
@@ -510,8 +514,11 @@ runs = ["settings-page-dialog"]
 
 [[plant.edit]]
 file = "app/ui/core/specs-settings.js"
-find = "      this.#draw((name) => name !== 'folder' && untouched(name))"
-replace = "      this.#draw(untouched)"
+find = '''        this.#folderRefused = words
+      } else {'''
+replace = '''        this.#folderRefused = words
+        this.#drafts.delete('folder')
+      } else {'''
 
 [[plant]]
 name = "specs settings: a box the daemon refuses stays as it was clicked"
@@ -520,8 +527,11 @@ runs = ["settings-page-dialog"]
 
 [[plant.edit]]
 file = "app/ui/core/specs-settings.js"
-find = "    if (fresh('on')) this.#on.checked = app.on\n"
-replace = ""
+find = '''        this.#otherRefused = words
+        if (this.#edits[name] === edits) this.#drafts.delete(name)
+'''
+replace = '''        this.#otherRefused = words
+'''
 
 [[plant]]
 name = "specs settings: a refusal waits in the dialog for the next time it opens"
@@ -530,10 +540,11 @@ runs = ["settings-page-dialog"]
 
 [[plant.edit]]
 file = "app/ui/core/specs-settings.js"
-find = '''    await this.#page.readSpecs()
-    this.#say('')
+find = '''    this.#folderRefused = ''
+    this.#otherRefused = ''
+    this.#draw()
 '''
-replace = '''    await this.#page.readSpecs()
+replace = '''    this.#draw()
 '''
 
 [[plant]]
@@ -543,11 +554,9 @@ runs = ["settings-page-dialog"]
 
 [[plant.edit]]
 file = "app/ui/core/specs-settings.js"
-find = '''      if (this.#dialog.open) this.#say(words)
-      else this.#page.report(words)
+find = '''      if (!this.#dialog.open) this.#page.report(words)
 '''
-replace = '''      this.#say(words)
-'''
+replace = ""
 
 [[plant]]
 name = "specs settings: the Specmint version is written in the dialog"
@@ -690,8 +699,8 @@ runs = ["settings-page-dialog"]
 
 [[plant.edit]]
 file = "app/ui/core/specs-settings.js"
-find = "      this.#draw(untouched)\n"
-replace = "      this.#draw(() => true)\n"
+find = "    if (!this.#drafts.has('folder')) this.#folder.value = app.folder ?? ''"
+replace = "    this.#folder.value = app.folder ?? ''"
 
 # A bundled SKILL.md whose version could not be read failed `specs.get`, which New project and
 # Project settings wait on before they open: the human's settings came back only with the metadata.
@@ -790,3 +799,138 @@ replace = '''        if record.window.borrow().retiring {
             return Ok(());
         }
         // A participant forgotten while the step waits is done with.'''
+
+# --- what Astra and Sol found at their second look (2026-10-16) ---
+
+# The dialog asked every save as it came, and the app asks each on a worker of its own: an
+# earlier save kept after a later one left the file and the dialog's copy older than the controls.
+[[plant]]
+name = "specs settings: the dialog asks a save while another is on its way"
+meant = "Settings, Specs: one save at a time, each with the control as it is when it is asked, so what is kept and what is shown agree however the daemon answers"
+runs = ["settings-page-dialog"]
+
+[[plant.edit]]
+file = "app/ui/core/specs-settings.js"
+find = "    if (this.#saving === null) this.#saving = this.#next()"
+replace = "    this.#saving = this.#next()"
+
+[[plant]]
+name = "specs settings: a control changed twice while a save is on its way is saved twice"
+meant = "Settings, Specs: one save at a time, each with the control as it is when it is asked, so what is kept and what is shown agree however the daemon answers"
+runs = ["settings-page-dialog"]
+
+[[plant.edit]]
+file = "app/ui/core/specs-settings.js"
+find = "    if (!this.#queue.includes(name)) this.#queue.push(name)"
+replace = "    this.#queue.push(name)"
+
+[[plant]]
+name = "specs settings: a read of what is kept goes ahead of the saves on their way"
+meant = "Settings, Specs: one save at a time, each with the control as it is when it is asked, so what is kept and what is shown agree however the daemon answers"
+runs = ["settings-page-dialog"]
+
+[[plant.edit]]
+file = "app/ui/core/app.js"
+find = '''  await specsSettings.settled()
+'''
+replace = ""
+
+# A folder the daemon refused was drawn over, refusal and all, by the answer of another control's save.
+[[plant]]
+name = "specs settings: the folder's refusal goes with another control's save"
+meant = "Settings, Specs: a folder the daemon refused stays as typed, with why, while the other controls are saved, until a save of it is kept or the dialog opens again"
+runs = ["settings-page-dialog"]
+
+[[plant.edit]]
+file = "app/ui/core/specs-settings.js"
+find = "      if (name === 'folder') this.#folderRefused = ''\n"
+replace = "      this.#folderRefused = ''\n"
+
+[[plant]]
+name = "specs settings: a refused folder is drawn over by the next answer"
+meant = "Settings, Specs: a folder the daemon refused stays as typed, with why, while the other controls are saved, until a save of it is kept or the dialog opens again"
+runs = ["settings-page-dialog"]
+
+[[plant.edit]]
+file = "app/ui/core/specs-settings.js"
+find = '''        this.#folderRefused = words
+      } else {'''
+replace = '''        this.#folderRefused = words
+        this.#drafts.delete('folder')
+      } else {'''
+
+# The released 3.0.4 sets `preferences` to an object of its two choices at every save, so the
+# folder and the variant kept there were gone once it had saved the file; this build dropped a
+# later build's keys there too.
+[[plant]]
+name = "specs settings: the folder and the variant are kept in preferences, where 3.0.4 drops them"
+meant = "a_file_this_build_wrote_keeps_the_defaults_once_the_released_3_0_4_has_saved_it"
+runs = ["settings-catalog"]
+
+[[plant.edit]]
+file = "crates/cf-catalog/src/roster/preferences.rs"
+find = '''    document.set("preferences", Value::Object(kept));
+    keep_defaults(document, app);
+'''
+replace = '''    if let Some(folder) = &app.folder {
+        kept.insert("specsFolder".to_owned(), Value::String(folder.clone()));
+    }
+    if let Some(variant) = app.variant {
+        kept.insert("specsVariant".to_owned(), Value::String(variant.as_str().to_owned()));
+    }
+    document.set("preferences", Value::Object(kept));
+'''
+
+[[plant]]
+name = "specs settings: what a later build keeps in preferences is dropped"
+meant = "what_a_later_build_keeps_in_preferences_and_beside_the_defaults_survives_every_write_of_this_one"
+runs = ["settings-catalog", "settings-catalog-goldens"]
+
+[[plant.edit]]
+file = "crates/cf-catalog/src/roster/preferences.rs"
+find = "        kept.extend(later.map(|(key, value)| (key.clone(), value.clone())));"
+replace = "        let _ = later;"
+
+[[plant]]
+name = "specs settings: what a later build keeps beside the defaults is dropped"
+meant = "what_a_later_build_keeps_in_preferences_and_beside_the_defaults_survives_every_write_of_this_one"
+runs = ["settings-catalog"]
+
+[[plant.edit]]
+file = "crates/cf-catalog/src/roster/app_specs.rs"
+find = "        defaults.extend(later.map(|(key, value)| (key.clone(), value.clone())));"
+replace = "        let _ = later;"
+
+[[plant]]
+name = "specs settings: where an earlier build of this one kept them is not read"
+meant = "where_an_earlier_build_of_this_one_kept_them_they_are_read_unless_specs_defaults_says_them"
+runs = ["settings-catalog"]
+
+[[plant.edit]]
+file = "crates/cf-catalog/src/roster/app_specs.rs"
+find = "            .or_else(|| kept(document, earlier))\n"
+replace = "            .or_else(|| kept(document, earlier).filter(|_| false))\n"
+
+[[plant]]
+name = "specs settings: a write leaves where an earlier build of this one kept them, which then outlives a change"
+meant = "where_an_earlier_build_of_this_one_kept_them_they_are_read_unless_specs_defaults_says_them"
+runs = ["settings-catalog"]
+
+[[plant.edit]]
+file = "crates/cf-catalog/src/roster/preferences.rs"
+find = '''            !matches!(key.as_str(), "ownHarnessOnly" | "specs") && !EARLIER.contains(&key.as_str())'''
+replace = '''            !matches!(key.as_str(), "ownHarnessOnly" | "specs")'''
+
+[[plant]]
+name = "specs settings: the defaults' key stays, empty, where neither is named"
+meant = "each_part_said_is_kept_only_where_it_says_something_and_the_roster_s_choice_stays"
+runs = ["settings-catalog"]
+
+[[plant.edit]]
+file = "crates/cf-catalog/src/roster/app_specs.rs"
+find = '''    if defaults.is_empty() {
+        document.remove(DEFAULTS);
+    } else {
+        document.set(DEFAULTS, Value::Object(defaults));
+    }'''
+replace = '''    document.set(DEFAULTS, Value::Object(defaults));'''

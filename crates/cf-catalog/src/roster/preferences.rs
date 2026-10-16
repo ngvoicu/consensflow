@@ -1,7 +1,8 @@
 //! What the human chose about the roster, kept in the file beside their own
-//! agents, under `preferences`; and the one writer of that object, which also
-//! holds what the human says of specs for every project (`app_specs`): a write
-//! of either keeps the other as the file has it.
+//! agents, under `preferences`; and the one writer of what the human chose,
+//! which also writes what they say of specs for every project (`app_specs`): a
+//! write of either keeps the other as the file has it, and keeps the keys of
+//! `preferences` a later build wrote and this one does not know.
 
 use std::path::Path;
 
@@ -11,7 +12,7 @@ use cf_proto::agents::{AgentView, Preferences};
 use cf_proto::specs::AppSpecs;
 use serde_json::{Map, Value};
 
-use super::app_specs::app_specs_of;
+use super::app_specs::{app_specs_of, keep_defaults, EARLIER};
 use super::document::{load_document, Document};
 use super::save::save_document;
 
@@ -36,10 +37,9 @@ const PREFERENCE_KEYS: [&str; 1] = ["ownHarnessOnly"];
 /// `setPreferences`: the choices `patch` names set, each refused in the
 /// order JavaScript enumerates the request's keys, then the whole set kept
 /// in the file: a write even when nothing changes, and a file made when
-/// there is none. A key the file kept that this build does not know is
-/// dropped from it, and the app's specs are kept as they were: they are no
-/// choice about the roster, and a patch that names them is refused as one
-/// that names any other.
+/// there is none. The app's specs are kept as they were: they are no choice
+/// about the roster, and a patch that names them is refused as one that names
+/// any other.
 pub(crate) fn set_preferences(path: &Path, patch: Option<&Value>) -> Result<Preferences, Refusal> {
     let mut document = load_document(path)?;
     let mut next = preferences_of(&document);
@@ -63,11 +63,13 @@ pub(crate) fn set_preferences(path: &Path, patch: Option<&Value>) -> Result<Pref
     Ok(next)
 }
 
-/// Writes the whole of `preferences` into the file at `path`, whose
-/// `document` was read for the write: the human's choice about the roster,
-/// then the app's specs, each part of these only where it says something
-/// (specs only when on, the folder and the variant only when named), so a
-/// file that never knew of them is written as it always was.
+/// Writes what the human chose into the file at `path`, whose `document` was
+/// read for the write. `preferences` holds the choice about the roster, then
+/// whether specs are on for every project (only when they are), as Node and
+/// 3.0.4 wrote it, so a file that never knew of more is written as it always
+/// was; then every key a later build kept there, as it was. The app's folder
+/// and variant go under a key of their own (`app_specs`), and where an earlier
+/// build of this one kept them in `preferences` they are moved there.
 pub(super) fn keep(
     path: &Path,
     document: &mut Document,
@@ -81,16 +83,14 @@ pub(super) fn keep(
     if app.on {
         kept.insert("specs".to_owned(), Value::Bool(true));
     }
-    if let Some(folder) = &app.folder {
-        kept.insert("specsFolder".to_owned(), Value::String(folder.clone()));
-    }
-    if let Some(variant) = app.variant {
-        kept.insert(
-            "specsVariant".to_owned(),
-            Value::String(variant.as_str().to_owned()),
-        );
+    if let Some(Value::Object(before)) = document.get("preferences") {
+        let later = before.iter().filter(|(key, _)| {
+            !matches!(key.as_str(), "ownHarnessOnly" | "specs") && !EARLIER.contains(&key.as_str())
+        });
+        kept.extend(later.map(|(key, value)| (key.clone(), value.clone())));
     }
     document.set("preferences", Value::Object(kept));
+    keep_defaults(document, app);
     save_document(path, document)
 }
 
