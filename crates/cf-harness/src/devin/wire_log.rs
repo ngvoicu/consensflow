@@ -15,11 +15,14 @@
 //! one pasted while a prompt was asked went into that turn, and Devin runs what it is
 //! handed in a turn when the turn ends. So did one that a prompt of other words was
 //! put to the agent ahead of, read after the paste and before the TUI put the message
-//! to it: that turn began while the window was found ready, or as the message was
-//! handed over. And one the TUI put to its agent in a prompt of its own, whose words
-//! begin with the paste's line as the paste does, is in the turn that prompt began.
-//! Its record shows it once that turn ends, and the message is held no longer: words
-//! that quote its line elsewhere are no paste of it.
+//! to it, while no turn had ended since the paste: that turn began while the window
+//! was found ready, or as the message was handed over. And one the TUI put to its
+//! agent in a prompt of its own, whose words begin with the paste's line as the paste
+//! does, is in the turn that prompt began. Its record shows it once that turn ends,
+//! and the message is held no longer: words that quote its line elsewhere are no paste
+//! of it, and a turn begun after the one the paste went into is none it waits behind
+//! (the reviews of 2026-10-16: a paste Devin dropped was held in every turn the human
+//! began after it, and never went again).
 //!
 //! Kept from Node on purpose:
 //! - where V8 threw (a line that is JSON `null`, or a configuration that is
@@ -103,6 +106,9 @@ struct State {
     /// The message last pasted went in while a prompt was asked, or behind one
     /// read after it, or in a prompt of its own.
     into_a_turn: bool,
+    /// A turn ended since the message last pasted: a prompt of other words read
+    /// after it began after the TUI had the message, and is no turn it went into.
+    turn_ended: bool,
     /// The prompts of the shown conversation that no turn's end or answer closed.
     asked: Vec<Asked>,
 }
@@ -140,6 +146,7 @@ impl WireLog {
         state.expected = Some(text.to_owned()).filter(|text| !text.is_empty());
         state.sent = false;
         state.into_a_turn = !state.asked.is_empty();
+        state.turn_ended = false;
     }
 
     /// What the log says now, read from where the last look stopped: a log
@@ -210,6 +217,7 @@ impl State {
         let Ok(event) = from_slice_lossy(line.as_bytes()) else {
             return Ok(());
         };
+        let asking = !self.asked.is_empty();
         if let Some(shown) = shown_in(&event).map_err(|_| UNREADABLE.to_owned())? {
             // A prompt of the conversation the window showed is no turn of the one it
             // shows now.
@@ -230,6 +238,7 @@ impl State {
         // The turn the message last pasted went into is over once no prompt is asked.
         if self.asked.is_empty() {
             self.into_a_turn = false;
+            self.turn_ended |= asking;
         }
         let text = event
             .get("update")
@@ -258,13 +267,17 @@ impl State {
     /// paste expected is the message put to the agent, and a prompt of the shown
     /// conversation is a turn begun. The message is in the turn its own prompt begins,
     /// for as long as that is asked. A prompt of other words, read after the message
-    /// last pasted and before any request of the TUI held it, began before the TUI
-    /// had the message, which it queued behind that turn: the message went into it.
-    /// A look before the paste read the window at rest, and the prompt began while it
-    /// was found ready or handed over (a review of 2026-10-16). A prompt that quotes
-    /// the header in other words is no paste, and holds the message in no turn of its
-    /// own (the reviews of 2026-10-16: the human's words that quoted a header Devin
-    /// had dropped were taken for its paste, and the message was waited for for good).
+    /// last pasted and before any request of the TUI held it or any turn ended, began
+    /// before the TUI had the message, which it queued behind that turn: the message
+    /// went into it. A look before the paste read the window at rest, and the prompt
+    /// began while it was found ready or handed over (a review of 2026-10-16). One
+    /// read after a turn ended began after the TUI had the message, which Devin runs
+    /// when a turn ends: a message it did not put to its agent then was dropped, and
+    /// is in no turn the human begins after (the reviews of 2026-10-16: every such
+    /// turn held it, and it never went again). A prompt that quotes the header in
+    /// other words is no paste, and holds the message in no turn of its own (the
+    /// reviews of 2026-10-16: the human's words that quoted a header Devin had dropped
+    /// were taken for its paste, and the message was waited for for good).
     fn put_to_the_agent(&mut self, method: &str, request: &Value, at_ms: i64) {
         let pasted = self
             .expected
@@ -278,7 +291,7 @@ impl State {
             .and_then(|params| params.get("sessionId"))
             .and_then(Value::as_str);
         if method == "session/prompt" && session.is_some() && session == self.shown.as_deref() {
-            if self.expected.is_some() && (pasted || !self.sent) {
+            if self.expected.is_some() && (pasted || (!self.sent && !self.turn_ended)) {
                 self.into_a_turn = true;
             }
             self.asked.push(Asked {

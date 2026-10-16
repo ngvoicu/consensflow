@@ -68,7 +68,8 @@ pub struct Ledger {
 /// as does a file that is no ledger (`ledger-unreadable`) and one a newer
 /// build wrote (`ledger-newer`). A file the Node daemon last held is taken
 /// as it left it: rows it left under a carrier it never knew of are queued
-/// messages of their own again (`messages::release_stranded`).
+/// messages of their own again (`messages::release_stranded`), which the
+/// schema the file was written at tells.
 pub fn open_ledger(file: &Path, options: Options) -> Result<Ledger, LedgerError> {
     let db = Connection::open(file)?;
     // SQLite's own default waits five seconds for a lock: a second instance
@@ -82,14 +83,19 @@ pub fn open_ledger(file: &Path, options: Options) -> Result<Ledger, LedgerError>
         db.execute_batch("BEGIN EXCLUSIVE; COMMIT")?;
         db.execute_batch("PRAGMA journal_mode = WAL")?;
         db.execute_batch("PRAGMA synchronous = FULL")?;
-        migrate(&db, &MIGRATIONS)
+        let written_at: i64 = db.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+        migrate(&db, &MIGRATIONS)?;
+        Ok(written_at)
     })();
-    if let Err(cause) = ready {
-        drop(db);
-        return Err(opening_refusal(file, cause));
-    }
+    let written_at = match ready {
+        Ok(written_at) => written_at,
+        Err(cause) => {
+            drop(db);
+            return Err(opening_refusal(file, cause));
+        }
+    };
     let mut store = Store::new(db, options.clock, options.names, options.trace);
-    release_stranded(&mut store)?;
+    release_stranded(&mut store, written_at)?;
     Ok(Ledger {
         store,
         #[cfg(feature = "test-support")]

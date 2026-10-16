@@ -199,6 +199,10 @@ pub(crate) fn release_carried(store: &Store, task_id: i64) -> Result<(), LedgerE
     Ok(())
 }
 
+/// The last schema a build with the Node daemon wrote (3.0.0-alpha.82's): a ledger
+/// opened at it may hold what that daemon left (`release_stranded`).
+const NODE_SCHEMA: i64 = 11;
+
 /// What a daemon that knows no carriers left riding in one. A row is in the
 /// paste of a carrier while the carrier waits for it (`queued` or `gated`) and
 /// while it goes in (`delivering`), and this ledger settles a carrier's set in
@@ -218,22 +222,31 @@ pub(crate) fn release_carried(store: &Store, task_id: i64) -> Result<(), LedgerE
 /// window's record shows its marker and queued again with it where it does not.
 /// Let go of it here, they went again on their own after a paste that had them (a
 /// review of 2026-10-16: the answers kept for a window pasted twice). A carrier the
-/// Node daemon was pasting when it stopped pasted its own words alone, and would
-/// have its rows taken for received with it; 3.0.0-alpha.82 is the one build that
-/// shipped both carriers and that daemon (2026-10-08). Every version since alpha.82
-/// settles such rows on its first restart, by the old rule, so no ledger today can
-/// hold one.
-pub(crate) fn release_stranded(store: &mut Store) -> Result<(), LedgerError> {
+/// Node daemon was pasting when it stopped pasted its own words alone: kept, its
+/// rows would be taken for received with it, so they are let go of, as before.
+/// `written_at`, the schema the file was at when it was opened, tells which it may
+/// be. Carriers first shipped in 3.0.0-alpha.82, whose Node daemon ran where the
+/// home held the `use-node` file (2026-10-08); it wrote schema 11, and so did
+/// alpha.83 and 3.0.0, which had no Node daemon. From 3.0.1 (schema 12) the start
+/// let go of the set of every carrier on its way, so a file past 11 holds none that
+/// Node left. At 11 nothing tells the two daemons' carriers apart: each is let go
+/// of, and the rows of one that alpha.83 or 3.0.0 was pasting go again on their own
+/// after a paste that had them, as they did at those builds' own starts (the
+/// reviews of 2026-10-16: kept at 11, an answer Node never pasted was confirmed).
+pub(crate) fn release_stranded(store: &mut Store, written_at: i64) -> Result<(), LedgerError> {
     store.write(|store| {
         let carriers: Vec<(i64, i64)> = store
             .db
             .prepare(
                 "SELECT DISTINCT m.carried_by, m.project_id FROM message m
                  JOIN message c ON c.id = m.carried_by
-                 WHERE m.state = 'queued' AND c.state NOT IN ('queued', 'gated', 'delivering')
+                 WHERE m.state = 'queued' AND c.state NOT IN ('queued', 'gated')
+                   AND (c.state != 'delivering' OR ?1)
                  ORDER BY m.carried_by",
             )?
-            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .query_map([written_at <= NODE_SCHEMA], |row| {
+                Ok((row.get(0)?, row.get(1)?))
+            })?
             .collect::<rusqlite::Result<_>>()?;
         let mut tasks = Vec::new();
         for (carrier, project) in carriers {

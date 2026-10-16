@@ -185,9 +185,10 @@ fn a_prompt_that_quotes_the_header_of_a_paste_devin_dropped_holds_it_for_no_long
         !log.said().held,
         "the turn is over, and the record has its whole wait"
     );
-    // None of the TUI's prompts was the paste yet: the next is a turn it may wait behind.
+    // None of the TUI's prompts was the paste, and a turn ended since: the TUI dropped
+    // it, and the next turn holds nothing.
     log.append(&asks(3, "s", "and now?"));
-    assert!(log.said().held, "still a turn it may wait behind");
+    assert!(!log.said().held, "a turn begun after the TUI had the paste");
     log.append(&ends("s"));
     // Words that quote it after a blank line are no paste of it either.
     log.append(&asks(
@@ -195,15 +196,55 @@ fn a_prompt_that_quotes_the_header_of_a_paste_devin_dropped_holds_it_for_no_long
         "s",
         &format!("Investigate this:\n\n{header}\nwords"),
     ));
-    log.append(&ends("s"));
-    log.append(&asks(5, "s", "and now?"));
-    assert!(log.said().held, "still a turn it may wait behind");
-    log.append(&ends("s"));
     assert!(!log.said().held);
+    log.append(&ends("s"));
     // Its own prompt holds it in the turn it begins, and no longer.
     log.append(&asks(6, "s", &format!("{header}\nRESULT_ONE")));
     assert!(log.said().held);
     log.append(&answers(6));
+    assert!(!log.said().held);
+}
+
+/// The reviews of 2026-10-16: a paste Devin dropped was held in each turn the human
+/// began after it, ten seconds of work and twenty of rest over and over, and never went
+/// again. Only the turn it went into holds it, or its own prompt's.
+#[test]
+fn a_paste_the_tui_dropped_is_held_in_no_turn_begun_after_the_one_it_went_into() {
+    let log = Log::new();
+    let header = "[ConsensFlow m-9 | T-1 | result from @worker]";
+    log.write(&shows("s"));
+    log.wire.expect(header);
+    // Pasted at rest: the first turn begun after it may be the one the TUI queued it
+    // behind.
+    log.append(&asks(2, "s", "a message of the human's"));
+    assert!(log.said().held, "the turn it may have gone into");
+    log.append(&ends("s"));
+    assert!(!log.said().held);
+    // The TUI did not put it to its agent when that turn ended: it dropped it, and the
+    // turns the human begins after hold nothing, by the turn's end or by the answer.
+    for id in 3..13 {
+        log.append(&asks(id, "s", "and now?"));
+        assert!(!log.said().held, "turn {id}");
+        if id % 2 == 0 {
+            log.append(&ends("s"));
+        } else {
+            log.append(&answers(id));
+        }
+    }
+    // A paste made while a prompt is asked went into its turn, and no turn after it.
+    let next = "[ConsensFlow m-10 | T-1 | result from @worker]";
+    log.append(&asks(13, "s", "busy"));
+    assert_eq!(log.said().asked_at, Some(EPOCH_MS), "a look reads the turn");
+    log.wire.expect(next);
+    assert!(log.said().held, "the turn it went into");
+    log.append(&ends("s"));
+    log.append(&asks(14, "s", "and now?"));
+    assert!(!log.said().held, "a turn begun after it");
+    log.append(&ends("s"));
+    // Its own prompt holds it still, whenever the TUI puts it to its agent.
+    log.append(&asks(15, "s", &format!("{next}\nRESULT_TWO")));
+    assert!(log.said().held, "its own prompt's turn");
+    log.append(&ends("s"));
     assert!(!log.said().held);
 }
 

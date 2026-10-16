@@ -755,6 +755,15 @@ impl Dispatcher {
                 }
             }
         };
+        // The role a launch said first may be told by now, its record read (`settle_gone`):
+        // the launch came up, and its window went as any may (a review of 2026-10-16:
+        // taken for a launch that never came up, a chief's exit left its project open and
+        // its workers running, and with nothing else queued no launch followed).
+        let said_first = owed.as_ref().map(|prelude| prelude.replacement);
+        let owed = match owed {
+            Some(prelude) => self.still_owed(prelude)?,
+            None => None,
+        };
         let launch_owed = owed.is_some();
         if let Some(prelude) = owed {
             self.settle_exited_launch(&record, &project, &participant, &prelude, &because)?;
@@ -772,7 +781,7 @@ impl Dispatcher {
                 // The human closed nothing: a chief that went before its first
                 // message showed says why, where the host said. One whose record
                 // shows it came up, and went as any chief's window may.
-                let came_up = match first {
+                let came_up = match first.or(said_first) {
                     Some(first) => self
                         .seams
                         .ledger

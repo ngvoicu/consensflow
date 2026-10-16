@@ -199,5 +199,5 @@ runs = ["engine-slow-records"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/arrival.rs"
-find = "        let overdue = waited > RECONCILE_MS && at_rest && !held && !delivering.held;"
-replace = "        let overdue = false && waited > RECONCILE_MS && at_rest && !held && !delivering.held;"
+find = "        let overdue = unshown > RECONCILE_MS && at_rest && !held;"
+replace = "        let overdue = false && unshown > RECONCILE_MS && at_rest && !held;"

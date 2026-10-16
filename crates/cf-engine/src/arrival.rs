@@ -20,8 +20,10 @@
 //! reviews of 2026-10-16: Devin's word that its queue had the message, which the
 //! human's words quoting a header Devin had dropped gave, kept it waited for for
 //! good). However often the window goes into other turns, a paste the record has not shown
-//! within [`RECONCILE_MS`] of its hand-over is pasted again at the window's next
-//! rest, so unrelated turns never hold the queue behind it for good. What a chief's
+//! within [`RECONCILE_MS`] of its hand-over, or of the end of the turn its harness held
+//! it in, is pasted again at the window's next rest, so unrelated turns never hold the
+//! queue behind it for good (the reviews of 2026-10-16: once a turn had held a paste
+//! Devin dropped, ten-second turns twenty seconds apart kept it waited for). What a chief's
 //! launch put ahead of its queue (the role it says first, and the message that
 //! role displaced) is its first messages, as its handoff is on its command line:
 //! waited for as those are, and never pasted again for being slow
@@ -62,8 +64,8 @@ const ENTER_AGAIN_MS: i64 = 10_000;
 /// or drawing, is left be.
 const ENTER_AGAIN_QUIET_MS: f64 = 3_000.0;
 /// How long after its hand-over a paste the record never showed is pasted again
-/// at the window's next rest, however its rest was cut by turns: by turns other
-/// than one its harness held it in (`Delivering::held`).
+/// at the window's next rest, however its rest was cut by turns, or after the end
+/// of the last turn its harness held it in (`Delivering::last_held`).
 const RECONCILE_MS: i64 = 30 * 60_000;
 
 impl Dispatcher {
@@ -166,10 +168,13 @@ impl Dispatcher {
         let (rested, turned) = self.rested(record, observed, held);
         let at_rest = observed.settled && observed.waiting.is_none();
         // A paste its harness holds in a turn goes again never while it does, at any
-        // age, and the half hour's shortcut is none once it did: the turn's end gives
-        // its record a whole arrival window (the reviews of 2026-10-16: past the half
-        // hour, a second copy went into the turn that held the first).
-        let overdue = waited > RECONCILE_MS && at_rest && !held && !delivering.held;
+        // age, and the half hour counts from that turn's end: the end gives its record
+        // a whole arrival window (the reviews of 2026-10-16: past the half hour, a
+        // second copy went into the turn that held the first), and the turns after it
+        // never put the half hour off (the reviews of 2026-10-16: once a turn had held
+        // it, a paste Devin dropped never went again).
+        let unshown = self.now() - delivering.last_held.unwrap_or(delivering.since);
+        let overdue = unshown > RECONCILE_MS && at_rest && !held;
         if rested <= self.seams.limits.arrival_ms && !overdue {
             if waited > ENTER_AGAIN_MS
                 && waited <= self.seams.limits.arrival_ms
@@ -190,8 +195,13 @@ impl Dispatcher {
         // reaches the reader. (A message the harness queued itself waits for
         // the record, or for the window to close.)
         let because = if overdue && rested <= self.seams.limits.arrival_ms {
+            let since = if delivering.last_held.is_some() {
+                "the turn that held it ended"
+            } else {
+                "it was handed over"
+            };
             format!(
-                "the harness record never showed it in the {} min since it was handed over",
+                "the harness record never showed it in the {} min since {since}",
                 RECONCILE_MS / 60_000
             )
         } else if turned {
@@ -211,10 +221,11 @@ impl Dispatcher {
         self.window_of(record).0.is_some_and(|window| window.held())
     }
 
-    /// The message on its way went into a turn its harness held it in.
+    /// The message on its way is in a turn its harness holds it in, as this look found.
     fn held_in_a_turn(&self, record: &Record) {
+        let now = self.now();
         if let Some(delivering) = record.delivery.borrow_mut().delivering.as_mut() {
-            delivering.held = true;
+            delivering.last_held = Some(now);
         }
     }
 

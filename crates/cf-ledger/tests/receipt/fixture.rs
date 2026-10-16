@@ -39,6 +39,19 @@ fn session_names() -> Box<dyn FnMut() -> String> {
     })
 }
 
+/// The ledger at `file`, opened again later on: this build's start.
+fn opened_again(file: &std::path::Path) -> Ledger {
+    open_ledger(
+        file,
+        Options {
+            clock: Box::new(Ticks(1_790_000_100_000)),
+            names: session_names(),
+            trace: Box::new(|_| {}),
+        },
+    )
+    .expect("the ledger opens again")
+}
+
 /// A project in a home of its own, and what a test does with it.
 pub struct World {
     pub ledger: Ledger,
@@ -109,15 +122,18 @@ impl World {
         let db = rusqlite::Connection::open(&file).expect("the file");
         change(&db);
         db.close().expect("the file is closed");
-        self.ledger = open_ledger(
-            &file,
-            Options {
-                clock: Box::new(Ticks(1_790_000_100_000)),
-                names: session_names(),
-                trace: Box::new(|_| {}),
-            },
-        )
-        .expect("the ledger opens again");
+        self.ledger = opened_again(&file);
+    }
+
+    /// Project `project` of the ledger another build left in `dir`, opened by this
+    /// one, as its start opens it.
+    pub fn left_in(dir: tempfile::TempDir, project: i64) -> Self {
+        let ledger = opened_again(&dir.path().join("consensflow.db"));
+        Self {
+            ledger,
+            project,
+            dir,
+        }
     }
 
     /// The id of `handle` in the project.

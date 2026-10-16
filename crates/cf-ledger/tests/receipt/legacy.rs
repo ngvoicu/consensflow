@@ -221,8 +221,7 @@ fn a_gated_question_node_withdrew_whose_answer_node_then_cancelled_obliges_until
 /// ledger is opened again (this daemon starts) with the carrier so, and the
 /// task going on, as Node's confirm moves it, unless the carrier still waits.
 /// Each of the states a carrier that cannot carry any more can be left in
-/// frees what it carried, and the one that waits does not, nor the one on its
-/// way, which is settled with what it carried.
+/// frees what it carried, and the one that waits does not.
 fn after_node_left_the_carrier(state: &str) -> (World, i64, i64) {
     after_node_left(state, "queued")
 }
@@ -263,16 +262,8 @@ fn after_node_left(state: &str, row: &str) -> (World, i64, i64) {
 fn a_row_left_under_a_carrier_node_delivered_cancelled_or_failed_is_a_queued_message_of_its_own() {
     for state in ["delivered", "cancelled", "failed"] {
         let (mut w, carrier, answer) = after_node_left_the_carrier(state);
-        let let_go: Vec<serde_json::Value> = w
-            .ledger
-            .events(w.project, 0, 500)
-            .expect("the log")
-            .iter()
-            .filter(|event| event.kind == "message.uncarried")
-            .map(|event| event.data.clone())
-            .collect();
         assert_eq!(
-            let_go,
+            let_go(&w),
             [serde_json::json!({ "carrier": carrier, "released": [answer] })],
             "the start says what it let go of, from a carrier {state}"
         );
@@ -294,30 +285,90 @@ fn a_row_left_under_a_carrier_node_delivered_cancelled_or_failed_is_a_queued_mes
     }
 }
 
-/// This daemon's start settles what was on its way: the record showed the carrier,
-/// so it is confirmed, and the row in its set with it. A carrier this daemon was
-/// pasting when it stopped had the row in its paste, which a second paste of it
-/// would have given the window twice (a review of 2026-10-16). What Node pasted was
-/// the carrier's own words alone, so the row is taken for received though it was
-/// not, and that is kept on purpose: 3.0.0-alpha.82 is the one build that shipped
-/// both carriers and the Node daemon, and every version since alpha.82 settles such
-/// rows on its first restart, by the old rule, so no ledger today can hold one.
+/// A home a build left at schema `written_at` as it stopped while it pasted a
+/// carrier: the native `cf` had folded the chief's answer into the words that resume
+/// the task while they waited, and the daemon had begun the words' paste. This build
+/// opens it, as its start does. In 3.0.0-alpha.82 (schema 11) that daemon may have
+/// been Node's, where the home held the `use-node` file: Node knows no carriers, and
+/// pasted the words alone.
+fn a_carrier_on_its_way_as_a_build_left_it(written_at: usize) -> (World, i64, i64) {
+    const AT: &str = "2026-10-08T12:00:00.000Z";
+    let dir = tempfile::tempdir().expect("a home");
+    let db = Connection::open(dir.path().join("consensflow.db")).unwrap();
+    db.execute_batch("PRAGMA foreign_keys = ON").unwrap();
+    migrate(&db, &MIGRATIONS[..written_at]).unwrap();
+    db.execute_batch(&format!(
+        "INSERT INTO project (id, directory, name, state, gate, created_at, updated_at)
+           VALUES (1, '/work/app', 'app', 'open', 0, '{AT}', '{AT}');
+         INSERT INTO participant (id, project_id, handle, role, roles, agent, harness, tier, created_at) VALUES
+           (1, 1, 'human', 'human', '[]', NULL, NULL, NULL, '{AT}'),
+           (2, 1, 'chief', 'chief', '[]', 'apollo', 'claude-code', NULL, '{AT}'),
+           (3, 1, 'zeus', 'worker', '[\"worker\"]', 'zeus', 'claude-code', 'standard', '{AT}');
+         INSERT INTO task (id, project_id, number, title, body, requester_id, assignee_id, state, created_at, updated_at)
+           VALUES (1, 1, 1, 'Parser', 'Parser', 2, 3, 'working', '{AT}', '{AT}');
+         INSERT INTO message (id, project_id, recipient_id, sender_id, kind, task_id, reply_to, body, state, attempts, created_at, carried_by) VALUES
+           (1, 1, 3, 2, 'task', 1, NULL, 'Parser', 'delivered', 1, '{AT}', NULL),
+           (2, 1, 2, 3, 'question', 1, NULL, 'Which format?', 'delivered', 1, '{AT}', NULL),
+           (3, 1, 3, NULL, 'task', 1, NULL, 'Go on with T-1.', 'delivering', 1, '{AT}', NULL),
+           (4, 1, 3, 2, 'answer', 1, 2, 'JSON', 'queued', 0, '{AT}', 3);
+         INSERT INTO event (project_id, at, kind, data)
+           VALUES (1, '{AT}', 'delivery.begun', '{{\"message\":3,\"attempt\":1}}');"
+    ))
+    .unwrap();
+    db.close().expect("the file is closed");
+    (World::left_in(dir, 1), 3, 4)
+}
+
+/// What the start let go of, as the log says it.
+fn let_go(w: &World) -> Vec<serde_json::Value> {
+    w.ledger
+        .events(w.project, 0, 500)
+        .expect("the log")
+        .iter()
+        .filter(|event| event.kind == "message.uncarried")
+        .map(|event| event.data.clone())
+        .collect()
+}
+
+/// The reviews of 2026-10-16: a home alpha.82 left, opened by this build, had the
+/// answer confirmed from the carrier's marker, though Node never pasted it.
 #[test]
-fn a_row_left_under_a_carrier_on_its_way_is_settled_with_it_whoever_began_to_paste_it() {
-    let (mut w, carrier, answer) = after_node_left_the_carrier("delivering");
+fn a_row_left_under_a_carrier_node_began_to_paste_is_not_taken_for_received_with_it() {
+    let (mut w, carrier, answer) = a_carrier_on_its_way_as_a_build_left_it(11);
+    assert_eq!(
+        let_go(&w),
+        [serde_json::json!({ "carrier": carrier, "released": [answer] })],
+        "a carrier on its way at schema 11 may be Node's: what it carried is let go of"
+    );
+    // This daemon's start settles what was on its way: the record showed the
+    // carrier, so it is confirmed. What Node pasted was the carrier's own words:
+    // the answer was never in the paste, and is not marked received by it. A
+    // carrier alpha.83 or 3.0.0 began when it stopped looks the same, and its rows
+    // go again: pasted twice, never lost.
     let in_flight = w.ledger.in_flight().unwrap();
     assert_eq!(ids(&in_flight), [carrier]);
-    assert!(
-        w.ledger
-            .events(w.project, 0, 500)
-            .expect("the log")
-            .iter()
-            .all(|event| event.kind != "message.uncarried"),
-        "the start lets go of nothing"
-    );
     w.confirm(carrier);
-    assert_eq!(w.states(&[carrier, answer]), ["delivered", "delivered"]);
-    assert_eq!(w.next("zeus"), None);
+    assert_eq!(w.states(&[carrier, answer]), ["delivered", "queued"]);
+    assert_eq!(w.next("zeus"), Some(answer));
+    let begun = w.deliver(answer);
+    assert!(begun.carried.is_empty(), "it rides in nothing");
+    assert_eq!(w.states(&[answer]), ["delivered"]);
+}
+
+/// From 3.0.1 (schema 12) no build had a Node daemon, and each let go at its start of
+/// what Node had left: a carrier on its way in a file past 11 is this daemon's, and
+/// its rows were in its paste. The start settles them with it (a review of
+/// 2026-10-16: let go of, they were pasted again on their own).
+#[test]
+fn a_row_left_under_a_carrier_this_daemon_began_to_paste_is_settled_with_it() {
+    for written_at in [12, MIGRATIONS.len()] {
+        let (mut w, carrier, answer) = a_carrier_on_its_way_as_a_build_left_it(written_at);
+        assert!(let_go(&w).is_empty(), "the start lets go of nothing");
+        assert_eq!(ids(&w.ledger.in_flight().unwrap()), [carrier]);
+        w.confirm(carrier);
+        assert_eq!(w.states(&[carrier, answer]), ["delivered", "delivered"]);
+        assert_eq!(w.next("zeus"), None);
+    }
 }
 
 #[test]

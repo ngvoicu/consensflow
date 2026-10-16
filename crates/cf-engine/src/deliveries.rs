@@ -37,10 +37,12 @@ pub(crate) struct Delivering {
     pub(crate) chief: bool,
     /// The harness's own queue took it, as it said at the hand-over.
     pub(crate) queued: bool,
-    /// Its harness held it in a turn it is in (`Window::held`): never pasted
-    /// again while it does, and from that turn's end its record has a whole
-    /// arrival window of rest, however long ago it was handed over.
-    pub(crate) held: bool,
+    /// When a look last found its harness holding it in a turn it is in
+    /// (`Window::held`): never pasted again while it does, and from that turn's
+    /// end its record has a whole arrival window of rest, however long ago it was
+    /// handed over, and the half hour counts from there (`arrival`). None where no
+    /// look did.
+    pub(crate) last_held: Option<i64>,
     /// Enter was pressed once more for it.
     pub(crate) entered_again: bool,
 }
@@ -149,7 +151,7 @@ impl Dispatcher {
             // plugin): it shows when the harness gets to it, and sending it
             // again would only make a duplicate.
             queued: matches!(outcome, Admission::Admitted { queued: true }),
-            held: false,
+            last_held: None,
             entered_again: false,
         };
         if let Admission::Refused { reason } = &outcome {

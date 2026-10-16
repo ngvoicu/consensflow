@@ -121,8 +121,8 @@ runs = ["ledger-receipt"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/ledger.rs"
-find = "    release_stranded(&mut store)?;"
-replace = "    let _ = release_stranded;"
+find = "    release_stranded(&mut store, written_at)?;"
+replace = "    let _ = (release_stranded, written_at);"
 
 [[plant]]
 name = "pause: this ledger opens leaving a task working that Node moved on for a queued answer"
@@ -141,9 +141,9 @@ runs = ["ledger-receipt"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/carrying.rs"
-find = "                 WHERE m.state = 'queued' AND c.state NOT IN ('queued', 'gated', 'delivering')"
+find = "                 WHERE m.state = 'queued' AND c.state NOT IN ('queued', 'gated')"
 replace = "                 WHERE m.state = 'queued' AND c.state IN ('cancelled', 'failed')"
 
-# A carrier on its way at the start keeps its rows, which are settled with it: the rule that the
-# plant here held the other way round until 2026-10-16 (its rows were let go of, and pasted twice);
-# its plants are `carried-restart.toml`'s.
+# A carrier on its way at the start keeps its rows, which are settled with it, unless the ledger was
+# written at a schema the Node daemon wrote: the rule that the plant here held the other way round
+# until 2026-10-16 (its rows were let go of, and pasted twice); its plants are `carried-restart.toml`'s.

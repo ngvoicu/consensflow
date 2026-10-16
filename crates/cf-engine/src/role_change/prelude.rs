@@ -120,9 +120,11 @@ impl Dispatcher {
     /// with.
     pub(crate) fn owed(&self, record: &Record) -> Result<Option<Prelude>, EngineError> {
         let prelude = record.delivery.borrow().prelude.clone();
-        let Some(prelude) = prelude else {
-            return Ok(None);
-        };
+        prelude.map_or(Ok(None), |prelude| self.still_owed(prelude))
+    }
+
+    /// `prelude` while its replacement has not been told, as the ledger has it now.
+    pub(crate) fn still_owed(&self, prelude: Prelude) -> Result<Option<Prelude>, EngineError> {
         let told = self
             .seams
             .ledger
@@ -169,7 +171,7 @@ impl Dispatcher {
             launch: true,
             chief: false,
             queued: false,
-            held: false,
+            last_held: None,
             entered_again: false,
         })
     }

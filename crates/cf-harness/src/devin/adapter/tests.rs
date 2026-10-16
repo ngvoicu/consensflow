@@ -379,9 +379,10 @@ fn a_message_pasted_is_held_in_the_turn_of_the_tuis_prompt_its_line_begins_and_n
     assert!(window.held());
     append(&wire, turn_ends());
     assert!(!window.held(), "its turn is over");
-    // Still none of the TUI's prompts was the paste: a prompt asked now may hold it.
+    // None of the TUI's prompts was the paste, and a turn ended since: a prompt asked
+    // now is no turn it went into.
     append(&wire, &asks("mild-coin", "and now?"));
-    assert!(window.held());
+    assert!(!window.held());
     append(&wire, turn_ends());
     // The TUI's prompt of what was pasted: the agent runs it in that prompt's turn,
     // and its record shows it when the turn ends.
@@ -479,12 +480,14 @@ fn on_windows_a_message_is_told_by_its_first_line_as_the_console_carries_it_to_d
     };
     let text = "[ConsensFlow m-9 · T-1 · note from ConsensFlow]\n@human cancelled T-1";
     assert!(finished(window.deliver(&host, &pane, text)).is_ok());
-    // The TUI had what the console carried: the middle dots are bars. Words with the
-    // dots were not pasted: a prompt after them may be the turn the paste waits behind.
-    append(&wire, &asks("mild-coin", text));
+    // The TUI had what the console carried: the middle dots are bars. A turn begun after
+    // the paste may be the one it went into; once it ends, words with the dots are no
+    // paste of it, and their turn holds nothing.
+    append(&wire, &asks("mild-coin", "a message of the human's"));
+    assert!(window.held(), "the turn it may have gone into");
     append(&wire, turn_ends());
-    append(&wire, &asks("mild-coin", "and now?"));
-    assert!(window.held(), "words that were not pasted");
+    append(&wire, &asks("mild-coin", text));
+    assert!(!window.held(), "words that were not pasted");
     append(&wire, turn_ends());
     append(
         &wire,

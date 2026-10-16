@@ -406,7 +406,7 @@ fn a_displaced_message_that_rides_in_the_paste_of_another_is_not_begun_and_its_l
         launch: true,
         chief: false,
         queued: false,
-        held: false,
+        last_held: None,
         entered_again: false,
     };
     assert!(

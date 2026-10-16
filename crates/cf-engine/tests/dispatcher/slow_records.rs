@@ -13,7 +13,7 @@
 //! went into, or the one the harness began with it) is in that turn, however at rest
 //! it reads, as long as the harness says so, and
 //! the paste never goes again meanwhile, however old: once that turn ends, its
-//! record has a whole arrival window of rest.
+//! record has a whole arrival window of rest, and the half hour counts from there.
 //! The one more Enter a paste is given (`deliveries`) is pressed in the first arrival
 //! window only, whatever the wait after it.
 //!
@@ -397,6 +397,68 @@ fn never_pastes_again_a_paste_held_in_a_turn_however_long_and_gives_its_record_a
             ARRIVAL_MS / 1000
         )
     );
+}
+
+/// The reviews of 2026-10-16: Devin dropped a paste, and the turn the human began next
+/// held it. Once that turn ended, turns of ten seconds twenty seconds apart kept every
+/// rest short of an arrival window, and the paste never went again, its queue behind
+/// it: no half hour was counted once a turn had held it.
+#[test]
+fn pastes_again_half_an_hour_after_the_turn_that_held_it_ended_a_paste_short_turns_keep_unshown() {
+    let context = Context::new();
+    let project = holding(&context);
+    let pasted = counting(&context);
+    let note = context.note(project, "zeus", "chief", "hello");
+    let behind = context.note(project, "zeus", "chief", "behind");
+    context.pass().unwrap();
+
+    // A turn holds it for a minute, and ends.
+    context.adapter.with("chief", |agent| agent.held = true);
+    for _ in 0..2 {
+        context.advance(ARRIVAL_MS);
+        context.pass().unwrap();
+    }
+    context.adapter.with("chief", |agent| agent.held = false);
+
+    // Ten seconds of a turn and twenty of rest, over and over, none holding it: half
+    // an hour of them, and nothing shows the paste.
+    for _ in 0..60 {
+        context.adapter.with("chief", |agent| agent.settled = true);
+        context.advance(20_000);
+        context.pass().unwrap();
+        context.adapter.busy("chief");
+        context.advance(10_000);
+        context.pass().unwrap();
+    }
+    assert_eq!(context.message(note.id).attempts, 1);
+    assert_eq!(pasted.get(), 1);
+    assert_eq!(context.message(behind.id).state, "queued");
+
+    // Past half an hour from the end of the turn that held it, the next look at rest
+    // pastes it again and says why.
+    context.adapter.with("chief", |agent| {
+        agent.settled = true;
+        agent.arrive = true;
+    });
+    context.advance(1_000);
+    context.pass().unwrap();
+    assert_eq!(pasted.get(), 2, "pasted again once");
+    assert_eq!(
+        why_retried(&context, project),
+        "the harness record never showed it in the 30 min since the turn that held it ended"
+    );
+    context.pass().unwrap();
+    let delivered = context.message(note.id);
+    assert_eq!(
+        (delivered.state.as_str(), delivered.attempts),
+        ("delivered", 2)
+    );
+
+    // The queue behind it goes on.
+    context.adapter.answer("chief", "noted");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(context.message(behind.id).state, "delivered");
 }
 
 #[test]
