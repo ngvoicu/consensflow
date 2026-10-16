@@ -4597,6 +4597,39 @@ test('Settings, Specs: a folder the daemon refused stays as typed, with why, whi
   await expect(again.refusal).toBeHidden()
 })
 
+test('Settings, Specs: a save that failed is sent again when the human asks again, and one pending or kept is not', async ({
+  page,
+}) => {
+  await open(page)
+  const specs = await openSpecsSettings(page)
+  // The daemon cannot write the agents file: the folder's save fails, and what was typed stays.
+  const words = 'could not write the agents file: EACCES: permission denied'
+  await refuseSpecs(page, words)
+  await specs.folder.fill('docs/specs')
+  await specs.folder.press('Enter')
+  await expect(specs.refusal).toHaveText(words)
+  await expect(specs.folder).toHaveValue('docs/specs')
+  // It can again: Enter with nothing changed asks once more, and not again while that is on its way.
+  await refuseSpecs(page, null)
+  await hold(page, 'specs.set')
+  await specs.folder.press('Enter')
+  await expect.poll(() => calls(page, 'specs.set')).toHaveLength(2)
+  await specs.folder.press('Enter')
+  await letGo(page, 'specs.set')
+  await expect.poll(() => answers(page, 'specs.set')).toBe(2)
+  await expect(specs.refusal).toBeHidden()
+  expect(await page.evaluate(() => window.__model.specsApp.folder)).toBe('docs/specs')
+  // Kept, Enter asks nothing; the next change is the box's own.
+  await specs.folder.press('Enter')
+  await specs.on.check()
+  await expect.poll(() => answers(page, 'specs.set')).toBe(3)
+  expect(await calls(page, 'specs.set')).toEqual([
+    { folder: 'docs/specs' },
+    { folder: 'docs/specs' },
+    { on: true },
+  ])
+})
+
 test('Settings, Specs: a change the daemon refuses once the dialog is shut is said on the status line', async ({
   page,
 }) => {

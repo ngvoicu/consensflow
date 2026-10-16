@@ -38,11 +38,18 @@ export class SpecsSettings {
   /** How often the human has changed each control. */
   #edits = { on: 0, folder: 0, variant: 0 }
   /**
-   * How often each had been changed when it was last asked to be saved: a control asked
-   * again with nothing changed since is not saved twice (Enter in the folder is both a
-   * change and a submit, and a refused folder is left, as the human leaves it, unchanged).
+   * How often each had been changed when a save of it was last kept, or the dialog opened:
+   * a control asked again with nothing changed since is not saved again.
    */
-  #asked = { on: 0, folder: 0, variant: 0 }
+  #kept = { on: 0, folder: 0, variant: 0 }
+  /**
+   * How often each had been changed when a save of it was last sent: one that failed is
+   * sent again when the human asks for it again (the daemon may have been out of reach),
+   * but not as they leave the field.
+   */
+  #sent = { on: 0, folder: 0, variant: 0 }
+  /** The control whose save is on its way; none where none is. */
+  #sending = null
   /** The controls that hold the human's word and no save has kept it yet. */
   #drafts = new Set()
   /** The controls to save once the save on its way is answered, in the order they changed. */
@@ -80,11 +87,14 @@ export class SpecsSettings {
       // The folder is kept as the human leaves it; the box and the variant at once.
       control.addEventListener('change', () => this.#ask(name))
     }
-    // Enter in the folder keeps it, and the form has no other way to send.
-    this.#form.addEventListener('submit', (event) => {
+    // Enter in the folder keeps it, each press once: taken as the key goes down, so the
+    // browser neither sends the form nor says a change of it as well.
+    this.#folder.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter' || event.isComposing) return
       event.preventDefault()
-      this.#ask('folder')
+      this.#ask('folder', true)
     })
+    this.#form.addEventListener('submit', (event) => event.preventDefault())
     dialog.querySelector('[value="close"]').addEventListener('click', () => dialog.close())
   }
 
@@ -95,7 +105,7 @@ export class SpecsSettings {
   async open() {
     await this.#page.readSpecs()
     this.#drafts.clear()
-    this.#asked = { ...this.#edits }
+    this.#kept = { ...this.#edits }
     this.#folderRefused = ''
     this.#otherRefused = ''
     this.#draw()
@@ -107,11 +117,17 @@ export class SpecsSettings {
     while (this.#saving !== null) await this.#saving
   }
 
-  /** Asks for `name` to be saved, unless nothing changed in it since it last was. */
-  #ask(name) {
-    if (this.#edits[name] === this.#asked[name]) return
-    this.#asked[name] = this.#edits[name]
-    if (!this.#queue.includes(name)) this.#queue.push(name)
+  /**
+   * Asks for `name` to be saved, unless nothing changed in it since a save of it was kept,
+   * or a save of it is pending: one waiting in the queue, which sends the control as it is
+   * then, or the one on its way with nothing changed since it was sent. Nothing changed since
+   * a save of it failed, it is sent again only when the human asks `again` (Enter).
+   */
+  #ask(name, again = false) {
+    const edits = this.#edits[name]
+    if (edits === this.#kept[name] || this.#queue.includes(name)) return
+    if (this.#sent[name] === edits && (this.#sending === name || !again)) return
+    this.#queue.push(name)
     if (this.#saving === null) this.#saving = this.#next()
   }
 
@@ -132,8 +148,11 @@ export class SpecsSettings {
   async #save(name) {
     const edits = this.#edits[name]
     const value = name === 'on' ? this.#on.checked : this.#form.elements[name].value
+    this.#sent[name] = edits
+    this.#sending = name
     try {
       this.#page.setSpecs(await this.#page.daemon('specs.set', { [name]: value }))
+      this.#kept[name] = edits
       if (this.#edits[name] === edits) this.#drafts.delete(name)
       if (name === 'folder') this.#folderRefused = ''
       this.#otherRefused = ''
@@ -147,6 +166,7 @@ export class SpecsSettings {
       }
       if (!this.#dialog.open) this.#page.report(words)
     }
+    this.#sending = null
     this.#draw()
   }
 

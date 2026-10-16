@@ -465,15 +465,14 @@ find = '''        <li><button class="quiet-button" type="button" id="specs-setti
 replace = ""
 
 [[plant]]
-name = "specs settings: Enter in the folder keeps it twice"
-meant = "Settings, Specs: the box, the folder and the variant every project uses unless it names its own, each kept as it changes and shown again when it opens"
+name = "specs settings: Enter in the folder sends again a folder already kept"
+meant = "Settings, Specs: a save that failed is sent again when the human asks again, and one pending or kept is not"
 runs = ["settings-page-dialog"]
 
 [[plant.edit]]
 file = "app/ui/core/specs-settings.js"
-find = '''    if (this.#edits[name] === this.#asked[name]) return
-'''
-replace = ""
+find = "    if (edits === this.#kept[name] || this.#queue.includes(name)) return"
+replace = "    if (this.#queue.includes(name)) return"
 
 [[plant]]
 name = "specs settings: Enter in the folder keeps it twice while the daemon's answer is on its way"
@@ -482,9 +481,8 @@ runs = ["settings-page-dialog"]
 
 [[plant.edit]]
 file = "app/ui/core/specs-settings.js"
-find = '''    this.#asked[name] = this.#edits[name]
-'''
-replace = ""
+find = "    if (this.#sent[name] === edits && (this.#sending === name || !again)) return"
+replace = "    if (this.#sent[name] === edits && !again) return"
 
 [[plant]]
 name = "specs settings: the dialog does not read the daemon again as it opens"
@@ -821,8 +819,8 @@ runs = ["settings-page-dialog"]
 
 [[plant.edit]]
 file = "app/ui/core/specs-settings.js"
-find = "    if (!this.#queue.includes(name)) this.#queue.push(name)"
-replace = "    this.#queue.push(name)"
+find = "    if (edits === this.#kept[name] || this.#queue.includes(name)) return"
+replace = "    if (edits === this.#kept[name]) return"
 
 [[plant]]
 name = "specs settings: a read of what is kept goes ahead of the saves on their way"
@@ -934,3 +932,37 @@ find = '''    if defaults.is_empty() {
         document.set(DEFAULTS, Value::Object(defaults));
     }'''
 replace = '''    document.set(DEFAULTS, Value::Object(defaults));'''
+
+# --- what Astra and Sol found at their third look (2026-10-16) ---
+
+# A save that failed counted as asked: once the daemon could write again, Enter with the folder
+# as it was sent nothing, and the folder stayed unsaved until it was edited.
+[[plant]]
+name = "specs settings: a save that failed is not sent again when the human presses Enter"
+meant = "Settings, Specs: a save that failed is sent again when the human asks again, and one pending or kept is not"
+runs = ["settings-page-dialog"]
+
+[[plant.edit]]
+file = "app/ui/core/specs-settings.js"
+find = "    if (this.#sent[name] === edits && (this.#sending === name || !again)) return"
+replace = "    if (this.#sent[name] === edits) return"
+
+[[plant]]
+name = "specs settings: a refused folder is sent again as the human leaves it"
+meant = "Settings, Specs: a folder the daemon refused stays as typed, with why, while the other controls are saved, until a save of it is kept or the dialog opens again"
+runs = ["settings-page-dialog"]
+
+[[plant.edit]]
+file = "app/ui/core/specs-settings.js"
+find = "    if (this.#sent[name] === edits && (this.#sending === name || !again)) return"
+replace = "    if (this.#sent[name] === edits && this.#sending === name) return"
+
+[[plant]]
+name = "specs settings: Enter in the folder asks nothing"
+meant = "Settings, Specs: a save that failed is sent again when the human asks again, and one pending or kept is not"
+runs = ["settings-page-dialog"]
+
+[[plant.edit]]
+file = "app/ui/core/specs-settings.js"
+find = "      this.#ask('folder', true)\n"
+replace = ""

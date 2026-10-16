@@ -253,6 +253,49 @@ fn ending_a_lookup_ends_the_shell_it_asks_at_once_and_only_it() {
     assert!(left, "what the shell started was ended with it");
 }
 
+/// A lookup given up on has ended its shell before it lets the lock go: a quit
+/// that comes then finds no shell to end, and the app may be gone before the
+/// lookup's thread goes on (the third review of 2026-10-16). The shell counts
+/// on in a file while it runs.
+#[cfg(unix)]
+#[test]
+fn a_lookup_given_up_on_has_ended_its_shell_before_a_quit_can_miss_it() {
+    let home = tempfile::tempdir().expect("home");
+    let beat = home.path().join("beat");
+    let mut shell = Command::new("/bin/sh");
+    shell
+        .args([
+            "-c",
+            &format!(
+                "i=0; while :; do i=$((i+1)); echo $i > '{}'; /bin/sleep 0.05; done",
+                beat.display()
+            ),
+        ])
+        .stdout(Stdio::piped());
+    let lookup = LoginLookup::default();
+    let _output = lookup.start(&mut shell).expect("the shell is started");
+    let started = Instant::now();
+    while !beat.exists() {
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "the shell never ran"
+        );
+        thread::sleep(Duration::from_millis(20));
+    }
+    let mut stopped = false;
+    lookup.finish_with(|| {
+        // The quit comes here, and the app could end with it.
+        lookup.end();
+        let before = std::fs::read_to_string(&beat).unwrap_or_default();
+        thread::sleep(Duration::from_millis(400));
+        stopped = std::fs::read_to_string(&beat).unwrap_or_default() == before;
+    });
+    assert!(
+        stopped,
+        "the shell ran on past the quit, with nothing left to end it"
+    );
+}
+
 /// The PATH the Finder gives an app.
 #[cfg(unix)]
 const FINDER_PATH: &str = "/usr/bin:/bin:/usr/sbin:/sbin";

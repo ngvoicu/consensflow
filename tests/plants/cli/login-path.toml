@@ -134,14 +134,16 @@ replace = '''
 [[plant.edit]]
 file = "app/src-tauri/src/daemon_command.rs"
 find = '''
-        if let Some(mut shell) = shell {
-            let _ = shell.kill();
-'''
+            if let Some(shell) = asking.shell.as_mut() {
+                let _ = shell.kill();
+            }
+            asking.shell.take()'''
 replace = '''
-        if let Some(mut shell) = shell {
-            unsafe { libc::killpg(shell.id() as i32, libc::SIGKILL) };
-            let _ = shell.kill();
-'''
+            if let Some(shell) = asking.shell.as_mut() {
+                unsafe { libc::killpg(shell.id() as i32, libc::SIGKILL) };
+                let _ = shell.kill();
+            }
+            asking.shell.take()'''
 
 [[plant]]
 name = "login path: the app's quit ends what the login file started too"
@@ -166,6 +168,33 @@ replace = '''
             unsafe { libc::killpg(shell.id() as i32, libc::SIGKILL) };
             let _ = shell.kill();
 '''
+
+# A shell given up on is ended under the lock, then let go (the third review of 2026-10-16).
+[[plant]]
+name = "login path: a lookup given up on lets its shell go before it ends it"
+meant = "a_lookup_given_up_on_has_ended_its_shell_before_a_quit_can_miss_it"
+runs = ["app-daemon-path"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/daemon_command.rs"
+find = '''
+            let mut asking = self.lock();
+            if let Some(shell) = asking.shell.as_mut() {
+                let _ = shell.kill();
+            }
+            asking.shell.take()
+        };
+        between();
+        if let Some(mut shell) = shell {
+            let _ = shell.wait();'''
+replace = '''
+            let mut asking = self.lock();
+            asking.shell.take()
+        };
+        between();
+        if let Some(mut shell) = shell {
+            let _ = shell.kill();
+            let _ = shell.wait();'''
 
 # The quit, the start and the holding of the shell are one step.
 [[plant]]

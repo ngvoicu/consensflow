@@ -232,12 +232,27 @@ impl LoginLookup {
         }
     }
 
-    /// The lookup is over: the shell is let go, ended if it still runs, and
-    /// waited for.
+    /// The lookup is over: the shell is ended if it still runs, under the lock,
+    /// and only then let go and waited for. A shell let go first was one a quit
+    /// could find nowhere, and the app could end before anything ended it (the
+    /// third review of 2026-10-16).
     fn finish(&self) {
-        let shell = self.lock().shell.take();
+        self.finish_with(|| {});
+    }
+
+    /// [`LoginLookup::finish`], with `between` run once the lock is let go and
+    /// before the shell is waited for: where the app's quit may come, and the
+    /// app end.
+    fn finish_with(&self, between: impl FnOnce()) {
+        let shell = {
+            let mut asking = self.lock();
+            if let Some(shell) = asking.shell.as_mut() {
+                let _ = shell.kill();
+            }
+            asking.shell.take()
+        };
+        between();
         if let Some(mut shell) = shell {
-            let _ = shell.kill();
             let _ = shell.wait();
         }
     }
