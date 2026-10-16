@@ -33,6 +33,7 @@ use serde_json::{json, Value};
 use super::ask::{self, Interrupt, Item};
 use super::last_lines;
 use super::machine::Harness;
+use super::members::Identity;
 use crate::rig::Rig;
 use crate::Result;
 
@@ -75,8 +76,6 @@ pub struct Window<'r> {
     harness: Harness,
     kind: String,
     id: String,
-    /// Its program's process, as the pane host said it opened it.
-    pid: Option<u32>,
     workspace: PathBuf,
     argv: Vec<String>,
     session: RefCell<Option<String>>,
@@ -97,10 +96,12 @@ impl Window<'_> {
         &self.id
     }
 
-    /// Its program's process, as the pane host said it opened it (`pane.open`'s `pid`):
-    /// what descends from it is the window's own tree. None where the host did not say.
-    pub fn pid(&self) -> Option<u32> {
-        self.pid
+    /// Which process its program is, as the pane host said it opened it (`pane.open`'s
+    /// `pid`), read once as the host answered and kept ([`Rig::window_process`]): what
+    /// descends from it is the window's own tree, and nothing does once it has gone. None
+    /// where the host did not say, or the process had gone when it was read.
+    pub fn process(&self) -> Option<Identity> {
+        self.rig.window_process(&self.pane())
     }
 
     /// Its pane, as the pane host takes it in a request.

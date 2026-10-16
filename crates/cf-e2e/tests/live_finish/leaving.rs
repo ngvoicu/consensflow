@@ -34,13 +34,12 @@ use std::path::Path;
 use std::time::Duration;
 
 use cf_e2e::live::members::{
-    self, delivered_result, end_chosen, find, holding, is_over, notes_of_work, Account, Identity,
-    Machine, Members, Plan, Running, ThisMachine,
+    self, delivered_result, end_chosen, find, holding, is_over, notes_of_work, Account, Ended,
+    Identity, Machine, Members, Plan, Running, ThisMachine,
 };
 use cf_e2e::live::tree::{self, Proc, Tree};
 use cf_e2e::live::{cut, secs, text, Log, Who};
 use cf_e2e::process::{is_alive, Run};
-use cf_e2e::rig::Job;
 use cf_e2e::Result as Fallible;
 
 use crate::check::{
@@ -190,10 +189,21 @@ pub fn judge(left: &Left) -> Result<(), Vec<String>> {
         Some(_) => {}
     }
     let close = after_the_close(left);
+    // When what the turn left was looked for: once the task was done and the chief told, or
+    // when the run last looked at a task that came to anything else.
+    let done = left.state == "done";
+    let when = |once: &str| {
+        if done {
+            format!("{once} the task was done and the chief told")
+        } else {
+            format!("when the run last looked, T-1 being {}", left.state)
+        }
+    };
     if left.listed.is_empty() {
         if !left.escaped.is_empty() {
             problems.push(format!(
-                "the command escaped the ending: the pane host never listed it, and it still ran once the task was done and the chief told (the agent detached it from the shell that started it, which ended, so no chain of processes that run led from it to a shell the harness started): {}; {}{}",
+                "the command escaped the ending: the pane host never listed it, and it still ran {} (the agent detached it from the shell that started it, which ended, so no chain of processes that run led from it to a shell the harness started): {}; {}{}",
+                when("once"),
                 left.escaped.join("; "),
                 close.unwrap_or_default(),
                 without_a_terminal(&left.escaped)
@@ -208,7 +218,8 @@ pub fn judge(left: &Left) -> Result<(), Vec<String>> {
                 .map(|process| format!("{} {}", process.pid, process.command))
                 .collect();
             let mut said = format!(
-                "the command is still running after the task was done and the chief told: {}",
+                "the command is still running {}: {}",
+                when("after"),
                 still.join("; ")
             );
             if let Some(close) = close {
@@ -326,24 +337,37 @@ pub fn run_asked(
     let log = log.scoped(who.name());
     let mut members = Members::open(plan, stand_in, &log)?;
     let waits = Waits::of(who);
-    let finished = observe(&mut members, &agent(who), brief, &wanted(who), waits, &log);
+    // What the run chose to end is ended whatever came of the run, and what could not be
+    // ended, or looked for, fails it (Astra and Sol on round 6).
+    let mut chosen = Chosen::default();
+    let finished = observe(
+        &mut members,
+        (&agent(who), brief, &wanted(who)),
+        waits,
+        &log,
+        &mut chosen,
+    );
+    let ended = end_chosen(&chosen.processes);
     let closed = members.close();
-    let mut finished = finished?;
+    let mut finished = finished.unwrap_or_else(Finished::failed);
+    for problem in chosen.problems(&ended) {
+        finished.case.fail(problem);
+    }
     finished.case.closed(closed);
     Ok(finished)
 }
 
-/// The worker given its task, and the board and the pane host looked at once a second until
-/// the task ends; then the result and the chief's note waited for, the command waited to be
-/// gone, and what was seen held to the brief. `wanted` is what the command line of the
-/// command holds, to find it on the machine.
+/// The worker `agent` given its task (`brief`), and the board and the pane host looked at
+/// once a second until the task ends; then the result and the chief's note waited for, the
+/// command waited to be gone, and what was seen held to the brief. `wanted` is what the
+/// command line of the command holds, to find it on the machine. What the run is to end of
+/// it is in `chosen`.
 fn observe(
     members: &mut Members,
-    agent: &str,
-    brief: &str,
-    wanted: &str,
+    (agent, brief, wanted): (&str, &str, &str),
     waits: Waits,
     log: &Log,
+    chosen: &mut Chosen,
 ) -> Fallible<Finished> {
     let mut case = Account::new();
     if let Some(trust) = members.trust() {
@@ -358,17 +382,17 @@ fn observe(
     let mut began: Option<Duration> = None;
     let mut pane: Option<String> = None;
     let mut progress = Progress::default();
-    // What the run ends of the command at its end, once it has seen what came of it: what
-    // it saw of it in the worker's window, each process by which it is ([`choose`]).
-    let mut chosen: Vec<Running> = Vec::new();
     let ended = find(log, "the worker's task to end", WORK, LOOK, || {
         let thread = members.task(number)?;
         let lane = members.lane(agent)?;
         let own = members
             .window_in(lane.clone())
             .and_then(|window| members.window_process(&window));
-        if let Ok(all) = ThisMachine.processes() {
-            choose(&mut chosen, &all, own, &running_jobs(members), wanted);
+        // The jobs first: a listing made after a job wrote its process has the job, if it runs.
+        let jobs = running_jobs(members);
+        match ThisMachine.processes() {
+            Ok(all) => chosen.choose(&all, own, &jobs, wanted),
+            Err(failed) => chosen.failed.push(failed.to_string()),
         }
         let listing = (!lane["pane"].is_null()).then(|| tree::read(members.rig(), &lane["pane"]));
         progress.say(log, progress_line(number, &thread, &lane, listing.as_ref()));
@@ -414,8 +438,8 @@ fn observe(
             left.alive = still_there(&left.listed);
             Ok(left.alive.is_empty().then_some(()))
         })?;
-        left.escaped = on_the_machine(wanted);
     }
+    look_for_leftovers(&mut left, still_there, || on_the_machine(wanted));
     let mut exit: Option<Tree> = None;
     if let (true, Some(pane)) = (ended, pane.clone()) {
         find(
@@ -437,7 +461,6 @@ fn observe(
     if !left.escaped.is_empty() && exit.is_some() {
         left.after_close = Some(on_the_machine(wanted));
     }
-    end_chosen(&ThisMachine, &chosen);
 
     let verdict = judge(&left);
     case.say(format!(
@@ -475,43 +498,108 @@ fn observe(
     })
 }
 
-/// Adds to `chosen` what of the command the run ends at its end, as the machine lists its
-/// processes now (`all`): what descends from the worker's window's own process `own` and
-/// holds `wanted`, with what it started ([`holding`]); and the processes of the rig's
-/// stand-in jobs that run (`jobs`, the numbers the jobs wrote themselves: one the stand-in
-/// detached has no window to descend from), where the process of the number is the job
-/// still (its command line holds `wanted` too). Each by which process it is, so that one
-/// whose number another takes later is not ended ([`end_chosen`]); a process outside the
-/// window that no job of the rig's wrote is none of it, whatever its command line says.
-fn choose(
-    chosen: &mut Vec<Running>,
-    all: &[Running],
-    own: Option<Identity>,
-    jobs: &[u32],
-    wanted: &str,
+/// What the turn left, looked for whatever came of the task: one that failed or ran out of
+/// its time leaves its command as one that was done does (Astra on round 6). Of the
+/// processes the host listed, those `still` there, where the task was not done (one that
+/// was has waited for them already); and the machine's processes that run the command
+/// (`on_the_machine`).
+fn look_for_leftovers(
+    left: &mut Left,
+    still: impl Fn(&[Proc]) -> Vec<u64>,
+    on_the_machine: impl Fn() -> Vec<String>,
 ) {
-    let in_window = own.map(|own| holding(all, own, wanted)).unwrap_or_default();
-    let of_jobs = all
-        .iter()
-        .filter(|process| jobs.contains(&process.identity.pid) && process.command.contains(wanted))
-        .cloned();
-    for one in in_window.into_iter().chain(of_jobs) {
-        if !chosen.iter().any(|known| known.identity == one.identity) {
-            chosen.push(one);
+    if left.state != "done" {
+        left.alive = still(&left.listed);
+    }
+    left.escaped = on_the_machine();
+}
+
+/// What the run ends at its end, as it saw it ([`Chosen::choose`]), and the looks at the
+/// machine's processes that failed.
+#[derive(Debug, Default)]
+struct Chosen {
+    /// The processes, each by which process it is ([`end_chosen`]).
+    processes: Vec<Running>,
+    /// The rig's stand-in jobs looked at already, by their files.
+    jobs: Vec<String>,
+    /// Why a look at the machine's processes failed, each time one did.
+    failed: Vec<String>,
+}
+
+impl Chosen {
+    /// Adds what of the command the run ends at its end, as the machine lists its processes
+    /// now (`all`): what descends from the worker's window's own process `own` and holds
+    /// `wanted`, with what it started ([`holding`]); and the rig's stand-in jobs (`jobs`:
+    /// each one's process, as the job wrote it, and its file, which no process but the job
+    /// has in its command line; one the stand-in detached has no window to descend from).
+    /// A job is taken, as the process it is then, at the first look that finds the process
+    /// of its number holding its file, which is when the rig knows it is its own, and never
+    /// looked at again: a job that has gone leaves its number written, and another process
+    /// that has the number since holds no file of this rig's, and is never taken for it
+    /// (Astra and Sol on round 6). One a look does not find (its parent went between two
+    /// reads of the machine) is looked for again. A process outside the window that no job
+    /// of the rig's is, is none of it, whatever its command line says.
+    fn choose(
+        &mut self,
+        all: &[Running],
+        own: Option<Identity>,
+        jobs: &[(u32, String)],
+        wanted: &str,
+    ) {
+        let in_window = own.map(|own| holding(all, own, wanted)).unwrap_or_default();
+        let mut of_jobs = Vec::new();
+        for (pid, file) in jobs {
+            if self.jobs.contains(file) {
+                continue;
+            }
+            let found = all.iter().find(|process| {
+                process.identity.pid == *pid && process.command.contains(file.as_str())
+            });
+            if let Some(process) = found {
+                self.jobs.push(file.clone());
+                of_jobs.push(process.clone());
+            }
         }
+        for one in in_window.into_iter().chain(of_jobs) {
+            if !self
+                .processes
+                .iter()
+                .any(|known| known.identity == one.identity)
+            {
+                self.processes.push(one);
+            }
+        }
+    }
+
+    /// What may still run of what the run chose, a problem of the run each: what could not
+    /// be ended (`ended`), and the looks that could not read the machine's processes, which
+    /// may have missed what the window ran then.
+    fn problems(&self, ended: &Ended) -> Vec<String> {
+        let mut problems: Vec<String> = ended
+            .problems()
+            .into_iter()
+            .map(|problem| format!("the command: {problem}"))
+            .collect();
+        if let Some(first) = self.failed.first() {
+            problems.push(format!(
+                "the machine's processes could not be read at {} look(s) while the task was watched, and what the window ran then may still run: {first}",
+                self.failed.len()
+            ));
+        }
+        problems
     }
 }
 
-/// The processes of the jobs the rig's stand-in agents started that run: those that have
-/// written their process and neither that they ran to their end nor that they were asked
-/// to end. None where the windows are a harness's.
-fn running_jobs(members: &Members) -> Vec<u32> {
+/// The jobs the rig's stand-in agents started that run, each as its process and its file:
+/// those that have written their process and neither that they ran to their end nor that
+/// they were asked to end. None where the windows are a harness's.
+fn running_jobs(members: &Members) -> Vec<(u32, String)> {
     members
         .rig()
         .jobs("job")
         .iter()
         .filter(|job| !job.finished() && !job.released())
-        .map(Job::pid)
+        .map(|job| (job.pid(), job.file().display().to_string()))
         .collect()
 }
 

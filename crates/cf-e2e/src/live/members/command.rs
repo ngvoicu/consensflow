@@ -18,7 +18,9 @@ use std::sync::OnceLock;
 use regex::Regex;
 
 use super::super::claude::{processes_with, Process};
-use super::descent::{descending_from, end_chosen, holding, Identity, Machine, Running};
+use super::descent::{
+    descending_from, end_chosen, holding, Ended, Identity, Machine, Running, ThisMachine,
+};
 use crate::{pattern, Result};
 
 /// A command that runs for a while, which a check finds by its mark.
@@ -80,11 +82,11 @@ impl LongCommand {
     }
 
     /// Ends its processes in the window whose own process is `window`, and what they
-    /// started ([`LongCommand::chosen_in`], [`end_chosen`]): what it ended, none where the
-    /// window runs no such command. Nothing outside the window is ended, whatever its
-    /// command line says.
-    pub fn end_in(&self, machine: &dyn Machine, window: Identity) -> Result<Vec<Running>> {
-        Ok(end_chosen(machine, &self.chosen_in(machine, window)?))
+    /// started, on this machine ([`LongCommand::chosen_in`], [`end_chosen`]): what came of
+    /// each, nothing where the window runs no such command. Nothing outside the window is
+    /// ended, whatever its command line says.
+    pub fn end_in(&self, window: Identity) -> Result<Ended> {
+        Ok(end_chosen(&self.chosen_in(&ThisMachine, window)?))
     }
 }
 
@@ -169,36 +171,6 @@ mod tests {
         );
     }
 
-    /// A machine whose processes are `listed`, whose numbers are now the processes `now`
-    /// says (each as listed where it says nothing of it), and that keeps the processes it
-    /// was asked to end, and ends none.
-    struct Listed {
-        listed: Vec<Running>,
-        now: Vec<(u32, Option<Identity>)>,
-        ended: std::cell::RefCell<Vec<u32>>,
-    }
-
-    impl Machine for Listed {
-        fn processes(&self) -> Result<Vec<Running>> {
-            Ok(self.listed.clone())
-        }
-
-        fn identity(&self, pid: u32) -> Result<Option<Identity>> {
-            if let Some((_, now)) = self.now.iter().find(|(number, _)| *number == pid) {
-                return Ok(*now);
-            }
-            Ok(self
-                .listed
-                .iter()
-                .map(|process| process.identity)
-                .find(|identity| identity.pid == pid))
-        }
-
-        fn end(&self, pid: u32) {
-            self.ended.borrow_mut().push(pid);
-        }
-    }
-
     /// A process `pid`, begun at `started`, started by `ppid`.
     fn running(pid: u32, started: u64, ppid: u32, command: &str) -> Running {
         Running {
@@ -212,6 +184,9 @@ mod tests {
     fn a_process_outside_the_window_that_holds_the_mark_runs_on_and_the_windows_own_command_is_ended(
     ) {
         use std::time::Duration;
+
+        use super::super::descent::end_chosen_by;
+        use super::super::descent::testing::Listed;
 
         // A check that ended every process whose command line held its mark ended the
         // worker that ran it, whose brief quoted the mark (2026-10-16). What is found and
@@ -232,83 +207,39 @@ mod tests {
             pid: 100,
             started: 10,
         };
-        let machine = Listed {
-            listed: vec![
-                running(100, 10, 1, "devin --config /c/config.json"),
-                running(101, 11, 100, "devin --config /c/config.json"),
-                running(102, 12, 101, &format!("node -e \"x\" {mark}")),
-                running(103, 13, 102, "node worker"),
-                running(
-                    outsider.id(),
-                    5,
-                    std::process::id(),
-                    &format!("sh -c sleep 30; : {mark}"),
-                ),
-                running(300, 3, 1, "editor"),
-            ],
-            now: Vec::new(),
-            ended: std::cell::RefCell::default(),
-        };
-        let pids = |found: Vec<Running>| -> Vec<u32> {
-            found.iter().map(|one| one.identity.pid).collect()
-        };
-        assert_eq!(pids(command.in_window(&machine, window).unwrap()), [102]);
-        assert_eq!(pids(command.end_in(&machine, window).unwrap()), [102, 103]);
-        assert_eq!(*machine.ended.borrow(), [102, 103]);
+        let machine = Listed::new(vec![
+            running(100, 10, 1, "devin --config /c/config.json"),
+            running(101, 11, 100, "devin --config /c/config.json"),
+            running(102, 12, 101, &format!("node -e \"x\" {mark}")),
+            running(103, 13, 102, "node worker"),
+            running(
+                outsider.id(),
+                5,
+                std::process::id(),
+                &format!("sh -c sleep 30; : {mark}"),
+            ),
+            running(300, 3, 1, "editor"),
+        ]);
+        let pids =
+            |found: &[Running]| -> Vec<u32> { found.iter().map(|one| one.identity.pid).collect() };
+        assert_eq!(pids(&command.in_window(&machine, window).unwrap()), [102]);
+        let chosen = command.chosen_in(&machine, window).unwrap();
+        assert_eq!(pids(&end_chosen_by(&machine, &chosen).ended), [102, 103]);
+        assert_eq!(machine.ended(), [102, 103]);
         // A window that runs no such command has nothing found or ended.
         let editor = Identity {
             pid: 300,
             started: 3,
         };
         assert!(command.in_window(&machine, editor).unwrap().is_empty());
-        assert!(command.end_in(&machine, editor).unwrap().is_empty());
-        assert_eq!(machine.ended.borrow().len(), 2);
+        assert!(command.chosen_in(&machine, editor).unwrap().is_empty());
+        assert_eq!(machine.ended().len(), 2);
 
         // And the process outside the window that says the same words runs on.
         assert!(
             outsider.wait(Duration::from_millis(500)).unwrap().is_none(),
             "the process outside the window was ended"
         );
-    }
-
-    #[test]
-    fn a_process_is_ended_only_while_it_is_still_the_one_chosen() {
-        // Between the look that chose them and their end, the command's number was taken by
-        // another process, and its child's can no longer be read: neither is ended, and the
-        // process still the one chosen is (Astra and Sol on the B1 fix, their second look).
-        let mark = "cf-live-members-reused-mark";
-        let command = LongCommand::new(mark);
-        let window = Identity {
-            pid: 100,
-            started: 10,
-        };
-        let machine = Listed {
-            listed: vec![
-                running(100, 10, 1, "devin"),
-                running(101, 11, 100, &format!("node {mark}")),
-                running(102, 12, 101, "node worker"),
-                running(103, 12, 100, &format!("node {mark} again")),
-            ],
-            now: vec![
-                (
-                    101,
-                    Some(Identity {
-                        pid: 101,
-                        started: 99,
-                    }),
-                ),
-                (102, None),
-            ],
-            ended: std::cell::RefCell::default(),
-        };
-        let ended: Vec<u32> = command
-            .end_in(&machine, window)
-            .unwrap()
-            .iter()
-            .map(|one| one.identity.pid)
-            .collect();
-        assert_eq!(ended, [103]);
-        assert_eq!(*machine.ended.borrow(), [103]);
     }
 
     #[test]
@@ -396,9 +327,10 @@ mod tests {
     ) {
         use std::time::Duration;
 
-        use super::super::descent::{process_of, ThisMachine};
         use crate::live::until;
         use crate::process::Run;
+
+        let process_of = |pid: u32| ThisMachine.identity(pid).ok().flatten();
 
         // A window that is cut leaves what it ran with no window to descend from: what the
         // window ran of the command is chosen while it is the window's, and ended after the
@@ -431,7 +363,7 @@ mod tests {
             command.in_window(&ThisMachine, own).unwrap().is_empty(),
             "a window that is gone has no tree to find the command in"
         );
-        assert_eq!(end_chosen(&ThisMachine, &chosen), chosen);
+        assert_eq!(end_chosen(&chosen).ended, chosen);
         let gone = until(Duration::from_secs(10), Duration::from_millis(50), || {
             chosen
                 .iter()

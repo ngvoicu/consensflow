@@ -326,12 +326,15 @@ fn the_check_ends_the_command_its_window_runs_and_nothing_outside_the_window_tha
             "[ConsensFlow m-1 · T-1 · task from @chief]\nBACKGROUND 613 Reply with exactly: LEFT_IT",
         ))
         .open()?;
-    let pid = window
-        .pid()
-        .ok_or("the pane host said no process of the window")?;
-    let own = ThisMachine
-        .identity(pid)?
-        .ok_or("the machine knows no process of the window's number")?;
+    // Read as the pane host answered the window's open, and kept.
+    let own = window
+        .process()
+        .ok_or("the pane host said no process of the window, or it was gone when read")?;
+    assert_eq!(
+        ThisMachine.identity(own.pid)?,
+        Some(own),
+        "the window's process runs"
+    );
     let step = Duration::from_millis(200);
     let found = until(secs(30), step, || {
         command
@@ -347,13 +350,15 @@ fn the_check_ends_the_command_its_window_runs_and_nothing_outside_the_window_tha
         "{found:?}"
     );
 
-    let ended = command.end_in(&ThisMachine, own)?;
+    let ended = command.end_in(own)?;
     assert!(
         ended
+            .ended
             .iter()
             .any(|process| process.command.contains("sleep 613")),
         "{ended:?}"
     );
+    assert!(ended.failed.is_empty(), "{ended:?}");
     let gone = until(secs(10), step, || {
         command
             .in_window(&ThisMachine, own)

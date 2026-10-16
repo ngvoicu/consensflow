@@ -82,7 +82,9 @@
 //! tests turn on: `fake-agent`, `fake-codex`, `fake-devin`, `fake-cf`,
 //! `liar-daemon` and the packaged smoke's `smoke-paste-reader`.
 
-#![forbid(unsafe_code)]
+// The one module that calls the system itself allows it, block by block: the live checks'
+// hold on a process they end (`live::members::descent`'s native calls).
+#![deny(unsafe_code)]
 
 pub mod agents_proof;
 pub mod cf;

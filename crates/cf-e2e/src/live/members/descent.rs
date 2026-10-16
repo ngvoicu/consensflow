@@ -6,23 +6,42 @@
 //! number the tree had, or take for the tree's a process whose parent's number the
 //! window's program had taken since (Astra and Sol on the B1 fix, their second look).
 //! So a process is known by its number and when it began ([`Identity`]): a child began
-//! no earlier than its parent, the window's own process is the one the check found when
-//! the window opened, and a process is ended only while it is still the one chosen,
-//! read again right before (`LongCommand::end_in`).
+//! no earlier than its parent, and the window's own process is the one the pane host
+//! opened, read once as it answered the open and kept (the rig's
+//! [`crate::rig::Rig::window_process`]): a window whose process has gone has nothing that
+//! descends from it, whatever has its number since (Astra and Sol on round 6).
 //!
-//! The machine's list is `ps` on macOS and Linux (`lstart`, to the second, in the C
-//! locale), and on Windows, which has none, the process table through PowerShell, as
-//! JSON: a command line of many lines is one string there, where read as lines it could
-//! make up a process.
+//! A process is ended only while it is still the one chosen, checked on what holds it
+//! ([`end_chosen`]): on Windows a handle to the process, opened first, on which its
+//! creation time is read and through which it is ended, so that its number is no other's
+//! in between; on macOS and Linux, which have no such handle, its number, when it began
+//! read again right before the signal. What could not be ended is said, never dropped
+//! ([`Ended`]).
+//!
+//! When a process began is read to the microsecond on macOS (`proc_pidinfo`), to the
+//! 100 ns on Windows (the process's own handle), and to the second on Linux (`ps`'s
+//! `lstart`, in the C locale). The machine's list is `ps` on macOS and Linux, and on
+//! Windows, which has none, the process table through PowerShell, as JSON: a command
+//! line of many lines is one string there, where read as lines it could make up a
+//! process. On macOS and Windows each process listed is read again where it is held, for
+//! when it began ([`refined_by_bsd`], [`refined_by_handle`]).
 
+use std::io;
+
+#[cfg(any(windows, test))]
 use serde_json::Value;
 
-use crate::process::{signal, Run, Signal};
+use crate::process::Run;
 use crate::{Error, Result};
+
+mod native;
+#[cfg(test)]
+pub(crate) mod testing;
 
 /// Which process a process is: its number and when it began, which no two processes
 /// have together. `started` grows with the time it says, on the machine that said it:
-/// `YYYYMMDDhhmmss` of `ps`'s `lstart`, and Windows' file time of its `CreationDate`.
+/// microseconds since 1970 on macOS, Windows' 100 ns since 1601 of its creation time,
+/// and `YYYYMMDDhhmmss` of `ps`'s `lstart` on Linux.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Identity {
     pub pid: u32,
@@ -38,69 +57,118 @@ pub struct Running {
     pub command: String,
 }
 
-/// What a check reads of the machine's processes, and how it ends one: the seam by which
-/// it finds what descends from a window's own process, and ends that alone.
+/// What a check reads of the machine's processes: the seam by which it finds what
+/// descends from a window's own process. Nothing of it ends a process.
 pub trait Machine {
     /// Every process of the machine.
     fn processes(&self) -> Result<Vec<Running>>;
     /// Which process has the number `pid` now: none where none has it.
     fn identity(&self, pid: u32) -> Result<Option<Identity>>;
-    /// Ends the process `pid`.
-    fn end(&self, pid: u32);
 }
 
-/// The machine the check runs on: its own list of processes, and an end that is a kill.
+/// The machine the check runs on.
 #[derive(Debug, Clone, Copy)]
 pub struct ThisMachine;
 
 impl Machine for ThisMachine {
     fn processes(&self) -> Result<Vec<Running>> {
-        if cfg!(windows) {
-            table(None)
-        } else {
-            ps(None)
-        }
+        native::processes()
     }
 
     fn identity(&self, pid: u32) -> Result<Option<Identity>> {
-        let found = if cfg!(windows) {
-            table(Some(pid))?
-        } else {
-            ps(Some(pid))?
-        };
-        Ok(found
-            .into_iter()
-            .map(|process| process.identity)
-            .find(|identity| identity.pid == pid))
+        native::identity(pid)
     }
+}
 
-    fn end(&self, pid: u32) {
-        let _ = signal(pid, Signal::Kill);
+/// What holds a process while a check makes sure it is the one chosen, and ends it: on
+/// Windows a handle to it, on macOS and Linux its number.
+pub(crate) trait Held {
+    /// When the process held began: none where it has ended.
+    fn started(&self) -> io::Result<Option<u64>>;
+    /// Ends the process held.
+    fn end(&self) -> io::Result<()>;
+}
+
+/// How a check takes hold of the process that has a number now.
+pub(crate) trait Holds {
+    /// What holds the process `pid`: none where no process has the number.
+    fn hold(&self, pid: u32) -> io::Result<Option<Box<dyn Held>>>;
+}
+
+/// What came of ending the processes a check chose: each process ended, gone already
+/// (ended, or its number another process's now), or not ended, with why.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct Ended {
+    pub ended: Vec<Running>,
+    pub gone: Vec<Running>,
+    /// What may still run: the process, and why it could not be ended.
+    pub failed: Vec<(Running, String)>,
+}
+
+impl Ended {
+    /// What may still run, a problem for the case's verdict each: a process that could not
+    /// be reached, read or ended.
+    pub fn problems(&self) -> Vec<String> {
+        self.failed
+            .iter()
+            .map(|(process, why)| {
+                format!(
+                    "process {} ({}) may still run: {why}",
+                    process.identity.pid,
+                    crate::live::cut(&process.command, 90)
+                )
+            })
+            .collect()
     }
+}
+
+/// What came of ending one process.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Outcome {
+    Ended,
+    Gone,
+    Failed(String),
 }
 
 /// Ends each of `chosen` (chosen from a window's own tree) that is still the process
-/// chosen, read again right before its end: a number another process took since is not
-/// ended, nor one whose process cannot be read. What it ended. This and a machine's
-/// [`Machine::end`] are the only ways a live check ends a process: no check ends one by
-/// what its command line says (a guard test of the live suites holds them to it).
-pub fn end_chosen(machine: &dyn Machine, chosen: &[Running]) -> Vec<Running> {
-    let mut ended = Vec::new();
-    for process in chosen {
-        let pid = process.identity.pid;
-        if matches!(machine.identity(pid), Ok(Some(now)) if now == process.identity) {
-            machine.end(pid);
-            ended.push(process.clone());
-        }
-    }
-    ended
+/// chosen, checked on what holds it right before its end ([`end_one`]): a number another
+/// process took since is not ended, and what could not be reached, read or ended is said
+/// ([`Ended::failed`]). This is the one way a live check ends a process: no check ends
+/// one by what its command line says, or by its number alone (a guard test of the live
+/// checks holds them to it).
+pub fn end_chosen(chosen: &[Running]) -> Ended {
+    end_chosen_by(&native::Native, chosen)
 }
 
-/// Which process the program of a window is, its number `pid` (`pane.open`'s answer):
-/// read while the window runs, when its number is its own. None where no process has
-/// the number, or the machine cannot be read.
-pub fn process_of(pid: u32) -> Option<Identity> {
-    ThisMachine.identity(pid).ok().flatten()
+/// [`end_chosen`], each process held by `holds`.
+pub(crate) fn end_chosen_by(holds: &dyn Holds, chosen: &[Running]) -> Ended {
+    let mut said = Ended::default();
+    for process in chosen {
+        match end_one(holds, process.identity) {
+            Outcome::Ended => said.ended.push(process.clone()),
+            Outcome::Gone => said.gone.push(process.clone()),
+            Outcome::Failed(why) => said.failed.push((process.clone(), why)),
+        }
+    }
+    said
+}
+
+/// Ends the process `identity` names, only while what `holds` holds of its number began
+/// when it did: one that has ended, or whose number another process has now, is gone.
+fn end_one(holds: &dyn Holds, identity: Identity) -> Outcome {
+    let held = match holds.hold(identity.pid) {
+        Ok(Some(held)) => held,
+        Ok(None) => return Outcome::Gone,
+        Err(failed) => return Outcome::Failed(format!("it could not be reached: {failed}")),
+    };
+    match held.started() {
+        Ok(Some(started)) if started == identity.started => match held.end() {
+            Ok(()) => Outcome::Ended,
+            Err(failed) => Outcome::Failed(format!("its end failed: {failed}")),
+        },
+        Ok(_) => Outcome::Gone,
+        Err(failed) => Outcome::Failed(format!("when it began could not be read again: {failed}")),
+    }
 }
 
 /// What descends from the process `root` among `all`: the processes it started, and what
@@ -148,8 +216,69 @@ pub fn holding(all: &[Running], window: Identity, text: &str) -> Vec<Running> {
     chosen
 }
 
+/// What macOS says of a process, read where it is held (`proc_pidinfo`): the process that
+/// started it, and when it began, in microseconds since 1970.
+#[cfg(any(target_os = "macos", test))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Bsd {
+    pub ppid: u32,
+    pub started: u64,
+}
+
+/// The processes `ps` listed (`listed`), each with when it began as macOS says it to the
+/// microsecond (`read`): one the system says nothing of, or whose parent it says is
+/// another than `ps` listed, has ended since, and its number may be another's: it is not
+/// listed.
+#[cfg(any(target_os = "macos", test))]
+pub(crate) fn refined_by_bsd(
+    listed: Vec<Running>,
+    read: impl Fn(u32) -> io::Result<Option<Bsd>>,
+) -> Vec<Running> {
+    listed
+        .into_iter()
+        .filter_map(|mut process| {
+            let bsd = read(process.identity.pid).ok()??;
+            if bsd.ppid != process.ppid {
+                return None;
+            }
+            process.identity.started = bsd.started;
+            Some(process)
+        })
+        .collect()
+}
+
+/// How far, in 100 ns, the table's creation time of a process may be from its handle's:
+/// the table says it to the microsecond.
+#[cfg(any(windows, test))]
+const TABLE_GRAIN: u64 = 10;
+
+/// The processes Windows' table listed (`listed`), each with its creation time as its own
+/// handle says it (`read`), to the 100 ns. One the handle says has exited, or that no
+/// process has the number of, is not listed; nor one whose handle says another creation
+/// time than the table, give or take its grain ([`TABLE_GRAIN`]): its number is
+/// another's now. One that cannot be opened (the system's own, another user's) keeps
+/// what the table said: no check can end it.
+#[cfg(any(windows, test))]
+pub(crate) fn refined_by_handle(
+    listed: Vec<Running>,
+    read: impl Fn(u32) -> io::Result<Option<u64>>,
+) -> Vec<Running> {
+    listed
+        .into_iter()
+        .filter_map(|mut process| match read(process.identity.pid) {
+            Ok(Some(created)) if created.abs_diff(process.identity.started) < TABLE_GRAIN => {
+                process.identity.started = created;
+                Some(process)
+            }
+            Ok(_) => None,
+            Err(_) => Some(process),
+        })
+        .collect()
+}
+
 /// What `ps` says of every process, or of the process `pid` alone, in the C locale so
 /// that its `lstart` is what [`ps_lines`] reads.
+#[cfg(unix)]
 fn ps(pid: Option<u32>) -> Result<Vec<Running>> {
     let words = match pid {
         Some(pid) => vec![
@@ -171,7 +300,7 @@ fn ps(pid: Option<u32>) -> Result<Vec<Running>> {
         return Err(Error::Program {
             action: "list the processes with",
             program: "ps".to_owned(),
-            source: std::io::Error::other(ran.to_string()),
+            source: io::Error::other(ran.to_string()),
         });
     }
     Ok(ps_lines(&ran.stdout))
@@ -180,6 +309,7 @@ fn ps(pid: Option<u32>) -> Result<Vec<Running>> {
 /// The processes of a listing `ps -o pid=,ppid=,lstart=,command=` made: on each line the
 /// number, the parent's, five words of `lstart` (`Fri Oct  6 04:44:58 2026`) and the
 /// command line, as it is spaced.
+#[cfg(any(unix, test))]
 fn ps_lines(listing: &str) -> Vec<Running> {
     listing
         .lines()
@@ -204,11 +334,13 @@ fn ps_lines(listing: &str) -> Vec<Running> {
 }
 
 /// The months as `lstart` names them in the C locale.
+#[cfg(any(unix, test))]
 const MONTHS: [&str; 12] = [
     "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
 ];
 
 /// The five words of an `lstart` (`Fri Oct 16 04:44:58 2026`) as `YYYYMMDDhhmmss`.
+#[cfg(any(unix, test))]
 fn started(lstart: &[&str]) -> Option<u64> {
     let month = MONTHS.iter().position(|name| *name == lstart[1])?;
     let month = u64::try_from(month).ok()? + 1;
@@ -223,24 +355,25 @@ fn started(lstart: &[&str]) -> Option<u64> {
 /// selects (` -Filter 'ProcessId=N'`, or nothing for all): each as an object of its
 /// number, its parent's, its start as a file time (none for the system's own) and its
 /// command line, all of them as JSON, in UTF-8.
+#[cfg(any(windows, test))]
 fn table_script(which: &str) -> String {
     format!(
         "[Console]::OutputEncoding = [Text.Encoding]::UTF8; Get-CimInstance Win32_Process{which} | ForEach-Object {{ [pscustomobject]@{{ pid = $_.ProcessId; ppid = $_.ParentProcessId; started = $(if ($_.CreationDate) {{ $_.CreationDate.ToFileTimeUtc() }} else {{ 0 }}); command = $_.CommandLine }} }} | ConvertTo-Json -Compress"
     )
 }
 
-/// What Windows' process table says of every process, or of the process `pid` alone.
-fn table(pid: Option<u32>) -> Result<Vec<Running>> {
-    let which = pid.map_or_else(String::new, |pid| format!(" -Filter 'ProcessId={pid}'"));
+/// What Windows' process table says of every process.
+#[cfg(windows)]
+fn table() -> Result<Vec<Running>> {
     let ran = Run::new("powershell")
-        .args(["-NoProfile", "-Command", &table_script(&which)])
+        .args(["-NoProfile", "-Command", &table_script("")])
         .inheriting_env()
         .run()?;
     if ran.code != Some(0) {
         return Err(Error::Program {
             action: "list the processes with",
             program: "powershell".to_owned(),
-            source: std::io::Error::other(ran.to_string()),
+            source: io::Error::other(ran.to_string()),
         });
     }
     table_of(&ran.stdout)
@@ -248,6 +381,7 @@ fn table(pid: Option<u32>) -> Result<Vec<Running>> {
 
 /// The processes of what [`table_script`] printed: a list of them, one alone, or nothing
 /// for none, a byte order mark before it where PowerShell writes one.
+#[cfg(any(windows, test))]
 fn table_of(listing: &str) -> Result<Vec<Running>> {
     let listing = listing
         .trim_start_matches(|letter: char| u32::from(letter) == 0xFEFF)

@@ -167,19 +167,48 @@ pub fn at_rest(lane: &Value) -> bool {
         && unstopped(lane).is_none()
 }
 
+/// How long what was ended of the command is given to be gone.
+const GONE: Duration = Duration::from_secs(5);
+
 /// The case, on the harness the member `agent` runs on (`name` is its name). What ignores
 /// the signals is ended for good at the end, whatever came of the case, and with it the
 /// window: every process of the command the run chose in the window, killed while it is
-/// still the one chosen, and waited for until none is there.
+/// still the one chosen, and waited for until none is there. What could not be ended, or
+/// was not gone in [`GONE`], fails the case (Astra and Sol on round 6: it was dropped).
 pub fn run(ctx: &Ctx, case: &mut Account, name: &str) -> Result<()> {
     let mut chosen: Vec<Running> = Vec::new();
     let ran = drive(ctx, case, name, &mut chosen);
-    end_chosen(&ThisMachine, &chosen);
-    until(Duration::from_secs(5), Duration::from_millis(100), || {
-        let all = ThisMachine.processes().ok()?;
-        still_running(&chosen, &all).is_empty().then_some(())
+    for problem in end_chosen(&chosen).problems() {
+        case.fail(format!("what ignores the signals: {problem}"));
+    }
+    let mut last = Ok(Vec::new());
+    until(GONE, Duration::from_millis(100), || {
+        last = ThisMachine
+            .processes()
+            .map(|all| still_running(&chosen, &all))
+            .map_err(|failed| failed.to_string());
+        unended(&last).is_none().then_some(())
     });
+    if let Some(problem) = unended(&last) {
+        case.fail(problem);
+    }
     ran
+}
+
+/// What the last look after the end found (`last`: what of the command still ran, or why
+/// the machine could not be read), as a problem: none where nothing of it ran.
+fn unended(last: &std::result::Result<Vec<Running>, String>) -> Option<String> {
+    match last {
+        Ok(still) if still.is_empty() => None,
+        Ok(still) => Some(format!(
+            "what ignores the signals still ran {} s after its end: {}",
+            GONE.as_secs(),
+            said(still)
+        )),
+        Err(failed) => Some(format!(
+            "whether what ignores the signals was gone could not be read: {failed}"
+        )),
+    }
 }
 
 /// The steps of the case: what it chose of the command in the window is in `chosen`.
@@ -437,6 +466,25 @@ mod tests {
         let seen = look(&mut chosen, &all, None);
         assert_eq!(seen, Seen::default());
         assert_eq!(pids(&chosen), [102, 103]);
+    }
+
+    #[test]
+    fn what_still_runs_after_its_end_or_could_not_be_looked_at_is_a_problem_of_the_case() {
+        // The wait for the command to be gone ran out, and nothing was said (Astra and Sol on
+        // round 6).
+        assert_eq!(unended(&Ok(Vec::new())), None);
+        assert_eq!(
+            unended(&Ok(vec![running(51, 1, 1, "sleep 200")])),
+            Some(
+                "what ignores the signals still ran 5 s after its end: 51 (1) sleep 200".to_owned()
+            )
+        );
+        assert_eq!(
+            unended(&Err("ps failed".to_owned())),
+            Some(
+                "whether what ignores the signals was gone could not be read: ps failed".to_owned()
+            )
+        );
     }
 
     #[test]

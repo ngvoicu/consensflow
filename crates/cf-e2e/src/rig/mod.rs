@@ -40,6 +40,7 @@ use serde_json::Value;
 
 use crate::daemon::Daemon;
 use crate::daemon_log::StartLine;
+use crate::live::members::Identity;
 use crate::process::{self, Ran, Run, Sink, Spawned};
 use crate::{cf, checkout, files, wire, Error, Result};
 
@@ -320,11 +321,12 @@ impl Rig {
         find().ok_or_else(|| Error::Daemon(format!("the window {id} was opened, and is gone")))
     }
 
-    /// The process the pane host opened the program of the window `pane` (`id`,
-    /// `generation`) as, for the daemon: the `pid` of its answer to that `pane.open`.
-    /// None until it answered, or where it said none.
-    pub fn window_process(&self, pane: &Value) -> Option<u32> {
-        window_process_in(&self.shared.seen().host, pane)
+    /// Which process the pane host opened the program of the window `pane` (`id`,
+    /// `generation`) as: the `pid` of its answer to that `pane.open`, read once as the
+    /// answer passed and kept ([`route::Root`]). None until it answered, or where it said
+    /// none, or the process had gone by the time it was read.
+    pub fn window_process(&self, pane: &Value) -> Option<Identity> {
+        window_process_in(&self.shared.seen().roots, pane)
     }
 
     /// Every `pane.exit` the pane host told so far, in order: which window
@@ -529,21 +531,16 @@ impl Drop for Rig {
     }
 }
 
-/// The process the pane host said, among the frames it wrote (`frames`), it opened the
-/// program of the window `pane` (`id`, `generation`) as: the `pid` of its answer to the
-/// `pane.open` of that window, the last where it answered more than once.
-fn window_process_in(frames: &[Value], pane: &Value) -> Option<u32> {
-    frames
+/// The process the pane host said, among the windows it answered the open of (`roots`),
+/// it opened the program of the window `pane` (`id`, `generation`) as: as it was read
+/// then, the last where it answered more than once. It is never read again: the number may
+/// be another process's by now.
+fn window_process_in(roots: &[route::Root], pane: &Value) -> Option<Identity> {
+    roots
         .iter()
         .rev()
-        .find(|frame| {
-            frame["kind"] == "res"
-                && frame["op"] == "pane.open"
-                && frame["body"]["id"] == pane["id"]
-                && frame["body"]["generation"] == pane["generation"]
-        })
-        .and_then(|frame| frame["body"]["pid"].as_u64())
-        .and_then(|pid| u32::try_from(pid).ok())
+        .find(|root| root.id == pane["id"] && root.generation == pane["generation"])
+        .and_then(|root| root.identity)
 }
 
 /// The records of the conversation `session` that the stand-in agent wrote
@@ -561,27 +558,35 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_windows_process_is_the_pid_of_the_hosts_answer_to_its_open() {
+    fn a_windows_process_is_the_one_read_as_the_host_answered_its_open_and_never_read_again() {
         use serde_json::json;
-        let answer = |id: &str, generation: u64, pid: Option<u32>| {
-            let mut body = json!({ "ok": true, "id": id, "generation": generation });
-            if let Some(pid) = pid {
-                body["pid"] = json!(pid);
-            }
-            json!({ "v": 1, "id": "n-3", "kind": "res", "op": "pane.open", "body": body })
+        let root = |id: &str, generation: u64, identity: Option<Identity>| route::Root {
+            id: json!(id),
+            generation: json!(generation),
+            identity,
         };
-        let frames = [
-            answer("p1-zeus", 1, Some(100)),
-            json!({ "v": 1, "id": "n-4", "kind": "res", "op": "pane.snapshot", "body": { "id": "p1-zeus", "generation": 2, "pid": 7 } }),
-            answer("p1-zeus", 2, Some(200)),
-            answer("p1-hera", 1, None),
+        // The window p1-zeus's first process was this test's number, begun long before this
+        // test: it has gone, and the number is this test's process now. A look that read the
+        // number again took this process for the window's (Astra and Sol on round 6).
+        let gone = Identity {
+            pid: std::process::id(),
+            started: 1,
+        };
+        let other = Identity {
+            pid: 200,
+            started: 20,
+        };
+        let roots = [
+            root("p1-zeus", 1, Some(gone)),
+            root("p1-zeus", 2, Some(other)),
+            root("p1-hera", 1, None),
         ];
         let pane = |id: &str, generation: u64| json!({ "id": id, "generation": generation });
-        assert_eq!(window_process_in(&frames, &pane("p1-zeus", 1)), Some(100));
-        assert_eq!(window_process_in(&frames, &pane("p1-zeus", 2)), Some(200));
+        assert_eq!(window_process_in(&roots, &pane("p1-zeus", 1)), Some(gone));
+        assert_eq!(window_process_in(&roots, &pane("p1-zeus", 2)), Some(other));
         // A host that said no process of it, and a window it never answered the open of.
-        assert_eq!(window_process_in(&frames, &pane("p1-hera", 1)), None);
-        assert_eq!(window_process_in(&frames, &pane("p1-zeus", 3)), None);
+        assert_eq!(window_process_in(&roots, &pane("p1-hera", 1)), None);
+        assert_eq!(window_process_in(&roots, &pane("p1-zeus", 3)), None);
     }
 
     #[test]

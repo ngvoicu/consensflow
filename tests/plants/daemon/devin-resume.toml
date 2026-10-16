@@ -45,6 +45,8 @@ rig-live-member-work = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", 
 # The other live suites that ended what a window ran by a mark (round 6): what each now
 # chooses to end, of a window's own tree.
 live-finish-leaving = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_finish", "leaving::tests::"]
+# Round 7: the window's process, read as the pane host answers its open, and kept.
+e2e-lib-rig = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "rig::"]
 live-stops-stuck = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_stops", "stuck::"]
 
 [[plant]]
@@ -372,13 +374,13 @@ replace = '''    if false {'''
 
 [[plant]]
 name = "devin resume: a process is ended by the number chosen, whichever process has it now"
-meant = "a_process_is_ended_only_while_it_is_still_the_one_chosen"
-runs = ["e2e-lib-command"]
+meant = "a_process_is_ended_only_while_it_is_still_the_one_chosen_and_what_could_not_be_ended_is_said"
+runs = ["e2e-lib-descent"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/members/descent.rs"
-find = '''        if matches!(machine.identity(pid), Ok(Some(now)) if now == process.identity) {'''
-replace = '''        if true {'''
+find = '''        Ok(Some(started)) if started == identity.started => match held.end() {'''
+replace = '''        Ok(Some(_)) => match held.end() {'''
 
 # Round 5 (Astra, P1): Windows' process table is read as JSON, where a command line of
 # many lines is one string; read as lines, an argument made up a process of the window.
@@ -466,10 +468,11 @@ runs = ["e2e-lib-descent"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/tests/live_stops/stuck.rs"
-find = '''    end_chosen(&ThisMachine, &chosen);'''
+find = '''    for problem in end_chosen(&chosen).problems() {'''
 replace = '''    for found in cf_e2e::live::claude::processes_with(SCRIPT).unwrap_or_default() {
         let _ = cf_e2e::process::signal(found.pid, cf_e2e::process::Signal::Kill);
-    }'''
+    }
+    for problem in end_chosen(&chosen).problems() {'''
 
 [[plant]]
 name = "devin resume: the long command can end what says its mark across the machine again"
@@ -489,26 +492,157 @@ replace = '''    /// Ends every process that says its mark.
     /// Ends its processes in the window whose own process is `window`, and what they'''
 
 # `live_finish`'s leaving: what the run ends at its end is what it saw of the command in
-# the worker's window, and the jobs the rig's stand-in wrote it started.
+# the worker's window, and the jobs the rig's stand-in wrote it started. Round 7 (Astra and
+# Sol on round 6): a job is the process of its number that holds its own file, taken once.
 [[plant]]
-name = "devin resume: the leaving run ends a process that says the job's words though no job of the rig's wrote it"
-meant = "what_the_run_ends_is_what_the_window_ran_of_the_command_and_the_stand_ins_own_jobs_and_nothing_else_that_says_it"
+name = "devin resume: the leaving run takes the process of a job's number for the job, whatever its command line"
+meant = "a_stand_in_job_is_taken_by_its_own_file_at_the_first_look_and_its_number_never_again"
 runs = ["live-finish-leaving"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/tests/live_finish/leaving.rs"
-find = '''        .filter(|process| jobs.contains(&process.identity.pid) && process.command.contains(wanted))'''
-replace = '''        .filter(|process| process.command.contains(wanted))'''
+find = '''                process.identity.pid == *pid && process.command.contains(file.as_str())'''
+replace = '''                process.identity.pid == *pid'''
 
 [[plant]]
-name = "devin resume: the leaving run ends the process that has a number a job wrote, whichever it is"
-meant = "what_the_run_ends_is_what_the_window_ran_of_the_command_and_the_stand_ins_own_jobs_and_nothing_else_that_says_it"
+name = "devin resume: the leaving run takes a job's number again at a later look"
+meant = "a_stand_in_job_is_taken_by_its_own_file_at_the_first_look_and_its_number_never_again"
 runs = ["live-finish-leaving"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/tests/live_finish/leaving.rs"
-find = '''        .filter(|process| jobs.contains(&process.identity.pid) && process.command.contains(wanted))'''
-replace = '''        .filter(|process| jobs.contains(&process.identity.pid))'''
+find = '''            if self.jobs.contains(file) {'''
+replace = '''            if false {'''
+
+# Round 7 (Astra on round 6): what the turn left is looked for whatever came of the task.
+[[plant]]
+name = "devin resume: the leaving run looks for what a turn left only once its task is done"
+meant = "what_a_task_left_is_looked_for_whatever_came_of_it"
+runs = ["live-finish-leaving"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_finish/leaving.rs"
+find = '''    left.escaped = on_the_machine();'''
+replace = '''    if left.state == "done" {
+        left.escaped = on_the_machine();
+    }'''
+
+# Round 7 (Astra and Sol on round 6): a failure that leaves a process running is said in the
+# case's verdict, never dropped.
+[[plant]]
+name = "devin resume: a process that could not be ended is taken for one that had gone"
+meant = "a_process_is_ended_only_while_it_is_still_the_one_chosen_and_what_could_not_be_ended_is_said"
+runs = ["e2e-lib-descent"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/descent.rs"
+find = '''            Outcome::Failed(why) => said.failed.push((process.clone(), why)),'''
+replace = '''            Outcome::Failed(_) => said.gone.push(process.clone()),'''
+
+[[plant]]
+name = "devin resume: the leaving run says nothing of the looks at the machine that failed"
+meant = "what_could_not_be_ended_or_looked_for_is_a_problem_of_the_run"
+runs = ["live-finish-leaving"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_finish/leaving.rs"
+find = '''        if let Some(first) = self.failed.first() {'''
+replace = '''        if let Some(first) = self.failed.first().filter(|_| false) {'''
+
+[[plant]]
+name = "devin resume: the stuck case says nothing of what still runs after its end"
+meant = "what_still_runs_after_its_end_or_could_not_be_looked_at_is_a_problem_of_the_case"
+runs = ["live-stops-stuck"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_stops/stuck.rs"
+find = '''        Ok(still) if still.is_empty() => None,'''
+replace = '''        _ if true => None,'''
+
+# Round 7 (Astra and Sol on round 6): the window's process is read once, as the pane host
+# answers its open, and kept; a later look never reads its number again.
+[[plant]]
+name = "devin resume: a window's process is read again by its number at each look"
+meant = "a_windows_process_is_the_one_read_as_the_host_answered_its_open_and_never_read_again"
+runs = ["e2e-lib-rig"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/mod.rs"
+find = '''        .and_then(|root| root.identity)'''
+replace = '''        .and_then(|root| root.identity)
+        .and_then(|kept| {
+            <crate::live::members::ThisMachine as crate::live::members::Machine>::identity(
+                &crate::live::members::ThisMachine,
+                kept.pid,
+            )
+            .ok()
+            .flatten()
+        })'''
+
+[[plant]]
+name = "devin resume: the rig reads no process of a window as the host answers its open"
+meant = "a_windows_process_is_read_as_the_host_answers_its_open_and_kept"
+runs = ["e2e-lib-rig"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/route.rs"
+find = '''        let root = root_of(&frame, |pid| ThisMachine.identity(pid).ok().flatten());'''
+replace = '''        let root = root_of(&frame, |_| None);'''
+
+# Round 7 (Astra and Sol on round 6): when a process began is read where it is held, to the
+# microsecond on macOS and to the 100 ns on Windows' handle, and a listed process whose
+# number changed hands is not listed.
+[[plant]]
+name = "devin resume: a Mac says when a process began to the second"
+meant = "a_mac_says_when_a_process_began_to_the_microsecond"
+runs = ["e2e-lib-descent"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/descent/native.rs"
+find = '''        seconds * 1_000_000 + micros'''
+replace = '''        seconds * 1_000_000 + micros * 0'''
+
+[[plant]]
+name = "devin resume: a Mac lists a process whose parent changed since ps listed it"
+meant = "a_mac_lists_a_process_with_when_it_began_to_the_microsecond_and_not_one_whose_number_changed_hands"
+runs = ["e2e-lib-descent"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/descent.rs"
+find = '''            if bsd.ppid != process.ppid {'''
+replace = '''            if false {'''
+
+[[plant]]
+name = "devin resume: Windows lists a process whose handle says another creation time than its table"
+meant = "windows_lists_a_process_with_its_handles_creation_time_and_not_one_whose_number_changed_hands"
+runs = ["e2e-lib-descent"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/descent.rs"
+find = '''            Ok(Some(created)) if created.abs_diff(process.identity.started) < TABLE_GRAIN => {'''
+replace = '''            Ok(Some(created)) => {'''
+
+# Round 7 (Astra and Sol on round 6): the guard refuses the machine's own end and a `kill`
+# program started by its name.
+[[plant]]
+name = "devin resume: the guard lets a check call the machine's own end"
+meant = "no_live_check_ends_a_process_but_through_the_descent"
+runs = ["e2e-lib-descent"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/descent/tests.rs"
+find = '''            "ThisMachine.end(",'''
+replace = ""
+
+[[plant]]
+name = "devin resume: the guard lets a check start a kill program"
+meant = "no_live_check_ends_a_process_but_through_the_descent"
+runs = ["e2e-lib-descent"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/descent/tests.rs"
+find = '''    program.is_match(code)'''
+replace = '''    (program.is_match(code) && false)'''
 
 # `live_stops`' stuck: the command is chosen in the window's own tree, and known from then
 # on by which process it is.

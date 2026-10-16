@@ -12,7 +12,7 @@ use std::thread::sleep;
 use std::time::{Duration, Instant};
 
 use cf_e2e::live::ask::{Interrupt, Record};
-use cf_e2e::live::members::{squash, Identity, Machine, ThisMachine};
+use cf_e2e::live::members::{squash, Identity};
 use cf_e2e::live::window::Window;
 use cf_e2e::live::{last_lines, secs};
 use cf_e2e::rig::Rig;
@@ -60,9 +60,9 @@ const APPROVE_ONCE: &str = "(Approve once)";
 pub struct Scene<'a> {
     pub rig: &'a Rig,
     pub window: &'a Window<'a>,
-    /// Which process the window's program is, read as the window opened: what descends
-    /// from it is the window's own tree. None where the pane host said no process, or
-    /// the machine knew none of its number.
+    /// Which process the window's program is, read as the pane host answered its open and
+    /// kept: what descends from it is the window's own tree. None where the pane host said
+    /// no process, or it had gone by the time it was read.
     pub own: Option<Identity>,
     pub trail: Trail,
     pub watch: Watch,
@@ -116,10 +116,8 @@ impl<'a> Scene<'a> {
         wire: Option<PathBuf>,
         life: Life,
     ) -> Self {
-        // While the window's program runs, its number is its own.
-        let own = window
-            .pid()
-            .and_then(|pid| ThisMachine.identity(pid).ok().flatten());
+        // Read as the pane host answered the window's open, and kept.
+        let own = window.process();
         Self {
             rig,
             window,

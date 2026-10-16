@@ -124,32 +124,158 @@ fn what_the_run_ends_is_what_the_window_ran_of_the_command_and_the_stand_ins_own
         running(103, 13, 102, "helper"),
         running(300, 5, 1, "claude -p Start the command `sleep 4711`"),
     ];
-    let mut chosen = Vec::new();
-    choose(&mut chosen, &all, Some(window), &[], "sleep 4711");
-    assert_eq!(pids(&chosen), [101, 102, 103]);
+    let mut chosen = Chosen::default();
+    chosen.choose(&all, Some(window), &[], "sleep 4711");
+    assert_eq!(pids(&chosen.processes), [101, 102, 103]);
     // Each once, however often the run looks; and a window that has gone adds nothing.
-    choose(&mut chosen, &all, Some(window), &[], "sleep 4711");
-    choose(&mut chosen, &all, None, &[], "sleep 4711");
-    assert_eq!(pids(&chosen), [101, 102, 103]);
+    chosen.choose(&all, Some(window), &[], "sleep 4711");
+    chosen.choose(&all, None, &[], "sleep 4711");
+    assert_eq!(pids(&chosen.processes), [101, 102, 103]);
+}
 
-    // The stand-in: the job it detached, which has no window to descend from, is chosen by
-    // the number it wrote; a number a job wrote that another process has now is not, nor a
-    // process that says the job's words and that no job of the rig's wrote.
+#[test]
+fn a_stand_in_job_is_taken_by_its_own_file_at_the_first_look_and_its_number_never_again() {
+    // A killed job leaves its number written, and a process of another suite's that took the
+    // number and said the job's words was taken for it, and ended (Astra and Sol on round 6).
+    // A job is the process of its number that holds its file, which is the rig's own.
     let wanted = "--background-job 4711";
+    let job = |pid: u32, n: u32| (pid, format!("/rig/jobs/job-100-{n}"));
+    let jobs = [job(200, 1), job(201, 2), job(202, 3)];
     let all = vec![
         running(100, 10, 1, "fake-agent"),
+        // The job the stand-in detached, which has no window to descend from.
         running(
             200,
             14,
             1,
-            "fake-agent --background-job 4711 /jobs/job-100-1",
+            "fake-agent --background-job 4711 /rig/jobs/job-100-1",
         ),
+        // The number a job wrote is another program's now, and another rig's job's.
         running(201, 20, 1, "editor"),
-        running(300, 5, 1, "fake-agent --background-job 4711 /other/job-7-1"),
+        running(
+            202,
+            21,
+            1,
+            "fake-agent --background-job 4711 /other/jobs/job-7-1",
+        ),
     ];
-    let mut chosen = Vec::new();
-    choose(&mut chosen, &all, Some(window), &[200, 201], wanted);
+    let pids = |chosen: &Chosen| -> Vec<u32> {
+        chosen
+            .processes
+            .iter()
+            .map(|one| one.identity.pid)
+            .collect()
+    };
+    let mut chosen = Chosen::default();
+    chosen.choose(&all, None, &jobs, wanted);
     assert_eq!(pids(&chosen), [200]);
+    // Later, 200's job has gone and another process has its number, the job's file in its
+    // words: the job was taken once, as the process it was, and nothing is taken for it
+    // again. The job of 201's file, which the first look did not find (it is the one now),
+    // is taken now.
+    let later = vec![
+        running(
+            200,
+            99,
+            1,
+            "fake-agent --background-job 4711 /rig/jobs/job-100-1",
+        ),
+        running(
+            201,
+            98,
+            1,
+            "fake-agent --background-job 4711 /rig/jobs/job-100-2",
+        ),
+    ];
+    chosen.choose(&later, None, &jobs, wanted);
+    assert_eq!(
+        chosen
+            .processes
+            .iter()
+            .map(|one| one.identity)
+            .collect::<Vec<_>>(),
+        [
+            Identity {
+                pid: 200,
+                started: 14
+            },
+            Identity {
+                pid: 201,
+                started: 98
+            }
+        ]
+    );
+}
+
+#[test]
+fn what_could_not_be_ended_or_looked_for_is_a_problem_of_the_run() {
+    let mut chosen = Chosen::default();
+    assert!(chosen.problems(&Ended::default()).is_empty());
+    chosen.failed.push("ps failed".to_owned());
+    chosen.failed.push("ps failed again".to_owned());
+    let unended = Ended {
+        failed: vec![(
+            running(200, 14, 1, "sleep 4711"),
+            "its end failed: refused".to_owned(),
+        )],
+        ..Ended::default()
+    };
+    assert_eq!(
+        chosen.problems(&unended),
+        [
+            "the command: process 200 (sleep 4711) may still run: its end failed: refused",
+            "the machine's processes could not be read at 2 look(s) while the task was watched, and what the window ran then may still run: ps failed",
+        ]
+    );
+}
+
+#[test]
+fn what_a_task_left_is_looked_for_whatever_came_of_it() {
+    // Leftovers were looked for only once the task was done: one that failed or ran out of
+    // its time left its command unsaid (Astra on round 6).
+    for state in ["done", "failed", "working"] {
+        let mut left = good();
+        left.state = state.to_owned();
+        left.alive.clear();
+        look_for_leftovers(
+            &mut left,
+            |listed| listed.iter().map(|process| process.pid).collect(),
+            || vec!["4242 sleep 4711".to_owned()],
+        );
+        assert_eq!(left.escaped, ["4242 sleep 4711"], "{state}");
+        // A task done waited for what the host listed to be gone; the others are looked at now.
+        let alive: &[u64] = if state == "done" { &[] } else { &[41] };
+        assert_eq!(left.alive, alive, "{state}");
+    }
+}
+
+#[test]
+fn what_a_task_that_was_not_done_left_running_is_a_problem_too() {
+    // Leftovers were looked for only once the task was done: one that failed or ran out of
+    // its time left its command unsaid (Astra on round 6).
+    let mut left = good();
+    left.state = "failed".to_owned();
+    left.alive = vec![41];
+    let problems = judge(&left).unwrap_err();
+    assert!(
+        problems.contains(
+            &"the command is still running when the run last looked, T-1 being failed: 41 sleep 4711"
+                .to_owned()
+        ),
+        "{problems:#?}"
+    );
+    let mut left = good();
+    left.state = "working".to_owned();
+    left.listed.clear();
+    left.notes.clear();
+    left.escaped = vec!["4242 sleep 4711".to_owned()];
+    let problems = judge(&left).unwrap_err();
+    assert!(
+        problems.iter().any(|problem| problem.starts_with(
+            "the command escaped the ending: the pane host never listed it, and it still ran when the run last looked, T-1 being working"
+        )),
+        "{problems:#?}"
+    );
 }
 
 #[test]

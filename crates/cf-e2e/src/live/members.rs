@@ -61,7 +61,7 @@ pub use board::{
 };
 pub use command::{quiet_command, shown, LongCommand};
 pub use descent::{
-    descending_from, end_chosen, holding, process_of, Identity, Machine, Running, ThisMachine,
+    descending_from, end_chosen, holding, Ended, Identity, Machine, Running, ThisMachine,
 };
 pub use door::{judge, moves, ms_of, waited_then_worked, Finding, Judged, Seen};
 pub use plan::{
@@ -343,14 +343,11 @@ impl Members {
     }
 
     /// Which process the program of `window` is, as the pane host opened it for the
-    /// daemon, read now: what descends from it is the window's own tree. None where the
-    /// host said no process, or the window's program has gone (its number may be
-    /// another's then, and is not read).
+    /// daemon: read once, as the host answered the open, and kept
+    /// ([`Rig::window_process`]). What descends from it is the window's own tree, and
+    /// nothing does once it has gone, whatever has its number since.
     pub fn window_process(&self, window: &MemberWindow) -> Option<Identity> {
-        if window.activity["state"] == "closed" {
-            return None;
-        }
-        self.rig.window_process(&window.pane).and_then(process_of)
+        self.rig.window_process(&window.pane)
     }
 
     /// Every `pane.open` the daemon made for the windows of the member `agent`,

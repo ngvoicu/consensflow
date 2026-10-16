@@ -113,6 +113,99 @@ fn what_descends_from_a_process_is_what_it_started_and_began_after_it_and_not_it
 }
 
 #[test]
+fn a_process_is_ended_only_while_it_is_still_the_one_chosen_and_what_could_not_be_ended_is_said() {
+    use super::testing::{Listed, Now};
+
+    // Between the look that chose them and their end: 102 has gone, 103's number is another
+    // process's, 104 cannot be reached, 105's start cannot be read, and 106 refuses its end.
+    // Only 101 is ended; what may still run is said, never dropped (Astra and Sol on the B1
+    // fix and on round 6).
+    let chosen: Vec<Running> = (101..=106)
+        .map(|pid| running(pid, u64::from(pid), 1, "node cf-mark"))
+        .collect();
+    let machine = Listed::new(chosen.clone())
+        .with(102, Now::Nobody)
+        .with(103, Now::Began(999))
+        .with(104, Now::Unreachable)
+        .with(105, Now::Unreadable)
+        .with(106, Now::Unending);
+    let said = end_chosen_by(&machine, &chosen);
+    let pids =
+        |found: &[Running]| -> Vec<u32> { found.iter().map(|one| one.identity.pid).collect() };
+    assert_eq!(pids(&said.ended), [101]);
+    assert_eq!(pids(&said.gone), [102, 103]);
+    let failed: Vec<u32> = said
+        .failed
+        .iter()
+        .map(|(one, _)| one.identity.pid)
+        .collect();
+    assert_eq!(failed, [104, 105, 106]);
+    assert_eq!(machine.ended(), [101]);
+    assert_eq!(
+        said.problems(),
+        [
+            "process 104 (node cf-mark) may still run: it could not be reached: access denied",
+            "process 105 (node cf-mark) may still run: when it began could not be read again: unreadable",
+            "process 106 (node cf-mark) may still run: its end failed: refused",
+        ]
+    );
+    assert!(Ended::default().problems().is_empty());
+}
+
+#[test]
+fn a_mac_lists_a_process_with_when_it_began_to_the_microsecond_and_not_one_whose_number_changed_hands(
+) {
+    // `ps` lists 10, 11 and 12; since, 11 has ended and its number is a process that 99
+    // started, and 12 is gone. Only 10 is listed, with when it began as the system says it.
+    let listed = vec![
+        running(10, 20_261_016_044_446, 1, "devin"),
+        running(11, 20_261_016_044_447, 10, "node cf-mark"),
+        running(12, 20_261_016_044_448, 10, "sleep 1"),
+    ];
+    let refined = refined_by_bsd(listed, |pid| match pid {
+        10 => Ok(Some(Bsd {
+            ppid: 1,
+            started: 1_792_118_686_123_456,
+        })),
+        11 => Ok(Some(Bsd {
+            ppid: 99,
+            started: 1_792_118_690_000_001,
+        })),
+        12 => Ok(None),
+        _ => Err(std::io::Error::other("unreadable")),
+    });
+    assert_eq!(refined, [running(10, 1_792_118_686_123_456, 1, "devin")]);
+}
+
+#[test]
+fn windows_lists_a_process_with_its_handles_creation_time_and_not_one_whose_number_changed_hands() {
+    // The table says when each began to the microsecond; its handle, to the 100 ns. 11's
+    // handle says another time than the table (its number is another process's), 12 has
+    // exited, 13 is no process now, and 14 cannot be opened (the system's own): it keeps
+    // what the table said.
+    let listed = vec![
+        running(10, 133_000_000_000_000_120, 1, "devin.exe"),
+        running(11, 133_000_000_000_000_120, 10, "node.exe cf-mark"),
+        running(12, 133_000_000_000_000_120, 10, "ping.exe"),
+        running(13, 133_000_000_000_000_120, 10, "cmd.exe"),
+        running(14, 5, 0, "System"),
+    ];
+    let refined = refined_by_handle(listed, |pid| match pid {
+        10 => Ok(Some(133_000_000_000_000_127)),
+        11 => Ok(Some(133_000_000_000_500_120)),
+        12 | 13 => Ok(None),
+        _ => Err(std::io::Error::other("access denied")),
+    });
+    assert_eq!(
+        refined,
+        [
+            running(10, 133_000_000_000_000_127, 1, "devin.exe"),
+            running(14, 5, 0, "System"),
+        ]
+    );
+}
+
+#[test]
 fn this_machine_says_which_process_this_one_is_and_lists_it_as_the_same() {
     let own = std::process::id();
     let identity = ThisMachine
@@ -146,27 +239,36 @@ fn rust_files(path: &std::path::Path) -> Vec<std::path::PathBuf> {
     found
 }
 
-/// Whether a line of Rust ends a process: sends a signal (`signal`, a system's `kill`), or
-/// runs a program that ends processes. A window's own end (the pane host's `pane.kill` of
-/// it) and a test's of a program it started (`.kill()`) go by no command line. A comment
-/// says.
+/// Whether a line of Rust ends a process: sends a signal (`signal`, a system's `kill`),
+/// ends one through the descent's own machine, or runs a program that ends processes,
+/// named in the words of the line or started by `Run::new` or `Command::new`. A window's
+/// own end (the pane host's `pane.kill` of it) and a test's of a program it started
+/// (`.kill()`) go by no command line. A comment says.
 fn ends_a_process(line: &str) -> bool {
+    static PROGRAM: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
     let code = line.trim_start();
     if code.starts_with("//") {
         return false;
     }
-    [
-        "signal(",
-        "Signal::",
-        "::kill(",
-        "taskkill",
-        "pkill",
-        "killall",
-        "Stop-Process",
-        "kill -",
-    ]
-    .iter()
-    .any(|word| code.contains(word))
+    let program = crate::pattern::once(
+        &PROGRAM,
+        r#"(Run|Command)::new\(\s*"([^"]*[/\\])?(kill|pkill|killall|taskkill|tskill)(\.exe)?""#,
+    );
+    program.is_match(code)
+        || [
+            "signal(",
+            "Signal::",
+            "::kill(",
+            "taskkill",
+            "pkill",
+            "killall",
+            "Stop-Process",
+            "kill -",
+            "ThisMachine.end(",
+            "ThisMachine::end(",
+        ]
+        .iter()
+        .any(|word| code.contains(word))
 }
 
 #[test]
@@ -229,12 +331,23 @@ fn no_live_check_ends_a_process_but_through_the_descent() {
         ending.is_empty(),
         "a live check ends a process other than through the descent: {ending:#?}"
     );
-    // What the guard takes for an end, and what it does not.
+    // What the guard takes for an end, and what it does not: the machine's own end and a
+    // `kill` program passed it once (Astra and Sol on round 6).
     assert!(ends_a_process("let _ = signal(found.pid, Signal::Kill);"));
     assert!(ends_a_process("    libc::kill(pid, 9);"));
     assert!(ends_a_process(
         r#"Run::new("taskkill").args(["/F", "/PID", &pid])"#
     ));
+    assert!(ends_a_process("    ThisMachine.end(pid);"));
+    assert!(ends_a_process(
+        r#"let _ = Run::new("/bin/kill").args(["-9", &pid]).run();"#
+    ));
+    assert!(ends_a_process(r#"Run::new("kill").arg(pid)"#));
+    assert!(ends_a_process(
+        r#"std::process::Command::new( "C:\\Windows\\System32\\taskkill.exe")"#
+    ));
+    assert!(!ends_a_process(r#"Run::new("ps").args(["-p", &pid])"#));
+    assert!(!ends_a_process(r#"Run::new("killer-app")"#));
     assert!(!ends_a_process("        cut.kill();"));
     assert!(!ends_a_process("        kill();"));
     assert!(!ends_a_process("    rig.kill_daemon();"));

@@ -91,13 +91,17 @@ cf-e2e = { path = ".", features = ["test-support"] }
 url.workspace = true
 
 # Signals by process id, whether a process is there, the group it is in, and the
-# terminal's raw mode, which std does not give (and this crate forbids unsafe code).
+# terminal's raw mode, which std does not give (this crate allows unsafe code only in
+# the few calls a live check makes to hold a process it ends); and through its `libc`,
+# macOS's `proc_pidinfo`, which says when a process began to the microsecond.
 [target.'cfg(unix)'.dependencies]
 nix = { workspace = true, features = ["process", "signal", "term"] }
 
-# The console's raw mode for the stand-in agent, which std does not give.
+# The console's raw mode for the stand-in agent, which std does not give; and a handle
+# to a process a live check ends, on which its creation time is read and through which
+# it is ended.
 [target.'cfg(windows)'.dependencies]
-windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_System_Console"] }
+windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_System_Console", "Win32_System_Threading"] }
 
 [lints]
 workspace = true

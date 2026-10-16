@@ -36,8 +36,8 @@ use std::thread::sleep;
 use std::time::{Duration, Instant};
 
 use cf_e2e::live::members::{
-    end_chosen, find, member, member_as, stand_in_chief, stand_in_worker, Account, LongCommand,
-    Members, Plan, Running, ThisMachine, STAND_IN_WORKER,
+    end_chosen, find, member, member_as, stand_in_chief, stand_in_worker, Account, Ended,
+    LongCommand, Members, Plan, Running, ThisMachine, STAND_IN_WORKER,
 };
 use cf_e2e::live::report::{self, Check};
 use cf_e2e::live::{self, ask, seconds, Harness, Log};
@@ -162,10 +162,19 @@ fn in_window(members: &Members, who: &str) -> Result<Vec<Running>> {
 }
 
 /// Ends what the window of `who` runs of the long command: a command it starts again
-/// is the long one. Each process is ended only while it is still the one chosen.
-fn end_in_window(members: &Members, who: &str) -> Result<()> {
-    end_chosen(&ThisMachine, &in_window(members, who)?);
+/// is the long one. Each process is ended only while it is still the one chosen, and what
+/// could not be ended fails the case ([`ended`]).
+fn end_in_window(members: &Members, who: &str, case: &mut Account) -> Result<()> {
+    ended(case, &end_chosen(&in_window(members, who)?));
     Ok(())
+}
+
+/// What could not be ended of the long command, a failure of the case each: a process
+/// that may still run is never left unsaid.
+fn ended(case: &mut Account, ended: &Ended) {
+    for problem in ended.problems() {
+        case.fail(format!("the long command: {problem}"));
+    }
 }
 
 /// The states a lane was read in, each with when it was first read, as a line:
@@ -271,8 +280,9 @@ fn drive_chief(mut members: Members, log: &Log) -> Result<Account> {
     // left of it is ended after.
     let quit_at = Instant::now();
     let left = in_window(&members, "chief")?;
-    let members = members.restart(log)?;
-    end_chosen(&ThisMachine, &left);
+    let restarted = members.restart(log);
+    ended(&mut case, &end_chosen(&left));
+    let members = restarted?;
     case.say(format!(
         "quit and started again in {} s",
         seconds(i64::try_from(quit_at.elapsed().as_millis()).unwrap_or(i64::MAX))
@@ -288,7 +298,7 @@ fn drive_chief(mut members: Members, log: &Log) -> Result<Account> {
         LOOK,
         || {
             // A command it starts again is the long one: it is ended.
-            end_in_window(&members, "chief")?;
+            end_in_window(&members, "chief", &mut case)?;
             Ok(notes_saying(&members, "chief", CHIEF_CUT)?
                 .into_iter()
                 .find(|note| note["state"] == "delivered"))
@@ -312,7 +322,7 @@ fn drive_chief(mut members: Members, log: &Log) -> Result<Account> {
         IDLE,
         LOOK,
         || {
-            end_in_window(&members, "chief")?;
+            end_in_window(&members, "chief", &mut case)?;
             let state = state_of(&members.lane("chief")?);
             if samples.last().is_none_or(|(last, _)| *last != state) {
                 samples.push((state.clone(), Instant::now()));
@@ -364,7 +374,7 @@ fn drive_chief(mut members: Members, log: &Log) -> Result<Account> {
         "the chief's screen: {}",
         members.tail(lane["pane"]["id"].as_str().unwrap_or_default())
     ));
-    end_in_window(&members, "chief")?;
+    end_in_window(&members, "chief", &mut case)?;
     case.closed(members.close());
     Ok(case)
 }
@@ -410,8 +420,9 @@ fn drive_worker(mut members: Members, agent: &str, log: &Log) -> Result<Account>
     // quit left of it is ended after.
     let quit_at = Instant::now();
     let left = in_window(&members, agent)?;
-    let members = members.restart(log)?;
-    end_chosen(&ThisMachine, &left);
+    let restarted = members.restart(log);
+    ended(&mut case, &end_chosen(&left));
+    let members = restarted?;
     case.say(format!(
         "quit and started again in {} s",
         seconds(i64::try_from(quit_at.elapsed().as_millis()).unwrap_or(i64::MAX))
@@ -437,7 +448,7 @@ fn drive_worker(mut members: Members, agent: &str, log: &Log) -> Result<Account>
         LOOK,
         || {
             // A command it starts again is the long one: it is ended.
-            end_in_window(&members, agent)?;
+            end_in_window(&members, agent, &mut case)?;
             Ok(notes_saying(&members, &handle, &words)?
                 .into_iter()
                 .find(|note| note["state"] == "delivered"))
@@ -460,7 +471,7 @@ fn drive_worker(mut members: Members, agent: &str, log: &Log) -> Result<Account>
         DELIVERED,
         LOOK,
         || {
-            end_in_window(&members, agent)?;
+            end_in_window(&members, agent, &mut case)?;
             Ok(result_for(&members, number)?.filter(|result| result["state"] == "delivered"))
         },
     )?;
@@ -482,7 +493,7 @@ fn drive_worker(mut members: Members, agent: &str, log: &Log) -> Result<Account>
     );
     let told_once = notes_saying(&members, &handle, &words)?.len() == 1;
     case.check("told once", told_once, "one note, not more");
-    end_in_window(&members, agent)?;
+    end_in_window(&members, agent, &mut case)?;
     case.closed(members.close());
     Ok(case)
 }

@@ -364,9 +364,6 @@ impl<'a> Open<'a> {
             harness,
             kind,
             id: self.id.clone(),
-            pid: opened["pid"]
-                .as_u64()
-                .and_then(|pid| u32::try_from(pid).ok()),
             workspace,
             argv,
             session: RefCell::new(session),
