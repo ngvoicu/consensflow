@@ -4,7 +4,9 @@
 
 use std::cell::Cell;
 
-use super::open::{asked_for, new_session, pasted_into, session_for, trust_line};
+use super::open::{
+    asked_for, consensflows_hooks_of, new_session, pasted_into, session_for, trust_line, Member,
+};
 use super::*;
 
 fn item(role: &str, text: &str) -> Item {
@@ -88,6 +90,63 @@ fn claude_code_and_pi_are_opened_on_an_id_they_are_given_and_the_others_name_the
     for kind in ["devin", "codex", "opencode", "claude", ""] {
         assert_eq!(session_for(kind), None, "{kind}");
     }
+}
+
+#[test]
+fn a_member_has_the_first_message_it_was_given_and_none_until_it_is() {
+    let member = Member::new("worker", "# worker");
+    assert_eq!(member.message(), None);
+    let told = member.first_message("[ConsensFlow m-1 · T-1 · task from @chief]\nGo");
+    assert_eq!(
+        told.message(),
+        Some("[ConsensFlow m-1 · T-1 · task from @chief]\nGo")
+    );
+}
+
+#[test]
+fn a_member_has_the_owners_hooks_unless_it_is_asked_to_be_without_them() {
+    let member = Member::new("worker", "# worker");
+    assert!(!member.is_alone());
+    assert!(member.without_the_owners_hooks().is_alone());
+}
+
+#[test]
+fn only_the_hooks_consensflow_added_stay_when_a_launch_is_to_have_none_of_the_owners() {
+    // What the launch added, as its config has them written (`ask::devin_hooks`).
+    let session = json!({ "matcher": "", "hooks": [{ "type": "command", "command": "'/b/cf' hook devin-session", "timeout": 5 }] });
+    let question = json!({ "matcher": "ask_user_question", "hooks": [{ "type": "command", "command": "cf hook devin", "timeout": 3600 }] });
+    let added = json!({ "SessionStart": [session], "PreToolUse": [question] });
+    let mut config = json!({
+        "model": "kept",
+        "hooks": {
+            "SessionStart": [
+                { "matcher": "", "hooks": [{ "type": "command", "command": "notify session" }] },
+                session,
+            ],
+            "PreToolUse": [
+                // An owner's that says the words of ConsensFlow's, and refuses every call: it
+                // stayed, kept by a word in its command (Sol on the B1 fix, the second look).
+                { "hooks": [{ "type": "command", "command": "echo 'calling cf hook devin' >&2; exit 2" }] },
+                // An owner's entry that holds ConsensFlow's command beside its own.
+                { "hooks": [{ "type": "command", "command": "audit" }, { "type": "command", "command": "cf hook devin" }] },
+                { "matcher": "ask_user_question", "hooks": [{ "type": "command", "command": "other" }] },
+                question,
+            ],
+            "PermissionRequest": [{ "hooks": [{ "type": "command", "command": "notify permission" }] }],
+            "Stop": "not a list",
+        },
+    });
+    consensflows_hooks_of(&mut config, &added);
+    assert_eq!(config["model"], "kept");
+    assert_eq!(config["hooks"], added);
+    // An event that holds none of what was added goes, and one that is no list.
+    let mut odd = json!({ "hooks": { "PreToolUse": [{ "matcher": "x" }, { "hooks": "audit" }] } });
+    consensflows_hooks_of(&mut odd, &added);
+    assert_eq!(odd, json!({ "hooks": {} }));
+    // A config with no hooks is left as it is.
+    let mut bare = json!({ "model": "kept" });
+    consensflows_hooks_of(&mut bare, &added);
+    assert_eq!(bare, json!({ "model": "kept" }));
 }
 
 #[test]

@@ -493,12 +493,14 @@ fn observed(observed: &Observed) -> Value {
 }
 
 /// Whether a window is ready, as Node's adapter answered it: `true`, or why not.
+/// One that never will be (Node had none) is `{"unfit": why}`.
 fn readiness(readiness: &Readiness) -> Value {
     match readiness {
         Readiness::Ready => json!(true),
         // Devin's `false`, which the engine says as `Unsaid`'s sentence.
         Readiness::Held(Held::Unsaid) => json!(false),
         Readiness::Held(held) => json!(held.sentence()),
+        Readiness::Unfit(why) => json!({ "unfit": why }),
     }
 }
 

@@ -16,6 +16,7 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use serde_json::{json, Value};
 
+use crate::live::members::{Identity, Machine, ThisMachine};
 use crate::process::Sink;
 use crate::wire::{self, Pending};
 
@@ -44,6 +45,33 @@ pub(super) struct Press {
     pub at_ms: i64,
 }
 
+/// A window the pane host said it opened (`id`, `generation`), and which process its
+/// program is: read once, as the host answered the open, and kept. A live check holds
+/// what it finds of the window to this: a window whose process has gone has nothing that
+/// descends from it, whatever has its number since (Astra and Sol on round 6).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct Root {
+    pub id: Value,
+    pub generation: Value,
+    /// None where the host said no process, or it had gone by the time it was read.
+    pub identity: Option<Identity>,
+}
+
+/// The window a frame of the pane host's says it opened, its process read by `read` as it
+/// says so: none for any other frame.
+fn root_of(frame: &Value, read: impl FnOnce(u32) -> Option<Identity>) -> Option<Root> {
+    if frame["kind"] != "res" || frame["op"] != "pane.open" || frame["body"]["id"].is_null() {
+        return None;
+    }
+    let body = &frame["body"];
+    let pid = body["pid"].as_u64().and_then(|pid| u32::try_from(pid).ok());
+    Some(Root {
+        id: body["id"].clone(),
+        generation: body["generation"].clone(),
+        identity: pid.and_then(read),
+    })
+}
+
 /// What the frames showed so far.
 #[derive(Debug, Default)]
 pub(super) struct Seen {
@@ -59,6 +87,8 @@ pub(super) struct Seen {
     pub printed: HashMap<String, Vec<u8>>,
     /// The body of each `pane.exit` the pane host told.
     pub exits: Vec<Value>,
+    /// Each window the pane host answered the open of, and its process ([`Root`]).
+    pub roots: Vec<Root>,
     /// Lines a program wrote that are no frame, which a failure shows.
     pub stray: Vec<String>,
 }
@@ -130,9 +160,14 @@ impl Shared {
         };
         let id = frame["id"].as_str().unwrap_or_default();
         let mut reply = None;
+        // The window's process, read as the host says it opened it, before the answer goes on.
+        let root = root_of(&frame, |pid| ThisMachine.identity(pid).ok().flatten());
         {
             let mut seen = self.seen();
             seen.host.push(frame.clone());
+            if let Some(root) = root {
+                seen.roots.push(root);
+            }
             if frame["op"] == "pane.output" {
                 if let Some(bytes) = bytes_of(&frame["body"]["bytes"]) {
                     let pane = frame["body"]["id"].as_str().unwrap_or_default().to_owned();
@@ -349,6 +384,46 @@ mod tests {
             passed,
             [printed.to_string(), more.to_string(), exit.to_string()]
         );
+    }
+
+    #[test]
+    fn a_windows_process_is_read_as_the_host_answers_its_open_and_kept() {
+        let shared = Shared::default();
+        let (host, _, daemon, _) = sinks();
+        let own = std::process::id();
+        let opened = |id: &str, pid: Option<u32>| {
+            let mut body = json!({ "ok": true, "id": id, "generation": 1 });
+            if let Some(pid) = pid {
+                body["pid"] = json!(pid);
+            }
+            json!({ "v": 1, "id": "n-3", "kind": "res", "op": "pane.open", "body": body })
+                .to_string()
+        };
+        shared.route_host(&opened("p1-chief", Some(own)), &host, &daemon);
+        shared.route_host(&opened("p1-zeus", None), &host, &daemon);
+        // Another answer is no window's open.
+        shared.route_host(
+            r#"{"v":1,"id":"n-4","kind":"res","op":"pane.snapshot","body":{"id":"p1-chief","generation":1,"pid":7}}"#,
+            &host,
+            &daemon,
+        );
+        let seen = shared.seen();
+        assert_eq!(
+            seen.roots,
+            [
+                Root {
+                    id: json!("p1-chief"),
+                    generation: json!(1),
+                    identity: ThisMachine.identity(own).unwrap(),
+                },
+                Root {
+                    id: json!("p1-zeus"),
+                    generation: json!(1),
+                    identity: None,
+                },
+            ]
+        );
+        assert!(seen.roots[0].identity.is_some());
     }
 
     #[test]

@@ -19,6 +19,10 @@ pub struct Store {
     head: Option<String>,
     /// How many messages the session has.
     count: u64,
+    /// What the session held when it was opened: whether a turn of it ended, and the
+    /// user's message of a turn that never did (the one a quit cut), if its last is one.
+    finished_a_turn: bool,
+    cut: Option<String>,
 }
 
 /// A failure of the store, in words.
@@ -57,19 +61,38 @@ impl Store {
             .optional()
             .map_err(said)?
             .flatten();
-        let count: i64 = db
-            .query_row(
-                "SELECT count(*) FROM message_nodes WHERE session_id = ?",
-                [session],
-                |row| row.get(0),
-            )
-            .map_err(said)?;
+        let messages = messages_of(&db, session)?;
+        let finished_a_turn = messages.iter().any(ends_a_turn);
+        // The last user's message, where nothing after it ended its turn.
+        let cut = messages
+            .iter()
+            .rposition(|message| message["role"] == "user")
+            .filter(|at| !messages[*at..].iter().any(ends_a_turn))
+            .and_then(|at| messages[at]["content"].as_str().map(str::to_owned));
         Ok(Self {
             db,
             session: session.to_owned(),
             head,
-            count: u64::try_from(count).unwrap_or(0),
+            count: u64::try_from(messages.len()).unwrap_or(0),
+            finished_a_turn,
+            cut,
         })
+    }
+
+    /// Whether a turn of the session had ended when it was opened.
+    pub fn finished_a_turn(&self) -> bool {
+        self.finished_a_turn
+    }
+
+    /// The user's message of the turn a quit cut, which the session ended in when it
+    /// was opened: given once.
+    pub fn take_cut(&mut self) -> Option<String> {
+        self.cut.take()
+    }
+
+    /// What a tool call came back with.
+    pub fn tool(&mut self, text: &str) -> Result<(), String> {
+        self.append(json!({ "role": "tool", "content": text, "metadata": {} }))
     }
 
     /// The user's message `text`, which the TUI names `client` in what it says to
@@ -95,6 +118,7 @@ impl Store {
 
     /// A message as the node the main chain goes on in.
     fn append(&mut self, mut message: Value) -> Result<(), String> {
+        self.cut = None;
         let at = jiff::Timestamp::now().to_string();
         self.count += 1;
         let node = format!("{}-node-{}", self.session, self.count);
@@ -118,6 +142,24 @@ impl Store {
         self.head = Some(node);
         Ok(())
     }
+}
+
+/// The messages of `session`, in the order they were written.
+fn messages_of(db: &Connection, session: &str) -> Result<Vec<Value>, String> {
+    let mut rows = db
+        .prepare("SELECT chat_message FROM message_nodes WHERE session_id = ? ORDER BY row_id")
+        .map_err(said)?;
+    let messages = rows
+        .query_map([session], |row| row.get::<_, String>(0))
+        .map_err(said)?
+        .filter_map(|message| serde_json::from_str(&message.ok()?).ok())
+        .collect();
+    Ok(messages)
+}
+
+/// Whether a message ended its turn: the assistant's, with Devin's `finish_reason: stop`.
+fn ends_a_turn(message: &Value) -> bool {
+    message["role"] == "assistant" && message["metadata"]["finish_reason"] == "stop"
 }
 
 #[cfg(test)]
@@ -220,6 +262,37 @@ mod tests {
         other.user("elsewhere", "client-1").unwrap();
         assert_eq!(read(&file, "brisk-ember").1[0].1, None);
         assert_eq!(read(&file, "calm-river").1.len(), 2);
+    }
+
+    #[test]
+    fn a_session_opened_again_says_whether_a_turn_of_it_ended_and_the_message_a_quit_cut() {
+        let folder = tempfile::tempdir().unwrap();
+        let file = folder.path().join("sessions.db");
+        let fresh = Store::open(&file, "calm-river").unwrap();
+        assert!(!fresh.finished_a_turn());
+        // Its first turn, cut: a message and a call, and no end.
+        let mut first = Store::open(&file, "calm-river").unwrap();
+        first.user("SLEEP 600 FILE made.txt x", "client-1").unwrap();
+        first.tool("Command running in background").unwrap();
+        let mut cut = Store::open(&file, "calm-river").unwrap();
+        assert!(!cut.finished_a_turn());
+        assert_eq!(cut.take_cut().as_deref(), Some("SLEEP 600 FILE made.txt x"));
+        assert_eq!(cut.take_cut(), None, "given once");
+        // A turn that ended: none was cut, and a turn has ended since.
+        cut.user("next", "client-2").unwrap();
+        cut.assistant("done", true).unwrap();
+        let mut ended = Store::open(&file, "calm-river").unwrap();
+        assert!(ended.finished_a_turn());
+        assert_eq!(ended.take_cut(), None);
+        // A second turn cut after a first that ended.
+        ended.user("SLEEP 600 again", "client-3").unwrap();
+        let mut second = Store::open(&file, "calm-river").unwrap();
+        assert!(second.finished_a_turn());
+        assert_eq!(second.take_cut().as_deref(), Some("SLEEP 600 again"));
+        // Anything written goes on from the cut: it is gone.
+        let mut written = Store::open(&file, "calm-river").unwrap();
+        written.user("else", "client-4").unwrap();
+        assert_eq!(written.take_cut(), None);
     }
 
     #[test]

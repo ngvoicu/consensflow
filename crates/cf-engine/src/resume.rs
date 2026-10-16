@@ -47,7 +47,7 @@ impl Coming {
     /// was working on. The chief came back by the human's Resume, not by a quit
     /// alone (a Close cuts it too), so its words say only that ConsensFlow
     /// stopped.
-    fn words(&self) -> String {
+    pub(crate) fn words(&self) -> String {
         match self {
             Coming::Chief => {
                 "ConsensFlow stopped in the middle of your turn, which was cut. Go on where you stopped."
@@ -64,7 +64,7 @@ impl Coming {
     }
 
     /// The task the note is about: a member's first, the chief's none.
-    fn task(&self) -> Option<i64> {
+    pub(crate) fn task(&self) -> Option<i64> {
         match self {
             Coming::Chief => None,
             Coming::Member(tasks) => tasks.first().copied(),

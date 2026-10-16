@@ -100,11 +100,11 @@ pub(super) fn environment(root: &Path, fake_bin: &Path, config: &Config) -> Vec<
 }
 
 /// The `PATH` of the rig: the folder of the stand-in `claude` first, then the
-/// folders a case added ([`Config::also_on_path`]), then the system's own and
-/// no folder a package manager installs into (`/usr/local/bin` is Homebrew's on
-/// an Intel Mac, whose harnesses a daemon of the rig found there); as the
-/// Finder starts it, no stand-in's folder, and the system's as the Finder
-/// gives it.
+/// folders a case wants found before the rest ([`Config::first_on_path`]) and the
+/// ones it added ([`Config::also_on_path`]), then the system's own and no folder a
+/// package manager installs into (`/usr/local/bin` is Homebrew's on an Intel Mac,
+/// whose harnesses a daemon of the rig found there); as the Finder starts it, no
+/// stand-in's folder, and the system's as the Finder gives it.
 fn path(fake_bin: &Path, config: &Config) -> String {
     let system: Vec<String> = if cfg!(windows) {
         let root = own_var("SystemRoot").unwrap_or_else(|| "C:\\Windows".to_owned());
@@ -119,6 +119,7 @@ fn path(fake_bin: &Path, config: &Config) -> String {
     (!config.finder)
         .then_some(fake_bin)
         .into_iter()
+        .chain(config.first.iter().map(PathBuf::as_path))
         .chain(config.path.iter().map(PathBuf::as_path))
         .map(|dir| dir.to_string_lossy().into_owned())
         .chain(system)
@@ -250,6 +251,22 @@ mod tests {
         let plain: Vec<&str> = var(&plain, "PATH").split(delimiter).collect();
         assert_eq!(plain.len(), folders.len() - 2);
         assert_eq!(folders[3..], plain[1..]);
+    }
+
+    #[test]
+    fn a_folder_a_case_wants_found_first_comes_right_after_the_stand_in_claudes() {
+        let root = Path::new("root");
+        let fake_bin = root.join("fake-bin");
+        let delimiter = if cfg!(windows) { ';' } else { ':' };
+        // Added after the others, it is still ahead of them: the machine's own program
+        // of its name is in one of the others' folders.
+        let added = config()
+            .also_on_path("/real/devin")
+            .first_on_path("/stand-in/cf");
+        let env = environment(root, &fake_bin, &added);
+        let folders: Vec<&str> = var(&env, "PATH").split(delimiter).collect();
+        assert_eq!(folders[0], fake_bin.to_string_lossy());
+        assert_eq!(folders[1..3], ["/stand-in/cf", "/real/devin"]);
     }
 
     #[test]

@@ -194,6 +194,46 @@ fn a_members_window_that_is_never_ready_for_the_role_is_closed_when_the_time_a_l
 }
 
 #[test]
+fn a_members_window_unfit_for_work_before_the_role_was_told_fails_the_follow_up_it_went_ahead_of_once_and_no_launch_follows(
+) {
+    // The window says it never will be ready (a Devin left in its normal permission
+    // mode): the note that says the role was failed in place of the follow-up, which
+    // stayed queued and was launched for at every pass (Astra on the B1 fix).
+    let context = codex();
+    let (project, session, member) = finished_session(&context);
+    context.roles.rewritten.replace(" (rewritten)".to_owned());
+    let why = "its window stayed in a mode nobody works in";
+    context
+        .codex
+        .ready
+        .replace(Some(Rc::new(move || Ok(Readiness::Unfit(why.to_owned())))));
+    follow_up(&context, &project, "Now the lexer");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(context.codex.prepared().len(), 2);
+    assert_eq!(kills_of(&context, &session), 1, "its window is closed");
+    assert_eq!(
+        context.task(project.id, 2).task.state,
+        "failed",
+        "the follow-up the role went ahead of fails with the launch"
+    );
+    let notes = replacements(&context, member);
+    assert_eq!(notes.len(), 1);
+    assert_eq!(context.message(notes[0].id).state, "cancelled");
+    assert_eq!(told_the_human(&context, project.id, why), 1, "and says why");
+
+    // No launch follows, and no replacement is written for one.
+    for _ in 0..4 {
+        context.advance(60_000);
+        context.pass().unwrap();
+    }
+    assert_eq!(context.codex.prepared().len(), 2, "no other window opens");
+    assert_eq!(replacements(&context, member).len(), 1);
+    assert_eq!(told_the_human(&context, project.id, "did not reach @"), 1);
+    context.close();
+}
+
+#[test]
 fn a_members_window_is_not_closed_for_the_time_a_launch_has_once_the_delivery_of_the_role_began() {
     let context = codex();
     let (project, session, member) = finished_session(&context);

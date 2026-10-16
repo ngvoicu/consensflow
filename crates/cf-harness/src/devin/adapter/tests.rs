@@ -11,6 +11,8 @@ use super::*;
 use crate::records::{Quota, Reading, Record, Settlement};
 use crate::testing::{finished, Driver, Fakes, EPOCH_MS};
 
+mod bypass;
+
 const MINUTE_MS: i64 = 60_000;
 
 /// A window of Devin on `wire`, on `session` if it has one, served by `fakes`.
@@ -22,6 +24,8 @@ fn window(fakes: &Fakes, wire: &Path, session: Option<&str>) -> Rc<DevinWindow> 
         session: RefCell::new(session.map(str::to_owned)),
         wire: WireLog::new(&wire.to_string_lossy(), jiff::tz::TimeZone::UTC),
         discover_for_ms: MINUTE_MS,
+        switch: Cell::default(),
+        looked: Cell::default(),
     })
 }
 
@@ -222,6 +226,8 @@ fn a_look_takes_the_wires_word_on_the_quota_never_the_records_and_the_rest_from_
         session: RefCell::new(Some("mild-coin".to_owned())),
         wire: WireLog::new(&wire.to_string_lossy(), jiff::tz::TimeZone::UTC),
         discover_for_ms: MINUTE_MS,
+        switch: Cell::default(),
+        looked: Cell::default(),
     });
     let observed = finished(window.observe()).unwrap();
     assert_eq!(observed.quota, None, "the log says nothing of the quota");
@@ -258,6 +264,8 @@ fn window_reading(fakes: &Fakes, wire: &Path, env: Env, record: Record) -> Rc<De
         session: RefCell::new(Some("mild-coin".to_owned())),
         wire: WireLog::new(&wire.to_string_lossy(), jiff::tz::TimeZone::UTC),
         discover_for_ms: MINUTE_MS,
+        switch: Cell::default(),
+        looked: Cell::default(),
     })
 }
 
