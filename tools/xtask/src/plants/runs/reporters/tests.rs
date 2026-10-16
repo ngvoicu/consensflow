@@ -1,3 +1,5 @@
+use cf_base::env::Env;
+
 use super::*;
 
 fn words(command: &[&str]) -> Vec<String> {
@@ -8,13 +10,42 @@ fn of(command: &[&str]) -> Reporter {
     Reporter::of(&words(command))
 }
 
+/// A checkout at `root`, which nothing is read from.
+fn checkout(root: &Path) -> Context {
+    Context {
+        root: root.to_path_buf(),
+        env: Env::default(),
+    }
+}
+
+/// The words of `invocation` after its program.
+fn args(invocation: &Invocation) -> Vec<String> {
+    invocation
+        .args
+        .iter()
+        .map(|word| word.to_string_lossy().into_owned())
+        .collect()
+}
+
 #[test]
 fn a_command_is_reported_by_the_runner_of_its_tests() {
     assert_eq!(of(&["cargo", "test", "-p", "x"]), Reporter::Nextest);
-    assert_eq!(
-        of(&["cargo", "xtask", "app", "test", "file_drop"]),
-        Reporter::Libtest
-    );
+    // A suite of xtask's that is a `cargo test` is that test's, under nextest.
+    for suite in [
+        &["cargo", "xtask", "app", "test", "file_drop"][..],
+        &["cargo", "xtask", "app", "test"],
+        &["cargo", "xtask", "test", "clis", "--offline"],
+        &["cargo", "xtask", "test", "agents", "--offline"],
+    ] {
+        assert_eq!(of(suite), Reporter::Nextest, "{suite:?}");
+    }
+    let smoke = if cfg!(target_os = "macos") {
+        Reporter::Nextest
+    } else {
+        Reporter::Status
+    };
+    assert_eq!(of(&["cargo", "xtask", "smoke"]), smoke);
+    assert_eq!(of(&["cargo", "xtask", "smoke", "--app", "a.app"]), smoke);
     assert_eq!(of(&["node", "--test", "tests/a.test.mjs"]), Reporter::Node);
     assert_eq!(
         of(&[
@@ -29,6 +60,11 @@ fn a_command_is_reported_by_the_runner_of_its_tests() {
         &["node", "app/scripts/bundle-ui.mjs"][..],
         &["node", "node.exe", "cf.mjs"],
         &["cargo", "build", "-p", "x"],
+        &["cargo", "xtask", "build-cf", "--offline"],
+        &["cargo", "xtask", "smoke-updater", "--export-bridge"],
+        &["cargo", "xtask", "test", "no-such-suite"],
+        &["cargo", "xtask", "smoke", "--no-such-option"],
+        &["cargo", "xtask", "app", "clippy"],
         &["git", "status"],
         &[],
     ] {
@@ -40,7 +76,8 @@ fn a_command_is_reported_by_the_runner_of_its_tests() {
 fn cargo_test_is_run_by_nextest_with_its_own_words_and_a_config_that_writes_the_report_to_the_run()
 {
     let dir = tempfile::tempdir().unwrap();
-    let setup = Reporter::Nextest
+    let context = checkout(Path::new("/checkout"));
+    let invocation = Reporter::Nextest
         .setup(
             &words(&[
                 "cargo",
@@ -55,15 +92,15 @@ fn cargo_test_is_run_by_nextest_with_its_own_words_and_a_config_that_writes_the_
                 "b",
             ]),
             dir.path(),
+            &context,
             "/tools/cargo-nextest",
-            None,
         )
         .unwrap();
     let config = dir.path().join("nextest.toml");
+    assert_eq!(invocation.program, "/tools/cargo-nextest");
     assert_eq!(
-        setup.words,
+        args(&invocation),
         [
-            "/tools/cargo-nextest",
             "nextest",
             "run",
             "--profile",
@@ -80,7 +117,8 @@ fn cargo_test_is_run_by_nextest_with_its_own_words_and_a_config_that_writes_the_
             "b",
         ]
     );
-    assert!(setup.env.is_empty());
+    assert_eq!(invocation.cwd, Path::new("/checkout"));
+    assert!(invocation.vars.is_empty());
     let written = fs::read_to_string(&config).unwrap();
     let store = dir.path().display().to_string().replace('\\', "/");
     assert_eq!(
@@ -92,39 +130,89 @@ fn cargo_test_is_run_by_nextest_with_its_own_words_and_a_config_that_writes_the_
     );
 }
 
-#[test]
-fn a_suite_of_xtask_s_has_cargo_start_each_test_binary_through_plants_log() {
-    let dir = Path::new("/runs/7");
-    let command = words(&["cargo", "xtask", "app", "test", "file_drop"]);
-    let setup = Reporter::Libtest
-        .setup(
-            &command,
-            dir,
-            "",
-            Some(("CARGO_TARGET_AARCH64_APPLE_DARWIN_RUNNER", "/target/xtask")),
-        )
+/// What nextest is asked to run for `command`, a suite of xtask's, in `context`: its
+/// words after the config file, its folder and its variables.
+fn under_nextest_for(command: &[&str], context: &Context) -> (Vec<String>, PathBuf, Vec<String>) {
+    let dir = tempfile::tempdir().unwrap();
+    let invocation = Reporter::of(&words(command))
+        .setup(&words(command), dir.path(), context, "/tools/cargo-nextest")
         .unwrap();
-    assert_eq!(setup.words, command);
+    assert_eq!(invocation.program, "/tools/cargo-nextest");
+    let all = args(&invocation);
     assert_eq!(
-        setup.env,
-        [(
-            OsString::from("CARGO_TARGET_AARCH64_APPLE_DARWIN_RUNNER"),
-            OsString::from(format!("/target/xtask plants-log {}", dir.display())),
-        )]
+        all[..5],
+        ["nextest", "run", "--profile", "plants", "--config-file"]
     );
+    let vars = invocation
+        .vars
+        .iter()
+        .map(|(name, value)| format!("{}={:?}", name.to_string_lossy(), value))
+        .collect();
+    (all[6..].to_vec(), invocation.cwd, vars)
 }
 
 #[test]
-fn node_writes_its_junit_report_to_the_run_beside_the_report_it_prints() {
-    let junit = Path::new("/runs/7/junit.xml");
+fn a_suite_of_xtask_s_is_the_cargo_test_it_runs_under_nextest_in_its_folder_with_its_variables() {
+    let context = checkout(Path::new("/checkout"));
+    let (words, cwd, vars) =
+        under_nextest_for(&["cargo", "xtask", "app", "test", "file_drop"], &context);
+    assert_eq!(words, ["--offline", "--", "file_drop"]);
+    assert_eq!(cwd, Path::new("/checkout").join("app/src-tauri"));
     assert_eq!(
-        node_words(&words(&["node", "--test", "tests/a.test.mjs"]), junit),
+        vars,
+        [r#"TAURI_CONFIG=Some("{\"bundle\":{\"resources\":null}}")"#]
+    );
+    let (words, cwd, vars) =
+        under_nextest_for(&["cargo", "xtask", "test", "agents", "--offline"], &context);
+    assert_eq!(
+        words,
         [
-            "node",
+            "-p",
+            "cf-e2e",
+            "--test",
+            "daemon",
+            "agents_proof::",
+            "--offline"
+        ]
+    );
+    assert_eq!(cwd, Path::new("/checkout"));
+    assert!(vars.is_empty());
+    if cfg!(target_os = "macos") {
+        let (words, cwd, vars) =
+            under_nextest_for(&["cargo", "xtask", "smoke", "--app", "a.app"], &context);
+        assert_eq!(
+            words,
+            [
+                "-p",
+                "cf-e2e",
+                "--test",
+                "smoke",
+                "--",
+                "--ignored",
+                "--nocapture"
+            ]
+        );
+        assert_eq!(cwd, Path::new("/checkout"));
+        let app = Path::new("/checkout").join("a.app");
+        assert_eq!(vars, [format!("CONSENSFLOW_SMOKE_APP=Some({:?})", app)]);
+    }
+}
+
+#[test]
+fn node_writes_the_plants_report_to_the_run_beside_the_report_it_prints() {
+    let reporter = "./app/src-tauri/target/plants-runs/run-7/plants.mjs";
+    let report = Path::new("/runs/7/node.jsonl");
+    assert_eq!(
+        node_words(
+            &words(&["node", "--test", "tests/a.test.mjs"]),
+            reporter,
+            report
+        ),
+        [
             "--test-reporter=spec",
             "--test-reporter-destination=stdout",
-            "--test-reporter=junit",
-            &format!("--test-reporter-destination={}", junit.display()),
+            &format!("--test-reporter={reporter}"),
+            &format!("--test-reporter-destination={}", report.display()),
             "--test",
             "tests/a.test.mjs",
         ]
@@ -139,30 +227,45 @@ fn node_writes_its_junit_report_to_the_run_beside_the_report_it_prints() {
                 "--test-reporter-destination=out.txt",
                 "tests/a.test.mjs"
             ]),
-            junit
+            reporter,
+            report
         ),
         [
-            "node",
             "--test-reporter=tap",
             "--test-reporter-destination=stdout",
-            "--test-reporter=junit",
-            &format!("--test-reporter-destination={}", junit.display()),
+            &format!("--test-reporter={reporter}"),
+            &format!("--test-reporter-destination={}", report.display()),
             "--test",
             "tests/a.test.mjs",
         ]
     );
-    let setup = Reporter::Node
+    // The reporter is written into the run's folder, and named from the checkout's root.
+    let root = tempfile::tempdir().unwrap();
+    let dir = root.path().join("app/src-tauri/target/plants-runs/run-7");
+    fs::create_dir_all(&dir).unwrap();
+    let invocation = Reporter::Node
         .setup(
             &words(&["node", "--test", "a.test.mjs"]),
-            Path::new("/runs/7"),
+            &dir,
+            &checkout(root.path()),
             "",
-            None,
         )
         .unwrap();
-    assert!(setup.env.is_empty());
-    assert!(setup.words.contains(&format!(
+    assert_eq!(invocation.program, "node");
+    assert_eq!(invocation.cwd, root.path());
+    assert!(invocation.vars.is_empty());
+    assert_eq!(
+        fs::read_to_string(dir.join("plants.mjs")).unwrap(),
+        NODE_REPORTER
+    );
+    let said = args(&invocation);
+    assert!(
+        said.contains(&format!("--test-reporter={reporter}")),
+        "{said:?}"
+    );
+    assert!(said.contains(&format!(
         "--test-reporter-destination={}",
-        Path::new("/runs/7").join("junit.xml").display()
+        dir.join("node.jsonl").display()
     )));
 }
 
@@ -178,11 +281,13 @@ fn playwright_writes_its_json_report_to_the_run_beside_the_list_it_prints() {
         "file drop",
     ]);
     let dir = Path::new("/runs/7");
-    let setup = Reporter::Playwright.setup(&command, dir, "", None).unwrap();
+    let invocation = Reporter::Playwright
+        .setup(&command, dir, &checkout(Path::new("/checkout")), "")
+        .unwrap();
+    assert_eq!(invocation.program, "node");
     assert_eq!(
-        setup.words,
+        args(&invocation),
         [
-            "node",
             "app/node_modules/@playwright/test/cli.js",
             "test",
             "--reporter=list,json",
@@ -192,52 +297,52 @@ fn playwright_writes_its_json_report_to_the_run_beside_the_list_it_prints() {
         ]
     );
     assert_eq!(
-        setup.env,
+        invocation.vars,
         [(
             OsString::from("PLAYWRIGHT_JSON_OUTPUT_FILE"),
-            dir.join("report.json").into_os_string(),
+            Some(dir.join("report.json").into_os_string()),
         )]
     );
 }
 
 #[test]
 fn a_command_that_says_no_more_than_its_status_is_run_as_it_is_and_reports_nothing() {
-    let command = words(&["node", "app/scripts/bundle-ui.mjs"]);
+    let command = words(&["cargo", "xtask", "smoke-updater", "--export-bridge"]);
     let dir = tempfile::tempdir().unwrap();
-    let setup = Reporter::Status
-        .setup(&command, dir.path(), "", None)
+    let invocation = Reporter::Status
+        .setup(&command, dir.path(), &checkout(Path::new("/checkout")), "")
         .unwrap();
-    assert_eq!(setup.words, command);
-    assert!(setup.env.is_empty());
+    assert_eq!(invocation.program, "cargo");
+    assert_eq!(args(&invocation), command[1..]);
+    assert_eq!(invocation.cwd, Path::new("/checkout"));
+    assert!(invocation.vars.is_empty());
     fs::write(dir.path().join("junit.xml"), "<testsuites/>").unwrap();
     assert_eq!(Reporter::Status.results(dir.path()), None);
 }
 
 #[test]
-fn each_report_is_read_from_where_its_runner_wrote_it_and_none_is_none() {
+fn each_report_is_read_from_where_its_runner_wrote_it_and_one_that_is_not_there_is_an_error() {
     let dir = tempfile::tempdir().unwrap();
-    for reporter in [
-        Reporter::Nextest,
-        Reporter::Libtest,
-        Reporter::Node,
-        Reporter::Playwright,
-    ] {
-        assert_eq!(reporter.results(dir.path()), None, "{reporter:?}");
+    for reporter in [Reporter::Nextest, Reporter::Node, Reporter::Playwright] {
+        let said = reporter.results(dir.path()).unwrap().unwrap_err();
+        assert!(said.contains("could not be read"), "{reporter:?}: {said}");
     }
-    let failed = |name: &str| {
-        format!("<testsuites><testcase name=\"{name}\"><failure/></testcase></testsuites>")
-    };
     fs::create_dir_all(dir.path().join("plants")).unwrap();
-    fs::write(dir.path().join("plants/junit.xml"), failed("a::nextest")).unwrap();
-    fs::write(dir.path().join("junit.xml"), failed("node")).unwrap();
+    fs::write(
+        dir.path().join("plants/junit.xml"),
+        "<testsuites><testcase name=\"a::nextest\"><failure/></testcase></testsuites>",
+    )
+    .unwrap();
+    fs::write(
+        dir.path().join("node.jsonl"),
+        "{\"path\":[\"node\"],\"file\":\"/a.test.mjs\",\"line\":1,\"column\":1,\"failed\":true,\"skipped\":false}\n{\"end\":true}\n",
+    )
+    .unwrap();
     fs::write(
         dir.path().join("report.json"),
         r#"{"suites": [{"title": "a.spec.mjs", "specs": [{"title": "page", "tests": [{"status": "unexpected"}]}]}], "errors": []}"#,
     )
     .unwrap();
-    // A log for each test binary, in the order cargo ran them.
-    fs::write(dir.path().join("0001-b.log"), "failed b::second\n").unwrap();
-    fs::write(dir.path().join("0000-a.log"), "ok a::first\n").unwrap();
     let failed_of = |reporter: Reporter| -> Vec<String> {
         let results = reporter.results(dir.path()).unwrap().unwrap();
         results
@@ -249,23 +354,119 @@ fn each_report_is_read_from_where_its_runner_wrote_it_and_none_is_none() {
     assert_eq!(failed_of(Reporter::Nextest), ["a::nextest true"]);
     assert_eq!(failed_of(Reporter::Node), ["node true"]);
     assert_eq!(failed_of(Reporter::Playwright), ["page true"]);
+    // A report that is empty, cut short or not one says why, with its path.
+    for (file, text, reporter) in [
+        ("plants/junit.xml", "", Reporter::Nextest),
+        (
+            "plants/junit.xml",
+            "<testsuites><testcase name=\"a\"/>",
+            Reporter::Nextest,
+        ),
+        ("node.jsonl", "", Reporter::Node),
+        ("report.json", "{", Reporter::Playwright),
+    ] {
+        fs::write(dir.path().join(file), text).unwrap();
+        let said = reporter.results(dir.path()).unwrap().unwrap_err();
+        assert!(
+            said.starts_with(&dir.path().join(file).display().to_string()),
+            "{said}"
+        );
+    }
+}
+
+#[test]
+fn the_tests_of_cf_e2e_run_one_at_a_time_and_every_other_s_beside_each_other() {
+    let names = |line: &[&str]| names_cf_e2e(&line.iter().map(OsString::from).collect::<Vec<_>>());
+    assert!(names(&[
+        "test",
+        "--offline",
+        "-p",
+        "cf-e2e",
+        "--test",
+        "rig"
+    ]));
+    assert!(names(&["test", "--package", "cf-e2e"]));
+    assert!(names(&["test", "--package=cf-e2e"]));
+    assert!(names(&["test", "-pcf-e2e"]));
+    assert!(!names(&["test", "-p", "cf-engine", "--test", "cf-e2e"]));
+    assert!(!names(&["test", "-p", "cf", "--", "-p", "cf-e2e"]));
+    assert!(!names(&["test", "--offline", "--", "file_drop"]));
+    // The suites of xtask's that are tests of cf-e2e name it.
+    let dir = tempfile::tempdir().unwrap();
+    for (suite, one) in [
+        (&["cargo", "xtask", "test", "clis", "--offline"][..], true),
+        (&["cargo", "xtask", "app", "test", "file_drop"], false),
+        (
+            &[
+                "cargo",
+                "test",
+                "--offline",
+                "-p",
+                "cf-e2e",
+                "--test",
+                "regressions",
+            ],
+            true,
+        ),
+        (&["cargo", "test", "--offline", "-p", "cf", "--lib"], false),
+    ] {
+        Reporter::Nextest
+            .setup(
+                &words(suite),
+                dir.path(),
+                &checkout(Path::new("/checkout")),
+                "",
+            )
+            .unwrap();
+        let config = fs::read_to_string(dir.path().join("nextest.toml")).unwrap();
+        assert_eq!(config.contains("\ntest-threads = 1\n"), one, "{suite:?}");
+    }
+    assert!(nextest_config(dir.path(), true)
+        .contains("[profile.plants]\nretries = 0\nfail-fast = false\ntest-threads = 1\n\n"));
+}
+
+#[test]
+fn nextest_is_given_none_of_the_variables_of_its_own_that_this_run_was_given() {
+    // As a run of the plants under a nextest of its own (the tooling table's) is given
+    // them, or a shell that sets them: each would win over the run's config.
+    let context = Context {
+        root: PathBuf::from("/checkout"),
+        env: Env::from_vars([
+            ("NEXTEST_TEST_THREADS", "8"),
+            ("NEXTEST_RETRIES", "2"),
+            ("PATH", "/bin"),
+        ]),
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let invocation = Reporter::Nextest
+        .setup(
+            &words(&["cargo", "test", "-p", "cf-e2e"]),
+            dir.path(),
+            &context,
+            "",
+        )
+        .unwrap();
+    let mut taken: Vec<(String, Option<OsString>)> = invocation
+        .vars
+        .iter()
+        .map(|(name, value)| (name.to_string_lossy().into_owned(), value.clone()))
+        .collect();
+    taken.sort();
     assert_eq!(
-        failed_of(Reporter::Libtest),
-        ["a::first false", "b::second true"]
+        taken,
+        [
+            ("NEXTEST_RETRIES".to_owned(), None),
+            ("NEXTEST_TEST_THREADS".to_owned(), None)
+        ]
     );
-    // A report that cannot be read says why.
-    fs::write(dir.path().join("report.json"), "{").unwrap();
-    assert!(matches!(
-        Reporter::Playwright.results(dir.path()),
-        Some(Err(_))
-    ));
 }
 
 #[test]
 fn the_folder_of_nextest_s_store_is_written_with_forward_slashes() {
-    let config = nextest_config(Path::new(
-        r"C:\checkout\app\src-tauri\target\plants-runs\run-1",
-    ));
+    let config = nextest_config(
+        Path::new(r"C:\checkout\app\src-tauri\target\plants-runs\run-1"),
+        false,
+    );
     assert!(
         config
             .starts_with("[store]\ndir = \"C:/checkout/app/src-tauri/target/plants-runs/run-1\"\n"),

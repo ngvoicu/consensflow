@@ -66,7 +66,7 @@ fn run(context: &Context, args: &[OsString], console: &mut Console) -> Result<i3
 
 /// The app the command line names, as it was written: none when it names none.
 /// `--app PATH` or `--app=PATH`, and nothing else.
-fn app_of(args: &[OsString]) -> Result<Option<PathBuf>, String> {
+pub(crate) fn app_of(args: &[OsString]) -> Result<Option<PathBuf>, String> {
     let mut app = None;
     let mut rest = args.iter();
     while let Some(arg) = rest.next() {

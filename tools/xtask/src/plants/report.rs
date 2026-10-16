@@ -64,7 +64,7 @@ pub fn line(verdict: Verdict, name: &str, seconds: u64, caught_by: &str) -> Stri
 
 /// Whether the test named `name` is the one `meant`: its whole name, or the end of
 /// it from a boundary of its path, `::` of a Rust test's (`m::tests::the_test`) or
-/// ` › ` of a Playwright test's groups (`a group › the test`). `the_test` is not
+/// ` › ` of the groups of a Playwright test or a Node one (`a group › the test`). `the_test` is not
 /// `not_the_test` nor `the_test_too`.
 pub fn is_meant(name: &str, meant: &str) -> bool {
     !meant.is_empty()

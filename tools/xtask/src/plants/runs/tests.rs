@@ -3,18 +3,36 @@ use std::time::{Duration, Instant};
 use super::results::Test;
 use super::*;
 
-/// A run of `command` that ended with `code` having written `output`, its report `results`.
-fn ran_by(command: &[&str], code: Option<i32>, output: &str, results: Option<Results>) -> Ran {
-    Ran::new(command, code, output, results)
+/// A run of `command` that ended with `code` having written `output`, its report `report`.
+fn ran_by(
+    command: &[&str],
+    code: Option<i32>,
+    output: &str,
+    report: Option<Result<Results, String>>,
+) -> Ran {
+    Ran::new(command, code, output, report)
 }
 
-/// A report of `tests`, each a name and whether it failed.
+/// A report that was read, of `results`.
+fn read(results: Results) -> Option<Result<Results, String>> {
+    Some(Ok(results))
+}
+
+/// A report that could not be read.
+fn unread() -> Option<Result<Results, String>> {
+    Some(Err(
+        "/run/junit.xml could not be read: No such file or directory".to_owned(),
+    ))
+}
+
+/// A report of `tests`, each a name and whether it failed, all of one test binary.
 fn results(tests: &[(&str, bool)]) -> Results {
     Results {
         tests: tests
             .iter()
             .map(|(name, failed)| Test {
                 name: (*name).to_owned(),
+                at: "x".to_owned(),
                 file: None,
                 failed: *failed,
             })
@@ -30,6 +48,7 @@ fn node_results(tests: &[(&str, &str, bool)]) -> Results {
             .iter()
             .map(|(name, file, failed)| Test {
                 name: (*name).to_owned(),
+                at: format!("{file}:1:1"),
                 file: Some((*file).to_owned()),
                 failed: *failed,
             })
@@ -40,7 +59,7 @@ fn node_results(tests: &[(&str, &str, bool)]) -> Results {
 
 /// A run of `cargo test`, which nextest runs.
 const CARGO: [&str; 4] = ["cargo", "test", "-p", "x"];
-/// A suite of xtask's, whose test binaries log their tests.
+/// A suite of xtask's that is a `cargo test`, which nextest runs too.
 const XTASK: [&str; 5] = ["cargo", "xtask", "app", "test", "file_drop"];
 /// A run of `node --test` on two test files.
 const NODE: [&str; 4] = ["node", "--test", "tests/a.test.mjs", "tests/b.test.mjs"];
@@ -51,6 +70,8 @@ const PAGE: [&str; 4] = [
     "test",
     "app/tests/core-page.spec.mjs",
 ];
+/// A command of xtask's that says no more than its status.
+const SMOKE: [&str; 4] = ["cargo", "xtask", "smoke-updater", "--export-bridge"];
 
 /// What every runner prints of a test that failed, a footer and a summary of each,
 /// naming the test that passed: what a test may print.
@@ -58,7 +79,7 @@ const PRINTED: &str = "test m::the_test ... FAILED\n\nfailures:\n    m::the_test
     test result: FAILED. 0 passed; 1 failed\nnot ok 1 - the_test\n\
     ✖ failing tests:\n\ntest at tests/a.test.mjs:1:1\n✖ the_test (1ms)\n  Error: no\n\
     1 failed\n    a.spec.mjs:1:1 › the_test \n  1 error was not a part of any test, see above for details\n\
-    Error: No tests found.\n";
+    Error: No tests found.\nerror[E0308]: mismatched types\nerror: could not compile `x`\n";
 
 #[test]
 fn the_tests_a_run_caught_are_those_its_report_says_failed_each_once_in_the_order_it_says_them() {
@@ -69,11 +90,11 @@ fn the_tests_a_run_caught_are_those_its_report_says_failed_each_once_in_the_orde
         ("b::second", true),
     ]);
     assert_eq!(
-        ran_by(&CARGO, Some(100), "", Some(report.clone())).caught(),
+        ran_by(&CARGO, Some(100), "", read(report.clone())).caught(),
         ["b::second", "a::first"]
     );
     // A run that exited with success caught nothing, whatever its report.
-    assert!(ran_by(&CARGO, Some(0), "", Some(report))
+    assert!(ran_by(&CARGO, Some(0), "", read(report))
         .caught()
         .is_empty());
 }
@@ -84,59 +105,71 @@ fn what_a_run_printed_is_never_read_for_a_test_that_failed_whoever_ran_it() {
         // The meant test passed, said so by its report, and printed every runner's words
         // for it failing; another failed.
         let report = results(&[("m::the_test", false), ("m::other", true)]);
-        let ran = ran_by(command, Some(1), PRINTED, Some(report));
+        let ran = ran_by(command, Some(1), PRINTED, read(report));
         assert_eq!(ran.caught(), ["m::other"], "{command:?}");
         assert!(ran.names_tests());
         assert_eq!(ran.broken(), None, "{command:?}");
         assert!(ran.compiled(), "{command:?}");
-        assert_eq!(ran.tests_ran(), ["m::the_test", "m::other"]);
+        let ran_names: Vec<&str> = ran.tests().iter().map(|test| test.name.as_str()).collect();
+        assert_eq!(ran_names, ["m::the_test", "m::other"]);
     }
 }
 
 #[test]
-fn a_run_that_failed_with_no_report_or_none_failed_in_it_is_the_catch_itself() {
+fn a_run_whose_reporter_wrote_no_report_it_could_read_catches_nothing_whatever_its_status() {
+    for command in [&CARGO[..], &XTASK, &NODE, &PAGE] {
+        for code in [Some(1), Some(100), None, Some(0)] {
+            let ran = ran_by(command, code, PRINTED, unread());
+            assert!(ran.caught().is_empty(), "{command:?} {code:?}");
+            assert!(!ran.names_tests());
+            assert!(ran.tests().is_empty());
+            assert_eq!(
+                ran.broken().as_deref(),
+                Some("no report of its tests could be read: /run/junit.xml could not be read: No such file or directory"),
+                "{command:?} {code:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_run_whose_report_names_no_failure_or_that_has_no_reporter_is_the_catch_itself() {
     assert_eq!(
-        ran_by(&CARGO, Some(3), PRINTED, None).caught(),
-        ["test -p x: ended with 3"]
+        ran_by(&SMOKE, Some(3), PRINTED, None).caught(),
+        ["xtask smoke-updater --export-bridge: ended with 3"]
     );
     assert_eq!(
-        ran_by(&CARGO, None, "", None).caught(),
-        ["test -p x: was ended by a signal"]
-    );
-    let died = "error: test failed, to rerun pass `-p x --test t`\n\nCaused by:\n  \
-                process didn't exit successfully: `/target/t-1a --nocapture` (signal: 11, SIGSEGV: invalid memory reference)\n";
-    assert_eq!(
-        ran_by(&XTASK, Some(101), died, Some(results(&[("a::passes", false)]))).caught(),
-        ["xtask app test file_drop: the test binary died (signal: 11, SIGSEGV: invalid memory reference)"]
+        ran_by(&SMOKE, None, "", None).caught(),
+        ["xtask smoke-updater --export-bridge: was ended by a signal"]
     );
     let silent = ran_by(
         &XTASK,
-        Some(101),
+        Some(100),
         "",
-        Some(results(&[("a::passes", false)])),
+        read(results(&[("a::passes", false)])),
     );
     assert!(!silent.names_tests());
     assert_eq!(
         silent.caught(),
-        ["xtask app test file_drop: ended with 101"]
+        ["xtask app test file_drop: ended with 100"]
     );
 }
 
 #[test]
 fn a_run_that_passed_hung_overflowed_or_did_not_build_catches_nothing() {
-    let failing = || Some(results(&[("a::fails", true)]));
+    let failing = || read(results(&[("a::fails", true)]));
     assert!(ran_by(&CARGO, Some(0), "", failing()).caught().is_empty());
     let hung = Ran {
         hung: true,
-        ..ran_by(&CARGO, None, "", None)
+        ..ran_by(&SMOKE, None, "", None)
     };
     assert!(hung.caught().is_empty());
     let overflowed = Ran {
         overflowed: true,
-        ..ran_by(&CARGO, None, "", None)
+        ..ran_by(&SMOKE, None, "", None)
     };
     assert!(overflowed.caught().is_empty());
-    let unbuilt = ran_by(&CARGO, Some(NEXTEST_BUILD_FAILED), "", None);
+    let unbuilt = ran_by(&CARGO, Some(NEXTEST_BUILD_FAILED), "", unread());
     assert!(!unbuilt.compiled());
     assert!(unbuilt.caught().is_empty());
 }
@@ -145,16 +178,19 @@ fn a_run_that_passed_hung_overflowed_or_did_not_build_catches_nothing() {
 fn nextest_says_a_build_that_failed_by_its_status_whatever_a_test_printed() {
     let quoted = "thread 'a::fails' panicked at src/lib.rs:11:9:\nerror[E0308]: mismatched types\n\
                   error: could not compile `x`\n";
-    let failed_test = ran_by(
-        &CARGO,
-        Some(100),
-        quoted,
-        Some(results(&[("a::fails", true)])),
-    );
-    assert!(failed_test.compiled());
-    assert_eq!(failed_test.caught(), ["a::fails"]);
-    // The build failed: nextest said so by its status, whatever it printed.
-    assert!(!ran_by(&CARGO, Some(101), "", None).compiled());
+    for command in [&CARGO[..], &XTASK] {
+        let failed_test = ran_by(
+            command,
+            Some(100),
+            quoted,
+            read(results(&[("a::fails", true)])),
+        );
+        assert!(failed_test.compiled());
+        assert_eq!(failed_test.caught(), ["a::fails"]);
+        // The build failed: nextest said so by its status, whatever it printed.
+        assert!(!ran_by(command, Some(101), "", unread()).compiled());
+        assert!(ran_by(command, Some(1), quoted, unread()).compiled());
+    }
 }
 
 #[test]
@@ -163,39 +199,14 @@ fn node_and_playwright_build_nothing_whatever_their_tests_say_of_a_build() {
         "Error: could not compile the response\n",
         "Error: error[E0308]: mismatched types\n",
     ] {
-        for command in [&NODE[..], &PAGE] {
-            let ran = ran_by(command, Some(1), said, Some(results(&[("the_test", true)])));
+        for command in [&NODE[..], &PAGE, &SMOKE] {
+            let ran = ran_by(command, Some(1), said, read(results(&[("the_test", true)])));
             assert!(ran.compiled(), "{command:?} {said}");
             assert_eq!(ran.caught(), ["the_test"]);
             // A run of theirs with no report is still no build of its own.
-            assert!(ran_by(command, Some(1), said, None).compiled());
+            assert!(ran_by(command, Some(1), said, unread()).compiled());
         }
     }
-}
-
-#[test]
-fn a_suite_of_xtask_s_did_not_build_where_cargo_said_so_before_any_test_binary_logged() {
-    let unbuilt =
-        "   Compiling app v1\nerror[E0308]: mismatched types\nerror: could not compile `app`\n";
-    assert!(!ran_by(&XTASK, Some(101), unbuilt, None).compiled());
-    assert!(!ran_by(
-        &XTASK,
-        Some(101),
-        "error: could not compile `app` (lib)\n",
-        None
-    )
-    .compiled());
-    // A binary logged its tests: the build was made, and a test printed the words.
-    let logged = ran_by(
-        &XTASK,
-        Some(101),
-        unbuilt,
-        Some(results(&[("a::fails", true)])),
-    );
-    assert!(logged.compiled());
-    assert_eq!(logged.caught(), ["a::fails"]);
-    // An error code is `E` and digits and `]`.
-    assert!(ran_by(&XTASK, Some(1), "error[E]: no\nerror[E12: no\n", None).compiled());
 }
 
 #[test]
@@ -206,7 +217,7 @@ fn a_node_test_file_that_ran_no_test_is_broken_whatever_the_other_files_ran() {
         &NODE,
         Some(1),
         "ℹ tests 2\nℹ pass 1\nℹ fail 1\n",
-        Some(node_results(&[
+        read(node_results(&[
             ("passes", "/checkout/tests/a.test.mjs", false),
             ("tests/b.test.mjs", "/checkout/tests/b.test.mjs", true),
         ])),
@@ -221,7 +232,7 @@ fn a_node_test_file_that_ran_no_test_is_broken_whatever_the_other_files_ran() {
         &NODE,
         Some(1),
         "",
-        Some(node_results(&[
+        read(node_results(&[
             ("passes first", "/checkout/tests/b.test.mjs", false),
             ("tests/b.test.mjs", "/checkout/tests/b.test.mjs", true),
         ])),
@@ -230,8 +241,29 @@ fn a_node_test_file_that_ran_no_test_is_broken_whatever_the_other_files_ran() {
     assert!(!late.names_tests());
     assert_eq!(late.caught(), ["tests/b.test.mjs"]);
     // No test at all.
-    let none = ran_by(&NODE, Some(1), "", Some(Results::default()));
+    let none = ran_by(&NODE, Some(1), "", read(Results::default()));
     assert_eq!(none.broken().as_deref(), Some("Node ran no test"));
+}
+
+#[test]
+fn a_node_test_file_that_loaded_and_holds_no_test_is_no_load_failure() {
+    // As Node says a file that holds no test beside one whose test failed.
+    let ran = ran_by(
+        &NODE,
+        Some(1),
+        "",
+        read(node_results(&[
+            (
+                "tests/empty.test.mjs",
+                "/checkout/tests/empty.test.mjs",
+                false,
+            ),
+            ("the_test", "/checkout/tests/a.test.mjs", true),
+        ])),
+    );
+    assert_eq!(ran.broken(), None);
+    assert!(ran.names_tests());
+    assert_eq!(ran.caught(), ["the_test"]);
 }
 
 #[test]
@@ -244,13 +276,13 @@ fn playwright_is_broken_by_an_error_outside_every_test_or_no_test_and_not_by_wha
         ],
     };
     assert_eq!(
-        ran_by(&PAGE, Some(1), "", Some(outside))
+        ran_by(&PAGE, Some(1), "", read(outside))
             .broken()
             .as_deref(),
         Some("Playwright: an error outside every test: Error: Cannot find module './a.mjs'")
     );
     assert_eq!(
-        ran_by(&PAGE, Some(1), "", Some(Results::default()))
+        ran_by(&PAGE, Some(1), "", read(Results::default()))
             .broken()
             .as_deref(),
         Some("Playwright found no test")
@@ -260,7 +292,7 @@ fn playwright_is_broken_by_an_error_outside_every_test_or_no_test_and_not_by_wha
         &PAGE,
         Some(1),
         "  1 error was not a part of any test, see above for details\nError: No tests found.\n",
-        Some(results(&[("g › the_test", true)])),
+        read(results(&[("g › the_test", true)])),
     );
     assert_eq!(quoted.broken(), None);
     assert_eq!(quoted.caught(), ["g › the_test"]);
@@ -269,29 +301,29 @@ fn playwright_is_broken_by_an_error_outside_every_test_or_no_test_and_not_by_wha
 #[test]
 fn a_run_of_rust_tests_is_broken_where_nextest_found_none_or_a_binary_could_not_say_its_own() {
     assert_eq!(
-        ran_by(&CARGO, Some(NEXTEST_NO_TESTS), "", Some(Results::default()))
+        ran_by(&CARGO, Some(NEXTEST_NO_TESTS), "", read(Results::default()))
             .broken()
             .as_deref(),
         Some("nextest found no test to run")
     );
     assert_eq!(
-        ran_by(&CARGO, Some(NEXTEST_UNLISTED), "", None)
+        ran_by(&XTASK, Some(NEXTEST_UNLISTED), "", unread())
             .broken()
             .as_deref(),
         Some("nextest: a test binary could not say its tests")
     );
     assert_eq!(
-        ran_by(&XTASK, Some(101), "", Some(Results::default()))
+        ran_by(&CARGO, Some(100), "", read(Results::default()))
             .broken()
             .as_deref(),
         Some("it ran no test")
     );
-    // No log at all is no word on its tests.
-    assert_eq!(ran_by(&XTASK, Some(101), "", None).broken(), None);
     assert_eq!(
-        ran_by(&CARGO, Some(0), "", Some(Results::default())).broken(),
+        ran_by(&CARGO, Some(0), "", read(Results::default())).broken(),
         None
     );
+    // A command that has no reporter says nothing of its tests.
+    assert_eq!(ran_by(&SMOKE, Some(1), PRINTED, None).broken(), None);
 }
 
 #[test]
@@ -310,7 +342,7 @@ fn what_cf_process_answered_is_what_the_run_did() {
         (Some(0), false, false)
     );
     assert_eq!(ended.output, "out\nerr\n");
-    assert_eq!(ended.results, None);
+    assert_eq!(ended.report, None);
 
     let failed = |message: &str, code, killed| CaptureFailed {
         message: message.into(),
@@ -395,27 +427,6 @@ fn a_build_is_judged_by_what_cargo_says_of_it_in_its_structured_words_where_it_s
     );
 }
 
-#[test]
-fn the_target_runner_is_set_by_the_variable_cargo_reads_for_this_machine_s_target() {
-    let variable = runner(Duration::from_secs(120)).runner_variable().unwrap();
-    let host = variable
-        .strip_prefix("CARGO_TARGET_")
-        .and_then(|rest| rest.strip_suffix("_RUNNER"))
-        .unwrap_or_default();
-    assert!(!host.is_empty(), "{variable}");
-    assert!(
-        host.chars()
-            .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_'),
-        "{variable}"
-    );
-    let arch = if cfg!(target_arch = "aarch64") {
-        "AARCH64_"
-    } else {
-        "X86_64_"
-    };
-    assert!(host.starts_with(arch), "{variable}");
-}
-
 // The commands below are real. Where the program is the one running these tests, each of
 // the tests it is asked for is one of the ignored ones below.
 
@@ -479,22 +490,6 @@ fn helper_has_no_colour() {
     assert_eq!(std::env::var("FORCE_COLOR").as_deref(), Ok("0"));
 }
 
-/// Passes, printing libtest's log of itself failing, and libtest's words for it.
-#[test]
-#[ignore = "a program the tests of runs start"]
-fn helper_named_meant() {
-    println!("failed plants::runs::tests::helper_named_meant");
-    println!("test plants::runs::tests::helper_named_meant ... FAILED");
-}
-
-/// Fails, printing libtest's log of the other failing.
-#[test]
-#[ignore = "a program the tests of runs start"]
-fn helper_named_other() {
-    println!("failed plants::runs::tests::helper_named_meant");
-    panic!("the other test failed");
-}
-
 fn context() -> Context {
     Context::new(&Env::from_process()).unwrap()
 }
@@ -545,7 +540,7 @@ fn a_command_that_says_no_more_than_its_status_is_the_catch_itself_whatever_it_p
     );
     assert_eq!(ran.code, Some(101));
     assert!(!ran.hung);
-    assert_eq!(ran.results, None);
+    assert_eq!(ran.report, None);
     let caught = ran.caught();
     assert_eq!(caught.len(), 1);
     assert!(caught[0].ends_with(": ended with 101"), "{}", caught[0]);
@@ -619,67 +614,6 @@ fn cargo_xtask_is_the_xtask_that_runs_the_plants_and_not_a_cargo_to_build_it_aga
     );
 }
 
-#[test]
-fn plants_log_runs_a_test_binary_with_libtest_s_log_which_nothing_a_test_prints_reaches() {
-    for nocapture in [false, true] {
-        let folder = tempfile::tempdir().unwrap();
-        let mut words: Vec<OsString> = vec![
-            "--ignored".into(),
-            "plants::runs::tests::helper_named_".into(),
-        ];
-        if nocapture {
-            words.push("--nocapture".into());
-        }
-        let binary = this_binary().into_os_string();
-        let invocation = logged(folder.path(), &binary, &words, context().root);
-        let ran = process::capture(&invocation, &context().env).unwrap();
-        assert_eq!(ran.code, 101, "the binary's own status");
-        assert!(
-            ran.stdout
-                .contains("failed plants::runs::tests::helper_named_meant"),
-            "{}",
-            ran.stdout
-        );
-        let read = Reporter::Libtest.results(folder.path()).unwrap().unwrap();
-        // In the order the tests ended, which their threads decide.
-        let mut said: Vec<(&str, bool)> = read
-            .tests
-            .iter()
-            .map(|test| (test.name.as_str(), test.failed))
-            .collect();
-        said.sort_unstable();
-        assert_eq!(
-            said,
-            [
-                ("plants::runs::tests::helper_named_meant", false),
-                ("plants::runs::tests::helper_named_other", true),
-            ],
-            "nocapture: {nocapture}"
-        );
-        // A log for each binary started, named by the binary's, in turn.
-        let logs: Vec<String> = fs::read_dir(folder.path())
-            .unwrap()
-            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
-            .collect();
-        assert_eq!(logs.len(), 1);
-        assert!(logs[0].starts_with("0000-"), "{logs:?}");
-        let next = logged(folder.path(), &binary, &[], context().root);
-        let last = next.args.last().unwrap().to_string_lossy().into_owned();
-        assert!(last.contains("0001-"), "{last}");
-    }
-}
-
-#[test]
-fn plants_log_takes_a_folder_a_test_binary_and_its_words() {
-    let (mut out, mut err) = (Vec::new(), Vec::new());
-    let mut console = Console {
-        out: &mut out,
-        err: &mut err,
-    };
-    let said = log(&context(), &[OsString::from("folder")], &mut console).unwrap_err();
-    assert!(matches!(said, Failure::Usage(_)), "{said}");
-}
-
 /// Whether `program` is on the PATH of this run.
 fn on_path(program: &str) -> bool {
     let found = process::resolved(OsStr::new(program), &context().env);
@@ -706,8 +640,43 @@ test('passes at the top', () => {})
 "#;
 const NODE_SECOND: &str = "await Promise.resolve()\nthrow new Error('thrown after an await')\n";
 
+/// The cases the reviews of the plants' runner found Node's JUnit report wrong in: a
+/// test to do that fails; a parent that fails after its subtest passed; a test named
+/// with an entity that fails beside one named with the quote it stands for, which
+/// passes; and, in a file of its own, no test at all.
+const NODE_CASES: &str = r#"import { test } from 'node:test'
+
+test('a todo that fails', { todo: true }, () => {
+  throw new Error('a test to do fails')
+})
+
+test('a parent that fails itself', async (t) => {
+  await t.test('its child passes', () => {})
+  throw new Error('the parent fails after its child')
+})
+
+test('says &quot;hi&quot;', () => {
+  throw new Error('the one named with an entity fails')
+})
+
+test('says "hi"', () => {})
+"#;
+const NODE_EMPTY: &str = "export const nothing = 1\n";
+
+/// The names of the tests `ran`'s report says failed, and those it says passed.
+fn failed_and_passed(ran: &Ran) -> (Vec<&str>, Vec<&str>) {
+    let names = |failed: bool| -> Vec<&str> {
+        ran.tests()
+            .iter()
+            .filter(|test| test.failed == failed)
+            .map(|test| test.name.as_str())
+            .collect()
+    };
+    (names(true), names(false))
+}
+
 #[test]
-fn node_s_junit_report_names_each_test_as_written_and_a_file_that_ran_none_of_its_own() {
+fn node_s_report_names_each_test_as_written_and_a_file_that_ran_none_of_its_own() {
     assert!(on_path("node"), "node is not on the PATH");
     let checkout = tempfile::tempdir().unwrap();
     fs::write(checkout.path().join("a.test.mjs"), NODE_FIRST).unwrap();
@@ -724,13 +693,14 @@ fn node_s_junit_report_names_each_test_as_written_and_a_file_that_ran_none_of_it
     assert_eq!(first.broken(), None);
     assert_eq!(
         first.caught(),
-        [r#"the meant one # marked "quoted""#],
+        [r#"a group › the meant one # marked "quoted""#],
         "{}",
         first.output
     );
     assert!(first
-        .tests_ran()
-        .contains(&"passes, and prints that it failed"));
+        .tests()
+        .iter()
+        .any(|test| test.name == "a group › passes, and prints that it failed"));
     // The report the table asked for is the one printed.
     let tap = ended(
         runner
@@ -757,6 +727,45 @@ fn node_s_junit_report_names_each_test_as_written_and_a_file_that_ran_none_of_it
         "{}",
         both.output
     );
+}
+
+#[test]
+fn node_s_report_holds_a_parent_s_own_failure_neither_fails_nor_passes_a_test_to_do_and_tells_an_entity_from_its_character(
+) {
+    assert!(on_path("node"), "node is not on the PATH");
+    let checkout = tempfile::tempdir().unwrap();
+    fs::write(checkout.path().join("cases.test.mjs"), NODE_CASES).unwrap();
+    fs::write(checkout.path().join("empty.test.mjs"), NODE_EMPTY).unwrap();
+    let mut runner = runner_in(checkout.path());
+    let ran = ended(
+        runner
+            .run(&words(&[
+                "node",
+                "--test",
+                "cases.test.mjs",
+                "empty.test.mjs",
+            ]))
+            .unwrap(),
+    );
+    assert_eq!(ran.code, Some(1), "{}", ran.output);
+    let (failed, passed) = failed_and_passed(&ran);
+    assert_eq!(
+        failed,
+        ["a parent that fails itself", "says &quot;hi&quot;"],
+        "{}",
+        ran.output
+    );
+    assert_eq!(
+        passed,
+        [
+            "a parent that fails itself › its child passes",
+            r#"says "hi""#,
+            "empty.test.mjs",
+        ]
+    );
+    // A file that loaded and holds no test did not fail, and broke nothing.
+    assert_eq!(ran.broken(), None);
+    assert!(ran.names_tests());
 }
 
 /// A spec of Playwright's whose test in a group passes, writing Playwright's summary of
@@ -820,7 +829,13 @@ fn playwright_s_json_report_names_each_test_and_the_errors_outside_every_test() 
     assert_eq!(printed.code, Some(1), "{}", printed.output);
     assert_eq!(printed.broken(), None, "{}", printed.output);
     assert_eq!(printed.caught(), ["another fails"], "{}", printed.output);
-    assert!(printed.tests_ran().contains(&"a group › the meant one"));
+    let meant = printed
+        .tests()
+        .iter()
+        .find(|test| test.name == "a group › the meant one")
+        .unwrap();
+    // Told from another test of its name by where it is written.
+    assert_eq!(meant.at, "prints.spec.mjs:4:3");
     // The list is printed, whatever reporter the configuration names.
     assert!(
         printed.output.contains("a group › the meant one"),
@@ -846,11 +861,50 @@ fn playwright_s_json_report_names_each_test_and_the_errors_outside_every_test() 
         "{broken}\n{}",
         missing.output
     );
+
+    // A configuration that throws as it loads: Playwright fails before its JSON
+    // reporter is made, and no report is written. The run names no test and catches
+    // nothing, whatever its status.
+    fs::write(
+        folder.path().join("throws.config.mjs"),
+        "throw new Error('the configuration does not load')\n",
+    )
+    .unwrap();
+    let unloaded = ended(
+        runner
+            .run(&words(&[
+                "node",
+                cli,
+                "test",
+                "--config",
+                &at("throws.config.mjs"),
+                &at("prints.spec.mjs"),
+            ]))
+            .unwrap(),
+    );
+    assert_ne!(unloaded.code, Some(0), "{}", unloaded.output);
+    assert!(
+        unloaded.output.contains("the configuration does not load"),
+        "{}",
+        unloaded.output
+    );
+    assert!(
+        matches!(unloaded.report, Some(Err(_))),
+        "{:?}",
+        unloaded.report
+    );
+    assert!(unloaded.caught().is_empty());
+    let broken = unloaded.broken().unwrap_or_default();
+    assert!(
+        broken.starts_with("no report of its tests could be read: "),
+        "{broken}"
+    );
 }
 
 /// A crate of Rust tests: one that passes, printing libtest's words for itself failing,
-/// its failures list and a footer, and one that fails with a panic quoting a build that
-/// failed; a feature that does not build; a test binary that cannot say its tests.
+/// its failures list and a footer; one that fails with a panic quoting a build that
+/// failed; one ignored for a reason that holds libtest's log of the first failing; a
+/// feature that does not build; a test binary that cannot say its tests.
 const CRATE_MANIFEST: &str = "[package]\nname = \"plants-fixture\"\nversion = \"0.1.0\"\n\
     edition = \"2021\"\npublish = false\n\n[[test]]\nname = \"unlisted\"\nharness = false\n\n\
     [features]\nbroken = []\n\n[workspace]\n";
@@ -871,6 +925,10 @@ mod tests {
     fn another_fails_quoting_a_build() {
         panic!("error[E0308]: mismatched types\nerror: could not compile `x`");
     }
+
+    #[test]
+    #[ignore = "a reason\nfailed tests::the_meant_one_passes_and_prints_a_footer\nignored: the rest"]
+    fn ignored_with_a_reason() {}
 }
 "#;
 const CRATE_UNLISTED: &str = "fn main() {\n    std::process::exit(3);\n}\n";
@@ -917,15 +975,35 @@ fn nextest_s_junit_report_names_the_tests_that_failed_and_its_status_what_else_h
         "{}",
         failed.output
     );
+    // The meant one passed, whatever it printed and whatever the ignored one's reason
+    // says; the ignored one did not run.
+    let (failed_names, passed_names) = failed_and_passed(&failed);
+    assert_eq!(failed_names, ["tests::another_fails_quoting_a_build"]);
+    assert_eq!(
+        passed_names,
+        ["tests::the_meant_one_passes_and_prints_a_footer"]
+    );
     assert!(failed
-        .tests_ran()
-        .contains(&"tests::the_meant_one_passes_and_prints_a_footer"));
+        .tests()
+        .iter()
+        .all(|test| test.at == "plants-fixture"));
     // libtest's words for a filter, passed on.
     let skipped = cargo_test(&["--lib", "--", "--skip", "another_fails"]);
     assert_eq!(skipped.code, Some(0), "{}", skipped.output);
     assert_eq!(
-        skipped.tests_ran(),
-        ["tests::the_meant_one_passes_and_prints_a_footer"]
+        failed_and_passed(&skipped),
+        (
+            Vec::new(),
+            vec!["tests::the_meant_one_passes_and_prints_a_footer"]
+        )
+    );
+    // The ignored one, asked for, ran, and passed.
+    let ignored = cargo_test(&["--lib", "--", "--ignored"]);
+    assert_eq!(
+        failed_and_passed(&ignored),
+        (Vec::new(), vec!["tests::ignored_with_a_reason"]),
+        "{}",
+        ignored.output
     );
 
     let unbuilt = cargo_test(&["--lib", "--features", "broken"]);
@@ -941,6 +1019,92 @@ fn nextest_s_junit_report_names_the_tests_that_failed_and_its_status_what_else_h
         Some("nextest: a test binary could not say its tests"),
         "{}",
         unlisted.output
+    );
+}
+
+/// Two tests that each leave a mark in their crate's folder while they run, and wait
+/// a while for the other's: one that sees it ran beside the other, and fails. Run one
+/// at a time, neither sees the other's; run beside each other, both do.
+const ALONE_LIB: &str = r#"#[cfg(test)]
+mod tests {
+    use std::time::{Duration, Instant};
+
+    fn alone(own: &str, other: &str) {
+        let folder = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        std::fs::write(folder.join(own), "").unwrap();
+        let started = Instant::now();
+        let mut beside = false;
+        while !beside && started.elapsed() < Duration::from_secs(5) {
+            beside = folder.join(other).exists();
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        // Seen, the other's mark stays for it to see this one's.
+        std::thread::sleep(Duration::from_millis(500));
+        std::fs::remove_file(folder.join(own)).unwrap();
+        assert!(!beside, "the other test ran beside this one");
+    }
+
+    #[test]
+    fn first() {
+        alone("first", "second")
+    }
+
+    #[test]
+    fn second() {
+        alone("second", "first")
+    }
+}
+"#;
+
+#[test]
+fn nextest_runs_the_tests_of_cf_e2e_one_at_a_time_and_the_others_beside_each_other() {
+    let mut runner = runner(Duration::from_secs(600));
+    let mut tried = |package: &str| -> Ran {
+        let fixture = tempfile::tempdir().unwrap();
+        fs::create_dir_all(fixture.path().join("src")).unwrap();
+        fs::write(
+            fixture.path().join("Cargo.toml"),
+            format!(
+                "[package]\nname = \"{package}\"\nversion = \"0.1.0\"\nedition = \"2021\"\npublish = false\n\n[workspace]\n"
+            ),
+        )
+        .unwrap();
+        fs::write(fixture.path().join("src/lib.rs"), ALONE_LIB).unwrap();
+        let manifest = fixture.path().join("Cargo.toml").display().to_string();
+        let target = fixture.path().join("target").display().to_string();
+        ended(
+            runner
+                .run(&words(&[
+                    "cargo",
+                    "test",
+                    "--offline",
+                    "--manifest-path",
+                    &manifest,
+                    "--target-dir",
+                    &target,
+                    "-p",
+                    package,
+                ]))
+                .unwrap(),
+        )
+    };
+    let serial = tried("cf-e2e");
+    assert_eq!(serial.code, Some(0), "{}", serial.output);
+    assert_eq!(
+        failed_and_passed(&serial),
+        (Vec::new(), vec!["tests::first", "tests::second"])
+    );
+    // Another crate's tests run beside each other, and so meet.
+    let beside = tried("plants-beside");
+    assert_eq!(beside.code, Some(100), "{}", beside.output);
+    // In the order they ended, which is not known.
+    let (mut failed, passed) = failed_and_passed(&beside);
+    failed.sort_unstable();
+    assert_eq!(
+        (failed, passed),
+        (vec!["tests::first", "tests::second"], Vec::new()),
+        "{}",
+        beside.output
     );
 }
 
@@ -973,29 +1137,341 @@ fn tried_by(command: Vec<String>) -> (tempfile::TempDir, Context, crate::plants:
     (folder, checkout, plant)
 }
 
-/// What the driver says of `plant` in `checkout`, its commands run as processes.
-fn verdict_of(checkout: &Context, plant: &crate::plants::kit::Plant) -> String {
+/// The status the driver ends `plants` with in `checkout`, their commands run as
+/// processes, and what it says.
+fn driven(checkout: &Context, plants: &[crate::plants::kit::Plant]) -> (i32, String) {
     let family = crate::plants::kit::Family {
         name: "demo".into(),
-        limit: Duration::from_secs(120),
+        limit: Duration::from_secs(600),
         rebuild: None,
-        plants: vec![plant.clone()],
+        plants: plants.to_vec(),
     };
+    let chosen: Vec<&crate::plants::kit::Plant> = family.plants.iter().collect();
     let mut out = Vec::new();
     let status = crate::plants::driver::run(
         checkout,
         &family,
-        &[plant],
-        &mut runner(Duration::from_secs(120)),
+        &chosen,
+        &mut runner(Duration::from_secs(600)),
         &mut out,
     )
     .unwrap();
+    (status, String::from_utf8(out).unwrap())
+}
+
+/// What the driver says of `plant` in `checkout`, its commands run as processes.
+fn verdict_of(checkout: &Context, plant: &crate::plants::kit::Plant) -> String {
+    let (status, said) = driven(checkout, std::slice::from_ref(plant));
     assert_eq!(status, 1);
     assert_eq!(
         std::fs::read_to_string(checkout.path("a.rs")).unwrap(),
         "one\n"
     );
-    String::from_utf8(out).unwrap()
+    said
+}
+
+/// A crate whose one test holds a value to one, which a plant makes two.
+const VALUED_MANIFEST: &str =
+    "[package]\nname = \"plants-valued\"\nversion = \"0.1.0\"\nedition = \"2021\"\npublish = false\n\n[workspace]\n";
+const VALUED_LIB: &str = "pub fn value() -> u8 {\n    1\n}\n\n#[cfg(test)]\nmod tests {\n    #[test]\n    fn the_value_is_one() {\n        assert_eq!(super::value(), 1);\n    }\n}\n";
+
+#[test]
+fn every_command_of_a_plant_runs_and_one_whose_test_target_is_gone_is_said_for_itself() {
+    use crate::plants::kit::{Edit, Plant, Run as PlantRun};
+    let folder = tempfile::tempdir().unwrap();
+    let checkout = Context {
+        root: folder.path().to_path_buf(),
+        env: Env::default(),
+    };
+    fs::create_dir_all(checkout.path("src")).unwrap();
+    fs::write(checkout.path("Cargo.toml"), VALUED_MANIFEST).unwrap();
+    fs::write(checkout.path("src/lib.rs"), VALUED_LIB).unwrap();
+    let manifest = checkout.path("Cargo.toml").display().to_string();
+    let target = checkout.path("target").display().to_string();
+    let cargo_test = |more: &[&str]| -> PlantRun {
+        let mut command = words(&[
+            "cargo",
+            "test",
+            "--offline",
+            "--manifest-path",
+            &manifest,
+            "--target-dir",
+            &target,
+        ]);
+        command.extend(words(more));
+        PlantRun {
+            command,
+            builds: false,
+        }
+    };
+    let plant = |name: &str, meant: &str, runs: Vec<PlantRun>| Plant {
+        table: "t".into(),
+        name: name.into(),
+        meant: meant.into(),
+        runs,
+        builds: false,
+        prepare: Vec::new(),
+        requires: Vec::new(),
+        edits: vec![Edit {
+            file: "src/lib.rs".into(),
+            find: "    1\n}\n\n#[cfg".into(),
+            replace: "    2\n}\n\n#[cfg".into(),
+        }],
+    };
+    let gone = || cargo_test(&["--test", "a_test_target_that_is_gone"]);
+    let (status, said) = driven(
+        &checkout,
+        &[
+            // As the obligations' plants are: a run whose test target is gone, then a
+            // run that has the meant test.
+            plant(
+                "p: the target is gone, then the meant test fails",
+                "the_value_is_one",
+                vec![gone(), cargo_test(&["--lib"])],
+            ),
+            // A program that is not there, then the meant test.
+            plant(
+                "p: a program that is not there, then the meant test fails",
+                "the_value_is_one",
+                vec![
+                    PlantRun {
+                        command: words(&["no-such-program-for-the-plants"]),
+                        builds: false,
+                    },
+                    cargo_test(&["--lib"]),
+                ],
+            ),
+            // As the obligations' plants are once their meant test is gone too.
+            plant(
+                "p: the target is gone, and the meant test",
+                "a_test_that_is_gone",
+                vec![gone(), cargo_test(&["--lib"])],
+            ),
+        ],
+    );
+    assert_eq!(
+        fs::read_to_string(checkout.path("src/lib.rs")).unwrap(),
+        VALUED_LIB
+    );
+    let gone_words = gone().command.join(" ");
+    let first = said
+        .find("CAUGHT           p: the target is gone, then the meant test fails (")
+        .unwrap_or_else(|| panic!("{said}"));
+    let second = said
+        .find("CAUGHT           p: a program that is not there, then the meant test fails (")
+        .unwrap_or_else(|| panic!("{said}"));
+    let third = said
+        .find("NOT RUN          p: the target is gone, and the meant test (")
+        .unwrap_or_else(|| panic!("{said}"));
+    let (first, second, third) = (&said[first..second], &said[second..third], &said[third..]);
+    assert!(first.contains(") by tests::the_value_is_one\n"), "{first}");
+    // Gone without the plant too: it tells nothing of any plant, and is said so.
+    assert!(
+        first.contains(&format!(
+            "    and NOT RUN: {gone_words} fails without the plant too, twice, so it tells nothing of it:"
+        )),
+        "{first}"
+    );
+    assert!(
+        second.contains("    and NOT RUN: no-such-program-for-the-plants could not be started: "),
+        "{second}"
+    );
+    // Known to fail by then, the gone one is not run again; the other run names another
+    // test, and no run ran the meant one.
+    assert!(
+        third.contains(&format!(
+            "    {gone_words} fails without the plant too, twice, so it tells nothing of it:"
+        )),
+        "{third}"
+    );
+    assert!(third.contains("    and MISSED-BY-MEANT: "), "{third}");
+    assert!(
+        third.contains("    failed: tests::the_value_is_one\n"),
+        "{third}"
+    );
+    assert!(
+        third.contains("    no test named a_test_that_is_gone ran in its runs\n"),
+        "{third}"
+    );
+    assert_eq!(status, 1);
+    assert!(said.ends_with("2 of 3 plants caught\n"), "{said}");
+}
+
+/// A plant of `checkout`'s `flag.mjs`, which says `planted` is `true`, tried by `command`
+/// for the test `meant`.
+fn flagged(name: &str, meant: &str, command: Vec<String>) -> crate::plants::kit::Plant {
+    use crate::plants::kit::{Edit, Plant, Run as PlantRun};
+    Plant {
+        table: "t".into(),
+        name: name.into(),
+        meant: meant.into(),
+        runs: vec![PlantRun {
+            command,
+            builds: false,
+        }],
+        builds: false,
+        prepare: Vec::new(),
+        requires: Vec::new(),
+        edits: vec![Edit {
+            file: "flag.mjs".into(),
+            find: "planted = false".into(),
+            replace: "planted = true".into(),
+        }],
+    }
+}
+
+const FLAG: &str = "export const planted = false\n";
+
+/// Node's tests of the plants' cases: a test to do that always fails, a test the plant
+/// fails, a parent that the plant fails after its subtest passed, and one title in two
+/// groups, the plant failing the second.
+const NODE_PLANTED: &str = r#"import assert from 'node:assert'
+import { describe, it, test } from 'node:test'
+import { planted } from './flag.mjs'
+
+test('a todo that always fails', { todo: true }, () => {
+  throw new Error('a test to do that always fails')
+})
+
+test('fails only with the plant', () => {
+  assert.equal(planted, false)
+})
+
+test('a parent', async (t) => {
+  await t.test('its child passes', () => {})
+  assert.equal(planted, false)
+})
+
+describe('a group', () => {
+  it('the same title', () => {})
+})
+
+describe('another', () => {
+  it('the same title', () => {
+    assert.equal(planted, false)
+  })
+})
+"#;
+
+#[test]
+fn node_s_tests_catch_a_plant_by_a_parent_s_own_failure_and_never_by_a_test_to_do_or_a_title_of_two(
+) {
+    assert!(on_path("node"), "node is not on the PATH");
+    let folder = tempfile::tempdir().unwrap();
+    let checkout = Context {
+        root: folder.path().to_path_buf(),
+        env: Env::default(),
+    };
+    fs::write(checkout.path("flag.mjs"), FLAG).unwrap();
+    fs::write(checkout.path("planted.test.mjs"), NODE_PLANTED).unwrap();
+    let file = checkout.path("planted.test.mjs").display().to_string();
+    let command = || words(&["node", "--test", &file]);
+    let (status, said) = driven(
+        &checkout,
+        &[
+            flagged("p: a todo", "a todo that always fails", command()),
+            flagged("p: a parent", "a parent", command()),
+            flagged("p: a title of two", "the same title", command()),
+            flagged(
+                "p: a title named whole",
+                "another › the same title",
+                command(),
+            ),
+        ],
+    );
+    assert_eq!(fs::read_to_string(checkout.path("flag.mjs")).unwrap(), FLAG);
+    assert_eq!(status, 1);
+    // A test to do that fails with the plant as without it is no catch of it.
+    assert!(said.contains("MISSED-BY-MEANT  p: a todo ("), "{said}");
+    assert!(
+        said.contains(" s) by fails only with the plant (+2), not by a todo that always fails\n"),
+        "{said}"
+    );
+    assert!(
+        said.contains("    no test named a todo that always fails ran in its runs\n"),
+        "{said}"
+    );
+    assert!(said.contains("CAUGHT           p: a parent ("), "{said}");
+    assert!(
+        said.contains("MISSED-BY-MEANT  p: a title of two ("),
+        "{said}"
+    );
+    // Each is told by where Node says it is written: the file as the system names it.
+    for doubt in [
+        format!(
+            "    the meant name the same title stands for 2 tests of node --test {file}, so none \
+             of them is taken for it: a group › the same title ("
+        ),
+        "planted.test.mjs:19:3), another › the same title (".to_owned(),
+        "planted.test.mjs:23:3)\n".to_owned(),
+    ] {
+        assert!(said.contains(&doubt), "{said}");
+    }
+    assert!(
+        said.contains("CAUGHT           p: a title named whole ("),
+        "{said}"
+    );
+    assert!(said.ends_with("2 of 4 plants caught\n"), "{said}");
+}
+
+#[test]
+fn playwright_s_meant_test_failing_beside_a_global_teardown_that_threw_is_caught_and_the_error_said(
+) {
+    let root = context().root;
+    let cli = "app/node_modules/@playwright/test/cli.js";
+    assert!(
+        root.join(cli).is_file(),
+        "Playwright is not installed: npm ci --prefix app"
+    );
+    // In the checkout, where the specs find `@playwright/test`.
+    let fixtures = root.join("app/src-tauri/target/plants-fixtures");
+    fs::create_dir_all(&fixtures).unwrap();
+    let folder = tempfile::tempdir_in(&fixtures).unwrap();
+    let checkout = Context {
+        root: folder.path().to_path_buf(),
+        env: Env::default(),
+    };
+    fs::write(checkout.path("flag.mjs"), FLAG).unwrap();
+    fs::write(
+        checkout.path("teardown.mjs"),
+        "import { planted } from './flag.mjs'\n\nexport default function teardown() {\n  \
+         if (planted) throw new Error('the teardown fails with the plant')\n}\n",
+    )
+    .unwrap();
+    fs::write(
+        checkout.path("plants.config.mjs"),
+        "export default { testDir: '.', outputDir: './test-results', globalTeardown: './teardown.mjs' }\n",
+    )
+    .unwrap();
+    fs::write(
+        checkout.path("meant.spec.mjs"),
+        "import { expect, test } from '@playwright/test'\nimport { planted } from './flag.mjs'\n\n\
+         test('the meant one', () => {\n  expect(planted).toBe(false)\n})\n",
+    )
+    .unwrap();
+    let relative = folder.path().strip_prefix(&root).unwrap();
+    let at = |file: &str| relative.join(file).to_string_lossy().replace('\\', "/");
+    let command = words(&[
+        "node",
+        cli,
+        "test",
+        "--config",
+        &at("plants.config.mjs"),
+        &at("meant.spec.mjs"),
+    ]);
+    let (status, said) = driven(
+        &checkout,
+        &[flagged("p: teardown", "the meant one", command)],
+    );
+    assert_eq!(fs::read_to_string(checkout.path("flag.mjs")).unwrap(), FLAG);
+    assert_eq!(status, 0, "{said}");
+    assert!(said.contains("CAUGHT           p: teardown ("), "{said}");
+    assert!(said.contains(") by the meant one\n"), "{said}");
+    assert!(
+        said.contains("    beside it: Playwright: an error outside every test: ")
+            && said.contains("the teardown fails with the plant"),
+        "{said}"
+    );
 }
 
 #[test]

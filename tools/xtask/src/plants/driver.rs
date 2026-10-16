@@ -21,24 +21,32 @@
 //! A catch is the test the plant was meant for (`meant`) failing with it. Where a
 //! run that fails with the plant names the tests that failed (`cargo test`, `node
 //! --test` and Playwright do), the plant is CAUGHT where the meant test is among
-//! them and the same command passes once the plant is put back, which is run once
-//! for the run of the plants; a failure that names only other tests goes on to the
-//! plant's next run, and where none names the meant test the plant is
-//! MISSED-BY-MEANT, said with the tests that failed. Where a failure names no test
-//! (a command that says no more than its status, as the release smokes do),
-//! nothing can be attributed, and the catch is confirmed: the run is run so again
-//! and must fail again, and the command must pass twice without the plant.
+//! them, and is one test (a name that stands for two tests of the report is
+//! neither), and the same command passes once the plant is put back, which is run
+//! once for the run of the plants; an error outside every test beside it is said
+//! with the catch. A failure that names only other tests goes on to the plant's
+//! next run, and where none names the meant test the plant is MISSED-BY-MEANT, said
+//! with the tests that failed. Where a failure names no test (a command that says
+//! no more than its status, as the release smokes do), nothing can be attributed,
+//! and the catch is confirmed: the run is run so again and must fail again, and the
+//! command must pass twice without the plant. A run whose reporter wrote no report
+//! it could read is BROKEN, whatever its status.
 //!
-//! A command that fails without the plant is run again once; failing twice (a
-//! program that is not there, a suite that cannot start), it leaves every plant it
-//! decides NOT RUN: a bug no test was there to see is no catch. A command that
-//! passes once without the plant and fails once, or a run that fails with it once
-//! only, is UNSTABLE, neither caught nor missed. A run that could not load a module
-//! of its own is BROKEN. A run whose tests build the native `cf` and the pane host
-//! (the rig's) is preceded by their release build from the plant, which installs
-//! nothing (`PREFLIGHT`): a plant that breaks it DOES NOT COMPILE, where cargo's
-//! own status says the build failed; a build that ends otherwise is NOT BUILT, or
-//! HUNG where its time ran out. All of these are counted as not caught, and told
+//! Every run of a plant is tried until one catches it: a run that tells nothing of
+//! it is said for itself, and the next is run with the plant in. A command that
+//! fails without the plant is run again once; failing twice (a program that is not
+//! there, a suite that cannot start, a test target that is gone), it tells nothing
+//! of any plant: NOT RUN, a bug no test was there to see is no catch. A command
+//! that passes once without the plant and fails once, or a run that fails with it
+//! once only, is UNSTABLE, neither caught nor missed. A run that could not load a
+//! module of its own is BROKEN. A run whose tests build the native `cf` and the
+//! pane host (the rig's) is preceded by their release build from the plant, which
+//! installs nothing (`PREFLIGHT`): a plant that breaks it DOES NOT COMPILE, where
+//! cargo's own status says the build failed; a build that ends otherwise is NOT
+//! BUILT, or HUNG where its time ran out. A run that did not build, or was BROKEN,
+//! is run once the plant is put back, and is NOT RUN where it fails so too. Where no
+//! run catches the plant, it ends as the first run that told nothing did, else
+//! MISSED-BY-MEANT, else MISSED; all of these are counted as not caught, and told
 //! with what they said.
 
 mod confirm;
@@ -90,6 +98,8 @@ struct Copy {
     path: PathBuf,
     copy: PathBuf,
     original: Vec<u8>,
+    /// The text it holds while planted.
+    planted: String,
 }
 
 impl Planting {
@@ -107,10 +117,25 @@ impl Planting {
                 path: file.path.clone(),
                 copy,
                 original: file.original,
+                planted: file.text.clone(),
             });
             fs::write(&file.path, file.text).map_err(Error::files("write", &file.path))?;
         }
         Ok(planting)
+    }
+
+    /// Writes the plant again where it was put back, for the runs after the one that
+    /// put it back to run its command without it.
+    fn replant(&mut self) -> Result<(), Error> {
+        if !self.restored {
+            return Ok(());
+        }
+        // From here the files are put back again, even if a write is what fails.
+        self.restored = false;
+        for copy in &self.copies {
+            fs::write(&copy.path, &copy.planted).map_err(Error::files("write", &copy.path))?;
+        }
+        Ok(())
     }
 
     /// Puts every file back from its copy, and says if one is not as it was; once.
@@ -122,6 +147,7 @@ impl Planting {
             path,
             copy,
             original,
+            ..
         } in &self.copies
         {
             let saved = fs::read(copy).map_err(Error::files("read the copy of", path))?;
@@ -153,10 +179,13 @@ struct Trial {
     ran: Option<Ran>,
     /// The tests that failed, or what else caught it.
     caught: Vec<String>,
-    /// Why it did not apply.
+    /// Why it did not apply, or why its run told nothing of it.
     said: String,
-    /// What else is to be said of it: that no run ran a test of the name it was meant for.
-    note: Option<String>,
+    /// What else is to be said of it: that no run ran a test of the name it was meant
+    /// for, or that the name stands for more than one test, what broke beside a catch.
+    notes: Vec<String>,
+    /// The other runs that told nothing of it, each as it ended.
+    also: Vec<Trial>,
 }
 
 impl Trial {
@@ -166,7 +195,8 @@ impl Trial {
             ran: Some(ran),
             caught,
             said: String::new(),
-            note: None,
+            notes: Vec::new(),
+            also: Vec::new(),
         }
     }
 
@@ -176,7 +206,8 @@ impl Trial {
             ran: None,
             caught: Vec::new(),
             said,
-            note: None,
+            notes: Vec::new(),
+            also: Vec::new(),
         }
     }
 
@@ -254,7 +285,7 @@ fn planted_run(
 /// How a trial ended before its verdict, once its plant is put back.
 enum Ended {
     Stopped,
-    Trial(Trial),
+    Trial(Box<Trial>),
 }
 
 /// Plants `plant`, tries its runs in order until one decides (`tried`), and puts it
@@ -292,7 +323,7 @@ fn trial(
     planting.restore()?;
     match ended {
         Ended::Stopped => Ok(None),
-        Ended::Trial(trial) => Ok(Some(trial)),
+        Ended::Trial(trial) => Ok(Some(*trial)),
     }
 }
 
@@ -302,7 +333,7 @@ fn preflight(runner: &mut dyn Runner) -> Result<Option<Ended>, Error> {
     let words: Vec<String> = PREFLIGHT.iter().map(|word| (*word).to_owned()).collect();
     let ran = match planted_run(&words, runner)? {
         None => return Ok(Some(Ended::Stopped)),
-        Some(Err(said)) => return Ok(Some(Ended::Trial(Trial::not_run(said)))),
+        Some(Err(said)) => return Ok(Some(Ended::Trial(Box::new(Trial::not_run(said))))),
         Some(Ok(ran)) => ran,
     };
     let verdict = if ran.hung {
@@ -314,18 +345,71 @@ fn preflight(runner: &mut dyn Runner) -> Result<Option<Ended>, Error> {
     } else {
         Verdict::NotBuilt
     };
-    Ok(Some(Ended::Trial(Trial::of(verdict, ran, Vec::new()))))
+    Ok(Some(Ended::Trial(Box::new(Trial::of(
+        verdict,
+        ran,
+        Vec::new(),
+    )))))
 }
 
-/// How a trial ends that a run of `command` decided, by how the command did without
-/// the plant: caught by the tests `caught` where it passes.
-fn confirmed(clean: Option<Clean>, ran: Ran, caught: Vec<String>) -> Ended {
+/// What a run that told nothing of the plant ends as, by how its command did without
+/// the plant: one that fails so too tells nothing of any plant, NOT RUN.
+fn unconfirmed(clean: Clean) -> Option<Trial> {
     match clean {
-        None => Ended::Stopped,
-        Some(Clean::Passes) => Ended::Trial(Trial::of(Verdict::Caught, ran, caught)),
-        Some(Clean::Fails(said)) => Ended::Trial(Trial::not_run(said)),
-        Some(Clean::Unstable(said)) => Ended::Trial(Trial::unstable(said)),
+        Clean::Passes => None,
+        Clean::Fails(said) => Some(Trial::not_run(said)),
+        Clean::Unstable(said) => Some(Trial::unstable(said)),
     }
+}
+
+/// A run of a plant that told nothing of it, and the command to run without the plant
+/// where how it does so tells what it is: a run that did not build, or was BROKEN.
+struct Told {
+    trial: Trial,
+    unsure: Option<Vec<String>>,
+}
+
+impl Told {
+    /// What `command` came to, with the plant in, where it told nothing of it.
+    fn of(trial: Trial, command: &[String]) -> Self {
+        let unsure = matches!(trial.verdict, Verdict::DoesNotCompile | Verdict::Broken)
+            .then(|| command.to_vec());
+        Self { trial, unsure }
+    }
+
+    fn sure(trial: Trial) -> Self {
+        Self {
+            trial,
+            unsure: None,
+        }
+    }
+}
+
+/// The runs of a plant that told nothing of it (`told`), each as it is to be said once
+/// the plant is put back: a run that did not build, or was BROKEN, is NOT RUN where its
+/// command fails without the plant too (a test target that is gone, a module that is
+/// not there), and UNSTABLE where it fails once in two. `None` is a stop.
+fn settled(
+    told: Vec<Told>,
+    clean: &mut CleanRuns,
+    runner: &mut dyn Runner,
+    unplanted: &str,
+) -> Result<Option<Vec<Trial>>, Error> {
+    // Where a run with the plant changed the checkout, how a command does without it
+    // would be told of another.
+    let moved = told.iter().any(|told| told.unsure.is_some()) && runner.state() != unplanted;
+    let mut settled = Vec::new();
+    for Told { trial, unsure } in told {
+        let Some(command) = unsure.filter(|_| !moved) else {
+            settled.push(trial);
+            continue;
+        };
+        let Some(clean) = clean.measure(&command, 1, runner)? else {
+            return Ok(None);
+        };
+        settled.push(unconfirmed(clean).unwrap_or(trial));
+    }
+    Ok(Some(settled))
 }
 
 /// Where the checkout, its plant put back, is not as it was before the plant: a run
@@ -333,18 +417,20 @@ fn confirmed(clean: Option<Clean>, ran: Ran, caught: Vec<String>) -> Ended {
 /// command does without the plant would be told of another checkout.
 fn moved(runner: &mut dyn Runner, unplanted: &str, command: &[String]) -> Option<Ended> {
     (runner.state() != unplanted).then(|| {
-        Ended::Trial(Trial::unstable(format!(
+        Ended::Trial(Box::new(Trial::unstable(format!(
             "{} changed the checkout: once the plant is put back, it is not as it was before it",
             command.join(" ")
-        )))
+        ))))
     })
 }
 
-/// The runs of `plant`, planted, until one decides; `planting` is put back before a
+/// The runs of `plant`, planted, until one catches it; `planting` is put back before a
 /// command is run without the plant, in the state of the checkout before the plant
-/// (`unplanted`) alone. A command known to fail without the plant in that state tells
-/// nothing of it: the plant's next run is tried, and where none decides, the plant is
-/// NOT RUN.
+/// (`unplanted`) alone, and planted again for the next run. A run that tells nothing
+/// of the plant (a command known to fail without it in that state, one that cannot be
+/// started, does not build, is BROKEN or HUNG, a catch that its command does not
+/// confirm) is kept to be said, and the plant's next run is tried; where none catches
+/// it, the plant ends as the first of them did.
 fn tried(
     plant: &Plant,
     runner: &mut dyn Runner,
@@ -357,105 +443,146 @@ fn tried(
     // The last run that failed naming only tests the plant was not meant for, and the
     // tests every such run named.
     let mut others: Option<(Ran, Vec<String>)> = None;
-    // What a command known to fail without the plant said, the first of them.
-    let mut known_to_fail: Option<String> = None;
+    // The runs that told nothing of the plant, in turn.
+    let mut told: Vec<Told> = Vec::new();
+    // Why a meant name that a run's tests failed under was not taken for a catch.
+    let mut doubts: Vec<String> = Vec::new();
     // Every test a run's report said it ran, where any run's report said.
     let mut tests_ran: Option<Vec<String>> = None;
     for run in &plant.runs {
         if let Some(said) = clean.fails(&run.command, unplanted) {
-            known_to_fail.get_or_insert(said);
+            told.push(Told::sure(Trial::not_run(said)));
             continue;
         }
+        // An earlier run's command may have been run without it.
+        planting.replant()?;
         let builds = run.builds || plant.builds;
         *built = *built || builds;
         if builds {
-            if let Some(ended) = preflight(runner)? {
-                return Ok(ended);
+            match preflight(runner)? {
+                None => {}
+                Some(Ended::Stopped) => return Ok(Ended::Stopped),
+                Some(Ended::Trial(unbuilt)) => {
+                    told.push(Told::sure(*unbuilt));
+                    continue;
+                }
             }
         }
         let ran = match planted_run(&run.command, runner)? {
             None => return Ok(Ended::Stopped),
-            Some(Err(said)) => return Ok(Ended::Trial(Trial::not_run(said))),
-            Some(Ok(ran)) => {
-                if ran.results.is_some() {
-                    let names = ran.tests_ran().into_iter().map(str::to_owned);
-                    tests_ran.get_or_insert_with(Vec::new).extend(names);
-                }
-                ran
+            Some(Err(said)) => {
+                told.push(Told::sure(Trial::not_run(said)));
+                continue;
             }
+            Some(Ok(ran)) => ran,
         };
-        let (ran, caught) = match Judged::of(ran) {
+        if matches!(ran.report, Some(Ok(_))) {
+            let names = ran.tests().iter().map(|test| test.name.clone());
+            tests_ran.get_or_insert_with(Vec::new).extend(names);
+        }
+        let (measured, ran, caught, beside) = match Judged::of(ran, &plant.meant) {
             Judged::Passed(ran) => {
                 last = Some(ran);
                 continue;
             }
             Judged::Not(verdict, ran) => {
-                return Ok(Ended::Trial(Trial::of(verdict, ran, Vec::new())));
+                told.push(Told::of(Trial::of(verdict, ran, Vec::new()), &run.command));
+                continue;
             }
-            Judged::Caught(ran, caught) => (ran, caught),
-        };
-        if ran.names_tests() && !plant.meant.is_empty() {
-            if caught
-                .iter()
-                .any(|name| report::is_meant(name, &plant.meant))
-            {
+            Judged::Others { ran, caught, doubt } => {
+                doubts.extend(doubt);
+                let mut named = others.take().map(|(_, named)| named).unwrap_or_default();
+                for name in caught {
+                    if !named.contains(&name) {
+                        named.push(name);
+                    }
+                }
+                others = Some((ran, named));
+                continue;
+            }
+            Judged::Meant {
+                ran,
+                caught,
+                beside,
+            } => {
                 planting.restore()?;
                 if let Some(ended) = moved(runner, unplanted, &run.command) {
                     return Ok(ended);
                 }
-                return Ok(confirmed(
-                    clean.measure(&run.command, 1, runner)?,
-                    ran,
-                    caught,
-                ));
+                (clean.measure(&run.command, 1, runner)?, ran, caught, beside)
             }
-            let mut named = others.take().map(|(_, named)| named).unwrap_or_default();
-            for name in caught {
-                if !named.contains(&name) {
-                    named.push(name);
+            // Nothing to attribute it by: once more with the plant, which must fail again.
+            Judged::Unnamed(ran, caught) => {
+                let again = match planted_run(&run.command, runner)? {
+                    None => return Ok(Ended::Stopped),
+                    Some(Err(said)) => {
+                        told.push(Told::sure(Trial::not_run(said)));
+                        continue;
+                    }
+                    Some(Ok(again)) => Judged::of(again, &plant.meant),
+                };
+                if !again.failed() {
+                    told.push(Told::sure(Trial::unstable(format!(
+                        "{} failed with the plant, then {}",
+                        run.command.join(" "),
+                        again.then()
+                    ))));
+                    continue;
                 }
+                planting.restore()?;
+                if let Some(ended) = moved(runner, unplanted, &run.command) {
+                    return Ok(ended);
+                }
+                (clean.measure(&run.command, 2, runner)?, ran, caught, None)
             }
-            others = Some((ran, named));
+        };
+        let Some(measured) = measured else {
+            return Ok(Ended::Stopped);
+        };
+        if let Some(unconfirmed) = unconfirmed(measured) {
+            told.push(Told::sure(unconfirmed));
             continue;
         }
-        // Nothing to attribute it by: once more with the plant, which must fail again.
-        let again = match planted_run(&run.command, runner)? {
-            None => return Ok(Ended::Stopped),
-            Some(Err(said)) => return Ok(Ended::Trial(Trial::not_run(said))),
-            Some(Ok(ran)) => Judged::of(ran),
+        let Some(told) = settled(told, clean, runner, unplanted)? else {
+            return Ok(Ended::Stopped);
         };
-        planting.restore()?;
-        if !matches!(again, Judged::Caught(..)) {
-            return Ok(Ended::Trial(Trial::unstable(format!(
-                "{} failed with the plant, then {}",
-                run.command.join(" "),
-                again.then()
-            ))));
-        }
-        if let Some(ended) = moved(runner, unplanted, &run.command) {
-            return Ok(ended);
-        }
-        return Ok(confirmed(
-            clean.measure(&run.command, 2, runner)?,
-            ran,
-            caught,
-        ));
+        let mut trial = Trial::of(Verdict::Caught, ran, caught);
+        trial.also = told;
+        trial.notes = doubts;
+        trial
+            .notes
+            .extend(beside.map(|beside| format!("beside it: {beside}")));
+        return Ok(Ended::Trial(Box::new(trial)));
     }
-    if let Some(said) = known_to_fail {
-        return Ok(Ended::Trial(Trial::not_run(said)));
-    }
-    let mut trial = match (others, last) {
-        (Some((ran, named)), _) => Trial::of(Verdict::MissedByMeant, ran, named),
-        (None, Some(ran)) => Trial::of(Verdict::Missed, ran, Vec::new()),
-        (None, None) => Trial::unapplied(format!("{}: it has no run", plant.name)),
+    planting.restore()?;
+    let Some(mut told) = settled(told, clean, runner, unplanted)? else {
+        return Ok(Ended::Stopped);
     };
+    let missed = match (others, last) {
+        (Some((ran, named)), _) => Some(Trial::of(Verdict::MissedByMeant, ran, named)),
+        (None, Some(ran)) => Some(Trial::of(Verdict::Missed, ran, Vec::new())),
+        (None, None) => None,
+    };
+    let mut trial = if told.is_empty() {
+        missed.unwrap_or_else(|| Trial::unapplied(format!("{}: it has no run", plant.name)))
+    } else {
+        // The first run that told nothing is the plant's end; a run that failed naming
+        // other tests is said with the others.
+        let mut first = told.remove(0);
+        told.extend(missed.filter(|missed| missed.verdict == Verdict::MissedByMeant));
+        first.also = told;
+        first
+    };
+    trial.notes = doubts;
     // A meant test that no run ran: a name the table holds wrong, or a test that is gone.
     if let Some(ran) = tests_ran {
         if !ran.iter().any(|name| report::is_meant(name, &plant.meant)) {
-            trial.note = Some(format!("no test named {} ran in its runs", plant.meant));
+            trial
+                .notes
+                .push(format!("no test named {} ran in its runs", plant.meant));
         }
     }
-    Ok(Ended::Trial(trial))
+    Ok(Ended::Trial(Box::new(trial)))
 }
 
 /// Says a plant, and what follows from how it ended.
@@ -476,6 +603,24 @@ fn say(
         "{}",
         report::line(trial.verdict, &plant.name, seconds, &by)
     )?;
+    tell(out, trial, limit)?;
+    for other in &trial.also {
+        let Some(ran) = &other.ran else {
+            writeln!(out, "    and {}: {}", other.verdict.label(), other.said)?;
+            continue;
+        };
+        let words = ran.command.join(" ");
+        writeln!(out, "    and {}: {words}", other.verdict.label())?;
+        tell(out, other, limit)?;
+    }
+    for note in &trial.notes {
+        writeln!(out, "    {note}")?;
+    }
+    Ok(())
+}
+
+/// What follows from how `trial` ended, after the line that says it.
+fn tell(out: &mut dyn Write, trial: &Trial, limit: u64) -> Result<(), Failure> {
     let Some(ran) = &trial.ran else {
         writeln!(out, "    {}", trial.said)?;
         return Ok(());
@@ -510,22 +655,19 @@ fn say(
             "    {} did not end in {limit} s",
             ran.command.join(" ")
         )?,
-        Verdict::Missed => match &ran.results {
-            Some(results) => writeln!(
+        Verdict::Missed => match &ran.report {
+            Some(Ok(results)) => writeln!(
                 out,
                 "    {} tests ran, and none of them failed",
                 results.tests.len()
             )?,
-            None => {
+            _ => {
                 for line in report::what_ran(&ran.output) {
                     writeln!(out, "    {line}")?;
                 }
             }
         },
         Verdict::DoesNotApply | Verdict::NotRun | Verdict::Unstable => {}
-    }
-    if let Some(note) = &trial.note {
-        writeln!(out, "    {note}")?;
     }
     Ok(())
 }
@@ -625,8 +767,27 @@ pub fn run(
     Ok(i32::from(wrong != 0))
 }
 
+/// The first XML entity `meant` holds (`&quot;`, `&amp;`, `&#34;`), if it holds one:
+/// a name copied from a report that escapes it, which is not the test's name.
+fn entity(meant: &str) -> Option<&str> {
+    meant.match_indices('&').find_map(|(at, _)| {
+        let body = &meant[at + 1..];
+        let body = &body[..body.find(';')?];
+        let number = body
+            .strip_prefix("#x")
+            .or_else(|| body.strip_prefix('#'))
+            .filter(|digits| !digits.is_empty());
+        let entity = match number {
+            Some(digits) => digits.chars().all(|digit| digit.is_ascii_hexdigit()),
+            None => !body.is_empty() && body.chars().all(|letter| letter.is_ascii_alphanumeric()),
+        };
+        entity.then(|| &meant[at..at + body.len() + 2])
+    })
+}
+
 /// Whether each of `plants` applies, which plants nothing: the status is 0 where
-/// every one does. The commands a plant needs first are run.
+/// every one does. The commands a plant needs first are run. A meant name that holds
+/// an XML entity is refused.
 pub fn check(
     context: &Context,
     plants: &[&Plant],
@@ -635,6 +796,15 @@ pub fn check(
 ) -> Result<i32, Failure> {
     let mut unapplied = 0;
     for plant in plants {
+        if let Some(entity) = entity(&plant.meant) {
+            unapplied += 1;
+            writeln!(
+                out,
+                "{}: its meant name holds {entity}, a report's escape and no part of a test's name: write the name as the test does",
+                plant.name
+            )?;
+            continue;
+        }
         let applied = match prepare(plant, runner)? {
             Prepared::Stopped => return Ok(STOPPED),
             Prepared::Failed(unready) => Err(unready),

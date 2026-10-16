@@ -1,7 +1,9 @@
 //! Running the commands a plant is tried with, and reading what their tests did.
 //!
 //! A command runs to its end, or to the time its family gives it, in the
-//! checkout's root with xtask's environment less `NODE_TEST_CONTEXT` (which a
+//! checkout's root (a suite of xtask's in the folder the suite runs its tests in,
+//! with the variables it sets: `reporters`) with xtask's environment less
+//! `NODE_TEST_CONTEXT` (which a
 //! `node --test` that this run happens to be under would pass on to the ones it
 //! starts), and with no colour (`NO_COLOR=1`, `FORCE_COLOR=0`). `cf-process`
 //! starts it, as it does every program the product starts: the command leads a
@@ -10,17 +12,19 @@
 //! command in hand the same way and is told to the driver, which puts the sources
 //! back. A run that writes more than `OUTPUT_LIMIT` to a stream is ended for it.
 //!
-//! `cargo xtask …` is this xtask itself, started as the program it is. Cargo would
-//! first build again the xtask it starts, and that is the one running the plants:
-//! stale as soon as a plant has touched what xtask is built from, and one that
-//! runs cannot be replaced on Windows.
+//! `cargo xtask …` that is no suite of tests is this xtask itself, started as the
+//! program it is. Cargo would first build again the xtask it starts, and that is
+//! the one running the plants: stale as soon as a plant has touched what xtask is
+//! built from, and one that runs cannot be replaced on Windows.
 //!
 //! What a run's tests did is read from the report its reporter wrote to a folder
 //! of the run's own (`reporters`, `results`): which tests ran, which failed, which
 //! test files ran no test, which errors came outside every test. What the run
 //! printed is read for none of it: it is what is said of a plant, no more. A run
-//! with no report names no test: it failed, or it did not, as its exit status
-//! says, and the driver confirms such a failure twice each way.
+//! whose reporter wrote no report, or one that cannot be read whole, names no test
+//! and catches nothing, whatever its exit status: no test was seen to run. Only a
+//! command that has no reporter (a smoke that says no more than its status) is
+//! judged by its status, and the driver confirms such a failure twice each way.
 
 mod reporters;
 pub(super) mod results;
@@ -39,10 +43,9 @@ use cf_process::{capture, CaptureFailed, Captured, Limits, Run};
 use tokio::runtime::Runtime;
 
 use self::reporters::Reporter;
-use self::results::Results;
+use self::results::{Results, Test};
 use super::Error;
 use crate::context::Context;
-use crate::dispatch::{Console, Failure};
 use crate::process::{self, Invocation};
 use crate::stops::Stops;
 
@@ -80,8 +83,9 @@ pub struct Ran {
     pub overflowed: bool,
     /// What it wrote: its standard output, then its standard error.
     pub output: String,
-    /// What its reporter's report says its tests did: none where it wrote none.
-    pub results: Option<Results>,
+    /// What its reporter's report says its tests did, or why it could not be read:
+    /// none for a command that has no reporter.
+    pub report: Option<Result<Results, String>>,
 }
 
 /// How a command ended, or that this program was stopped while it ran.
@@ -107,13 +111,13 @@ pub trait Runner {
 }
 
 impl Ran {
-    /// A run of `command` that ended with `code`, wrote `output` and reported `results`.
+    /// A run of `command` that ended with `code`, wrote `output` and reported `report`.
     #[cfg(test)]
     pub fn new(
         command: &[&str],
         code: Option<i32>,
         output: &str,
-        results: Option<Results>,
+        report: Option<Result<Results, String>>,
     ) -> Self {
         Self {
             command: command.iter().map(|word| (*word).to_owned()).collect(),
@@ -121,33 +125,25 @@ impl Ran {
             hung: false,
             overflowed: false,
             output: output.to_owned(),
-            results,
+            report,
         }
     }
 
-    /// Whether the source built: nextest says a build that failed by its status; of
-    /// a suite of xtask's, what cargo and rustc wrote of a build that failed where no
-    /// test binary ran, so that no test wrote it. A run of Node or Playwright builds
-    /// nothing.
+    /// Whether the source built, which nextest says by its status where it did not.
+    /// A run of Node or Playwright builds nothing.
     pub fn compiled(&self) -> bool {
-        match Reporter::of(&self.command) {
-            Reporter::Nextest => self.code != Some(NEXTEST_BUILD_FAILED),
-            Reporter::Libtest => {
-                self.results.is_some()
-                    || (!self.output.contains("could not compile") && !has_error_code(&self.output))
-            }
-            Reporter::Node | Reporter::Playwright | Reporter::Status => true,
-        }
+        Reporter::of(&self.command) != Reporter::Nextest || self.code != Some(NEXTEST_BUILD_FAILED)
     }
 
     /// Why no test of the run could see the plant, if none could, as its reporter
-    /// says: a test file of Node's that failed whole and ran no test of its own (it
-    /// did not parse, imported what is not there, threw as it loaded, after a
-    /// top-level `await` too, or ended before a test of it was told), whatever the
-    /// other files did; an error Playwright says came outside every test, or no test
-    /// it found; no test nextest found to run, or a test binary that could not say
-    /// its tests; a run that failed with no test run at all. A test file that failed
-    /// whole after tests of it ran is none of these.
+    /// says: no report it could read whole; a test file of Node's that failed whole
+    /// and ran no test of its own (it did not parse, imported what is not there,
+    /// threw as it loaded, after a top-level `await` too, or ended before a test of
+    /// it was told), whatever the other files did; an error Playwright says came
+    /// outside every test, or no test it found; no test nextest found to run, or a
+    /// test binary that could not say its tests; a run that failed with no test run
+    /// at all. A test file that failed whole after tests of it ran is none of these,
+    /// nor one that loaded and holds no test.
     pub fn broken(&self) -> Option<String> {
         let reporter = Reporter::of(&self.command);
         if reporter == Reporter::Nextest {
@@ -159,7 +155,10 @@ impl Ran {
                 _ => {}
             }
         }
-        let results = self.results.as_ref()?;
+        let results = match self.report.as_ref()? {
+            Ok(results) => results,
+            Err(why) => return Some(format!("no report of its tests could be read: {why}")),
+        };
         let none_ran = results.tests.is_empty() && self.code != Some(0);
         match reporter {
             Reporter::Node => match results.files_that_ran_none().first() {
@@ -173,7 +172,7 @@ impl Ran {
                     .is_empty()
                     .then(|| "Playwright found no test".to_owned()),
             },
-            Reporter::Nextest | Reporter::Libtest => none_ran.then(|| "it ran no test".to_owned()),
+            Reporter::Nextest => none_ran.then(|| "it ran no test".to_owned()),
             Reporter::Status => None,
         }
     }
@@ -181,30 +180,33 @@ impl Ran {
     /// Whether the run's failure names a test of its own, which a plant can be
     /// attributed by: a test file that failed whole names none.
     pub fn names_tests(&self) -> bool {
-        self.results
-            .as_ref()
-            .is_some_and(|results| results.failed().iter().any(|test| !test.is_whole_file()))
+        self.tests()
+            .iter()
+            .any(|test| test.failed && !test.is_whole_file())
     }
 
-    /// The names of every test the run's report says ran, failed or not.
-    pub fn tests_ran(&self) -> Vec<&str> {
-        self.results
-            .iter()
-            .flat_map(|results| &results.tests)
-            .map(|test| test.name.as_str())
-            .collect()
+    /// Every test the run's report says ran, failed or not: none where it has no
+    /// report it could read.
+    pub fn tests(&self) -> &[Test] {
+        match &self.report {
+            Some(Ok(results)) => &results.tests,
+            _ => &[],
+        }
     }
 
     /// What caught the plant, if this run did, which only a run that exited with a
     /// failure can: the tests its report says failed, each once, in the order it says
-    /// them; else, for a run that names no test, the run itself.
+    /// them; else, for a run whose report names no test that failed, or that has no
+    /// reporter, the run itself. A run whose reporter wrote no report it could read
+    /// catches nothing.
     pub fn caught(&self) -> Vec<String> {
-        if self.code == Some(0) {
+        if self.code == Some(0) || matches!(self.report, Some(Err(_))) {
             return Vec::new();
         }
         let failed: Vec<String> = self
-            .results
+            .report
             .iter()
+            .flatten()
             .flat_map(Results::failed)
             .map(|test| test.name.clone())
             .collect();
@@ -212,12 +214,9 @@ impl Ran {
             return failed;
         }
         let words = self.command.get(1..).unwrap_or_default().join(" ");
-        vec![match died(&self.output) {
-            Some(how) => format!("{words}: the test binary died ({how})"),
-            None => match self.code {
-                Some(code) => format!("{words}: ended with {code}"),
-                None => format!("{words}: was ended by a signal"),
-            },
+        vec![match self.code {
+            Some(code) => format!("{words}: ended with {code}"),
+            None => format!("{words}: was ended by a signal"),
         }]
     }
 
@@ -255,36 +254,16 @@ fn plain(output: &str) -> String {
     plain
 }
 
-/// Whether `output` holds an error code of rustc's: `error[E0432]`.
-fn has_error_code(output: &str) -> bool {
-    output.match_indices("error[E").any(|(at, found)| {
-        let rest = &output[at + found.len()..];
-        let digits = rest.chars().take_while(char::is_ascii_digit).count();
-        digits > 0 && rest[digits..].starts_with(']')
-    })
-}
-
-/// What cargo says of a test binary that was ended: ``process didn't exit
-/// successfully: `<command>` (<how>)``, the `<how>` of the first; told, not read.
-fn died(output: &str) -> Option<&str> {
-    let marker = "process didn't exit successfully: `";
-    let after = &output[output.find(marker)? + marker.len()..];
-    let rest = after[after.find('`')? + 1..].strip_prefix(" (")?;
-    rest.split(')').next()
-}
-
 /// Runs the commands as processes, within a limit of time, through `cf-process`.
 pub struct Execute {
     runtime: Runtime,
-    root: PathBuf,
+    /// The checkout, and the environment the commands are given.
+    checkout: Context,
     own: PathBuf,
-    env: Env,
     limits: Limits,
     stops: Stops,
     /// How many states could not be told, each told apart from every other.
     untold: u64,
-    /// The variable cargo reads its target runner from on this machine, once asked.
-    runner_variable: Option<String>,
 }
 
 impl Execute {
@@ -328,16 +307,17 @@ impl Execute {
         );
         Self {
             runtime,
-            root: context.root.clone(),
+            checkout: Context {
+                root: context.root.clone(),
+                env,
+            },
             own,
-            env,
             limits: Limits {
                 timeout: limit,
                 max_buffer: OUTPUT_LIMIT,
             },
             stops,
             untold: 0,
-            runner_variable: None,
         }
     }
 
@@ -357,7 +337,7 @@ impl Execute {
     /// A folder for a run's report, under `RUNS`, removed once dropped: one of its own
     /// for each run, whatever else runs beside it.
     fn folder(&self) -> Result<tempfile::TempDir, Error> {
-        let runs = self.root.join(RUNS);
+        let runs = self.checkout.root.join(RUNS);
         fs::create_dir_all(&runs)
             .and_then(|()| tempfile::Builder::new().prefix("run-").tempdir_in(&runs))
             .map_err(Error::files("make a folder for a run's report in", &runs))
@@ -370,11 +350,11 @@ impl Execute {
         } else {
             "cargo-nextest"
         };
-        let installed = self.root.join(TOOLS).join("bin").join(name);
+        let installed = self.checkout.root.join(TOOLS).join("bin").join(name);
         if installed.is_file() {
             return Ok(installed.display().to_string());
         }
-        let found = process::resolved(OsStr::new("cargo-nextest"), &self.env);
+        let found = process::resolved(OsStr::new("cargo-nextest"), &self.checkout.env);
         if Path::new(&found).components().count() > 1 {
             return Ok(found.to_string_lossy().into_owned());
         }
@@ -386,44 +366,16 @@ impl Execute {
         .into())
     }
 
-    /// The variable cargo reads the target runner of this machine's own target from
-    /// (`CARGO_TARGET_<HOST>_RUNNER`), the host as `rustc -vV` says it.
-    fn runner_variable(&mut self) -> Result<String, Error> {
-        if let Some(known) = &self.runner_variable {
-            return Ok(known.clone());
-        }
-        let asked = ["rustc".to_owned(), "-vV".to_owned()];
-        let host = match self.run(&asked)? {
-            Execution::Ended(ran) => ran
-                .output
-                .lines()
-                .find_map(|line| line.strip_prefix("host: "))
-                .map(str::trim)
-                .map(str::to_owned),
-            Execution::Stopped => None,
-        };
-        let host = host.ok_or_else(|| process::Failure::NotFound {
-            program: "rustc, which says the machine's target (rustc -vV)".to_owned(),
-        })?;
-        let variable = format!(
-            "CARGO_TARGET_{}_RUNNER",
-            host.to_ascii_uppercase().replace(['-', '.'], "_")
-        );
-        self.runner_variable = Some(variable.clone());
-        Ok(variable)
-    }
-
-    /// The program to start for `words` (the program first), and its words.
-    fn start(&self, words: &[String]) -> Result<Run, Error> {
-        let (program, args): (OsString, Vec<String>) = match words {
-            [cargo, xtask, args @ ..] if cargo == "cargo" && xtask == "xtask" => {
-                (self.own.clone().into_os_string(), args.to_vec())
+    /// The program to start for `invocation`, and its words: `cargo xtask` is this xtask.
+    fn start(&self, invocation: &Invocation) -> Result<Run, Error> {
+        let (program, args): (OsString, &[OsString]) = match invocation.args.as_slice() {
+            [xtask, args @ ..] if invocation.program == "cargo" && xtask == "xtask" => {
+                (self.own.clone().into_os_string(), args)
             }
-            [program, args @ ..] => (
-                process::resolved(OsStr::new(program), &self.env),
-                args.to_vec(),
+            args => (
+                process::resolved(&invocation.program, &self.checkout.env),
+                args,
             ),
-            [] => (OsString::new(), Vec::new()),
         };
         // A bare name that the PATH did not give is a program that is not there.
         if Path::new(&program).components().count() <= 1 {
@@ -434,7 +386,7 @@ impl Execute {
         }
         Ok(Run {
             program: PathBuf::from(program),
-            args: args.iter().map(OsString::from).collect(),
+            args: args.to_vec(),
             verbatim: false,
         })
     }
@@ -448,39 +400,43 @@ impl Runner for Execute {
             Reporter::Status => None,
             _ => Some(self.folder()?),
         };
-        let dir = folder
-            .as_ref()
-            .map_or_else(|| self.root.clone(), |folder| folder.path().to_path_buf());
+        let dir = folder.as_ref().map_or_else(
+            || self.checkout.root.clone(),
+            |folder| folder.path().to_path_buf(),
+        );
         let dir = dir.as_path();
         let nextest = match reporter {
             Reporter::Nextest => self.nextest()?,
             _ => String::new(),
         };
-        let variable = match reporter {
-            Reporter::Libtest => Some(self.runner_variable()?),
-            _ => None,
-        };
-        let own = self.own.display().to_string();
-        let runner = variable.as_deref().map(|variable| (variable, own.as_str()));
-        let setup = reporter
-            .setup(command, dir, &nextest, runner)
+        let invocation = reporter
+            .setup(command, dir, &self.checkout, &nextest)
             .map_err(Error::files("write the config of a run in", dir))?;
-        let run = self.start(&setup.words)?;
+        let run = self.start(&invocation)?;
+        // The environment, with the variables the invocation sets or takes away.
+        let given = |name: &OsStr| invocation.vars.iter().any(|(set, _)| set == name);
         let env = Env::from_vars(
-            self.env
+            self.checkout
+                .env
                 .iter()
+                .filter(|(name, _)| !given(name))
                 .map(|(name, value)| (name.to_owned(), value.to_owned()))
-                .chain(setup.env),
+                .chain(
+                    invocation
+                        .vars
+                        .iter()
+                        .filter_map(|(name, value)| Some((name.clone(), value.clone()?))),
+                ),
         );
         let Self {
             runtime,
-            root,
             limits,
             stops,
             ..
         } = self;
+        let cwd = invocation.cwd.as_path();
         let result = runtime.block_on(async {
-            let mut running = pin!(capture(&run, Some(root.as_path()), &env, *limits, |_| {}));
+            let mut running = pin!(capture(&run, Some(cwd), &env, *limits, |_| {}));
             // Dropped with the block, the command in hand is ended whole.
             poll_fn(|cx| {
                 if let Poll::Ready(done) = running.as_mut().poll(cx) {
@@ -493,13 +449,7 @@ impl Runner for Execute {
         let execution = match result {
             None => Ok(Execution::Stopped),
             Some(done) => Ran::of(command, done).map(|mut ran| {
-                match reporter.results(dir) {
-                    Some(Ok(results)) => ran.results = Some(results),
-                    Some(Err(why)) => ran.output.push_str(&format!(
-                        "\nthe report of its tests could not be read: {why}\n"
-                    )),
-                    None => {}
-                }
+                ran.report = reporter.results(dir);
                 Execution::Ended(ran)
             }),
         };
@@ -531,7 +481,9 @@ impl Runner for Execute {
         head.hash(&mut hasher);
         status.hash(&mut hasher);
         for path in changed(&status) {
-            std::fs::read(self.root.join(path)).ok().hash(&mut hasher);
+            std::fs::read(self.checkout.root.join(path))
+                .ok()
+                .hash(&mut hasher);
         }
         format!("{:016x}", hasher.finish())
     }
@@ -583,40 +535,9 @@ impl Ran {
             hung,
             overflowed,
             output: plain(&(stdout + &stderr)),
-            results: None,
+            report: None,
         })
     }
-}
-
-/// `cargo xtask plants-log <folder> <test binary> [its words…]`: cargo's target
-/// runner while a plant's run is a suite of xtask's. Runs the test binary with its
-/// words and asks libtest to log each test's result to a file of its own in
-/// `<folder>`, which no test's output reaches; ends as the binary did.
-pub fn log(context: &Context, args: &[OsString], _console: &mut Console) -> Result<i32, Failure> {
-    let [folder, binary, words @ ..] = args else {
-        return Err(Failure::Usage(
-            "plants-log takes a folder, a test binary and its words".to_owned(),
-        ));
-    };
-    let here = std::env::current_dir()?;
-    Ok(process::run(
-        &logged(Path::new(folder), binary, words, here),
-        &context.env,
-    )?)
-}
-
-/// The test binary `binary` with its `words`, run in `here`, asking libtest to log to
-/// the next file of `folder`, named in turn and by the binary's name.
-fn logged(folder: &Path, binary: &OsStr, words: &[OsString], here: PathBuf) -> Invocation {
-    let count = fs::read_dir(folder).map(Iterator::count).unwrap_or(0);
-    let name = Path::new(binary)
-        .file_stem()
-        .map(|stem| stem.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    Invocation::new(binary, here)
-        .args(words)
-        .arg("--logfile")
-        .arg(folder.join(format!("{count:04}-{name}.log")))
 }
 
 #[cfg(test)]

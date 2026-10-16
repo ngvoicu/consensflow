@@ -65,6 +65,7 @@ fn a_file_that_is_not_as_it_was_after_it_is_put_back_is_said_with_where_its_copy
             path: context.path("src/a.rs"),
             copy: copy.clone(),
             original: b"one\ntwo\n".to_vec(),
+            planted: "ONE\ntwo\n".into(),
         }],
         restored: false,
     };

@@ -53,7 +53,6 @@ fn every_command_of_the_plan_is_there_once() {
             "departures",
             "bench records-memory",
             "plants",
-            "plants-log",
             "smoke",
             "smoke-updater",
             "candidate",

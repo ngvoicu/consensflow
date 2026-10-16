@@ -72,7 +72,7 @@ test tests::the_meant_one_passes_and_prints_a_footer ... ok
 
 #[test]
 fn a_test_failed_where_its_report_holds_a_failure_and_never_for_what_it_printed() {
-    let read = junit(NEXTEST, false).unwrap();
+    let read = junit(NEXTEST).unwrap();
     assert_eq!(
         said(&read.tests),
         [
@@ -81,192 +81,191 @@ fn a_test_failed_where_its_report_holds_a_failure_and_never_for_what_it_printed(
             ("tests::another_fails_quoting_a_build", true),
         ]
     );
+    assert!(read.tests.iter().all(|test| test.at == "plants-fixture"));
     assert_eq!(
         names(&read.failed()),
         ["tests::another_fails_quoting_a_build"]
     );
     assert!(read.outside.is_empty());
     // Libtest's words, a failures list and a footer, in what a passing test printed.
-    let kept = junit(NEXTEST_KEPT_OUTPUT, false).unwrap();
+    let kept = junit(NEXTEST_KEPT_OUTPUT).unwrap();
     assert_eq!(
         names(&kept.failed()),
         ["tests::another_fails_quoting_a_build"]
     );
     assert_eq!(kept.tests.len(), 2);
+    // A name is read as it is escaped once, as XML escapes it.
+    let once = r#"<testsuites><testcase name="says &quot;hi&quot; &amp;quot;"/></testsuites>"#;
+    assert_eq!(
+        said(&junit(once).unwrap().tests),
+        [(r#"says "hi" &quot;"#, false)]
+    );
 }
 
-/// What Node 26.8.1 wrote (2026-10-16) in its JUnit report for a file of four tests:
-/// two in a group whose name holds `&`, `<` and `"`, one of them failing with an error
-/// that quotes a build that failed, named with a `#` that Node's TAP escapes; one at the
-/// top that fails; one at the top that passes. The test that fails printed a forged
-/// `<testcase>`, which Node keeps out of the report. The checkout's path cut to
-/// `/checkout/`.
-const NODE: &str = r#"<?xml version="1.0" encoding="utf-8"?>
-<testsuites>
-	<testsuite name="a group &amp; &lt;its> &amp;quot;kind&amp;quot;" time="0.000999" disabled="0" errors="0" tests="2" failures="1" skipped="0" timestamp="2026-10-16T05:15:12.449Z" hostname="host">
-		<testcase name="passes inside" time="0.000270" classname="a group &amp; &lt;its> &amp;quot;kind&amp;quot;" file="/checkout/tests/mixed.test.mjs"/>
-		<testcase name="the meant one # marked fails inside" time="0.000301" classname="a group &amp; &lt;its> &amp;quot;kind&amp;quot;" file="/checkout/tests/mixed.test.mjs" failure="could not compile the response, error[E0308]">
-			<failure type="testCodeFailure" message="could not compile the response, error[E0308]">
-Error [ERR_TEST_FAILURE]: could not compile the response, error[E0308]
-    at async Promise.all (index 0) {
-  code: 'ERR_TEST_FAILURE',
-  failureType: 'testCodeFailure',
-  cause: Error: could not compile the response, error[E0308]
-      at TestContext.&lt;anonymous> (file:///checkout/tests/mixed.test.mjs:7:11)
-}
-			</failure>
-		</testcase>
-	</testsuite>
-	<testcase name="a top-level one fails" time="0.000044" classname="test" file="/checkout/tests/mixed.test.mjs" failure="top failure">
-		<failure type="testCodeFailure" message="top failure">
-[Error [ERR_TEST_FAILURE]: top failure] {
-  code: 'ERR_TEST_FAILURE',
-  failureType: 'testCodeFailure',
-  cause: Error: top failure
-}
-		</failure>
-	</testcase>
-	<testcase name="says &amp;quot;hi&amp;quot; &amp; &lt;bye>" time="0.000454" classname="test" file="/checkout/tests/mixed.test.mjs"/>
-	<!-- tests 4 -->
-	<!-- suites 1 -->
-	<!-- pass 2 -->
-	<!-- fail 2 -->
-</testsuites>
+/// What the plants' reporter of Node's tests wrote under Node 26.8.1 (2026-10-16) for
+/// three test files, the checkout's path cut to `/checkout/`:
+/// - `cases.test.mjs`: a test to do that fails; a test skipped; a parent test that
+///   fails after its subtest passed; a parent whose subtest fails; a group; a test
+///   named `says &quot;hi&quot;` that fails and one named `says "hi"` that passes; a
+///   name of two lines; a title in two groups, the second inside another and failing,
+///   printing a line of this report that names `says "hi"` failed;
+/// - `empty.test.mjs`, which loads and holds no test;
+/// - `broken.test.mjs`, whose test passed before the file threw after an `await`.
+const NODE: &str = r#"{"path":["before it throws"],"file":"/checkout/tests/broken.test.mjs","line":3,"column":1,"failed":false,"skipped":false}
+{"path":["tests/broken.test.mjs"],"file":"/checkout/tests/broken.test.mjs","line":1,"column":1,"failed":true,"skipped":false}
+{"path":["a todo that fails"],"file":"/checkout/tests/cases.test.mjs","line":3,"column":1,"failed":true,"skipped":true}
+{"path":["a skip"],"file":"/checkout/tests/cases.test.mjs","line":7,"column":1,"failed":false,"skipped":true}
+{"path":["a parent that fails itself","its child passes"],"file":"/checkout/tests/cases.test.mjs","line":10,"column":11,"failed":false,"skipped":false}
+{"path":["a parent that fails itself"],"file":"/checkout/tests/cases.test.mjs","line":9,"column":1,"failed":true,"skipped":false}
+{"path":["a parent whose child fails","its failing child"],"file":"/checkout/tests/cases.test.mjs","line":15,"column":11,"failed":true,"skipped":false}
+{"path":["a parent whose child fails"],"file":"/checkout/tests/cases.test.mjs","line":14,"column":1,"failed":false,"skipped":false}
+{"path":["a group","passes inside"],"file":"/checkout/tests/cases.test.mjs","line":21,"column":3,"failed":false,"skipped":false}
+{"path":["a group"],"file":"/checkout/tests/cases.test.mjs","line":20,"column":1,"failed":false,"skipped":false}
+{"path":["says &quot;hi&quot;"],"file":"/checkout/tests/cases.test.mjs","line":24,"column":1,"failed":true,"skipped":false}
+{"path":["says \"hi\""],"file":"/checkout/tests/cases.test.mjs","line":28,"column":1,"failed":false,"skipped":false}
+{"path":["two\nlines"],"file":"/checkout/tests/cases.test.mjs","line":30,"column":1,"failed":false,"skipped":false}
+{"path":["first group","same title"],"file":"/checkout/tests/cases.test.mjs","line":33,"column":3,"failed":false,"skipped":false}
+{"path":["first group"],"file":"/checkout/tests/cases.test.mjs","line":32,"column":1,"failed":false,"skipped":false}
+{"path":["second group","inner","same title"],"file":"/checkout/tests/cases.test.mjs","line":38,"column":5,"failed":true,"skipped":false}
+{"path":["second group","inner"],"file":"/checkout/tests/cases.test.mjs","line":37,"column":3,"failed":false,"skipped":false}
+{"path":["second group"],"file":"/checkout/tests/cases.test.mjs","line":36,"column":1,"failed":false,"skipped":false}
+{"path":["tests/empty.test.mjs"],"file":"/checkout/tests/empty.test.mjs","line":1,"column":1,"failed":false,"skipped":false}
+{"end":true}
 "#;
 
 #[test]
-fn node_names_a_test_by_its_own_title_as_written_however_its_reporters_escape_it() {
-    let read = junit(NODE, true).unwrap();
+fn node_names_a_test_by_the_titles_it_is_in_and_its_own_exactly_and_a_failure_by_its_own_code() {
+    let read = node(NODE).unwrap();
     assert_eq!(
         said(&read.tests),
         [
-            ("passes inside", false),
-            ("the meant one # marked fails inside", true),
-            ("a top-level one fails", true),
-            (r#"says "hi" & <bye>"#, false),
+            ("before it throws", false),
+            ("tests/broken.test.mjs", true),
+            // A test to do, failed or not, and a test skipped are neither.
+            ("a parent that fails itself › its child passes", false),
+            // A parent's own failure is its own; a parent whose subtest failed did not.
+            ("a parent that fails itself", true),
+            ("a parent whose child fails › its failing child", true),
+            ("a parent whose child fails", false),
+            ("a group › passes inside", false),
+            ("a group", false),
+            // A name as it is written, an entity too: two names.
+            ("says &quot;hi&quot;", true),
+            (r#"says "hi""#, false),
+            ("two\nlines", false),
+            ("first group › same title", false),
+            ("first group", false),
+            ("second group › inner › same title", true),
+            ("second group › inner", false),
+            ("second group", false),
+            ("tests/empty.test.mjs", false),
         ]
     );
-    assert!(read
-        .tests
-        .iter()
-        .all(|test| test.file.as_deref() == Some("/checkout/tests/mixed.test.mjs")));
-    assert!(read.files_that_ran_none().is_empty());
-    // nextest's report escapes once.
-    let once = r#"<testsuites><testcase name="says &quot;hi&quot;"/></testsuites>"#;
     assert_eq!(
-        said(&junit(once, false).unwrap().tests),
-        [(r#"says "hi""#, false)]
+        names(&read.failed()),
+        [
+            "tests/broken.test.mjs",
+            "a parent that fails itself",
+            "a parent whose child fails › its failing child",
+            "says &quot;hi&quot;",
+            "second group › inner › same title",
+        ]
     );
+    // Each test is told from another of its name by its place.
+    assert_eq!(read.tests[11].at, "/checkout/tests/cases.test.mjs:33:3");
+    assert_eq!(read.tests[13].at, "/checkout/tests/cases.test.mjs:38:5");
+    assert_eq!(
+        read.tests[0].file.as_deref(),
+        Some("/checkout/tests/broken.test.mjs")
+    );
+    assert!(read.outside.is_empty());
 }
 
-/// What Node 26.8.1 wrote (2026-10-16) for two test files, one whose test passed and
-/// one that threw after a top-level `await`, before it had a test: Node's own counts
-/// are of the two files together.
-const NODE_TWO_FILES: &str = r#"<?xml version="1.0" encoding="utf-8"?>
-<testsuites>
-	<testcase name="passes in another file" time="0.000288" classname="test" file="/checkout/tests/passes.test.mjs"/>
-	<testcase name="tests/tla.test.mjs" time="0.029056" classname="test" file="/checkout/tests/tla.test.mjs" failure="test failed">
-		<failure type="testCodeFailure" message="test failed">
-[Error: test failed] { code: 'ERR_TEST_FAILURE', failureType: 'testCodeFailure', cause: 'test failed', exitCode: 1, signal: null }
-		</failure>
-	</testcase>
-	<!-- tests 2 -->
-	<!-- suites 0 -->
-	<!-- pass 1 -->
-	<!-- fail 1 -->
-</testsuites>
-"#;
-
-/// A file whose first test passed and whose second ended the process after a wait.
-const NODE_ENDED_LATE: &str = r#"<?xml version="1.0" encoding="utf-8"?>
-<testsuites>
-	<testcase name="passes first" time="0.000288" classname="test" file="/checkout/tests/late.test.mjs"/>
-	<testcase name="tests/late.test.mjs" time="0.086890" classname="test" file="/checkout/tests/late.test.mjs" failure="test failed">
-		<failure type="testCodeFailure" message="test failed">
-[Error: test failed] { code: 'ERR_TEST_FAILURE', failureType: 'testCodeFailure', cause: 'test failed', exitCode: 3, signal: null }
-		</failure>
-	</testcase>
-	<!-- tests 2 -->
-</testsuites>
-"#;
-
-/// A file that does not parse, in a folder with a space in its name.
-const NODE_UNPARSED: &str = r#"<?xml version="1.0" encoding="utf-8"?>
-<testsuites>
-	<testcase name="tests/with spaces/syntax.test.mjs" time="0.029564" classname="test" file="/checkout/tests/with spaces/syntax.test.mjs" failure="test failed">
-		<failure type="testCodeFailure" message="test failed">
-[Error: test failed] { code: 'ERR_TEST_FAILURE', failureType: 'testCodeFailure', cause: 'test failed', exitCode: 1, signal: null }
-		</failure>
-	</testcase>
-	<!-- tests 1 -->
-</testsuites>
-"#;
-
 #[test]
-fn a_node_test_file_ran_no_test_where_its_own_tests_are_none_whatever_the_other_files_ran() {
-    let two = junit(NODE_TWO_FILES, true).unwrap();
+fn a_node_test_file_ran_no_test_where_it_failed_whole_and_its_own_tests_are_none() {
+    let read = node(NODE).unwrap();
+    // The broken file ran a test before it threw; the empty file did not fail.
+    assert!(read.tests[1].is_whole_file());
+    assert!(read.tests[16].is_whole_file());
+    assert!(read.files_that_ran_none().is_empty());
+    let alone = |lines: &[&str]| {
+        let mut report = lines.join("\n");
+        report.push_str("\n{\"end\":true}\n");
+        node(&report).unwrap()
+    };
+    // What the reporter wrote under Node 26.8.1 (2026-10-16) for two files, one whose test
+    // passed and one that threw after a top-level `await`, before it had a test; the
+    // checkout's path cut to `/checkout/`. The other file's test is none of its own.
+    let two = alone(&[
+        r#"{"path":["passes in another file"],"file":"/checkout/tests/passes.test.mjs","line":3,"column":1,"failed":false,"skipped":false}"#,
+        r#"{"path":["tests/tla.test.mjs"],"file":"/checkout/tests/tla.test.mjs","line":1,"column":1,"failed":true,"skipped":false}"#,
+    ]);
     assert_eq!(two.files_that_ran_none(), ["tests/tla.test.mjs"]);
-    assert_eq!(names(&two.failed()), ["tests/tla.test.mjs"]);
-    assert!(two.failed()[0].is_whole_file());
-    let unparsed = junit(NODE_UNPARSED, true).unwrap();
+    let broken = r#"{"path":["tests/broken.test.mjs"],"file":"/checkout/tests/broken.test.mjs","line":1,"column":1,"failed":true,"skipped":false}"#;
+    let empty = r#"{"path":["tests/empty.test.mjs"],"file":"/checkout/tests/empty.test.mjs","line":1,"column":1,"failed":false,"skipped":false}"#;
     assert_eq!(
-        unparsed.files_that_ran_none(),
-        ["tests/with spaces/syntax.test.mjs"]
+        alone(&[broken]).files_that_ran_none(),
+        ["tests/broken.test.mjs"]
     );
-    // A file that failed whole once tests of it ran ran them.
-    let late = junit(NODE_ENDED_LATE, true).unwrap();
-    assert!(late.files_that_ran_none().is_empty());
-    assert!(late.failed()[0].is_whole_file());
+    assert!(alone(&[empty]).files_that_ran_none().is_empty());
     // A test of its own named as a file is, in a file of another name, is a test.
-    let named = r#"<testsuites><testcase name="config.mjs" file="/checkout/tests/a.test.mjs"><failure/></testcase></testsuites>"#;
-    let named = junit(named, true).unwrap();
+    let named = r#"{"path":["config.mjs"],"file":"/checkout/tests/a.test.mjs","line":1,"column":1,"failed":true,"skipped":false}"#;
+    let named = alone(&[named]);
     assert!(!named.tests[0].is_whole_file());
     assert!(named.files_that_ran_none().is_empty());
 }
 
 #[test]
-fn a_report_that_is_not_xml_is_an_error_and_a_testcase_with_no_name_too() {
-    assert!(junit("<testsuites><testcase name=\"a\"/></testcase>", false).is_err());
-    assert!(junit(
-        "<testsuites><testcase name=\"a &unknown; b\"/></testsuites>",
-        false
-    )
-    .is_err());
-    assert!(junit("<testsuites><testcase file=\"a\"/></testsuites>", true).is_err());
-    assert_eq!(junit("", false).unwrap(), Results::default());
+fn a_report_of_node_s_that_is_cut_short_or_is_not_one_is_an_error() {
+    let ended = "{\"end\":true}\n";
+    assert_eq!(node(ended).unwrap(), Results::default());
+    // No end: the run did not get to it, and the tests after are not known.
+    let cut = NODE.strip_suffix(ended).unwrap();
+    assert!(node(cut).unwrap_err().contains("ends before the run did"));
+    assert!(node("").is_err());
+    // A line after the end, a line that is not JSON, one that is neither a test nor the end.
+    for wrong in [
+        format!("{NODE}{ended}"),
+        format!("not json\n{ended}"),
+        format!("{{}}\n{ended}"),
+        "{\"path\":[\"a\"],\"end\":true}\n".to_owned(),
+        format!("{{\"path\":[\"a\"],\"more\":1}}\n{ended}"),
+    ] {
+        assert!(node(&wrong).is_err(), "{wrong}");
+    }
 }
 
-/// What libtest wrote to its log (`--logfile`, the stable toolchain of 2026-10-16) for a binary of
-/// five tests: one ignored with a reason, two that passed, a `should_panic` test whose
-/// panic was another (libtest says why on lines of their own, the panic quoted with a
-/// line that is libtest's words for a test that passed), and one that failed.
-const LIBTEST_LOG: &str = "ignored: asked for by name tests::ignored_with_a_reason
-ok tests::passes
-ok tests::the_meant_one_passes_and_prints_a_footer
-failed: panic did not contain expected string
-      panic message: \"another\\nok tests::passes\"
- expected substring: \"the one\" tests::panics_with_another
-failed tests::another_fails_quoting_a_build
-";
+#[test]
+fn a_testcase_marked_skipped_neither_failed_nor_passed_though_it_holds_a_failure() {
+    // nextest 0.9.148 writes no case for a test it did not run (an ignored one, 2026-10-16);
+    // a JUnit report that marks one skipped, a test to do that failed among them, says
+    // nothing of it.
+    let xml = r#"<testsuites><testsuite name="x">
+        <testcase name="a::to_do" classname="x"><skipped type="todo"/><failure message="fails"/></testcase>
+        <testcase name="a::skipped" classname="x"><skipped/></testcase>
+        <testcase name="a::runs" classname="x"/>
+    </testsuite></testsuites>"#;
+    assert_eq!(said(&junit(xml).unwrap().tests), [("a::runs", false)]);
+}
 
 #[test]
-fn libtest_s_log_says_each_test_that_ran_and_whether_it_failed_its_name_last() {
-    let read = libtest_logs(&[
-        LIBTEST_LOG.to_owned(),
-        "ok b::one\nfailed b::two\n".to_owned(),
-    ]);
+fn a_report_of_nextest_s_that_is_cut_short_or_is_not_xml_is_an_error_and_a_testcase_with_no_name_too(
+) {
+    assert!(junit("<testsuites><testcase name=\"a\"/></testcase>").is_err());
+    assert!(junit("<testsuites><testcase name=\"a &unknown; b\"/></testsuites>").is_err());
+    assert!(junit("<testsuites><testcase classname=\"a\"/></testsuites>").is_err());
+    assert!(junit("").is_err());
+    let cut = NEXTEST.strip_suffix("</testsuites>").unwrap();
+    assert!(junit(cut).unwrap_err().contains("ends before"));
     assert_eq!(
-        said(&read.tests),
-        [
-            ("tests::passes", false),
-            ("tests::the_meant_one_passes_and_prints_a_footer", false),
-            ("tests::panics_with_another", true),
-            ("tests::another_fails_quoting_a_build", true),
-            ("b::one", false),
-            ("b::two", true),
-        ]
+        junit("<testsuites><testsuite>").unwrap_err(),
+        "the report ends before its <testsuites> does"
     );
-    assert_eq!(libtest_logs(&[String::new()]), Results::default());
+    assert_eq!(junit("<testsuites/>").unwrap(), Results::default());
+    assert_eq!(
+        junit("<testsuites></testsuites>").unwrap(),
+        Results::default()
+    );
 }
 
 /// What Playwright 1.63 wrote (2026-10-16) in its JSON report for a spec whose test in a
@@ -304,7 +303,9 @@ const PLAYWRIGHT: &str = r#"{
               "status": "unexpected"
             }
           ],
-          "file": "prints.spec.mjs"
+          "file": "prints.spec.mjs",
+          "line": 11,
+          "column": 1
         }
       ],
       "suites": [
@@ -332,7 +333,9 @@ const PLAYWRIGHT: &str = r#"{
                   "status": "flaky"
                 }
               ],
-              "file": "prints.spec.mjs"
+              "file": "prints.spec.mjs",
+              "line": 4,
+              "column": 3
             }
           ]
         }
@@ -375,6 +378,10 @@ fn playwright_says_each_test_named_from_its_first_group_on_and_whether_it_failed
     );
     assert_eq!(names(&read.failed()), ["another fails"]);
     assert!(read.outside.is_empty(), "{:?}", read.outside);
+    // The same test, run in two projects, is one test in one place.
+    assert_eq!(read.tests[0].at, "prints.spec.mjs:11:1");
+    assert_eq!(read.tests[1].at, "prints.spec.mjs:4:3");
+    assert_eq!(read.tests[2].at, read.tests[1].at);
 }
 
 #[test]
@@ -389,4 +396,8 @@ fn playwright_says_the_errors_outside_every_test_each_by_its_first_line() {
         ]
     );
     assert!(playwright("Running 2 tests").is_err());
+    // A report that is JSON and not Playwright's is no report of its tests.
+    assert!(playwright("{}").is_err());
+    assert!(playwright(r#"{"suites": []}"#).is_err());
+    assert!(playwright(r#"{"suites": [], "errors": []}"#).is_ok());
 }

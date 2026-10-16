@@ -50,10 +50,13 @@ impl<A: FnMut(&[String]) -> Answer> Runner for Fake<A> {
     }
 }
 
-/// A run of `cargo test -p x`, which nextest runs, that exited with `code` having
-/// written `output` and no report.
+/// The words of a command of xtask's that says no more than its status.
+const STATUS: [&str; 3] = ["cargo", "xtask", "smoke-updater"];
+
+/// A run of a command that says no more than its status (`STATUS`), that exited with
+/// `code` having written `output`.
 fn ended(code: i32, output: &str) -> Answer {
-    ended_by(&["cargo", "test", "-p", "x"], code, output, None)
+    ended_by(&STATUS, code, output, None)
 }
 
 /// A run of `command` that exited with `code` having written `output`, its report `results`.
@@ -62,17 +65,31 @@ fn ended_by(command: &[&str], code: i32, output: &str, results: Option<Results>)
         command,
         Some(code),
         output,
-        results,
+        results.map(Ok),
     )))
 }
 
-/// A report of `tests`, each a name and whether it failed.
+/// A run of `cargo test -p x` that exited with `code` having written `output`, whose
+/// report could not be read.
+fn unreported(code: i32, output: &str) -> Answer {
+    Ok(Execution::Ended(Ran::new(
+        &["cargo", "test", "-p", "x"],
+        Some(code),
+        output,
+        Some(Err(
+            "/run/plants/junit.xml could not be read: No such file or directory".into(),
+        )),
+    )))
+}
+
+/// A report of `tests`, each a name and whether it failed, all of one test binary.
 fn report(tests: &[(&str, bool)]) -> Results {
     Results {
         tests: tests
             .iter()
             .map(|(name, failed)| Test {
                 name: (*name).to_owned(),
+                at: "x".into(),
                 file: None,
                 failed: *failed,
             })
@@ -459,7 +476,7 @@ fn a_failure_that_names_no_test_is_run_so_again_and_its_command_twice_without_th
     assert_eq!(runner.ran, ["smoke"; 4]);
     assert!(
         said.contains(
-            "CAUGHT           p: one (0 s) by test -p x: ended with 1, not by the_test\n"
+            "CAUGHT           p: one (0 s) by xtask smoke-updater: ended with 1, not by the_test\n"
         ),
         "{said}"
     );
@@ -506,7 +523,10 @@ fn a_plant_that_does_not_build_or_does_not_end_is_no_catch_and_says_what_happene
     ]);
     let mut runner = Fake::new(|command| {
         if command[0] == "first" {
-            return ended(
+            if !planted(&context) {
+                return passes();
+            }
+            return unreported(
                 101,
                 "error[E0432]: unresolved import\nerror: could not compile `x`\n",
             );
@@ -518,6 +538,8 @@ fn a_plant_that_does_not_build_or_does_not_end_is_no_catch_and_says_what_happene
     });
     let (status, said) = go(&context, &family, &mut runner);
     assert_eq!(status.unwrap(), 1);
+    // The run that did not build passes without the plant: the plant broke the build.
+    assert_eq!(runner.ran, ["first", "first", "second"]);
     assert!(said.contains("DOES NOT COMPILE p: broken ("), "{said}");
     assert!(said.contains("error: could not compile `x`"), "{said}");
     assert!(said.contains("HUNG             p: hung ("), "{said}");
@@ -957,6 +979,7 @@ fn a_failed_test_said_by_a_run_that_exited_with_success_is_no_catch() {
 fn node_test(name: &str, file: &str, failed: bool) -> Test {
     Test {
         name: name.to_owned(),
+        at: format!("{file}:1:1"),
         file: Some(file.to_owned()),
         failed,
     }
@@ -977,8 +1000,8 @@ fn a_run_that_ran_no_test_that_could_see_the_plant_is_broken_whatever_test_faile
         "a.spec.mjs",
     ];
     let mut runner = Fake::new(|command| match command[0].as_str() {
-        // The test the plant was meant for failed, in one file; the other failed whole
-        // and ran none of its own.
+        _ if !planted(&context) => passes(),
+        // Another test failed, in one file; the other failed whole and ran none of its own.
         "node" => ended_by(
             &node,
             1,
@@ -986,7 +1009,7 @@ fn a_run_that_ran_no_test_that_could_see_the_plant_is_broken_whatever_test_faile
             Some(Results {
                 tests: vec![
                     node_test("tests/a.test.mjs", "/checkout/tests/a.test.mjs", true),
-                    node_test("the_test", "/checkout/tests/b.test.mjs", true),
+                    node_test("m::other", "/checkout/tests/b.test.mjs", true),
                 ],
                 outside: Vec::new(),
             }),
@@ -1007,7 +1030,8 @@ fn a_run_that_ran_no_test_that_could_see_the_plant_is_broken_whatever_test_faile
     });
     let (status, said) = go(&context, &family, &mut runner);
     assert_eq!(status.unwrap(), 1);
-    assert_eq!(runner.ran, ["node", "page"], "none is run again");
+    // Each is run once without the plant, where it passes: the plant broke it.
+    assert_eq!(runner.ran, ["node", "node", "page", "page"], "{said}");
     assert!(
         said.contains(
             "BROKEN           p: node (0 s)\n    the test file tests/a.test.mjs ran no test\n"
@@ -1080,7 +1104,8 @@ fn a_build_nextest_says_failed_does_not_compile_and_a_test_that_quotes_one_is_ca
         let code = i32::from(planted(&context));
         match command[0].as_str() {
             // nextest's status for a build that failed, whatever else it printed.
-            "broken" => reported(101, "test a::fails ... FAILED\n", &[]),
+            "broken" if planted(&context) => unreported(101, "test a::fails ... FAILED\n"),
+            "broken" => passes(),
             // A test that fails quoting a broken build, where nextest says a test failed.
             "quoted" => ended_by(
                 &["cargo", "test", "-p", "x"],
@@ -1427,4 +1452,418 @@ fn to_check_is_stopped_where_a_command_is() {
     needs.prepare = vec![vec!["prepare".into()]];
     let mut runner = Fake::new(|_| Ok(Execution::Stopped));
     assert_eq!(checked(&context, &[needs], &mut runner).0, 130);
+}
+
+#[test]
+fn to_check_refuses_a_meant_name_that_holds_an_xml_entity() {
+    let (_folder, context) = checkout();
+    let meant = |name: &str, meant: &str| {
+        let mut plant = upper(name, &[("first", false)]);
+        plant.meant = meant.into();
+        plant
+    };
+    let plants = [
+        meant("p: quoted", "says &quot;hi&quot;"),
+        meant("p: numbered", "says &#34;hi"),
+        meant("p: written", r#"says "hi" & bye; to R&D"#),
+    ];
+    let mut runner = Fake::new(|_| passes());
+    let (status, said) = checked(&context, &plants, &mut runner);
+    assert_eq!(status, 1);
+    assert_eq!(
+        said,
+        "p: quoted: its meant name holds &quot;, a report's escape and no part of a test's name: write the name as the test does\n\
+         p: numbered: its meant name holds &#34;, a report's escape and no part of a test's name: write the name as the test does\n\
+         1 of 3 plants apply\n"
+    );
+    assert!(runner.ran.is_empty());
+}
+
+/// The words of a run of Playwright's tests.
+const PAGE: [&str; 4] = [
+    "node",
+    "app/node_modules/@playwright/test/cli.js",
+    "test",
+    "a.spec.mjs",
+];
+
+#[test]
+fn a_run_whose_reporter_wrote_no_report_is_broken_and_no_catch_though_it_fails_twice_and_passes_twice(
+) {
+    let (_folder, context) = checkout();
+    let family = family(vec![upper("p: unloaded", &[("page", false)])]);
+    // As Playwright is where the plant breaks its configuration: it fails before its
+    // JSON reporter is made, and writes no report. Without the plant it passes.
+    let mut runner = Fake::new(|_| {
+        if planted(&context) {
+            Ok(Execution::Ended(Ran::new(
+                &PAGE,
+                Some(1),
+                "Error: the configuration does not load\n",
+                Some(Err(
+                    "/run/report.json could not be read: No such file or directory".into(),
+                )),
+            )))
+        } else {
+            ended_by(
+                &PAGE,
+                0,
+                "  1 passed\n",
+                Some(report(&[("a › the_test", false)])),
+            )
+        }
+    });
+    let (status, said) = go(&context, &family, &mut runner);
+    assert_eq!(status.unwrap(), 1);
+    // Once with the plant, and once without it, where it passes: the plant broke it.
+    assert_eq!(runner.ran, ["page", "page"]);
+    assert!(
+        said.contains(
+            "BROKEN           p: unloaded (0 s)\n    no report of its tests could be read: \
+             /run/report.json could not be read: No such file or directory\n"
+        ),
+        "{said}"
+    );
+    assert!(!said.contains("CAUGHT"), "{said}");
+}
+
+#[test]
+fn a_run_without_the_plant_whose_reporter_wrote_no_report_is_no_pass() {
+    let (_folder, context) = checkout();
+    let family = family(vec![upper("p: one", &[("first", false)])]);
+    let mut runner = Fake::new(|_| {
+        if planted(&context) {
+            fails("m::the_test")
+        } else {
+            unreported(0, "")
+        }
+    });
+    let (status, said) = go(&context, &family, &mut runner);
+    assert_eq!(status.unwrap(), 1);
+    assert_eq!(runner.ran, ["first"; 3]);
+    assert!(
+        said.contains(
+            "NOT RUN          p: one (0 s)\n    first fails without the plant too, twice, so it \
+             tells nothing of it:\nno report of its tests could be read: "
+        ),
+        "{said}"
+    );
+}
+
+#[test]
+fn every_run_of_a_plant_is_tried_until_one_catches_it_and_each_that_told_nothing_is_said() {
+    let (_folder, context) = checkout();
+    let family = family(vec![
+        upper(
+            "p: caught last",
+            &[
+                ("missing", false),
+                ("unbuilt", false),
+                ("hung", false),
+                ("unloaded", false),
+                ("last", false),
+            ],
+        ),
+        plant(
+            "p: caught by none",
+            &[("src/b.rs", "three", "3")],
+            &[("missing", false), ("unbuilt", false), ("other", false)],
+        ),
+    ]);
+    let mut seen = Vec::new();
+    let mut runner = Fake::new(|command| {
+        let with = planted(&context);
+        seen.push((command[0].clone(), with));
+        match command[0].as_str() {
+            "missing" => Err(Error::Process(crate::process::Failure::NotFound {
+                program: "missing".into(),
+            })),
+            "unbuilt" if with => unreported(101, "error[E0308]: mismatched types\n"),
+            "hung" if with => Ok(Execution::Ended(Ran {
+                hung: true,
+                ..Ran::new(&["cargo", "test", "-p", "x"], None, "", None)
+            })),
+            "unloaded" if with => unreported(1, "Error: the configuration does not load\n"),
+            "last" if with => fails("m::the_test"),
+            "other" if with => fails("m::other"),
+            _ => passes(),
+        }
+    });
+    let (status, said) = go(&context, &family, &mut runner);
+    assert_eq!(status.unwrap(), 1);
+    let seen: Vec<(&str, bool)> = seen
+        .iter()
+        .map(|(run, with)| (run.as_str(), *with))
+        .collect();
+    assert_eq!(
+        seen,
+        [
+            // Every run with the plant, the last of which catches it, confirmed without it;
+            // then what did not build and what was BROKEN, without it, where they pass.
+            ("missing", true),
+            ("unbuilt", true),
+            ("hung", true),
+            ("unloaded", true),
+            ("last", true),
+            ("last", false),
+            ("unbuilt", false),
+            ("unloaded", false),
+            // How a command does without a plant is known by now.
+            ("missing", true),
+            ("unbuilt", true),
+            ("other", true),
+        ]
+    );
+    assert!(
+        said.contains(
+            "CAUGHT           p: caught last (0 s) by m::the_test\n\
+             \x20   and NOT RUN: missing could not be started: `missing` was not found: is it installed, and on the PATH?\n\
+             \x20   and DOES NOT COMPILE: cargo test -p x\n\
+             error[E0308]: mismatched types\n\n\
+             \x20   and HUNG: cargo test -p x\n\
+             \x20   cargo test -p x did not end in 600 s\n\
+             \x20   and BROKEN: cargo test -p x\n\
+             \x20   no report of its tests could be read: /run/plants/junit.xml could not be read: No such file or directory\n"
+        ),
+        "{said}"
+    );
+    // Where none catches it, it ends as the first that told nothing did.
+    assert!(
+        said.contains(
+            "NOT RUN          p: caught by none (0 s)\n\
+             \x20   missing could not be started: `missing` was not found: is it installed, and on the PATH?\n\
+             \x20   and DOES NOT COMPILE: cargo test -p x\n"
+        ),
+        "{said}"
+    );
+    assert!(
+        said.contains("    and MISSED-BY-MEANT: cargo test -p x\n    failed: m::other\n"),
+        "{said}"
+    );
+    assert!(said.ends_with("1 of 2 plants caught\n"), "{said}");
+    assert!(!planted(&context));
+}
+
+#[test]
+fn a_run_that_did_not_build_or_was_broken_without_the_plant_too_tells_nothing_of_it() {
+    let (_folder, context) = checkout();
+    // As the obligations' plants are: a run whose test target is gone, which nextest
+    // says did not build with the plant and without it, then a run of other tests.
+    let family = family(vec![upper("p: gone", &[("gone", false), ("other", false)])]);
+    let mut runner = Fake::new(|command| match command[0].as_str() {
+        "gone" => unreported(
+            101,
+            "error: no test target named `node` in `cf-ledger` package\n",
+        ),
+        _ => passes(),
+    });
+    let (status, said) = go(&context, &family, &mut runner);
+    assert_eq!(status.unwrap(), 1);
+    assert_eq!(runner.ran, ["gone", "other", "gone", "gone"]);
+    assert!(
+        said.contains(
+            "NOT RUN          p: gone (0 s)\n    gone fails without the plant too, twice, so it \
+             tells nothing of it:\nno report of its tests could be read: "
+        ),
+        "{said}"
+    );
+    assert!(!said.contains("DOES NOT COMPILE"), "{said}");
+}
+
+#[test]
+fn a_catch_its_command_does_not_confirm_is_said_and_the_next_run_is_tried_with_the_plant_in() {
+    let (_folder, context) = checkout();
+    let family = family(vec![upper(
+        "p: one",
+        &[("fails", false), ("second", false)],
+    )]);
+    let mut seen = Vec::new();
+    let mut runner = Fake::new(|command| {
+        seen.push((command[0].clone(), planted(&context)));
+        match command[0].as_str() {
+            // Its meant test fails with the plant, and without it.
+            "fails" => fails("m::the_test"),
+            _ => catches(&context, "m::the_test"),
+        }
+    });
+    let (status, said) = go(&context, &family, &mut runner);
+    assert_eq!(status.unwrap(), 0);
+    let seen: Vec<(&str, bool)> = seen
+        .iter()
+        .map(|(run, with)| (run.as_str(), *with))
+        .collect();
+    assert_eq!(
+        seen,
+        [
+            ("fails", true),
+            ("fails", false),
+            ("fails", false),
+            ("second", true),
+            ("second", false),
+        ]
+    );
+    assert!(
+        said.contains("CAUGHT           p: one (0 s) by m::the_test\n"),
+        "{said}"
+    );
+    assert!(
+        said.contains(
+            "    and NOT RUN: fails fails without the plant too, twice, so it tells nothing of it:\n"
+        ),
+        "{said}"
+    );
+    assert!(!planted(&context));
+}
+
+/// A run of `node --test` that exited with `code`, its report `tests`: each a name, where
+/// it is written, and whether it failed.
+fn placed(code: i32, tests: &[(&str, &str, bool)]) -> Answer {
+    ended_by(
+        &["node", "--test", "tests/a.test.mjs"],
+        code,
+        "",
+        Some(Results {
+            tests: tests
+                .iter()
+                .map(|(name, at, failed)| Test {
+                    name: (*name).into(),
+                    at: (*at).into(),
+                    file: Some("/checkout/tests/a.test.mjs".into()),
+                    failed: *failed,
+                })
+                .collect(),
+            outside: Vec::new(),
+        }),
+    )
+}
+
+#[test]
+fn a_meant_name_that_stands_for_two_tests_of_a_report_is_no_catch_and_says_so() {
+    // As the plants' reporter of Node's tests says a title in two groups, one of them
+    // failing; the meant name is the title alone.
+    let runner_for = |meant: &str| {
+        let (_folder, context) = checkout();
+        let mut plant = upper("p: one", &[("node", false)]);
+        plant.meant = meant.into();
+        let mut runner = Fake::new(|_| {
+            let with = planted(&context);
+            placed(
+                i32::from(with),
+                &[
+                    (
+                        "a group › the_test",
+                        "/checkout/tests/a.test.mjs:2:3",
+                        false,
+                    ),
+                    ("another › the_test", "/checkout/tests/a.test.mjs:6:3", with),
+                ],
+            )
+        });
+        let (status, said) = go(&context, &family_of(plant), &mut runner);
+        (status.unwrap(), said, runner.ran)
+    };
+    let (status, said, ran) = runner_for("the_test");
+    assert_eq!(status, 1);
+    assert_eq!(ran, ["node"], "nothing is run without the plant");
+    assert!(
+        said.contains(
+            "MISSED-BY-MEANT  p: one (0 s) by another › the_test\n    failed: another › the_test\n    \
+             the meant name the_test stands for 2 tests of node --test tests/a.test.mjs, so none of \
+             them is taken for it: a group › the_test (/checkout/tests/a.test.mjs:2:3), another › \
+             the_test (/checkout/tests/a.test.mjs:6:3)\n"
+        ),
+        "{said}"
+    );
+    // Named whole, it is the one test.
+    let (status, said, ran) = runner_for("another › the_test");
+    assert_eq!(status, 0, "{said}");
+    assert_eq!(ran, ["node", "node"]);
+    // One test in one place, run twice (in two of Playwright's projects), is one test.
+    let (_folder, context) = checkout();
+    let mut runner = Fake::new(|_| {
+        let with = planted(&context);
+        placed(
+            i32::from(with),
+            &[
+                ("g › the_test", "a.spec.mjs:4:3", with),
+                ("g › the_test", "a.spec.mjs:4:3", false),
+            ],
+        )
+    });
+    let (status, said) = go(
+        &context,
+        &family_of(upper("p: two", &[("page", false)])),
+        &mut runner,
+    );
+    assert_eq!(status.unwrap(), 0, "{said}");
+    assert!(
+        said.contains("CAUGHT           p: two (0 s) by g › the_test\n"),
+        "{said}"
+    );
+}
+
+#[test]
+fn an_error_outside_every_test_beside_the_meant_test_s_failure_is_said_with_the_catch() {
+    let (_folder, context) = checkout();
+    let family = family(vec![
+        upper("p: page", &[("page", false)]),
+        upper("p: node", &[("node", false)]),
+    ]);
+    let node = ["node", "--test", "tests/a.test.mjs", "tests/b.test.mjs"];
+    let mut runner = Fake::new(|command| {
+        let with = planted(&context);
+        let code = i32::from(with);
+        match command[0].as_str() {
+            // As Playwright says the meant test failing, and a global teardown that threw.
+            "page" => ended_by(
+                &PAGE,
+                code,
+                "",
+                Some(Results {
+                    outside: if with {
+                        vec!["Error: the teardown fails with the plant".into()]
+                    } else {
+                        Vec::new()
+                    },
+                    ..report(&[("g › the_test", with)])
+                }),
+            ),
+            // As Node says the meant test failing, and another file that failed whole.
+            _ => {
+                let mut tests = vec![node_test("the_test", "/checkout/tests/a.test.mjs", with)];
+                if with {
+                    tests.push(node_test(
+                        "tests/b.test.mjs",
+                        "/checkout/tests/b.test.mjs",
+                        true,
+                    ));
+                }
+                ended_by(
+                    &node,
+                    code,
+                    "",
+                    Some(Results {
+                        tests,
+                        outside: Vec::new(),
+                    }),
+                )
+            }
+        }
+    });
+    let (status, said) = go(&context, &family, &mut runner);
+    assert_eq!(status.unwrap(), 0, "{said}");
+    assert!(
+        said.contains(
+            "CAUGHT           p: page (0 s) by g › the_test\n    beside it: Playwright: an error \
+             outside every test: Error: the teardown fails with the plant\n"
+        ),
+        "{said}"
+    );
+    assert!(
+        said.contains(
+            "CAUGHT           p: node (0 s) by the_test (+1)\n    beside it: the test file \
+             tests/b.test.mjs ran no test\n"
+        ),
+        "{said}"
+    );
 }
