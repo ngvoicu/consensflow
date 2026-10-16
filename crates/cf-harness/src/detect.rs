@@ -1,10 +1,16 @@
-//! Where each harness's CLI is on this machine: on PATH first, then in the
-//! places each installs itself, which a Finder-launched app's PATH may lack.
-//! Every place is the user's own, under the home but for npm's folder on
-//! Windows, which the environment names: a system-wide one
-//! (`/opt/homebrew/bin`) is on every login PATH already, and a test with a home
-//! of its own then sees only the CLIs it put there. And which harnesses those
-//! are: the ones that are installed here, and the ones that are not.
+//! Where each harness's CLI is on this machine: on the PATH the daemon was
+//! given first ([`Env::search_path`]), then in the places each installs itself,
+//! which a Finder-launched app's PATH may lack, under the home (and npm's folder
+//! on Windows, which the environment names), then in the system's own folders
+//! of programs (`/opt/homebrew/bin` on a Mac: [`Env::tool_folders`]). Only a
+//! login shell puts those on the PATH, and one too slow to answer left a
+//! Homebrew `codex` not installed (2026-10-15). The daemon runs everything with
+//! them after its PATH, and a harness is still looked for on the PATH as given:
+//! a CLI the human keeps in the home comes before an older one of Homebrew's. A
+//! test with a home of its own sees only the CLIs it put there: an environment a
+//! test makes has no folders of the system's unless it names them. And which
+//! harnesses those are: the ones that are installed here, and the ones that are
+//! not.
 
 use std::path::PathBuf;
 
@@ -82,11 +88,13 @@ fn npm_global(env: &Env) -> Option<PathBuf> {
 
 /// The absolute path `harness`'s CLI resolves to here, or none: a pane opens
 /// only on an absolute program. On PATH, else in the harness's own places,
-/// else in the common ones, npm's folder on Windows the last of them.
+/// else in the common ones, npm's folder on Windows the last of them, else in
+/// the system's folders of programs.
 pub fn harness_path(harness: Harness, env: &Env) -> Option<PathBuf> {
     let command = harness.as_str();
-    cf_process::on_path(command, env).or_else(|| {
+    cf_process::on_search_path(command, env).or_else(|| {
         let folders = homed(harness, env).into_iter().chain(npm_global(env));
+        let folders = folders.chain(env.tool_folders().iter().cloned());
         cf_process::find_in(command, folders, env)
     })
 }

@@ -41,6 +41,8 @@ windows-sys = { workspace = true, features = ["Win32_System_Console", "Win32_Sys
 
 [dev-dependencies]
 cf-panes = { workspace = true, features = ["test-support"] }
+# Detection as the daemon the app starts runs it, in the tests of the daemon's PATH.
+cf-harness.workspace = true
 portable-pty.workspace = true
 tauri = { version = "2.11.3", features = ["test"] }
 

@@ -3949,9 +3949,18 @@ test('a screen opened again keeps what the human left on it, and lists the agent
   }
 })
 
-/** The preferences the daemon keeps in the agents file of the home `env` names. */
-const preferencesIn = (env) =>
-  JSON.parse(readFileSync(join(env.CONSENSFLOW_HOME, 'agents.json'), 'utf8')).preferences
+/**
+ * The preferences the daemon keeps in the agents file of the home `env` names: none
+ * until it has written the file. A poll gives up on a reader that throws, and the
+ * first read may come before the write (it did once, in a whole run of the suite).
+ */
+const preferencesIn = (env) => {
+  try {
+    return JSON.parse(readFileSync(join(env.CONSENSFLOW_HOME, 'agents.json'), 'utf8')).preferences
+  } catch {
+    return undefined
+  }
+}
 
 test('the app’s setting for specs is a box of the Agents screen, kept in the agents file beside the other choice, and shown again when the screen opens', async ({
   page,

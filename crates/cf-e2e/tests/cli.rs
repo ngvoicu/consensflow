@@ -29,6 +29,8 @@ mod roster;
 mod saved_data;
 #[path = "cli/switch_over.rs"]
 mod switch_over;
+#[path = "cli/tool_folders.rs"]
+mod tool_folders;
 
 use std::path::PathBuf;
 

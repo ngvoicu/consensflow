@@ -18,10 +18,20 @@ pub(super) fn var<'e>(env: &'e [(String, String)], name: &str) -> &'e str {
         .map_or("", |(_, value)| value.as_str())
 }
 
+/// The machine's own folder of programs as the rig has it, the one Homebrew's
+/// are in on a Mac (`/opt/homebrew/bin`), which the daemon is told is the
+/// system's (`CONSENSFLOW_TOOL_FOLDERS`): a daemon of the rig finds nothing of
+/// the machine's there, and a stand-in only where a case puts one
+/// ([`Config::as_the_finder_starts_it`]).
+pub(super) fn tool_folder(root: &Path) -> PathBuf {
+    root.join("system-bin")
+}
+
 /// What the daemon, the pane host and so every window is given, and nothing
 /// else of the machine's: a home of its own, a `PATH` that finds the stand-in
-/// `claude` first, and the stand-in's settings. `config`'s variables come last,
-/// but for the ones it unsets, which are not there at all.
+/// `claude` first, the rig's own folder of programs for the system's, and the
+/// stand-in's settings. `config`'s variables come last, but for the ones it
+/// unsets, which are not there at all.
 pub(super) fn environment(root: &Path, fake_bin: &Path, config: &Config) -> Vec<(String, String)> {
     let text = |path: &Path| path.to_string_lossy().into_owned();
     let home = root.join("home");
@@ -39,6 +49,10 @@ pub(super) fn environment(root: &Path, fake_bin: &Path, config: &Config) -> Vec<
         ("CODEX_HOME".to_owned(), text(&home.join(".codex"))),
         ("XDG_CONFIG_HOME".to_owned(), text(&home.join(".config"))),
         ("PATH".to_owned(), path(fake_bin, config)),
+        (
+            "CONSENSFLOW_TOOL_FOLDERS".to_owned(),
+            text(&tool_folder(root)),
+        ),
     ];
     if cfg!(windows) {
         // What Windows itself needs to start a process, and the home it reads there.
@@ -86,17 +100,25 @@ pub(super) fn environment(root: &Path, fake_bin: &Path, config: &Config) -> Vec<
 }
 
 /// The `PATH` of the rig: the folder of the stand-in `claude` first, then the
-/// folders a case added ([`Config::also_on_path`]), then the system's.
+/// folders a case added ([`Config::also_on_path`]), then the system's own and
+/// no folder a package manager installs into (`/usr/local/bin` is Homebrew's on
+/// an Intel Mac, whose harnesses a daemon of the rig found there); as the
+/// Finder starts it, no stand-in's folder, and the system's as the Finder
+/// gives it.
 fn path(fake_bin: &Path, config: &Config) -> String {
     let system: Vec<String> = if cfg!(windows) {
         let root = own_var("SystemRoot").unwrap_or_else(|| "C:\\Windows".to_owned());
         vec![format!("{root}\\System32")]
-    } else {
-        ["/usr/local/bin", "/usr/bin", "/bin"]
+    } else if config.finder {
+        ["/usr/bin", "/bin", "/usr/sbin", "/sbin"]
             .map(str::to_owned)
             .into()
+    } else {
+        ["/usr/bin", "/bin"].map(str::to_owned).into()
     };
-    std::iter::once(fake_bin)
+    (!config.finder)
+        .then_some(fake_bin)
+        .into_iter()
         .chain(config.path.iter().map(PathBuf::as_path))
         .map(|dir| dir.to_string_lossy().into_owned())
         .chain(system)
@@ -110,25 +132,31 @@ fn path(fake_bin: &Path, config: &Config) -> String {
 /// names the stand-in as both program and script, and the stand-in knows its own
 /// file when it is given it first. The stand-in `devin` beside it, where the rig
 /// has one, the stand-in `opencode` of an OpenCode 2 likewise, and the stand-in
-/// `codex` (Unix's). The folder they are in.
+/// `codex` (Unix's). The folder they are in, which the `PATH` names. As the
+/// Finder starts it, they are where each harness installs itself instead (see
+/// [`Config::as_the_finder_starts_it`]), and that folder holds none.
 pub(super) fn write_fake_install(root: &Path, config: &Config) -> Result<PathBuf> {
     let fake_bin = root.join("fake-bin");
-    let projects = root
-        .join("home")
-        .join(".claude")
-        .join("projects")
-        .join("integration");
+    let home = root.join("home");
+    let projects = home.join(".claude").join("projects").join("integration");
     files::make_dir(&projects)?;
-    write_shim(&fake_bin, "claude", "CF_TEST_HARNESS", &config.stand_in)?;
+    let (own, system) = if config.finder {
+        // There, as Homebrew's is on a Mac, for what a case puts in it.
+        files::make_dir(&tool_folder(root))?;
+        (home.join(".local").join("bin"), tool_folder(root))
+    } else {
+        (fake_bin.clone(), fake_bin.clone())
+    };
+    write_shim(&own, "claude", "CF_TEST_HARNESS", &config.stand_in)?;
     if let Some(devin) = &config.devin {
-        write_shim(&fake_bin, "devin", "CF_TEST_DEVIN", devin)?;
+        write_shim(&own, "devin", "CF_TEST_DEVIN", devin)?;
     }
     if let Some(opencode) = &config.opencode_2 {
-        write_shim(&fake_bin, "opencode", "CF_TEST_OPENCODE", opencode)?;
+        write_shim(&own, "opencode", "CF_TEST_OPENCODE", opencode)?;
     }
     // The stand-in Codex's is a script, so Unix's.
     if let Some(codex) = config.codex.as_ref().filter(|_| !cfg!(windows)) {
-        write_shim(&fake_bin, "codex", "CF_TEST_CODEX", codex)?;
+        write_shim(&system, "codex", "CF_TEST_CODEX", codex)?;
     }
     Ok(fake_bin)
 }
@@ -377,6 +405,68 @@ mod tests {
         assert_eq!(
             files::read_string(&fake_bin.join("codex")).unwrap(),
             "#!/bin/sh\nexec \"$CF_TEST_CODEX\" \"$@\"\n"
+        );
+    }
+
+    /// The stand-ins' folder, then the system's own, and no folder a package
+    /// manager installs into: `/usr/local/bin` is Homebrew's on an Intel Mac,
+    /// where a daemon of the rig found the machine's harnesses (the reviews of
+    /// 2026-10-16).
+    #[cfg(unix)]
+    #[test]
+    fn the_path_is_the_stand_ins_folder_then_the_systems_own_and_no_package_managers() {
+        let root = Path::new("root");
+        let env = environment(root, &root.join("fake-bin"), &config());
+        assert_eq!(
+            var(&env, "PATH"),
+            format!("{}:/usr/bin:/bin", root.join("fake-bin").display())
+        );
+    }
+
+    #[test]
+    fn every_rig_names_a_folder_of_its_own_for_the_systems_programs() {
+        let root = Path::new("root");
+        for config in [config(), config().as_the_finder_starts_it()] {
+            let env = environment(root, &root.join("fake-bin"), &config);
+            assert_eq!(
+                var(&env, "CONSENSFLOW_TOOL_FOLDERS"),
+                root.join("system-bin").to_string_lossy()
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn as_the_finder_starts_it_the_path_is_the_systems_and_each_stand_in_is_where_it_installs_itself(
+    ) {
+        let root = tempfile::tempdir().unwrap();
+        let given = config()
+            .codex("/the/fake-codex")
+            .devin("/the/fake-devin")
+            .as_the_finder_starts_it();
+        let fake_bin = write_fake_install(root.path(), &given).unwrap();
+        let env = environment(root.path(), &fake_bin, &given);
+        assert_eq!(var(&env, "PATH"), "/usr/bin:/bin:/usr/sbin:/sbin");
+        let own = root.path().join("home").join(".local").join("bin");
+        assert!(own.join("claude").is_file() && own.join("devin").is_file());
+        // The system's folder is there with no Codex in it too, as Homebrew's is.
+        let bare = tempfile::tempdir().unwrap();
+        write_fake_install(bare.path(), &config().as_the_finder_starts_it()).unwrap();
+        assert!(bare.path().join("system-bin").is_dir());
+        let system = root.path().join("system-bin");
+        assert_eq!(
+            files::read_string(&system.join("codex")).unwrap(),
+            "#!/bin/sh\nexec \"$CF_TEST_CODEX\" \"$@\"\n"
+        );
+        for name in ["claude", "devin", "codex"] {
+            assert!(!fake_bin.join(name).exists(), "{name} is on no PATH");
+        }
+        assert!(!own.join("codex").exists() && !system.join("claude").exists());
+        // A folder a case adds is still on it, before the system's.
+        let env = environment(root.path(), &fake_bin, &given.also_on_path("/real/node"));
+        assert_eq!(
+            var(&env, "PATH"),
+            "/real/node:/usr/bin:/bin:/usr/sbin:/sbin"
         );
     }
 }
