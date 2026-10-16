@@ -63,12 +63,15 @@ fn a_member_paused_while_its_command_runs_stops_and_the_hosts_tree_says_the_comm
     let command = Command::quiet(119, cfg!(windows));
     let begun =
         begin_running(&ctx, &mut case, &command, true).expect("the member never ran its command");
-    // Seen running by its process in the host's tree, before anything is pressed.
+    // Seen running by its process in the host's tree, before anything is pressed: the line
+    // runs the command, as told or by its program's path (PowerShell's, on Windows).
     let began = case.text();
+    let line = tool::seen_in_tree(&began).unwrap_or_default();
     assert!(
         began.contains(
             "T-1: the member is running its command: its process is in the host's tree ("
-        ) && began.contains(&format!(" {}); its activity: working", command.text())),
+        ) && command.runs_in(line)
+            && began.contains(&format!(" {line}); its activity: working")),
         "{began}"
     );
     stop_it(

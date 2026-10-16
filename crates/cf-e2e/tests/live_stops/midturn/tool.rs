@@ -22,7 +22,7 @@
 use std::time::Duration;
 
 use cf_e2e::live::ask;
-use cf_e2e::live::members::{plus, quiet_command, Account, MemberWindow, Members};
+use cf_e2e::live::members::{plus, quiet_command, runs_command, Account, MemberWindow, Members};
 use cf_e2e::live::tree::{self, Read};
 use cf_e2e::live::Harness;
 use cf_e2e::live::{command, cut};
@@ -111,6 +111,23 @@ impl Command {
     pub fn text(&self) -> &str {
         &self.text
     }
+
+    /// Whether `line`, a process's command line as the host's tree gives it, runs the
+    /// command: as it was told, or by its program's path as PowerShell starts it
+    /// ([`runs_command`]).
+    pub fn runs_in(&self, line: &str) -> bool {
+        runs_command(line, &self.text)
+    }
+}
+
+/// The command line of the process that the case said showed the command running in the
+/// host's tree (`its process is in the host's tree (<pid> <line>); …`). None where it
+/// said no such thing.
+pub fn seen_in_tree(said: &str) -> Option<&str> {
+    let (_, rest) = said.split_once(&format!("{IN_TREE} ("))?;
+    let (process, _) = rest.split_once("); ")?;
+    let (pid, line) = process.split_once(' ')?;
+    pid.parse::<u64>().ok().map(|_| line)
 }
 
 /// What the host's tree says of the command, as a part of a line of the case: whether
@@ -371,6 +388,31 @@ mod tests {
         assert_eq!(
             started(&unread, &command, || true, boom).as_deref(),
             Some("its replies are on its screen")
+        );
+    }
+
+    #[test]
+    fn the_process_the_case_saw_in_the_tree_runs_the_command_on_a_mac_and_on_windows() {
+        // On a Mac the stand-in's shell and its `sleep`: either line is the command's.
+        let sleep = Command::quiet(119, false);
+        let mac = "T-1: the member is running its command: its process is in the host's tree (4102 sleep 119); its activity: working";
+        assert_eq!(seen_in_tree(mac), Some("sleep 119"));
+        assert!(sleep.runs_in("sleep 119"));
+        assert!(sleep.runs_in("/bin/sh -c \"$0\" \"$@\" sleep 119"));
+        // On zeewin PowerShell started the ping by its path, which the tree shows.
+        let ping = Command::quiet(119, true);
+        let zeewin = r#"T-1: the member is running its command: its process is in the host's tree (5864 "C:\WINDOWS\System32\PING.EXE" -n 120 127.0.0.1); its activity: working"#;
+        let line = seen_in_tree(zeewin).unwrap();
+        assert_eq!(line, r#""C:\WINDOWS\System32\PING.EXE" -n 120 127.0.0.1"#);
+        assert!(ping.runs_in(line));
+        // Another command, or another program with its words, is not it.
+        assert!(!ping.runs_in(r#""C:\WINDOWS\System32\PING.EXE" -n 61 127.0.0.1"#));
+        assert!(!ping.runs_in("tracert -n 120 127.0.0.1"));
+        assert!(!sleep.runs_in("sleep 61"));
+        // A case that saw it some other way names no process.
+        assert_eq!(
+            seen_in_tree("T-1: its replies are on its screen; its activity: working"),
+            None
         );
     }
 

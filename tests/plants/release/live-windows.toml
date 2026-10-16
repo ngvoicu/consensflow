@@ -1,0 +1,112 @@
+# The live suites' support on a Windows user's machine (zeewin, Windows 11, 2026-10-16), whose
+# tests of cf-e2e failed where CI's `windows-latest` never runs them (CI runs cf-e2e's
+# `daemon`, `rig`, `regressions` and `cli` tests and its library, not the `live_*` ones):
+#
+# - a program found on the PATH is taken only if it runs as it is asked
+#   (`live::working_command`): the Microsoft Store's alias of `python3`, which a shell finds,
+#   ends 9009 with "Python was not found", and the MCP server's test ran it;
+# - a process runs a command when its line holds the command as told, or its program by a path,
+#   quoted, with an `.exe` and in any case, then its words (`live::members::runs_command`):
+#   PowerShell starts a `ping` it finds on the PATH as `"C:\WINDOWS\System32\PING.EXE" -n …`,
+#   which the stop case of `live_stops` and the escaped command of `live_finish` look for;
+# - the stop case reads the process it saw from what the case said (`tool::seen_in_tree`).
+#
+# The tests are the library's and the live suites' own, which start no window and spend
+# nothing. Every name holds `live windows`, so `npm run plants:release -- "live windows"` runs
+# them all.
+
+[run]
+e2e-live-path = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::machine::path::"]
+e2e-live-command = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::members::command::"]
+e2e-stops-tool = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_stops", "midturn::tool::"]
+e2e-finish-leaving = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_finish", "leaving::"]
+
+[[plant]]
+name = "live windows: a program that ends with an error is taken as working"
+meant = "a_file_of_the_name_that_does_not_run_as_it_is_asked_is_no_working_program"
+runs = ["e2e-live-path"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/machine/path.rs"
+find = "    if ran.code == Some(0) {"
+replace = "    if ran.code.is_some() {"
+
+[[plant]]
+name = "live windows: a program's path in quotes is not read"
+meant = "a_line_runs_the_command_as_it_was_told_or_by_its_programs_path_as_powershell_starts_it"
+runs = ["e2e-live-command", "e2e-stops-tool", "e2e-finish-leaving"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/command.rs"
+find = "    let named = match before.strip_suffix('\"') {"
+replace = "    let named = match None::<&str> {"
+
+[[plant]]
+name = "live windows: a program named with .exe is not its name"
+meant = "a_line_runs_the_command_as_it_was_told_or_by_its_programs_path_as_powershell_starts_it"
+runs = ["e2e-live-command", "e2e-stops-tool", "e2e-finish-leaving"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/command.rs"
+find = 'file[at..].eq_ignore_ascii_case(".exe")'
+replace = '&file[at..] == ".exe"'
+
+[[plant]]
+name = "live windows: a program's name in capitals is another"
+meant = "a_line_runs_the_command_as_it_was_told_or_by_its_programs_path_as_powershell_starts_it"
+runs = ["e2e-live-command", "e2e-stops-tool", "e2e-finish-leaving"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/command.rs"
+find = "    stem.eq_ignore_ascii_case(program)"
+replace = "    stem == program"
+
+[[plant]]
+name = "live windows: a Windows path's folders are taken for the name"
+meant = "a_line_runs_the_command_as_it_was_told_or_by_its_programs_path_as_powershell_starts_it"
+runs = ["e2e-live-command", "e2e-stops-tool", "e2e-finish-leaving"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/command.rs"
+find = "named.rsplit(['/', '\\\\'])"
+replace = "named.rsplit(['/'])"
+
+[[plant]]
+name = "live windows: any program with the command's words runs it"
+meant = "a_line_runs_the_command_as_it_was_told_or_by_its_programs_path_as_powershell_starts_it"
+runs = ["e2e-live-command", "e2e-stops-tool", "e2e-finish-leaving"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/command.rs"
+find = "        .any(|(at, _)| ends_with_program(&line[..at], program))"
+replace = "        .any(|(at, _)| at > 0 || ends_with_program(&line[..at], program))"
+
+[[plant]]
+name = "live windows: the stop case matches the command as told only"
+meant = "the_process_the_case_saw_in_the_tree_runs_the_command_on_a_mac_and_on_windows"
+runs = ["e2e-stops-tool"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_stops/midturn/tool.rs"
+find = "        runs_command(line, &self.text)"
+replace = "        line.contains(&self.text)"
+
+[[plant]]
+name = "live windows: the process the stop case saw keeps its number"
+meant = "the_process_the_case_saw_in_the_tree_runs_the_command_on_a_mac_and_on_windows"
+runs = ["e2e-stops-tool"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_stops/midturn/tool.rs"
+find = "    pid.parse::<u64>().ok().map(|_| line)"
+replace = "    pid.parse::<u64>().ok().map(|_| process)"
+
+[[plant]]
+name = "live windows: an escaped command is found by its line as told only"
+meant = "on_windows_a_ping_powershell_started_by_its_path_is_found_as_the_command_and_no_other"
+runs = ["e2e-finish-leaving"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_finish/leaving.rs"
+find = "        .filter(|line| runs_command(line, wanted))"
+replace = "        .filter(|line| line.contains(wanted))"

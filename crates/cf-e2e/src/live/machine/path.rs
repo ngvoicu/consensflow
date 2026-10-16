@@ -6,7 +6,7 @@
 use std::io;
 use std::path::{Path, PathBuf};
 
-use crate::process::own_var;
+use crate::process::{own_var, Run};
 use crate::{Error, Result};
 
 /// Where the program `name` is, on the `PATH` of this run, as a shell finds it.
@@ -20,6 +20,39 @@ pub fn command(name: &str) -> Result<PathBuf> {
             io::ErrorKind::NotFound,
             "it is in no folder of the PATH of this run: install it, or put its folder on the PATH",
         ),
+    })
+}
+
+/// Where the program `name` is, as [`command`] finds it, if it runs: asked `probe`, it
+/// ends 0. A file a shell finds is not always a program: the Microsoft Store's
+/// app-execution alias of `python3`, on the `PATH` of a Windows 11 user who has not
+/// turned it off, ends 9009 with "Python was not found" whatever it is asked (zeewin,
+/// 2026-10-16), and a Python the Store installed is an alias of the same kind in the
+/// same folder, so only running it tells the two apart. The `probe` is never empty:
+/// the alias asked nothing opens the Store.
+pub fn working_command(name: &str, probe: &[&str]) -> Result<PathBuf> {
+    runs(command(name)?, name, probe)
+}
+
+/// `found`, the program `name`, if it ends 0 when it is asked `probe`; an error that
+/// says how it ended otherwise.
+pub(super) fn runs(found: PathBuf, name: &str, probe: &[&str]) -> Result<PathBuf> {
+    let ran = Run::new(&found)
+        .args(probe)
+        .inheriting_env()
+        .closed_input()
+        .run()?;
+    if ran.code == Some(0) {
+        return Ok(found);
+    }
+    Err(Error::Program {
+        action: "run",
+        program: name.to_owned(),
+        source: io::Error::other(format!(
+            "{} {} is no program that runs: {ran}",
+            found.display(),
+            probe.join(" ")
+        )),
     })
 }
 
@@ -158,6 +191,49 @@ mod tests {
         // A folder of another name that ends in `bin` is as good as any.
         assert!(!holds_no_harness(&root.path().join("tools").join("bin")));
         assert!(holds_no_harness(&root.path().join("EVALS").join("Bin")));
+    }
+
+    /// A program of the name `command` in `folder` that says `said` and ends `code`: a
+    /// script on Unix, a batch file on Windows (where a status is not cut to a byte).
+    fn program(folder: &Path, command: &str, said: &str, code: u32) -> PathBuf {
+        let path = folder.join(file_of(command));
+        let text = if cfg!(windows) {
+            format!("@echo {said}\r\n@exit /b {code}\r\n")
+        } else {
+            format!("#!/bin/sh\necho '{said}'\nexit {code}\n")
+        };
+        crate::files::write_executable(&path, text).unwrap();
+        path
+    }
+
+    #[test]
+    fn a_file_of_the_name_that_does_not_run_as_it_is_asked_is_no_working_program() {
+        // The Store's alias of `python3`, as zeewin has it first on its PATH: a shell finds
+        // it, and whatever it is asked it ends 9009 and says there is no Python.
+        let (alias, real) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let stub = program(
+            alias.path(),
+            "python3",
+            "Python was not found; run without arguments to install from the Microsoft Store",
+            9009,
+        );
+        let path = path_of(&[alias.path(), real.path()]);
+        let found = find("python3", &path, Some(".cmd")).unwrap();
+        assert_eq!(found, stub);
+        let refused = runs(found, "python3", &["--version"]).unwrap_err();
+        let said = refused.to_string();
+        assert!(
+            matches!(&refused, Error::Program { action: "run", program, .. } if program == "python3"),
+            "{said}"
+        );
+        assert!(said.contains("is no program that runs"), "{said}");
+        assert!(said.contains("Python was not found"), "{said}");
+        // One that runs is taken, as it was found.
+        let python = program(real.path(), "python3", "Python 3.12.1", 0);
+        assert_eq!(
+            runs(python.clone(), "python3", &["--version"]).unwrap(),
+            python
+        );
     }
 
     #[test]

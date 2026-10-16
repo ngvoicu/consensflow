@@ -58,7 +58,7 @@ pub use board::{
     answer_to, brief_delivered, delivered_result, find, first_answer, first_question, is_over,
     last_result, notes_of_work, session_of, MemberWindow, Paused,
 };
-pub use command::{quiet_command, shown, LongCommand};
+pub use command::{quiet_command, runs_command, shown, LongCommand};
 pub use door::{judge, moves, ms_of, waited_then_worked, Finding, Judged, Seen};
 pub use plan::{
     member, member_as, question_brief, stand_in_chief, stand_in_question_brief, stand_in_worker,

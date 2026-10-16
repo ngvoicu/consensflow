@@ -104,6 +104,26 @@ fn what_escaped_is_found_by_its_command_and_ended_by_the_number_a_line_begins_wi
 }
 
 #[test]
+fn on_windows_a_ping_powershell_started_by_its_path_is_found_as_the_command_and_no_other() {
+    // `Start-Process ping …` leaves a ping whose line has its path, as PowerShell found it
+    // on the PATH, and no shell's line that holds the command.
+    let wanted = format!("ping -n {SECONDS} 127.0.0.1");
+    let listing = format!(
+        "4 System\r\n5864 \"C:\\WINDOWS\\system32\\PING.EXE\" -n {SECONDS} 127.0.0.1\r\n\
+         5870 \"C:\\WINDOWS\\system32\\PING.EXE\" -n 61 127.0.0.1\r\n\
+         5900 powershell -NoProfile -Command Get-CimInstance Win32_Process\r\n\
+         6100 bash -c ping -n {SECONDS} 127.0.0.1\r\n"
+    );
+    assert_eq!(
+        running(&listing, &wanted, true),
+        [
+            format!("5864 \"C:\\WINDOWS\\system32\\PING.EXE\" -n {SECONDS} 127.0.0.1"),
+            format!("6100 bash -c ping -n {SECONDS} 127.0.0.1"),
+        ]
+    );
+}
+
+#[test]
 fn a_command_that_ran_on_is_said_to_have_been_found_by_the_close_or_not_and_only_where_it_ran_on() {
     let mut left = good();
     assert_eq!(after_the_close(&left), None, "nothing ran on");

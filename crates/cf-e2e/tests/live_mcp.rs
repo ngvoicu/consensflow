@@ -252,7 +252,7 @@ fn a_real_claude_worker_with_an_mcp_server_finishes_its_task_and_the_chief_gets_
         claude.version(),
         claude.home().display()
     ));
-    let python = live::command("python3")?;
+    let python = live::working_command("python3", &["--version"])?;
     let made = Path::new(env!("CARGO_TARGET_TMPDIR")).join("live-mcp");
     files::make_dir(&made)?;
     let server = Server::write(&made, &python)?;
