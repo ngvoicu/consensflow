@@ -752,6 +752,25 @@ async function start() {
       report(cause)
     }
   }
+  // Updates are the app's, not the daemon's, and listen for the menu's Check for
+  // Updates before anything waits on the daemon: its start may wait on a slow login
+  // shell for half a minute, and a click before a listener is lost.
+  await initializeUpdates({
+    invoke,
+    listen,
+    getState: () => ({
+      tabs: state.board
+        ? [
+            {
+              name: state.board.project.name,
+              panes: state.board.lanes
+                .filter((lane) => lane.pane !== null)
+                .map((lane) => ({ ...lane.pane, name: `@${lane.participant.handle}` })),
+            },
+          ]
+        : [],
+    }),
+  })
   if (typeof Channel === 'function') {
     const channel = new Channel()
     channel.onmessage = (message) => {
@@ -786,22 +805,6 @@ async function start() {
       },
     })
   }
-  await initializeUpdates({
-    invoke,
-    listen,
-    getState: () => ({
-      tabs: state.board
-        ? [
-            {
-              name: state.board.project.name,
-              panes: state.board.lanes
-                .filter((lane) => lane.pane !== null)
-                .map((lane) => ({ ...lane.pane, name: `@${lane.participant.handle}` })),
-            },
-          ]
-        : [],
-    }),
-  })
 }
 
 void start()

@@ -2,7 +2,8 @@
 //! them, in a home of the case's own, with a stand-in `claude` in the windows
 //! it opens (and a stand-in `devin`, for a case that asks for one:
 //! [`Config::devin`]; and an `opencode` that has updated itself to 2:
-//! [`Config::opencode_2`]). The daemon is `cf ui --json --no-open`; the pane
+//! [`Config::opencode_2`]; or each where it installs itself, off a `PATH` that is
+//! the Finder's: [`Config::as_the_finder_starts_it`]). The daemon is `cf ui --json --no-open`; the pane
 //! host is `consensflow-bridge`, which gives each window a terminal of its own
 //! (a PTY, or ConPTY); they speak the bridge's frames to each other over their
 //! standard streams, and the rig stands between them ([`route`]). It only
@@ -84,6 +85,7 @@ pub struct Config {
     codex: Option<PathBuf>,
     devin: Option<PathBuf>,
     opencode_2: Option<PathBuf>,
+    finder: bool,
 }
 
 impl Config {
@@ -101,7 +103,22 @@ impl Config {
             codex: None,
             devin: None,
             opencode_2: None,
+            finder: false,
         }
+    }
+
+    /// As the Finder starts an app's daemon when the login shell gives it no
+    /// `PATH`: on the system's alone, `/usr/bin:/bin:/usr/sbin:/sbin`, with no
+    /// stand-in on it. Each is where its harness installs itself: `claude` (and a
+    /// Devin's, an OpenCode's) in the home's `.local/bin`, and a Codex's in the
+    /// machine's own folder of programs, the one Homebrew's `codex` is in
+    /// (`/opt/homebrew/bin`), which is the rig's (`install::tool_folder`). The
+    /// owner's machine the night a task to a Codex worker was refused
+    /// (2026-10-15).
+    #[must_use]
+    pub fn as_the_finder_starts_it(mut self) -> Self {
+        self.finder = true;
+        self
     }
 
     /// With `stand_in`, the stand-in Codex (the `fake-codex` binary of this crate),

@@ -53,6 +53,7 @@ version = "3.0.5"
 dependencies = [
  "cf-base",
  "cf-bridge",
+ "cf-harness",
  "cf-launcher",
  "cf-panes",
  "cf-portable",

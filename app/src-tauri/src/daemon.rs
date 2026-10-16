@@ -13,6 +13,8 @@ use serde_json::Value;
 use cf_bridge::{Bridge, BridgeBuilder, BridgeError};
 use cf_panes::pty::PaneTable;
 
+use crate::daemon_command::LoginLookup;
+
 /// How long the daemon gets to stop on its own before it is killed.
 pub(crate) const DAEMON_STOP_GRACE: Duration = Duration::from_secs(2);
 /// What the page is told of the daemon (see `DaemonStatus`).
@@ -116,6 +118,9 @@ pub(crate) struct Daemon {
     /// Woken when the first start has its outcome, or the app stops.
     settled: Condvar,
     report: DaemonReport,
+    /// The login shell a start is asking for the daemon's PATH, which the
+    /// app's stop ends.
+    login: Arc<LoginLookup>,
 }
 
 struct DaemonState {
@@ -148,7 +153,13 @@ impl Daemon {
             }),
             settled: Condvar::new(),
             report,
+            login: Arc::default(),
         })
+    }
+
+    /// The login shell its starts ask for the daemon's PATH, while one asks.
+    pub(crate) fn login(&self) -> Arc<LoginLookup> {
+        Arc::clone(&self.login)
     }
 
     fn lock(&self) -> MutexGuard<'_, DaemonState> {
@@ -311,9 +322,11 @@ impl Daemon {
     }
 
     /// The app is stopping: no start is taken in, nothing more is told, and
-    /// nothing waits for a first start. The first call has the daemon and its
-    /// bridge handed over to be stopped.
+    /// nothing waits for a first start; a login shell a start is asking ends
+    /// now, where the app's own end would leave it running. The first call has
+    /// the daemon and its bridge handed over to be stopped.
     pub(crate) fn stop(&self) -> Option<(Option<Child>, Option<Bridge>)> {
+        self.login.end();
         let mut state = self.lock();
         if state.stopping {
             return None;
