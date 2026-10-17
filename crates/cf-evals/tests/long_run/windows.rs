@@ -117,6 +117,37 @@ fn a_window_that_closed_by_itself_while_its_task_was_at_work_breaks_the_sixth() 
 }
 
 #[test]
+fn a_pause_in_the_crashs_own_millisecond_is_the_one_it_caused_and_the_task_was_at_work() {
+    // Sol's: the worker's window crashed at 10:05 while T-18 worked, and the daemon
+    // paused T-18 for it in the same millisecond.
+    let paused_at = |at: &str| {
+        let scene = Scene::new(&[("long-worker", "devin")]);
+        scene.task(18, 3, "paused", at);
+        scene.event(
+            &t(1, 0),
+            "task.state",
+            &json!({ "task": 18, "from": "queued", "to": "working" }),
+        );
+        scene.event(
+            at,
+            "task.state",
+            &json!({ "task": 18, "from": "working", "to": "paused", "because": "@long-worker's window closed" }),
+        );
+        let mut look = scene.look(ms(6, 0));
+        look.windows.exits.push(exit(ClosedBy::Itself));
+        found(&look, 6)
+    };
+    let breaks = paused_at(&t(5, 0));
+    assert_eq!(breaks.len(), 1, "{breaks:?}");
+    assert_eq!(
+        breaks[0].said,
+        "@long-worker's window closed by itself while T-18 was at work"
+    );
+    // A pause before the crash, its millisecond before: the task was paused, not at work.
+    assert!(paused_at("2026-10-15T10:04:59.999Z").is_empty());
+}
+
+#[test]
 fn a_crash_is_held_against_whoever_had_the_task_when_the_window_exited() {
     // T-18 was given to the worker, whose window crashed at 10:05 while it worked;
     // T-18 went to another worker a second later, who holds it now.

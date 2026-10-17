@@ -263,6 +263,11 @@ impl Keeper {
         self.keep_at(look.at, found, &Names::of(look))
     }
 
+    /// Whether the break whose key is `key` is recorded already.
+    pub fn recorded(&self, key: &str) -> bool {
+        self.recorded.contains(key)
+    }
+
     /// [`Keeper::keep`] of breaks found at `at`, the run's `names` shown.
     pub fn keep_at(&mut self, at: i64, found: Vec<Break>, names: &Names) -> Vec<Break> {
         let mut now = Vec::new();

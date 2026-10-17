@@ -9,29 +9,73 @@
 //! writes on its error output ([`Edge::failure`]); and what the rig says of itself when
 //! it is dropped unclosed (the masker its configuration is given: [`Edge::masker`]).
 //! Nothing of the long run writes around it: `tests/long_run/edge.rs` holds that.
+//!
+//! A window's screen is what the pane host gives of it: its last lines, at most
+//! twelve (`TAIL_LINES`, the host's own cut), of a screen that keeps no scrollback.
+//! A secret's name may be above them and its value in them. So the edge reads whole
+//! what every window of the run printed (each rig hands it over as it starts,
+//! [`Edge::reads`]), and hides the secrets it finds there wherever it sees them
+//! ([`Names::learn`]): before a screen leaves the run, before the report is kept, and
+//! before the rig says what it shows of itself. It reads a window again only once the
+//! window printed more, and never for a line of the run's own words.
 
+use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use cf_e2e::files;
-use cf_e2e::rig::Masker;
+use cf_e2e::rig::{Masker, Printed};
 use serde_json::Value;
 
 use super::mask::{mask, screen, Names};
 use crate::run::floor::Floor;
 use crate::{Error, Result};
 
-/// The edge of a run, with the names it has learned: one for the run, shared by all it
-/// hands out.
+/// What the windows of a rig printed, as the edge reads it: each window by its id with
+/// how many bytes it printed so far, and the whole of what it printed as text.
+pub trait Streams: Send + Sync {
+    /// Each window that printed, by its id, with how many bytes it printed so far.
+    fn panes(&self) -> Vec<(String, usize)>;
+    /// Everything the window `pane` printed so far, as the text on its screen.
+    fn screen(&self, pane: &str) -> String;
+}
+
+impl Streams for Printed {
+    fn panes(&self) -> Vec<(String, usize)> {
+        Printed::panes(self)
+    }
+
+    fn screen(&self, pane: &str) -> String {
+        Printed::screen(self, pane)
+    }
+}
+
+/// What the run's rigs printed, and how much of each window's the edge read whole.
+#[derive(Default)]
+struct Printing {
+    rigs: Vec<Arc<dyn Streams>>,
+    /// By the rig's place in `rigs` and the window's id: how many bytes it had printed.
+    read: BTreeMap<(usize, String), usize>,
+}
+
+impl std::fmt::Debug for Printing {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "Printing of {} rigs", self.rigs.len())
+    }
+}
+
+/// The edge of a run, with the names it has learned and what its windows printed: one
+/// for the run, shared by all it hands out.
 #[derive(Debug, Clone, Default)]
 pub struct Edge {
     names: Arc<Mutex<Names>>,
+    printing: Arc<Mutex<Printing>>,
 }
 
 impl Edge {
-    /// `text` as it leaves the run: what looks like a key or a token hidden, the run's
-    /// own names shown.
+    /// `text` as it leaves the run: what looks like a key or a token hidden, and the
+    /// secrets learned so far; the run's own names shown.
     pub fn shown(&self, text: &str) -> String {
         mask(text, &self.names())
     }
@@ -44,10 +88,40 @@ impl Edge {
             .extend(names);
     }
 
+    /// What the windows of a rig of the run print, `printed`, is read whole from now.
+    pub fn reads(&self, printed: impl Streams + 'static) {
+        self.printing
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .rigs
+            .push(Arc::new(printed));
+    }
+
+    /// The names the run knows, once every window that printed more since it was last
+    /// read is read whole ([`Names::learn`]).
+    pub fn learned(&self) -> Names {
+        let mut printing = self.printing.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut names = self.names();
+        let Printing { rigs, read } = &mut *printing;
+        for (rig, printed) in rigs.iter().enumerate() {
+            for (pane, length) in printed.panes() {
+                if read.get(&(rig, pane.clone())) == Some(&length) {
+                    continue;
+                }
+                let rows: Vec<String> = printed.screen(&pane).lines().map(str::to_owned).collect();
+                names.learn(&rows);
+                read.insert((rig, pane), length);
+            }
+        }
+        self.knows(&names);
+        names
+    }
+
     /// The rows of a window's screen as they leave the run: masked as one text, its
-    /// wrapped rows joined, the run's own names shown.
+    /// wrapped rows joined, in the light of all the run's windows printed
+    /// ([`Edge::learned`]), the run's own names shown.
     pub fn screen(&self, rows: &[String]) -> Vec<String> {
-        screen(rows, &self.names())
+        screen(rows, &self.learned())
     }
 
     /// The console of the run, on `out`: everything it notes and says, and the log it
@@ -62,16 +136,23 @@ impl Edge {
         )
     }
 
-    /// What the run's rig passes what it says of itself through, when it is dropped
-    /// unclosed: [`Edge::shown`], with the names the run knows by then.
+    /// What the run's rigs pass what they say of themselves through, when one is dropped
+    /// unclosed: each text through [`Edge::shown`] and each window's screen through
+    /// [`Edge::screen`], with the names the run knows by then; and what each rig's
+    /// windows print, handed to it as the rig starts, is read whole ([`Edge::reads`]).
     pub fn masker(&self) -> Masker {
-        let edge = self.clone();
-        Masker::new(move |text| edge.shown(text))
+        let (text, screen, reads) = (self.clone(), self.clone(), self.clone());
+        Masker::new(
+            move |said| text.shown(said),
+            move |rows| screen.screen(rows),
+        )
+        .reading(move |printed| reads.reads(printed))
     }
 
     /// Keeps the report `value` and its Markdown `text` in `folder`, as `<name>.json`
     /// and `<name>.md`, each text through [`Edge::shown`] (a window's screen as one
-    /// text): where each is. The files' names are the run's own from then.
+    /// text), in the light of all the run's windows printed ([`Edge::learned`]): where
+    /// each is. The files' names are the run's own from then.
     pub fn keep(
         &self,
         folder: &Path,
@@ -82,7 +163,7 @@ impl Edge {
         let json_file = folder.join(format!("{name}.json"));
         let text_file = folder.join(format!("{name}.md"));
         self.knows_files(&[&json_file, &text_file]);
-        let shown = masked(value, &self.names());
+        let shown = masked(value, &self.learned());
         let pretty = serde_json::to_string_pretty(&shown)
             .map_err(|cause| Error::Refused(format!("the report is no JSON: {cause}")))?;
         files::write(&json_file, format!("{pretty}\n"))?;
@@ -91,11 +172,14 @@ impl Edge {
     }
 
     /// What stopped the run, as it leaves it for `cf-evals` to write on its error
-    /// output: through [`Edge::shown`], a usage's error a usage's still.
+    /// output: masked as [`Edge::shown`] masks, but in the light of all the run's windows
+    /// printed ([`Edge::learned`]), for it may quote a window's screen; a usage's error
+    /// a usage's still.
     pub fn failure(&self, failed: Error) -> Error {
+        let names = self.learned();
         match failed {
-            Error::Usage(said) => Error::Usage(self.shown(&said)),
-            other => Error::Refused(self.shown(&other.to_string())),
+            Error::Usage(said) => Error::Usage(mask(&said, &names)),
+            other => Error::Refused(mask(&other.to_string(), &names)),
         }
     }
 

@@ -24,7 +24,7 @@ use crate::long_run::mask::{cut, Names};
 
 /// Each delivery's header in a text, in order: the message it names, and where the
 /// header begins and ends.
-fn headers(text: &str) -> Vec<(i64, usize, usize)> {
+pub(super) fn headers(text: &str) -> Vec<(i64, usize, usize)> {
     static HEADER: OnceLock<Regex> = OnceLock::new();
     pattern::once(
         &HEADER,

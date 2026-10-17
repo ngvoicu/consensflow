@@ -21,7 +21,10 @@
 //! or named a process that began after the look saw the number, or the process was
 //! first known from a window's exit (whose list names a number and a command, nothing
 //! that ties the number to a process), its identity is never taken: if its number is
-//! there when it is judged, it is unresolved, and said so. A
+//! there when it is judged, it is unresolved, and said so. One known already whose
+//! asking failed at a later look that saw its number is doubted: the window may have
+//! run another process under the number then, which the system never named; a
+//! process there at the end begun at another time is unresolved, never another's. A
 //! number no process has is gone, whoever it was. The asking is the caller's: the
 //! tracker says which numbers, and is told what the system said or why it could not.
 
@@ -44,6 +47,10 @@ enum Identity {
     Asking,
     /// When it began, as the system said to the look that saw it.
     Began(String),
+    /// When it began, as the system said to a look that saw it; but a look that saw
+    /// its number since could not ask who was under it (why): another process may have
+    /// had the number then.
+    Doubted { began: String, why: String },
     /// Never to be taken, and why.
     Never(String),
 }
@@ -126,7 +133,9 @@ impl Tracker {
     /// began; or, begun after `shown_at`, never known. A process begun after `shown_at`
     /// may be another, given the number since, or the one the tree showed, which was
     /// taken a moment after: which, the system does not say. One it did not name had
-    /// ended, and is followed no more.
+    /// ended, and is followed no more. One known already that the system could not be
+    /// asked of is doubted: the window may run another process under its number since,
+    /// which nothing said; a later look that asks resolves it.
     pub fn identify(&mut self, shown_at: i64, answer: Result<&BTreeMap<u32, String>, &str>) {
         for pid in std::mem::take(&mut self.shown) {
             let Some(tracked) = self.tracked.get_mut(&pid) else {
@@ -134,10 +143,21 @@ impl Tracker {
             };
             let said = match answer {
                 Err(why) => {
-                    if tracked.identity == Identity::Asking {
-                        tracked.identity = Identity::Never(format!(
-                            "the system could not say who it was at the look that saw it ({why})"
-                        ));
+                    match &tracked.identity {
+                        Identity::Asking => {
+                            tracked.identity = Identity::Never(format!(
+                                "the system could not say who it was at the look that saw it ({why})"
+                            ));
+                        }
+                        Identity::Began(began) => {
+                            tracked.identity = Identity::Doubted {
+                                began: began.clone(),
+                                why: format!(
+                                    "the system could not say who was under its number at a look that saw it there since ({why})"
+                                ),
+                            };
+                        }
+                        Identity::Doubted { .. } | Identity::Never(_) => {}
                     }
                     continue;
                 }
@@ -151,12 +171,12 @@ impl Tracker {
             match &tracked.identity {
                 Identity::Never(_) => {}
                 Identity::Began(known) if known == began => {}
-                Identity::Asking | Identity::Began(_) if after => {
+                Identity::Asking | Identity::Began(_) | Identity::Doubted { .. } if after => {
                     tracked.identity = Identity::Never(
                         "the process the system named under its number began after the look saw it there".to_owned(),
                     );
                 }
-                Identity::Asking | Identity::Began(_) => {
+                Identity::Asking | Identity::Began(_) | Identity::Doubted { .. } => {
                     tracked.identity = Identity::Began(began.clone());
                 }
             }
@@ -247,7 +267,8 @@ impl Tracker {
     /// look knew it, the process under it may be the window's own, begun since, which
     /// it is where the system says it began before the exit, none of the window's where
     /// after, and unresolved where the system says the second alone; else another's.
-    /// The rest are gone.
+    /// Unless its identity is doubted: then it may be the one a look that could not ask
+    /// saw, and it is unresolved. The rest are gone.
     fn take(&mut self, pids: &[u32], now: i64, there: &BTreeMap<u32, String>) -> Found {
         let mut found = Found::default();
         for pid in pids {
@@ -257,27 +278,34 @@ impl Tracker {
             let Some(now_said) = there.get(pid) else {
                 continue;
             };
+            let judged = match &tracked.identity {
+                Identity::Began(began) => match under(began, now_said, tracked.listed) {
+                    Under::Its => Ok(()),
+                    Under::Another => continue,
+                    Under::Untold => Err("its number holds a process begun at another time than the one the look knew, and its window's exit listed the number: whether that is the window's own, begun since, the system does not say to the moment".to_owned()),
+                },
+                // A process begun at another time may be the one a look that could not
+                // ask saw under the number: never another to drop.
+                Identity::Doubted { began, why } => match under(began, now_said, tracked.listed) {
+                    Under::Its => Ok(()),
+                    Under::Another | Under::Untold => Err(why.clone()),
+                },
+                Identity::Never(why) => Err(why.clone()),
+                Identity::Asking => Err("its identity was never asked".to_owned()),
+            };
             let process = Process {
                 pid: *pid,
                 command: tracked.command,
             };
             let since = tracked.gone.unwrap_or(now);
-            let never = match tracked.identity {
-                Identity::Began(began) => match under(&began, now_said, tracked.listed) {
-                    Under::Its => {
-                        found.leftovers.push(Leftover {
-                            process,
-                            pane: tracked.owner.0,
-                            since,
-                            began: now_said.clone(),
-                        });
-                        continue;
-                    }
-                    Under::Another => continue,
-                    Under::Untold => "its number holds a process begun at another time than the one the look knew, and its window's exit listed the number: whether that is the window's own, begun since, the system does not say to the moment".to_owned(),
-                },
-                Identity::Never(why) => why,
-                Identity::Asking => "its identity was never asked".to_owned(),
+            let Err(never) = judged else {
+                found.leftovers.push(Leftover {
+                    process,
+                    pane: tracked.owner.0,
+                    since,
+                    began: now_said.clone(),
+                });
+                continue;
             };
             found.unresolved.push(Unresolved {
                 process,

@@ -32,8 +32,47 @@ fn known(tracker: &mut Tracker, pids: &[u32]) {
 fn began(tracker: &Tracker, pid: u32) -> Option<&str> {
     match &tracker.tracked.get(&pid)?.identity {
         Identity::Began(began) => Some(began),
-        Identity::Asking | Identity::Never(_) => None,
+        Identity::Asking | Identity::Doubted { .. } | Identity::Never(_) => None,
     }
+}
+
+#[test]
+fn a_known_number_shown_again_when_the_system_cannot_say_is_doubted_never_another() {
+    // Sol's: A is known; B takes A's number in the same window, and the look that shows
+    // it cannot ask who it is; B detaches, and no exit lists it. At the end the number
+    // holds B, begun at another time: unresolved, never another process to drop.
+    let a = window("p1-a", 1);
+    let doubted = || {
+        let mut tracker = Tracker::default();
+        tracker.saw(&a, &[process(10, "npm test")]);
+        known(&mut tracker, &[10]);
+        tracker.saw(&a, &[process(10, "node server.mjs")]);
+        tracker.identify(0, Err("ps timed out"));
+        tracker.gone(&a, 1_000, &[]);
+        tracker
+    };
+    let b = BTreeMap::from([(10, "began later".to_owned())]);
+    let found = doubted().left(2_000, &b);
+    assert!(found.leftovers.is_empty(), "{found:?}");
+    assert_eq!(found.unresolved.len(), 1, "{found:?}");
+    assert_eq!(
+        found.unresolved[0].why,
+        "the system could not say who was under its number at a look that saw it there since (ps timed out), so whether the process under its number is it cannot be told; it was left running"
+    );
+    assert_eq!(found.unresolved[0].process, process(10, "node server.mjs"));
+    // The process as it was known still there: a stranger.
+    assert_eq!(leftovers(&doubted().left(2_000, &there(&[10]))), [10]);
+    // A later look that asks takes the doubt away.
+    let mut tracker = Tracker::default();
+    tracker.saw(&a, &[process(10, "npm test")]);
+    known(&mut tracker, &[10]);
+    tracker.saw(&a, &[process(10, "npm test")]);
+    tracker.identify(0, Err("ps timed out"));
+    tracker.saw(&a, &[process(10, "npm test")]);
+    known(&mut tracker, &[10]);
+    assert_eq!(began(&tracker, 10), Some("began 10"));
+    tracker.gone(&a, 1_000, &[]);
+    assert_eq!(tracker.left(2_000, &b), Found::default());
 }
 
 /// The numbers of what a check found to end.

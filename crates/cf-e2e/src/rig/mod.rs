@@ -50,6 +50,7 @@ use crate::{cf, checkout, files, wire, Error, Result};
 
 pub use forget::project_name;
 pub use jobs::Job;
+pub use observe::Printed;
 pub use project::{write_staff, Project};
 
 pub(crate) use observe::events_of;
@@ -98,19 +99,54 @@ pub struct Config {
 
 /// What a rig passes what it says of itself through, where its owner gives it one
 /// ([`Config::masked_by`]): a run that hides what looks like a key or a token in all
-/// it says. A rig with none says it as it is.
+/// it says. Each text is passed whole, before any of it is cut; a window's screen as
+/// its rows, which the owner masks as one text; and what the rig's windows print is
+/// handed to it as the rig starts ([`Printed`]), which the owner may read whole. A rig
+/// with none says it as it is.
 #[derive(Clone)]
-pub struct Masker(std::sync::Arc<dyn Fn(&str) -> String + Send + Sync>);
+pub struct Masker {
+    text: Arc<dyn Fn(&str) -> String + Send + Sync>,
+    screen: Arc<ScreenMask>,
+    reads: Arc<dyn Fn(Printed) + Send + Sync>,
+}
+
+/// What a masker passes the rows of a window's screen through.
+type ScreenMask = dyn Fn(&[String]) -> Vec<String> + Send + Sync;
 
 impl Masker {
-    /// A masker that passes each text through `mask`.
-    pub fn new(mask: impl Fn(&str) -> String + Send + Sync + 'static) -> Self {
-        Self(std::sync::Arc::new(mask))
+    /// A masker that passes each text through `text`, and the rows of each window's
+    /// screen through `screen`.
+    pub fn new(
+        text: impl Fn(&str) -> String + Send + Sync + 'static,
+        screen: impl Fn(&[String]) -> Vec<String> + Send + Sync + 'static,
+    ) -> Self {
+        Self {
+            text: Arc::new(text),
+            screen: Arc::new(screen),
+            reads: Arc::new(|_| {}),
+        }
+    }
+
+    /// The masker, handed what each rig it is given to prints, through `reads`.
+    #[must_use]
+    pub fn reading(mut self, reads: impl Fn(Printed) + Send + Sync + 'static) -> Self {
+        self.reads = Arc::new(reads);
+        self
     }
 
     /// `text` as it is said.
     pub fn shown(&self, text: &str) -> String {
-        (self.0)(text)
+        (self.text)(text)
+    }
+
+    /// The rows of a window's screen as they are said.
+    pub fn screen(&self, rows: &[String]) -> Vec<String> {
+        (self.screen)(rows)
+    }
+
+    /// The rig that has this masker prints `printed`.
+    fn read(&self, printed: Printed) {
+        (self.reads)(printed);
     }
 }
 

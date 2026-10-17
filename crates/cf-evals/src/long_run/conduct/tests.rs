@@ -3,7 +3,7 @@
 
 use super::*;
 use crate::long_run::disruptions::{Disruption, Target, NO_IDLE_COMPACTION};
-use crate::long_run::ledger::{Conversation, Item, Message, Participant, Task};
+use crate::long_run::ledger::{Conversation, Event, Item, Message, Participant, Task};
 use crate::long_run::look::{Process, Stranger, Unread};
 use crate::long_run::record::Record;
 
@@ -491,6 +491,17 @@ fn what_the_app_wrote_as_it_closed_is_held_in_the_last_look() {
             copied_at: iso(2, second),
         });
     }
+    // The brief, m-120, delivered to the worker: its turn is the result's.
+    running.messages.push(Message {
+        recipient: 3,
+        ..message(120, Some(2), "task", "Run them", 2, 0)
+    });
+    running.events.push(Event {
+        id: 1,
+        at: iso(2, 0),
+        kind: "delivery.begun".to_owned(),
+        data: serde_json::json!({ "message": 120, "attempt": 1 }),
+    });
     running
         .messages
         .push(message(131, Some(3), "result", "Done.", 3, 0));

@@ -15,7 +15,7 @@ use super::install::{environment, var, write_fake_install, write_roster};
 use super::route::Shared;
 #[cfg(unix)]
 use super::stranger::Stranger;
-use super::{Config, Rig};
+use super::{Config, Printed, Rig};
 use crate::daemon::Daemon;
 use crate::daemon_log::{self, errors_with_cause, lines_of, StartLine};
 use crate::process::{Run, Spawned};
@@ -71,6 +71,10 @@ impl Rig {
         let (mut daemon, start_line) = start_daemon(&config, &env)?;
         let (mut host, host_output) = start_host(&env)?;
         let shared = route(&mut daemon, &mut host, host_output)?;
+        // What its windows print is its owner's masker's to read, from the first byte.
+        if let Some(masker) = &config.masker {
+            masker.read(Printed::of(&shared));
+        }
 
         // The rig owns its home from here on: it goes with it.
         if let Some(scratch) = scratch {

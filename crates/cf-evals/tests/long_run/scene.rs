@@ -125,6 +125,24 @@ impl Scene {
             .unwrap();
     }
 
+    /// The chief's task message `id` of the task whose row is `task` to `recipient`, its
+    /// delivery begun at `at`, as the log tells it.
+    pub fn briefed(&self, id: i64, recipient: i64, task: i64, at: &str) {
+        self.message(
+            id,
+            (recipient, Some(CHIEF)),
+            "task",
+            Some(task),
+            "the brief",
+            at,
+        );
+        self.event(
+            at,
+            "delivery.begun",
+            &serde_json::json!({ "message": id, "attempt": 1 }),
+        );
+    }
+
     /// An item of a conversation's copy, at its place `seq`.
     pub fn item(
         &self,

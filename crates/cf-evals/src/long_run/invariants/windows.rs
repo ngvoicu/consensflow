@@ -357,9 +357,9 @@ pub fn skipped_or_waiting(look: &Look, settings: &Settings) -> Vec<Break> {
 /// The tasks `handle` held that were at work at `at`, by number: whom each was given
 /// to by then, by the log ([`holder_at`]; the task's assignee now, where the log says
 /// no assignment of it), and the log's last word on its state by then ([`MOVES`]; the
-/// task's state now, where it has none). A task given to another since is still the
-/// one the window held when it closed, and one given to it is at work once it moved
-/// on from `queued`.
+/// task's state now, where it has none), a pause the exit at `at` caused aside. A task
+/// given to another since is still the one the window held when it closed, and one
+/// given to it is at work once it moved on from `queued`.
 fn at_work_at(look: &Look, handle: &str, at: i64) -> Vec<i64> {
     let worker = look.ledger.by_handle(handle).map(|worker| worker.id);
     look.ledger
@@ -380,7 +380,17 @@ fn at_work_at(look: &Look, handle: &str, at: i64) -> Vec<i64> {
                         && event.data["task"].as_i64() == Some(task.number)
                         && clock::millis(&event.at).is_some_and(|when| when <= at)
                 })
-                .map(|event| event.data["to"].as_str().unwrap_or_default().to_owned());
+                .map(|event| {
+                    let to = event.data["to"].as_str().unwrap_or_default();
+                    // The rig is told of a window's exit before the daemon is: a pause
+                    // in the exit's own millisecond is the one it caused, after it, and
+                    // the state at the exit is the one that pause moved from.
+                    if to == "paused" && clock::millis(&event.at) == Some(at) {
+                        event.data["from"].as_str().unwrap_or_default().to_owned()
+                    } else {
+                        to.to_owned()
+                    }
+                });
             AT_WORK.contains(&said.as_deref().unwrap_or(task.state.as_str()))
         })
         .map(|task| task.number)

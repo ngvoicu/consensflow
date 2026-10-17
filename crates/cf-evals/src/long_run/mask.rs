@@ -32,10 +32,16 @@
 //!   the same.
 //!
 //! A text is masked whole before it is cut short ([`cut`]): a secret whose end is past
-//! the cut is no secret's shape once it is cut, and would be kept as it was.
+//! the cut is no secret's shape once it is cut, and would be kept as it was. A window's
+//! screen is masked as one text ([`screen`]), its rows joined where the terminal may
+//! have wrapped them. And what a cut made before the run had the text (the pane host's
+//! last lines of a screen) may hold a secret whose name it cut off: what a window
+//! printed is read whole, and each secret only what is around it tells is hidden
+//! wherever it is seen from then ([`Names::learn`]).
 
 use std::collections::BTreeSet;
-use std::sync::LazyLock;
+use std::ops::Range;
+use std::sync::{Arc, LazyLock, OnceLock};
 
 use regex::{Captures, Regex};
 
@@ -45,10 +51,24 @@ use super::look::Look;
 /// What a hidden secret is replaced with.
 pub const MASK: &str = "[masked]";
 
-/// The run's own names, which are shown: each participant's handle and each of their
-/// windows' ids.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct Names(BTreeSet<String>);
+/// What the run knows of what it says: its own names, which are shown (each
+/// participant's handle and each of their windows' ids); and the secrets its windows
+/// printed, which are hidden wherever they are seen ([`Names::learn`]).
+#[derive(Debug, Clone, Default)]
+pub struct Names {
+    shown: BTreeSet<String>,
+    hidden: BTreeSet<String>,
+    /// `hidden` as the run looks for it, made when it is first asked for.
+    learned: Arc<OnceLock<Learned>>,
+}
+
+impl PartialEq for Names {
+    fn eq(&self, other: &Self) -> bool {
+        self.shown == other.shown && self.hidden == other.hidden
+    }
+}
+
+impl Eq for Names {}
 
 impl Names {
     /// The names a look shows: the handles of its project's participants, the id of
@@ -66,9 +86,9 @@ impl Names {
         let mut names = Self::default();
         let project = ledger.project.as_ref().map(|project| project.id);
         for someone in &ledger.participants {
-            names.0.insert(someone.handle.clone());
+            names.shown.insert(someone.handle.clone());
             if let Some(project) = project {
-                names.0.insert(format!("p{project}-{}", someone.handle));
+                names.shown.insert(format!("p{project}-{}", someone.handle));
             }
         }
         names
@@ -76,7 +96,7 @@ impl Names {
 
     /// The names `look` shows, added.
     pub fn add(&mut self, look: &Look) {
-        self.0.extend(Self::of_ledger(&look.ledger).0);
+        self.shown.extend(Self::of_ledger(&look.ledger).shown);
         let windows = &look.windows;
         let panes = windows
             .open
@@ -85,34 +105,128 @@ impl Names {
             .chain(windows.exits.iter().map(|exit| &exit.pane))
             .chain(windows.strangers.iter().map(|stranger| &stranger.pane))
             .chain(windows.unresolved.iter().map(|left| &left.pane));
-        self.0.extend(panes.cloned());
+        self.shown.extend(panes.cloned());
     }
 
     /// `name` is one of the run's from now: a file it keeps, by its name or a folder of
     /// its path.
     pub fn insert(&mut self, name: impl Into<String>) {
-        self.0.insert(name.into());
+        self.shown.insert(name.into());
     }
 
-    /// `other`'s names, added.
+    /// `other`'s names and secrets, added.
     pub fn extend(&mut self, other: &Names) {
-        self.0.extend(other.0.iter().cloned());
+        self.shown.extend(other.shown.iter().cloned());
+        self.hide(other.hidden.iter().cloned());
+    }
+
+    /// What a window printed, `rows` (all of it, as the rows of its screen), read whole:
+    /// the secrets in it that only what is around them tells (a URL's user and password,
+    /// what follows `Bearer` or `Basic`, the value of a secret name) are hidden from now
+    /// wherever they are seen, each row's part of each of [`LEAST`] characters or more.
+    /// A screen the pane host cut to its last lines may hold a value whose name it cut
+    /// off: the value is hidden there all the same. (A token of a known kind, or of the
+    /// length of one, is hidden by its shape wherever it is.)
+    pub fn learn(&mut self, rows: &[String]) {
+        let (joined, places) = joined(rows);
+        let mut learned = Vec::new();
+        for span in found(&joined, self, |rule| rule.context) {
+            for place in places
+                .iter()
+                .filter(|place| place.start < span.end && span.start < place.end)
+            {
+                let part = joined[span.start.max(place.start)..span.end.min(place.end)].trim();
+                if part.chars().count() >= LEAST {
+                    learned.push(part.to_owned());
+                }
+            }
+        }
+        self.hide(learned);
+    }
+
+    /// `secrets` are hidden from now wherever they are seen.
+    fn hide(&mut self, secrets: impl IntoIterator<Item = String>) {
+        let before = self.hidden.len();
+        self.hidden.extend(secrets);
+        if self.hidden.len() != before {
+            self.learned = Arc::default();
+        }
+    }
+
+    /// Where in `text` the secrets learned are.
+    fn learned_in(&self, text: &str) -> Vec<Range<usize>> {
+        self.learned
+            .get_or_init(|| Learned::of(&self.hidden))
+            .find(text)
     }
 
     /// Whether `found` is one of the run's names.
     fn holds(&self, found: &str) -> bool {
-        self.0.contains(found)
+        self.shown.contains(found)
     }
 }
 
+/// The secrets the run learned, as it looks for them in a text.
+#[derive(Debug, Default)]
+enum Learned {
+    /// None learned.
+    #[default]
+    Nothing,
+    /// All as one pattern, the longest first, so that one that holds another is hidden
+    /// whole. (The pattern crate makes an alternation of plain words without the
+    /// automaton its size limit is of, however many.)
+    Pattern(Regex),
+    /// Each, the longest first, looked for one at a time: where the one pattern could
+    /// not be made after all. Never none of them.
+    Each(Vec<String>),
+}
+
+impl Learned {
+    /// `secrets`, in one pattern where it can be made.
+    fn of(secrets: &BTreeSet<String>) -> Self {
+        let mut secrets: Vec<&String> = secrets.iter().collect();
+        if secrets.is_empty() {
+            return Self::Nothing;
+        }
+        secrets.sort_by_key(|secret| std::cmp::Reverse(secret.len()));
+        let alternatives: Vec<String> =
+            secrets.iter().map(|secret| regex::escape(secret)).collect();
+        match Regex::new(&alternatives.join("|")) {
+            Ok(pattern) => Self::Pattern(pattern),
+            Err(_) => Self::Each(secrets.into_iter().cloned().collect()),
+        }
+    }
+
+    /// Where in `text` they are, in no order.
+    fn find(&self, text: &str) -> Vec<Range<usize>> {
+        match self {
+            Self::Nothing => Vec::new(),
+            Self::Pattern(pattern) => pattern.find_iter(text).map(|found| found.range()).collect(),
+            Self::Each(secrets) => secrets
+                .iter()
+                .flat_map(|secret| {
+                    text.match_indices(secret.as_str())
+                        .map(|(at, _)| at..at + secret.len())
+                })
+                .collect(),
+        }
+    }
+}
+
+/// How long a part of a learned secret is before it is hidden wherever it is seen:
+/// the least a secret name's value is ([`quoted`]`(6)`).
+const LEAST: usize = 6;
+
 /// A pattern, the groups of it that may hold the secret (0 for all of it; the first
-/// that matched is the one), whether what it matched is one, and whether a run's name
-/// it matched whole is shown.
+/// that matched is the one), whether what it matched is one, whether a run's name
+/// it matched whole is shown, and whether it is a secret by what is around it (a
+/// name, a scheme), which a text cut after it no longer holds.
 struct Rule {
     pattern: Regex,
     secret: &'static [usize],
     is_secret: fn(&str) -> bool,
     names_shown: bool,
+    context: bool,
 }
 
 /// The patterns are constants of this file, and a test builds each: a mistake in one
@@ -124,6 +238,15 @@ fn rule(pattern: &str, secret: &'static [usize], is_secret: fn(&str) -> bool) ->
         secret,
         is_secret,
         names_shown: false,
+        context: false,
+    }
+}
+
+/// A rule whose secret is one by what is around it.
+fn by_context(pattern: &str, secret: &'static [usize], is_secret: fn(&str) -> bool) -> Rule {
+    Rule {
+        context: true,
+        ..rule(pattern, secret, is_secret)
     }
 }
 
@@ -199,13 +322,13 @@ fn quoted(least: usize) -> String {
 
 static RULES: LazyLock<Vec<Rule>> = LazyLock::new(|| {
     vec![
-        rule(
+        by_context(
             r"(?i)\b[a-z][a-z0-9+.-]*://([^\s/@:]+:[^\s/@]+)@",
             &[1],
             always,
         ),
-        rule(r"(?i)\bbearer\s+([A-Za-z0-9._~+/=-]{8,})", &[1], always),
-        rule(
+        by_context(r"(?i)\bbearer\s+([A-Za-z0-9._~+/=-]{8,})", &[1], always),
+        by_context(
             r"(?i)\bbasic\s+([A-Za-z0-9._~+/=-]{8,})",
             &[1],
             base64_credentials,
@@ -214,15 +337,15 @@ static RULES: LazyLock<Vec<Rule>> = LazyLock::new(|| {
         // "name": "a \"quoted\" value", each of them inside a JSON string (its quotes
         // and its escapes escaped again), and a quoted value whose closing quote never
         // comes (a command the pane host cut at 512 characters).
-        rule(
+        by_context(
             &format!(
                 r"(?i)\b[A-Za-z0-9_.-]*(?:passw(?:or)?d|pwd|secret|credential){NAMED}{}",
-                quoted(6)
+                quoted(LEAST)
             ),
             &[1, 2, 3, 4, 5, 6, 7],
             a_value,
         ),
-        rule(
+        by_context(
             &format!(r"(?i)\b[A-Za-z0-9_.-]*(?:key|token){NAMED}{}", quoted(8)),
             &[1, 2, 3, 4, 5, 6, 7],
             a_long_or_numbered_value,
@@ -253,7 +376,8 @@ static RULES: LazyLock<Vec<Rule>> = LazyLock::new(|| {
     ]
 });
 
-/// `text` with what looks like a key or a token hidden, the run's own `names` shown.
+/// `text` with what looks like a key or a token hidden, and every secret the run
+/// learned ([`Names::learn`]); the run's own `names` shown.
 pub fn mask(text: &str, names: &Names) -> String {
     let mut text = text.to_owned();
     for rule in RULES.iter() {
@@ -262,7 +386,19 @@ pub fn mask(text: &str, names: &Names) -> String {
             .replace_all(&text, |found: &Captures<'_>| hide(rule, found, names))
             .into_owned();
     }
-    text
+    let learned = merged(names.learned_in(&text));
+    if learned.is_empty() {
+        return text;
+    }
+    let mut shown = String::with_capacity(text.len());
+    let mut at = 0;
+    for secret in learned {
+        shown.push_str(&text[at..secret.start]);
+        shown.push_str(MASK);
+        at = secret.end;
+    }
+    shown.push_str(&text[at..]);
+    shown
 }
 
 /// The first `most` UTF-16 units of `text` once it is masked whole: what a line of
@@ -271,45 +407,98 @@ pub fn cut(text: &str, most: usize, names: &Names) -> String {
     crate::js::first(&mask(text, names), most)
 }
 
-/// How wide a row is before it is taken for one the terminal wrapped, where it is
-/// the screen's widest: every window of a run is as wide (the daemon's `pane.open`
-/// asks no size, the pane host's default is 80 by 24, and nothing resizes a window).
+/// How many cells of the terminal a row may fill before it runs on into the next:
+/// every window of a run is as wide (the daemon's `pane.open` asks no size, the pane
+/// host's default is 80 by 24, and nothing resizes a window).
 const WRAPS_AT: usize = 80;
 
-/// The rows of a screen masked as one text: a secret's name may end one row and its
-/// value begin the next (`DB_PASSWORD=` / `"correct horse battery staple"`), and a
-/// terminal wraps a long line at its width, a token run across two rows. The rows are
-/// joined as they were drawn (a row as wide as the screen's widest, of [`WRAPS_AT`]
-/// characters or more, runs on into the next as the terminal wrapped it; any other
-/// ends its line), what is to be hidden is found in the whole, and each row keeps its
-/// own part of it: `[masked]` where a secret begins, nothing of it in the rows it runs
-/// on into. Then each row is masked as a text of its own too. Rows joined may hide a
-/// little more than either would alone, and never less.
-pub fn screen(rows: &[String], names: &Names) -> Vec<String> {
-    let widest = rows
-        .iter()
-        .map(|row| row.chars().count())
-        .max()
-        .unwrap_or(0);
+/// How many cells of the terminal a character takes, as the pane host counts them
+/// (`crates/cf-panes/src/screen/grid.rs`, which a crate of the evals may not link):
+/// none for a control character, a combining mark or a zero-width one, two for what
+/// East Asian scripts and emoji draw wide, one otherwise. The ranges are the blocks,
+/// not every code point of them.
+fn cells(character: char) -> usize {
+    match u32::from(character) {
+        0x00..=0x1F | 0x7F..=0x9F => 0,
+        0x300..=0x36F
+        | 0x200B..=0x200F
+        | 0x2028..=0x202E
+        | 0x2060..=0x2064
+        | 0xFE00..=0xFE0F
+        | 0xFEFF => 0,
+        0x1100..=0x115F
+        | 0x2E80..=0x303E
+        | 0x3041..=0x33FF
+        | 0x3400..=0x4DBF
+        | 0x4E00..=0x9FFF
+        | 0xA000..=0xA4CF
+        | 0xAC00..=0xD7A3
+        | 0xF900..=0xFAFF
+        | 0xFE30..=0xFE6F
+        | 0xFF00..=0xFF60
+        | 0xFFE0..=0xFFE6
+        | 0x1F300..=0x1F64F
+        | 0x1F900..=0x1F9FF
+        | 0x20000..=0x3FFFD => 2,
+        _ => 1,
+    }
+}
+
+/// Whether the terminal may have wrapped `row` into the next, by the cells it fills
+/// ([`cells`]): a row that ends at the screen's edge, [`WRAPS_AT`] cells, or one cell
+/// short of it, where the wide character that came next did not fit and went to the
+/// next row whole. A row wider than the screen is a line the pane host joined from the
+/// rows it wrapped, and its last part is the row that may run on.
+fn runs_on(row: &str) -> bool {
+    let width: usize = row.chars().map(cells).sum();
+    let last = width % WRAPS_AT;
+    width >= WRAPS_AT - 1 && (last == 0 || last == WRAPS_AT - 1)
+}
+
+/// The rows of a screen as one text, as they were drawn: a row that may run on
+/// ([`runs_on`]) goes on into the next, any other ends its line. And where each row
+/// is in it.
+fn joined(rows: &[String]) -> (String, Vec<Range<usize>>) {
     let mut joined = String::new();
     let mut places = Vec::new();
     for row in rows {
         let start = joined.len();
         joined.push_str(row);
         places.push(start..joined.len());
-        if !(widest >= WRAPS_AT && row.chars().count() == widest) {
+        if !runs_on(row) {
             joined.push('\n');
         }
     }
+    (joined, places)
+}
+
+/// The rows of a screen masked as one text: a secret's name may end one row and its
+/// value begin the next (`DB_PASSWORD=` / `"correct horse battery staple"`), and a
+/// terminal wraps a long line at its width, a token run across two rows. The rows are
+/// joined as they were drawn ([`joined`]), what is to be hidden is found in the whole,
+/// and each row keeps its own part of it: `[masked]` where a secret begins, nothing of
+/// it in the rows it runs on into. Then each row is masked as a text of its own too.
+/// Rows joined may hide a little more than either would alone, and never less.
+pub fn screen(rows: &[String], names: &Names) -> Vec<String> {
+    let (joined, places) = joined(rows);
     let hidden = spans(&joined, names);
+    // The stretches are in order, and so are the rows: one that ended before a row
+    // meets none after it.
+    let mut first = 0;
     places
         .into_iter()
         .map(|place| {
+            while hidden
+                .get(first)
+                .is_some_and(|span| span.end <= place.start)
+            {
+                first += 1;
+            }
             let mut shown = String::new();
             let mut at = place.start;
-            for span in hidden
+            for span in hidden[first..]
                 .iter()
-                .filter(|span| span.start < place.end && span.end > place.start)
+                .take_while(|span| span.start < place.end)
             {
                 shown.push_str(&joined[at..span.start.max(at)]);
                 if span.start >= place.start {
@@ -324,10 +513,32 @@ pub fn screen(rows: &[String], names: &Names) -> Vec<String> {
 }
 
 /// Where in `text` each rule finds a secret to hide (the run's `names` shown), every
-/// rule read against the whole text: the stretches, in order, those that meet made one.
-fn spans(text: &str, names: &Names) -> Vec<std::ops::Range<usize>> {
-    let mut found: Vec<std::ops::Range<usize>> = Vec::new();
-    for rule in RULES.iter() {
+/// rule read against the whole text, and every secret the run learned: the stretches,
+/// in order, those that meet made one.
+fn spans(text: &str, names: &Names) -> Vec<Range<usize>> {
+    let mut stretches = found(text, names, |_| true);
+    stretches.extend(names.learned_in(text));
+    merged(stretches)
+}
+
+/// `stretches` in order, those that meet made one.
+fn merged(mut stretches: Vec<Range<usize>>) -> Vec<Range<usize>> {
+    stretches.sort_by_key(|span| span.start);
+    let mut merged: Vec<Range<usize>> = Vec::new();
+    for span in stretches {
+        match merged.last_mut() {
+            Some(last) if span.start <= last.end => last.end = last.end.max(span.end),
+            _ => merged.push(span),
+        }
+    }
+    merged
+}
+
+/// Where in `text` the rules `which` takes find a secret to hide, the run's `names`
+/// shown.
+fn found(text: &str, names: &Names, which: impl Fn(&Rule) -> bool) -> Vec<Range<usize>> {
+    let mut found = Vec::new();
+    for rule in RULES.iter().filter(|rule| which(rule)) {
         for matched in rule.pattern.captures_iter(text) {
             let Some(secret) = rule.secret.iter().find_map(|group| matched.get(*group)) else {
                 continue;
@@ -339,15 +550,7 @@ fn spans(text: &str, names: &Names) -> Vec<std::ops::Range<usize>> {
             }
         }
     }
-    found.sort_by_key(|span| span.start);
-    let mut merged: Vec<std::ops::Range<usize>> = Vec::new();
-    for span in found {
-        match merged.last_mut() {
-            Some(last) if span.start <= last.end => last.end = last.end.max(span.end),
-            _ => merged.push(span),
-        }
-    }
-    merged
+    found
 }
 
 /// What replaces a match of `rule`: the match with its secret hidden, or the match
@@ -568,6 +771,150 @@ mod tests {
         names.insert("p1-long-claude-1-olive-valley");
         let rows = vec!["window p1-long-claude-1-olive-valley exited".to_owned()];
         assert_eq!(screen(&rows, &names), rows);
+    }
+
+    #[test]
+    fn rows_run_on_by_the_cells_they_fill_as_the_terminal_counts_them() {
+        // Astra's: a row of 80 cells and 52 characters, a token cut in two at its edge.
+        let wide = "確認".repeat(14);
+        let row = format!("{wide} to ghp_abcdefghijklmnop");
+        assert_eq!(row.chars().count(), 52);
+        let rows = vec![row, "qrstuvwxyz0123456789 done".to_owned()];
+        assert_eq!(
+            screen(&rows, &Names::default()),
+            [format!("{wide} to [masked]"), " done".to_owned()]
+        );
+        // 79 cells: the wide character that came next did not fit, and went on whole.
+        let row = format!("{}password=秘密の", " ".repeat(64));
+        let rows = vec![row, "パスワード".to_owned()];
+        assert_eq!(
+            screen(&rows, &Names::default()),
+            [
+                format!("{}password=[masked]", " ".repeat(64)),
+                String::new()
+            ]
+        );
+        for (row, runs) in [
+            ("a".repeat(80), true),
+            ("a".repeat(79), true),
+            ("a".repeat(78), false),
+            (format!("{}é", "a".repeat(79)), true),
+            (format!("{}\u{301}", "a".repeat(78)), false),
+            // A line the pane host joined from the rows it wrapped: its last row.
+            ("a".repeat(160), true),
+            ("a".repeat(159), true),
+            ("a".repeat(81), false),
+            (String::new(), false),
+        ] {
+            assert_eq!(runs_on(&row), runs, "{} cells", row.chars().count());
+        }
+    }
+
+    #[test]
+    fn a_secret_whose_name_a_cut_left_out_is_hidden_once_its_window_is_read_whole() {
+        // Astra's: the name, the value, and eleven lines of status; the pane host's last
+        // twelve lines begin at the value.
+        let mut printed: Vec<String> =
+            ["$ export DB_PASSWORD=", "\"correct horse battery staple\""]
+                .map(str::to_owned)
+                .to_vec();
+        printed.extend((1..=11).map(|step| format!("step {step} of 11 done")));
+        let tail = printed[printed.len() - 12..].to_vec();
+        let mut names = Names::default();
+        assert_eq!(
+            screen(&tail, &names),
+            tail,
+            "the last lines alone name no secret"
+        );
+        names.learn(&printed);
+        let shown = screen(&tail, &names);
+        assert_eq!(shown[0], "\"[masked]\"");
+        assert_eq!(shown[1..], tail[1..]);
+        // Wherever the run says it, and in any names it is given to.
+        let said = "the value was correct horse battery staple";
+        assert_eq!(mask(said, &names), "the value was [masked]");
+        let mut given = Names::default();
+        given.extend(&names);
+        assert_eq!(mask(said, &given), "the value was [masked]");
+        // A value over two lines, the first cut off: each line's part is learned.
+        let printed: Vec<String> = ["password: 'correct horse", "battery staple' was set", "ok"]
+            .map(str::to_owned)
+            .to_vec();
+        let mut names = Names::default();
+        names.learn(&printed);
+        assert_eq!(screen(&printed[1..], &names), ["[masked]' was set", "ok"]);
+        // A part of fewer than six characters is no secret of its own to hide everywhere.
+        let mut names = Names::default();
+        names.learn(&["password: 'correct horse".to_owned(), "abc' ok".to_owned()]);
+        assert_eq!(mask("abc def", &names), "abc def");
+        // Printed whole, and drawn again later over two rows, the name not among them: each
+        // row's part is hidden, however short.
+        let mut names = Names::default();
+        names.learn(&["export DB_SECRET=abcdefgh01234567".to_owned()]);
+        let rows = vec![
+            format!("{}abc", " ".repeat(77)),
+            "defgh01234567 is the one".to_owned(),
+        ];
+        assert_eq!(
+            screen(&rows, &names),
+            [
+                format!("{}[masked]", " ".repeat(77)),
+                " is the one".to_owned()
+            ]
+        );
+        // A quote still open where the window's printing ends: the value runs to its end,
+        // as it does in any text, and each row of it is learned.
+        let mut names = Names::default();
+        names.learn(&[
+            "export DB_PASSWORD=\"correct horse".to_owned(),
+            "battery staple".to_owned(),
+        ]);
+        assert_eq!(mask("battery staple, then", &names), "[masked], then");
+        // What only its shape says is a secret is hidden by its shape, and not learned.
+        let mut names = Names::default();
+        names.learn(&["commit 0123456789abcdef0123456789abcdef01234567 ok".to_owned()]);
+        assert_eq!(names, Names::default());
+    }
+
+    #[test]
+    fn secrets_learned_are_found_whole_by_one_pattern_or_each_alone_and_never_dropped() {
+        let secrets: BTreeSet<String> = [
+            "correct horse",
+            "correct horse battery staple",
+            "hunter2hunter",
+        ]
+        .map(str::to_owned)
+        .into();
+        let one = Learned::of(&secrets);
+        assert!(matches!(one, Learned::Pattern(_)), "{one:?}");
+        let each = Learned::Each(secrets.iter().cloned().collect());
+        let text = "said correct horse battery staple, and hunter2hunter";
+        for learned in [one, each] {
+            let found: Vec<&str> = merged(learned.find(text))
+                .into_iter()
+                .map(|secret| &text[secret])
+                .collect();
+            assert_eq!(found, ["correct horse battery staple", "hunter2hunter"]);
+        }
+        assert!(Learned::of(&BTreeSet::new()).find(text).is_empty());
+        // A window's rows by the thousand, a quote opened early that never closed: one
+        // pattern still.
+        let rows: BTreeSet<String> = (0..5_000)
+            .map(|row| {
+                format!(
+                    "{row:>6} ✻ Working… esc to interrupt · {row:x} {}",
+                    "·".repeat(30)
+                )
+            })
+            .collect();
+        let many = Learned::of(&rows);
+        assert!(matches!(many, Learned::Pattern(_)));
+        assert_eq!(
+            many.find("  4999 ✻ Working… esc to interrupt · 1387 ")
+                .len(),
+            0
+        );
+        assert_eq!(many.find(rows.iter().next_back().unwrap()).len(), 1);
     }
 
     #[test]

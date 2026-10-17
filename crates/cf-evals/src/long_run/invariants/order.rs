@@ -1,11 +1,13 @@
 //! What reaches the chief of a task, in its order and in its words: the notice
 //! that what a worker's turn left running was ended comes with its result or
 //! before it, never after (3, A3: a mutation run ended mid-edit, its notice m-132
-//! after the result m-131); and a result is the last turn's final answer whole, the
+//! after the result m-131); and a result is its turn's final answer whole, the
 //! words after its last tool call, with none of the progress written on the way
-//! (4, A4: results that held every progress line). Both read the ledger alone:
-//! the messages, the log of the tasks' states, and the daemon's copy of the
-//! worker's conversation.
+//! (4, A4: results that held every progress line). Its turn is the one the delivery
+//! of its task that began it began: a turn of an attempt before is never taken for
+//! its own, missing (a retry's turn lost, its result the old answer again). Both read
+//! the ledger alone: the messages, the log of the tasks' states and deliveries, and
+//! the daemon's copy of the worker's conversation.
 //!
 //! A task may be worked more than once: done, sent back, and done again; and a
 //! notice is of the attempt of its own result, whenever it is written. Only the log
@@ -18,6 +20,7 @@
 //! result's, late, or the next attempt's own, which the log does not say: it is
 //! unresolved, said so once in the timeline, never a break and never taken to hold.
 
+use super::deliveries::headers;
 use super::work::lines_of;
 use super::{plain, Break, Evidence, Settings, Unjudged};
 use crate::clock;
@@ -161,6 +164,63 @@ fn settled_results<'l>(
         })
 }
 
+/// Why the copy of a worker's conversation holds no turn of a result's.
+enum Unheld {
+    /// The log shows no delivery to the worker of the result's task before it.
+    NoDelivery,
+    /// No prompt of the copy holds the header of the message whose delivery began it.
+    NotCopied(i64),
+    /// The copy holds no answer of the agent's after its last prompt.
+    NoAnswer,
+}
+
+/// The turn of `result`, the worker `worker`'s, written at `at`, in `items`, the copy of
+/// the worker's conversation by then: begun by the last delivery to the worker of a
+/// message of the result's task before it (`delivery.begun`), its last turn from the
+/// prompt that holds that message's header on ([`last_turn`]). A turn before that
+/// prompt is an attempt before it, never the result's.
+fn turn_of<'a>(
+    look: &Look,
+    result: &Message,
+    worker: i64,
+    at: i64,
+    items: &'a [&'a Item],
+) -> Result<&'a [&'a Item], Unheld> {
+    let began = look
+        .ledger
+        .events_of("delivery.begun")
+        .into_iter()
+        .rev()
+        .find_map(|event| {
+            let id = event.data["message"].as_i64()?;
+            let message = look
+                .ledger
+                .messages
+                .iter()
+                .find(|message| message.id == id)?;
+            (message.recipient == worker
+                && message.task.is_some()
+                && message.task == result.task
+                && clock::millis(&event.at).is_some_and(|when| when <= at))
+            .then_some(id)
+        })
+        .ok_or(Unheld::NoDelivery)?;
+    let prompt = items
+        .iter()
+        .position(|item| {
+            item.role == "user" && headers(&item.text).iter().any(|(id, _, _)| *id == began)
+        })
+        .ok_or(Unheld::NotCopied(began))?;
+    last_turn(&items[prompt..]).ok_or(Unheld::NoAnswer)
+}
+
+/// Whether `worker` works on Codex, whose commentary is no part of its final answer.
+fn on_codex(look: &Look, worker: i64) -> bool {
+    look.ledger
+        .participant(worker)
+        .is_some_and(|who| who.harness.as_deref() == Some("codex"))
+}
+
 /// 4: a result that holds a line of the progress of its turn the final answer does
 /// not hold too, or not the whole of the turn's final answer.
 pub fn final_answer(look: &Look, settings: &Settings) -> Vec<Break> {
@@ -168,14 +228,10 @@ pub fn final_answer(look: &Look, settings: &Settings) -> Vec<Break> {
     let mut found = Vec::new();
     for (result, worker, at) in settled_results(look, settings) {
         let items = look.items_by(worker, at);
-        let Some(turn) = last_turn(&items) else {
+        let Ok(turn) = turn_of(look, result, worker, at, &items) else {
             continue;
         };
-        let codex = look
-            .ledger
-            .participant(worker)
-            .is_some_and(|who| who.harness.as_deref() == Some("codex"));
-        let (answer, progress) = answer_and_progress(turn, codex);
+        let (answer, progress) = answer_and_progress(turn, on_codex(look, worker));
         let answer = plain(&answer);
         if answer.is_empty() {
             continue;
@@ -214,25 +270,37 @@ pub fn final_answer(look: &Look, settings: &Settings) -> Vec<Break> {
 }
 
 /// 4, unresolved: a result whose turn the copy of its worker's conversation does not
-/// hold (none, or prompts and tools' items alone), or holds with nothing said after its
-/// last tool call: what its final answer was, the result cannot be held to.
+/// hold (no delivery began it, no prompt holds the delivery that did, or prompts and
+/// tools' items alone after it), or holds with nothing said after its last tool call
+/// (for Codex, nothing it marked complete): what its final answer was, the result
+/// cannot be held to.
 pub fn unanswered_results(look: &Look, settings: &Settings) -> Vec<Unjudged> {
     let mut found = Vec::new();
     for (result, worker, at) in settled_results(look, settings) {
         let items = look.items_by(worker, at);
-        let codex = look
-            .ledger
-            .participant(worker)
-            .is_some_and(|who| who.harness.as_deref() == Some("codex"));
+        let codex = on_codex(look, worker);
         let handle = look.ledger.handle(worker);
-        let missing = match last_turn(&items) {
-            None => format!(
+        let missing = match turn_of(look, result, worker, at, &items) {
+            Err(Unheld::NoDelivery) => {
+                let task = result
+                    .task
+                    .and_then(|task| look.ledger.task(task))
+                    .map_or_else(|| "its task".to_owned(), |task| format!("T-{}", task.number));
+                format!("was begun by no delivery to @{handle} of {task} that the log shows before it")
+            }
+            Err(Unheld::NotCopied(began)) => format!(
+                "is not in the copy of @{handle}'s conversation, which holds no prompt of m-{began}, the delivery that began it"
+            ),
+            Err(Unheld::NoAnswer) => format!(
                 "is not in the copy of @{handle}'s conversation, which holds no answer of the agent's after its last prompt"
             ),
-            Some(turn) if plain(&answer_and_progress(turn, codex).0).is_empty() => format!(
+            Ok(turn) if plain(&answer_and_progress(turn, codex).0).is_empty() && codex => format!(
+                "has no final answer after its last tool call in the copy of @{handle}'s conversation, only Codex's commentary, which it never marks complete"
+            ),
+            Ok(turn) if plain(&answer_and_progress(turn, codex).0).is_empty() => format!(
                 "says nothing after its last tool call in the copy of @{handle}'s conversation"
             ),
-            Some(_) => continue,
+            Ok(_) => continue,
         };
         found.push(Unjudged::new(
             4,
@@ -258,8 +326,9 @@ fn last_turn<'a>(items: &'a [&'a Item]) -> Option<&'a [&'a Item]> {
 
 /// A turn's final answer, as the product makes the result of it: what it said after
 /// its last tool call, every item of it, a blank line between (Codex's commentary
-/// left out: the progress notes it writes there, which its record never marks
-/// complete, where its final answer is); and its progress, what it said before.
+/// left out, whether or not a final answer came: the progress notes it writes there,
+/// which its record never marks complete, where its final answer is); and its
+/// progress, what it said before.
 fn answer_and_progress<'a>(turn: &'a [&'a Item], codex: bool) -> (String, Vec<&'a Item>) {
     let after = turn
         .iter()
@@ -274,7 +343,7 @@ fn answer_and_progress<'a>(turn: &'a [&'a Item], codex: bool) -> (String, Vec<&'
     };
     let mut answer = said(&turn[after..]);
     let mut progress = said(&turn[..after]);
-    if codex && answer.iter().any(|item| item.complete) {
+    if codex {
         let (finals, commentary): (Vec<&Item>, Vec<&Item>) =
             answer.into_iter().partition(|item| item.complete);
         answer = finals;

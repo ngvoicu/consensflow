@@ -112,20 +112,291 @@ fn what_stops_the_run_and_what_its_rig_says_leave_through_the_edge() {
     let setup = read(&folder.join("setup.rs"));
     assert!(setup.contains(".masked_by(masker)"));
     assert!(read(&folder.join("stage.rs")).contains("Rig::start(self.config.clone()"));
-    // And the rig keeps the masker its configuration is given, and says what it says of
-    // itself, dropped, through it.
+    // And the rig keeps the masker its configuration is given, hands it what its
+    // windows print as it starts, and says what it says of itself, dropped, through it.
     let rig = root.join("..").join("cf-e2e").join("src").join("rig");
-    assert!(read(&rig.join("launch.rs")).contains("masker: config.masker,"));
+    let launch = read(&rig.join("launch.rs"));
+    assert!(launch.contains("masker: config.masker,"));
+    assert!(launch.contains("masker.read(Printed::of(&shared));"));
     let report = read(&rig.join("report.rs"));
     let written: Vec<&str> = report
         .lines()
         .filter(|line| line.contains("stderr()"))
         .collect();
     assert_eq!(written.len(), 1, "{written:?}");
+    assert!(written[0].contains("tell.text(&report)"), "{written:?}");
+    assert!(report.contains("let tell = Tell(rig.masker.as_ref());"));
+}
+
+/// Whether a line of Rust takes a part of a text: its first characters or its last,
+/// its last lines or items, the lines of a screen the pane host cut to its last, or its
+/// lines or words split apart. A comment says.
+fn takes_part(line: &str) -> bool {
+    let code = line.trim_start();
+    if code.starts_with("//") {
+        return false;
+    }
+    let taken = code
+        .match_indices(".take(")
+        .any(|(at, _)| !code[at..].starts_with(".take()"));
+    taken
+        || [
+            "js::first(",
+            "saturating_sub(",
+            "snapshot(",
+            "[\"tail\"]",
+            ".truncate(",
+            "split_at(",
+            "split_off(",
+            ".lines()",
+            ".split(",
+            "split_once(",
+            "split_whitespace(",
+            "chars().rev()",
+        ]
+        .iter()
+        .any(|word| code.contains(word))
+}
+
+/// Each line of the long run's, and of the rig's report, that takes a part of a text,
+/// and why what it takes is masked first, or is no text it says. A line new here takes
+/// a part of a text unmasked until it is shown to take one masked whole first.
+const TAKEN: [(&str, &str, &str); 31] = [
+    (
+        "long_run/mask.rs",
+        "crate::js::first(&mask(text, names), most)",
+        "the cut, of a text masked whole",
+    ),
+    (
+        "long_run/record.rs",
+        "crate::js::first(&crate::js::squeeze(&self.text), 160)",
+        "an entry's words, cut when read",
+    ),
+    (
+        "long_run/record.rs",
+        "said[said.len().saturating_sub(count)..]",
+        "the last entries, each masked whole when read",
+    ),
+    (
+        "long_run/record.rs",
+        ".lines()",
+        "a record's lines, each an entry of its own",
+    ),
+    (
+        "long_run/invariants/work.rs",
+        "items[items.len().saturating_sub(count)..]",
+        "the last items, each masked whole and then cut",
+    ),
+    (
+        "long_run/processes.rs",
+        "said.lines()",
+        "what the system says of processes",
+    ),
+    (
+        "long_run/processes.rs",
+        "let (pid, began) = line.trim().split_once(char::is_whitespace)?;",
+        "the same",
+    ),
+    ("long_run/staff.rs", ".split(',')", "the run's own words"),
+    (
+        "long_run/staff.rs",
+        "let Some((name, list)) = part.split_once('=') else {",
+        "the same",
+    ),
+    ("long_run/staff.rs", ".split('+')", "the same"),
+    (
+        "long_run/staff.rs",
+        ".split(|at: char| !at.is_ascii_digit())",
+        "the same",
+    ),
+    ("long_run/options.rs", ".split(',')", "the same"),
+    (
+        "long_run/play.rs",
+        "sleep(every.min(within.saturating_sub(elapsed)));",
+        "a time",
+    ),
+    (
+        "long_run/tracker.rs",
+        "self.take(&due, now, there)",
+        "the tracker's own, of processes",
+    ),
+    (
+        "long_run/tracker.rs",
+        "self.take(&all, now, there)",
+        "the same",
+    ),
+    (
+        "long_run/watcher.rs",
+        "let snapshot = rig.snapshot(pane, TAIL);",
+        "the pane host's cut: the edge reads every window whole",
+    ),
+    (
+        "long_run/watcher.rs",
+        ".map(|answer| exits::lines(&answer[\"tail\"]))",
+        "the same",
+    ),
+    (
+        "long_run/watcher/exits.rs",
+        "tail: lines(&body[\"tail\"]),",
+        "the same",
+    ),
+    (
+        "long_run/stage.rs",
+        ".and_then(|rig| rig.snapshot(pane, SCREEN))",
+        "the same",
+    ),
+    (
+        "long_run/stage.rs",
+        ".map(|answer| lines(&answer[\"tail\"]))",
+        "the same",
+    ),
+    (
+        "long_run/edge.rs",
+        "let rows: Vec<String> = printed.screen(&pane).lines().map(str::to_owned).collect();",
+        "a window's whole, read as one screen",
+    ),
+    (
+        "rig/report.rs",
+        "let rows: Vec<String> = screen.lines().map(str::to_owned).collect();",
+        "a window's whole, told as one screen",
+    ),
+    (
+        "rig/report.rs",
+        "let lines: Vec<&str> = log.lines().collect();",
+        "the daemon's log, told whole just before",
+    ),
+    (
+        "rig/report.rs",
+        "let kept: Vec<char> = screen.chars().rev().take(SCREEN).collect();",
+        "a window's screen, told whole just before",
+    ),
+    (
+        "rig/report.rs",
+        "let cut: String = line.chars().take(SAID).collect();",
+        "what is said is told whole first: each file whole, each text of an answer",
+    ),
+    (
+        "rig/report.rs",
+        ".lines()",
+        "a conversation's records, of a file told whole",
+    ),
+    (
+        "rig/report.rs",
+        "for record in &records[records.len().saturating_sub(RECORDS)..] {",
+        "the same",
+    ),
+    (
+        "rig/report.rs",
+        "for message in &messages[messages.len().saturating_sub(MESSAGES)..] {",
+        "the messages of an answer told whole",
+    ),
+    (
+        "rig/report.rs",
+        "lines[lines.len().saturating_sub(LOG)..]",
+        "the daemon's log, told whole just before",
+    ),
+    (
+        "rig/report.rs",
+        "let rows: Option<Vec<String>> = exit[\"tail\"].as_array().and_then(|rows| {",
+        "an exit's lines, read to be told as one screen",
+    ),
+    (
+        "rig/report.rs",
+        "told[\"tail\"] = json!(self.screen(&rows));",
+        "the same, told",
+    ),
+];
+
+#[test]
+fn no_cut_split_or_tail_is_taken_of_text_unmasked() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let source = root.join("src");
+    let rig = root.join("..").join("cf-e2e").join("src").join("rig");
+    let mut files: Vec<(String, PathBuf)> = rust_files(&source.join("long_run"))
+        .into_iter()
+        .chain(rust_files(&source.join("long_run.rs")))
+        .filter(|file| file.file_name().is_some_and(|name| name != "tests.rs"))
+        .map(|file| {
+            let shown = file.strip_prefix(&source).unwrap().display().to_string();
+            (shown.replace('\\', "/"), file)
+        })
+        .collect();
+    files.push(("rig/report.rs".to_owned(), rig.join("report.rs")));
+    let mut taken = Vec::new();
+    for (shown, file) in &files {
+        let text = read(file);
+        // What is before the file's own tests.
+        let code = text
+            .split("#[cfg(test)]\nmod tests")
+            .next()
+            .unwrap_or_default();
+        for line in code.lines().filter(|line| takes_part(line)) {
+            taken.push((shown.clone(), line.trim().to_owned()));
+        }
+    }
+    let unshown: Vec<String> = taken
+        .iter()
+        .filter(|(file, line)| {
+            !TAKEN
+                .iter()
+                .any(|(at, known, _)| at == file && known == line)
+        })
+        .map(|(file, line)| format!("{file}: {line}"))
+        .collect();
     assert!(
-        written[0].contains("told(rig.masker.as_ref(), report)"),
-        "{written:?}"
+        unshown.is_empty(),
+        "taken of a text not shown masked first:\n{}",
+        unshown.join("\n")
     );
+    let gone: Vec<&str> = TAKEN
+        .iter()
+        .filter(|(at, known, _)| !taken.iter().any(|(file, line)| file == at && line == known))
+        .map(|(_, known, _)| *known)
+        .collect();
+    assert!(gone.is_empty(), "no longer there: {gone:?}");
+    // Masked first, where each is: the rig's report tells each text and screen before
+    // it cuts, the pane host's screens leave in the light of all their windows printed,
+    // and a break's screen is kept so.
+    let report = read(&rig.join("report.rs"));
+    for told in [
+        "let log = tell.text(log);",
+        "let screen = tell.screen_text(screen);",
+        "status_line(&name, &tell.text(&held), process::is_alive)",
+        "conversation_lines(&name, &tell.text(&held))",
+        "rig.page(method, body).map(|answer| tell.value(&answer))",
+        "told[\"tail\"] = json!(self.screen(&rows));",
+    ] {
+        assert!(report.contains(told), "{told}");
+    }
+    let edge = read(&source.join("long_run").join("edge.rs"));
+    for learned in [
+        "screen(rows, &self.learned())",
+        "let shown = masked(value, &self.learned());",
+        ".reading(move |printed| reads.reads(printed))",
+    ] {
+        assert!(edge.contains(learned), "{learned}");
+    }
+    assert!(read(&source.join("long_run").join("conduct.rs")).contains("self.edge.learned()"));
+}
+
+#[test]
+fn the_parts_it_looks_for_are_found_where_they_are() {
+    for line in [
+        "let tail: String = screen.chars().rev().take(1500).collect();",
+        "crate::js::first(&text, 200)",
+        "lines[lines.len().saturating_sub(30)..]",
+        "rig.snapshot(pane, 12)",
+        "for row in text.lines() {",
+    ] {
+        assert!(takes_part(line), "{line}");
+    }
+    for line in [
+        "let then = self.then.take();",
+        "// a line's .lines() of its own",
+        "let shown = cut(text, 200, names);",
+    ] {
+        assert!(!takes_part(line), "{line}");
+    }
 }
 
 #[test]
