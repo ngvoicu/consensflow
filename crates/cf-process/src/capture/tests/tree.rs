@@ -15,9 +15,10 @@ use crate::testing::{gone, pids_written_to_soon, Survivors};
 #[cfg(unix)]
 use crate::testing::{gone_within, pids_in};
 
-/// How long the capture of a tree that is ended has to end: far less than the
-/// minute its programs run, so that one that is not ended fails the test where
-/// it waits, and is not mistaken for one that was.
+/// How long the capture of a tree that is ended has to end, counted once the
+/// tree has written its pids: far less than the minute its programs run, so
+/// that one that is not ended fails the test where it waits, and is not
+/// mistaken for one that was.
 const ENDS_WITHIN: Duration = Duration::from_secs(25);
 
 /// A parent that starts a grandchild, waits for it, and writes the pids of
@@ -77,15 +78,25 @@ fn forced_after(
                 finished.set(true);
                 captured
             };
+            let mut capturing = std::pin::pin!(capturing);
+            // The tree starts in a time of its own, not the ending's: how soon
+            // it starts is not what is tested.
+            let pids = tokio::select! {
+                pids = pids_written_to_soon(file, 2) => pids,
+                captured = &mut capturing => {
+                    panic!("the capture ended before its program wrote its pids: {captured:?}")
+                }
+            };
+            left.0.clone_from(&pids);
             let ending = async {
-                let pids = pids_written_to_soon(file, 2).await;
-                left.0.clone_from(&pids);
                 tokio::time::sleep(wait).await;
                 let going = !done.get();
                 kept.borrow().as_ref().expect("handed over").force();
-                (pids, going)
+                going
             };
-            tokio::time::timeout(ENDS_WITHIN, async { tokio::join!(capturing, ending) }).await
+            tokio::time::timeout(ENDS_WITHIN, async { tokio::join!(capturing, ending) })
+                .await
+                .map(|(captured, going)| (captured, (pids, going)))
         })
         .expect("the capture ended with the force");
     (captured, pids, going)

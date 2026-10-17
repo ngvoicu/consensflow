@@ -8,9 +8,14 @@ use std::time::{Duration, Instant};
 
 use crate::{alive, terminate, Ending};
 
-/// How long a test waits for a program to write down what it started, and
-/// for the system to say that a process has gone.
-const WAIT: Duration = Duration::from_secs(20);
+/// How long a test waits for a program to write down what it started: how
+/// soon it starts is not what is tested, and PowerShell started cold beside a
+/// crate's other tests on a slow runner took longer than the ending is given
+/// (CI's Windows, run 39055885804).
+const STARTS_WITHIN: Duration = Duration::from_secs(120);
+
+/// How long a test waits for the system to say that a process has gone.
+const GONE_WITHIN: Duration = Duration::from_secs(20);
 
 /// The `count` pids a program has written to `file`, if it has written them
 /// all: white space between, and a line's end last, so that a line half
@@ -28,7 +33,7 @@ pub(crate) fn pids_in(file: &Path, count: usize) -> Option<Vec<u32>> {
 /// test's own thread: the program is running.
 #[cfg(unix)]
 pub(crate) fn pids_written_to(file: &Path, count: usize) -> Vec<u32> {
-    let until = Instant::now() + WAIT;
+    let until = Instant::now() + STARTS_WITHIN;
     while Instant::now() < until {
         if let Some(pids) = pids_in(file, count) {
             return pids;
@@ -41,7 +46,7 @@ pub(crate) fn pids_written_to(file: &Path, count: usize) -> Vec<u32> {
 /// The pids the program wrote to `file`, waited for on the runtime that runs
 /// the capture, which would stop were it waited for by the thread.
 pub(crate) async fn pids_written_to_soon(file: &Path, count: usize) -> Vec<u32> {
-    let until = Instant::now() + WAIT;
+    let until = Instant::now() + STARTS_WITHIN;
     while Instant::now() < until {
         if let Some(pids) = pids_in(file, count) {
             return pids;
@@ -66,7 +71,7 @@ pub(crate) fn gone_within(pid: u32, within: Duration) -> bool {
 
 /// Whether the process `pid` is gone, given the time the system needs.
 pub(crate) fn gone(pid: u32) -> bool {
-    gone_within(pid, WAIT)
+    gone_within(pid, GONE_WITHIN)
 }
 
 /// Processes a test started, ended when it is dropped if they are still

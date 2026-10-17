@@ -1,0 +1,109 @@
+# The tests of a stop that ends whole trees give the tree its own time to start, apart from the
+# time its ending is given (main's Windows CI, run 39055885804): the daemon's stop test waited
+# for PowerShell to write its pids within the 20 s meant for the tree to be gone, and failed on
+# the start, "the program never wrote its pids", the crate's lib taking 122 s on the runner
+# against 15 s on zeewin. The same was in cf-process: its tests' helpers had one 20 s wait for a
+# start and for a process to be gone, and the forced capture's 25 s for its ending counted the
+# start too.
+#
+# Each plant brings back the shared budget and starts the tree late, as PowerShell started cold
+# under load: 25 s, past the 20 s, or 30 s, past the 25 s, and far within the 120 s a start is
+# given. The delay is planted in both the shell (Unix) and PowerShell (Windows): the plants were
+# caught on a Mac (2026-10-17), and on Windows are run by `cargo xtask windows --host zeewin --
+# cargo xtask plants daemon "start budget"`.
+#
+# Every name holds `start budget`, so `npm run plants:daemon -- "start budget"` runs them all.
+
+[run]
+daemon-lib-stop-tree = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "stop::tests::tree::"]
+process-lib-capture-forced = ["cargo", "test", "--offline", "-p", "cf-process", "--lib", "capture::tests::tree::an_ender_ends_the_whole_tree_of_a_capture_still_running"]
+
+[[plant]]
+name = "start budget: the stop's tree is given the 20 s of its ending to start"
+meant = "the_whole_trees_of_the_programs_still_running_are_ended_on_the_way_out"
+runs = ["daemon-lib-stop-tree"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/stop/tests/tree.rs"
+find = "const STARTS_WITHIN: Duration = Duration::from_secs(120);"
+replace = "const STARTS_WITHIN: Duration = GONE_WITHIN;"
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/stop/tests/tree.rs"
+find = '"sleep 60 {} & printf'
+replace = '"sleep 25; sleep 60 {} & printf'
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/stop/tests/tree.rs"
+find = '"$p = Start-Process -PassThru'
+replace = '"Start-Sleep 25; $p = Start-Process -PassThru'
+
+[[plant]]
+name = "start budget: a capture's tree is given the 20 s a process has to be gone to start"
+meant = "an_ender_ends_the_whole_tree_of_a_capture_still_running"
+runs = ["process-lib-capture-forced"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/testing.rs"
+find = "const STARTS_WITHIN: Duration = Duration::from_secs(120);"
+replace = "const STARTS_WITHIN: Duration = GONE_WITHIN;"
+
+[[plant.edit]]
+file = "crates/cf-process/src/capture/tests/tree.rs"
+find = '''"sleep 60 & printf '%s %s\\n' \"$$\" \"$!\" > '{}'; wait"'''
+replace = '''"sleep 25; sleep 60 & printf '%s %s\\n' \"$$\" \"$!\" > '{}'; wait"'''
+
+[[plant.edit]]
+file = "crates/cf-process/src/capture/tests/tree.rs"
+find = '"$p = Start-Process -PassThru'
+replace = '"Start-Sleep 25; $p = Start-Process -PassThru'
+
+[[plant]]
+name = "start budget: a forced capture's 25 s to end count its tree's start"
+meant = "an_ender_ends_the_whole_tree_of_a_capture_still_running"
+runs = ["process-lib-capture-forced"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/capture/tests/tree.rs"
+find = '''
+            let mut capturing = std::pin::pin!(capturing);
+            // The tree starts in a time of its own, not the ending's: how soon
+            // it starts is not what is tested.
+            let pids = tokio::select! {
+                pids = pids_written_to_soon(file, 2) => pids,
+                captured = &mut capturing => {
+                    panic!("the capture ended before its program wrote its pids: {captured:?}")
+                }
+            };
+            left.0.clone_from(&pids);
+            let ending = async {
+                tokio::time::sleep(wait).await;
+                let going = !done.get();
+                kept.borrow().as_ref().expect("handed over").force();
+                going
+            };
+            tokio::time::timeout(ENDS_WITHIN, async { tokio::join!(capturing, ending) })
+                .await
+                .map(|(captured, going)| (captured, (pids, going)))
+'''
+replace = '''
+            let ending = async {
+                let pids = pids_written_to_soon(file, 2).await;
+                left.0.clone_from(&pids);
+                tokio::time::sleep(wait).await;
+                let going = !done.get();
+                kept.borrow().as_ref().expect("handed over").force();
+                (pids, going)
+            };
+            tokio::time::timeout(ENDS_WITHIN, async { tokio::join!(capturing, ending) }).await
+'''
+
+[[plant.edit]]
+file = "crates/cf-process/src/capture/tests/tree.rs"
+find = '''"sleep 60 & printf '%s %s\\n' \"$$\" \"$!\" > '{}'; wait"'''
+replace = '''"sleep 30; sleep 60 & printf '%s %s\\n' \"$$\" \"$!\" > '{}'; wait"'''
+
+[[plant.edit]]
+file = "crates/cf-process/src/capture/tests/tree.rs"
+find = '"$p = Start-Process -PassThru'
+replace = '"Start-Sleep 30; $p = Start-Process -PassThru'
