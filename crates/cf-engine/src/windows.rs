@@ -437,6 +437,7 @@ impl Dispatcher {
             chief: participant.role == "chief",
             queued: false,
             entered_again: false,
+            carried: Vec::new(),
         });
         // What fails with a launch that does not come up: its first message, or
         // the one that would have been, which the role goes ahead of. A member's

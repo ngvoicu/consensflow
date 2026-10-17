@@ -172,6 +172,7 @@ impl Dispatcher {
             chief: false,
             queued: false,
             entered_again: false,
+            carried: Vec::new(),
         })
     }
 

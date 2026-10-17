@@ -43,6 +43,10 @@ pub(crate) struct Delivering {
     pub(crate) queued: bool,
     /// Enter was pressed once more for it.
     pub(crate) entered_again: bool,
+    /// The rows its paste was begun with, which an Enter pressed once more for it
+    /// sends with it (`arrival`). None for a launch's first message, which is
+    /// never pressed for.
+    pub(crate) carried: Vec<i64>,
 }
 
 /// The record's delivery part.
@@ -236,8 +240,9 @@ impl Dispatcher {
         self.mark_turn(record, &pane).await;
         // The adapter asks the ledger at its hand-over whether the project is still
         // open and nothing of the paste was withdrawn since it was begun.
-        let carried = begun.carried.iter().map(|row| row.id).collect();
-        let admitting = Admitting::new(self, message.project_id).handing(message.id, carried);
+        let carried: Vec<i64> = begun.carried.iter().map(|row| row.id).collect();
+        let admitting =
+            Admitting::new(self, message.project_id).handing(message.id, carried.clone());
         let outcome = match returning(window.deliver(&admitting, &pane, &text)).await {
             Ok(admission) => admission,
             // An adapter that failed never handed it over, and its error must show.
@@ -270,6 +275,7 @@ impl Dispatcher {
             // again would only make a duplicate.
             queued: matches!(outcome, Admission::Admitted { queued: true }),
             entered_again: false,
+            carried,
         };
         if let Admission::Refused { reason } = &outcome {
             return self.settle_failure(delivering, reason, true);
@@ -359,6 +365,50 @@ impl Dispatcher {
                 .record_result(project.id, thread.task.number, &body)?;
         self.changed();
         Ok(Some(moved.task))
+    }
+
+    /// Whether one more Enter may go for `message`, the paste on its way into
+    /// `record`'s window, after the look at its screen: the Enter sends it, so it
+    /// goes only as the paste's hand-over went, as the ledger admits it now, with
+    /// the rows the paste was begun with (`cf_ledger`'s `admit`). Its project
+    /// closed since, it waits for the Resume, and the next look after it presses
+    /// it. Withdrawn since (a continuation whose task was paused or cancelled while
+    /// the screen was looked at), or a row of its paste withdrawn, no key goes:
+    /// what is left of it goes back to its queue, to go again without what was
+    /// withdrawn, as a paste turned away at its hand-over does (both reviews of
+    /// 2026-10-17, round 9: the Enter sent a word to go on with a task paused
+    /// since). The text stays in the window's input box: nothing the engine does
+    /// clears it there.
+    pub(crate) fn enter_admitted(
+        &self,
+        record: &Record,
+        message: i64,
+    ) -> Result<bool, EngineError> {
+        let carried = record
+            .delivery
+            .borrow()
+            .delivering
+            .as_ref()
+            .filter(|delivering| delivering.message == message)
+            .map(|delivering| delivering.carried.clone())
+            .unwrap_or_default();
+        let project = self
+            .seams
+            .ledger
+            .borrow()
+            .message(message)?
+            .map_or(0, |message| message.project_id);
+        let admitting = Admitting::new(self, project).handing(message, carried);
+        if admitting.admits() {
+            return Ok(true);
+        }
+        if let Some(Some(failed)) = admitting.turned_away() {
+            return Err(failed);
+        }
+        if admitting.withdrawn.get() {
+            self.give_back(message, admitting.because())?;
+        }
+        Ok(false)
     }
 
     /// What a window was to receive goes back to its queue with its attempt:

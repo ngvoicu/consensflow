@@ -665,6 +665,17 @@ fn resumed_and_paused_again(w: &mut World, number: i64) {
     w.pause(number);
 }
 
+/// The chief resumes T-`number`, and the words that resume it are given up, their
+/// attempts spent: the task fails with them (Astra's review of 2026-10-17).
+fn resumed_and_its_words_given_up(w: &mut World, number: i64) {
+    let words = w.resume(number, "Go on").message.expect("its words").id;
+    w.begin(words);
+    w.ledger
+        .fail_delivery(words, "the window never showed it")
+        .expect("given up");
+    assert_eq!(w.state(number), "failed");
+}
+
 /// The chief takes T-`number` back to the board.
 fn taken_back(w: &mut World, number: i64) {
     w.ledger
@@ -680,10 +691,11 @@ fn taken_back(w: &mut World, number: i64) {
 #[test]
 fn a_pause_note_on_its_way_whose_task_moved_on_says_its_warning_again_if_it_goes_back_or_is_given_up(
 ) {
-    let cases: [(&str, MoveOn); 3] = [
+    let cases: [(&str, MoveOn); 4] = [
         ("resumed", resumed),
         ("was taken back", taken_back),
         ("was paused again", resumed_and_paused_again),
+        ("failed", resumed_and_its_words_given_up),
     ];
     for (why, moved) in cases {
         for given_up in [false, true] {

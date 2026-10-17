@@ -1044,6 +1044,130 @@ fn a_paste_left_unsent_in_a_window_the_close_could_not_close_gets_no_enter_until
     assert_eq!(enters(&context), 1, "pressed once the project is open");
 }
 
+/// Both reviews of 2026-10-17, round 9: zeus's continuation was handed over and
+/// sat unsent in its input box, and the human paused T-1, or cancelled it, while
+/// the Enter pressed once more for it looked at the screen. The Enter went, and
+/// sent a word to go on with a task paused or cancelled since. It goes only as
+/// the ledger admits the paste: no key goes, and the continuation reads withdrawn.
+#[test]
+fn an_enter_sends_no_continuation_whose_task_was_paused_or_cancelled_while_the_screen_was_looked_at(
+) {
+    for cancel in [false, true] {
+        let context = Context::new();
+        let tiers = at_work(&context);
+        let project = tiers.project.id;
+        let zeus = tiers.id("zeus-amber-pine");
+        let note = continuation_for_an_open_window(&context, project);
+        context
+            .adapter
+            .with("zeus-amber-pine", |agent| agent.arrive = false);
+        context.pass().unwrap();
+        assert_eq!(context.message(note.id).state, "delivering");
+        context.advance(11_000);
+        context.host.set_snapshot(json!({ "outputQuietMs": 5_000 }));
+        let looking = context
+            .host
+            .request_holds
+            .hold(|args| args[0] == "pane.snapshot" && args[1]["id"] == "p1-zeus-amber-pine");
+        let passing = context.begin_pass();
+        context.settle();
+        if cancel {
+            context
+                .ledger
+                .borrow_mut()
+                .cancel_task(project, 1, "human")
+                .unwrap();
+        } else {
+            context.human_pause(project, 1);
+        }
+        looking.open();
+        context.settle();
+        passing.take().unwrap().unwrap();
+
+        assert_eq!(enters(&context), 0, "cancel {cancel}: no key that sends");
+        let read = context
+            .inbox(zeus)
+            .into_iter()
+            .find(|message| message.id == note.id)
+            .expect("in zeus's inbox");
+        assert_eq!(read.state, "cancelled", "cancel {cancel}");
+    }
+}
+
+/// The same of a row its paste carries: the chief pauses T-1 again while the
+/// Enter for the words that resume it, carrying its note, looks at the screen,
+/// and its pause takes the note back. No key goes, and the words go back to
+/// their queue, as a paste turned away at its hand-over does. Nothing withdrawn,
+/// the Enter goes and the words are on their way still, the note with them: a
+/// paste admitted once is admitted again with the rows it was begun with.
+#[test]
+fn an_enter_sends_no_paste_a_row_of_which_was_withdrawn_while_the_screen_was_looked_at() {
+    for paused in [false, true] {
+        let context = Context::new();
+        let tiers = at_work(&context);
+        let project = tiers.project.id;
+        context.pause_task(project, 1);
+        context.pass().unwrap();
+        context.adapter.with("zeus-amber-pine", |agent| {
+            agent.settled = true;
+            agent.arrive = false;
+        });
+        let note = context
+            .ledger
+            .borrow_mut()
+            .note(
+                project,
+                &NewNote {
+                    from: Some("chief".to_owned()),
+                    to: "zeus-amber-pine".to_owned(),
+                    task: Some(1),
+                    body: "Use tabs".to_owned(),
+                },
+            )
+            .unwrap();
+        context.resume_task(project, 1, "Carry on");
+        let words = tiers.task(1).messages.last().cloned().expect("the words");
+        for _ in 0..2 {
+            context.pass().unwrap();
+        }
+        assert_eq!(context.message(words.id).state, "delivering");
+        context.advance(11_000);
+        context.host.set_snapshot(json!({ "outputQuietMs": 5_000 }));
+        let looking = context
+            .host
+            .request_holds
+            .hold(|args| args[0] == "pane.snapshot" && args[1]["id"] == "p1-zeus-amber-pine");
+        let passing = context.begin_pass();
+        context.settle();
+        if paused {
+            context.pause_task(project, 1);
+        }
+        looking.open();
+        context.settle();
+        passing.take().unwrap().unwrap();
+
+        let (note, words) = (context.message(note.id), context.message(words.id));
+        if !paused {
+            assert_eq!(enters(&context), 1, "the Enter goes");
+            assert_eq!(
+                (words.state.as_str(), note.state.as_str()),
+                ("delivering", "queued"),
+                "the note rides with the words still"
+            );
+            continue;
+        }
+        assert_eq!(enters(&context), 0, "no key that sends");
+        assert_eq!(note.state, "cancelled");
+        assert_eq!(
+            (words.state.as_str(), words.reason.as_deref()),
+            (
+                "queued",
+                Some("what its paste held was withdrawn before it was handed over")
+            )
+        );
+    }
+}
+
 /// T-1 paused with the words that its window's program may still run, and the
 /// note that says so to the chief begun, the host taking its time over the
 /// word that the chief's turn begins: what lets that go.

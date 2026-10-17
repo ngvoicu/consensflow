@@ -324,7 +324,7 @@ pub(crate) fn withdrawn_on_its_way(
     }
     for (task, because) in &gone {
         if because.contains(MAY_STILL_RUN) {
-            say_again(store, task, moved_on(task), vec![because.clone()])?;
+            say_again(store, task, &moved_on(task), vec![because.clone()])?;
         }
     }
     if !left.is_empty() {
@@ -373,14 +373,32 @@ fn moved_on_its_way(
 
 /// What became of a task a pause note named that moved on, in the words its
 /// requester is told of it ([`say_again`]), as the operations that moved it say
-/// them when they leave a note still queued.
-fn moved_on(task: &TaskRow) -> &'static str {
-    match task.state.as_str() {
-        "cancelled" => "cancelled",
-        "open" => "was taken back",
+/// them when they leave a note still queued: the state it is in now, whichever
+/// it is, failure and the end of its work included (Astra's review of
+/// 2026-10-17: a task resumed, whose words were then given up, was said to be
+/// resumed). Each state the schema has is said in words of its own
+/// ([`moved_on_from`]); one it does not have is said as it is.
+fn moved_on(task: &TaskRow) -> String {
+    said_of(&task.state)
+}
+
+/// The words [`moved_on`] says of a task in `state`.
+fn said_of(state: &str) -> String {
+    moved_on_from(state).map_or_else(|| format!("is {state} now"), str::to_owned)
+}
+
+/// The words [`moved_on`] says of a task in `state`, a state of the schema's.
+fn moved_on_from(state: &str) -> Option<&'static str> {
+    Some(match state {
+        "queued" | "working" | "waiting" => "resumed",
         "paused" => "was paused again",
-        _ => "resumed",
-    }
+        "open" => "was taken back",
+        "done" => "was done",
+        "accepted" => "was accepted",
+        "failed" => "failed",
+        "cancelled" => "cancelled",
+        _ => return None,
+    })
 }
 
 /// Says each of `warnings` again to the task's requester, as what came before
@@ -424,6 +442,49 @@ fn set(store: &Store, id: i64, project_id: i64, paused: &[Paused]) -> Result<(),
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The states the schema lets a task be in, as its check names them.
+    fn task_states() -> Vec<String> {
+        use crate::schema::{migrate, MIGRATIONS};
+        let db = rusqlite::Connection::open_in_memory().unwrap();
+        migrate(&db, &MIGRATIONS).unwrap();
+        let table: String = db
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE name = 'task'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let check = table
+            .split("task_state_check CHECK (")
+            .nth(1)
+            .and_then(|rest| rest.split_once("state IN (")?.1.split_once(')'))
+            .map(|(states, _)| states)
+            .unwrap();
+        check
+            .split(',')
+            .map(|state| state.trim().trim_matches('\'').to_owned())
+            .collect()
+    }
+
+    /// Astra's review of 2026-10-17: every state a task can be in has words of its
+    /// own, so a new one is not said as a resume, and a failure is said as one.
+    #[test]
+    fn every_state_a_task_can_be_in_is_said_in_words_of_its_own() {
+        let states = task_states();
+        assert_eq!(states.len(), 9, "{states:?}");
+        for state in &states {
+            assert!(moved_on_from(state).is_some(), "{state}");
+        }
+        assert_eq!(said_of("failed"), "failed");
+        assert_eq!(said_of("done"), "was done");
+        assert_eq!(said_of("accepted"), "was accepted");
+        assert_eq!(
+            said_of("archived"),
+            "is archived now",
+            "a state the schema does not have is said as it is"
+        );
+    }
 
     fn paused(number: i64, because: &str) -> Paused {
         Paused {

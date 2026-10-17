@@ -48,6 +48,8 @@ ledger-continuations = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test
 ledger-handed = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "receipt", "handed::"]
 # A launch whose first message's task is paused while it waits.
 engine-launch-stops = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "launch_stops::"]
+# The words a pause note's reconciliation says of each state a task can be in.
+ledger-pause-words = ["cargo", "test", "--offline", "-p", "cf-ledger", "--lib", "messages::pauses"]
 # Where each harness's window takes its first message.
 harness-first-message = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "first_message::"]
 # The words of a continuation, written and read back.
@@ -558,7 +560,7 @@ runs = ["engine-closed-given-nothing"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/arrival.rs"
-find = "        if !admitting.admits() {"
+find = "        if !self.enter_admitted(record, message)? {"
 replace = "        if false {"
 
 [[plant]]
@@ -1500,6 +1502,100 @@ file = "crates/cf-ledger/src/messages/pauses.rs"
 find = '''        "paused" => "was paused again",'''
 replace = ""
 
+# --- the Enter pressed once more, and the words of every state (round 10) ---
+
+[[plant]]
+name = "resume tasks: the Enter pressed once more asks whether the project is open alone, as round 9 left it"
+meant = "an_enter_sends_no_continuation_whose_task_was_paused_or_cancelled_while_the_screen_was_looked_at"
+runs = ["engine-closed-given-nothing"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''        let admitting = Admitting::new(self, project).handing(message, carried);'''
+replace = '''        let admitting = Admitting::new(self, project);
+        let _ = carried;'''
+
+[[plant]]
+name = "resume tasks: the Enter pressed once more is admitted without the rows its paste was begun with"
+meant = "an_enter_sends_no_paste_a_row_of_which_was_withdrawn_while_the_screen_was_looked_at"
+runs = ["engine-closed-given-nothing"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''            .map(|delivering| delivering.carried.clone())'''
+replace = '''            .map(|_| Vec::new())'''
+
+[[plant]]
+name = "resume tasks: a paste keeps no word of the rows it was begun with"
+meant = "an_enter_sends_no_paste_a_row_of_which_was_withdrawn_while_the_screen_was_looked_at"
+runs = ["engine-closed-given-nothing"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''
+            entered_again: false,
+            carried,'''
+replace = '''
+            entered_again: false,
+            carried: Vec::new(),'''
+
+[[plant]]
+name = "resume tasks: a paste whose Enter found a row of it withdrawn waits on its way"
+meant = "an_enter_sends_no_paste_a_row_of_which_was_withdrawn_while_the_screen_was_looked_at"
+runs = ["engine-closed-given-nothing"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''
+        if admitting.withdrawn.get() {
+            self.give_back(message, admitting.because())?;
+        }
+        Ok(false)'''
+replace = '''
+        Ok(false)'''
+
+[[plant]]
+name = "resume tasks: a paste admitted once is withdrawn when the Enter pressed once more admits it again"
+meant = "an_enter_sends_no_paste_a_row_of_which_was_withdrawn_while_the_screen_was_looked_at"
+runs = ["engine-closed-given-nothing"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = '''.prepare("SELECT id FROM message WHERE carried_by = ? AND state = 'queued'")?'''
+replace = '''.prepare("SELECT id FROM message WHERE carried_by = ? AND state = 'queued' AND handed_at IS NULL")?'''
+
+[[plant]]
+name = "resume tasks: a pause note's task that failed on its way is said to have been resumed"
+meant = "a_pause_note_on_its_way_whose_task_moved_on_says_its_warning_again_if_it_goes_back_or_is_given_up"
+runs = ["ledger-suspended", "ledger-pause-words"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/pauses.rs"
+find = '''        "failed" => "failed",'''
+replace = '''        "failed" => "resumed",'''
+
+[[plant]]
+name = "resume tasks: a pause note's task in a state of no words of its own is said to have been resumed"
+meant = "every_state_a_task_can_be_in_is_said_in_words_of_its_own"
+runs = ["ledger-pause-words"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/pauses.rs"
+find = '''        _ => return None,'''
+replace = '''        _ => "resumed",'''
+
+[[plant]]
+name = "resume tasks: a pause note's task that is done, or accepted, falls through to the words of a state of no words"
+meant = "every_state_a_task_can_be_in_is_said_in_words_of_its_own"
+runs = ["ledger-pause-words"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/pauses.rs"
+find = '''
+        "done" => "was done",
+        "accepted" => "was accepted",'''
+replace = ""
+
 [[plant]]
 name = "resume tasks: an answer a door claimed is not handed over"
 meant = "an_answer_a_door_claimed_is_handed_over"
@@ -1572,8 +1668,8 @@ runs = ["engine-closed-given-nothing"]
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
 find = '''
-        let carried = begun.carried.iter().map(|row| row.id).collect();
-        let admitting = Admitting::new(self, message.project_id).handing(message.id, carried);'''
+        let admitting =
+            Admitting::new(self, message.project_id).handing(message.id, carried.clone());'''
 replace = '''
         let admitting = Admitting::new(self, message.project_id);'''
 
@@ -1654,8 +1750,8 @@ runs = ["ledger-suspended", "engine-closed-given-nothing"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/pauses.rs"
-find = '''        _ => "resumed",'''
-replace = '''        _ => "cancelled",'''
+find = '''        "queued" | "working" | "waiting" => "resumed",'''
+replace = '''        "queued" | "working" | "waiting" => "cancelled",'''
 
 [[plant]]
 name = "resume tasks: a continuation's words are read in those of builds before 3.0.5 alone"
@@ -1696,7 +1792,7 @@ runs = ["ledger-suspended", "engine-closed-given-nothing"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/pauses.rs"
-find = "            say_again(store, task, moved_on(task), vec![because.clone()])?;"
+find = "            say_again(store, task, &moved_on(task), vec![because.clone()])?;"
 replace = "            let _ = (task, because);"
 
 # --- reads while the project is closed (round 7) ---
