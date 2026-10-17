@@ -6,11 +6,12 @@
 //! program that does not leave ten before it kills it. So a project of real
 //! harnesses is given [`EXIT`] to end in, and one that does not end in it says why:
 //! "process did not exit" does not say which process it was, so the rig's processes
-//! are looked at while it ends, and what was still there goes into the failure.
+//! are looked at while it ends, and what was still there the moment it gave up (before
+//! the rig is dropped, which kills what it could not end) goes into the failure.
 
 use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Mutex, PoisonError};
 use std::thread;
 use std::time::Duration;
 
@@ -56,17 +57,27 @@ fn parsed(listing: &str) -> Vec<Listed> {
         .collect()
 }
 
-/// The processes of the machine now, with their groups: none on a machine with no
-/// `ps`.
-fn listing() -> Vec<Listed> {
-    Run::new("ps")
+/// The processes of the machine, with their groups, or why they could not be listed.
+type Listing = std::result::Result<Vec<Listed>, String>;
+
+/// The processes of the machine now, with their groups, as `ps` lists them: why it
+/// could not, on a machine with no `ps` or one that did not end well.
+fn listing() -> Listing {
+    let ran = Run::new("ps")
         .args(["-axo", "pid=,ppid=,pgid=,command="])
         .inheriting_env()
         .run()
-        .ok()
-        .filter(|ran| ran.code == Some(0))
-        .map(|ran| parsed(&ran.stdout))
-        .unwrap_or_default()
+        .map_err(|failed| failed.to_string())?;
+    if ran.code == Some(0) {
+        return Ok(parsed(&ran.stdout));
+    }
+    // The first line of what it ran to is how it ended (a code, a signal, its limit).
+    let ended = ran.to_string();
+    Err(format!(
+        "ps: {}: {}",
+        ended.lines().next().unwrap_or_default(),
+        ran.stderr.trim()
+    ))
 }
 
 /// The processes of `all` that descend from `root`, by the parent each was started
@@ -101,58 +112,113 @@ fn left_of(alive: &[Listed], started: &BTreeSet<u32>) -> Vec<Process> {
         .collect()
 }
 
-/// One look at what this process started, its processes written into `seen`.
-fn look(seen: &Mutex<BTreeSet<u32>>) {
-    let tree = descendants(&listing(), std::process::id());
-    seen.lock()
-        .unwrap_or_else(PoisonError::into_inner)
+/// What the looks at the rig's processes have seen.
+#[derive(Default)]
+struct Seen {
+    /// Every process any look has seen.
+    ever: BTreeSet<u32>,
+    /// What the last look that could list the processes found: none before one could.
+    last: Option<Vec<Process>>,
+}
+
+/// One look at what this process started, by `list`, written into `seen`: a look
+/// that could not list the processes finds nothing.
+fn look(seen: &Mutex<Seen>, list: &impl Fn() -> Listing) {
+    let Ok(all) = list() else {
+        return;
+    };
+    let tree = descendants(&all, std::process::id());
+    let mut seen = seen.lock().unwrap_or_else(PoisonError::into_inner);
+    seen.ever
         .extend(tree.iter().map(|listed| listed.process.pid));
+    seen.last = Some(tree.into_iter().map(|listed| listed.process).collect());
 }
 
 /// Ends `rig`, giving its daemon and its pane host `within` each. One that does
 /// not end is an error that says which of the processes it started were left.
 pub fn end_within(mut rig: Rig, within: Duration) -> Result {
-    let seen: Arc<Mutex<BTreeSet<u32>>> = Arc::default();
-    let done = Arc::new(AtomicBool::new(false));
-    // The first look is made before the rig begins to end: a window that leaves the
-    // moment it is asked (a stand-in does) and the jobs it leaves to the machine are
-    // out of reach of the parents by the time a look in a thread of its own is made.
-    look(&seen);
-    let looking = {
-        let (seen, done) = (Arc::clone(&seen), Arc::clone(&done));
-        thread::spawn(move || loop {
-            thread::sleep(LOOK);
-            if done.load(Ordering::Relaxed) {
-                break;
-            }
-            look(&seen);
-        })
-    };
-    let closed = rig.shut_down_within(within);
-    done.store(true, Ordering::Relaxed);
-    let _ = looking.join();
-    // What is left is listed before the rig is dropped, which kills the daemon and the
-    // pane host it could not end: a listing after that would not have the host that
-    // was still waiting for its windows.
-    let said = closed.map_err(|failed| {
-        let seen = seen.lock().unwrap_or_else(PoisonError::into_inner);
-        let mut left = left_of(&listing(), &seen);
-        left.sort_by_key(|process| process.pid);
-        Error::Timeout(format!(
-            "{failed}; the processes it started that were left: {}",
-            if left.is_empty() {
-                "none".to_owned()
-            } else {
-                shown(&left).join("; ")
-            }
-        ))
-    });
+    let said = ended(|| rig.shut_down_within(within), listing, LOOK);
+    // What was left is listed before the rig is dropped, which kills the daemon and
+    // the pane host it could not end: a listing after that would not have the host
+    // that was still waiting for its windows.
     drop(rig);
     said
 }
 
+/// [`end_within`] with what it ends by (`shut_down`), what lists the machine's
+/// processes (`list`) and how often they are looked at (`every`) given.
+fn ended(
+    shut_down: impl FnOnce() -> Result,
+    list: impl Fn() -> Listing + Sync,
+    every: Duration,
+) -> Result {
+    let seen = Mutex::new(Seen::default());
+    let done = AtomicBool::new(false);
+    // The first look is made before the rig begins to end: a window that leaves the
+    // moment it is asked (a stand-in does) and the jobs it leaves to the machine are
+    // out of reach of the parents by the time a look in a thread of its own is made.
+    look(&seen, &list);
+    thread::scope(|scope| {
+        let looking = scope.spawn(|| loop {
+            thread::sleep(every);
+            if done.load(Ordering::Relaxed) {
+                break;
+            }
+            look(&seen, &list);
+        });
+        // What was left is listed the moment the shutdown gives up, on this thread: a
+        // look in flight can take as long as `ps` is let run (half a minute, under
+        // load), past the host's grace, after which the host has ended the window's
+        // jobs itself, and a listing that waited for it would not have them.
+        let failed = shut_down().err().map(|failed| (failed, list()));
+        done.store(true, Ordering::Relaxed);
+        let _ = looking.join();
+        let seen = seen.lock().unwrap_or_else(PoisonError::into_inner);
+        match failed {
+            None => Ok(()),
+            Some((failed, now)) => Err(Error::Timeout(format!(
+                "{failed}; {}",
+                left_said(now, &seen)
+            ))),
+        }
+    })
+}
+
+/// What is said of the processes a rig started that were left, by the listing
+/// taken as it gave up (`now`) and what the looks saw: a listing that failed says
+/// why, and what the last look that could list them found, as that look's.
+fn left_said(now: Listing, seen: &Seen) -> String {
+    let shown_or_none = |processes: &[Process]| {
+        if processes.is_empty() {
+            "none".to_owned()
+        } else {
+            shown(processes).join("; ")
+        }
+    };
+    match now {
+        Ok(alive) => {
+            let mut left = left_of(&alive, &seen.ever);
+            left.sort_by_key(|process| process.pid);
+            format!(
+                "the processes it started that were left: {}",
+                shown_or_none(&left)
+            )
+        }
+        Err(why) => format!(
+            "the processes it started that were left could not be listed ({why}); {}",
+            seen.last.as_deref().map_or_else(
+                || "no look could list them either".to_owned(),
+                |last| format!("the last look that could saw: {}", shown_or_none(last))
+            )
+        ),
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::AtomicUsize;
+    use std::sync::mpsc;
+
     use super::*;
 
     fn listed(pid: u32, ppid: u32, group: u32, command: &str) -> Listed {
@@ -233,5 +299,110 @@ mod tests {
             .collect();
         assert_eq!(left, [21, 33]);
         assert!(left_of(&alive, &BTreeSet::new()).is_empty());
+    }
+
+    /// A rig made up under this process: its pane host, the shell of a window's job
+    /// and the job that ignores the request to end, in the window's group.
+    fn a_rig_waiting_for_its_job() -> Vec<Listed> {
+        let me = std::process::id();
+        vec![
+            listed(900_001, me, me, "consensflow-bridge"),
+            listed(900_003, 900_001, 900_002, "sh -c job"),
+            listed(
+                900_004,
+                900_003,
+                900_002,
+                "fake-agent --background-job 120 job --deaf",
+            ),
+        ]
+    }
+
+    fn did_not_exit() -> Result {
+        Err(Error::Timeout("process did not exit".to_owned()))
+    }
+
+    #[test]
+    fn what_was_left_is_listed_as_the_shutdown_gives_up_and_not_once_a_look_in_flight_has_ended() {
+        // A look in flight takes as long as the host's grace (a `ps` under load), after
+        // which the host has ended the window's job and only the host is left; the
+        // listing taken as the shutdown gives up lets that look go.
+        const GRACE: Duration = Duration::from_secs(2);
+        let world = Mutex::new(a_rig_waiting_for_its_job());
+        let here = thread::current().id();
+        let listed_here = AtomicUsize::new(0);
+        let (in_flight, a_look_is_in_flight) = mpsc::channel();
+        let (let_go, let_go_of) = mpsc::channel();
+        let let_go_of = Mutex::new(let_go_of);
+        let list = || -> Listing {
+            if thread::current().id() == here {
+                let all = world.lock().unwrap().clone();
+                // The first is the look before the rig ends, the second what was left.
+                if listed_here.fetch_add(1, Ordering::SeqCst) == 1 {
+                    let _ = let_go.send(());
+                }
+                return Ok(all);
+            }
+            let _ = in_flight.send(());
+            if let_go_of.lock().unwrap().recv_timeout(GRACE).is_err() {
+                world
+                    .lock()
+                    .unwrap()
+                    .retain(|listed| listed.process.command == "consensflow-bridge");
+            }
+            Ok(world.lock().unwrap().clone())
+        };
+        let shut_down = || {
+            a_look_is_in_flight
+                .recv_timeout(Duration::from_secs(30))
+                .expect("the looker made no look");
+            did_not_exit()
+        };
+        let failed = ended(shut_down, list, Duration::from_millis(10))
+            .unwrap_err()
+            .to_string();
+        let left = failed
+            .split("the processes it started that were left: ")
+            .nth(1)
+            .unwrap_or_else(|| panic!("{failed}"));
+        for pid in [900_001, 900_003, 900_004] {
+            assert!(left.contains(&format!("{pid} (")), "{pid}: {failed}");
+        }
+    }
+
+    #[test]
+    fn a_listing_that_fails_as_the_shutdown_gives_up_says_why_and_what_the_last_look_that_could_saw(
+    ) {
+        let here = thread::current().id();
+        let listed_here = AtomicUsize::new(0);
+        let list = || -> Listing {
+            if thread::current().id() == here && listed_here.fetch_add(1, Ordering::SeqCst) == 1 {
+                return Err("ps: Resource temporarily unavailable".to_owned());
+            }
+            Ok(a_rig_waiting_for_its_job())
+        };
+        let failed = ended(did_not_exit, list, Duration::from_millis(10))
+            .unwrap_err()
+            .to_string();
+        assert!(
+            failed.starts_with(
+                "process did not exit; the processes it started that were left could not be \
+                 listed (ps: Resource temporarily unavailable); the last look that could saw: "
+            ),
+            "{failed}"
+        );
+        for pid in [900_001, 900_003, 900_004] {
+            assert!(failed.contains(&format!("{pid} (")), "{pid}: {failed}");
+        }
+
+        // No look could list them: none is said to have been seen.
+        let never = || -> Listing { Err("ps: not found".to_owned()) };
+        let failed = ended(did_not_exit, never, Duration::from_millis(10))
+            .unwrap_err()
+            .to_string();
+        assert_eq!(
+            failed,
+            "process did not exit; the processes it started that were left could not be \
+             listed (ps: not found); no look could list them either"
+        );
     }
 }

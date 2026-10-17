@@ -94,6 +94,8 @@ rig-stranger = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "
 e2e-lib-stranger = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "rig::stranger::"]
 # What a project of the live checks that does not end in time says it left.
 rig-members-left = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "live_members::a_project_that_does_not_end_in_time"]
+# How what such a project left is listed, on processes made up.
+e2e-lib-closing = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::members::closing::"]
 # T-15's shape: a command that never exits, and the final answer of the worker that left it.
 regression-never-exits = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_command_that_never_exits"]
 # The same of a Devin worker whose command goes on reporting on its wire after its turn ended (zeewin, 2026-10-14).
@@ -1247,11 +1249,8 @@ runs = ["rig-members-left"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/members/closing.rs"
-find = '''
-    let said = closed.map_err(|failed| {'''
-replace = '''
-    drop(rig);
-    let said = closed.map_err(|failed| {'''
+find = '    let said = ended(|| rig.shut_down_within(within), listing, LOOK);'
+replace = '    let said = ended(move || rig.close_within(within), listing, LOOK);'
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/live/members/closing.rs"
@@ -1262,6 +1261,42 @@ find = '''
 replace = '''
     said
 }'''
+
+# The reviews of that fix (Astra and Sol, 2026-10-17): the listing of what was left
+# waited for the looker's look in flight, whose `ps` may run half a minute under load,
+# past the host's grace, after which the host has ended the window's job itself. This
+# plant and the next run the library's tests on processes made up, so unlike the closes
+# above they are caught on Windows too.
+[[plant]]
+name = "background rig: what a project that did not end left is listed once the look in flight has ended"
+meant = "what_was_left_is_listed_as_the_shutdown_gives_up_and_not_once_a_look_in_flight_has_ended"
+runs = ["e2e-lib-closing"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/closing.rs"
+find = '''
+        let failed = shut_down().err().map(|failed| (failed, list()));
+        done.store(true, Ordering::Relaxed);
+        let _ = looking.join();
+'''
+replace = '''
+        let failed = shut_down().err();
+        done.store(true, Ordering::Relaxed);
+        let _ = looking.join();
+        let failed = failed.map(|failed| (failed, list()));
+'''
+
+# A `ps` that could not run was a listing of nothing: "none" was said to be left while
+# the rig's processes ran on (Astra, 2026-10-17).
+[[plant]]
+name = "background rig: a listing of what was left that failed is said as none left"
+meant = "a_listing_that_fails_as_the_shutdown_gives_up_says_why_and_what_the_last_look_that_could_saw"
+runs = ["e2e-lib-closing"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/closing.rs"
+find = "    match now {"
+replace = "    match Ok::<_, String>(now.unwrap_or_default()) {"
 
 # What an ending names of what the bound refuses: the turn's work the chain of processes
 # proved and nothing shows is the window's is not signalled, and is not dropped: the chief is
