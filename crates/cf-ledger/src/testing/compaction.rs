@@ -113,7 +113,7 @@ mod tests {
         };
         let before = names(&MIGRATIONS[..18]);
         let after = names(&MIGRATIONS[..19]);
-        assert_eq!(after.len(), before.len() + 10, "{after:?}");
+        assert_eq!(after.len(), before.len() + 11, "{after:?}");
         let schema: Vec<_> = after
             .iter()
             .map(|name| json!({ "name": name, "sql": "CREATE …" }))

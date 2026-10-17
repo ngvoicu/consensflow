@@ -152,6 +152,12 @@ impl Ledger {
         )?;
         Ok(())
     }
+
+    /// The SQLite connection itself: what a test counts the pages and steps a
+    /// read takes by, and writes rows by in bulk.
+    pub fn sqlite(&self) -> &rusqlite::Connection {
+        &self.store.db
+    }
 }
 
 impl Ledger {

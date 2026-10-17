@@ -639,6 +639,50 @@ fn words_where_one_part_ends_and_the_next_begins_are_found() {
 }
 
 #[test]
+fn a_search_that_goes_on_inside_an_item_reads_the_end_of_the_part_before_as_its_last_copy_wrote_it()
+{
+    let dir = tempfile::tempdir().expect("a folder");
+    let (mut ledger, project, conversation) = chief(&dir);
+    // Two parts, then copied again changed: a first part of characters of four
+    // bytes, "Needle" beginning three before its end, and a short second.
+    let copy = |ledger: &mut Ledger, text: &str| {
+        ledger
+            .copy_transcript(conversation, &[item("long", "assistant", text)], 0)
+            .expect("copied");
+    };
+    copy(&mut ledger, &"a".repeat(HISTORY_PART * 2));
+    copy(
+        &mut ledger,
+        &format!("{}Needle and on", "🙂".repeat(HISTORY_PART - 3)),
+    );
+    // Where a search that stopped past the first part goes on from: the
+    // second, with the end of the first, its last 2,000 characters, read by
+    // itself: a read that loaded the first part whole would fail.
+    let place = cf_ledger::HistoryKey {
+        conversation,
+        row: row_of(&ledger, project, "long"),
+        part: 1,
+    };
+    ledger.limit_value_length(64 * 1024).expect("held");
+    let found = ledger
+        .read_history(
+            project,
+            "chief",
+            &ask(HistoryFrom::Before(place), Some("needle"), false, ROOM),
+        )
+        .expect("a search");
+    assert_eq!(ids(&found), ["long"], "{:?}", found.scanned);
+    let HistoryEntry::Item(row) = &found.entries[0] else {
+        panic!("an item");
+    };
+    assert_eq!(row.cut.expect("a part").from, HISTORY_PART - 2_000);
+    assert_eq!(
+        row.item.text,
+        format!("{}Needle and on", "🙂".repeat(1_997))
+    );
+}
+
+#[test]
 fn a_search_holds_at_most_1_000_characters_and_a_phrase_that_long_is_found_across_two_parts() {
     const MOST: usize = 1_000;
     let dir = tempfile::tempdir().expect("a folder");
@@ -737,16 +781,30 @@ fn each_part_says_which_copy_of_its_item_it_is_of_and_a_copy_written_again_chang
 fn a_long_item_that_shrinks_and_grows_is_read_as_it_is_now() {
     let dir = tempfile::tempdir().expect("a folder");
     let (mut ledger, project, conversation) = chief(&dir);
-    // Written over three looks: three parts and more, then less than one, then two and a bit.
-    for (length, letter) in [
-        (HISTORY_PART * 3 + 5, "a"),
-        (10, "b"),
-        (HISTORY_PART * 2 + 1, "c"),
+    // Written over three looks: three parts and more, then less than one, then
+    // two and a bit; each time kept in as many parts as it is now, and no more.
+    for (length, letter, parts) in [
+        (HISTORY_PART * 3 + 5, "a", 4),
+        (10, "b", 0),
+        (HISTORY_PART * 2 + 1, "c", 3),
     ] {
         let whole = letter.repeat(length);
         ledger
             .copy_transcript(conversation, &[item("w", "assistant", &whole)], 0)
             .expect("copied");
+        let kept: (i64, i64) = ledger
+            .sqlite()
+            .query_row(
+                "SELECT (SELECT COUNT(*) FROM transcript_part), (SELECT sum(parts) FROM transcript_head)",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("the parts");
+        assert_eq!(
+            kept,
+            (parts, parts),
+            "{length}: the parts kept, and those its head says"
+        );
         let place = row_of(&ledger, project, "w");
         let mut read = String::new();
         let mut from = Some(0);

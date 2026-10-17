@@ -39,15 +39,14 @@
 
 -- The history viewer reads a participant's history a page at a time, and what
 -- one page costs is bounded whatever the history's size: it reaches what it
--- reads through these indexes, and scans nothing. A participant's conversations:
+-- reads through these indexes, and scans nothing; and it reads nothing of a row
+-- past a value it does not read, which can be long (a row holds its values one
+-- after another, and reaching one goes through those before it). The
+-- participant it reads, by its handle, all it reads of it held in the index
+-- (whether it left, its role and its agent), never in its row, which holds the
+-- roles it was given before its agent; and its conversations:
+  CREATE INDEX participant_history_index ON participant (project_id, handle, left_at IS NULL, role, agent);
   CREATE INDEX conversation_participant_index ON conversation (participant_id);
--- A conversation's items in the order they were first copied, which is their
--- row's (a copy made again keeps the row): all of them; those that are no tool's
--- output, so that a page that leaves the tools out never goes through them; and
--- the tools' outputs alone, counted without being read.
-  CREATE INDEX transcript_copied_index ON transcript (conversation_id);
-  CREATE INDEX transcript_said_index ON transcript (conversation_id) WHERE role != 'tool';
-  CREATE INDEX transcript_tool_index ON transcript (conversation_id) WHERE role = 'tool';
 -- What the log says of a conversation, as each heading says it: where it began
 -- or a window went to it, and where it ended; where each of a participant's
 -- began or was gone to; and the chief's switches. An event an older build
@@ -58,21 +57,26 @@
   CREATE INDEX event_participant_index ON event (project_id, CASE WHEN json_valid(data) THEN json_extract(data, '$.participant') END) WHERE kind IN ('conversation.started', 'conversation.followed');
   CREATE INDEX event_switch_index ON event (project_id) WHERE kind = 'chief.switched';
 
--- What the viewer reads of each item besides its text, by the item's row: the
--- item's id as a page shows it (its first 256 characters, and "…" where it is
--- longer; the id itself is the item's identity, kept whole in its row), whether
--- it is complete, its time, whether it is a compaction's summary, and which
--- copy of it the row holds (the copy that writes the item again changed makes
--- it the next, so that a reader of a long item's parts knows they are of one
--- copy). A row holds these past the whole of its text, which an item's can run
--- to megabytes, and SQLite indexes no row by its id: so they are held here,
--- where each is short. The copy writes them with the row, and is its only
--- writer but this migration, which writes them for the items copied before it
--- (`schema::after`). A row's id is its own for as long as the row is: nothing
--- rebuilds the table, and no build runs VACUUM.
+-- What the viewer reads of each item but its text, by the item's row: its
+-- role, the size of its text in bytes, how many parts its text is kept in (none
+-- where it is read from its row), its id as a page shows it (its first 256
+-- characters, and "…" where it is longer; the id itself is the item's identity,
+-- kept whole in its row), whether it is complete, its time, whether it is a
+-- compaction's summary, and which copy of it the row holds (the copy that
+-- writes the item again changed makes it the next, so that a reader of a long
+-- item's parts knows they are of one copy). A row holds its role past its id
+-- and the rest past its text, either of which can run to megabytes, and SQLite
+-- indexes no row by its id: so they are held here, where each is short. The
+-- copy writes them with the row, and is their only writer but this migration,
+-- which writes them for the items copied before it (`schema::after`). A row's
+-- id is its own for as long as the row is: nothing rebuilds the table, and no
+-- build runs VACUUM.
   CREATE TABLE transcript_head (
     item INTEGER PRIMARY KEY,
     conversation_id INTEGER NOT NULL,
+    role TEXT NOT NULL,
+    bytes INTEGER NOT NULL,
+    parts INTEGER NOT NULL,
     id_shown TEXT NOT NULL,
     complete INTEGER NOT NULL,
     at TEXT,
@@ -81,15 +85,27 @@
     CONSTRAINT transcript_head_conversation_fk FOREIGN KEY (conversation_id)
       REFERENCES conversation (id) ON DELETE CASCADE
   ) STRICT;
+-- A conversation's items in the order they were first copied, which is their
+-- row's (a copy made again keeps the row): all of them, which is also how a
+-- conversation's heads are found when it is deleted; those that are no tool's
+-- output, so that a page that leaves the tools out never goes through them; and
+-- the tools' outputs alone, counted without being read.
+  CREATE INDEX transcript_head_conversation_index ON transcript_head (conversation_id);
+  CREATE INDEX transcript_head_said_index ON transcript_head (conversation_id) WHERE role != 'tool';
+  CREATE INDEX transcript_head_tool_index ON transcript_head (conversation_id) WHERE role = 'tool';
 
 -- An item longer than a part (64,000 characters; the human's words, an
--- agent's, are copied whole and can run to megabytes) is kept in parts as well,
--- each part a row of its item's, so that the viewer reads a part and no more.
--- The copy writes them; the long items copied before this table are split
--- once, when this migration runs (`schema::after`).
+-- agent's, are copied whole and can run to megabytes), or whose id is too long
+-- to read past (`conversations::ID_IN_ROW`), is kept in parts as well, each part
+-- a row of its item's, so that the viewer reads a part and no more, and never
+-- reads the item's row past its id. Each holds the end of its text before its
+-- text (its last 2,000 characters), what a search that goes on in the next part
+-- reads of it. The copy writes them; the items copied before this table are
+-- split once, when this migration runs (`schema::after`).
   CREATE TABLE transcript_part (
     item INTEGER NOT NULL,
     part INTEGER NOT NULL,
+    tail TEXT NOT NULL,
     text TEXT NOT NULL,
     CONSTRAINT transcript_part_pk PRIMARY KEY (item, part),
     CONSTRAINT transcript_part_item_fk FOREIGN KEY (item)

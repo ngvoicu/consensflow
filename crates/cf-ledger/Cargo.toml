@@ -20,7 +20,8 @@ thiserror.workspace = true
 # What the engine's tests watch of the ledger: each read of `projects` and
 # `next_delivery`, which a test counts or fails ([`Ledger::watch`]); and the
 # most of one value SQLite loads, which a test lowers to prove a read never
-# loads a long one ([`Ledger::limit_value_length`]).
+# loads a long one ([`Ledger::limit_value_length`]); and the connection, which a
+# test counts the pages a read takes by ([`Ledger::sqlite`]).
 test-support = ["rusqlite/limits"]
 
 [dev-dependencies]

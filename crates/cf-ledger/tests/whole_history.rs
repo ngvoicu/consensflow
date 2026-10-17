@@ -11,10 +11,14 @@
 mod bounds;
 #[path = "whole_history/ceilings.rs"]
 mod ceilings;
+#[path = "whole_history/deleting.rs"]
+mod deleting;
 #[path = "whole_history/headings.rs"]
 mod headings;
 #[path = "whole_history/old_logs.rs"]
 mod old_logs;
+#[path = "whole_history/pages.rs"]
+mod pages;
 #[path = "whole_history/reads.rs"]
 mod reads;
 

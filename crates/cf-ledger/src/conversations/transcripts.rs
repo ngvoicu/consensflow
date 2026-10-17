@@ -98,55 +98,83 @@ pub(crate) fn copy_transcript(
             let Some((row, compaction)) = changed else {
                 continue;
             };
+            let parts = parts_of(&text, id.len() > ID_IN_ROW);
             write_head(
                 &store.db,
                 &Head {
                     item: row,
                     conversation_id,
+                    role,
+                    bytes: text.len(),
+                    parts: parts.len(),
                     id_shown: shown_id(id),
                     complete,
                     at,
                     compaction,
                 },
             )?;
-            write_parts(&store.db, row, &text)?;
+            write_parts(&store.db, row, &parts)?;
             written += 1;
         }
         Ok(written)
     })
 }
 
-/// What the history viewer reads of the item at row `item` besides its text,
-/// as migration 0019's `transcript_head` holds it.
-struct Head {
+/// The most bytes of an item's id its text is read past: the text of an item
+/// whose id is longer is kept in parts however short, so that no reader of the
+/// history goes through the id, which the item's row holds before its text, to
+/// reach it. An id a page shows whole ([`ID_SHOWN`] characters) is no longer.
+pub(crate) const ID_IN_ROW: usize = 4 * ID_SHOWN;
+
+/// How many of the last characters of its text each part holds again before
+/// it, what a search that goes on in the next part reads of it: as many as a
+/// page shows before what a search found, more than a phrase it may hold.
+pub(crate) const PART_TAIL: usize = 2_000;
+
+/// What the history viewer reads of the item at row `item` but its text, as
+/// migration 0019's `transcript_head` holds it.
+struct Head<'a> {
     item: i64,
     conversation_id: i64,
+    role: &'a str,
+    bytes: usize,
+    parts: usize,
     id_shown: String,
     complete: bool,
     at: Option<String>,
     compaction: i64,
 }
 
-/// Writes `head`, with its row: its id as a page shows it and its mark of a
-/// compaction's summary as they were when it was first copied, which they stay;
+/// Writes `head`, with its row: its role, its id as a page shows it and its
+/// mark of a compaction's summary as they were when it was first copied, which
+/// they stay, as its row's do; its text's size, how many parts it is kept in,
 /// whether it is complete and its time as they are now; and the next revision
 /// of it where it was written before.
-fn write_head(db: &Connection, head: &Head) -> rusqlite::Result<()> {
+fn write_head(db: &Connection, head: &Head<'_>) -> rusqlite::Result<()> {
     db.prepare_cached(
-        "INSERT INTO transcript_head (item, conversation_id, id_shown, complete, at, compaction)
-       VALUES (?, ?, ?, ?, ?, ?)
+        "INSERT INTO transcript_head (item, conversation_id, role, bytes, parts, id_shown, complete, at, compaction)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (item) DO UPDATE
-         SET complete = excluded.complete, at = excluded.at, revision = transcript_head.revision + 1",
+         SET bytes = excluded.bytes, parts = excluded.parts, complete = excluded.complete,
+             at = excluded.at, revision = transcript_head.revision + 1",
     )?
     .execute(params![
         head.item,
         head.conversation_id,
+        head.role,
+        number(head.bytes),
+        number(head.parts),
         head.id_shown,
         i64::from(head.complete),
         head.at,
         head.compaction
     ])?;
     Ok(())
+}
+
+/// `count` as SQLite takes a number.
+fn number(count: usize) -> i64 {
+    i64::try_from(count).unwrap_or(i64::MAX)
 }
 
 /// An item's id as a page shows it: whole, where it is no longer than
@@ -167,13 +195,14 @@ fn shown_id(id: &str) -> String {
 /// How many rows' times were written back.
 pub(crate) fn head_copied(db: &Connection) -> rusqlite::Result<usize> {
     let mut heads = db.prepare(
-        "SELECT rowid, conversation_id, item_id, complete, at, compaction FROM transcript",
+        "SELECT rowid, conversation_id, item_id, role, octet_length(text), complete, at, compaction
+       FROM transcript",
     )?;
     let mut rows = heads.query([])?;
     let mut retimed = Vec::new();
     while let Some(row) = rows.next()? {
         let item: i64 = row.get(0)?;
-        let given = match row.get_ref(4)? {
+        let given = match row.get_ref(6)? {
             rusqlite::types::ValueRef::Text(at) => Some(text_of(at)),
             _ => None,
         };
@@ -181,15 +210,19 @@ pub(crate) fn head_copied(db: &Connection) -> rusqlite::Result<usize> {
         if at != given {
             retimed.push((item, at.clone()));
         }
+        let role: String = row.get(3)?;
         write_head(
             db,
             &Head {
                 item,
                 conversation_id: row.get(1)?,
+                role: &role,
+                bytes: row.get::<_, i64>(4)?.unsigned_abs() as usize,
+                parts: 0,
                 id_shown: shown_id(&text_of(row.get_ref(2)?.as_bytes()?)),
-                complete: row.get::<_, i64>(3)? == 1,
+                complete: row.get::<_, i64>(5)? == 1,
                 at,
-                compaction: row.get(5)?,
+                compaction: row.get(7)?,
             },
         )?;
     }
@@ -200,16 +233,18 @@ pub(crate) fn head_copied(db: &Connection) -> rusqlite::Result<usize> {
     Ok(retimed.len())
 }
 
-/// The parts of a text longer than one ([`TRANSCRIPT_ITEM_MAX`] characters
-/// each, the last fewer), or none for a text no longer than that.
-fn parts_of(text: &str) -> Vec<&str> {
+/// The parts `text` is kept in: [`TRANSCRIPT_ITEM_MAX`] characters each, the
+/// last fewer, where it is longer than one; else the whole of it, one part,
+/// where it must be kept in parts all the same (`kept`, the item's id being
+/// longer than [`ID_IN_ROW`]); else none.
+fn parts_of(text: &str, kept: bool) -> Vec<&str> {
     let starts: Vec<usize> = text
         .char_indices()
         .step_by(TRANSCRIPT_ITEM_MAX)
         .map(|(at, _)| at)
         .collect();
     if starts.len() < 2 {
-        return Vec::new();
+        return if kept { vec![text] } else { Vec::new() };
     }
     let ends = starts.iter().skip(1).copied().chain([text.len()]);
     starts
@@ -219,50 +254,63 @@ fn parts_of(text: &str) -> Vec<&str> {
         .collect()
 }
 
-/// Keeps the text of the item at row `item` in parts as well, where it is
-/// longer than one, so that a reader of a long item reads a part of it and no
-/// more: each part that changed is written, and the parts past the text's last
-/// are taken away (all of them from a text no longer than a part).
-fn write_parts(db: &Connection, item: i64, text: &str) -> rusqlite::Result<()> {
-    let parts = parts_of(text);
+/// The end of a part its row holds before it: its last [`PART_TAIL`] characters.
+fn tail_of(part: &str) -> &str {
+    let start = part
+        .char_indices()
+        .rev()
+        .nth(PART_TAIL - 1)
+        .map_or(0, |(at, _)| at);
+    &part[start..]
+}
+
+/// Keeps the text of the item at row `item` in `parts` ([`parts_of`]), so that
+/// a reader reads a part of it and no more: each part that changed is written,
+/// with its end, and the parts past the last are taken away (all of them where
+/// there are none).
+fn write_parts(db: &Connection, item: i64, parts: &[&str]) -> rusqlite::Result<()> {
     let mut write = db.prepare_cached(
-        "INSERT INTO transcript_part (item, part, text) VALUES (?, ?, ?)
-       ON CONFLICT (item, part) DO UPDATE SET text = excluded.text
+        "INSERT INTO transcript_part (item, part, tail, text) VALUES (?, ?, ?, ?)
+       ON CONFLICT (item, part) DO UPDATE SET tail = excluded.tail, text = excluded.text
          WHERE transcript_part.text != excluded.text",
     )?;
-    for (part, piece) in (0_i64..).zip(&parts) {
-        write.execute(params![item, part, piece])?;
+    for (part, piece) in (0_i64..).zip(parts) {
+        write.execute(params![item, part, tail_of(piece), piece])?;
     }
     db.prepare_cached("DELETE FROM transcript_part WHERE item = ? AND part >= ?")?
-        .execute(params![
-            item,
-            i64::try_from(parts.len()).unwrap_or(i64::MAX)
-        ])?;
+        .execute(params![item, number(parts.len())])?;
     Ok(())
 }
 
-/// Splits into parts every item copied before the copy kept long items in
-/// parts too: what migration 0019 does past its SQL, once, after it wrote their
-/// heads. Only a text of more bytes than a part's characters can be longer than
-/// a part, and only those are read, one at a time. A text that is no UTF-8
-/// (neither Node's ledger nor this one writes one, each writing its language's
-/// own strings) is split as it reads, U+FFFD for what is none, never refused.
+/// Keeps in parts every item copied before the copy kept them: what migration
+/// 0019 does past its SQL, once, after it wrote their heads, and writes how many
+/// to each head. Only a text of more bytes than a part's characters can be
+/// longer than a part, and only those, and the items of ids longer than
+/// [`ID_IN_ROW`], are read, one at a time. A text that is no UTF-8 (neither
+/// Node's ledger nor this one writes one, each writing its language's own
+/// strings) is split as it reads, U+FFFD for what is none, never refused.
 pub(crate) fn split_copied(db: &Connection) -> rusqlite::Result<()> {
     let long = db
-        .prepare("SELECT rowid FROM transcript WHERE octet_length(text) > ?")?
+        .prepare(
+            "SELECT rowid, octet_length(item_id) > ?2 FROM transcript
+       WHERE octet_length(text) > ?1 OR octet_length(item_id) > ?2",
+        )?
         .query_map(
-            [i64::try_from(TRANSCRIPT_ITEM_MAX).unwrap_or(i64::MAX)],
-            |row| row.get::<_, i64>(0),
+            params![number(TRANSCRIPT_ITEM_MAX), number(ID_IN_ROW)],
+            |row| Ok((row.get::<_, i64>(0)?, row.get::<_, bool>(1)?)),
         )?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     let mut read = db.prepare("SELECT text FROM transcript WHERE rowid = ?")?;
     let mut write =
-        db.prepare("INSERT INTO transcript_part (item, part, text) VALUES (?, ?, ?)")?;
-    for row in long {
+        db.prepare("INSERT INTO transcript_part (item, part, tail, text) VALUES (?, ?, ?, ?)")?;
+    let mut count = db.prepare("UPDATE transcript_head SET parts = ?2 WHERE item = ?1")?;
+    for (row, kept) in long {
         let text = read.query_row([row], |found| Ok(text_of(found.get_ref(0)?.as_bytes()?)))?;
-        for (part, piece) in (0_i64..).zip(parts_of(&text)) {
-            write.execute(params![row, part, piece])?;
+        let parts = parts_of(&text, kept);
+        for (part, piece) in (0_i64..).zip(&parts) {
+            write.execute(params![row, part, tail_of(piece), piece])?;
         }
+        count.execute(params![row, number(parts.len())])?;
     }
     Ok(())
 }

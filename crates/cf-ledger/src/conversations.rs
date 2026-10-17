@@ -160,7 +160,8 @@ pub(crate) fn cut_sessions(db: &Connection) -> rusqlite::Result<()> {
 /// ([`time::canonical`]), and one that is no time is cut as a harness is, as
 /// the conversation began, and ended, all the same. A participant's agent is
 /// cut as a harness is; the time it is out until is kept as a store keeps one,
-/// none where it is no time (which says it is not out, as before).
+/// none where it is no time (which says it is not out, as before). The time of
+/// each event a heading reads is kept as a conversation's is.
 pub(crate) fn fields_within(db: &Connection) -> rusqlite::Result<()> {
     let text = |value: ValueRef<'_>| match value {
         ValueRef::Text(bytes) => Some(crate::openings::text_of(bytes)),
@@ -210,6 +211,23 @@ pub(crate) fn fields_within(db: &Connection) -> rusqlite::Result<()> {
     let mut keep = db.prepare("UPDATE participant SET agent = ?2, out_until = ?3 WHERE id = ?1")?;
     for (id, (agent, until)) in participants {
         keep.execute(params![id, agent, until])?;
+    }
+    // The time of each event a heading reads, which its row holds before its
+    // data: one longer than a time a store keeps can be (a few dozen bytes).
+    let mut events = Vec::new();
+    let mut rows = db.prepare(
+        "SELECT id, at FROM event
+       WHERE kind IN ('conversation.started', 'conversation.followed', 'conversation.ended', 'chief.switched')
+         AND octet_length(at) > 64",
+    )?;
+    let mut found = rows.query([])?;
+    while let Some(row) = found.next()? {
+        let at = text(row.get_ref(1)?).unwrap_or_default();
+        events.push((row.get::<_, i64>(0)?, time_kept(&at)));
+    }
+    let mut keep = db.prepare("UPDATE event SET at = ?2 WHERE id = ?1")?;
+    for (id, at) in events {
+        keep.execute(params![id, at])?;
     }
     Ok(())
 }
