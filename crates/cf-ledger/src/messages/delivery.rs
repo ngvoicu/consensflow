@@ -11,7 +11,6 @@ use serde_json::{json, Value};
 
 use super::again::tell_failed_answer;
 use super::carrying::{adopt, carried, release_carried};
-use super::continuations::{narrow, repoint};
 use super::pauses::withdrawn_on_its_way;
 use super::receipt::reconcile;
 use super::{known_message, message_task, messages, require_message};
@@ -228,11 +227,6 @@ pub(crate) fn begin_delivery(store: &mut Store, message_id: i64) -> Result<Begun
                 409,
             ));
         }
-        // A continuation that rides in the paste names only the tasks its window
-        // still holds, and goes no more where it holds none (`continuations`).
-        for row in carried(store, message_id)? {
-            narrow(store, &row)?;
-        }
         store.db.execute(
             "UPDATE message SET state = 'delivering', attempts = attempts + 1, reason = NULL
          WHERE id = ?",
@@ -248,6 +242,79 @@ pub(crate) fn begin_delivery(store: &mut Store, message_id: i64) -> Result<Begun
             carried: carried(store, message_id)?,
         })
     })
+}
+
+/// What the transport is to do with a hand-over begun ([`admit`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HandOver {
+    /// It goes to the window now, and is the window's from then on.
+    Admitted,
+    /// Nothing goes in: the project is closed, and the message waits for the Resume.
+    Closed,
+    /// Nothing goes in: the message, or a row its paste carries, was withdrawn
+    /// since its delivery began (its task moved on, `continuations`).
+    Withdrawn,
+}
+
+/// The transport is about to let a hand-over begun ([`begin_delivery`]) go to its
+/// window, after every wait of its own: the paste asked of the pane host, the
+/// inbox rename made, the request given to its connection, the command line its
+/// window opens with. It goes while the project is open, the message still on
+/// its way, and every row of `carried` (what its paste was begun with) still
+/// riding in it; then the message and those rows are marked handed, in this
+/// write, and a reader of a closed project reads their text from now on (the
+/// daemon's `Waits`). A delivery that is only begun is not handed: what is still
+/// to come of it may never come (Sol's review of 2026-10-16, round 7).
+pub(crate) fn admit(
+    store: &mut Store,
+    message_id: i64,
+    carried: &[i64],
+) -> Result<HandOver, LedgerError> {
+    store.write(|store| {
+        let Some(message) = store.message(message_id)? else {
+            return Ok(HandOver::Withdrawn);
+        };
+        let open = store
+            .db
+            .prepare("SELECT 1 FROM project WHERE id = ? AND state = 'open'")?
+            .exists([message.project_id])?;
+        if !open {
+            return Ok(HandOver::Closed);
+        }
+        let riding: Vec<i64> = store
+            .db
+            .prepare("SELECT id FROM message WHERE carried_by = ? AND state = 'queued'")?
+            .query_map([message_id], |row| row.get(0))?
+            .collect::<rusqlite::Result<_>>()?;
+        if message.state != "delivering" || carried.iter().any(|id| !riding.contains(id)) {
+            return Ok(HandOver::Withdrawn);
+        }
+        let at = store.at();
+        store.db.execute(
+            "UPDATE message SET handed_at = ?1
+             WHERE id = ?2 OR (carried_by = ?2 AND state = 'queued')",
+            params![at, message_id],
+        )?;
+        Ok(HandOver::Admitted)
+    })
+}
+
+/// The messages of a project whose hand-over has begun at their window and is not
+/// over: one on its way that its transport let go ([`admit`]), and an answer a
+/// question's door claimed for its harness (`claim_answer`). Every other message
+/// still to be given was handed nothing.
+pub(crate) fn handed_over(store: &Store, project_id: i64) -> Result<Vec<i64>, LedgerError> {
+    Ok(store
+        .db
+        .prepare(
+            "SELECT id FROM message
+             WHERE project_id = ?
+               AND ((state = 'delivering' AND handed_at IS NOT NULL)
+                    OR (state = 'queued' AND (handed_at IS NOT NULL OR claimed_at IS NOT NULL)))
+             ORDER BY id",
+        )?
+        .query_map([project_id], |row| row.get(0))?
+        .collect::<rusqlite::Result<_>>()?)
 }
 
 /// The harness's own record proves the message arrived: `receipt` is what it
@@ -357,10 +424,10 @@ pub(crate) fn cancel_message(
 /// under a carrier that cannot carry it any more (the Node daemon was pasting
 /// it on its own when it stopped, which `release_stranded` leaves to the
 /// delivery that settles it) is let go of that carrier first: carried, it
-/// would be skipped as one and never delivered. A pause note whose task was
-/// cancelled while it was on its way goes no more, and says its warning again
-/// (`withdrawn_on_its_way`); a continuation is about the first task its window
-/// still holds (`continuations`).
+/// would be skipped as one and never delivered. It was handed nothing, nor
+/// was what it carried, whatever its transport let go: it is handed again, or
+/// never (`admit`). A pause note naming a task that moved on while it was on its
+/// way leaves it, and says its warning again (`withdrawn_on_its_way`).
 pub(crate) fn retry_delivery(
     store: &mut Store,
     message_id: i64,
@@ -374,9 +441,14 @@ pub(crate) fn retry_delivery(
             return known_message(store, message_id);
         }
         store.db.execute(
-            "UPDATE message SET state = 'queued', reason = ?, attempts = MAX(attempts - ?, 0)
+            "UPDATE message SET state = 'queued', reason = ?, attempts = MAX(attempts - ?, 0),
+               handed_at = NULL
          WHERE id = ?",
             params![reason, i64::from(refund), message_id],
+        )?;
+        store.db.execute(
+            "UPDATE message SET handed_at = NULL WHERE carried_by = ? AND state = 'queued'",
+            [message_id],
         )?;
         store.log(
             message.project_id,
@@ -389,10 +461,6 @@ pub(crate) fn retry_delivery(
                AND carried_by IN (SELECT id FROM message WHERE state NOT IN ('queued', 'gated'))",
             [message_id],
         )?;
-        // A continuation back in its queue is about the first task its window still
-        // holds: one about a task paused since would wait for that task, the others
-        // with it (`continuations`).
-        repoint(store, &known_message(store, message_id)?)?;
         adopt(store, message_id)?;
         known_message(store, message_id)
     })

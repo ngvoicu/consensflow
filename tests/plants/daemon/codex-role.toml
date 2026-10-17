@@ -293,8 +293,8 @@ runs = ["ledger-lib", "ledger-replay"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/testing.rs"
-find = '''                *sql = sql.replace(role_note::COLUMN_LINES, "");'''
-replace = '''                *sql = sql.replace(role_note::COLUMN_LINES, " ");'''
+find = '''                    .replace(role_note::COLUMN_LINES, "")'''
+replace = '''                    .replace(role_note::COLUMN_LINES, " ")'''
 
 # --- the harness ---
 
@@ -659,8 +659,8 @@ replace = '''            delivery.delivering = delivering.clone();'''
 
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
-find = '''        if let (Err(error), Some(delivering)) = (&started, failing.filter(|_| !moved)) {'''
-replace = '''        if let (Err(error), Some(delivering)) = (&started, delivering.filter(|_| !moved)) {'''
+find = '''        if let (Err(error), Some(delivering)) = (&started, failing) {'''
+replace = '''        if let (Err(error), Some(delivering)) = (&started, delivering) {'''
 
 [[plant]]
 name = "codex role: a member's launch that fails leaves the replacement written for it waiting for ever"
@@ -1020,11 +1020,9 @@ runs = ["engine-role-change"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
-find = '''            captured,
-            prelude,
+find = '''            prelude,
             first_instructions:'''
-replace = '''            captured,
-            prelude: None,
+replace = '''            prelude: None,
             first_instructions:'''
 
 # What confirms a note that says a role records it in the same write; one too long to go whole

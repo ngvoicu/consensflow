@@ -145,6 +145,43 @@ async fn a_gated_answer_is_not_listed_and_so_not_received() {
     assert_eq!(scene.kicks.get(), 0);
 }
 
+/// Sol's review of 2026-10-16, round 7: the list gave the first line of a message
+/// whose delivery was only begun when the Close came. It waits as one queued
+/// does; one its transport let go before the Close is listed whole.
+#[tokio::test]
+async fn while_the_project_is_closed_a_message_only_begun_is_listed_with_none_of_its_text_and_one_handed_over_whole(
+) {
+    for handed in [false, true] {
+        let scene = scene();
+        let answer = answered_question(&scene, "Blue.");
+        {
+            let mut ledger = scene.context.ledger.borrow_mut();
+            ledger.begin_delivery(answer.id).unwrap();
+            if handed {
+                ledger.admit(answer.id, &[]).unwrap();
+            }
+        }
+        project_is(&scene, "suspended");
+
+        let (status, said) = api(&scene, Method::GET, "/api/inbox", &scene.zeus, "").await;
+
+        assert_eq!(status, 200);
+        let entry = said["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|message| message["id"] == answer.id)
+            .cloned()
+            .unwrap();
+        let preview = if handed { "H: Blue." } else { WAITS };
+        assert_eq!(
+            (&entry["preview"], &entry["state"]),
+            (&Value::from(preview), &Value::from("delivering")),
+            "handed {handed}"
+        );
+    }
+}
+
 /// Both reviews of 2026-10-16, round 6: a window of a closed project read the
 /// text of what was not handed to it. Its list says such a message waits, and
 /// none of it: no first line, no choices.

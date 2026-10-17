@@ -22,6 +22,7 @@ mod decided;
 mod doors;
 mod fixture;
 mod gate;
+mod handed;
 mod legacy;
 mod pause_notes;
 mod questions;

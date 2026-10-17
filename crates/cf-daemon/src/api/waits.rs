@@ -4,9 +4,14 @@
 //! paste and the question door hold it, and the reader is told so in its place
 //! (both reviews of 2026-10-16, round 6: `cf inbox read` and `cf task get` gave a
 //! window the Close could not close the answer the door held for the Resume, and
-//! `cf` then said it received it). Only a message still `queued` is held: one
-//! being pasted, or claimed by a door, is a hand-over begun, the window's whatever
-//! came since, and a receipt of it is taken as ever. What the reader wrote itself
+//! `cf` then said it received it). A message still to be given is held until its
+//! hand-over has begun at its window: let go by its transport (the paste asked
+//! for, the rename made, the request given to its connection, the command line a
+//! window opens with; the ledger's `admit`), or claimed by a question's door.
+//! One whose delivery is only begun in the ledger is held too: what is still to
+//! come of it may never come (Sol's review of 2026-10-16, round 7: a delivery begun
+//! before the Close, and refused at its hand-over after it, was read whole). A
+//! receipt of a hand-over begun is taken as ever, and what the reader wrote itself
 //! is its own to read.
 
 use cf_ledger::MessageView;
@@ -26,22 +31,37 @@ pub struct Waits<'a> {
     closed: bool,
     /// The reader's handle.
     reader: &'a str,
+    /// The messages of the project whose hand-over has begun at their window,
+    /// while it is closed.
+    handed: Vec<i64>,
 }
 
 impl<'a> Waits<'a> {
     /// For `caller`, its project as the ledger has it now.
     pub fn now(context: &Context, caller: &'a Caller) -> Result<Self, Failure> {
-        let project = context.ledger.borrow().project(caller.project.id)?;
+        let ledger = context.ledger.borrow();
+        let project = ledger.project(caller.project.id)?;
+        let closed = project.is_none_or(|project| project.state != "open");
+        let handed = if closed {
+            ledger.handed_over(caller.project.id)?
+        } else {
+            Vec::new()
+        };
         Ok(Self {
-            closed: project.is_none_or(|project| project.state != "open"),
+            closed,
             reader: &caller.participant.handle,
+            handed,
         })
     }
 
     /// Whether the text of `message` waits for the Resume: its project is closed,
-    /// no window was handed it, and the reader did not write it.
+    /// it is still to be given (queued, or on its way) and no window was handed it,
+    /// and the reader did not write it.
     pub fn holds(&self, message: &MessageView) -> bool {
-        self.closed && message.state == "queued" && message.sender.as_deref() != Some(self.reader)
+        self.closed
+            && matches!(message.state.as_str(), "queued" | "delivering")
+            && !self.handed.contains(&message.id)
+            && message.sender.as_deref() != Some(self.reader)
     }
 
     /// A summary of `message` for the reader: its first line, its questions and

@@ -15,9 +15,10 @@
 //! But for a warning: a pause whose words say that its window's program could
 //! not be ended and may still run ([`MAY_STILL_RUN`]) warns of a program that
 //! outlives the pause, and whoever is told next opens a window beside it. When
-//! its note goes, the warning stays, in a note of its own. A cancel leaves such a
-//! note on its way to run its course, and only one that does not arrive says its
-//! warning again ([`withdrawn_on_its_way`]).
+//! its note goes, the warning stays, in a note of its own. A note already on its
+//! way runs its course whatever its tasks do meanwhile (a cancel, a resume, a
+//! release, a reassignment), and only one that does not arrive says its warning
+//! again ([`withdrawn_on_its_way`]).
 
 use cf_proto::ledger::MessageView;
 use rusqlite::params;
@@ -283,16 +284,18 @@ pub(crate) fn warnings_on_their_way(
 }
 
 /// `message`, on its way and not to arrive (it goes back to its queue, or is
-/// given up), if it is a pause note naming a task cancelled while it was on its
-/// way: a cancel leaves on their way the notes of its task alone that say a
-/// warning ([`warnings_on_their_way`]), and every note that names others too.
-/// Each such task leaves the note, as a cancel takes it out of a note still
-/// queued, and a warning the note said of it is said again, in a note of its own:
-/// the warning outlives the words of a pause that went stale (both reviews of
-/// 2026-10-16, round 6: a note of two given up lost the warning of the one
-/// cancelled). A note with no task left is withdrawn, which this says; one with
-/// tasks left names those, and goes back or is given up as any message does.
-/// Nothing is written for any other message.
+/// given up), if it is a pause note naming a task that moved on while it was on
+/// its way: one cancelled (a cancel leaves on their way the notes of its task
+/// alone that say a warning, [`warnings_on_their_way`], and every note that names
+/// others too), or resumed, taken back to the board or reassigned, which leave a
+/// note on its way as it is. Each such task leaves the note, as it leaves a note
+/// still queued, and a warning the note said of it is said again, in a note of its
+/// own: the warning is owed until a delivery of it is known to have arrived, and
+/// outlives the words of a pause that went stale, which would tell the requester
+/// to resume a task that is paused no more (both reviews of 2026-10-16, rounds 6
+/// and 7). A note with no task left is withdrawn, which this says; one with tasks
+/// left names those, and goes back or is given up as any message does. Nothing is
+/// written for any other message.
 pub(crate) fn withdrawn_on_its_way(
     store: &mut Store,
     message: &MessageView,
@@ -307,10 +310,10 @@ pub(crate) fn withdrawn_on_its_way(
     let mut gone: Vec<(TaskRow, String)> = Vec::new();
     for named in paused {
         let task = store.task_row(message.project_id, named.number)?;
-        if task.state == "cancelled" {
-            gone.push((task, named.because));
-        } else {
+        if task.state == "paused" {
             left.push(named);
+        } else {
+            gone.push((task, named.because));
         }
     }
     if gone.is_empty() {
@@ -318,7 +321,7 @@ pub(crate) fn withdrawn_on_its_way(
     }
     for (task, because) in &gone {
         if because.contains(MAY_STILL_RUN) {
-            say_again(store, task, "cancelled", vec![because.clone()])?;
+            say_again(store, task, moved_on(task), vec![because.clone()])?;
         }
     }
     if !left.is_empty() {
@@ -327,9 +330,9 @@ pub(crate) fn withdrawn_on_its_way(
     }
     let numbers: Vec<String> = gone
         .iter()
-        .map(|(task, _)| format!("T-{}", task.number))
+        .map(|(task, _)| format!("T-{} {}", task.number, moved_on(task)))
         .collect();
-    let reason = format!("{} cancelled", numbers.join(", "));
+    let reason = numbers.join(", ");
     withdraw(store, message.id, &reason)?;
     store.log(
         message.project_id,
@@ -337,6 +340,17 @@ pub(crate) fn withdrawn_on_its_way(
         json!({ "message": message.id, "reason": reason }),
     )?;
     Ok(true)
+}
+
+/// What became of a task a pause note named, that is paused no more, in the
+/// words its requester is told of it ([`say_again`]), as the operations that
+/// moved it say them when they leave a note still queued.
+fn moved_on(task: &TaskRow) -> &'static str {
+    match task.state.as_str() {
+        "cancelled" => "cancelled",
+        "open" => "was taken back",
+        _ => "resumed",
+    }
 }
 
 /// Says each of `warnings` again to the task's requester, as what came before

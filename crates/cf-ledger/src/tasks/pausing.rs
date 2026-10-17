@@ -7,12 +7,13 @@
 //! A task whose window closed with its project (the human's Close, or the
 //! chief's window ending, suspends it) is paused with a mark of that
 //! (`paused_with_project`), and goes on by itself with the human's Resume of
-//! the project ([`resume_with_project`]). Every other pause stays until the
-//! chief or the human resumes it, or the daemon does at a hold's end: so does a
-//! pause a ledger made before the mark, which has none.
+//! the project ([`resume_with_project`]), unless its window holds other tasks
+//! too. Every other pause stays until the chief or the human resumes it, or the
+//! daemon does at a hold's end: so does a pause a ledger made before the mark,
+//! which has none.
 
 use cf_base::time;
-use cf_proto::ledger::{HeldTask, Standing, Stop, TaskMoved, TaskThread, TaskView};
+use cf_proto::ledger::{HeldTask, Stop, TaskMoved, TaskThread, TaskView};
 use rusqlite::{params, OptionalExtension};
 use serde_json::{json, Map, Value};
 
@@ -20,9 +21,10 @@ use super::{
     carrier_body, delivery_body, m_list, require_task_state, task, task_by_id, task_found,
 };
 use crate::messages::{
-    fold, leave_pause_notes, reconcile, release_carried, tell_goes_on, transfer,
+    fold, join_pause_note, leave_pause_notes, note_pause, reconcile, release_carried, tell_goes_on,
+    transfer, withdraw_stale,
 };
-use crate::model::{self, LedgerError, ACTIVE_TASK_STATES, MAX_BODY};
+use crate::model::{self, sql_list, LedgerError, ACTIVE_TASK_STATES, HELD_TASK_STATES, MAX_BODY};
 use crate::queue::{queue, send, Queued, Sent};
 use crate::staff::{require_free, Giving};
 use crate::store::Store;
@@ -347,35 +349,6 @@ pub(crate) fn stop_of(store: &Store, participant_id: i64) -> Result<Option<Stop>
         .optional()?)
 }
 
-/// Where tasks `numbers` of a project stand ([`Standing`]), in that order: a
-/// number that is no task of it is left out. What [`stop_of`] tells of one task
-/// a window works on, this tells of each of several: a participant that holds
-/// several is told of them all, and any of them can move.
-pub(crate) fn standings(
-    store: &Store,
-    project_id: i64,
-    numbers: &[i64],
-) -> Result<Vec<Standing>, LedgerError> {
-    let mut read = store.db.prepare(
-        "SELECT number, state, assignee_id, stop_seq FROM task WHERE project_id = ? AND number = ?",
-    )?;
-    let mut found = Vec::with_capacity(numbers.len());
-    for number in numbers {
-        let standing = read
-            .query_row(params![project_id, number], |row| {
-                Ok(Standing {
-                    number: row.get("number")?,
-                    state: row.get("state")?,
-                    assignee_id: row.get("assignee_id")?,
-                    stop_seq: row.get("stop_seq")?,
-                })
-            })
-            .optional()?;
-        found.extend(standing);
-    }
-    Ok(found)
-}
-
 /// The task a participant's window is on as far as a question or a note it
 /// sends goes: the one it holds (queued, working or waiting), else the paused
 /// one. A question asked in a window that the pause has not yet stopped is
@@ -591,7 +564,14 @@ pub(crate) fn resume_task(
 /// are withdrawn, as they are when it is resumed. A task whose session left the
 /// project meanwhile has no window to come back in, and stays paused, for its
 /// requester to resume or call off.
+///
+/// A window that holds more than one task comes back for none of them
+/// ([`leave_several_paused`]), and what an earlier build or an earlier Resume left
+/// queued telling a window to go on goes where it is not for the one task its
+/// window holds at work (`continuations`): the windows are told anew as they come
+/// back.
 pub(crate) fn resume_with_project(store: &mut Store, project_id: i64) -> Result<(), LedgerError> {
+    leave_several_paused(store, project_id)?;
     let numbers: Vec<i64> = store
         .db
         .prepare(
@@ -611,6 +591,77 @@ pub(crate) fn resume_with_project(store: &mut Store, project_id: i64) -> Result<
             json!({ "by": null, "because": "the project was resumed" }),
         )?;
         reconcile(store, task.id)?;
+    }
+    withdraw_stale(store, project_id)
+}
+
+/// The Resume's part of a window that holds more than one task (a session a
+/// ledger wrote before the rule of one, or a member's own lane, which holds to
+/// none): no word tells it to go on, as none could tell it which of its tasks
+/// still stand (the lead's design of 2026-10-17, after both reviews of four
+/// rounds found a continuation naming several tasks escaping one check or
+/// another). Each of its tasks is its requester's to resume, task by task:
+/// - one its project's suspension paused stays paused, the pause its requester's
+///   from now on, and the note that told the requester so is given after the
+///   Resume, as every such note was before 3.0.6;
+/// - one still at work (a quit leaves it so) is paused now, and its requester
+///   told why, in one note of all of them it is told of;
+/// - one queued waits for its brief, as any does.
+fn leave_several_paused(store: &mut Store, project_id: i64) -> Result<(), LedgerError> {
+    let held = sql_list(&[&HELD_TASK_STATES[..], &["paused"]].concat());
+    let lanes: Vec<(i64, String)> = store
+        .db
+        .prepare(&format!(
+            "SELECT p.id, p.handle FROM participant p
+             WHERE p.project_id = ? AND p.role NOT IN ('chief', 'human')
+               AND (SELECT COUNT(*) FROM task t
+                    WHERE t.assignee_id = p.id AND t.state IN ({held})) > 1
+             ORDER BY p.id"
+        ))?
+        .query_map([project_id], |row| Ok((row.get(0)?, row.get(1)?)))?
+        .collect::<rusqlite::Result<_>>()?;
+    let mut told: Vec<(i64, i64)> = Vec::new();
+    for (lane, handle) in lanes {
+        let numbers: Vec<i64> = store
+            .db
+            .prepare(&format!(
+                "SELECT number FROM task WHERE assignee_id = ? AND state IN ({held}) ORDER BY number"
+            ))?
+            .query_map([lane], |row| row.get(0))?
+            .collect::<rusqlite::Result<_>>()?;
+        let named: Vec<String> = numbers.iter().map(|number| format!("T-{number}")).collect();
+        let because = format!(
+            "@{handle}'s window held {}, and a window is told to go on only when it held one task",
+            named.join(", ")
+        );
+        for number in numbers {
+            let task = store.task_row(project_id, number)?;
+            match task.state.as_str() {
+                "paused" => {
+                    store.db.execute(
+                        "UPDATE task SET paused_with_project = 0 WHERE id = ?",
+                        [task.id],
+                    )?;
+                }
+                "working" | "waiting" => {
+                    pause_task_as(store, project_id, number, None, Some(&because), false)?;
+                    let earlier = told
+                        .iter()
+                        .find(|(requester, _)| *requester == task.requester_id)
+                        .map(|(_, note)| *note);
+                    let joined = match earlier {
+                        Some(note) => join_pause_note(store, note, number, &because)?.is_some(),
+                        None => false,
+                    };
+                    if !joined {
+                        let to = store.participant_row(task.requester_id)?.handle;
+                        let note = note_pause(store, project_id, &to, number, &because)?;
+                        told.push((task.requester_id, note.id));
+                    }
+                }
+                _ => {}
+            }
+        }
     }
     Ok(())
 }

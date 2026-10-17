@@ -10,7 +10,8 @@ use cf_proto::ledger::MessageView;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::{json, Value};
 
-use crate::model::{quoted, require_active, LedgerError};
+use crate::messages::withdraw_continuations;
+use crate::model::{quoted, require_active, LedgerError, ACTIVE_TASK_STATES};
 use crate::projects::ProjectRow;
 use crate::views::{message_view, ParticipantRow, TaskRow, MESSAGE_SELECT, PARTICIPANT_SELECT};
 use crate::Event;
@@ -178,7 +179,9 @@ impl Store {
     /// `detail` after the move. A member leaving, a delivery and a decision
     /// all move tasks, so the move lives here, under every concern that makes one.
     /// A move ends a hold, and the mark that a project's suspension paused the
-    /// task: the pause that sets either sets it after the move.
+    /// task: the pause that sets either sets it after the move. A move out of the
+    /// work (to any state but working and waiting) withdraws what told the task's
+    /// window to go on with it and was not handed to it (`continuations`).
     pub(crate) fn move_task(
         &mut self,
         task: &TaskRow,
@@ -206,7 +209,11 @@ impl Store {
         if let (Value::Object(data), Value::Object(detail)) = (&mut data, detail) {
             data.extend(detail);
         }
-        self.log(task.project_id, kind, data)
+        self.log(task.project_id, kind, data)?;
+        if !ACTIVE_TASK_STATES.contains(&to) {
+            withdraw_continuations(self, task, to)?;
+        }
+        Ok(())
     }
 
     /// Logs an event of the project, and tells the trace.

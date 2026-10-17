@@ -641,6 +641,13 @@ impl Adapter for Asked {
     }
 
     /// Not a call of Node's adapter: nothing is written down of it in the
+    /// traces. The fake posts its first message once up where the test says it
+    /// seeds, as OpenCode does.
+    fn first_message_once_up(&self) -> bool {
+        self.fake.seeds.get()
+    }
+
+    /// Not a call of Node's adapter: nothing is written down of it in the
     /// traces. What the fake says is where the test says its harness has the
     /// variant installed, else the copy ConsensFlow would keep for it: at a
     /// place that no launch is in, as the adapters' is.

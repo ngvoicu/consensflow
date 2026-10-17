@@ -630,6 +630,318 @@ fn a_note_of_several_whose_tasks_were_all_cancelled_on_its_way_is_withdrawn_when
     );
 }
 
+/// What moves a paused task on: the chief resumes it, or takes it back.
+type MoveOn = fn(&mut World, i64);
+
+/// T-`warned`'s pause note, which says [`OUTLIVED`], on its way to the chief when
+/// `moved` moves the task on: the chief resumes it, or takes it back to the board.
+fn moved_on_its_way(w: &mut World, moved: MoveOn) -> (i64, i64) {
+    let warned = at_work(w, "zeus");
+    closed_with(w, &[warned], OUTLIVED);
+    w.ledger
+        .set_project_state(w.project, "open")
+        .expect("resumed");
+    w.pause(warned);
+    let note = w
+        .ledger
+        .note_pause(w.project, "chief", warned, OUTLIVED)
+        .expect("the chief is told");
+    w.ledger.begin_delivery(note.id).expect("on its way");
+    moved(w, warned);
+    assert_eq!(w.message(note.id).state, "delivering", "it may yet arrive");
+    (warned, note.id)
+}
+
+/// The chief resumes T-`number`.
+fn resumed(w: &mut World, number: i64) {
+    w.resume(number, "Go on");
+}
+
+/// The chief takes T-`number` back to the board.
+fn taken_back(w: &mut World, number: i64) {
+    w.ledger
+        .release_task(w.project, number, "the chief takes it back")
+        .expect("back on the board");
+}
+
+/// Both reviews of 2026-10-16, round 7: a pause note on its way at its last
+/// attempt, whose task the chief resumed or took back meanwhile, failed with its
+/// warning in it, and nothing said the warning again; one that went back to its
+/// queue told the chief to resume a task paused no more. The task leaves the note
+/// as a cancelled one does, and the warning is said apart.
+#[test]
+fn a_pause_note_on_its_way_whose_task_moved_on_says_its_warning_again_if_it_goes_back_or_is_given_up(
+) {
+    let cases: [(&str, MoveOn); 2] = [("resumed", resumed), ("was taken back", taken_back)];
+    for (why, moved) in cases {
+        for given_up in [false, true] {
+            let mut w = world();
+            let (warned, note) = moved_on_its_way(&mut w, moved);
+
+            if given_up {
+                w.ledger
+                    .fail_delivery(note, "the window refused it")
+                    .expect("given up");
+            } else {
+                w.ledger
+                    .retry_delivery(note, "the window went", true)
+                    .expect("tried again");
+            }
+
+            assert_eq!(
+                w.message(note).state,
+                "cancelled",
+                "{why}, given up {given_up}: it goes no more"
+            );
+            assert_eq!(
+                said_again(&w),
+                [format!("T-{warned} {why}. Before that, {OUTLIVED}.")],
+                "{why}, given up {given_up}"
+            );
+        }
+    }
+}
+
+/// The same of a note of two whose warned task was resumed on its way: it goes
+/// back naming the other alone (Astra's review of 2026-10-16, round 7).
+#[test]
+fn a_note_of_several_that_goes_back_after_one_of_its_tasks_was_resumed_names_the_rest_and_says_the_warning_apart(
+) {
+    let mut w = world();
+    let warned = at_work(&mut w, "zeus");
+    let plain = at_work(&mut w, "diana");
+    closed_with(&mut w, &[warned], OUTLIVED);
+    closed_with(&mut w, &[plain], CLOSED);
+    let note = w
+        .ledger
+        .note_pause(w.project, "chief", warned, OUTLIVED)
+        .expect("the chief is told");
+    w.ledger
+        .join_pause_note(note.id, plain, CLOSED)
+        .expect("joined")
+        .expect("the note takes it");
+    w.ledger.begin_delivery(note.id).expect("on its way");
+    w.resume(warned, "Go on");
+
+    w.ledger
+        .retry_delivery(note.id, "the window went", true)
+        .expect("tried again");
+
+    assert_eq!(
+        (
+            w.message(note.id).state.as_str(),
+            w.message(note.id).task_number
+        ),
+        ("queued", Some(plain)),
+        "it is T-{plain}'s alone"
+    );
+    assert_eq!(
+        said_again(&w),
+        [format!("T-{warned} resumed. Before that, {OUTLIVED}.")]
+    );
+}
+
+/// T-`first` at work in a session of zeus, and T-`second` at work there too, as a
+/// ledger written before one task per session may have it.
+fn holding_two(w: &mut World) -> (i64, i64) {
+    let first = at_work(w, "zeus");
+    let session = session_of(w, first);
+    let second = w.open("Parser").task.number;
+    w.hand_to(second, &session);
+    w.edit(|db| {
+        db.execute(
+            "UPDATE task SET state = 'working' WHERE number = ?",
+            [second],
+        )
+        .expect("at work");
+    });
+    (first, second)
+}
+
+/// What the chief is told, still queued, about tasks: the bodies of ConsensFlow's
+/// notes to it.
+fn told_the_chief(w: &World) -> Vec<String> {
+    w.ledger
+        .inbox(w.id("chief"), 100)
+        .expect("the chief's inbox")
+        .into_iter()
+        .rev()
+        .filter(|message| message.state == "queued" && message.sender.is_none())
+        .map(|message| message.body)
+        .collect()
+}
+
+/// The lead's design of 2026-10-17, after both reviews of four rounds found a
+/// continuation naming several tasks escaping one check or another: a window
+/// that holds several tasks comes back for none. What its project's suspension
+/// paused stays paused, the pause the chief's, and the chief is given the notes
+/// that say so, as before 3.0.6.
+#[test]
+fn a_window_that_holds_several_tasks_the_close_paused_comes_back_for_none_and_the_chief_is_told_of_each(
+) {
+    let mut w = world();
+    let (first, second) = holding_two(&mut w);
+    closed_with(&mut w, &[first, second], CLOSED);
+    for number in [first, second] {
+        w.ledger
+            .note_pause(w.project, "chief", number, CLOSED)
+            .expect("the chief is told");
+    }
+
+    w.ledger
+        .set_project_state(w.project, "open")
+        .expect("resumed");
+
+    assert_eq!([w.state(first), w.state(second)], ["paused", "paused"]);
+    assert_eq!(
+        [mark_of(&mut w, first), mark_of(&mut w, second)],
+        [0, 0],
+        "the pauses are the chief's: no later Resume resumes them"
+    );
+    let resume = |number: i64| {
+        format!(
+            "T-{number} is paused: {CLOSED}. Resume it with: cf task resume T-{number} \"…\"; its window comes back on its own conversation."
+        )
+    };
+    assert_eq!(told_the_chief(&w), [resume(first), resume(second)]);
+}
+
+/// A task the human paused, held by the window beside the one the Close paused,
+/// counts: a word to go on with the one would reach the window of the other too.
+#[test]
+fn a_window_that_holds_a_task_the_human_paused_beside_one_the_close_paused_comes_back_for_neither()
+{
+    let mut w = world();
+    let (first, second) = holding_two(&mut w);
+    w.ledger
+        .pause_task(w.project, second, Some("human"), None)
+        .expect("paused by the human");
+    closed_with(&mut w, &[first], CLOSED);
+
+    w.ledger
+        .set_project_state(w.project, "open")
+        .expect("resumed");
+
+    assert_eq!([w.state(first), w.state(second)], ["paused", "paused"]);
+    assert_eq!(mark_of(&mut w, first), 0);
+}
+
+/// The same of a window that holds several tasks still at work, as a quit leaves
+/// them: they are paused by the Resume, and the chief told why, in one note.
+#[test]
+fn a_window_that_holds_several_tasks_a_quit_left_at_work_has_them_paused_by_the_resume_and_the_chief_told_why(
+) {
+    let mut w = world();
+    let (first, second) = holding_two(&mut w);
+    let session = session_of(&w, first);
+    w.ledger
+        .set_project_state(w.project, "suspended")
+        .expect("a start leaves it closed");
+
+    w.ledger
+        .set_project_state(w.project, "open")
+        .expect("resumed");
+
+    assert_eq!([w.state(first), w.state(second)], ["paused", "paused"]);
+    let because = format!(
+        "@{session}'s window held T-{first}, T-{second}, and a window is told to go on only when it held one task"
+    );
+    assert_eq!(
+        told_the_chief(&w),
+        [format!(
+            "T-{first} is paused: {because}. Resume it with: cf task resume T-{first} \"…\"\n\
+             T-{second} is paused: {because}. Resume it with: cf task resume T-{second} \"…\"\n\
+             Each window comes back on its own conversation."
+        )]
+    );
+}
+
+/// What an earlier build left queued telling a window to go on with several tasks
+/// goes with the Resume; one naming the one task its window holds at work stays,
+/// for the Resume to give.
+#[test]
+fn the_resume_withdraws_what_an_earlier_build_left_telling_a_window_to_go_on_with_several_tasks() {
+    let mut w = world();
+    let number = at_work(&mut w, "zeus");
+    let session = session_of(&w, number);
+    let quit = |tasks: &str| {
+        format!("ConsensFlow quit while you were working on {tasks}. Go on where you stopped.")
+    };
+    let several = w
+        .ledger
+        .note(
+            w.project,
+            &cf_ledger::NewNote {
+                from: None,
+                to: session.clone(),
+                task: Some(number),
+                body: quit(&format!("T-{number}, T-9")),
+            },
+        )
+        .expect("an earlier build's");
+    let one = w
+        .ledger
+        .note(
+            w.project,
+            &cf_ledger::NewNote {
+                from: None,
+                to: session,
+                task: Some(number),
+                body: quit(&format!("T-{number}")),
+            },
+        )
+        .expect("an earlier build's");
+    w.ledger
+        .set_project_state(w.project, "suspended")
+        .expect("a start leaves it closed");
+
+    w.ledger
+        .set_project_state(w.project, "open")
+        .expect("resumed");
+
+    assert_eq!(w.states(&[several.id, one.id]), ["cancelled", "queued"]);
+}
+
+/// And one an earlier build left for a task its window holds that is not at work
+/// now (resumed for the human's approval, its words at the gate): it would tell the
+/// window to go on before the human passed the words on (Sol's review of
+/// 2026-10-16, round 7).
+#[test]
+fn the_resume_withdraws_what_an_earlier_build_left_telling_a_window_to_go_on_with_a_task_not_at_work(
+) {
+    let mut w = world();
+    let number = at_work(&mut w, "zeus");
+    let session = session_of(&w, number);
+    let continuation = w
+        .ledger
+        .note(
+            w.project,
+            &cf_ledger::NewNote {
+                from: None,
+                to: session,
+                task: Some(number),
+                body: cf_ledger::continuation(number),
+            },
+        )
+        .expect("an earlier build's");
+    // An earlier build moved the task on and left the continuation as it was.
+    w.edit(|db| {
+        db.execute(
+            "UPDATE task SET state = 'queued' WHERE number = ?",
+            [number],
+        )
+        .expect("queued again");
+        db.execute("UPDATE project SET state = 'suspended'", [])
+            .expect("a start leaves it closed");
+    });
+
+    w.ledger
+        .set_project_state(w.project, "open")
+        .expect("resumed");
+
+    assert_eq!(w.message(continuation.id).state, "cancelled");
+}
+
 #[test]
 fn a_ledger_from_before_the_mark_keeps_every_paused_task_paused_through_a_resume() {
     const AT: &str = "2026-10-15T00:00:00.000Z";

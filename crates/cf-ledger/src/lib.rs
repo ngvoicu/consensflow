@@ -41,15 +41,17 @@ pub use cf_proto::ledger::{
     Begun, Board, Candidate, ChiefConversation, ChiefOpenWork, Claim, ConversationView, Cut,
     DeletedProject, EventView, HeldTask, Lane, LastSwitch, LatestMessages, LatestTranscript,
     MemberView, MessageView, ParticipantView, ProjectView, Question, QuestionOption, RemovedMember,
-    Resume, StaffMember, Standing, Stop, TaskCard, TaskCreated, TaskMoved, TaskReleased,
-    TaskThatFits, TaskThread, TaskTranscript, TaskView, TierChange,
+    Resume, StaffMember, Stop, TaskCard, TaskCreated, TaskMoved, TaskReleased, TaskThatFits,
+    TaskThread, TaskTranscript, TaskView, TierChange,
 };
 pub use cf_proto::wake_ups::WakeUpView;
 pub use conversations::{ChiefSwitch, TRANSCRIPT_ITEM_MAX};
 #[cfg(feature = "test-support")]
 pub use ledger::Watcher;
 pub use ledger::{open_ledger, Event, Ledger, Options};
-pub use messages::{continuation, continuation_tasks, NewNote, NewQuestion, Read, MAY_STILL_RUN};
+pub use messages::{
+    continuation, continuation_tasks, HandOver, NewNote, NewQuestion, Read, MAY_STILL_RUN,
+};
 pub use model::LedgerError;
 pub use page_reads::PAGE_BYTES;
 pub use projects::{parse_description, parse_name, NewChief, NewMember, NewProject};

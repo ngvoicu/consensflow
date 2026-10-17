@@ -282,6 +282,82 @@ async fn a_message_no_window_was_handed_waits_while_the_project_is_closed_and_it
     );
 }
 
+/// Sol's review of 2026-10-16, round 7: a delivery begun before the Close, its
+/// adapter still waiting, was read whole after it, though its hand-over was then
+/// refused. One only begun waits as one queued does; one whose transport let it
+/// go before the Close is the window's, and is read.
+#[tokio::test]
+async fn a_message_whose_delivery_is_only_begun_waits_while_the_project_is_closed_and_one_handed_over_is_read(
+) {
+    for handed in [false, true] {
+        let scene = scene();
+        let answer = answered_question(&scene, "Blue.");
+        {
+            let mut ledger = scene.context.ledger.borrow_mut();
+            ledger.begin_delivery(answer.id).unwrap();
+            if handed {
+                ledger.admit(answer.id, &[]).unwrap();
+            }
+        }
+        project_is(&scene, "suspended");
+        let target = format!("/api/inbox/{}", answer.id);
+
+        let (status, said) = api(&scene, Method::GET, &target, &scene.zeus, "").await;
+
+        if handed {
+            assert_eq!(
+                (status, &said["message"]["body"]),
+                (200, &json!(answer.body))
+            );
+        } else {
+            assert_eq!((status, &said["error"]), (409, &json!("waits")), "{said}");
+        }
+    }
+}
+
+/// Astra's review of 2026-10-16, round 7: a window read the word to go on with a
+/// task paused since, as one still waiting for it. The pause withdrew it in its
+/// own write: read, it is a message withdrawn, and its reason says why.
+#[tokio::test]
+async fn a_continuation_of_a_task_paused_since_reads_as_withdrawn() {
+    let scene = scene();
+    let number = working_task(&scene);
+    let continuation = {
+        let mut ledger = scene.context.ledger.borrow_mut();
+        let note = ledger
+            .note(
+                scene.project.id,
+                &cf_ledger::NewNote {
+                    from: None,
+                    to: "zeus".to_owned(),
+                    task: Some(number),
+                    body: cf_ledger::continuation(number),
+                },
+            )
+            .unwrap();
+        ledger
+            .pause_task(scene.project.id, number, Some("human"), None)
+            .unwrap();
+        note
+    };
+    let target = format!("/api/inbox/{}", continuation.id);
+
+    let (status, said) = api(&scene, Method::GET, &target, &scene.zeus, "").await;
+
+    assert_eq!(
+        (
+            status,
+            &said["message"]["state"],
+            &said["message"]["reason"]
+        ),
+        (
+            200,
+            &json!("cancelled"),
+            &json!(format!("T-{number} is paused now"))
+        )
+    );
+}
+
 #[tokio::test]
 async fn only_a_get_reads_a_message() {
     let scene = scene();

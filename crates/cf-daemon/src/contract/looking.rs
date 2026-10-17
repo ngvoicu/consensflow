@@ -106,6 +106,10 @@ impl Adapter for LookingAdapter {
         self.adapter.keeps_first_instructions()
     }
 
+    fn first_message_once_up(&self) -> bool {
+        self.adapter.first_message_once_up()
+    }
+
     fn specmint(&self, variant: Variant) -> Result<Skill, String> {
         self.adapter.specmint(variant)
     }

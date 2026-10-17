@@ -20,9 +20,8 @@ find = '''
                AND carried_by IN (SELECT id FROM message WHERE state NOT IN ('queued', 'gated'))",
             [message_id],
         )?;
-        // A continuation back in its queue'''
-replace = '''
-        // A continuation back in its queue'''
+        adopt(store, message_id)?;'''
+replace = "        adopt(store, message_id)?;"
 
 [[plant]]
 name = "review: a task sent back to a busy session is told it can be opened for its tier"

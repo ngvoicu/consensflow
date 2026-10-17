@@ -365,6 +365,35 @@ fn thread(said: &Value) -> Vec<i64> {
         .collect()
 }
 
+/// Sol's review of 2026-10-16, round 7: the thread held a message whose delivery
+/// was only begun when the Close came. It is left out as one queued is; one its
+/// transport let go before the Close is in it.
+#[tokio::test]
+async fn while_the_project_is_closed_a_message_only_begun_is_left_out_of_the_thread_and_one_handed_over_is_in_it(
+) {
+    for handed in [false, true] {
+        let scene = scene();
+        let answer = answered_question(&scene, "Blue.");
+        {
+            let mut ledger = scene.context.ledger.borrow_mut();
+            ledger.begin_delivery(answer.id).unwrap();
+            if handed {
+                ledger.admit(answer.id, &[]).unwrap();
+            }
+        }
+        project_is(&scene, "suspended");
+
+        let (status, said) = get(&scene, &scene.zeus, "1").await;
+
+        assert_eq!(status, 200);
+        assert_eq!(
+            thread(&said).contains(&answer.id),
+            handed,
+            "handed {handed}: {said}"
+        );
+    }
+}
+
 /// Both reviews of 2026-10-16, round 6: a window of a closed project read the
 /// answer the door held for the Resume in its task's thread, and `cf` said it
 /// received it. While the project is closed, a message no window was handed is

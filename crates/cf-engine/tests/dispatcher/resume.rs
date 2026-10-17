@@ -39,7 +39,7 @@ pub(crate) fn at_work(context: &Context) -> Tiers<'_> {
 
 /// The app quits and starts again: the daemon suspends what was open and the
 /// engine settles what was on its way.
-fn quit_and_start(context: &Context) -> Restarted<'_> {
+pub(crate) fn quit_and_start(context: &Context) -> Restarted<'_> {
     context.ledger.borrow_mut().suspend_for_restart().unwrap();
     let after = context.make();
     after.settle_after_restart().unwrap();

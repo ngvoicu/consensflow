@@ -99,7 +99,7 @@ replace = '''            let current = self.seams.ledger.borrow().current_conver
 
 [[plant]]
 name = "resume unturned: a member's message is begun after its harness is asked, so a pause during the ask is forgiven"
-meant = "a_pause_while_the_harness_is_asked_about_the_conversation_opens_no_pane_and_the_note_is_given_back"
+meant = "a_pause_while_the_harness_is_asked_about_the_conversation_opens_no_pane_and_the_note_is_withdrawn"
 runs = ["engine-launch-stops"]
 
 [[plant.edit]]
@@ -126,7 +126,7 @@ find = '''        let conversation = if participant.role == "chief" {
                 record,
                 participant,
                 delivering,
-                &captured,
+                stop,
                 "a pause came while its harness was asked about its conversation",
             )? {
                 return Ok(None);
@@ -137,7 +137,7 @@ replace = ''''''
 
 [[plant]]
 name = "resume unturned: a launch whose pause came while the harness was asked goes on to prepare its window"
-meant = "a_pause_while_the_harness_is_asked_about_the_conversation_opens_no_pane_and_the_note_is_given_back"
+meant = "a_pause_while_the_harness_is_asked_about_the_conversation_opens_no_pane_and_the_note_is_withdrawn"
 runs = ["engine-launch-stops"]
 
 [[plant.edit]]
@@ -146,7 +146,7 @@ find = '''            if self.launch_over(
                 record,
                 participant,
                 delivering,
-                &captured,
+                stop,
                 "a pause came while its harness was asked about its conversation",
             )? {
                 return Ok(None);

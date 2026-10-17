@@ -15,6 +15,7 @@ use cf_proto::ledger::MessageView;
 use rusqlite::params;
 use serde_json::json;
 
+use super::continuations::drop_continuations;
 use super::delivery::cancel_message;
 use super::messages;
 use super::receipt::reconcile;
@@ -171,11 +172,12 @@ pub(crate) fn adopt(store: &mut Store, id: i64) -> Result<(), LedgerError> {
 }
 
 /// What a carrier that was cancelled, or failed, carried is its own again:
-/// still kept, still `queued`, for the next carrier to take. Withdrawing a
+/// still kept, still `queued`, for the next carrier to take, and handed nothing,
+/// whatever its carrier's transport let go (`delivery`'s `admit`). Withdrawing a
 /// carrier's transport never takes what it carried with it.
 pub(crate) fn release_carried(store: &Store, task_id: i64) -> Result<(), LedgerError> {
     store.db.execute(
-        "UPDATE message SET carried_by = NULL
+        "UPDATE message SET carried_by = NULL, handed_at = NULL
          WHERE task_id = ?1 AND state = 'queued'
            AND carried_by IN (SELECT id FROM message WHERE task_id = ?1
                               AND state IN ('cancelled', 'failed'))",
@@ -267,13 +269,16 @@ pub(crate) struct Transfer {
 /// - what it had held at the gate, and any tell, is withdrawn: the human
 ///   gave no word for the next window, and the one that is gone was the tell's;
 /// - what it asked, and no one has seen yet, is withdrawn with it. Only the
-///   next window's own questions count for the task.
+///   next window's own questions count for the task;
+/// - what told it to go on after a cut turn is withdrawn first, and never said
+///   in the brief (`continuations`): the next window never began that turn.
 pub(crate) fn transfer(
     store: &mut Store,
     task: &TaskRow,
     window: &ParticipantRow,
     brief: &str,
 ) -> Result<Transfer, LedgerError> {
+    drop_continuations(store, task, window.id)?;
     requeue_unreceived_reads(store, task, window.id)?;
     let rows = messages(
         store,

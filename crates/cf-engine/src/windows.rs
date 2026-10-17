@@ -11,7 +11,9 @@ use std::time::Duration;
 
 use cf_harness::contract::{Interrupt, Launch, LaunchId, Observed, Pane, Window};
 use cf_harness::seams::Time;
-use cf_ledger::{Begun, ConversationView, MessageView, NewNote, ParticipantView, ProjectView};
+use cf_ledger::{
+    Begun, ConversationView, HandOver, MessageView, NewNote, ParticipantView, ProjectView, Stop,
+};
 use cf_proto::agents::Harness;
 use cf_proto::panes::Servers;
 use cf_proto::trace::WindowEvent;
@@ -22,7 +24,6 @@ use crate::delivery_text::{delivery_text, marker_of};
 use crate::dispatcher::Dispatcher;
 use crate::host::{EngineHost, Killed, OpenPane, Opened};
 use crate::record::Record;
-use crate::resume::Captured;
 use crate::role_change::{Compared, Prelude};
 use crate::runtime::{begin, caught, returning};
 use crate::seams::{EngineError, SavedAgent};
@@ -258,9 +259,9 @@ fn assign(env: &mut Vec<(String, String)>, key: &str, value: &str) {
 
 /// What a launch was prepared with: the window, the keys that interrupt it,
 /// how its harness keeps its own processes and which harness it is, how its pane
-/// opens, the conversation it goes on with if there is one, and the work it was
-/// read for: the stop its task had asked when the first message was begun, which
-/// the new window owes nothing for, or what its caller read before.
+/// opens, the conversation it goes on with if there is one, and the stop its task
+/// had asked when the first message was begun, which the new window owes nothing
+/// for.
 struct Planned {
     window: Rc<dyn Window>,
     keys: Interrupt,
@@ -271,7 +272,12 @@ struct Planned {
     drop_env: Vec<String>,
     native_session: Option<String>,
     conversation: Option<ConversationView>,
-    captured: Captured,
+    stop: Option<Stop>,
+    /// The rows the first message's paste was begun with.
+    carried: Vec<i64>,
+    /// The first message goes in once the window is up, not on its command line
+    /// ([`Adapter::first_message_once_up`]).
+    first_once_up: bool,
     /// What goes into the window before anything else of its queue once it is up,
     /// in this order ([`Compared::prelude`]).
     prelude: Option<Prelude>,
@@ -371,10 +377,12 @@ impl Dispatcher {
     /// be told ([`Dispatcher::conversation_to_go_on_with`]). One that does not come
     /// up says why ([`Dispatcher::launch_failed`]); a participant forgotten while
     /// its launch waits gets nothing more under its ids. The stops its window is to
-    /// have paid, and where each task a continuation in its first message names
-    /// stands, are read as that message is begun, narrowed to the work its window
-    /// still holds ([`Captured::read`]): a stop asked since is owed, and a task
-    /// moved since ends the launch as a pause while it is prepared does.
+    /// have paid are read as its first message is begun: a stop asked since is
+    /// owed, and ends the launch. A first message withdrawn before it is begun
+    /// (a continuation whose task moved on) ends it too. One that goes in on the
+    /// command line is handed over as the pane is asked for, one a window takes
+    /// once it is up as it is posted, each as the ledger admits it
+    /// ([`cf_ledger::Ledger::admit`]).
     pub(crate) async fn launch(
         self: &Rc<Self>,
         record: &Rc<Record>,
@@ -481,9 +489,10 @@ impl Dispatcher {
             record,
             participant,
             delivering.as_ref(),
-            &planned.captured,
+            planned.stop,
             "a pause came while its window was prepared",
-        )? {
+        )? || !self.handed_on_open(delivering.as_ref(), &planned)?
+        {
             self.seams.launch_files.forget(&launch_id);
             return Ok(());
         }
@@ -601,8 +610,13 @@ impl Dispatcher {
             part.activity = Activity::of(ActivityState::Starting);
             part.drawn = false;
             part.named = false;
-            part.stopped = planned.captured.paid.map(|stop| (stop.task_id, stop.seq));
+            part.stopped = planned.stop.map(|stop| (stop.task_id, stop.seq));
         }
+        // The first message that goes in once the window is up, where there is one.
+        let posted = delivering
+            .as_ref()
+            .map(|first| first.message)
+            .filter(|_| planned.first_once_up);
         {
             let mut delivery = record.delivery.borrow_mut();
             delivery.delivering = delivering;
@@ -615,31 +629,26 @@ impl Dispatcher {
         }
         // The adapter's `started` is an `async` function, and `.catch(...)`
         // made a promise of its own to wait on.
-        let admitting =
-            Admitting::new(self, project.id).watching(participant.id, &planned.captured);
+        let admitting = Admitting::new(self, project.id);
+        let admitting = match posted {
+            Some(first) => admitting.handing(first, planned.carried.clone()),
+            None => admitting,
+        };
         let started = caught(planned.window.started(&admitting)).await;
         // A first message that was to go in once the window was up, its project
         // closed first: it waits for the Resume, never handed over, and the window,
-        // given nothing, goes with the Close. One whose continuation names a task
-        // that moved meanwhile goes back too, to be narrowed: the window came up,
-        // and is given it so as any open window is given what waits for it.
-        let moved = match admitting.turned_away() {
-            Some(failed) => {
-                let delivering = record.delivery.borrow_mut().delivering.take();
-                if let Some(delivering) = delivering {
-                    self.give_back(delivering.message, admitting.because())?;
-                }
-                if let Some(failed) = failed {
-                    return Err(failed);
-                }
-                if !admitting.moved() {
-                    return Ok(());
-                }
-                true
+        // given nothing, goes with the Close. One withdrawn meanwhile (a
+        // continuation whose task moved on) stays so, or goes again without what
+        // was withdrawn of its paste, and the window, up, is given what waits for
+        // it at the next pass. Neither is a launch that failed.
+        if let Some(failed) = admitting.turned_away() {
+            let delivering = record.delivery.borrow_mut().delivering.take();
+            if let Some(delivering) = delivering {
+                self.give_back(delivering.message, admitting.because())?;
             }
-            None => false,
-        };
-        if let (Err(error), Some(delivering)) = (&started, failing.filter(|_| !moved)) {
+            return failed.map_or(Ok(()), Err);
+        }
+        if let (Err(error), Some(delivering)) = (&started, failing) {
             // What the window shows is asked before it closes: the screen goes with it.
             let (shown, settles) = self.look_before_giving_up(record, Some(&pane)).await;
             // The chief's window goes without taking its project with it: the chief is tried again.
@@ -709,16 +718,12 @@ impl Dispatcher {
         role: Option<RoleText>,
         prelude: Option<Prelude>,
     ) -> Result<Option<Planned>, EngineError> {
-        // A continuation names only the tasks its window still holds as it is
-        // begun, and one that holds none goes no more: the launch is over.
+        // A first message withdrawn while the launch waited (a continuation whose
+        // task moved on, the ledger's) opens no window: the launch is over, and
+        // what waits now is the next pass's.
         if let Some(first) = first {
-            if self
-                .seams
-                .ledger
-                .borrow_mut()
-                .as_it_stands(first.id)?
-                .is_none()
-            {
+            let message = self.seams.ledger.borrow().message(first.id)?;
+            if message.is_none_or(|message| message.state != "queued") {
                 self.changed();
                 return Ok(None);
             }
@@ -729,11 +734,8 @@ impl Dispatcher {
         // The stops this window owes are those asked before this look: a pause
         // that comes while it is prepared or opened is asked after it, and is
         // owed. Read in this turn, with the first message begun: the window
-        // works on the task that message is about, and goes on with the tasks a
-        // continuation in it names, narrowed to those it still holds, which the
-        // launch watches until its window opens.
-        let captured =
-            Captured::read(self, participant.id, participant.project_id, begun.as_ref())?;
+        // works on the task that message is about.
+        let stop = self.seams.ledger.borrow().stop_of(participant.id)?;
         // A member's conversation is looked into now, which asks its harness and
         // may wait: a pause that comes during it is asked after the stop was read,
         // as one that comes while the window is prepared is, and the launch is over.
@@ -745,7 +747,7 @@ impl Dispatcher {
                 record,
                 participant,
                 delivering,
-                &captured,
+                stop,
                 "a pause came while its harness was asked about its conversation",
             )? {
                 return Ok(None);
@@ -843,10 +845,48 @@ impl Dispatcher {
             drop_env: prepared.drop_env,
             native_session: prepared.native_session,
             conversation,
-            captured,
+            stop,
+            carried: begun
+                .iter()
+                .flat_map(|begun| &begun.carried)
+                .map(|row| row.id)
+                .collect(),
+            first_once_up: adapter.first_message_once_up(),
             prelude,
             first_instructions: adapter.keeps_first_instructions().then_some(instructions),
         }))
+    }
+
+    /// Whether a launch's first message, which goes in on the command line its
+    /// window opens with, is handed over now, as its pane is asked for: as the
+    /// ledger admits it, which marks it handed (the project is open, and nothing of
+    /// its paste was withdrawn since it was begun). One it turns away goes back to
+    /// its queue, unless it was withdrawn itself, and the launch is over. A launch
+    /// with no first message on its command line hands nothing over now: one that
+    /// goes in once the window is up is admitted as it is posted.
+    fn handed_on_open(
+        &self,
+        delivering: Option<&Delivering>,
+        planned: &Planned,
+    ) -> Result<bool, EngineError> {
+        let Some(first) = delivering.filter(|_| !planned.first_once_up) else {
+            return Ok(true);
+        };
+        let handed = self
+            .seams
+            .ledger
+            .borrow_mut()
+            .admit(first.message, &planned.carried)?;
+        if handed == HandOver::Admitted {
+            return Ok(true);
+        }
+        let because = if handed == HandOver::Closed {
+            "its project was closed before its window opened"
+        } else {
+            "what its paste held was withdrawn before its window opened"
+        };
+        self.give_back(first.message, because)?;
+        Ok(false)
     }
 
     /// A participant whose saved agent the human has deleted does not open:
@@ -908,17 +948,16 @@ impl Dispatcher {
     /// which would go in on its command line, waits for the Resume, never handed
     /// over (both reviews of 2026-10-16, round 4: a chief's handoff went into a
     /// window the Close then closed, and again after the Resume). A member's
-    /// launch holds only while its first message is still on its way and its work
-    /// is as `captured` read it ([`Dispatcher::unmoved`]): no stop was asked of its
-    /// window since, and no task it comes back for moved, which is a pause that
-    /// came in between. The message goes back to wait for the words that resume
+    /// launch holds only while its first message is still on its way and no stop
+    /// was asked of its window since `captured` was read, which is a pause that
+    /// came in between: the message goes back to wait for the words that resume
     /// the task, with `because`.
     fn launch_over(
         &self,
         record: &Rc<Record>,
         participant: &ParticipantView,
         delivering: Option<&Delivering>,
-        captured: &Captured,
+        captured: Option<Stop>,
         because: &str,
     ) -> Result<bool, EngineError> {
         if self.forgotten(record) {
@@ -936,13 +975,14 @@ impl Dispatcher {
         let Some(delivering) = delivering.filter(|_| participant.role != "chief") else {
             return Ok(false);
         };
-        let on_its_way = self
-            .seams
-            .ledger
-            .borrow()
-            .message(delivering.message)?
-            .is_some_and(|message| message.state == "delivering");
-        if on_its_way && self.unmoved(participant.id, participant.project_id, captured)? {
+        let holds = {
+            let ledger = self.seams.ledger.borrow();
+            let on_its_way = ledger
+                .message(delivering.message)?
+                .is_some_and(|message| message.state == "delivering");
+            on_its_way && ledger.stop_of(participant.id)? == captured
+        };
+        if holds {
             return Ok(false);
         }
         self.give_back(delivering.message, because)?;

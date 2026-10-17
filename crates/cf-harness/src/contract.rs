@@ -90,6 +90,15 @@ pub trait Adapter {
         false
     }
 
+    /// Whether a window's first message goes in once the window is up, through
+    /// the harness's own server, which asks [`PaneHost::admits`] then
+    /// ([`Window::started`]): OpenCode's. Every other harness's goes in with the
+    /// command line its window opens with ([`Launch::message`]), handed over as
+    /// the window's pane is asked for.
+    fn first_message_once_up(&self) -> bool {
+        false
+    }
+
     /// Where the window of a chief given specs finds the Specmint skill of
     /// `variant`, asked before the window is prepared, as its role text names
     /// the file. The copy the human installed where this harness looks for
@@ -287,8 +296,10 @@ pub trait PaneHost {
     /// ([`Loopback::hand_over`](crate::seams::loopback::Loopback::hand_over)). The
     /// engine's host for a window says no once the window's project is closed (the
     /// human's Close, or the chief's window ending), and the text goes back to wait
-    /// for the Resume, never handed over ([`NOT_ADMITTED`]). A host that says
-    /// nothing admits everything.
+    /// for the Resume, never handed over ([`NOT_ADMITTED`]); and once what it was
+    /// to hand over was withdrawn since it was begun. A yes is the hand-over's
+    /// moment: the engine counts the text the window's from then on. A host that
+    /// says nothing admits everything.
     ///
     /// What an adapter must keep: no wait comes between the answer and the moment
     /// the text is the transport's, so nothing else of the engine runs in between.

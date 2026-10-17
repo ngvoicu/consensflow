@@ -217,6 +217,11 @@ impl Adapter for OpenCodeAdapter {
     fn resumable<'a>(&'a self, _session: &'a str) -> Work<'a, Option<bool>> {
         Box::pin(async { Some(true) })
     }
+
+    /// Its first message is posted to its server once the window is up (`seed`).
+    fn first_message_once_up(&self) -> bool {
+        true
+    }
 }
 
 /// An OpenCode window, and the channel to its server and its plugin.

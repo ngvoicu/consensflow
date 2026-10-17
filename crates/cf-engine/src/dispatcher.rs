@@ -1227,23 +1227,19 @@ impl Dispatcher {
                 return Ok(());
             };
             // A window the Resume brings back opens only for work still at work once
-            // its cut was read. Work that moved while the record was read is read
-            // again, and the window comes back for what is at work then, if anything
-            // is (both reviews of 2026-10-16, round 6: a window of two tasks, one
-            // paused meanwhile, was to come back for both). What moves after is the
-            // launch's: its continuation names only what its window holds as it is
-            // begun, and the launch watches that.
-            let first = match coming {
-                Some(mut coming) => loop {
-                    let note = this.cut_note(&project, &who, &coming).await?;
-                    if this.still_coming(&who, &coming)? {
-                        break note;
+            // its cut was read: a stop asked of it meanwhile (a pause, a cancel, a
+            // release or an end of its task) leaves it closed, and its task with the
+            // chief (Astra's review of 2026-10-16, round 4). What moves after is the
+            // launch's: the move withdraws the continuation (the ledger's), and the
+            // launch watches the stops its window pays.
+            let first = match &coming {
+                Some(coming) => {
+                    let note = this.cut_note(&project, &who, coming).await?;
+                    if !this.still_coming(&who, coming)? {
+                        return Ok(());
                     }
-                    match this.coming_now(&project, participant)? {
-                        Some(now) => coming = now,
-                        None => return Ok(()),
-                    }
-                },
+                    note
+                }
                 None => None,
             };
             let (launching, at) = (Rc::clone(&this), Rc::clone(&held));

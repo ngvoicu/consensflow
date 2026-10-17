@@ -4,7 +4,9 @@
 use serde_json::Value;
 
 use super::Ledger;
-use crate::{messages, Begun, Claim, LedgerError, MessageView, NewNote, NewQuestion, Read};
+use crate::{
+    messages, Begun, Claim, HandOver, LedgerError, MessageView, NewNote, NewQuestion, Read,
+};
 
 impl Ledger {
     /// One message, or none.
@@ -206,10 +208,18 @@ impl Ledger {
         messages::confirm_delivery_telling(&mut self.store, message_id, receipt)
     }
 
-    /// A message about to be begun, as it stands: a continuation names only the
-    /// tasks its window still holds, and one that holds none is withdrawn (none).
-    pub fn as_it_stands(&mut self, message_id: i64) -> Result<Option<MessageView>, LedgerError> {
-        messages::as_it_stands(&mut self.store, message_id)
+    /// The transport lets a hand-over begun go to its window now, after every wait
+    /// of its own, if the project is open, the message still on its way, and each
+    /// row of `carried` (what its paste was begun with) still riding in it: then
+    /// they are the window's, marked handed in this write.
+    pub fn admit(&mut self, message_id: i64, carried: &[i64]) -> Result<HandOver, LedgerError> {
+        messages::admit(&mut self.store, message_id, carried)
+    }
+
+    /// The messages of a project whose hand-over has begun at their window and is
+    /// not over: let go by their transport, or claimed by a question's door.
+    pub fn handed_over(&self, project_id: i64) -> Result<Vec<i64>, LedgerError> {
+        messages::handed_over(&self.store, project_id)
     }
 
     /// A message not yet delivered that no longer applies.
@@ -222,8 +232,8 @@ impl Ledger {
     }
 
     /// A delivery queued again; `refund` gives back its attempt. A pause note
-    /// whose task was cancelled on its way is withdrawn instead, and says its
-    /// warning again.
+    /// naming a task that moved on while it was on its way leaves it, and says
+    /// its warning again.
     pub fn retry_delivery(
         &mut self,
         message_id: i64,
@@ -244,8 +254,9 @@ impl Ledger {
 
     /// A delivery given up. A task message that fails takes its task with it;
     /// an answer that fails leaves its question to be answered again, and the
-    /// one who was asked is told so. A pause note whose task was cancelled on
-    /// its way is withdrawn instead, and says its warning again.
+    /// one who was asked is told so. A pause note naming a task that moved on
+    /// while it was on its way leaves it, and says its warning again; one with
+    /// no task left is withdrawn instead.
     pub fn fail_delivery(
         &mut self,
         message_id: i64,

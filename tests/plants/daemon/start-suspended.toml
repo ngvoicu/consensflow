@@ -272,7 +272,7 @@ runs = ["engine-resume"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/resume.rs"
-find = '''            None => matches!(coming, Coming::Member(..)),'''
+find = '''            None => matches!(coming, Coming::Member { .. }),'''
 replace = '''            None => false,'''
 
 [[plant]]
@@ -282,7 +282,7 @@ runs = ["engine-resume"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/resume.rs"
-find = '''            None => matches!(coming, Coming::Member(..)),'''
+find = '''            None => matches!(coming, Coming::Member { .. }),'''
 replace = '''            None => true,'''
 
 [[plant]]
@@ -292,9 +292,8 @@ runs = ["engine-resume"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/resume.rs"
-find = '''        if let Some(note) = told.next() {
-            self.one_continuation(told.chain(others))?;
-            return Ok(Some(note));
+find = '''        if told.is_some() {
+            return Ok(told);
         }
 '''
 replace = ""
@@ -316,8 +315,8 @@ runs = ["engine-resume"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/resume.rs"
-find = '''            Coming::Member(work) => work.tasks.first().map(|task| task.number),'''
-replace = '''            Coming::Member(..) => None,'''
+find = '''            Coming::Member { task, .. } => Some(*task),'''
+replace = '''            Coming::Member { .. } => None,'''
 
 [[plant]]
 name = "start suspended: a chief that is given its handoff again is told its turn was cut too"

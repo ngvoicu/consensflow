@@ -1,26 +1,30 @@
 //! Continuations: what ConsensFlow tells a member's window whose turn a quit or
-//! a Close cut, when the human's Resume brings it back: the tasks it was working
+//! a Close cut, when the human's Resume brings it back: the task it was working
 //! on, and to go on. It is a `note` of ConsensFlow's own, told by its words
 //! ([`continuation_tasks`]), as a pause note is.
 //!
-//! A continuation names the tasks its window is to go on with, and those can move
-//! while it waits: the human pauses one, the chief cancels another. Whenever it is
-//! begun, on its own or riding in another's paste, it names only the tasks its
-//! window still holds, and one that holds none goes no more ([`narrow`]). A launch
-//! or a delivery that hands one over watches what it names until the hand-over
-//! (the engine's). Its checks so go with it for its whole life, however often it
-//! goes back to its queue (both reviews of 2026-10-16, round 6: a continuation
-//! a launch gave back named a task paused since, and the next launch gave it
-//! whole).
+//! A continuation is about the one task its window holds, and lives only while
+//! that task is at work as it was written for: a pause, a cancel, a release, a
+//! reassignment or an end of the task withdraws it, in the write that moves the
+//! task, unless its window was handed it already ([`withdraw_continuations`]); a
+//! reassignment never carries it into the next window's brief
+//! ([`drop_continuations`]). The next Resume writes one anew from the task as it
+//! is then. A window that holds several tasks (a session a ledger wrote before the
+//! rule of one, or a member's own lane) is told to go on with none: the Resume
+//! leaves its work paused, for the chief to resume task by task (`tasks`'
+//! `resume_with_project`), and withdraws what an earlier build left queued telling
+//! it to go on with several ([`withdraw_stale`]). Four rounds of reviews of
+//! 2026-10-16 found a continuation naming several tasks escaping one check or
+//! another; none is written now.
 
-use cf_proto::ledger::MessageView;
-use rusqlite::{params, OptionalExtension};
+use rusqlite::params;
 use serde_json::json;
 
 use crate::model::LedgerError;
 use crate::queue::withdraw;
 use crate::store::Store;
 use crate::tasks::RESUME_WORDS;
+use crate::views::TaskRow;
 
 /// How a continuation begins, before the tasks it names.
 const STOPPED: &str = "ConsensFlow stopped while you were working on ";
@@ -29,14 +33,15 @@ const STOPPED: &str = "ConsensFlow stopped while you were working on ";
 /// window that never came.
 const QUIT: &str = "ConsensFlow quit while you were working on ";
 
-/// The words of a continuation naming `tasks` (their numbers), in that order.
-pub fn continuation(tasks: &[i64]) -> String {
-    format!("{STOPPED}{}. {RESUME_WORDS}", named(tasks))
+/// The words of a continuation of task `number`.
+pub fn continuation(number: i64) -> String {
+    format!("{STOPPED}{}. {RESUME_WORDS}", named(&[number]))
 }
 
 /// The tasks a continuation names, in its words or in those of builds before
-/// 3.0.5; none for any other text. Only the words [`continuation`] writes are
-/// read, so no other note is taken for one.
+/// 3.0.5, which named every task a window held; none for any other text. Only
+/// the words those builds and [`continuation`] write are read, so no other note
+/// is taken for one.
 pub fn continuation_tasks(body: &str) -> Option<Vec<i64>> {
     let (start, rest) = [STOPPED, QUIT]
         .into_iter()
@@ -56,99 +61,152 @@ fn named(tasks: &[i64]) -> String {
     tasks.join(", ")
 }
 
-/// Whether `message` is a continuation still waiting to be begun: ConsensFlow's
-/// own note in its words, `queued`. One withdrawn or begun meanwhile is left as
-/// it is, for its beginning to refuse as any.
-fn is_continuation(message: &MessageView) -> bool {
-    message.kind == "note"
-        && message.sender.is_none()
-        && message.state == "queued"
-        && continuation_tasks(&message.body).is_some()
+/// The continuations that `states` holds about `task`, oldest first, each with
+/// the window it is for: ConsensFlow's own notes in their words, tied to the task
+/// or naming it to the window that has it (an earlier build's may be tied to no
+/// task, or to another it names).
+fn continuations_of(
+    store: &Store,
+    task: &TaskRow,
+    states: &str,
+) -> Result<Vec<(i64, i64)>, LedgerError> {
+    let found: Vec<(i64, i64, Option<i64>, String)> = store
+        .db
+        .prepare(&format!(
+            "SELECT id, recipient_id, task_id, body FROM message
+             WHERE project_id = ?1 AND sender_id IS NULL AND kind = 'note' AND ({states})
+               AND (task_id = ?2 OR recipient_id = ?3)
+             ORDER BY id"
+        ))?
+        .query_map(params![task.project_id, task.id, task.assignee_id], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+        })?
+        .collect::<rusqlite::Result<_>>()?;
+    Ok(found
+        .into_iter()
+        .filter(|(_, _, tied, body)| {
+            continuation_tasks(body)
+                .is_some_and(|named| *tied == Some(task.id) || named.contains(&task.number))
+        })
+        .map(|(id, recipient, _, _)| (id, recipient))
+        .collect())
 }
 
-/// A message about to be begun, as it stands: a continuation names only the
-/// tasks its window still holds (queued with it, at work or waiting), and one
-/// that holds none is withdrawn. None when it was; the message as it is now
-/// otherwise, any other message as it was.
-pub(crate) fn as_it_stands(
+/// Withdraws each of `ids` with `reason`, as the log says.
+fn withdraw_each(
     store: &mut Store,
-    message_id: i64,
-) -> Result<Option<MessageView>, LedgerError> {
-    store.write(|store| {
-        let Some(message) = store.message(message_id)? else {
-            return Ok(None);
-        };
-        if !narrow(store, &message)? {
-            return Ok(None);
-        }
-        store.message(message_id)
-    })
-}
-
-/// The tasks a continuation names that its window still holds (queued with it,
-/// at work or waiting), in the order it names them: their numbers and ids.
-fn held(store: &Store, message: &MessageView) -> Result<Vec<(i64, i64)>, LedgerError> {
-    let named = continuation_tasks(&message.body).unwrap_or_default();
-    let mut held: Vec<(i64, i64)> = Vec::with_capacity(named.len());
-    for number in named {
-        let task: Option<i64> = store
-            .db
-            .query_row(
-                "SELECT id FROM task WHERE project_id = ? AND number = ? AND assignee_id = ?
-                   AND state IN ('queued', 'working', 'waiting')",
-                params![message.project_id, number, message.recipient_id],
-                |row| row.get(0),
-            )
-            .optional()?;
-        held.extend(task.map(|id| (number, id)));
-    }
-    Ok(held)
-}
-
-/// A continuation back in its queue (its launch or its delivery did not hand it
-/// over) is about the first task it names that its window still holds, where it
-/// holds one: about a task paused meanwhile, it would wait for that task and hold
-/// the others back with it. Its words name them all until it is begun
-/// ([`narrow`]); one whose window holds none of them waits, about the task it was.
-pub(crate) fn repoint(store: &Store, message: &MessageView) -> Result<(), LedgerError> {
-    if !is_continuation(message) {
-        return Ok(());
-    }
-    if let Some(&(_, first)) = held(store, message)?.first() {
-        store.db.execute(
-            "UPDATE message SET task_id = ? WHERE id = ?",
-            params![first, message.id],
+    project_id: i64,
+    ids: &[i64],
+    reason: &str,
+) -> Result<(), LedgerError> {
+    for id in ids {
+        withdraw(store, *id, reason)?;
+        store.log(
+            project_id,
+            "delivery.cancelled",
+            json!({ "message": id, "reason": reason }),
         )?;
     }
     Ok(())
 }
 
-/// Narrows `message` if it is a continuation, as [`as_it_stands`] says: whether
-/// it still goes. Nothing for any other message, which goes.
-pub(crate) fn narrow(store: &mut Store, message: &MessageView) -> Result<bool, LedgerError> {
-    if !is_continuation(message) {
-        return Ok(true);
+/// `task` moves on from the work its window was told to go on with (it is
+/// paused, cancelled, released, reassigned or ended; `to` is its state now): what
+/// told the window to go on and was not handed to it is withdrawn, in the write
+/// that moves the task. That is one still queued, on its own or riding in another's
+/// paste, and one on its way that the transport has not let go yet (`handed_at`,
+/// [`super::delivery::admit`]), whose hand-over the transport then refuses. One
+/// handed over is the window's already, as any message is.
+pub(crate) fn withdraw_continuations(
+    store: &mut Store,
+    task: &TaskRow,
+    to: &str,
+) -> Result<(), LedgerError> {
+    let unsent: Vec<i64> = continuations_of(
+        store,
+        task,
+        "state = 'queued' OR (state = 'delivering' AND handed_at IS NULL)",
+    )?
+    .into_iter()
+    .map(|(id, _)| id)
+    .collect();
+    withdraw_each(
+        store,
+        task.project_id,
+        &unsent,
+        &format!("T-{} is {to} now", task.number),
+    )
+}
+
+/// `task` goes from `window` to another (it is reassigned, or taken back to the
+/// board): whatever told `window` to go on with it is withdrawn, handed or not, as
+/// what the task takes on from the window is carried into its next brief
+/// (`carrying`'s `transfer`). A continuation is no part of that: it is about a
+/// turn of the window's own, and would tell the next window to go on with work it
+/// never began (both reviews of 2026-10-16, round 7).
+pub(crate) fn drop_continuations(
+    store: &mut Store,
+    task: &TaskRow,
+    window: i64,
+) -> Result<(), LedgerError> {
+    let pending: Vec<i64> = continuations_of(store, task, "state IN ('queued', 'delivering')")?
+        .into_iter()
+        .filter(|(_, recipient)| *recipient == window)
+        .map(|(id, _)| id)
+        .collect();
+    withdraw_each(
+        store,
+        task.project_id,
+        &pending,
+        &format!("T-{} went from its window", task.number),
+    )
+}
+
+/// The human's Resume of a project, in the write that opens it: what an earlier
+/// build or an earlier Resume left queued telling a window to go on goes unless it
+/// names the one task its window holds, at work. A continuation that names several
+/// is a build's before 3.0.5, and this one tells a window that holds several to go
+/// on with none; one whose task stands otherwise is for work as it was. The Resume
+/// writes one anew where it is due.
+pub(crate) fn withdraw_stale(store: &mut Store, project_id: i64) -> Result<(), LedgerError> {
+    let queued: Vec<(i64, i64, String)> = store
+        .db
+        .prepare(
+            "SELECT id, recipient_id, body FROM message
+             WHERE project_id = ? AND sender_id IS NULL AND kind = 'note' AND state = 'queued'
+             ORDER BY id",
+        )?
+        .query_map([project_id], |row| {
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+        })?
+        .collect::<rusqlite::Result<_>>()?;
+    let mut stale = Vec::new();
+    for (id, recipient, body) in queued {
+        let Some(named) = continuation_tasks(&body) else {
+            continue;
+        };
+        let held: Vec<(i64, String)> = store
+            .db
+            .prepare(
+                "SELECT number, state FROM task
+                 WHERE assignee_id = ? AND state IN ('queued', 'working', 'waiting', 'paused')",
+            )?
+            .query_map(params![recipient], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect::<rusqlite::Result<_>>()?;
+        let at_work = matches!(
+            (named.as_slice(), held.as_slice()),
+            ([number], [(holds, state)]) if number == holds && matches!(state.as_str(), "working" | "waiting")
+        );
+        if !at_work {
+            stale.push(id);
+        }
     }
-    let named = continuation_tasks(&message.body).unwrap_or_default();
-    let held = held(store, message)?;
-    let Some(&(_, first)) = held.first() else {
-        let reason = "the work it named stopped before it was given";
-        withdraw(store, message.id, reason)?;
-        store.log(
-            message.project_id,
-            "delivery.cancelled",
-            json!({ "message": message.id, "reason": reason }),
-        )?;
-        return Ok(false);
-    };
-    if held.len() < named.len() {
-        let numbers: Vec<i64> = held.iter().map(|(number, _)| *number).collect();
-        store.db.execute(
-            "UPDATE message SET body = ?, task_id = ? WHERE id = ?",
-            params![continuation(&numbers), first, message.id],
-        )?;
-    }
-    Ok(true)
+    withdraw_each(
+        store,
+        project_id,
+        &stale,
+        "the Resume tells its window to go on with its work as it is now",
+    )
 }
 
 #[cfg(test)]
@@ -157,13 +215,12 @@ mod tests {
 
     #[test]
     fn what_is_written_reads_back_and_the_words_of_older_builds_are_read_too() {
+        assert_eq!(continuation_tasks(&continuation(7)), Some(vec![7]));
         for tasks in [vec![1], vec![2, 10, 3]] {
-            assert_eq!(
-                continuation_tasks(&continuation(&tasks)),
-                Some(tasks.clone())
-            );
             let quit = format!("{QUIT}{}. {RESUME_WORDS}", named(&tasks));
-            assert_eq!(continuation_tasks(&quit), Some(tasks));
+            assert_eq!(continuation_tasks(&quit), Some(tasks.clone()));
+            let stopped = format!("{STOPPED}{}. {RESUME_WORDS}", named(&tasks));
+            assert_eq!(continuation_tasks(&stopped), Some(tasks));
         }
     }
 
