@@ -42,6 +42,7 @@ rig-regression-results-at-work = ["cargo", "test", "--offline", "-p", "cf-e2e", 
 rig-regression-results-silent = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_result_delivered_twice_to_a_devin_chief::two_results_for_a_devin_chief_whose_turn_says_nothing"]
 rig-regression-results-dropped = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_result_delivered_twice_to_a_devin_chief::two_results_for_a_devin_chief_whose_tui_dropped"]
 rig-regression-results-quoted = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_result_delivered_twice_to_a_devin_chief::a_result_whose_paste_devins_tui_dropped"]
+fake-devin-plans = ["cargo", "test", "--offline", "-p", "cf-e2e", "--bin", "fake-devin", "turn::tests::"]
 
 # The cases of the rig, each a version's shape.
 
@@ -295,12 +296,42 @@ file = "crates/cf-harness/src/devin/wire_log.rs"
 find = '''
             if self.shown.as_deref() != Some(shown) {
                 self.asked.clear();
-            }'''
-replace = ""
+                self.mode = None;'''
+replace = '''
+            if self.shown.as_deref() != Some(shown) {
+                self.mode = None;'''
+
+# Main's B1 reads a log replaced in place (rewritten, renamed over) from its start: the
+# turns since the paste are read again from it, and none of the log before's is kept.
+[[plant]]
+name = "results twice: a log replaced keeps the turn the paste went into in the log before"
+meant = "a_log_that_was_replaced_says_the_turns_since_the_paste_as_the_new_one_has_them"
+runs = ["harness-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/wire_log.rs"
+find = '''
+            state.into_a_turn = false;
+            state.turn_ended = false;'''
+replace = '''
+            state.turn_ended = false;'''
 
 [[plant]]
-name = "results twice: a paste a prompt was put to the agent ahead of, the prompt begun while the window was found ready, is held by nothing (the reviews of 2026-10-16)"
-meant = "a_message_pasted_as_a_prompt_begins_while_the_window_is_found_ready_is_held_in_its_turn"
+name = "results twice: a log replaced keeps the turn's end since the paste the log before said"
+meant = "a_log_that_was_replaced_says_the_turns_since_the_paste_as_the_new_one_has_them"
+runs = ["harness-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/wire_log.rs"
+find = '''
+            state.turn_ended = false;
+            state.mode = None;'''
+replace = '''
+            state.mode = None;'''
+
+[[plant]]
+name = "results twice: a paste a prompt was put to the agent ahead of, the prompt begun as the paste was handed over, is held by nothing (the reviews of 2026-10-16)"
+meant = "a_message_pasted_as_a_prompt_begins_while_it_is_handed_over_is_held_in_its_turn"
 runs = ["harness-devin"]
 
 [[plant.edit]]
@@ -358,5 +389,30 @@ runs = ["harness-devin"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/devin/wire_log.rs"
-find = "        state.turn_ended = false;"
+find = '''
+        state.into_a_turn = !state.asked.is_empty();
+        state.turn_ended = false;'''
+replace = '''
+        state.into_a_turn = !state.asked.is_empty();'''
+
+# The stand-in Devin's silence (`THINK`), and main's B1 turn that goes on after a quit cut
+# the one it was: that one takes the pace's time, to its first word as in its work.
+[[plant]]
+name = "results twice: a stand-in turn that goes on after a cut keeps the silence of the turn it was"
+meant = "a_file_line_has_the_turns_tool_make_the_file_and_a_turn_that_goes_on_takes_no_wait_of_its_own"
+runs = ["fake-devin-plans"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_devin/turn.rs"
+find = "            first_word: pace.first_word,"
 replace = ""
+
+[[plant]]
+name = "results twice: a stand-in THINK line is no silence"
+meant = "a_think_line_is_a_silence_that_long_before_the_first_word_whatever_the_pace_and_then_what_the_words_say"
+runs = ["fake-devin-plans"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_devin/turn.rs"
+find = "        Some(silent) => (seconds(&silent[1]), silent[2].to_owned()),"
+replace = "        Some(silent) => (pace.first_word, silent[2].to_owned()),"

@@ -235,6 +235,15 @@ pub trait Window {
         host: &'a dyn PaneHost,
         pane: &'a Pane,
     ) -> Work<'a, Result<Readiness, String>>;
+    /// Whether the engine asks [`Window::ready`] of the window before it has drawn its
+    /// screen too, only for a window that says it never will be fit for work
+    /// ([`Readiness::Unfit`]), which is given up then: a harness whose readiness has
+    /// a bound that runs whether or not the window draws (Devin's normal permission
+    /// mode, which held a window that never drew for ever). The others are asked
+    /// once it has drawn.
+    fn ready_while_drawing(&self) -> bool {
+        false
+    }
     /// Hands `text` to the window's harness: what became of it, or why it
     /// failed before the hand-over, which the engine says the delivery
     /// failed for. A failure after the hand-over is uncertain, never an
@@ -293,6 +302,11 @@ pub struct HostError {
 pub enum Readiness {
     Ready,
     Held(Held),
+    /// It never will be, and says why: the window came up unfit for work and
+    /// did not come right in the time it was given (a Devin left in its normal
+    /// permission mode, where every call waits for a permission nobody gives).
+    /// The engine gives the launch up, as one that did not come up.
+    Unfit(String),
 }
 
 /// Why a delivery waits.

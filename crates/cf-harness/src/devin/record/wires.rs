@@ -90,8 +90,8 @@ impl Wires {
     /// A look at every launch's log, each read on from where the last look
     /// left it: whether any said something new. A log that is not the one
     /// read so far, or one read before and gone, takes what every log said
-    /// with it, and all are read again.
-    pub(super) fn read(&mut self, session: &str, env: &Env) -> Result<bool, String> {
+    /// with it, and all are read again. `now_ms` is when the look began.
+    pub(super) fn read(&mut self, session: &str, env: &Env, now_ms: i64) -> Result<bool, String> {
         let consensflow = match env.os("CONSENSFLOW_HOME") {
             Some(consensflow) => consensflow.to_string_lossy().into_owned(),
             None => path::join(&[&home(env)?, ".consensflow"]),
@@ -112,6 +112,7 @@ impl Wires {
                 let looked = read_on(
                     Path::new(&file),
                     log.seen.as_ref(),
+                    now_ms,
                     &mut |event, _| log.said.visit(&event, session, outcomes),
                     Some(only.as_bytes()),
                 );
@@ -121,9 +122,13 @@ impl Wires {
                         break;
                     }
                     Ok(looked) => {
-                        if let Looked::Read(seen) = looked {
-                            log.seen = Some(seen);
-                            changed = true;
+                        match looked {
+                            Looked::Read(seen) => {
+                                log.seen = Some(seen);
+                                changed = true;
+                            }
+                            Looked::Held(seen) => log.seen = Some(seen),
+                            Looked::Unchanged | Looked::NotTheFile => {}
                         }
                         self.logs.insert(launch.clone(), log);
                         present.insert(launch.as_str());

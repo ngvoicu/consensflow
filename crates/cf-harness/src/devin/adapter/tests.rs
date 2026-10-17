@@ -11,6 +11,8 @@ use super::*;
 use crate::records::{Quota, Reading, Record, Settlement};
 use crate::testing::{finished, Driver, Fakes, EPOCH_MS};
 
+mod bypass;
+
 const MINUTE_MS: i64 = 60_000;
 
 /// A window of Devin on `wire`, on `session` if it has one, served by `fakes`.
@@ -22,6 +24,8 @@ fn window(fakes: &Fakes, wire: &Path, session: Option<&str>) -> Rc<DevinWindow> 
         session: RefCell::new(session.map(str::to_owned)),
         wire: WireLog::new(&wire.to_string_lossy(), jiff::tz::TimeZone::UTC),
         discover_for_ms: MINUTE_MS,
+        switch: Cell::default(),
+        looked: Cell::default(),
     })
 }
 
@@ -222,6 +226,8 @@ fn a_look_takes_the_wires_word_on_the_quota_never_the_records_and_the_rest_from_
         session: RefCell::new(Some("mild-coin".to_owned())),
         wire: WireLog::new(&wire.to_string_lossy(), jiff::tz::TimeZone::UTC),
         discover_for_ms: MINUTE_MS,
+        switch: Cell::default(),
+        looked: Cell::default(),
     });
     let observed = finished(window.observe()).unwrap();
     assert_eq!(observed.quota, None, "the log says nothing of the quota");
@@ -258,6 +264,8 @@ fn window_reading(fakes: &Fakes, wire: &Path, env: Env, record: Record) -> Rc<De
         session: RefCell::new(Some("mild-coin".to_owned())),
         wire: WireLog::new(&wire.to_string_lossy(), jiff::tz::TimeZone::UTC),
         discover_for_ms: MINUTE_MS,
+        switch: Cell::default(),
+        looked: Cell::default(),
     })
 }
 
@@ -433,17 +441,18 @@ fn a_message_pasted_into_a_turn_whose_agent_has_said_nothing_past_the_gap_is_hel
 }
 
 #[test]
-fn a_message_pasted_as_a_prompt_begins_while_the_window_is_found_ready_is_held_in_its_turn() {
+fn a_message_pasted_as_a_prompt_begins_while_it_is_handed_over_is_held_in_its_turn() {
     let dir = tempfile::tempdir().unwrap();
     let wire = dir.path().join("wire.jsonl");
     fs::write(&wire, shows("mild-coin")).unwrap();
     let fakes = Fakes::new(&Env::default());
     let window = window_at_rest(&fakes, &wire, Env::default());
-    // The human's prompt begins while the window's screen is looked at, after the
-    // wire was read at rest (a review of 2026-10-16).
+    // The human's prompt begins after readiness read the wire at rest, as the paste is
+    // handed over (a review of 2026-10-16). One begun while the screen is looked at holds
+    // the window (B1's second read of the wire).
     let human = std::cell::Cell::new(false);
     let host = crate::testing::AnsweringHost::new(|op| {
-        if op == "pane.snapshot" && !human.replace(true) {
+        if op == "pane.write_paste" && !human.replace(true) {
             append(&wire, &asks("mild-coin", "a message of the human's"));
         }
         Ok(serde_json::json!({ "ok": true }))
@@ -457,9 +466,9 @@ fn a_message_pasted_as_a_prompt_begins_while_the_window_is_found_ready_is_held_i
         finished(window.ready(&host, &pane)),
         Ok(Readiness::Ready)
     ));
-    assert!(human.get(), "the prompt began during the wait");
     let text = "[ConsensFlow m-9 · T-1 · result from @worker]\nRESULT_ONE";
     assert!(finished(window.deliver(&host, &pane, text)).is_ok());
+    assert!(human.get(), "the prompt began as the paste was handed over");
     // The TUI queued the paste behind the human's turn: held, however long its agent
     // says nothing.
     fakes.time.settle_at(EPOCH_MS + PROMPT_GAP_MS);

@@ -139,6 +139,35 @@ fn a_log_that_was_replaced_forgets_the_prompts_of_the_one_it_replaced() {
     assert_eq!(log.said().asked_at, None);
 }
 
+/// A log replaced is read from its start, and the turns since the paste with it: what
+/// the log before said of them (the turn the paste went into, a turn's end since it) is
+/// none of the new one's, which says them again where it holds them.
+#[test]
+fn a_log_that_was_replaced_says_the_turns_since_the_paste_as_the_new_one_has_them() {
+    let header = "[ConsensFlow m-9 | T-1 | result from @worker]";
+    // The paste's own prompt was asked in the log before: the prompt of other words the
+    // new one begins with is no turn the paste went into.
+    let log = Log::new();
+    log.write(&shows("s"));
+    log.wire.expect(header);
+    log.append(&asks(2, "s", &format!("{header}\nRESULT_ONE")));
+    assert!(log.said().held);
+    log.write(&asks(3, "s", "hello"));
+    assert!(!log.said().held, "the turn the log before held it in");
+    // A turn ended since the paste in the log before: the new one's first prompt read
+    // after the paste is one the TUI may have queued it behind, as at the paste.
+    let log = Log::new();
+    log.write(&shows("s"));
+    log.wire.expect(header);
+    log.append(&asks(2, "s", "a message of the human's"));
+    log.append(&ends("s"));
+    assert!(!log.said().held);
+    log.write(&format!("{}{}", shows("s"), asks(3, "s", "hi")));
+    assert!(log.said().held, "a turn's end of the log before");
+    log.append(&ends("s"));
+    assert!(!log.said().held);
+}
+
 #[test]
 fn the_message_last_pasted_is_held_in_the_turn_of_the_tuis_prompt_whose_words_begin_with_it_until_that_turn_ends(
 ) {

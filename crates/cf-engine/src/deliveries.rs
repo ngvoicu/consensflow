@@ -99,8 +99,13 @@ impl Dispatcher {
             return Ok(());
         }
         let held = match ready {
-            Readiness::Ready => None,
+            Readiness::Ready => {
+                self.came_up(record);
+                None
+            }
             Readiness::Held(held) => Some(held),
+            // A window that never will be ready is a launch that did not come up.
+            Readiness::Unfit(why) => return self.give_up_unfit(record, &message, &why).await,
         };
         // Held for what the human typed and has not sent: the board says so.
         record.delivery.borrow_mut().unsent = held == Some(Held::Unsent);

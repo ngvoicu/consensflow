@@ -49,12 +49,58 @@ pub struct Message {
     /// `user`, `assistant`, `tool` or `system`.
     pub role: String,
     pub text: String,
+    /// The message as Devin stored it, whole: what it says besides its words
+    /// (the tool calls of an assistant's, what a tool's came back with).
+    pub raw: Value,
+}
+
+/// A tool an assistant's message calls: the id of the call, which the tool's own
+/// message answers by, the tool's name, and the call as it was stored, whole (its
+/// arguments among it).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Call {
+    pub id: String,
+    pub name: String,
+    pub text: String,
+}
+
+impl Call {
+    /// Whether `words` are anywhere in the call as it was stored.
+    pub fn says(&self, words: &str) -> bool {
+        self.text.contains(words)
+    }
 }
 
 impl Message {
     /// How many times `marker` is in its words.
     pub fn times(&self, marker: &str) -> usize {
         self.text.matches(marker).count()
+    }
+
+    /// The tools it calls, in the order it calls them: none for a message that
+    /// calls none.
+    pub fn calls(&self) -> Vec<Call> {
+        let calls = self.raw["tool_calls"].as_array();
+        calls
+            .into_iter()
+            .flatten()
+            .map(|call| Call {
+                id: call["id"].as_str().unwrap_or_default().to_owned(),
+                name: call["name"].as_str().unwrap_or_default().to_owned(),
+                text: call.to_string(),
+            })
+            .collect()
+    }
+
+    /// The call a tool's message answers, by the id of the call.
+    pub fn answers(&self) -> Option<&str> {
+        self.raw["tool_call_id"].as_str()
+    }
+
+    /// Whether `marker` is anywhere in the message as it was stored: its words, a
+    /// tool's result, the arguments of a call, whatever Devin kept of it.
+    pub fn holds(&self, marker: &str) -> bool {
+        self.raw.to_string().contains(marker)
     }
 }
 
@@ -66,6 +112,16 @@ impl Message {
 /// rig's Devin worker opened again after a restart, 2026-10-16), where the daemon's
 /// look takes the record for unread and looks again.
 pub fn messages(file: &Path) -> Result<Vec<Message>> {
+    read(file, None)
+}
+
+/// [`messages`] of the one session `session`.
+pub fn messages_of(file: &Path, session: &str) -> Result<Vec<Message>> {
+    read(file, Some(session))
+}
+
+/// The messages of `session`, or of every session, as [`messages`] says them.
+fn read(file: &Path, session: Option<&str>) -> Result<Vec<Message>> {
     let said = |failed: rusqlite::Error| {
         Error::Daemon(format!("Devin's store {}: {failed}", file.display()))
     };
@@ -76,10 +132,13 @@ pub fn messages(file: &Path) -> Result<Vec<Message>> {
     .map_err(said)?;
     db.busy_timeout(HELD_FOR).map_err(said)?;
     let mut rows = db
-        .prepare("SELECT chat_message FROM message_nodes ORDER BY row_id")
+        .prepare(
+            "SELECT chat_message FROM message_nodes WHERE (?1 IS NULL OR session_id = ?1) \
+             ORDER BY row_id",
+        )
         .map_err(said)?;
     let written: Vec<String> = rows
-        .query_map([], |row| row.get(0))
+        .query_map([session], |row| row.get(0))
         .map_err(said)?
         .collect::<std::result::Result<_, _>>()
         .map_err(said)?;
@@ -89,18 +148,19 @@ pub fn messages(file: &Path) -> Result<Vec<Message>> {
         let Ok(message) = serde_json::from_str::<Value>(&row) else {
             continue;
         };
-        let Some(id) = message["message_id"].as_str() else {
+        let Some(id) = message["message_id"].as_str().map(str::to_owned) else {
             continue;
         };
         let message = Message {
-            id: id.to_owned(),
+            id: id.clone(),
             role: message["role"].as_str().unwrap_or_default().to_owned(),
             text: words(&message["content"]),
+            raw: message,
         };
-        match at.get(id) {
+        match at.get(&id) {
             Some(&place) => found[place] = message,
             None => {
-                at.insert(id.to_owned(), found.len());
+                at.insert(id, found.len());
                 found.push(message);
             }
         }
@@ -148,8 +208,14 @@ mod tests {
         );
     }
 
-    /// A store of these rows: a message each, as its JSON.
+    /// A store of these rows: a message each, as its JSON, of one session.
     fn store_of(rows: &[Value]) -> (tempfile::TempDir, PathBuf) {
+        let rows: Vec<(&str, Value)> = rows.iter().map(|row| ("s", row.clone())).collect();
+        store_in(&rows)
+    }
+
+    /// A store of these rows: the session of each, and its message as JSON.
+    fn store_in(rows: &[(&str, Value)]) -> (tempfile::TempDir, PathBuf) {
         let folder = tempfile::tempdir().unwrap();
         let file = folder.path().join("sessions.db");
         let db = Connection::open(&file).unwrap();
@@ -158,10 +224,10 @@ mod tests {
                node_id TEXT, parent_node_id TEXT, chat_message TEXT, created_at TEXT);",
         )
         .unwrap();
-        for row in rows {
+        for (session, row) in rows {
             db.execute(
-                "INSERT INTO message_nodes (session_id, chat_message) VALUES ('s', ?)",
-                [row.to_string()],
+                "INSERT INTO message_nodes (session_id, chat_message) VALUES (?, ?)",
+                [*session, row.to_string().as_str()],
             )
             .unwrap();
         }
@@ -219,6 +285,63 @@ mod tests {
         writer.execute_batch("COMMIT").unwrap();
         let found = reading.join().unwrap().unwrap();
         assert_eq!(found.len(), 1, "read, not a locked store");
+    }
+
+    #[test]
+    fn the_messages_of_one_session_are_those_of_it_alone() {
+        let (_folder, file) = store_in(&[
+            (
+                "one",
+                json!({ "message_id": "a", "role": "user", "content": "first" }),
+            ),
+            (
+                "two",
+                json!({ "message_id": "b", "role": "user", "content": "other" }),
+            ),
+            (
+                "one",
+                json!({ "message_id": "c", "role": "assistant", "content": "second" }),
+            ),
+        ]);
+        let of = |session: &str| -> Vec<String> {
+            messages_of(&file, session)
+                .unwrap()
+                .into_iter()
+                .map(|message| message.text)
+                .collect()
+        };
+        assert_eq!(of("one"), ["first", "second"]);
+        assert_eq!(of("two"), ["other"]);
+        assert!(of("three").is_empty());
+        assert_eq!(messages(&file).unwrap().len(), 3);
+    }
+
+    #[test]
+    fn a_message_tells_the_tools_it_calls_the_call_it_answers_and_whatever_it_holds() {
+        let (_folder, file) = store_of(&[
+            json!({ "message_id": "a", "role": "assistant", "content": "", "tool_calls": [
+                { "id": "call-1", "name": "run_command", "arguments": { "command": "echo x" } },
+                { "id": "call-2", "name": "write" },
+            ] }),
+            json!({ "message_id": "b", "role": "tool", "tool_call_id": "call-1",
+                   "content": [{ "type": "tool_result",
+                                 "text": "Tool execution was rejected: User skipped this tool call" }] }),
+            json!({ "message_id": "c", "role": "assistant", "content": "done" }),
+        ]);
+        let found = messages(&file).unwrap();
+        let calls = found[0].calls();
+        let named: Vec<(&str, &str)> = calls.iter().map(|call| (&*call.id, &*call.name)).collect();
+        assert_eq!(named, [("call-1", "run_command"), ("call-2", "write")]);
+        // The call is kept whole, and says what it was asked to do.
+        assert!(calls[0].says("echo x") && !calls[1].says("echo x"));
+        assert_eq!(found[0].answers(), None);
+        assert_eq!(found[1].answers(), Some("call-1"));
+        assert!(found[2].calls().is_empty());
+        // What a tool came back with is not its words (the part is no text), and is in it.
+        assert_eq!(found[1].text, "");
+        assert!(found[1].holds("User skipped this tool call"));
+        assert!(found[0].holds("echo x"));
+        assert!(!found[2].holds("User skipped this tool call"));
     }
 
     #[test]

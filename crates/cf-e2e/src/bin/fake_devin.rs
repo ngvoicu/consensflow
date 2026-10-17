@@ -36,12 +36,23 @@
 //! never took it (`FAKE_DEVIN_DROP`), or end as its agent takes a message, once the
 //! message is recorded (`FAKE_DEVIN_CRASH`).
 //!
+//! It is in the permission mode Devin is in (`permission`): full permission where it
+//! was opened with `--permission-mode dangerous`, but a session resumed after a quit
+//! cut its first turn (its store has the turn's message and no end of any turn), which
+//! comes back in the normal mode whatever the flag says, as Devin 3000.11.92 does. Its
+//! wire says the mode in the configuration it opens with, and each change of it. In the
+//! normal mode a call of the prompt file's turn is refused ("User skipped this tool
+//! call") and a pasted turn's opens a dialog, which Enter answers (its first option,
+//! approve once) and Escape leaves; `/bypass` switches it.
+//!
 //! The terminal and the signals are the other stand-in's own (`fake_agent/`).
 
 // The parts are in `fake_devin/` and `fake_agent/`: cargo looks for the modules
 // of a binary's root file beside it, where each would be a binary of its own.
 #[path = "fake_devin/args.rs"]
 mod args;
+#[path = "fake_devin/calls.rs"]
+mod calls;
 #[path = "fake_devin/command.rs"]
 mod command;
 #[path = "fake_devin/crash.rs"]
@@ -50,6 +61,8 @@ mod crash;
 mod escapes;
 #[path = "fake_devin/faults.rs"]
 mod faults;
+#[path = "fake_devin/permission.rs"]
+mod permission;
 #[path = "fake_agent/signals.rs"]
 mod signals;
 #[path = "fake_agent/stop.rs"]
@@ -78,6 +91,7 @@ use cf_e2e::process::own_var;
 use args::{Asked, Launch};
 use escapes::Escapes;
 use faults::Fault;
+use permission::{Answer, Permission};
 use stop::Stop;
 use store::Store;
 use terminal::{Event, Keys};
@@ -145,8 +159,13 @@ fn run(launch: &Launch, signals: signals::Signals) -> Result<Infallible, String>
         .clone()
         .unwrap_or_else(|| format!("fake-devin-{}", std::process::id()));
     let store = Store::open(&file, &session)?;
+    // Full permission where it was asked for, but on a session whose first turn a quit
+    // cut: Devin brings that one back in the normal mode, whatever the flag says.
+    let asked_full = launch.permission_mode.as_deref() == Some("dangerous");
+    let cut_in_its_first_turn = launch.resume.is_some() && !store.finished_a_turn();
+    let permission = Arc::new(Permission::new(asked_full && !cut_in_its_first_turn));
     let mut wire = Wire::open(Path::new(&wire_log), &session).map_err(said)?;
-    wire.announce().map_err(said)?;
+    wire.announce(permission.mode()).map_err(said)?;
     signals::leave_on(signals, || leave(0));
     say(&format!("fake devin started on {session}\n")).map_err(said)?;
 
@@ -155,7 +174,8 @@ fn run(launch: &Launch, signals: signals::Signals) -> Result<Infallible, String>
         own_var(turn::FIRST_WORD_VARIABLE).as_deref(),
         own_var(turn::WORK_VARIABLE).as_deref(),
     );
-    let (turns, queued) = mpsc::channel::<String>();
+    // Each message, and whether it is the first of the launch, in its prompt file.
+    let (turns, queued) = mpsc::channel::<(String, bool)>();
     // The jobs of a window are in `jobs/` beside the daemon's home, where the rig looks.
     let jobs = own_var("CONSENSFLOW_HOME")
         .and_then(|home| Path::new(&home).parent().map(|folder| folder.join("jobs")));
@@ -165,16 +185,19 @@ fn run(launch: &Launch, signals: signals::Signals) -> Result<Infallible, String>
             .as_deref()
             .filter(|_| launch.resume.is_none()),
     );
+    let folder = std::env::current_dir().map_err(said)?;
     {
-        let stop = Arc::clone(&stop);
+        let (stop, permission) = (Arc::clone(&stop), Arc::clone(&permission));
         thread::spawn(move || {
-            let mut window = Window::new(store, wire, stop, io::stdout(), pace).crashing_on(crash);
+            let mut window = Window::new(store, wire, stop, io::stdout(), pace)
+                .in_mode(permission, folder)
+                .crashing_on(crash);
             if let Some(folder) = jobs {
                 window = window.leaving_jobs_in(folder, std::process::id(), command::THINKING);
             }
             // One turn at a time, in the order the messages came.
-            for text in queued {
-                if let Err(failed) = window.take(&text) {
+            for (text, prompt_file) in queued {
+                if let Err(failed) = window.take_message(&text, prompt_file) {
                     let _ = writeln!(io::stderr(), "fake-devin: {failed}");
                     leave(1);
                 }
@@ -183,7 +206,7 @@ fn run(launch: &Launch, signals: signals::Signals) -> Result<Infallible, String>
     }
     if let Some(file) = &launch.prompt_file {
         let first = std::fs::read_to_string(file).map_err(|failed| format!("{file}: {failed}"))?;
-        let _ = turns.send(first);
+        let _ = turns.send((first, true));
     }
 
     // Raw input, like a real TUI: a bracketed paste is text, Enter outside one
@@ -197,15 +220,19 @@ fn run(launch: &Launch, signals: signals::Signals) -> Result<Infallible, String>
         for event in events {
             match event {
                 Event::Submit(text) if dropping.meets(&text) => {}
+                // Enter at a dialog takes its first option; anywhere else it submits.
                 Event::Submit(text) => {
-                    let _ = turns.send(text);
+                    if !permission.answer(Answer::Approved) {
+                        let _ = turns.send((text, false));
+                    }
                 }
                 // A real TUI draws what was pasted, and a paste's Enter waits for that.
                 Event::Pasted(characters) => {
                     let _ = say(&format!("[pasted, {characters} characters]\n"));
                 }
+                // Escape at a dialog leaves it; anywhere else, two stop a turn.
                 Event::Escape => {
-                    if escapes.press(Instant::now()) {
+                    if !permission.answer(Answer::Cancelled) && escapes.press(Instant::now()) {
                         stop.press();
                     }
                 }
