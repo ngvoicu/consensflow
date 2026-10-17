@@ -496,6 +496,13 @@ impl Rig {
     /// that, and the host gives a program that does not leave ten seconds before
     /// it kills it.
     pub fn close_within(mut self, within: Duration) -> Result<()> {
+        self.shut_down_within(within)
+    }
+
+    /// [`Rig::close_within`], but the rig is kept: what the daemon and the pane
+    /// host did not end in `within` is still running until the rig is dropped,
+    /// which kills them, for a look at what a rig that did not end left.
+    pub fn shut_down_within(&mut self, within: Duration) -> Result<()> {
         self.shutdown(within)
     }
 

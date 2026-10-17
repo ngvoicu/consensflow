@@ -92,6 +92,8 @@ rig-background-grace = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", 
 rig-stranger = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "stranger::"]
 # How the rig tells the stranger's own end from one it was given.
 e2e-lib-stranger = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "rig::stranger::"]
+# What a project of the live checks that does not end in time says it left.
+rig-members-left = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "live_members::a_project_that_does_not_end_in_time"]
 # T-15's shape: a command that never exits, and the final answer of the worker that left it.
 regression-never-exits = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_command_that_never_exits"]
 # The same of a Devin worker whose command goes on reporting on its wire after its turn ended (zeewin, 2026-10-14).
@@ -1233,6 +1235,33 @@ runs = ["e2e-lib-stranger"]
 file = "crates/cf-e2e/src/rig/stranger.rs"
 find = '    if !released {'
 replace = '    if false && !released {'
+
+# A project that did not end in time said it had left no pane host, 3 times in 6 under
+# load (2026-10-17): the rig was dropped, which kills the host still waiting for its
+# windows, before what was left was listed, and a look at the processes made after the
+# kill was the last.
+[[plant]]
+name = "background rig: what a project that did not end left is listed once the rig has killed it"
+meant = "a_project_that_does_not_end_in_time_says_which_of_the_processes_it_started_were_left"
+runs = ["rig-members-left"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/closing.rs"
+find = '''
+    let said = closed.map_err(|failed| {'''
+replace = '''
+    drop(rig);
+    let said = closed.map_err(|failed| {'''
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/closing.rs"
+find = '''
+    drop(rig);
+    said
+}'''
+replace = '''
+    said
+}'''
 
 # What an ending names of what the bound refuses: the turn's work the chain of processes
 # proved and nothing shows is the window's is not signalled, and is not dropped: the chief is

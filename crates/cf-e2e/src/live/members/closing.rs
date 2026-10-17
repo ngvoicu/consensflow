@@ -101,28 +101,18 @@ fn left_of(alive: &[Listed], started: &BTreeSet<u32>) -> Vec<Process> {
         .collect()
 }
 
-/// What the looks at the rig's processes have seen.
-#[derive(Default)]
-struct Seen {
-    /// The processes it had at the last look.
-    last: Vec<Process>,
-    /// Every one of them any look has seen.
-    ever: BTreeSet<u32>,
-}
-
-/// One look at what this process started, written into `seen`.
-fn look(seen: &Mutex<Seen>) {
+/// One look at what this process started, its processes written into `seen`.
+fn look(seen: &Mutex<BTreeSet<u32>>) {
     let tree = descendants(&listing(), std::process::id());
-    let mut seen = seen.lock().unwrap_or_else(PoisonError::into_inner);
-    seen.ever
+    seen.lock()
+        .unwrap_or_else(PoisonError::into_inner)
         .extend(tree.iter().map(|listed| listed.process.pid));
-    seen.last = tree.into_iter().map(|listed| listed.process).collect();
 }
 
 /// Ends `rig`, giving its daemon and its pane host `within` each. One that does
-/// not end is an error that says which of the processes it started were there.
-pub fn end_within(rig: Rig, within: Duration) -> Result {
-    let seen: Arc<Mutex<Seen>> = Arc::new(Mutex::new(Seen::default()));
+/// not end is an error that says which of the processes it started were left.
+pub fn end_within(mut rig: Rig, within: Duration) -> Result {
+    let seen: Arc<Mutex<BTreeSet<u32>>> = Arc::default();
     let done = Arc::new(AtomicBool::new(false));
     // The first look is made before the rig begins to end: a window that leaves the
     // moment it is asked (a stand-in does) and the jobs it leaves to the machine are
@@ -138,29 +128,27 @@ pub fn end_within(rig: Rig, within: Duration) -> Result {
             look(&seen);
         })
     };
-    let closed = rig.close_within(within);
+    let closed = rig.shut_down_within(within);
     done.store(true, Ordering::Relaxed);
     let _ = looking.join();
-    closed.map_err(|failed| {
+    // What is left is listed before the rig is dropped, which kills the daemon and the
+    // pane host it could not end: a listing after that would not have the host that
+    // was still waiting for its windows.
+    let said = closed.map_err(|failed| {
         let seen = seen.lock().unwrap_or_else(PoisonError::into_inner);
-        // What was there at the last look (the rig's own end took some of it since), and
-        // what is left of the rig now that no look by the parents finds.
-        let mut left = seen.last.clone();
-        for process in left_of(&listing(), &seen.ever) {
-            if !left.iter().any(|known| known.pid == process.pid) {
-                left.push(process);
-            }
-        }
+        let mut left = left_of(&listing(), &seen);
         left.sort_by_key(|process| process.pid);
         Error::Timeout(format!(
-            "{failed}; the processes it started, left or last looked at: {}",
+            "{failed}; the processes it started that were left: {}",
             if left.is_empty() {
                 "none".to_owned()
             } else {
                 shown(&left).join("; ")
             }
         ))
-    })
+    });
+    drop(rig);
+    said
 }
 
 #[cfg(test)]

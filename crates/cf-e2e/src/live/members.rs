@@ -467,7 +467,7 @@ impl Members {
     /// Ends the rig: the daemon, the pane host and their windows, and the
     /// records of the stand-ins. The harnesses' windows are given the time the
     /// host gives them to leave, and a rig that does not end says which of its
-    /// processes were left or last looked at ([`closing`]).
+    /// processes were left ([`closing`]).
     pub fn close(self) -> Result {
         self.close_within(closing::EXIT)
     }
