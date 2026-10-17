@@ -145,6 +145,17 @@ pub fn end_within(mut rig: Rig, within: Duration) -> Result {
     said
 }
 
+/// The looker's stop: its flag is set when it goes, however that is. A shutdown or a
+/// listing that panics would otherwise leave the looker looking, and the scope that
+/// waits for its threads before the panic goes on waiting for ever.
+struct Stop<'a>(&'a AtomicBool);
+
+impl Drop for Stop<'_> {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::Relaxed);
+    }
+}
+
 /// [`end_within`] with what it ends by (`shut_down`), what lists the machine's
 /// processes (`list`) and how often they are looked at (`every`) given.
 fn ended(
@@ -166,12 +177,13 @@ fn ended(
             }
             look(&seen, &list);
         });
+        let stop = Stop(&done);
         // What was left is listed the moment the shutdown gives up, on this thread: a
         // look in flight can take as long as `ps` is let run (half a minute, under
         // load), past the host's grace, after which the host has ended the window's
         // jobs itself, and a listing that waited for it would not have them.
         let failed = shut_down().err().map(|failed| (failed, list()));
-        done.store(true, Ordering::Relaxed);
+        drop(stop);
         let _ = looking.join();
         let seen = seen.lock().unwrap_or_else(PoisonError::into_inner);
         match failed {
@@ -323,13 +335,16 @@ mod tests {
 
     #[test]
     fn what_was_left_is_listed_as_the_shutdown_gives_up_and_not_once_a_look_in_flight_has_ended() {
-        // A look in flight takes as long as the host's grace (a `ps` under load), after
-        // which the host has ended the window's job and only the host is left; the
-        // listing taken as the shutdown gives up lets that look go.
-        const GRACE: Duration = Duration::from_secs(2);
+        // The looker's first look is in flight as the shutdown gives up, and ends only
+        // once what was left is listed: a listing that waits for it never comes, and
+        // the watchdog (time for nothing else) ends the look, as the host's grace would
+        // end the job, and fails the case.
+        const WATCHDOG: Duration = Duration::from_secs(20);
         let world = Mutex::new(a_rig_waiting_for_its_job());
         let here = thread::current().id();
         let listed_here = AtomicUsize::new(0);
+        let first_look = AtomicBool::new(true);
+        let held = AtomicBool::new(false);
         let (in_flight, a_look_is_in_flight) = mpsc::channel();
         let (let_go, let_go_of) = mpsc::channel();
         let let_go_of = Mutex::new(let_go_of);
@@ -342,18 +357,22 @@ mod tests {
                 }
                 return Ok(all);
             }
-            let _ = in_flight.send(());
-            if let_go_of.lock().unwrap().recv_timeout(GRACE).is_err() {
-                world
-                    .lock()
-                    .unwrap()
-                    .retain(|listed| listed.process.command == "consensflow-bridge");
+            // The looker's later looks are not held: only the first is in flight.
+            if first_look.swap(false, Ordering::SeqCst) {
+                let _ = in_flight.send(());
+                if let_go_of.lock().unwrap().recv_timeout(WATCHDOG).is_err() {
+                    held.store(true, Ordering::SeqCst);
+                    world
+                        .lock()
+                        .unwrap()
+                        .retain(|listed| listed.process.command == "consensflow-bridge");
+                }
             }
             Ok(world.lock().unwrap().clone())
         };
         let shut_down = || {
             a_look_is_in_flight
-                .recv_timeout(Duration::from_secs(30))
+                .recv_timeout(WATCHDOG)
                 .expect("the looker made no look");
             did_not_exit()
         };
@@ -364,6 +383,10 @@ mod tests {
             .split("the processes it started that were left: ")
             .nth(1)
             .unwrap_or_else(|| panic!("{failed}"));
+        assert!(
+            !held.load(Ordering::SeqCst),
+            "the listing waited for the look in flight: {failed}"
+        );
         for pid in [900_001, 900_003, 900_004] {
             assert!(left.contains(&format!("{pid} (")), "{pid}: {failed}");
         }
@@ -404,5 +427,65 @@ mod tests {
             "process did not exit; the processes it started that were left could not be \
              listed (ps: not found); no look could list them either"
         );
+    }
+
+    /// What a panic in `ended` was, if it ended by one: the call is made on a thread of
+    /// its own, so that one that never ends is said, after `watchdog`, and not waited
+    /// for.
+    fn panic_of(
+        call: impl FnOnce() -> Result + Send + 'static,
+        watchdog: Duration,
+    ) -> std::result::Result<Option<String>, String> {
+        let (ended, end) = mpsc::channel();
+        thread::spawn(move || {
+            let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(call));
+            let _ = ended.send(caught.err().map(|payload| {
+                payload.downcast_ref::<&str>().map_or_else(
+                    || "a panic that says nothing".to_owned(),
+                    |said| (*said).to_owned(),
+                )
+            }));
+        });
+        end.recv_timeout(watchdog).map_err(|_| {
+            format!("the call had not ended after {watchdog:?}: the looker never stopped")
+        })
+    }
+
+    #[test]
+    fn a_shutdown_or_a_listing_that_panics_ends_the_call_with_its_panic_and_the_looker_with_it() {
+        const WATCHDOG: Duration = Duration::from_secs(20);
+        let shutdown = panic_of(
+            || {
+                ended(
+                    || panic!("the shutdown panicked"),
+                    || Ok(a_rig_waiting_for_its_job()),
+                    Duration::from_millis(10),
+                )
+            },
+            WATCHDOG,
+        );
+        assert_eq!(shutdown, Ok(Some("the shutdown panicked".to_owned())));
+
+        let listing = panic_of(
+            || {
+                let here = thread::current().id();
+                let listed_here = AtomicUsize::new(0);
+                ended(
+                    did_not_exit,
+                    move || {
+                        // The first is the look before the rig ends, the second what was left.
+                        if thread::current().id() == here
+                            && listed_here.fetch_add(1, Ordering::SeqCst) == 1
+                        {
+                            panic!("the listing panicked");
+                        }
+                        Ok(a_rig_waiting_for_its_job())
+                    },
+                    Duration::from_millis(10),
+                )
+            },
+            WATCHDOG,
+        );
+        assert_eq!(listing, Ok(Some("the listing panicked".to_owned())));
     }
 }

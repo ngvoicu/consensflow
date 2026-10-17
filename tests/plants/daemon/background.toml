@@ -1265,8 +1265,8 @@ replace = '''
 # The reviews of that fix (Astra and Sol, 2026-10-17): the listing of what was left
 # waited for the looker's look in flight, whose `ps` may run half a minute under load,
 # past the host's grace, after which the host has ended the window's job itself. This
-# plant and the next run the library's tests on processes made up, so unlike the closes
-# above they are caught on Windows too.
+# plant and the two after it run the library's tests on processes made up, so unlike the
+# closes above they are caught on Windows too.
 [[plant]]
 name = "background rig: what a project that did not end left is listed once the look in flight has ended"
 meant = "what_was_left_is_listed_as_the_shutdown_gives_up_and_not_once_a_look_in_flight_has_ended"
@@ -1276,12 +1276,12 @@ runs = ["e2e-lib-closing"]
 file = "crates/cf-e2e/src/live/members/closing.rs"
 find = '''
         let failed = shut_down().err().map(|failed| (failed, list()));
-        done.store(true, Ordering::Relaxed);
+        drop(stop);
         let _ = looking.join();
 '''
 replace = '''
         let failed = shut_down().err();
-        done.store(true, Ordering::Relaxed);
+        drop(stop);
         let _ = looking.join();
         let failed = failed.map(|failed| (failed, list()));
 '''
@@ -1297,6 +1297,33 @@ runs = ["e2e-lib-closing"]
 file = "crates/cf-e2e/src/live/members/closing.rs"
 find = "    match now {"
 replace = "    match Ok::<_, String>(now.unwrap_or_default()) {"
+
+# A shutdown or a listing that panicked skipped the looker's stop, and the scope waited
+# for the looker for ever (Astra and Sol, 2026-10-17): the stop is a guard, set however
+# the call ends.
+[[plant]]
+name = "background rig: the looker of a project that did not end is stopped only when nothing panics"
+meant = "a_shutdown_or_a_listing_that_panics_ends_the_call_with_its_panic_and_the_looker_with_it"
+runs = ["e2e-lib-closing"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/closing.rs"
+find = '''
+        let stop = Stop(&done);
+'''
+replace = '''
+'''
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/closing.rs"
+find = '''
+        drop(stop);
+        let _ = looking.join();
+'''
+replace = '''
+        done.store(true, Ordering::Relaxed);
+        let _ = looking.join();
+'''
 
 # What an ending names of what the bound refuses: the turn's work the chain of processes
 # proved and nothing shows is the window's is not signalled, and is not dropped: the chief is
