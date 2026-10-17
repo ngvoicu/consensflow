@@ -199,9 +199,9 @@ pub(crate) fn release_carried(store: &Store, task_id: i64) -> Result<(), LedgerE
     Ok(())
 }
 
-/// The last schema a build with the Node daemon wrote (3.0.0-alpha.82's): a ledger
-/// opened at it may hold what that daemon left (`release_stranded`).
-const NODE_SCHEMA: i64 = 11;
+/// The schema of the migration (0019) that let go of what rode in every carrier on
+/// its way when a build before this one stopped (`release_stranded`).
+pub(crate) const RELEASED_AT: i64 = 19;
 
 /// What a daemon that knows no carriers left riding in one. A row is in the
 /// paste of a carrier while the carrier waits for it (`queued` or `gated`) and
@@ -221,32 +221,26 @@ const NODE_SCHEMA: i64 = 11;
 /// in its paste, and the start settles them with it, received with it where the
 /// window's record shows its marker and queued again with it where it does not.
 /// Let go of it here, they went again on their own after a paste that had them (a
-/// review of 2026-10-16: the answers kept for a window pasted twice). A carrier the
-/// Node daemon was pasting when it stopped pasted its own words alone: kept, its
-/// rows would be taken for received with it, so they are let go of, as before.
-/// `written_at`, the schema the file was at when it was opened, tells which it may
-/// be. Carriers first shipped in 3.0.0-alpha.82, whose Node daemon ran where the
-/// home held the `use-node` file (2026-10-08); it wrote schema 11, and so did
-/// alpha.83 and 3.0.0, which had no Node daemon. From 3.0.1 (schema 12) the start
-/// let go of the set of every carrier on its way, so a file past 11 holds none that
-/// Node left. At 11 nothing tells the two daemons' carriers apart: each is let go
-/// of, and the rows of one that alpha.83 or 3.0.0 was pasting go again on their own
-/// after a paste that had them, as they did at those builds' own starts (the
-/// reviews of 2026-10-16: kept at 11, an answer Node never pasted was confirmed).
-pub(crate) fn release_stranded(store: &mut Store, written_at: i64) -> Result<(), LedgerError> {
+/// review of 2026-10-16: the answers kept for a window pasted twice). Only a carrier
+/// this ledger began is so: it froze the set at the first paste. One an earlier
+/// build was pasting may hold a row its paste never had (the Node daemon of
+/// 3.0.0-alpha.82 pasted a carrier's words alone, and up to 3.0.4 a row could join a
+/// carrier whose first paste was late and that waited again), and migration 0019 let
+/// go of what each such carrier carried, in the step that wrote its version, as
+/// every earlier build's start did (the reviews of 2026-10-16: a marker found then
+/// took an answer no paste had held for received). The tasks those rows are about
+/// are reconciled by the start that ran it (`reconcile_released`).
+pub(crate) fn release_stranded(store: &mut Store) -> Result<(), LedgerError> {
     store.write(|store| {
         let carriers: Vec<(i64, i64)> = store
             .db
             .prepare(
                 "SELECT DISTINCT m.carried_by, m.project_id FROM message m
                  JOIN message c ON c.id = m.carried_by
-                 WHERE m.state = 'queued' AND c.state NOT IN ('queued', 'gated')
-                   AND (c.state != 'delivering' OR ?1)
+                 WHERE m.state = 'queued' AND c.state NOT IN ('queued', 'gated', 'delivering')
                  ORDER BY m.carried_by",
             )?
-            .query_map([written_at <= NODE_SCHEMA], |row| {
-                Ok((row.get(0)?, row.get(1)?))
-            })?
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
             .collect::<rusqlite::Result<_>>()?;
         let mut tasks = Vec::new();
         for (carrier, project) in carriers {
@@ -275,6 +269,29 @@ pub(crate) fn release_stranded(store: &mut Store, written_at: i64) -> Result<(),
                 json!({ "carrier": carrier, "released": released }),
             )?;
         }
+        for task in tasks {
+            reconcile(store, task)?;
+        }
+        Ok(())
+    })
+}
+
+/// The tasks of the rows migration 0019 let go of, reconciled once each by the start
+/// that ran it, as the start of an earlier build reconciled what it let go of: a row
+/// the log says was let go of that waits still, on its own. Run at a start that took
+/// the ledger past [`RELEASED_AT`]; one that stopped before this goes on to the
+/// carrier's own settling, whose receipt reconciles the same task.
+pub(crate) fn reconcile_released(store: &mut Store) -> Result<(), LedgerError> {
+    store.write(|store| {
+        let tasks = ids(
+            store,
+            "SELECT DISTINCT m.task_id FROM event e, json_each(e.data, '$.released') r
+             JOIN message m ON m.id = r.value
+             WHERE e.kind = 'message.uncarried' AND m.state = 'queued'
+               AND m.carried_by IS NULL AND m.task_id IS NOT NULL
+             ORDER BY m.task_id",
+            [],
+        )?;
         for task in tasks {
             reconcile(store, task)?;
         }

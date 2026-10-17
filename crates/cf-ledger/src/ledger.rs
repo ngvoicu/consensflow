@@ -18,7 +18,7 @@ use cf_base::time::{Clock, SystemClock};
 use rusqlite::{Connection, ErrorCode};
 use serde_json::Value;
 
-use crate::messages::release_stranded;
+use crate::messages::{reconcile_released, release_stranded, RELEASED_AT};
 use crate::model::LedgerError;
 use crate::names;
 use crate::schema::{migrate, MIGRATIONS};
@@ -68,8 +68,10 @@ pub struct Ledger {
 /// as does a file that is no ledger (`ledger-unreadable`) and one a newer
 /// build wrote (`ledger-newer`). A file the Node daemon last held is taken
 /// as it left it: rows it left under a carrier it never knew of are queued
-/// messages of their own again (`messages::release_stranded`), which the
-/// schema the file was written at tells.
+/// messages of their own again (`messages::release_stranded`). A start that
+/// takes a file past migration 0019, which let go of what rode in every carrier
+/// an earlier build was pasting, reconciles their tasks
+/// (`messages::reconcile_released`).
 pub fn open_ledger(file: &Path, options: Options) -> Result<Ledger, LedgerError> {
     let db = Connection::open(file)?;
     // SQLite's own default waits five seconds for a lock: a second instance
@@ -95,7 +97,10 @@ pub fn open_ledger(file: &Path, options: Options) -> Result<Ledger, LedgerError>
         }
     };
     let mut store = Store::new(db, options.clock, options.names, options.trace);
-    release_stranded(&mut store, written_at)?;
+    release_stranded(&mut store)?;
+    if written_at < RELEASED_AT {
+        reconcile_released(&mut store)?;
+    }
     Ok(Ledger {
         store,
         #[cfg(feature = "test-support")]

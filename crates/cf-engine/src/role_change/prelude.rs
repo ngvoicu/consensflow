@@ -171,7 +171,8 @@ impl Dispatcher {
             launch: true,
             chief: false,
             queued: false,
-            last_held: None,
+            rested_last: None,
+            rest_after_hold: None,
             entered_again: false,
         })
     }

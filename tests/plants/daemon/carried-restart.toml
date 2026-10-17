@@ -4,9 +4,11 @@
 # settles what it carried with it: received with it where the window's record shows the carrier's
 # marker, queued again with it where it does not. Opening the ledger let go of the rows of a carrier
 # that was `delivering`, which a start then pasted again on their own, or sent without their carrier.
-# A ledger written at the schema of the last build with the Node daemon (11, 3.0.0-alpha.82) still
-# lets go of them: Node pasted a carrier's own words alone, and kept, its rows were taken for received
-# with it (the reviews of 2026-10-16).
+# Only a carrier this ledger began is so: it froze the set at the first paste. A carrier an earlier
+# build was pasting may hold a row its recorded paste never had (Node pasted a carrier's own words
+# alone; up to 3.0.4 a row could join a carrier that waited again after a late first paste), and
+# migration 0019 lets go of what each carried, in the step that writes its version, and the start
+# that ran it reconciles their tasks (the reviews of 2026-10-16).
 #
 # The cases are `crates/cf-e2e/tests/regressions/rows_a_paste_carried_pasted_again_after_a_restart.rs`
 # (the real daemon and pane host, a Claude worker and a Devin worker, the paste caught by the rig and
@@ -33,8 +35,8 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/carrying.rs"
-find = "AND (c.state != 'delivering' OR ?1)"
-replace = "AND (c.state != 'delivering' OR ?1 OR 1)"
+find = "WHERE m.state = 'queued' AND c.state NOT IN ('queued', 'gated', 'delivering')"
+replace = "WHERE m.state = 'queued' AND c.state NOT IN ('queued', 'gated')"
 
 [[plant]]
 name = "carried restart: a start lets go of what a carrier on its way carried, and a carrier that never reached the window goes again without it (main, 2026-10-16)"
@@ -44,8 +46,8 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/carrying.rs"
-find = "AND (c.state != 'delivering' OR ?1)"
-replace = "AND (c.state != 'delivering' OR ?1 OR 1)"
+find = "WHERE m.state = 'queued' AND c.state NOT IN ('queued', 'gated', 'delivering')"
+replace = "WHERE m.state = 'queued' AND c.state NOT IN ('queued', 'gated')"
 
 [[plant]]
 name = "carried restart: the ledger opened again lets go of what a carrier on its way carried"
@@ -54,31 +56,61 @@ runs = ["ledger-receipt"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/carrying.rs"
-find = "AND (c.state != 'delivering' OR ?1)"
-replace = "AND (c.state != 'delivering' OR ?1 OR 1)"
+find = "WHERE m.state = 'queued' AND c.state NOT IN ('queued', 'gated', 'delivering')"
+replace = "WHERE m.state = 'queued' AND c.state NOT IN ('queued', 'gated')"
 
 [[plant]]
-name = "carried restart: a ledger at the schema the Node daemon wrote keeps the set of a carrier on its way, and the answer Node never pasted is taken for received with it (the reviews of 2026-10-16)"
+name = "carried restart: migration 0019 lets go of nothing, and an answer no recorded paste held is taken for received with its carrier (the reviews of 2026-10-16)"
+meant = "a_row_node_left_under_a_carrier_on_its_way_is_let_go_of_by_a_start_after_one_that_stopped_between_two_migrations"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0019.sql"
+find = "     WHERE m.state = 'queued' AND c.state = 'delivering';"
+replace = "     WHERE m.state = 'queued' AND c.state = 'delivering' AND 0;"
+
+[[plant]]
+name = "carried restart: migration 0019 lets go of what rides in a carrier that waits too"
+meant = "a_populated_version_18_ledger_is_migrated_to_19_and_again_with_only_what_rode_in_a_carrier_on_its_way_let_go_of"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0019.sql"
+find = "     WHERE m.state = 'queued' AND c.state = 'delivering';"
+replace = "     WHERE m.state = 'queued' AND c.state IN ('delivering', 'queued');"
+
+[[plant]]
+name = "carried restart: migration 0019 logs what it let go of under another name, so the start reconciles none of its tasks"
 meant = "a_row_left_under_a_carrier_node_began_to_paste_is_not_taken_for_received_with_it"
 runs = ["ledger-receipt"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/messages/carrying.rs"
-find = "AND (c.state != 'delivering' OR ?1)"
-replace = "AND (c.state != 'delivering' OR ?1 AND 0)"
+file = "crates/cf-ledger/migrations/0019.sql"
+find = "strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), 'message.uncarried',"
+replace = "strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), 'message.left',"
 
 [[plant]]
-name = "carried restart: a ledger 3.0.1 wrote (schema 12) is taken for one the Node daemon may have written, and its carrier's rows go again after a paste that had them"
-meant = "a_row_left_under_a_carrier_this_daemon_began_to_paste_is_settled_with_it"
+name = "carried restart: migration 0019 logs the carrier for each row it let go of"
+meant = "a_populated_version_18_ledger_is_migrated_to_19_and_again_with_only_what_rode_in_a_carrier_on_its_way_let_go_of"
 runs = ["ledger-receipt"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/src/messages/carrying.rs"
-find = ".query_map([written_at <= NODE_SCHEMA], |row| {"
-replace = ".query_map([written_at <= NODE_SCHEMA + 1], |row| {"
+file = "crates/cf-ledger/migrations/0019.sql"
+find = "json_object('carrier', carrier, 'released', json_group_array(id))"
+replace = "json_object('carrier', carrier, 'released', json_group_array(carrier))"
 
 [[plant]]
-name = "carried restart: the schema a ledger was written at is read after it was migrated, so a ledger Node left is taken for this daemon's"
+name = "carried restart: the start that runs migration 0019 reconciles none of the tasks of what it let go of"
+meant = "a_row_that_joined_a_carrier_an_earlier_build_pasted_again_is_not_taken_for_received_by_its_first_paste"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/ledger.rs"
+find = "    if written_at < RELEASED_AT {"
+replace = "    if written_at < 0 {"
+
+[[plant]]
+name = "carried restart: the schema a ledger was written at is read after it was migrated, so the start that ran migration 0019 reconciles none of the tasks of what it let go of"
 meant = "a_row_left_under_a_carrier_node_began_to_paste_is_not_taken_for_received_with_it"
 runs = ["ledger-receipt"]
 
@@ -120,8 +152,8 @@ runs = ["ledger-receipt"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/carrying.rs"
-find = "WHERE m.state = 'queued' AND c.state NOT IN ('queued', 'gated')"
-replace = "WHERE m.state = 'queued' AND c.state NOT IN ('queued', 'gated', 'delivered')"
+find = "WHERE m.state = 'queued' AND c.state NOT IN ('queued', 'gated', 'delivering')"
+replace = "WHERE m.state = 'queued' AND c.state NOT IN ('queued', 'gated', 'delivering', 'delivered')"
 
 [[plant]]
 name = "carried restart: a row told after a carrier's first paste joins it, and the first paste's marker takes it for received though no paste had it (the reviews of 2026-10-16)"

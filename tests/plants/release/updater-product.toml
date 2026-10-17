@@ -84,12 +84,13 @@ requires = ["app/src-tauri/target/updater-smoke/flip/ConsensFlow.app"]
 [[plant.edit]]
 file = "crates/cf-ledger/src/ledger.rs"
 find = '''
-        migrate(&db, &MIGRATIONS)
+        migrate(&db, &MIGRATIONS)?;
+        Ok(written_at)
     })();'''
 replace = '''
         migrate(&db, &MIGRATIONS)?;
         db.execute_batch("DELETE FROM event")?;
-        Ok(())
+        Ok(written_at)
     })();'''
 
 # The refused update's check: the installed app's, which is the bridge's.

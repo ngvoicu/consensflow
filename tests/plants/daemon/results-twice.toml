@@ -18,9 +18,10 @@
 # What stands against a second paste there: the engine counts the arrival window in the window's
 # rest (`notes-twice.toml`), and a window whose harness says the paste went into a turn it is in still
 # (`Window::held`) is in that turn, however at rest it reads, and its paste never goes again while it
-# is, not even past the half hour after which a paste never shown is pasted again; that half hour
-# counts from the end of the turn that held it, and turns that hold nothing never put it off (the
-# reviews of 2026-10-16; `cf-engine`'s `arrival`, its tests in
+# is, not even past the half hour after which a paste never shown is pasted again; that half hour is
+# the rest the looks saw after the turn that held it ended, from one look at rest to the next, so
+# turns that hold nothing never put it off and a gap in the looks counts none of it (the reviews of
+# 2026-10-16; `cf-engine`'s `arrival`, its tests in
 # `crates/cf-engine/tests/dispatcher/slow_records.rs`). Devin's adapter says so from its wire log: a
 # paste made while a prompt of its TUI was asked is held as long as a prompt is, and so is one a prompt
 # read after it was put to the agent ahead of, while no turn has ended since the paste (it began while
@@ -68,8 +69,13 @@ replace = ""
 
 [[plant.edit]]
 file = "crates/cf-engine/src/arrival.rs"
-find = "        let (rested, turned) = self.rested(record, observed, held);"
-replace = "        let (rested, turned) = (waited, held && false);"
+find = "        } = self.rested(record, observed, held);"
+replace = '''
+        } = Rest {
+            rested: waited,
+            turned: false,
+            ..self.rested(record, observed, held)
+        };'''
 
 [[plant]]
 name = "results twice: the chief at work when the second result comes, the arrival window counted from the hand-over, turns or none (3.0.3)"
@@ -84,8 +90,13 @@ replace = ""
 
 [[plant.edit]]
 file = "crates/cf-engine/src/arrival.rs"
-find = "        let (rested, turned) = self.rested(record, observed, held);"
-replace = "        let (rested, turned) = (waited, held && false);"
+find = "        } = self.rested(record, observed, held);"
+replace = '''
+        } = Rest {
+            rested: waited,
+            turned: false,
+            ..self.rested(record, observed, held)
+        };'''
 
 [[plant]]
 name = "results twice: every paste is held, so a paste Devin's TUI dropped waits half an hour"
@@ -131,14 +142,14 @@ find = "        let overdue = unshown > RECONCILE_MS && at_rest && !held;"
 replace = "        let overdue = waited > RECONCILE_MS && at_rest && !held;"
 
 [[plant]]
-name = "results twice: the half hour counts from the first look that found the paste held, so a turn that held it past half an hour has it pasted again at its end"
-meant = "never_pastes_again_a_paste_held_in_a_turn_however_long_and_gives_its_record_a_window_when_it_ends"
+name = "results twice: the rest a held paste's half hour counts is not begun again by a second turn that holds it"
+meant = "pastes_again_half_an_hour_after_the_turn_that_held_it_ended_a_paste_short_turns_keep_unshown"
 runs = ["engine-slow-records"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/arrival.rs"
-find = "            delivering.last_held = Some(now);"
-replace = "            delivering.last_held.get_or_insert(now);"
+find = "            delivering.rest_after_hold = Some(0);"
+replace = "            delivering.rest_after_hold.get_or_insert(0);"
 
 [[plant]]
 name = "results twice: a held paste is held for good, past the turn it was held in (the reviews of 2026-10-16)"
@@ -148,7 +159,7 @@ runs = ["engine-slow-records"]
 [[plant.edit]]
 file = "crates/cf-engine/src/arrival.rs"
 find = "        let held = self.held(record);"
-replace = "        let held = self.held(record) || delivering.last_held.is_some();"
+replace = "        let held = self.held(record) || delivering.rest_after_hold.is_some();"
 
 [[plant]]
 name = "results twice: round 6's rule put back, once a turn held a paste no half hour is counted, and turns that hold nothing keep it waited for for good (the reviews of 2026-10-16)"
@@ -158,7 +169,40 @@ runs = ["engine-slow-records"]
 [[plant.edit]]
 file = "crates/cf-engine/src/arrival.rs"
 find = "        let overdue = unshown > RECONCILE_MS && at_rest && !held;"
-replace = "        let overdue = unshown > RECONCILE_MS && at_rest && !held && delivering.last_held.is_none();"
+replace = "        let overdue = unshown > RECONCILE_MS && at_rest && !held && after_hold.is_none();"
+
+[[plant]]
+name = "results twice: a held paste's half hour counts from the hand-over, a gap in the looks with it, and it is pasted again at the first look after a laptop's sleep, with no rest (round 7, a review of 2026-10-16)"
+meant = "counts_no_rest_in_a_gap_in_the_looks_that_began_in_the_turn_that_held_the_paste"
+runs = ["engine-slow-records"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = "        let unshown = after_hold.unwrap_or(waited);"
+replace = "        let unshown = waited;"
+
+[[plant]]
+name = "results twice: a look in a turn keeps the last look at rest, so a gap in the looks that began in a turn is counted as rest"
+meant = "counts_no_rest_in_a_gap_in_the_looks_that_began_in_a_turn_after_the_one_that_held_the_paste"
+runs = ["engine-slow-records"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = '''
+            delivering.rested_since = None;
+            delivering.rested_last = None;'''
+replace = '''
+            delivering.rested_since = None;'''
+
+[[plant]]
+name = "results twice: no rest is counted after a turn that held the paste, and turns that hold nothing keep it waited for for good"
+meant = "pastes_again_half_an_hour_after_the_turn_that_held_it_ended_a_paste_short_turns_keep_unshown"
+runs = ["engine-slow-records"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = "            delivering.rested_last = Some(now);"
+replace = ""
 
 # Devin's adapter: what its wire log says of a paste.
 

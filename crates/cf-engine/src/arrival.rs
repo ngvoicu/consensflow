@@ -20,10 +20,15 @@
 //! reviews of 2026-10-16: Devin's word that its queue had the message, which the
 //! human's words quoting a header Devin had dropped gave, kept it waited for for
 //! good). However often the window goes into other turns, a paste the record has not shown
-//! within [`RECONCILE_MS`] of its hand-over, or of the end of the turn its harness held
-//! it in, is pasted again at the window's next rest, so unrelated turns never hold the
-//! queue behind it for good (the reviews of 2026-10-16: once a turn had held a paste
-//! Devin dropped, ten-second turns twenty seconds apart kept it waited for). What a chief's
+//! within [`RECONCILE_MS`] of its hand-over is pasted again at the window's next rest,
+//! so unrelated turns never hold the queue behind it for good (the reviews of
+//! 2026-10-16: once a turn had held a paste Devin dropped, ten-second turns twenty
+//! seconds apart kept it waited for). One its harness held in a turn is given that
+//! half hour of the rest the looks saw after the turn ended, from one look that found
+//! the window at rest to the next: a stretch no look was made in that began in the
+//! turn, or in another, counts none of it (a review of 2026-10-16: looks that stopped
+//! for half an hour, a laptop asleep, while a turn held the paste had it pasted again
+//! at the first look after, with no rest). What a chief's
 //! launch put ahead of its queue (the role it says first, and the message that
 //! role displaced) is its first messages, as its handoff is on its command line:
 //! waited for as those are, and never pasted again for being slow
@@ -64,9 +69,22 @@ const ENTER_AGAIN_MS: i64 = 10_000;
 /// or drawing, is left be.
 const ENTER_AGAIN_QUIET_MS: f64 = 3_000.0;
 /// How long after its hand-over a paste the record never showed is pasted again
-/// at the window's next rest, however its rest was cut by turns, or after the end
-/// of the last turn its harness held it in (`Delivering::last_held`).
+/// at the window's next rest, however its rest was cut by turns; or, once its
+/// harness held it in a turn, how long looks saw the window at rest since that turn
+/// ended (`Delivering::rest_after_hold`).
 const RECONCILE_MS: i64 = 30 * 60_000;
+
+/// What a look found of the window's rest since the message on its way was handed over.
+#[derive(Debug, Default)]
+struct Rest {
+    /// How long the window has been at rest since the hand-over or since its last turn.
+    rested: i64,
+    /// A turn was found since the hand-over.
+    turned: bool,
+    /// How long looks saw it at rest since the last turn its harness held the message
+    /// in (`Delivering::rest_after_hold`).
+    after_hold: Option<i64>,
+}
 
 impl Dispatcher {
     /// Whether the message on its way shows in the window's record; it is
@@ -165,15 +183,20 @@ impl Dispatcher {
         if held {
             self.held_in_a_turn(record);
         }
-        let (rested, turned) = self.rested(record, observed, held);
+        let Rest {
+            rested,
+            turned,
+            after_hold,
+        } = self.rested(record, observed, held);
         let at_rest = observed.settled && observed.waiting.is_none();
         // A paste its harness holds in a turn goes again never while it does, at any
-        // age, and the half hour counts from that turn's end: the end gives its record
-        // a whole arrival window (the reviews of 2026-10-16: past the half hour, a
-        // second copy went into the turn that held the first), and the turns after it
-        // never put the half hour off (the reviews of 2026-10-16: once a turn had held
-        // it, a paste Devin dropped never went again).
-        let unshown = self.now() - delivering.last_held.unwrap_or(delivering.since);
+        // age, and the half hour is the rest the looks saw after that turn ended: the
+        // end gives its record a whole arrival window (the reviews of 2026-10-16: past
+        // the half hour, a second copy went into the turn that held the first), the
+        // turns after it never put the half hour off (the reviews of 2026-10-16: once a
+        // turn had held it, a paste Devin dropped never went again), and no stretch
+        // without a look is taken for rest (a review of 2026-10-16: a laptop's sleep).
+        let unshown = after_hold.unwrap_or(waited);
         let overdue = unshown > RECONCILE_MS && at_rest && !held;
         if rested <= self.seams.limits.arrival_ms && !overdue {
             if waited > ENTER_AGAIN_MS
@@ -195,13 +218,13 @@ impl Dispatcher {
         // reaches the reader. (A message the harness queued itself waits for
         // the record, or for the window to close.)
         let because = if overdue && rested <= self.seams.limits.arrival_ms {
-            let since = if delivering.last_held.is_some() {
-                "the turn that held it ended"
+            let since = if after_hold.is_some() {
+                "its window was at rest since the turn that held it ended"
             } else {
-                "it was handed over"
+                "since it was handed over"
             };
             format!(
-                "the harness record never showed it in the {} min since {since}",
+                "the harness record never showed it in the {} min {since}",
                 RECONCILE_MS / 60_000
             )
         } else if turned {
@@ -221,11 +244,11 @@ impl Dispatcher {
         self.window_of(record).0.is_some_and(|window| window.held())
     }
 
-    /// The message on its way is in a turn its harness holds it in, as this look found.
+    /// The message on its way is in a turn its harness holds it in, as this look found:
+    /// the rest its half hour counts begins again when that turn ends.
     fn held_in_a_turn(&self, record: &Record) {
-        let now = self.now();
         if let Some(delivering) = record.delivery.borrow_mut().delivering.as_mut() {
-            delivering.last_held = Some(now);
+            delivering.rest_after_hold = Some(0);
         }
     }
 
@@ -236,19 +259,36 @@ impl Dispatcher {
     /// hold it until it runs it, which is the record's wait, not its failure. A
     /// window waiting on a dialog is in its turn still, and so is one whose harness
     /// `held` the message in the turn it went into. And whether a turn was found
-    /// since the hand-over.
-    fn rested(&self, record: &Record, observed: &Observed, held: bool) -> (i64, bool) {
+    /// since the hand-over, and the rest the looks saw since a turn its harness held
+    /// the message in: the time from one look at rest to the next, so a stretch no
+    /// look was made in that began in a turn adds none of it.
+    fn rested(&self, record: &Record, observed: &Observed, held: bool) -> Rest {
         let now = self.now();
         let mut part = record.delivery.borrow_mut();
         let Some(delivering) = part.delivering.as_mut() else {
-            return (0, false);
+            return Rest::default();
         };
         if observed.settled && observed.waiting.is_none() && !held {
+            if let (Some(rest), Some(last)) =
+                (delivering.rest_after_hold.as_mut(), delivering.rested_last)
+            {
+                *rest += now - last;
+            }
+            delivering.rested_last = Some(now);
             let since = *delivering.rested_since.get_or_insert(now);
-            (now - since, since != delivering.since)
+            Rest {
+                rested: now - since,
+                turned: since != delivering.since,
+                after_hold: delivering.rest_after_hold,
+            }
         } else {
             delivering.rested_since = None;
-            (0, true)
+            delivering.rested_last = None;
+            Rest {
+                rested: 0,
+                turned: true,
+                after_hold: delivering.rest_after_hold,
+            }
         }
     }
 

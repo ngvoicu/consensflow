@@ -46,8 +46,13 @@ replace = ""
 
 [[plant.edit]]
 file = "crates/cf-engine/src/arrival.rs"
-find = "        let (rested, turned) = self.rested(record, observed, held);"
-replace = "        let (rested, turned) = (waited, held && false);"
+find = "        } = self.rested(record, observed, held);"
+replace = '''
+        } = Rest {
+            rested: waited,
+            turned: false,
+            ..self.rested(record, observed, held)
+        };'''
 
 [[plant]]
 name = "notes twice: the engine counts the arrival window from the hand-over, its turns or none"
@@ -56,8 +61,13 @@ runs = ["engine-slow-records"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/arrival.rs"
-find = "        let (rested, turned) = self.rested(record, observed, held);"
-replace = "        let (rested, turned) = (waited, held && false);"
+find = "        } = self.rested(record, observed, held);"
+replace = '''
+        } = Rest {
+            rested: waited,
+            turned: false,
+            ..self.rested(record, observed, held)
+        };'''
 
 [[plant]]
 name = "notes twice: a window that waits on a dialog of its own is at rest"
@@ -96,8 +106,8 @@ runs = ["engine-slow-records"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/arrival.rs"
-find = "            (now - since, since != delivering.since)"
-replace = "            (now - since, false)"
+find = "                turned: since != delivering.since,"
+replace = "                turned: false,"
 
 [[plant]]
 name = "notes twice: one more Enter is pressed for a paste after its arrival window, into a turn whose record is waited for"
