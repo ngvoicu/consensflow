@@ -8,10 +8,11 @@
 //   module that adds a subtest to a test of another file too). Each line is one test
 //   registered: a loop that registers two tests of one title and place is two lines.
 // - How it ended (`ended`): `failed` where its own code did (it threw, or ran out of
-//   its time); `passed` where it passed, and where only tests inside it failed;
-//   `skipped` and `todo` where it was marked so, whatever the reason given, an empty
-//   one too; `cancelled` where it ended for what is not its own (its parent cancelled
-//   it, or ended first; it was aborted; a hook of it failed).
+//   its time; a timer or a promise of it threw or rejected, unhandled, while it ran);
+//   `passed` where it passed, and where only tests inside it failed; `skipped` and
+//   `todo` where it was marked so, whatever the reason given, an empty one too;
+//   `cancelled` where it ended for what is not its own (its parent cancelled it, or
+//   ended first; it was aborted; a hook of it failed).
 // - A file Node failed whole, or that holds no test, is a test of its own (`whole`):
 //   at the top, named by the file's path as Node was given it, at its first line and
 //   column.
@@ -23,6 +24,8 @@ const OWN = new Set([
   'testTimeoutFailure',
   'callbackAndPromisePresent',
   'multipleCallbackInvocations',
+  'uncaughtException',
+  'unhandledRejection',
 ])
 
 // The events that tell a test.

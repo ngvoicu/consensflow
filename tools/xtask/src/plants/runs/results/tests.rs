@@ -218,6 +218,23 @@ fn node_names_a_test_by_the_titles_it_is_in_and_its_own_exactly_and_a_failure_by
         Some("/checkout/tests/broken.test.mjs")
     );
     assert!(read.outside.is_empty());
+    // Those that neither failed nor passed are registrations all the same, kept apart,
+    // none of them failed.
+    assert_eq!(
+        said(&read.others),
+        [
+            ("a todo that fails", false),
+            ("a skip", false),
+            ("a todo of no reason that fails", false),
+            ("a skip of no reason that fails", false),
+            (
+                "a parent that throws while its child waits › a child its parent cancelled",
+                false
+            ),
+            ("aborted", false),
+        ]
+    );
+    assert_eq!(read.others[1].at, "/checkout/tests/cases.test.mjs:9:1");
 }
 
 #[test]
@@ -294,7 +311,13 @@ fn a_testcase_marked_skipped_neither_failed_nor_passed_though_it_holds_a_failure
         <testcase name="a::skipped" classname="x"><skipped/></testcase>
         <testcase name="a::runs" classname="x"/>
     </testsuite></testsuites>"#;
-    assert_eq!(said(&junit(xml).unwrap().tests), [("a::runs", false)]);
+    let read = junit(xml).unwrap();
+    assert_eq!(said(&read.tests), [("a::runs", false)]);
+    // Registered all the same, and none of them failed.
+    assert_eq!(
+        said(&read.others),
+        [("a::to_do", false), ("a::skipped", false)]
+    );
 }
 
 #[test]
@@ -429,8 +452,10 @@ fn playwright_says_each_test_named_from_its_first_group_on_and_whether_it_failed
     assert!(read.outside.is_empty(), "{:?}", read.outside);
     assert_eq!(read.tests[0].at, "prints.spec.mjs:11:1");
     assert_eq!(read.tests[1].at, "prints.spec.mjs:4:3");
+    // The test skipped in every project is one registered.
+    assert_eq!(said(&read.others), [("is skipped", false)]);
     // A test failed where it failed in one project of those it ran in; one skipped in
-    // every project is left out.
+    // every project is one of the others.
     let projects = |statuses: &[&str]| {
         let tests: Vec<String> = statuses
             .iter()
@@ -440,16 +465,20 @@ fn playwright_says_each_test_named_from_its_first_group_on_and_whether_it_failed
             r#"{{ "suites": [{{ "title": "a.spec.mjs", "specs": [{{ "title": "t", "file": "a.spec.mjs", "line": 1, "column": 1, "tests": [{}] }}] }}], "errors": [] }}"#,
             tests.join(", ")
         );
-        said(&playwright(&json).unwrap().tests)
-            .into_iter()
-            .map(|(name, failed)| (name.to_owned(), failed))
-            .collect::<Vec<_>>()
+        let read = playwright(&json).unwrap();
+        let owned = |tests: &[Test]| {
+            said(tests)
+                .into_iter()
+                .map(|(name, failed)| (name.to_owned(), failed))
+                .collect::<Vec<_>>()
+        };
+        (owned(&read.tests), owned(&read.others))
     };
     let t = |failed| vec![("t".to_owned(), failed)];
-    assert_eq!(projects(&["expected", "unexpected"]), t(true));
-    assert_eq!(projects(&["unexpected", "skipped"]), t(true));
-    assert_eq!(projects(&["skipped", "expected"]), t(false));
-    assert_eq!(projects(&["skipped", "skipped"]), []);
+    assert_eq!(projects(&["expected", "unexpected"]), (t(true), Vec::new()));
+    assert_eq!(projects(&["unexpected", "skipped"]), (t(true), Vec::new()));
+    assert_eq!(projects(&["skipped", "expected"]), (t(false), Vec::new()));
+    assert_eq!(projects(&["skipped", "skipped"]), (Vec::new(), t(false)));
 }
 
 #[test]

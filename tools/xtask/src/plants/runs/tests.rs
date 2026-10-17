@@ -39,6 +39,7 @@ fn results(tests: &[(&str, bool)]) -> Results {
             })
             .collect(),
         outside: Vec::new(),
+        others: Vec::new(),
     }
 }
 
@@ -57,6 +58,7 @@ fn node_results(tests: &[(&str, &str, bool)]) -> Results {
             })
             .collect(),
         outside: Vec::new(),
+        others: Vec::new(),
     }
 }
 
@@ -136,7 +138,8 @@ fn a_run_whose_reporter_wrote_no_report_it_could_read_catches_nothing_whatever_i
 }
 
 #[test]
-fn a_run_whose_report_names_no_failure_or_that_has_no_reporter_is_the_catch_itself() {
+fn a_command_that_has_no_reporter_is_the_catch_itself_and_a_run_whose_report_names_no_failure_is_broken(
+) {
     assert_eq!(
         ran_by(&SMOKE, Some(3), PRINTED, None).caught(),
         ["xtask smoke-updater --export-bridge: ended with 3"]
@@ -145,17 +148,31 @@ fn a_run_whose_report_names_no_failure_or_that_has_no_reporter_is_the_catch_itse
         ran_by(&SMOKE, None, "", None).caught(),
         ["xtask smoke-updater --export-bridge: was ended by a signal"]
     );
-    let silent = ran_by(
-        &XTASK,
-        Some(100),
-        "",
-        read(results(&[("a::passes", false)])),
-    );
-    assert!(!silent.names_tests());
-    assert_eq!(
-        silent.caught(),
-        ["xtask app test file_drop: ended with 100"]
-    );
+    assert_eq!(ran_by(&SMOKE, Some(3), PRINTED, None).broken(), None);
+    // A run that has a reporter catches by its tests alone: one that failed while no test
+    // of it did (the meant one cancelled, as an aborted signal cancels it) is broken.
+    for command in [&CARGO[..], &XTASK, &NODE, &PAGE] {
+        let mut report = results(&[("a::passes", false)]);
+        report.others = results(&[("m::meant", false)]).tests;
+        let silent = ran_by(command, Some(100), "", read(report));
+        assert!(!silent.names_tests());
+        assert!(silent.caught().is_empty(), "{command:?}");
+        assert_eq!(
+            silent.broken().as_deref(),
+            Some(
+                "it ended with 100, and its report names no test that failed; \
+                 neither failed nor passed (skipped, to do, cancelled): m::meant"
+            ),
+            "{command:?}"
+        );
+        let signalled = ran_by(command, None, "", read(results(&[("a::passes", false)])));
+        assert!(signalled.caught().is_empty(), "{command:?}");
+        assert_eq!(
+            signalled.broken().as_deref(),
+            Some("a signal ended it, and its report names no test that failed"),
+            "{command:?}"
+        );
+    }
 }
 
 #[test]
@@ -230,7 +247,8 @@ fn a_node_test_file_that_ran_no_test_is_broken_whatever_the_other_files_ran() {
         Some("the test file tests/b.test.mjs ran no test")
     );
     assert!(!threw.names_tests());
-    // One whose tests ran before it ended whole: no load failure, and no test named.
+    // One whose tests ran before it ended whole: no load failure, and no test named, so
+    // no test of its own failed: broken all the same.
     let late = ran_by(
         &NODE,
         Some(1),
@@ -240,7 +258,13 @@ fn a_node_test_file_that_ran_no_test_is_broken_whatever_the_other_files_ran() {
             ("tests/b.test.mjs", "/checkout/tests/b.test.mjs", true),
         ])),
     );
-    assert_eq!(late.broken(), None);
+    assert_eq!(
+        late.broken().as_deref(),
+        Some(
+            "it ended with 1, and its report names no test that failed; \
+             the test file tests/b.test.mjs failed whole"
+        )
+    );
     assert!(!late.names_tests());
     assert_eq!(late.caught(), ["tests/b.test.mjs"]);
     // No test at all.
@@ -277,6 +301,7 @@ fn playwright_is_broken_by_an_error_outside_every_test_or_no_test_and_not_by_wha
             "Error: Cannot find module './a.mjs'".to_owned(),
             "Error: No tests found.".to_owned(),
         ],
+        others: Vec::new(),
     };
     assert_eq!(
         ran_by(&PAGE, Some(1), "", read(outside))
@@ -365,6 +390,11 @@ fn what_cf_process_answered_is_what_the_run_did() {
     );
     let out_of_time = Ran::of(&command, Err(failed("Command failed: cargo", None, true))).unwrap();
     assert_eq!((out_of_time.code, out_of_time.hung), (None, true));
+    // Ended for its time, whatever it exited with once asked: no code of its own.
+    for code in [Some(0), Some(3)] {
+        let asked = Ran::of(&command, Err(failed("Command failed: cargo", code, true))).unwrap();
+        assert_eq!((asked.code, asked.hung), (None, true), "{code:?}");
+    }
     // A stream that said more than a run may: cf-process's own words for it, either stream.
     for message in [
         "stdout maxBuffer length exceeded",
@@ -601,6 +631,74 @@ fn a_command_that_writes_more_than_a_run_may_is_ended_and_said_to_have_overflowe
     assert!(
         ran.caught().is_empty(),
         "a run ended for its output is no catch"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_command_that_ends_with_0_once_its_time_ran_out_hung_and_catches_nothing() {
+    // It takes the ask to end as its cue to say 0, and its child takes no notice.
+    let late = words(&[
+        "sh",
+        "-c",
+        "trap 'exit 0' TERM; (trap '' TERM; exec sleep 30) & wait",
+    ]);
+    let started = Instant::now();
+    let ran = ended(runner(Duration::from_secs(1)).run(&late).unwrap());
+    assert!(ran.hung, "{ran:?}");
+    assert_eq!(ran.code, None, "no code of its own: it was ended");
+    assert!(ran.caught().is_empty());
+    assert!(started.elapsed() < Duration::from_secs(20));
+}
+
+#[cfg(unix)]
+#[test]
+fn a_plant_whose_command_without_it_hangs_and_then_says_0_is_not_caught() {
+    // With the plant the command fails at once; without it, it does not end in its time,
+    // and ends with 0 when asked to: no run without the plant passed.
+    let (_folder, checkout, mut plant) = tried_by(Vec::new());
+    plant.runs[0].command = words(&[
+        "sh",
+        "-c",
+        &format!(
+            "grep -q ONE '{}' && exit 1; trap 'exit 0' TERM; sleep 30 & wait",
+            checkout.path("a.rs").display()
+        ),
+    ]);
+    let (status, said) = driven_within(&checkout, &[plant], Duration::from_secs(2));
+    assert_eq!(status, 1);
+    assert_eq!(fs::read_to_string(checkout.path("a.rs")).unwrap(), "one\n");
+    assert!(said.contains("NOT RUN          p: one ("), "{said}");
+    assert!(
+        said.contains("did not end in its time, and was ended"),
+        "{said}"
+    );
+}
+
+#[test]
+fn what_a_command_left_running_is_ended_with_it_before_the_sources_are_put_back() {
+    // The command starts a writer that has none of its streams and writes the planted
+    // file a moment after it ended (on Windows out of node's own job, which ends what node
+    // starts as node ends), and fails: its run, every one, is ended whole.
+    assert!(on_path("node"), "node is not on the PATH");
+    let (_folder, checkout, mut plant) = tried_by(Vec::new());
+    let file = checkout.path("a.rs");
+    let writer = format!(
+        "setTimeout(() => require('fs').writeFileSync({:?}, 'LATE'), 1500)",
+        file.display().to_string()
+    );
+    let leaves = format!(
+        "require('child_process').spawn(process.execPath, ['-e', {writer:?}], \
+         {{ detached: process.platform === 'win32', stdio: 'ignore' }}).unref(); process.exit(1)"
+    );
+    plant.runs[0].command = words(&["node", "-e", &leaves]);
+    let said = verdict_of(&checkout, &plant);
+    assert!(said.contains("NOT RUN          p: one ("), "{said}");
+    std::thread::sleep(Duration::from_secs(4));
+    assert_eq!(
+        fs::read_to_string(&file).unwrap(),
+        "one\n",
+        "nothing a run started wrote after it"
     );
 }
 
@@ -1153,8 +1251,8 @@ fn nextest_runs_tests_beside_each_other_and_is_given_cargo_s_jobs_and_profile_as
 }
 
 /// The tests of a crate named `cf-e2e`, which see where the programs they run were built
-/// (`CF_E2E_BUILT`): that it is the release folder of the checkout `RELEASED`, and that
-/// the build before them left `MARK`; and the mark that they ran.
+/// (`CF_E2E_BUILT`): that it is the folder `RELEASED`, and that `cf` is there; and the
+/// mark that they ran.
 #[cfg(unix)]
 const CF_E2E_LIB: &str = r#"#[cfg(test)]
 mod tests {
@@ -1162,11 +1260,56 @@ mod tests {
     fn given_the_programs_built_before_the_run() {
         let folder = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
         std::fs::write(folder.join("ran"), "").unwrap();
-        assert_eq!(std::env::var("CF_E2E_BUILT").as_deref(), Ok("RELEASED"));
-        assert!(folder.join("built").exists(), "built before");
+        let built = std::path::PathBuf::from(std::env::var_os("CF_E2E_BUILT").unwrap());
+        assert_eq!(
+            std::fs::canonicalize(&built).unwrap(),
+            std::fs::canonicalize("RELEASED").unwrap()
+        );
+        assert!(built.join("cf").exists(), "built before");
     }
 }
 "#;
+
+/// A crate whose programs are named as the two the tests of `cf-e2e` run, and the release
+/// builds of each (as `CF_E2E_PROGRAMS` builds them, from that crate), with `more` words.
+#[cfg(unix)]
+fn programs_crate(more: &[&[&str]; 2]) -> (tempfile::TempDir, Vec<Vec<String>>) {
+    let fixture = tempfile::tempdir().unwrap();
+    fs::create_dir_all(fixture.path().join("src/bin")).unwrap();
+    fs::write(
+        fixture.path().join("Cargo.toml"),
+        "[package]\nname = \"plants-programs\"\nversion = \"0.1.0\"\nedition = \"2021\"\npublish = false\n\n[workspace]\n",
+    )
+    .unwrap();
+    for bin in ["cf", "consensflow-bridge"] {
+        fs::write(
+            fixture.path().join(format!("src/bin/{bin}.rs")),
+            "fn main() {}\n",
+        )
+        .unwrap();
+    }
+    let manifest = fixture.path().join("Cargo.toml").display().to_string();
+    let builds = ["cf", "consensflow-bridge"]
+        .iter()
+        .zip(more)
+        .map(|(bin, more)| {
+            let mut build = words(&[
+                "cargo",
+                "build",
+                "--release",
+                "--offline",
+                "--message-format=json-render-diagnostics",
+                "--manifest-path",
+                &manifest,
+                "--bin",
+                bin,
+            ]);
+            build.extend(words(more));
+            build
+        })
+        .collect();
+    (fixture, builds)
+}
 
 /// The tests of another crate, which see no programs built for them.
 #[cfg(unix)]
@@ -1183,15 +1326,27 @@ mod tests {
 #[test]
 fn a_run_of_cf_e2e_s_tests_is_given_the_programs_built_before_it_and_one_whose_build_failed_runs_no_test(
 ) {
-    let mut runner = runner(Duration::from_secs(600));
-    let released = context().root.join("app/src-tauri/target/release");
+    // Cargo builds where it is told to (`CARGO_TARGET_DIR`), not in the checkout's folder:
+    // the tests are told the folder it says it put the programs in (2026-10-17).
+    let target = tempfile::tempdir().unwrap();
+    let mut checkout = context();
+    checkout.env = Env::from_vars(
+        checkout
+            .env
+            .iter()
+            .map(|(name, value)| (name.to_owned(), value.to_owned()))
+            .chain([(
+                OsString::from("CARGO_TARGET_DIR"),
+                target.path().as_os_str().to_owned(),
+            )]),
+    );
+    let mut runner = runner_with(&checkout, Duration::from_secs(600), Stops::never);
+    let released = target.path().join("release");
     let lib = CF_E2E_LIB.replace("RELEASED", &released.display().to_string());
     let (crate_folder, command) = fixture_crate("cf-e2e", &lib);
     let marked = |name: &str| crate_folder.path().join(name).exists();
-    // Builds that stand for cf's and the pane host's, the first leaving its mark.
-    let builds = |first: &str| vec![words(&["sh", "-c", first]), words(&["sh", "-c", "exit 0"])];
-    let mark = format!(": > '{}'", crate_folder.path().join("built").display());
-    runner.programs = builds(&mark);
+    let (_programs, builds) = programs_crate(&[&[], &[]]);
+    runner.programs = builds;
     let given = ended(runner.run(&command).unwrap());
     assert_eq!(given.code, Some(0), "{}", given.output);
     assert_eq!(
@@ -1202,13 +1357,43 @@ fn a_run_of_cf_e2e_s_tests_is_given_the_programs_built_before_it_and_one_whose_b
         )
     );
     // Another crate's tests are given nothing, and nothing is built for them.
-    fs::remove_file(crate_folder.path().join("built")).unwrap();
+    fs::remove_file(released.join("cf")).unwrap();
     let (_other, other) = fixture_crate("plants-other", OTHER_LIB);
     let alone = ended(runner.run(&other).unwrap());
     assert_eq!(alone.code, Some(0), "{}", alone.output);
-    assert!(!marked("built"));
-    // A build cargo says failed: the run did not build, and no test of it ran.
+    assert!(!released.join("cf").exists());
     fs::remove_file(crate_folder.path().join("ran")).unwrap();
+    // Builds that put the two programs in two folders, or one that says nowhere it put
+    // its program: no folder holds both, and no test runs.
+    let elsewhere = tempfile::tempdir().unwrap();
+    let elsewhere_words = elsewhere.path().display().to_string();
+    let (_programs, builds) = programs_crate(&[&[], &["--target-dir", &elsewhere_words]]);
+    runner.programs = builds;
+    let apart = ended(runner.run(&command).unwrap());
+    assert!(apart.caught().is_empty());
+    let broken = apart.broken().unwrap_or_default();
+    assert!(
+        broken.contains(&format!(
+            "put consensflow-bridge in {}, and the build before it in {}",
+            elsewhere.path().join("release").display(),
+            released.display()
+        )),
+        "{broken}"
+    );
+    assert!(!marked("ran"), "no test ran");
+    runner.programs = vec![words(&["sh", "-c", "exit 0", "--bin", "cf"])];
+    let nowhere = ended(runner.run(&command).unwrap());
+    assert_eq!(
+        nowhere.broken().as_deref(),
+        Some(
+            "no report of its tests could be read: sh -c exit 0 --bin cf said nowhere it put cf, \
+             and no test was run"
+        )
+    );
+    assert!(!marked("ran"), "no test ran");
+    // Builds that stand for cf's and the pane host's.
+    let builds = |first: &str| vec![words(&["sh", "-c", first]), words(&["sh", "-c", "exit 0"])];
+    // A build cargo says failed: the run did not build, and no test of it ran.
     runner.programs = builds(r#"echo '{"reason":"build-finished","success":false}'; exit 101"#);
     let unbuilt = ended(runner.run(&command).unwrap());
     assert!(!unbuilt.compiled(), "{}", unbuilt.output);
@@ -1271,22 +1456,26 @@ fn tried_by(command: Vec<String>) -> (tempfile::TempDir, Context, crate::plants:
 /// The status the driver ends `plants` with in `checkout`, their commands run as
 /// processes, and what it says.
 fn driven(checkout: &Context, plants: &[crate::plants::kit::Plant]) -> (i32, String) {
+    driven_within(checkout, plants, Duration::from_secs(600))
+}
+
+/// As `driven`, each command given `limit` to end in.
+fn driven_within(
+    checkout: &Context,
+    plants: &[crate::plants::kit::Plant],
+    limit: Duration,
+) -> (i32, String) {
     let family = crate::plants::kit::Family {
         name: "demo".into(),
-        limit: Duration::from_secs(600),
+        limit,
         rebuild: None,
         plants: plants.to_vec(),
     };
     let chosen: Vec<&crate::plants::kit::Plant> = family.plants.iter().collect();
     let mut out = Vec::new();
-    let status = crate::plants::driver::run(
-        checkout,
-        &family,
-        &chosen,
-        &mut runner(Duration::from_secs(600)),
-        &mut out,
-    )
-    .unwrap();
+    let status =
+        crate::plants::driver::run(checkout, &family, &chosen, &mut runner(limit), &mut out)
+            .unwrap();
     (status, String::from_utf8(out).unwrap())
 }
 
@@ -1706,6 +1895,114 @@ fn node_s_frames_written_by_a_test_a_cancelled_test_a_todo_of_no_reason_and_a_na
         "{said}"
     );
     assert!(said.ends_with("1 of 5 plants caught\n"), "{said}");
+}
+
+/// Node's tests of the fourth review's cases (2026-10-17), each file run on its own, the
+/// plant flag read by each: the meant test aborted with the plant, beside a test that
+/// passes; a test alone whose timer throws with the plant while it runs; one alone whose
+/// promise rejects with the plant, unhandled, while it runs; and one title registered
+/// twice, the first skipped, the second failing with the plant.
+const NODE_ABORTED: &str = r#"import { test } from 'node:test'
+import { planted } from './flag.mjs'
+
+test('passes beside it', () => {})
+
+test('aborted with the plant', { signal: planted ? AbortSignal.abort() : undefined }, () => {})
+"#;
+
+const NODE_TIMER: &str = r#"import { test } from 'node:test'
+import { planted } from './flag.mjs'
+
+test('its timer throws with the plant', async () => {
+  setTimeout(() => {
+    if (planted) throw new Error('the timer throws')
+  }, 10)
+  await new Promise((resolve) => setTimeout(resolve, 200))
+})
+"#;
+
+const NODE_REJECTED: &str = r#"import { test } from 'node:test'
+import { planted } from './flag.mjs'
+
+test('its promise rejects with the plant', async () => {
+  if (planted) Promise.reject(new Error('rejected, and nobody waits for it'))
+  await new Promise((resolve) => setTimeout(resolve, 200))
+})
+"#;
+
+const NODE_SKIPPED_TWICE: &str = r#"import assert from 'node:assert'
+import { test } from 'node:test'
+import { planted } from './flag.mjs'
+
+test('one title', { skip: true }, () => {})
+
+test('one title', () => {
+  assert.equal(planted, false)
+})
+"#;
+
+#[test]
+fn node_s_meant_test_aborted_catches_nothing_its_async_failures_are_its_own_and_a_skipped_twin_makes_its_name_two(
+) {
+    assert!(on_path("node"), "node is not on the PATH");
+    let folder = tempfile::tempdir().unwrap();
+    let checkout = Context {
+        root: folder.path().to_path_buf(),
+        env: Env::default(),
+    };
+    fs::write(checkout.path("flag.mjs"), FLAG).unwrap();
+    let run = |name: &str, text: &str| {
+        fs::write(checkout.path(name), text).unwrap();
+        words(&["node", "--test", &checkout.path(name).display().to_string()])
+    };
+    let (status, said) = driven(
+        &checkout,
+        &[
+            flagged(
+                "p: aborted",
+                "aborted with the plant",
+                run("aborted.test.mjs", NODE_ABORTED),
+            ),
+            flagged(
+                "p: a timer",
+                "its timer throws with the plant",
+                run("timer.test.mjs", NODE_TIMER),
+            ),
+            flagged(
+                "p: a promise",
+                "its promise rejects with the plant",
+                run("rejected.test.mjs", NODE_REJECTED),
+            ),
+            flagged(
+                "p: skipped twice",
+                "one title",
+                run("twice.test.mjs", NODE_SKIPPED_TWICE),
+            ),
+        ],
+    );
+    assert_eq!(fs::read_to_string(checkout.path("flag.mjs")).unwrap(), FLAG);
+    assert_eq!(status, 1);
+    // Node exits with 1 and no test failed: the run broke, and caught nothing.
+    assert!(said.contains("BROKEN           p: aborted ("), "{said}");
+    assert!(
+        said.contains(
+            "    it ended with 1, and its report names no test that failed; neither failed nor \
+             passed (skipped, to do, cancelled): aborted with the plant\n"
+        ),
+        "{said}"
+    );
+    assert!(said.contains("CAUGHT           p: a timer ("), "{said}");
+    assert!(said.contains("CAUGHT           p: a promise ("), "{said}");
+    // The skipped one is a test of the name too.
+    assert!(
+        said.contains("MISSED-BY-MEANT  p: skipped twice ("),
+        "{said}"
+    );
+    assert!(
+        said.contains("    the meant name one title stands for 2 tests of node --test "),
+        "{said}"
+    );
+    assert!(said.ends_with("2 of 4 plants caught\n"), "{said}");
 }
 
 #[test]

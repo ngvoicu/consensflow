@@ -11,7 +11,8 @@
 //! group: this process's exit path (the [`Ender`] handed out), its time
 //! running out, and the wait for it dropped. What the program left running
 //! once it was waited for is let go of, as with a program that exited after
-//! it detached its children.
+//! it detached its children; a program held whole (`capture_whole`) is not
+//! waited for until what is left of its group has been ended.
 
 use std::cell::Cell;
 use std::rc::Rc;

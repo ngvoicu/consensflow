@@ -14,6 +14,7 @@ use cf_base::file::error_code;
 
 use crate::execute::{command_line, hide_window, read_both, Read, FORCE_AFTER};
 use crate::group::{lead, Group};
+use crate::job::Job;
 use crate::{Ender, Ending, Limits, Run};
 
 /// How often a program asked to end is looked at for whether it has.
@@ -83,6 +84,52 @@ pub async fn capture(
     limits: Limits,
     started: impl FnOnce(Ender),
 ) -> Result<Captured, CaptureFailed> {
+    captured(run, cwd, env, limits, started, Hold::Node).await
+}
+
+/// As [`capture`], the program held to its time and its tree whole, as the
+/// plants' runner holds a run (a run's child that went on writing the sources
+/// once they were put back, 2026-10-17):
+///
+/// - A program asked to end because its time ran out has failed (`killed`),
+///   whatever it exits with once asked, where Node answers one that exits
+///   with 0.
+/// - Nothing it started outlives it. On Unix, once it has ended, however it
+///   ended, what is left of the group it leads is forced to end before it is
+///   waited for (a process that leaves the group, by `setsid`, is out of its
+///   reach). On Windows it runs in a job of its own, which nothing it starts
+///   can leave (a program that asks to start one outside it is refused), and
+///   which is ended once it has ended, at a stop, and with the future
+///   dropped. A job that cannot be made is a program that did not start
+///   (`spawn <file> …`).
+pub async fn capture_whole(
+    run: &Run,
+    cwd: Option<&Path>,
+    env: &Env,
+    limits: Limits,
+    started: impl FnOnce(Ender),
+) -> Result<Captured, CaptureFailed> {
+    captured(run, cwd, env, limits, started, Hold::Whole).await
+}
+
+/// What a capture holds its program to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Hold {
+    /// As Node's `execFile`: what the program left running once it was waited
+    /// for is let go of, and one that ends with 0 at the ask has answered.
+    Node,
+    /// [`capture_whole`]'s.
+    Whole,
+}
+
+async fn captured(
+    run: &Run,
+    cwd: Option<&Path>,
+    env: &Env,
+    limits: Limits,
+    started: impl FnOnce(Ender),
+    hold: Hold,
+) -> Result<Captured, CaptureFailed> {
     let mut command = tokio::process::Command::from(run.command());
     command
         .env_clear()
@@ -103,7 +150,18 @@ pub async fn capture(
             error_code(&failed)
         ))
     })?;
-    crate::job::adopt(&child);
+    // Held whole, its own job (Windows), which ends whatever is left of it as
+    // the capture ends, however it ends; else the job of every child of this
+    // process. A program not put in its own is ended as the child is dropped.
+    let _job = match hold {
+        Hold::Node => {
+            crate::job::adopt(&child);
+            None
+        }
+        Hold::Whole => Some(Job::of(&child).map_err(|why| {
+            CaptureFailed::unstarted(format!("spawn {} {why}", run.program.to_string_lossy()))
+        })?),
+    };
     // Declared after the child, so it is dropped before it: a capture dropped
     // ends the group while its leader is not yet reaped.
     let group = Group::new(child.id());
@@ -117,7 +175,9 @@ pub async fn capture(
 
     let (mut out, mut err) = (Read::default(), Read::default());
     // Its streams read to their ends, then its exit, all within its time:
-    // none when it said too much.
+    // none when it said too much. Held whole on Unix, it is not waited for
+    // once it has exited (`Some(None)`): until it is, its pid holds the id of
+    // its group, which what it left running is ended by.
     let finished = async {
         read_both(
             &mut stdout,
@@ -128,10 +188,16 @@ pub async fn capture(
         )
         .await;
         if out.overflowed || err.overflowed {
-            None
-        } else {
-            Some(child.wait().await)
+            return None;
         }
+        #[cfg(unix)]
+        if hold == Hold::Whole {
+            while !group.ended() {
+                tokio::time::sleep(ENDED_EVERY).await;
+            }
+            return Some(None);
+        }
+        Some(Some(child.wait().await))
     };
     let mut killed = false;
     let finished = if limits.timeout.is_zero() {
@@ -143,7 +209,12 @@ pub async fn capture(
         None
     };
     let status = match finished {
-        Some(status) => status,
+        Some(Some(status)) => status,
+        // Ended, and not yet waited for: what it left running goes first.
+        Some(None) => {
+            group.end(Ending::Forced);
+            child.wait().await
+        }
         None => {
             // As Node's `kill`: both streams closed first, so nothing it left
             // running holds the answer back, then the program asked to end,
@@ -199,7 +270,9 @@ pub async fn capture(
             ));
         }
     }
-    if status.success() {
+    // Asked to end because its time ran out, a program held whole has failed
+    // whatever it then exited with.
+    if status.success() && !(killed && hold == Hold::Whole) {
         return Ok(Captured { stdout, stderr });
     }
     // Ended by a signal, Node has no code for it; on Windows this side's

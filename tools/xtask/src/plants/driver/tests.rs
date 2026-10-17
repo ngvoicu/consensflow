@@ -106,6 +106,7 @@ fn report(tests: &[(&str, bool)]) -> Results {
             })
             .collect(),
         outside: Vec::new(),
+        others: Vec::new(),
     }
 }
 
@@ -402,6 +403,30 @@ fn a_test_that_printed_the_meant_one_failed_is_no_catch_by_it() {
     assert_eq!(status.unwrap(), 1);
     assert!(
         said.contains("MISSED-BY-MEANT  p: one (0 s) by m::other, not by the_test\n"),
+        "{said}"
+    );
+}
+
+#[test]
+fn a_plant_meant_for_no_test_is_caught_by_none_of_the_tests_that_failed() {
+    // Only the meant test's own failure catches a plant, in a run that names its tests: a
+    // plant that names none is caught by none of them, nor by the run.
+    let (_folder, context) = checkout();
+    let mut plant = upper("p: one", &[("first", false)]);
+    plant.meant = String::new();
+    let family = family(vec![plant]);
+    let mut runner = Fake::new(|_| {
+        if planted(&context) {
+            reported(100, "", &[("m::other", true)])
+        } else {
+            passes()
+        }
+    });
+    let (status, said) = go(&context, &family, &mut runner);
+    assert_eq!(status.unwrap(), 1);
+    assert_eq!(runner.ran, ["first"]);
+    assert!(
+        said.contains("MISSED-BY-MEANT  p: one (0 s) by m::other\n"),
         "{said}"
     );
 }
@@ -1031,6 +1056,7 @@ fn a_run_that_ran_no_test_that_could_see_the_plant_is_broken_whatever_test_faile
                     node_test("m::other", "/checkout/tests/b.test.mjs", true),
                 ],
                 outside: Vec::new(),
+                others: Vec::new(),
             }),
         ),
         // As Playwright 1.63 says a spec it could not import.
@@ -1044,6 +1070,7 @@ fn a_run_that_ran_no_test_that_could_see_the_plant_is_broken_whatever_test_faile
                     "Error: Cannot find module './a.mjs'".to_owned(),
                     "Error: No tests found.".to_owned(),
                 ],
+                others: Vec::new(),
             }),
         ),
     });
@@ -1067,8 +1094,7 @@ fn a_run_that_ran_no_test_that_could_see_the_plant_is_broken_whatever_test_faile
 }
 
 #[test]
-fn a_node_test_file_the_plant_ended_after_tests_of_it_ran_is_a_catch_confirmed_as_one_that_names_no_test(
-) {
+fn a_node_test_file_the_plant_ended_after_tests_of_it_ran_is_broken_and_no_catch() {
     let (_folder, context) = checkout();
     let family = family(vec![upper("p: crash", &[("node", false)])]);
     // As Node 26 says a file whose second test called `process.exit(3)` after a wait: the
@@ -1088,14 +1114,19 @@ fn a_node_test_file_the_plant_ended_after_tests_of_it_ran_is_a_catch_confirmed_a
             Some(Results {
                 tests,
                 outside: Vec::new(),
+                others: Vec::new(),
             }),
         )
     });
     let (status, said) = go(&context, &family, &mut runner);
-    assert_eq!(status.unwrap(), 0);
-    assert_eq!(runner.ran, ["node"; 4]);
+    assert_eq!(status.unwrap(), 1);
+    // With the plant, then once without it, which passes: the plant broke the run.
+    assert_eq!(runner.ran, ["node"; 2]);
     assert!(
-        said.contains("CAUGHT           p: crash (0 s) by tests/late.test.mjs, not by the_test\n"),
+        said.contains(
+            "BROKEN           p: crash (0 s)\n    it ended with 1, and its report names no test \
+             that failed; the test file tests/late.test.mjs failed whole\n"
+        ),
         "{said}"
     );
 }
@@ -1868,6 +1899,7 @@ fn placed(code: i32, tests: &[(&str, &str, bool)]) -> Answer {
                 })
                 .collect(),
             outside: Vec::new(),
+            others: Vec::new(),
         }),
     )
 }
@@ -1986,6 +2018,7 @@ fn an_error_outside_every_test_beside_the_meant_test_s_failure_is_said_with_the_
                     Some(Results {
                         tests,
                         outside: Vec::new(),
+                        others: Vec::new(),
                     }),
                 )
             }

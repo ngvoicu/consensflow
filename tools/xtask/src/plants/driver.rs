@@ -24,16 +24,19 @@
 //! A catch is the test the plant was meant for (`meant`) failing with it. Where a
 //! run that fails with the plant names the tests that failed (`cargo test`, `node
 //! --test` and Playwright do), the plant is CAUGHT where the meant test is among
-//! them, and is one test (a name that stands for two tests of the report is
-//! neither), and the same command passes once the plant is put back, which is run
-//! once for the run of the plants; an error outside every test beside it is said
-//! with the catch. A failure that names only other tests goes on to the plant's
-//! next run, and where none names the meant test the plant is MISSED-BY-MEANT, said
-//! with the tests that failed. Where a failure names no test (a command that says
-//! no more than its status, as the release smokes do), nothing can be attributed,
-//! and the catch is confirmed: the run is run so again and must fail again, and the
-//! command must pass twice without the plant. A run whose reporter wrote no report
-//! it could read is BROKEN, whatever its status.
+//! them, and is one test (a name that stands for two tests registered, whatever came
+//! of each, is neither), and the same command passes once the plant is put back,
+//! which is run once for the run of the plants; an error outside every test beside it
+//! is said with the catch. A failure that names only other tests goes on to the
+//! plant's next run, and where none names the meant test the plant is
+//! MISSED-BY-MEANT, said with the tests that failed. A run that has a reporter and
+//! fails with no test failing (one cancelled, aborted, a test file that failed whole)
+//! catches nothing: it is BROKEN, as is one whose reporter wrote no report it could
+//! read, whatever its status. Only a failure of a command that has no reporter (one
+//! that says no more than its status, as the release smokes do) is the run's own
+//! catch, which nothing can attribute, and it is confirmed: the run is run so again
+//! and must fail again, and the command must pass twice without the plant, each run
+//! ending in its time.
 //!
 //! Every run of a plant is tried until one catches it: a run that tells nothing of
 //! it is said for itself, and the next is run with the plant in. A command that

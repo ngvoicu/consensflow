@@ -7,12 +7,16 @@
 # without it, where the report its runner wrote names the tests that failed (nextest's
 # JUnit for `cargo test` and a suite of xtask's, the plants' own reporter of Node's tests
 # run in Node's process, Playwright's JSON; what a run printed is never read for it, and a
-# name that stands for two tests registered is none), and a failure that names only others
-# MISSED-BY-MEANT; where a failure names no test, a run that exits with a failure twice
-# with the plant and passes twice without it, anything else unstable, a run that left
-# the checkout otherwise than it found it too; a test file that ran no test of its own,
-# an error outside every test, no test found, are BROKEN, a Node test file ended while a
-# test of it ran is not; a build nextest says failed DOES NOT COMPILE, whatever a test
+# name that stands for two tests registered, whatever came of each, is none), and a failure
+# that names only others MISSED-BY-MEANT; a run that has a reporter and fails with no test
+# failing catches nothing; where a command has no reporter, a run that exits with a failure
+# twice with the plant and passes twice without it, each in its time, anything else
+# unstable, a run that left the checkout otherwise than it found it too; a test file that
+# ran no test of its own, an error outside every test, no test found, a failure that names
+# no test (one cancelled, a Node test file ended while a test of it ran) are BROKEN; a run
+# out of its time HUNG whatever it then exits with, and nothing it started outlives it; the
+# programs cf-e2e's tests run are taken from where cargo says it put them; a build nextest
+# says failed DOES NOT COMPILE, whatever a test
 # printed, and the build before the rig is cargo's own, which installs nothing, a build
 # that fails otherwise NOT BUILT; a run that writes more than it may is HUNG; and the
 # runs speak with no colour). The tools' own tests must catch each.
@@ -445,8 +449,8 @@ runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
 file = "tools/xtask/src/plants/driver/confirm.rs"
-find = "        if !caught.is_empty() && ran.names_tests() && !meant.is_empty() {"
-replace = "        if !caught.is_empty() && !meant.is_empty() {"
+find = "        if !caught.is_empty() && ran.names_tests() {"
+replace = "        if !caught.is_empty() {"
 
 [[plant]]
 name = "tooling: a Node test file that failed whole is taken for a test it names"
@@ -467,8 +471,8 @@ runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
 file = "tools/xtask/src/plants/runs.rs"
-find = "        if self.code == Some(0) || matches!(self.report, Some(Err(_))) {"
-replace = "        if matches!(self.report, Some(Err(_))) {"
+find = "        if self.code == Some(0) {\n            return Vec::new();\n        }\n        match &self.report {"
+replace = "        match &self.report {"
 
 [[plant]]
 name = "tooling: nextest's status for a build that failed is not read"
@@ -645,8 +649,8 @@ runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
 file = "tools/xtask/src/plants/runs/results.rs"
-find = "        suite(file, &[], &mut tests);"
-replace = '''        suite(file, &[file["title"].as_str().unwrap_or_default().to_owned()], &mut tests);'''
+find = "        suite(file, &[], &mut tests, &mut others);"
+replace = '''        suite(file, &[file["title"].as_str().unwrap_or_default().to_owned()], &mut tests, &mut others);'''
 
 [[plant]]
 name = "tooling: Node is not asked for the plants' report"
@@ -938,8 +942,15 @@ runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
 file = "tools/xtask/src/plants/runs.rs"
-find = "        if self.code == Some(0) || matches!(self.report, Some(Err(_))) {"
-replace = "        if self.code == Some(0) {"
+find = '''
+            Some(Err(_)) => Vec::new(),
+            None if self.hung || self.overflowed => Vec::new(),
+            None => {
+'''
+replace = '''
+            _ if self.hung || self.overflowed => Vec::new(),
+            _ => {
+'''
 
 [[plant.edit]]
 file = "tools/xtask/src/plants/runs.rs"
@@ -1035,8 +1046,8 @@ runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
 file = "tools/xtask/src/plants/runs/results.rs"
-find = "        let Some(how @ (Ended::Passed | Ended::Failed)) = read.ended else {"
-replace = "        let Some(how @ (Ended::Passed | Ended::Failed | Ended::Skipped | Ended::Todo)) = read.ended else {"
+find = "            Ended::Passed | Ended::Failed => tests.push(test),\n            Ended::Skipped | Ended::Todo | Ended::Cancelled => others.push(test),"
+replace = "            Ended::Passed | Ended::Failed | Ended::Skipped | Ended::Todo => tests.push(test),\n            Ended::Cancelled => others.push(test),"
 
 [[plant]]
 name = "tooling: the plants' reporter of Node's tests does not say a test to do"
@@ -1087,8 +1098,8 @@ runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
 file = "tools/xtask/src/plants/runs/results.rs"
-find = "        let Some(how @ (Ended::Passed | Ended::Failed)) = read.ended else {"
-replace = "        let Some(how @ (Ended::Passed | Ended::Failed | Ended::Cancelled)) = read.ended else {"
+find = "            Ended::Passed | Ended::Failed => tests.push(test),\n            Ended::Skipped | Ended::Todo | Ended::Cancelled => others.push(test),"
+replace = "            Ended::Passed | Ended::Failed | Ended::Cancelled => tests.push(test),\n            Ended::Skipped | Ended::Todo => others.push(test),"
 
 [[plant]]
 name = "tooling: a JUnit testcase marked skipped is read as one that ran"
@@ -1097,8 +1108,8 @@ runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
 file = "tools/xtask/src/plants/runs/results.rs"
-find = "                if let Some((test, false)) = open.take() {"
-replace = "                if let Some((test, _)) = open.take() {"
+find = "                Some((test, false)) => tests.push(test),"
+replace = "                Some((test, _)) => tests.push(test),"
 
 # A suite of xtask's that is a `cargo test` is that test, under nextest, in its folder and
 # with its variables; libtest's log, whose lines an ignored test's reason could write, is
@@ -1201,8 +1212,8 @@ runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
 file = "tools/xtask/src/plants/runs/results.rs"
-find = "        if statuses.is_empty() {\n"
-replace = "        for _ in statuses.iter().skip(1) {\n            tests.push(Test { name: name.clone(), at: at.clone(), file: None, whole: false, failed: false });\n        }\n        if statuses.is_empty() {\n"
+find = "        let test = Test {\n            name,\n            at,\n"
+replace = "        for _ in statuses.iter().skip(1) {\n            tests.push(Test { name: name.clone(), at: at.clone(), file: None, whole: false, failed: false });\n        }\n        let test = Test {\n            name,\n            at,\n"
 
 [[plant]]
 name = "tooling: a Playwright test is told from another of its name by nothing"
@@ -1463,8 +1474,8 @@ runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
 file = "tools/xtask/src/plants/runs.rs"
-find = "                Execution::Ended(ran) if ran.code == Some(0) => continue,"
-replace = "                Execution::Ended(_) => continue,"
+find = "                Execution::Ended(ran) if ran.code == Some(0) => {"
+replace = "                Execution::Ended(ran) if ran.code.is_some() => {"
 
 [[plant]]
 name = "tooling: a build before cf-e2e's tests that ran out of its time is said as its tests"
@@ -1757,3 +1768,285 @@ runs = ["xtask-lib-plants"]
 file = "tools/xtask/src/plants/driver/confirm.rs"
 find = "        let Some(state) = runner.state() else {\n            return Ok(None);\n        };"
 replace = "        let state = runner.state().unwrap_or_default();"
+
+# Round 5 (both reviewers' look at round 4, 2026-10-17). A run that has a reporter catches by
+# the meant test's own named failure alone: one that fails with no test failing (the meant
+# one aborted beside a test that passes) is BROKEN, never a catch by the run.
+
+[[plant]]
+name = "tooling: a run whose report names no test that failed is caught by the run itself"
+meant = "node_s_meant_test_aborted_catches_nothing_its_async_failures_are_its_own_and_a_skipped_twin_makes_its_name_two"
+runs = ["xtask-lib-plants"]
+
+[[plant.edit]]
+file = "tools/xtask/src/plants/runs.rs"
+find = '''
+            Some(Ok(results)) => results
+                .failed()
+'''
+replace = '''
+            Some(Ok(results)) if !results.failed().is_empty() => results
+                .failed()
+'''
+
+[[plant.edit]]
+file = "tools/xtask/src/plants/runs.rs"
+find = '''
+            None if self.hung || self.overflowed => Vec::new(),
+            None => {
+'''
+replace = '''
+            _ if self.hung || self.overflowed => Vec::new(),
+            _ => {
+'''
+
+[[plant.edit]]
+file = "tools/xtask/src/plants/runs.rs"
+find = "        if self.code == Some(0) || self.names_tests() {"
+replace = "        if true || self.code == Some(0) || self.names_tests() {"
+
+[[plant]]
+name = "tooling: a run whose report names no test that failed is not said to be broken"
+meant = "a_command_that_has_no_reporter_is_the_catch_itself_and_a_run_whose_report_names_no_failure_is_broken"
+runs = ["xtask-lib-plants"]
+
+[[plant.edit]]
+file = "tools/xtask/src/plants/runs.rs"
+find = "        if self.code == Some(0) || self.names_tests() {"
+replace = "        if true || self.code == Some(0) || self.names_tests() {"
+
+[[plant]]
+name = "tooling: a plant meant for no test is caught by the run whose tests failed"
+meant = "a_plant_meant_for_no_test_is_caught_by_none_of_the_tests_that_failed"
+runs = ["xtask-lib-plants"]
+
+[[plant.edit]]
+file = "tools/xtask/src/plants/driver/confirm.rs"
+find = "        if !caught.is_empty() && ran.names_tests() {"
+replace = "        if !caught.is_empty() && ran.names_tests() && !meant.is_empty() {"
+
+[[plant]]
+name = "tooling: a plant meant for no test is said to be caught not by it"
+meant = "a_plant_meant_for_no_test_is_caught_by_none_of_the_tests_that_failed"
+runs = ["xtask-lib-plants"]
+
+[[plant.edit]]
+file = "tools/xtask/src/plants/report.rs"
+find = "    let other = if meant.is_empty() || caught.iter().any(|name| is_meant(name, meant)) {"
+replace = "    let other = if caught.iter().any(|name| is_meant(name, meant)) {"
+
+# A run out of its time hung, whatever it exits with once asked to end, and a confirmation
+# that ran out of its time confirms nothing.
+
+[[plant]]
+name = "tooling (cf-process): a program held whole that ends with 0 once its time ran out has answered"
+meant = "held_whole_a_program_that_ended_with_0_at_the_ask_has_failed_out_of_its_time"
+runs = ["cf-process-capture"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/capture.rs"
+find = "    if status.success() && !(killed && hold == Hold::Whole) {"
+replace = "    if status.success() {"
+
+[[plant]]
+name = "tooling: a run ended for its time keeps the code it exited with once asked"
+meant = "what_cf_process_answered_is_what_the_run_did"
+runs = ["xtask-lib-plants"]
+
+[[plant.edit]]
+file = "tools/xtask/src/plants/runs.rs"
+find = "                let code = if failed.killed { None } else { failed.code };"
+replace = "                let code = failed.code;"
+
+[[plant]]
+name = "tooling: a run without the plant that ran out of its time is not said to have been ended"
+meant = "a_plant_whose_command_without_it_hangs_and_then_says_0_is_not_caught"
+runs = ["xtask-lib-plants"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "tools/xtask/src/plants/driver/confirm.rs"
+find = '''
+        Ok(Execution::Ended(ran)) if ran.hung => Err(format!(
+            "{} did not end in its time, and was ended",
+            command.join(" ")
+        )),
+'''
+replace = ""
+
+[[plant]]
+name = "tooling: the runs are captured as Node's execFile captures, and one that ends with 0 once its time ran out passed"
+meant = "a_command_that_ends_with_0_once_its_time_ran_out_hung_and_catches_nothing"
+runs = ["xtask-lib-plants"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "tools/xtask/src/plants/runs.rs"
+find = "            let mut running = pin!(capture_whole(&run, Some(cwd), &env, *limits, |_| {}));"
+replace = "            let mut running = pin!(cf_process::capture(&run, Some(cwd), &env, *limits, |_| {}));"
+
+# Nothing a run started outlives it: on Unix the group it leads is ended once it has ended,
+# however it ended; on Windows it runs in a job of its own that nothing it starts can leave.
+
+[[plant]]
+name = "tooling: the runs are captured as Node's execFile captures, and what one left running goes on"
+meant = "what_a_command_left_running_is_ended_with_it_before_the_sources_are_put_back"
+runs = ["xtask-lib-plants"]
+
+[[plant.edit]]
+file = "tools/xtask/src/plants/runs.rs"
+find = "            let mut running = pin!(capture_whole(&run, Some(cwd), &env, *limits, |_| {}));"
+replace = "            let mut running = pin!(cf_process::capture(&run, Some(cwd), &env, *limits, |_| {}));"
+
+[[plant]]
+name = "tooling (cf-process): what a program held whole left running is let go of once it ended"
+meant = "held_whole_what_a_program_left_running_is_ended_once_it_has_ended"
+runs = ["cf-process-capture"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/capture.rs"
+find = '''
+        Some(None) => {
+            group.end(Ending::Forced);
+            child.wait().await
+        }
+'''
+replace = '''
+        Some(None) => child.wait().await,
+'''
+
+[[plant]]
+name = "tooling (cf-process): a program held whole runs in the job of every child, which it leaves"
+meant = "held_whole_what_a_program_left_running_is_ended_once_it_has_ended"
+runs = ["cf-process-capture"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/capture.rs"
+find = "        Hold::Node => {\n            crate::job::adopt(&child);"
+replace = "        _ if true => {\n            crate::job::adopt(&child);"
+
+[[plant]]
+name = "tooling (cf-process): the job of a program held whole lets what it starts leave"
+meant = "held_whole_what_a_program_left_running_is_ended_once_it_has_ended"
+runs = ["cf-process-capture"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/job.rs"
+find = "                JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION | JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;"
+replace = "                JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION | JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | windows_sys::Win32::System::JobObjects::JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK;"
+
+# A meant name stands for every test registered of it, whatever came of each.
+
+[[plant]]
+name = "tooling: a test of the meant name that was skipped is not one of its tests"
+meant = "node_s_meant_test_aborted_catches_nothing_its_async_failures_are_its_own_and_a_skipped_twin_makes_its_name_two"
+runs = ["xtask-lib-plants"]
+
+[[plant.edit]]
+file = "tools/xtask/src/plants/driver/confirm.rs"
+find = "        .chain(ran.others())\n"
+replace = ""
+
+[[plant]]
+name = "tooling: Node's tests that neither failed nor passed are dropped from its report"
+meant = "node_names_a_test_by_the_titles_it_is_in_and_its_own_exactly_and_a_failure_by_its_own_code"
+runs = ["xtask-lib-plants"]
+
+[[plant.edit]]
+file = "tools/xtask/src/plants/runs/results.rs"
+find = "            Ended::Skipped | Ended::Todo | Ended::Cancelled => others.push(test),"
+replace = "            Ended::Skipped | Ended::Todo | Ended::Cancelled => drop(test),"
+
+[[plant]]
+name = "tooling: nextest's tests marked skipped are dropped from its report"
+meant = "a_testcase_marked_skipped_neither_failed_nor_passed_though_it_holds_a_failure"
+runs = ["xtask-lib-plants"]
+
+[[plant.edit]]
+file = "tools/xtask/src/plants/runs/results.rs"
+find = '''
+                Some((test, true)) => others.push(Test {
+                    failed: false,
+                    ..test
+                }),
+'''
+replace = '''
+                Some((_, true)) => {}
+'''
+
+[[plant]]
+name = "tooling: a Playwright test skipped in every project is dropped from its report"
+meant = "playwright_says_each_test_named_from_its_first_group_on_and_whether_it_failed_and_nothing_it_printed"
+runs = ["xtask-lib-plants"]
+
+[[plant.edit]]
+file = "tools/xtask/src/plants/runs/results.rs"
+find = "        if statuses.is_empty() {\n            others.push(test);"
+replace = "        if statuses.is_empty() {\n            drop(test);"
+
+# An exception or a rejection, unhandled, from a test while it runs is that test's failure.
+
+[[plant]]
+name = "tooling: a Node test's timer that throws while it runs cancels it"
+meant = "node_s_meant_test_aborted_catches_nothing_its_async_failures_are_its_own_and_a_skipped_twin_makes_its_name_two"
+runs = ["xtask-lib-plants"]
+
+[[plant.edit]]
+file = "tools/xtask/src/plants/runs/reporters/node.mjs"
+find = "  'uncaughtException',\n"
+replace = ""
+
+[[plant]]
+name = "tooling: a Node test's promise that rejects unhandled while it runs cancels it"
+meant = "node_s_meant_test_aborted_catches_nothing_its_async_failures_are_its_own_and_a_skipped_twin_makes_its_name_two"
+runs = ["xtask-lib-plants"]
+
+[[plant.edit]]
+file = "tools/xtask/src/plants/runs/reporters/node.mjs"
+find = "  'unhandledRejection',\n"
+replace = ""
+
+# The tests of cf-e2e are told the folder cargo says it put their programs in, whatever folder
+# it builds in.
+
+[[plant]]
+name = "tooling: cf-e2e's tests are told the checkout's release folder, wherever cargo built"
+meant = "a_run_of_cf_e2e_s_tests_is_given_the_programs_built_before_it_and_one_whose_build_failed_runs_no_test"
+runs = ["xtask-lib-plants"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "tools/xtask/src/plants/runs.rs"
+find = "            Some(folder) => Ok(folder),"
+replace = "            Some(_) => Ok(self.checkout.root.join(\"app/src-tauri/target/release\")),"
+
+[[plant]]
+name = "tooling: builds before cf-e2e's tests that put its programs in two folders name the first"
+meant = "a_run_of_cf_e2e_s_tests_is_given_the_programs_built_before_it_and_one_whose_build_failed_runs_no_test"
+runs = ["xtask-lib-plants"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "tools/xtask/src/plants/runs.rs"
+find = "                    if let Some(other) = folder.as_ref().filter(|other| *other != there) {"
+replace = "                    if let Some(other) = folder.as_ref().filter(|_| false) {"
+
+[[plant]]
+name = "tooling: a build before cf-e2e's tests that says nowhere it put its program is passed over"
+meant = "a_run_of_cf_e2e_s_tests_is_given_the_programs_built_before_it_and_one_whose_build_failed_runs_no_test"
+runs = ["xtask-lib-plants"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "tools/xtask/src/plants/runs.rs"
+find = '''
+                        let why = format!("{} said nowhere it put {bin}", words.join(" "));
+                        return Ok(Err(Execution::Ended(Self::unbuilt(command, ran, why))));
+'''
+replace = '''
+                        continue;
+'''

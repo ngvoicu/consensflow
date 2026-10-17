@@ -2,6 +2,9 @@
 //! given back here: the variables Windows needs that a child's environment
 //! lacks, taken from this process's, and a job object that ends the child
 //! when this process ends. Elsewhere a child is started as it is given.
+//!
+//! A program held whole (`capture_whole`) runs in a job of its own instead,
+//! which nothing it starts can leave, ended with the capture.
 
 use cf_base::env::Env;
 
@@ -103,6 +106,97 @@ fn job() -> Option<usize> {
             (set != 0).then_some(job as usize)
         }
     })
+}
+
+/// The job of a program held whole and of every process it starts, which none
+/// of them can leave: on Windows, a job of its own, every process of which is
+/// ended when it is dropped (and when this process ends, as its handle
+/// closes). On other systems nothing: the group the program leads holds what
+/// it starts.
+pub(crate) struct Job {
+    #[cfg(windows)]
+    handle: usize,
+}
+
+#[cfg(not(windows))]
+impl Job {
+    /// The job of `process`, which has just started.
+    #[allow(clippy::unnecessary_wraps)] // As Windows has it.
+    pub(crate) fn of(_process: &tokio::process::Child) -> Result<Self, String> {
+        Ok(Self {})
+    }
+}
+
+#[cfg(windows)]
+impl Job {
+    /// A job made for `process`, which has just started, and `process` put in it:
+    /// what it starts from then on is in it too, with no way out (no breakaway is
+    /// allowed, silent or asked for), and a process of it that fails unhandled
+    /// ends, as libuv's job has it, with no dialog of Windows' to wait on. Why
+    /// it could not be made, if it could not: a process already in a job is put
+    /// in this one as a job inside that one (Windows 8 on), and is refused by a
+    /// job that allows none. What the program started before it was put in the
+    /// job (in the moment after it started) is not in it.
+    pub(crate) fn of(process: &tokio::process::Child) -> Result<Self, String> {
+        use windows_sys::Win32::System::JobObjects::{
+            AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
+            SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+            JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+        };
+        let failed = |what: &str| format!("{what}: {}", std::io::Error::last_os_error());
+        let handle = process
+            .raw_handle()
+            .ok_or_else(|| "could not be put in a job of its own: it has ended".to_owned())?;
+        #[allow(unsafe_code)]
+        // SAFETY: CreateJobObjectW takes no attributes and no name here and
+        // returns a handle or null, closed by the drop of the job from then on;
+        // SetInformationJobObject reads `limits`, a whole struct of the size
+        // given, for as long as the call lasts; the process's handle is open while
+        // `process` is borrowed. None of them writes memory of ours.
+        unsafe {
+            let made = CreateJobObjectW(std::ptr::null(), std::ptr::null());
+            if made.is_null() {
+                return Err(failed("could not make a job of its own"));
+            }
+            let job = Self {
+                handle: made as usize,
+            };
+            let mut limits: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
+            limits.BasicLimitInformation.LimitFlags =
+                JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION | JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+            let size = u32::try_from(std::mem::size_of_val(&limits))
+                .map_err(|_| "could not make a job of its own".to_owned())?;
+            let limited = SetInformationJobObject(
+                made,
+                JobObjectExtendedLimitInformation,
+                (&raw const limits).cast(),
+                size,
+            );
+            if limited == 0 {
+                return Err(failed("could not make a job of its own"));
+            }
+            if AssignProcessToJobObject(made, handle as _) == 0 {
+                return Err(failed("could not be put in a job of its own"));
+            }
+            Ok(job)
+        }
+    }
+}
+
+#[cfg(windows)]
+impl Drop for Job {
+    /// Every process of the job is ended, at once, and its handle closed.
+    fn drop(&mut self) {
+        use windows_sys::Win32::Foundation::CloseHandle;
+        use windows_sys::Win32::System::JobObjects::TerminateJobObject;
+        #[allow(unsafe_code)]
+        // SAFETY: the handle is the job's, open until now, and closed once; the
+        // calls write no memory of ours.
+        unsafe {
+            TerminateJobObject(self.handle as _, 1);
+            CloseHandle(self.handle as _);
+        }
+    }
 }
 
 #[cfg(test)]

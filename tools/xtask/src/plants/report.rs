@@ -76,7 +76,7 @@ pub fn is_meant(name: &str, meant: &str) -> bool {
 }
 
 /// What caught a plant: the first test that failed, how many others did, and, when
-/// none of them is the test it was written for (`is_meant`), that.
+/// none of them is the test it was written for (`is_meant`), that, where it names one.
 pub fn caught_by(caught: &[String], meant: &str) -> String {
     let Some(first) = caught.first() else {
         return String::new();
@@ -86,7 +86,7 @@ pub fn caught_by(caught: &[String], meant: &str) -> String {
     } else {
         String::new()
     };
-    let other = if caught.iter().any(|name| is_meant(name, meant)) {
+    let other = if meant.is_empty() || caught.iter().any(|name| is_meant(name, meant)) {
         String::new()
     } else {
         format!(", not by {meant}")

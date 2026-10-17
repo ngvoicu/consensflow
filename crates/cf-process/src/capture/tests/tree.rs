@@ -11,9 +11,7 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use super::*;
-use crate::testing::{gone, pids_written_to_soon, Survivors};
-#[cfg(unix)]
-use crate::testing::{gone_within, pids_in};
+use crate::testing::{gone, gone_within, pids_in, pids_written_to_soon, Survivors};
 
 /// How long the capture of a tree that is ended has to end: far less than the
 /// minute its programs run, so that one that is not ended fails the test where
@@ -212,6 +210,88 @@ fn a_child_that_ignores_being_asked_is_forced_though_its_parent_ended_at_the_ask
         gone_within(pids[1], Duration::from_secs(1)),
         "the child that took no notice of the ask, forced once its time to end ran out"
     );
+}
+
+#[cfg(unix)]
+#[test]
+fn held_whole_a_program_that_ended_with_0_at_the_ask_has_failed_out_of_its_time() {
+    // The program `capture` answers above, as Node does: held whole, a time that ran
+    // out is a time that ran out (a run of the plants that hung, 2026-10-17).
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("pids");
+    let run = shell(&format!(
+        "trap 'exit 0' TERM; (trap '' TERM; exec sleep 60) & printf '%s %s\\n' \"$$\" \"$!\" > '{}'; wait",
+        file.display()
+    ));
+    let limits = Limits {
+        timeout: Duration::from_millis(1500),
+        max_buffer: 1024,
+    };
+    let failed = runtime()
+        .block_on(capture_whole(&run, None, &tree_env(), limits, |_| {}))
+        .unwrap_err();
+    assert!(failed.killed, "{failed:?}");
+    assert_eq!(failed.code, Some(0), "it did exit with 0, once asked");
+    let pids = pids_in(&file, 2).expect("written long before its time ran out");
+    let _left = Survivors(pids.clone());
+    assert!(gone(pids[0]), "the parent");
+    assert!(
+        gone_within(pids[1], Duration::from_secs(1)),
+        "the child, forced"
+    );
+}
+
+/// A program that leaves a child running and ends at once: the child has none of
+/// its streams, and writes `late` to the file `marked` once `after` has passed;
+/// `pids` gets the program's pid and the child's, as `tree` writes them.
+fn leaves_a_writer(pids: &Path, marked: &Path, after: u32) -> Run {
+    #[cfg(unix)]
+    return shell(&format!(
+        "(sleep {after}; echo late > '{}') </dev/null >/dev/null 2>&1 & printf '%s %s\\n' \"$$\" \"$!\" > '{}'",
+        marked.display(),
+        pids.display()
+    ));
+    #[cfg(windows)]
+    return Run {
+        program: PathBuf::from(r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"),
+        args: [
+            "-NoProfile".to_owned(),
+            "-Command".to_owned(),
+            format!(
+                "$p = Start-Process -PassThru -WindowStyle Hidden -FilePath 'C:\\Windows\\System32\\cmd.exe' -ArgumentList '/d','/c','ping -n {} 127.0.0.1 >NUL & echo late> \"{}\"'; \
+                 Set-Content -Path '{}' -Value (@($PID, $p.Id) -join ' ')",
+                after + 1,
+                marked.display(),
+                pids.display().to_string().replace('\'', "''")
+            ),
+        ]
+        .map(OsString::from)
+        .to_vec(),
+        verbatim: false,
+    };
+}
+
+#[test]
+fn held_whole_what_a_program_left_running_is_ended_once_it_has_ended() {
+    // The program ends with 0 at once, and its child would write after the capture
+    // answered: as a run's child wrote the sources once they were put back.
+    let dir = tempfile::tempdir().unwrap();
+    let (file, marked) = (dir.path().join("pids"), dir.path().join("late"));
+    let run = leaves_a_writer(&file, &marked, 2);
+    let limits = Limits {
+        timeout: Duration::from_secs(60),
+        max_buffer: 1024,
+    };
+    let answered = runtime().block_on(capture_whole(&run, None, &tree_env(), limits, |_| {}));
+    assert!(answered.is_ok(), "{answered:?}");
+    let pids = pids_in(&file, 2).expect("written before it ended");
+    let _left = Survivors(pids.clone());
+    assert!(
+        gone_within(pids[1], Duration::from_secs(1)),
+        "the child it left running is ended with it"
+    );
+    std::thread::sleep(Duration::from_secs(4));
+    assert!(!marked.exists(), "nothing it left running wrote after it");
 }
 
 #[cfg(unix)]

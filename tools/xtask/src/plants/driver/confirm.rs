@@ -5,13 +5,16 @@
 //! Where the run's report names the test the plant was meant for among those that
 //! failed, the plant is caught once its command passes without it, once, whatever
 //! else broke beside it (an error outside every test is said with the catch); where
-//! it names only other tests, or a meant name that stands for more than one test of
-//! the report, it is MISSED-BY-MEANT. Where it names no test (a command that says no
-//! more than its status, a test file that failed whole), nothing can be attributed:
-//! the run is run so again and must fail again, and the command must pass twice
-//! without the plant. A run whose reporter wrote no report it could read catches
-//! nothing. A command that fails without the plant is always run again once before
-//! it is taken to fail; one that passes once and fails once is unstable.
+//! it names only other tests, or a meant name that stands for more than one test
+//! registered (whatever came of each), it is MISSED-BY-MEANT. A run that has a
+//! reporter catches by nothing else: one whose report names no test that failed
+//! (a test cancelled, a test file that failed whole) is BROKEN, as is one whose
+//! reporter wrote no report it could read. Only where the command has no reporter
+//! (it says no more than its status) is the run itself the catch, which nothing can
+//! attribute: the run is run so again and must fail again, and the command must
+//! pass twice without the plant. A command that fails without the plant, or does not
+//! end in its time, is always run again once before it is taken to fail; one that
+//! passes once and fails once is unstable.
 
 use std::collections::HashMap;
 
@@ -36,7 +39,7 @@ pub(super) enum Judged {
         caught: Vec<String>,
         doubt: Option<String>,
     },
-    /// It failed, and names no test of its own that did: the run is what caught it.
+    /// It failed, a command that has no reporter: the run is what caught it.
     Unnamed(Ran, Vec<String>),
     /// Whatever else ends the run: it was ended (out of time, or for writing more
     /// than a run may), it did not build, no test of it could see the plant.
@@ -54,7 +57,7 @@ impl Judged {
         }
         let caught = ran.caught();
         let broken = ran.broken();
-        if !caught.is_empty() && ran.names_tests() && !meant.is_empty() {
+        if !caught.is_empty() && ran.names_tests() {
             match meant_in(&ran, meant) {
                 Some(Ok(())) => {
                     return Self::Meant {
@@ -104,14 +107,16 @@ impl Judged {
 }
 
 /// Whether the meant test is among those `ran` says failed: none where it is not;
-/// else, where the meant name stands for more than one test of the report (two
-/// tests of one name in two places, or two registered in one place, as a loop
-/// registers them: the name cannot tell them apart), why it is not taken for the
-/// one that failed. Each test of the report is one registered (`results`).
+/// else, where the meant name stands for more than one test registered (two tests of
+/// one name in two places, or two registered in one place, as a loop registers them:
+/// the name cannot tell them apart), whatever came of each (one skipped, to do or
+/// cancelled too), why it is not taken for the one that failed. Each test of the
+/// report is one registered (`results`).
 fn meant_in(ran: &Ran, meant: &str) -> Option<Result<(), String>> {
     let named: Vec<_> = ran
         .tests()
         .iter()
+        .chain(ran.others())
         .filter(|test| report::is_meant(&test.name, meant))
         .collect();
     if !named.iter().any(|test| test.failed) {
@@ -228,7 +233,8 @@ impl CleanRuns {
 }
 
 /// One run of `command` on the sources as they are: `Err` is what it said where it
-/// failed, where its reporter wrote no report it could read, or that it could not be
+/// failed, where its reporter wrote no report it could read, that it did not end in
+/// its time (whatever it exited with once asked to end), or that it could not be
 /// started. `None` is a stop.
 pub(super) fn once(
     command: &[String],
@@ -236,6 +242,10 @@ pub(super) fn once(
 ) -> Result<Option<Result<(), String>>, Error> {
     Ok(Some(match runner.run(command) {
         Ok(Execution::Stopped) => return Ok(None),
+        Ok(Execution::Ended(ran)) if ran.hung => Err(format!(
+            "{} did not end in its time, and was ended",
+            command.join(" ")
+        )),
         Ok(Execution::Ended(Ran {
             report: Some(Err(why)),
             ..

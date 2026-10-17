@@ -17,11 +17,12 @@
 //! A report is whole or it is an error: one cut short (no end to its root, or no
 //! last line) says nothing of the tests it did not get to. A test that was skipped,
 //! or marked to do (Node runs a test to do, and it may fail), neither failed nor
-//! passed: it is left out; so is a test of Node's that ended for what is not its
-//! own code (cancelled by its parent, aborted, its hook failed).
+//! passed: it is none of the tests that ran, and is kept apart (`others`); so is a
+//! test of Node's that ended for what is not its own code (cancelled by its parent,
+//! aborted, its hook failed).
 //!
-//! Each test of `Results` is one test registered: two of a name and place are two
-//! tests, which the name cannot tell apart.
+//! Each test of `Results` is one test registered, whatever came of it: two of a
+//! name and place are two tests, which the name cannot tell apart.
 
 use quick_xml::events::{BytesStart, Event};
 use quick_xml::Reader;
@@ -30,9 +31,13 @@ use serde::Deserialize;
 /// The tests a run's reporter says it ran, and the errors it says came outside them.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Results {
+    /// The tests that ran: each passed or failed.
     pub tests: Vec<Test>,
     /// Errors outside every test, each as its first line.
     pub outside: Vec<String>,
+    /// The tests registered that neither failed nor passed (skipped, to do, ended
+    /// for what is not their own code), none of them failed.
+    pub others: Vec<Test>,
 }
 
 /// A test, as its reporter names it, and whether it failed.
@@ -83,7 +88,7 @@ impl Results {
 /// The tests of nextest's JUnit report.
 pub fn junit(xml: &str) -> Result<Results, String> {
     let mut reader = Reader::from_str(xml);
-    let mut tests = Vec::new();
+    let (mut tests, mut others) = (Vec::new(), Vec::new());
     // The test whose `<testcase>` is open, until its end, and whether it was skipped.
     let mut open: Option<(Test, bool)> = None;
     let mut ended = false;
@@ -105,11 +110,14 @@ pub fn junit(xml: &str) -> Result<Results, String> {
                     }
                 }
             }
-            Event::End(element) if element.name().as_ref() == b"testcase" => {
-                if let Some((test, false)) = open.take() {
-                    tests.push(test);
-                }
-            }
+            Event::End(element) if element.name().as_ref() == b"testcase" => match open.take() {
+                Some((test, false)) => tests.push(test),
+                Some((test, true)) => others.push(Test {
+                    failed: false,
+                    ..test
+                }),
+                None => {}
+            },
             Event::End(element) if element.name().as_ref() == b"testsuites" => ended = true,
             Event::Eof => break,
             _ => {}
@@ -121,6 +129,7 @@ pub fn junit(xml: &str) -> Result<Results, String> {
     Ok(Results {
         tests,
         outside: Vec::new(),
+        others,
     })
 }
 
@@ -179,7 +188,7 @@ enum Ended {
 /// The tests of the report of the plants' reporter of Node's tests, each named by
 /// the titles of the tests it is in and its own, joined as Playwright joins them.
 pub fn node(report: &str) -> Result<Results, String> {
-    let mut tests = Vec::new();
+    let (mut tests, mut others) = (Vec::new(), Vec::new());
     let mut ended = false;
     for (number, text) in report.lines().enumerate() {
         let read: NodeLine =
@@ -190,18 +199,22 @@ pub fn node(report: &str) -> Result<Results, String> {
             return Err(format!("line {}: not a test, nor the end", number + 1));
         }
         ended = read.end;
-        let Some(how @ (Ended::Passed | Ended::Failed)) = read.ended else {
+        let Some(how) = read.ended else {
             continue;
         };
         let file = read.file.unwrap_or_default();
         let place = |at: Option<u64>| at.map(|at| at.to_string()).unwrap_or_default();
-        tests.push(Test {
+        let test = Test {
             name: read.path.join(" › "),
             at: format!("{file}:{}:{}", place(read.line), place(read.column)),
             file: Some(file),
             whole: read.whole,
             failed: how == Ended::Failed,
-        });
+        };
+        match how {
+            Ended::Passed | Ended::Failed => tests.push(test),
+            Ended::Skipped | Ended::Todo | Ended::Cancelled => others.push(test),
+        }
     }
     if !ended {
         return Err("the report ends before the run did".to_owned());
@@ -209,6 +222,7 @@ pub fn node(report: &str) -> Result<Results, String> {
     Ok(Results {
         tests,
         outside: Vec::new(),
+        others,
     })
 }
 
@@ -219,10 +233,10 @@ pub fn playwright(json: &str) -> Result<Results, String> {
     let suites = report["suites"]
         .as_array()
         .ok_or("the report has no suites")?;
-    let mut tests = Vec::new();
+    let (mut tests, mut others) = (Vec::new(), Vec::new());
     for file in suites {
         // The file's own suite is no group of a test's name.
-        suite(file, &[], &mut tests);
+        suite(file, &[], &mut tests, &mut others);
     }
     let outside = report["errors"]
         .as_array()
@@ -238,14 +252,23 @@ pub fn playwright(json: &str) -> Result<Results, String> {
                 .to_owned()
         })
         .collect();
-    Ok(Results { tests, outside })
+    Ok(Results {
+        tests,
+        outside,
+        others,
+    })
 }
 
 /// The tests of a suite of Playwright's report and of the suites in it, each named
 /// by `groups` (the titles of the suites around it, the file's left out) and its own:
-/// one test for each spec, which failed where it failed in a project, and is left
-/// out where it was skipped in every project it was given to.
-fn suite(suite: &serde_json::Value, groups: &[String], tests: &mut Vec<Test>) {
+/// one test for each spec, which failed where it failed in a project, and is one of
+/// the `others` where it was skipped in every project it was given to.
+fn suite(
+    suite: &serde_json::Value,
+    groups: &[String],
+    tests: &mut Vec<Test>,
+    others: &mut Vec<Test>,
+) {
     for spec in suite["specs"].as_array().into_iter().flatten() {
         let title = spec["title"].as_str().unwrap_or_default();
         let name = groups
@@ -267,21 +290,23 @@ fn suite(suite: &serde_json::Value, groups: &[String], tests: &mut Vec<Test>) {
             .map(|test| test["status"].as_str().unwrap_or_default())
             .filter(|status| *status != "skipped")
             .collect();
-        if statuses.is_empty() {
-            continue;
-        }
-        tests.push(Test {
+        let test = Test {
             name,
             at,
             file: None,
             whole: false,
             failed: statuses.contains(&"unexpected"),
-        });
+        };
+        if statuses.is_empty() {
+            others.push(test);
+        } else {
+            tests.push(test);
+        }
     }
     for inner in suite["suites"].as_array().into_iter().flatten() {
         let mut deeper = groups.to_vec();
         deeper.push(inner["title"].as_str().unwrap_or_default().to_owned());
-        self::suite(inner, &deeper, tests);
+        self::suite(inner, &deeper, tests, others);
     }
 }
 

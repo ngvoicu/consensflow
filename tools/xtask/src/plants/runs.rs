@@ -6,16 +6,21 @@
 //! `NODE_TEST_CONTEXT` (which a
 //! `node --test` that this run happens to be under would pass on to the ones it
 //! starts), and with no colour (`NO_COLOR=1`, `FORCE_COLOR=0`). `cf-process`
-//! starts it, as it does every program the product starts: the command leads a
-//! process group of its own on Unix, ended whole at its time, and on Windows its
-//! tree is. A stop (Ctrl-C, a terminal closed, `kill`) heard meanwhile ends the
-//! command in hand the same way and is told to the driver, which puts the sources
-//! back. A run that writes more than `OUTPUT_LIMIT` to a stream is ended for it.
+//! starts it, as it does every program the product starts, held whole
+//! (`capture_whole`): a command asked to end because its time ran out hung,
+//! whatever it exits with then; and nothing it started outlives it, before the
+//! driver puts the sources back. On Unix it leads a process group of its own, which
+//! is ended once the command has ended, however it ended; on Windows it runs in a
+//! job of its own that nothing it starts can leave, ended with it. A stop (Ctrl-C, a
+//! terminal closed, `kill`) heard meanwhile ends the command in hand the same way
+//! and is told to the driver, which puts the sources back. A run that writes more
+//! than `OUTPUT_LIMIT` to a stream is ended for it.
 //!
 //! A run of the tests of `cf-e2e` is preceded by the release builds of the
 //! programs they run, from the sources as they are, with the plant or without it
-//! (`CF_E2E_PROGRAMS`), and its tests are told where those are (`CF_E2E_BUILT`) and
-//! build nothing; a build that does not succeed ends the run, with no test run.
+//! (`CF_E2E_PROGRAMS`), and its tests are told where cargo says it put those
+//! (`CF_E2E_BUILT`) and build nothing; a build that does not succeed ends the run,
+//! with no test run.
 //!
 //! `cargo xtask …` that is no suite of tests is this xtask itself, started as the
 //! program it is. Cargo would first build again the xtask it starts, and that is
@@ -27,9 +32,10 @@
 //! test files ran no test, which errors came outside every test. What the run
 //! printed is read for none of it: it is what is said of a plant, no more. A run
 //! whose reporter wrote no report, or one that cannot be read whole, names no test
-//! and catches nothing, whatever its exit status: no test was seen to run. Only a
-//! command that has no reporter (a smoke that says no more than its status) is
-//! judged by its status, and the driver confirms such a failure twice each way.
+//! and catches nothing, whatever its exit status: no test was seen to run; nor does
+//! one that failed while its report names no test that failed. Only a command that
+//! has no reporter (a smoke that says no more than its status) is judged by its
+//! status, and the driver confirms such a failure twice each way.
 
 mod reporters;
 pub(super) mod results;
@@ -44,7 +50,7 @@ use std::task::Poll;
 use std::time::Duration;
 
 use cf_base::env::Env;
-use cf_process::{capture, CaptureFailed, Captured, Limits, Run};
+use cf_process::{capture_whole, CaptureFailed, Captured, Limits, Run};
 use tokio::runtime::Runtime;
 
 use self::reporters::Reporter;
@@ -65,9 +71,6 @@ const RUNS: &str = "app/src-tauri/target/plants-runs";
 
 /// Where the workspace's tools are installed (`cargo install --root`).
 const TOOLS: &str = "app/src-tauri/target/tools";
-
-/// Where a release build lands, from the checkout's root (`.cargo/config.toml`).
-const RELEASE: &str = "app/src-tauri/target/release";
 
 /// The variable that tells the tests of `cf-e2e` the folder the programs they run
 /// were built in before the run (crates/cf-e2e/src/cf.rs, `BUILT`).
@@ -188,8 +191,11 @@ impl Ran {
     /// it was told), whatever the other files did; an error Playwright says came
     /// outside every test, or no test it found; no test nextest found to run, or a
     /// test binary that could not say its tests; a run that failed with no test run
-    /// at all. A test file that failed whole after tests of it ran is none of these,
-    /// nor one that loaded and holds no test.
+    /// at all; and a run that failed while its report names no test that did, which
+    /// no test's own failure made fail (a test cancelled or aborted, a hook that
+    /// failed, a Node test file that failed whole after tests of it ran, an error
+    /// after a test had ended). A test file that loaded and holds no test is none of
+    /// these.
     pub fn broken(&self) -> Option<String> {
         let reporter = Reporter::of(&self.command);
         if reporter == Reporter::Nextest {
@@ -206,7 +212,7 @@ impl Ran {
             Err(why) => return Some(format!("no report of its tests could be read: {why}")),
         };
         let none_ran = results.tests.is_empty() && self.code != Some(0);
-        match reporter {
+        let why = match reporter {
             Reporter::Node => match results.files_that_ran_none().first() {
                 Some(file) => Some(format!("the test file {file} ran no test")),
                 None => none_ran.then(|| "Node ran no test".to_owned()),
@@ -220,7 +226,40 @@ impl Ran {
             },
             Reporter::Nextest => none_ran.then(|| "it ran no test".to_owned()),
             Reporter::Status => None,
+        };
+        why.or_else(|| self.unnamed(results))
+    }
+
+    /// Why the run failed with no failure of a test's own, where its report names no
+    /// test that failed: how it ended, the test files that failed whole, and the tests
+    /// that neither failed nor passed.
+    fn unnamed(&self, results: &Results) -> Option<String> {
+        if self.code == Some(0) || self.names_tests() {
+            return None;
         }
+        let mut why = match self.code {
+            Some(code) => format!("it ended with {code}, and its report names no test that failed"),
+            None => "a signal ended it, and its report names no test that failed".to_owned(),
+        };
+        for whole in results
+            .tests
+            .iter()
+            .filter(|test| test.whole && test.failed)
+        {
+            why.push_str(&format!("; the test file {} failed whole", whole.name));
+        }
+        if !results.others.is_empty() {
+            let names: Vec<&str> = results
+                .others
+                .iter()
+                .map(|test| test.name.as_str())
+                .collect();
+            why.push_str(&format!(
+                "; neither failed nor passed (skipped, to do, cancelled): {}",
+                names.join(", ")
+            ));
+        }
+        Some(why)
     }
 
     /// Whether the run's failure names a test of its own, which a plant can be
@@ -238,30 +277,41 @@ impl Ran {
         }
     }
 
+    /// Every test the run's report says was registered and neither failed nor passed
+    /// (`Results::others`): none where it has no report it could read.
+    pub fn others(&self) -> &[Test] {
+        match &self.report {
+            Some(Ok(results)) => &results.others,
+            _ => &[],
+        }
+    }
+
     /// What caught the plant, if this run did, which only a run that exited with a
-    /// failure can: the tests its report says failed, each once, in the order it says
-    /// them; else, for a run whose report names no test that failed, or that has no
-    /// reporter, the run itself. A run whose reporter wrote no report it could read
-    /// catches nothing.
+    /// failure can. For a run that has a reporter, the tests its report says failed,
+    /// each once, in the order it says them, and nothing else: a failure its report
+    /// names no test of is no test's catch (`broken`), and a run whose reporter wrote
+    /// no report it could read catches nothing. For a command that has none, the run
+    /// itself, where it was not ended for its time or its output.
     pub fn caught(&self) -> Vec<String> {
-        if self.code == Some(0) || matches!(self.report, Some(Err(_))) {
+        if self.code == Some(0) {
             return Vec::new();
         }
-        let failed: Vec<String> = self
-            .report
-            .iter()
-            .flatten()
-            .flat_map(Results::failed)
-            .map(|test| test.name.clone())
-            .collect();
-        if !failed.is_empty() || !self.compiled() || self.hung || self.overflowed {
-            return failed;
+        match &self.report {
+            Some(Ok(results)) => results
+                .failed()
+                .into_iter()
+                .map(|test| test.name.clone())
+                .collect(),
+            Some(Err(_)) => Vec::new(),
+            None if self.hung || self.overflowed => Vec::new(),
+            None => {
+                let words = self.command.get(1..).unwrap_or_default().join(" ");
+                vec![match self.code {
+                    Some(code) => format!("{words}: ended with {code}"),
+                    None => format!("{words}: was ended by a signal"),
+                }]
+            }
         }
-        let words = self.command.get(1..).unwrap_or_default().join(" ");
-        vec![match self.code {
-            Some(code) => format!("{words}: ended with {code}"),
-            None => format!("{words}: was ended by a signal"),
-        }]
     }
 
     /// Whether cargo's builds succeeded, where it said so in its structured words.
@@ -271,6 +321,24 @@ impl Ran {
             .filter(|line| line.starts_with(r#"{"reason":"build-finished""#))
             .map(|line| line.contains(r#""success":true"#))
             .reduce(|all, built| all && built)
+    }
+
+    /// Where cargo put the program `bin` it built, built now or already, as it says
+    /// in its structured words (`compiler-artifact`), the last time it says it: none
+    /// where it does not.
+    pub fn executable(&self, bin: &str) -> Option<PathBuf> {
+        self.output
+            .lines()
+            .filter(|line| line.starts_with(r#"{"reason":"compiler-artifact""#))
+            .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+            .filter(|artifact| {
+                artifact["target"]["name"] == bin
+                    && artifact["target"]["kind"]
+                        .as_array()
+                        .is_some_and(|kinds| kinds.iter().any(|kind| kind == "bin"))
+            })
+            .filter_map(|artifact| artifact["executable"].as_str().map(PathBuf::from))
+            .next_back()
     }
 }
 
@@ -421,15 +489,38 @@ impl Execute {
     }
 
     /// Builds the programs the tests of `cf-e2e` run (`CF_E2E_PROGRAMS`), before a run
-    /// of `command`: the folder they are in; or, where a build did not succeed, how
-    /// the run ends: stopped; the build itself, where its time ran out; else as
-    /// `command` with the build's status and words and no test run, which a build
-    /// cargo says failed is one that did not build.
+    /// of `command`: the folder they are in, where cargo says it put each program a
+    /// build names (`--bin`), whatever folder it builds in (`CARGO_TARGET_DIR`, its
+    /// config); or, where a build did not succeed, how the run ends: stopped; the
+    /// build itself, where its time ran out; else as `command` with the build's
+    /// status and words and no test run, which a build cargo says failed is one that
+    /// did not build. Builds that put the programs in two folders, or that say of
+    /// none where they put it, are no run of the tests either.
     fn programs(&mut self, command: &[String]) -> Result<Result<PathBuf, Execution>, Error> {
+        let mut folder: Option<PathBuf> = None;
         for words in self.programs.clone() {
             let ran = match self.run(&words)? {
                 Execution::Stopped => return Ok(Err(Execution::Stopped)),
-                Execution::Ended(ran) if ran.code == Some(0) => continue,
+                Execution::Ended(ran) if ran.code == Some(0) => {
+                    let bin = words.iter().skip_while(|word| *word != "--bin").nth(1);
+                    let Some(bin) = bin else { continue };
+                    let built = ran.executable(bin);
+                    let Some(there) = built.as_deref().and_then(Path::parent) else {
+                        let why = format!("{} said nowhere it put {bin}", words.join(" "));
+                        return Ok(Err(Execution::Ended(Self::unbuilt(command, ran, why))));
+                    };
+                    if let Some(other) = folder.as_ref().filter(|other| *other != there) {
+                        let why = format!(
+                            "{} put {bin} in {}, and the build before it in {}",
+                            words.join(" "),
+                            there.display(),
+                            other.display()
+                        );
+                        return Ok(Err(Execution::Ended(Self::unbuilt(command, ran, why))));
+                    }
+                    folder = Some(there.to_path_buf());
+                    continue;
+                }
                 // Ended for its time or its output, it is said as the build it is.
                 Execution::Ended(ran) if ran.hung || ran.overflowed => {
                     return Ok(Err(Execution::Ended(ran)))
@@ -441,19 +532,36 @@ impl Execute {
             } else {
                 ran.code
             };
-            return Ok(Err(Execution::Ended(Ran {
-                command: command.to_vec(),
-                code,
-                hung: ran.hung,
-                overflowed: ran.overflowed,
-                output: ran.output,
-                report: Some(Err(format!(
-                    "{} did not succeed, and no test was run",
-                    words.join(" ")
-                ))),
-            })));
+            let why = format!("{} did not succeed", words.join(" "));
+            return Ok(Err(Execution::Ended(Self::unbuilt(
+                command,
+                Ran { code, ..ran },
+                why,
+            ))));
         }
-        Ok(Ok(self.checkout.root.join(RELEASE)))
+        Ok(match folder {
+            Some(folder) => Ok(folder),
+            None => Err(Execution::Ended(Ran {
+                command: command.to_vec(),
+                code: None,
+                hung: false,
+                overflowed: false,
+                output: String::new(),
+                report: Some(Err(
+                    "no build before it named a program it built, and no test was run".to_owned(),
+                )),
+            })),
+        })
+    }
+
+    /// A run of `command` that ran no test, the build `ran` before it having come to
+    /// `why`: its status, its words and its end are the build's.
+    fn unbuilt(command: &[String], ran: Ran, why: String) -> Ran {
+        Ran {
+            command: command.to_vec(),
+            report: Some(Err(format!("{why}, and no test was run"))),
+            ..ran
+        }
     }
 
     /// The program to start for `invocation`, and its words: `cargo xtask` is this xtask.
@@ -553,7 +661,7 @@ impl Runner for Execute {
         } = self;
         let cwd = invocation.cwd.as_path();
         let result = runtime.block_on(async {
-            let mut running = pin!(capture(&run, Some(cwd), &env, *limits, |_| {}));
+            let mut running = pin!(capture_whole(&run, Some(cwd), &env, *limits, |_| {}));
             // Dropped with the block, the command in hand is ended whole.
             poll_fn(|cx| {
                 if let Poll::Ready(done) = running.as_mut().poll(cx) {
@@ -638,8 +746,11 @@ impl Ran {
             }
             Err(failed) => {
                 let overflowed = failed.message.ends_with("maxBuffer length exceeded");
+                // Ended for its time, it exited with no code of its own, whatever it
+                // exited with once asked to end (`capture_whole`).
+                let code = if failed.killed { None } else { failed.code };
                 (
-                    failed.code,
+                    code,
                     failed.killed,
                     overflowed,
                     failed.stdout,
