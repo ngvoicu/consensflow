@@ -111,15 +111,24 @@ struct Case {
     err: String,
 }
 
+/// What nextest writes for a test's standard error where capture was off.
+const NOT_CAPTURED: &str = "(stderr not captured)";
+
 impl Case {
-    /// Whether nextest could not start the test: its own error that says so, or the
-    /// double-spawn's failure and its words.
+    /// Whether nothing proves nextest started the test: its own error that says it
+    /// could not; or the double-spawn's status, where the test's standard error is the
+    /// double-spawn's words, or was not kept to say otherwise (capture off, which says
+    /// `NOT_CAPTURED`, or nothing written): a test that exits with 70 of itself and says
+    /// nothing is no failure of its own to take (both reviewers' look at round 6).
     fn unstarted(&self) -> bool {
         match self.failure.as_deref() {
             Some(EXECUTION_FAILURE) => true,
             Some(failure) => {
+                let err = self.err.trim();
                 failure == DOUBLE_SPAWN_FAILED.0
-                    && self.err.trim_start().starts_with(DOUBLE_SPAWN_FAILED.1)
+                    && (err.is_empty()
+                        || err == NOT_CAPTURED
+                        || err.starts_with(DOUBLE_SPAWN_FAILED.1))
             }
             None => false,
         }
@@ -130,7 +139,9 @@ impl Case {
 /// not there to run, or cannot be run) never ran: it neither failed nor passed, and
 /// that it could not be started is an error outside every test. It is the one thing
 /// read of what a test wrote: the double-spawn's words on its standard error (Unix),
-/// which can make a test's failure read as one that never started, never the other way.
+/// or none kept there (`Case::unstarted`), which can make a test's failure read as one
+/// that never started, never the other way. A run with capture off is refused before
+/// it starts (`reporters`).
 pub fn junit(xml: &str) -> Result<Results, String> {
     let mut reader = Reader::from_str(xml);
     let mut results = Results::default();
@@ -318,10 +329,10 @@ struct PlaywrightTest {
     column: u64,
     project: String,
     outcome: Outcome,
-    /// Whether its own body failed, its last run: not only a hook or a fixture.
+    /// Whether its own body failed, and nothing else of its attempt did.
     own: bool,
-    /// The first error a hook or a fixture of its last run threw, where one did.
-    hook: Option<String>,
+    /// Why its attempt is no failure of its body's own, where it failed and is not.
+    why: Option<String>,
 }
 
 /// Playwright's last word on a test, across its retries.
@@ -338,10 +349,11 @@ enum Outcome {
 /// The tests of the report of the plants' reporter of Playwright's tests, and the
 /// errors outside them: one test for each test written, however many projects ran it,
 /// named by the titles of the groups it is in (the file's left out) and its own,
-/// joined with ` › `. It failed where its own body failed in a project. It ran where
-/// its body ran in one (it passed, or failed of itself); else it neither failed nor
-/// passed (`others`): skipped in every project it was given to, or failed in a hook or
-/// a fixture alone, which is an error outside it, said with the hook's first words.
+/// joined with ` › `. It failed where its own body failed in a project, as the reporter
+/// proves it. It ran where its body ran in one (it passed, or failed of itself); else it
+/// neither failed nor passed (`others`): skipped in every project it was given to, or
+/// failed with no proof it was of itself (a hook that failed, a body beside it too, a
+/// worker that exited), which is an error outside it, said with the reporter's why.
 pub fn playwright(json: &str) -> Result<Results, String> {
     let report: PlaywrightReport = serde_json::from_str(json).map_err(|cause| cause.to_string())?;
     if !report.end {
@@ -390,9 +402,9 @@ pub fn playwright(json: &str) -> Result<Results, String> {
                 format!(" in {}", project.project)
             };
             results.outside.push(format!(
-                "a hook of {}{place} failed: {}",
+                "{}{place} did not fail of itself: {}",
                 test.name,
-                project.hook.as_deref().unwrap_or("it says no more")
+                project.why.as_deref().unwrap_or("it says no more")
             ));
         }
         let test = Test { failed, ..test };

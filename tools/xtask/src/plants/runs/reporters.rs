@@ -20,7 +20,8 @@
 //!   (`reporters/playwright.mjs`, written into the run's folder) beside the list it
 //!   prints: its JSON report says no step of a test, and a test whose `beforeAll`
 //!   threw is `unexpected` there though its body never ran, where the reporter's
-//!   steps say which hook threw (Playwright 1.63, 2026-10-17).
+//!   steps say which hook threw (Playwright 1.63, 2026-10-17). Each test is given one
+//!   attempt (`--retries=0`), and a run that asks for more is refused.
 //! - Anything else, every other `cargo xtask …` among them, says no more than its
 //!   exit status.
 
@@ -171,11 +172,18 @@ impl Reporter {
 
     /// Why `command` cannot be run as its reporter runs it in the checkout `context`,
     /// if it cannot: an option of `cargo test` that nextest has no word for
-    /// (`nextest_words`).
+    /// (`nextest_words`), or one that turns capture off (`uncaptured`); retries of
+    /// Playwright's (`retried`).
     pub(super) fn refused(self, command: &[String], context: &Context) -> Option<String> {
         match self {
-            Self::Nextest => nextest_words(&cargo_test(command, context).args).err(),
-            Self::Node | Self::Playwright | Self::Status => None,
+            Self::Nextest => {
+                let tests = cargo_test(command, context);
+                nextest_words(&tests.args)
+                    .err()
+                    .or_else(|| uncaptured(&tests))
+            }
+            Self::Playwright => retried(command),
+            Self::Node | Self::Status => None,
         }
     }
 
@@ -215,6 +223,54 @@ fn cargo_test(command: &[String], context: &Context) -> Invocation {
         .map(|(name, _)| name)
         .filter(|name| name.to_string_lossy().starts_with("NEXTEST"))
         .fold(tests, |tests, name| tests.without(name))
+}
+
+/// Why the `cargo test` of `tests` cannot be run under nextest with capture off, if
+/// it would be: a word that turns it off (`--nocapture`, libtest's, which nextest takes
+/// after `--`, or nextest's own `--no-capture`), or a variable the suite sets that does
+/// (`NEXTEST_NO_CAPTURE`, libtest's `RUST_TEST_NOCAPTURE`). Without capture nextest
+/// keeps nothing a test wrote, and a test it could not start fails with the status of
+/// one that ran (both reviewers' look at round 6).
+fn uncaptured(tests: &Invocation) -> Option<String> {
+    const WORDS: [&str; 2] = ["--nocapture", "--no-capture"];
+    const VARIABLES: [&str; 2] = ["NEXTEST_NO_CAPTURE", "RUST_TEST_NOCAPTURE"];
+    let why = "nextest keeps nothing its tests wrote without capture, and a test it could not \
+               start reads as one that failed";
+    if let Some(word) = tests
+        .args
+        .iter()
+        .find(|word| WORDS.iter().any(|off| *word == *off))
+    {
+        return Some(format!("cargo test {}: {why}", word.to_string_lossy()));
+    }
+    tests.vars.iter().find_map(|(name, value)| {
+        let off = VARIABLES.iter().any(|variable| name == *variable)
+            && value
+                .as_ref()
+                .is_some_and(|value| !value.is_empty() && value != "0");
+        off.then(|| format!("{}: {why}", name.to_string_lossy()))
+    })
+}
+
+/// Why a run of Playwright cannot be run as the plants run it, if it cannot: it asks
+/// for retries (`--retries N` above 0), where a plant's run takes one attempt, the one
+/// its report says (`playwright_words`).
+fn retried(command: &[String]) -> Option<String> {
+    let mut words = command.iter();
+    while let Some(word) = words.next() {
+        let count = match word.strip_prefix("--retries") {
+            Some("") => words.next().map(String::as_str),
+            Some(value) => value.strip_prefix('='),
+            None => continue,
+        };
+        if count.is_none_or(|count| count != "0") {
+            return Some(format!(
+                "Playwright's --retries {}: a plant's run takes one attempt",
+                count.unwrap_or_default()
+            ));
+        }
+    }
+    None
 }
 
 /// What an option of `cargo test` is, before its `--`.
@@ -543,18 +599,31 @@ fn node_words(command: &[String], reporter: &str, report: &Path) -> Vec<String> 
 
 /// The words of a Playwright run that also has the plants' reporter (the module
 /// `reporter`) write its report: the list it prints and that report, whatever
-/// reporter the command named.
+/// reporter the command named; and one attempt of each test, whatever the config
+/// says (`--retries=0`), so that the report's word on a test is of the run of it.
+/// A command that asks for retries is refused (`retried`); one that asks for none
+/// is given it once.
 fn playwright_words(command: &[String], reporter: &str) -> Vec<String> {
-    let mut words: Vec<String> = command
-        .iter()
-        .filter(|word| !word.starts_with("--reporter="))
-        .cloned()
-        .collect();
+    let mut words: Vec<String> = Vec::new();
+    let mut given = command.iter();
+    while let Some(word) = given.next() {
+        if word == "--retries" {
+            given.next();
+        } else if !word.starts_with("--reporter=") && !word.starts_with("--retries=") {
+            words.push(word.clone());
+        }
+    }
     let test = words
         .iter()
         .position(|word| word == "test")
         .map_or(words.len(), |at| at + 1);
-    words.insert(test, format!("--reporter=list,{reporter}"));
+    words.splice(
+        test..test,
+        [
+            format!("--reporter=list,{reporter}"),
+            "--retries=0".to_owned(),
+        ],
+    );
     words
 }
 

@@ -325,7 +325,9 @@ fn a_test_nextest_could_not_start_never_ran_and_is_an_error_outside_every_test()
     // As nextest 0.9.148 says a test whose binary was taken away after it listed its
     // tests (2026-10-17): its own error where it starts the test itself (Windows); on
     // Unix its double-spawn's status and words. A test that exits with 70 itself, or
-    // writes those words and fails otherwise, failed.
+    // writes those words and fails otherwise, failed. Round 7, decision 1: with the
+    // double-spawn's status, a standard error that was not kept (capture off), or one
+    // with nothing in it, proves no start either.
     let xml = r#"<testsuites><testsuite name="x">
         <testcase name="a::unstarted" classname="x"><error message="error spawning child process" type="execution failure">error spawning child process
   - No such file or directory (os error 2)</error></testcase>
@@ -334,6 +336,8 @@ fn a_test_nextest_could_not_start_never_ran_and_is_an_error_outside_every_test()
 Caused by:
   No such file or directory (os error 2)
 </system-err></testcase>
+        <testcase name="a::uncaptured" classname="x"><failure type="test failure with exit code 70"/><system-out>(stdout not captured)</system-out><system-err>(stderr not captured)</system-err></testcase>
+        <testcase name="a::silent" classname="x"><failure type="test failure with exit code 70"/></testcase>
         <testcase name="a::exits_with_70" classname="x"><failure type="test failure with exit code 70"/><system-err>it exits with 70 itself</system-err></testcase>
         <testcase name="a::says_the_words" classname="x"><failure type="test failure with exit code 101"/><system-err>error: [double-spawn] failed to exec, it says</system-err></testcase>
     </testsuite></testsuites>"#;
@@ -344,13 +348,20 @@ Caused by:
     );
     assert_eq!(
         said(&read.others),
-        [("a::unstarted", false), ("a::double_spawned", false)]
+        [
+            ("a::unstarted", false),
+            ("a::double_spawned", false),
+            ("a::uncaptured", false),
+            ("a::silent", false)
+        ]
     );
     assert_eq!(
         read.outside,
         [
             "nextest could not start a::unstarted (x)",
-            "nextest could not start a::double_spawned (x)"
+            "nextest could not start a::double_spawned (x)",
+            "nextest could not start a::uncaptured (x)",
+            "nextest could not start a::silent (x)"
         ]
     );
 }
@@ -376,23 +387,25 @@ fn a_report_of_nextest_s_that_is_cut_short_or_is_not_xml_is_an_error_and_a_testc
 }
 
 /// What the plants' reporter of Playwright's tests wrote (Playwright 1.63, 2026-10-17)
-/// for a spec run in two projects, the second given one retry: a test skipped; a test
-/// in a group that passed, having written Playwright's summary of a failure to its
-/// standard error, and in the second project failed and then passed, run again; a test
-/// that failed on an expectation that quotes Playwright's words for an error outside
-/// every test; a test whose group's `beforeAll` threw, its body never run; and a test
-/// whose body failed and whose `afterEach` threw.
+/// for a spec run in two projects, one attempt each (`--retries=0`): a test skipped; a
+/// test in a group that passed, having written Playwright's summary of a failure to its
+/// standard error; a test that failed on an expectation that quotes Playwright's words
+/// for an error outside every test; a test whose group's `beforeAll` threw, its body
+/// never run; a test whose body failed and whose `afterEach` threw; and a test whose
+/// two `beforeEach` threw, its body never run.
 const PLAYWRIGHT: &str = r#"{"tests":[
-{"path":["is skipped"],"file":"/checkout/app/tests/prints.spec.mjs","line":3,"column":6,"project":"first","outcome":"skipped","own":false,"hook":null},
-{"path":["a group","the meant one"],"file":"/checkout/app/tests/prints.spec.mjs","line":6,"column":3,"project":"first","outcome":"expected","own":false,"hook":null},
-{"path":["another fails"],"file":"/checkout/app/tests/prints.spec.mjs","line":12,"column":1,"project":"first","outcome":"unexpected","own":true,"hook":null},
-{"path":["set up","its body never runs"],"file":"/checkout/app/tests/prints.spec.mjs","line":20,"column":3,"project":"first","outcome":"unexpected","own":false,"hook":"Error: the beforeAll throws"},
-{"path":["torn down","its body fails too"],"file":"/checkout/app/tests/prints.spec.mjs","line":27,"column":3,"project":"first","outcome":"unexpected","own":true,"hook":"Error: the afterEach throws"},
-{"path":["is skipped"],"file":"/checkout/app/tests/prints.spec.mjs","line":3,"column":6,"project":"second","outcome":"skipped","own":false,"hook":null},
-{"path":["a group","the meant one"],"file":"/checkout/app/tests/prints.spec.mjs","line":6,"column":3,"project":"second","outcome":"flaky","own":false,"hook":null},
-{"path":["another fails"],"file":"/checkout/app/tests/prints.spec.mjs","line":12,"column":1,"project":"second","outcome":"unexpected","own":true,"hook":null},
-{"path":["set up","its body never runs"],"file":"/checkout/app/tests/prints.spec.mjs","line":20,"column":3,"project":"second","outcome":"unexpected","own":false,"hook":"Error: the beforeAll throws"},
-{"path":["torn down","its body fails too"],"file":"/checkout/app/tests/prints.spec.mjs","line":27,"column":3,"project":"second","outcome":"unexpected","own":true,"hook":"Error: the afterEach throws"}
+{"path":["is skipped"],"file":"/checkout/app/tests/prints.spec.mjs","line":3,"column":6,"project":"first","outcome":"skipped","own":false,"why":null},
+{"path":["a group","the meant one"],"file":"/checkout/app/tests/prints.spec.mjs","line":6,"column":3,"project":"first","outcome":"expected","own":false,"why":null},
+{"path":["another fails"],"file":"/checkout/app/tests/prints.spec.mjs","line":11,"column":1,"project":"first","outcome":"unexpected","own":true,"why":null},
+{"path":["set up","its body never runs"],"file":"/checkout/app/tests/prints.spec.mjs","line":19,"column":3,"project":"first","outcome":"unexpected","own":false,"why":"a hook failed: Error: the beforeAll throws"},
+{"path":["torn down","its body fails too"],"file":"/checkout/app/tests/prints.spec.mjs","line":26,"column":3,"project":"first","outcome":"unexpected","own":false,"why":"a hook failed: Error: the afterEach throws"},
+{"path":["two hooks","its body never runs"],"file":"/checkout/app/tests/prints.spec.mjs","line":38,"column":3,"project":"first","outcome":"unexpected","own":false,"why":"a hook failed: Error: the first beforeEach throws"},
+{"path":["is skipped"],"file":"/checkout/app/tests/prints.spec.mjs","line":3,"column":6,"project":"second","outcome":"skipped","own":false,"why":null},
+{"path":["a group","the meant one"],"file":"/checkout/app/tests/prints.spec.mjs","line":6,"column":3,"project":"second","outcome":"expected","own":false,"why":null},
+{"path":["another fails"],"file":"/checkout/app/tests/prints.spec.mjs","line":11,"column":1,"project":"second","outcome":"unexpected","own":true,"why":null},
+{"path":["set up","its body never runs"],"file":"/checkout/app/tests/prints.spec.mjs","line":19,"column":3,"project":"second","outcome":"unexpected","own":false,"why":"a hook failed: Error: the beforeAll throws"},
+{"path":["torn down","its body fails too"],"file":"/checkout/app/tests/prints.spec.mjs","line":26,"column":3,"project":"second","outcome":"unexpected","own":false,"why":"a hook failed: Error: the afterEach throws"},
+{"path":["two hooks","its body never runs"],"file":"/checkout/app/tests/prints.spec.mjs","line":38,"column":3,"project":"second","outcome":"unexpected","own":false,"why":"a hook failed: Error: the first beforeEach throws"}
 ],"errors":[],"end":true}
 "#;
 
@@ -407,35 +420,36 @@ fn playwright_says_each_test_named_from_its_first_group_on_and_whether_its_own_b
     assert_eq!(
         said(&read.tests),
         [
-            // The same test, run in two projects, is one test; in the second it failed and
-            // then passed, run again, which is no failure.
+            // The same test, run in two projects, is one test.
             ("a group › the meant one", false),
             ("another fails", true),
-            // Its body failed, whatever its `afterEach` did.
-            ("torn down › its body fails too", true),
         ]
     );
-    assert_eq!(
-        names(&read.failed()),
-        ["another fails", "torn down › its body fails too"]
-    );
+    assert_eq!(names(&read.failed()), ["another fails"]);
     assert_eq!(read.tests[0].at, "/checkout/app/tests/prints.spec.mjs:6:3");
-    assert_eq!(read.tests[1].at, "/checkout/app/tests/prints.spec.mjs:12:1");
-    // The test skipped in every project, and the one whose `beforeAll` threw, whose body
-    // never ran, are registered, and neither failed nor passed.
+    assert_eq!(read.tests[1].at, "/checkout/app/tests/prints.spec.mjs:11:1");
+    // The test skipped in every project, and those whose failure nothing proves their
+    // body's own (a hook threw: before the body, or after it failed too), are registered,
+    // and neither failed nor passed (both reviewers' look at round 6).
     assert_eq!(
         said(&read.others),
         [
             ("is skipped", false),
-            ("set up › its body never runs", false)
+            ("set up › its body never runs", false),
+            ("torn down › its body fails too", false),
+            ("two hooks › its body never runs", false),
         ]
     );
-    // The hook's failure is an error outside every test, in each project.
+    // Why each did not fail of itself is an error outside every test, in each project.
     assert_eq!(
         read.outside,
         [
-            "a hook of set up › its body never runs in first failed: Error: the beforeAll throws",
-            "a hook of set up › its body never runs in second failed: Error: the beforeAll throws",
+            "set up › its body never runs in first did not fail of itself: a hook failed: Error: the beforeAll throws",
+            "set up › its body never runs in second did not fail of itself: a hook failed: Error: the beforeAll throws",
+            "torn down › its body fails too in first did not fail of itself: a hook failed: Error: the afterEach throws",
+            "torn down › its body fails too in second did not fail of itself: a hook failed: Error: the afterEach throws",
+            "two hooks › its body never runs in first did not fail of itself: a hook failed: Error: the first beforeEach throws",
+            "two hooks › its body never runs in second did not fail of itself: a hook failed: Error: the first beforeEach throws",
         ]
     );
     // A test failed where its body failed in one project of those it was given to; one
@@ -445,7 +459,7 @@ fn playwright_says_each_test_named_from_its_first_group_on_and_whether_its_own_b
             .iter()
             .map(|(outcome, own)| {
                 format!(
-                    r#"{{"path":["t"],"file":"/a.spec.mjs","line":1,"column":1,"project":"","outcome":"{outcome}","own":{own},"hook":null}}"#
+                    r#"{{"path":["t"],"file":"/a.spec.mjs","line":1,"column":1,"project":"","outcome":"{outcome}","own":{own},"why":null}}"#
                 )
             })
             .collect();

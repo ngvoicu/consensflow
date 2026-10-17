@@ -294,21 +294,89 @@ fn held_whole_what_a_program_left_running_is_ended_once_it_has_ended() {
     assert!(!marked.exists(), "nothing it left running wrote after it");
 }
 
+#[cfg(unix)]
+#[test]
+fn held_whole_a_program_has_ended_when_it_exits_though_what_it_left_holds_its_streams() {
+    // zeewin, round 7, decision 8: a run held whole was read until its streams closed,
+    // as long as a grandchild given them lived, and only then ended. Its child holds
+    // them, and would write a moment later.
+    let dir = tempfile::tempdir().unwrap();
+    let (file, marked) = (dir.path().join("pids"), dir.path().join("late"));
+    let run = shell(&format!(
+        "(sleep 5; echo late > '{}') & printf '%s %s\\n' \"$$\" \"$!\" > '{}'; echo said",
+        marked.display(),
+        file.display()
+    ));
+    let began = Instant::now();
+    let answered = runtime().block_on(capture_whole(&run, None, &tree_env(), ROOMY, |_| {}));
+    let elapsed = began.elapsed();
+    let pids = pids_in(&file, 2).expect("written before it ended");
+    let _left = Survivors(pids.clone());
+    assert_eq!(
+        answered.map(|captured| captured.stdout),
+        Ok("said\n".to_owned()),
+        "what it wrote is read to the end once what it left was ended"
+    );
+    assert!(
+        elapsed < Duration::from_secs(3),
+        "it ended as it exited: {elapsed:?}"
+    );
+    assert!(
+        gone_within(pids[1], Duration::from_secs(1)),
+        "the child that held its streams is ended with it"
+    );
+    std::thread::sleep(Duration::from_secs(4));
+    assert!(!marked.exists(), "nothing it left running wrote after it");
+}
+
+#[cfg(unix)]
+#[test]
+fn held_whole_streams_still_held_after_its_end_by_what_is_out_of_reach_fail_the_capture() {
+    // A grandchild that left the run's session once its parent had ended (out of
+    // reach, the group module says) holds the streams: what was read of them is not
+    // all, and the run is not over.
+    let dir = tempfile::tempdir().unwrap();
+    let escaped = dir.path().join("escaped");
+    let run = shell(&format!(
+        "perl -MPOSIX -e 'exit if fork; POSIX::setsid(); open my $f, \">\", $ARGV[0]; print $f \"$$\\n\"; close $f; sleep 6' '{escaped}' & \
+         while [ ! -s '{escaped}' ]; do sleep 0.01; done; echo said",
+        escaped = escaped.display()
+    ));
+    let began = Instant::now();
+    let answered = runtime().block_on(capture_whole(&run, None, &tree_env(), ROOMY, |_| {}));
+    let elapsed = began.elapsed();
+    let _left = Survivors(pids_in(&escaped, 1).expect("it said where it went"));
+    let failed = answered.expect_err("not over");
+    assert_eq!(
+        failed.message,
+        format!("{LEFT_RUNNING}: its output was still held open 2 s after it ended")
+    );
+    assert_eq!((failed.code, failed.killed), (Some(0), false));
+    assert_eq!(failed.stdout, "said\n", "what was read of it is kept");
+    assert!(
+        elapsed < Duration::from_secs(5),
+        "held a moment, no more: {elapsed:?}"
+    );
+}
+
 #[cfg(windows)]
 #[test]
 fn held_whole_a_grandchild_started_at_once_is_in_the_job_and_ends_with_it() {
     // Both reviewers' look at round 5: the program ran before it was put in its job, and
     // what it started at once was not in it. It starts a grandchild at once, with none of
-    // its streams, and ends at once; the grandchild would write a moment later.
+    // its streams, and ends at once; the grandchild would write a moment later. Round 7,
+    // decision 8 (zeewin): the grandchild inherits the program's streams as Windows hands
+    // a child every handle it may inherit, and the run, read until they closed, ended
+    // only with it, 3.24 s later.
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(
         dir.path().join("writer.cmd"),
-        "@echo off\r\nping -n 4 127.0.0.1 >NUL\r\necho late> \"%~dp0late\"\r\n",
+        "@echo off\r\nping -n 8 127.0.0.1 >NUL\r\necho late> \"%~dp0late\"\r\n",
     )
     .unwrap();
     std::fs::write(
         dir.path().join("parent.cmd"),
-        "@echo off\r\nstart \"\" /b cmd /d /c \"%~dp0writer.cmd\" <NUL >NUL 2>NUL\r\nexit /b 0\r\n",
+        "@echo off\r\nstart \"\" /b cmd /d /c \"%~dp0writer.cmd\" <NUL >NUL 2>NUL\r\necho said\r\nexit /b 0\r\n",
     )
     .unwrap();
     let run = Run {
@@ -326,13 +394,17 @@ fn held_whole_a_grandchild_started_at_once_is_in_the_job_and_ends_with_it() {
     };
     let began = Instant::now();
     let answered = runtime().block_on(capture_whole(&run, None, &tree_env(), limits, |_| {}));
-    assert!(answered.is_ok(), "{answered:?}");
-    assert!(
-        began.elapsed() < Duration::from_secs(3),
-        "it ended at once: {:?}",
-        began.elapsed()
+    let elapsed = began.elapsed();
+    assert_eq!(
+        answered.map(|captured| captured.stdout.trim().to_owned()),
+        Ok("said".to_owned()),
+        "what it wrote is read to the end once its job was ended"
     );
-    std::thread::sleep(Duration::from_secs(6));
+    assert!(
+        elapsed < Duration::from_secs(3),
+        "it ended at once: {elapsed:?}"
+    );
+    std::thread::sleep(Duration::from_secs(9));
     assert!(
         !dir.path().join("late").exists(),
         "the grandchild was in the job, and ended with it"

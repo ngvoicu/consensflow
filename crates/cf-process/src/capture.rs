@@ -7,10 +7,11 @@
 //! so no field for.
 
 use std::path::Path;
-use std::process::Stdio;
+use std::process::{ExitStatus, Stdio};
 
 use cf_base::env::Env;
 use cf_base::file::error_code;
+use tokio::process::{ChildStderr, ChildStdout};
 
 use crate::execute::{command_line, hide_window, read_both, Read, FORCE_AFTER};
 #[cfg(unix)]
@@ -18,6 +19,11 @@ use crate::group::ENDED_EVERY;
 use crate::group::{lead, lead_whole, Group};
 use crate::job::Job;
 use crate::{Ender, Ending, Limits, Run};
+
+/// How the message of a capture held whole (`capture_whole`) begins where what its
+/// program started did not end once it was ended (Windows: a job's processes that
+/// outlived its end): what follows names them. Nothing of such a run is over.
+pub const LEFT_RUNNING: &str = "what the program started did not end";
 
 /// What a program that ended with 0 wrote: `execFile`'s `{ stdout, stderr }`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -101,9 +107,18 @@ pub async fn capture(
 ///   ended before then, is out of its reach. On Windows it is started suspended,
 ///   put in a job of its own, and then let run: nothing it starts can leave that
 ///   job (a program that asks to start one outside it is refused), which is ended
-///   once it has ended, at a stop, and with the future dropped. A job that cannot
-///   be made, or a program that cannot be let run, is a program that did not
+///   once it has ended, at a stop, and with the future dropped; and the capture
+///   answers once each process of the job has ended, as its handle says. A job that
+///   cannot be made, or a program that cannot be let run, is a program that did not
 ///   start (`spawn <file> …`).
+/// - It has ended when it exits, not when its streams close: a process it left
+///   may hold them (Windows gives a child every handle it may inherit). What it
+///   left is ended first, then its streams are read to their ends, for a moment at
+///   most.
+/// - Where what it left did not end (a process of its job had not ended a moment
+///   after the job was ended), or its streams are still held open a moment after,
+///   it has failed, whatever it exited with: the message begins with
+///   [`LEFT_RUNNING`].
 pub async fn capture_whole(
     run: &Run,
     cwd: Option<&Path>,
@@ -159,7 +174,7 @@ async fn captured(
     // ends whatever is left of it as the capture ends, however it ends; else the job
     // of every child of this process. A program not put in its own, or not let run,
     // is ended as the child is dropped.
-    let _job = match hold {
+    let job = match hold {
         Hold::Node => {
             crate::job::adopt(&child);
             None
@@ -173,84 +188,35 @@ async fn captured(
     let group = Group::new(child.id(), hold == Hold::Whole);
     started(group.ender());
     let _input = child.stdin.take();
-    let (Some(mut stdout), Some(mut stderr)) = (child.stdout.take(), child.stderr.take()) else {
+    let (Some(stdout), Some(stderr)) = (child.stdout.take(), child.stderr.take()) else {
         return Err(CaptureFailed::unstarted(
             "the program's output could not be read".to_owned(),
         ));
     };
 
     let (mut out, mut err) = (Read::default(), Read::default());
-    // Its streams read to their ends, then its exit, all within its time:
-    // none when it said too much. Held whole on Unix, it is not waited for
-    // once it has exited (`Some(None)`): until it is, its pid holds the id of
-    // its group, which what it left running is ended by.
-    let finished = async {
-        read_both(
-            &mut stdout,
-            &mut stderr,
-            &mut out,
-            &mut err,
-            limits.max_buffer,
-        )
-        .await;
-        if out.overflowed || err.overflowed {
-            return None;
+    let (status, killed, left) = match hold {
+        Hold::Node => {
+            let (status, killed) = node_end(
+                &mut child,
+                &group,
+                (stdout, stderr),
+                (&mut out, &mut err),
+                limits,
+            )
+            .await;
+            (status, killed, Ok(()))
         }
-        #[cfg(unix)]
-        if hold == Hold::Whole {
-            while !group.ended() {
-                tokio::time::sleep(ENDED_EVERY).await;
-            }
-            return Some(None);
-        }
-        Some(Some(child.wait().await))
-    };
-    let mut killed = false;
-    let finished = if limits.timeout.is_zero() {
-        finished.await
-    } else if let Ok(finished) = tokio::time::timeout(limits.timeout, finished).await {
-        finished
-    } else {
-        killed = true;
-        None
-    };
-    let status = match finished {
-        Some(Some(status)) => status,
-        // Ended, and not yet waited for: what it left running goes first.
-        Some(None) => {
-            group.end(Ending::Forced);
-            child.wait().await
-        }
-        None => {
-            // As Node's `kill`: both streams closed first, so nothing it left
-            // running holds the answer back, then the program asked to end,
-            // and the group it leads with it.
-            drop((stdout, stderr));
-            group.end(Ending::Asked);
-            // Once the program has ended at the ask, or its time to has run
-            // out, whatever is left of the group it leads is forced to end: a
-            // child that took no notice of the ask would go on after the
-            // answer. The program is not waited for until then, so that its
-            // id, and its group's, name no other.
-            #[cfg(unix)]
-            let status = {
-                let until = tokio::time::Instant::now() + FORCE_AFTER;
-                while !group.ended() && tokio::time::Instant::now() < until {
-                    tokio::time::sleep(ENDED_EVERY).await;
-                }
-                group.end(Ending::Forced);
-                child.wait().await
-            };
-            // Windows ended the whole tree at the ask.
-            #[cfg(not(unix))]
-            let status = tokio::select! {
-                status = child.wait() => status,
-                () = tokio::time::sleep(FORCE_AFTER) => {
-                    group.end(Ending::Forced);
-                    child.wait().await
-                }
-            };
-            status
+        Hold::Whole => {
+            held_end(
+                &mut child,
+                &group,
+                job.as_ref(),
+                (stdout, stderr),
+                (&mut out, &mut err),
+                limits,
+            )
+            .await
         }
     };
 
@@ -267,6 +233,14 @@ async fn captured(
         stderr: stderr.clone(),
     };
     let status = status.map_err(|cause| failed(cause.to_string(), None, killed))?;
+    // Held whole, what it started did not end once ended: nothing of the run is over.
+    if let Err(why) = left {
+        return Err(failed(
+            format!("{LEFT_RUNNING}: {why}"),
+            status.code(),
+            killed,
+        ));
+    }
     for (stream, read) in [("stdout", &out), ("stderr", &err)] {
         if read.overflowed {
             return Err(failed(
@@ -293,6 +267,198 @@ async fn captured(
         code,
         killed,
     ))
+}
+
+/// The streams of a program, and what was read of each.
+type Streams = (ChildStdout, ChildStderr);
+type Reads<'a> = (&'a mut Read, &'a mut Read);
+
+/// How a program run as Node's `execFile` runs it ends: its streams read to their ends,
+/// then its exit, all within its time, or not; then, where it said too much or its
+/// time ran out, asked to end, and forced a moment later. What it came to, and whether
+/// its time ran out.
+async fn node_end(
+    child: &mut tokio::process::Child,
+    group: &Group,
+    (mut stdout, mut stderr): Streams,
+    (out, err): Reads<'_>,
+    limits: Limits,
+) -> (std::io::Result<ExitStatus>, bool) {
+    // Its streams read to their ends, then its exit, all within its time: none when it
+    // said too much.
+    let finished = async {
+        if read_both(&mut stdout, &mut stderr, out, err, limits.max_buffer).await {
+            return None;
+        }
+        Some(child.wait().await)
+    };
+    let mut killed = false;
+    let finished = if limits.timeout.is_zero() {
+        finished.await
+    } else if let Ok(finished) = tokio::time::timeout(limits.timeout, finished).await {
+        finished
+    } else {
+        killed = true;
+        None
+    };
+    if let Some(status) = finished {
+        return (status, killed);
+    }
+    // As Node's `kill`: both streams closed first, so nothing it left running holds the
+    // answer back, then the program asked to end, and the group it leads with it.
+    drop((stdout, stderr));
+    group.end(Ending::Asked);
+    (forced(child, group).await, killed)
+}
+
+/// Once a program asked to end has ended at the ask, or its time to has run out,
+/// whatever is left of the group it leads is forced to end: a child that took no notice
+/// of the ask would go on after the answer. On Unix the program is not waited for until
+/// then, so that its id, and its group's, name no other; Windows ended the whole tree at
+/// the ask. What it came to.
+async fn forced(child: &mut tokio::process::Child, group: &Group) -> std::io::Result<ExitStatus> {
+    #[cfg(unix)]
+    {
+        let until = tokio::time::Instant::now() + FORCE_AFTER;
+        while !group.ended() && tokio::time::Instant::now() < until {
+            tokio::time::sleep(ENDED_EVERY).await;
+        }
+        group.end(Ending::Forced);
+        child.wait().await
+    }
+    #[cfg(not(unix))]
+    tokio::select! {
+        status = child.wait() => status,
+        () = tokio::time::sleep(FORCE_AFTER) => {
+            group.end(Ending::Forced);
+            child.wait().await
+        }
+    }
+}
+
+/// How a program held whole ended, before what it left was.
+enum Held {
+    /// It exited of itself: what it came to, where it was waited for (Windows; on
+    /// Unix it is not, its pid holding the id of the session and the group it leads).
+    Exited(Option<std::io::Result<ExitStatus>>),
+    /// A stream of it said more than a run may.
+    Overflowed,
+    /// Its time ran out.
+    OutOfTime,
+}
+
+/// How a program held whole ends (`capture_whole`): when it exits, whatever still
+/// holds its streams (a grandchild given them as Windows gives a child every handle it
+/// may inherit, which held a run as long as it lived, zeewin 2026-10-17), its streams
+/// read meanwhile. Then what it left is ended (`end_the_rest`), and only then are its
+/// streams read to their ends, for a moment at most. Where it said too much or its
+/// time ran out, it is asked to end and forced as Node's is, and what it left with it.
+/// What it came to, whether its time ran out, and whether what it left ended.
+async fn held_end(
+    child: &mut tokio::process::Child,
+    group: &Group,
+    job: Option<&Job>,
+    (mut stdout, mut stderr): Streams,
+    (out, err): Reads<'_>,
+    limits: Limits,
+) -> (std::io::Result<ExitStatus>, bool, Result<(), String>) {
+    let mut reading = Box::pin(read_both(
+        &mut stdout,
+        &mut stderr,
+        out,
+        err,
+        limits.max_buffer,
+    ));
+    let mut read = false;
+    let held = {
+        let mut exit = Box::pin(exited(child, group));
+        let ending = async {
+            loop {
+                tokio::select! {
+                    overflowed = &mut reading, if !read => {
+                        if overflowed {
+                            return Held::Overflowed;
+                        }
+                        read = true;
+                    }
+                    status = &mut exit => return Held::Exited(status),
+                }
+            }
+        };
+        if limits.timeout.is_zero() {
+            ending.await
+        } else {
+            tokio::time::timeout(limits.timeout, ending)
+                .await
+                .unwrap_or(Held::OutOfTime)
+        }
+    };
+    match held {
+        Held::Exited(status) => {
+            let mut left = end_the_rest(group, job);
+            // Streams still held once all it left was ended: something out of reach
+            // holds them, and what was read of them is not all.
+            if !read
+                && tokio::time::timeout(FORCE_AFTER, &mut reading)
+                    .await
+                    .is_err()
+            {
+                left = left.and(Err(format!(
+                    "its output was still held open {} s after it ended",
+                    FORCE_AFTER.as_secs()
+                )));
+            }
+            drop(reading);
+            let status = match status {
+                Some(status) => status,
+                None => child.wait().await,
+            };
+            (status, false, left)
+        }
+        Held::Overflowed | Held::OutOfTime => {
+            drop(reading);
+            drop((stdout, stderr));
+            group.end(Ending::Asked);
+            // Forced before it is reaped on Unix, its session and descendants with it;
+            // on Windows its job is what is left.
+            let status = forced(child, group).await;
+            let left = job.map_or(Ok(()), Job::end);
+            (status, matches!(held, Held::OutOfTime), left)
+        }
+    }
+}
+
+/// When a program held whole has exited, asked without reaping it on Unix (its pid
+/// holds the id of its session and group until it is), and waited for on Windows (its
+/// job holds what it left): what it came to, where it was waited for.
+async fn exited(
+    child: &mut tokio::process::Child,
+    group: &Group,
+) -> Option<std::io::Result<ExitStatus>> {
+    #[cfg(unix)]
+    {
+        let _ = child;
+        while !group.ended() {
+            tokio::time::sleep(ENDED_EVERY).await;
+        }
+        None
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = group;
+        Some(child.wait().await)
+    }
+}
+
+/// Ends what a program held whole left once it exited of itself: on Unix every process
+/// of its session and every one descended from it, then its group (it is not reaped
+/// yet); on Windows, where it was waited for and its pid may be another's, every process
+/// of its job, waited for until none is left. Why not all of it ended, where not all did.
+fn end_the_rest(group: &Group, job: Option<&Job>) -> Result<(), String> {
+    if cfg!(unix) {
+        group.end(Ending::Forced);
+    }
+    job.map_or(Ok(()), Job::end)
 }
 
 #[cfg(test)]

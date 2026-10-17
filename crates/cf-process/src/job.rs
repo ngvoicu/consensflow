@@ -125,6 +125,12 @@ impl Job {
     pub(crate) fn of(_process: &tokio::process::Child) -> Result<Self, String> {
         Ok(Self {})
     }
+
+    /// Ends every process of the job: there is none.
+    #[allow(clippy::unnecessary_wraps, clippy::unused_self)] // As Windows has it.
+    pub(crate) fn end(&self) -> Result<(), String> {
+        Ok(())
+    }
 }
 
 #[cfg(windows)]
@@ -256,17 +262,166 @@ fn resume(pid: u32) -> Result<(), String> {
     }
 }
 
+/// How long the processes of a job that was ended are waited for, until each has ended.
 #[cfg(windows)]
-impl Drop for Job {
-    /// Every process of the job is ended, at once, and its handle closed.
+const JOB_ENDS_WITHIN: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// Waits until no process of a job that was ended is left, as `left` names those that
+/// have not ended, for `within` at most: why not, naming them, where the time runs out.
+#[cfg(any(windows, test))]
+fn ended_within(within: std::time::Duration, left: impl Fn() -> Vec<usize>) -> Result<(), String> {
+    let until = std::time::Instant::now() + within;
+    loop {
+        let left = left();
+        if left.is_empty() {
+            return Ok(());
+        }
+        if std::time::Instant::now() >= until {
+            return Err(format!(
+                "processes {left:?} of its job had not ended {within:?} after it was ended"
+            ));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+}
+
+/// The processes of a job, each held by a handle that says when it has ended (it is
+/// signalled), opened before the job is ended; closed when this is dropped. A process
+/// that ended before it could be opened is not held.
+#[cfg(windows)]
+struct Held(Vec<(usize, usize)>);
+
+#[cfg(windows)]
+impl Held {
+    /// The processes `pids`, those of them still there.
+    fn open(pids: Vec<usize>) -> Self {
+        use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_SYNCHRONIZE};
+        Self(
+            pids.into_iter()
+                .filter_map(|pid| {
+                    let id = u32::try_from(pid).ok()?;
+                    #[allow(unsafe_code)]
+                    // SAFETY: OpenProcess takes plain values and returns a handle or null.
+                    let handle = unsafe { OpenProcess(PROCESS_SYNCHRONIZE, 0, id) };
+                    (!handle.is_null()).then_some((pid, handle as usize))
+                })
+                .collect(),
+        )
+    }
+
+    /// The ids of those that have not ended.
+    fn left(&self) -> Vec<usize> {
+        use windows_sys::Win32::Foundation::WAIT_OBJECT_0;
+        use windows_sys::Win32::System::Threading::WaitForSingleObject;
+        self.0
+            .iter()
+            .filter(|(_, handle)| {
+                #[allow(unsafe_code)]
+                // SAFETY: the handle is open until this is dropped, with SYNCHRONIZE.
+                let waited = unsafe { WaitForSingleObject(*handle as _, 0) };
+                waited != WAIT_OBJECT_0
+            })
+            .map(|(pid, _)| *pid)
+            .collect()
+    }
+}
+
+#[cfg(windows)]
+impl Drop for Held {
     fn drop(&mut self) {
         use windows_sys::Win32::Foundation::CloseHandle;
+        for (_, handle) in &self.0 {
+            #[allow(unsafe_code)]
+            // SAFETY: each handle is open, and closed once, here.
+            unsafe {
+                CloseHandle(*handle as _);
+            }
+        }
+    }
+}
+
+#[cfg(windows)]
+impl Job {
+    /// Ends every process of the job, and waits until each has ended, as its handle
+    /// says, for `JOB_ENDS_WITHIN` at most (both reviewers' look at round 6: a process
+    /// that still held a source file as it was put back). Why not, naming those that
+    /// have not, where some have not.
+    ///
+    /// They are held before the job is ended: TerminateJobObject begins their end, and
+    /// from then on the job counts and lists none of them while they are still ending
+    /// (zeewin 2026-10-17: the call took 20 ms; the job then counted none and listed
+    /// none, while 7 of 8 processes of 500 threads each had not ended, which all had
+    /// 48 ms after it began); nor does a process's exit code say it has ended, which is
+    /// set as its end begins. What is left: a process the job starts in the moment
+    /// between the list and the end is ended and not waited for; and a process listed
+    /// that ends in that moment, its id given to another, is waited for in its stead, as
+    /// long as the wait allows. The list holds 256 processes at most.
+    pub(crate) fn end(&self) -> Result<(), String> {
         use windows_sys::Win32::System::JobObjects::TerminateJobObject;
+        let held = Held::open(self.processes());
         #[allow(unsafe_code)]
-        // SAFETY: the handle is the job's, open until now, and closed once; the
-        // calls write no memory of ours.
+        // SAFETY: the handle is the job's, open until the job is dropped; the call
+        // writes no memory of ours.
         unsafe {
             TerminateJobObject(self.handle as _, 1);
+        }
+        ended_within(JOB_ENDS_WITHIN, || held.left())
+    }
+
+    /// The ids of the processes the job holds, as far as the system says them.
+    fn processes(&self) -> Vec<usize> {
+        use windows_sys::Win32::System::JobObjects::{
+            JobObjectBasicProcessIdList, QueryInformationJobObject,
+        };
+        /// JOBOBJECT_BASIC_PROCESS_ID_LIST, with room for 256 ids.
+        #[repr(C)]
+        struct Listed {
+            _assigned: u32,
+            listed: u32,
+            ids: [usize; 256],
+        }
+        let mut list = Listed {
+            _assigned: 0,
+            listed: 0,
+            ids: [0; 256],
+        };
+        let Ok(size) = u32::try_from(std::mem::size_of_val(&list)) else {
+            return Vec::new();
+        };
+        #[allow(unsafe_code)]
+        // SAFETY: the buffer is `list`, writable for the `size` bytes passed with it and
+        // laid out as JOBOBJECT_BASIC_PROCESS_ID_LIST, and the call writes no more than
+        // that.
+        let asked = unsafe {
+            QueryInformationJobObject(
+                self.handle as _,
+                JobObjectBasicProcessIdList,
+                (&raw mut list).cast(),
+                size,
+                std::ptr::null_mut(),
+            )
+        };
+        if asked == 0 {
+            return Vec::new();
+        }
+        let listed = usize::try_from(list.listed)
+            .unwrap_or(0)
+            .min(list.ids.len());
+        list.ids[..listed].to_vec()
+    }
+}
+
+#[cfg(windows)]
+impl Drop for Job {
+    /// Every process of the job is ended, and waited for as `end` waits (none is left
+    /// where the job was ended before), and its handle closed.
+    fn drop(&mut self) {
+        use windows_sys::Win32::Foundation::CloseHandle;
+        let _ = self.end();
+        #[allow(unsafe_code)]
+        // SAFETY: the handle is the job's, open until now, and closed once; the call
+        // writes no memory of ours.
+        unsafe {
             CloseHandle(self.handle as _);
         }
     }
@@ -292,5 +447,138 @@ mod tests {
             assert_eq!(started.text("SYSTEMROOT"), None);
         }
         assert_eq!(started.text("OTHER"), None, "nothing else comes along");
+    }
+
+    #[test]
+    fn a_job_that_was_ended_is_waited_for_until_every_process_of_it_has_ended() {
+        // Round 7, decision 7: TerminateJobObject returns before its processes have
+        // ended, and a run said ended then had a process still holding a source file.
+        let left = std::cell::RefCell::new(vec![vec![12, 34], vec![34], vec![]]);
+        let read = || left.borrow_mut().remove(0);
+        let within = std::time::Duration::from_secs(5);
+        assert_eq!(ended_within(within, read), Ok(()));
+        assert!(left.borrow().is_empty(), "asked until none was left");
+
+        // One that does not end is said so, by name.
+        let short = std::time::Duration::from_millis(50);
+        assert_eq!(
+            ended_within(short, || vec![12, 34]),
+            Err("processes [12, 34] of its job had not ended 50ms after it was ended".to_owned())
+        );
+    }
+
+    /// How many processes of `helper_holds_many_threads` the job test starts.
+    #[cfg(windows)]
+    const HELPERS: usize = 8;
+
+    /// A program the job test starts, and no test of its own: 500 threads that wait, a
+    /// file named by its pid in the folder it is given last that says they are there,
+    /// and a minute's wait. Each thread is to end before the process has.
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "a program the job test starts"]
+    fn helper_holds_many_threads() {
+        use std::time::Duration;
+        let folder = std::env::args().next_back().unwrap();
+        for _ in 0..500 {
+            std::thread::Builder::new()
+                .stack_size(64 * 1024)
+                .spawn(|| std::thread::sleep(Duration::from_secs(60)))
+                .unwrap();
+        }
+        let ready = std::path::Path::new(&folder).join(format!("{}.ready", std::process::id()));
+        std::fs::write(ready, "").unwrap();
+        std::thread::sleep(Duration::from_secs(60));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    #[allow(clippy::disallowed_methods)] // The test starts what it ends.
+    fn every_process_of_a_job_that_was_ended_has_ended_once_its_end_has_returned() {
+        // Round 7, decision 7: TerminateJobObject begins the end of a job's processes and
+        // returns, and the job then counts and lists none of them, their exit codes set,
+        // while they are still ending (zeewin 2026-10-17: 7 of 8 had not ended, 28 ms
+        // more). A program held whole starts 8 that hold 500 threads each, and waits; the
+        // test holds each by a handle of its own, opened before the end, which says when
+        // it has ended.
+        use std::time::{Duration, Instant};
+        use windows_sys::Win32::Foundation::{CloseHandle, WAIT_OBJECT_0};
+        use windows_sys::Win32::System::Threading::{
+            OpenProcess, WaitForSingleObject, PROCESS_SYNCHRONIZE,
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let helper = std::env::current_exe().unwrap();
+        std::fs::write(
+            dir.path().join("many.cmd"),
+            format!(
+                "@echo off\r\nfor /l %%i in (1,1,{HELPERS}) do start \"\" /b \"{}\" --exact job::tests::helper_holds_many_threads --ignored \"{}\"\r\nping -n 60 127.0.0.1 >NUL\r\n",
+                helper.display(),
+                dir.path().display()
+            ),
+        )
+        .unwrap();
+        let ready = || -> Vec<u32> {
+            std::fs::read_dir(dir.path())
+                .unwrap()
+                .filter_map(|entry| {
+                    let path = entry.ok()?.path();
+                    if path.extension()? != "ready" {
+                        return None;
+                    }
+                    path.file_stem()?.to_str()?.parse().ok()
+                })
+                .collect()
+        };
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let mut command = tokio::process::Command::new(r"C:\Windows\System32\cmd.exe");
+            command
+                .arg("/d")
+                .arg("/c")
+                .arg(dir.path().join("many.cmd"))
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .kill_on_drop(true);
+            crate::group::lead_whole(&mut command);
+            let child = command.spawn().unwrap();
+            let job = Job::of(&child).unwrap();
+            let until = Instant::now() + Duration::from_secs(60);
+            while ready().len() < HELPERS {
+                assert!(Instant::now() < until, "it started them: {:?}", ready());
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            let handles: Vec<_> = ready()
+                .into_iter()
+                .map(|pid| {
+                    #[allow(unsafe_code)]
+                    // SAFETY: OpenProcess takes plain values and returns a handle or null.
+                    let handle = unsafe { OpenProcess(PROCESS_SYNCHRONIZE, 0, pid) };
+                    assert!(!handle.is_null(), "{pid} is there");
+                    handle
+                })
+                .collect();
+            assert_eq!(job.end(), Ok(()));
+            let left = handles
+                .iter()
+                .filter(|handle| {
+                    #[allow(unsafe_code)]
+                    // SAFETY: the handle is open, with SYNCHRONIZE.
+                    let waited = unsafe { WaitForSingleObject(**handle, 0) };
+                    waited != WAIT_OBJECT_0
+                })
+                .count();
+            for handle in handles {
+                #[allow(unsafe_code)]
+                // SAFETY: the handle is open, and closed once, here.
+                unsafe {
+                    CloseHandle(handle);
+                }
+            }
+            assert_eq!(left, 0, "each had ended once its end returned");
+        });
     }
 }

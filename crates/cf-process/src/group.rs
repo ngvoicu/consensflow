@@ -20,8 +20,19 @@
 //! ended: asked first (SIGTERM to its group, which nextest passes on to its tests),
 //! given a moment, then forced, every process of its session, every process still
 //! descended from it, and every one that was when it was asked and is still the
-//! process it was, then its group (`end`). A capture dropped (a stop) asks it so
-//! too, and waits that moment.
+//! process it was, then its group (`end`); each process is read again right before
+//! it is signalled, and signalled only where it is still the one meant
+//! (`table::signal_if_same`). A capture dropped (a stop) asks it so too, and waits
+//! that moment.
+//!
+//! What is out of reach: a process that starts a session of its own, and is no
+//! longer linked to the program by the time it is looked for. A grandchild that
+//! started its own session and whose parent ended before the program was asked;
+//! and a child started while the program is asked (a SIGTERM handler that starts a
+//! program which calls `setsid`, then exits), which was not there when the program's
+//! descendants were noted, and has been given to another by the time they are
+//! forced. Either is in no session of the run's, descended from it no more, and
+//! noted never: it is let go, and may write after the run.
 
 use std::cell::Cell;
 #[cfg(unix)]
@@ -157,37 +168,7 @@ impl Group {
         let Ok(leader) = i32::try_from(pid) else {
             return;
         };
-        let noted = self.asked.borrow().clone();
-        for _ in 0..3 {
-            let now = table::processes();
-            let mut doomed: Vec<Identity> = now
-                .iter()
-                .filter(|process| process.session == leader)
-                .chain(&table::descendants(&now, leader))
-                .map(|process| process.identity)
-                .chain(
-                    noted
-                        .iter()
-                        .filter(|noted| now.iter().any(|process| process.identity == **noted))
-                        .copied(),
-                )
-                .filter(|identity| identity.pid != leader)
-                .collect();
-            doomed.sort_unstable_by_key(|identity| identity.pid);
-            doomed.dedup();
-            if doomed.is_empty() {
-                break;
-            }
-            for identity in doomed {
-                #[allow(unsafe_code)]
-                // SAFETY: kill takes two integers and touches no memory of ours; the
-                // pid is above 1 (the table has none other) and was just read as a
-                // process of this run's.
-                unsafe {
-                    libc::kill(identity.pid, libc::SIGKILL);
-                }
-            }
-        }
+        sweep(leader, &self.asked.borrow(), &table::process);
     }
 
     /// Whether the program has ended, asked without waiting for it: it is not
@@ -221,6 +202,42 @@ impl Group {
     /// its group's id, after this.
     pub(crate) fn release(&self) {
         self.exited.set(true);
+    }
+}
+
+/// `Group::sweep`'s, of the program `leader`, given the processes `noted` as it was
+/// asked, and how a process is read again before it is signalled (`read`, the system's
+/// but for a test): one found by the session must be in it still, and every one born
+/// when it was.
+#[cfg(unix)]
+fn sweep(leader: i32, noted: &[Identity], read: &dyn Fn(i32) -> Option<table::Process>) {
+    for _ in 0..3 {
+        let now = table::processes();
+        let mut doomed: Vec<(Identity, Option<i32>)> = now
+            .iter()
+            .filter(|process| process.session == leader)
+            .map(|process| (process.identity, Some(leader)))
+            .chain(
+                table::descendants(&now, leader)
+                    .iter()
+                    .map(|process| (process.identity, None)),
+            )
+            .chain(
+                noted
+                    .iter()
+                    .filter(|noted| now.iter().any(|process| process.identity == **noted))
+                    .map(|noted| (*noted, None)),
+            )
+            .filter(|(identity, _)| identity.pid != leader)
+            .collect();
+        doomed.sort_unstable_by_key(|(identity, session)| (identity.pid, session.is_none()));
+        doomed.dedup_by_key(|(identity, _)| *identity);
+        if doomed.is_empty() {
+            break;
+        }
+        for (identity, session) in doomed {
+            table::signal_if_same(identity, session, libc::SIGKILL, read);
+        }
     }
 }
 
@@ -310,5 +327,97 @@ mod tests {
         assert_eq!(sleeper.wait().unwrap().signal(), Some(libc::SIGKILL));
         assert!(!ender.running());
         ender.force();
+    }
+
+    #[test]
+    fn a_process_noted_or_found_is_signalled_only_where_it_is_still_the_one_it_was() {
+        // Both reviewers' look at round 6: a process noted as the program was asked may
+        // end, and another take its number, before the force. Read again as born another
+        // time, or in another session, it is no process of the run's: it is sent nothing.
+        let mut noted = sleeper();
+        let _left = Survivors(vec![noted.id()]);
+        let pid = i32::try_from(noted.id()).unwrap();
+        let read = table::process(pid).expect("the sleep is in the table");
+        let reborn = |pid: i32| {
+            table::process(pid).map(|now| table::Process {
+                identity: Identity {
+                    born: now.identity.born + 1,
+                    ..now.identity
+                },
+                ..now
+            })
+        };
+        // A leader no process is in the session of, nor descended from: only what was
+        // noted is looked at.
+        sweep(i32::MAX, &[read.identity], &reborn);
+        assert!(
+            !table::signal_if_same(
+                read.identity,
+                Some(read.session + 1),
+                libc::SIGKILL,
+                &table::process
+            ),
+            "found by a session it is not in"
+        );
+        std::thread::sleep(Duration::from_millis(300));
+        assert!(
+            noted.try_wait().unwrap().is_none(),
+            "it was sent nothing: it is not the process noted"
+        );
+        // Read again as the process it was, it is forced.
+        sweep(i32::MAX, &[read.identity], &table::process);
+        assert_eq!(noted.wait().unwrap().signal(), Some(libc::SIGKILL));
+    }
+
+    #[test]
+    #[allow(clippy::disallowed_methods)] // The test starts what it ends.
+    fn a_process_found_in_the_session_is_signalled_only_while_it_is_in_it_still() {
+        // Round 7, decision 5: a process found in the program's session is read again right
+        // before it is signalled, and must be in that session still, though it descends
+        // from the program too. The program leads a session, and a sleep is in it.
+        let mut leader = std::process::Command::new("/usr/bin/perl")
+            .args([
+                "-MPOSIX",
+                "-e",
+                "POSIX::setsid(); exec '/bin/sh', '-c', '/bin/sleep 30 & wait'",
+            ])
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        let session = i32::try_from(leader.id()).unwrap();
+        let mut left = Survivors(vec![leader.id()]);
+        let until = std::time::Instant::now() + Duration::from_secs(5);
+        let member = loop {
+            let found = table::processes()
+                .into_iter()
+                .find(|process| process.session == session && process.identity.pid != session);
+            if let Some(found) = found {
+                break u32::try_from(found.identity.pid).unwrap();
+            }
+            assert!(
+                std::time::Instant::now() < until,
+                "the sleep is in the session"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        };
+        left.0.push(member);
+        let elsewhere = |pid: i32| {
+            table::process(pid).map(|now| table::Process {
+                session: now.session + 1,
+                ..now
+            })
+        };
+        sweep(session, &[], &elsewhere);
+        std::thread::sleep(Duration::from_millis(300));
+        assert!(
+            crate::alive(member),
+            "read in another session, it was sent nothing"
+        );
+        sweep(session, &[], &table::process);
+        assert!(
+            crate::testing::gone_within(member, Duration::from_secs(5)),
+            "in it still, it is forced"
+        );
+        leader.wait().unwrap();
     }
 }

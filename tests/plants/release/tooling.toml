@@ -41,6 +41,9 @@ xtask-lib-windows = ["cargo", "test", "--offline", "--target-dir", "app/src-taur
 cf-e2e-lib-cf = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "cf::"]
 # What capturing a program ends when its time runs out.
 cf-process-capture = ["cargo", "test", "--offline", "-p", "cf-process", "--lib", "capture::"]
+# The same, with what a program held whole leads (its group, its job) and how a process is
+# read before it is signalled.
+cf-process-lib = ["cargo", "test", "--offline", "-p", "cf-process", "--lib"]
 
 [[plant]]
 name = "tooling: a package.json that says another version is passed"
@@ -688,8 +691,8 @@ runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
 file = "tools/xtask/src/plants/runs/reporters.rs"
-find = '''    words.insert(test, format!("--reporter=list,{reporter}"));'''
-replace = '''    words.insert(test, format!("--reporter=list{}", &reporter[..0]));'''
+find = '''            format!("--reporter=list,{reporter}"),'''
+replace = '''            format!("--reporter=list{}", &reporter[..0]),'''
 
 [[plant]]
 name = "tooling: nextest runs a test that failed again"
@@ -1691,8 +1694,8 @@ platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = "crates/cf-process/src/capture.rs"
-find = "                group.end(Ending::Forced);\n                child.wait().await\n            };"
-replace = "                if !group.ended() {\n                    group.end(Ending::Forced);\n                }\n                child.wait().await\n            };"
+find = "        group.end(Ending::Forced);\n        child.wait().await\n    }\n    #[cfg(not(unix))]"
+replace = "        if !group.ended() {\n            group.end(Ending::Forced);\n        }\n        child.wait().await\n    }\n    #[cfg(not(unix))]"
 
 [[plant]]
 name = "tooling: nextest is given the variables of its own this run was given, which win over its config"
@@ -1906,15 +1909,8 @@ platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = "crates/cf-process/src/capture.rs"
-find = '''
-        Some(None) => {
-            group.end(Ending::Forced);
-            child.wait().await
-        }
-'''
-replace = '''
-        Some(None) => child.wait().await,
-'''
+find = "    if cfg!(unix) {\n        group.end(Ending::Forced);\n    }\n"
+replace = ""
 
 [[plant]]
 name = "tooling (cf-process): a program held whole runs in the job of every child, which it leaves"
@@ -2095,8 +2091,51 @@ runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
 file = "tools/xtask/src/plants/runs/results.rs"
-find = "                failure == DOUBLE_SPAWN_FAILED.0\n                    && self.err.trim_start().starts_with(DOUBLE_SPAWN_FAILED.1)"
-replace = "                failure == DOUBLE_SPAWN_FAILED.0 && DOUBLE_SPAWN_FAILED.1.is_empty()"
+find = "                        || err.starts_with(DOUBLE_SPAWN_FAILED.1))"
+replace = "                        || DOUBLE_SPAWN_FAILED.1.is_empty())"
+
+# With capture off nextest keeps nothing a test wrote: a test it could not start reads as one
+# that exited with 70, and a run that turns capture off is refused.
+
+[[plant]]
+name = "tooling: a test that exited with 70 and whose output was not kept started"
+meant = "a_rust_test_nextest_could_not_start_with_capture_off_never_ran_and_capture_off_is_refused"
+runs = ["xtask-lib-plants"]
+
+[[plant.edit]]
+file = "tools/xtask/src/plants/runs/results.rs"
+find = "                        || err == NOT_CAPTURED\n"
+replace = ""
+
+[[plant]]
+name = "tooling: a test that exited with 70 and wrote nothing started"
+meant = "a_test_nextest_could_not_start_never_ran_and_is_an_error_outside_every_test"
+runs = ["xtask-lib-plants"]
+
+[[plant.edit]]
+file = "tools/xtask/src/plants/runs/results.rs"
+find = "                    && (err.is_empty()\n"
+replace = "                    && (false\n"
+
+[[plant]]
+name = "tooling: a cargo test that turns capture off is taken"
+meant = "a_rust_test_nextest_could_not_start_with_capture_off_never_ran_and_capture_off_is_refused"
+runs = ["xtask-lib-plants"]
+
+[[plant.edit]]
+file = "tools/xtask/src/plants/runs/reporters.rs"
+find = "                nextest_words(&tests.args)\n                    .err()\n                    .or_else(|| uncaptured(&tests))"
+replace = "                let _ = uncaptured;\n                nextest_words(&tests.args).err()"
+
+[[plant]]
+name = "tooling: a suite that turns capture off by its variable is taken"
+meant = "a_cargo_test_whose_suite_turns_capture_off_is_refused_by_its_variable"
+runs = ["xtask-lib-plants"]
+
+[[plant.edit]]
+file = "tools/xtask/src/plants/runs/reporters.rs"
+find = '''    const VARIABLES: [&str; 2] = ["NEXTEST_NO_CAPTURE", "RUST_TEST_NOCAPTURE"];'''
+replace = '''    const VARIABLES: [&str; 2] = ["", ""];'''
 
 [[plant]]
 name = "tooling: a test nextest could not start is not said with the run that broke"
@@ -2108,27 +2147,88 @@ file = "tools/xtask/src/plants/runs.rs"
 find = '''                Some(error) => Some(format!("{error}: it never ran")),'''
 replace = '''                Some(_) => none_ran.then(|| "it ran no test".to_owned()),'''
 
-# Playwright: only a test whose own body ran and failed catches; a hook's failure is the hook's.
+# Playwright: only a test whose own body ran and failed catches: an error of any step in a
+# hook, a worker that exited, a test out of its time, and any retry are no proof of it.
 
 [[plant]]
-name = "tooling: a Playwright test whose beforeAll threw is one whose body failed"
-meant = "a_playwright_test_whose_before_all_threw_never_ran_and_catches_nothing"
+name = "tooling: a failed Playwright test is one whose body failed, whatever its hooks or its worker did"
+meant = "a_playwright_test_whose_hooks_threw_or_whose_worker_exited_never_failed_of_itself"
 runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
 file = "tools/xtask/src/plants/runs/reporters/playwright.mjs"
-find = "        own: last !== undefined && last.errors.length > hooks.count,"
-replace = "        own: last !== undefined && last.errors.length > 0,"
+find = "        own: last?.status === 'failed' && why === null,"
+replace = "        own: last?.status === 'failed',"
 
 [[plant]]
-name = "tooling: every hook step of a Playwright test is counted, its inner ones too"
-meant = "a_playwright_test_whose_before_all_threw_never_ran_and_catches_nothing"
+name = "tooling: a Playwright hook's error said by a step inside the hook alone is not the hook's"
+meant = "playwright_s_reporter_takes_an_error_of_any_step_in_a_hook_for_the_hook_s"
 runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
 file = "tools/xtask/src/plants/runs/reporters/playwright.mjs"
-find = "    if (step.category !== 'hook' || step.parent !== undefined || step.error === undefined) return"
-replace = "    if (step.category !== 'hook' || step.error === undefined) return"
+find = "  for (let at = step; at; at = at.parent) if (at.category === 'hook') return true"
+replace = "  if (step.category === 'hook') return true"
+
+[[plant]]
+name = "tooling: an error of a Playwright test's own step is taken for a hook's"
+meant = "playwright_s_reporter_takes_an_error_of_any_step_in_a_hook_for_the_hook_s"
+runs = ["xtask-lib-plants"]
+
+[[plant.edit]]
+file = "tools/xtask/src/plants/runs/reporters/playwright.mjs"
+find = "  for (let at = step; at; at = at.parent) if (at.category === 'hook') return true\n  return false"
+replace = "  return true"
+
+[[plant]]
+name = "tooling: a Playwright test whose worker exited under it failed of itself"
+meant = "a_playwright_test_whose_hooks_threw_or_whose_worker_exited_never_failed_of_itself"
+runs = ["xtask-lib-plants"]
+
+[[plant.edit]]
+file = "tools/xtask/src/plants/runs/reporters/playwright.mjs"
+find = "    if (exited !== undefined) return `its worker exited: ${firstLine(exited)}`\n"
+replace = ""
+
+[[plant]]
+name = "tooling: a Playwright test out of its time says no more of why it did not fail of itself"
+meant = "a_playwright_test_whose_hooks_threw_or_whose_worker_exited_never_failed_of_itself"
+runs = ["xtask-lib-plants"]
+
+[[plant.edit]]
+file = "tools/xtask/src/plants/runs/reporters/playwright.mjs"
+find = "    if (result.status !== 'failed') return `it ended ${result.status}`\n"
+replace = ""
+
+[[plant]]
+name = "tooling: the last hook error of a Playwright test is said, not its first"
+meant = "a_playwright_test_whose_hooks_threw_or_whose_worker_exited_never_failed_of_itself"
+runs = ["xtask-lib-plants"]
+
+[[plant.edit]]
+file = "tools/xtask/src/plants/runs/reporters/playwright.mjs"
+find = " && !this.hooks.has(result)) this.hooks.set(result, step.error)"
+replace = ") this.hooks.set(result, step.error)"
+
+[[plant]]
+name = "tooling: a Playwright run is given no word on its retries"
+meant = "playwright_writes_the_plants_report_to_the_run_beside_the_list_it_prints"
+runs = ["xtask-lib-plants"]
+
+[[plant.edit]]
+file = "tools/xtask/src/plants/runs/reporters.rs"
+find = '''            "--retries=0".to_owned(),'''
+replace = ""
+
+[[plant]]
+name = "tooling: a Playwright run that asks for retries is taken"
+meant = "playwright_writes_the_plants_report_to_the_run_beside_the_list_it_prints"
+runs = ["xtask-lib-plants"]
+
+[[plant.edit]]
+file = "tools/xtask/src/plants/runs/reporters.rs"
+find = "            Self::Playwright => retried(command),"
+replace = "            Self::Playwright => None,"
 
 [[plant]]
 name = "tooling: a Playwright hook that failed is not said"
@@ -2175,8 +2275,8 @@ platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = "crates/cf-process/src/group.rs"
-find = "                .filter(|process| process.session == leader)"
-replace = "                .filter(|_| false)"
+find = "            .filter(|process| process.session == leader)"
+replace = "            .filter(|_| false)"
 
 [[plant]]
 name = "tooling (cf-process): nothing is noted as a program held whole is asked to end"
@@ -2197,7 +2297,13 @@ platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = "crates/cf-process/src/group.rs"
-find = "                .chain(&table::descendants(&now, leader))\n"
+find = '''
+            .chain(
+                table::descendants(&now, leader)
+                    .iter()
+                    .map(|process| (process.identity, None)),
+            )
+'''
 replace = ""
 
 [[plant]]
@@ -2280,21 +2386,180 @@ find = "    \".git\",\n"
 replace = "    \".synced-files\",\n"
 
 [[plant]]
-name = "tooling: a checkout git says nothing of is not said"
-meant = "a_plant_of_a_checkout_git_says_nothing_of_is_tried_and_that_is_said_once_before_any"
+name = "tooling: plants are tried in a checkout git says nothing of"
+meant = "no_plant_is_tried_in_a_checkout_git_says_nothing_of_and_one_is_checked_there"
 runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
 file = "tools/xtask/src/plants/driver.rs"
-find = "    if let Some(untold) = runner.untold() {\n        writeln!(out, \"{untold}\")?;\n    }\n"
+find = "    if let Some(root) = runner.gitless() {\n        return Err(Error::NoCheckout { root }.into());\n    }\n"
 replace = ""
 
 [[plant]]
-name = "tooling: a checkout git says nothing of is given a state of its own each time"
-meant = "a_plant_of_a_checkout_git_says_nothing_of_is_tried_and_that_is_said_once_before_any"
+name = "tooling: a checkout git says nothing of is taken for one"
+meant = "the_state_of_a_checkout_is_its_commit_and_the_bytes_of_what_changed_and_nothing_else"
 runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
 file = "tools/xtask/src/plants/runs.rs"
-find = "            return Some(UNTOLD.to_owned());"
-replace = "            return Some(format!(\"{UNTOLD} {:?}\", std::time::Instant::now()));"
+find = "            Some(None) => Some(self.checkout.root.clone()),"
+replace = "            Some(None) => None,"
+
+[[plant]]
+name = "tooling: a state git says nothing of once is the same each time"
+meant = "the_state_of_a_checkout_is_its_commit_and_the_bytes_of_what_changed_and_nothing_else"
+runs = ["xtask-lib-plants"]
+
+[[plant.edit]]
+file = "tools/xtask/src/plants/runs.rs"
+find = "            self.untold += 1;\n            return Some(format!(\"untold {}\", self.untold));"
+replace = "            return Some(\"untold\".to_owned());"
+
+# A process found or noted by a run held whole is read again right before it is signalled,
+# and signalled only where it is still the one it was, in the session it was found by.
+
+[[plant]]
+name = "tooling (cf-process): a process is signalled without being read again"
+meant = "a_process_noted_or_found_is_signalled_only_where_it_is_still_the_one_it_was"
+runs = ["cf-process-lib"]
+# Linux holds the process by a pidfd first, a branch of its own.
+platforms = ["macos"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/table.rs"
+find = "    if !same() {\n        return false;\n    }\n"
+replace = "    let _ = same;\n"
+
+[[plant]]
+name = "tooling (cf-process): a process found by the session is not read again for its session"
+meant = "a_process_found_in_the_session_is_signalled_only_while_it_is_in_it_still"
+runs = ["cf-process-lib"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/table.rs"
+find = "            now.identity == identity && session.is_none_or(|session| now.session == session)"
+replace = "            now.identity == identity && session.is_none_or(|_| true)"
+
+[[plant]]
+name = "tooling (cf-process): a process found by the session and descended from the program is read as descended alone"
+meant = "a_process_found_in_the_session_is_signalled_only_while_it_is_in_it_still"
+runs = ["cf-process-lib"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/group.rs"
+find = "        doomed.sort_unstable_by_key(|(identity, session)| (identity.pid, session.is_none()));"
+replace = "        doomed.sort_unstable_by_key(|(identity, session)| (identity.pid, session.is_some()));"
+
+# A job that was ended (Windows) is waited for until the system counts no process in it, and
+# a held run has ended when it exits: what it left is ended, and only then are its streams
+# read to their ends, for a moment at most.
+
+[[plant]]
+name = "tooling (cf-process): a job that was ended is not waited for"
+meant = "a_job_that_was_ended_is_waited_for_until_every_process_of_it_has_ended"
+runs = ["cf-process-lib"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/job.rs"
+find = "        if left.is_empty() {"
+replace = "        if left.len() < 100 {"
+
+# The job then counts and lists none of its processes, while they are still ending: they are
+# held before it is ended.
+[[plant]]
+name = "tooling (cf-process): a job's end returns before every process of it has ended"
+meant = "every_process_of_a_job_that_was_ended_has_ended_once_its_end_has_returned"
+runs = ["cf-process-lib"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/job.rs"
+find = "        let held = Held::open(self.processes());\n"
+replace = ""
+
+[[plant.edit]]
+file = "crates/cf-process/src/job.rs"
+find = "        ended_within(JOB_ENDS_WITHIN, || held.left())"
+replace = "        let held = Held::open(self.processes());\n        ended_within(JOB_ENDS_WITHIN, || held.left())"
+
+[[plant]]
+name = "tooling (cf-process): a program held whole has ended only once its streams closed"
+meant = "held_whole_a_program_has_ended_when_it_exits_though_what_it_left_holds_its_streams"
+runs = ["cf-process-lib"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/capture.rs"
+find = "                    status = &mut exit => return Held::Exited(status),"
+replace = "                    status = &mut exit, if read => return Held::Exited(status),"
+
+[[plant]]
+name = "tooling (cf-process): a program held whole has ended only once its streams closed (Windows)"
+meant = "held_whole_a_grandchild_started_at_once_is_in_the_job_and_ends_with_it"
+runs = ["cf-process-lib"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/capture.rs"
+find = "                    status = &mut exit => return Held::Exited(status),"
+replace = "                    status = &mut exit, if read => return Held::Exited(status),"
+
+[[plant]]
+name = "tooling (cf-process): the job of a program held whole that exited is not ended before its streams are read"
+meant = "held_whole_a_grandchild_started_at_once_is_in_the_job_and_ends_with_it"
+runs = ["cf-process-lib"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/capture.rs"
+find = "    job.map_or(Ok(()), Job::end)\n}"
+replace = "    let _ = job;\n    Ok(())\n}"
+
+[[plant]]
+name = "tooling (cf-process): streams held open after a program held whole ended are let go of"
+meant = "held_whole_streams_still_held_after_its_end_by_what_is_out_of_reach_fail_the_capture"
+runs = ["cf-process-lib"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/capture.rs"
+find = "                    .is_err()\n            {"
+replace = "                    .is_err()\n                && false\n            {"
+
+[[plant]]
+name = "tooling (cf-process): what a program held whole left running is not said"
+meant = "held_whole_streams_still_held_after_its_end_by_what_is_out_of_reach_fail_the_capture"
+runs = ["cf-process-lib"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/capture.rs"
+find = "    if let Err(why) = left {"
+replace = "    if let (Err(why), true) = (left, false) {"
+
+[[plant]]
+name = "tooling: a run whose processes did not all end is taken for one that ended"
+meant = "what_cf_process_answered_is_what_the_run_did"
+runs = ["xtask-lib-plants"]
+
+[[plant.edit]]
+file = "tools/xtask/src/plants/runs.rs"
+find = "            Err(failed) if failed.message.starts_with(LEFT_RUNNING) => {"
+replace = "            Err(failed) if false && failed.message.starts_with(LEFT_RUNNING) => {"
+
+# A path a test compares is built from its parts, as the system joins them.
+
+[[plant]]
+name = "tooling: the plants' fixtures folder is joined with forward slashes"
+meant = "playwright_s_report_names_each_test_and_the_errors_outside_every_test"
+runs = ["xtask-lib-plants"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/plants/runs/tests.rs"
+find = '''    ["app", "src-tauri", "target", "plants-fixtures"]
+        .iter()
+        .fold(root.to_path_buf(), |path, part| path.join(part))'''
+replace = '''    root.join("app/src-tauri/target/plants-fixtures")'''

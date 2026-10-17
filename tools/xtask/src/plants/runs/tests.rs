@@ -415,6 +415,19 @@ fn what_cf_process_answered_is_what_the_run_did() {
         Ran::of(&command, Err(unstarted)),
         Err(Error::Process(process::Failure::Refused { .. }))
     ));
+
+    // Nor one whose processes did not all end (round 7, decision 7): the run is not over,
+    // whatever it exited with.
+    let message =
+        format!("{LEFT_RUNNING}: processes [12] of its job had not ended 2s after it was ended");
+    for (code, killed) in [(Some(0), false), (Some(1), false), (None, true)] {
+        let left = Ran::of(&command, Err(failed(&message, code, killed))).map(|ran| ran.code);
+        assert_eq!(
+            left.map_err(|error| error.to_string()),
+            Err(format!("cargo: {message}")),
+            "{code:?}"
+        );
+    }
 }
 
 #[test]
@@ -914,6 +927,15 @@ test('another fails', () => {
 })
 "#;
 
+/// Where the Playwright fixtures of these tests go, in the checkout `root` (where the specs
+/// find `@playwright/test`): built from its parts, so that a path Playwright says of one,
+/// with the system's own separator, is the path built here (zeewin, 2026-10-17).
+fn plants_fixtures(root: &Path) -> PathBuf {
+    ["app", "src-tauri", "target", "plants-fixtures"]
+        .iter()
+        .fold(root.to_path_buf(), |path, part| path.join(part))
+}
+
 #[test]
 fn playwright_s_report_names_each_test_and_the_errors_outside_every_test() {
     let root = context().root;
@@ -923,7 +945,7 @@ fn playwright_s_report_names_each_test_and_the_errors_outside_every_test() {
         "Playwright is not installed: npm ci --prefix app"
     );
     // In the checkout, where the specs find `@playwright/test`.
-    let fixtures = root.join("app/src-tauri/target/plants-fixtures");
+    let fixtures = plants_fixtures(&root);
     fs::create_dir_all(&fixtures).unwrap();
     let folder = tempfile::tempdir_in(&fixtures).unwrap();
     fs::write(
@@ -1600,6 +1622,73 @@ fn a_rust_test_nextest_could_not_start_is_no_catch_and_the_run_says_which() {
     assert!(!said.contains("CAUGHT"), "{said}");
 }
 
+#[test]
+fn a_rust_test_nextest_could_not_start_with_capture_off_never_ran_and_capture_off_is_refused() {
+    // Both reviewers' look at round 6: with capture off nextest keeps nothing a test wrote,
+    // and a test it could not start reads as one that failed with 70, the double-spawn's
+    // words not kept. nextest is run here as the runner would never run it: capture off.
+    let lib = binary_taken_away_lib().replace("    1\n", "    2\n");
+    let (fixture, command) = fixture_crate("plants-uncaptured", &lib);
+    let runner = runner(Duration::from_secs(600));
+    let store = tempfile::tempdir().unwrap();
+    let config = store.path().join("nextest.toml");
+    fs::write(
+        &config,
+        format!(
+            "[store]\ndir = \"{}\"\n\n[profile.plants]\nretries = 0\nfail-fast = false\n\n\
+             [profile.plants.junit]\npath = \"junit.xml\"\nreport-skipped = \"all\"\n",
+            store.path().display().to_string().replace('\\', "/")
+        ),
+    )
+    .unwrap();
+    let uncaptured = Invocation::new(runner.nextest().unwrap(), fixture.path())
+        .args([
+            "nextest",
+            "run",
+            "--offline",
+            "--profile",
+            "plants",
+            "--config-file",
+        ])
+        .arg(&config)
+        .arg("--manifest-path")
+        .arg(fixture.path().join("Cargo.toml"))
+        .arg("--target-dir")
+        .arg(fixture.path().join("target"))
+        .arg("--no-capture");
+    let ran = process::capture(&uncaptured, &context().env).unwrap();
+    let junit = ["plants", "junit.xml"]
+        .iter()
+        .fold(store.path().to_path_buf(), |path, part| path.join(part));
+    let report = results::junit(&fs::read_to_string(junit).unwrap()).unwrap();
+    assert!(
+        report.others.iter().any(|test| test.name == "tests::meant"),
+        "{}\n{report:?}",
+        ran.stderr
+    );
+    assert!(
+        report
+            .outside
+            .iter()
+            .any(|error| error == "nextest could not start tests::meant (plants-uncaptured)"),
+        "{report:?}"
+    );
+    assert!(report.tests.iter().all(|test| !test.failed), "{report:?}");
+    // The runner refuses a run with capture off, before it starts, and says why.
+    for more in [&["--", "--nocapture"][..], &["--", "--no-capture"]] {
+        let mut off = command.clone();
+        off.extend(words(more));
+        let why = refused(&off, &context()).unwrap_or_default();
+        assert!(
+            why.starts_with(&format!(
+                "cargo test {}: nextest keeps nothing its tests wrote without capture",
+                more[1]
+            )),
+            "{why}"
+        );
+    }
+}
+
 /// A plant of one file in a checkout of its own, tried by `command`.
 fn tried_by(command: Vec<String>) -> (tempfile::TempDir, Context, crate::plants::kit::Plant) {
     use crate::plants::kit::{Edit, Plant, Run as PlantRun};
@@ -2255,7 +2344,7 @@ fn playwright_s_meant_test_failing_beside_a_global_teardown_that_threw_is_caught
         "Playwright is not installed: npm ci --prefix app"
     );
     // In the checkout, where the specs find `@playwright/test`.
-    let fixtures = root.join("app/src-tauri/target/plants-fixtures");
+    let fixtures = plants_fixtures(&root);
     fs::create_dir_all(&fixtures).unwrap();
     let folder = tempfile::tempdir_in(&fixtures).unwrap();
     let checkout = Context {
@@ -2305,44 +2394,96 @@ fn playwright_s_meant_test_failing_beside_a_global_teardown_that_threw_is_caught
     );
 }
 
-/// A spec of Playwright's whose group's `beforeAll` throws with the plant, before the
-/// meant test, which would fail with it too, were its body run; and a test whose body
-/// fails with the plant and whose `afterEach` throws with it.
-const PLAYWRIGHT_SET_UP: &str = r#"import { expect, test } from '@playwright/test'
-import { planted } from './flag.mjs'
+/// A spec of Playwright's whose group `a group` has the hooks `hooks` (each doing what it
+/// does with the plant alone), and the meant test, whose body `body` would fail with the
+/// plant too, were it run.
+fn playwright_hooked(hooks: &str, body: &str) -> String {
+    format!(
+        "import {{ expect, test }} from '@playwright/test'\nimport {{ planted }} from './flag.mjs'\n\n\
+         test.describe('a group', () => {{\n{hooks}\n  test('the meant one', async () => {{\n    {body}\n  }})\n}})\n"
+    )
+}
 
-test.describe('a group', () => {
-  test.beforeAll(() => {
-    if (planted) throw new Error('the beforeAll throws with the plant')
-  })
+/// The meant test's body in `playwright_hooked`: it fails with the plant.
+const FAILS: &str = "expect(planted).toBe(false)";
 
-  test('the meant one', () => {
-    expect(planted).toBe(false)
-  })
-})
-
-test.describe('torn down', () => {
-  test.afterEach(() => {
-    if (planted) throw new Error('the afterEach throws with the plant')
-  })
-
-  test('its body fails too', () => {
-    expect(planted).toBe(false)
-  })
-})
-"#;
+/// The specs of `playwright_hooked`'s that no catch is to be taken from, each a file of its
+/// own, each its hooks and its meant test's body, and the first words of why its meant
+/// test did not fail of itself.
+const PLAYWRIGHT_HOOKS: [(&str, &str, &str, &str); 9] = [
+    (
+        "before-all",
+        "  test.beforeAll(() => {\n    if (planted) throw new Error('the beforeAll throws')\n  })",
+        FAILS,
+        "a hook failed: Error: the beforeAll throws",
+    ),
+    (
+        "after-each",
+        "  test.afterEach(() => {\n    if (planted) throw new Error('the afterEach throws')\n  })",
+        FAILS,
+        "a hook failed: Error: the afterEach throws",
+    ),
+    (
+        "two-before-each",
+        "  test.beforeEach(() => {\n    if (planted) throw new Error('the first beforeEach throws')\n  })\n  \
+         test.beforeEach(() => {\n    if (planted) throw new Error('the second beforeEach throws')\n  })",
+        FAILS,
+        "a hook failed: Error: the first beforeEach throws",
+    ),
+    (
+        "two-before-all",
+        "  test.beforeAll(() => {\n    if (planted) throw new Error('the first beforeAll throws')\n  })\n  \
+         test.beforeAll(() => {\n    if (planted) throw new Error('the second beforeAll throws')\n  })",
+        FAILS,
+        "a hook failed: Error: the first beforeAll throws",
+    ),
+    (
+        "before-and-after-each",
+        "  test.beforeEach(() => {\n    if (planted) throw new Error('the beforeEach throws')\n  })\n  \
+         test.afterEach(() => {\n    if (planted) throw new Error('the afterEach throws')\n  })",
+        FAILS,
+        "a hook failed: Error: the beforeEach throws",
+    ),
+    (
+        "aggregate",
+        "  test.beforeAll(() => {\n    if (planted) throw new AggregateError([new Error('one'), new Error('two')], 'an aggregate')\n  })",
+        FAILS,
+        "a hook failed: AggregateError: an aggregate",
+    ),
+    (
+        "exits",
+        "  test.beforeAll(() => {\n    if (planted) process.exit(3)\n  })",
+        FAILS,
+        "its worker exited: Error: worker process exited unexpectedly (code=3, signal=null)",
+    ),
+    (
+        "exits-in-its-body",
+        "",
+        "if (planted) process.exit(3)",
+        "its worker exited: Error: worker process exited unexpectedly (code=3, signal=null)",
+    ),
+    (
+        "out-of-time",
+        "",
+        "test.setTimeout(1000)\n    if (planted) await new Promise(() => {})",
+        "it ended timedOut",
+    ),
+];
 
 #[test]
-fn a_playwright_test_whose_before_all_threw_never_ran_and_catches_nothing() {
-    // The first reviewer's look at round 5: Playwright says a test whose `beforeAll`
-    // threw failed, though its body never ran.
+fn a_playwright_test_whose_hooks_threw_or_whose_worker_exited_never_failed_of_itself() {
+    // Both reviewers' looks at rounds 5 and 6: a test whose `beforeAll` threw was taken for
+    // one whose body failed; then two throwing hooks, an AggregateError and a worker that
+    // exited in a `beforeAll` were, counted. A body that failed beside an `afterEach` that
+    // threw is no proof of itself either, nor one whose worker exited or whose time ran
+    // out. Each is BROKEN, never CAUGHT.
     let root = context().root;
     let cli = "app/node_modules/@playwright/test/cli.js";
     assert!(
         root.join(cli).is_file(),
         "Playwright is not installed: npm ci --prefix app"
     );
-    let fixtures = root.join("app/src-tauri/target/plants-fixtures");
+    let fixtures = plants_fixtures(&root);
     fs::create_dir_all(&fixtures).unwrap();
     let folder = tempfile::tempdir_in(&fixtures).unwrap();
     let checkout = Context {
@@ -2355,41 +2496,41 @@ fn a_playwright_test_whose_before_all_threw_never_ran_and_catches_nothing() {
         "export default { testDir: '.', outputDir: './test-results' }\n",
     )
     .unwrap();
-    fs::write(checkout.path("set-up.spec.mjs"), PLAYWRIGHT_SET_UP).unwrap();
     let relative = folder.path().strip_prefix(&root).unwrap();
     let at = |file: &str| relative.join(file).to_string_lossy().replace('\\', "/");
-    let command = words(&[
-        "node",
-        cli,
-        "test",
-        "--config",
-        &at("plants.config.mjs"),
-        &at("set-up.spec.mjs"),
-    ]);
-    let (status, said) = driven(
-        &checkout,
-        &[
-            flagged("p: set up", "a group › the meant one", command.clone()),
-            // A body that failed is the test's own, whatever its `afterEach` did.
-            flagged("p: torn down", "torn down › its body fails too", command),
-        ],
-    );
+    let plants: Vec<crate::plants::kit::Plant> = PLAYWRIGHT_HOOKS
+        .iter()
+        .map(|(name, hooks, body, _)| {
+            let spec = format!("{name}.spec.mjs");
+            fs::write(checkout.path(&spec), playwright_hooked(hooks, body)).unwrap();
+            let command = words(&[
+                "node",
+                cli,
+                "test",
+                "--config",
+                &at("plants.config.mjs"),
+                &at(&spec),
+            ]);
+            flagged(&format!("p: {name}"), "a group › the meant one", command)
+        })
+        .collect();
+    let (status, said) = driven(&checkout, &plants);
     assert_eq!(fs::read_to_string(checkout.path("flag.mjs")).unwrap(), FLAG);
     assert_eq!(status, 1, "{said}");
-    assert!(said.contains("BROKEN           p: set up ("), "{said}");
-    assert!(
-        said.contains(
-            "    Playwright: an error outside every test: a hook of a group › the meant one \
-             failed: Error: the beforeAll throws with the plant\n"
-        ),
-        "{said}"
-    );
-    assert!(!said.contains("CAUGHT           p: set up"), "{said}");
-    assert!(said.contains("CAUGHT           p: torn down ("), "{said}");
-    assert!(
-        said.contains(") by torn down › its body fails too\n"),
-        "{said}"
-    );
+    for (name, _, _, why) in PLAYWRIGHT_HOOKS {
+        assert!(
+            said.contains(&format!("BROKEN           p: {name} (")),
+            "{name}: {said}"
+        );
+        assert!(
+            said.contains(&format!(
+                "    Playwright: an error outside every test: a group › the meant one did not \
+                 fail of itself: {why}"
+            )),
+            "{name}: {said}"
+        );
+    }
+    assert!(!said.contains("CAUGHT"), "{said}");
 }
 
 #[test]
@@ -2529,9 +2670,9 @@ fn the_state_of_a_checkout_is_its_commit_and_the_bytes_of_what_changed_and_nothi
     git(&mut runner, &["add", "."]);
     git(&mut runner, &["commit", "-q", "-m", "second"]);
     assert_ne!(runner.state(), added);
-    assert_eq!(runner.untold(), None, "a checkout of git's");
-    // Where git says nothing of the folder, its state is the same whatever changed in it,
-    // which the runner says.
+    assert_eq!(runner.gitless(), None, "a checkout of git's");
+    // Where git says nothing of the folder, each state is one of its own, never one a
+    // command was known in; and the runner says where.
     let elsewhere = tempfile::tempdir().unwrap();
     let mut untold = runner_with(
         &Context {
@@ -2541,57 +2682,51 @@ fn the_state_of_a_checkout_is_its_commit_and_the_bytes_of_what_changed_and_nothi
         Duration::from_secs(120),
         Stops::never,
     );
-    let before = untold.state();
-    std::fs::write(elsewhere.path().join("a.rs"), "changed\n").unwrap();
-    assert_eq!(untold.state(), before);
-    assert_eq!(
-        untold.untold(),
-        Some(format!(
-            "no git checkout at {}: a run that changes the checkout can't be told",
-            elsewhere.path().display()
-        ))
-    );
+    assert_ne!(untold.state(), untold.state());
+    assert_eq!(untold.gitless(), Some(elsewhere.path().to_path_buf()));
 }
 
 #[test]
-fn a_plant_of_a_checkout_git_says_nothing_of_is_tried_and_that_is_said_once_before_any() {
-    // zeewin's copy, shipped with no checkout of git's: every plant was UNSTABLE, its run
-    // "changed the checkout" (2026-10-17).
+fn no_plant_is_tried_in_a_checkout_git_says_nothing_of_and_one_is_checked_there() {
+    // Both reviewers' look at round 6: one state for a checkout git says nothing of let
+    // a clean pass of another state stand, and a state of its own each time made every
+    // plant UNSTABLE on zeewin. Plants need git; `--check` does not.
     assert!(on_path("node"), "node is not on the PATH");
-    let (_folder, checkout, mut plant) = tried_by(words(&[
+    let (_folder, checkout, plant) = tried_by(words(&[
         "node",
         "-e",
         "process.exit(require('fs').readFileSync('a.rs', 'utf8').includes('ONE') ? 1 : 0)",
     ]));
-    let mut second = plant.clone();
-    second.name = "p: two".into();
-    plant.name = "p: one".into();
     let family = crate::plants::kit::Family {
         name: "demo".into(),
         limit: Duration::from_secs(600),
         rebuild: None,
-        plants: vec![plant, second],
+        plants: vec![plant],
     };
     let chosen: Vec<&crate::plants::kit::Plant> = family.plants.iter().collect();
     let mut out = Vec::new();
-    let status = crate::plants::driver::run(
+    let refused = crate::plants::driver::run(
         &checkout,
         &family,
         &chosen,
         &mut runner_in(&checkout.root),
         &mut out,
     )
-    .unwrap();
-    let said = String::from_utf8(out).unwrap();
-    assert_eq!(status, 0, "{said}");
-    let notice = format!(
-        "no git checkout at {}: a run that changes the checkout can't be told\n",
-        checkout.root.display()
+    .unwrap_err();
+    assert_eq!(
+        refused.to_string(),
+        format!(
+            "plants need a git checkout at {} to tell a changed checkout",
+            checkout.root.display()
+        )
     );
-    assert_eq!(said.matches(&notice).count(), 1, "{said}");
-    assert!(said.contains("CAUGHT           p: one ("), "{said}");
-    assert!(said.contains("CAUGHT           p: two ("), "{said}");
-    assert!(said.find(&notice) < said.find("CAUGHT"), "{said}");
+    assert!(out.is_empty(), "no plant was tried");
+    assert_eq!(fs::read_to_string(checkout.path("a.rs")).unwrap(), "one\n");
+    let mut out = Vec::new();
+    let checked =
+        crate::plants::driver::check(&checkout, &chosen, &mut runner_in(&checkout.root), &mut out)
+            .unwrap();
+    assert_eq!(checked, 0, "{}", String::from_utf8_lossy(&out));
 }
 
 #[cfg(unix)]

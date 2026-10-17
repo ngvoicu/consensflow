@@ -57,7 +57,7 @@ pub(crate) fn processes() -> Vec<Process> {
 /// What the system says of the process `pid`: none where it is not this user's, it
 /// is a zombie, or it is gone.
 #[cfg(target_os = "macos")]
-fn process(pid: i32) -> Option<Process> {
+pub(crate) fn process(pid: i32) -> Option<Process> {
     if pid <= 1 {
         return None;
     }
@@ -111,7 +111,7 @@ pub(crate) fn processes() -> Vec<Process> {
 /// name in parentheses (which may hold anything) are its state, the process that
 /// started it, its group and its session, and, nineteenth, when it began.
 #[cfg(target_os = "linux")]
-fn process(pid: i32) -> Option<Process> {
+pub(crate) fn process(pid: i32) -> Option<Process> {
     if pid <= 1 {
         return None;
     }
@@ -139,6 +139,76 @@ fn process(pid: i32) -> Option<Process> {
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]
 pub(crate) fn processes() -> Vec<Process> {
     Vec::new()
+}
+
+/// Nor any one of them.
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+pub(crate) fn process(_pid: i32) -> Option<Process> {
+    None
+}
+
+/// Sends `signal` to the process `identity` names, where `read` (the system's word,
+/// `process`, but for a test) says right before that it is still that process: born
+/// when it was, and in the session `session` where one is given (it was found by the
+/// session). Whether it was sent: nothing is sent to a process that is not the one
+/// meant, whose number another has taken since (both reviewers' look at round 6).
+///
+/// On Linux the process is first held by a pidfd, so that the process read is the one
+/// signalled whatever happens to its number. macOS has none: a process that ends, is
+/// reaped and whose number is given to another in the moment between the read and the
+/// signal is the window left there.
+pub(crate) fn signal_if_same(
+    identity: Identity,
+    session: Option<i32>,
+    signal: i32,
+    read: &dyn Fn(i32) -> Option<Process>,
+) -> bool {
+    let same = || {
+        read(identity.pid).is_some_and(|now| {
+            now.identity == identity && session.is_none_or(|session| now.session == session)
+        })
+    };
+    #[cfg(target_os = "linux")]
+    {
+        #[allow(unsafe_code)]
+        // SAFETY: pidfd_open takes a pid and flags and touches no memory of ours; it
+        // answers a descriptor of ours, or -1.
+        let opened = unsafe { libc::syscall(libc::SYS_pidfd_open, identity.pid, 0) };
+        if let Ok(pidfd) = libc::c_int::try_from(opened) {
+            if pidfd >= 0 {
+                let sent = same() && {
+                    #[allow(unsafe_code)]
+                    // SAFETY: the descriptor is ours, open until it is closed below; no
+                    // siginfo is passed, and the call writes no memory of ours.
+                    let sent = unsafe {
+                        libc::syscall(
+                            libc::SYS_pidfd_send_signal,
+                            pidfd,
+                            signal,
+                            std::ptr::null::<libc::siginfo_t>(),
+                            0,
+                        )
+                    };
+                    sent == 0
+                };
+                #[allow(unsafe_code)]
+                // SAFETY: the descriptor is ours, and closed once.
+                unsafe {
+                    libc::close(pidfd);
+                }
+                return sent;
+            }
+        }
+    }
+    if !same() {
+        return false;
+    }
+    #[allow(unsafe_code)]
+    // SAFETY: kill takes two integers and touches no memory of ours; the number was read
+    // as the process meant just now (the window left is said above).
+    unsafe {
+        libc::kill(identity.pid, signal) == 0
+    }
 }
 
 /// The processes of `table` started by `root`, and by those, and so on down, as the

@@ -11,10 +11,13 @@
 //! whatever it exits with then; and nothing it started outlives it, before the
 //! driver puts the sources back. On Unix it leads a process group of its own, which
 //! is ended once the command has ended, however it ended; on Windows it runs in a
-//! job of its own that nothing it starts can leave, ended with it. A stop (Ctrl-C, a
-//! terminal closed, `kill`) heard meanwhile ends the command in hand the same way
-//! and is told to the driver, which puts the sources back. A run that writes more
-//! than `OUTPUT_LIMIT` to a stream is ended for it.
+//! job of its own that nothing it starts can leave, ended with it, and waited for
+//! until each process of the job has ended, as its handle says. What it started
+//! that did not end, or that still held its output a moment later, is an error, and
+//! no verdict: the run is not over. It has ended when it exits, not when its output
+//! closes. A stop (Ctrl-C, a terminal closed, `kill`) heard meanwhile ends the
+//! command in hand the same way and is told to the driver, which puts the sources
+//! back. A run that writes more than `OUTPUT_LIMIT` to a stream is ended for it.
 //!
 //! A run of the tests of `cf-e2e` is preceded by the release builds of the
 //! programs they run, from the sources as they are, with the plant or without it
@@ -50,7 +53,7 @@ use std::task::Poll;
 use std::time::Duration;
 
 use cf_base::env::Env;
-use cf_process::{capture_whole, CaptureFailed, Captured, Limits, Run};
+use cf_process::{capture_whole, CaptureFailed, Captured, Limits, Run, LEFT_RUNNING};
 use tokio::runtime::Runtime;
 
 use self::reporters::Reporter;
@@ -158,9 +161,9 @@ pub trait Runner {
     /// was asked.
     fn state(&mut self) -> Option<String>;
 
-    /// Why what a run changes in the checkout cannot be told, if it cannot (git says
-    /// nothing of it): its state is then the same whatever a run changed.
-    fn untold(&mut self) -> Option<String> {
+    /// The checkout's root, where git says nothing of it: what a run changes in it cannot
+    /// be told, and no plant is tried there (the driver refuses).
+    fn gitless(&mut self) -> Option<PathBuf> {
         None
     }
 }
@@ -384,6 +387,8 @@ pub struct Execute {
     own: PathBuf,
     limits: Limits,
     stops: Stops,
+    /// How many states could not be told, each told apart from every other.
+    untold: u64,
     /// The builds before a run of cf-e2e's tests (`CF_E2E_PROGRAMS`).
     programs: Vec<Vec<String>>,
 }
@@ -441,6 +446,7 @@ impl Execute {
                 max_buffer: OUTPUT_LIMIT,
             },
             stops,
+            untold: 0,
             programs: CF_E2E_PROGRAMS
                 .iter()
                 .map(|build| build.iter().map(|word| (*word).to_owned()).collect())
@@ -701,15 +707,16 @@ impl Runner for Execute {
     /// The commit the checkout is at, what git says of it beyond that (every file
     /// changed, added or untracked, ignored ones aside), and the bytes of each such
     /// file, hashed: a file put back as it was is the state it was. Where git says
-    /// nothing (no checkout of git's), one state whatever a run changed, which is
-    /// said once (`untold`): a state of its own each time made every plant UNSTABLE
-    /// on a copy shipped with no checkout (zeewin, 2026-10-17). A stop heard while
-    /// git is asked is none.
+    /// nothing this once (its index locked, say: no plant is tried in a checkout it says
+    /// nothing of, `gitless`), a state of its own, told apart from every other: a state
+    /// it cannot tell is never taken for one a command was known to pass in. A stop
+    /// heard while git is asked is none.
     fn state(&mut self) -> Option<String> {
         let head = self.git(&["rev-parse", "HEAD"])?;
         let status = self.git(&["status", "--porcelain=v1", "-z", "--untracked-files=all"])?;
         let (Some(head), Some(status)) = (head, status) else {
-            return Some(UNTOLD.to_owned());
+            self.untold += 1;
+            return Some(format!("untold {}", self.untold));
         };
         let mut hasher = DefaultHasher::new();
         head.hash(&mut hasher);
@@ -722,21 +729,16 @@ impl Runner for Execute {
         Some(format!("{:016x}", hasher.finish()))
     }
 
-    /// That git says nothing of the checkout, where it does not (`state`): a stop heard
-    /// while it is asked is the driver's to hear, which says nothing here.
-    fn untold(&mut self) -> Option<String> {
+    /// The checkout's root where git says nothing of it: no commit there to tell a state
+    /// from (`state`). A stop heard while it is asked is the driver's to hear, which
+    /// says nothing here.
+    fn gitless(&mut self) -> Option<PathBuf> {
         match self.git(&["rev-parse", "HEAD"]) {
-            Some(None) => Some(format!(
-                "no git checkout at {}: a run that changes the checkout can't be told",
-                self.checkout.root.display()
-            )),
+            Some(None) => Some(self.checkout.root.clone()),
             Some(Some(_)) | None => None,
         }
     }
 }
-
-/// The state of a checkout git says nothing of, whatever a run changed in it.
-const UNTOLD: &str = "untold";
 
 /// The paths of `git status --porcelain=v1 -z`: each entry `XY <path>`, a rename's or
 /// a copy's followed by the path it was.
@@ -766,6 +768,13 @@ impl Ran {
                     program: command.first().cloned().unwrap_or_default(),
                     cause: std::io::Error::other(failed.message),
                 }));
+            }
+            // What it started did not end: the run is not over, and no verdict.
+            Err(failed) if failed.message.starts_with(LEFT_RUNNING) => {
+                return Err(Error::LeftRunning {
+                    command: command.join(" "),
+                    said: failed.message,
+                });
             }
             Err(failed) => {
                 let overflowed = failed.message.ends_with("maxBuffer length exceeded");

@@ -306,6 +306,68 @@ fn node_writes_the_plants_report_to_the_run_beside_the_report_it_prints() {
     )));
 }
 
+/// Drives the plants' reporter of Playwright's tests by hand: a test whose error is said
+/// by a step two below its hook's step alone, and one whose error is its body's.
+const PLAYWRIGHT_DRIVEN: &str = r"import Plants from './plants-playwright.mjs'
+
+const plants = new Plants()
+const test = (title) => {
+  const result = { status: 'failed', errors: [{ message: 'Error: inside' }] }
+  const test = {
+    results: [result],
+    titlePath: () => ['', 'p', 'a.spec.mjs', title],
+    location: { file: 'a.spec.mjs', line: 1, column: 1 },
+    parent: { project: () => ({ name: 'p' }) },
+    outcome: () => 'unexpected',
+  }
+  return [test, result]
+}
+const [hooked, inHook] = test('hooked')
+const [own, ofItsOwn] = test('own')
+plants.onBegin({}, { allTests: () => [hooked, own] })
+const hook = { category: 'hook', title: 'Before Hooks' }
+const fixture = { category: 'fixture', title: 'a fixture', parent: hook }
+plants.onStepEnd(hooked, inHook, { category: 'expect', title: 'soft', parent: fixture, error: { message: 'Error: inside' } })
+plants.onStepEnd(hooked, inHook, fixture)
+plants.onStepEnd(hooked, inHook, hook)
+plants.onStepEnd(own, ofItsOwn, hook)
+plants.onStepEnd(own, ofItsOwn, { category: 'expect', title: 'toBe', error: { message: 'Error: inside' } })
+plants.onEnd()
+";
+
+#[test]
+fn playwright_s_reporter_takes_an_error_of_any_step_in_a_hook_for_the_hook_s() {
+    // Round 7, decision 2: a hook's error, wherever in the hook's steps it is said, is the
+    // hook's (Playwright 1.63 says it again on each step it is in, which another version
+    // need not); a body's own step is no hook's.
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(
+        dir.path().join("plants-playwright.mjs"),
+        PLAYWRIGHT_REPORTER,
+    )
+    .unwrap();
+    fs::write(dir.path().join("driven.mjs"), PLAYWRIGHT_DRIVEN).unwrap();
+    let report = dir.path().join("report.json");
+    let driven = crate::process::capture(
+        &Invocation::new("node", dir.path())
+            .arg("driven.mjs")
+            .var(PLAYWRIGHT_REPORT_VAR, &report),
+        &Env::from_process(),
+    )
+    .unwrap();
+    assert_eq!(driven.code, 0, "{driven:?}");
+    let said = fs::read_to_string(&report).unwrap();
+    assert!(
+        said.contains(r#""path":["hooked"],"#)
+            && said.contains(r#""own":false,"why":"a hook failed: Error: inside"}"#),
+        "{said}"
+    );
+    assert!(
+        said.contains(r#""path":["own"],"#) && said.contains(r#""own":true,"why":null}"#),
+        "{said}"
+    );
+}
+
 #[test]
 fn playwright_writes_the_plants_report_to_the_run_beside_the_list_it_prints() {
     let command = words(&[
@@ -337,11 +399,54 @@ fn playwright_writes_the_plants_report_to_the_run_beside_the_list_it_prints() {
             "app/node_modules/@playwright/test/cli.js",
             "test",
             "--reporter=list,./app/src-tauri/target/plants-runs/run-7/plants-playwright.mjs",
+            "--retries=0",
             "app/tests/core-page.spec.mjs",
             "-g",
             "file drop",
         ]
     );
+    // One attempt of each test, whatever the config says: a command's own retries of
+    // none are given once; any others refuse the run (the first reviewer's look at
+    // round 6: an attempt after the one that caught the plant could unsay it).
+    let reporter = "./plants-playwright.mjs";
+    for asked in [&["--retries=0"][..], &["--retries", "0"]] {
+        let command: Vec<String> = ["node", "cli.js", "test"]
+            .iter()
+            .chain(asked)
+            .chain(&["a.spec.mjs"])
+            .map(|word| (*word).to_owned())
+            .collect();
+        assert_eq!(retried(&command), None, "{asked:?}");
+        assert_eq!(
+            playwright_words(&command, reporter),
+            [
+                "node",
+                "cli.js",
+                "test",
+                "--reporter=list,./plants-playwright.mjs",
+                "--retries=0",
+                "a.spec.mjs"
+            ],
+            "{asked:?}"
+        );
+    }
+    for asked in [&["--retries=2"][..], &["--retries", "1"], &["--retries"]] {
+        let command: Vec<String> = ["node", "cli.js", "test"]
+            .iter()
+            .chain(asked)
+            .map(|word| (*word).to_owned())
+            .collect();
+        let why = retried(&command).unwrap_or_default();
+        assert!(
+            why.starts_with("Playwright's --retries "),
+            "{asked:?}: {why}"
+        );
+        assert!(why.ends_with(": a plant's run takes one attempt"), "{why}");
+        assert_eq!(
+            Reporter::Playwright.refused(&command, &checkout(Path::new("/checkout"))),
+            Some(why)
+        );
+    }
     assert_eq!(
         invocation.vars,
         [(
@@ -386,7 +491,7 @@ fn each_report_is_read_from_where_its_runner_wrote_it_and_one_that_is_not_there_
     .unwrap();
     fs::write(
         dir.path().join("playwright.json"),
-        r#"{"tests":[{"path":["page"],"file":"/a.spec.mjs","line":1,"column":1,"project":"","outcome":"unexpected","own":true,"hook":null}],"errors":[],"end":true}"#,
+        r#"{"tests":[{"path":["page"],"file":"/a.spec.mjs","line":1,"column":1,"project":"","outcome":"unexpected","own":true,"why":null}],"errors":[],"end":true}"#,
     )
     .unwrap();
     let failed_of = |reporter: Reporter| -> Vec<String> {
@@ -628,6 +733,32 @@ fn nextest_is_given_none_of_the_variables_of_its_own_that_this_run_was_given() {
             ("NEXTEST_TEST_THREADS".to_owned(), None)
         ]
     );
+}
+
+#[test]
+fn a_cargo_test_whose_suite_turns_capture_off_is_refused_by_its_variable() {
+    // A suite of xtask's that set nextest's or libtest's variable for it would run its
+    // tests with capture off, whatever the words say.
+    let tests = |vars: &[(&str, Option<&str>)]| Invocation {
+        program: OsString::from("cargo"),
+        args: ["test", "-p", "x"].map(OsString::from).to_vec(),
+        cwd: PathBuf::from("/checkout"),
+        vars: vars
+            .iter()
+            .map(|(name, value)| (OsString::from(name), value.map(OsString::from)))
+            .collect(),
+    };
+    for name in ["NEXTEST_NO_CAPTURE", "RUST_TEST_NOCAPTURE"] {
+        let why = uncaptured(&tests(&[(name, Some("1"))])).unwrap_or_default();
+        assert!(
+            why.starts_with(&format!("{name}: nextest keeps nothing its tests wrote")),
+            "{why}"
+        );
+        for off in [None, Some(""), Some("0")] {
+            assert_eq!(uncaptured(&tests(&[(name, off)])), None, "{name} {off:?}");
+        }
+    }
+    assert_eq!(uncaptured(&tests(&[])), None);
 }
 
 #[test]

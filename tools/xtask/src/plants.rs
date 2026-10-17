@@ -90,6 +90,13 @@ pub enum Error {
     /// A word that no plant's name holds.
     #[error("no plant of {family} has a name that holds `{word}`")]
     NoName { word: String, family: String },
+    /// A checkout git says nothing of, where what a run changed cannot be told.
+    #[error("plants need a git checkout at {} to tell a changed checkout", root.display())]
+    NoCheckout { root: PathBuf },
+    /// What a run started did not end once it was ended: its files are not to be put
+    /// back under it.
+    #[error("{command}: {said}")]
+    LeftRunning { command: String, said: String },
     /// A command that could not be started.
     #[error(transparent)]
     Process(#[from] process::Failure),

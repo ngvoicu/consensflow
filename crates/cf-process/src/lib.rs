@@ -25,7 +25,7 @@ mod terminate;
 mod testing;
 
 pub use alive::alive;
-pub use capture::{capture, capture_whole, CaptureFailed, Captured};
+pub use capture::{capture, capture_whole, CaptureFailed, Captured, LEFT_RUNNING};
 pub use child::{spawn, Child, Ender, Streams};
 pub use execute::{execute, Failed, Limits};
 pub use hand_over::{hand_over, Handed};
