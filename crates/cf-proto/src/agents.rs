@@ -188,18 +188,14 @@ pub struct AgentView {
 }
 
 /// What the human chose about the roster, kept in the file beside their own
-/// agents.
+/// agents, as the Agents screen and the CLI read it. What they say of specs for
+/// every project is kept in the same place of the file and is no choice about
+/// the roster: the page alone says it (`cf_proto::specs::AppSpecs`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Preferences {
     /// Claude and OpenAI models reached through Pi or OpenCode are hidden.
     pub own_harness_only: bool,
-    /// Every project's chief plans big work as specs, unless the project says
-    /// otherwise (`specs` of a project's own settings). Off unless chosen, and
-    /// said only when on, so a file and an answer that never knew of it read as
-    /// they always did.
-    #[serde(skip_serializing_if = "is_false")]
-    pub specs: bool,
 }
 
 fn is_false(value: &bool) -> bool {
@@ -433,30 +429,13 @@ mod tests {
     }
 
     #[test]
-    fn preferences_write_the_choices_the_roster_keeps_and_specs_only_when_on() {
-        let on = Preferences {
-            own_harness_only: true,
-            specs: false,
-        };
-        assert_eq!(
-            serde_json::to_string(&on).unwrap(),
-            r#"{"ownHarnessOnly":true}"#
-        );
-        let off = Preferences {
-            own_harness_only: false,
-            specs: false,
-        };
-        assert_eq!(
-            serde_json::to_string(&off).unwrap(),
-            r#"{"ownHarnessOnly":false}"#
-        );
-        let planning = Preferences {
-            own_harness_only: false,
-            specs: true,
-        };
-        assert_eq!(
-            serde_json::to_string(&planning).unwrap(),
-            r#"{"ownHarnessOnly":false,"specs":true}"#
-        );
+    fn preferences_write_the_one_choice_about_the_roster_and_nothing_of_specs() {
+        for (own_harness_only, written) in [
+            (true, r#"{"ownHarnessOnly":true}"#),
+            (false, r#"{"ownHarnessOnly":false}"#),
+        ] {
+            let preferences = Preferences { own_harness_only };
+            assert_eq!(serde_json::to_string(&preferences).unwrap(), written);
+        }
     }
 }

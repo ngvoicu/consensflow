@@ -14,7 +14,8 @@
       "!!**/dist",
       "!!**/coverage",
       "!!**/test-results",
-      "!!app/ui/vendor"
+      "!!app/ui/vendor",
+      "!!app/tests/fixtures"
     ]
   },
   "formatter": {

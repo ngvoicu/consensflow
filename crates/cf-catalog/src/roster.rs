@@ -21,12 +21,15 @@
 //! - `rows`: the catalog's rows and the human's, as the app sees them;
 //! - `views`: a row as the page and the CLI list it;
 //! - `preferences`: what the human chose, what it hides, and its setting;
+//! - `app_specs`: what the human says of specs for every project, kept
+//!   beside it;
 //! - `save`: the file written;
 //! - `normalize`: the file folded into the shape it keeps now;
 //! - `add` and `edit`: an agent defined by hand, added, edited or removed.
 
 mod add;
 mod agent_row;
+mod app_specs;
 mod document;
 mod edit;
 mod file;
@@ -43,9 +46,11 @@ use std::path::PathBuf;
 use cf_base::refusal::Refusal;
 use cf_base::time::Clock;
 use cf_proto::agents::{AgentView, Preferences};
+use cf_proto::specs::AppSpecs;
 use serde_json::{Map, Value};
 
 use crate::Catalog;
+use app_specs::{app_specs_of, set_app_specs};
 use document::load_document;
 use preferences::{hides, preferences_of, set_preferences};
 
@@ -113,6 +118,19 @@ impl<'a> Roster<'a> {
     /// file is written even when nothing changes, and made when there is none.
     pub fn set_preferences(&self, patch: Option<&Value>) -> Result<Preferences, Refusal> {
         set_preferences(&self.path, patch)
+    }
+
+    /// What the human says of specs for every project that does not say
+    /// otherwise, as the file keeps it now.
+    pub fn app_specs(&self) -> Result<AppSpecs, Refusal> {
+        Ok(app_specs_of(&load_document(&self.path)?))
+    }
+
+    /// Sets what `said` says of specs for every project (`{on, folder,
+    /// variant}`, a part left out as it was), each part checked before
+    /// anything is written, and answers them as kept.
+    pub fn set_app_specs(&self, said: &Value) -> Result<AppSpecs, Refusal> {
+        set_app_specs(&self.path, said)
     }
 
     /// Folds what older builds wrote into the shape the file keeps now: a

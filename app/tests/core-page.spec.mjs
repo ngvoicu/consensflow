@@ -5,14 +5,18 @@ import { chromium, expect, test } from '@playwright/test'
 
 import { tempEnv } from '../../tests/helpers.mjs'
 import { addAgent, agentsServer } from './agents-server.mjs'
-import { serveUi } from './serve-ui.mjs'
+import { refusedByPolicy, serveUi } from './serve-ui.mjs'
 
 /**
  * The board page (TEST-BDC-13), against a stand-in for the app:
  * `daemon_request` answers from an in-page model and records every call, the way
- * the Rust app forwards the page's requests to the core.
+ * the Rust app forwards the page's requests to the core. The page is served
+ * under the app's own Content-Security-Policy, and each test is held to the
+ * policy refusing nothing the page does.
  */
 let ui
+/** What the app's policy refused in the test running. */
+let refused
 
 test.setTimeout(15_000)
 
@@ -21,6 +25,14 @@ test.beforeAll(async () => {
 })
 
 test.afterAll(() => ui?.close())
+
+test.beforeEach(({ page }) => {
+  refused = refusedByPolicy(page)
+})
+
+test.afterEach(() => {
+  expect(refused, "the app's policy refuses nothing the page does").toEqual([])
+})
 
 const at = (minutesAgo) => new Date(Date.now() - minutesAgo * 60_000).toISOString()
 const MEMBER = ['worker', 'advisor', 'reviewer', 'tester']
@@ -144,6 +156,24 @@ function model() {
         profile: { workTier: 'light' },
       },
     ],
+    // What the app says of specs for every project, as the agents file keeps it (each part
+    // only where set), and the Specmint the build bundles, as the daemon reads it from the
+    // bundled files: the page draws both from what `specs.get` answers.
+    specsApp: { on: false },
+    specmint: {
+      version: '3.0.0',
+      variants: [
+        { name: 'core', version: '3.0.0', commit: 'c1c8949', about: 'Markdown specs' },
+        { name: 'core-html', version: '3.0.0', commit: 'e1762ab', about: 'HTML spec pages' },
+        { name: 'tdd', version: '3.0.0', commit: '0fede12', about: 'Test-first Markdown specs' },
+        {
+          name: 'tdd-html',
+          version: '3.0.0',
+          commit: '9ab34cd',
+          about: 'Test-first specs as HTML pages',
+        },
+      ],
+    },
     boards: {
       1: {
         project: {
@@ -310,6 +340,15 @@ async function open(page, data = model()) {
     // A project as the list has it and as its board has it: the daemon says one and the same.
     const shownProject = (id) =>
       [data.projects.find((project) => project.id === id), data.boards[id]?.project].filter(Boolean)
+    const specsAnswer = () =>
+      answer({
+        app: data.specsApp,
+        applied: {
+          folder: data.specsApp.folder ?? '.specs',
+          variant: data.specsApp.variant ?? 'core',
+        },
+        specmint: data.specmint,
+      })
     const operations = {
       'projects.list': () => answer({ projects: data.projects }),
       'agents.list': () => answer({ agents: data.agents, missing: data.missing ?? [] }),
@@ -376,6 +415,26 @@ async function open(page, data = model()) {
         if (Object.keys(said).length === 0) delete shown.specs
         else shown.specs = said
         return answer({ project: shown })
+      },
+      // What the app says of specs for every project, as the daemon answers it: the raw word
+      // of the app, what a project that names none then uses (the documented `.specs` and
+      // `core` where the app names none), and the Specmint the build bundles.
+      'specs.get': () => specsAnswer(),
+      // Each part given is kept (`null`, or a blank folder, names none again), unless a test has
+      // the daemon refuse with its own words (`specsAppRefusal`), which keeps nothing.
+      'specs.set': ({ on, folder, variant }) => {
+        if (data.specsAppRefusal) return { ok: false, error: data.specsAppRefusal }
+        const app = data.specsApp
+        if (on !== undefined) app.on = on
+        if (folder !== undefined) {
+          if (folder === null || folder.trim() === '') delete app.folder
+          else app.folder = folder.trim()
+        }
+        if (variant !== undefined) {
+          if (variant === null) delete app.variant
+          else app.variant = variant
+        }
+        return specsAnswer()
       },
       // The newest messages one frame holds (all of them, unless a test says
       // how many fit) and how many there are; asked for what For you lists,
@@ -2976,6 +3035,7 @@ async function newProject(page) {
       mode: section('Specs').locator('[name="specs"]'),
       folder: section('Specs').locator('[name="specsFolder"]'),
       variant: section('Specs').locator('[name="specsVariant"]'),
+      version: section('Specs').locator('.specs-version'),
       save: section('Specs').getByRole('button', { name: 'Save specs' }),
     },
   }
@@ -3009,22 +3069,38 @@ test('New project has Staff, Human approval, Wake-up calls and Specs after the f
   await expect(made.calls.unit).toHaveValue('hours')
   await expect(made.calls.words).toHaveValue(DEFAULT_WAKE_UP_WORDS)
   await expect(made.specs.mode).toHaveValue('follow')
-  await expect(made.specs.mode.locator('option:checked')).toHaveText(/^Follow the app's setting/)
+  // Following says what the app says now, and the variant's first choice names none.
+  await expect(made.specs.mode.locator('option:checked')).toHaveText(
+    "Follow the app's setting (off)",
+  )
   await expect(made.specs.folder).toHaveValue('')
   await expect(made.specs.folder).toHaveAttribute('placeholder', '.specs')
-  await expect(made.specs.variant).toHaveValue('core')
+  await expect(made.specs.variant).toHaveValue('')
+  await expect(made.specs.variant.locator('option:checked')).toHaveText('As the app says (core)')
+  await expect(made.specs.version).toHaveText('Specmint 3.0.0')
   // Nothing is saved before there is a project: no Save, and nothing of when a change reaches the chief.
   await expect(made.calls.save).toBeHidden()
   await expect(made.specs.save).toBeHidden()
   await expect(made.specs.group.locator('.specs-help [data-live]')).toBeHidden()
-  await expect(made.specs.group).toContainText("The app's setting is under Settings")
-  // The same markup as Project settings has for them, control for control and word for word.
+  await expect(made.specs.group).toContainText("The app's setting is under Settings, in Specs")
+  // The same markup as Project settings has for them, control for control and word for word:
+  // but for what is said of the app, which a dialog says once it has read it.
   const markup = (id) =>
     page.evaluate(
       (id) =>
-        [...document.querySelectorAll(`#${id} .project-section`)]
-          .slice(1)
-          .map((section) => section.outerHTML.replaceAll(' hidden=""', '')),
+        [...document.querySelectorAll(`#${id} .project-section`)].slice(1).map((section) => {
+          const copy = section.cloneNode(true)
+          const variant = copy.querySelector('[name="specsVariant"]')
+          if (variant !== null) {
+            const [first] = variant.options
+            first.textContent = ''
+            variant.replaceChildren(first)
+            copy.querySelector('[name="specs"] [value="follow"]').textContent = ''
+            copy.querySelector('[name="specsFolder"]').removeAttribute('placeholder')
+            copy.querySelector('.specs-version').textContent = ''
+          }
+          return copy.outerHTML.replaceAll(' hidden=""', '')
+        }),
       id,
     )
   const [here, there] = [
@@ -3118,7 +3194,7 @@ test('New project: says all of its specs and all of its wake-up calls once eithe
   expect((await calls(page, 'project.open'))[1].specs).toEqual({
     on: false,
     folder: null,
-    variant: 'core',
+    variant: null,
   })
 })
 
@@ -3154,8 +3230,8 @@ test('New project: a start the daemon refuses is said in the dialog in the daemo
   await expect(made.dialog).toBeHidden()
   const asked = await calls(page, 'project.open')
   expect(asked.map((body) => body.specs)).toEqual([
-    { on: true, folder: '../elsewhere', variant: 'core' },
-    { on: true, folder: 'docs', variant: 'core' },
+    { on: true, folder: '../elsewhere', variant: null },
+    { on: true, folder: 'docs', variant: null },
   ])
   // Opened again, it is as a new project's dialog opens, with no refusal in it.
   await page.getByRole('button', { name: 'New project' }).click()
@@ -3275,7 +3351,7 @@ test('New project opens on the defaults every time: what was set in it before is
   await expect(made.calls.words).toHaveValue(DEFAULT_WAKE_UP_WORDS)
   await expect(made.specs.mode).toHaveValue('follow')
   await expect(made.specs.folder).toHaveValue('')
-  await expect(made.specs.variant).toHaveValue('core')
+  await expect(made.specs.variant).toHaveValue('')
   await expect(made.specs.folder).toBeEnabled()
 })
 
@@ -3460,7 +3536,7 @@ test('Project settings: each section saves in its own way as before, and none sa
   await specs.getByRole('button', { name: 'Save specs' }).click()
   await expect
     .poll(() => calls(page, 'project.specs'))
-    .toEqual([{ project: 1, on: true, folder: 'docs', variant: 'core' }])
+    .toEqual([{ project: 1, on: true, folder: 'docs', variant: null }])
   expect(await calls(page, 'wakeup.set')).toHaveLength(1)
   // The staff as a member is added, at once.
   await section('Staff').getByRole('button', { name: 'Add to staff' }).click()
@@ -3494,7 +3570,7 @@ test('saves the specs on Enter in the folder and adds nobody to the staff', asyn
   await specs.folder.press('Enter')
   await expect
     .poll(() => calls(page, 'project.specs'))
-    .toEqual([{ project: 1, on: true, folder: 'docs/specs', variant: 'core' }])
+    .toEqual([{ project: 1, on: true, folder: 'docs/specs', variant: null }])
   expect(await calls(page, 'member.add')).toEqual([])
   expect(await calls(page, 'member.roles')).toEqual([])
 })
@@ -3505,13 +3581,20 @@ test('a project follows the app’s setting for specs until it says on or off, a
   await open(page)
   const specs = await openSpecs(page)
   await expect(specs.group).toContainText('A change reaches the chief when it next starts')
-  // It says nothing: it follows what the human set for every project (Settings, Agents).
+  // It says nothing: it follows what the human set for every project (Settings, Specs).
   await expect(specs.mode).toHaveValue('follow')
   await expect(specs.mode.locator('option:checked')).toHaveText(/^Follow the app's setting/)
   await expect(specs.folder).toHaveValue('')
   await expect(specs.folder).toHaveAttribute('placeholder', '.specs')
-  await expect(specs.variant).toHaveValue('core')
-  await expect(specs.variant.locator('option')).toHaveText(['core', 'core-html', 'tdd', 'tdd-html'])
+  await expect(specs.variant).toHaveValue('')
+  // The variants are the ones Specmint has, as the daemon said them, after the choice of none.
+  await expect(specs.variant.locator('option')).toHaveText([
+    'As the app says (core)',
+    'core',
+    'core-html',
+    'tdd',
+    'tdd-html',
+  ])
   await expect(specs.note).toBeHidden()
 
   // On, with its own folder and the variant it plans with.
@@ -3573,6 +3656,137 @@ test('a folder the daemon refuses is said in the dialog, where it was typed, and
   await expect(specs.mode).toHaveValue('on')
   // The refusal is no note on the status line, and the next save clears it.
   await expect(page.locator('#status')).not.toHaveText(/Saved/)
+})
+
+/** The app says specs are on in `docs/specs` with core-html, and tdd is a version ahead of the rest. */
+function appThatSays(data = model()) {
+  data.specsApp = { on: true, folder: 'docs/specs', variant: 'core-html' }
+  data.specmint.variants.find((variant) => variant.name === 'tdd').version = '3.1.0'
+  return data
+}
+
+test('a project’s Specs section says what following the app means: whether it is on, the folder and the variant, with the Specmint version beside', async ({
+  page,
+}) => {
+  await open(page, appThatSays())
+  const specs = await openSpecs(page)
+  const version = specs.group.locator('.specs-version')
+  // Following names what the app says now, each part where it is said.
+  await expect(specs.mode.locator('option[value="follow"]')).toHaveText(
+    "Follow the app's setting (on)",
+  )
+  await expect(specs.folder).toHaveAttribute('placeholder', 'docs/specs')
+  await expect(specs.variant.locator('option').first()).toHaveText('As the app says (core-html)')
+  await expect(specs.variant).toHaveValue('')
+  await expect(version).toHaveText('Specmint 3.0.0')
+  // A variant of its own has the version of that variant beside it, and the first choice goes back.
+  await specs.variant.selectOption('tdd')
+  await expect(version).toHaveText('Specmint 3.1.0')
+  await specs.variant.selectOption('')
+  await expect(version).toHaveText('Specmint 3.0.0')
+  // Following says none of the three, and says it with the variant left to the app.
+  await specs.save.click()
+  await expect
+    .poll(() => calls(page, 'project.specs'))
+    .toEqual([{ project: 1, on: null, folder: null, variant: null }])
+  // The app turned off, and a project that follows is told so.
+  await specs.dialog.getByRole('button', { name: 'Close' }).click()
+  await page.evaluate(() => {
+    window.__model.specsApp = { on: false }
+  })
+  await openSpecs(page)
+  await expect(specs.mode.locator('option[value="follow"]')).toHaveText(
+    "Follow the app's setting (off)",
+  )
+  await expect(specs.folder).toHaveAttribute('placeholder', '.specs')
+  await expect(specs.variant.locator('option').first()).toHaveText('As the app says (core)')
+})
+
+test('a project that said a variant keeps it whatever the app says, and one Specmint no longer has is still the project’s', async ({
+  page,
+}) => {
+  const data = appThatSays()
+  data.boards[1].project.specs = { on: true, variant: 'tdd' }
+  await open(page, data)
+  const specs = await openSpecs(page)
+  await expect(specs.variant).toHaveValue('tdd')
+  await expect(specs.group.locator('.specs-version')).toHaveText('Specmint 3.1.0')
+  await specs.save.click()
+  await expect
+    .poll(() => calls(page, 'project.specs'))
+    .toEqual([{ project: 1, on: true, folder: null, variant: 'tdd' }])
+  // A variant the bundled Specmint does not have (an older build's) is not lost on the next save.
+  await specs.dialog.getByRole('button', { name: 'Close' }).click()
+  await page.evaluate(() => {
+    window.__model.boards[1].project.specs = { on: true, variant: 'tdd-lite' }
+  })
+  await page.evaluate(() => window.__listeners.get('state-changed')())
+  const again = await openSpecs(page)
+  await expect(again.variant).toHaveValue('tdd-lite')
+  await again.save.click()
+  await expect
+    .poll(async () => (await calls(page, 'project.specs')).at(-1))
+    .toEqual({ project: 1, on: true, folder: null, variant: 'tdd-lite' })
+})
+
+test('a project’s variant that changes while its settings are open has the version of the one it is now beside it', async ({
+  page,
+}) => {
+  await open(page, appThatSays())
+  const specs = await openSpecs(page)
+  const version = specs.group.locator('.specs-version')
+  await expect(specs.variant).toHaveValue('')
+  await expect(version).toHaveText('Specmint 3.0.0')
+  // The project says another variant while the dialog is open: its board is read again.
+  const reads = async () => (await calls(page, 'board.get')).length
+  const before = await reads()
+  await page.evaluate(() => {
+    window.__model.boards[1].project.specs = { variant: 'tdd' }
+  })
+  await page.evaluate(() => window.__listeners.get('state-changed')())
+  await expect.poll(reads).toBeGreaterThan(before)
+  await expect(specs.variant).toHaveValue('tdd')
+  await expect(version).toHaveText('Specmint 3.1.0')
+})
+
+test('New project says what following the app means as Project settings does, and starts nothing of it unless the human sets it', async ({
+  page,
+}) => {
+  await open(page, appThatSays())
+  const made = await newProject(page)
+  await expect(made.specs.mode.locator('option[value="follow"]')).toHaveText(
+    "Follow the app's setting (on)",
+  )
+  await expect(made.specs.folder).toHaveAttribute('placeholder', 'docs/specs')
+  await expect(made.specs.variant.locator('option').first()).toHaveText(
+    'As the app says (core-html)',
+  )
+  await expect(made.specs.version).toHaveText('Specmint 3.0.0')
+  await made.specs.variant.selectOption('tdd')
+  await expect(made.specs.version).toHaveText('Specmint 3.1.0')
+  // Chosen and taken back, the section is as it opened and the project starts with no word of specs.
+  await made.specs.variant.selectOption('')
+  await made.chief.selectOption('zeus')
+  await made.start.click()
+  await expect
+    .poll(() => calls(page, 'project.open'))
+    .toEqual([{ directory: '/work/fresh', agent: 'zeus', gate: false, staff: [] }])
+})
+
+test('New project opened again shows the version of the variant it opens with, not of the one chosen before it was cancelled', async ({
+  page,
+}) => {
+  // The app plans with core-html, at 3.0.0; tdd is at 3.1.0.
+  await open(page, appThatSays())
+  const made = await newProject(page)
+  await made.specs.variant.selectOption('tdd')
+  await expect(made.specs.version).toHaveText('Specmint 3.1.0')
+  await made.dialog.getByRole('button', { name: 'Cancel' }).click()
+  await expect(made.dialog).toBeHidden()
+  await page.getByRole('button', { name: 'New project' }).click()
+  await expect(made.dialog).toBeVisible()
+  await expect(made.specs.variant).toHaveValue('')
+  await expect(made.specs.version).toHaveText('Specmint 3.0.0')
 })
 
 test('a board drawn again while the dialog is open leaves what the human is typing, and a project that says otherwise sets it', async ({
@@ -4006,44 +4220,509 @@ test('a screen opened again keeps what the human left on it, and lists the agent
   }
 })
 
-/** The preferences the daemon keeps in the agents file of the home `env` names. */
-const preferencesIn = (env) =>
-  JSON.parse(readFileSync(join(env.CONSENSFLOW_HOME, 'agents.json'), 'utf8')).preferences
+/**
+ * The preferences the daemon keeps in the agents file of the home `env` names: none
+ * until it has written the file. A poll gives up on a reader that throws, and the
+ * first read may come before the write (it did once, in a whole run of the suite).
+ */
+const preferencesIn = (env) => {
+  try {
+    return JSON.parse(readFileSync(join(env.CONSENSFLOW_HOME, 'agents.json'), 'utf8')).preferences
+  } catch {
+    return undefined
+  }
+}
 
-test('the app’s setting for specs is a box of the Agents screen, kept in the agents file beside the other choice, and shown again when the screen opens', async ({
+test('the Agents screen has no box for specs any more: what the app says of them is in Settings, under Specs', async ({
   page,
 }) => {
   const daemon = await agentsScreens()
   try {
     await open(page, { ...model(), screens: daemon.screens })
-    let agents = await openScreen(page, 'Agents')
-    let screen = agents.frameLocator('iframe')
+    const agents = await openScreen(page, 'Agents')
+    const screen = agents.frameLocator('iframe')
     await expect(screen.locator('#agents-count')).toHaveText(/^(\d+) of \1 shown$/)
-    const box = (screen) => screen.getByLabel('Plan big work as specs', { exact: false })
-    // Off until the human turns it on.
-    await expect(box(screen)).not.toBeChecked()
-    await box(screen).check()
-    await expect(screen.locator('#roster-note')).toHaveText('')
-    await expect
-      .poll(() => preferencesIn(daemon.env))
-      .toEqual({ ownHarnessOnly: false, specs: true })
-    // The other choice goes on beside it, and neither moves the other.
-    await screen.getByLabel('Claude and OpenAI models only', { exact: false }).check()
-    await expect
-      .poll(() => preferencesIn(daemon.env))
-      .toEqual({ ownHarnessOnly: true, specs: true })
-    await agents.getByRole('button', { name: 'Close' }).click()
-
-    // Opened again, it shows what is kept; turned off, it is kept no more.
-    agents = await openScreen(page, 'Agents')
-    screen = agents.frameLocator('iframe')
-    await expect(box(screen)).toBeChecked()
-    await box(screen).uncheck()
+    // The other choice is where it was, and keeps the agents file as it did.
+    const own = screen.getByLabel('Claude and OpenAI models only', { exact: false })
+    await expect(own).not.toBeChecked()
+    await expect(screen.locator('[name="specs"]')).toHaveCount(0)
+    await expect(screen.getByLabel('Plan big work as specs', { exact: false })).toHaveCount(0)
+    await own.check()
     await expect.poll(() => preferencesIn(daemon.env)).toEqual({ ownHarnessOnly: true })
-    await expect(box(screen)).not.toBeChecked()
+    // With specs off and no folder or variant named, what the screen is told of the human's
+    // choices says nothing of specs: the agents file reads as it always did.
+    const listed = await screen.locator('body').evaluate(async () => {
+      const response = await fetch('/api/agents', { headers })
+      return (await response.json()).preferences
+    })
+    expect(listed).toEqual({ ownHarnessOnly: true })
   } finally {
     await daemon.close()
   }
+})
+
+/** Settings, then Specs: the dialog it opens, and its controls. */
+async function openSpecsSettings(page) {
+  await page.getByRole('button', { name: 'Settings', exact: true }).click()
+  const settings = page.getByRole('dialog', { name: 'Settings', exact: true })
+  await settings.getByRole('button', { name: 'Specs' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Specs', exact: true })
+  return {
+    settings,
+    dialog,
+    on: dialog.getByRole('checkbox', { name: /Plan big work as specs/ }),
+    folder: dialog.locator('[name="folder"]'),
+    variant: dialog.locator('[name="variant"]'),
+    refusal: dialog.locator('.dialog-refusal'),
+    version: dialog.locator('.specmint-version'),
+    rows: dialog.locator('.specmint tbody tr'),
+    close: dialog.getByRole('button', { name: 'Close' }),
+  }
+}
+
+test('Settings has Specs as a third entry, under Agents and Harnesses, and it opens a dialog of the page, Settings closed behind it', async ({
+  page,
+}) => {
+  await open(page)
+  await page.getByRole('button', { name: 'Settings', exact: true }).click()
+  const settings = page.getByRole('dialog', { name: 'Settings', exact: true })
+  await expect(settings.locator('.settings-menu li button')).toHaveText([
+    'Agents',
+    'Harnesses',
+    'Specs',
+  ])
+  await settings.getByRole('button', { name: 'Specs' }).click()
+  const specs = page.getByRole('dialog', { name: 'Specs', exact: true })
+  await expect(specs).toBeVisible()
+  await expect(settings).toBeHidden()
+  // Nothing of the daemon's screens: no frame, and no screen asked for.
+  await expect(specs.locator('iframe')).toHaveCount(0)
+  expect(await page.evaluate(() => window.__calls.filter(([c]) => c === 'agents_screen'))).toEqual(
+    [],
+  )
+  // Close goes back to the Settings button, as the screens' dialogs do.
+  await specs.getByRole('button', { name: 'Close' }).click()
+  await expect(specs).toBeHidden()
+  await expect(page.getByRole('button', { name: 'Settings', exact: true })).toBeFocused()
+})
+
+test('Settings, Specs: the box, the folder and the variant every project uses unless it names its own, each kept as it changes and shown again when it opens', async ({
+  page,
+}) => {
+  await open(page)
+  const specs = await openSpecsSettings(page)
+  // Off until the human turns it on; no folder named, so the documented one is the hint; core.
+  await expect(specs.on).not.toBeChecked()
+  await expect(specs.folder).toHaveValue('')
+  await expect(specs.folder).toHaveAttribute('placeholder', '.specs')
+  await expect(specs.variant.locator('option')).toHaveText(['core', 'core-html', 'tdd', 'tdd-html'])
+  await expect(specs.variant).toHaveValue('core')
+  await expect(specs.refusal).toBeHidden()
+  expect(await calls(page, 'specs.set')).toEqual([])
+
+  await specs.on.check()
+  await expect.poll(() => calls(page, 'specs.set')).toEqual([{ on: true }])
+  // The folder is kept as the human leaves it, or presses Enter, and once for either.
+  await specs.folder.fill('  docs/specs ')
+  await specs.folder.press('Enter')
+  await expect
+    .poll(() => calls(page, 'specs.set'))
+    .toEqual([{ on: true }, { folder: '  docs/specs ' }])
+  await expect(specs.folder).toHaveValue('docs/specs')
+  await specs.folder.blur()
+  await specs.variant.selectOption('tdd')
+  await expect
+    .poll(() => calls(page, 'specs.set'))
+    .toEqual([{ on: true }, { folder: '  docs/specs ' }, { variant: 'tdd' }])
+  await specs.folder.fill('plans')
+  await specs.folder.blur()
+  await expect.poll(async () => (await calls(page, 'specs.set')).length).toBe(4)
+  expect((await calls(page, 'specs.set'))[3]).toEqual({ folder: 'plans' })
+  await expect(specs.refusal).toBeHidden()
+
+  // Closed and opened again, it is what the daemon keeps, read again as it opens.
+  const reads = async () => (await calls(page, 'specs.get')).length
+  const before = await reads()
+  await specs.close.click()
+  const again = await openSpecsSettings(page)
+  await expect.poll(reads).toBe(before + 1)
+  await expect(again.on).toBeChecked()
+  await expect(again.folder).toHaveValue('plans')
+  await expect(again.variant).toHaveValue('tdd')
+  // Taken back: a blank folder and off are the app saying none of it again.
+  await again.folder.fill('')
+  await again.folder.press('Enter')
+  await again.on.uncheck()
+  await expect
+    .poll(async () => (await calls(page, 'specs.set')).slice(4))
+    .toEqual([{ folder: '' }, { on: false }])
+  await expect(again.folder).toHaveAttribute('placeholder', '.specs')
+})
+
+test('Settings, Specs: a change is what every project’s Specs section says following the app means, with no reload', async ({
+  page,
+}) => {
+  await open(page)
+  const specs = await openSpecsSettings(page)
+  await specs.on.check()
+  await specs.folder.fill('docs/specs')
+  await specs.folder.press('Enter')
+  await specs.variant.selectOption('tdd-html')
+  await expect.poll(async () => (await calls(page, 'specs.set')).length).toBe(3)
+  await specs.close.click()
+  // Project settings: following says on, the folder and the variant.
+  const project = await openSpecs(page)
+  await expect(project.mode.locator('option[value="follow"]')).toHaveText(
+    "Follow the app's setting (on)",
+  )
+  await expect(project.folder).toHaveAttribute('placeholder', 'docs/specs')
+  await expect(project.variant.locator('option').first()).toHaveText('As the app says (tdd-html)')
+  await project.dialog.getByRole('button', { name: 'Close' }).click()
+  // So does New project.
+  const made = await newProject(page)
+  await expect(made.specs.folder).toHaveAttribute('placeholder', 'docs/specs')
+  await expect(made.specs.variant.locator('option').first()).toHaveText(
+    'As the app says (tdd-html)',
+  )
+})
+
+test('Settings, Specs: the Specmint it brings is shown as the daemon read it, its version and each variant’s name, version, commit and what it is', async ({
+  page,
+}) => {
+  const data = model()
+  data.specmint = {
+    version: '3.4.0, 3.5.0',
+    variants: [
+      { name: 'core', version: '3.4.0', commit: 'aaaaaaa', about: 'Markdown specs' },
+      { name: 'core-html', version: '3.4.0', commit: 'bbbbbbb', about: 'HTML spec pages' },
+      { name: 'tdd', version: '3.4.0', commit: 'ccccccc', about: 'Test-first Markdown specs' },
+      { name: 'tdd-html', version: '3.5.0', commit: 'ddddddd', about: 'Both of them' },
+    ],
+  }
+  await open(page, data)
+  const specs = await openSpecsSettings(page)
+  await expect(specs.version).toContainText('Specmint 3.4.0, 3.5.0')
+  await expect(specs.rows).toHaveCount(4)
+  await expect(specs.rows).toHaveText([
+    /^core\s*3\.4\.0\s*aaaaaaa\s*Markdown specs$/,
+    /^core-html\s*3\.4\.0\s*bbbbbbb\s*HTML spec pages$/,
+    /^tdd\s*3\.4\.0\s*ccccccc\s*Test-first Markdown specs$/,
+    /^tdd-html\s*3\.5\.0\s*ddddddd\s*Both of them$/,
+  ])
+  // The variants the choice offers are the ones listed, in the same order.
+  await expect(specs.variant.locator('option')).toHaveText(['core', 'core-html', 'tdd', 'tdd-html'])
+  // A Specmint vendored again shows itself: the page keeps nothing of the last one.
+  await specs.close.click()
+  await page.evaluate(() => {
+    window.__model.specmint.version = '3.5.1'
+    window.__model.specmint.variants[2].commit = '1234567'
+  })
+  const again = await openSpecsSettings(page)
+  await expect(again.version).toContainText('Specmint 3.5.1')
+  await expect(again.rows.nth(2)).toContainText('1234567')
+})
+
+test('a Specmint variant whose bundled files do not say its version or commit shows them unknown, in Settings, Project settings and New project', async ({
+  page,
+}) => {
+  const data = model()
+  const tdd = data.specmint.variants.find((variant) => variant.name === 'tdd')
+  tdd.version = null
+  tdd.commit = null
+  await open(page, data)
+  const specs = await openSpecsSettings(page)
+  await expect(specs.version).toHaveText('Specmint 3.0.0, brought with this app.')
+  await expect(specs.rows.nth(2)).toHaveText(
+    /^tdd\s*unknown\s*unknown\s*Test-first Markdown specs$/,
+  )
+  await specs.close.click()
+  // The project's dialogs open as ever, and say it beside the variant.
+  const project = await openSpecs(page)
+  await project.variant.selectOption('tdd')
+  await expect(project.group.locator('.specs-version')).toHaveText('Specmint version unknown')
+  await project.variant.selectOption('core')
+  await expect(project.group.locator('.specs-version')).toHaveText('Specmint 3.0.0')
+  await project.dialog.getByRole('button', { name: 'Close' }).click()
+  const made = await newProject(page)
+  await made.specs.variant.selectOption('tdd')
+  await expect(made.specs.version).toHaveText('Specmint version unknown')
+  await made.dialog.getByRole('button', { name: 'Cancel' }).click()
+  // No variant says one: the headline says so too.
+  await page.evaluate(() => {
+    window.__model.specmint.version = null
+    for (const variant of window.__model.specmint.variants) variant.version = null
+  })
+  const again = await openSpecsSettings(page)
+  await expect(again.version).toHaveText('Specmint, its version unknown, brought with this app.')
+})
+
+test('Settings, Specs: a change the daemon refuses is said under the controls in its words, what was typed stays, and the next change clears it', async ({
+  page,
+}) => {
+  const data = model()
+  await open(page, data)
+  const specs = await openSpecsSettings(page)
+  const words = 'the specs folder is a folder inside the project: it stays inside it, with no `..`'
+  await page.evaluate((words) => {
+    window.__model.specsAppRefusal = words
+  }, words)
+  await specs.folder.fill('../elsewhere')
+  await specs.folder.press('Enter')
+  await expect(specs.refusal).toHaveText(words)
+  await expect(specs.folder).toHaveValue('../elsewhere')
+  // A box the daemon refuses goes back to what is kept.
+  await specs.on.click()
+  await expect(specs.refusal).toHaveText(words)
+  await expect(specs.on).not.toBeChecked()
+  await expect(page.locator('#status')).toHaveText('')
+  // Mended, the next change goes through and the refusal goes.
+  await page.evaluate(() => {
+    window.__model.specsAppRefusal = null
+  })
+  await specs.folder.fill('docs')
+  await specs.folder.press('Enter')
+  await expect(specs.refusal).toBeHidden()
+  await expect(specs.folder).toHaveValue('docs')
+  // And a refusal does not wait in the dialog for the next time it opens.
+  await page.evaluate((words) => {
+    window.__model.specsAppRefusal = words
+  }, words)
+  await specs.on.click()
+  await expect(specs.refusal).toHaveText(words)
+  await specs.close.click()
+  await page.evaluate(() => {
+    window.__model.specsAppRefusal = null
+  })
+  const again = await openSpecsSettings(page)
+  await expect(again.refusal).toBeHidden()
+})
+
+test('Settings, Specs: with the daemon down it opens nothing and the status line says why', async ({
+  page,
+}) => {
+  await open(page)
+  await page.evaluate(() => {
+    window.__down = 'the daemon stopped'
+  })
+  await page.getByRole('button', { name: 'Settings', exact: true }).click()
+  await page
+    .getByRole('dialog', { name: 'Settings', exact: true })
+    .getByRole('button', { name: 'Specs' })
+    .click()
+  await expect(page.locator('#status')).toHaveText('the daemon stopped')
+  await expect(page.getByRole('dialog', { name: 'Specs', exact: true })).toBeHidden()
+})
+
+test('Settings, Specs: Enter in the folder asks the daemon once, however long its answer takes', async ({
+  page,
+}) => {
+  await open(page)
+  const specs = await openSpecsSettings(page)
+  // The real daemon answers over the bridge a while later: Enter is a change and a submit before it does.
+  await page.evaluate(() => {
+    window.__delay['specs.set'] = 300
+  })
+  await specs.folder.fill('docs/specs')
+  await specs.folder.press('Enter')
+  await expect.poll(() => answers(page, 'specs.set')).toBe(1)
+  expect(await calls(page, 'specs.set')).toEqual([{ folder: 'docs/specs' }])
+  await expect(specs.folder).toHaveValue('docs/specs')
+  // Left for another control, it asks nothing more.
+  await specs.variant.focus()
+  await specs.folder.press('Enter')
+  expect(await calls(page, 'specs.set')).toHaveLength(1)
+})
+
+test('Settings, Specs: what the human changes while a save is on its way is kept when that save’s answer comes', async ({
+  page,
+}) => {
+  await open(page)
+  const specs = await openSpecsSettings(page)
+  // The switch's save waits on the daemon, and the human types a folder meanwhile.
+  await hold(page, 'specs.set')
+  await specs.on.check()
+  await expect.poll(() => calls(page, 'specs.set')).toEqual([{ on: true }])
+  await specs.folder.fill('docs/specs')
+  await letGo(page, 'specs.set')
+  await expect.poll(() => answers(page, 'specs.set')).toBe(1)
+  // The answer, which knows no folder, leaves the one typed, and draws the switch as kept.
+  await expect(specs.folder).toHaveValue('docs/specs')
+  await expect(specs.on).toBeChecked()
+  // It goes in with a save of its own, whose answer draws it as kept.
+  await specs.folder.press('Enter')
+  await expect
+    .poll(() => calls(page, 'specs.set'))
+    .toEqual([{ on: true }, { folder: 'docs/specs' }])
+  await expect.poll(() => answers(page, 'specs.set')).toBe(2)
+  await expect(specs.folder).toHaveValue('docs/specs')
+  // A folder typed over a kept one while the switch's save waits stays too.
+  await hold(page, 'specs.set')
+  await specs.on.uncheck()
+  await expect.poll(() => calls(page, 'specs.set')).toHaveLength(3)
+  await specs.folder.fill('plans')
+  await letGo(page, 'specs.set')
+  await expect.poll(() => answers(page, 'specs.set')).toBe(3)
+  await expect(specs.folder).toHaveValue('plans')
+  await expect(specs.on).not.toBeChecked()
+})
+
+/** The stand-in daemon refuses every save of the app's specs in `words`, or none for `null`. */
+const refuseSpecs = (page, words) =>
+  page.evaluate((words) => {
+    window.__model.specsAppRefusal = words
+  }, words)
+
+test('Settings, Specs: one save at a time, each with the control as it is when it is asked, so what is kept and what is shown agree however the daemon answers', async ({
+  page,
+}) => {
+  await open(page)
+  const specs = await openSpecsSettings(page)
+  // The variant's save waits on the daemon; the human chooses twice more and turns specs on.
+  await hold(page, 'specs.set')
+  await specs.variant.selectOption('tdd')
+  await expect.poll(() => calls(page, 'specs.set')).toEqual([{ variant: 'tdd' }])
+  await specs.variant.selectOption('core-html')
+  await specs.variant.selectOption('tdd-html')
+  await specs.on.check()
+  // Nothing more is asked while one is on its way: an answer to a later one could come first,
+  // and the earlier one be kept after it.
+  expect(await calls(page, 'specs.set')).toEqual([{ variant: 'tdd' }])
+  await letGo(page, 'specs.set')
+  await expect.poll(() => answers(page, 'specs.set')).toBe(3)
+  // Then each control once, as it is by then.
+  expect(await calls(page, 'specs.set')).toEqual([
+    { variant: 'tdd' },
+    { variant: 'tdd-html' },
+    { on: true },
+  ])
+  // What is kept is the human's last word, and the dialog shows it.
+  expect(await page.evaluate(() => window.__model.specsApp)).toEqual({
+    on: true,
+    variant: 'tdd-html',
+  })
+  await expect(specs.variant).toHaveValue('tdd-html')
+  await expect(specs.on).toBeChecked()
+  // The page's copy is the newest answer: a refusal now draws the controls from it as kept.
+  await refuseSpecs(page, 'the specs folder is a folder inside the project: it is text')
+  await specs.folder.fill('../x')
+  await specs.folder.press('Enter')
+  await expect(specs.refusal).toBeVisible()
+  await expect(specs.on).toBeChecked()
+  await expect(specs.variant).toHaveValue('tdd-html')
+  await refuseSpecs(page, null)
+  // Opened again while a save is on its way, it reads what is kept once that one is answered.
+  await hold(page, 'specs.set')
+  await specs.on.uncheck()
+  await expect.poll(() => calls(page, 'specs.set')).toHaveLength(5)
+  await specs.close.click()
+  const reads = await calls(page, 'specs.get')
+  await page.getByRole('button', { name: 'Settings', exact: true }).click()
+  await page
+    .getByRole('dialog', { name: 'Settings', exact: true })
+    .getByRole('button', { name: 'Specs' })
+    .click()
+  expect(await calls(page, 'specs.get')).toEqual(reads)
+  await letGo(page, 'specs.set')
+  await expect(specs.dialog).toBeVisible()
+  expect((await calls(page, 'specs.get')).length).toBe(reads.length + 1)
+  await expect(specs.on).not.toBeChecked()
+})
+
+test('Settings, Specs: a folder the daemon refused stays as typed, with why, while the other controls are saved, until a save of it is kept or the dialog opens again', async ({
+  page,
+}) => {
+  await open(page)
+  const specs = await openSpecsSettings(page)
+  const words = 'the specs folder is a folder inside the project: it stays inside it, with no `..`'
+  await refuseSpecs(page, words)
+  await specs.folder.fill('../elsewhere')
+  await specs.folder.press('Enter')
+  await expect(specs.refusal).toHaveText(words)
+  await refuseSpecs(page, null)
+  // The box and the variant are saved, and their answers leave the folder and its refusal.
+  await specs.on.check()
+  await expect.poll(() => answers(page, 'specs.set')).toBe(2)
+  await expect(specs.folder).toHaveValue('../elsewhere')
+  await expect(specs.refusal).toHaveText(words)
+  await specs.variant.selectOption('tdd')
+  await expect.poll(() => answers(page, 'specs.set')).toBe(3)
+  await expect(specs.folder).toHaveValue('../elsewhere')
+  await expect(specs.refusal).toHaveText(words)
+  // Mended, a save of it is kept, and the refusal goes.
+  await specs.folder.fill('docs')
+  await specs.folder.press('Enter')
+  await expect.poll(() => answers(page, 'specs.set')).toBe(4)
+  await expect(specs.refusal).toBeHidden()
+  await expect(specs.folder).toHaveValue('docs')
+  // One refused and left in the dialog is gone when it opens again: it shows what is kept.
+  await refuseSpecs(page, words)
+  await specs.folder.fill('../again')
+  await specs.folder.press('Enter')
+  await expect(specs.refusal).toHaveText(words)
+  await specs.close.click()
+  await refuseSpecs(page, null)
+  const again = await openSpecsSettings(page)
+  await expect(again.folder).toHaveValue('docs')
+  await expect(again.refusal).toBeHidden()
+})
+
+test('Settings, Specs: a save that failed is sent again when the human asks again, and one pending or kept is not', async ({
+  page,
+}) => {
+  await open(page)
+  const specs = await openSpecsSettings(page)
+  // The daemon cannot write the agents file: the folder's save fails, and what was typed stays.
+  const words = 'could not write the agents file: EACCES: permission denied'
+  await refuseSpecs(page, words)
+  await specs.folder.fill('docs/specs')
+  await specs.folder.press('Enter')
+  await expect(specs.refusal).toHaveText(words)
+  await expect(specs.folder).toHaveValue('docs/specs')
+  // It can again: Enter with nothing changed asks once more, and not again while that is on its way.
+  await refuseSpecs(page, null)
+  await hold(page, 'specs.set')
+  await specs.folder.press('Enter')
+  await expect.poll(() => calls(page, 'specs.set')).toHaveLength(2)
+  await specs.folder.press('Enter')
+  await letGo(page, 'specs.set')
+  await expect.poll(() => answers(page, 'specs.set')).toBe(2)
+  await expect(specs.refusal).toBeHidden()
+  expect(await page.evaluate(() => window.__model.specsApp.folder)).toBe('docs/specs')
+  // Kept, Enter asks nothing; the next change is the box's own.
+  await specs.folder.press('Enter')
+  await specs.on.check()
+  await expect.poll(() => answers(page, 'specs.set')).toBe(3)
+  expect(await calls(page, 'specs.set')).toEqual([
+    { folder: 'docs/specs' },
+    { folder: 'docs/specs' },
+    { on: true },
+  ])
+})
+
+test('Settings, Specs: a change the daemon refuses once the dialog is shut is said on the status line', async ({
+  page,
+}) => {
+  await open(page)
+  const specs = await openSpecsSettings(page)
+  const words = 'the specs folder is a folder inside the project: it stays inside it, with no `..`'
+  await page.evaluate((words) => {
+    window.__model.specsAppRefusal = words
+  }, words)
+  await hold(page, 'specs.set')
+  await specs.folder.fill('../elsewhere')
+  await specs.folder.press('Enter')
+  await expect.poll(() => calls(page, 'specs.set')).toHaveLength(1)
+  await specs.close.click()
+  await expect(specs.dialog).toBeHidden()
+  await letGo(page, 'specs.set')
+  await expect(page.locator('#status')).toHaveText(words)
+  // Opened again, it is what is kept, and the refusal is not waiting in it.
+  await page.evaluate(() => {
+    window.__model.specsAppRefusal = null
+  })
+  const again = await openSpecsSettings(page)
+  await expect(again.refusal).toBeHidden()
+  await expect(again.folder).toHaveValue('')
 })
 
 test('a screen that cannot open says why, and no dialog opens', async ({ page }) => {
@@ -4329,6 +5008,7 @@ test('project menu: a right-click on a project opens its menu beside the pointer
     'Rename…',
     'Description…',
     'Project settings…',
+    'Specs…',
   ])
   await expect(projectMenu(page)).toHaveAccessibleName('foundry')
   await expect(itemNamed(page, 'Rename…')).toBeFocused()
@@ -4404,12 +5084,16 @@ test('project menu: Shift+F10 and the context-menu key open it on the project th
   await page.keyboard.press('ArrowDown')
   await expect(itemNamed(page, 'Project settings…')).toBeFocused()
   await page.keyboard.press('ArrowDown')
+  await expect(itemNamed(page, 'Specs…')).toBeFocused()
+  await page.keyboard.press('ArrowDown')
   await expect(itemNamed(page, 'Rename…')).toBeFocused()
   await page.keyboard.press('ArrowUp')
-  await expect(itemNamed(page, 'Project settings…')).toBeFocused()
+  await expect(itemNamed(page, 'Specs…')).toBeFocused()
   await page.keyboard.press('Home')
   await expect(itemNamed(page, 'Rename…')).toBeFocused()
   await page.keyboard.press('End')
+  await expect(itemNamed(page, 'Specs…')).toBeFocused()
+  await page.keyboard.press('ArrowUp')
   await expect(itemNamed(page, 'Project settings…')).toBeFocused()
   await page.keyboard.press('ArrowUp')
   await expect(itemNamed(page, 'Description…')).toBeFocused()
@@ -4971,6 +5655,7 @@ test('project menu: a closed project has Project settings… to open as an open 
     'Rename…',
     'Description…',
     'Project settings…',
+    'Specs…',
   ])
   await expect(itemNamed(page, 'Project settings…')).toBeEnabled()
   await expect(itemNamed(page, 'Rename…')).toBeFocused()
@@ -4979,8 +5664,12 @@ test('project menu: a closed project has Project settings… to open as an open 
   await page.keyboard.press('ArrowDown')
   await expect(itemNamed(page, 'Project settings…')).toBeFocused()
   await page.keyboard.press('ArrowDown')
+  await expect(itemNamed(page, 'Specs…')).toBeFocused()
+  await page.keyboard.press('ArrowDown')
   await expect(itemNamed(page, 'Rename…')).toBeFocused()
   await page.keyboard.press('End')
+  await expect(itemNamed(page, 'Specs…')).toBeFocused()
+  await page.keyboard.press('ArrowUp')
   await expect(itemNamed(page, 'Project settings…')).toBeFocused()
   // Chosen, it shows foundry, as it does for any project the board does not show, and opens
   // the dialog on it.

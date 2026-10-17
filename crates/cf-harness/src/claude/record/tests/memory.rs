@@ -43,6 +43,7 @@ use sha2::{Digest, Sha256};
 use super::synthetic::{self, Plan};
 use super::*;
 use crate::shared::record::jsonl::read_on_with;
+use crate::testing::LONG_AFTER_MS;
 
 /// The session the synthetic transcript is of.
 const SESSION: &str = "bench";
@@ -215,6 +216,7 @@ fn first_look_parts() {
     let looked = read_on_with(
         &subject.file,
         None,
+        LONG_AFTER_MS,
         Transcript::parse,
         &mut |record, index| transcript.visit(record, index),
         None,
@@ -281,7 +283,10 @@ fn reread() {
         return;
     };
     let mut followed = subject.followed();
-    assert!(followed.read().unwrap().is_some_and(|read| read.changed));
+    assert!(followed
+        .read(LONG_AFTER_MS)
+        .unwrap()
+        .is_some_and(|read| read.changed));
     let claim = format!(
         r#"{{"type":"attachment","uuid":"{watched}","sessionId":"{}","isSidechain":false}}"#,
         subject.session
@@ -293,7 +298,7 @@ fn reread() {
     writeln!(file, "{claim}").unwrap();
     drop(file);
     let started = Instant::now();
-    let read = followed.read().unwrap().unwrap();
+    let read = followed.read(LONG_AFTER_MS).unwrap().unwrap();
     let reread = started.elapsed();
     assert_eq!(
         Some(read.state.count),

@@ -129,14 +129,13 @@ impl Job {
 
 #[cfg(windows)]
 impl Job {
-    /// A job made for `process`, which has just started, and `process` put in it:
-    /// what it starts from then on is in it too, with no way out (no breakaway is
-    /// allowed, silent or asked for), and a process of it that fails unhandled
-    /// ends, as libuv's job has it, with no dialog of Windows' to wait on. Why
-    /// it could not be made, if it could not: a process already in a job is put
-    /// in this one as a job inside that one (Windows 8 on), and is refused by a
-    /// job that allows none. What the program started before it was put in the
-    /// job (in the moment after it started) is not in it.
+    /// A job made for `process`, which was started suspended (`group::lead_whole`),
+    /// `process` put in it, and then let run: what it starts is in it too, with no
+    /// way out (no breakaway is allowed, silent or asked for), and a process of it
+    /// that fails unhandled ends, as libuv's job has it, with no dialog of Windows'
+    /// to wait on. Why it could not be made, or the process let run, if it could
+    /// not: a process already in a job is put in this one as a job inside that one
+    /// (Windows 8 on), and is refused by a job that allows none.
     pub(crate) fn of(process: &tokio::process::Child) -> Result<Self, String> {
         use windows_sys::Win32::System::JobObjects::{
             AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
@@ -178,7 +177,81 @@ impl Job {
             if AssignProcessToJobObject(made, handle as _) == 0 {
                 return Err(failed("could not be put in a job of its own"));
             }
+            let pid = process
+                .id()
+                .ok_or_else(|| "could not be let run: it has ended".to_owned())?;
+            resume(pid)?;
             Ok(job)
+        }
+    }
+}
+
+/// Lets the process `pid`, started suspended, run: each thread the system has of it
+/// (a process started suspended has one), found by a snapshot of the system's threads
+/// (Toolhelp32, a documented API), resumed. Each must have been suspended once: one
+/// that was not tells a process that was not started suspended, and ran before it
+/// was put in its job. Why it could not be let run, if it could not.
+#[cfg(windows)]
+fn resume(pid: u32) -> Result<(), String> {
+    use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, Thread32First, Thread32Next, TH32CS_SNAPTHREAD, THREADENTRY32,
+    };
+    use windows_sys::Win32::System::Threading::{OpenThread, ResumeThread, THREAD_SUSPEND_RESUME};
+    let failed = |what: &str| {
+        format!(
+            "could not be let run: {what}: {}",
+            std::io::Error::last_os_error()
+        )
+    };
+    let size = u32::try_from(std::mem::size_of::<THREADENTRY32>())
+        .map_err(|_| "could not be let run".to_owned())?;
+    #[allow(unsafe_code)]
+    // SAFETY: the snapshot's handle is closed once, below, whatever came of the walk;
+    // Thread32First and Thread32Next write the entry they are given, ours, whose size
+    // it says; each thread's handle is closed once it is resumed. None writes other
+    // memory of ours.
+    unsafe {
+        let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+        if snapshot == INVALID_HANDLE_VALUE {
+            return Err(failed("no snapshot of the system's threads"));
+        }
+        let mut entry = THREADENTRY32 {
+            dwSize: size,
+            ..THREADENTRY32::default()
+        };
+        let (mut resumed, mut refused) = (0, None);
+        let mut more = Thread32First(snapshot, &mut entry) != 0;
+        while more {
+            if entry.th32OwnerProcessID == pid && refused.is_none() {
+                let thread = OpenThread(THREAD_SUSPEND_RESUME, 0, entry.th32ThreadID);
+                if thread.is_null() {
+                    refused = Some(failed("its thread could not be opened"));
+                } else {
+                    let before = ResumeThread(thread);
+                    if before == u32::MAX {
+                        refused = Some(failed("its thread could not be resumed"));
+                    }
+                    CloseHandle(thread);
+                    match before {
+                        1 => resumed += 1,
+                        u32::MAX => {}
+                        times => {
+                            refused = Some(format!(
+                                "could not be let run: its thread was suspended {times} times, not once: it was not started suspended"
+                            ));
+                        }
+                    }
+                }
+            }
+            entry.dwSize = size;
+            more = Thread32Next(snapshot, &mut entry) != 0;
+        }
+        CloseHandle(snapshot);
+        match (refused, resumed) {
+            (Some(why), _) => Err(why),
+            (None, 0) => Err("could not be let run: the system has no thread of it".to_owned()),
+            (None, _) => Ok(()),
         }
     }
 }

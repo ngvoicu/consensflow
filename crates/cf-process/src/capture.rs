@@ -13,13 +13,11 @@ use cf_base::env::Env;
 use cf_base::file::error_code;
 
 use crate::execute::{command_line, hide_window, read_both, Read, FORCE_AFTER};
-use crate::group::{lead, Group};
+#[cfg(unix)]
+use crate::group::ENDED_EVERY;
+use crate::group::{lead, lead_whole, Group};
 use crate::job::Job;
 use crate::{Ender, Ending, Limits, Run};
-
-/// How often a program asked to end is looked at for whether it has.
-#[cfg(unix)]
-const ENDED_EVERY: std::time::Duration = std::time::Duration::from_millis(10);
 
 /// What a program that ended with 0 wrote: `execFile`'s `{ stdout, stderr }`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -94,14 +92,18 @@ pub async fn capture(
 /// - A program asked to end because its time ran out has failed (`killed`),
 ///   whatever it exits with once asked, where Node answers one that exits
 ///   with 0.
-/// - Nothing it started outlives it. On Unix, once it has ended, however it
-///   ended, what is left of the group it leads is forced to end before it is
-///   waited for (a process that leaves the group, by `setsid`, is out of its
-///   reach). On Windows it runs in a job of its own, which nothing it starts
-///   can leave (a program that asks to start one outside it is refused), and
-///   which is ended once it has ended, at a stop, and with the future
-///   dropped. A job that cannot be made is a program that did not start
-///   (`spawn <file> …`).
+/// - Nothing it started outlives it. On Unix it leads a session of its own, and
+///   once it has ended, however it ended, every process of that session (the
+///   groups nextest gives its tests too), and every process still descended from
+///   it, is forced to end before it is waited for; where its time ran out or the
+///   future is dropped, it is asked first, and given a moment (the group module
+///   says how). A process that starts a session of its own, and whose parent
+///   ended before then, is out of its reach. On Windows it is started suspended,
+///   put in a job of its own, and then let run: nothing it starts can leave that
+///   job (a program that asks to start one outside it is refused), which is ended
+///   once it has ended, at a stop, and with the future dropped. A job that cannot
+///   be made, or a program that cannot be let run, is a program that did not
+///   start (`spawn <file> …`).
 pub async fn capture_whole(
     run: &Run,
     cwd: Option<&Path>,
@@ -142,7 +144,10 @@ async fn captured(
         command.current_dir(cwd);
     }
     hide_window(&mut command);
-    lead(&mut command);
+    match hold {
+        Hold::Node => lead(&mut command),
+        Hold::Whole => lead_whole(&mut command),
+    }
     let mut child = command.spawn().map_err(|failed| {
         CaptureFailed::unstarted(format!(
             "spawn {} {}",
@@ -150,9 +155,10 @@ async fn captured(
             error_code(&failed)
         ))
     })?;
-    // Held whole, its own job (Windows), which ends whatever is left of it as
-    // the capture ends, however it ends; else the job of every child of this
-    // process. A program not put in its own is ended as the child is dropped.
+    // Held whole, its own job (Windows), which it is put in before it runs and which
+    // ends whatever is left of it as the capture ends, however it ends; else the job
+    // of every child of this process. A program not put in its own, or not let run,
+    // is ended as the child is dropped.
     let _job = match hold {
         Hold::Node => {
             crate::job::adopt(&child);
@@ -164,7 +170,7 @@ async fn captured(
     };
     // Declared after the child, so it is dropped before it: a capture dropped
     // ends the group while its leader is not yet reaped.
-    let group = Group::new(child.id());
+    let group = Group::new(child.id(), hold == Hold::Whole);
     started(group.ender());
     let _input = child.stdin.take();
     let (Some(mut stdout), Some(mut stderr)) = (child.stdout.take(), child.stderr.take()) else {

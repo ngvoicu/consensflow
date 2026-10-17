@@ -29,6 +29,7 @@ mod round_trip;
 mod simple_fix;
 mod six_decisions;
 mod terminal_questions;
+mod uncommitted_work;
 
 /// What the owner says after the first message, once the chief is done with the last.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -91,6 +92,16 @@ pub(crate) fn answer(source: &str, text: impl Into<String>) -> Answer {
     }
 }
 
+/// A change of the owner's that is not committed: the workspace is made a git
+/// repository of the fixture, committed, and then `find` in `file` becomes
+/// `replace`, in the file and not in the commit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Uncommitted {
+    pub file: &'static str,
+    pub find: &'static str,
+    pub replace: &'static str,
+}
+
 /// A scenario.
 #[derive(Debug)]
 pub struct Scenario {
@@ -98,6 +109,10 @@ pub struct Scenario {
     pub title: &'static str,
     /// The toy project the chief works on: `evals/fixtures/<fixture>/`.
     pub fixture: &'static str,
+    /// The owner's work in progress in the workspace, if the scenario has any: its
+    /// file is read whole ([`Metrics::files_read`]), and the files of the fixture the
+    /// run deleted are counted ([`Metrics::files_gone`]).
+    pub uncommitted: Option<Uncommitted>,
     /// What the owner types into the chief's terminal first.
     pub prompt: String,
     /// What the owner says next, in turn.
@@ -121,6 +136,18 @@ impl Scenario {
         self.follow_ups.contains(&FollowUp::Switch)
     }
 
+    /// The files of the workspace the run reads whole: as it begins, when the first
+    /// worker task's result is in, and at the end.
+    pub fn reads(&self) -> Vec<&'static str> {
+        self.uncommitted.iter().map(|change| change.file).collect()
+    }
+
+    /// Whether the measure counts the files of the fixture the run deleted: a
+    /// scenario with the owner's work does, and the others' reports keep their shape.
+    pub fn counts_gone_files(&self) -> bool {
+        self.uncommitted.is_some()
+    }
+
     /// Each of the expectations against the numbers: what held, what did not.
     pub fn verdict(&self, metrics: &Metrics) -> Vec<Check> {
         self.expectations
@@ -134,7 +161,7 @@ impl Scenario {
 }
 
 /// The ids of the scenarios, in the order they are listed.
-pub const IDS: [&str; 12] = [
+pub const IDS: [&str; 13] = [
     "advice-trip",
     "chief-switch",
     "complex-launch",
@@ -147,6 +174,7 @@ pub const IDS: [&str; 12] = [
     "simple-fix",
     "six-decisions",
     "terminal-questions",
+    "uncommitted-work",
 ];
 
 /// The scenario called `id`, if there is one. The codeword of `chief-switch` is
@@ -165,6 +193,7 @@ pub fn by_id(id: &str) -> Option<Scenario> {
         "simple-fix" => simple_fix::scenario(),
         "six-decisions" => six_decisions::scenario(),
         "terminal-questions" => terminal_questions::scenario(),
+        "uncommitted-work" => uncommitted_work::scenario(),
         _ => return None,
     })
 }

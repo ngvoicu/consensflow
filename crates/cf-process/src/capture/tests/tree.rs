@@ -294,6 +294,243 @@ fn held_whole_what_a_program_left_running_is_ended_once_it_has_ended() {
     assert!(!marked.exists(), "nothing it left running wrote after it");
 }
 
+#[cfg(windows)]
+#[test]
+fn held_whole_a_grandchild_started_at_once_is_in_the_job_and_ends_with_it() {
+    // Both reviewers' look at round 5: the program ran before it was put in its job, and
+    // what it started at once was not in it. It starts a grandchild at once, with none of
+    // its streams, and ends at once; the grandchild would write a moment later.
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("writer.cmd"),
+        "@echo off\r\nping -n 4 127.0.0.1 >NUL\r\necho late> \"%~dp0late\"\r\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("parent.cmd"),
+        "@echo off\r\nstart \"\" /b cmd /d /c \"%~dp0writer.cmd\" <NUL >NUL 2>NUL\r\nexit /b 0\r\n",
+    )
+    .unwrap();
+    let run = Run {
+        program: PathBuf::from(r"C:\Windows\System32\cmd.exe"),
+        args: ["/d", "/c"]
+            .into_iter()
+            .map(OsString::from)
+            .chain([dir.path().join("parent.cmd").into_os_string()])
+            .collect(),
+        verbatim: false,
+    };
+    let limits = Limits {
+        timeout: Duration::from_secs(60),
+        max_buffer: 1024,
+    };
+    let began = Instant::now();
+    let answered = runtime().block_on(capture_whole(&run, None, &tree_env(), limits, |_| {}));
+    assert!(answered.is_ok(), "{answered:?}");
+    assert!(
+        began.elapsed() < Duration::from_secs(3),
+        "it ended at once: {:?}",
+        began.elapsed()
+    );
+    std::thread::sleep(Duration::from_secs(6));
+    assert!(
+        !dir.path().join("late").exists(),
+        "the grandchild was in the job, and ended with it"
+    );
+}
+
+/// A shell that starts `job` in the background in a group of its own (`setpgid`, as
+/// nextest puts each test; a shell's `set -m` does so only where it is bash), with none
+/// of its streams, writes its pid and the job's to `pids`, waits until the job is in its
+/// group (it marks so first), and then runs `then`: a program that ended first would
+/// take the job with its own group. `job` holds no double quote and no `$`.
+#[cfg(unix)]
+fn job_in_a_group_of_its_own(job: &str, pids: &Path, then: &str) -> Run {
+    let ready = pids.with_extension("ready");
+    shell(&format!(
+        "perl -MPOSIX -e 'POSIX::setpgid(0, 0); exec @ARGV' /bin/sh -c \": > '{ready}'; {job}\" </dev/null >/dev/null 2>&1 & printf '%s %s\\n' \"$$\" \"$!\" > '{pids}'; while [ ! -e '{ready}' ]; do sleep 0.01; done; {then}",
+        ready = ready.display(),
+        pids = pids.display()
+    ))
+}
+
+/// Whether the process `pid` leads a group of its own, as the system says, within the
+/// moment it takes to make it so.
+#[cfg(unix)]
+fn leads_a_group(pid: u32) -> bool {
+    let pid = i32::try_from(pid).unwrap();
+    let until = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < until {
+        let leads = crate::table::processes()
+            .iter()
+            .any(|process| process.identity.pid == pid && process.group == pid);
+        if leads {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    false
+}
+
+#[cfg(unix)]
+#[test]
+fn held_whole_what_a_program_left_in_a_group_of_its_own_is_ended_once_it_has_ended() {
+    // Both reviewers' look at round 5: nextest puts each test in a group of its own, and
+    // what one left was out of the run's group's reach. The program leads a session,
+    // which the job is in.
+    let dir = tempfile::tempdir().unwrap();
+    let (file, marked) = (dir.path().join("pids"), dir.path().join("late"));
+    let job = format!("sleep 2; echo late > '{}'", marked.display());
+    let run = job_in_a_group_of_its_own(&job, &file, "exit 0");
+    let limits = Limits {
+        timeout: Duration::from_secs(60),
+        max_buffer: 1024,
+    };
+    let answered = runtime().block_on(capture_whole(&run, None, &tree_env(), limits, |_| {}));
+    assert!(answered.is_ok(), "{answered:?}");
+    let pids = pids_in(&file, 2).expect("written before it ended");
+    let _left = Survivors(pids.clone());
+    assert!(
+        gone_within(pids[1], Duration::from_secs(1)),
+        "the job in a group of its own is ended with the program"
+    );
+    std::thread::sleep(Duration::from_secs(3));
+    assert!(!marked.exists(), "nothing it left running wrote after it");
+}
+
+#[cfg(unix)]
+#[test]
+fn held_whole_out_of_its_time_what_is_in_a_group_of_its_own_and_ignores_the_ask_is_forced() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("pids");
+    let run = job_in_a_group_of_its_own("trap '' TERM; exec sleep 60", &file, "wait");
+    let limits = Limits {
+        timeout: Duration::from_millis(1500),
+        max_buffer: 1024,
+    };
+    let failed = runtime()
+        .block_on(capture_whole(&run, None, &tree_env(), limits, |_| {}))
+        .unwrap_err();
+    assert!(failed.killed, "{failed:?}");
+    let pids = pids_in(&file, 2).expect("written long before its time ran out");
+    let _left = Survivors(pids.clone());
+    assert!(gone(pids[0]), "the program");
+    assert!(
+        gone_within(pids[1], Duration::from_secs(1)),
+        "the job, which led a group of its own and took no notice of the ask"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn held_whole_a_capture_dropped_asks_its_program_first_and_then_forces_what_is_left() {
+    // As the plants' runner drops a run at a stop: the program is asked to end (nextest
+    // ends its tests so), and what took no notice is forced, in a group of its own too.
+    let dir = tempfile::tempdir().unwrap();
+    let (file, asked, armed) = (
+        dir.path().join("pids"),
+        dir.path().join("asked"),
+        dir.path().join("armed"),
+    );
+    // The program says once it listens for the ask, and is dropped then.
+    let then = format!(
+        "trap \"echo asked > '{}'; exit 0\" TERM; : > '{}'; wait",
+        asked.display(),
+        armed.display()
+    );
+    let run = job_in_a_group_of_its_own("trap '' TERM; exec sleep 60", &file, &then);
+    let (env, limits) = (
+        tree_env(),
+        Limits {
+            timeout: Duration::from_secs(60),
+            max_buffer: 1024,
+        },
+    );
+    let (pids, led) = runtime().block_on(async {
+        let capturing = capture_whole(&run, None, &env, limits, |_| {});
+        let written = async {
+            let pids = pids_written_to_soon(&file, 2).await;
+            while !armed.exists() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            let led = leads_a_group(pids[1]);
+            (pids, led)
+        };
+        tokio::select! {
+            _ = capturing => panic!("a program that waits for a minute does not end"),
+            written = written => written,
+        }
+    });
+    let _left = Survivors(pids.clone());
+    assert!(led, "the job led a group of its own");
+    assert!(asked.exists(), "the program was asked first");
+    assert!(
+        gone_within(pids[1], Duration::from_secs(1)),
+        "the job that took no notice of the ask was forced"
+    );
+}
+
+/// What starts a program in a session of its own (as Playwright starts a browser), which
+/// leaves the run's, and has none of the streams of the one that started it.
+#[cfg(unix)]
+const OWN_SESSION: &str =
+    "perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV' sleep 60 </dev/null >/dev/null 2>&1";
+
+/// What a capture held whole, out of its time, made of `run`, which writes its pid and
+/// a child's to `file`: the pids.
+#[cfg(unix)]
+fn out_of_time_whole(run: &Run, file: &Path) -> Vec<u32> {
+    let limits = Limits {
+        timeout: Duration::from_millis(1500),
+        max_buffer: 1024,
+    };
+    let failed = runtime()
+        .block_on(capture_whole(run, None, &tree_env(), limits, |_| {}))
+        .unwrap_err();
+    assert!(failed.killed, "{failed:?}");
+    pids_in(file, 2).expect("written long before its time ran out")
+}
+
+#[cfg(unix)]
+#[test]
+fn held_whole_out_of_its_time_a_child_in_a_session_of_its_own_is_noted_as_the_program_is_asked() {
+    // The program ends at the ask, and its child, out of its session and its group, is
+    // given to another: noted while the table linked it to the program, it is ended.
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("pids");
+    let run = shell(&format!(
+        "{OWN_SESSION} & printf '%s %s\\n' \"$$\" \"$!\" > '{}'; trap 'exit 0' TERM; wait",
+        file.display()
+    ));
+    let pids = out_of_time_whole(&run, &file);
+    let _left = Survivors(pids.clone());
+    assert!(gone(pids[0]), "the program");
+    assert!(
+        gone_within(pids[1], Duration::from_secs(1)),
+        "the child in a session of its own"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn held_whole_out_of_its_time_a_child_the_program_starts_as_it_is_asked_is_ended_too() {
+    // The program starts a child in a session of its own as it is asked to end, and
+    // takes no notice of the ask: the child is linked to it as it is forced.
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("pids");
+    let run = shell(&format!(
+        "trap \"{OWN_SESSION} & printf '%s %s\\\\n' \\\"\\$\\$\\\" \\\"\\$!\\\" > '{}'\" TERM; sleep 60 & wait; wait",
+        file.display()
+    ));
+    let pids = out_of_time_whole(&run, &file);
+    let _left = Survivors(pids.clone());
+    assert!(gone(pids[0]), "the program");
+    assert!(
+        gone_within(pids[1], Duration::from_secs(1)),
+        "the child it started as it was asked"
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn a_capture_that_ended_on_its_own_leaves_nothing_for_its_ender_to_end() {

@@ -61,8 +61,9 @@ impl AppRuntime {
             let panes = Arc::clone(&panes);
             let output = Arc::clone(&output);
             let inputs = Arc::clone(&inputs);
+            let login = daemon.login();
             Arc::new(move |closed| {
-                let command = daemon_command(&app)?;
+                let command = daemon_command(&app, &login)?;
                 let mut builder = BridgeBuilder::new(Role::Host, MAX_FRAME_BYTES);
                 let page_app = app.clone();
                 let page_events: PageEventSink = Arc::new(move |name, body| {
@@ -619,6 +620,69 @@ mod tests {
         deaf.shutdown();
         assert!(started.elapsed() >= DAEMON_STOP_GRACE, "it had its grace");
         assert!(!process_exists(deaf_pid), "and was killed after it");
+    }
+
+    /// Quitting while a start asks the login shell for the daemon's PATH ends
+    /// the shell at once: one that never answered outlived the app. Only the
+    /// shell: what its login files started is the user's, an `ssh-agent -D`
+    /// other programs use, say (the reviews of 2026-10-16).
+    #[test]
+    fn quitting_ends_a_login_shell_a_start_is_still_asking_and_leaves_what_it_started() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let home = tempfile::tempdir().expect("home");
+        let pids = home.path().join("pids");
+        let shell = home.path().join("login-shell");
+        std::fs::write(
+            &shell,
+            format!(
+                "#!/bin/sh\n/bin/sleep 60 &\necho $$ $! > '{}'\nwait\n",
+                pids.display()
+            ),
+        )
+        .expect("write the shell");
+        std::fs::set_permissions(&shell, std::fs::Permissions::from_mode(0o755))
+            .expect("make the shell executable");
+        let panes = Arc::new(PaneTable::new());
+        let arbiter = Arc::new(InputArbiter::new(EnterTiming::fixed(0)));
+        let inputs = Arc::new(InputQueue::new(Arc::clone(&panes), arbiter));
+        let runtime = test_runtime(panes, inputs, None, None);
+        let login = runtime.daemon.login();
+        let (sent, asked) = mpsc::channel();
+        thread::spawn(move || {
+            let _ = sent.send(crate::daemon_command::login_path_in(
+                &shell,
+                Duration::from_secs(60),
+                &login,
+            ));
+        });
+        let started = Instant::now();
+        let (shell, agent) = loop {
+            let said = std::fs::read_to_string(&pids).unwrap_or_default();
+            let read: Vec<i32> = said
+                .split_whitespace()
+                .filter_map(|pid| pid.parse().ok())
+                .collect();
+            if let [shell, agent] = read[..] {
+                break (shell, agent);
+            }
+            assert!(
+                started.elapsed() < Duration::from_secs(10),
+                "the shell never ran"
+            );
+            thread::sleep(Duration::from_millis(20));
+        };
+        runtime.shutdown();
+        let ended = asked.recv_timeout(Duration::from_secs(5));
+        // Given a moment to be ended, as it would have been with the shell.
+        thread::sleep(Duration::from_millis(200));
+        let left = process_exists(agent);
+        let _ = Command::new("/bin/kill")
+            .args(["-9", &agent.to_string()])
+            .status();
+        assert_eq!(ended.expect("the lookup ended with the quit"), None);
+        assert!(!process_exists(shell), "the shell outlived the quit");
+        assert!(left, "what the login file started was ended with the shell");
     }
 
     /// Why the daemon is killed FIRST, stated as a test rather than a comment.

@@ -111,13 +111,14 @@ impl Judged {
 /// one name in two places, or two registered in one place, as a loop registers them:
 /// the name cannot tell them apart), whatever came of each (one skipped, to do or
 /// cancelled too), why it is not taken for the one that failed. Each test of the
-/// report is one registered (`results`).
+/// report is one registered (`results`). A test file that failed whole is no test,
+/// whatever its name: it never stands for the meant one.
 fn meant_in(ran: &Ran, meant: &str) -> Option<Result<(), String>> {
     let named: Vec<_> = ran
         .tests()
         .iter()
         .chain(ran.others())
-        .filter(|test| report::is_meant(&test.name, meant))
+        .filter(|test| !test.whole && report::is_meant(&test.name, meant))
         .collect();
     if !named.iter().any(|test| test.failed) {
         return None;

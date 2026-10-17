@@ -249,7 +249,7 @@ fn check(log: &Log) -> Result<Check> {
 #[test]
 #[ignore = "opt-in: spends the machine's quota on a Codex window; cargo xtask live codex-resume (npm run live:codex-resume)"]
 fn a_codex_window_opened_again_on_its_thread_takes_the_message_it_was_opened_with() -> Result {
-    let log = Log::new("live codex-resume");
+    let log = Log::begin("live codex-resume")?;
     let checks = vec![check(&log)?];
     report::conclude(&log, "what the check came to", &checks)
 }

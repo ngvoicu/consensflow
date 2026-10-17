@@ -133,7 +133,7 @@ fn machine(plan: &[plan::Planned], log: &Log) -> Result<Machine> {
 #[ignore = "opt-in: spends the machine's quota on a chief of each harness; cargo xtask live specs (npm run live:specs)"]
 fn a_chief_of_every_harness_is_told_of_specs_where_they_are_on_plans_one_and_carries_it_to_the_board(
 ) -> Result {
-    let log = Log::new("live specs");
+    let log = Log::begin("live specs")?;
     let (chiefs, steps, options) = limits()?;
     let plan = plan::projects(&chiefs, &steps);
     if plan.is_empty() || plan.iter().all(|project| project.steps.is_empty()) {

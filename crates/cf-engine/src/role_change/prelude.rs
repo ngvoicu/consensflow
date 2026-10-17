@@ -271,7 +271,7 @@ impl Dispatcher {
     /// and the launch settled as one that did not come up. What the window shows is
     /// asked first, for the screen goes with it. An exit that came while the host
     /// answered settled the launch already.
-    async fn abandon_launch(
+    pub(crate) async fn abandon_launch(
         self: &Rc<Self>,
         project: &ProjectView,
         participant: &ParticipantView,

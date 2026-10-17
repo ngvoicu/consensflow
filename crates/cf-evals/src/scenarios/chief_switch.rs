@@ -56,6 +56,7 @@ pub(super) fn with(codeword: &str) -> Scenario {
         id: "chief-switch",
         title: "A chief switched to another harness knows what the old one was told",
         fixture: "site",
+        uncommitted: None,
         prompt: format!(
             "Two things to remember for later; nothing to do yet. The codeword for this release is {codeword}. And we decided the release goes out on Friday, not Thursday. Confirm in one line."
         ),

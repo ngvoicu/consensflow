@@ -19,6 +19,7 @@
       </div>
       <span class="spacer"></span>
       <button class="quiet-button" id="inbox-button" type="button">Inbox</button>
+      <button class="quiet-button" id="specs-button" type="button" aria-controls="specs-viewer-dialog" hidden>Specs</button>
       <button class="quiet-button" id="project-settings-button" type="button">Project settings</button>
       <button class="primary-button" id="new-project" type="button">New project</button>
       <button class="icon-button" id="settings-button" type="button" aria-label="Settings" title="Settings">
@@ -61,6 +62,7 @@
     <li role="none"><button type="button" role="menuitem" data-action="rename">Rename…</button></li>
     <li role="none"><button type="button" role="menuitem" data-action="describe">Description…</button></li>
     <li role="none"><button type="button" role="menuitem" data-action="settings">Project settings…</button></li>
+    <li role="none"><button type="button" role="menuitem" data-action="specs">Specs…</button></li>
   </ul>
   <dialog id="rename-dialog" class="settings" aria-labelledby="rename-title">
     <form class="dialog-form">
@@ -118,6 +120,7 @@
       <menu class="settings-menu">
         <li><button class="quiet-button" type="button" data-agents-page="" aria-controls="agents-dialog">Agents</button><span>The catalog and your own agents: model, effort and tier.</span></li>
         <li><button class="quiet-button" type="button" data-agents-page="harnesses" aria-controls="harnesses-dialog">Harnesses</button><span>Which coding tools are installed, and their updates.</span></li>
+        <li><button class="quiet-button" type="button" id="specs-settings-button" aria-controls="specs-dialog">Specs</button><span>Plan big work as specs in every project, and the Specmint ConsensFlow brings.</span></li>
       </menu>
       <div class="dialog-actions">
         <button class="quiet-button" type="submit">Close</button>
@@ -134,6 +137,56 @@
     <iframe title="Harnesses" sandbox="allow-forms allow-same-origin allow-scripts" referrerpolicy="no-referrer"></iframe>
     <form class="dialog-actions" method="dialog">
       <button class="quiet-button" type="submit" autofocus>Close</button>
+    </form>
+  </dialog>
+  <!-- The specs viewer (core/specs-viewer.js): the project's specs folder, read through the
+       daemon, its tree on the left and the file chosen on the right. -->
+  <dialog id="specs-viewer-dialog" class="screen specs-viewer" aria-labelledby="specs-viewer-title">
+    <header class="specs-head">
+      <h2 class="specs-title" id="specs-viewer-title">Specs</h2>
+      <span class="specs-folder"></span>
+      <span class="spacer"></span>
+      <button class="quiet-button" type="button" name="specs-refresh">Refresh</button>
+    </header>
+    <p class="specs-hint">HTML specs and mockups open in your browser, outside ConsensFlow.</p>
+    <p class="specs-cut" role="status" hidden></p>
+    <div class="specs-body">
+      <nav class="specs-tree" aria-label="The specs folder"></nav>
+      <section class="specs-file" aria-label="The file chosen"></section>
+    </div>
+    <form class="dialog-actions" method="dialog">
+      <button class="quiet-button" type="submit" autofocus>Close</button>
+    </form>
+  </dialog>
+  <!-- What the app says of specs for every project that does not say otherwise, and the Specmint
+       it brings (core/specs-settings.js): each control saves as it changes, and the variants and
+       versions are drawn from what the daemon reads of the bundled files. -->
+  <dialog id="specs-dialog" class="settings" aria-labelledby="specs-title">
+    <form class="dialog-form">
+      <h2 id="specs-title">Specs</h2>
+      <p class="dialog-help">With specs on, a chief plans big work as a spec, with Specmint, and puts each phase on the board as tasks; a small ask still goes straight on the board. A project's own Specs settings win over these. A change reaches a chief when it next starts: after Resume, or when you switch the chief.</p>
+      <label class="check"><input type="checkbox" name="on">Plan big work as specs in every project that doesn't say otherwise</label>
+      <label>Specs folder, inside the project
+        <input name="folder" autocomplete="off" spellcheck="false">
+      </label>
+      <label>Specmint variant
+        <select name="variant"></select>
+      </label>
+      <p class="dialog-help">Every project uses this folder and this variant unless it names its own, in its Project settings.</p>
+      <p class="dialog-refusal" role="alert" hidden></p>
+      <fieldset class="project-section specmint">
+        <legend>Specmint</legend>
+        <p class="specmint-version"></p>
+        <table class="staff" aria-label="Specmint variants">
+          <thead>
+            <tr><th>Variant</th><th>Version</th><th>Commit</th><th>What it is</th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </fieldset>
+      <div class="dialog-actions">
+        <button class="quiet-button" type="button" value="close">Close</button>
+      </div>
     </form>
   </dialog>
   <dialog id="new-project-dialog" aria-labelledby="new-project-title">
@@ -247,7 +300,7 @@
     </fieldset>
     <fieldset class="project-section project-specs">
       <legend>Specs</legend>
-      <p class="specs-help">With specs on, the chief plans big work as a spec, with Specmint, and puts each phase on the board as tasks; a small ask still goes straight on the board. The app's setting is under Settings, on the Agents screen. <span data-live>A change reaches the chief when it next starts: after Resume, or when you switch the chief.</span></p>
+      <p class="specs-help">With specs on, the chief plans big work as a spec, with Specmint, and puts each phase on the board as tasks; a small ask still goes straight on the board. The app's setting is under Settings, in Specs. <span data-live>A change reaches the chief when it next starts: after Resume, or when you switch the chief.</span></p>
       <label>Specs
         <select name="specs">
           <option value="follow">Follow the app's setting</option>
@@ -256,15 +309,15 @@
         </select>
       </label>
       <label>Specs folder, inside the project
-        <input name="specsFolder" placeholder=".specs" autocomplete="off" spellcheck="false">
+        <input name="specsFolder" autocomplete="off" spellcheck="false">
       </label>
       <label>Specmint variant
-        <select name="specsVariant">
-          <option value="core">core</option>
-          <option value="core-html">core-html</option>
-          <option value="tdd">tdd</option>
-          <option value="tdd-html">tdd-html</option>
-        </select>
+        <span class="specs-pick">
+          <select name="specsVariant">
+            <option value="">As the app says</option>
+          </select>
+          <span class="specs-version"></span>
+        </span>
       </label>
       <p class="staff-hint specs-note" role="status" hidden></p>
       <button class="quiet-button" type="button" name="specs-save" data-live>Save specs</button>

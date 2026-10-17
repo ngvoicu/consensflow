@@ -5,18 +5,23 @@
 # of the page's suite that could not load Playwright was counted as one; now a catch
 # is the test a plant was meant for failing with it and its command passing once
 # without it, where the report its runner wrote names the tests that failed (nextest's
-# JUnit for `cargo test` and a suite of xtask's, the plants' own reporter of Node's tests
-# run in Node's process, Playwright's JSON; what a run printed is never read for it, and a
-# name that stands for two tests registered, whatever came of each, is none), and a failure
-# that names only others MISSED-BY-MEANT; a run that has a reporter and fails with no test
-# failing catches nothing; where a command has no reporter, a run that exits with a failure
-# twice with the plant and passes twice without it, each in its time, anything else
-# unstable, a run that left the checkout otherwise than it found it too; a test file that
-# ran no test of its own, an error outside every test, no test found, a failure that names
+# JUnit for `cargo test` and a suite of xtask's, its skipped tests named too, the plants'
+# own reporters of Node's tests, run in Node's process, and of Playwright's; what a run
+# printed is never read for it, and a name that stands for two tests registered, whatever
+# came of each, is none, nor is a test file that failed whole), and a failure that names
+# only others MISSED-BY-MEANT; a run that has a reporter and fails with no test failing
+# catches nothing; where a command has no reporter, a run that exits with a failure twice
+# with the plant and passes twice without it, each in its time, anything else unstable, a
+# run that left the checkout otherwise than it found it too (where git says nothing of the
+# checkout, that is said once, and nothing is unstable for it); a test file that ran no
+# test of its own, an error outside every test, no test found, a test nextest could not
+# start, a Playwright test whose hook failed and whose body never did, a failure that names
 # no test (one cancelled, a Node test file ended while a test of it ran) are BROKEN; a run
-# out of its time HUNG whatever it then exits with, and nothing it started outlives it; the
-# programs cf-e2e's tests run are taken from where cargo says it put them; a build nextest
-# says failed DOES NOT COMPILE, whatever a test
+# out of its time HUNG whatever it then exits with, and nothing it started outlives it,
+# the groups nextest gives its tests too (a run leads a session of its own on Unix, and on
+# Windows a job it is put in before it runs); the programs cf-e2e's tests run are taken
+# from where cargo says it put them; the Windows runner's copy is a checkout of git's whose
+# one commit is what went over; a build nextest says failed DOES NOT COMPILE, whatever a test
 # printed, and the build before the rig is cargo's own, which installs nothing, a build
 # that fails otherwise NOT BUILT; a run that writes more than it may is HUNG; and the
 # runs speak with no colour). The tools' own tests must catch each.
@@ -30,6 +35,8 @@ xtask-test-process = ["cargo", "test", "--offline", "--target-dir", "app/src-tau
 xtask-test-closure = ["cargo", "test", "--offline", "--target-dir", "app/src-tauri/target/xtask-check", "-p", "xtask", "--test", "closure"]
 # The plants' own driver, runs and report, on stand-in commands and on this test binary.
 xtask-lib-plants = ["cargo", "test", "--offline", "--target-dir", "app/src-tauri/target/xtask-check", "-p", "xtask", "--lib", "plants::"]
+# The Windows runner: the scripts it sends, and on Windows what they do.
+xtask-lib-windows = ["cargo", "test", "--offline", "--target-dir", "app/src-tauri/target/xtask-check", "-p", "xtask", "--lib", "windows::"]
 # The programs cf-e2e's tests run: built for them, or taken from where the run built them.
 cf-e2e-lib-cf = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "cf::"]
 # What capturing a program ends when its time runs out.
@@ -619,18 +626,18 @@ runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
 file = "tools/xtask/src/plants/runs/results.rs"
-find = '''                        b"failure" | b"error" => test.failed = true,'''
-replace = '''                        b"failure" | b"error" | b"system-out" => test.failed = true,'''
+find = '''                        b"failure" | b"error" => {'''
+replace = '''                        b"failure" | b"error" | b"system-out" => {'''
 
 [[plant]]
 name = "tooling: what a Playwright test wrote to its standard error is read for a test that failed"
-meant = "playwright_says_each_test_named_from_its_first_group_on_and_whether_it_failed_and_nothing_it_printed"
+meant = "playwright_s_report_names_each_test_and_the_errors_outside_every_test"
 runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
-file = "tools/xtask/src/plants/runs/results.rs"
-find = '''            failed: statuses.contains(&"unexpected"),'''
-replace = '''            failed: statuses.contains(&"unexpected") || spec.to_string().contains(" failed"),'''
+file = "tools/xtask/src/plants/runs/reporters/playwright.mjs"
+find = "        outcome: test.outcome(),"
+replace = "        outcome: last?.stderr.length ? 'unexpected' : test.outcome(),"
 
 [[plant]]
 name = "tooling: a Node test is named by its own title alone, whatever tests it is in"
@@ -644,13 +651,13 @@ replace = "            name: read.path.last().cloned().unwrap_or_default(),"
 
 [[plant]]
 name = "tooling: a Playwright test is named with its file"
-meant = "playwright_says_each_test_named_from_its_first_group_on_and_whether_it_failed_and_nothing_it_printed"
+meant = "playwright_s_report_names_each_test_and_the_errors_outside_every_test"
 runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
-file = "tools/xtask/src/plants/runs/results.rs"
-find = "        suite(file, &[], &mut tests, &mut others);"
-replace = '''        suite(file, &[file["title"].as_str().unwrap_or_default().to_owned()], &mut tests, &mut others);'''
+file = "tools/xtask/src/plants/runs/reporters/playwright.mjs"
+find = "        path: test.titlePath().slice(3),"
+replace = "        path: test.titlePath().slice(2),"
 
 [[plant]]
 name = "tooling: Node is not asked for the plants' report"
@@ -675,14 +682,14 @@ find = '''    Ok(format!("./{}", parts.join("/")))'''
 replace = '''    Ok(parts.join("/"))'''
 
 [[plant]]
-name = "tooling: Playwright is not asked for its JSON report"
-meant = "playwright_writes_its_json_report_to_the_run_beside_the_list_it_prints"
+name = "tooling: Playwright is not asked for the plants' report"
+meant = "playwright_writes_the_plants_report_to_the_run_beside_the_list_it_prints"
 runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
 file = "tools/xtask/src/plants/runs/reporters.rs"
-find = '''    words.insert(test, "--reporter=list,json".to_owned());'''
-replace = '''    words.insert(test, "--reporter=list".to_owned());'''
+find = '''    words.insert(test, format!("--reporter=list,{reporter}"));'''
+replace = '''    words.insert(test, format!("--reporter=list{}", &reporter[..0]));'''
 
 [[plant]]
 name = "tooling: nextest runs a test that failed again"
@@ -1024,18 +1031,13 @@ runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
 file = "tools/xtask/src/plants/runs/results.rs"
-find = '''    let suites = report["suites"]
-        .as_array()
-        .ok_or("the report has no suites")?;'''
-replace = '''    let none = Vec::new();
-    let suites = report["suites"].as_array().unwrap_or(&none);'''
+find = "    tests: Vec<PlaywrightTest>,\n    errors: Vec<String>,\n    end: bool,\n"
+replace = "    #[serde(default)]\n    tests: Vec<PlaywrightTest>,\n    #[serde(default)]\n    errors: Vec<String>,\n    #[serde(default)]\n    end: bool,\n"
 
 [[plant.edit]]
 file = "tools/xtask/src/plants/runs/results.rs"
-find = '''        .ok_or("the report has no errors")?
-'''
-replace = '''        .unwrap_or(&none)
-'''
+find = "    if !report.end {"
+replace = "    if false && !report.end {"
 
 # A test to do, or skipped, neither failed nor passed.
 
@@ -1108,8 +1110,8 @@ runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
 file = "tools/xtask/src/plants/runs/results.rs"
-find = "                Some((test, false)) => tests.push(test),"
-replace = "                Some((test, _)) => tests.push(test),"
+find = "                if case.skipped || unstarted {"
+replace = "                if unstarted {"
 
 # A suite of xtask's that is a `cargo test` is that test, under nextest, in its folder and
 # with its variables; libtest's log, whose lines an ignored test's reason could write, is
@@ -1165,7 +1167,7 @@ replace = "        vars: Vec::new(),"
 
 [[plant]]
 name = "tooling: the variables a run is set up with are not given to it"
-meant = "playwright_s_json_report_names_each_test_and_the_errors_outside_every_test"
+meant = "playwright_s_report_names_each_test_and_the_errors_outside_every_test"
 runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
@@ -1207,27 +1209,22 @@ replace = "    if named.iter().all(|test| test.name == named[0].name && test.at 
 
 [[plant]]
 name = "tooling: one test run in two of Playwright's projects is read as two"
-meant = "playwright_says_each_test_named_from_its_first_group_on_and_whether_it_failed_and_nothing_it_printed"
+meant = "playwright_says_each_test_named_from_its_first_group_on_and_whether_its_own_body_failed"
 runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
 file = "tools/xtask/src/plants/runs/results.rs"
-find = "        let test = Test {\n            name,\n            at,\n"
-replace = "        for _ in statuses.iter().skip(1) {\n            tests.push(Test { name: name.clone(), at: at.clone(), file: None, whole: false, failed: false });\n        }\n        let test = Test {\n            name,\n            at,\n"
+find = "            .find(|(seen, _)| seen.name == name && seen.at == at)"
+replace = "            .find(|(seen, seen_in)| seen.name == name && seen.at == at && seen_in.iter().all(|other| other.project == test.project))"
 
 [[plant]]
 name = "tooling: a Playwright test is told from another of its name by nothing"
-meant = "playwright_says_each_test_named_from_its_first_group_on_and_whether_it_failed_and_nothing_it_printed"
+meant = "playwright_says_each_test_named_from_its_first_group_on_and_whether_its_own_body_failed"
 runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
 file = "tools/xtask/src/plants/runs/results.rs"
-find = '''        let at = format!(
-            "{}:{}:{}",
-            spec["file"].as_str().unwrap_or_default(),
-            spec["line"],
-            spec["column"]
-        );'''
+find = '''        let at = format!("{}:{}:{}", test.file, test.line, test.column);'''
 replace = "        let at = String::new();"
 
 [[plant]]
@@ -1689,6 +1686,8 @@ replace = "        .find(|platform| platform.is_empty());"
 name = "tooling (cf-process): a child that took no notice of the ask is left running once its parent ended at it"
 meant = "a_child_that_ignores_being_asked_is_forced_though_its_parent_ended_at_the_ask"
 runs = ["cf-process-capture"]
+# Windows has no ask a child can take no notice of: its end is the whole tree's.
+platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = "crates/cf-process/src/capture.rs"
@@ -1926,7 +1925,7 @@ platforms = ["windows"]
 [[plant.edit]]
 file = "crates/cf-process/src/capture.rs"
 find = "        Hold::Node => {\n            crate::job::adopt(&child);"
-replace = "        _ if true => {\n            crate::job::adopt(&child);"
+replace = "        Hold::Node | Hold::Whole => {\n            crate::job::adopt(&child);"
 
 [[plant]]
 name = "tooling (cf-process): the job of a program held whole lets what it starts leave"
@@ -1969,24 +1968,26 @@ runs = ["xtask-lib-plants"]
 [[plant.edit]]
 file = "tools/xtask/src/plants/runs/results.rs"
 find = '''
-                Some((test, true)) => others.push(Test {
-                    failed: false,
-                    ..test
-                }),
+                if case.skipped || unstarted {
+                    results.others.push(test);
+                } else {
 '''
 replace = '''
-                Some((_, true)) => {}
+                if unstarted {
+                    results.others.push(test);
+                } else if case.skipped {
+                } else {
 '''
 
 [[plant]]
 name = "tooling: a Playwright test skipped in every project is dropped from its report"
-meant = "playwright_says_each_test_named_from_its_first_group_on_and_whether_it_failed_and_nothing_it_printed"
+meant = "playwright_says_each_test_named_from_its_first_group_on_and_whether_its_own_body_failed"
 runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
 file = "tools/xtask/src/plants/runs/results.rs"
-find = "        if statuses.is_empty() {\n            others.push(test);"
-replace = "        if statuses.is_empty() {\n            drop(test);"
+find = "        if ran {\n            results.tests.push(test);\n        } else {\n            results.others.push(test);\n        }"
+replace = "        if ran {\n            results.tests.push(test);\n        }"
 
 # An exception or a rejection, unhandled, from a test while it runs is that test's failure.
 
@@ -2050,3 +2051,250 @@ find = '''
 replace = '''
                         continue;
 '''
+
+# Round 6 (both reviewers' look at round 5, and what zeewin found, 2026-10-17). nextest names
+# every test a run registered, the skipped ones too: an ignored Rust test of the meant name is
+# a test of it.
+
+[[plant]]
+name = "tooling: nextest is not asked to name the tests it skipped"
+meant = "an_ignored_rust_test_of_the_meant_name_in_another_binary_makes_the_name_stand_for_two"
+runs = ["xtask-lib-plants"]
+
+[[plant.edit]]
+file = "tools/xtask/src/plants/runs/reporters.rs"
+find = '''path = \"junit.xml\"\nreport-skipped = \"all\"\n"'''
+replace = '''path = \"junit.xml\"\n"'''
+
+# A test nextest could not start never ran: the run is BROKEN, and says which.
+
+[[plant]]
+name = "tooling: a test nextest could not start is one that failed"
+meant = "a_rust_test_nextest_could_not_start_is_no_catch_and_the_run_says_which"
+runs = ["xtask-lib-plants"]
+
+[[plant.edit]]
+file = "tools/xtask/src/plants/runs/results.rs"
+find = "                let unstarted = case.unstarted();"
+replace = "                let unstarted = false && case.unstarted();"
+
+[[plant]]
+name = "tooling: nextest's own word for a test it could not start is not read"
+meant = "a_test_nextest_could_not_start_never_ran_and_is_an_error_outside_every_test"
+runs = ["xtask-lib-plants"]
+
+[[plant.edit]]
+file = "tools/xtask/src/plants/runs/results.rs"
+find = "            Some(EXECUTION_FAILURE) => true,"
+replace = "            Some(EXECUTION_FAILURE) => false,"
+
+[[plant]]
+name = "tooling: the double-spawn's failure to start a test is not read"
+meant = "a_test_nextest_could_not_start_never_ran_and_is_an_error_outside_every_test"
+runs = ["xtask-lib-plants"]
+
+[[plant.edit]]
+file = "tools/xtask/src/plants/runs/results.rs"
+find = "                failure == DOUBLE_SPAWN_FAILED.0\n                    && self.err.trim_start().starts_with(DOUBLE_SPAWN_FAILED.1)"
+replace = "                failure == DOUBLE_SPAWN_FAILED.0 && DOUBLE_SPAWN_FAILED.1.is_empty()"
+
+[[plant]]
+name = "tooling: a test nextest could not start is not said with the run that broke"
+meant = "a_rust_test_nextest_could_not_start_is_no_catch_and_the_run_says_which"
+runs = ["xtask-lib-plants"]
+
+[[plant.edit]]
+file = "tools/xtask/src/plants/runs.rs"
+find = '''                Some(error) => Some(format!("{error}: it never ran")),'''
+replace = '''                Some(_) => none_ran.then(|| "it ran no test".to_owned()),'''
+
+# Playwright: only a test whose own body ran and failed catches; a hook's failure is the hook's.
+
+[[plant]]
+name = "tooling: a Playwright test whose beforeAll threw is one whose body failed"
+meant = "a_playwright_test_whose_before_all_threw_never_ran_and_catches_nothing"
+runs = ["xtask-lib-plants"]
+
+[[plant.edit]]
+file = "tools/xtask/src/plants/runs/reporters/playwright.mjs"
+find = "        own: last !== undefined && last.errors.length > hooks.count,"
+replace = "        own: last !== undefined && last.errors.length > 0,"
+
+[[plant]]
+name = "tooling: every hook step of a Playwright test is counted, its inner ones too"
+meant = "a_playwright_test_whose_before_all_threw_never_ran_and_catches_nothing"
+runs = ["xtask-lib-plants"]
+
+[[plant.edit]]
+file = "tools/xtask/src/plants/runs/reporters/playwright.mjs"
+find = "    if (step.category !== 'hook' || step.parent !== undefined || step.error === undefined) return"
+replace = "    if (step.category !== 'hook' || step.error === undefined) return"
+
+[[plant]]
+name = "tooling: a Playwright hook that failed is not said"
+meant = "playwright_says_each_test_named_from_its_first_group_on_and_whether_its_own_body_failed"
+runs = ["xtask-lib-plants"]
+
+[[plant.edit]]
+file = "tools/xtask/src/plants/runs/results.rs"
+find = "            .filter(|project| project.outcome == Outcome::Unexpected && !project.own)"
+replace = "            .filter(|_| false)"
+
+# A test file that failed whole never stands for the meant test, whatever its name.
+
+[[plant]]
+name = "tooling: a Node test file that failed whole stands for the meant test of its name"
+meant = "a_node_test_file_that_failed_whole_never_stands_for_the_meant_test_of_its_name"
+runs = ["xtask-lib-plants"]
+
+[[plant.edit]]
+file = "tools/xtask/src/plants/driver/confirm.rs"
+find = "        .filter(|test| !test.whole && report::is_meant(&test.name, meant))"
+replace = "        .filter(|test| report::is_meant(&test.name, meant))"
+
+# Nothing a run started outlives it, the groups nextest gives its tests included: held whole, a
+# run leads a session of its own on Unix, is asked first, then its session, its descendants and
+# those noted as it was asked are forced.
+
+[[plant]]
+name = "tooling (cf-process): a program held whole leads a group, not a session"
+meant = "held_whole_what_a_program_left_in_a_group_of_its_own_is_ended_once_it_has_ended"
+runs = ["cf-process-capture"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/group.rs"
+find = "            if libc::setsid() == -1 {"
+replace = "            if libc::setpgid(0, 0) == -1 {"
+
+[[plant]]
+name = "tooling (cf-process): the session of a program held whole is not swept"
+meant = "held_whole_what_a_program_left_in_a_group_of_its_own_is_ended_once_it_has_ended"
+runs = ["cf-process-capture"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/group.rs"
+find = "                .filter(|process| process.session == leader)"
+replace = "                .filter(|_| false)"
+
+[[plant]]
+name = "tooling (cf-process): nothing is noted as a program held whole is asked to end"
+meant = "held_whole_out_of_its_time_a_child_in_a_session_of_its_own_is_noted_as_the_program_is_asked"
+runs = ["cf-process-capture"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/group.rs"
+find = "                Ending::Asked => self.note(pid),"
+replace = "                Ending::Asked => {}"
+
+[[plant]]
+name = "tooling (cf-process): what descends from a program held whole as it is forced is let go"
+meant = "held_whole_out_of_its_time_a_child_the_program_starts_as_it_is_asked_is_ended_too"
+runs = ["cf-process-capture"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/group.rs"
+find = "                .chain(&table::descendants(&now, leader))\n"
+replace = ""
+
+[[plant]]
+name = "tooling (cf-process): a capture held whole that is dropped forces its program, unasked"
+meant = "held_whole_a_capture_dropped_asks_its_program_first_and_then_forces_what_is_left"
+runs = ["cf-process-capture"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/group.rs"
+find = "                self.end(Ending::Asked);\n"
+replace = ""
+
+[[plant]]
+name = "tooling: a run stopped or out of its time forces nextest alone, not what its tests left"
+meant = "what_a_rust_test_left_in_the_group_nextest_gave_it_is_ended_at_a_stop_and_out_of_time"
+runs = ["xtask-lib-plants"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/group.rs"
+find = "                Ending::Forced => self.sweep(pid),"
+replace = "                Ending::Forced => {}"
+
+# On Windows a program held whole is started suspended, put in its job, and then let run.
+
+[[plant]]
+name = "tooling (cf-process): a program held whole runs before it is put in its job"
+meant = "held_whole_a_grandchild_started_at_once_is_in_the_job_and_ends_with_it"
+runs = ["cf-process-capture"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/group.rs"
+find = "    command.creation_flags(CREATE_NO_WINDOW | CREATE_SUSPENDED);"
+replace = "    command.creation_flags(CREATE_NO_WINDOW | (CREATE_SUSPENDED & 0));"
+
+[[plant]]
+name = "tooling (cf-process): a program held whole is never let run"
+meant = "held_whole_a_grandchild_started_at_once_is_in_the_job_and_ends_with_it"
+runs = ["cf-process-capture"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/job.rs"
+find = "            resume(pid)?;"
+replace = "            let _ = (pid, resume as fn(u32) -> Result<(), String>);"
+
+# The Windows runner's copy is a checkout of git's whose one commit is what went over, and
+# where git says nothing of a checkout, the plants' runner says so once.
+
+[[plant]]
+name = "tooling: the Windows runner's copy is not made a checkout of git's"
+meant = "the_copy_is_made_a_checkout_whose_one_commit_is_what_went_over_and_nothing_else"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "  if (Get-Command git -ErrorAction SilentlyContinue) { Save-Tree } else {"
+replace = "  if ($false) { Save-Tree } else {"
+
+[[plant]]
+name = "tooling: the Windows runner commits every file of its copy, a build's outputs too"
+meant = "the_copy_is_made_a_checkout_whose_one_commit_is_what_went_over_and_nothing_else"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "@('read-tree', '--empty'), @('--literal-pathspecs', 'add', '-f', '--pathspec-from-file=«synced»')"
+replace = "@('add', '-A')"
+
+[[plant]]
+name = "tooling: the Windows runner's sweep takes its copy's checkout away"
+meant = "the_copy_keeps_the_runs_own_files_and_the_builds_outputs_and_nothing_else"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "    \".git\",\n"
+replace = "    \".synced-files\",\n"
+
+[[plant]]
+name = "tooling: a checkout git says nothing of is not said"
+meant = "a_plant_of_a_checkout_git_says_nothing_of_is_tried_and_that_is_said_once_before_any"
+runs = ["xtask-lib-plants"]
+
+[[plant.edit]]
+file = "tools/xtask/src/plants/driver.rs"
+find = "    if let Some(untold) = runner.untold() {\n        writeln!(out, \"{untold}\")?;\n    }\n"
+replace = ""
+
+[[plant]]
+name = "tooling: a checkout git says nothing of is given a state of its own each time"
+meant = "a_plant_of_a_checkout_git_says_nothing_of_is_tried_and_that_is_said_once_before_any"
+runs = ["xtask-lib-plants"]
+
+[[plant.edit]]
+file = "tools/xtask/src/plants/runs.rs"
+find = "            return Some(UNTOLD.to_owned());"
+replace = "            return Some(format!(\"{UNTOLD} {:?}\", std::time::Instant::now()));"

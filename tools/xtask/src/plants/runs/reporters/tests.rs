@@ -125,7 +125,7 @@ fn cargo_test_is_run_by_nextest_with_its_own_words_and_a_config_that_writes_the_
         written,
         format!(
             "[store]\ndir = \"{store}\"\n\n[profile.plants]\nretries = 0\nfail-fast = false\n\n\
-             [profile.plants.junit]\npath = \"junit.xml\"\n"
+             [profile.plants.junit]\npath = \"junit.xml\"\nreport-skipped = \"all\"\n"
         )
     );
 }
@@ -307,7 +307,7 @@ fn node_writes_the_plants_report_to_the_run_beside_the_report_it_prints() {
 }
 
 #[test]
-fn playwright_writes_its_json_report_to_the_run_beside_the_list_it_prints() {
+fn playwright_writes_the_plants_report_to_the_run_beside_the_list_it_prints() {
     let command = words(&[
         "node",
         "app/node_modules/@playwright/test/cli.js",
@@ -317,17 +317,26 @@ fn playwright_writes_its_json_report_to_the_run_beside_the_list_it_prints() {
         "-g",
         "file drop",
     ]);
-    let dir = Path::new("/runs/7");
+    // The reporter is written into the run's folder, and named from the checkout's root;
+    // the report goes where the variable it reads says.
+    let root = tempfile::tempdir().unwrap();
+    let dir = root.path().join("app/src-tauri/target/plants-runs/run-7");
+    fs::create_dir_all(&dir).unwrap();
     let invocation = Reporter::Playwright
-        .setup(&command, dir, &checkout(Path::new("/checkout")), "")
+        .setup(&command, &dir, &checkout(root.path()), "")
         .unwrap();
     assert_eq!(invocation.program, "node");
+    assert_eq!(invocation.cwd, root.path());
+    assert_eq!(
+        fs::read_to_string(dir.join("plants-playwright.mjs")).unwrap(),
+        PLAYWRIGHT_REPORTER
+    );
     assert_eq!(
         args(&invocation),
         [
             "app/node_modules/@playwright/test/cli.js",
             "test",
-            "--reporter=list,json",
+            "--reporter=list,./app/src-tauri/target/plants-runs/run-7/plants-playwright.mjs",
             "app/tests/core-page.spec.mjs",
             "-g",
             "file drop",
@@ -336,8 +345,8 @@ fn playwright_writes_its_json_report_to_the_run_beside_the_list_it_prints() {
     assert_eq!(
         invocation.vars,
         [(
-            OsString::from("PLAYWRIGHT_JSON_OUTPUT_FILE"),
-            Some(dir.join("report.json").into_os_string()),
+            OsString::from("PLANTS_PLAYWRIGHT_REPORT"),
+            Some(dir.join("playwright.json").into_os_string()),
         )]
     );
 }
@@ -376,8 +385,8 @@ fn each_report_is_read_from_where_its_runner_wrote_it_and_one_that_is_not_there_
     )
     .unwrap();
     fs::write(
-        dir.path().join("report.json"),
-        r#"{"suites": [{"title": "a.spec.mjs", "specs": [{"title": "page", "tests": [{"status": "unexpected"}]}]}], "errors": []}"#,
+        dir.path().join("playwright.json"),
+        r#"{"tests":[{"path":["page"],"file":"/a.spec.mjs","line":1,"column":1,"project":"","outcome":"unexpected","own":true,"hook":null}],"errors":[],"end":true}"#,
     )
     .unwrap();
     let failed_of = |reporter: Reporter| -> Vec<String> {
@@ -391,23 +400,24 @@ fn each_report_is_read_from_where_its_runner_wrote_it_and_one_that_is_not_there_
     assert_eq!(failed_of(Reporter::Nextest), ["a::nextest true"]);
     assert_eq!(failed_of(Reporter::Node), ["node true"]);
     assert_eq!(failed_of(Reporter::Playwright), ["page true"]);
-    // A report that is empty, cut short or not one says why, with its path.
+    // A report that is empty, cut short or not one says why, with its path, as the
+    // system writes it (with `\` on Windows: zeewin, 2026-10-17).
     for (file, text, reporter) in [
-        ("plants/junit.xml", "", Reporter::Nextest),
+        (&["plants", "junit.xml"][..], "", Reporter::Nextest),
         (
-            "plants/junit.xml",
+            &["plants", "junit.xml"],
             "<testsuites><testcase name=\"a\"/>",
             Reporter::Nextest,
         ),
-        ("node.jsonl", "", Reporter::Node),
-        ("report.json", "{", Reporter::Playwright),
+        (&["node.jsonl"], "", Reporter::Node),
+        (&["playwright.json"], "{", Reporter::Playwright),
     ] {
-        fs::write(dir.path().join(file), text).unwrap();
+        let path = file
+            .iter()
+            .fold(dir.path().to_path_buf(), |path, part| path.join(part));
+        fs::write(&path, text).unwrap();
         let said = reporter.results(dir.path()).unwrap().unwrap_err();
-        assert!(
-            said.starts_with(&dir.path().join(file).display().to_string()),
-            "{said}"
-        );
+        assert!(said.starts_with(&path.display().to_string()), "{said}");
     }
 }
 

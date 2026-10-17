@@ -3,7 +3,9 @@
 //! time, and seeded sequences of them, as Node answered. Each case starts from
 //! the same file in a home of its own, makes the same call at the same instant,
 //! and is held to Node's answer or refusal as `JSON.stringify` writes it, to
-//! the file it left, byte for byte, and to nothing left beside it.
+//! the file it left, byte for byte, and to nothing left beside it. One change to
+//! the files is made on purpose, and held to what it is ([`departed_after`]):
+//! the keys of `preferences` this build does not know are kept.
 
 // The golden's own reading: a failure in it is the test's.
 #![allow(clippy::unwrap_used)]
@@ -12,6 +14,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use cf_base::js;
+use cf_base::json::as_parsed_fields;
 use cf_base::refusal::Refusal;
 use cf_base::time::{parse, Clock};
 use cf_catalog::{Catalog, Roster};
@@ -146,6 +149,39 @@ fn holds_js_numbers(value: &Value) -> bool {
     }
 }
 
+/// The keys of `preferences` this build knows: Node's choice, 3.0.4's switch for
+/// specs, and where an earlier build of this one kept the app's folder and variant.
+const KNOWN: [&str; 4] = ["ownHarnessOnly", "specs", "specsFolder", "specsVariant"];
+
+/// The file this build leaves where Node left `after`, for the one change made
+/// to it on purpose since (2026-10-16): Node's writer of the choices dropped from
+/// `preferences` every key it did not know, and this build keeps them after its
+/// own, so that a later build's survive it. For a `setPreferences` that wrote
+/// the file, the keys of the file before that this build does not know follow
+/// Node's, as they were; none where there were none, and Node's file is this
+/// build's.
+fn departed_after(case: &Value, before: Option<&str>, after: &str) -> Option<String> {
+    if case["call"][0] != "setPreferences" {
+        return None;
+    }
+    let before: Value = serde_json::from_str(before?).ok()?;
+    let Value::Object(kept) = &before["preferences"] else {
+        return None;
+    };
+    let mut later: Map<String, Value> = kept
+        .iter()
+        .filter(|(key, _)| !KNOWN.contains(&key.as_str()))
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect();
+    if later.is_empty() {
+        return None;
+    }
+    as_parsed_fields(&mut later);
+    let mut left: Value = serde_json::from_str(after).unwrap();
+    left["preferences"].as_object_mut().unwrap().extend(later);
+    Some(format!("{}\n", js::stringify_indented(&left, 2)))
+}
+
 /// The names of what the home holds, in order.
 fn left_in(home: &Path) -> Vec<String> {
     let mut left: Vec<String> = std::fs::read_dir(home)
@@ -164,6 +200,7 @@ fn every_operation_on_the_roster_answers_as_node_answered_and_leaves_the_file_no
     let cases = golden["cases"].as_array().unwrap();
     let mut calls = BTreeMap::<String, usize>::new();
     let (mut answers, mut refusals, mut wrote, mut from_steps) = (0, 0, 0, 0);
+    let mut departures = 0;
     for case in cases {
         let call = case["call"].as_array().unwrap();
         *calls
@@ -213,9 +250,17 @@ fn every_operation_on_the_roster_answers_as_node_answered_and_leaves_the_file_no
         }
         match case.get("after") {
             Some(after) => {
+                let after = after.as_str().unwrap();
+                let expected = match departed_after(case, before, after) {
+                    Some(departed) => {
+                        departures += 1;
+                        departed
+                    }
+                    None => after.to_owned(),
+                };
                 assert_eq!(
                     std::fs::read_to_string(&path).unwrap(),
-                    after.as_str().unwrap(),
+                    expected,
                     "the file {case} left"
                 );
                 wrote += 1;
@@ -256,4 +301,9 @@ fn every_operation_on_the_roster_answers_as_node_answered_and_leaves_the_file_no
         ]
     );
     assert_eq!((answers, refusals, wrote, from_steps), (716, 1000, 523, 60));
+    // Held, so a departure that grows or shrinks is seen.
+    assert_eq!(
+        departures, 9,
+        "the files left with a later build's keys kept"
+    );
 }

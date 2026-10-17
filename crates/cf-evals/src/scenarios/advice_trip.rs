@@ -11,6 +11,7 @@ pub(super) fn scenario() -> Scenario {
         id: "advice-trip",
         title: "Advice out, advice back, a note to the owner",
         fixture: "site",
+        uncommitted: None,
         prompt: join(&[
             "Un test de funcționare, te rog, fără să mă întrebi pe mine nimic. Cere sfatul unui advisor",
             "(cf task add --advice): pentru un site despre burnout, ce culoare e mai potrivită pentru",

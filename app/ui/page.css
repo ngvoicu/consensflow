@@ -14,6 +14,7 @@
   --seafoam-dim: #2b7569;
   --buoy: #ff7868;
   --amber: #e7b968;
+  --sky: #9cc3f0;
   --slate: #3d5b62;
   --strip: #0e252b;
   --strip-hover: #133139;
@@ -638,6 +639,14 @@ tr[data-session] .row-name { font-weight: 600; letter-spacing: .08em; text-trans
 .project-specs .specs-help { margin: 0; font-size: 12px; color: var(--muted); }
 .project-specs button { justify-self: start; }
 .project-specs :disabled { opacity: .5; }
+/* The variant's choice, with the Specmint version of the one that will be used beside it. */
+.specs-pick { display: flex; align-items: center; gap: 12px; }
+.specs-pick select { flex: 1 1 auto; min-width: 0; }
+.specs-version { flex: none; font: 11px var(--mono); color: var(--muted); }
+/* Settings, Specs: the Specmint this build brings, its version and its variants. */
+.specmint { gap: 8px; }
+.specmint .specmint-version { margin: 0; font-size: 13px; }
+.specmint .staff { margin: 0; }
 .member-confirm { color: var(--buoy); font-size: 12px; margin-right: 8px; }
 /* Each part of a task is a panel of its own, headed by what it is. */
 .drawer-section {
@@ -719,6 +728,10 @@ details.drawer-section > summary:focus-visible { outline: 2px solid var(--seafoa
 .step-body table { border-collapse: collapse; }
 .step-body :is(th, td) { padding: 3px 14px 3px 0; border-bottom: 1px solid var(--line-soft); text-align: left; vertical-align: top; }
 .step-body th { color: var(--muted); font-weight: 600; }
+.step-body hr { margin: 8px 0; border: 0; border-top: 1px solid var(--line-soft); }
+/* A task's box, ticked or not, where its bullet would be. */
+.md-task { list-style: none; }
+.md-task > input { margin: 0 6px 0 -18px; vertical-align: -2px; accent-color: var(--seafoam); }
 .transcript { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
 .transcript-item { border-left: 3px solid var(--line); padding: 2px 0 2px 12px; }
 .transcript-item[data-role="assistant"] { border-color: var(--seafoam-dim); }
@@ -919,6 +932,140 @@ dialog.screen { width: min(860px, calc(100vw - 48px)); height: calc(100vh - 48px
 dialog.screen[open] { display: grid; grid-template-rows: minmax(0, 1fr) auto; }
 dialog.screen iframe { width: 100%; height: 100%; border: 0; }
 dialog.screen .dialog-actions { padding: 12px 26px 14px; border-top: 1px solid var(--line-soft); }
+
+/* The specs viewer: a project's specs folder, its tree on the left, the file chosen on the right. */
+dialog.specs-viewer { width: min(1240px, calc(100vw - 48px)); }
+dialog.specs-viewer[open] { grid-template-rows: auto auto auto minmax(0, 1fr) auto; }
+.specs-head { grid-row: 1; display: flex; align-items: baseline; gap: 12px; padding: 16px 22px 12px; border-bottom: 1px solid var(--line-soft); }
+.specs-title { margin: 0; font-size: 17px; font-weight: 650; }
+.specs-folder { font: 11px var(--mono); color: var(--muted); }
+.specs-hint { grid-row: 2; margin: 0; padding: 6px 22px; border-bottom: 1px solid var(--line-soft); font-size: 11.5px; color: var(--muted); }
+.specs-cut { grid-row: 3; margin: 0; padding: 8px 22px; border-bottom: 1px solid var(--line-soft); font-size: 12px; color: var(--amber); }
+.specs-body { grid-row: 4; display: grid; grid-template-columns: minmax(200px, 270px) minmax(0, 1fr); min-height: 0; }
+dialog.specs-viewer .dialog-actions { grid-row: 5; }
+.specs-tree { overflow: auto; padding: 10px 8px 16px; border-right: 1px solid var(--line-soft); background: var(--deep); }
+.tree-level { list-style: none; margin: 0; padding: 0; }
+.tree-level .tree-level { padding-left: 14px; }
+.tree-file {
+  display: block;
+  width: 100%;
+  padding: 4px 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--foam);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tree-file:hover { background: var(--strip-hover); }
+.tree-file[aria-current="true"] { background: var(--panel-raised); border-color: var(--line); color: var(--seafoam); }
+.tree-folder > summary {
+  padding: 4px 6px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 650;
+  color: var(--foam);
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tree-folder > summary::marker { color: var(--muted); }
+.tree-folder > summary:hover { background: var(--strip-hover); }
+.specs-file { min-width: 0; overflow: auto; padding: 16px 28px 32px; display: flex; flex-direction: column; }
+.specs-caption { margin: 0 0 14px; font: 11px var(--mono); color: var(--muted); }
+.specs-path { color: var(--foam); }
+:is(.specs-note, .specs-withheld) { margin: 0; color: var(--muted); font-size: 13px; }
+.specs-withheld { padding: 12px 14px; border: 1px dashed var(--line); border-radius: 8px; }
+.specs-refusal { margin: 0; color: var(--buoy); font-size: 13px; }
+.specs-plain { margin: 0; padding: 12px 14px; border: 1px solid var(--line-soft); border-radius: 8px; background: var(--deep); font: 12px/1.5 var(--mono); overflow: auto; white-space: pre; }
+.specs-image { align-self: flex-start; max-width: 100%; padding: 12px; border: 1px solid var(--line-soft); border-radius: 8px; background: var(--deep); }
+/* An HTML file: a card that opens it in the browser, its title read as text. */
+.spec-html { align-self: flex-start; display: grid; gap: 8px; justify-items: start; max-width: 560px; padding: 18px 20px; border: 1px solid var(--line-soft); border-radius: 10px; background: var(--panel-raised); }
+.spec-html-title { margin: 0; font-size: 18px; overflow-wrap: anywhere; }
+.spec-html-meta { margin: 0; font: 11.5px var(--mono); color: var(--muted); }
+.spec-html-help { margin: 0 0 4px; font-size: 12.5px; color: var(--muted); }
+.spec-html-said { margin: 0; font-size: 12px; color: var(--seafoam); }
+.spec-html-said:empty { display: none; }
+.spec-html-said[data-tone="error"] { color: var(--buoy); }
+.registry-more { margin: 10px 0 0; font-size: 12px; color: var(--muted); }
+
+/* A Markdown file: the board's own reading, at a document's size, its headings as headings. */
+.spec-markdown { max-width: 920px; font-size: 13.5px; line-height: 1.6; overflow-wrap: anywhere; }
+.spec-markdown > :first-child { margin-top: 0; }
+.spec-markdown :is(p, ul, ol, pre, blockquote, .md-table, figure) { margin: 0 0 12px; }
+.spec-markdown .md-heading { margin: 22px 0 10px; line-height: 1.25; }
+.spec-markdown h1.md-heading { font-size: 24px; }
+.spec-markdown h2.md-heading { font-size: 18px; padding-bottom: 6px; border-bottom: 1px solid var(--line-soft); }
+.spec-markdown h3.md-heading { font-size: 15px; }
+.spec-markdown :is(h4, h5, h6).md-heading { font-size: 13.5px; }
+.spec-markdown :is(ul, ol) { padding-left: 22px; }
+.spec-markdown li::marker { color: var(--muted); }
+.spec-markdown li > :is(ul, ol) { margin: 2px 0 0; }
+.spec-markdown code { font: 12px var(--mono); padding: 1px 5px; border-radius: 4px; background: var(--panel-raised); }
+.spec-markdown pre { padding: 10px 12px; border: 1px solid var(--line-soft); border-radius: 8px; background: var(--deep); overflow-x: auto; line-height: 1.45; }
+.spec-markdown pre code { padding: 0; background: none; }
+.spec-markdown blockquote { padding: 2px 0 2px 12px; border-left: 3px solid var(--seafoam-dim); color: var(--muted); }
+.spec-markdown hr { margin: 20px 0; border: 0; border-top: 1px solid var(--line); }
+.spec-markdown .md-table { overflow-x: auto; }
+.spec-markdown table { border-collapse: collapse; font-size: 12.5px; }
+.spec-markdown :is(th, td) { padding: 5px 14px 5px 0; border-bottom: 1px solid var(--line-soft); text-align: left; vertical-align: top; }
+.spec-markdown th { color: var(--muted); font-weight: 600; }
+.spec-markdown .md-task > input { margin-left: -20px; }
+/* A link to another file of the folder: it opens that file here. Any other link is words. */
+.md-link { padding: 0; border: 0; background: none; color: var(--seafoam); font: inherit; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.spec-markdown span[title] { text-decoration: underline dotted var(--muted); text-underline-offset: 2px; }
+.spec-fields { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 18px; }
+.spec-fields > div { display: flex; gap: 6px; padding: 3px 9px; border: 1px solid var(--line-soft); border-radius: 999px; font-size: 11.5px; }
+.spec-fields dt { color: var(--muted); }
+.spec-fields dd { margin: 0; color: var(--foam); }
+/* A diagram, drawn by Mermaid in the page's colours, or its source and why it was not. */
+.spec-diagram { padding: 14px; border: 1px solid var(--line-soft); border-radius: 8px; background: var(--deep); overflow-x: auto; }
+.spec-diagram svg { display: block; max-width: 100%; height: auto; margin: 0 auto; }
+.spec-diagram-note { margin: 0; color: var(--muted); font-size: 12px; }
+.spec-diagram-error { margin: 0 0 8px; color: var(--buoy); font-size: 12px; }
+.spec-diagram .spec-diagram-source { margin: 0; }
+
+/* The registry: a row for each spec, its status a chip, its progress a bar. */
+.spec-registry { max-width: 980px; }
+.registry-heading { margin: 0 0 14px; font-size: 22px; }
+.registry-rows { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.registry-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 96px 76px 170px 96px;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 10px 14px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: var(--panel-raised);
+  color: var(--foam);
+  font-size: 12.5px;
+  text-align: left;
+}
+button.registry-row { cursor: pointer; }
+button.registry-row:hover:not(:disabled) { border-color: var(--seafoam-dim); }
+.registry-head { padding-block: 0 4px; border: 0; background: none; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; }
+.registry-title { display: grid; min-width: 0; }
+.registry-title > * { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.registry-title strong { font-size: 13.5px; font-weight: 650; }
+.registry-title small { font: 11px var(--mono); color: var(--muted); }
+.registry-priority, .registry-updated { color: var(--muted); }
+.registry-updated { font: 11.5px var(--mono); }
+.status-chip { justify-self: start; padding: 2px 9px; border: 1px solid var(--line); border-radius: 999px; font-size: 11px; font-weight: 650; text-transform: capitalize; }
+.status-chip[data-status="active"] { border-color: var(--seafoam); background: rgba(99, 199, 178, .14); color: var(--seafoam); }
+.status-chip[data-status="paused"] { border-color: var(--amber); background: rgba(231, 185, 104, .14); color: var(--amber); }
+.status-chip[data-status="completed"] { border-color: var(--sky); background: rgba(156, 195, 240, .14); color: var(--sky); }
+.status-chip[data-status="archived"] { border-color: var(--slate); background: transparent; color: var(--muted); }
+.registry-progress { display: flex; align-items: center; gap: 8px; }
+.progress-bar { flex: 1; height: 6px; border-radius: 3px; background: var(--line-soft); overflow: hidden; }
+.progress-fill { display: block; height: 100%; border-radius: 3px; background: var(--seafoam); }
+.progress-words { font: 11.5px var(--mono); color: var(--muted); }
 
 @media (max-width: 760px) {
   .main, .main[data-board="hidden"] { grid-template-columns: 1fr; grid-template-rows: minmax(0, 1fr) 42vh; }

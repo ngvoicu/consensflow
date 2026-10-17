@@ -743,6 +743,11 @@ pub fn run(
         "copies of what is planted are kept in {}",
         saved.display()
     )?;
+    // Said once: each plant would otherwise be told of as one whose run left the
+    // checkout as it found it, unknown.
+    if let Some(untold) = runner.untold() {
+        writeln!(out, "{untold}")?;
+    }
     let limit = family.limit.as_secs();
     let mut built = false;
     let mut clean = CleanRuns::default();

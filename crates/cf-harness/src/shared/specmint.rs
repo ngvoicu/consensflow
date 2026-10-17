@@ -32,6 +32,7 @@
 //! its `skills.paths`, Pi the file as a second skill, and Codex and Devin read
 //! it by its path, which the chief's role text names.
 
+mod bundled;
 mod files;
 #[cfg(test)]
 pub(crate) mod testing;
@@ -48,6 +49,8 @@ use cf_base::file::{make_folder, rename, rm_force, write_file, FileError, Mkdir}
 use cf_base::path;
 use cf_proto::agents::Harness;
 use cf_proto::specs::Variant;
+
+pub use bundled::bundled_specmint;
 
 use crate::contract::{Launch, LaunchId, Skill, Specs};
 use crate::shared::launch_files::{harness_folder, integrations_path, CODEX_FOLDER};

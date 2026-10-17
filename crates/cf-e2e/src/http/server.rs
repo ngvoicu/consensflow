@@ -5,7 +5,7 @@
 //! request to a connection; each answer says it closes the connection.
 
 use std::io::{self, BufRead, BufReader, Read, Write};
-use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream};
+use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream, ToSocketAddrs};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
@@ -109,7 +109,16 @@ impl Server {
     /// Starts a server on a port it picks, answering each request as `handler`
     /// says.
     pub fn start(handler: impl Fn(&Request) -> Answer + Send + Sync + 'static) -> io::Result<Self> {
-        let listener = TcpListener::bind("127.0.0.1:0")?;
+        Self::bound("127.0.0.1:0", handler)
+    }
+
+    /// Starts a server on `address`, as a program told the port to listen on
+    /// does, answering each request as `handler` says.
+    pub fn bound(
+        address: impl ToSocketAddrs,
+        handler: impl Fn(&Request) -> Answer + Send + Sync + 'static,
+    ) -> io::Result<Self> {
+        let listener = TcpListener::bind(address)?;
         let address = listener.local_addr()?;
         let stopped = Arc::new(AtomicBool::new(false));
         let handler = Arc::new(handler);

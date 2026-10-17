@@ -23,7 +23,9 @@
 //! - [`trace`] reads what the daemon wrote as it went (its event file).
 //! - [`ask`] asks the harness code of the product what a test needs of it (its
 //!   own record of a conversation, a window's command line, the text a window
-//!   takes), through the test binary `harness-ask`.
+//!   takes, a member's Devin launch whole), through the test binary `harness-ask`.
+//! - [`calls`] is the stand-in `cf` of a window that has no daemon to reach, and
+//!   what it wrote down of the calls it was given.
 //! - [`members`] is the rig of the checks that play the chief with its token and
 //!   run real members.
 //! - [`tree`] says what a worker's turn left running: the processes its window's
@@ -36,16 +38,19 @@
 //!   them ([`report::conclude`]).
 //!
 //! What a run is asked to do is in variables that `cargo xtask live` sets from
-//! its flags ([`option`], [`list`], and the shared [`KEEP`], [`HARNESS`] and
-//! [`STEPS`]); what a live run says as it goes, and how it waits, is here too:
-//! [`Log`] says what the run is doing with the seconds since it began (and,
-//! with [`Log::found`], which harness it found and where), [`version_of`] names
+//! its flags ([`option`], [`list`], and the shared [`KEEP`], [`HARNESS`],
+//! [`STEPS`], [`MODELS`] and [`CLAUDE_MODEL`]); what a live run says as it goes,
+//! and how it waits, is here too: [`Log`] says what the run is doing with the
+//! seconds since it began (a run on the models of [`agents`] [`Log::begin`]s,
+//! which says what each harness runs on; with [`Log::found`], which harness it
+//! found and where), [`version_of`] names
 //! a harness's version, [`wait`] and [`until`] say what they wait for and for how
 //! long, and [`text`], [`cut`] and [`last_lines`] make what the product answered,
 //! or what a window showed, fit a line.
 
 pub mod agents;
 pub mod ask;
+pub mod calls;
 pub mod claude;
 pub mod cleanup;
 pub mod codex;
@@ -65,6 +70,7 @@ mod tests;
 use std::fmt::Display;
 use std::io::{self, Write};
 use std::path::Path;
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use serde_json::Value;
@@ -75,7 +81,7 @@ use crate::{files, Error, Result};
 
 pub use machine::{
     codex, command, installed, isolated_claude, rig, rig_with_stand_ins, shimmed_claude,
-    shimmed_claude_with_servers, Harness, Installed, ISOLATION,
+    shimmed_claude_with_servers, working_command, Harness, Installed, ISOLATION,
 };
 pub use who::{between, Who};
 
@@ -96,6 +102,14 @@ pub const HARNESS: &str = "CONSENSFLOW_LIVE_HARNESS";
 /// The variable that limits a live run to some of its steps or cases,
 /// `worker,question` (the flag `--steps`).
 pub const STEPS: &str = "CONSENSFLOW_LIVE_STEPS";
+
+/// The variable that names the models some harnesses run on,
+/// `pi=openai/gpt-6-luna,codex=gpt-6.1-sol:high` (the flag `--models`: [`agents`]).
+pub const MODELS: &str = "CONSENSFLOW_LIVE_MODELS";
+
+/// The variable that names Claude's model, as `--models claude=…` does (the flag
+/// `--claude-model`); `--models` wins where both name Claude.
+pub const CLAUDE_MODEL: &str = "CONSENSFLOW_LIVE_CLAUDE_MODEL";
 
 /// The variable the flag `flag` sets: `PREFIX`, then the flag in capitals with
 /// its dashes as underscores (`--input-box` is `CONSENSFLOW_LIVE_INPUT_BOX`).
@@ -147,6 +161,12 @@ fn kept(value: Option<&str>) -> bool {
 pub struct Log {
     name: String,
     started: Instant,
+    /// Whether the run [`Log::begin`]s: its report says what its windows were
+    /// launched on, or that none was.
+    begun: bool,
+    /// What each window of the run was launched on, in the order they first were,
+    /// once each: the run and every scope of it share them ([`Log::launched`]).
+    launches: Arc<Mutex<Vec<agents::Model>>>,
 }
 
 impl Log {
@@ -155,7 +175,46 @@ impl Log {
         Self {
             name: name.to_owned(),
             started: Instant::now(),
+            begun: false,
+            launches: Arc::default(),
         }
+    }
+
+    /// A run called `name` whose harnesses run on the models of [`agents`],
+    /// beginning now: the flags that name them (`--models`, `--claude-model`) are
+    /// read first, and are the error where no window could be asked for what they
+    /// say, before anything is spent; its first line says what they give each
+    /// harness, and its report what each window was launched on
+    /// ([`report::conclude`]).
+    pub fn begin(name: &str) -> Result<Self> {
+        Self::begun(name, agents::asked())
+    }
+
+    /// A run called `name` whose windows run agents of its own, not the models of
+    /// [`agents`] (the catalog's agents by name, the image designer): `instead`
+    /// says how it is asked for another agent. `--models` and `--claude-model`
+    /// would be read by nothing, so a run given either is the error, before
+    /// anything is spent.
+    pub fn own_agents(name: &str, instead: &str) -> Result<Self> {
+        not_asked_for_models(
+            name,
+            instead,
+            requested(MODELS).as_deref(),
+            requested(CLAUDE_MODEL).as_deref(),
+        )
+        .map_err(Error::Daemon)?;
+        Ok(Self::new(name))
+    }
+
+    /// [`Log::begin`], with the models the run was `asked` for.
+    fn begun(name: &str, asked: Result<agents::Models>) -> Result<Self> {
+        let given = asked?.line();
+        let log = Self {
+            begun: true,
+            ..Self::new(name)
+        };
+        log.say(given);
+        Ok(log)
     }
 
     /// The same run, saying `scope` after its name: one project of it.
@@ -164,7 +223,37 @@ impl Log {
         Self {
             name: format!("{} {scope}", self.name),
             started: self.started,
+            begun: self.begun,
+            launches: Arc::clone(&self.launches),
         }
+    }
+
+    /// Notes that a window of the run is launched on `agent` (what a window is
+    /// asked for, or the roster row the daemon opens a member's on), which its
+    /// report says: the stand-in agent's are none ([`agents::launched_on`]).
+    pub fn launched(&self, agent: &Value) {
+        let Some(model) = agents::launched_on(agent) else {
+            return;
+        };
+        let mut launches = self.launches.lock().unwrap_or_else(PoisonError::into_inner);
+        if !launches.contains(&model) {
+            launches.push(model);
+        }
+    }
+
+    /// What the run's windows were launched on, where it [`Log::begin`]s: each
+    /// harness with the model and the effort it was given, or that none was.
+    pub fn ran_on(&self) -> Option<String> {
+        if !self.begun {
+            return None;
+        }
+        let launches = self.launches.lock().unwrap_or_else(PoisonError::into_inner);
+        Some(if launches.is_empty() {
+            "no window was launched".to_owned()
+        } else {
+            let each: Vec<String> = launches.iter().map(ToString::to_string).collect();
+            format!("the windows ran on: {}", each.join("; "))
+        })
     }
 
     /// Says `text`, with the seconds since the run began.
@@ -184,6 +273,20 @@ impl Log {
         self.say(format!("{title}:\n{}", indented.join("\n")));
     }
 
+    /// The run's report under `title`: `table`, what each check or step came to,
+    /// then what its windows were launched on where the run [`Log::begin`]s.
+    pub fn report(&self, title: &str, table: &str) {
+        self.block(title, &self.reported(table));
+    }
+
+    /// What [`Log::report`] says under its title.
+    fn reported(&self, table: &str) -> String {
+        match self.ran_on() {
+            Some(ran_on) => format!("{table}\n{ran_on}"),
+            None => table.to_owned(),
+        }
+    }
+
     /// Finds `harness` on the machine as a person's shell does ([`installed`]: one
     /// that is not there, or not logged in, is the error, before anything is
     /// spent) and says what was found.
@@ -191,6 +294,27 @@ impl Log {
         let install = installed(harness)?;
         self.say(found_line(&install, &install.version()));
         Ok(install)
+    }
+}
+
+/// Why the run `name`, which runs agents of its own, is not run where it was
+/// given `--models` (`models`) or `--claude-model` (`claude`): `instead` says
+/// how it is asked for another agent.
+fn not_asked_for_models(
+    name: &str,
+    instead: &str,
+    models: Option<&str>,
+    claude: Option<&str>,
+) -> std::result::Result<(), String> {
+    let given = [("--models", models), ("--claude-model", claude)]
+        .into_iter()
+        .find_map(|(flag, value)| value.map(|value| format!("{flag} {value}")));
+    match given {
+        None => Ok(()),
+        Some(given) => Err(format!(
+            "{name} runs agents of its own, each on the model and effort it has, and reads no \
+             --models or --claude-model: {given} would be run on nothing; {instead}"
+        )),
     }
 }
 

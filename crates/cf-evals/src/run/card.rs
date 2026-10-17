@@ -6,12 +6,13 @@
 //! the app starts them, and the harnesses run in the pane host's windows on the
 //! machine's own logins ([`super::machine`]).
 
+use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
-use cf_e2e::live::{agents, ask, text};
+use cf_e2e::live::{agents, ask, text, Log};
 use cf_e2e::rig::{Project, Rig};
 use serde_json::{json, Value};
 
@@ -22,8 +23,8 @@ use super::report::{file_name, keep, Card, Refused, Said};
 use super::workspace;
 use super::{start, Plan};
 use crate::measure::{
-    chief_open_question, devin_chief_questions, measure, mechanics, on_windows, Check,
-    Options as Measuring,
+    begun, chief_open_question, devin_chief_questions, measure, mechanics, on_windows,
+    read as read_file, Check, FileRead, Options as Measuring,
 };
 use crate::plan::{
     dialog_answers, last_lines, terminal_answer, Agent, DialogAnswer, DialogQuestion,
@@ -39,7 +40,8 @@ type Spell = Box<dyn Fn(&str) -> String>;
 
 /// What the board and the owner did while the run went, which the report needs once
 /// it is over: the chief's window, how many tasks the board listed at the last look,
-/// and the owner's approvals at the gate.
+/// the owner's approvals at the gate, and what the files the scenario reads held as
+/// the run began and when the first worker task's result was in.
 #[derive(Default)]
 struct Scene {
     pane: Option<Value>,
@@ -47,15 +49,20 @@ struct Scene {
     approvals: i64,
     refused: Vec<Refused>,
     said: Said,
+    read: BTreeMap<String, FileRead>,
+    read_at_result: bool,
 }
 
 /// Plays the scenario once, as run number `index`: whether it held.
 pub fn play(plan: &Plan, index: u32, out: &mut dyn Write) -> Result<bool> {
     let (options, scenario) = (plan.options, &plan.options.scenario);
     let mut floor = Floor::new(out);
-    let workspace = workspace::fresh(plan.machine, scenario.fixture)?;
+    let workspace = workspace::fresh(plan.machine, scenario)?;
     let rig = start(plan, &mut floor, &workspace)?;
-    let mut scene = Scene::default();
+    let mut scene = Scene {
+        read: begun(&workspace, &scenario.reads())?,
+        ..Scene::default()
+    };
     let conducted = conduct(plan, &rig, &workspace, &mut floor, &mut scene);
     let screen = scene
         .pane
@@ -75,6 +82,8 @@ pub fn play(plan: &Plan, index: u32, out: &mut dyn Write) -> Result<bool> {
         &Measuring {
             files: Some((&fixture, &workspace)),
             pickers: scene.said.dialogs,
+            read: Some(&scene.read),
+            gone: scenario.counts_gone_files(),
         },
     )?;
     let checks = scenario.verdict(&metrics);
@@ -123,7 +132,9 @@ fn conduct(
     let (options, scenario) = (plan.options, &plan.options.scenario);
     let mut rows = vec![plan.agent.to_value()];
     rows.extend(plan.staff.agents.iter().map(Agent::to_value));
-    agents::write_roster(rig, &rows)?;
+    // The eval's report says the chief's and the staff's models itself: the log is
+    // no live run's, whose report the launches would be.
+    agents::write_roster(rig, &rows, &Log::new("eval"))?;
     let file = rig.home().join("consensflow.db");
     let mut request = json!({
         "directory": workspace,
@@ -192,6 +203,13 @@ fn conduct(
         let step = owner.step(scenario, &seen, options.timeout, &mut || {
             chief_open_question(&file)
         })?;
+        keep_at_result(
+            &mut scene.read,
+            &mut scene.read_at_result,
+            &step,
+            &tasks,
+            workspace,
+        )?;
         match step {
             Step::Wait => {}
             Step::Dialog => {
@@ -257,6 +275,45 @@ fn tasks_of(board: &Value) -> Vec<&Value> {
         .flat_map(|lane| lane["tasks"].as_array().into_iter().flatten())
         .chain(board["open"].as_array().into_iter().flatten())
         .collect()
+}
+
+/// Whether the first worker task of a board, the lowest number that is no advice,
+/// review, test or image, has its result in: done, or accepted already.
+fn first_result_in(tasks: &[&Value]) -> bool {
+    tasks
+        .iter()
+        .filter(|task| {
+            !matches!(
+                task["pool"].as_str(),
+                Some("advisor" | "reviewer" | "tester" | "designer")
+            )
+        })
+        .min_by_key(|task| task["number"].as_i64().unwrap_or(i64::MAX))
+        .is_some_and(|task| matches!(task["state"].as_str(), Some("done" | "accepted")))
+}
+
+/// At a look at the board, whose tasks are `tasks`, where the owner's next step is
+/// `step`: the files the scenario reads, as they are in `workspace`, kept in `read` as
+/// the first worker task's result left them; once, and `kept` says it was. They are
+/// read as the owner is about to say the next thing, which is the scenario's next step
+/// (an undo, Sol 2026-10-15): nothing of that step is asked for yet, so nothing of it
+/// can be in them. A look of the board alone would be behind a chief that went on at
+/// once.
+fn keep_at_result(
+    read: &mut BTreeMap<String, FileRead>,
+    kept: &mut bool,
+    step: &Step,
+    tasks: &[&Value],
+    workspace: &Path,
+) -> Result {
+    if *kept || !matches!(step, Step::Next(FollowUp::Say(_))) || !first_result_in(tasks) {
+        return Ok(());
+    }
+    for (file, seen) in read.iter_mut() {
+        seen.at_result = read_file(workspace, file)?;
+    }
+    *kept = true;
+    Ok(())
 }
 
 /// What of the board changes when the run is not quiet: the chief's state, the

@@ -129,6 +129,10 @@ pub(crate) struct WindowPart {
     pub(crate) retiring: bool,
     /// Its exit is the engine's own (`close_own`): a chief's closes no project.
     pub(crate) own_exit: bool,
+    /// Why the engine closes it, where the pause note of the task it was working
+    /// on is to say more than that it closed: with its project, when the chief's
+    /// window closed by itself.
+    pub(crate) closed_with: Option<String>,
     /// The human opened it (Show): it stays open.
     pub(crate) pinned: bool,
     /// The human hid it since: it closes once free and its turn settled.
@@ -172,6 +176,7 @@ impl Default for WindowPart {
             token: None,
             retiring: false,
             own_exit: false,
+            closed_with: None,
             pinned: false,
             hidden: false,
             settled: false,
@@ -450,7 +455,6 @@ impl Dispatcher {
         // message the launch was for went back to its queue: the window opens with
         // no first message, and that one goes after the note that says the role.
         let prelude = planned.prelude.clone();
-        let says_the_role = prelude.is_some();
         let delivering = delivering.filter(|_| {
             prelude
                 .as_ref()
@@ -622,14 +626,12 @@ impl Dispatcher {
         if self.forgotten(record) {
             return Ok(());
         }
-        // A launch that is to say the role has not come up until it has: a chief
-        // whose window was given up for it, and is tried again, keeps its count of
-        // failures, so that its wait grows and the human is told once. The
-        // human's Resume and switch clear it, and so does a launch that has no
-        // role to say.
-        if !says_the_role {
-            record.window.borrow_mut().relaunch = None;
-        }
+        // A launch has not come up until its window is ready for work, and one that
+        // is to say the role not until it has: a chief whose window was given up for
+        // either, and is tried again, keeps its count of failures, so that its wait
+        // grows and the human is told once. The human's Resume and switch clear it,
+        // and so does the first readiness of a launch that has no role to say
+        // ([`Dispatcher::came_up`]).
         if let (Ok(Some(native)), Some(conversation)) = (&started, conversation_id) {
             if !native.is_empty() && Some(native) != planned.native_session.as_ref() {
                 self.seams
@@ -991,6 +993,16 @@ impl Dispatcher {
         }
         self.changed();
         Ok(())
+    }
+
+    /// A window said it is ready for a delivery: its launch came up, and a chief
+    /// that failed to start before has its count of failures cleared, the next
+    /// failure told the human again. A launch that is to say the role first has not
+    /// come up until it has, and keeps its count (`role_change`).
+    pub(crate) fn came_up(&self, record: &Record) {
+        if record.delivery.borrow().prelude.is_none() {
+            record.window.borrow_mut().relaunch = None;
+        }
     }
 
     /// One look at a window: what its harness's record shows now, or why

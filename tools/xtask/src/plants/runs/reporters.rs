@@ -16,7 +16,11 @@
 //!   (`reporters/node.mjs`, written into the run's folder) beside the report it
 //!   prints, its tests run in Node's own process (`node_words` says why, and what
 //!   it costs).
-//! - Playwright's CLI writes its JSON report beside the list it prints.
+//! - Playwright's CLI writes the report of the plants' own reporter of its tests
+//!   (`reporters/playwright.mjs`, written into the run's folder) beside the list it
+//!   prints: its JSON report says no step of a test, and a test whose `beforeAll`
+//!   threw is `unexpected` there though its body never ran, where the reporter's
+//!   steps say which hook threw (Playwright 1.63, 2026-10-17).
 //! - Anything else, every other `cargo xtask …` among them, says no more than its
 //!   exit status.
 
@@ -35,6 +39,13 @@ const NEXTEST_PROFILE: &str = "plants";
 const NODE_REPORTER: &str = include_str!("reporters/node.mjs");
 const NODE_REPORTER_FILE: &str = "plants.mjs";
 const NODE_REPORT: &str = "node.jsonl";
+
+/// The plants' reporter of Playwright's tests, the file it is written to, the file it
+/// writes, and the variable that tells it where.
+const PLAYWRIGHT_REPORTER: &str = include_str!("reporters/playwright.mjs");
+const PLAYWRIGHT_REPORTER_FILE: &str = "plants-playwright.mjs";
+const PLAYWRIGHT_REPORT: &str = "playwright.json";
+const PLAYWRIGHT_REPORT_VAR: &str = "PLANTS_PLAYWRIGHT_REPORT";
 
 /// What reads a report of one kind.
 type Reader = fn(&str) -> Result<Results, String>;
@@ -141,9 +152,13 @@ impl Reporter {
                     &dir.join(NODE_REPORT),
                 ))
             }
-            Self::Playwright => Invocation::new(command[0].clone(), &context.root)
-                .args(playwright_words(command).into_iter().skip(1))
-                .var("PLAYWRIGHT_JSON_OUTPUT_FILE", dir.join("report.json")),
+            Self::Playwright => {
+                fs::write(dir.join(PLAYWRIGHT_REPORTER_FILE), PLAYWRIGHT_REPORTER)?;
+                let reporter = from_root(&dir.join(PLAYWRIGHT_REPORTER_FILE), &context.root)?;
+                Invocation::new(command[0].clone(), &context.root)
+                    .args(playwright_words(command, &reporter).into_iter().skip(1))
+                    .var(PLAYWRIGHT_REPORT_VAR, dir.join(PLAYWRIGHT_REPORT))
+            }
             Self::Status => as_written(),
         })
     }
@@ -171,7 +186,7 @@ impl Reporter {
         let (path, read): (PathBuf, Reader) = match self {
             Self::Nextest => (dir.join(NEXTEST_PROFILE).join("junit.xml"), results::junit),
             Self::Node => (dir.join(NODE_REPORT), results::node),
-            Self::Playwright => (dir.join("report.json"), results::playwright),
+            Self::Playwright => (dir.join(PLAYWRIGHT_REPORT), results::playwright),
             Self::Status => return None,
         };
         Some(match fs::read_to_string(&path) {
@@ -463,12 +478,15 @@ fn names_cf_e2e(words: &[OsString]) -> bool {
 }
 
 /// nextest's config for a run whose report lands in `dir`: every test run once, all
-/// of them whatever fails, and the JUnit report at `<dir>/plants/junit.xml`.
+/// of them whatever fails, and the JUnit report at `<dir>/plants/junit.xml`, which
+/// names every test the run registered, the skipped ones too (nextest 0.9.148 leaves
+/// them out unless asked): an ignored test of the meant name is a test of it all the
+/// same.
 fn nextest_config(dir: &Path) -> String {
     let store = dir.display().to_string().replace('\\', "/");
     format!(
         "[store]\ndir = \"{store}\"\n\n[profile.{NEXTEST_PROFILE}]\nretries = 0\nfail-fast = false\n\n\
-         [profile.{NEXTEST_PROFILE}.junit]\npath = \"junit.xml\"\n"
+         [profile.{NEXTEST_PROFILE}.junit]\npath = \"junit.xml\"\nreport-skipped = \"all\"\n"
     )
 }
 
@@ -523,9 +541,10 @@ fn node_words(command: &[String], reporter: &str, report: &Path) -> Vec<String> 
     words
 }
 
-/// The words of a Playwright run that also writes its JSON report: the list it
-/// prints and the JSON report, whatever reporter the command named.
-fn playwright_words(command: &[String]) -> Vec<String> {
+/// The words of a Playwright run that also has the plants' reporter (the module
+/// `reporter`) write its report: the list it prints and that report, whatever
+/// reporter the command named.
+fn playwright_words(command: &[String], reporter: &str) -> Vec<String> {
     let mut words: Vec<String> = command
         .iter()
         .filter(|word| !word.starts_with("--reporter="))
@@ -535,7 +554,7 @@ fn playwright_words(command: &[String]) -> Vec<String> {
         .iter()
         .position(|word| word == "test")
         .map_or(words.len(), |at| at + 1);
-    words.insert(test, "--reporter=list,json".to_owned());
+    words.insert(test, format!("--reporter=list,{reporter}"));
     words
 }
 

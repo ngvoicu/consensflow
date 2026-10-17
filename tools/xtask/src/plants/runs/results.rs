@@ -3,16 +3,18 @@
 //! what the run printed, which a test may make say anything.
 //!
 //! - nextest's JUnit report: a `<testcase>` for each test, failed where it holds a
-//!   `<failure>` or an `<error>`, and by its test binary (`classname`).
+//!   `<failure>` or an `<error>`, and by its test binary (`classname`); one nextest
+//!   could not start is none that ran (`junit`).
 //! - Node's report, which the plants' own reporter of Node's tests writes
 //!   (`reporters/node.mjs`): a line of JSON for each test registered that ended,
 //!   named by its own title and those of the tests it is in, and how it ended; then
 //!   a line that the run ended. A test file that failed whole is a test named by
 //!   its path, which the line says it is.
-//! - Playwright's JSON report: every test of every suite and its status in each
-//!   project it ran in (`unexpected` is a failure), named from its first group on,
-//!   one test however many projects ran it; the errors that came outside every test
-//!   (`errors`).
+//! - Playwright's report, which the plants' own reporter of Playwright's tests writes
+//!   (`reporters/playwright.mjs`): every test registered and how it ended in each
+//!   project, and whether its own body failed (a hook's or a fixture's failure is
+//!   theirs), named from its first group on, one test however many projects ran it;
+//!   the errors that came outside every test; that the run ended.
 //!
 //! A report is whole or it is an error: one cut short (no end to its root, or no
 //! last line) says nothing of the tests it did not get to. A test that was skipped,
@@ -85,39 +87,112 @@ impl Results {
     }
 }
 
-/// The tests of nextest's JUnit report.
+/// What nextest 0.9.148 says of a test whose process it could not start: an `<error>`
+/// of this type, where it starts the test itself (on Windows).
+const EXECUTION_FAILURE: &str = "execution failure";
+
+/// On Unix nextest starts each test through a process of its own (its double-spawn),
+/// which execs the test binary: where that exec fails, nextest says the test failed
+/// with this status, and the double-spawn says why on the test's standard error, which
+/// begins so.
+const DOUBLE_SPAWN_FAILED: (&str, &str) = (
+    "test failure with exit code 70",
+    "error: [double-spawn] failed to exec",
+);
+
+/// A `<testcase>` of nextest's JUnit report that is open, until its end.
+struct Case {
+    test: Test,
+    skipped: bool,
+    /// The type of its `<failure>` or `<error>`, where it holds one.
+    failure: Option<String>,
+    /// Whether its `<system-err>` is open, and its text as far as read.
+    in_err: bool,
+    err: String,
+}
+
+impl Case {
+    /// Whether nextest could not start the test: its own error that says so, or the
+    /// double-spawn's failure and its words.
+    fn unstarted(&self) -> bool {
+        match self.failure.as_deref() {
+            Some(EXECUTION_FAILURE) => true,
+            Some(failure) => {
+                failure == DOUBLE_SPAWN_FAILED.0
+                    && self.err.trim_start().starts_with(DOUBLE_SPAWN_FAILED.1)
+            }
+            None => false,
+        }
+    }
+}
+
+/// The tests of nextest's JUnit report. A test nextest could not start (its binary is
+/// not there to run, or cannot be run) never ran: it neither failed nor passed, and
+/// that it could not be started is an error outside every test. It is the one thing
+/// read of what a test wrote: the double-spawn's words on its standard error (Unix),
+/// which can make a test's failure read as one that never started, never the other way.
 pub fn junit(xml: &str) -> Result<Results, String> {
     let mut reader = Reader::from_str(xml);
-    let (mut tests, mut others) = (Vec::new(), Vec::new());
-    // The test whose `<testcase>` is open, until its end, and whether it was skipped.
-    let mut open: Option<(Test, bool)> = None;
+    let mut results = Results::default();
+    let mut open: Option<Case> = None;
     let mut ended = false;
     loop {
         match reader.read_event().map_err(|cause| cause.to_string())? {
             Event::Start(element) if element.name().as_ref() == b"testcase" => {
-                open = Some((testcase(&element)?, false));
+                open = Some(Case {
+                    test: testcase(&element)?,
+                    skipped: false,
+                    failure: None,
+                    in_err: false,
+                    err: String::new(),
+                });
             }
             Event::Empty(element) if element.name().as_ref() == b"testcase" => {
-                tests.push(testcase(&element)?);
+                results.tests.push(testcase(&element)?);
             }
             Event::Empty(element) if element.name().as_ref() == b"testsuites" => ended = true,
             Event::Start(element) | Event::Empty(element) => {
-                if let Some((test, skipped)) = open.as_mut() {
+                if let Some(case) = open.as_mut() {
                     match element.name().as_ref() {
-                        b"failure" | b"error" => test.failed = true,
-                        b"skipped" => *skipped = true,
+                        b"failure" | b"error" => {
+                            case.test.failed = true;
+                            case.failure = Some(attribute(&element, "type")?.unwrap_or_default());
+                        }
+                        b"skipped" => case.skipped = true,
+                        b"system-err" => case.in_err = true,
                         _ => {}
                     }
                 }
             }
-            Event::End(element) if element.name().as_ref() == b"testcase" => match open.take() {
-                Some((test, false)) => tests.push(test),
-                Some((test, true)) => others.push(Test {
-                    failed: false,
-                    ..test
-                }),
-                None => {}
-            },
+            Event::Text(text) => {
+                if let Some(case) = open.as_mut().filter(|case| case.in_err) {
+                    case.err.push_str(&String::from_utf8_lossy(text.as_ref()));
+                }
+            }
+            Event::End(element) if element.name().as_ref() == b"system-err" => {
+                if let Some(case) = open.as_mut() {
+                    case.in_err = false;
+                }
+            }
+            Event::End(element) if element.name().as_ref() == b"testcase" => {
+                let Some(case) = open.take() else { continue };
+                let unstarted = case.unstarted();
+                let test = Test {
+                    failed: case.test.failed && !case.skipped && !unstarted,
+                    ..case.test
+                };
+                if unstarted {
+                    results.outside.push(format!(
+                        "nextest could not start {} ({})",
+                        test.name, test.at
+                    ));
+                }
+                if case.skipped || unstarted {
+                    results.others.push(test);
+                } else {
+                    results.tests.push(test);
+                }
+            }
             Event::End(element) if element.name().as_ref() == b"testsuites" => ended = true,
             Event::Eof => break,
             _ => {}
@@ -126,34 +201,32 @@ pub fn junit(xml: &str) -> Result<Results, String> {
     if !ended {
         return Err("the report ends before its <testsuites> does".to_owned());
     }
-    Ok(Results {
-        tests,
-        outside: Vec::new(),
-        others,
-    })
+    Ok(results)
 }
 
 /// The test a `<testcase>` names, not failed until a `<failure>` in it says so.
 fn testcase(element: &BytesStart<'_>) -> Result<Test, String> {
-    let attribute = |key: &str| -> Result<Option<String>, String> {
-        let Some(found) = element
-            .try_get_attribute(key)
-            .map_err(|cause| cause.to_string())?
-        else {
-            return Ok(None);
-        };
-        let value = found
-            .normalized_value(quick_xml::XmlVersion::Explicit1_0)
-            .map_err(|cause| cause.to_string())?;
-        Ok(Some(value.into_owned()))
-    };
     Ok(Test {
-        name: attribute("name")?.ok_or("a <testcase> with no name")?,
-        at: attribute("classname")?.unwrap_or_default(),
+        name: attribute(element, "name")?.ok_or("a <testcase> with no name")?,
+        at: attribute(element, "classname")?.unwrap_or_default(),
         file: None,
         whole: false,
         failed: false,
     })
+}
+
+/// The value of the attribute `key` of `element`, its entities read, where it has one.
+fn attribute(element: &BytesStart<'_>, key: &str) -> Result<Option<String>, String> {
+    let Some(found) = element
+        .try_get_attribute(key)
+        .map_err(|cause| cause.to_string())?
+    else {
+        return Ok(None);
+    };
+    let value = found
+        .normalized_value(quick_xml::XmlVersion::Explicit1_0)
+        .map_err(|cause| cause.to_string())?;
+    Ok(Some(value.into_owned()))
 }
 
 /// A line of the plants' reporter of Node's tests: a test that ended, or the end.
@@ -226,88 +299,110 @@ pub fn node(report: &str) -> Result<Results, String> {
     })
 }
 
-/// The tests of Playwright's JSON report, and the errors outside them.
-pub fn playwright(json: &str) -> Result<Results, String> {
-    let report: serde_json::Value =
-        serde_json::from_str(json).map_err(|cause| cause.to_string())?;
-    let suites = report["suites"]
-        .as_array()
-        .ok_or("the report has no suites")?;
-    let (mut tests, mut others) = (Vec::new(), Vec::new());
-    for file in suites {
-        // The file's own suite is no group of a test's name.
-        suite(file, &[], &mut tests, &mut others);
-    }
-    let outside = report["errors"]
-        .as_array()
-        .ok_or("the report has no errors")?
-        .iter()
-        .map(|error| {
-            error["message"]
-                .as_str()
-                .unwrap_or_default()
-                .lines()
-                .next()
-                .unwrap_or_default()
-                .to_owned()
-        })
-        .collect();
-    Ok(Results {
-        tests,
-        outside,
-        others,
-    })
+/// The report of the plants' reporter of Playwright's tests.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PlaywrightReport {
+    tests: Vec<PlaywrightTest>,
+    errors: Vec<String>,
+    end: bool,
 }
 
-/// The tests of a suite of Playwright's report and of the suites in it, each named
-/// by `groups` (the titles of the suites around it, the file's left out) and its own:
-/// one test for each spec, which failed where it failed in a project, and is one of
-/// the `others` where it was skipped in every project it was given to.
-fn suite(
-    suite: &serde_json::Value,
-    groups: &[String],
-    tests: &mut Vec<Test>,
-    others: &mut Vec<Test>,
-) {
-    for spec in suite["specs"].as_array().into_iter().flatten() {
-        let title = spec["title"].as_str().unwrap_or_default();
-        let name = groups
-            .iter()
-            .map(String::as_str)
-            .chain([title])
-            .collect::<Vec<_>>()
-            .join(" › ");
-        let at = format!(
-            "{}:{}:{}",
-            spec["file"].as_str().unwrap_or_default(),
-            spec["line"],
-            spec["column"]
-        );
-        let statuses: Vec<&str> = spec["tests"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .map(|test| test["status"].as_str().unwrap_or_default())
-            .filter(|status| *status != "skipped")
-            .collect();
-        let test = Test {
-            name,
-            at,
-            file: None,
-            whole: false,
-            failed: statuses.contains(&"unexpected"),
-        };
-        if statuses.is_empty() {
-            others.push(test);
-        } else {
-            tests.push(test);
+/// A test of Playwright's in one project it was given to, as the plants' reporter says.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PlaywrightTest {
+    path: Vec<String>,
+    file: String,
+    line: u64,
+    column: u64,
+    project: String,
+    outcome: Outcome,
+    /// Whether its own body failed, its last run: not only a hook or a fixture.
+    own: bool,
+    /// The first error a hook or a fixture of its last run threw, where one did.
+    hook: Option<String>,
+}
+
+/// Playwright's last word on a test, across its retries.
+#[derive(Deserialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+enum Outcome {
+    Expected,
+    Unexpected,
+    /// It failed, and passed when run again.
+    Flaky,
+    Skipped,
+}
+
+/// The tests of the report of the plants' reporter of Playwright's tests, and the
+/// errors outside them: one test for each test written, however many projects ran it,
+/// named by the titles of the groups it is in (the file's left out) and its own,
+/// joined with ` › `. It failed where its own body failed in a project. It ran where
+/// its body ran in one (it passed, or failed of itself); else it neither failed nor
+/// passed (`others`): skipped in every project it was given to, or failed in a hook or
+/// a fixture alone, which is an error outside it, said with the hook's first words.
+pub fn playwright(json: &str) -> Result<Results, String> {
+    let report: PlaywrightReport = serde_json::from_str(json).map_err(|cause| cause.to_string())?;
+    if !report.end {
+        return Err("the report does not say the run ended".to_owned());
+    }
+    // Each test written, with what each project made of it, in the order said.
+    let mut written: Vec<(Test, Vec<&PlaywrightTest>)> = Vec::new();
+    for test in &report.tests {
+        let name = test.path.join(" › ");
+        let at = format!("{}:{}:{}", test.file, test.line, test.column);
+        match written
+            .iter_mut()
+            .find(|(seen, _)| seen.name == name && seen.at == at)
+        {
+            Some((_, projects)) => projects.push(test),
+            None => written.push((
+                Test {
+                    name,
+                    at,
+                    file: Some(test.file.clone()),
+                    whole: false,
+                    failed: false,
+                },
+                vec![test],
+            )),
         }
     }
-    for inner in suite["suites"].as_array().into_iter().flatten() {
-        let mut deeper = groups.to_vec();
-        deeper.push(inner["title"].as_str().unwrap_or_default().to_owned());
-        self::suite(inner, &deeper, tests, others);
+    let mut results = Results {
+        outside: report.errors,
+        ..Results::default()
+    };
+    for (test, projects) in written {
+        let own = |project: &&PlaywrightTest| project.outcome == Outcome::Unexpected && project.own;
+        let failed = projects.iter().any(own);
+        let ran = failed
+            || projects
+                .iter()
+                .any(|project| matches!(project.outcome, Outcome::Expected | Outcome::Flaky));
+        for project in projects
+            .iter()
+            .filter(|project| project.outcome == Outcome::Unexpected && !project.own)
+        {
+            let place = if project.project.is_empty() {
+                String::new()
+            } else {
+                format!(" in {}", project.project)
+            };
+            results.outside.push(format!(
+                "a hook of {}{place} failed: {}",
+                test.name,
+                project.hook.as_deref().unwrap_or("it says no more")
+            ));
+        }
+        let test = Test { failed, ..test };
+        if ran {
+            results.tests.push(test);
+        } else {
+            results.others.push(test);
+        }
     }
+    Ok(results)
 }
 
 #[cfg(test)]

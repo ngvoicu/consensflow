@@ -915,7 +915,7 @@ test('another fails', () => {
 "#;
 
 #[test]
-fn playwright_s_json_report_names_each_test_and_the_errors_outside_every_test() {
+fn playwright_s_report_names_each_test_and_the_errors_outside_every_test() {
     let root = context().root;
     let cli = "app/node_modules/@playwright/test/cli.js";
     assert!(
@@ -963,7 +963,10 @@ fn playwright_s_json_report_names_each_test_and_the_errors_outside_every_test() 
         .find(|test| test.name == "a group › the meant one")
         .unwrap();
     // Told from another test of its name by where it is written.
-    assert_eq!(meant.at, "prints.spec.mjs:4:3");
+    assert_eq!(
+        meant.at,
+        format!("{}:4:3", folder.path().join("prints.spec.mjs").display())
+    );
     // The list is printed, whatever reporter the configuration names.
     assert!(
         printed.output.contains("a group › the meant one"),
@@ -1421,6 +1424,180 @@ fn a_run_of_cf_e2e_s_tests_is_given_the_programs_built_before_it_and_one_whose_b
     assert!(hung.hung);
     assert_eq!(hung.command, ["sh", "-c", "exec sleep 30"]);
     assert!(!marked("ran"), "no test ran");
+}
+
+/// A crate named `name` in `checkout`, whose files are `files` (each a path from the
+/// crate's folder and its text), and the `cargo test` of all its targets, built in
+/// its own folder; and the plant of `checkout`'s `src/lib.rs` that makes `1` there `2`,
+/// meant for the test `meant`.
+fn crate_plant(
+    checkout: &Context,
+    name: &str,
+    files: &[(&str, &str)],
+    meant: &str,
+) -> crate::plants::kit::Plant {
+    use crate::plants::kit::{Edit, Plant, Run as PlantRun};
+    fs::write(
+        checkout.path("Cargo.toml"),
+        format!("[package]\nname = \"{name}\"\nversion = \"0.1.0\"\nedition = \"2021\"\npublish = false\n\n[workspace]\n"),
+    )
+    .unwrap();
+    for (file, text) in files {
+        let path = file
+            .split('/')
+            .fold(checkout.root.clone(), |path, part| path.join(part));
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, text).unwrap();
+    }
+    let manifest = checkout.path("Cargo.toml").display().to_string();
+    let target = checkout.path("target").display().to_string();
+    Plant {
+        table: "t".into(),
+        name: format!("p: {name}"),
+        meant: meant.into(),
+        runs: vec![PlantRun {
+            command: words(&[
+                "cargo",
+                "test",
+                "--offline",
+                "--manifest-path",
+                &manifest,
+                "--target-dir",
+                &target,
+            ]),
+            builds: false,
+        }],
+        builds: false,
+        prepare: Vec::new(),
+        requires: Vec::new(),
+        platforms: Vec::new(),
+        edits: vec![Edit {
+            file: "src/lib.rs".into(),
+            find: "    1\n".into(),
+            replace: "    2\n".into(),
+        }],
+    }
+}
+
+/// A library whose test `tests::meant` holds a value to one, which the plant makes two.
+const ONE_LIB: &str = "pub fn value() -> u8 {\n    1\n}\n\n#[cfg(test)]\nmod tests {\n    #[test]\n    fn meant() {\n        assert_eq!(super::value(), 1);\n    }\n}\n";
+
+#[test]
+fn an_ignored_rust_test_of_the_meant_name_in_another_binary_makes_the_name_stand_for_two() {
+    // Both reviewers' look at round 5: nextest left the ignored twin out of its report,
+    // and the failing one stood alone for the name.
+    let folder = tempfile::tempdir().unwrap();
+    let checkout = Context {
+        root: folder.path().to_path_buf(),
+        env: Env::default(),
+    };
+    let plant = crate_plant(
+        &checkout,
+        "plants-twins",
+        &[
+            ("src/lib.rs", ONE_LIB),
+            (
+                "tests/twin.rs",
+                "mod tests {\n    #[test]\n    #[ignore]\n    fn meant() {}\n}\n",
+            ),
+        ],
+        "tests::meant",
+    );
+    let (status, said) = driven(&checkout, &[plant]);
+    assert_eq!(status, 1, "{said}");
+    assert_eq!(
+        fs::read_to_string(checkout.path("src/lib.rs")).unwrap(),
+        ONE_LIB
+    );
+    assert!(
+        said.contains("MISSED-BY-MEANT  p: plants-twins ("),
+        "{said}"
+    );
+    assert!(
+        said.contains("    the meant name tests::meant stands for 2 tests of cargo test "),
+        "{said}"
+    );
+    assert!(said.contains("tests::meant (plants-twins::twin)"), "{said}");
+}
+
+/// A library whose first test, with the plant, takes its own test binary away (a
+/// rename, which Windows allows of a program that runs): nextest started that test and
+/// those beside it, and can start none after it. 128 tests that wait a moment come
+/// before the meant one, which no machine runs as many at a time: the meant one, which
+/// fails with the plant, is never started.
+fn binary_taken_away_lib() -> String {
+    let fillers: String = (0..128)
+        .map(|n| {
+            format!(
+                "    #[test]\n    fn filler_{n:03}() {{\n        std::thread::sleep(std::time::Duration::from_millis(300));\n    }}\n\n"
+            )
+        })
+        .collect();
+    format!(
+        "pub fn value() -> u8 {{\n    1\n}}\n\n#[cfg(test)]\nmod tests {{\n    #[test]\n    fn a_takes_its_binary_away() {{\n        if super::value() == 2 {{\n            let exe = std::env::current_exe().unwrap();\n            std::fs::rename(&exe, exe.with_extension(\"gone\")).unwrap();\n        }}\n    }}\n\n{fillers}    #[test]\n    fn meant() {{\n        assert_eq!(super::value(), 1);\n    }}\n}}\n"
+    )
+}
+
+#[test]
+fn a_rust_test_nextest_could_not_start_is_no_catch_and_the_run_says_which() {
+    // Both reviewers' look at round 5: nextest's word for a test it could not start was
+    // read as that test's failure, and the meant test caught a plant it never saw.
+    let folder = tempfile::tempdir().unwrap();
+    let checkout = Context {
+        root: folder.path().to_path_buf(),
+        env: Env::default(),
+    };
+    let lib = binary_taken_away_lib();
+    let plant = crate_plant(
+        &checkout,
+        "plants-unstarted",
+        &[("src/lib.rs", &lib)],
+        "tests::meant",
+    );
+    // The run itself, with the plant in: the meant test is one nextest could not start.
+    fs::write(
+        checkout.path("src/lib.rs"),
+        lib.replace("    1\n", "    2\n"),
+    )
+    .unwrap();
+    let planted = ended(
+        runner(Duration::from_secs(600))
+            .run(&plant.runs[0].command)
+            .unwrap(),
+    );
+    fs::write(checkout.path("src/lib.rs"), &lib).unwrap();
+    assert!(planted.caught().is_empty(), "{:?}", planted.caught());
+    assert!(
+        planted
+            .others()
+            .iter()
+            .any(|test| test.name == "tests::meant"),
+        "{}",
+        planted.output
+    );
+    // Which test is the first nextest could not start depends on how many it runs at a
+    // time: one of the fillers, or the meant one.
+    let broken = planted.broken().unwrap_or_default();
+    assert!(
+        broken.starts_with("nextest could not start tests::") && broken.ends_with(": it never ran"),
+        "{broken}"
+    );
+    // Through the driver: BROKEN, never CAUGHT, though the run passes without the plant.
+    let (status, said) = driven(&checkout, &[plant]);
+    assert_eq!(status, 1, "{said}");
+    assert_eq!(
+        fs::read_to_string(checkout.path("src/lib.rs")).unwrap(),
+        lib
+    );
+    assert!(
+        said.contains("BROKEN           p: plants-unstarted ("),
+        "{said}"
+    );
+    assert!(
+        said.contains("    nextest could not start tests::"),
+        "{said}"
+    );
+    assert!(!said.contains("CAUGHT"), "{said}");
 }
 
 /// A plant of one file in a checkout of its own, tried by `command`.
@@ -2005,6 +2182,69 @@ fn node_s_meant_test_aborted_catches_nothing_its_async_failures_are_its_own_and_
     assert!(said.ends_with("2 of 4 plants caught\n"), "{said}");
 }
 
+/// A test file that, with the plant, throws before it registers its one test, which is
+/// titled `TITLE`: Node names the file that failed whole by its path, as it was given.
+const NODE_THROWS_FIRST: &str = r#"import { test } from 'node:test'
+import { planted } from './flag.mjs'
+
+if (planted) throw new Error('the file throws before its test')
+
+test('TITLE', () => {})
+"#;
+
+/// Another file, whose test the plant fails.
+const NODE_FAILS_BESIDE: &str = r#"import assert from 'node:assert'
+import { test } from 'node:test'
+import { planted } from './flag.mjs'
+
+test('fails beside it', () => {
+  assert.equal(planted, false)
+})
+"#;
+
+#[test]
+fn a_node_test_file_that_failed_whole_never_stands_for_the_meant_test_of_its_name() {
+    // The second review's case (2026-10-17): the meant name is the file's, as Node names
+    // the file that failed whole; the file throws before its test of that name is
+    // registered, and another test fails. No test of the meant name ran, so no catch.
+    assert!(on_path("node"), "node is not on the PATH");
+    let folder = tempfile::tempdir().unwrap();
+    let checkout = Context {
+        root: folder.path().to_path_buf(),
+        env: Env::default(),
+    };
+    fs::write(checkout.path("flag.mjs"), FLAG).unwrap();
+    let throws = checkout.path("cases.test.mjs").display().to_string();
+    let title = throws.replace('\\', "\\\\");
+    fs::write(&throws, NODE_THROWS_FIRST.replace("TITLE", &title)).unwrap();
+    let beside = checkout.path("beside.test.mjs").display().to_string();
+    fs::write(&beside, NODE_FAILS_BESIDE).unwrap();
+    let plant = flagged(
+        "p: a file's name",
+        &throws,
+        words(&["node", "--test", &throws, &beside]),
+    );
+    let said = verdict_of_flagged(&checkout, &plant);
+    assert!(
+        said.contains("BROKEN           p: a file's name ("),
+        "{said}"
+    );
+    assert!(
+        said.contains(&format!("    the test file {throws} ran no test\n")),
+        "{said}"
+    );
+    assert!(!said.contains("CAUGHT"), "{said}");
+}
+
+/// What the driver says of the flagged `plant` in `checkout`, which it ends with its
+/// flag as it was.
+fn verdict_of_flagged(checkout: &Context, plant: &crate::plants::kit::Plant) -> String {
+    let (status, said) = driven(checkout, std::slice::from_ref(plant));
+    assert_eq!(fs::read_to_string(checkout.path("flag.mjs")).unwrap(), FLAG);
+    assert_eq!(status, 1, "{said}");
+    said
+}
+
 #[test]
 fn playwright_s_meant_test_failing_beside_a_global_teardown_that_threw_is_caught_and_the_error_said(
 ) {
@@ -2061,6 +2301,93 @@ fn playwright_s_meant_test_failing_beside_a_global_teardown_that_threw_is_caught
     assert!(
         said.contains("    beside it: Playwright: an error outside every test: ")
             && said.contains("the teardown fails with the plant"),
+        "{said}"
+    );
+}
+
+/// A spec of Playwright's whose group's `beforeAll` throws with the plant, before the
+/// meant test, which would fail with it too, were its body run; and a test whose body
+/// fails with the plant and whose `afterEach` throws with it.
+const PLAYWRIGHT_SET_UP: &str = r#"import { expect, test } from '@playwright/test'
+import { planted } from './flag.mjs'
+
+test.describe('a group', () => {
+  test.beforeAll(() => {
+    if (planted) throw new Error('the beforeAll throws with the plant')
+  })
+
+  test('the meant one', () => {
+    expect(planted).toBe(false)
+  })
+})
+
+test.describe('torn down', () => {
+  test.afterEach(() => {
+    if (planted) throw new Error('the afterEach throws with the plant')
+  })
+
+  test('its body fails too', () => {
+    expect(planted).toBe(false)
+  })
+})
+"#;
+
+#[test]
+fn a_playwright_test_whose_before_all_threw_never_ran_and_catches_nothing() {
+    // The first reviewer's look at round 5: Playwright says a test whose `beforeAll`
+    // threw failed, though its body never ran.
+    let root = context().root;
+    let cli = "app/node_modules/@playwright/test/cli.js";
+    assert!(
+        root.join(cli).is_file(),
+        "Playwright is not installed: npm ci --prefix app"
+    );
+    let fixtures = root.join("app/src-tauri/target/plants-fixtures");
+    fs::create_dir_all(&fixtures).unwrap();
+    let folder = tempfile::tempdir_in(&fixtures).unwrap();
+    let checkout = Context {
+        root: folder.path().to_path_buf(),
+        env: Env::default(),
+    };
+    fs::write(checkout.path("flag.mjs"), FLAG).unwrap();
+    fs::write(
+        checkout.path("plants.config.mjs"),
+        "export default { testDir: '.', outputDir: './test-results' }\n",
+    )
+    .unwrap();
+    fs::write(checkout.path("set-up.spec.mjs"), PLAYWRIGHT_SET_UP).unwrap();
+    let relative = folder.path().strip_prefix(&root).unwrap();
+    let at = |file: &str| relative.join(file).to_string_lossy().replace('\\', "/");
+    let command = words(&[
+        "node",
+        cli,
+        "test",
+        "--config",
+        &at("plants.config.mjs"),
+        &at("set-up.spec.mjs"),
+    ]);
+    let (status, said) = driven(
+        &checkout,
+        &[
+            flagged("p: set up", "a group › the meant one", command.clone()),
+            // A body that failed is the test's own, whatever its `afterEach` did.
+            flagged("p: torn down", "torn down › its body fails too", command),
+        ],
+    );
+    assert_eq!(fs::read_to_string(checkout.path("flag.mjs")).unwrap(), FLAG);
+    assert_eq!(status, 1, "{said}");
+    assert!(said.contains("BROKEN           p: set up ("), "{said}");
+    assert!(
+        said.contains(
+            "    Playwright: an error outside every test: a hook of a group › the meant one \
+             failed: Error: the beforeAll throws with the plant\n"
+        ),
+        "{said}"
+    );
+    assert!(!said.contains("CAUGHT           p: set up"), "{said}");
+    assert!(said.contains("CAUGHT           p: torn down ("), "{said}");
+    assert!(
+        said.contains(") by torn down › its body fails too\n"),
         "{said}"
     );
 }
@@ -2202,7 +2529,9 @@ fn the_state_of_a_checkout_is_its_commit_and_the_bytes_of_what_changed_and_nothi
     git(&mut runner, &["add", "."]);
     git(&mut runner, &["commit", "-q", "-m", "second"]);
     assert_ne!(runner.state(), added);
-    // Where git says nothing of the folder, each state is one of its own.
+    assert_eq!(runner.untold(), None, "a checkout of git's");
+    // Where git says nothing of the folder, its state is the same whatever changed in it,
+    // which the runner says.
     let elsewhere = tempfile::tempdir().unwrap();
     let mut untold = runner_with(
         &Context {
@@ -2212,7 +2541,57 @@ fn the_state_of_a_checkout_is_its_commit_and_the_bytes_of_what_changed_and_nothi
         Duration::from_secs(120),
         Stops::never,
     );
-    assert_ne!(untold.state(), untold.state());
+    let before = untold.state();
+    std::fs::write(elsewhere.path().join("a.rs"), "changed\n").unwrap();
+    assert_eq!(untold.state(), before);
+    assert_eq!(
+        untold.untold(),
+        Some(format!(
+            "no git checkout at {}: a run that changes the checkout can't be told",
+            elsewhere.path().display()
+        ))
+    );
+}
+
+#[test]
+fn a_plant_of_a_checkout_git_says_nothing_of_is_tried_and_that_is_said_once_before_any() {
+    // zeewin's copy, shipped with no checkout of git's: every plant was UNSTABLE, its run
+    // "changed the checkout" (2026-10-17).
+    assert!(on_path("node"), "node is not on the PATH");
+    let (_folder, checkout, mut plant) = tried_by(words(&[
+        "node",
+        "-e",
+        "process.exit(require('fs').readFileSync('a.rs', 'utf8').includes('ONE') ? 1 : 0)",
+    ]));
+    let mut second = plant.clone();
+    second.name = "p: two".into();
+    plant.name = "p: one".into();
+    let family = crate::plants::kit::Family {
+        name: "demo".into(),
+        limit: Duration::from_secs(600),
+        rebuild: None,
+        plants: vec![plant, second],
+    };
+    let chosen: Vec<&crate::plants::kit::Plant> = family.plants.iter().collect();
+    let mut out = Vec::new();
+    let status = crate::plants::driver::run(
+        &checkout,
+        &family,
+        &chosen,
+        &mut runner_in(&checkout.root),
+        &mut out,
+    )
+    .unwrap();
+    let said = String::from_utf8(out).unwrap();
+    assert_eq!(status, 0, "{said}");
+    let notice = format!(
+        "no git checkout at {}: a run that changes the checkout can't be told\n",
+        checkout.root.display()
+    );
+    assert_eq!(said.matches(&notice).count(), 1, "{said}");
+    assert!(said.contains("CAUGHT           p: one ("), "{said}");
+    assert!(said.contains("CAUGHT           p: two ("), "{said}");
+    assert!(said.find(&notice) < said.find("CAUGHT"), "{said}");
 }
 
 #[cfg(unix)]
@@ -2304,5 +2683,67 @@ mod stops {
             std::thread::sleep(Duration::from_millis(10));
         }
         assert!(!runner.stopped(), "a stop is asked for once");
+    }
+
+    /// A crate whose one test starts a writer that takes no notice of being asked to end
+    /// and has none of the test's streams, marks that it did (`started`), and waits a
+    /// minute; the writer waits for the file `go`, then writes `late`. nextest runs the
+    /// test, and so the writer, in a group of its own.
+    const WRITER_LIB: &str = r#"#[cfg(test)]
+mod tests {
+    #[test]
+    fn leaves_a_writer() {
+        let folder = env!("CARGO_MANIFEST_DIR");
+        std::process::Command::new("/bin/sh")
+            .arg("-c")
+            .arg(format!(
+                "trap '' TERM; while [ ! -e '{folder}/go' ]; do sleep 0.1; done; echo late > '{folder}/late'"
+            ))
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        std::fs::write(format!("{folder}/started"), "").unwrap();
+        std::thread::sleep(std::time::Duration::from_secs(60));
+    }
+}
+"#;
+
+    #[test]
+    fn what_a_rust_test_left_in_the_group_nextest_gave_it_is_ended_at_a_stop_and_out_of_time() {
+        // The first reviewer's look at round 5: a stop ended nextest, not the groups it
+        // gives its tests, and what a test left there wrote the sources once they were
+        // put back.
+        let (fixture, command) = fixture_crate("plants-writer", WRITER_LIB);
+        let mark = |name: &str| fixture.path().join(name);
+        let wrote_after = |what: &str| {
+            fs::write(mark("go"), "").unwrap();
+            std::thread::sleep(Duration::from_secs(2));
+            let wrote = mark("late").exists();
+            for name in ["go", "late", "started"] {
+                let _ = fs::remove_file(mark(name));
+            }
+            assert!(!wrote, "what the test left wrote after {what}");
+        };
+        // Stopped once the test has left its writer.
+        let mut stopped = runner_with(&context(), Duration::from_secs(600), || {
+            Stops::on(&[SignalKind::from_raw(Signal::SIGVTALRM as i32)]).unwrap()
+        });
+        let started = mark("started");
+        let sender = std::thread::spawn(move || {
+            while !started.exists() {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            raise(Signal::SIGVTALRM).unwrap();
+        });
+        assert_eq!(stopped.run(&command).unwrap(), Execution::Stopped);
+        sender.join().unwrap();
+        wrote_after("the stop");
+        // Out of its time, the test's binary built already.
+        let hurried = ended(runner(Duration::from_secs(10)).run(&command).unwrap());
+        assert!(hurried.hung, "{}", hurried.output);
+        assert!(mark("started").exists(), "the test ran: {}", hurried.output);
+        wrote_after("the run ran out of its time");
     }
 }

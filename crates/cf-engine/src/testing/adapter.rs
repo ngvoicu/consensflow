@@ -144,6 +144,9 @@ pub struct FakeAdapter {
     /// conversation began with (`adapter.keeps_first_instructions`, which no
     /// trace of Node's has): not, as an adapter that says no more.
     pub keeps_first_instructions: Cell<bool>,
+    /// Whether its windows are asked whether they are ready before they have
+    /// drawn their screens too, as Devin's are: not, as an adapter that says no more.
+    pub ready_while_drawing: Cell<bool>,
     /// Launches the test holds (`hold(adapter, 'prepare', ...)`): one let go
     /// fails with the reason, where the test gave one.
     pub prepare_holds: Holds<String>,
@@ -200,6 +203,7 @@ impl FakeAdapter {
             }),
             servers: Cell::new(Servers::Unknown),
             keeps_first_instructions: Cell::new(false),
+            ready_while_drawing: Cell::new(false),
             prepare_holds: Holds::default(),
             observe_holds: Holds::default(),
             start_holds: Holds::default(),

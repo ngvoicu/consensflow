@@ -251,7 +251,7 @@ fn checks_of(rig: &Rig, install: &Installed, cases: &[Case], log: &Log) -> Resul
 #[test]
 #[ignore = "opt-in: spends the machine's quota on a window of each harness named; cargo xtask live paste (npm run live:paste)"]
 fn a_window_sends_every_message_the_daemon_pastes_into_it() -> Result {
-    let log = Log::new("live paste");
+    let log = Log::begin("live paste")?;
     // What a window is opened on is the harness code's to say: built before anything is spent.
     ask::prepare()?;
     let cases = cases(&lengths(&live::list("long"))?);

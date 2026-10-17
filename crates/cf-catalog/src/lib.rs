@@ -86,7 +86,7 @@ mod tests {
     #[test]
     fn the_bundled_catalog_reads_whole_every_field_known() {
         let catalog = Catalog::bundled().unwrap();
-        assert_eq!(catalog.presets().len(), 120);
+        assert_eq!(catalog.presets().len(), 121);
         assert_eq!(
             catalog
                 .presets()

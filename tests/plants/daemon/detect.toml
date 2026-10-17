@@ -1,12 +1,243 @@
-# Where `crates/cf-harness` finds a harness's CLI (`detect.rs`): on Windows,
-# npm's global folder, `%APPDATA%\npm`, after PATH, the harness's own places
-# and the common ones, and nowhere off Windows. Every name here begins
-# `detect:`, so `npm run plants:daemon -- detect` runs them.
+# Where `crates/cf-harness` finds a harness's CLI (`detect.rs`): on the PATH the
+# daemon was given, then on Windows npm's global folder, `%APPDATA%\npm`, after the
+# harness's own places and the common ones, and nowhere off Windows; then, on every
+# system, the system's own folders of programs (`/opt/homebrew/bin` on a Mac), which
+# the environment carries (`crates/cf-base/src/env.rs`: the ones
+# `CONSENSFLOW_TOOL_FOLDERS` names, else the machine's for the process's own, none for
+# one a test makes). The daemon runs everything with them after its PATH
+# (`crates/cf-daemon/src/start.rs`), and finds what it needs there, the Node of an npm
+# shim among it; a harness's CLI alone is looked for on the PATH as given first
+# (`crates/cf-process/src/search.rs`, `on_search_path`). The owner's Homebrew `codex` was "not
+# installed" when a slow login shell left the daemon on the Finder's PATH (2026-10-15,
+# 3.0.4); the rig's cases are
+# `crates/cf-e2e/tests/regressions/codex_in_homebrew_taken_for_not_installed.rs`,
+# whose run builds the native `cf` from the sources as planted. Every name here
+# begins `detect:`, so `npm run plants:daemon -- detect` runs them.
 
 [run]
 detect-unit = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "detect::"]
 # Node's recordings of detection, played (`crates/cf-harness/tests/goldens/admin`).
 detect-goldens = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "admin"]
+# The environment's folders of programs, and the PATH they make.
+base-env = ["cargo", "test", "--offline", "-p", "cf-base", "--lib", "env::"]
+# Where a program is looked for on a PATH.
+process-search = ["cargo", "test", "--offline", "-p", "cf-process", "--lib", "search::"]
+# The daemon started as the Finder starts it: a task to a Codex worker whose Codex is
+# only in the system's folder, or the human's own in the home with an older one there,
+# and a window that runs a program of the system's folder.
+rig-regression-codex-in-homebrew = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "codex_in_homebrew_taken_for_not_installed::"]
+
+# The system's folders of programs, looked in last.
+[[plant]]
+name = "detect: the system's folders of programs are not looked in"
+meant = "a_cli_only_in_a_folder_of_the_systems_is_found_when_path_lacks_it"
+runs = ["detect-unit"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/detect.rs"
+find = '''
+        let folders = folders.chain(env.tool_folders().iter().cloned());
+'''
+replace = ""
+
+[[plant]]
+name = "detect: the system's folders of programs are not looked in, by the rig's daemon"
+meant = "a_task_for_a_codex_worker_whose_codex_is_only_in_the_systems_folder_reaches_it_and_its_result_the_chief"
+runs = ["rig-regression-codex-in-homebrew"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-harness/src/detect.rs"
+find = '''
+        let folders = folders.chain(env.tool_folders().iter().cloned());
+'''
+replace = ""
+
+[[plant]]
+name = "detect: the system's folders of programs are looked in before the places under the home"
+meant = "they_come_after_path_and_every_place_under_the_home_each_in_the_order_named"
+runs = ["detect-unit"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/detect.rs"
+find = '''
+        let folders = homed(harness, env).into_iter().chain(npm_global(env));
+        let folders = folders.chain(env.tool_folders().iter().cloned());'''
+replace = '''
+        let folders = env.tool_folders().iter().cloned().chain(homed(harness, env)).chain(npm_global(env));'''
+
+# Which they are: the named, the machine's, or none.
+[[plant]]
+name = "detect: an environment a test makes has the machine's folders of programs"
+meant = "the_folders_of_programs_are_the_ones_named_else_the_machines_for_its_own_and_none_for_a_tests"
+runs = ["base-env"]
+
+[[plant.edit]]
+file = "crates/cf-base/src/env.rs"
+find = '''
+            .unwrap_or_default();
+        let search_path = vars.get(&key("PATH".into())).cloned();'''
+replace = '''
+            .unwrap_or_else(|| MACHINE_TOOL_FOLDERS.iter().map(PathBuf::from).collect());
+        let search_path = vars.get(&key("PATH".into())).cloned();'''
+
+[[plant]]
+name = "detect: the process's own environment has none of the machine's folders of programs"
+meant = "the_folders_of_programs_are_the_ones_named_else_the_machines_for_its_own_and_none_for_a_tests"
+runs = ["base-env"]
+
+[[plant.edit]]
+file = "crates/cf-base/src/env.rs"
+find = "        if self.os(TOOL_FOLDERS).is_none() {"
+replace = "        if false {"
+
+[[plant]]
+name = "detect: the folders an environment names give way to the machine's"
+meant = "the_folders_of_programs_are_the_ones_named_else_the_machines_for_its_own_and_none_for_a_tests"
+runs = ["base-env"]
+
+[[plant.edit]]
+file = "crates/cf-base/src/env.rs"
+find = "        if self.os(TOOL_FOLDERS).is_none() {"
+replace = "        if true {"
+
+[[plant]]
+name = "detect: an empty folder in the ones named is the working folder"
+meant = "the_folders_of_programs_are_the_ones_named_else_the_machines_for_its_own_and_none_for_a_tests"
+runs = ["base-env"]
+
+[[plant.edit]]
+file = "crates/cf-base/src/env.rs"
+find = '''
+                    .filter(|folder| !folder.as_os_str().is_empty())
+'''
+replace = ""
+
+# Looked for on the PATH as given; run with the system's folders after it (the reviews
+# of 2026-10-16: on the PATH the daemon runs with, Homebrew's harness came before the
+# human's own in the home).
+[[plant]]
+name = "detect: a harness is looked for on the PATH with the system's folders after it"
+meant = "on_the_path_a_daemon_runs_with_a_harness_in_the_home_still_comes_before_the_systems"
+runs = ["detect-unit"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/detect.rs"
+find = "    cf_process::on_search_path(command, env).or_else(|| {"
+replace = "    cf_process::on_path(command, env).or_else(|| {"
+
+[[plant]]
+name = "detect: a harness is looked for on the PATH with the system's folders after it, by the rig's daemon"
+meant = "a_task_for_a_codex_worker_runs_the_codex_in_its_home_and_not_an_older_one_of_the_systems_folder"
+runs = ["rig-regression-codex-in-homebrew"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-harness/src/detect.rs"
+find = "    cf_process::on_search_path(command, env).or_else(|| {"
+replace = "    cf_process::on_path(command, env).or_else(|| {"
+
+# What a program needs is found on the PATH it runs on, the system's folders and all
+# (the second reviews of 2026-10-16: an npm shim's Node only in one was not found).
+[[plant]]
+name = "detect: a program is looked for on the PATH a harness is first looked for on"
+meant = "a_program_is_found_on_the_path_it_runs_on_and_a_harness_on_the_one_given"
+runs = ["process-search"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/search.rs"
+find = '    on(command, env.os("PATH"), env)'
+replace = "    on(command, env.search_path(), env)"
+
+[[plant]]
+name = "detect: the Node an npm shim runs on is looked for on the PATH a harness is first looked for on"
+meant = "a_shim_runs_on_a_node_only_in_the_systems_folder_the_daemon_runs_with"
+runs = ["detect-unit"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/runnable.rs"
+find = '    on_path("node", env)'
+replace = '    crate::on_search_path("node", env)'
+
+[[plant]]
+name = "detect: putting the system's folders on the PATH puts them on the one a harness is looked for on"
+meant = "programs_run_on_the_path_with_the_systems_folders_after_it_and_are_looked_for_on_the_one_given"
+runs = ["base-env"]
+
+[[plant.edit]]
+file = "crates/cf-base/src/env.rs"
+find = '            self.vars.insert(key("PATH".into()), path);'
+replace = '''
+            self.search_path = Some(path.clone());
+            self.vars.insert(key("PATH".into()), path);'''
+
+[[plant]]
+name = "detect: the daemon runs its windows without the system's folders"
+meant = "a_window_of_a_daemon_on_the_finders_path_finds_a_program_in_the_systems_folder"
+runs = ["rig-regression-codex-in-homebrew"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/start.rs"
+find = '''
+    let env = env.with_tool_folders_on_path();
+'''
+replace = ""
+
+# What the system's folders put on a PATH are: those there, after it, once, each whole.
+[[plant]]
+name = "detect: a folder of the system's that is not there is put on the PATH"
+meant = "the_systems_folders_go_after_the_path_each_once_and_only_where_they_are"
+runs = ["base-env"]
+
+[[plant.edit]]
+file = "crates/cf-base/src/env.rs"
+find = "        if !folder.is_dir() || on_it.contains(folder) {"
+replace = "        if on_it.contains(folder) {"
+
+[[plant]]
+name = "detect: a folder of the system's that the PATH has is put on it again"
+meant = "the_systems_folders_go_after_the_path_each_once_and_only_where_they_are"
+runs = ["base-env"]
+
+[[plant.edit]]
+file = "crates/cf-base/src/env.rs"
+find = "        if !folder.is_dir() || on_it.contains(folder) {"
+replace = "        if !folder.is_dir() {"
+
+[[plant]]
+name = "detect: the system's folders go before the PATH, not after it"
+meant = "the_systems_folders_go_after_the_path_each_once_and_only_where_they_are"
+runs = ["base-env"]
+
+[[plant.edit]]
+file = "crates/cf-base/src/env.rs"
+find = '''
+        if !joined.is_empty() {
+            joined.push(DELIMITER);
+        }
+        joined.push(written);'''
+replace = '''
+        let mut before = written;
+        if !joined.is_empty() {
+            before.push(DELIMITER);
+        }
+        before.push(&joined);
+        joined = before;'''
+
+[[plant]]
+name = "detect: a folder whose name holds the delimiter is put on the PATH as it is, as two"
+meant = "a_folder_whose_name_holds_the_delimiter_is_put_on_the_path_whole_or_not_at_all"
+runs = ["base-env"]
+
+[[plant.edit]]
+file = "crates/cf-base/src/env.rs"
+find = '''
+        let Ok(written) = std::env::join_paths([folder]) else {
+            continue;
+        };'''
+replace = '''
+        let written = folder.clone().into_os_string();'''
 
 [[plant]]
 name = "detect: npm's folder is not looked in"

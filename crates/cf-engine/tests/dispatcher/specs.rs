@@ -8,7 +8,7 @@
 
 use cf_engine::testing::Context;
 use cf_ledger::{ProjectView, SpecsChange};
-use cf_proto::specs::Variant;
+use cf_proto::specs::{AppSpecs, Variant};
 use serde_json::{json, Value};
 
 /// The request that opens a project at `directory`, with `said` among its
@@ -48,10 +48,46 @@ fn says(context: &Context, project: i64, on: Option<bool>, folder: &str, variant
         .unwrap();
 }
 
+/// The human turned specs on or off for every project, and named no folder or variant.
+fn app_says(context: &Context, on: bool) {
+    app_names(context, on, "", None);
+}
+
+/// The human turned specs on or off for every project, and named the folder and
+/// the variant a project uses that names its own (a blank folder names none).
+fn app_names(context: &Context, on: bool, folder: &str, variant: Option<Variant>) {
+    *context.roster.app_specs.borrow_mut() = AppSpecs {
+        on,
+        folder: (!folder.is_empty()).then(|| folder.to_owned()),
+        variant,
+    };
+}
+
 /// The human closes the project and resumes it: the chief's window opens again.
 fn relaunch(context: &Context, project: i64) {
     context.close_project(project).unwrap();
     context.resume_project(project).unwrap();
+}
+
+/// The dispatcher's passes go on with the chief of `project` at work, after a
+/// change of what it is to be given: its window is neither closed nor opened
+/// again, nothing is typed into it, and no Specmint skill is asked for. A change
+/// reaches a chief at its next launch, and only then.
+fn leaves_the_running_chief_as_it_was(context: &Context, project: i64) {
+    let launched = launches(context, project, "chief").len();
+    let (killed, typed) = (context.host.killed().len(), context.host.inputs().len());
+    let asked = context.adapter.specmint_asked.borrow().len();
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(launches(context, project, "chief").len(), launched);
+    assert_eq!(context.host.killed().len(), killed, "no window was closed");
+    assert_eq!(
+        context.host.inputs().len(),
+        typed,
+        "nothing was typed into it"
+    );
+    assert_eq!(context.adapter.specmint_asked.borrow().len(), asked);
 }
 
 /// The launches the adapter was asked for `role` in `project`, oldest first.
@@ -80,7 +116,7 @@ fn a_chief_of_a_project_with_specs_off_is_told_nothing_of_them_and_no_adapter_is
         assert!(launch.get("specs").is_none(), "{launch}");
     }
     // The project says no, whatever the human turned on for every project.
-    context.roster.specs_by_default.set(true);
+    app_says(&context, true);
     says(&context, project.id, Some(false), "", None);
     relaunch(&context, project.id);
     let launch = chief_launch(&context, project.id);
@@ -100,7 +136,7 @@ fn a_chief_of_a_project_with_specs_on_is_told_where_the_skill_is_and_given_it_at
     let project = project_at(&context, "/work/app");
     let first = chief_launch(&context, project.id);
     assert!(first.get("specs").is_none());
-    // The human says it while the chief runs: its window is as it was.
+    // The human says it while the chief runs, and the dispatcher goes on: its window is as it was.
     says(
         &context,
         project.id,
@@ -108,6 +144,7 @@ fn a_chief_of_a_project_with_specs_on_is_told_where_the_skill_is_and_given_it_at
         "docs/specs",
         Some(Variant::TddHtml),
     );
+    leaves_the_running_chief_as_it_was(&context, project.id);
     assert_eq!(launches(&context, project.id, "chief").len(), 1);
     assert_eq!(context.adapter.specmint_asked.borrow().len(), 0);
     // Its next launch has it.
@@ -186,7 +223,7 @@ fn a_chief_of_a_project_opened_with_specs_is_told_and_given_what_one_is_whose_sp
 #[test]
 fn a_project_opened_with_specs_off_or_unsaid_launches_a_chief_told_nothing_of_them() {
     let context = Context::new();
-    context.roster.specs_by_default.set(true);
+    app_says(&context, true);
     let off = context
         .open_project(request_at(
             "/work/off",
@@ -230,7 +267,7 @@ fn a_member_is_never_given_specs_whatever_the_project_says() {
     let context = Context::new();
     let project = project_at(&context, "/work/app");
     says(&context, project.id, Some(true), "", Some(Variant::Core));
-    context.roster.specs_by_default.set(true);
+    app_says(&context, true);
     context.pool_task(project.id, "worker", "Write the parser");
     context.pass().unwrap();
     context.pass().unwrap();
@@ -262,7 +299,7 @@ fn the_app_s_default_applies_where_the_project_says_nothing_and_the_project_s_ow
         (Some(false), true, false),
     ];
     for (own, default, given) in table {
-        context.roster.specs_by_default.set(default);
+        app_says(&context, default);
         says(&context, project.id, own, "", None);
         relaunch(&context, project.id);
         assert_eq!(
@@ -272,7 +309,7 @@ fn the_app_s_default_applies_where_the_project_says_nothing_and_the_project_s_ow
         );
     }
     // Where the project leaves the folder and the variant unsaid they are the documented ones.
-    context.roster.specs_by_default.set(true);
+    app_says(&context, true);
     says(&context, project.id, None, "", None);
     relaunch(&context, project.id);
     let launch = chief_launch(&context, project.id);
@@ -284,6 +321,129 @@ fn the_app_s_default_applies_where_the_project_says_nothing_and_the_project_s_ow
             .contains(" in .specs at "),
         "{launch}"
     );
+}
+
+/// The words a chief's role text and its launch have of specs kept in `folder`
+/// and planned with `variant`, as the fake adapter says them.
+fn is_given(launch: &Value, variant: &str, folder: &str) {
+    let skill = format!(
+        "/consensflow/integrations/specmint/fake/{variant}/.claude/skills/specmint-{variant}/SKILL.md"
+    );
+    assert_eq!(
+        launch["specs"],
+        json!({ "variant": variant, "skill": skill, "installed": false }),
+        "{launch}"
+    );
+    assert_eq!(
+        launch["instructions"],
+        format!("instructions for chief with specs: {variant} in {folder} at {skill}")
+    );
+}
+
+#[test]
+fn a_project_that_names_no_folder_or_variant_uses_the_app_s_and_what_it_names_wins_part_by_part() {
+    let context = Context::new();
+    let project = project_at(&context, "/work/app");
+    app_names(&context, true, "docs/specs", Some(Variant::CoreHtml));
+    let launched = |context: &Context| {
+        relaunch(context, project.id);
+        chief_launch(context, project.id)
+    };
+    // It names nothing, and follows the app on whether, in which folder and with which variant.
+    says(&context, project.id, None, "", None);
+    is_given(&launched(&context), "core-html", "docs/specs");
+    // On and naming nothing else is the same.
+    says(&context, project.id, Some(true), "", None);
+    is_given(&launched(&context), "core-html", "docs/specs");
+    // Its own folder, and the app's variant.
+    says(&context, project.id, Some(true), "plans", None);
+    is_given(&launched(&context), "core-html", "plans");
+    // Its own variant, and the app's folder.
+    says(&context, project.id, Some(true), "", Some(Variant::Tdd));
+    is_given(&launched(&context), "tdd", "docs/specs");
+    // Both its own.
+    says(
+        &context,
+        project.id,
+        Some(true),
+        "plans",
+        Some(Variant::TddHtml),
+    );
+    is_given(&launched(&context), "tdd-html", "plans");
+    // Off is off, whatever the app names.
+    says(
+        &context,
+        project.id,
+        Some(false),
+        "plans",
+        Some(Variant::TddHtml),
+    );
+    assert!(launched(&context).get("specs").is_none());
+}
+
+#[test]
+fn what_the_app_names_goes_where_the_app_names_nothing_is_the_documented_default() {
+    let context = Context::new();
+    let project = project_at(&context, "/work/app");
+    says(&context, project.id, Some(true), "", None);
+    // The app names only the folder, and then only the variant, and then neither.
+    app_names(&context, false, "docs", None);
+    is_given(&relaunched(&context, project.id), "core", "docs");
+    app_names(&context, false, "", Some(Variant::Tdd));
+    is_given(&relaunched(&context, project.id), "tdd", ".specs");
+    app_names(&context, false, "", None);
+    is_given(&relaunched(&context, project.id), "core", ".specs");
+}
+
+/// The chief's launch after a close and a Resume.
+fn relaunched(context: &Context, project: i64) -> Value {
+    relaunch(context, project);
+    chief_launch(context, project)
+}
+
+#[test]
+fn a_project_that_said_a_variant_keeps_it_when_the_app_names_another_and_a_change_reaches_the_next_launch(
+) {
+    let context = Context::new();
+    let project = project_at(&context, "/work/app");
+    says(&context, project.id, Some(true), "", Some(Variant::Tdd));
+    app_names(&context, true, "docs", Some(Variant::CoreHtml));
+    is_given(&relaunched(&context, project.id), "tdd", "docs");
+    // The app changes what it names while the chief runs, and the dispatcher goes on.
+    app_names(&context, true, "elsewhere", Some(Variant::TddHtml));
+    leaves_the_running_chief_as_it_was(&context, project.id);
+    // Its next launch has the project's own variant, and the app's new folder.
+    is_given(&relaunched(&context, project.id), "tdd", "elsewhere");
+}
+
+#[test]
+fn the_roster_is_asked_what_the_app_says_unless_the_project_says_off() {
+    let context = Context::new();
+    let project = project_at(&context, "/work/app");
+    app_names(&context, true, "docs", Some(Variant::CoreHtml));
+    let asked = |context: &Context| context.roster.app_specs_asked.get();
+    let before = asked(&context);
+    says(
+        &context,
+        project.id,
+        Some(false),
+        "plans",
+        Some(Variant::Tdd),
+    );
+    relaunch(&context, project.id);
+    assert_eq!(asked(&context), before, "off needs nothing of the app's");
+    for own in [None, Some(true)] {
+        says(&context, project.id, own, "", None);
+        let before = asked(&context);
+        relaunch(&context, project.id);
+        assert_eq!(asked(&context), before + 1, "{own:?}");
+    }
+    // A member's launch asks nothing of it.
+    context.pool_task(project.id, "worker", "Write the parser");
+    let before = asked(&context);
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(asked(&context), before);
 }
 
 #[test]

@@ -13,7 +13,7 @@ use super::Page;
 
 /// `project.specs`: all three parts at once, each checked before the project is
 /// looked for; one the page leaves out, or sends as `null`, is not said (the
-/// project follows the app's default, `.specs` and `core`). It applies at the
+/// project follows what the app says, [`super::app_specs`]). It applies at the
 /// chief's next launch, which the page says.
 pub(super) async fn set(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
     let change = SpecsChange::from_json(&json!({

@@ -153,10 +153,16 @@ pub trait Runner {
     fn stopped(&mut self) -> bool;
 
     /// What the checkout is now, as far as a command's run can tell: the same text
-    /// where nothing of it changed, whatever wrote it, and another where it cannot be
-    /// told. How a command did without a plant is known in the state it ran in alone.
-    /// `None` is a stop, heard while it was asked.
+    /// where nothing of it changed, whatever wrote it. How a command did without a
+    /// plant is known in the state it ran in alone. `None` is a stop, heard while it
+    /// was asked.
     fn state(&mut self) -> Option<String>;
+
+    /// Why what a run changes in the checkout cannot be told, if it cannot (git says
+    /// nothing of it): its state is then the same whatever a run changed.
+    fn untold(&mut self) -> Option<String> {
+        None
+    }
 }
 
 impl Ran {
@@ -189,8 +195,9 @@ impl Ran {
     /// and ran no test of its own (it did not parse, imported what is not there,
     /// threw as it loaded, after a top-level `await` too, or ended before a test of
     /// it was told), whatever the other files did; an error Playwright says came
-    /// outside every test, or no test it found; no test nextest found to run, or a
-    /// test binary that could not say its tests; a run that failed with no test run
+    /// outside every test (a hook of a test that failed too), or no test it found; no
+    /// test nextest found to run, a test it could not start, or a test binary that
+    /// could not say its tests; a run that failed with no test run
     /// at all; and a run that failed while its report names no test that did, which
     /// no test's own failure made fail (a test cancelled or aborted, a hook that
     /// failed, a Node test file that failed whole after tests of it ran, an error
@@ -224,7 +231,10 @@ impl Ran {
                     .is_empty()
                     .then(|| "Playwright found no test".to_owned()),
             },
-            Reporter::Nextest => none_ran.then(|| "it ran no test".to_owned()),
+            Reporter::Nextest => match results.outside.first() {
+                Some(error) => Some(format!("{error}: it never ran")),
+                None => none_ran.then(|| "it ran no test".to_owned()),
+            },
             Reporter::Status => None,
         };
         why.or_else(|| self.unnamed(results))
@@ -374,8 +384,6 @@ pub struct Execute {
     own: PathBuf,
     limits: Limits,
     stops: Stops,
-    /// How many states could not be told, each told apart from every other.
-    untold: u64,
     /// The builds before a run of cf-e2e's tests (`CF_E2E_PROGRAMS`).
     programs: Vec<Vec<String>>,
 }
@@ -433,7 +441,6 @@ impl Execute {
                 max_buffer: OUTPUT_LIMIT,
             },
             stops,
-            untold: 0,
             programs: CF_E2E_PROGRAMS
                 .iter()
                 .map(|build| build.iter().map(|word| (*word).to_owned()).collect())
@@ -694,14 +701,15 @@ impl Runner for Execute {
     /// The commit the checkout is at, what git says of it beyond that (every file
     /// changed, added or untracked, ignored ones aside), and the bytes of each such
     /// file, hashed: a file put back as it was is the state it was. Where git says
-    /// nothing (no checkout of git's), a state of its own each time; a stop heard
-    /// while git is asked is none.
+    /// nothing (no checkout of git's), one state whatever a run changed, which is
+    /// said once (`untold`): a state of its own each time made every plant UNSTABLE
+    /// on a copy shipped with no checkout (zeewin, 2026-10-17). A stop heard while
+    /// git is asked is none.
     fn state(&mut self) -> Option<String> {
         let head = self.git(&["rev-parse", "HEAD"])?;
         let status = self.git(&["status", "--porcelain=v1", "-z", "--untracked-files=all"])?;
         let (Some(head), Some(status)) = (head, status) else {
-            self.untold += 1;
-            return Some(format!("untold {}", self.untold));
+            return Some(UNTOLD.to_owned());
         };
         let mut hasher = DefaultHasher::new();
         head.hash(&mut hasher);
@@ -713,7 +721,22 @@ impl Runner for Execute {
         }
         Some(format!("{:016x}", hasher.finish()))
     }
+
+    /// That git says nothing of the checkout, where it does not (`state`): a stop heard
+    /// while it is asked is the driver's to hear, which says nothing here.
+    fn untold(&mut self) -> Option<String> {
+        match self.git(&["rev-parse", "HEAD"]) {
+            Some(None) => Some(format!(
+                "no git checkout at {}: a run that changes the checkout can't be told",
+                self.checkout.root.display()
+            )),
+            Some(Some(_)) | None => None,
+        }
+    }
 }
+
+/// The state of a checkout git says nothing of, whatever a run changed in it.
+const UNTOLD: &str = "untold";
 
 /// The paths of `git status --porcelain=v1 -z`: each entry `XY <path>`, a rename's or
 /// a copy's followed by the path it was.

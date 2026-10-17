@@ -3,7 +3,8 @@
 //! expectation holds on the numbers of a run that did what it asks and fails on
 //! those of a run that did not (`tests/scenarios/verdicts.rs`), by the name a report
 //! says it by; and on the numbers of the eleven ledgers recorded from real runs and
-//! made ones, each judges as the JavaScript's did.
+//! made ones, each judges as the JavaScript's did. A scenario written after the
+//! JavaScript (`AFTER_NODE`) has no golden, and its verdicts alone hold it.
 
 #![allow(clippy::unwrap_used)]
 
@@ -73,12 +74,17 @@ pub fn scenario(id: &str) -> Scenario {
     }
 }
 
+/// The scenarios written after the JavaScript was gone, which no golden holds: their
+/// expectations are held by `tests/scenarios/verdicts.rs` alone.
+const AFTER_NODE: [&str; 1] = ["uncommitted-work"];
+
 #[test]
 fn every_scenario_says_what_the_javascript_one_said_word_for_word() {
     let golden = golden();
-    assert_eq!(golden.len(), scenarios::IDS.len());
+    assert_eq!(golden.len() + AFTER_NODE.len(), scenarios::IDS.len());
     for said in golden {
         let id = said["id"].as_str().unwrap();
+        assert!(!AFTER_NODE.contains(&id), "{id}");
         assert_eq!(described(&scenario(id)), said, "{id}");
     }
 }
@@ -97,7 +103,7 @@ fn each_scenario_judges_each_recorded_ledger_as_the_javascript_one_did() {
     assert_eq!(recordings.len(), 11);
     for (name, said) in recordings {
         let metrics = support::measured(name);
-        for id in scenarios::IDS {
+        for id in scenarios::IDS.iter().filter(|id| !AFTER_NODE.contains(id)) {
             let judged: String = scenario(id)
                 .verdict(&metrics)
                 .iter()
@@ -109,8 +115,8 @@ fn each_scenario_judges_each_recorded_ledger_as_the_javascript_one_did() {
 }
 
 #[test]
-fn the_twelve_scenarios_are_found_by_their_ids_and_no_other() {
-    assert_eq!(scenarios::IDS.len(), 12);
+fn the_thirteen_scenarios_are_found_by_their_ids_and_no_other() {
+    assert_eq!(scenarios::IDS.len(), 13);
     for id in scenarios::IDS {
         assert_eq!(scenarios::by_id(id).unwrap().id, id);
     }
@@ -119,7 +125,41 @@ fn the_twelve_scenarios_are_found_by_their_ids_and_no_other() {
     let mut ids = scenarios::IDS.to_vec();
     ids.sort_unstable();
     ids.dedup();
-    assert_eq!(ids.len(), 12, "one each");
+    assert_eq!(ids.len(), 13, "one each");
+}
+
+#[test]
+fn only_the_uncommitted_work_has_a_change_of_the_owner_s_reads_its_page_and_counts_the_files_gone()
+{
+    for id in scenarios::IDS {
+        let scenario = scenarios::by_id(id).unwrap();
+        if id == "uncommitted-work" {
+            let change = scenario.uncommitted.unwrap();
+            assert_eq!(change.file, "site/evaluare.html");
+            assert_eq!(scenario.reads(), ["site/evaluare.html"]);
+            assert!(scenario.counts_gone_files(), "{id}");
+            // The prompt says nothing of the owner's change: that is what a worker must
+            // find for itself.
+            assert!(!scenario.prompt.contains(change.replace), "{id}");
+            assert!(!scenario.prompt.contains("100"), "{id}");
+            // The undo is the owner's second message, never the first's: the run reads
+            // the page T-1 left just before it is typed (Sol, 2026-10-15).
+            assert!(!scenario.prompt.contains("--after"), "{id}");
+            let [FollowUp::Say(undo)] = scenario.follow_ups.as_slice() else {
+                panic!("{id}: one message after the first, the undo");
+            };
+            assert!(undo.contains("cf task add --after T-1"), "{undo}");
+            assert!(
+                !undo.contains(change.replace) && !undo.contains("100"),
+                "{undo}"
+            );
+        } else {
+            // The others' reports keep their shape: no file read, no file gone counted.
+            assert!(scenario.uncommitted.is_none(), "{id}");
+            assert!(scenario.reads().is_empty(), "{id}");
+            assert!(!scenario.counts_gone_files(), "{id}");
+        }
+    }
 }
 
 #[test]

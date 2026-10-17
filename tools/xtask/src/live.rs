@@ -17,7 +17,12 @@
 //!   flag is never called `keep` (the stops that kept a folder of transcripts by
 //!   `--keep <folder>` call it `--transcripts`);
 //! - a word that is no flag and no flag's value names a harness, which is the
-//!   same as `--harness word`: `cargo xtask live approval claude pi`.
+//!   same as `--harness word`: `cargo xtask live approval claude pi`;
+//! - `--models pi=openai/gpt-6-luna,codex=gpt-6.1-sol:high` is a flag as any
+//!   other, which sets `CONSENSFLOW_LIVE_MODELS`: what it means (each harness
+//!   named on that model, and that effort, the others on their cheap one) is the
+//!   suites' to read (`cf_e2e::live::agents`), and a value they cannot ask a
+//!   window for is refused there, before anything is spent.
 //!
 //! The words end at a `--`, or at the first of cargo's own flags that a run is
 //! likely to want (`--offline`, `--locked`, `--frozen`): they and what follows
@@ -44,7 +49,7 @@ use crate::process::{self, Invocation};
 pub const COMMANDS: &[Command] = &[Command {
     words: &["live"],
     about: "Run a live test of cf-e2e (the tests/live_<name>.rs files): it runs real harnesses on the machine's own logins and spends real quota, so it is ignored unless asked for and is no part of check",
-    usage: "<name> [harness ...] [--keep] [--<flag> <value> ...] [--offline] [-- libtest's arguments] (each flag sets CONSENSFLOW_LIVE_<FLAG>, a repeated flag its values with commas between them; --keep leaves the run's home and project where they are; words that are no flags name harnesses; run it with no name to list the tests)",
+    usage: "<name> [harness ...] [--keep] [--models harness=model[:effort],...] [--<flag> <value> ...] [--offline] [-- libtest's arguments] (each flag sets CONSENSFLOW_LIVE_<FLAG>, a repeated flag its values with commas between them; --keep leaves the run's home and project where they are; --models runs each harness it names on that model, and that effort where one is given, the others on their cheap one (--claude-model M is --models claude=M, and --models wins where both name Claude); words that are no flags name harnesses; run it with no name to list the tests)",
     run: Run::Native(live),
 }];
 

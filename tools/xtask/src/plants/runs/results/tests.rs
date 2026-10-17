@@ -321,6 +321,41 @@ fn a_testcase_marked_skipped_neither_failed_nor_passed_though_it_holds_a_failure
 }
 
 #[test]
+fn a_test_nextest_could_not_start_never_ran_and_is_an_error_outside_every_test() {
+    // As nextest 0.9.148 says a test whose binary was taken away after it listed its
+    // tests (2026-10-17): its own error where it starts the test itself (Windows); on
+    // Unix its double-spawn's status and words. A test that exits with 70 itself, or
+    // writes those words and fails otherwise, failed.
+    let xml = r#"<testsuites><testsuite name="x">
+        <testcase name="a::unstarted" classname="x"><error message="error spawning child process" type="execution failure">error spawning child process
+  - No such file or directory (os error 2)</error></testcase>
+        <testcase name="a::double_spawned" classname="x"><failure type="test failure with exit code 70"/><system-out></system-out><system-err>error: [double-spawn] failed to exec `&quot;/x/target/debug/deps/x-1&quot; &quot;--exact&quot;`
+
+Caused by:
+  No such file or directory (os error 2)
+</system-err></testcase>
+        <testcase name="a::exits_with_70" classname="x"><failure type="test failure with exit code 70"/><system-err>it exits with 70 itself</system-err></testcase>
+        <testcase name="a::says_the_words" classname="x"><failure type="test failure with exit code 101"/><system-err>error: [double-spawn] failed to exec, it says</system-err></testcase>
+    </testsuite></testsuites>"#;
+    let read = junit(xml).unwrap();
+    assert_eq!(
+        said(&read.tests),
+        [("a::exits_with_70", true), ("a::says_the_words", true)]
+    );
+    assert_eq!(
+        said(&read.others),
+        [("a::unstarted", false), ("a::double_spawned", false)]
+    );
+    assert_eq!(
+        read.outside,
+        [
+            "nextest could not start a::unstarted (x)",
+            "nextest could not start a::double_spawned (x)"
+        ]
+    );
+}
+
+#[test]
 fn a_report_of_nextest_s_that_is_cut_short_or_is_not_xml_is_an_error_and_a_testcase_with_no_name_too(
 ) {
     assert!(junit("<testsuites><testcase name=\"a\"/></testcase>").is_err());
@@ -340,130 +375,83 @@ fn a_report_of_nextest_s_that_is_cut_short_or_is_not_xml_is_an_error_and_a_testc
     );
 }
 
-/// What Playwright 1.63 wrote (2026-10-16) in its JSON report for a spec whose test in a
-/// group passed, having written Playwright's summary of a failure to its standard error,
-/// and whose test at the top failed on an expectation that quotes Playwright's words for
-/// an error outside every test; cut to what is read. The test before it was skipped.
-const PLAYWRIGHT: &str = r#"{
-  "config": { "version": "1.63.0" },
-  "suites": [
-    {
-      "title": "prints.spec.mjs",
-      "file": "prints.spec.mjs",
-      "specs": [
-        {
-          "title": "is skipped",
-          "ok": true,
-          "tests": [{ "results": [], "status": "skipped" }],
-          "file": "prints.spec.mjs"
-        },
-        {
-          "title": "another fails",
-          "ok": false,
-          "tests": [
-            {
-              "results": [
-                {
-                  "status": "failed",
-                  "error": {
-                    "message": "Error: expect(received).toBe(expected)\n\nExpected: \"Error: No tests found.\"\nReceived: \"1 error was not a part of any test\""
-                  },
-                  "stdout": [],
-                  "stderr": []
-                }
-              ],
-              "status": "unexpected"
-            }
-          ],
-          "file": "prints.spec.mjs",
-          "line": 11,
-          "column": 1
-        }
-      ],
-      "suites": [
-        {
-          "title": "a group",
-          "file": "prints.spec.mjs",
-          "specs": [
-            {
-              "title": "the meant one",
-              "ok": true,
-              "tests": [
-                {
-                  "results": [
-                    {
-                      "status": "passed",
-                      "errors": [],
-                      "stdout": [],
-                      "stderr": [{ "text": "  1 failed\n    prints.spec.mjs:4:3 › a group › the meant one \n" }]
-                    }
-                  ],
-                  "status": "expected"
-                },
-                {
-                  "results": [{ "status": "failed" }, { "status": "passed" }],
-                  "status": "flaky"
-                }
-              ],
-              "file": "prints.spec.mjs",
-              "line": 4,
-              "column": 3
-            }
-          ]
-        }
-      ]
-    }
-  ],
-  "errors": [],
-  "stats": { "expected": 1, "skipped": 1, "unexpected": 1, "flaky": 1 }
-}"#;
+/// What the plants' reporter of Playwright's tests wrote (Playwright 1.63, 2026-10-17)
+/// for a spec run in two projects, the second given one retry: a test skipped; a test
+/// in a group that passed, having written Playwright's summary of a failure to its
+/// standard error, and in the second project failed and then passed, run again; a test
+/// that failed on an expectation that quotes Playwright's words for an error outside
+/// every test; a test whose group's `beforeAll` threw, its body never run; and a test
+/// whose body failed and whose `afterEach` threw.
+const PLAYWRIGHT: &str = r#"{"tests":[
+{"path":["is skipped"],"file":"/checkout/app/tests/prints.spec.mjs","line":3,"column":6,"project":"first","outcome":"skipped","own":false,"hook":null},
+{"path":["a group","the meant one"],"file":"/checkout/app/tests/prints.spec.mjs","line":6,"column":3,"project":"first","outcome":"expected","own":false,"hook":null},
+{"path":["another fails"],"file":"/checkout/app/tests/prints.spec.mjs","line":12,"column":1,"project":"first","outcome":"unexpected","own":true,"hook":null},
+{"path":["set up","its body never runs"],"file":"/checkout/app/tests/prints.spec.mjs","line":20,"column":3,"project":"first","outcome":"unexpected","own":false,"hook":"Error: the beforeAll throws"},
+{"path":["torn down","its body fails too"],"file":"/checkout/app/tests/prints.spec.mjs","line":27,"column":3,"project":"first","outcome":"unexpected","own":true,"hook":"Error: the afterEach throws"},
+{"path":["is skipped"],"file":"/checkout/app/tests/prints.spec.mjs","line":3,"column":6,"project":"second","outcome":"skipped","own":false,"hook":null},
+{"path":["a group","the meant one"],"file":"/checkout/app/tests/prints.spec.mjs","line":6,"column":3,"project":"second","outcome":"flaky","own":false,"hook":null},
+{"path":["another fails"],"file":"/checkout/app/tests/prints.spec.mjs","line":12,"column":1,"project":"second","outcome":"unexpected","own":true,"hook":null},
+{"path":["set up","its body never runs"],"file":"/checkout/app/tests/prints.spec.mjs","line":20,"column":3,"project":"second","outcome":"unexpected","own":false,"hook":"Error: the beforeAll throws"},
+{"path":["torn down","its body fails too"],"file":"/checkout/app/tests/prints.spec.mjs","line":27,"column":3,"project":"second","outcome":"unexpected","own":true,"hook":"Error: the afterEach throws"}
+],"errors":[],"end":true}
+"#;
 
-/// Playwright 1.63's report for a spec that imports a module that is not there.
-const PLAYWRIGHT_UNIMPORTED: &str = r#"{
-  "config": { "version": "1.63.0" },
-  "suites": [],
-  "errors": [
-    {
-      "message": "Error: Cannot find module '/checkout/app/tests/not-there.mjs' imported from /checkout/app/tests/missing.spec.mjs",
-      "stack": "Error: Cannot find module '/checkout/app/tests/not-there.mjs' imported from /checkout/app/tests/missing.spec.mjs\n    at eval (<anonymous>:1:1)"
-    },
-    {
-      "message": "Error: No tests found.\nMake sure that arguments are regular expressions matching test files.\nYou may need to escape symbols like \"$\" or \"*\" and quote the arguments.",
-      "stack": "Error: No tests found."
-    }
-  ],
-  "stats": { "expected": 0, "skipped": 0, "unexpected": 0, "flaky": 0 }
-}"#;
+/// The plants' reporter's report (Playwright 1.63) for a spec that imports a module that
+/// is not there, and for a run that found no test.
+const PLAYWRIGHT_UNIMPORTED: &str = r#"{"tests":[],"errors":["Error: Cannot find module '/checkout/app/tests/not-there.mjs' imported from /checkout/app/tests/missing.spec.mjs","Error: No tests found."],"end":true}
+"#;
 
 #[test]
-fn playwright_says_each_test_named_from_its_first_group_on_and_whether_it_failed_and_nothing_it_printed(
-) {
+fn playwright_says_each_test_named_from_its_first_group_on_and_whether_its_own_body_failed() {
     let read = playwright(PLAYWRIGHT).unwrap();
     assert_eq!(
         said(&read.tests),
         [
-            ("another fails", true),
             // The same test, run in two projects, is one test; in the second it failed and
             // then passed, run again, which is no failure.
             ("a group › the meant one", false),
+            ("another fails", true),
+            // Its body failed, whatever its `afterEach` did.
+            ("torn down › its body fails too", true),
         ]
     );
-    assert_eq!(names(&read.failed()), ["another fails"]);
-    assert!(read.outside.is_empty(), "{:?}", read.outside);
-    assert_eq!(read.tests[0].at, "prints.spec.mjs:11:1");
-    assert_eq!(read.tests[1].at, "prints.spec.mjs:4:3");
-    // The test skipped in every project is one registered.
-    assert_eq!(said(&read.others), [("is skipped", false)]);
-    // A test failed where it failed in one project of those it ran in; one skipped in
-    // every project is one of the others.
-    let projects = |statuses: &[&str]| {
-        let tests: Vec<String> = statuses
+    assert_eq!(
+        names(&read.failed()),
+        ["another fails", "torn down › its body fails too"]
+    );
+    assert_eq!(read.tests[0].at, "/checkout/app/tests/prints.spec.mjs:6:3");
+    assert_eq!(read.tests[1].at, "/checkout/app/tests/prints.spec.mjs:12:1");
+    // The test skipped in every project, and the one whose `beforeAll` threw, whose body
+    // never ran, are registered, and neither failed nor passed.
+    assert_eq!(
+        said(&read.others),
+        [
+            ("is skipped", false),
+            ("set up › its body never runs", false)
+        ]
+    );
+    // The hook's failure is an error outside every test, in each project.
+    assert_eq!(
+        read.outside,
+        [
+            "a hook of set up › its body never runs in first failed: Error: the beforeAll throws",
+            "a hook of set up › its body never runs in second failed: Error: the beforeAll throws",
+        ]
+    );
+    // A test failed where its body failed in one project of those it was given to; one
+    // skipped in every project, or failed by its hooks alone, is one of the others.
+    let projects = |outcomes: &[(&str, bool)]| {
+        let tests: Vec<String> = outcomes
             .iter()
-            .map(|status| format!(r#"{{ "results": [], "status": "{status}" }}"#))
+            .map(|(outcome, own)| {
+                format!(
+                    r#"{{"path":["t"],"file":"/a.spec.mjs","line":1,"column":1,"project":"","outcome":"{outcome}","own":{own},"hook":null}}"#
+                )
+            })
             .collect();
         let json = format!(
-            r#"{{ "suites": [{{ "title": "a.spec.mjs", "specs": [{{ "title": "t", "file": "a.spec.mjs", "line": 1, "column": 1, "tests": [{}] }}] }}], "errors": [] }}"#,
-            tests.join(", ")
+            r#"{{"tests":[{}],"errors":[],"end":true}}"#,
+            tests.join(",")
         );
         let read = playwright(&json).unwrap();
         let owned = |tests: &[Test]| {
@@ -475,10 +463,29 @@ fn playwright_says_each_test_named_from_its_first_group_on_and_whether_it_failed
         (owned(&read.tests), owned(&read.others))
     };
     let t = |failed| vec![("t".to_owned(), failed)];
-    assert_eq!(projects(&["expected", "unexpected"]), (t(true), Vec::new()));
-    assert_eq!(projects(&["unexpected", "skipped"]), (t(true), Vec::new()));
-    assert_eq!(projects(&["skipped", "expected"]), (t(false), Vec::new()));
-    assert_eq!(projects(&["skipped", "skipped"]), (Vec::new(), t(false)));
+    let failed = ("unexpected", true);
+    let hooked = ("unexpected", false);
+    assert_eq!(
+        projects(&[("expected", false), failed]),
+        (t(true), Vec::new())
+    );
+    assert_eq!(
+        projects(&[failed, ("skipped", false)]),
+        (t(true), Vec::new())
+    );
+    assert_eq!(
+        projects(&[("skipped", false), ("expected", false)]),
+        (t(false), Vec::new())
+    );
+    assert_eq!(
+        projects(&[("skipped", false), ("skipped", false)]),
+        (Vec::new(), t(false))
+    );
+    assert_eq!(projects(&[hooked]), (Vec::new(), t(false)));
+    assert_eq!(
+        projects(&[hooked, ("expected", false)]),
+        (t(false), Vec::new())
+    );
 }
 
 #[test]
@@ -493,8 +500,10 @@ fn playwright_says_the_errors_outside_every_test_each_by_its_first_line() {
         ]
     );
     assert!(playwright("Running 2 tests").is_err());
-    // A report that is JSON and not Playwright's is no report of its tests.
+    // A report that is JSON and not the reporter's is no report of its tests, nor one
+    // that does not say the run ended.
     assert!(playwright("{}").is_err());
-    assert!(playwright(r#"{"suites": []}"#).is_err());
-    assert!(playwright(r#"{"suites": [], "errors": []}"#).is_ok());
+    assert!(playwright(r#"{"suites": [], "errors": []}"#).is_err());
+    assert!(playwright(r#"{"tests":[],"errors":[],"end":false}"#).is_err());
+    assert!(playwright(r#"{"tests":[],"errors":[],"end":true}"#).is_ok());
 }

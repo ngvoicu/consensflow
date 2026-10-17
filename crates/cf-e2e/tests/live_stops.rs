@@ -205,10 +205,6 @@ fn run(case: Case, harness: Harness, options: &Options, log: &Log) -> Result<Acc
         Case::MidTurn => midturn::run(&ctx, &mut account, harness),
         Case::MidTool => midturn::tool::run(&ctx, &mut account, harness),
     };
-    // What ignores the signals is ended for good, and with it the window.
-    if case == Case::Stuck {
-        stuck::end_the_command();
-    }
     if let Some(folder) = &options.transcripts {
         for file in keep_transcripts(&members, &agent, folder)? {
             log.say(format!("kept {}", file.display()));
@@ -224,7 +220,7 @@ fn run(case: Case, harness: Harness, options: &Options, log: &Log) -> Result<Acc
 #[ignore = "opt-in: spends the machine's quota on a member of the harness each case runs; cargo xtask live stops (npm run live:stops)"]
 fn a_stop_the_daemon_presses_is_paid_at_rest_and_never_said_to_be_ignored_where_the_window_stopped(
 ) -> Result {
-    let log = Log::new("live stops");
+    let log = Log::begin("live stops")?;
     let options = options(
         &live::list("case"),
         live::option("hook").as_deref(),
