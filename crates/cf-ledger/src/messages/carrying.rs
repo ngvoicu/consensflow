@@ -15,7 +15,7 @@ use cf_proto::ledger::MessageView;
 use rusqlite::params;
 use serde_json::json;
 
-use super::continuations::drop_continuations;
+use super::continuations::{drop_continuations, withdraw_stale_among};
 use super::delivery::cancel_message;
 use super::messages;
 use super::receipt::reconcile;
@@ -173,9 +173,19 @@ pub(crate) fn adopt(store: &mut Store, id: i64) -> Result<(), LedgerError> {
 
 /// What a carrier that was cancelled, or failed, carried is its own again:
 /// still kept, still `queued`, for the next carrier to take, and handed nothing,
-/// whatever its carrier's transport let go (`delivery`'s `admit`). Withdrawing a
-/// carrier's transport never takes what it carried with it.
-pub(crate) fn release_carried(store: &Store, task_id: i64) -> Result<(), LedgerError> {
+/// whatever its carrier's transport let go (`delivery`'s `admit`), but for a
+/// continuation whose task is no longer at work, which goes (`continuations`).
+/// Withdrawing a carrier's transport never takes what it carried with it.
+pub(crate) fn release_carried(store: &mut Store, task_id: i64) -> Result<(), LedgerError> {
+    let released = ids(
+        store,
+        "SELECT id FROM message
+         WHERE task_id = ?1 AND state = 'queued'
+           AND carried_by IN (SELECT id FROM message WHERE task_id = ?1
+                              AND state IN ('cancelled', 'failed'))
+         ORDER BY id",
+        [task_id],
+    )?;
     store.db.execute(
         "UPDATE message SET carried_by = NULL, handed_at = NULL
          WHERE task_id = ?1 AND state = 'queued'
@@ -183,7 +193,7 @@ pub(crate) fn release_carried(store: &Store, task_id: i64) -> Result<(), LedgerE
                               AND state IN ('cancelled', 'failed'))",
         [task_id],
     )?;
-    Ok(())
+    withdraw_stale_among(store, &released)
 }
 
 /// What a daemon that knows no carriers left riding in one. A row is in the
@@ -202,6 +212,11 @@ pub(crate) fn release_carried(store: &Store, task_id: i64) -> Result<(), LedgerE
 /// as received, and that answer is still to be. A row Node was pasting on its
 /// own when it stopped is `delivering`, not `queued`: it is left to the
 /// delivery that settles it, and `retry_delivery` lets it go of its carrier then.
+/// A row let go of is handed nothing, whatever its carrier's transport let go
+/// (both reviews of 2026-10-17: a restart during an admitted carrier's delivery
+/// left its rows marked, and a reader of the closed project read them), and a
+/// continuation among them whose task is no longer at work goes
+/// (`continuations`).
 pub(crate) fn release_stranded(store: &mut Store) -> Result<(), LedgerError> {
     store.write(|store| {
         let carriers: Vec<(i64, i64)> = store
@@ -232,7 +247,8 @@ pub(crate) fn release_stranded(store: &mut Store) -> Result<(), LedgerError> {
                 }
             }
             store.db.execute(
-                "UPDATE message SET carried_by = NULL WHERE carried_by = ? AND state = 'queued'",
+                "UPDATE message SET carried_by = NULL, handed_at = NULL
+                 WHERE carried_by = ? AND state = 'queued'",
                 [carrier],
             )?;
             store.log(
@@ -240,6 +256,7 @@ pub(crate) fn release_stranded(store: &mut Store) -> Result<(), LedgerError> {
                 "message.uncarried",
                 json!({ "carrier": carrier, "released": released }),
             )?;
+            withdraw_stale_among(store, &released)?;
         }
         for task in tasks {
             reconcile(store, task)?;

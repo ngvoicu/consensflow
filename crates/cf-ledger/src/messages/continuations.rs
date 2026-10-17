@@ -8,7 +8,13 @@
 //! reassignment or an end of the task withdraws it, in the write that moves the
 //! task, unless its window was handed it already ([`withdraw_continuations`]); a
 //! reassignment never carries it into the next window's brief
-//! ([`drop_continuations`]). The next Resume writes one anew from the task as it
+//! ([`drop_continuations`]). One its window was handed runs its course; if it
+//! comes back (its paste refused, the window gone, a restart, a carrier given up
+//! or taken back), it goes on only while its task is still at work, and is
+//! withdrawn in that write otherwise, as the transport's admission withdraws it
+//! ([`withdrawn_if_stale`]; Astra's review of 2026-10-17: a continuation handed
+//! over, its task paused while the paste waited, came back after a refusal and was
+//! read as a word to go on). The next Resume writes one anew from the task as it
 //! is then. A window that holds several tasks (a session a ledger wrote before the
 //! rule of one, or a member's own lane) is told to go on with none: the Resume
 //! leaves its work paused, for the chief to resume task by task (`tasks`'
@@ -17,7 +23,8 @@
 //! 2026-10-16 found a continuation naming several tasks escaping one check or
 //! another; none is written now.
 
-use rusqlite::params;
+use cf_proto::ledger::MessageView;
+use rusqlite::{params, OptionalExtension};
 use serde_json::json;
 
 use crate::model::LedgerError;
@@ -162,12 +169,76 @@ pub(crate) fn drop_continuations(
     )
 }
 
+/// Why `message`, a continuation, is no longer to be given to its window: its
+/// task is not at work there (working, or waiting for an answer), or it names
+/// several tasks, as builds before 3.0.5 wrote them. None while its task is at
+/// work there, for one no longer to be given at all (given already, or
+/// withdrawn), and for any other message.
+fn stale(store: &Store, message: &MessageView) -> Result<Option<String>, LedgerError> {
+    if message.kind != "note"
+        || message.sender.is_some()
+        || !matches!(message.state.as_str(), "queued" | "delivering")
+    {
+        return Ok(None);
+    }
+    let Some(named) = continuation_tasks(&message.body) else {
+        return Ok(None);
+    };
+    let [number] = named.as_slice() else {
+        return Ok(Some("it names several tasks".to_owned()));
+    };
+    let task: Option<(String, Option<i64>)> = store
+        .db
+        .query_row(
+            "SELECT state, assignee_id FROM task WHERE project_id = ? AND number = ?",
+            params![message.project_id, number],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?;
+    Ok(match task {
+        Some((state, Some(window))) if window == message.recipient_id => {
+            (!matches!(state.as_str(), "working" | "waiting"))
+                .then(|| format!("T-{number} is {state} now"))
+        }
+        _ => Some(format!("T-{number} went from its window")),
+    })
+}
+
+/// `message`, about to be handed to its window or back in its queue, withdrawn in
+/// this write if it is a continuation whose task is no longer at work there
+/// ([`stale`]): whether it was. The transport's admission asks it of what it is to
+/// let go (`delivery`'s `admit`), and every way a message comes back to its queue
+/// asks it of what comes back: a delivery tried again or given up, a carrier
+/// given up, cancelled or taken back, what a restart lets go of.
+pub(crate) fn withdrawn_if_stale(
+    store: &mut Store,
+    message: &MessageView,
+) -> Result<bool, LedgerError> {
+    let Some(reason) = stale(store, message)? else {
+        return Ok(false);
+    };
+    withdraw_each(store, message.project_id, &[message.id], &reason)?;
+    Ok(true)
+}
+
+/// Each of `ids` that came back to its queue, withdrawn if it is a continuation
+/// whose task is no longer at work in its window ([`withdrawn_if_stale`]).
+pub(crate) fn withdraw_stale_among(store: &mut Store, ids: &[i64]) -> Result<(), LedgerError> {
+    for id in ids {
+        if let Some(message) = store.message(*id)? {
+            withdrawn_if_stale(store, &message)?;
+        }
+    }
+    Ok(())
+}
+
 /// The human's Resume of a project, in the write that opens it: what an earlier
 /// build or an earlier Resume left queued telling a window to go on goes unless it
 /// names the one task its window holds, at work. A continuation that names several
 /// is a build's before 3.0.5, and this one tells a window that holds several to go
-/// on with none; one whose task stands otherwise is for work as it was. The Resume
-/// writes one anew where it is due.
+/// on with none; one whose task stands otherwise is for work as it was. Of several
+/// left for the same task, the oldest stays and the others go: the window is told
+/// once (Sol's review of 2026-10-17). The Resume writes one anew where it is due.
 pub(crate) fn withdraw_stale(store: &mut Store, project_id: i64) -> Result<(), LedgerError> {
     let queued: Vec<(i64, i64, String)> = store
         .db
@@ -181,6 +252,7 @@ pub(crate) fn withdraw_stale(store: &mut Store, project_id: i64) -> Result<(), L
         })?
         .collect::<rusqlite::Result<_>>()?;
     let mut stale = Vec::new();
+    let mut kept: Vec<(i64, i64)> = Vec::new();
     for (id, recipient, body) in queued {
         let Some(named) = continuation_tasks(&body) else {
             continue;
@@ -193,12 +265,17 @@ pub(crate) fn withdraw_stale(store: &mut Store, project_id: i64) -> Result<(), L
             )?
             .query_map(params![recipient], |row| Ok((row.get(0)?, row.get(1)?)))?
             .collect::<rusqlite::Result<_>>()?;
-        let at_work = matches!(
-            (named.as_slice(), held.as_slice()),
-            ([number], [(holds, state)]) if number == holds && matches!(state.as_str(), "working" | "waiting")
-        );
-        if !at_work {
-            stale.push(id);
+        let at_work = match (named.as_slice(), held.as_slice()) {
+            ([number], [(holds, state)])
+                if number == holds && matches!(state.as_str(), "working" | "waiting") =>
+            {
+                Some(*number)
+            }
+            _ => None,
+        };
+        match at_work {
+            Some(number) if !kept.contains(&(recipient, number)) => kept.push((recipient, number)),
+            _ => stale.push(id),
         }
     }
     withdraw_each(

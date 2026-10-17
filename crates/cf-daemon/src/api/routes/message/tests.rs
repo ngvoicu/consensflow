@@ -358,6 +358,47 @@ async fn a_continuation_of_a_task_paused_since_reads_as_withdrawn() {
     );
 }
 
+/// Astra's review of 2026-10-17: the continuation was handed over, the human
+/// paused its task while the paste waited, and the paste was refused, nothing
+/// written: `cf inbox read` then gave an uncancelled word to go on. The refusal
+/// withdraws it, and the read says so.
+#[tokio::test]
+async fn a_continuation_handed_over_and_sent_back_after_its_task_was_paused_reads_as_withdrawn() {
+    let scene = scene();
+    let number = working_task(&scene);
+    let continuation = {
+        let mut ledger = scene.context.ledger.borrow_mut();
+        let note = ledger
+            .note(
+                scene.project.id,
+                &cf_ledger::NewNote {
+                    from: None,
+                    to: "zeus".to_owned(),
+                    task: Some(number),
+                    body: cf_ledger::continuation(number),
+                },
+            )
+            .unwrap();
+        ledger.begin_delivery(note.id).unwrap();
+        ledger.admit(note.id, &[]).unwrap();
+        ledger
+            .pause_task(scene.project.id, number, Some("human"), None)
+            .unwrap();
+        ledger
+            .retry_delivery(note.id, "the paste wrote nothing", true)
+            .unwrap();
+        note
+    };
+    let target = format!("/api/inbox/{}", continuation.id);
+
+    let (status, said) = api(&scene, Method::GET, &target, &scene.zeus, "").await;
+
+    assert_eq!(
+        (status, &said["message"]["state"]),
+        (200, &json!("cancelled"))
+    );
+}
+
 #[tokio::test]
 async fn only_a_get_reads_a_message() {
     let scene = scene();

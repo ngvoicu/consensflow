@@ -11,6 +11,7 @@ use serde_json::{json, Value};
 
 use super::again::tell_failed_answer;
 use super::carrying::{adopt, carried, release_carried};
+use super::continuations::{withdraw_stale_among, withdrawn_if_stale};
 use super::pauses::withdrawn_on_its_way;
 use super::receipt::reconcile;
 use super::{known_message, message_task, messages, require_message};
@@ -260,15 +261,17 @@ pub enum HandOver {
 /// window, after every wait of its own: the paste asked of the pane host, the
 /// inbox rename made, the request given to its connection, the command line its
 /// window opens with. It goes while the project is open, the message still on
-/// its way, and every row of `carried` (what its paste was begun with) still
+/// its way, and every row of `begun_with` (what its paste was begun with) still
 /// riding in it; then the message and those rows are marked handed, in this
 /// write, and a reader of a closed project reads their text from now on (the
 /// daemon's `Waits`). A delivery that is only begun is not handed: what is still
-/// to come of it may never come (Sol's review of 2026-10-16, round 7).
+/// to come of it may never come (Sol's review of 2026-10-16, round 7). A
+/// continuation in it, on its own or riding, goes only while its task is at work
+/// in its window, and is withdrawn in this write otherwise (`continuations`).
 pub(crate) fn admit(
     store: &mut Store,
     message_id: i64,
-    carried: &[i64],
+    begun_with: &[i64],
 ) -> Result<HandOver, LedgerError> {
     store.write(|store| {
         let Some(message) = store.message(message_id)? else {
@@ -281,12 +284,19 @@ pub(crate) fn admit(
         if !open {
             return Ok(HandOver::Closed);
         }
+        let mut stale = withdrawn_if_stale(store, &message)?;
+        for row in carried(store, message_id)? {
+            stale |= withdrawn_if_stale(store, &row)?;
+        }
+        if stale {
+            return Ok(HandOver::Withdrawn);
+        }
         let riding: Vec<i64> = store
             .db
             .prepare("SELECT id FROM message WHERE carried_by = ? AND state = 'queued'")?
             .query_map([message_id], |row| row.get(0))?
             .collect::<rusqlite::Result<_>>()?;
-        if message.state != "delivering" || carried.iter().any(|id| !riding.contains(id)) {
+        if message.state != "delivering" || begun_with.iter().any(|id| !riding.contains(id)) {
             return Ok(HandOver::Withdrawn);
         }
         let at = store.at();
@@ -427,7 +437,9 @@ pub(crate) fn cancel_message(
 /// would be skipped as one and never delivered. It was handed nothing, nor
 /// was what it carried, whatever its transport let go: it is handed again, or
 /// never (`admit`). A pause note naming a task that moved on while it was on its
-/// way leaves it, and says its warning again (`withdrawn_on_its_way`).
+/// way leaves it, and says its warning again (`withdrawn_on_its_way`). A
+/// continuation whose task is no longer at work in its window is withdrawn
+/// instead, and so is one that rides in it (`continuations`).
 pub(crate) fn retry_delivery(
     store: &mut Store,
     message_id: i64,
@@ -437,9 +449,14 @@ pub(crate) fn retry_delivery(
     model::require_text(reason, "reason", 1000)?;
     store.write(|store| {
         let message = require_message(store, message_id, "delivering")?;
-        if withdrawn_on_its_way(store, &message)? {
+        if withdrawn_on_its_way(store, &message)? || withdrawn_if_stale(store, &message)? {
             return known_message(store, message_id);
         }
+        let riding: Vec<i64> = carried(store, message_id)?
+            .iter()
+            .map(|row| row.id)
+            .collect();
+        withdraw_stale_among(store, &riding)?;
         store.db.execute(
             "UPDATE message SET state = 'queued', reason = ?, attempts = MAX(attempts - ?, 0),
                handed_at = NULL
@@ -477,9 +494,14 @@ pub(crate) fn retry_delivery(
 ///   delivery tried again does (`adopt`).
 ///
 /// What its paste carried was in the window's conversation no longer than it
-/// was, so each row it carried is kept again too, and rides with it. The
+/// was, so each row it carried is kept again too, and rides with it, but for a
+/// continuation whose task is no longer at work (`continuations`). The
 /// receipt it was given is no receipt: the carrier's will be. The task's state
-/// is not moved: it is paused, or queued behind the words that resume it.
+/// is not moved: it is paused, or queued behind the words that resume it. It
+/// and its rows were handed to the window, which holds them in its input box:
+/// a reader of a closed project reads them still, whether or not their transport
+/// marked them so (one delivered before migration 0020 has no mark, and its
+/// delivery is its mark; Astra's review of 2026-10-17).
 pub(crate) fn take_back(
     store: &mut Store,
     message_id: i64,
@@ -501,7 +523,8 @@ pub(crate) fn take_back(
             ));
         }
         store.db.execute(
-            "UPDATE message SET state = 'queued', reason = ?, delivered_at = NULL, receipt = NULL
+            "UPDATE message SET state = 'queued', reason = ?, delivered_at = NULL, receipt = NULL,
+               handed_at = COALESCE(handed_at, delivered_at)
          WHERE id = ?",
             params![reason, message_id],
         )?;
@@ -513,7 +536,8 @@ pub(crate) fn take_back(
             .query_map([message_id], |row| row.get(0))?
             .collect::<rusqlite::Result<_>>()?;
         store.db.execute(
-            "UPDATE message SET state = 'queued', delivered_at = NULL, receipt = NULL
+            "UPDATE message SET state = 'queued', delivered_at = NULL, receipt = NULL,
+               handed_at = COALESCE(handed_at, delivered_at)
          WHERE carried_by = ? AND state = 'delivered'",
             [message_id],
         )?;
@@ -522,6 +546,7 @@ pub(crate) fn take_back(
             "delivery.taken-back",
             json!({ "message": message_id, "reason": reason, "kept": kept }),
         )?;
+        withdraw_stale_among(store, &kept)?;
         adopt(store, message_id)?;
         known_message(store, message_id)
     })
@@ -531,7 +556,9 @@ pub(crate) fn take_back(
 /// what it carried is its own again, for the reopening to take. A pause note
 /// whose task was cancelled while it was on its way is withdrawn instead, and
 /// says its warning again in a note of its own, which has its own attempts
-/// (`withdrawn_on_its_way`).
+/// (`withdrawn_on_its_way`). A continuation whose task is no longer at work in
+/// its window is withdrawn instead too: nothing failed that was still to go
+/// (`continuations`).
 pub(crate) fn fail_delivery(
     store: &mut Store,
     message_id: i64,
@@ -540,7 +567,7 @@ pub(crate) fn fail_delivery(
     model::require_text(reason, "reason", 1000)?;
     store.write(|store| {
         let message = require_message(store, message_id, "delivering")?;
-        if withdrawn_on_its_way(store, &message)? {
+        if withdrawn_on_its_way(store, &message)? || withdrawn_if_stale(store, &message)? {
             return known_message(store, message_id);
         }
         store.db.execute(

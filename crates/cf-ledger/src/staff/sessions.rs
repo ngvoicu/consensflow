@@ -163,9 +163,14 @@ pub(crate) enum Giving {
     /// given as a new one.
     SentBack(i64),
     /// Task `number`, paused, resumed into its session's window: it counts as in
-    /// hand while paused, and only another task in hand makes the session busy.
-    /// A follow-up paused while it waited on the board for its needs is one: the
-    /// session may have taken another task since.
+    /// hand while paused, and only another task its window is at work on (queued,
+    /// working or waiting) makes the session busy. A follow-up paused while it
+    /// waited on the board for its needs is one: the session may have taken
+    /// another task since. Another task of the session that is paused too does
+    /// not: the session goes on with one, and the other is resumed once that one
+    /// has its result (a ledger written before one task per session left some
+    /// holding several, and the Resume tells the chief to resume them one at a
+    /// time; Astra's review of 2026-10-17).
     Resumed(i64),
 }
 
@@ -173,8 +178,8 @@ pub(crate) enum Giving {
 /// every door giving a session a task holds it to: a follow-up (`--after`), a
 /// task sent back to it (a reopen) and a task named for it are refused
 /// `session-busy` while it has a task in hand ([`has_task_in_hand`]), and so is
-/// a paused task resumed into its window while it has another, so that its
-/// window is never at work on one task while the board speaks of another.
+/// a paused task resumed into its window while the window is at work on another,
+/// so that it is never at work on one task while the board speaks of another.
 /// The refusal says what the door can do instead (`giving`). A task that waits
 /// on the board for what it needs does not make its session busy: the release
 /// (`release_ready`) gives the session's window those one at a time, each once
@@ -209,7 +214,8 @@ pub(crate) fn require_free(
 }
 
 /// Whether a participant has a task in hand that is not the one `giving` gives
-/// it: any, but for a task resumed, which is its own already.
+/// it: any, but for a task resumed, which is its own already, and which only a
+/// task at work keeps out of its window.
 fn on_other_work(store: &Store, participant_id: i64, giving: Giving) -> Result<bool, LedgerError> {
     let Giving::Resumed(number) = giving else {
         return has_task_in_hand(store, participant_id);
@@ -219,7 +225,7 @@ fn on_other_work(store: &Store, participant_id: i64, giving: Giving) -> Result<b
         .query_row(
             &format!(
                 "SELECT 1 FROM task WHERE assignee_id = ? AND number != ? AND state IN ({})",
-                sql_list(&[&HELD_TASK_STATES[..], &["paused"]].concat())
+                sql_list(&HELD_TASK_STATES)
             ),
             params![participant_id, number],
             |_| Ok(()),

@@ -600,13 +600,19 @@ pub(crate) fn resume_with_project(store: &mut Store, project_id: i64) -> Result<
 /// none): no word tells it to go on, as none could tell it which of its tasks
 /// still stand (the lead's design of 2026-10-17, after both reviews of four
 /// rounds found a continuation naming several tasks escaping one check or
-/// another). Each of its tasks is its requester's to resume, task by task:
+/// another). Each of its tasks is its requester's to resume, task by task, and
+/// none goes on by itself (both reviews of 2026-10-17: a queued one was handed its
+/// window by the next pass):
 /// - one its project's suspension paused stays paused, the pause its requester's
-///   from now on, and the note that told the requester so is given after the
-///   Resume, as every such note was before 3.0.6;
-/// - one still at work (a quit leaves it so) is paused now, and its requester
-///   told why, in one note of all of them it is told of;
-/// - one queued waits for its brief, as any does.
+///   from now on;
+/// - one queued or at work (a quit leaves it so) is paused now;
+/// - one paused any other way stays as it was, its pause told already.
+///
+/// The requester is told of the first two in one note of all it is told of,
+/// which says to resume them one at a time: the session goes on with one, and
+/// takes the next once that one has its result (`staff`'s `require_free`). What
+/// the suspension's note said of a task goes, but for a warning, which is said
+/// again (`leave_pause_notes`).
 fn leave_several_paused(store: &mut Store, project_id: i64) -> Result<(), LedgerError> {
     let held = sql_list(&[&HELD_TASK_STATES[..], &["paused"]].concat());
     let lanes: Vec<(i64, String)> = store
@@ -631,37 +637,57 @@ fn leave_several_paused(store: &mut Store, project_id: i64) -> Result<(), Ledger
             .collect::<rusqlite::Result<_>>()?;
         let named: Vec<String> = numbers.iter().map(|number| format!("T-{number}")).collect();
         let because = format!(
-            "@{handle}'s window held {}, and a window is told to go on only when it held one task",
+            "@{handle}'s window held {}, and a window is told to go on only when it held one task: resume them one at a time",
             named.join(", ")
         );
         for number in numbers {
             let task = store.task_row(project_id, number)?;
-            match task.state.as_str() {
+            let left = match task.state.as_str() {
                 "paused" => {
-                    store.db.execute(
-                        "UPDATE task SET paused_with_project = 0 WHERE id = ?",
+                    let suspension = store.db.execute(
+                        "UPDATE task SET paused_with_project = 0
+                         WHERE id = ? AND paused_with_project = 1",
                         [task.id],
-                    )?;
-                }
-                "working" | "waiting" => {
-                    pause_task_as(store, project_id, number, None, Some(&because), false)?;
-                    let earlier = told
-                        .iter()
-                        .find(|(requester, _)| *requester == task.requester_id)
-                        .map(|(_, note)| *note);
-                    let joined = match earlier {
-                        Some(note) => join_pause_note(store, note, number, &because)?.is_some(),
-                        None => false,
-                    };
-                    if !joined {
-                        let to = store.participant_row(task.requester_id)?.handle;
-                        let note = note_pause(store, project_id, &to, number, &because)?;
-                        told.push((task.requester_id, note.id));
+                    )? > 0;
+                    if suspension {
+                        leave_pause_notes(store, &task, "stays paused")?;
                     }
+                    suspension
                 }
-                _ => {}
+                "queued" | "working" | "waiting" => {
+                    pause_task_as(store, project_id, number, None, Some(&because), false)?;
+                    true
+                }
+                _ => false,
+            };
+            if left {
+                tell_left_paused(store, &mut told, &task, &because)?;
             }
         }
     }
+    Ok(())
+}
+
+/// Tells `task`'s requester that the Resume left it paused, `because`: in the
+/// note of this Resume it was told in already (`told`, by requester), or in one
+/// of its own.
+fn tell_left_paused(
+    store: &mut Store,
+    told: &mut Vec<(i64, i64)>,
+    task: &TaskRow,
+    because: &str,
+) -> Result<(), LedgerError> {
+    let earlier = told
+        .iter()
+        .find(|(requester, _)| *requester == task.requester_id)
+        .map(|(_, note)| *note);
+    if let Some(note) = earlier {
+        if join_pause_note(store, note, task.number, because)?.is_some() {
+            return Ok(());
+        }
+    }
+    let to = store.participant_row(task.requester_id)?.handle;
+    let note = note_pause(store, task.project_id, &to, task.number, because)?;
+    told.push((task.requester_id, note.id));
     Ok(())
 }

@@ -293,9 +293,12 @@ pub(crate) fn warnings_on_their_way(
 /// own: the warning is owed until a delivery of it is known to have arrived, and
 /// outlives the words of a pause that went stale, which would tell the requester
 /// to resume a task that is paused no more (both reviews of 2026-10-16, rounds 6
-/// and 7). A note with no task left is withdrawn, which this says; one with tasks
-/// left names those, and goes back or is given up as any message does. Nothing is
-/// written for any other message.
+/// and 7). What moved is what the log says moved since the note's delivery began
+/// ([`moved_on_its_way`]), not the state a task is in now: a resume and another
+/// pause leave it paused, the note's pause over and its words stale (both reviews
+/// of 2026-10-17). A note with no task left is withdrawn, which this says; one
+/// with tasks left names those, and goes back or is given up as any message
+/// does. Nothing is written for any other message.
 pub(crate) fn withdrawn_on_its_way(
     store: &mut Store,
     message: &MessageView,
@@ -310,7 +313,7 @@ pub(crate) fn withdrawn_on_its_way(
     let mut gone: Vec<(TaskRow, String)> = Vec::new();
     for named in paused {
         let task = store.task_row(message.project_id, named.number)?;
-        if task.state == "paused" {
+        if task.state == "paused" && !moved_on_its_way(store, message, named.number)? {
             left.push(named);
         } else {
             gone.push((task, named.because));
@@ -342,13 +345,40 @@ pub(crate) fn withdrawn_on_its_way(
     Ok(true)
 }
 
-/// What became of a task a pause note named, that is paused no more, in the
-/// words its requester is told of it ([`say_again`]), as the operations that
-/// moved it say them when they leave a note still queued.
+/// Whether task `number` moved while `message` was on its way: a move of it is
+/// logged after the message's last delivery began (a resume, a pause, a cancel,
+/// a release, an assignment: `task.state`, `task.released`, `task.assigned`).
+/// A note is begun only with tasks paused still: one that moved while it was
+/// queued left it then (`leave_pause_notes`).
+fn moved_on_its_way(
+    store: &Store,
+    message: &MessageView,
+    number: i64,
+) -> Result<bool, LedgerError> {
+    Ok(store
+        .db
+        .prepare(
+            "SELECT 1 FROM event e
+             WHERE e.project_id = ?1
+               AND e.kind IN ('task.state', 'task.released', 'task.assigned')
+               AND CASE WHEN json_valid(e.data) THEN json_extract(e.data, '$.task') END = ?3
+               AND e.id > (SELECT b.id FROM event b
+                           WHERE b.project_id = ?1 AND b.kind = 'delivery.begun'
+                             AND CASE WHEN json_valid(b.data)
+                                      THEN json_extract(b.data, '$.message') END = ?2
+                           ORDER BY b.id DESC LIMIT 1)",
+        )?
+        .exists(params![message.project_id, message.id, number])?)
+}
+
+/// What became of a task a pause note named that moved on, in the words its
+/// requester is told of it ([`say_again`]), as the operations that moved it say
+/// them when they leave a note still queued.
 fn moved_on(task: &TaskRow) -> &'static str {
     match task.state.as_str() {
         "cancelled" => "cancelled",
         "open" => "was taken back",
+        "paused" => "was paused again",
         _ => "resumed",
     }
 }

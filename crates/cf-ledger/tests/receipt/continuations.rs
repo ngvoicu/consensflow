@@ -155,6 +155,195 @@ fn a_move_of_its_task_within_the_work_leaves_a_continuation_queued() {
     assert_eq!(w.message(note.id).state, "queued");
 }
 
+/// Astra's review of 2026-10-17: a continuation handed over, its task paused while
+/// the paste waited for its reply, came back after a refusal with nothing written,
+/// and a reader read a word to go on with a task paused since. One that comes back
+/// goes on only while its task is at work: it is withdrawn in the write that sends
+/// it back, and in the one that gives it up, which fails nothing.
+#[test]
+fn a_continuation_handed_over_that_comes_back_after_its_task_moved_is_withdrawn() {
+    for given_up in [false, true] {
+        let mut w = world();
+        let (number, _, note) = continued(&mut w);
+        w.begin(note.id);
+        w.ledger.admit(note.id, &[]).expect("admitted");
+        w.pause(number);
+        assert_eq!(
+            w.message(note.id).state,
+            "delivering",
+            "handed over: it runs its course"
+        );
+
+        if given_up {
+            w.ledger
+                .fail_delivery(note.id, "the window never showed it")
+                .expect("given up");
+        } else {
+            w.ledger
+                .retry_delivery(note.id, "the paste wrote nothing", true)
+                .expect("tried again");
+        }
+
+        assert_eq!(
+            withdrawn(&w, note.id),
+            (
+                "cancelled".to_owned(),
+                Some(format!("T-{number} is paused now"))
+            ),
+            "given up {given_up}"
+        );
+    }
+}
+
+/// One whose task is still at work goes back to its queue as any message does.
+#[test]
+fn a_continuation_that_comes_back_while_its_task_is_at_work_goes_again() {
+    let mut w = world();
+    let (_, _, note) = continued(&mut w);
+    w.begin(note.id);
+    w.ledger.admit(note.id, &[]).expect("admitted");
+
+    w.ledger
+        .retry_delivery(note.id, "the paste wrote nothing", true)
+        .expect("tried again");
+
+    assert_eq!(w.message(note.id).state, "queued");
+}
+
+/// The transport's admission asks it too, of a continuation however it came to
+/// be begun with its task not at work (an earlier build moved the task and left
+/// it): it is withdrawn, and nothing goes in.
+#[test]
+fn a_continuation_whose_task_is_not_at_work_is_withdrawn_by_the_transport_s_admission() {
+    // Its task paused under it, taken to the board, or named with another, as a
+    // build before 3.0.5 wrote it.
+    let ways: [(&str, &str, &str); 3] = [
+        ("paused", "UPDATE task SET state = 'paused' WHERE number = 1", "T-1 is paused now"),
+        (
+            "taken back",
+            "UPDATE task SET state = 'open', assignee_id = NULL WHERE number = 1",
+            "T-1 went from its window",
+        ),
+        (
+            "named with another",
+            "UPDATE message SET body = 'ConsensFlow quit while you were working on T-1, T-2. Go on where you stopped.'
+               WHERE kind = 'note' AND sender_id IS NULL",
+            "it names several tasks",
+        ),
+    ];
+    for (way, sql, reason) in ways {
+        let mut w = world();
+        let (number, _, note) = continued(&mut w);
+        assert_eq!(number, 1);
+        w.begin(note.id);
+        w.ledger
+            .write_raw(sql)
+            .expect("as an earlier build left it");
+
+        assert_eq!(
+            w.ledger.admit(note.id, &[]).expect("asked"),
+            HandOver::Withdrawn,
+            "{way}"
+        );
+        assert_eq!(
+            withdrawn(&w, note.id),
+            ("cancelled".to_owned(), Some(reason.to_owned())),
+            "{way}"
+        );
+    }
+}
+
+/// One withdrawn already as its transport asks (its task cancelled while the paste
+/// waited) is left as it was: the cancel's words stand, and nothing is written.
+#[test]
+fn a_continuation_withdrawn_already_is_left_as_it_was_by_the_transport_s_admission() {
+    let mut w = world();
+    let (number, _, note) = continued(&mut w);
+    w.begin(note.id);
+    w.ledger
+        .cancel_task(w.project, number, "chief")
+        .expect("called off");
+    let before = withdrawn(&w, note.id);
+    assert_eq!(before.0, "cancelled");
+
+    assert_eq!(
+        w.ledger.admit(note.id, &[]).expect("asked"),
+        HandOver::Withdrawn
+    );
+    assert_eq!(withdrawn(&w, note.id), before);
+}
+
+/// As an earlier build could leave it: T-1's continuation riding in a task message
+/// of T-1's for its window (the words a hold's end resumes it with), the carrier
+/// `carrier` and the continuation `riding`, and T-1 paused under them by no write
+/// of this build's: the carrier, and the continuation.
+fn riding_with_its_task_paused(w: &mut World, carrier: &str, riding: &str) -> (i64, i64) {
+    let (number, session, note) = continued(w);
+    let window = w.id(&session);
+    w.ledger
+        .write_raw(&format!(
+            "INSERT INTO message (project_id, recipient_id, kind, task_id, body, state, attempts, created_at)
+               SELECT project_id, {window}, 'task', id, 'Resumed: Go on where you stopped.', '{carrier}', 1, created_at
+               FROM task WHERE number = {number};
+             UPDATE message SET carried_by = last_insert_rowid(), state = '{riding}' WHERE id = {note};
+             UPDATE task SET state = 'paused' WHERE number = {number};",
+            note = note.id
+        ))
+        .expect("as an earlier build left it");
+    let words = w
+        .ledger
+        .inbox(window, 100)
+        .expect("its inbox")
+        .into_iter()
+        .find(|message| message.kind == "task" && message.body.starts_with("Resumed: "))
+        .expect("the carrier")
+        .id;
+    (words, note.id)
+}
+
+/// What a carrier carries comes back with it, or is let go of by it: a
+/// continuation among it whose task is not at work is withdrawn in that write,
+/// whichever way it came back: its carrier's admission refused, its carrier tried
+/// again, given up, taken back out of its window, or let go of at a start.
+#[test]
+fn a_continuation_riding_in_a_carrier_that_comes_back_is_withdrawn_unless_its_task_is_at_work() {
+    type Back = fn(&mut World, i64, i64);
+    let ways: [(&str, &str, &str, Back); 5] = [
+        ("admitted", "delivering", "queued", |w, words, note| {
+            assert_eq!(
+                w.ledger.admit(words, &[note]).expect("asked"),
+                HandOver::Withdrawn
+            );
+        }),
+        ("tried again", "delivering", "queued", |w, words, _| {
+            w.ledger
+                .retry_delivery(words, "the paste wrote nothing", true)
+                .expect("tried again");
+        }),
+        ("given up", "delivering", "queued", |w, words, _| {
+            w.ledger
+                .fail_delivery(words, "the window never showed it")
+                .expect("given up");
+        }),
+        ("taken back", "delivered", "delivered", |w, words, _| {
+            w.ledger
+                .take_back(words, "the window took it back")
+                .expect("taken back");
+        }),
+        ("let go of at a start", "delivering", "queued", |w, _, _| {
+            w.edit(|_| {});
+        }),
+    ];
+    for (way, carrier, riding, back) in ways {
+        let mut w = world();
+        let (words, note) = riding_with_its_task_paused(&mut w, carrier, riding);
+
+        back(&mut w, words, note);
+
+        assert_eq!(w.message(note).state, "cancelled", "{way}");
+    }
+}
+
 /// Both reviews of 2026-10-16, round 7: a continuation still on its way went
 /// into the next window's brief when its task was reassigned, telling a window
 /// that never began the turn to go on with it. It goes with the window, handed

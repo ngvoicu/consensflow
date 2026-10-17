@@ -110,6 +110,42 @@ fn what_a_paste_carried_is_handed_no_more_once_its_carrier_is_given_up() {
     assert!(!w.ledger.handed_over(w.project).unwrap().contains(&note));
 }
 
+/// Both reviews of 2026-10-17: a start during an admitted carrier's delivery let
+/// go of what it carried with its marks, and a reader of the closed project read
+/// it as handed. What a start lets go of is handed nothing.
+#[test]
+fn what_a_start_lets_go_of_is_handed_no_more() {
+    let mut w = world();
+    let (words, note) = resumed_with_a_note(&mut w);
+    w.ledger.admit(words, &[note]).unwrap();
+
+    // The app quits with the words on their way, and the ledger is opened again.
+    w.edit(|_| {});
+
+    assert_eq!(w.message(note).state, "queued");
+    assert!(!w.ledger.handed_over(w.project).unwrap().contains(&note));
+}
+
+/// Astra's review of 2026-10-17: a message delivered before migration 0020 has
+/// no mark, and one its window takes back out of its conversation was read as
+/// handed nothing. It was delivered, so it was handed, and so was what its paste
+/// carried: the window holds them in its input box.
+#[test]
+fn a_message_taken_back_was_handed_whether_or_not_its_transport_marked_it() {
+    let mut w = world();
+    let (words, note) = resumed_with_a_note(&mut w);
+    // Delivered as before 0020: no transport marked it.
+    w.confirm(words);
+    assert!(w.ledger.handed_over(w.project).unwrap().is_empty());
+
+    w.ledger
+        .take_back(words, "the window took it back")
+        .expect("taken back");
+
+    assert_eq!(w.states(&[words, note]), ["queued", "queued"]);
+    assert_eq!(w.ledger.handed_over(w.project).unwrap(), [note, words]);
+}
+
 /// A door's claim is a hand-over begun at its window, as a paste let go is.
 #[test]
 fn an_answer_a_door_claimed_is_handed_over() {

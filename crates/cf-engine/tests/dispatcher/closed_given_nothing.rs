@@ -483,13 +483,157 @@ fn a_session_holding_two_tasks_a_quit_left_at_work_comes_back_for_neither_and_th
     assert_eq!(opened(&context)[before..], ["p1-chief"]);
     assert!(continuations_given(&context).is_empty());
     let because =
-        "@zeus-amber-pine's window held T-1, T-2, and a window is told to go on only when it held one task";
+        "@zeus-amber-pine's window held T-1, T-2, and a window is told to go on only when it held one task: resume them one at a time";
     assert_eq!(
         pauses_given_to_the_chief(&context),
         [1, 2].map(|number| format!(
             "T-{number} is paused: {because}. Resume it with: cf task resume T-{number} \"…\""
         ))
     );
+}
+
+/// Sol's review of 2026-10-17: zeus's session held T-1 at work and T-2 queued,
+/// its brief not yet given, and the Resume left T-2 queued: the next pass opened
+/// zeus's window with T-2's brief, though nobody resumed it. The Resume pauses
+/// T-2 too, and the chief is told of both.
+#[test]
+fn a_session_holding_a_queued_task_beside_one_the_close_paused_opens_for_neither() {
+    let context = Context::new();
+    let tiers = at_work(&context);
+    let project = tiers.project.id;
+    let zeus = tiers.id("zeus-amber-pine");
+    context
+        .ledger
+        .borrow_mut()
+        .write_raw(&format!(
+            "UPDATE task SET assignee_id = {zeus}, pool = NULL, tier = NULL, state = 'queued'
+               WHERE project_id = {project} AND number = 2;
+             UPDATE message SET recipient_id = {zeus}, state = 'queued', delivered_at = NULL, receipt = NULL
+               WHERE kind = 'task'
+                 AND task_id = (SELECT id FROM task WHERE project_id = {project} AND number = 2);"
+        ))
+        .unwrap();
+    context.close_project(project).unwrap();
+    let before = opened(&context).len();
+
+    context.resume_project(project).unwrap();
+    for _ in 0..4 {
+        context.pass().unwrap();
+    }
+
+    assert_eq!(
+        [tiers.task(1).task.state, tiers.task(2).task.state],
+        ["paused", "paused"]
+    );
+    assert_eq!(
+        opened(&context)[before..],
+        ["p1-chief"],
+        "zeus's window stays closed"
+    );
+    let pauses = pauses_given_to_the_chief(&context);
+    for number in [1, 2] {
+        assert!(
+            pauses
+                .iter()
+                .any(|line| line.starts_with(&format!("T-{number} is paused: "))),
+            "T-{number}: {pauses:?}"
+        );
+    }
+}
+
+/// The lead's decision of 2026-10-17 (Astra's review): the chief does what the
+/// note says, as it says it. The first command resumes T-1 in zeus's window; the
+/// second is refused while T-1 is at work, and goes once T-1 has its result.
+#[test]
+fn the_chief_s_commands_as_its_note_words_them_resume_a_session_of_two_one_at_a_time() {
+    let context = Context::new();
+    let tiers = at_work(&context);
+    let project = tiers.project.id;
+    let zeus = tiers.id("zeus-amber-pine");
+    holding_two(&context, project, zeus);
+    let after = quit_and_start(&context);
+    after.resume_project(project).unwrap();
+    for _ in 0..4 {
+        after.pass().unwrap();
+    }
+    let commands: Vec<(i64, String)> = pauses_given_to_the_chief(&context)
+        .iter()
+        .filter_map(|line| line.split_once("Resume it with: cf task resume T-"))
+        .map(|(_, command)| {
+            let (number, words) = command.split_once(' ').expect("a number and its words");
+            let words = words.split('"').nth(1).expect("quoted words");
+            (number.parse().expect("a number"), words.to_owned())
+        })
+        .collect();
+    assert_eq!(commands, [(1, "…".to_owned()), (2, "…".to_owned())]);
+    let resume = |(number, words): &(i64, String)| {
+        context
+            .ledger
+            .borrow_mut()
+            .resume_task(project, *number, Some("chief"), words)
+    };
+
+    resume(&commands[0]).unwrap();
+    for _ in 0..3 {
+        after.pass().unwrap();
+    }
+    assert_eq!(
+        tiers.task(1).task.state,
+        "working",
+        "zeus is given T-1's words"
+    );
+    let busy = resume(&commands[1]).unwrap_err();
+    assert_eq!(busy.code(), Some("session-busy"));
+    context.adapter.answer("zeus", "Lexer done");
+    for _ in 0..3 {
+        after.pass().unwrap();
+    }
+    assert_eq!(tiers.task(1).task.state, "done");
+
+    resume(&commands[1]).unwrap();
+    for _ in 0..3 {
+        after.pass().unwrap();
+    }
+    assert_eq!(tiers.task(2).task.state, "working", "and then T-2's");
+}
+
+/// Sol's review of 2026-10-17: two continuations an earlier build left for T-1,
+/// zeus's one task at work, both stayed, and zeus's window was told to go on
+/// twice. The Resume keeps the oldest.
+#[test]
+fn a_window_an_earlier_build_left_two_words_to_go_on_with_its_task_is_told_once() {
+    let context = Context::new();
+    let tiers = at_work(&context);
+    let project = tiers.project.id;
+    let after = quit_and_start(&context);
+    for _ in 0..2 {
+        context
+            .ledger
+            .borrow_mut()
+            .note(
+                project,
+                &NewNote {
+                    from: None,
+                    to: "zeus-amber-pine".to_owned(),
+                    task: Some(1),
+                    body:
+                        "ConsensFlow quit while you were working on T-1. Go on where you stopped."
+                            .to_owned(),
+                },
+            )
+            .unwrap();
+    }
+
+    after.resume_project(project).unwrap();
+    for _ in 0..4 {
+        after.pass().unwrap();
+    }
+
+    let told = given(&context, "zeus-amber-pine")
+        .iter()
+        .filter(|text| text.contains("Go on where you stopped."))
+        .count();
+    assert_eq!(told, 1);
 }
 
 /// The Resume's launch of zeus's window, held in its preparation with its
@@ -701,6 +845,75 @@ fn continuation_for_an_open_window(context: &Context, project: i64) -> MessageVi
             },
         )
         .unwrap()
+}
+
+/// Astra's review of 2026-10-17: zeus's continuation was handed over, the human
+/// paused T-1 while the paste waited for its reply, and the paste came back
+/// refused, nothing written. The continuation went back to its queue, and a read
+/// of it gave a word to go on with a task paused since. It is withdrawn as it
+/// comes back, and reads as withdrawn.
+#[test]
+fn a_continuation_handed_over_and_refused_after_its_task_was_paused_is_withdrawn() {
+    let context = Context::new();
+    let tiers = at_work(&context);
+    let project = tiers.project.id;
+    let zeus = tiers.id("zeus-amber-pine");
+    let ledger = Rc::clone(&context.ledger);
+    *context.adapter.deliver.borrow_mut() = Some(Rc::new(move |_| {
+        ledger
+            .borrow_mut()
+            .pause_task(project, 1, Some("human"), None)
+            .unwrap();
+        Box::pin(async {
+            Ok(Admission::Refused {
+                reason: "the paste wrote nothing".to_owned(),
+            })
+        })
+    }));
+    let note = continuation_for_an_open_window(&context, project);
+
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+
+    assert_eq!(tiers.task(1).task.state, "paused");
+    let read = context
+        .inbox(zeus)
+        .into_iter()
+        .find(|message| message.id == note.id)
+        .expect("in zeus's inbox");
+    assert_eq!(
+        (read.state.as_str(), read.reason.as_deref()),
+        ("cancelled", Some("T-1 is paused now"))
+    );
+    assert!(continuations_given(&context).is_empty());
+}
+
+/// The same where the app quits with the continuation handed over and its
+/// arrival not yet seen, its task paused meanwhile: the start settles it, and it
+/// goes rather than wait in its queue.
+#[test]
+fn a_continuation_handed_over_whose_task_was_paused_goes_when_the_app_quits_with_it_on_its_way() {
+    let context = Context::new();
+    let tiers = at_work(&context);
+    let project = tiers.project.id;
+    *context.adapter.deliver.borrow_mut() = Some(Rc::new(|_| {
+        Box::pin(async { Ok(Admission::Admitted { queued: false }) })
+    }));
+    let note = continuation_for_an_open_window(&context, project);
+    context.pass().unwrap();
+    assert_eq!(context.message(note.id).state, "delivering");
+    context.human_pause(project, 1);
+    assert_eq!(
+        context.message(note.id).state,
+        "delivering",
+        "handed over: it runs its course"
+    );
+
+    let after = quit_and_start(&context);
+    drop(after);
+
+    assert_eq!(context.message(note.id).state, "cancelled");
 }
 
 /// The human pauses T-1 while the adapter takes its continuation, the delivery
@@ -1076,6 +1289,59 @@ fn a_cancel_keeps_the_warning_of_a_pause_note_whose_last_attempt_its_window_refu
     assert_eq!(
         said_again(&context, project),
         [format!("T-1 cancelled. Before that, {SURVIVOR}.")]
+    );
+    assert!(
+        context
+            .inbox(context.id(project, "human"))
+            .iter()
+            .all(|message| !message.body.contains("did not reach")),
+        "nothing failed"
+    );
+}
+
+/// Both reviews of 2026-10-17: the chief resumes T-1 and pauses it again while the
+/// note's last attempt is on its way, and the attempt is refused. T-1 is paused
+/// as it was, but not by the pause the note says: the note goes, and its warning
+/// is said again, once, and nothing failed.
+#[test]
+fn a_resume_and_another_pause_keep_the_warning_of_a_pause_note_whose_last_attempt_its_window_refused(
+) {
+    let context = Context::new();
+    let tiers = at_work(&context);
+    let project = tiers.project.id;
+    context.adapter.with("chief", |agent| agent.admit = false);
+    let note = {
+        let mut ledger = context.ledger.borrow_mut();
+        ledger.pause_task(project, 1, None, Some(SURVIVOR)).unwrap();
+        ledger.note_pause(project, "chief", 1, SURVIVOR).unwrap()
+    };
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(context.message(note.id).attempts, 2);
+    let marking = context.background.hold_marks();
+    context.pass().unwrap();
+    assert_eq!(context.message(note.id).state, "delivering");
+    {
+        let mut ledger = context.ledger.borrow_mut();
+        ledger
+            .resume_task(project, 1, Some("chief"), "Go on")
+            .unwrap();
+        ledger.pause_task(project, 1, Some("chief"), None).unwrap();
+    }
+    marking.open();
+    context.settle();
+
+    assert_eq!(tiers.task(1).task.state, "paused");
+    assert_eq!(context.message(note.id).state, "cancelled");
+    let said: Vec<String> = context
+        .inbox(context.id(project, "chief"))
+        .into_iter()
+        .filter(|message| message.id != note.id && message.body.contains(SURVIVOR))
+        .map(|message| message.body)
+        .collect();
+    assert_eq!(
+        said,
+        [format!("T-1 was paused again. Before that, {SURVIVOR}.")]
     );
     assert!(
         context

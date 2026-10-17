@@ -99,7 +99,8 @@ runs = ["taken-back-ledger"]
 file = "crates/cf-ledger/src/messages/delivery.rs"
 find = '''
         store.db.execute(
-            "UPDATE message SET state = 'queued', delivered_at = NULL, receipt = NULL
+            "UPDATE message SET state = 'queued', delivered_at = NULL, receipt = NULL,
+               handed_at = COALESCE(handed_at, delivered_at)
          WHERE carried_by = ? AND state = 'delivered'",
             [message_id],
         )?;'''
