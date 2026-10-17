@@ -12,10 +12,10 @@ use crate::{alive, terminate, Ending};
 /// soon it starts is not what is tested, and PowerShell started cold beside a
 /// crate's other tests on a slow runner took longer than the ending is given
 /// (CI's Windows, run 39055885804).
-const STARTS_WITHIN: Duration = Duration::from_secs(120);
+pub(crate) const STARTS_WITHIN: Duration = Duration::from_secs(120);
 
 /// How long a test waits for the system to say that a process has gone.
-const GONE_WITHIN: Duration = Duration::from_secs(20);
+pub(crate) const GONE_WITHIN: Duration = Duration::from_secs(20);
 
 /// The `count` pids a program has written to `file`, if it has written them
 /// all: white space between, and a line's end last, so that a line half
