@@ -362,10 +362,12 @@ pub fn skipped_or_waiting(look: &Look, settings: &Settings) -> Vec<Break> {
 /// work once it moved on from `queued`.
 ///
 /// The rig is told of a window's exit before the daemon is, so a pause in the exit's
-/// own millisecond may be the one the exit caused, after it, or someone's before it.
+/// own millisecond may be the one the exit caused, after it, or someone's, before it or
+/// after it (the owner's, as the window crashed and before the daemon took the exit).
 /// It is the exit's where its `because` says the window closed or went: the task was
-/// in the state it paused from. It is someone's where it names who paused it (`by`):
-/// the task was paused. Where it says neither, which came first is untold.
+/// in the state it paused from. Anyone else's says whose it is and nothing of when, and
+/// nothing but the two times orders it against the exit (the log and the host's exits
+/// are two sources): which came first is untold.
 fn held_at(look: &Look, handle: &str, at: i64) -> Vec<(i64, AtExit)> {
     let worker = look.ledger.by_handle(handle).map(|worker| worker.id);
     let closed = format!("@{handle}'s window ");
@@ -388,13 +390,9 @@ fn held_at(look: &Look, handle: &str, at: i64) -> Vec<(i64, AtExit)> {
                     let to = event.data["to"].as_str().unwrap_or_default();
                     if to == "paused" && clock::millis(&event.at) == Some(at) {
                         let because = event.data["because"].as_str().unwrap_or_default();
-                        if because.starts_with(&closed) {
-                            Some(event.data["from"].as_str().unwrap_or_default())
-                        } else if event.data["by"].is_string() {
-                            Some(to)
-                        } else {
-                            None
-                        }
+                        because
+                            .starts_with(&closed)
+                            .then(|| event.data["from"].as_str().unwrap_or_default())
                     } else {
                         Some(to)
                     }
@@ -415,7 +413,7 @@ fn held_at(look: &Look, handle: &str, at: i64) -> Vec<(i64, AtExit)> {
 enum AtExit {
     AtWork,
     Not,
-    /// A pause in the exit's own millisecond that says neither whose it is.
+    /// A pause in the exit's own millisecond that does not say it is the exit's.
     Untold,
 }
 
@@ -429,8 +427,8 @@ fn at_work_at(look: &Look, handle: &str, at: i64) -> Vec<i64> {
 }
 
 /// 6, unresolved: a window that closed by itself holding a task whose pause shares the
-/// exit's millisecond and says neither whose it is ([`held_at`]): whether the task was
-/// at work when it closed, the log does not tell.
+/// exit's millisecond and does not say it is the exit's ([`held_at`]): whether the task
+/// was at work when it closed, nothing tells.
 pub fn untold_exits(look: &Look) -> Vec<Unjudged> {
     look.windows
         .exits
@@ -447,7 +445,7 @@ pub fn untold_exits(look: &Look) -> Vec<Unjudged> {
                     6,
                     format!("6:closed:{}:{}", exit.pane, exit.generation),
                     format!(
-                        "@{}'s window closed by itself at {}, and {} paused in the same millisecond by no one the log names: whether it was at work when the window closed cannot be told",
+                        "@{}'s window closed by itself at {}, and {} paused in the same millisecond, which nothing but the two times orders: whether it was at work when the window closed cannot be told",
                         exit.handle,
                         iso(exit.at),
                         untold.join(", ")

@@ -11,11 +11,12 @@
 //!   (`CF task cancel T-3`), and `CF <words> :: <text>` with the text, spaces
 //!   and all, as one last word (`CF tell T-1 :: Stop now`): the chief's own
 //!   verbs, as it would type them.
-//! - A result delivered to a window started with `CF_TEST_ACCEPT_RESULTS` set is
-//!   accepted, `cf task accept` of the task each result header names, and nothing
-//!   else in it is done: a chief that takes its staff's results, as the long run's
-//!   dry run needs to reach its end (every task accepted). Without it a result is
-//!   answered as any message is.
+//! - A result delivered to the chief's window started with `CF_TEST_ACCEPT_RESULTS`
+//!   set is accepted, `cf task accept` of the task its envelope (its first line, the
+//!   result's header) names, and nothing else in it is done: a chief that takes its
+//!   staff's results, as the long run's dry run needs to reach its end (every task
+//!   accepted). A result header its words quote, a note's or a result's, is none.
+//!   Without it a result is answered as any message is.
 //! - A line `SLEEP <seconds> <words>` is a turn that works that long before it
 //!   does what the words say: a window a chief can still tell, or a chief
 //!   nothing is delivered to. An Escape stops it, as it stops Claude's: the turn
@@ -78,7 +79,11 @@ use crate::stop::Stop;
 const DETACHED_SHELL: Duration = Duration::from_secs(30);
 
 /// The header of a result delivered to a window, with the task it is the result of.
-const RESULT: &str = r"(?m)^\[ConsensFlow m-\d+ · (T-\d+) · result from @";
+const RESULT: &str = r"^\[ConsensFlow m-\d+ · (T-\d+) · result from @[^\]]+\]$";
+
+/// The participant the chief's window is started as, before a switch of the chief and
+/// after it.
+const CHIEF: &str = "chief";
 
 /// What a window knows of itself that decides how it answers.
 pub struct Window {
@@ -228,8 +233,11 @@ pub fn reply_to(text: &str, window: &Window) -> Result<Reply, String> {
     static EXACT: OnceLock<Regex> = OnceLock::new();
     static RESULTS: OnceLock<Regex> = OnceLock::new();
 
-    let accepting = own_var("CF_TEST_ACCEPT_RESULTS").is_some_and(|on| !on.is_empty());
-    let accepted: Vec<String> = acceptances(text, pattern::once(&RESULTS, RESULT), accepting)
+    let accepts = accepting(
+        own_var("CF_TEST_ACCEPT_RESULTS").as_deref(),
+        &window.participant,
+    );
+    let accepted: Vec<String> = acceptances(text, pattern::once(&RESULTS, RESULT), accepts)
         .iter()
         .map(|words| run_cf(words))
         .collect();
@@ -391,17 +399,26 @@ fn dispatches(text: &str, line: &Regex) -> Vec<Vec<String>> {
         .collect()
 }
 
-/// The words of `cf task accept` for each result `text` holds (`header` is the
-/// pattern of a result's header), in the order of the headers: none for a window
-/// that is not `accepting`.
+/// The words of `cf task accept` of the result the delivery `text` is: where its own
+/// envelope, its first line, is a result's header (`header` is its pattern), the task it
+/// names; none where it is not, whatever its words quote, and none for a window that
+/// is not `accepting`.
 fn acceptances(text: &str, header: &Regex, accepting: bool) -> Vec<Vec<String>> {
     if !accepting {
         return Vec::new();
     }
-    header
-        .captures_iter(text)
+    text.lines()
+        .next()
+        .and_then(|envelope| header.captures(envelope))
         .map(|result| vec!["task".to_owned(), "accept".to_owned(), result[1].to_owned()])
+        .into_iter()
         .collect()
+}
+
+/// Whether the window of `participant` accepts the results delivered to it: the chief's,
+/// started with `CF_TEST_ACCEPT_RESULTS` set to something (`switched_on`).
+fn accepting(switched_on: Option<&str>, participant: &str) -> bool {
+    switched_on.is_some_and(|on| !on.is_empty()) && participant == CHIEF
 }
 
 /// Whether the provider refuses this window the message `text`: it says
@@ -643,26 +660,48 @@ mod tests {
     }
 
     #[test]
-    fn a_window_that_accepts_results_accepts_the_task_of_each_result_header_and_no_other() {
+    fn a_chief_accepts_the_result_its_delivery_opens_with_and_no_header_its_words_hold() {
         let header = Regex::new(RESULT).unwrap();
-        let text = "[ConsensFlow m-18 · T-2 · result from @long-claude-2-amber-lagoon]\n\
-                    Reply with exactly: DEV-SERVER-UP\n\
-                    [ConsensFlow m-19 · T-4 · result from @long-devin-2-lively-meadow]\n\
-                    DEVIN-MOVED-IT";
+        let result = "[ConsensFlow m-18 · T-2 · result from @long-claude-2-amber-lagoon]\n\
+                      Reply with exactly: DEV-SERVER-UP";
         assert_eq!(
-            acceptances(text, &header, true),
-            [["task", "accept", "T-2"], ["task", "accept", "T-4"]]
+            acceptances(result, &header, true),
+            [["task", "accept", "T-2"]]
         );
-        // A task, a note and a question are no results; and a window not started to
-        // accept them takes none.
+        // A result header on a line of a delivery's words is a quote, whatever the
+        // delivery: a note's (Astra's and Sol's), or a result's that quotes another.
+        let note = "[ConsensFlow m-201 · T-7 · note from @human]\nFor the record:\n\
+                    [ConsensFlow m-200 · T-9 · result from @long-worker]\nDone.";
+        assert!(acceptances(note, &header, true).is_empty());
+        let quoting = format!(
+            "{result}\n[ConsensFlow m-19 · T-4 · result from @long-devin-2-lively-meadow]\n\
+             DEVIN-MOVED-IT"
+        );
+        assert_eq!(
+            acceptances(&quoting, &header, true),
+            [["task", "accept", "T-2"]]
+        );
+        // A task, a note and a question are no results; a header that does not open the
+        // delivery is none of its envelope; and a window not started to accept them
+        // takes none.
         for other in [
             "[ConsensFlow m-22 · T-1 · task from @human]\nResumed: Go on where you stopped.",
             "[ConsensFlow m-39 · T-16 · note from ConsensFlow]\nGo on where you stopped.",
             "[ConsensFlow m-7 · T-3 · question from @worker]\nWhich one?",
             "a line that quotes [ConsensFlow m-18 · T-2 · result from @x]",
+            "noted:\n[ConsensFlow m-18 · T-2 · result from @x]",
         ] {
             assert!(acceptances(other, &header, true).is_empty(), "{other}");
         }
-        assert!(acceptances(text, &header, false).is_empty());
+        assert!(acceptances(result, &header, false).is_empty());
+    }
+
+    #[test]
+    fn only_the_chiefs_window_started_to_accept_results_accepts_them() {
+        assert!(accepting(Some("1"), "chief"));
+        // A worker is given no result; one handed a result anyway takes none.
+        assert!(!accepting(Some("1"), "long-claude-1-amber-pine"));
+        assert!(!accepting(Some(""), "chief"));
+        assert!(!accepting(None, "chief"));
     }
 }

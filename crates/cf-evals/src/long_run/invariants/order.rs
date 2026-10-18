@@ -7,7 +7,10 @@
 //! attempt of its task that began it began, in that attempt's conversation, and no
 //! further than the next delivery of another task: a turn of an earlier attempt (a
 //! retry's turn lost, its result the old answer again) or of the next task (a late
-//! result carrying another task's answer) is never taken for its own. Both read
+//! result carrying another task's answer) is never taken for its own. A delivery is a
+//! prompt that opens with the header of a message to the worker, read as B5 reads one
+//! (`deliveries`): a header a brief, a job's notification or a tool's output quotes is
+//! none, and neither begins nor ends a turn. Both read
 //! the ledger alone: the messages, the log of the tasks' states and deliveries, and
 //! the daemon's copy of the worker's conversation.
 //!
@@ -22,7 +25,7 @@
 //! result's, late, or the next attempt's own, which the log does not say: it is
 //! unresolved, said so once in the timeline, never a break and never taken to hold.
 
-use super::deliveries::headers;
+use super::deliveries::delivered_to;
 use super::work::lines_of;
 use super::{plain, Break, Evidence, Settings, Unjudged};
 use crate::clock;
@@ -212,24 +215,23 @@ fn attempt_of(look: &Look, result: &Message, worker: i64, at: i64) -> Option<(i6
         })
 }
 
-/// Whether `item` is a prompt that delivers a message of another task than `task`.
-fn delivers_another_task(look: &Look, item: &Item, task: Option<i64>) -> bool {
-    item.role == "user"
-        && headers(&item.text).iter().any(|(id, _, _)| {
-            look.ledger
-                .messages
-                .iter()
-                .find(|message| message.id == *id)
-                .is_some_and(|message| message.task.is_some() && message.task != task)
-        })
+/// Whether `item` is a prompt that delivered `worker` a message of another task than
+/// `task` ([`delivered_to`]).
+fn delivers_another_task(look: &Look, item: &Item, worker: i64, task: Option<i64>) -> bool {
+    delivered_to(look, item, worker)
+        .iter()
+        .any(|message| message.task.is_some() && message.task != task)
 }
 
 /// The turn of `result`, the worker `worker`'s, written at `at`, in `items`, the copy of
 /// the worker's conversations by then. It is bound to the delivery attempt that began it
-/// ([`attempt_of`]): its prompt is the first that holds that message's header said once
-/// the attempt began, never an earlier attempt's of the same message; and what follows
-/// it is the turn's only in that prompt's conversation, and only until a prompt that
-/// delivers another task. Of that, the last turn ([`last_turn`]).
+/// ([`attempt_of`]): its prompt is the first that delivered that message to the worker
+/// once the attempt began, never an earlier attempt's of the same message; and what
+/// follows it is the turn's only in that prompt's conversation, and only until a prompt
+/// that delivered the worker another task. A delivery is a prompt that opens with a
+/// header of a message to the worker ([`delivered_to`]): a header its words, a job's
+/// notification or a tool's output quote is none, and begins or ends nothing. Of that,
+/// the last turn ([`last_turn`]).
 fn turn_of<'a>(
     look: &Look,
     result: &Message,
@@ -242,16 +244,18 @@ fn turn_of<'a>(
     let prompt = items
         .iter()
         .position(|item| {
-            item.role == "user"
-                && item.millis().is_some_and(|said| said >= began)
-                && headers(&item.text).iter().any(|(id, _, _)| *id == message)
+            item.millis().is_some_and(|said| said >= began)
+                && delivered_to(look, item, worker)
+                    .iter()
+                    .any(|delivered| delivered.id == message)
         })
         .ok_or(Unheld::NotCopied(message, attempt))?;
     let conversation = items[prompt].conversation;
     let end = items[prompt + 1..]
         .iter()
         .position(|item| {
-            item.conversation != conversation || delivers_another_task(look, item, result.task)
+            item.conversation != conversation
+                || delivers_another_task(look, item, worker, result.task)
         })
         .map_or(items.len(), |after| prompt + 1 + after);
     last_turn(&items[prompt..end]).ok_or(Unheld::NoAnswer)

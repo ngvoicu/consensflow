@@ -1,8 +1,11 @@
 //! The run's last look, taken once the app has closed: what the close left of the
 //! run's processes, and what the app wrote as it closed, are held to the invariants.
 
+use cf_e2e::files;
+
 use super::*;
 use crate::long_run::disruptions::{Disruption, Target, NO_IDLE_COMPACTION};
+use crate::long_run::invariants::Evidence;
 use crate::long_run::ledger::{Conversation, Event, Item, Message, Participant, Task};
 use crate::long_run::look::{Process, Stranger, Unread};
 use crate::long_run::record::Record;
@@ -97,7 +100,6 @@ fn going() -> Going {
 #[test]
 fn a_disruption_whose_effect_was_not_seen_is_failed_and_a_break_of_the_tenth_with_its_evidence() {
     use crate::long_run::disruptions::State;
-    use crate::long_run::invariants::Evidence;
     let mut said = Vec::new();
     let mut run = going();
     let mut floor = run.edge.floor(&mut said);
@@ -171,12 +173,15 @@ fn a_disruption_whose_effect_was_not_seen_is_failed_and_a_break_of_the_tenth_wit
         run.schedule.planned[3].lacked.as_deref(),
         Some(NO_IDLE_COMPACTION)
     );
-    // What a disruption said is said on the console with a token in it hidden.
+    // What a disruption said is kept in the log with a token in it hidden; the console
+    // says none of it, which may be a window's words.
+    let log = floor.log().to_string();
     drop(floor);
     let printed = String::from_utf8(said).unwrap();
+    assert!(!printed.contains("its screen said"), "{printed}");
     assert!(
-        printed.contains("token=[masked], and more") && !printed.contains("abcd1234efgh"),
-        "{printed}"
+        log.contains("token=[masked], and more") && !log.contains("abcd1234efgh"),
+        "{log}"
     );
 }
 
@@ -263,15 +268,113 @@ fn what_the_run_says_is_masked_whatever_says_it_its_own_names_shown() {
     floor
         .note("gave up waiting for the chief to be ready: chief null; its screen: export DB_PASSWORD=hunter2hunter ⏎ p1-long-claude-1-olive-valley")
         .unwrap();
-    let log = floor.log();
+    let log = floor.log().to_string();
     drop(floor);
+    // The console says none of it; the log the report keeps has it, masked.
     let printed = String::from_utf8(said).unwrap();
-    assert!(!printed.contains("hunter2hunter"), "{printed}");
+    assert!(!printed.contains("its screen"), "{printed}");
     assert!(
-        printed.contains("DB_PASSWORD=[masked] ⏎ p1-long-claude-1-olive-valley"),
-        "{printed}"
+        log.contains("DB_PASSWORD=[masked] ⏎ p1-long-claude-1-olive-valley"),
+        "{log}"
     );
-    assert!(!log.to_string().contains("hunter2hunter"));
+    assert!(!log.contains("hunter2hunter"));
+}
+
+#[test]
+fn a_findings_screen_and_words_stay_in_the_local_report_and_the_console_says_its_key() {
+    // A value whose name the screen's tail cut off, which no mask knows (the accepted
+    // limit): on the screen of a window that crashed mid-task, in the words of its break,
+    // and in what could not be judged.
+    let secret = "correct horse battery staple";
+    let mut said = Vec::new();
+    let mut run = going();
+    let mut floor = run.edge.floor(&mut said);
+    let found = Break::new(
+        6,
+        "6:closed:p1-long-worker-1:3",
+        format!(
+            "@long-worker's window closed by itself while T-18 was at work, saying \"{secret}\""
+        ),
+    )
+    .with(Evidence {
+        rows: vec!["p1-long-worker-1 generation 3".to_owned()],
+        screen: vec![format!("\"{secret}\""), "step 1 of 11 done".to_owned()],
+        record: Vec::new(),
+    });
+    run.record(&mut floor, at(5, 0), vec![found]);
+    run.unjudged(
+        &mut floor,
+        at(5, 0),
+        vec![Unjudged::new(
+            2,
+            "2:m-131",
+            format!("m-131's turn is not in @long-worker's own record ({secret})"),
+        )],
+    );
+    // The report kept on the machine, and its summary said.
+    let options = Options::of(&[]).unwrap();
+    let found = vec![crate::long_run::staff::Found {
+        name: "claude".to_owned(),
+        command: PathBuf::from("/bin/claude"),
+        version: "2.1.0 (Claude Code)".to_owned(),
+    }];
+    let staff = crate::long_run::staff::staff_of(
+        &["claude".to_owned()],
+        &crate::long_run::staff::models_of(None).unwrap(),
+        "medium",
+    )
+    .unwrap();
+    let log = floor.log();
+    let kept = Kept {
+        options: &options,
+        chief: ChiefKept {
+            harness: "claude".to_owned(),
+            model: "claude-opus-5-5".to_owned(),
+            effort: None,
+        },
+        found: &found,
+        left: &[],
+        staff: &staff,
+        daemon: "native (rust 3.0.5)".to_owned(),
+        home: None,
+        started: at(0, 0),
+        ended: at(30, 0),
+        schedule: &run.schedule,
+        breaks: &run.keeper.breaks,
+        unresolved: &run.keeper.unjudged,
+        timeline: &run.timeline,
+        ending: DONE.to_owned(),
+        error: Some(format!("the rig could not close: {secret}")),
+        log,
+    };
+    let folder = tempfile::tempdir().unwrap();
+    let status = keep_and_say(&kept, &run.edge, folder.path(), "long", &mut floor).unwrap();
+    drop(floor);
+    assert_eq!(status, 1);
+    let console = String::from_utf8(said).unwrap();
+    for part in ["correct", "horse", "battery", "staple", "step 1 of 11"] {
+        assert!(!console.contains(part), "{part}: {console}");
+    }
+    for line in [
+        "BREAK 6 (every window has its process, and no stranger): 6:closed:p1-long-worker-1:3",
+        "UNRESOLVED 2: 2:m-131",
+        "  why: unresolved (2): 2:m-131",
+        "  why: the run could not be run to its end (what stopped it is in the report)",
+    ] {
+        assert!(
+            console.lines().any(|said| said == line),
+            "{line}\n{console}"
+        );
+    }
+    assert!(console.contains(&format!(
+        "  report: {}",
+        folder.path().join("long.json").display()
+    )));
+    // The report, on the machine the run ran on, keeps all of it.
+    for file in ["long.json", "long.md"] {
+        let text = files::read_string(&folder.path().join(file)).unwrap();
+        assert!(text.contains(secret), "{file}: {text}");
+    }
 }
 
 #[test]

@@ -109,6 +109,14 @@ pub struct LeftOut {
     pub why: String,
 }
 
+impl LeftOut {
+    /// How the console says it: by its name alone. Why is a diagnostic (what the harness
+    /// said of its version, or why it could not be found), which the report keeps.
+    pub fn said(&self) -> String {
+        format!("left out: {}", self.name)
+    }
+}
+
 /// The harnesses of `wanted` that `look` finds (its program and its version, or
 /// why there is none), and those left out. What a harness says of its version, or
 /// why it could not be found, is its own words: what looks like a key or a token in

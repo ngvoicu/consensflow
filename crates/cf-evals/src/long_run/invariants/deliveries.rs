@@ -19,6 +19,7 @@ use cf_e2e::pattern;
 use regex::Regex;
 
 use super::{plain, Break, Evidence};
+use crate::long_run::ledger::{Item, Message};
 use crate::long_run::look::Look;
 use crate::long_run::mask::{cut, Names};
 
@@ -76,7 +77,7 @@ fn said_until(text: &str, body: &str) -> usize {
 /// The messages a prompt was given, in order: each header of it but those inside the
 /// words of a message delivered before it in the prompt (`body` of a message, by its
 /// id), where they stand after that message's header.
-fn given_in<'t>(text: &'t str, body: impl Fn(i64) -> Option<&'t str>) -> Vec<i64> {
+fn given_in<'b>(text: &str, body: impl Fn(i64) -> Option<&'b str>) -> Vec<i64> {
     let mut given: Vec<i64> = Vec::new();
     let mut quoting_until = 0;
     for (id, start, end) in headers(text) {
@@ -89,16 +90,38 @@ fn given_in<'t>(text: &'t str, body: impl Fn(i64) -> Option<&'t str>) -> Vec<i64
     given
 }
 
+/// The words of the message `id`, as the ledger holds them.
+fn body_in(look: &Look, id: i64) -> Option<&str> {
+    look.ledger
+        .messages
+        .iter()
+        .find(|message| message.id == id)
+        .map(|message| message.body.as_str())
+}
+
+/// The messages `item` delivered to `worker`, in order: none where it is no prompt that
+/// opens with a delivery's header (a job's notification, a tool's output or what a
+/// person typed may quote one anywhere); else each message it was given ([`given_in`]: a
+/// header its words quote is none) that the ledger holds as one to `worker`.
+pub(super) fn delivered_to<'l>(look: &'l Look, item: &Item, worker: i64) -> Vec<&'l Message> {
+    let leading = item.text.len() - item.text.trim_start().len();
+    let opens = headers(&item.text)
+        .first()
+        .is_some_and(|(_, start, _)| *start == leading);
+    if item.role != "user" || !opens {
+        return Vec::new();
+    }
+    given_in(&item.text, |id| body_in(look, id))
+        .into_iter()
+        .filter_map(|id| look.ledger.messages.iter().find(|message| message.id == id))
+        .filter(|message| message.recipient == worker)
+        .collect()
+}
+
 /// 7: per conversation, a message whose header is in two of its prompts, and a
 /// prompt that holds the headers of two messages.
 pub fn twice_or_joined(look: &Look) -> Vec<Break> {
-    let body = |id: i64| {
-        look.ledger
-            .messages
-            .iter()
-            .find(|message| message.id == id)
-            .map(|message| message.body.as_str())
-    };
+    let body = |id: i64| body_in(look, id);
     let names = Names::of(look);
     let mut found = Vec::new();
     for conversation in &look.ledger.conversations {

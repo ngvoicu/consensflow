@@ -284,9 +284,15 @@ fn a_break_a_disruption_not_played_or_a_run_cut_short_fails_it_and_says_which() 
         said[0],
         "long run · chief claude (claude-opus-5) · staff claude,devin · 90 min · FAIL"
     );
+    // Why a harness was left out, and what stopped the run, are the report's.
     assert_eq!(
-        said[1],
-        "  left out: codex (not on this machine: codex was not found)"
+        said[1..5],
+        [
+            "  left out: codex",
+            "  why: invariant 2 broke (A2, no task done while its job runs): 1",
+            "  why: devin-cut was not played",
+            "  why: the run could not be run to its end (what stopped it is in the report)",
+        ]
     );
     assert!(said.contains(&"  report: /r/x.json".to_owned()));
     assert_eq!(said.last().unwrap(), "  timeline: /r/x.md");
@@ -360,9 +366,10 @@ fn what_stopped_the_run_is_kept_and_said_with_a_key_or_a_token_hidden() {
         &format!("the run could not be run to its end: {hidden}")
     );
     assert_eq!(kept.value()["error"], hidden);
+    // The console says that something stopped it, and none of its words.
     let said = kept.say(Path::new("/r/x.json"), Path::new("/r/x.md"));
     assert!(
-        said.iter().all(|line| !line.contains("abcd1234efgh")),
+        said.iter().all(|line| !line.contains("daemon stderr")),
         "{said:?}"
     );
     assert!(!kept.markdown().contains("abcd1234efgh"));

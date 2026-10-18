@@ -65,10 +65,10 @@ pub struct Kept<'a> {
 }
 
 impl Kept<'_> {
-    /// Why the run did not pass: why it failed, then each thing the watch could not
-    /// judge; nothing for a run that passed.
+    /// Why the run did not pass, as the report keeps it: why it failed, then each thing
+    /// the watch could not judge; nothing for a run that passed.
     pub fn why(&self) -> Vec<String> {
-        let mut why = self.failures();
+        let mut why = self.failures(true);
         why.extend(
             self.unresolved
                 .iter()
@@ -94,12 +94,27 @@ impl Kept<'_> {
         self.breaks.len() - self.unknown().count()
     }
 
-    /// Why the run failed: each invariant that broke other than in a known way, each
-    /// disruption not played or played without the field's shape it is for, its time
-    /// running out, what stopped it (with what looks like a key or a token in it
-    /// hidden), and a list of known breaks that could not be read; nothing for a run
-    /// that did not fail.
-    fn failures(&self) -> Vec<String> {
+    /// Why the run did not pass, as its console says it ([`Kept::failures`] without their
+    /// words), then the key of each thing it could not judge. The report keeps the words
+    /// ([`Kept::why`]), which may be a window's or a diagnostic's.
+    fn said_why(&self) -> Vec<String> {
+        let mut why = self.failures(false);
+        why.extend(
+            self.unresolved
+                .iter()
+                .map(|open| format!("unresolved ({}): {}", open.invariant, open.key)),
+        );
+        why
+    }
+
+    /// Why the run failed: each invariant that broke other than in a known way, a list of
+    /// known breaks that could not be read, each disruption not played or played without
+    /// the field's shape it is for, its time running out, and what stopped it; nothing
+    /// for a run that did not fail. With `words`, as the report keeps it: why the list
+    /// could not be read, why each disruption was not played, and what stopped the run
+    /// (with what looks like a key or a token in it hidden); without, as the console
+    /// says it.
+    fn failures(&self, words: bool) -> Vec<String> {
         let mut why: Vec<String> = INVARIANTS
             .iter()
             .filter_map(|(number, name, shape)| {
@@ -111,15 +126,19 @@ impl Kept<'_> {
             })
             .collect();
         if let Err(why_not) = KNOWN.as_ref() {
-            why.push(format!(
-                "the list of known breaks (evals/known-breaks.json) could not be read: {why_not}"
-            ));
+            let list = "the list of known breaks (evals/known-breaks.json) could not be read";
+            why.push(if words {
+                format!("{list}: {why_not}")
+            } else {
+                list.to_owned()
+            });
         }
         why.extend(self.schedule.not_played().iter().map(|planned| {
-            let State::NotPlayed(because) = &planned.state else {
-                return String::new();
-            };
-            format!("{} was not played: {because}", planned.disruption.flag())
+            let flag = planned.disruption.flag();
+            match &planned.state {
+                State::NotPlayed(because) if words => format!("{flag} was not played: {because}"),
+                _ => format!("{flag} was not played"),
+            }
         }));
         why.extend(self.schedule.without_their_shape().iter().map(|planned| {
             format!(
@@ -135,7 +154,11 @@ impl Kept<'_> {
             ));
         }
         if let Some(error) = self.error() {
-            why.push(format!("the run could not be run to its end: {error}"));
+            why.push(if words {
+                format!("the run could not be run to its end: {error}")
+            } else {
+                "the run could not be run to its end (what stopped it is in the report)".to_owned()
+            });
         }
         why
     }
@@ -158,7 +181,7 @@ impl Kept<'_> {
     /// judge something; else `PASS`, or `PASS with N known` where its only breaks are
     /// N known ones.
     pub fn verdict(&self) -> String {
-        if !self.failures().is_empty() {
+        if !self.failures(false).is_empty() {
             "FAIL".to_owned()
         } else if !self.unresolved.is_empty() {
             "UNRESOLVED".to_owned()
@@ -424,8 +447,11 @@ impl Kept<'_> {
         text
     }
 
-    /// The verdict, as the console says it: a line of what ran, the verdict, why,
-    /// and where the report is.
+    /// The verdict, as the console says it: a line of what ran and the verdict, the
+    /// harnesses left out, why it did not pass ([`Kept::said_why`]), the known breaks by
+    /// their keys and issues, and where the report is. Nothing of a window, a record, a
+    /// message or a diagnostic: the console leaves the machine with whatever ran the
+    /// run, and the report keeps those.
     pub fn say(&self, json: &Path, markdown: &Path) -> Vec<String> {
         let staff: Vec<&str> = self.found.iter().map(|found| found.name.as_str()).collect();
         let mut lines = vec![format!(
@@ -436,12 +462,12 @@ impl Kept<'_> {
             (self.ended - self.started).max(0) / 60_000,
             self.verdict()
         )];
+        lines.extend(self.left.iter().map(|left| format!("  {}", left.said())));
         lines.extend(
-            self.left
-                .iter()
-                .map(|left| format!("  left out: {} ({})", left.name, left.why)),
+            self.said_why()
+                .into_iter()
+                .map(|why| format!("  why: {why}")),
         );
-        lines.extend(self.why().into_iter().map(|why| format!("  why: {why}")));
         lines.extend(self.breaks.iter().filter_map(|found| {
             Self::known(found).map(|known| format!("  known: {} ({})", found.key, known.issue))
         }));

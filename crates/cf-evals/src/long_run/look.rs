@@ -1,7 +1,9 @@
 //! One look at a running project: everything the invariants are held to at a
 //! moment, read from outside. The ledger's rows ([`Ledger`]), the windows as the
 //! pane host and the daemon's trace show them ([`Windows`]), and each harness's
-//! own record of a window's conversation ([`Record`]). The run takes a look every
+//! own record of a window's conversation ([`Record`]), with how far it was read
+//! ([`Reading`]): a check that needs a record holds to it only what it was read
+//! through ([`Look::record_through`]). The run takes a look every
 //! few seconds (`stage`); a test makes one by hand, from a ledger file made for it
 //! and records written in a harness's shape, with no harness running.
 
@@ -9,6 +11,11 @@ use std::collections::BTreeMap;
 
 use super::ledger::{Item, Ledger, Participant};
 use super::record::Record;
+
+/// The time `at` (in milliseconds) as the run writes one.
+fn iso(at: i64) -> String {
+    jiff::Timestamp::from_millisecond(at).map_or_else(|_| at.to_string(), crate::clock::iso)
+}
 
 /// A process, by its number and the command line it was started with.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -141,15 +148,82 @@ pub struct Look {
     pub at: i64,
     pub ledger: Ledger,
     pub windows: Windows,
-    /// Each harness's own record of a conversation, by the conversation's row,
-    /// where the run could read one.
+    /// Each harness's own record of a conversation, by the conversation's row, as far
+    /// as the run read it: kept once read, whatever came of a later reading.
     pub records: BTreeMap<i64, Record>,
-    /// Each conversation whose own record the run reads and could not read at this
-    /// look, by its row, with why.
-    pub records_unread: BTreeMap<i64, String>,
+    /// How far the run read each record it reads ([`Reading`]), by the conversation's
+    /// row. A record the look holds with none was read at the look.
+    pub readings: BTreeMap<i64, Reading>,
+}
+
+/// How far the run read a conversation's own record: when its last reading that held
+/// was taken, and why the latest failed, where it did. A record is only ever written
+/// on, so a reading taken at a moment holds all it said by then.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Reading {
+    /// When the last reading that held was taken, in milliseconds; none before one has.
+    pub through: Option<i64>,
+    /// Why the latest reading failed, where it did.
+    pub failed: Option<String>,
 }
 
 impl Look {
+    /// The conversation of `participant` at `at`: that of the last item of its copy said
+    /// by then, else its newest.
+    pub fn conversation_at(&self, participant: i64, at: i64) -> Option<i64> {
+        self.items_by(participant, at)
+            .last()
+            .map(|item| item.conversation)
+            .or_else(|| {
+                self.ledger
+                    .conversations_of(participant)
+                    .last()
+                    .map(|conversation| conversation.id)
+            })
+    }
+
+    /// The record of `conversation` where the run read it through `at` (a reading taken
+    /// then or after); else why it did not: never read, read only as far as before
+    /// `at`, or its latest reading failed before it was read that far.
+    pub fn record_through(&self, conversation: i64, at: i64) -> Result<&Record, String> {
+        let reading = self.readings.get(&conversation);
+        let through = match reading {
+            Some(reading) => reading.through,
+            None => self.records.contains_key(&conversation).then_some(self.at),
+        };
+        match (self.records.get(&conversation), through) {
+            (Some(record), Some(through)) if through >= at => Ok(record),
+            _ => Err(
+                match (
+                    reading.and_then(|reading| reading.failed.as_deref()),
+                    through,
+                ) {
+                    (Some(failed), Some(through)) => {
+                        format!("{failed}; it was read last at {}", iso(through))
+                    }
+                    (Some(failed), None) => failed.to_owned(),
+                    (None, Some(through)) => {
+                        format!("its record was read only as far as {}", iso(through))
+                    }
+                    (None, None) => "its record was never read".to_owned(),
+                },
+            ),
+        }
+    }
+
+    /// Every reading of the look's records: each record it holds with none said, read at
+    /// the look.
+    pub fn every_reading(&self) -> BTreeMap<i64, Reading> {
+        let mut readings = self.readings.clone();
+        for id in self.records.keys() {
+            readings.entry(*id).or_insert(Reading {
+                through: Some(self.at),
+                failed: None,
+            });
+        }
+        readings
+    }
+
     /// The record of the participant `id`'s newest conversation that the look
     /// has, if it has one.
     pub fn record_of(&self, participant: i64) -> Option<&Record> {

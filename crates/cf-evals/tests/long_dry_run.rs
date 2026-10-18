@@ -17,7 +17,9 @@
 //! What is held is that the run gets to its end (9), plays every disruption with its
 //! effect seen (10; the stand-in compacts as Claude Code does at `/compact`), and keeps
 //! a report of the shape it always keeps (JSON and Markdown, the harnesses and their
-//! versions, the invariants, the disruptions, the breaks, the timeline). The rest of
+//! versions, the invariants, the disruptions, the breaks, the timeline), on the machine
+//! alone: its console says the run's own words and identifiers, none of the report's
+//! evidence, as whatever runs it takes the console off the machine. The rest of
 //! its verdict is whatever the watch found: what the daemon does with a job a turn left
 //! is the daemon's, and a break of a known shape (`evals/known-breaks.json`) passes as
 //! known.
@@ -190,11 +192,12 @@ fn the_long_run_is_played_against_the_stand_ins_to_its_end_with_every_disruption
         .ends_with("-long-chief-claude-staff-claude-devin.json"));
     let report: Value = serde_json::from_str(&std::fs::read_to_string(&kept[0]).unwrap()).unwrap();
     let markdown = std::fs::read_to_string(&kept[1]).unwrap();
-    // The run says its report last, as it keeps it: what a run on zeewin brings back.
-    assert!(
-        ran.stdout.trim_end().ends_with(markdown.trim_end()),
-        "the report is said last: {ran}"
-    );
+    // The console says the run's own words and identifiers alone: none of the report's
+    // evidence, which stays on the machine the run ran on.
+    for part in ["## Harnesses", "## Invariants", "## Timeline"] {
+        assert!(markdown.contains(part), "{part}\n{markdown}");
+        assert!(!ran.stdout.contains(part), "{part} said: {ran}");
+    }
     assert_eq!(report["kind"], "long-run");
     // A pass, with the known breaks it carries said, is the exit code 0; a fail is 1.
     let verdict = report["verdict"].as_str().unwrap();
@@ -276,11 +279,16 @@ fn the_long_run_is_played_against_the_stand_ins_to_its_end_with_every_disruption
     ] {
         assert!(markdown.contains(part), "{part}\n{markdown}");
     }
-    // Each break the watch found is kept with what it found it by.
+    // Each break the watch found is kept with what it found it by, and said by its key
+    // alone.
     for found in report["breaks"].as_array().unwrap() {
         assert!(
             found["said"].is_string() && found["evidence"].is_object(),
             "{found}"
+        );
+        assert!(
+            !ran.stdout.contains(found["said"].as_str().unwrap()),
+            "{found} said: {ran}"
         );
     }
 }

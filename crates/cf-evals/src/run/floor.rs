@@ -28,6 +28,8 @@ pub struct Floor<'o> {
     started: Instant,
     log: Vec<(u64, String)>,
     mask: Option<Masking>,
+    /// Whether what it notes is kept alone, and only what it says is said.
+    quiet: bool,
 }
 
 impl<'o> Floor<'o> {
@@ -38,7 +40,17 @@ impl<'o> Floor<'o> {
             started: Instant::now(),
             log: Vec::new(),
             mask: None,
+            quiet: false,
         }
+    }
+
+    /// The floor, keeping what it notes for the report alone and saying on `out` only
+    /// what it says: a run whose console reaches whatever started it (an agent's tool,
+    /// another machine's runner) says there what it chooses to, and no more.
+    #[must_use]
+    pub fn quiet(mut self) -> Self {
+        self.quiet = true;
+        self
     }
 
     /// A run beginning now, which speaks on `out`, every line it notes or says passed
@@ -89,10 +101,13 @@ impl<'o> Floor<'o> {
     }
 
     /// Says `line` as a thing the run did, with the seconds since it began, and
-    /// keeps it for the report: `  [12s] chief idle; tasks T-1:working`.
+    /// keeps it for the report: `  [12s] chief idle; tasks T-1:working`. A quiet floor
+    /// keeps it alone.
     pub fn note(&mut self, line: impl Display) -> Result {
         let (at, line) = (self.seconds(), self.shown(line));
-        writeln!(self.out, "  [{at}s] {line}")?;
+        if !self.quiet {
+            writeln!(self.out, "  [{at}s] {line}")?;
+        }
         self.log.push((at, line));
         Ok(())
     }

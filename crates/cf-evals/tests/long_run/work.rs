@@ -93,7 +93,8 @@ fn a_job_its_record_holds_or_its_turn_left_running_holds_the_first() {
         found(&scene.look(ms(60, 0)), 1).is_empty(),
         "the job holds the task"
     );
-    // Its end, said by Claude Code itself, lets the task go: then it is held for nothing.
+    // Its end, said by Claude Code itself, lets the task go: then it is held for nothing
+    // (its own record read at the look, saying nothing the copy does not).
     let (scene, conversation) =
         rested_after("claude-code", "Command running in background with ID: b7x2");
     scene.item(
@@ -112,7 +113,14 @@ fn a_job_its_record_holds_or_its_turn_left_running_holds_the_first() {
         true,
         &t(6, 30),
     );
-    assert_eq!(found(&scene.look(ms(60, 0)), 1).len(), 1);
+    assert_eq!(
+        found(
+            &scene.look_with(ms(60, 0), conversation, Record::claude("")),
+            1
+        )
+        .len(),
+        1
+    );
     // A harness whose record says nothing of jobs: what the pane host lists.
     let (scene, _) = rested("opencode");
     let mut look = scene.look(ms(60, 0));
@@ -328,6 +336,76 @@ fn a_result_whose_native_record_was_not_read_through_its_turn_is_unresolved() {
     let record = Record::claude(&entry(t(0, 10), "Ready."));
     let look = scene.look_with(ms(10, 0), conversation, record);
     assert_eq!(unjudged_second(&look), ["2:m-131"]);
+}
+
+/// Why the worker's own record could not be read at the look.
+const UNREADABLE: &str = "its record could not be read: Input/output error (os error 5)";
+
+#[test]
+fn a_result_whose_record_was_not_read_through_its_turn_is_unresolved_whatever_jobs_the_copy_shows()
+{
+    // Both reviewers': the copy names the job b33m (A), whose end was told 5 s after the
+    // result, so the second lets it go; the worker's own record, read at 10:01:40 before
+    // its readings began to fail, names b44n (B) too, which ran on.
+    let (scene, conversation, _) = job_then_result("claude-code");
+    scene.item(conversation, 3, "user", B33M_ENDED, true, &t(2, 5));
+    let record = Record::claude(
+        &json!({ "timestamp": t(1, 20), "type": "user", "toolUseResult": { "backgroundTaskId": "b44n" },
+                 "message": { "role": "user", "content": [{ "type": "tool_result", "tool_use_id": "y",
+                 "content": "Command running in background with ID: b44n" }] } })
+        .to_string(),
+    );
+    let look = scene.look_read(
+        ms(10, 0),
+        conversation,
+        record.clone(),
+        (ms(1, 40), UNREADABLE),
+    );
+    assert!(found(&look, 2).is_empty(), "{:?}", found(&look, 2));
+    assert_eq!(unjudged_second(&look), ["2:m-131"]);
+    // Read through the settle time after the result before its readings failed: what
+    // was read stays read, and b44n ran on when the result was taken.
+    let look = scene.look_read(ms(10, 0), conversation, record, (ms(3, 30), UNREADABLE));
+    let breaks = found(&look, 2);
+    assert_eq!(breaks.len(), 1, "{breaks:?}");
+    assert!(breaks[0].said.contains("b44n"), "{}", breaks[0].said);
+    assert!(
+        unjudged_second(&look).is_empty(),
+        "{:?}",
+        unjudged_second(&look)
+    );
+}
+
+/// What a look could not judge of the first, by key.
+fn unjudged_first(look: &cf_evals::long_run::look::Look) -> Vec<String> {
+    cf_evals::long_run::invariants::unjudged(look, &Default::default())
+        .into_iter()
+        .filter(|open| open.invariant == 1)
+        .map(|open| open.key)
+        .collect()
+}
+
+#[test]
+fn a_claude_windows_rest_its_own_record_was_not_read_through_is_unresolved() {
+    // The copy says the window rested from 10:05, 21 minutes; its own record, which
+    // would say whether a turn or a job went on since, was never read.
+    let (scene, conversation) = rested("claude-code");
+    let look = scene.look(ms(26, 0));
+    assert!(found(&look, 1).is_empty(), "{:?}", found(&look, 1));
+    assert_eq!(unjudged_first(&look), [format!("1:T-4:{}", ms(5, 0))]);
+    // Read as far as 10:20 before its readings failed: no word of the look's moment.
+    let look = scene.look_read(
+        ms(26, 0),
+        conversation,
+        Record::claude(""),
+        (ms(20, 0), UNREADABLE),
+    );
+    assert!(found(&look, 1).is_empty(), "{:?}", found(&look, 1));
+    assert_eq!(unjudged_first(&look), [format!("1:T-4:{}", ms(5, 0))]);
+    // Read at the look, and saying nothing the copy does not: judged.
+    let look = scene.look_with(ms(26, 0), conversation, Record::claude(""));
+    assert_eq!(found(&look, 1).len(), 1);
+    assert!(unjudged_first(&look).is_empty());
 }
 
 /// The notification of the end of the job b33m, as Claude Code writes it.

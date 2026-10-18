@@ -2,13 +2,21 @@
 //! text goes through on its way out ([`Edge::shown`]): what looks like a key or a token
 //! hidden, the run's own names shown (its participants' handles and their windows'
 //! ids, every look's, and the names of the files it keeps). Through it go the console
-//! (the run's floor, all it notes and says, a window's screen it shows masked as one
-//! text first: [`Edge::floor`]); the report it keeps, with
-//! the timeline and the run's log in it (each text of the JSON, a window's screen as
-//! one text, and the Markdown: [`Edge::keep`]); what stopped the run, which `cf-evals`
-//! writes on its error output ([`Edge::failure`]); and what the rig says of itself when
-//! it is dropped unclosed (the masker its configuration is given: [`Edge::masker`]).
-//! Nothing of the long run writes around it: `tests/long_run/edge.rs` holds that.
+//! (the run's floor, a quiet one: what it notes kept for the report, and what it says
+//! said, a window's screen it shows masked as one text first: [`Edge::floor`]); the
+//! report it keeps, with the timeline and the run's log in it (each text of the JSON, a
+//! window's screen as one text, and the Markdown: [`Edge::keep`]); what stopped the run,
+//! kept in a file, of which `cf-evals` writes where it is on its error output
+//! ([`Edge::failure`]); and what the rig says of itself when it is dropped unclosed
+//! (the masker its configuration is given: [`Edge::masker`]). Nothing of the long run
+//! writes around it: `tests/long_run/edge.rs` holds that.
+//!
+//! The console and the error output are a tool's, where an agent runs the long run,
+//! and leave the machine with it (as they do from zeewin through `cargo xtask
+//! windows`): the run says there only its own words and identifiers (the verdict, the
+//! summary, the known breaks, each break's and each unresolved's key, where the report
+//! is), never a window's screen, a record's or a message's words, or a diagnostic. The
+//! report keeps all of it, on the machine it ran on.
 //!
 //! A window's screen is what the pane host gives of it, its last 12 lines, and a
 //! secret's name may be above them: such a value leaves unhidden. That is accepted
@@ -57,7 +65,10 @@ impl Edge {
 
     /// The console of the run, on `out`: everything it notes and says, and the log it
     /// keeps, through [`Edge::shown`], and a window's screen it shows through
-    /// [`Edge::screen`] first.
+    /// [`Edge::screen`] first. A quiet one: what the run notes is kept for the report,
+    /// and only what it says is said, which the run makes of its own words and
+    /// identifiers alone (whatever runs it, an agent's tool or another machine's runner,
+    /// takes its console off the machine).
     pub fn floor<'o>(&self, out: &'o mut dyn Write) -> Floor<'o> {
         let (edge, rows) = (self.clone(), self.clone());
         Floor::masked(
@@ -65,6 +76,7 @@ impl Edge {
             move |line| edge.shown(line),
             move |screen| rows.screen(screen),
         )
+        .quiet()
     }
 
     /// What the run's rigs pass what they say of themselves through, when one is dropped
@@ -99,13 +111,32 @@ impl Edge {
         Ok((json_file, text_file))
     }
 
-    /// What stopped the run, as it leaves it for `cf-evals` to write on its error
-    /// output: through [`Edge::shown`], a usage's error a usage's still.
-    pub fn failure(&self, failed: Error) -> Error {
-        match failed {
-            Error::Usage(said) => Error::Usage(self.shown(&said)),
-            other => Error::Refused(self.shown(&other.to_string())),
-        }
+    /// What stopped the run before it kept its report, as it leaves it for `cf-evals` to
+    /// write on its error output: a usage's error a usage's still, the person's own words
+    /// through [`Edge::shown`]; any other kept whole through [`Edge::shown`] in a file of
+    /// `folder` (the reports'), and said only by where it is. What stops a run may hold
+    /// a window's words (a wait that gave up says the chief's screen, a rig's timeout
+    /// what the daemon and the host wrote), and what runs the run takes its error output
+    /// off the machine as it takes its console.
+    pub fn failure(&self, failed: Error, folder: &Path) -> Error {
+        let said = match failed {
+            Error::Usage(said) => return Error::Usage(self.shown(&said)),
+            other => self.shown(&other.to_string()),
+        };
+        let file = folder.join(format!(
+            "{}-long-stopped.txt",
+            crate::clock::stamp(jiff::Timestamp::now())
+        ));
+        self.knows_files(&[&file]);
+        Error::Refused(match files::write(&file, format!("{said}\n")) {
+            Ok(()) => self.shown(&format!(
+                "the long run stopped before its report; what stopped it is kept in {}",
+                file.display()
+            )),
+            Err(unkept) => self.shown(&format!(
+                "the long run stopped before its report, and what stopped it could not be kept: {unkept}"
+            )),
+        })
     }
 
     /// The names the run knows.

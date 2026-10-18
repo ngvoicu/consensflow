@@ -100,7 +100,9 @@ fn what_stops_the_run_and_what_its_rig_says_leave_through_the_edge() {
     let folder = root.join("src").join("long_run");
     // What stops the run is the edge's before `cf-evals` writes it.
     let conduct = read(&folder.join("conduct.rs"));
-    assert!(conduct.contains("run(words, out, &edge).map_err(|failed| edge.failure(failed))"));
+    assert!(conduct.contains(
+        "run(words, out, &edge).map_err(|failed| edge.failure(failed, &reports_of(words)))"
+    ));
     assert!(read(&root.join("src").join("lib.rs")).contains("long_run::command(rest, out)"));
     // Every rig the run starts is given the edge's masker: the first in setup, and the
     // one a restart starts again on the same configuration.

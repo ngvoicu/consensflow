@@ -25,7 +25,7 @@ use serde_json::Value;
 
 use super::ledger::Ledger;
 use super::look::{
-    Activity, Exit, Look, OpenWindow, Process, Stranger, Unread, Unresolved, Windows,
+    Activity, Exit, Look, OpenWindow, Process, Reading, Stranger, Unread, Unresolved, Windows,
 };
 use super::mask::Names;
 use super::processes;
@@ -39,20 +39,24 @@ pub use exits::{exit_of, lines, Known};
 /// How many lines of a window's screen a look keeps.
 const TAIL: usize = 12;
 
-/// A Claude Code record, read as far as its last whole line; and why the last reading
-/// of it failed, where it did (a record not read is no record that says nothing).
+/// A Claude Code record, read as far as its last whole line; when the last reading that
+/// held was taken; and why the latest failed, where it did (a record not read is no
+/// record that says nothing). What was read is kept whatever comes of a later reading.
 #[derive(Debug, Default)]
 struct Grown {
     file: Option<PathBuf>,
     read: u64,
     record: Record,
+    through: Option<i64>,
     unread: Option<String>,
 }
 
 impl Grown {
     /// What the record's file holds past what was read, its whole lines alone, read
     /// with the run's `names` shown where its words are masked; or why it could not be.
+    /// A reading that holds is taken as of when it began: all the record said by then.
     fn grow(&mut self, config: &std::path::Path, session: &str, names: &Names) {
+        let began = jiff::Timestamp::now().as_millisecond();
         if self.file.is_none() {
             self.file = cf_e2e::live::claude::transcript_file(config, session);
         }
@@ -76,6 +80,7 @@ impl Grown {
             return;
         }
         self.unread = None;
+        self.through = Some(began);
         let Some(end) = more.iter().rposition(|byte| *byte == b'\n') else {
             return;
         };
@@ -189,19 +194,11 @@ impl Watcher {
                 );
             }
         }
+        let (records, readings) = kept(&self.records);
         Ok(Look {
             at,
-            records: self
-                .records
-                .iter()
-                .filter(|(_, grown)| grown.unread.is_none())
-                .map(|(id, grown)| (*id, grown.record.clone()))
-                .collect(),
-            records_unread: self
-                .records
-                .iter()
-                .filter_map(|(id, grown)| Some((*id, grown.unread.clone()?)))
-                .collect(),
+            records,
+            readings,
             ledger,
             windows: Windows {
                 open,
@@ -363,6 +360,29 @@ impl Watcher {
     }
 }
 
+/// What a look holds of the records `grown`, by their conversation's row: each as far as
+/// it was ever read, and how far that was, with why its latest reading failed.
+fn kept(grown: &BTreeMap<i64, Grown>) -> (BTreeMap<i64, Record>, BTreeMap<i64, Reading>) {
+    let records = grown
+        .iter()
+        .filter(|(_, grown)| grown.through.is_some())
+        .map(|(id, grown)| (*id, grown.record.clone()))
+        .collect();
+    let readings = grown
+        .iter()
+        .map(|(id, grown)| {
+            (
+                *id,
+                Reading {
+                    through: grown.through,
+                    failed: grown.unread.clone(),
+                },
+            )
+        })
+        .collect();
+    (records, readings)
+}
+
 /// What the run's processes came to once the app had closed.
 #[derive(Debug, Default)]
 pub struct Left {
@@ -397,6 +417,62 @@ fn activity(rig: &Rig) -> Vec<Activity> {
             })
         })
         .collect()
+}
+
+#[cfg(test)]
+mod reading_tests {
+    use super::*;
+
+    use std::path::Path;
+
+    #[test]
+    fn a_record_read_once_is_kept_as_far_as_it_was_read_whatever_a_later_reading_says() {
+        // A Claude Code record of the product's fixtures.
+        let file = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../cf-harness/tests/fixtures/claude/quit-before-a-word.jsonl");
+        let said = Record::claude(&std::fs::read_to_string(&file).unwrap()).last_said();
+        assert!(said.is_some());
+        let mut grown = Grown {
+            file: Some(file),
+            ..Grown::default()
+        };
+        let before = jiff::Timestamp::now().as_millisecond();
+        grown.grow(Path::new("/nowhere"), "s-worker", &Names::default());
+        let read = grown.through.unwrap();
+        assert!(read >= before, "{read} {before}");
+        // Its file gone (Astra's job B, read before the result): the reading fails, and
+        // what was read stays, read as far as it was, not as far as the failed reading.
+        sleep(Duration::from_millis(5));
+        grown.file = Some(PathBuf::from("/nowhere/s-worker.jsonl"));
+        grown.grow(Path::new("/nowhere"), "s-worker", &Names::default());
+        let failed = grown.unread.clone().unwrap();
+        assert!(
+            failed.starts_with("its record could not be opened: "),
+            "{failed}"
+        );
+        let never = Grown {
+            unread: Some("no record of the session s-other was found".to_owned()),
+            ..Grown::default()
+        };
+        let (records, readings) = kept(&BTreeMap::from([(7, grown), (8, never)]));
+        assert_eq!(records.keys().collect::<Vec<_>>(), [&7]);
+        assert_eq!(records[&7].last_said(), said);
+        assert_eq!(
+            readings[&7],
+            Reading {
+                through: Some(read),
+                failed: Some(failed),
+            }
+        );
+        // A record never read is none, and its reading says why.
+        assert_eq!(
+            readings[&8],
+            Reading {
+                through: None,
+                failed: Some("no record of the session s-other was found".to_owned()),
+            }
+        );
+    }
 }
 
 #[cfg(test)]

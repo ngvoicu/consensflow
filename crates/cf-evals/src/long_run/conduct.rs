@@ -13,10 +13,12 @@
 //! within the budget; and the report is kept. A ledger the app left that cannot be read
 //! fails the run: nothing is held on an earlier copy of it. Everything the run says
 //! and keeps, and what stops it, leaves it through its edge ([`Edge`]), the run's own
-//! names shown.
+//! names shown: its console says only the run's own words and identifiers (the
+//! harnesses it found, each break's and each unresolved's key as it is found, the
+//! summary, where the report is), and the report keeps the rest.
 
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
@@ -86,10 +88,12 @@ impl Going {
         self.last = Some(look);
     }
 
-    /// What a look at `at` could not judge (`found`): each not said before is said,
-    /// and told in the timeline as unresolved, masked with the run's names.
+    /// What a look at `at` could not judge (`found`): each not said before is said by
+    /// its key, and kept in the log and told in the timeline whole, as unresolved, masked
+    /// with the run's names.
     fn unjudged(&mut self, floor: &mut Floor, at: i64, found: Vec<Unjudged>) {
         for open in self.keeper.keep_unjudged(at, found, &self.timeline.names) {
+            let _ = floor.say(format!("UNRESOLVED {}: {}", open.invariant, open.key));
             let _ = floor.note(format!("UNRESOLVED {}: {}", open.invariant, open.said));
             self.timeline.add(
                 at,
@@ -156,10 +160,16 @@ impl Going {
         Ok(())
     }
 
-    /// The breaks `found` at `at`: each not recorded before is recorded, said and
-    /// told in the timeline, masked with the run's names.
+    /// The breaks `found` at `at`: each not recorded before is recorded, said by its key,
+    /// and kept in the log and told in the timeline whole, masked with the run's names.
     fn record(&mut self, floor: &mut Floor, at: i64, found: Vec<Break>) {
         for kept in self.keeper.keep_at(at, found, &self.timeline.names) {
+            let _ = floor.say(format!(
+                "BREAK {} ({}): {}",
+                kept.invariant,
+                kept.name(),
+                kept.key
+            ));
             let _ = floor.note(format!(
                 "BREAK {} ({}): {}",
                 kept.invariant,
@@ -201,10 +211,16 @@ impl Watch for Watching<'_, '_> {
 }
 
 /// `long`: the run, and its report; the status is 0 when it held. What stops it
-/// leaves it through its edge, as all it says does.
+/// leaves it through its edge, as all it says does, kept in the reports' folder.
 pub fn command(words: &[String], out: &mut dyn Write) -> Result<i32> {
     let edge = Edge::default();
-    run(words, out, &edge).map_err(|failed| edge.failure(failed))
+    run(words, out, &edge).map_err(|failed| edge.failure(failed, &reports_of(words)))
+}
+
+/// The folder a run of `words` keeps its reports in: none where they are no run's
+/// (what stops it then is a usage's error, which needs none).
+fn reports_of(words: &[String]) -> PathBuf {
+    Options::of(words).map_or_else(|_| PathBuf::new(), |options| options.reports)
 }
 
 /// The run of `command`, all it says and keeps leaving through `edge`.
@@ -216,7 +232,7 @@ fn run(words: &[String], out: &mut dyn Write, edge: &Edge) -> Result<i32> {
     let cast = Cast::of(&options)?;
     let mut floor = edge.floor(out);
     for left in &cast.left {
-        floor.say(format!("left out: {} ({})", left.name, left.why))?;
+        floor.say(left.said())?;
     }
     for found in &cast.found {
         floor.say(format!(
@@ -292,13 +308,24 @@ fn run(words: &[String], out: &mut dyn Write, edge: &Edge) -> Result<i32> {
         log: floor.log(),
     };
     let name = file_name(started, &options.chief, &cast.names);
-    let (json, markdown) = edge.keep(&options.reports, &name, &kept.value(), &kept.markdown())?;
+    keep_and_say(&kept, edge, &options.reports, &name, &mut floor)
+}
+
+/// Keeps the report `kept` in `folder` as `name`, through `edge`, and says on `floor` its
+/// summary and where it is, none of its evidence: that stays on the machine the run ran
+/// on (one on zeewin, through `cargo xtask windows`, keeps its files there). The
+/// status: 0 where the run held.
+fn keep_and_say(
+    kept: &Kept,
+    edge: &Edge,
+    folder: &Path,
+    name: &str,
+    floor: &mut Floor,
+) -> Result<i32> {
+    let (json, markdown) = edge.keep(folder, name, &kept.value(), &kept.markdown())?;
     for line in kept.say(&json, &markdown) {
         floor.say(line)?;
     }
-    // The report said last, whole: a run on another machine (zeewin, through `cargo
-    // xtask windows`) keeps its files there, and brings back only what it said.
-    floor.say(format!("\n{}", kept.markdown()))?;
     Ok(i32::from(!kept.held()))
 }
 
@@ -472,7 +499,8 @@ fn after_close(
 /// The look at the project once the app has closed, at `at`: its ledger as the app
 /// left it, the `windows` as the close left them (none open: every exit the run saw,
 /// the processes of the run that were left and those it could not judge, and every
-/// close whose host's last word was not read whole), and the records of the last look.
+/// close whose host's last word was not read whole), and the records of the last look,
+/// read as far as that look read them.
 fn closed_look(at: i64, ledger: Ledger, windows: Windows, last: Option<&Look>) -> Look {
     Look {
         at,
@@ -483,9 +511,7 @@ fn closed_look(at: i64, ledger: Ledger, windows: Windows, last: Option<&Look>) -
             ..windows
         },
         records: last.map(|look| look.records.clone()).unwrap_or_default(),
-        records_unread: last
-            .map(|look| look.records_unread.clone())
-            .unwrap_or_default(),
+        readings: last.map(Look::every_reading).unwrap_or_default(),
     }
 }
 

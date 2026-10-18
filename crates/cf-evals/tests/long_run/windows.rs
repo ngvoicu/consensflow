@@ -148,35 +148,15 @@ fn a_pause_in_the_crashs_own_millisecond_is_the_one_it_caused_and_the_task_was_a
 }
 
 #[test]
-fn a_pause_in_the_crashs_millisecond_is_the_crashs_only_where_it_says_so() {
+fn a_pause_in_the_crashs_millisecond_is_the_crashs_where_it_says_so_and_else_untold() {
     // Astra's: T-18 worked, and a pause of it shares the crash's millisecond, 10:05.
-    let paused = |detail: serde_json::Value| {
-        let scene = Scene::new(&[("long-worker", "devin")]);
-        scene.task(18, 3, "paused", &t(5, 0));
-        scene.event(
-            &t(1, 0),
-            "task.state",
-            &json!({ "task": 18, "from": "queued", "to": "working" }),
-        );
-        let mut data = json!({ "task": 18, "from": "working", "to": "paused" });
-        data.as_object_mut()
-            .unwrap()
-            .extend(detail.as_object().unwrap().clone());
-        scene.event(&t(5, 0), "task.state", &data);
-        let mut look = scene.look(ms(6, 0));
-        look.windows.exits.push(exit(ClosedBy::Itself));
-        let unjudged: Vec<String> =
-            cf_evals::long_run::invariants::unjudged(&look, &Default::default())
-                .into_iter()
-                .filter(|open| open.invariant == 6)
-                .map(|open| open.key)
-                .collect();
-        (found(&look, 6), unjudged)
-    };
-    // The owner's pause: T-18 was paused when the window exited, by the owner.
+    let paused = |detail: serde_json::Value| paused_at(&t(5, 0), detail);
+    // Sol's: the window crashed by itself, and the owner paused T-18 in the same
+    // millisecond, before the daemon took the exit. Who paused it says nothing of which
+    // came first, and nothing else orders the two: untold.
     let (breaks, unjudged) = paused(json!({ "by": "human", "stop": 1 }));
     assert!(breaks.is_empty(), "{breaks:?}");
-    assert!(unjudged.is_empty(), "{unjudged:?}");
+    assert_eq!(unjudged, ["6:closed:p1-long-worker-1:3"]);
     // The pause the crash caused says so: T-18 was at work when it exited.
     let (breaks, unjudged) =
         paused(json!({ "because": "@long-worker's window closed", "stop": 1 }));
@@ -186,6 +166,52 @@ fn a_pause_in_the_crashs_millisecond_is_the_crashs_only_where_it_says_so() {
     let (breaks, unjudged) = paused(json!({ "stop": 1 }));
     assert!(breaks.is_empty(), "{breaks:?}");
     assert_eq!(unjudged, ["6:closed:p1-long-worker-1:3"]);
+    // The owner's pause a millisecond before the crash is ordered by its time: T-18 was
+    // paused when the window exited. One a millisecond after it was not yet.
+    let (breaks, unjudged) = paused_at(
+        "2026-10-15T10:04:59.999Z",
+        json!({ "by": "human", "stop": 1 }),
+    );
+    assert!(
+        breaks.is_empty() && unjudged.is_empty(),
+        "{breaks:?} {unjudged:?}"
+    );
+    let (breaks, unjudged) = paused_at(
+        "2026-10-15T10:05:00.001Z",
+        json!({ "by": "human", "stop": 1 }),
+    );
+    assert_eq!(breaks.len(), 1, "{breaks:?}");
+    assert!(unjudged.is_empty(), "{unjudged:?}");
+}
+
+/// T-18, at work since 10:01, paused at `at` with `detail` in its move (who paused it,
+/// or why), and the worker's window closed by itself at 10:05: the breaks of the sixth,
+/// and the keys of what it could not judge.
+fn paused_at(
+    at: &str,
+    detail: serde_json::Value,
+) -> (Vec<cf_evals::long_run::invariants::Break>, Vec<String>) {
+    let scene = Scene::new(&[("long-worker", "devin")]);
+    scene.task(18, 3, "paused", at);
+    scene.event(
+        &t(1, 0),
+        "task.state",
+        &json!({ "task": 18, "from": "queued", "to": "working" }),
+    );
+    let mut data = json!({ "task": 18, "from": "working", "to": "paused" });
+    data.as_object_mut()
+        .unwrap()
+        .extend(detail.as_object().unwrap().clone());
+    scene.event(at, "task.state", &data);
+    let mut look = scene.look(ms(6, 0));
+    look.windows.exits.push(exit(ClosedBy::Itself));
+    let unjudged: Vec<String> =
+        cf_evals::long_run::invariants::unjudged(&look, &Default::default())
+            .into_iter()
+            .filter(|open| open.invariant == 6)
+            .map(|open| open.key)
+            .collect();
+    (found(&look, 6), unjudged)
 }
 
 #[test]

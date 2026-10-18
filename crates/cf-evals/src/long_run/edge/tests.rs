@@ -41,12 +41,16 @@ fn the_console_says_and_keeps_through_the_edge_what_the_run_notes_and_says() {
     );
     let log = floor.log();
     drop(floor);
+    // What it notes is kept for the report alone (a window's words among it): the
+    // console says what the run says, and no more.
     let said = String::from_utf8(said).unwrap();
+    assert_eq!(said, "report: token=[masked]\n");
+    let log = log.to_string();
     assert!(
-        !said.contains("hunter2hunter") && !said.contains("abcd1234efgh"),
-        "{said}"
+        log.contains("its screen: export DB_PASSWORD=[masked]"),
+        "{log}"
     );
-    assert!(!log.to_string().contains("hunter2hunter"));
+    assert!(!log.contains("hunter2hunter"), "{log}");
 }
 
 #[test]
@@ -104,17 +108,41 @@ fn the_report_is_kept_through_the_edge_each_text_of_it_and_a_screen_as_one_text(
 }
 
 #[test]
-fn what_stopped_the_run_leaves_through_the_edge_a_usage_a_usage_still() {
+fn what_stopped_the_run_is_kept_in_the_reports_folder_and_said_by_where_it_is() {
+    // A wait that gave up says the chief's screen: a value whose name the screen's tail
+    // cut off, which no mask knows, and a password it does.
     let edge = edge();
-    let failed = edge.failure(Error::Refused(
-        "codex mcp list said: password=hunter2hunter {\"servers\":[]}".to_owned(),
-    ));
+    let folder = tempfile::tempdir().unwrap();
+    let failed = edge.failure(
+        Error::Refused(
+            "gave up waiting for the chief; its screen: \"correct horse battery staple\" password=hunter2hunter"
+                .to_owned(),
+        ),
+        folder.path(),
+    );
+    let kept: Vec<PathBuf> = std::fs::read_dir(folder.path())
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .collect();
+    assert_eq!(kept.len(), 1, "{kept:?}");
+    assert!(kept[0].to_string_lossy().ends_with("-long-stopped.txt"));
     assert_eq!(
         failed.to_string(),
-        "codex mcp list said: password=[masked] {\"servers\":[]}"
+        format!(
+            "the long run stopped before its report; what stopped it is kept in {}",
+            kept[0].display()
+        )
     );
+    assert_eq!(
+        files::read_string(&kept[0]).unwrap(),
+        "gave up waiting for the chief; its screen: \"correct horse battery staple\" password=[masked]\n"
+    );
+    // A usage's error is the person's own words, said through the edge.
     assert!(matches!(
-        edge.failure(Error::Usage("unknown flag: --token=abcd1234efgh".to_owned())),
+        edge.failure(
+            Error::Usage("unknown flag: --token=abcd1234efgh".to_owned()),
+            folder.path()
+        ),
         Error::Usage(said) if said == "unknown flag: --token=[masked]"
     ));
 }

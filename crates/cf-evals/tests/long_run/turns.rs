@@ -59,6 +59,50 @@ fn a_cut_note_to_a_chief_at_rest_after_an_idle_compaction_breaks_the_fifth() {
     );
 }
 
+/// What a look could not judge of the fifth, by key.
+fn unjudged_fifth(look: &cf_evals::long_run::look::Look) -> Vec<String> {
+    cf_evals::long_run::invariants::unjudged(look, &Default::default())
+        .into_iter()
+        .filter(|open| open.invariant == 5)
+        .map(|open| open.key)
+        .collect()
+}
+
+#[test]
+fn a_cut_note_to_a_chief_whose_record_was_not_read_through_it_is_unresolved_never_the_copys() {
+    // Astra's: the chief compacted at rest at 10:54, its record read at 10:55 and then
+    // never again; at 11:00 it was told its turn was cut. The copy holds the
+    // compaction's summary as the user's, which reads as a turn at work.
+    let scene = Scene::new(&[]);
+    let conversation = told_cut(&scene);
+    scene.item(
+        conversation,
+        0,
+        "user",
+        "This session is being continued from a previous conversation.",
+        true,
+        &t(54, 1),
+    );
+    let record = chief_record(&[
+        json!({ "timestamp": t(54, 0), "type": "system", "subtype": "compact_boundary" }),
+        json!({ "timestamp": t(54, 1), "type": "user", "isCompactSummary": true, "message": { "role": "user", "content": "This session is being continued from a previous conversation." } }),
+    ]);
+    let unreadable = "its record could not be read: Input/output error (os error 5)";
+    let look = scene.look_read(
+        ms(61, 0),
+        conversation,
+        record.clone(),
+        (ms(55, 0), unreadable),
+    );
+    assert!(found(&look, 5).is_empty(), "{:?}", found(&look, 5));
+    assert_eq!(unjudged_fifth(&look), ["5:m-2063"]);
+    // Read through the note's moment before its readings failed: the compaction stays
+    // read, and the note breaks the fifth.
+    let look = scene.look_read(ms(61, 0), conversation, record, (ms(60, 30), unreadable));
+    assert_eq!(found(&look, 5).len(), 1, "{:?}", found(&look, 5));
+    assert!(unjudged_fifth(&look).is_empty());
+}
+
 #[test]
 fn a_cut_note_to_a_chief_whose_turn_was_at_work_holds_the_fifth() {
     let scene = Scene::new(&[]);

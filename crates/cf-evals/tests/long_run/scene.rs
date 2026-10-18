@@ -4,7 +4,7 @@
 
 use cf_evals::ledger_file::{self, add_project, Chief, Member, NewProject};
 use cf_evals::long_run::ledger::Ledger;
-use cf_evals::long_run::look::Look;
+use cf_evals::long_run::look::{Look, Reading};
 use cf_evals::long_run::record::Record;
 use rusqlite::{params, Connection};
 use serde_json::Value;
@@ -185,6 +185,27 @@ impl Scene {
     pub fn look_with(&self, at: i64, conversation: i64, record: Record) -> Look {
         let mut look = self.look(at);
         look.records.insert(conversation, record);
+        look
+    }
+
+    /// The look at `at`, with the record `record` of the conversation `conversation` as
+    /// far as its last reading that held read it (`through`), its latest reading failing
+    /// `failed`.
+    pub fn look_read(
+        &self,
+        at: i64,
+        conversation: i64,
+        record: Record,
+        (through, failed): (i64, &str),
+    ) -> Look {
+        let mut look = self.look_with(at, conversation, record);
+        look.readings.insert(
+            conversation,
+            Reading {
+                through: Some(through),
+                failed: Some(failed.to_owned()),
+            },
+        );
         look
     }
 }

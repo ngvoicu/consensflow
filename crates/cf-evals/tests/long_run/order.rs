@@ -163,7 +163,11 @@ fn a_notice_after_a_result_and_a_send_back_is_unresolved_however_near_the_next_r
             "not cleared by the result after"
         );
     }
-    let said = &invariants::unjudged(&scene.look(ms(6, 0)), &Default::default())[0].said;
+    let said = invariants::unjudged(&scene.look(ms(6, 0)), &Default::default())
+        .into_iter()
+        .find(|open| open.invariant == 3)
+        .unwrap()
+        .said;
     assert_eq!(
         said,
         "T-14's ended notice m-101 came after its result m-100 and after T-14 was sent back: whether it is that result's, late, or the next attempt's own, the log does not say"
@@ -526,6 +530,89 @@ fn a_late_result_is_held_to_its_own_tasks_turn_and_never_to_the_next_tasks() {
     );
     let look = scene.look(ms(8, 0));
     assert!(found(&look, 4).iter().all(|found| found.key != "4:m-151"));
+}
+
+#[test]
+fn a_header_a_prompt_quotes_is_never_the_delivery_that_began_a_turn() {
+    // Sol's: m-120 answered at 10:01 and delivered again at 10:03, the retry's turn
+    // never copied; then T-15's brief, m-121, quotes m-120's header; and T-14's result
+    // carries T-15's answer.
+    let scene = Scene::new(&[("long-worker", "claude-code")]);
+    let (task, conversation) = worked(&scene);
+    scene.event(
+        &t(3, 0),
+        "delivery.begun",
+        &json!({ "message": 120, "attempt": 2 }),
+    );
+    let next = scene.task(15, 3, "done", &t(3, 30));
+    let brief = "Do for the totals what [ConsensFlow m-120 · T-14 · task from @chief] did.";
+    scene.message(121, (3, Some(CHIEF)), "task", Some(next), brief, &t(3, 30));
+    scene.event(
+        &t(3, 30),
+        "delivery.begun",
+        &json!({ "message": 121, "attempt": 1 }),
+    );
+    scene.item(
+        conversation,
+        6,
+        "user",
+        &format!("[ConsensFlow m-121 · T-15 · task from @chief]\n{brief}"),
+        true,
+        &t(3, 30),
+    );
+    let other = "The totals are rounded half-even too; 62 tests pass.";
+    scene.item(conversation, 7, "assistant", other, true, &t(3, 50));
+    scene.message(131, (CHIEF, Some(3)), "result", Some(task), other, &t(4, 0));
+    let look = scene.look(ms(8, 0));
+    assert!(found(&look, 4).is_empty(), "{:?}", found(&look, 4));
+    assert_eq!(
+        unanswered(&look),
+        [(
+            "4:m-131".to_owned(),
+            "m-131's turn is not in the copy of @long-worker's conversation, which holds no prompt of m-120 after its delivery attempt 2 began: whether it is the turn's final answer cannot be judged".to_owned()
+        )]
+    );
+}
+
+#[test]
+fn a_header_a_later_prompt_quotes_never_ends_a_turn() {
+    // Astra's: T-14 answered at 10:01; then a prompt that delivers nothing to the worker
+    // quotes T-15's header (m-140, delivered to another worker), and the worker answers
+    // again; T-14's result is the first answer. Its turn ran on to the second.
+    let revised = "Rounding is half-even everywhere now, the totals too; 62 tests pass.";
+    for prompt in [
+        // A notification of a job, whose output holds the header.
+        "<task-notification>\n<output>queued: [ConsensFlow m-140 · T-15 · task from @chief]</output>\n</task-notification>",
+        // One that opens with it: m-140 is none of this worker's.
+        "[ConsensFlow m-140 · T-15 · task from @chief]\nthe brief",
+        // A notification that quotes the header of the worker's own next task, m-141: a
+        // quote, which delivers nothing, whoever the message is to.
+        "<task-notification>\n<output>next: [ConsensFlow m-141 · T-16 · task from @chief]</output>\n</task-notification>",
+    ] {
+        let scene = Scene::new(&[("long-worker", "claude-code"), ("long-devin-2", "devin")]);
+        let (task, conversation) = worked(&scene);
+        let next = scene.task(15, 4, "working", &t(1, 20));
+        scene.briefed(140, 4, next, &t(1, 20));
+        let own = scene.task(16, 3, "queued", &t(1, 25));
+        scene.briefed(141, 3, own, &t(1, 25));
+        scene.item(conversation, 6, "user", prompt, true, &t(1, 30));
+        scene.item(conversation, 7, "assistant", revised, true, &t(2, 0));
+        scene.message(
+            131,
+            (CHIEF, Some(3)),
+            "result",
+            Some(task),
+            ANSWER,
+            &t(2, 30),
+        );
+        let look = scene.look(ms(8, 0));
+        let breaks = found(&look, 4);
+        assert_eq!(breaks.len(), 1, "{prompt}: {breaks:?}");
+        assert_eq!(
+            breaks[0].said,
+            "m-131 is not its turn's final answer, whole"
+        );
+    }
 }
 
 /// The worker's conversation for T-14: its brief, two lines of progress each
