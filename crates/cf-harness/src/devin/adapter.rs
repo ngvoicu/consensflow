@@ -15,12 +15,21 @@
 //! own `stats`), so a note was pasted into a turn that had begun, and the engine,
 //! which gave the record a minute from the hand-over, pasted it again (the report
 //! of the same day: a chief read each of two notes twice). Three things stand
-//! against that. The window reads busy from the TUI's prompt to its agent
-//! (`wire_log`), so nothing is pasted into a turn that has begun. A message the TUI
-//! has put to its agent is the agent's own, whatever its record shows (`took`), and
-//! is waited for as the queue of Codex, OpenCode or Pi is. And where neither is
-//! told, the engine waits out a window's turns before it takes the record for
-//! lacking (`cf-engine`'s `arrival`).
+//! against that. The window reads busy from the TUI's prompt to its agent for a
+//! model's time to its first word (`wire_log`), so nothing is pasted into a turn that
+//! has just begun; one whose agent says nothing for longer reads as its record reads
+//! it, so that it holds back no message for good. And the engine waits out a
+//! window's turns before it takes the record for lacking (`cf-engine`'s `arrival`),
+//! the turn a message is in among them for as long as a prompt of the TUI's is asked,
+//! however long its agent says nothing (`held`): the turn it was pasted into, which
+//! Devin runs it after, or the one the TUI's prompt of the message itself began. A
+//! Devin resumed after a cut sat at "Thinking" for minutes (3000.11.92, 2026-10-15),
+//! and the rig's regression of a result pasted into a turn silent that long had it
+//! pasted again after the daemon's minute of the window's rest, into the queue that
+//! held it. Once that turn is over, its record has the engine's whole wait to show it,
+//! as any record has: words of the human's that quote the paste's header are no word
+//! that Devin has it (the reviews of 2026-10-16: such words, after a paste Devin had
+//! dropped, had the message waited for until the window closed).
 //!
 //! A window works in full permission, and Devin does not always put a resumed
 //! one there: its `--resume` of a session the app's quit cut in its first turn
@@ -525,8 +534,8 @@ impl Window for DevinWindow {
             } else {
                 window_text(text)
             };
-            // Its first line holds the message's id: the TUI's request that holds it
-            // is the sign the agent's queue has the message (`took`).
+            // Its first line holds the message's id: the TUI's prompt whose words begin
+            // with it is the message put to the agent (`held`).
             let first = body.lines().find(|line| !js::trim(line).is_empty());
             self.wire.expect(first.unwrap_or_default());
             let session = self.session.borrow().clone();
@@ -545,6 +554,12 @@ impl Window for DevinWindow {
         self.wire
             .read(self.time.wall_ms())
             .is_ok_and(|wire| wire.sent)
+    }
+
+    fn held(&self) -> bool {
+        self.wire
+            .read(self.time.wall_ms())
+            .is_ok_and(|wire| wire.held)
     }
 
     fn observe(&self) -> Work<'_, Result<Observed, String>> {

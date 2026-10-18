@@ -13,7 +13,8 @@
 //! The stand-in has no rewind, which two Escapes at a Devin at rest open.
 //!
 //! A turn takes no time unless the window is told how long a model takes
-//! (`FAKE_DEVIN_FIRST_WORD_MS`, `FAKE_DEVIN_WORK_MS`: [`turn::Pace`]). A message
+//! (`FAKE_DEVIN_FIRST_WORD_MS`, `FAKE_DEVIN_WORK_MS`: [`turn::Pace`]), or its message
+//! says (`THINK`, `SLEEP`: `turn`). A message
 //! the window is handed while a turn is at work goes into its agent's queue, and
 //! is run when the turn ends, one at a time in the order the messages came: its
 //! row is written to the store then, and not before, as Devin's are (the user
@@ -31,6 +32,10 @@
 //! tool does whose turn has ended. And a turn can end the window's program under it
 //! (`EXIT <code> <words>`: `crash`), as a harness that crashes does.
 //!
+//! A window can do wrong once, as Devin has (`faults`): drop a paste, as a TUI that
+//! never took it (`FAKE_DEVIN_DROP`), or end as its agent takes a message, once the
+//! message is recorded (`FAKE_DEVIN_CRASH`).
+//!
 //! It is in the permission mode Devin is in (`permission`): full permission where it
 //! was opened with `--permission-mode dangerous`, but a session resumed after a quit
 //! cut its first turn (its store has the turn's message and no end of any turn), which
@@ -38,7 +43,9 @@
 //! wire says the mode in the configuration it opens with, and each change of it. In the
 //! normal mode a call of the prompt file's turn is refused ("User skipped this tool
 //! call") and a pasted turn's opens a dialog, which Enter answers (its first option,
-//! approve once) and Escape leaves; `/bypass` switches it.
+//! approve once) and Escape leaves; `/bypass` switches it. Its store keeps the prompt a
+//! message ran under `/bypass`, or the message as it was given where
+//! `FAKE_DEVIN_STORES_COMMANDS` says so: how Devin stores one is not known.
 //!
 //! The terminal and the signals are the other stand-in's own (`fake_agent/`).
 
@@ -54,6 +61,8 @@ mod command;
 mod crash;
 #[path = "fake_devin/escapes.rs"]
 mod escapes;
+#[path = "fake_devin/faults.rs"]
+mod faults;
 #[path = "fake_devin/permission.rs"]
 mod permission;
 #[path = "fake_agent/signals.rs"]
@@ -83,6 +92,7 @@ use cf_e2e::process::own_var;
 
 use args::{Asked, Launch};
 use escapes::Escapes;
+use faults::Fault;
 use permission::{Answer, Permission};
 use stop::Stop;
 use store::Store;
@@ -171,12 +181,22 @@ fn run(launch: &Launch, signals: signals::Signals) -> Result<Infallible, String>
     // The jobs of a window are in `jobs/` beside the daemon's home, where the rig looks.
     let jobs = own_var("CONSENSFLOW_HOME")
         .and_then(|home| Path::new(&home).parent().map(|folder| folder.join("jobs")));
+    // Only a window opened afresh crashes: the one resumed after it goes on.
+    let crash = Fault::of(
+        own_var(faults::CRASH_VARIABLE)
+            .as_deref()
+            .filter(|_| launch.resume.is_none()),
+    );
     let folder = std::env::current_dir().map_err(said)?;
+    let stores_commands =
+        own_var(turn::STORES_COMMANDS_VARIABLE).is_some_and(|stores| !stores.is_empty());
     {
         let (stop, permission) = (Arc::clone(&stop), Arc::clone(&permission));
         thread::spawn(move || {
-            let mut window =
-                Window::new(store, wire, stop, io::stdout(), pace).in_mode(permission, folder);
+            let mut window = Window::new(store, wire, stop, io::stdout(), pace)
+                .in_mode(permission, folder)
+                .crashing_on(crash)
+                .storing_commands(stores_commands);
             if let Some(folder) = jobs {
                 window = window.leaving_jobs_in(folder, std::process::id(), command::THINKING);
             }
@@ -198,11 +218,13 @@ fn run(launch: &Launch, signals: signals::Signals) -> Result<Infallible, String>
     // submits, and an Escape that nothing follows is the key.
     let mut keys = Keys::start();
     let mut escapes = Escapes::default();
+    let mut dropping = Fault::of(own_var(faults::DROP_VARIABLE).as_deref());
     loop {
         // The terminal is gone.
         let Some(events) = keys.read() else { leave(0) };
         for event in events {
             match event {
+                Event::Submit(text) if dropping.meets(&text) => {}
                 // Enter at a dialog takes its first option; anywhere else it submits.
                 Event::Submit(text) => {
                     if !permission.answer(Answer::Approved) {

@@ -8,7 +8,7 @@
 use std::borrow::Cow;
 
 use cf_base::js;
-use cf_base::text::utf16_len;
+use cf_base::text::{utf16_len, window_text};
 use cf_proto::ledger::MessageView;
 
 /// A body longer than this, counted in UTF-16 code units as JavaScript counted
@@ -121,6 +121,69 @@ const HEADER_START: &str = "[ConsensFlow m-";
 /// (Devin on Windows takes it as |, see `console_text`).
 pub fn marker_of(message_id: i64) -> String {
     format!("{HEADER_START}{message_id} ")
+}
+
+/// What a member's fresh window is given ahead of its first message where that
+/// is not its task's brief (a reopening, an answer): the brief it received, as
+/// its paste said it, and a blank line (`launch_text`).
+pub fn brief_first(brief: &MessageView, carried: &[MessageView]) -> String {
+    format!("{}\n\n", delivery_text(brief, carried))
+}
+
+/// The tag Claude Code wraps a paste in, in its record (2.1.296 on 2026-10-16, and
+/// the eval of 2026-10-08): `<pasted_content id="b118">` on a line of its own, the
+/// paste, and the same tag closed after it, `</pasted_content id="b118">`.
+const PASTED: &str = "pasted_content";
+
+/// Whether `text`, an item of what a window was given, is the paste of the
+/// message `message_id`, which proves it arrived: the message's own header begins
+/// it, as ConsensFlow pastes it, the lines of the window's text
+/// (`window_text`). So it does where the record holds the paste as its harness
+/// writes one:
+/// - inside Claude Code's wrapper ([`PASTED`]), the tag opened with its attributes
+///   on a line of its own and closed with the same at the end (the reviews of
+///   2026-10-16: a Claude chief's record of every result was taken for lacking, and
+///   the result pasted again); the four others record the paste as it is given;
+/// - after `first`, the exact paste a member's fresh window is given ahead of its
+///   first message ([`brief_first`]), there and nowhere else.
+///
+/// A header quoted in other words, the human's (`Why is "[ConsensFlow m-42 …]"
+/// queued?`) or a message's (`Investigate this:\n\n[ConsensFlow m-42 …]`), is no
+/// paste, and proves nothing arrived (the reviews of 2026-10-16). Limit: words
+/// that begin with a header as a paste does are taken for one, and a paste Devin
+/// glued behind words the human typed and never sent (it pastes behind what its
+/// input box holds, a record of 2026-10-02) is none: the window waits for those
+/// words to be sent first (`Held::Unsent`), so only a typing between that look and
+/// the paste can make one.
+pub fn is_paste_of(text: &str, message_id: i64, first: Option<&str>) -> bool {
+    let marker = marker_of(message_id);
+    if !text.contains(&marker) {
+        return false;
+    }
+    let text = window_text(text);
+    let paste = unwrapped(text.trim_start());
+    let behind = first.and_then(|first| paste.strip_prefix(window_text(first).as_str()));
+    paste.starts_with(&marker) || behind.is_some_and(|rest| rest.starts_with(&marker))
+}
+
+/// The paste `text` holds where Claude Code wrapped it ([`PASTED`]), else `text`.
+fn unwrapped(text: &str) -> &str {
+    let Some(rest) = text
+        .strip_prefix('<')
+        .and_then(|rest| rest.strip_prefix(PASTED))
+    else {
+        return text;
+    };
+    let Some((attributes, inner)) = rest.split_once(">\n") else {
+        return text;
+    };
+    if !(attributes.is_empty() || attributes.starts_with(' ')) || attributes.contains(['>', '\n']) {
+        return text;
+    }
+    inner
+        .trim_end()
+        .strip_suffix(&format!("</{PASTED}{attributes}>"))
+        .unwrap_or(text)
 }
 
 /// The message a window's record item, text of what it was given, is: the one
@@ -273,6 +336,98 @@ mod tests {
         assert_eq!(header_id(&marker_of(7)), Some(7));
         // What the marker proves arrived is the same header.
         assert!(text.contains(&marker_of(12)));
+    }
+
+    #[test]
+    fn a_paste_is_an_item_its_header_begins_and_no_words_that_quote_it() {
+        let said = message(12, Some(3), "Look at what m-5 said".to_owned());
+        let text = delivery_text(&said, &[]);
+        assert!(is_paste_of(&text, 12, None));
+        assert!(!is_paste_of(&text, 1, None), "m-1 is not m-12");
+        // As a window keeps it: lines ended otherwise, or a blank line first.
+        let kept = format!("\n{}", text.replace('\n', "\r\n"));
+        assert!(is_paste_of(&kept, 12, None));
+        // A header quoted in the human's words is no paste of it.
+        let asked = format!(
+            "Why is \"{}· note from @zeus]\" still queued?",
+            marker_of(12)
+        );
+        assert!(!is_paste_of(&asked, 12, None));
+        let shown = format!("Look at this:\n\n{}· note from @zeus]", marker_of(12));
+        assert!(!is_paste_of(&shown, 12, None));
+        // Nor is one in a message's: m-13 quoting m-12 after a blank line (Astra), a
+        // note that says "Investigate this:" and the header after it (Sol), or one on
+        // a line of its own.
+        let quoting = |id: i64, body: String| delivery_text(&message(id, Some(3), body), &[]);
+        let astra = quoting(13, format!("Before it:\n\n{text}"));
+        let sol = quoting(43, format!("Investigate this:\n\n{}· T-3]", marker_of(42)));
+        let lined = quoting(14, format!("They said:\n{}", marker_of(5)));
+        assert!(is_paste_of(&astra, 13, None) && !is_paste_of(&astra, 12, None));
+        assert!(!is_paste_of(&sol, 42, None) && !is_paste_of(&lined, 5, None));
+        let mid_line = quoting(15, format!("As {} said: be brief", marker_of(5)));
+        assert!(!is_paste_of(&mid_line, 5, None));
+    }
+
+    #[test]
+    fn a_paste_claude_code_wrapped_in_its_record_is_the_paste_it_wraps() {
+        let text = delivery_text(&message(1, Some(1), "The page is done".to_owned()), &[]);
+        // As Claude Code 2.1.296 records it (the live paste suite's records).
+        let wrapped =
+            format!("\n\n<pasted_content id=\"b118\">\n{text}\n</pasted_content id=\"b118\">\n");
+        assert!(is_paste_of(&wrapped, 1, None));
+        assert!(is_paste_of(&wrapped.replace('\n', "\r\n"), 1, None));
+        // Only the tag as Claude writes it: opened on a line of its own, closed the same.
+        let wrapped_as = |open: &str, close: &str| format!("{open}\n{text}\n{close}\n");
+        for (open, close) in [
+            (
+                "<pasted_content id=\"b118\">",
+                "</pasted_content id=\"4f1a\">",
+            ),
+            ("<pasted_content id=\"b118\">", ""),
+            (
+                "<pasted_contents id=\"b118\">",
+                "</pasted_contents id=\"b118\">",
+            ),
+            ("<quote>", "</quote>"),
+        ] {
+            assert!(!is_paste_of(&wrapped_as(open, close), 1, None), "{open}");
+        }
+        // And a header quoted inside the wrapper is no more a paste than outside it.
+        let quoted = format!(
+            "<pasted_content id=\"b118\">\nSee {}\n</pasted_content id=\"b118\">",
+            marker_of(1)
+        );
+        assert!(!is_paste_of(&quoted, 1, None));
+    }
+
+    #[test]
+    fn a_second_header_is_a_paste_only_behind_the_brief_a_fresh_window_was_given_first() {
+        let brief = message(5, Some(3), "Write the parser".to_owned());
+        let first = brief_first(&brief, &[]);
+        let answer = delivery_text(&message(12, Some(3), "Use JSON".to_owned()), &[]);
+        let launched = format!("{first}{answer}");
+        assert!(is_paste_of(&launched, 12, Some(&first)));
+        assert!(is_paste_of(
+            &launched.replace('\n', "\r\n"),
+            12,
+            Some(&first)
+        ));
+        assert!(
+            is_paste_of(&launched, 5, Some(&first)),
+            "and the brief's own"
+        );
+        // Not where nothing says it was given first, nor behind another brief.
+        assert!(!is_paste_of(&launched, 12, None));
+        let other = brief_first(&message(6, Some(3), "Write the lexer".to_owned()), &[]);
+        assert!(!is_paste_of(&launched, 12, Some(&other)));
+        // Nor in a paragraph of the brief's own words that quotes it.
+        let quoting = message(5, Some(3), format!("Write the parser\n\n{answer}"));
+        let only_the_brief = delivery_text(&quoting, &[]);
+        assert!(!is_paste_of(
+            &only_the_brief,
+            12,
+            Some(&brief_first(&quoting, &[]))
+        ));
     }
 
     #[test]

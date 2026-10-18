@@ -57,7 +57,8 @@ fn replaces_a_handoff_still_on_its_way_and_resume_of_a_closed_project_brings_the
         r"from Codex \(astraeus\) to you, Claude Code \(apollo\)\.",
     );
 
-    // Closed before any look saw the new chief show it: the handoff waits for Resume.
+    // Closed before the new chief showed it, nor its record: the handoff waits for Resume.
+    context.adapter.with("chief", |agent| agent.items.clear());
     context.close_project(project.id).unwrap();
     context.resume_project(project.id).unwrap();
     let prepared = context.adapter.prepared().last().cloned().unwrap();

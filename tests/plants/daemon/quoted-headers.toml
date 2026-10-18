@@ -1,0 +1,128 @@
+# What proves a paste arrived (the reviews of 2026-10-16, GPT-6-Astra and GPT-6.1-Sol, two rounds): an
+# item its message's header begins, as ConsensFlow pastes it, the lines of the window's text. So does
+# one the harness records the paste in: inside the wrapper Claude Code 2.1.296 puts a paste in
+# (`<pasted_content id="…">`, opened on a line of its own and closed the same), and, for a member's
+# fresh window, behind the exact paste of the brief it received, which its launch gives first, and
+# nowhere else. A header quoted in other words, the human's or a message's, proves nothing: a look, a
+# window's end and a start each took any item that held it for the paste, so a message whose paste
+# never showed was confirmed by a question about it; and the stricter rule that followed took every
+# paste a real Claude records for lacking, so a Claude chief's result was pasted again.
+#
+# The cases are the engine's, `crates/cf-engine/tests/dispatcher/quoted_headers.rs` (a look, the record
+# read as the window ends, ConsensFlow's copy of it read so, a message that quotes the header after a
+# blank line) and `paste_shapes.rs` (Claude's wrapper, the brief a fresh window is given first, at a
+# look and at a start), and the rule's own, `delivery_text::tests` in
+# `crates/cf-engine/src/delivery_text.rs`.
+#
+# Every name holds `quoted header`, so `npm run plants:daemon -- "quoted header"` runs them all.
+
+[run]
+engine-dispatcher-quoted-headers = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "quoted_headers::"]
+engine-dispatcher-paste-shapes = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "paste_shapes::"]
+engine-lib-delivery-text = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "delivery_text::"]
+
+[[plant]]
+name = "quoted header: a look takes a header quoted in the human's words for the paste, and the message is confirmed though it never arrived"
+meant = "a_look_takes_no_header_quoted_in_the_humans_words_for_the_paste"
+runs = ["engine-dispatcher-quoted-headers"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = "            item.role == Role::User && is_paste_of(&item.text, message.id, first.as_deref())"
+replace = "            item.role == Role::User && item.text.contains(&crate::delivery_text::marker_of(message.id))"
+
+[[plant]]
+name = "quoted header: a window's record, read as it ends, has a header quoted in the human's words taken for the paste"
+meant = "a_window_that_ends_takes_no_header_quoted_in_its_record_for_the_paste"
+runs = ["engine-dispatcher-quoted-headers"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/in_flight.rs"
+find = "                item.role == Role::User && is_paste_of(&item.text, message, first.as_deref())"
+replace = "                item.role == Role::User && item.text.contains(&marker_of(message))"
+
+[[plant]]
+name = "quoted header: ConsensFlow's copy of a window, read as it ends, has a header quoted in the human's words taken for the paste"
+meant = "a_window_that_ends_takes_no_header_quoted_in_its_copy_for_the_paste"
+runs = ["engine-dispatcher-quoted-headers"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/in_flight.rs"
+find = "            .find(|(_, text)| is_paste_of(text, message.id, first.as_deref()));"
+replace = "            .next();"
+
+[[plant]]
+name = "quoted header: a header a message's words quote is the paste of the message it names"
+meant = "a_paste_is_an_item_its_header_begins_and_no_words_that_quote_it"
+runs = ["engine-lib-delivery-text"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/delivery_text.rs"
+find = "    paste.starts_with(&marker) || behind.is_some_and(|rest| rest.starts_with(&marker))"
+replace = "    paste.contains(&marker) || behind.is_some()"
+
+[[plant]]
+name = "quoted header: a header after a blank line is a paste wherever it is, as round 4 had it (the reviews of 2026-10-16)"
+meant = "a_look_takes_no_header_a_message_quotes_after_a_blank_line_for_the_paste"
+runs = ["engine-dispatcher-quoted-headers", "engine-lib-delivery-text"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/delivery_text.rs"
+find = "    paste.starts_with(&marker) || behind.is_some_and(|rest| rest.starts_with(&marker))"
+replace = "    paste.starts_with(&marker) || behind.is_some_and(|rest| rest.starts_with(&marker)) || paste.contains(&format!(\"\\n\\n{marker}\"))"
+
+[[plant]]
+name = "quoted header: a paste Claude Code wrapped in its record is taken for none, and pasted again (round 4, the review of 2026-10-16)"
+meant = "confirms_a_paste_claude_code_recorded_in_its_wrapper_and_pastes_it_once"
+runs = ["engine-dispatcher-paste-shapes", "engine-lib-delivery-text"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/delivery_text.rs"
+find = "    let paste = unwrapped(text.trim_start());"
+replace = "    let paste = text.trim_start();"
+
+[[plant]]
+name = "quoted header: any tag that opens a paste's line is taken for Claude's wrapper, closed or not"
+meant = "a_paste_claude_code_wrapped_in_its_record_is_the_paste_it_wraps"
+runs = ["engine-lib-delivery-text"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/delivery_text.rs"
+find = '''
+    inner
+        .trim_end()
+        .strip_suffix(&format!("</{PASTED}{attributes}>"))
+        .unwrap_or(text)'''
+replace = '''
+    let _ = attributes;
+    inner'''
+
+[[plant]]
+name = "quoted header: the first message of a fresh window, behind the brief it received, is never taken for arrived"
+meant = "confirms_the_first_message_a_fresh_window_was_given_behind_the_brief_it_received"
+runs = ["engine-dispatcher-paste-shapes", "engine-lib-delivery-text"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/delivery_text.rs"
+find = "    let behind = first.and_then(|first| paste.strip_prefix(window_text(first).as_str()));"
+replace = "    let behind = first.and_then(|_| None::<&str>);"
+
+[[plant]]
+name = "quoted header: a look is told nothing of the brief a launch's first message went in behind"
+meant = "confirms_the_first_message_a_fresh_window_was_given_behind_the_brief_it_received"
+runs = ["engine-dispatcher-paste-shapes"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = "            self.brief_given_first(&message)?"
+replace = "            self.brief_given_first(&message)?.filter(|_| false)"
+
+[[plant]]
+name = "quoted header: a start is told nothing of the brief a fresh window's first message went in behind, and pastes it again"
+meant = "a_start_confirms_the_first_message_a_fresh_window_was_given_behind_its_brief_and_never_pastes_it_again"
+runs = ["engine-dispatcher-paste-shapes"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/in_flight.rs"
+find = "        let first = self.brief_given_first(message)?;"
+replace = "        let first = self.brief_given_first(message)?.filter(|_| false);"

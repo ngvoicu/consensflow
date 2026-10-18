@@ -14,7 +14,8 @@
 //! (`hold`) says which, and when ([`FakeAdapter::prepare_holds`],
 //! [`FakeAdapter::observe_holds`], [`FakeAdapter::start_holds`],
 //! [`FakeAdapter::ready_holds`], [`FakeAdapter::deliver_holds`],
-//! [`FakeAdapter::resumable_holds`]).
+//! [`FakeAdapter::resumable_holds`], [`FakeAdapter::record_holds`],
+//! [`FakeAdapter::cut_holds`]).
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -53,9 +54,11 @@ pub struct FakeAgent {
     pub arrive: bool,
     /// Whether the harness's own queue takes a delivery.
     pub queued: bool,
-    /// The harness says, after a delivery, that its own queue holds it
-    /// (`Window::took`): its record shows nothing of it yet.
+    /// The harness says, after the hand-over, that it put the delivery to its
+    /// agent (`Window::took`).
     pub took: bool,
+    /// The harness holds the delivery in a turn it is in still (`Window::held`).
+    pub held: bool,
     pub failed: bool,
     /// The conversation the window shows, when the human switched it.
     pub shows: Option<String>,
@@ -172,6 +175,27 @@ pub struct FakeAdapter {
     /// told the conversation as `[session]`: what the harness says is its own
     /// when the ask is let go. Node's dispatcher asked nothing of the kind.
     pub resumable_holds: Holds,
+    /// Looks at a record with no window open that the test holds, told the
+    /// conversation as `[session]`: one let go reads the record as it is then.
+    /// Node's dispatcher suite held none.
+    pub record_holds: Holds,
+    /// Asks of whether a conversation's record ends in a turn that was cut, with no
+    /// window open, that the test holds, told the conversation as `[session]`: one
+    /// let go reads the record as it is then. Node's dispatcher asked nothing of the
+    /// kind.
+    pub cut_holds: Holds,
+    /// Its windows' record holds a paste in the wrapper Claude Code 2.1.296 puts it
+    /// in (`<pasted_content id="…">`), and a launch's first message as it was
+    /// given: not, as the fake of Node's suite, which recorded both as given.
+    pub wraps_pastes: Cell<bool>,
+    /// Its windows' record holds nothing of the first message a launch gives them:
+    /// each goes before its harness takes it, where the fake of Node's suite recorded
+    /// it as it prepared the launch.
+    pub forgets_first_messages: Cell<bool>,
+    /// A window resumed on a conversation reads that conversation's record as the
+    /// last window on it left it, as a harness's `--resume` does: not, as the fake of
+    /// Node's suite, whose every window began with an empty record.
+    pub resumes_records: Cell<bool>,
 }
 
 impl FakeAdapter {
@@ -212,6 +236,11 @@ impl FakeAdapter {
             specmint_installed: RefCell::new(None),
             specmint_asked: RefCell::new(Vec::new()),
             resumable_holds: Holds::default(),
+            record_holds: Holds::default(),
+            cut_holds: Holds::default(),
+            wraps_pastes: Cell::new(false),
+            forgets_first_messages: Cell::new(false),
+            resumes_records: Cell::new(false),
         })
     }
 
@@ -422,7 +451,14 @@ impl FakeAdapter {
                 };
             }
             if agent.arrive {
-                agent.items.push(self.item(Role::User, text));
+                let recorded = if self.wraps_pastes.get() {
+                    format!(
+                        "\n\n<pasted_content id=\"b118\">\n{text}\n</pasted_content id=\"b118\">\n"
+                    )
+                } else {
+                    text.to_owned()
+                };
+                agent.items.push(self.item(Role::User, &recorded));
                 agent.settled = false;
                 agent.agents_pending = false;
                 // A message that arrives starts a turn: the one before it ended as it did.
@@ -480,11 +516,16 @@ impl Asked {
         let native = launch
             .resume
             .map_or_else(|| format!("native-{id}"), str::to_owned);
+        let resumed = launch
+            .resume
+            .filter(|_| fake.resumes_records.get())
+            .and_then(|session| fake.record_of(session))
+            .map(|(items, _)| items);
         let mut agent = FakeAgent {
             launch: id.clone(),
             handle: launch.handle.to_owned(),
             native: native.clone(),
-            items: Vec::new(),
+            items: resumed.unwrap_or_default(),
             settled: true,
             agents_pending: false,
             waiting: None,
@@ -493,6 +534,7 @@ impl Asked {
             arrive: true,
             queued: false,
             took: false,
+            held: false,
             failed: false,
             shows: None,
             records: HashMap::new(),
@@ -504,7 +546,10 @@ impl Asked {
             cannot_tell_a_cut: false,
             resumable: Some(true),
         };
-        if let Some(message) = launch.message {
+        if let Some(message) = launch
+            .message
+            .filter(|_| !fake.forgets_first_messages.get())
+        {
             agent.items.push(fake.item(Role::User, message));
             agent.settled = false;
         }

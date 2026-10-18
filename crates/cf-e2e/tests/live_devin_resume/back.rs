@@ -21,7 +21,7 @@ use crate::case::{Case, Opening, Step, BYPASS, NOTE};
 use crate::drive::{command_running, wire_of, Run};
 use crate::outcome::{sightings_said, turn_line};
 use crate::scene::{Dialog, Scene, LOOK};
-use crate::turn::reading;
+use crate::turn::{read_header_first, reading, stored_shape, tail};
 use crate::words::marker_of;
 use crate::{LONG, SETTLE, WATCH};
 
@@ -161,6 +161,24 @@ fn opening(case: Case, scene: &mut Scene, again: &mut Again, said: &mut Account)
             "its first message was the note, in its prompt file",
             &turn,
         ));
+        // How Devin stores a prompt it ran under `/bypass`, which the daemon puts a
+        // resumed window's first message behind, and that the daemon reads it as the
+        // paste either way. Behind the case's own `/bypass` too, the window was given
+        // what ConsensFlow never gives one, which the daemon reads as Devin stored it.
+        let header = marker_of(NOTE);
+        said.say(format!(
+            "Devin's store has the note {}",
+            stored_shape(&scene.watch.messages(window), &header)
+                .as_deref()
+                .unwrap_or("nowhere")
+        ));
+        let products = case.opening == Opening::Note;
+        if turn.arrived && products && !read_header_first(window.record().as_ref(), &header) {
+            said.fail(format!(
+                "the daemon's reader has the note behind other words: {}",
+                tail(window.record().as_ref(), 4)
+            ));
+        }
     }
     let record = window.record();
     said.say(format!(

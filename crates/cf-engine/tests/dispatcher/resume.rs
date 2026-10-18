@@ -10,7 +10,7 @@ use cf_engine::testing::{Context, Restarted};
 use cf_ledger::{MessageView, RESUME_WORDS};
 use serde_json::Value;
 
-use crate::fixtures::{assert_match, finished, given, native_of, Tiers};
+use crate::fixtures::{assert_match, fail_next_retry, finished, given, native_of, Tiers};
 
 /// What a worker the quit cut in T-1 is told, and what the chief is told.
 const WORKER_CUT: &str = "ConsensFlow quit while you were working on T-1. Go on where you stopped.";
@@ -155,6 +155,164 @@ fn a_resume_opens_the_chief_and_each_window_with_a_task_in_hand_and_not_an_idle_
         "the chief, and the session at work: not the one whose task is done"
     );
     assert_eq!(context.project(project).state, "open");
+}
+
+/// The rig's restart of 2026-10-16 (`rows_a_paste_carried_pasted_again_after_a_restart`,
+/// red under load): the human's Resume came while the start still read the record of the
+/// words that resume a worker's paused task. The task was paused still, so the Resume
+/// brought no window back for it; the start then confirmed the words, the task was at
+/// work, and the next pass found it with no window and nothing due, and paused it for a
+/// window that was gone.
+#[test]
+fn a_resume_while_the_start_reads_what_was_on_its_way_brings_back_the_window_it_makes_at_work() {
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    context.give(project.id, "zeus", "Parser");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    // T-1 is paused, and the words that resume it are on their way into zeus's window,
+    // which took them, when the app quits.
+    context.adapter.busy("zeus");
+    context
+        .ledger
+        .borrow_mut()
+        .pause_task(project.id, 1, Some("chief"), None)
+        .unwrap();
+    context.pass().unwrap();
+    context
+        .ledger
+        .borrow_mut()
+        .resume_task(project.id, 1, Some("chief"), "Go on")
+        .unwrap();
+    context.adapter.answer("zeus", "Paused");
+    context.pass().unwrap();
+    let words = context
+        .ledger
+        .borrow()
+        .in_flight()
+        .unwrap()
+        .into_iter()
+        .next()
+        .expect("the words on their way");
+    assert_eq!(
+        context.task(project.id, 1).task.state,
+        "queued",
+        "behind its words"
+    );
+    let windows = |context: &Context| {
+        opened(context)
+            .iter()
+            .filter(|pane| pane.as_str() == "p1-zeus")
+            .count()
+    };
+    let before = windows(&context);
+    context.ledger.borrow_mut().suspend_for_restart().unwrap();
+    let after = context.make();
+    let reading = context.adapter.record_holds.hold(|_| true);
+    let settling = after.begin_settle_after_restart();
+    context.settle();
+
+    // The human resumes the project while the start reads zeus's record: it waits.
+    let resuming = after.begin_resume_project(project.id);
+    context.settle();
+    assert_eq!(context.project(project.id).state, "suspended");
+    reading.open();
+    context.settle();
+    settling.take().unwrap().unwrap();
+    resuming.take().unwrap().unwrap();
+    assert_eq!(context.message(words.id).state, "delivered");
+    after.pass().unwrap();
+    after.pass().unwrap();
+    assert_eq!(
+        context.task(project.id, 1).task.state,
+        "working",
+        "not paused for a window that is gone: {:?}",
+        context.inbox(context.id(project.id, "chief"))
+    );
+    assert_eq!(windows(&context), before + 1, "zeus's window is back");
+}
+
+/// The reviews of 2026-10-16: two briefs were on their way when the app quit, and the
+/// human cancelled the first's task while the start read its window's record. The
+/// start settled the cancelled brief all the same, which failed, and the settle with
+/// it: the second brief stayed on its way, with no window to watch it, and its task
+/// queued for good.
+#[test]
+fn a_task_cancelled_while_the_start_reads_its_briefs_record_leaves_the_next_brief_settled() {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus", "diana"]);
+    tiers.open();
+    tiers.open_body("Write the lexer");
+    context.pass().unwrap();
+    let briefs = context.ledger.borrow().in_flight().unwrap();
+    assert_eq!(
+        briefs
+            .iter()
+            .map(|brief| (brief.kind.as_str(), brief.task_number))
+            .collect::<Vec<_>>(),
+        [("task", Some(1)), ("task", Some(2))],
+        "both briefs on their way"
+    );
+    let first = native_of(&context, briefs[0].recipient_id).expect("the first's session");
+    context.ledger.borrow_mut().suspend_for_restart().unwrap();
+    let after = context.make();
+    let reading = context
+        .adapter
+        .record_holds
+        .hold(move |asked| asked[0] == first.as_str());
+    let settling = after.begin_settle_after_restart();
+    context.settle();
+
+    // The human cancels T-1 while the start reads its brief's record.
+    context
+        .ledger
+        .borrow_mut()
+        .cancel_task(tiers.project.id, 1, "human")
+        .unwrap();
+    reading.open();
+    context.settle();
+    settling.take().unwrap().unwrap();
+    assert_ne!(context.message(briefs[0].id).state, "delivering");
+    let second = context.message(briefs[1].id);
+    assert_eq!(
+        second.state, "delivered",
+        "the next brief, which its record shows, is settled all the same"
+    );
+    after.resume_project(tiers.project.id).unwrap();
+    after.pass().unwrap();
+    after.pass().unwrap();
+    assert_eq!(
+        [tiers.task(1).task.state, tiers.task(2).task.state],
+        ["cancelled", "working"]
+    );
+}
+
+/// A message the start fails to settle is the start's answer, written down, and every
+/// other is settled all the same.
+#[test]
+fn a_brief_the_start_fails_to_settle_leaves_the_next_brief_settled() {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus", "diana"]);
+    tiers.open();
+    tiers.open_body("Write the lexer");
+    context.pass().unwrap();
+    let briefs = context.ledger.borrow().in_flight().unwrap();
+    assert_eq!(briefs.len(), 2, "both briefs on their way");
+    // The first's record never showed it, and giving it back to its queue fails.
+    context
+        .adapter
+        .with(&briefs[0].recipient, |agent| agent.items.clear());
+    fail_next_retry(&context);
+    context.ledger.borrow_mut().suspend_for_restart().unwrap();
+    let after = context.make();
+    let failed = after.settle_after_restart().unwrap_err();
+    assert!(
+        failed
+            .to_string()
+            .contains("the ledger could not be written"),
+        "{failed}"
+    );
+    assert_eq!(context.message(briefs[1].id).state, "delivered");
 }
 
 #[test]

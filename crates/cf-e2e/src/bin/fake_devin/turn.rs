@@ -14,8 +14,11 @@
 //!
 //! A turn takes the time a model takes ([`Pace`]): from the message put to the
 //! agent to its first word, in which the turn is begun and its work is not to be
-//! seen, and the work itself, which no words but a `SLEEP` set. What a message
-//! the window is handed while a turn is at work comes to is the window's
+//! seen, and the work itself, which no words but a `SLEEP` set. A line `THINK
+//! <seconds> <words>` is a turn whose agent says nothing for that long, whatever the
+//! pace, before it does what the words say: a Devin that sat at "Thinking" (a window
+//! resumed after a cut, 3000.11.92 on 2026-10-15, never came back to rest). What a
+//! message the window is handed while a turn is at work comes to is the window's
 //! (`fake_devin.rs`): it waits, and is written to the store when its turn begins.
 //!
 //! A line `FILE <name> <words>` is a turn whose tool makes the file `name` once it
@@ -37,6 +40,7 @@ use regex::Regex;
 use crate::calls::Said;
 use crate::command;
 use crate::crash::{self, Crash};
+use crate::faults::Fault;
 use crate::permission::{self, Call, Permission, BYPASS, SWITCHED};
 use crate::said;
 use crate::stop::Stop;
@@ -80,6 +84,8 @@ impl Pace {
 /// What a turn is asked to do.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Plan {
+    /// How long its agent says nothing before its first word.
+    pub first_word: Duration,
     /// How long it works before it answers.
     pub work: Duration,
     /// How many seconds of a command it leaves running as it answers, if it does.
@@ -94,29 +100,35 @@ pub struct Plan {
 
 impl Plan {
     /// The plan a turn goes on with, after a quit cut the one it was: its calls and
-    /// its answer, and the time the pace gives a turn, not its own wait.
+    /// its answer, and the time the pace gives a turn, to its first word and in its
+    /// work, not its own wait.
     #[must_use]
     pub fn going_on(self, pace: Pace) -> Self {
         Self {
+            first_word: pace.first_word,
             work: pace.work,
             ..self
         }
     }
 }
 
-/// What the message `text` asks of a turn, which works as long as `pace` says
+/// What the message `text` asks of a turn, which takes as long as `pace` says
 /// where the message says nothing of it.
 pub fn plan_of(text: &str, pace: Pace) -> Plan {
+    static THINK: OnceLock<Regex> = OnceLock::new();
     static SLEEP: OnceLock<Regex> = OnceLock::new();
     static BACKGROUND: OnceLock<Regex> = OnceLock::new();
     static FILE: OnceLock<Regex> = OnceLock::new();
     static EXACT: OnceLock<Regex> = OnceLock::new();
-    let (work, words) = match pattern::once(&SLEEP, r"(?m)^SLEEP (\d+) (.+)$").captures(text) {
-        Some(slow) => (
-            Duration::from_secs(slow[1].parse().unwrap_or(0)),
-            slow[2].to_owned(),
-        ),
-        None => (pace.work, text.to_owned()),
+    let seconds = |count: &str| Duration::from_secs(count.parse().unwrap_or(0));
+    let (first_word, words) = match pattern::once(&THINK, r"(?m)^THINK (\d+) (.+)$").captures(text)
+    {
+        Some(silent) => (seconds(&silent[1]), silent[2].to_owned()),
+        None => (pace.first_word, text.to_owned()),
+    };
+    let (work, words) = match pattern::once(&SLEEP, r"(?m)^SLEEP (\d+) (.+)$").captures(&words) {
+        Some(slow) => (seconds(&slow[1]), slow[2].to_owned()),
+        None => (pace.work, words),
     };
     let (background, words) =
         match pattern::once(&BACKGROUND, r"(?m)^BACKGROUND (\d+) (.+)$").captures(&words) {
@@ -132,6 +144,7 @@ pub fn plan_of(text: &str, pace: Pace) -> Plan {
         None => format!("noted: {}", words.split('\n').next().unwrap_or_default()),
     };
     Plan {
+        first_word,
         work,
         background,
         file,
@@ -151,13 +164,23 @@ pub struct Window<W: Write> {
     turns: u64,
     /// Where a command a turn leaves is written, where the window has any.
     jobs: Option<Jobs>,
+    /// The message the window ends at, once it is recorded (`faults`).
+    crash: Fault,
     /// The window's permission mode, which its key reader answers a dialog of.
     permission: Arc<Permission>,
     /// The folder its tools make files in: the one it runs in.
     folder: PathBuf,
     /// How many calls its turns have made.
     calls: u64,
+    /// Its store keeps a message that ran under `/bypass` as it was given, the command
+    /// with the prompt, where it keeps the prompt alone otherwise.
+    stores_commands: bool,
 }
+
+/// What a window that stores a message as it was given is told by: how Devin stores a
+/// prompt it ran under `/bypass` is not known (the reviews of 2026-10-17), and the
+/// daemon reads either.
+pub const STORES_COMMANDS_VARIABLE: &str = "FAKE_DEVIN_STORES_COMMANDS";
 
 /// Where the rig looks for the jobs of a window, which window it is (its process), and
 /// how long the agent thinks before it runs its tool: a command a turn leaves is a job.
@@ -177,10 +200,28 @@ impl<W: Write> Window<W> {
             pace,
             turns: 0,
             jobs: None,
+            crash: Fault::default(),
             permission: Arc::new(Permission::new(true)),
             folder: std::env::current_dir().unwrap_or_default(),
             calls: 0,
+            stores_commands: false,
         }
+    }
+
+    /// The window's store keeps a message that ran under `/bypass` as it was given,
+    /// where `stores`.
+    #[must_use]
+    pub fn storing_commands(mut self, stores: bool) -> Self {
+        self.stores_commands = stores;
+        self
+    }
+
+    /// The window ends at the message `crash` meets, once its row and its prompt
+    /// are written.
+    #[must_use]
+    pub fn crashing_on(mut self, crash: Fault) -> Self {
+        self.crash = crash;
+        self
     }
 
     /// The window is in the mode `permission` says, which a dialog of its calls is
@@ -227,10 +268,11 @@ impl<W: Write> Window<W> {
     }
 
     /// A message that is `/bypass` switches the window to full permission, and the
-    /// prompt after it, if any, is a turn; any other message is a turn.
+    /// prompt after it, if any, is a turn, stored as the prompt or as the message was
+    /// given (`stores_commands`); any other message is a turn.
     fn command(&mut self, text: &str, prompt_file: bool) -> Result<(), String> {
         let Some(prompt) = permission::command(text) else {
-            return self.turn(text, prompt_file);
+            return self.turn(text, text, prompt_file);
         };
         if self.permission.to_bypass() {
             self.wire
@@ -241,7 +283,8 @@ impl<W: Write> Window<W> {
         if prompt.is_empty() {
             return Ok(());
         }
-        self.turn(prompt, prompt_file)
+        let stored = if self.stores_commands { text } else { prompt };
+        self.turn(prompt, stored, prompt_file)
     }
 
     /// What the next call of the turn `client` is said with.
@@ -257,7 +300,8 @@ impl<W: Write> Window<W> {
         }
     }
 
-    fn turn(&mut self, text: &str, prompt_file: bool) -> Result<(), String> {
+    /// The turn of the message `text`, which its store keeps as `stored`.
+    fn turn(&mut self, text: &str, stored: &str, prompt_file: bool) -> Result<(), String> {
         self.turns += 1;
         let client = format!("client-{}", self.turns);
         let stream = format!("stream-{}", self.turns);
@@ -265,13 +309,16 @@ impl<W: Write> Window<W> {
             Some(cut) => plan_of(&cut, self.pace).going_on(self.pace),
             None => plan_of(text, self.pace),
         };
-        self.store.user(text, &client)?;
+        self.store.user(stored, &client)?;
         self.wire.prompt(self.turns + 1, text).map_err(said)?;
+        if self.crash.meets(text) {
+            crate::leave(1);
+        }
         self.say("working (esc twice to interrupt)\n")
             .map_err(said)?;
         // The turn is begun, and its agent has not said a word: a model's time,
         // in which the wire shows none of its work.
-        let mut stopped = self.stop.work(self.pace.first_word);
+        let mut stopped = self.stop.work(plan.first_word);
         let mut left = None;
         if !stopped {
             self.wire.thinking(&client).map_err(said)?;

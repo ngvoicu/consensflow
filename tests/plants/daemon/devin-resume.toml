@@ -852,9 +852,7 @@ runs = ["harness-lib-devin"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/devin/wire_log.rs"
-find = '''            if self.shown.as_deref() != Some(shown) {
-                self.mode = None;
-            }'''
+find = '''                self.mode = None;'''
 replace = ""
 
 [[plant]]

@@ -224,6 +224,18 @@ impl Jobs {
             .map_err(|failed| format!("{}: {failed}", file.display()))
     }
 
+    /// The file of the window's next job named `label` (`<label>-<window>-<n>`), for a
+    /// program that is started otherwise than [`Jobs::start`] starts one to write its
+    /// files by: a build, and the daemon it leaves (`build`).
+    pub fn file(&self, label: &str) -> Result<PathBuf, String> {
+        fs::create_dir_all(&self.folder)
+            .map_err(|failed| format!("{}: {failed}", self.folder.display()))?;
+        let number = self.started.fetch_add(1, Ordering::Relaxed) + 1;
+        Ok(self
+            .folder
+            .join(format!("{label}-{}-{number}", self.window)))
+    }
+
     /// Starts the server of the window's harness, which runs past any case, in
     /// `group`, and the browser it launches if it does.
     fn start_server(&self, group: Group) -> Result<(), String> {

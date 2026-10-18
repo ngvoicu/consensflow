@@ -180,11 +180,14 @@ fn notices_a_chief_window_that_exits_before_its_open_is_answered() {
     let context = with_codex();
     let project = spoken(&context);
     let chief = context.id(project.id, "chief");
-    // The host sends the exit first, in the same read as its answer to the open.
+    // The host sends the exit first, in the same read as its answer to the open: the
+    // window went before Codex took its handoff, which its record holds nothing of.
     *context.host.exit_after_open.borrow_mut() = Some("chief".to_owned());
+    context.codex.forgets_first_messages.set(true);
     context
         .switch_chief(project.id, to("codex", "astraeus"), SwitchWhen::Now, false)
         .unwrap();
+    context.codex.forgets_first_messages.set(false);
     assert_eq!(context.dispatcher.pane(chief), None);
     assert_eq!(
         context.project(project.id).state,

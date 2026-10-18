@@ -22,7 +22,6 @@ use cf_ledger::{MessageView, NewNote, ProjectView};
 use cf_proto::panes::{SnapshotRequest, TAIL_LINES};
 
 use crate::deliveries::Delivering;
-use crate::delivery_text::marker_of;
 use crate::dispatcher::Dispatcher;
 use crate::record::Record;
 use crate::role_change::Prelude;
@@ -149,12 +148,12 @@ impl Dispatcher {
         let said = self.unstarted_because(record, why, &shown);
         let failing = Delivering {
             message: message.id,
-            marker: marker_of(message.id),
             since: self.now(),
             rested_since: None,
             launch: true,
             chief: participant.role == "chief",
             queued: false,
+            free_since: None,
             entered_again: false,
         };
         if participant.role == "chief" {

@@ -32,7 +32,9 @@
 //! its work is done, so that a case can do something while the turn is still open
 //! in the record: quit the app, as a human may at any moment. A turn that runs a
 //! command (`RUN`, in `tool`) works until the command ends, and Escape stops it
-//! and, as the line says, the command with it or not.
+//! and, as the line says, the command with it or not. A turn that runs a build
+//! (`BUILD`, in `build`) waits for it as for a command, and the build leaves a
+//! daemon running, as Gradle's does: the program is the build too (`--build`).
 //!
 //! It is the program of the suites that stands in a window, so it reads the
 //! environment a window is given and runs `cf` as an agent does, both through
@@ -46,6 +48,8 @@ mod agents;
 mod args;
 #[path = "fake_agent/background.rs"]
 mod background;
+#[path = "fake_agent/build.rs"]
+mod build;
 #[path = "fake_agent/records.rs"]
 mod records;
 #[path = "fake_agent/reply.rs"]
@@ -96,6 +100,10 @@ fn main() -> ExitCode {
     // window is launched with: it holds its signals as it needs, not as a window.
     if args.first().map(String::as_str) == Some(background::JOB) {
         return background::run(&args[1..]);
+    }
+    // The build a turn's command runs, which leaves a daemon of its own.
+    if args.first().map(String::as_str) == Some(build::BUILD) {
+        return build::run(&args[1..]);
     }
     // The shell of a command a harness detaches, which a session of its own is made for.
     #[cfg(unix)]
@@ -312,7 +320,7 @@ fn turn(records: &mut Records, pid: u32, window: &Window, text: &str) -> Result<
         }
         records.status(pid, "busy").map_err(failed)?;
     }
-    let reply = match tool::reply(text, window) {
+    let reply = match tool::reply(text, window).or_else(|| build::reply(text, window)) {
         Some(reply) => reply?,
         None => reply_to(text, window)?,
     };
