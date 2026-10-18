@@ -4,7 +4,7 @@
 
 use cf_evals::ledger_file::{self, add_project, Chief, Member, NewProject};
 use cf_evals::long_run::ledger::Ledger;
-use cf_evals::long_run::look::{Look, Windows};
+use cf_evals::long_run::look::Look;
 use cf_evals::long_run::record::Record;
 use rusqlite::{params, Connection};
 use serde_json::Value;
@@ -177,8 +177,7 @@ impl Scene {
         Look {
             at,
             ledger: Ledger::read(&self.db).unwrap(),
-            windows: Windows::default(),
-            records: Default::default(),
+            ..Look::default()
         }
     }
 

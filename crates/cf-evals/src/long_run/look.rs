@@ -144,6 +144,9 @@ pub struct Look {
     /// Each harness's own record of a conversation, by the conversation's row,
     /// where the run could read one.
     pub records: BTreeMap<i64, Record>,
+    /// Each conversation whose own record the run reads and could not read at this
+    /// look, by its row, with why.
+    pub records_unread: BTreeMap<i64, String>,
 }
 
 impl Look {

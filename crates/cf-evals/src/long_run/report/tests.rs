@@ -173,6 +173,73 @@ fn a_run_with_every_disruption_played_and_nothing_broken_holds() {
 }
 
 #[test]
+fn a_run_whose_only_breaks_are_known_passes_with_them_and_any_other_break_fails_it() {
+    use crate::long_run::invariants::{ENDED_NOTE, LET_GO_NOTE};
+    let mut scene = scene();
+    scene.schedule.played(
+        Disruption::DevinCut,
+        Duration::from_secs(1300),
+        "loose".to_owned(),
+    );
+    let late = |key: &str, shape: &'static str| {
+        let mut found = Break::new(
+            3,
+            key,
+            format!("{key}'s ended notice came after its result"),
+        )
+        .with_shape(shape);
+        found.at = STARTED + 60_000;
+        found
+    };
+    // The dry run's two: the background "ended" note after the result, each.
+    let found = [late("3:m-20", ENDED_NOTE), late("3:m-21", ENDED_NOTE)];
+    let kept = kept(&scene, &found, None);
+    assert_eq!(kept.verdict(), "PASS with 2 known");
+    assert!(kept.held());
+    assert!(kept.why().is_empty(), "{:?}", kept.why());
+    let value = kept.value();
+    assert_eq!(value["verdict"], "PASS with 2 known");
+    assert_eq!(value["invariants"][2]["held"], true);
+    assert_eq!(value["invariants"][2]["breaks"], 0);
+    assert_eq!(value["invariants"][2]["known"], 2);
+    assert_eq!(value["breaks"][0]["shape"], ENDED_NOTE);
+    assert!(value["breaks"][0]["known"]
+        .as_str()
+        .unwrap()
+        .contains("3.0.6"));
+    let said = kept.say(Path::new("long.json"), Path::new("long.md"));
+    assert!(said[0].ends_with(" · PASS with 2 known"), "{said:?}");
+    assert!(
+        said.iter()
+            .any(|line| line.starts_with("  known: 3:m-20 (")),
+        "{said:?}"
+    );
+    let text = kept.markdown();
+    assert!(text.starts_with("# Long run of 2026-10-11T10:00:00.000Z: PASS with 2 known\n"));
+    assert!(text.contains(" · KNOWN: "), "{text}");
+    assert!(text.contains("| known (2) | 2 |"), "{text}");
+    // An A3 of another notice fails the run, the known one beside it; so does an A3 of
+    // no shape.
+    for other in [late("3:m-22", LET_GO_NOTE), Break::new(3, "3:m-22", "late")] {
+        let found = [late("3:m-20", ENDED_NOTE), other];
+        let failed = self::kept(&scene, &found, None);
+        assert_eq!(failed.verdict(), "FAIL");
+        assert!(!failed.held());
+        assert_eq!(
+            failed.why(),
+            ["invariant 3 broke (A3, an ended notice comes with or before its result): 1"]
+        );
+    }
+    // Known breaks and something unjudged: no pass.
+    let open = [Unjudged::new(4, "4:m-131", "not judged")];
+    let unresolved = Kept {
+        unresolved: &open,
+        ..self::kept(&scene, &found, None)
+    };
+    assert_eq!(unresolved.verdict(), "UNRESOLVED");
+}
+
+#[test]
 fn a_break_a_disruption_not_played_or_a_run_cut_short_fails_it_and_says_which() {
     let mut scene = scene();
     scene

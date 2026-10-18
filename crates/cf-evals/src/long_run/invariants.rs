@@ -62,6 +62,7 @@ use super::look::Look;
 use super::mask::{mask, screen, Names};
 
 pub use end::end;
+pub use order::{ENDED_NOTE, LET_GO_NOTE};
 
 /// What each invariant is called in a report, and the field's shape it is made of.
 pub const INVARIANTS: [(u8, &str, &str); 10] = [
@@ -133,6 +134,9 @@ pub struct Break {
     pub twice: bool,
     /// When it was first found, in milliseconds (the keeper's).
     pub at: i64,
+    /// What kind of break of its invariant it is, where its check tells kinds apart:
+    /// what a list of known breaks matches it by ([`super::known`]).
+    pub shape: Option<&'static str>,
 }
 
 impl Break {
@@ -145,7 +149,15 @@ impl Break {
             evidence: Evidence::default(),
             twice: false,
             at: 0,
+            shape: None,
         }
+    }
+
+    /// The break, of the kind `shape`.
+    #[must_use]
+    pub fn with_shape(mut self, shape: &'static str) -> Self {
+        self.shape = Some(shape);
+        self
     }
 
     /// The break with `evidence`.
@@ -176,6 +188,7 @@ impl Break {
             "invariant": self.invariant,
             "name": self.name(),
             "key": self.key,
+            "shape": self.shape,
             "at": iso(self.at),
             "said": self.said,
             "evidence": {
@@ -229,14 +242,17 @@ pub fn check(look: &Look, settings: &Settings) -> Vec<Break> {
     found
 }
 
-/// What one look holds that the checks cannot judge, with `settings`: the ended
-/// notices the log ties to no result (3), the results whose turn the copy of their
-/// worker's conversation does not hold (4), and what the watch could not see of a
-/// window's tree (6).
+/// What one look holds that the checks cannot judge, with `settings`: the results whose
+/// worker's own record was not read through their turn (2), the ended notices the log
+/// ties to no result (3), the results whose turn the copy of their worker's conversation
+/// does not hold (4), and what the watch could not see of a window's tree, or of a
+/// task's state when its window closed by itself (6).
 pub fn unjudged(look: &Look, settings: &Settings) -> Vec<Unjudged> {
-    let mut found = order::unbound_notices(look);
+    let mut found = work::unread_records(look, settings);
+    found.extend(order::unbound_notices(look));
     found.extend(order::unanswered_results(look, settings));
     found.extend(windows::gaps(look));
+    found.extend(windows::untold_exits(look));
     found
 }
 
@@ -261,11 +277,6 @@ impl Keeper {
     /// said.
     pub fn keep(&mut self, look: &Look, found: Vec<Break>) -> Vec<Break> {
         self.keep_at(look.at, found, &Names::of(look))
-    }
-
-    /// Whether the break whose key is `key` is recorded already.
-    pub fn recorded(&self, key: &str) -> bool {
-        self.recorded.contains(key)
     }
 
     /// [`Keeper::keep`] of breaks found at `at`, the run's `names` shown.

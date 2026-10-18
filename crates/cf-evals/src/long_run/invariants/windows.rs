@@ -354,14 +354,21 @@ pub fn skipped_or_waiting(look: &Look, settings: &Settings) -> Vec<Break> {
     found
 }
 
-/// The tasks `handle` held that were at work at `at`, by number: whom each was given
-/// to by then, by the log ([`holder_at`]; the task's assignee now, where the log says
-/// no assignment of it), and the log's last word on its state by then ([`MOVES`]; the
-/// task's state now, where it has none), a pause the exit at `at` caused aside. A task
-/// given to another since is still the one the window held when it closed, and one
-/// given to it is at work once it moved on from `queued`.
-fn at_work_at(look: &Look, handle: &str, at: i64) -> Vec<i64> {
+/// The tasks `handle` held at `at`, by number, with whether each was at work then:
+/// whom each was given to by then, by the log ([`holder_at`]; the task's assignee now,
+/// where the log says no assignment of it), and the log's last word on its state by
+/// then ([`MOVES`]; the task's state now, where it has none). A task given to another
+/// since is still the one the window held when it closed, and one given to it is at
+/// work once it moved on from `queued`.
+///
+/// The rig is told of a window's exit before the daemon is, so a pause in the exit's
+/// own millisecond may be the one the exit caused, after it, or someone's before it.
+/// It is the exit's where its `because` says the window closed or went: the task was
+/// in the state it paused from. It is someone's where it names who paused it (`by`):
+/// the task was paused. Where it says neither, which came first is untold.
+fn held_at(look: &Look, handle: &str, at: i64) -> Vec<(i64, AtExit)> {
     let worker = look.ledger.by_handle(handle).map(|worker| worker.id);
+    let closed = format!("@{handle}'s window ");
     look.ledger
         .tasks
         .iter()
@@ -369,31 +376,85 @@ fn at_work_at(look: &Look, handle: &str, at: i64) -> Vec<i64> {
             Some(holder) => holder.as_deref() == Some(handle),
             None => task.assignee.is_some() && task.assignee == worker,
         })
-        .filter(|task| {
-            let said = look
-                .ledger
-                .events
-                .iter()
-                .rev()
-                .find(|event| {
-                    MOVES.contains(&event.kind.as_str())
-                        && event.data["task"].as_i64() == Some(task.number)
-                        && clock::millis(&event.at).is_some_and(|when| when <= at)
-                })
-                .map(|event| {
+        .map(|task| {
+            let last = look.ledger.events.iter().rev().find(|event| {
+                MOVES.contains(&event.kind.as_str())
+                    && event.data["task"].as_i64() == Some(task.number)
+                    && clock::millis(&event.at).is_some_and(|when| when <= at)
+            });
+            let state = match last {
+                None => Some(task.state.as_str()),
+                Some(event) => {
                     let to = event.data["to"].as_str().unwrap_or_default();
-                    // The rig is told of a window's exit before the daemon is: a pause
-                    // in the exit's own millisecond is the one it caused, after it, and
-                    // the state at the exit is the one that pause moved from.
                     if to == "paused" && clock::millis(&event.at) == Some(at) {
-                        event.data["from"].as_str().unwrap_or_default().to_owned()
+                        let because = event.data["because"].as_str().unwrap_or_default();
+                        if because.starts_with(&closed) {
+                            Some(event.data["from"].as_str().unwrap_or_default())
+                        } else if event.data["by"].is_string() {
+                            Some(to)
+                        } else {
+                            None
+                        }
                     } else {
-                        to.to_owned()
+                        Some(to)
                     }
-                });
-            AT_WORK.contains(&said.as_deref().unwrap_or(task.state.as_str()))
+                }
+            };
+            let at_exit = match state {
+                Some(state) if AT_WORK.contains(&state) => AtExit::AtWork,
+                Some(_) => AtExit::Not,
+                None => AtExit::Untold,
+            };
+            (task.number, at_exit)
         })
-        .map(|task| task.number)
+        .collect()
+}
+
+/// Whether a task a window held was at work when the window exited.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AtExit {
+    AtWork,
+    Not,
+    /// A pause in the exit's own millisecond that says neither whose it is.
+    Untold,
+}
+
+/// The tasks `handle` held that were at work at `at`, by number ([`held_at`]).
+fn at_work_at(look: &Look, handle: &str, at: i64) -> Vec<i64> {
+    held_at(look, handle, at)
+        .into_iter()
+        .filter(|(_, at_exit)| *at_exit == AtExit::AtWork)
+        .map(|(number, _)| number)
+        .collect()
+}
+
+/// 6, unresolved: a window that closed by itself holding a task whose pause shares the
+/// exit's millisecond and says neither whose it is ([`held_at`]): whether the task was
+/// at work when it closed, the log does not tell.
+pub fn untold_exits(look: &Look) -> Vec<Unjudged> {
+    look.windows
+        .exits
+        .iter()
+        .filter(|exit| exit.closed_by == ClosedBy::Itself)
+        .filter_map(|exit| {
+            let untold: Vec<String> = held_at(look, &exit.handle, exit.at)
+                .into_iter()
+                .filter(|(_, at_exit)| *at_exit == AtExit::Untold)
+                .map(|(number, _)| format!("T-{number}"))
+                .collect();
+            (!untold.is_empty()).then(|| {
+                Unjudged::new(
+                    6,
+                    format!("6:closed:{}:{}", exit.pane, exit.generation),
+                    format!(
+                        "@{}'s window closed by itself at {}, and {} paused in the same millisecond by no one the log names: whether it was at work when the window closed cannot be told",
+                        exit.handle,
+                        iso(exit.at),
+                        untold.join(", ")
+                    ),
+                )
+            })
+        })
         .collect()
 }
 

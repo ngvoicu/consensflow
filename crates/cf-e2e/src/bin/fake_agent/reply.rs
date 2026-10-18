@@ -11,6 +11,11 @@
 //!   (`CF task cancel T-3`), and `CF <words> :: <text>` with the text, spaces
 //!   and all, as one last word (`CF tell T-1 :: Stop now`): the chief's own
 //!   verbs, as it would type them.
+//! - A result delivered to a window started with `CF_TEST_ACCEPT_RESULTS` set is
+//!   accepted, `cf task accept` of the task each result header names, and nothing
+//!   else in it is done: a chief that takes its staff's results, as the long run's
+//!   dry run needs to reach its end (every task accepted). Without it a result is
+//!   answered as any message is.
 //! - A line `SLEEP <seconds> <words>` is a turn that works that long before it
 //!   does what the words say: a window a chief can still tell, or a chief
 //!   nothing is delivered to. An Escape stops it, as it stops Claude's: the turn
@@ -71,6 +76,9 @@ use crate::stop::Stop;
 /// How long the shell that detaches a job may take to end: a PowerShell's
 /// `Start-Process` takes a second or two, a `/bin/sh` a moment.
 const DETACHED_SHELL: Duration = Duration::from_secs(30);
+
+/// The header of a result delivered to a window, with the task it is the result of.
+const RESULT: &str = r"(?m)^\[ConsensFlow m-\d+ · (T-\d+) · result from @";
 
 /// What a window knows of itself that decides how it answers.
 pub struct Window {
@@ -218,7 +226,16 @@ pub fn reply_to(text: &str, window: &Window) -> Result<Reply, String> {
     static VERB: OnceLock<Regex> = OnceLock::new();
     static REFUSED: OnceLock<Regex> = OnceLock::new();
     static EXACT: OnceLock<Regex> = OnceLock::new();
+    static RESULTS: OnceLock<Regex> = OnceLock::new();
 
+    let accepting = own_var("CF_TEST_ACCEPT_RESULTS").is_some_and(|on| !on.is_empty());
+    let accepted: Vec<String> = acceptances(text, pattern::once(&RESULTS, RESULT), accepting)
+        .iter()
+        .map(|words| run_cf(words))
+        .collect();
+    if !accepted.is_empty() {
+        return Ok(Reply::Text(format!("accepted: {}", accepted.join(" | "))));
+    }
     if let Some(slow) = pattern::once(&SLEEP, r"(?m)^SLEEP (\d+) (.+)$").captures(text) {
         let seconds: u64 = slow[1].parse().map_err(|_| format!("SLEEP {}", &slow[1]))?;
         if window.stop.work(Duration::from_secs(seconds)) {
@@ -371,6 +388,19 @@ fn dispatches(text: &str, line: &Regex) -> Vec<Vec<String>> {
             words.push(dispatch[2].replace("\\n", "\n"));
             words
         })
+        .collect()
+}
+
+/// The words of `cf task accept` for each result `text` holds (`header` is the
+/// pattern of a result's header), in the order of the headers: none for a window
+/// that is not `accepting`.
+fn acceptances(text: &str, header: &Regex, accepting: bool) -> Vec<Vec<String>> {
+    if !accepting {
+        return Vec::new();
+    }
+    header
+        .captures_iter(text)
+        .map(|result| vec!["task".to_owned(), "accept".to_owned(), result[1].to_owned()])
         .collect()
 }
 
@@ -610,5 +640,29 @@ mod tests {
             ]
         );
         assert!(dispatches("DISPATCH nothing", &line).is_empty());
+    }
+
+    #[test]
+    fn a_window_that_accepts_results_accepts_the_task_of_each_result_header_and_no_other() {
+        let header = Regex::new(RESULT).unwrap();
+        let text = "[ConsensFlow m-18 · T-2 · result from @long-claude-2-amber-lagoon]\n\
+                    Reply with exactly: DEV-SERVER-UP\n\
+                    [ConsensFlow m-19 · T-4 · result from @long-devin-2-lively-meadow]\n\
+                    DEVIN-MOVED-IT";
+        assert_eq!(
+            acceptances(text, &header, true),
+            [["task", "accept", "T-2"], ["task", "accept", "T-4"]]
+        );
+        // A task, a note and a question are no results; and a window not started to
+        // accept them takes none.
+        for other in [
+            "[ConsensFlow m-22 · T-1 · task from @human]\nResumed: Go on where you stopped.",
+            "[ConsensFlow m-39 · T-16 · note from ConsensFlow]\nGo on where you stopped.",
+            "[ConsensFlow m-7 · T-3 · question from @worker]\nWhich one?",
+            "a line that quotes [ConsensFlow m-18 · T-2 · result from @x]",
+        ] {
+            assert!(acceptances(other, &header, true).is_empty(), "{other}");
+        }
+        assert!(acceptances(text, &header, false).is_empty());
     }
 }

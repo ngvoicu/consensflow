@@ -91,7 +91,7 @@ fn nothing_of_the_long_run_writes_around_its_edge() {
     assert!(edge.contains("move |screen| rows.screen(screen),"));
     // The chief's screen a wait that gave up shows goes through the floor's screen mask.
     let chief = read(&root.join("src").join("run").join("chief.rs"));
-    assert!(chief.contains("let shown = floor.screen(&shown).join(\" ⏎ \");"));
+    assert!(chief.contains("let lines = floor.screen(&self.last_lines(&pane, 40));"));
 }
 
 #[test]
@@ -112,12 +112,10 @@ fn what_stops_the_run_and_what_its_rig_says_leave_through_the_edge() {
     let setup = read(&folder.join("setup.rs"));
     assert!(setup.contains(".masked_by(masker)"));
     assert!(read(&folder.join("stage.rs")).contains("Rig::start(self.config.clone()"));
-    // And the rig keeps the masker its configuration is given, hands it what its
-    // windows print as it starts, and says what it says of itself, dropped, through it.
+    // And the rig keeps the masker its configuration is given, and says what it says of
+    // itself, dropped, through it.
     let rig = root.join("..").join("cf-e2e").join("src").join("rig");
-    let launch = read(&rig.join("launch.rs"));
-    assert!(launch.contains("masker: config.masker,"));
-    assert!(launch.contains("masker.read(Printed::of(&shared));"));
+    assert!(read(&rig.join("launch.rs")).contains("masker: config.masker,"));
     let report = read(&rig.join("report.rs"));
     let written: Vec<&str> = report
         .lines()
@@ -129,8 +127,9 @@ fn what_stops_the_run_and_what_its_rig_says_leave_through_the_edge() {
 }
 
 /// Whether a line of Rust takes a part of a text: its first characters or its last,
-/// its last lines or items, the lines of a screen the pane host cut to its last, or its
-/// lines or words split apart. A comment says.
+/// its last lines or items, a slice of it (`&text[..100]`, `[at..end]`), the lines of a
+/// screen the pane host cut to its last, or its lines or words split apart. A comment
+/// says.
 fn takes_part(line: &str) -> bool {
     let code = line.trim_start();
     if code.starts_with("//") {
@@ -139,7 +138,14 @@ fn takes_part(line: &str) -> bool {
     let taken = code
         .match_indices(".take(")
         .any(|(at, _)| !code[at..].starts_with(".take()"));
+    let sliced = code.match_indices('[').any(|(at, _)| {
+        code[at..]
+            .split(']')
+            .next()
+            .is_some_and(|inside| inside.contains(".."))
+    });
     taken
+        || sliced
         || [
             "js::first(",
             "saturating_sub(",
@@ -158,10 +164,99 @@ fn takes_part(line: &str) -> bool {
         .any(|word| code.contains(word))
 }
 
-/// Each line of the long run's, and of the rig's report, that takes a part of a text,
-/// and why what it takes is masked first, or is no text it says. A line new here takes
-/// a part of a text unmasked until it is shown to take one masked whole first.
-const TAKEN: [(&str, &str, &str); 31] = [
+/// Each line that takes a part of a text in the files the guard reads, and why what it
+/// takes is masked first, is no text the run says, or is a cut accepted. A line new
+/// here takes a part of a text unmasked until it is shown to take one masked whole
+/// first.
+///
+/// What it reads: the long run's own sources, the rig's report (what a rig dropped
+/// unclosed says), and the shared helpers its console and its report pass through
+/// (`run/chief.rs`'s wait that gave up, `run/floor.rs`, `js.rs`'s cut). What it cannot
+/// see: a cut inside a function it does not read (another crate's, or `plan.rs`'s
+/// `last_lines`, which the chief's wait takes a window's last 40 lines with, a cut
+/// accepted as the pane host's is), a cut it does not know the word of, and whether a
+/// text it lists reaches the run's output at all. It reads lines, not meaning.
+const TAKEN: [(&str, &str, &str); 46] = [
+    (
+        "long_run/disruptions.rs",
+        "if let Some(next) = self.planned[place + 1..]",
+        "the planned disruptions, no text",
+    ),
+    (
+        "long_run/invariants/deliveries.rs",
+        "quoting_until = body(id).map_or(end, |said| end + said_until(&text[end..], said));",
+        "a check reading a prompt, nothing it says",
+    ),
+    (
+        "long_run/invariants/order.rs",
+        "let end = items[prompt + 1..]",
+        "a check reading a conversation's items, nothing it says",
+    ),
+    (
+        "long_run/invariants/order.rs",
+        "last_turn(&items[prompt..end]).ok_or(Unheld::NoAnswer)",
+        "the same",
+    ),
+    (
+        "long_run/invariants/order.rs",
+        "let turn = &items[prompt + 1..];",
+        "the same",
+    ),
+    (
+        "long_run/invariants/order.rs",
+        "let mut answer = said(&turn[after..]);",
+        "the same",
+    ),
+    (
+        "long_run/invariants/order.rs",
+        "let mut progress = said(&turn[..after]);",
+        "the same",
+    ),
+    (
+        "long_run/mask.rs",
+        "for span in hidden[first..]",
+        "the masker's walk over a screen it masks as one text",
+    ),
+    (
+        "long_run/mask.rs",
+        "shown.push_str(&joined[at..span.start.max(at)]);",
+        "the same",
+    ),
+    (
+        "long_run/mask.rs",
+        "shown.push_str(&joined[at..place.end]);",
+        "the same",
+    ),
+    (
+        "long_run/mask.rs",
+        "format!(\"{}{MASK}{}\", &whole[..before], &whole[after..])",
+        "the masker hiding a secret it found in the whole",
+    ),
+    (
+        "long_run/watcher.rs",
+        ".add_claude(&String::from_utf8_lossy(&more[..=end]), names);",
+        "a record's whole lines, each entry masked as it is read",
+    ),
+    (
+        "run/chief.rs",
+        "lines[lines.len().saturating_sub(12)..].to_vec()",
+        "a screen's last rows, of rows masked as one text just before",
+    ),
+    (
+        "run/chief.rs",
+        "word.chars().take(most).collect()",
+        "a word of a command line, masked whole before it is given (started_as)",
+    ),
+    (
+        "js.rs",
+        "format!(\"{text}{}\", \" \".repeat(width.saturating_sub(length(text))))",
+        "padding to a width, no cut",
+    ),
+    (
+        "js.rs",
+        "format!(\"{}{text}\", \" \".repeat(width.saturating_sub(length(text))))",
+        "the same",
+    ),
     (
         "long_run/mask.rs",
         "crate::js::first(&mask(text, names), most)",
@@ -228,7 +323,7 @@ const TAKEN: [(&str, &str, &str); 31] = [
     (
         "long_run/watcher.rs",
         "let snapshot = rig.snapshot(pane, TAIL);",
-        "the pane host's cut: the edge reads every window whole",
+        "the pane host's own cut, before the run has the text: accepted (mask.rs's note)",
     ),
     (
         "long_run/watcher.rs",
@@ -249,11 +344,6 @@ const TAKEN: [(&str, &str, &str); 31] = [
         "long_run/stage.rs",
         ".map(|answer| lines(&answer[\"tail\"]))",
         "the same",
-    ),
-    (
-        "long_run/edge.rs",
-        "let rows: Vec<String> = printed.screen(&pane).lines().map(str::to_owned).collect();",
-        "a window's whole, read as one screen",
     ),
     (
         "rig/report.rs",
@@ -322,6 +412,9 @@ fn no_cut_split_or_tail_is_taken_of_text_unmasked() {
         })
         .collect();
     files.push(("rig/report.rs".to_owned(), rig.join("report.rs")));
+    for shared in ["run/chief.rs", "run/floor.rs", "js.rs"] {
+        files.push((shared.to_owned(), source.join(shared)));
+    }
     let mut taken = Vec::new();
     for (shown, file) in &files {
         let text = read(file);
@@ -355,28 +448,19 @@ fn no_cut_split_or_tail_is_taken_of_text_unmasked() {
         .collect();
     assert!(gone.is_empty(), "no longer there: {gone:?}");
     // Masked first, where each is: the rig's report tells each text and screen before
-    // it cuts, the pane host's screens leave in the light of all their windows printed,
-    // and a break's screen is kept so.
+    // it cuts.
     let report = read(&rig.join("report.rs"));
     for told in [
         "let log = tell.text(log);",
         "let screen = tell.screen_text(screen);",
-        "status_line(&name, &tell.text(&held), process::is_alive)",
-        "conversation_lines(&name, &tell.text(&held))",
+        "return format!(\"  sessions/{name}: not JSON: {}\\n\", said(&tell.text(text)));",
+        "return format!(\"    not JSON: {}\\n\", said(&tell.text(line)));",
+        "format!(\"    {kind}: {}\\n\", said(&tell.text(text)))",
         "rig.page(method, body).map(|answer| tell.value(&answer))",
         "told[\"tail\"] = json!(self.screen(&rows));",
     ] {
         assert!(report.contains(told), "{told}");
     }
-    let edge = read(&source.join("long_run").join("edge.rs"));
-    for learned in [
-        "screen(rows, &self.learned())",
-        "let shown = masked(value, &self.learned());",
-        ".reading(move |printed| reads.reads(printed))",
-    ] {
-        assert!(edge.contains(learned), "{learned}");
-    }
-    assert!(read(&source.join("long_run").join("conduct.rs")).contains("self.edge.learned()"));
 }
 
 #[test]
@@ -387,6 +471,8 @@ fn the_parts_it_looks_for_are_found_where_they_are() {
         "lines[lines.len().saturating_sub(30)..]",
         "rig.snapshot(pane, 12)",
         "for row in text.lines() {",
+        "let said = &text[..100];",
+        "shown.push_str(&joined[at..place.end]);",
     ] {
         assert!(takes_part(line), "{line}");
     }
@@ -394,6 +480,7 @@ fn the_parts_it_looks_for_are_found_where_they_are() {
         "let then = self.then.take();",
         "// a line's .lines() of its own",
         "let shown = cut(text, 200, names);",
+        "let first = rows[0].clone();",
     ] {
         assert!(!takes_part(line), "{line}");
     }

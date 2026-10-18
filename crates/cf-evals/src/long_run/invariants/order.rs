@@ -4,8 +4,10 @@
 //! after the result m-131); and a result is its turn's final answer whole, the
 //! words after its last tool call, with none of the progress written on the way
 //! (4, A4: results that held every progress line). Its turn is the one the delivery
-//! of its task that began it began: a turn of an attempt before is never taken for
-//! its own, missing (a retry's turn lost, its result the old answer again). Both read
+//! attempt of its task that began it began, in that attempt's conversation, and no
+//! further than the next delivery of another task: a turn of an earlier attempt (a
+//! retry's turn lost, its result the old answer again) or of the next task (a late
+//! result carrying another task's answer) is never taken for its own. Both read
 //! the ledger alone: the messages, the log of the tasks' states and deliveries, and
 //! the daemon's copy of the worker's conversation.
 //!
@@ -32,6 +34,12 @@ use crate::long_run::mask::{cut, Names};
 /// left running (`T-14's turn left background work running. Ended: …`), and of a
 /// task let go once its job was gone.
 pub const ENDED: [&str; 2] = ["'s turn left background work running", " is let go: "];
+
+/// The shape of a break of the third whose late notice is the background "ended" note
+/// (`ENDED[0]`), and of one whose notice is the note of a task let go (`ENDED[1]`): a
+/// list of known breaks tells them apart ([`crate::long_run::known`]).
+pub const ENDED_NOTE: &str = "ended-note";
+pub const LET_GO_NOTE: &str = "let-go-note";
 
 /// The states a task is in once an attempt has its result: a move to any other
 /// after a result begins another attempt.
@@ -86,6 +94,11 @@ pub fn ended_after_result(look: &Look) -> Vec<Break> {
                     notice.id, result.id
                 ),
             )
+            .with_shape(if notice.body.contains(ENDED[0]) {
+                ENDED_NOTE
+            } else {
+                LET_GO_NOTE
+            })
             .with(Evidence {
                 rows: [result, notice]
                     .iter()
@@ -168,26 +181,18 @@ fn settled_results<'l>(
 enum Unheld {
     /// The log shows no delivery to the worker of the result's task before it.
     NoDelivery,
-    /// No prompt of the copy holds the header of the message whose delivery began it.
-    NotCopied(i64),
+    /// No prompt of the copy holds the header of the message (its id) that the delivery
+    /// attempt (its number) began, said once that attempt began.
+    NotCopied(i64, i64),
     /// The copy holds no answer of the agent's after its last prompt.
     NoAnswer,
 }
 
-/// The turn of `result`, the worker `worker`'s, written at `at`, in `items`, the copy of
-/// the worker's conversation by then: begun by the last delivery to the worker of a
-/// message of the result's task before it (`delivery.begun`), its last turn from the
-/// prompt that holds that message's header on ([`last_turn`]). A turn before that
-/// prompt is an attempt before it, never the result's.
-fn turn_of<'a>(
-    look: &Look,
-    result: &Message,
-    worker: i64,
-    at: i64,
-    items: &'a [&'a Item],
-) -> Result<&'a [&'a Item], Unheld> {
-    let began = look
-        .ledger
+/// The delivery attempt that began the turn of `result`, the worker `worker`'s, written
+/// at `at`: the last `delivery.begun` by then of a message of the result's task to the
+/// worker. Its message's id, its attempt's number, and when it began.
+fn attempt_of(look: &Look, result: &Message, worker: i64, at: i64) -> Option<(i64, i64, i64)> {
+    look.ledger
         .events_of("delivery.begun")
         .into_iter()
         .rev()
@@ -198,20 +203,58 @@ fn turn_of<'a>(
                 .messages
                 .iter()
                 .find(|message| message.id == id)?;
+            let began = clock::millis(&event.at)?;
             (message.recipient == worker
                 && message.task.is_some()
                 && message.task == result.task
-                && clock::millis(&event.at).is_some_and(|when| when <= at))
-            .then_some(id)
+                && began <= at)
+                .then(|| (id, event.data["attempt"].as_i64().unwrap_or(1), began))
         })
-        .ok_or(Unheld::NoDelivery)?;
+}
+
+/// Whether `item` is a prompt that delivers a message of another task than `task`.
+fn delivers_another_task(look: &Look, item: &Item, task: Option<i64>) -> bool {
+    item.role == "user"
+        && headers(&item.text).iter().any(|(id, _, _)| {
+            look.ledger
+                .messages
+                .iter()
+                .find(|message| message.id == *id)
+                .is_some_and(|message| message.task.is_some() && message.task != task)
+        })
+}
+
+/// The turn of `result`, the worker `worker`'s, written at `at`, in `items`, the copy of
+/// the worker's conversations by then. It is bound to the delivery attempt that began it
+/// ([`attempt_of`]): its prompt is the first that holds that message's header said once
+/// the attempt began, never an earlier attempt's of the same message; and what follows
+/// it is the turn's only in that prompt's conversation, and only until a prompt that
+/// delivers another task. Of that, the last turn ([`last_turn`]).
+fn turn_of<'a>(
+    look: &Look,
+    result: &Message,
+    worker: i64,
+    at: i64,
+    items: &'a [&'a Item],
+) -> Result<&'a [&'a Item], Unheld> {
+    let (message, attempt, began) =
+        attempt_of(look, result, worker, at).ok_or(Unheld::NoDelivery)?;
     let prompt = items
         .iter()
         .position(|item| {
-            item.role == "user" && headers(&item.text).iter().any(|(id, _, _)| *id == began)
+            item.role == "user"
+                && item.millis().is_some_and(|said| said >= began)
+                && headers(&item.text).iter().any(|(id, _, _)| *id == message)
         })
-        .ok_or(Unheld::NotCopied(began))?;
-    last_turn(&items[prompt..]).ok_or(Unheld::NoAnswer)
+        .ok_or(Unheld::NotCopied(message, attempt))?;
+    let conversation = items[prompt].conversation;
+    let end = items[prompt + 1..]
+        .iter()
+        .position(|item| {
+            item.conversation != conversation || delivers_another_task(look, item, result.task)
+        })
+        .map_or(items.len(), |after| prompt + 1 + after);
+    last_turn(&items[prompt..end]).ok_or(Unheld::NoAnswer)
 }
 
 /// Whether `worker` works on Codex, whose commentary is no part of its final answer.
@@ -288,8 +331,8 @@ pub fn unanswered_results(look: &Look, settings: &Settings) -> Vec<Unjudged> {
                     .map_or_else(|| "its task".to_owned(), |task| format!("T-{}", task.number));
                 format!("was begun by no delivery to @{handle} of {task} that the log shows before it")
             }
-            Err(Unheld::NotCopied(began)) => format!(
-                "is not in the copy of @{handle}'s conversation, which holds no prompt of m-{began}, the delivery that began it"
+            Err(Unheld::NotCopied(message, attempt)) => format!(
+                "is not in the copy of @{handle}'s conversation, which holds no prompt of m-{message} after its delivery attempt {attempt} began"
             ),
             Err(Unheld::NoAnswer) => format!(
                 "is not in the copy of @{handle}'s conversation, which holds no answer of the agent's after its last prompt"

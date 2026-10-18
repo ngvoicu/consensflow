@@ -71,10 +71,11 @@ fn said(text: &str) -> String {
 }
 
 /// A status file of a stand-in agent, as a line: its process and whether that
-/// is still there, what the file says it does, and the conversation it shows.
-fn status_line(name: &str, text: &str, there: impl Fn(u32) -> bool) -> String {
+/// is still there, what the file says it does, and the conversation it shows. What is
+/// cut of it is told whole first.
+fn status_line(name: &str, text: &str, there: impl Fn(u32) -> bool, tell: &Tell) -> String {
     let Ok(status) = serde_json::from_str::<Value>(text) else {
-        return format!("  sessions/{name}: not JSON: {}\n", said(text));
+        return format!("  sessions/{name}: not JSON: {}\n", said(&tell.text(text)));
     };
     let process = match status["pid"]
         .as_u64()
@@ -92,10 +93,11 @@ fn status_line(name: &str, text: &str, there: impl Fn(u32) -> bool) -> String {
 }
 
 /// A record of a conversation, as a line: its type, its subtype if it has one,
-/// and what it says.
-fn record_line(line: &str) -> String {
+/// and what it says, read out of its JSON and told whole before it is cut (told as
+/// JSON, an escaped line break in it would hide a secret's shape from the mask).
+fn record_line(line: &str, tell: &Tell) -> String {
     let Ok(record) = serde_json::from_str::<Value>(line) else {
-        return format!("    not JSON: {}\n", said(line));
+        return format!("    not JSON: {}\n", said(&tell.text(line)));
     };
     let kind = record["type"].as_str().unwrap_or("?");
     let kind = match record["subtype"].as_str() {
@@ -107,12 +109,12 @@ fn record_line(line: &str) -> String {
         .as_str()
         .or_else(|| content[0]["text"].as_str())
         .unwrap_or_default();
-    format!("    {kind}: {}\n", said(text))
+    format!("    {kind}: {}\n", said(&tell.text(text)))
 }
 
 /// A conversation of a stand-in agent, as lines: how many records it holds
 /// and the last of them.
-fn conversation_lines(name: &str, text: &str) -> String {
+fn conversation_lines(name: &str, text: &str, tell: &Tell) -> String {
     let records: Vec<&str> = text
         .lines()
         .filter(|line| !line.trim().is_empty())
@@ -124,7 +126,7 @@ fn conversation_lines(name: &str, text: &str) -> String {
         ", the last:\n"
     });
     for record in &records[records.len().saturating_sub(RECORDS)..] {
-        shown.push_str(&record_line(record));
+        shown.push_str(&record_line(record, tell));
     }
     shown
 }
@@ -149,15 +151,16 @@ fn files_in(folder: &Path, suffix: &str) -> Vec<(String, String)> {
 }
 
 /// What the stand-in agents wrote of themselves under the Claude config folder
-/// `config`: each status file and the last records of each conversation, each file
-/// told whole before any of it is cut. It is all the daemon reads of a window.
+/// `config`: each status file and the last records of each conversation, each text read
+/// out of its file and told whole before any of it is cut. It is all the daemon reads
+/// of a window.
 fn written(config: &Path, tell: &Tell) -> String {
     let mut text = String::new();
     for (name, held) in files_in(&config.join("sessions"), ".json") {
-        text.push_str(&status_line(&name, &tell.text(&held), process::is_alive));
+        text.push_str(&status_line(&name, &held, process::is_alive, tell));
     }
     for (name, held) in files_in(&config.join("projects").join("integration"), ".jsonl") {
-        text.push_str(&conversation_lines(&name, &tell.text(&held)));
+        text.push_str(&conversation_lines(&name, &held, tell));
     }
     if text.is_empty() {
         text.push_str("  nothing\n");
@@ -529,46 +532,78 @@ mod tests {
     #[test]
     fn a_status_file_says_its_process_whether_that_is_there_what_it_says_and_the_conversation() {
         let text = r#"{"pid":4242,"sessionId":"sess-1","kind":"interactive","status":"busy"}"#;
+        let plain = Tell(None);
         assert_eq!(
-            status_line("4242.json", text, |pid| pid == 4242),
+            status_line("4242.json", text, |pid| pid == 4242, &plain),
             "  sessions/4242.json: process 4242 is there; says busy on sess-1\n"
         );
         assert_eq!(
-            status_line("4242.json", text, |_| false),
+            status_line("4242.json", text, |_| false, &plain),
             "  sessions/4242.json: process 4242 is gone; says busy on sess-1\n"
         );
         assert_eq!(
-            status_line("7.json", "{", |_| true),
+            status_line("7.json", "{", |_| true, &plain),
             "  sessions/7.json: not JSON: {\n"
         );
         assert_eq!(
-            status_line("8.json", "{}", |_| true),
+            status_line("8.json", "{}", |_| true, &plain),
             "  sessions/8.json: no process; says nothing on no conversation\n"
         );
     }
 
     #[test]
     fn a_record_is_its_type_and_what_it_says_in_one_line() {
+        let plain = Tell(None);
         let user = r#"{"type":"user","message":{"role":"user","content":"DISPATCH a\nb"}}"#;
-        assert_eq!(record_line(user), "    user: DISPATCH a b\n");
+        assert_eq!(record_line(user, &plain), "    user: DISPATCH a b\n");
         let answer = r#"{"type":"assistant","message":{"content":[{"type":"text","text":"dispatched: T-1"}]}}"#;
-        assert_eq!(record_line(answer), "    assistant: dispatched: T-1\n");
+        assert_eq!(
+            record_line(answer, &plain),
+            "    assistant: dispatched: T-1\n"
+        );
         let system = r#"{"type":"system","subtype":"stop_hook_summary"}"#;
-        assert_eq!(record_line(system), "    system/stop_hook_summary: \n");
-        assert_eq!(record_line("{broken"), "    not JSON: {broken\n");
+        assert_eq!(
+            record_line(system, &plain),
+            "    system/stop_hook_summary: \n"
+        );
+        assert_eq!(record_line("{broken", &plain), "    not JSON: {broken\n");
+    }
+
+    #[test]
+    fn a_records_words_are_read_out_of_its_json_and_told_before_they_are_cut() {
+        // Astra's: told as JSON, the escaped line break between `DB_PASSWORD=` and its
+        // value hides the secret's shape from the mask; read out first, it is one.
+        let words = format!(
+            "{}DB_PASSWORD=\n\"correct horse battery staple\"",
+            "x ".repeat(20)
+        );
+        let line = json!({ "type": "user", "message": { "content": words } }).to_string();
+        let masker = masker();
+        let said = record_line(&line, &Tell(Some(&masker)));
+        assert!(!said.contains("horse"), "{said}");
+        assert!(said.contains("DB_PASSWORD= \"[masked]\""), "{said}");
+        // And as the rig's report reads it, from the conversation's file.
+        let config = tempfile::tempdir().unwrap();
+        let folder = config.path().join("projects").join("integration");
+        fs::create_dir_all(&folder).unwrap();
+        fs::write(folder.join("a.jsonl"), format!("{line}\n")).unwrap();
+        let wrote = written(config.path(), &Tell(Some(&masker)));
+        assert!(!wrote.contains("horse"), "{wrote}");
+        assert!(wrote.contains("DB_PASSWORD= \"[masked]\""), "{wrote}");
     }
 
     #[test]
     fn a_conversation_says_how_many_records_it_holds_and_shows_the_last_four() {
+        let plain = Tell(None);
         let record = |n: usize| format!(r#"{{"type":"user","message":{{"content":"turn {n}"}}}}"#);
         let text = (1..=6).map(record).collect::<Vec<_>>().join("\n");
         assert_eq!(
-            conversation_lines("s.jsonl", &text),
+            conversation_lines("s.jsonl", &text, &plain),
             "  projects/integration/s.jsonl: 6 records, the last:\n\
              \x20   user: turn 3\n    user: turn 4\n    user: turn 5\n    user: turn 6\n"
         );
         assert_eq!(
-            conversation_lines("s.jsonl", "\n"),
+            conversation_lines("s.jsonl", "\n", &plain),
             "  projects/integration/s.jsonl: 0 records\n"
         );
     }

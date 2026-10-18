@@ -9,12 +9,18 @@
 //! worker when it ends, Devin's long turns), and each disruption is due a minute and
 //! a half after the one before.
 //!
-//! What is held is that the run gets to its end, plays every disruption with its
-//! effect seen (the stand-in compacts as Claude Code does at `/compact`), and keeps a
-//! report of the shape it always keeps (JSON and Markdown, the harnesses and their
-//! versions, the invariants, the disruptions, the breaks, the timeline). Its verdict
-//! is whatever the watch found: the stand-in chief accepts no task, so the end (9) is
-//! not reached, and what the daemon does with a job a turn left is the daemon's.
+//! The chief, before the switch and after it, accepts each result it is given, as a
+//! real chief takes its staff's work (`CF_TEST_ACCEPT_RESULTS`, which only this run's
+//! `claude` sets), so that the project reaches its end: every task accepted, and
+//! the owner told after the last.
+//!
+//! What is held is that the run gets to its end (9), plays every disruption with its
+//! effect seen (10; the stand-in compacts as Claude Code does at `/compact`), and keeps
+//! a report of the shape it always keeps (JSON and Markdown, the harnesses and their
+//! versions, the invariants, the disruptions, the breaks, the timeline). The rest of
+//! its verdict is whatever the watch found: what the daemon does with a job a turn left
+//! is the daemon's, and a break of a known shape (`evals/known-breaks.json`) passes as
+//! known.
 //!
 //! It is opt-in, and takes about fifteen minutes, on a budget of half an hour (the
 //! `cf` and the pane host are built first):
@@ -61,9 +67,10 @@ fn stand_in(name: &str) -> PathBuf {
 /// The `claude` and the `devin` of the run, in `bin`: the stand-ins, on the folders of
 /// the home they are run on.
 fn write_harnesses(bin: &Path) {
-    // A window given a conversation is the stand-in, on the Claude folder of its home;
-    // the one the run opens to trust its workspace, given none, a Claude with nothing
-    // to ask; and the run asks its version.
+    // A window given a conversation is the stand-in, on the Claude folder of its home,
+    // which accepts each result it is given (a worker is given none); the one the run
+    // opens to trust its workspace, given none, a Claude with nothing to ask; and the
+    // run asks its version.
     files::write_executable(
         &bin.join("claude"),
         format!(
@@ -72,7 +79,8 @@ fn write_harnesses(bin: &Path) {
              case \" $* \" in\n\
              \x20 *\" --session-id \"*|*\" --resume \"*)\n\
              \x20   CLAUDE_CONFIG_DIR=\"$HOME/.claude\"\n\
-             \x20   export CLAUDE_CONFIG_DIR\n\
+             \x20   CF_TEST_ACCEPT_RESULTS=1\n\
+             \x20   export CLAUDE_CONFIG_DIR CF_TEST_ACCEPT_RESULTS\n\
              \x20   exec '{}' \"$@\" ;;\n\
              esac\n\
              echo 'Welcome back!'\n\
@@ -188,7 +196,20 @@ fn the_long_run_is_played_against_the_stand_ins_to_its_end_with_every_disruption
         "the report is said last: {ran}"
     );
     assert_eq!(report["kind"], "long-run");
-    assert!(matches!(report["verdict"].as_str(), Some("PASS" | "FAIL")));
+    // A pass, with the known breaks it carries said, is the exit code 0; a fail is 1.
+    let verdict = report["verdict"].as_str().unwrap();
+    let known = verdict
+        .strip_prefix("PASS with ")
+        .and_then(|rest| rest.strip_suffix(" known"))
+        .is_some_and(|count| count.parse::<u32>().is_ok());
+    assert!(matches!(verdict, "PASS" | "FAIL") || known, "{verdict}");
+    assert_eq!(ran.code == Some(0), verdict.starts_with("PASS"), "{ran}");
+    assert!(
+        ran.stdout.lines().any(|line| line
+            .starts_with("long run · chief claude (fake-chief) · staff claude,devin · ")
+            && line.ends_with(&format!(" · {verdict}"))),
+        "the verdict is said on the summary line: {ran}"
+    );
     assert_eq!(report["error"], Value::Null, "{report}");
     assert_eq!(report["ask"], "stand-in");
 
@@ -219,12 +240,16 @@ fn the_long_run_is_played_against_the_stand_ins_to_its_end_with_every_disruption
         ],
         "{report}"
     );
-    let effect = &report["invariants"][9];
-    assert_eq!(
-        (&effect["number"], &effect["held"]),
-        (&Value::from(10), &Value::Bool(true)),
-        "{report}"
-    );
+    // The project reached its end (9), every task accepted and the owner told after
+    // the last, and each disruption had its effect (10).
+    for (at, number) in [(8, 9), (9, 10)] {
+        let invariant = &report["invariants"][at];
+        assert_eq!(
+            (&invariant["number"], &invariant["held"]),
+            (&Value::from(number), &Value::Bool(true)),
+            "{report}"
+        );
+    }
 
     // The harnesses with their versions, every invariant, and the timeline.
     let harnesses: Vec<&str> = report["harnesses"]

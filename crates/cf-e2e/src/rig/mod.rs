@@ -50,7 +50,6 @@ use crate::{cf, checkout, files, wire, Error, Result};
 
 pub use forget::project_name;
 pub use jobs::Job;
-pub use observe::Printed;
 pub use project::{write_staff, Project};
 
 pub(crate) use observe::events_of;
@@ -100,14 +99,11 @@ pub struct Config {
 /// What a rig passes what it says of itself through, where its owner gives it one
 /// ([`Config::masked_by`]): a run that hides what looks like a key or a token in all
 /// it says. Each text is passed whole, before any of it is cut; a window's screen as
-/// its rows, which the owner masks as one text; and what the rig's windows print is
-/// handed to it as the rig starts ([`Printed`]), which the owner may read whole. A rig
-/// with none says it as it is.
+/// its rows, which the owner masks as one text. A rig with none says it as it is.
 #[derive(Clone)]
 pub struct Masker {
     text: Arc<dyn Fn(&str) -> String + Send + Sync>,
     screen: Arc<ScreenMask>,
-    reads: Arc<dyn Fn(Printed) + Send + Sync>,
 }
 
 /// What a masker passes the rows of a window's screen through.
@@ -123,15 +119,7 @@ impl Masker {
         Self {
             text: Arc::new(text),
             screen: Arc::new(screen),
-            reads: Arc::new(|_| {}),
         }
-    }
-
-    /// The masker, handed what each rig it is given to prints, through `reads`.
-    #[must_use]
-    pub fn reading(mut self, reads: impl Fn(Printed) + Send + Sync + 'static) -> Self {
-        self.reads = Arc::new(reads);
-        self
     }
 
     /// `text` as it is said.
@@ -142,11 +130,6 @@ impl Masker {
     /// The rows of a window's screen as they are said.
     pub fn screen(&self, rows: &[String]) -> Vec<String> {
         (self.screen)(rows)
-    }
-
-    /// The rig that has this masker prints `printed`.
-    fn read(&self, printed: Printed) {
-        (self.reads)(printed);
     }
 }
 
@@ -613,6 +596,13 @@ impl Rig {
     /// that, and the host gives a program that does not leave ten seconds before
     /// it kills it.
     pub fn close_within(mut self, within: Duration) -> Result<()> {
+        self.shut_down_within(within)
+    }
+
+    /// [`Rig::close_within`], but the rig is kept: what the daemon and the pane
+    /// host did not end in `within` is still running until the rig is dropped,
+    /// which kills them, for a look at what a rig that did not end left.
+    pub fn shut_down_within(&mut self, within: Duration) -> Result<()> {
         self.shutdown(within)
     }
 

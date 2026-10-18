@@ -157,18 +157,9 @@ impl Going {
     }
 
     /// The breaks `found` at `at`: each not recorded before is recorded, said and
-    /// told in the timeline, masked with the run's names; one with a window's screen in
-    /// the light of all the run's windows printed ([`Edge::learned`]).
+    /// told in the timeline, masked with the run's names.
     fn record(&mut self, floor: &mut Floor, at: i64, found: Vec<Break>) {
-        let screens = found
-            .iter()
-            .any(|found| !found.evidence.screen.is_empty() && !self.keeper.recorded(&found.key));
-        let names = if screens {
-            self.edge.learned()
-        } else {
-            self.timeline.names.clone()
-        };
-        for kept in self.keeper.keep_at(at, found, &names) {
+        for kept in self.keeper.keep_at(at, found, &self.timeline.names) {
             let _ = floor.note(format!(
                 "BREAK {} ({}): {}",
                 kept.invariant,
@@ -492,6 +483,9 @@ fn closed_look(at: i64, ledger: Ledger, windows: Windows, last: Option<&Look>) -
             ..windows
         },
         records: last.map(|look| look.records.clone()).unwrap_or_default(),
+        records_unread: last
+            .map(|look| look.records_unread.clone())
+            .unwrap_or_default(),
     }
 }
 

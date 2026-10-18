@@ -119,129 +119,15 @@ fn what_stopped_the_run_leaves_through_the_edge_a_usage_a_usage_still() {
     ));
 }
 
-/// What the windows of a rig printed, as a test has them print: each window's text.
-#[derive(Clone, Default)]
-struct Windows(Arc<Mutex<BTreeMap<String, String>>>);
-
-impl Windows {
-    /// The window `pane` prints `text`.
-    fn print(&self, pane: &str, text: &str) {
-        self.0
-            .lock()
-            .unwrap()
-            .entry(pane.to_owned())
-            .or_default()
-            .push_str(text);
-    }
-}
-
-impl Streams for Windows {
-    fn panes(&self) -> Vec<(String, usize)> {
-        let printed = self.0.lock().unwrap();
-        printed
-            .iter()
-            .map(|(pane, text)| (pane.clone(), text.len()))
-            .collect()
-    }
-
-    fn screen(&self, pane: &str) -> String {
-        self.0
-            .lock()
-            .unwrap()
-            .get(pane)
-            .cloned()
-            .unwrap_or_default()
-    }
-}
-
-/// Astra's window: a secret's name, its value, and eleven lines of status after; and
-/// the last twelve lines of its screen, which begin at the value.
-fn printed_with_a_password() -> (String, Vec<String>) {
-    let status: String = (1..=11)
-        .map(|step| format!("step {step} of 11 done\n"))
-        .collect();
-    let printed = format!("$ export DB_PASSWORD=\n\"correct horse battery staple\"\n{status}");
-    let tail = printed.lines().skip(1).map(str::to_owned).collect();
-    (printed, tail)
-}
-
 #[test]
-fn a_screen_leaves_in_the_light_of_all_its_window_printed_and_a_line_of_words_reads_nothing() {
-    let edge = edge();
-    let windows = Windows::default();
-    edge.reads(windows.clone());
-    let (printed, tail) = printed_with_a_password();
-    windows.print("p1-long-claude-1-olive-valley", &printed);
-    // A line of the run's own words is said with what was learned so far: nothing yet.
-    let value = "the value: correct horse battery staple";
-    assert_eq!(edge.shown(value), value);
-    // A screen is masked once every window is read whole.
-    let shown = edge.screen(&tail);
-    assert_eq!(shown[0], "\"[masked]\"");
-    assert_eq!(shown[1..], tail[1..]);
-    assert_eq!(edge.shown(value), "the value: [masked]");
-    // A window that printed more is read again.
-    windows.print(
-        "p1-long-claude-1-olive-valley",
-        "export API_TOKEN=\n'abcd1234 efgh5678'\n",
-    );
+fn the_masker_the_rig_is_given_masks_a_screen_as_one_text() {
+    // The secret's name ends one row and its value is the next: each row told apart
+    // would keep the value.
+    let rows = ["$ export DB_PASSWORD=", "\"correct horse battery staple\""].map(str::to_owned);
     assert_eq!(
-        edge.screen(&["'abcd1234 efgh5678'".to_owned()]),
-        ["'[masked]'"]
+        edge().masker().screen(&rows),
+        ["$ export DB_PASSWORD=", "\"[masked]\""]
     );
-}
-
-#[test]
-fn the_report_and_what_the_rig_says_of_itself_leave_in_the_light_of_all_the_windows_printed() {
-    let (printed, tail) = printed_with_a_password();
-    // What the rig says of itself.
-    let edge = edge();
-    let windows = Windows::default();
-    edge.reads(windows.clone());
-    windows.print("p1-chief", &printed);
-    let shown = edge.masker().screen(&tail);
-    assert_eq!(shown[0], "\"[masked]\"");
-    // The report kept.
-    let edge = self::edge();
-    let windows = Windows::default();
-    edge.reads(windows.clone());
-    windows.print("p1-chief", &printed);
-    let folder = tempfile::tempdir().unwrap();
-    let value = json!({ "breaks": [{ "evidence": { "screen": tail } }] });
-    let (json_file, text_file) = edge
-        .keep(
-            folder.path(),
-            "long",
-            &value,
-            "the value: correct horse battery staple",
-        )
-        .unwrap();
-    let kept: Value = serde_json::from_str(&files::read_string(&json_file).unwrap()).unwrap();
-    assert_eq!(kept["breaks"][0]["evidence"]["screen"][0], "\"[masked]\"");
-    assert_eq!(
-        files::read_string(&text_file).unwrap(),
-        "the value: [masked]"
-    );
-}
-
-#[test]
-fn what_stopped_the_run_leaves_in_the_light_of_all_the_windows_printed() {
-    // A wait that gave up, quoting the last lines of the window's screen.
-    let (printed, tail) = printed_with_a_password();
-    let edge = edge();
-    let windows = Windows::default();
-    edge.reads(windows.clone());
-    windows.print("p1-chief", &printed);
-    let said = format!("gave up waiting for the chief; its screen: {}", tail[0]);
-    let failed = edge.failure(Error::Refused(said.clone()));
-    assert_eq!(
-        failed.to_string(),
-        "gave up waiting for the chief; its screen: \"[masked]\""
-    );
-    assert!(matches!(
-        edge.failure(Error::Usage(said)),
-        Error::Usage(said) if !said.contains("horse")
-    ));
 }
 
 #[test]

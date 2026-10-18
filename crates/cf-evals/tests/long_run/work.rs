@@ -291,6 +291,45 @@ fn a_result_taken_while_its_claude_windows_job_still_ran_breaks_the_second() {
     assert_eq!(found(&scene.look(ms(10, 0)), 2).len(), 1);
 }
 
+/// What a look could not judge of the second, by key.
+fn unjudged_second(look: &cf_evals::long_run::look::Look) -> Vec<String> {
+    cf_evals::long_run::invariants::unjudged(look, &Default::default())
+        .into_iter()
+        .filter(|open| open.invariant == 2)
+        .map(|open| open.key)
+        .collect()
+}
+
+#[test]
+fn a_result_whose_native_record_was_not_read_through_its_turn_is_unresolved() {
+    // Sol's: the copy's tool text names no job, and the Claude worker's own record,
+    // where a job it started would be, was never read. No job seen is no job held.
+    let (scene, conversation, _) = job_then_result("claude-code");
+    scene.item(conversation, 3, "user", B33M_ENDED, true, &t(1, 50));
+    let look = scene.look(ms(10, 0));
+    assert!(found(&look, 2).is_empty());
+    assert_eq!(unjudged_second(&look), ["2:m-131"]);
+    // Its record read through the turn: judged, and it holds.
+    let entry = |at: String, text: &str| {
+        json!({ "timestamp": at, "type": "assistant", "message": { "role": "assistant", "stop_reason": "end_turn", "content": [{ "type": "text", "text": text }] } })
+            .to_string()
+    };
+    let record = Record::claude(&entry(
+        t(1, 30),
+        "The mutation run is going in the background.",
+    ));
+    let look = scene.look_with(ms(10, 0), conversation, record);
+    assert!(
+        unjudged_second(&look).is_empty(),
+        "{:?}",
+        unjudged_second(&look)
+    );
+    // Read only as far as before the turn's prompt: it says nothing of the turn.
+    let record = Record::claude(&entry(t(0, 10), "Ready."));
+    let look = scene.look_with(ms(10, 0), conversation, record);
+    assert_eq!(unjudged_second(&look), ["2:m-131"]);
+}
+
 /// The notification of the end of the job b33m, as Claude Code writes it.
 const B33M_ENDED: &str =
     "<task-notification>\n<task-id>b33m</task-id>\n<status>completed</status>\n</task-notification>";

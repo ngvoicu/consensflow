@@ -15,7 +15,7 @@ use std::sync::OnceLock;
 use cf_e2e::pattern;
 use regex::Regex;
 
-use super::{iso, plain, Break, Evidence, Settings};
+use super::{iso, plain, Break, Evidence, Settings, Unjudged};
 use crate::clock;
 use crate::long_run::ledger::{Item, Message, Participant, Task};
 use crate::long_run::look::Look;
@@ -151,6 +151,79 @@ pub fn done_while_job(look: &Look, settings: &Settings) -> Vec<Break> {
                 record,
             }),
         );
+    }
+    found
+}
+
+/// 2, unresolved: a result of a Claude Code worker's where no job is seen held, whose
+/// worker's own record (where a job it left running would be: `run_in_background`)
+/// was not read through its turn: not read at all, or read only as far as before the
+/// turn's prompt. No job seen there is no job held; whether one still ran when the
+/// result was written cannot be judged.
+pub fn unread_records(look: &Look, settings: &Settings) -> Vec<Unjudged> {
+    let mut found = Vec::new();
+    for result in look
+        .ledger
+        .messages
+        .iter()
+        .filter(|message| message.kind == "result")
+    {
+        let (Some(worker), Some(task), Some(at)) = (
+            result.sender.and_then(|id| look.ledger.participant(id)),
+            result.task.and_then(|id| look.ledger.task(id)),
+            clock::millis(&result.created_at),
+        ) else {
+            continue;
+        };
+        if !Look::is_claude(worker)
+            || look.at - at < settings.young
+            || !jobs_held_by_record(look, worker, at, &Names::default()).is_empty()
+            || finished_before(look, task, result)
+        {
+            continue;
+        }
+        let items = look.items_by(worker.id, at);
+        let Some(conversation) = items
+            .last()
+            .map(|item| item.conversation)
+            .or_else(|| look.ledger.conversations_of(worker.id).last().map(|c| c.id))
+        else {
+            continue;
+        };
+        // The turn's prompt: the last delivery to the window by the result.
+        let prompt = items
+            .iter()
+            .rev()
+            .find(|item| item.role == "user" && item.text.starts_with(DELIVERY))
+            .and_then(|item| item.millis())
+            .unwrap_or(at);
+        let why = match look.records.get(&conversation) {
+            None => Some(
+                look.records_unread
+                    .get(&conversation)
+                    .cloned()
+                    .unwrap_or_else(|| "its record was never read".to_owned()),
+            ),
+            Some(record) => match record.last_said() {
+                Some(said) if said >= prompt => None,
+                Some(said) => Some(format!(
+                    "its record was read only as far as {}, before the turn's prompt at {}",
+                    iso(said),
+                    iso(prompt)
+                )),
+                None => Some("its record said nothing yet".to_owned()),
+            },
+        };
+        if let Some(why) = why {
+            found.push(Unjudged::new(
+                2,
+                format!("2:m-{}", result.id),
+                format!(
+                    "m-{}'s turn is not in @{}'s own record ({why}): whether a background job still ran when it was written cannot be judged",
+                    result.id, worker.handle
+                ),
+            ));
+        }
     }
     found
 }

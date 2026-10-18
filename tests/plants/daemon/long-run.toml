@@ -52,6 +52,8 @@ e2e-lib-process = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "proce
 e2e-lib-machine = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::machine"]
 # What the rig says of itself when it is dropped unclosed, through its owner's masker.
 e2e-lib-report = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "rig::report"]
+# A wait for the chief that gave up, and what it says of the chief's window.
+evals-lib-run-chief = ["cargo", "test", "--offline", "-p", "cf-evals", "--lib", "run::chief"]
 
 # 1 (A1)
 
@@ -444,11 +446,11 @@ runs = ["evals-long-run"]
 [[plant.edit]]
 file = "crates/cf-evals/src/long_run/invariants/order.rs"
 find = '''
-            Err(Unheld::NotCopied(began)) => format!(
-                "is not in the copy of @{handle}'s conversation, which holds no prompt of m-{began}, the delivery that began it"
+            Err(Unheld::NotCopied(message, attempt)) => format!(
+                "is not in the copy of @{handle}'s conversation, which holds no prompt of m-{message} after its delivery attempt {attempt} began"
             ),'''
 replace = '''
-            Err(Unheld::NotCopied(_)) => continue,'''
+            Err(Unheld::NotCopied(..)) => continue,'''
 
 [[plant]]
 name = "long run 4: a result whose copied turn holds no answer after its prompt is skipped"
@@ -559,8 +561,12 @@ runs = ["evals-long-run"]
 
 [[plant.edit]]
 file = "crates/cf-evals/src/long_run/invariants/windows.rs"
-find = "        .filter(|exit| exit.closed_by == ClosedBy::Itself)"
-replace = "        .filter(|exit| exit.closed_by == ClosedBy::Daemon)"
+find = '''
+        .filter(|exit| exit.closed_by == ClosedBy::Itself)
+    {'''
+replace = '''
+        .filter(|exit| exit.closed_by == ClosedBy::Daemon)
+    {'''
 
 [[plant]]
 name = "long run 6: an exit is timed at the next look, not when the host told it, and a crash whose task the daemon paused at once is missed"
@@ -1893,7 +1899,7 @@ runs = ["evals-lib-long-run"]
 
 [[plant.edit]]
 file = "crates/cf-evals/src/long_run/edge.rs"
-find = "        let shown = masked(value, &self.learned());"
+find = "        let shown = masked(value, &self.names());"
 replace = "        let shown = value.clone();"
 
 [[plant]]
@@ -1913,7 +1919,7 @@ runs = ["evals-lib-long-run"]
 
 [[plant.edit]]
 file = "crates/cf-evals/src/long_run/edge.rs"
-find = "            other => Error::Refused(mask(&other.to_string(), &names)),"
+find = "            other => Error::Refused(self.shown(&other.to_string())),"
 replace = "            other => other,"
 
 [[plant]]
@@ -1923,7 +1929,7 @@ runs = ["evals-lib-long-run"]
 
 [[plant.edit]]
 file = "crates/cf-evals/src/long_run/edge.rs"
-find = "            Error::Usage(said) => Error::Usage(mask(&said, &names)),"
+find = "            Error::Usage(said) => Error::Usage(self.shown(&said)),"
 replace = "            Error::Usage(said) => Error::Usage(said),"
 
 [[plant]]
@@ -1967,14 +1973,14 @@ find = "            move |screen| rows.screen(screen),"
 replace = "            move |screen| screen.iter().map(|row| rows.shown(row)).collect(),"
 
 [[plant]]
-name = "long run: the chief's screen a wait that gave up shows is joined before it is masked, and a value on the row after its name is said"
+name = "long run: the chief's screen a wait that gave up shows is cut to its last rows before it is masked, and a value on the row after its name is said"
 meant = "nothing_of_the_long_run_writes_around_its_edge"
 runs = ["evals-long-run"]
 
 [[plant.edit]]
 file = "crates/cf-evals/src/run/chief.rs"
-find = '''        let shown = floor.screen(&shown).join(" ⏎ ");'''
-replace = '''        let shown = shown.join(" ⏎ ");'''
+find = '''            let lines = floor.screen(&self.last_lines(&pane, 40));'''
+replace = '''            let lines = self.last_lines(&pane, 40);'''
 
 [[plant]]
 name = "long run: the rig is given a copy of the names the run knew when it started, and a window's id it learned later is hidden in what the rig says"
@@ -1984,11 +1990,11 @@ runs = ["evals-lib-long-run"]
 [[plant.edit]]
 file = "crates/cf-evals/src/long_run/edge.rs"
 find = '''
-        let (text, screen, reads) = (self.clone(), self.clone(), self.clone());
+        let (text, screen) = (self.clone(), self.clone());
         Masker::new(
             move |said| text.shown(said),'''
 replace = '''
-        let (names, screen, reads) = (self.names(), self.clone(), self.clone());
+        let (names, screen) = (self.names(), self.clone());
         Masker::new(
             move |said| mask(said, &names),'''
 
@@ -2202,6 +2208,57 @@ find = "    line.captures_iter(text)"
 replace = "    line.captures_iter(text).take(1)"
 
 [[plant]]
+name = "long run: the stand-in chief accepts no result it is given, and the dry run never reaches its end"
+meant = "a_window_that_accepts_results_accepts_the_task_of_each_result_header_and_no_other"
+runs = ["fake-agent-reply"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_agent/reply.rs"
+find = """
+    if !accepting {
+        return Vec::new();
+    }"""
+replace = """
+    if accepting {
+        return Vec::new();
+    }"""
+
+[[plant]]
+name = "long run: the stand-in chief accepts a task it was given or a question it was asked, as if each were a result"
+meant = "a_window_that_accepts_results_accepts_the_task_of_each_result_header_and_no_other"
+runs = ["fake-agent-reply"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_agent/reply.rs"
+find = '(T-\d+) · result from @";'
+replace = '(T-\d+) · \w+ from @";'
+
+[[plant]]
+name = "long run: the stand-in chief accepts a result header a line only quotes"
+meant = "a_window_that_accepts_results_accepts_the_task_of_each_result_header_and_no_other"
+runs = ["fake-agent-reply"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_agent/reply.rs"
+find = 'const RESULT: &str = r"(?m)^\[ConsensFlow'
+replace = 'const RESULT: &str = r"(?m)\[ConsensFlow'
+
+[[plant]]
+name = "long run: the stand-in chief accepts only the first result a delivery holds"
+meant = "a_window_that_accepts_results_accepts_the_task_of_each_result_header_and_no_other"
+runs = ["fake-agent-reply"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_agent/reply.rs"
+find = """
+        .captures_iter(text)
+        .map(|result| vec!["task".to_owned(), "accept".to_owned(), result[1].to_owned()])"""
+replace = """
+        .captures_iter(text)
+        .take(1)
+        .map(|result| vec!["task".to_owned(), "accept".to_owned(), result[1].to_owned()])"""
+
+[[plant]]
 name = "long run: the stand-in's compaction writes no boundary Claude Code writes, and the dry run's /compact is never seen done"
 meant = "a_compaction_writes_its_boundary_and_the_summary_in_claudes_shape_and_no_turn"
 runs = ["fake-agent-compact"]
@@ -2271,9 +2328,10 @@ file = "crates/cf-e2e/src/rig/report.rs"
 find = "    let tell = Tell(rig.masker.as_ref());"
 replace = "    let tell = Tell(None);"
 
-# Masked first, then cut (round 9, both reviewers): the rig's report tells each text whole and
-# each screen as one before it takes a part of it; the pane host's screens leave in the light of
-# all their windows printed; rows run on by the cells they fill.
+# Masked first, then cut (rounds 9 and 11, both reviewers): the rig's report tells each text whole
+# and each screen as one before it takes a part of it, a record's words read out of their JSON
+# first; rows run on by the cells they fill. (Round 9's reading of every window's whole output went
+# in round 11, its plants with it: the pane host's cut is accepted as hygiene, mask.rs's note.)
 
 [[plant]]
 name = "long run: the rig's report takes a window's last characters of its screen before it is told"
@@ -2326,14 +2384,24 @@ find = "    let log = tell.text(log);"
 replace = "    let log = log.to_owned();"
 
 [[plant]]
-name = "long run: the rig's report cuts a record's words before its file is told"
+name = "long run: the rig's report cuts a record's words before they are told"
 meant = "the_daemons_log_and_what_the_agents_wrote_are_told_whole_before_they_are_cut"
 runs = ["e2e-lib-report"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/rig/report.rs"
-find = "        text.push_str(&conversation_lines(&name, &tell.text(&held)));"
-replace = "        text.push_str(&conversation_lines(&name, &held));"
+find = '''    format!("    {kind}: {}\n", said(&tell.text(text)))'''
+replace = '''    format!("    {kind}: {}\n", said(text))'''
+
+[[plant]]
+name = "long run: the rig's report tells a record as JSON, and a secret whose line break JSON escaped is kept"
+meant = "a_records_words_are_read_out_of_its_json_and_told_before_they_are_cut"
+runs = ["e2e-lib-report"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/report.rs"
+find = "        text.push_str(&conversation_lines(&name, &held, tell));"
+replace = "        text.push_str(&conversation_lines(&name, &tell.text(&held), &Tell(None)));"
 
 [[plant]]
 name = "long run: a rig's masker tells a screen's rows each through its text mask"
@@ -2346,154 +2414,14 @@ find = "        (self.screen)(rows)"
 replace = "        rows.iter().map(|row| (self.text)(row)).collect()"
 
 [[plant]]
-name = "long run: a rig hands its owner's masker nothing of what its windows print"
-meant = "what_stops_the_run_and_what_its_rig_says_leave_through_the_edge"
-runs = ["evals-long-run"]
-
-[[plant.edit]]
-file = "crates/cf-e2e/src/rig/launch.rs"
-find = "            masker.read(Printed::of(&shared));"
-replace = "            let _ = (masker, Printed::of(&shared));"
-
-[[plant]]
-name = "long run: a screen leaves the run with no window read whole"
-meant = "a_screen_leaves_in_the_light_of_all_its_window_printed_and_a_line_of_words_reads_nothing"
-runs = ["evals-lib-long-run"]
-
-[[plant.edit]]
-file = "crates/cf-evals/src/long_run/edge.rs"
-find = "        screen(rows, &self.learned())"
-replace = "        screen(rows, &self.names())"
-
-[[plant]]
-name = "long run: the report is kept with no window read whole"
-meant = "the_report_and_what_the_rig_says_of_itself_leave_in_the_light_of_all_the_windows_printed"
-runs = ["evals-lib-long-run"]
-
-[[plant.edit]]
-file = "crates/cf-evals/src/long_run/edge.rs"
-find = "        let shown = masked(value, &self.learned());"
-replace = "        let shown = masked(value, &self.names());"
-
-[[plant]]
 name = "long run: the masker the rig is given tells a screen's rows each as a text"
-meant = "the_report_and_what_the_rig_says_of_itself_leave_in_the_light_of_all_the_windows_printed"
+meant = "the_masker_the_rig_is_given_masks_a_screen_as_one_text"
 runs = ["evals-lib-long-run"]
 
 [[plant.edit]]
 file = "crates/cf-evals/src/long_run/edge.rs"
 find = "            move |rows| screen.screen(rows),"
 replace = "            move |rows| rows.iter().map(|row| screen.shown(row)).collect(),"
-
-[[plant]]
-name = "long run: a window is read whole once, and what it printed after is never read"
-meant = "a_screen_leaves_in_the_light_of_all_its_window_printed_and_a_line_of_words_reads_nothing"
-runs = ["evals-lib-long-run"]
-
-[[plant.edit]]
-file = "crates/cf-evals/src/long_run/edge.rs"
-find = "                if read.get(&(rig, pane.clone())) == Some(&length) {"
-replace = "                if read.contains_key(&(rig, pane.clone())) {"
-
-[[plant]]
-name = "long run: every line of the run's own words reads every window whole"
-meant = "a_screen_leaves_in_the_light_of_all_its_window_printed_and_a_line_of_words_reads_nothing"
-runs = ["evals-lib-long-run"]
-
-[[plant.edit]]
-file = "crates/cf-evals/src/long_run/edge.rs"
-find = "        mask(text, &self.names())"
-replace = "        mask(text, &self.learned())"
-
-[[plant]]
-name = "long run: what stopped the run leaves with no window read whole"
-meant = "what_stopped_the_run_leaves_in_the_light_of_all_the_windows_printed"
-runs = ["evals-lib-long-run"]
-
-[[plant.edit]]
-file = "crates/cf-evals/src/long_run/edge.rs"
-find = "        let names = self.learned();"
-replace = "        let names = self.names();"
-
-[[plant]]
-name = "long run: a break's screen is kept with no window read whole"
-meant = "no_cut_split_or_tail_is_taken_of_text_unmasked"
-runs = ["evals-long-run"]
-
-[[plant.edit]]
-file = "crates/cf-evals/src/long_run/conduct.rs"
-find = "            self.edge.learned()"
-replace = "            self.timeline.names.clone()"
-
-[[plant]]
-name = "long run: a secret learned from a window's whole is hidden in no text"
-meant = "a_secret_whose_name_a_cut_left_out_is_hidden_once_its_window_is_read_whole"
-runs = ["evals-lib-long-run"]
-
-[[plant.edit]]
-file = "crates/cf-evals/src/long_run/mask.rs"
-find = "    let learned = merged(names.learned_in(&text));"
-replace = "    let learned: Vec<Range<usize>> = Vec::new();"
-
-[[plant]]
-name = "long run: a learned secret that holds another is hidden only as far as the shorter"
-meant = "secrets_learned_are_found_whole_by_one_pattern_or_each_alone_and_never_dropped"
-runs = ["evals-lib-long-run"]
-
-[[plant.edit]]
-file = "crates/cf-evals/src/long_run/mask.rs"
-find = "        secrets.sort_by_key(|secret| std::cmp::Reverse(secret.len()));"
-replace = "        secrets.sort();"
-
-[[plant]]
-name = "long run: the secrets learned, looked for one at a time, are none of them found"
-meant = "secrets_learned_are_found_whole_by_one_pattern_or_each_alone_and_never_dropped"
-runs = ["evals-lib-long-run"]
-
-[[plant.edit]]
-file = "crates/cf-evals/src/long_run/mask.rs"
-find = "            Self::Each(secrets) => secrets"
-replace = "            Self::Each(secrets) => secrets[..0]"
-
-[[plant]]
-name = "long run: a learned secret drawn again over two rows is looked for in each row alone"
-meant = "a_secret_whose_name_a_cut_left_out_is_hidden_once_its_window_is_read_whole"
-runs = ["evals-lib-long-run"]
-
-[[plant.edit]]
-file = "crates/cf-evals/src/long_run/mask.rs"
-find = "    stretches.extend(names.learned_in(text));"
-replace = "    let _ = names;"
-
-[[plant]]
-name = "long run: what a window printed teaches every secret, its shape's alone too"
-meant = "a_secret_whose_name_a_cut_left_out_is_hidden_once_its_window_is_read_whole"
-runs = ["evals-lib-long-run"]
-
-[[plant.edit]]
-file = "crates/cf-evals/src/long_run/mask.rs"
-find = "        for span in found(&joined, self, |rule| rule.context) {"
-replace = "        for span in found(&joined, self, |_| true) {"
-
-[[plant]]
-name = "long run: a secret over two lines is learned whole, and its second line alone is shown"
-meant = "a_secret_whose_name_a_cut_left_out_is_hidden_once_its_window_is_read_whole"
-runs = ["evals-lib-long-run"]
-
-[[plant.edit]]
-file = "crates/cf-evals/src/long_run/mask.rs"
-find = "                let part = joined[span.start.max(place.start)..span.end.min(place.end)].trim();"
-replace = "                let part = joined[span.clone()].trim();"
-
-[[plant]]
-name = "long run: a learned part of a few characters is hidden everywhere"
-meant = "a_secret_whose_name_a_cut_left_out_is_hidden_once_its_window_is_read_whole"
-runs = ["evals-lib-long-run"]
-
-[[plant.edit]]
-file = "crates/cf-evals/src/long_run/mask.rs"
-find = "                if part.chars().count() >= LEAST {"
-replace = "                if !part.is_empty() {"
 
 [[plant]]
 name = "long run: a row runs on by its characters, not the cells they fill"
@@ -2545,7 +2473,7 @@ runs = ["evals-long-run"]
 
 [[plant.edit]]
 file = "crates/cf-evals/src/long_run/invariants/order.rs"
-find = "        .ok_or(Unheld::NotCopied(began))?;"
+find = "        .ok_or(Unheld::NotCopied(message, attempt))?;"
 replace = "        .unwrap_or(0);"
 
 [[plant]]
@@ -2555,8 +2483,8 @@ runs = ["evals-long-run"]
 
 [[plant.edit]]
 file = "crates/cf-evals/src/long_run/invariants/order.rs"
-find = "                && clock::millis(&event.at).is_some_and(|when| when <= at))"
-replace = "                && clock::millis(&event.at).is_some())"
+find = "                && began <= at)"
+replace = "                && began >= 0)"
 
 [[plant]]
 name = "long run 4: a delivery of the task to another is taken for the one that began the worker's turn"
@@ -2637,3 +2565,152 @@ runs = ["evals-long-run"]
 file = "crates/cf-evals/src/long_run/invariants/windows.rs"
 find = '                    if to == "paused" && clock::millis(&event.at) == Some(at) {'
 replace = '                    if to == "paused" && clock::millis(&event.at) <= Some(at) {'
+
+# The long run's verdict (round 11, both reviewers): a result is held to its own delivery
+# attempt's turn, and to no other task's; a Claude worker's own record not read through a turn is
+# no record that says nothing; a pause that shares a crash's millisecond is the crash's only where
+# it says so; and a break the list of known breaks names (evals/known-breaks.json) fails nothing.
+# And the cheap mask-before-cut leftovers: a word of the chief's command line, a guard that sees
+# slices.
+
+[[plant]]
+name = "long run 4: a retried delivery's result is held to the first attempt's turn"
+meant = "a_retried_delivery_whose_turn_was_lost_is_never_held_to_the_first_attempts_turn"
+runs = ["evals-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/invariants/order.rs"
+find = "                && item.millis().is_some_and(|said| said >= began)"
+replace = "                && item.millis().is_some()"
+
+[[plant]]
+name = "long run 4: a late result's turn runs on into the next task's, and takes its answer"
+meant = "a_late_result_is_held_to_its_own_tasks_turn_and_never_to_the_next_tasks"
+runs = ["evals-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/invariants/order.rs"
+find = "            item.conversation != conversation || delivers_another_task(look, item, result.task)"
+replace = "            item.conversation != conversation"
+
+[[plant]]
+name = "long run 2: a Claude worker's record never read is taken for one that says no job ran"
+meant = "a_result_whose_native_record_was_not_read_through_its_turn_is_unresolved"
+runs = ["evals-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/invariants/work.rs"
+find = '''
+            None => Some(
+                look.records_unread
+                    .get(&conversation)
+                    .cloned()
+                    .unwrap_or_else(|| "its record was never read".to_owned()),
+            ),'''
+replace = '''
+            None => None,'''
+
+[[plant]]
+name = "long run 2: a Claude worker's record read only to before the turn is taken for the turn's"
+meant = "a_result_whose_native_record_was_not_read_through_its_turn_is_unresolved"
+runs = ["evals-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/invariants/work.rs"
+find = "                Some(said) if said >= prompt => None,"
+replace = "                Some(said) if said >= prompt || said < prompt => None,"
+
+[[plant]]
+name = "long run 6: a pause in the crash's millisecond is the crash's whoever paused"
+meant = "a_pause_in_the_crashs_millisecond_is_the_crashs_only_where_it_says_so"
+runs = ["evals-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/invariants/windows.rs"
+find = "                        if because.starts_with(&closed) {"
+replace = "                        if because.starts_with(&closed) || because.is_empty() {"
+
+[[plant]]
+name = "long run 6: a pause in the crash's millisecond that says neither whose it is is taken for someone's"
+meant = "a_pause_in_the_crashs_millisecond_is_the_crashs_only_where_it_says_so"
+runs = ["evals-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/invariants/windows.rs"
+find = '''                        } else if event.data["by"].is_string() {'''
+replace = '''                        } else if event.data["by"].is_string() || event.data["by"].is_null() {'''
+
+[[plant]]
+name = "long run 6: a crash whose task's state cannot be told is said nowhere"
+meant = "a_pause_in_the_crashs_millisecond_is_the_crashs_only_where_it_says_so"
+runs = ["evals-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/invariants.rs"
+find = "    found.extend(windows::untold_exits(look));"
+replace = "    let _ = windows::untold_exits;"
+
+[[plant]]
+name = "long run 3: any A3 is known, whatever its late notice"
+meant = "a_run_whose_only_breaks_are_known_passes_with_them_and_any_other_break_fails_it"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/known.rs"
+find = "        .find(|entry| entry.invariant == found.invariant && entry.shape == shape)"
+replace = "        .find(|entry| entry.invariant == found.invariant && !shape.is_empty())"
+
+[[plant]]
+name = "long run 3: every late notice is said to be the background ended note"
+meant = "a_late_notice_says_which_notice_it_is_the_background_ended_note_or_a_let_go"
+runs = ["evals-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/invariants/order.rs"
+find = "            .with_shape(if notice.body.contains(ENDED[0]) {"
+replace = "            .with_shape(if !notice.body.is_empty() {"
+
+[[plant]]
+name = "long run: a known break fails the run as any other does"
+meant = "a_run_whose_only_breaks_are_known_passes_with_them_and_any_other_break_fails_it"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/report.rs"
+find = '''
+                let count = self
+                    .unknown()'''
+replace = '''
+                let count = self
+                    .breaks
+                    .iter()'''
+
+[[plant]]
+name = "long run: a run with known breaks is no pass, and its status says it failed"
+meant = "a_run_whose_only_breaks_are_known_passes_with_them_and_any_other_break_fails_it"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/report.rs"
+find = '''        self.verdict().starts_with("PASS")'''
+replace = '''        self.verdict() == "PASS"'''
+
+[[plant]]
+name = "long run: a word of the chief's command line is cut before it is masked, and a token's start is said"
+meant = "each_word_of_a_command_line_is_masked_whole_before_it_is_cut"
+runs = ["evals-lib-run-chief"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/run/chief.rs"
+find = "            let word = floor.shown(word);"
+replace = "            let word = word.clone();"
+
+[[plant]]
+name = "long run: the guard of cuts reads no slice of a text"
+meant = "the_parts_it_looks_for_are_found_where_they_are"
+runs = ["evals-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/tests/long_run/edge.rs"
+find = "        || sliced"
+replace = "        || (sliced && false)"

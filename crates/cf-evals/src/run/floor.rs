@@ -61,7 +61,7 @@ impl<'o> Floor<'o> {
     }
 
     /// `line` as it is said: through the run's mask, where it has one.
-    fn shown(&self, line: impl Display) -> String {
+    pub fn shown(&self, line: impl Display) -> String {
         let line = line.to_string();
         match &self.mask {
             Some(mask) => (mask.line)(&line),

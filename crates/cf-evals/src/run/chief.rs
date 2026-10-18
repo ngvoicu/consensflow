@@ -152,10 +152,13 @@ impl<'r> Chief<'r> {
         } else {
             lane["pane"].clone()
         };
+        // The screen's rows through the run's screen mask first, as one text, and only
+        // then its last 12 taken: a secret's name may end one row and its value begin
+        // the next.
         let shown = if pane.is_null() {
             Vec::new()
         } else {
-            let lines = self.last_lines(&pane, 40);
+            let lines = floor.screen(&self.last_lines(&pane, 40));
             lines[lines.len().saturating_sub(12)..].to_vec()
         };
         let started = opened.map_or_else(String::new, |frame| {
@@ -163,22 +166,9 @@ impl<'r> Chief<'r> {
                 .as_array()
                 .map(|argv| argv.iter().map(text).collect())
                 .unwrap_or_default();
-            let whole: usize = argv.join(" ").chars().count();
-            let words: Vec<String> = argv
-                .iter()
-                .map(|word| {
-                    if word.chars().count() > 100 {
-                        format!("{}…({})", cut_to(word, 100), word.chars().count())
-                    } else {
-                        word.clone()
-                    }
-                })
-                .collect();
-            format!(" started ({whole} characters) as {};", words.join(" "))
+            started_as(&argv, floor)
         });
-        // The screen's rows through the run's screen mask first, as one text: a secret's
-        // name may end one row and its value begin the next.
-        let shown = floor.screen(&shown).join(" ⏎ ");
+        let shown = shown.join(" ⏎ ");
         floor.note(format!(
             "gave up waiting for {what}: chief {};{started} its screen: {shown}",
             serde_json::to_string(&lane["activity"]).unwrap_or_else(|_| "null".to_owned()),
@@ -206,6 +196,26 @@ impl<'r> Chief<'r> {
         }
         Ok(())
     }
+}
+
+/// What the chief's window was started as, `argv`, as a wait that gave up says it: how
+/// long it was, and each word, one of more than 100 characters cut to them and said how
+/// long it was. Each word through the run's mask whole before it is cut: a secret cut
+/// short is no secret's shape, and would be kept in part.
+fn started_as(argv: &[String], floor: &Floor) -> String {
+    let whole: usize = argv.join(" ").chars().count();
+    let words: Vec<String> = argv
+        .iter()
+        .map(|word| {
+            let word = floor.shown(word);
+            if word.chars().count() > 100 {
+                format!("{}…({})", cut_to(&word, 100), word.chars().count())
+            } else {
+                word
+            }
+        })
+        .collect();
+    format!(" started ({whole} characters) as {};", words.join(" "))
 }
 
 /// The first `most` characters of `word`.
@@ -236,6 +246,33 @@ mod tests {
         assert_eq!(Chief::lane_of(&board)["pane"]["id"], "p1-chief-1");
         assert_eq!(Chief::lane_of(&json!({ "lanes": [] })), Value::Null);
         assert_eq!(Chief::lane_of(&Value::Null), Value::Null);
+    }
+
+    #[test]
+    fn each_word_of_a_command_line_is_masked_whole_before_it_is_cut() {
+        // Astra's: a word of 84 characters and a token after them, which the cut at 100
+        // would leave 16 characters of: no token's shape, kept in part.
+        let word = format!(
+            "{}ghp_abcdefghijklmnopqrstuvwxyz0123456789",
+            "x ".repeat(42)
+        );
+        let mut out = Vec::new();
+        let floor = Floor::masked(
+            &mut out,
+            |line| crate::long_run::mask::mask(line, &crate::long_run::mask::Names::default()),
+            <[String]>::to_vec,
+        );
+        let said = started_as(&["claude".to_owned(), word], &floor);
+        assert!(!said.contains("ghp_abcdef"), "{said}");
+        assert!(said.contains("[masked]"), "{said}");
+        // Without a mask, as it was, cut where it says how long it was.
+        let mut out = Vec::new();
+        let plain = Floor::new(&mut out);
+        let said = started_as(&["a".repeat(101)], &plain);
+        assert_eq!(
+            said,
+            format!(" started (101 characters) as {}…(101);", "a".repeat(100))
+        );
     }
 
     #[test]

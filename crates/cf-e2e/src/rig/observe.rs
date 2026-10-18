@@ -3,47 +3,13 @@
 //! the keys it pressed into a window and when; and the human's typing into the
 //! chief's terminal.
 
-use std::sync::Arc;
 use std::time::Duration;
 
 use serde_json::{json, Map, Value};
 
 use super::report::plain;
-use super::route::Shared;
 use super::{Project, Rig, IDLE};
 use crate::{files, Error, Result};
-
-/// What the windows of a rig printed, each window's whole, by its id: read while the
-/// rig runs and after it is gone. Its owner's masker is handed it as the rig starts.
-#[derive(Clone)]
-pub struct Printed(Arc<Shared>);
-
-impl Printed {
-    /// What the windows of the rig `shared` is of print.
-    pub(super) fn of(shared: &Arc<Shared>) -> Self {
-        Self(Arc::clone(shared))
-    }
-
-    /// Each window that printed, by its id, with how many bytes it printed so far.
-    pub fn panes(&self) -> Vec<(String, usize)> {
-        let mut panes: Vec<(String, usize)> = self
-            .0
-            .seen()
-            .printed
-            .iter()
-            .map(|(pane, bytes)| (pane.clone(), bytes.len()))
-            .collect();
-        panes.sort();
-        panes
-    }
-
-    /// Everything the window `pane` printed so far, as the text on its screen
-    /// ([`Rig::screen`]).
-    pub fn screen(&self, pane: &str) -> String {
-        let printed = self.0.seen().printed.get(pane).cloned();
-        printed.map(|bytes| plain(&bytes)).unwrap_or_default()
-    }
-}
 
 impl Rig {
     /// Everything the window `pane` printed so far, as the text on its screen:
@@ -53,7 +19,8 @@ impl Rig {
     /// never opened. It is the whole of what was printed, not the screen as the
     /// terminal now draws it: what was drawn over is still in it.
     pub fn screen(&self, pane: &str) -> String {
-        Printed::of(&self.shared).screen(pane)
+        let printed = self.shared.seen().printed.get(pane).cloned();
+        printed.map(|bytes| plain(&bytes)).unwrap_or_default()
     }
 
     /// Everything the window `pane` printed so far, as the bytes the pane host

@@ -60,6 +60,30 @@ fn an_ended_notice_after_its_result_breaks_the_third() {
     assert_eq!(found(&scene.look(ms(4, 0)), 3).len(), 1);
 }
 
+#[test]
+fn a_late_notice_says_which_notice_it_is_the_background_ended_note_or_a_let_go() {
+    // What a list of known breaks matches a break of the third by.
+    let late = |body: &str| {
+        let scene = Scene::new(&[("long-worker", "claude-code")]);
+        let task = task(&scene);
+        scene.message(
+            131,
+            (CHIEF, Some(3)),
+            "result",
+            Some(task),
+            "Done.",
+            &t(2, 0),
+        );
+        scene.message(132, (CHIEF, None), "note", Some(task), body, &t(2, 1));
+        found(&scene.look(ms(2, 2)), 3)
+    };
+    assert_eq!(late(ENDED)[0].shape, Some(invariants::ENDED_NOTE));
+    assert_eq!(
+        late("T-14 is let go: its job is gone.")[0].shape,
+        Some(invariants::LET_GO_NOTE)
+    );
+}
+
 /// T-14 sent back for more work at `at`: it leaves done, and an attempt begins.
 fn sent_back(scene: &Scene, at: &str) {
     scene.event(
@@ -244,7 +268,7 @@ fn a_result_whose_turn_the_copy_does_not_hold_is_unresolved_never_skipped() {
     assert_eq!(open[0].0, "4:m-131");
     assert_eq!(
         open[0].1,
-        "m-131's turn is not in the copy of @long-worker's conversation, which holds no prompt of m-120, the delivery that began it: whether it is the turn's final answer cannot be judged"
+        "m-131's turn is not in the copy of @long-worker's conversation, which holds no prompt of m-120 after its delivery attempt 1 began: whether it is the turn's final answer cannot be judged"
     );
     // Too young to judge: the copy is made a moment after.
     assert!(unanswered(&scene.look(ms(2, 30))).is_empty());
@@ -378,7 +402,7 @@ fn a_result_whose_own_turn_is_missing_is_never_held_to_an_earlier_turn_of_its_wo
     assert_eq!(open[0].0, "4:m-141");
     assert_eq!(
         open[0].1,
-        "m-141's turn is not in the copy of @long-worker's conversation, which holds no prompt of m-140, the delivery that began it: whether it is the turn's final answer cannot be judged"
+        "m-141's turn is not in the copy of @long-worker's conversation, which holds no prompt of m-140 after its delivery attempt 1 began: whether it is the turn's final answer cannot be judged"
     );
     // Its turn copied: the old answer again is not its final answer.
     scene.item(
@@ -405,6 +429,103 @@ fn a_result_whose_own_turn_is_missing_is_never_held_to_an_earlier_turn_of_its_wo
         "m-141 is not its turn's final answer, whole"
     );
     assert!(unanswered(&look).is_empty());
+}
+
+/// The final answer of [`worked`]'s turn.
+const ANSWER: &str = "Rounding is half-even now, with a test; 61 tests pass.";
+
+#[test]
+fn a_retried_delivery_whose_turn_was_lost_is_never_held_to_the_first_attempts_turn() {
+    // Astra's: m-120 delivered and answered at 10:01; delivered again at 10:03 (its
+    // second attempt), the retry's turn never copied, and the result the old answer.
+    let scene = Scene::new(&[("long-worker", "claude-code")]);
+    let (task, conversation) = worked(&scene);
+    scene.event(
+        &t(3, 0),
+        "delivery.begun",
+        &json!({ "message": 120, "attempt": 2 }),
+    );
+    scene.message(
+        131,
+        (CHIEF, Some(3)),
+        "result",
+        Some(task),
+        ANSWER,
+        &t(4, 0),
+    );
+    let look = scene.look(ms(8, 0));
+    assert!(found(&look, 4).is_empty(), "{:?}", found(&look, 4));
+    let open = unanswered(&look);
+    assert_eq!(open.len(), 1, "{open:?}");
+    assert_eq!(
+        open[0].1,
+        "m-131's turn is not in the copy of @long-worker's conversation, which holds no prompt of m-120 after its delivery attempt 2 began: whether it is the turn's final answer cannot be judged"
+    );
+    // The retry's turn copied: the old answer again is not its final answer.
+    scene.item(
+        conversation,
+        6,
+        "user",
+        "[ConsensFlow m-120 · T-14 · task from @chief]\nFix the rounding",
+        true,
+        &t(3, 0),
+    );
+    scene.item(
+        conversation,
+        7,
+        "assistant",
+        "Rounding is half-even now in the totals too; 62 tests pass.",
+        true,
+        &t(3, 30),
+    );
+    let breaks = found(&scene.look(ms(8, 0)), 4);
+    assert_eq!(breaks.len(), 1, "{breaks:?}");
+    assert_eq!(
+        breaks[0].said,
+        "m-131 is not its turn's final answer, whole"
+    );
+}
+
+#[test]
+fn a_late_result_is_held_to_its_own_tasks_turn_and_never_to_the_next_tasks() {
+    // Sol's: T-14 answered at 10:01; T-15 delivered (m-140) and answered at 10:02:30;
+    // then T-14's late result carries T-15's answer.
+    let scene = Scene::new(&[("long-worker", "claude-code")]);
+    let (task, conversation) = worked(&scene);
+    let next = scene.task(15, 3, "done", &t(2, 0));
+    scene.briefed(140, 3, next, &t(2, 0));
+    scene.item(
+        conversation,
+        6,
+        "user",
+        "[ConsensFlow m-140 · T-15 · task from @chief]\nRound the totals",
+        true,
+        &t(2, 0),
+    );
+    let other = "The totals are rounded half-even too; 62 tests pass.";
+    scene.item(conversation, 7, "assistant", other, true, &t(2, 30));
+    scene.message(150, (CHIEF, Some(3)), "result", Some(task), other, &t(3, 0));
+    let look = scene.look(ms(8, 0));
+    let breaks: Vec<_> = found(&look, 4)
+        .into_iter()
+        .filter(|found| found.key == "4:m-150")
+        .collect();
+    assert_eq!(breaks.len(), 1, "{breaks:?}");
+    assert_eq!(
+        breaks[0].said,
+        "m-150 is not its turn's final answer, whole"
+    );
+    // Its own answer as its result holds.
+    scene.message(
+        151,
+        (CHIEF, Some(3)),
+        "result",
+        Some(task),
+        ANSWER,
+        &t(3, 0),
+    );
+    let look = scene.look(ms(8, 0));
+    assert!(found(&look, 4).iter().all(|found| found.key != "4:m-151"));
 }
 
 /// The worker's conversation for T-14: its brief, two lines of progress each

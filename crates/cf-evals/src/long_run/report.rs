@@ -6,7 +6,10 @@
 //! its end, or when it could not be run to its end; the verdict says which. A run that
 //! did not fail but holds what the watch could not judge (an ended notice the log ties
 //! to no result, a window's tree it could not see) is `UNRESOLVED`, each said: missing
-//! evidence never passes. Only a run with neither is `PASS`. What it keeps and says has
+//! evidence never passes. Only a run with neither is `PASS`. A break the list of known
+//! breaks names, by its invariant and its shape ([`super::known`]), is kept with its
+//! issue and fails nothing: a run whose only breaks are known is `PASS with N known`,
+//! and its status is 0, as a pass's. What it keeps and says has
 //! what looks like a key or a token hidden: the breaks are kept so
 //! ([`super::invariants::Keeper`]), the timeline is told so, and what a disruption
 //! said is hidden here; and it is written where every text leaves the run
@@ -18,6 +21,7 @@ use serde_json::{json, Value};
 
 use super::disruptions::{Schedule, State};
 use super::invariants::{Break, Unjudged, INVARIANTS};
+use super::known::{self, Known, KNOWN};
 use super::options::Options;
 use super::staff::{Found, LeftOut};
 use super::timeline::Timeline;
@@ -73,22 +77,44 @@ impl Kept<'_> {
         why
     }
 
-    /// Why the run failed: each invariant that broke, each disruption not played or
-    /// played without the field's shape it is for, its time running out, and what
-    /// stopped it (with what looks like a key or a token in it hidden); nothing for a
-    /// run that did not fail.
+    /// The entry of the list of known breaks that `found` is, if it is one.
+    fn known(found: &Break) -> Option<&'static Known> {
+        known::of(found, KNOWN.as_deref().unwrap_or(&[]))
+    }
+
+    /// The breaks that are none of the known ones: what fails the run.
+    fn unknown(&self) -> impl Iterator<Item = &Break> {
+        self.breaks
+            .iter()
+            .filter(|found| Self::known(found).is_none())
+    }
+
+    /// How many of the breaks are known ones.
+    fn known_count(&self) -> usize {
+        self.breaks.len() - self.unknown().count()
+    }
+
+    /// Why the run failed: each invariant that broke other than in a known way, each
+    /// disruption not played or played without the field's shape it is for, its time
+    /// running out, what stopped it (with what looks like a key or a token in it
+    /// hidden), and a list of known breaks that could not be read; nothing for a run
+    /// that did not fail.
     fn failures(&self) -> Vec<String> {
         let mut why: Vec<String> = INVARIANTS
             .iter()
             .filter_map(|(number, name, shape)| {
                 let count = self
-                    .breaks
-                    .iter()
+                    .unknown()
                     .filter(|found| found.invariant == *number)
                     .count();
                 (count > 0).then(|| format!("invariant {number} broke ({shape}, {name}): {count}"))
             })
             .collect();
+        if let Err(why_not) = KNOWN.as_ref() {
+            why.push(format!(
+                "the list of known breaks (evals/known-breaks.json) could not be read: {why_not}"
+            ));
+        }
         why.extend(self.schedule.not_played().iter().map(|planned| {
             let State::NotPlayed(because) = &planned.state else {
                 return String::new();
@@ -122,20 +148,25 @@ impl Kept<'_> {
             .map(|error| self.timeline.masked(error))
     }
 
-    /// Whether the run passed: nothing failed, and nothing was left unjudged.
+    /// Whether the run passed: nothing failed, and nothing was left unjudged; its
+    /// only breaks, if any, known ones.
     pub fn held(&self) -> bool {
-        self.verdict() == "PASS"
+        self.verdict().starts_with("PASS")
     }
 
     /// `FAIL` where anything failed; else `UNRESOLVED` where the watch could not
-    /// judge something; else `PASS`.
-    pub fn verdict(&self) -> &'static str {
+    /// judge something; else `PASS`, or `PASS with N known` where its only breaks are
+    /// N known ones.
+    pub fn verdict(&self) -> String {
         if !self.failures().is_empty() {
-            "FAIL"
+            "FAIL".to_owned()
         } else if !self.unresolved.is_empty() {
-            "UNRESOLVED"
+            "UNRESOLVED".to_owned()
         } else {
-            "PASS"
+            match self.known_count() {
+                0 => "PASS".to_owned(),
+                known => format!("PASS with {known} known"),
+            }
         }
     }
 
@@ -228,12 +259,17 @@ impl Kept<'_> {
             "harnesses": self.harnesses(),
             "leftOut": self.left.iter().map(|left| json!({ "harness": left.name, "why": left.why })).collect::<Vec<_>>(),
             "invariants": INVARIANTS.iter().map(|(number, name, shape)| {
-                let breaks = self.breaks.iter().filter(|found| found.invariant == *number).count();
+                let breaks = self.unknown().filter(|found| found.invariant == *number).count();
+                let known = self.breaks.iter().filter(|found| found.invariant == *number).count() - breaks;
                 let unresolved = self.unresolved.iter().filter(|open| open.invariant == *number).count();
-                json!({ "number": number, "name": name, "shape": shape, "held": breaks == 0 && unresolved == 0, "breaks": breaks, "unresolved": unresolved })
+                json!({ "number": number, "name": name, "shape": shape, "held": breaks == 0 && unresolved == 0, "breaks": breaks, "known": known, "unresolved": unresolved })
             }).collect::<Vec<_>>(),
             "disruptions": self.disruptions(),
-            "breaks": self.breaks.iter().map(Break::to_value).collect::<Vec<_>>(),
+            "breaks": self.breaks.iter().map(|found| {
+                let mut kept = found.to_value();
+                kept["known"] = json!(Self::known(found).map(|known| &known.issue));
+                kept
+            }).collect::<Vec<_>>(),
             "unresolved": self.unresolved.iter().map(|open| json!({
                 "invariant": open.invariant,
                 "key": open.key,
@@ -307,22 +343,29 @@ impl Kept<'_> {
         );
         for (number, name, shape) in INVARIANTS {
             let breaks = self
+                .unknown()
+                .filter(|found| found.invariant == number)
+                .count();
+            let known = self
                 .breaks
                 .iter()
                 .filter(|found| found.invariant == number)
-                .count();
+                .count()
+                - breaks;
             let unresolved = self
                 .unresolved
                 .iter()
                 .filter(|open| open.invariant == number)
                 .count();
             text.push_str(&format!(
-                "| {number} | {name} | {shape} | {} | {breaks} |\n",
-                match (breaks, unresolved) {
-                    (0, 0) => "yes".to_owned(),
-                    (0, unresolved) => format!("**unresolved** ({unresolved})"),
+                "| {number} | {name} | {shape} | {} | {} |\n",
+                match (breaks, unresolved, known) {
+                    (0, 0, 0) => "yes".to_owned(),
+                    (0, 0, known) => format!("known ({known})"),
+                    (0, unresolved, _) => format!("**unresolved** ({unresolved})"),
                     _ => "**no**".to_owned(),
-                }
+                },
+                breaks + known
             ));
         }
         text.push_str(
@@ -346,10 +389,13 @@ impl Kept<'_> {
         }
         for found in self.breaks {
             text.push_str(&format!(
-                "\n### {} · {} ({})\n\n{}\n",
+                "\n### {} · {} ({}){}\n\n{}\n",
                 found.invariant,
                 found.name(),
                 self.timeline.offset(found.at),
+                Self::known(found)
+                    .map(|known| format!(" · KNOWN: {}", known.issue))
+                    .unwrap_or_default(),
                 found.said
             ));
             for (title, lines) in [
@@ -396,6 +442,9 @@ impl Kept<'_> {
                 .map(|left| format!("  left out: {} ({})", left.name, left.why)),
         );
         lines.extend(self.why().into_iter().map(|why| format!("  why: {why}")));
+        lines.extend(self.breaks.iter().filter_map(|found| {
+            Self::known(found).map(|known| format!("  known: {} ({})", found.key, known.issue))
+        }));
         lines.push(format!("  report: {}", json.display()));
         lines.push(format!("  timeline: {}", markdown.display()));
         lines

@@ -39,33 +39,43 @@ pub use exits::{exit_of, lines, Known};
 /// How many lines of a window's screen a look keeps.
 const TAIL: usize = 12;
 
-/// A Claude Code record, read as far as its last whole line.
+/// A Claude Code record, read as far as its last whole line; and why the last reading
+/// of it failed, where it did (a record not read is no record that says nothing).
 #[derive(Debug, Default)]
 struct Grown {
     file: Option<PathBuf>,
     read: u64,
     record: Record,
+    unread: Option<String>,
 }
 
 impl Grown {
     /// What the record's file holds past what was read, its whole lines alone, read
-    /// with the run's `names` shown where its words are masked.
+    /// with the run's `names` shown where its words are masked; or why it could not be.
     fn grow(&mut self, config: &std::path::Path, session: &str, names: &Names) {
         if self.file.is_none() {
             self.file = cf_e2e::live::claude::transcript_file(config, session);
         }
         let Some(file) = &self.file else {
+            self.unread = Some(format!("no record of the session {session} was found"));
             return;
         };
-        let Ok(mut opened) = File::open(file) else {
-            return;
+        let mut opened = match File::open(file) {
+            Ok(opened) => opened,
+            Err(cause) => {
+                self.unread = Some(format!("its record could not be opened: {cause}"));
+                return;
+            }
         };
         let mut more = Vec::new();
-        if opened.seek(SeekFrom::Start(self.read)).is_err()
-            || opened.read_to_end(&mut more).is_err()
+        if let Err(cause) = opened
+            .seek(SeekFrom::Start(self.read))
+            .and_then(|_| opened.read_to_end(&mut more))
         {
+            self.unread = Some(format!("its record could not be read: {cause}"));
             return;
         }
+        self.unread = None;
         let Some(end) = more.iter().rposition(|byte| *byte == b'\n') else {
             return;
         };
@@ -184,7 +194,13 @@ impl Watcher {
             records: self
                 .records
                 .iter()
+                .filter(|(_, grown)| grown.unread.is_none())
                 .map(|(id, grown)| (*id, grown.record.clone()))
+                .collect(),
+            records_unread: self
+                .records
+                .iter()
+                .filter_map(|(id, grown)| Some((*id, grown.unread.clone()?)))
                 .collect(),
             ledger,
             windows: Windows {
