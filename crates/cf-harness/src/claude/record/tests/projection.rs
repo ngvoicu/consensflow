@@ -10,7 +10,7 @@ use std::collections::BTreeSet;
 
 use cf_base::json::{from_slice_lossy, from_slice_lossy_keeping};
 
-use super::restart::{closed, session_start};
+use super::restart::closed;
 use super::*;
 use keep::RECORD;
 
@@ -147,7 +147,7 @@ fn noisy(mut record: Value) -> Value {
     if let Some(Value::Object(attachment)) = fields.get_mut("attachment") {
         add(
             attachment,
-            &["toolUseID", "addedNames", "names", "skillCount"],
+            &["hookName", "toolUseID", "addedNames", "names", "skillCount"],
         );
     }
     record
@@ -158,7 +158,6 @@ fn variant(projected: &Projected) -> &'static str {
     match projected {
         Projected::Other => "other",
         Projected::Hook(_) => "hook",
-        Projected::Resumed => "resumed",
         Projected::Enqueue(_) => "enqueue",
         Projected::Dequeue => "dequeue",
         Projected::PopAll(_) => "popAll",
@@ -191,7 +190,6 @@ fn made() -> Vec<Value> {
             json!([tool_result(json!("t1"), json!("out"))]),
         ),
         hook(json!(["context", "more"]), Some("h1")),
-        session_start("h2", "u1", "SessionStart:resume"),
         closed("c1", "u1"),
         attachment("at1", "u1"),
         queue("enqueue", json!("later")),
@@ -253,7 +251,6 @@ fn what_nothing_reads_of_a_record_changes_neither_how_it_waits_nor_the_reading()
     let every = [
         "other",
         "hook",
-        "resumed",
         "enqueue",
         "dequeue",
         "popAll",

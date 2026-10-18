@@ -1,10 +1,14 @@
 //! A conversation Claude Code goes on with in a new process (`--resume`): the
 //! queue of messages is the process's own, held in memory, so what the process
-//! before had queued and not begun went with it, and no record says so. The
-//! process that resumes says it is one: it closes the turn the old one was cut
-//! in with a message of its own (`<synthetic>`, `No response requested.`), and a
-//! `SessionStart` hook, where the human's settings have one, runs as
-//! `SessionStart:resume`. Either empties the queue.
+//! before had queued and not begun went with it, and no record says so.
+//! ConsensFlow knows where the new process began, as it closed the window the
+//! old one ran in before it started the new one: a look is told the transcript's
+//! length then (`Options::relaunched_at`), and the queue is empty from there on,
+//! what the new process queued after it kept. The record's own signs of a resume
+//! (Claude's close of a cut turn, a `SessionStart:resume` hook's run) say
+//! nothing of it: Claude writes them for a `/resume` in the window too, which
+//! keeps its queue, and writes the hook's run after what the new process queued
+//! first.
 //!
 //! The field report (poker-lab, ConsensFlow 3.0.4, Claude Code 2.1.302, T-442):
 //! the worker's window was closed while a notification of a job ConsensFlow had
@@ -40,14 +44,60 @@ fn queued_notice(record: &Value, job: &str, status: &str) -> bool {
         })
 }
 
-/// What a look at `records` reads.
-fn record_of(records: &[Value]) -> Record {
+/// A look's options that say a process began where the transcript of the
+/// records before `from` ends: ConsensFlow opened the window again then.
+fn relaunched(records: &[Value], from: usize) -> Options {
+    Options {
+        relaunched_at: Some(Stage::lines(&records[..from]).len() as u64),
+        ..Options::default()
+    }
+}
+
+/// What a look told `options` reads of `records`.
+fn record_told(records: &[Value], options: &Options) -> Record {
     let mut stage = Stage::new();
     stage.write(records);
-    match &*stage.reader.look(&Options::default(), 0) {
+    known(&stage.look_told(options))
+}
+
+/// What a look at `records` reads.
+fn record_of(records: &[Value]) -> Record {
+    record_told(records, &Options::default())
+}
+
+fn known(reading: &Reading) -> Record {
+    match reading {
         Reading::Known(record) => record.clone(),
         Reading::Unknown(reason) => panic!("unknown: {reason}"),
     }
+}
+
+/// What a reader says of the turn after each record of `records` is written,
+/// one at a time and one look each, a letter a look: `S` settled, `F` in
+/// flight, `U` unknown. Its looks are told, once the records before
+/// `relaunch` are written, that a process began there: the first of them is
+/// the look the window takes as it is opened again.
+fn after_each(records: &[Value], relaunch: Option<usize>) -> String {
+    let mut stage = Stage::new();
+    let told = relaunch.map(|from| relaunched(records, from));
+    (1..=records.len())
+        .map(|written| {
+            if written == 1 {
+                stage.write(&records[..1]);
+            } else {
+                stage.append(&records[written - 1..written]);
+            }
+            let options = match (&told, relaunch) {
+                (Some(told), Some(from)) if written >= from => told.clone(),
+                _ => Options::default(),
+            };
+            match known(&stage.look_told(&options)).settlement {
+                Settlement::Settled => 'S',
+                Settlement::InFlight => 'F',
+                Settlement::Unknown => 'U',
+            }
+        })
+        .collect()
 }
 
 /// What the reopen's turn wrote: its last assistant's message.
@@ -55,19 +105,27 @@ const ANSWER: &str =
     "With the cache warm the import took 12 minutes; the slowest steps are index, write and parse.";
 
 #[test]
-fn a_notification_the_old_process_had_queued_holds_no_turn_of_the_process_that_resumed() {
+fn a_notification_the_closed_process_had_queued_holds_no_turn_after_the_relaunch() {
     let records = t442();
     // The notification of the job ConsensFlow ended, queued at 18:30:09 and gone
-    // with the process at the close: the record without its enqueue was read as
-    // settled before a restart was read at all.
+    // with the process at the close: the record without its enqueue is read as
+    // settled with nothing told.
     let stale = place(&records, |record| {
         queued_notice(record, "bqehk4ozo", "failed")
     });
     let mut without = records.clone();
     without.remove(stale);
     assert_eq!(settlement_of(&without), Settlement::Settled);
+    // With it, the record alone says the message is still to come: Claude's
+    // close of the cut turn and its resume hook's run are no word on it.
+    assert_eq!(settlement_of(&records), Settlement::InFlight);
 
-    let read = record_of(&records);
+    // The reopen started a process at 18:30:59: what it wrote first is the job's
+    // notification again (stopped), queued at 18:31:00.
+    let relaunch = place(&records, |record| {
+        queued_notice(record, "bqehk4ozo", "stopped")
+    });
+    let read = record_told(&records, &relaunched(&records, relaunch));
     assert_eq!(
         read.settlement,
         Settlement::Settled,
@@ -78,51 +136,291 @@ fn a_notification_the_old_process_had_queued_holds_no_turn_of_the_process_that_r
         (last.role, &*last.text, last.complete),
         (Role::Assistant, ANSWER, true)
     );
-}
-
-#[test]
-fn the_record_says_the_turn_as_it_was_written_through_the_restart() {
-    let records = t442();
-    let at = |found: &dyn Fn(&Value) -> bool| place(&records, found);
-    let uuid = |uuid: &'static str| move |record: &Value| record["uuid"] == uuid;
-    // The notification turn of 18:30:06 ended; the one of 18:30:09 was cut by
-    // the window's close; the restart closed it and began the reopen's, which
-    // ended at 19:25:10.
-    let ended = at(&uuid("be5ee0e5-3200-4b65-9e03-05b25e29b0e3"));
-    let cut = at(&uuid("0f115950-6cac-4f6e-a5c4-65d51bf1d2be"));
-    let reopened = at(&uuid("e0e24d7e-bb33-46e1-ba30-3a8e813f4d9c"));
-    let batches: Vec<&[Value]> = vec![
-        &records[..=ended],
-        &records[ended + 1..=cut],
-        &records[cut + 1..=reopened],
-        &records[reopened + 1..],
-    ];
-    let said: Vec<String> = looks(&batches)
+    // m-2081's turn is in flight from its message on, look after look, and
+    // ends where its record says so, not before.
+    let marker = place(&records, |record| {
+        record["message"]["content"]
+            .as_str()
+            .is_some_and(|text| text.starts_with("[ConsensFlow m-2081 "))
+    });
+    // Its end: the stop hooks' summary at 19:25:10, before the turn's duration.
+    let end = records
         .iter()
-        .map(|look| look.rsplit("\"settlement\":").next().unwrap().to_owned())
-        .collect();
-    assert_eq!(
-        said,
-        [
-            "\"settled\"}",
-            "\"in-flight\"}",
-            "\"in-flight\"}",
-            "\"settled\"}"
-        ]
+        .rposition(|record| record["subtype"] == "stop_hook_summary")
+        .unwrap();
+    let said = after_each(&records, Some(relaunch));
+    assert!(
+        said[marker..end].chars().all(|said| said == 'F'),
+        "{}",
+        &said[marker..end]
+    );
+    assert!(
+        said[end..].chars().all(|said| said == 'S'),
+        "{}",
+        &said[end..]
     );
 }
 
-/// A message queued, the turn that answered it, and `then`: whether the turn is
-/// settled after.
-fn queued_then(then: Vec<Value>) -> Settlement {
+/// A turn that ended at its stop hooks' summary (`s1`), as Claude Code writes
+/// one with `-p`, and what its process wrote of itself as it went: `bookkeeping`.
+fn ended_then(bookkeeping: &[&str]) -> Vec<Value> {
     let mut records = vec![
         hello(),
-        queue("enqueue", json!("waiting")),
         answer("a1", "u1"),
-        duration("d1", "a1"),
+        attachment("t1", "a1"),
+        summary("s1", "t1"),
     ];
-    records.extend(then);
-    settlement_of(&records)
+    records.extend(
+        bookkeeping
+            .iter()
+            .map(|kind| json!({ "type": kind, "sessionId": SESSION })),
+    );
+    records
+}
+
+/// What a process ConsensFlow started on the conversation writes as it takes the
+/// message it was given, a hook of the human's run as it resumed, in the order
+/// Claude Code 2.1.301 wrote them: the message queued and taken, the hook's
+/// run, the prompt; then its answer and its end.
+fn taken_after_a_resume(message: &str) -> Vec<Value> {
+    let prompt = having(
+        user("u2", json!("h1"), json!(message)),
+        json!({ "promptSource": "sdk" }),
+    );
+    let reply = assistant(
+        "a2",
+        "t2",
+        json!("m2"),
+        json!([text(json!("PELICAN"))]),
+        json!("end_turn"),
+    );
+    vec![
+        queue("enqueue", json!(message)),
+        queue("dequeue", Value::Null),
+        session_start("h1", "s1", "SessionStart:resume"),
+        prompt,
+        attachment("t2", "u2"),
+        reply,
+        summary("s2", "a2"),
+    ]
+}
+
+#[test]
+fn what_the_new_process_queued_before_its_resume_hook_ran_holds_its_turn_look_after_look() {
+    // Two records of 2.1.301 on this Mac (`3317ebf8…`, lines 513–519, and
+    // `384926cd…`, lines 52–60): the new process queued its message and took it
+    // before the hook's run was written. Its turn is in flight from the message
+    // on, at every look, until its end.
+    let orders = [
+        ("3317ebf8", vec!["last-prompt", "cost-state"]),
+        ("384926cd", vec!["last-prompt", "atis-latch", "cost-state"]),
+    ];
+    for (record, bookkeeping) in orders {
+        let mut records = ended_then(&bookkeeping);
+        let relaunch = records.len();
+        records.extend(taken_after_a_resume("What word did I ask you to remember?"));
+        let before = "FFFS".to_owned() + &"S".repeat(bookkeeping.len());
+        let expected = before + "FFFFFFS";
+        assert_eq!(
+            after_each(&records, None),
+            expected,
+            "{record}, nothing told"
+        );
+        assert_eq!(
+            after_each(&records, Some(relaunch)),
+            expected,
+            "{record}, its relaunch told"
+        );
+        // One look that reads past where the new process began, as the window's
+        // first can, its message taken and its prompt not yet written.
+        let taken = &records[..relaunch + 2];
+        assert_eq!(
+            record_told(taken, &relaunched(&records, relaunch)).settlement,
+            Settlement::InFlight,
+            "{record}, read at once"
+        );
+    }
+}
+
+#[test]
+fn a_resume_in_the_window_keeps_the_queue() {
+    // `/resume` in a window runs the hook as a new process does, in the process
+    // that holds the queue.
+    let records = vec![
+        hello(),
+        queue("enqueue", json!("waiting")),
+        session_start("h1", "u1", "SessionStart:resume"),
+        answer("a1", "h1"),
+        summary("s1", "a1"),
+        queue("dequeue", Value::Null),
+        user("u2", json!("s1"), json!("waiting")),
+        assistant(
+            "a2",
+            "u2",
+            json!("m2"),
+            json!([text(json!("Done"))]),
+            json!("end_turn"),
+        ),
+        summary("s2", "a2"),
+    ];
+    assert_eq!(after_each(&records, None), "FFFFFFFFS");
+}
+
+#[test]
+fn a_process_that_closed_at_rest_with_a_notification_queued_holds_no_turn_after_the_relaunch() {
+    // The turn ended, a job's notification was queued, and the window closed
+    // before Claude took it. A process started on the conversation then writes
+    // no sign of the old one: no turn was cut, and ConsensFlow's settings run
+    // no hook as it resumes.
+    let notification = "<task-notification>\n<task-id>bjob00001</task-id>\n<status>failed</status>\n</task-notification>";
+    let records = vec![
+        hello(),
+        answer("a1", "u1"),
+        summary("s1", "a1"),
+        queue("enqueue", json!(notification)),
+        user("u2", json!("s1"), json!("Go on")),
+        assistant(
+            "a2",
+            "u2",
+            json!("m2"),
+            json!([text(json!("Done"))]),
+            json!("end_turn"),
+        ),
+        summary("s2", "a2"),
+    ];
+    assert_eq!(after_each(&records, None), "FFSFFFF", "the record alone");
+    assert_eq!(after_each(&records, Some(4)), "FFSSFFS");
+}
+
+#[test]
+fn a_relaunch_told_after_the_new_process_was_read_takes_the_record_from_its_start() {
+    // A look of the engine's own, told nothing, read what the new process wrote
+    // before the window's first look told where it began.
+    let mut records = vec![
+        hello(),
+        answer("a1", "u1"),
+        summary("s1", "a1"),
+        queue("enqueue", json!("stale")),
+    ];
+    let relaunch = relaunched(&records, records.len());
+    records.extend([
+        queue("enqueue", json!("Go on")),
+        queue("dequeue", Value::Null),
+    ]);
+    let mut stage = Stage::new();
+    stage.write(&records);
+    let first = known(&stage.look_told(&Options::default()));
+    assert_eq!(first.settlement, Settlement::InFlight);
+    // The message the new process took is still to begin its turn.
+    let told = stage.look_told(&relaunch);
+    assert_eq!(known(&told).settlement, Settlement::InFlight);
+    let answered = [
+        user("u2", json!("s1"), json!("Go on")),
+        assistant(
+            "a2",
+            "u2",
+            json!("m2"),
+            json!([text(json!("Done"))]),
+            json!("end_turn"),
+        ),
+        summary("s2", "a2"),
+    ];
+    stage.append(&answered);
+    let after = stage.look_told(&relaunch);
+    assert_eq!(known(&after).settlement, Settlement::Settled);
+    // As a reader told from its first look reads it.
+    records.extend(answered);
+    assert_eq!(
+        show(&after),
+        show(&Reading::Known(record_told(&records, &relaunch)))
+    );
+}
+
+#[test]
+fn the_latest_relaunch_holds_and_a_look_that_tells_an_earlier_one_or_none_changes_nothing() {
+    let reply = |uuid: &str, parent: &str, id: &str| {
+        assistant(
+            uuid,
+            parent,
+            json!(id),
+            json!([text(json!("Done"))]),
+            json!("end_turn"),
+        )
+    };
+    let mut records = vec![
+        hello(),
+        answer("a1", "u1"),
+        summary("s1", "a1"),
+        queue("enqueue", json!("first stale")),
+    ];
+    let first = relaunched(&records, records.len());
+    records.extend([
+        user("u2", json!("s1"), json!("Again")),
+        reply("a2", "u2", "m2"),
+        summary("s2", "a2"),
+        queue("enqueue", json!("second stale")),
+    ]);
+    let second = relaunched(&records, records.len());
+    records.extend([
+        user("u3", json!("s2"), json!("Once more")),
+        reply("a3", "u3", "m3"),
+        summary("s3", "a3"),
+    ]);
+    let mut stage = Stage::new();
+    stage.write(&records);
+    let settled = |reading: Arc<Reading>| known(&reading).settlement;
+    assert_eq!(settled(stage.look_told(&first)), Settlement::InFlight);
+    assert_eq!(settled(stage.look_told(&second)), Settlement::Settled);
+    assert_eq!(settled(stage.look_told(&first)), Settlement::Settled);
+    assert_eq!(
+        settled(stage.look_told(&Options::default())),
+        Settlement::Settled
+    );
+}
+
+#[test]
+fn the_agents_the_closed_process_left_running_went_with_it() {
+    // Its last turn ended with an agent running, as its duration says.
+    let records = vec![
+        hello(),
+        answer("a1", "u1"),
+        having(
+            duration("d1", "a1"),
+            json!({ "pendingBackgroundAgentCount": 1 }),
+        ),
+    ];
+    let pending = |options: &Options| {
+        let read = record_told(&records, options);
+        (read.settlement, read.agents_pending)
+    };
+    assert_eq!(
+        pending(&Options::default()),
+        (Settlement::Settled, true),
+        "the record alone"
+    );
+    assert_eq!(
+        pending(&relaunched(&records, records.len())),
+        (Settlement::Settled, false),
+        "a process started after it"
+    );
+    // A turn of the new process that leaves agents says so as any.
+    let mut again = records.clone();
+    again.extend([
+        user("u2", json!("d1"), json!("Again")),
+        assistant(
+            "a2",
+            "u2",
+            json!("m2"),
+            json!([text(json!("Started one"))]),
+            json!("end_turn"),
+        ),
+        having(
+            duration("d2", "a2"),
+            json!({ "pendingBackgroundAgentCount": 1 }),
+        ),
+    ]);
+    let read = record_told(&again, &relaunched(&again, records.len()));
+    assert!(read.agents_pending);
 }
 
 /// The attachment a `SessionStart` hook's run writes, as `name` names it.
@@ -150,71 +448,6 @@ pub(super) fn closed(uuid: &str, parent: &str) -> Value {
         in_message(close, "model", Some(json!("<synthetic>"))),
         json!({ "isApiErrorMessage": false }),
     )
-}
-
-#[test]
-fn a_resume_empties_the_queue_and_nothing_else_of_claudes_own_does() {
-    assert_eq!(queued_then(vec![]), Settlement::InFlight);
-    let resumed = |name: &str| queued_then(vec![session_start("h1", "d1", name)]);
-    assert_eq!(resumed("SessionStart:resume"), Settlement::Settled);
-    // A session that starts afresh, after a `/clear` or a compaction, is the
-    // same process, with the same queue.
-    for name in [
-        "SessionStart:startup",
-        "SessionStart:clear",
-        "SessionStart:compact",
-        "SessionStart",
-    ] {
-        assert_eq!(resumed(name), Settlement::InFlight, "{name}");
-    }
-    // Another conversation's, or a sidechain's, says nothing of this one.
-    for other in [
-        json!({ "sessionId": "other" }),
-        json!({ "isSidechain": true }),
-    ] {
-        let start = having(
-            session_start("h1", "d1", "SessionStart:resume"),
-            other.clone(),
-        );
-        assert_eq!(queued_then(vec![start]), Settlement::InFlight, "{other}");
-    }
-    let named_elsewhere = in_attachment(
-        session_start("h1", "d1", "SessionStart:resume"),
-        "hookEvent",
-        Some(json!("Stop")),
-    );
-    assert_eq!(queued_then(vec![named_elsewhere]), Settlement::InFlight);
-
-    // The close of a cut turn says a restart too, and the turn that follows
-    // ends as any.
-    let next = |close: Value| {
-        let again = assistant(
-            "a3",
-            "u3",
-            json!("m3"),
-            json!([text(json!("Done"))]),
-            json!("end_turn"),
-        );
-        queued_then(vec![
-            user("u2", json!("d1"), json!("Cut")),
-            close,
-            user("u3", json!("c1"), json!("Again")),
-            again,
-            duration("d3", "a3"),
-        ])
-    };
-    assert_eq!(next(closed("c1", "u2")), Settlement::Settled);
-    // A model's own words, or the API's refusal, that say the same are no close.
-    let said_by_the_model = in_message(closed("c1", "u2"), "model", Some(json!("claude-opus-5-5")));
-    let refused = having(closed("c1", "u2"), json!({ "isApiErrorMessage": true }));
-    let other_words = in_message(
-        closed("c1", "u2"),
-        "content",
-        Some(json!([text(json!("No response needed."))])),
-    );
-    for close in [said_by_the_model, refused, other_words] {
-        assert_eq!(next(close.clone()), Settlement::InFlight, "{close}");
-    }
 }
 
 #[test]

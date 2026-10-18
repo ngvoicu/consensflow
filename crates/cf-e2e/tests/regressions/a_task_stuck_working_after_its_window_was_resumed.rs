@@ -16,11 +16,13 @@
 //!
 //! What the chief should have seen: the reopen's answer is T-1's result.
 //!
-//! The case is that shape on the rig: the worker answers T-1 and its window closes;
-//! its record then ends as the closed process left it (a job's notification queued,
-//! and the turn of another's begun, both written as Claude Code 2.1.302 writes them);
-//! the chief reopens T-1, and the window that comes back closes the cut turn, as
-//! Claude does, and answers.
+//! The cases are that shape on the rig: the worker answers T-1 and its window closes;
+//! its record then ends as the closed process left it; the chief reopens T-1, and the
+//! window that comes back answers. T-442's process left a job's notification queued
+//! and the turn of another's begun, both written as Claude Code 2.1.302 writes them,
+//! and the window that comes back closes the cut turn, as Claude does. One at rest
+//! with a notification queued leaves no sign of itself at all: no turn is cut, and
+//! ConsensFlow's settings run no hook as Claude resumes.
 
 use std::fs::OpenOptions;
 use std::io::Write;
@@ -71,21 +73,38 @@ fn failed(job: &str) -> String {
     )
 }
 
+/// A queue operation of the session `session`, at `at`, naming `content` where it
+/// names one.
+fn operation(session: &str, operation: &str, content: Option<String>, at: &str) -> Value {
+    let mut record = json!({
+        "type": "queue-operation", "operation": operation, "timestamp": at,
+        "sessionId": session,
+    });
+    if let Some(content) = content {
+        record["content"] = json!(content);
+    }
+    record
+}
+
+/// `records` written at the end of the record of `session`, in the Claude
+/// configuration `config`.
+fn left(config: &str, session: &str, records: &[Value]) -> std::io::Result<()> {
+    let file = Path::new(config)
+        .join("projects")
+        .join("integration")
+        .join(format!("{session}.jsonl"));
+    let mut record = OpenOptions::new().append(true).open(file)?;
+    for line in records {
+        writeln!(record, "{line}")?;
+    }
+    Ok(())
+}
+
 /// What the closed process left at the end of the record of `session`, in the Claude
 /// configuration `config`, as T-442's did at 18:30:09: the notifications of the two
 /// jobs the turn's end ended queued, the first taken and its turn begun, the second
 /// still queued when the window closed.
-fn closed_with_a_notification_queued(config: &str, session: &str) -> std::io::Result<()> {
-    let operation = |operation: &str, content: Option<String>, at: &str| {
-        let mut record = json!({
-            "type": "queue-operation", "operation": operation, "timestamp": at,
-            "sessionId": session,
-        });
-        if let Some(content) = content {
-            record["content"] = json!(content);
-        }
-        record
-    };
+fn closed_in_a_turn_with_a_notification_queued(config: &str, session: &str) -> std::io::Result<()> {
     let begun = json!({
         "type": "user", "uuid": "cut-notification", "parentUuid": null,
         "message": { "role": "user", "content": failed("bmonitor1") },
@@ -93,33 +112,59 @@ fn closed_with_a_notification_queued(config: &str, session: &str) -> std::io::Re
         "origin": { "kind": "task-notification", "producer": "session-task" },
         "turnOrigin": "task_notification", "sessionId": session, "isSidechain": false,
     });
-    let file = Path::new(config)
-        .join("projects")
-        .join("integration")
-        .join(format!("{session}.jsonl"));
-    let mut record = OpenOptions::new().append(true).open(file)?;
-    for line in [
-        operation(
-            "enqueue",
-            Some(failed("bmonitor1")),
-            "2026-10-17T18:30:09.143Z",
-        ),
-        operation("dequeue", None, "2026-10-17T18:30:09.172Z"),
-        operation(
+    left(
+        config,
+        session,
+        &[
+            operation(
+                session,
+                "enqueue",
+                Some(failed("bmonitor1")),
+                "2026-10-17T18:30:09.143Z",
+            ),
+            operation(session, "dequeue", None, "2026-10-17T18:30:09.172Z"),
+            operation(
+                session,
+                "enqueue",
+                Some(failed("bjob00001")),
+                "2026-10-17T18:30:09.183Z",
+            ),
+            begun,
+        ],
+    )
+}
+
+/// What a process that closed at rest left: a job's notification, queued after its
+/// turn ended, that it never took.
+fn closed_at_rest_with_a_notification_queued(config: &str, session: &str) -> std::io::Result<()> {
+    left(
+        config,
+        session,
+        &[operation(
+            session,
             "enqueue",
             Some(failed("bjob00001")),
             "2026-10-17T18:30:09.183Z",
-        ),
-        begun,
-    ] {
-        writeln!(record, "{line}")?;
-    }
-    Ok(())
+        )],
+    )
 }
 
 #[test]
 fn a_claude_workers_answer_to_a_reopen_is_its_result_though_its_window_closed_with_a_notification_queued(
 ) -> Outcome {
+    reopened_after(closed_in_a_turn_with_a_notification_queued)
+}
+
+#[test]
+fn a_claude_workers_answer_to_a_reopen_is_its_result_though_its_window_closed_at_rest_with_a_notification_queued(
+) -> Outcome {
+    reopened_after(closed_at_rest_with_a_notification_queued)
+}
+
+/// The worker answers T-1, its window closes, and its record then ends as `left`
+/// writes it, before the chief reopens T-1: the answer to the reopen is T-1's
+/// result.
+fn reopened_after(left: fn(&str, &str) -> std::io::Result<()>) -> Outcome {
     let rig = Rig::start(config())?;
     let project = Project::open(&rig, "chief", json!({}))?;
     let added = project.add_member("worker")?;
@@ -147,7 +192,7 @@ fn a_claude_workers_answer_to_a_reopen_is_its_result_though_its_window_closed_wi
         .var("CLAUDE_CONFIG_DIR")
         .ok_or("the rig gives Claude no configuration")?
         .to_owned();
-    closed_with_a_notification_queued(&claude, &session)?;
+    left(&claude, &session)?;
 
     let chief = rig.open_frame(&format!("p{}-chief", project.id()), OPEN)?;
     let reopened = rig.cf_in_window(

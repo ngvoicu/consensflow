@@ -4,7 +4,11 @@
 //! The queue is the process's own, in its memory: a process that resumes the
 //! conversation begins with none, and what the one before held went with it,
 //! with no operation to say so (T-442, Claude Code 2.1.302: a notification
-//! queued as the window closed held every turn after the reopen).
+//! queued as the window closed held every turn after the reopen). Where the
+//! new process began is ConsensFlow's to say, not the record's: Claude Code
+//! closes a cut turn, and runs a `SessionStart:resume` hook, for a `/resume`
+//! in the window too, which keeps its queue, and writes the hook's record
+//! after what the new process queued first.
 
 use std::collections::VecDeque;
 
@@ -62,10 +66,7 @@ impl Queues {
         self.popped.clear();
     }
 
-    /// A new process resumed the conversation: nothing waits. What it queued
-    /// before the record said it resumed (Claude Code writes the sign late) is
-    /// taken as any: a dequeue of nothing is a message taken all the same, and
-    /// a prompt with nothing taken takes nothing.
+    /// The process that queued what waits is gone: nothing waits.
     pub(super) fn restart(&mut self) {
         self.queued.clear();
         self.dequeued.clear();

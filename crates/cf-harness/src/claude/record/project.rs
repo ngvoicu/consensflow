@@ -32,9 +32,6 @@ pub(super) enum Projected {
     Other,
     /// What a `UserPromptSubmit` hook added to the prompt.
     Hook(Box<Hook>),
-    /// A `SessionStart` hook ran as Claude Code resumed the conversation: a
-    /// process of its own, whose queue of messages began empty.
-    Resumed,
     /// An operation on Claude Code's queue of messages, with the content it
     /// names where it names one.
     Enqueue(Result<String, String>),
@@ -81,7 +78,7 @@ pub(super) struct Assistant {
     /// The message stopped as `end_turn` or `stop_sequence`.
     pub(super) ended: bool,
     /// Claude Code's own close of the turn it found cut as it resumed the
-    /// conversation in a new process: no model's words.
+    /// conversation: no model's words.
     pub(super) closes_a_cut_turn: bool,
     /// The API refused the request (`isApiErrorMessage`).
     pub(super) refused: bool,
@@ -185,21 +182,15 @@ fn tool_result(block: &Value) -> ToolResult {
 }
 
 /// An attachment: what a `UserPromptSubmit` hook added to the prompt, a
-/// context of the conversation that is its own, not the assistant's; or the
-/// run of a `SessionStart` hook as the conversation was resumed, whatever it
-/// came to. Claude Code writes one only where the human's settings have such a
-/// hook (ConsensFlow's own have none).
+/// context of the conversation that is its own, not the assistant's.
 fn hook(record: &Value, session: &str) -> Projected {
     let attachment = record.get("attachment");
     let says =
         |name: &str, wanted: &str| field(attachment, name).and_then(Value::as_str) == Some(wanted);
-    if !of_main_conversation(record, session) {
-        return Projected::Other;
-    }
-    if says("hookEvent", "SessionStart") && says("hookName", "SessionStart:resume") {
-        return Projected::Resumed;
-    }
-    if !(says("type", "hook_additional_context") && says("hookEvent", "UserPromptSubmit")) {
+    if !(of_main_conversation(record, session)
+        && says("type", "hook_additional_context")
+        && says("hookEvent", "UserPromptSubmit"))
+    {
         return Projected::Other;
     }
     let Some(Value::Array(parts)) = field(attachment, "content") else {
@@ -252,9 +243,9 @@ fn assistant(record: &Value) -> Projected {
     let status = record.get("apiErrorStatus").and_then(Value::as_f64);
     let text = claude_text(content);
     let refused = record.get("isApiErrorMessage") == Some(&Value::Bool(true));
-    // Claude Code 2.1.296 to 2.1.302 write it with the next message, timed as
-    // they resumed (T-442's record; `quit-before-a-word-resumed.jsonl`). A
-    // refusal for quota may say the same words, and is the API's.
+    // Claude Code 2.1.296 to 2.1.302 write it with the next message (T-442's
+    // record; `quit-before-a-word-resumed.jsonl`). A refusal for quota may say
+    // the same words, and is the API's.
     let closes_a_cut_turn = !refused
         && in_message("model").and_then(Value::as_str) == Some("<synthetic>")
         && text == CUT_TURN_CLOSED;

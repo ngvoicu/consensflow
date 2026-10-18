@@ -115,21 +115,29 @@ pub(crate) fn read_on(
     visit: &mut dyn FnMut(Value, usize) -> Result<(), Stop>,
     only: Option<&[u8]>,
 ) -> Result<Looked, Stop> {
-    read_on_with(file, seen, looked_ms, from_slice_lossy, visit, only)
+    read_on_with(
+        file,
+        seen,
+        looked_ms,
+        from_slice_lossy,
+        &mut |record, index, _| visit(record, index),
+        only,
+    )
 }
 
 /// How a line is read into a record: a parser of the JSON of one line.
 pub(crate) type Parse = fn(&[u8]) -> serde_json::Result<Value>;
 
-/// [`read_on`], each line read by `parse`. It reads as `from_slice_lossy`
-/// does, or fails where that fails: a line it cannot read is a failure of the
-/// look, malformed or too much for a value, said as `read_on` says it.
+/// [`read_on`], each line read by `parse`, and each record handed to `visit`
+/// with the byte its line begins at too. It reads as `from_slice_lossy` does,
+/// or fails where that fails: a line it cannot read is a failure of the look,
+/// malformed or too much for a value, said as `read_on` says it.
 pub(crate) fn read_on_with(
     file: &Path,
     seen: Option<&Seen>,
     looked_ms: i64,
     parse: Parse,
-    visit: &mut dyn FnMut(Value, usize) -> Result<(), Stop>,
+    visit: &mut dyn FnMut(Value, usize, u64) -> Result<(), Stop>,
     only: Option<&[u8]>,
 ) -> Result<Looked, Stop> {
     let mut handle = File::open(file)?;
@@ -188,7 +196,7 @@ pub(crate) fn read_on_with(
                     visited = false;
                     tail.clear();
                 } else if holds_only(&line) {
-                    records = consume_line(&line, records, parse, visit)?;
+                    records = consume_line(&line, records, offset, parse, visit)?;
                 }
                 line.clear();
                 offset = at + end as u64 + 1;
@@ -206,7 +214,7 @@ pub(crate) fn read_on_with(
         let text = String::from_utf8_lossy(&line);
         match parse(text.as_bytes()) {
             Ok(record) => {
-                visit(record, records)?;
+                visit(record, records, offset)?;
                 records += 1;
                 tail = line;
             }
@@ -231,20 +239,22 @@ pub(crate) fn read_on_with(
     }))
 }
 
-/// One whole line: a record for `visit` at `index`, nothing when blank, a
-/// failure when malformed. A carriage return before the newline is JSON's
-/// white space: a line ended `\r\n` reads as one ended `\n`.
+/// One whole line, which begins at the byte `at`: a record for `visit` at
+/// `index`, nothing when blank, a failure when malformed. A carriage return
+/// before the newline is JSON's white space: a line ended `\r\n` reads as one
+/// ended `\n`.
 fn consume_line(
     raw: &[u8],
     index: usize,
+    at: u64,
     parse: Parse,
-    visit: &mut dyn FnMut(Value, usize) -> Result<(), Stop>,
+    visit: &mut dyn FnMut(Value, usize, u64) -> Result<(), Stop>,
 ) -> Result<usize, Stop> {
     if is_blank(raw) {
         return Ok(index);
     }
     let record = parse(raw).map_err(|_| unread(raw, index))?;
-    visit(record, index)?;
+    visit(record, index, at)?;
     Ok(index + 1)
 }
 

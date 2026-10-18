@@ -1,24 +1,31 @@
 # A task stuck "working" after its window was resumed (T-442, poker-lab, ConsensFlow 3.0.4, Claude
-# Code 2.1.302): the worker's window closed with a job's notification queued, the chief's reopen
-# resumed it, and the reopen's turn never read as over, since the record still had that message to
-# come. Claude's queue is the process's own, in memory; a process that resumes the conversation says
-# so by closing the turn it found cut (`<synthetic>`, `No response requested.`, which is no answer:
-# the harness's commentary) or by a `SessionStart:resume` hook's run, and Claude's reader empties the
-# queue there (`crates/cf-harness/src/claude/record/queues.rs`). The reader's test is
-# `crates/cf-harness/src/claude/record/tests/restart.rs`, on T-442's shape
-# (`crates/cf-harness/tests/fixtures/claude/restart-left-a-queued-notification.jsonl`); the case is
-# `crates/cf-e2e/tests/regressions/a_task_stuck_working_after_its_window_was_resumed.rs`, which builds
-# the native `cf` from the sources as they are planted, so its plant says `builds`.
+# Code 2.1.302): the worker's window closed with a job's notification queued in Claude's memory, the
+# chief's reopen opened it again on its conversation, and the reopen's turn never read as over, since
+# the record still had that message to come. ConsensFlow knows where the new process began: the Claude
+# adapter takes the transcript's length when it prepares a window on a conversation that already
+# was, every look of the window says it (`Options::relaunched_at`), and Claude's reader empties the
+# queue there, keeping what the new process queued after it
+# (`crates/cf-harness/src/claude/record.rs`, `crates/cf-harness/src/claude/adapter.rs`, the length
+# from the records seam: `crates/cf-harness/src/records/thread.rs`,
+# `crates/cf-daemon/src/seams/boundary.rs`). Claude's close of a cut turn (`No response requested.`)
+# is the harness's commentary, no part of a result.
+#
+# The reader's tests are `crates/cf-harness/src/claude/record/tests/restart.rs` (on T-442's shape,
+# `crates/cf-harness/tests/fixtures/claude/restart-left-a-queued-notification.jsonl`), the adapter's
+# `crates/cf-harness/tests/launch/claude/relaunched.rs`; the cases are
+# `crates/cf-e2e/tests/regressions/a_task_stuck_working_after_its_window_was_resumed.rs`, which build
+# the native `cf` from the sources as they are planted, so their plants say `builds`.
 #
 # Every name holds `lost-queue`, so `npm run plants:daemon -- "lost-queue"` runs them all.
 
 [run]
 lost-queue-reader = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::record"]
+lost-queue-adapter = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "claude::relaunched"]
 lost-queue-rig = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_task_stuck_working_after_its_window_was_resumed::"]
 
 [[plant]]
-name = "lost-queue: what the old process had queued holds the turns of the process that resumed (the reader)"
-meant = "a_notification_the_old_process_had_queued_holds_no_turn_of_the_process_that_resumed"
+name = "lost-queue: a relaunch empties nothing"
+meant = "a_notification_the_closed_process_had_queued_holds_no_turn_after_the_relaunch"
 runs = ["lost-queue-reader"]
 
 [[plant.edit]]
@@ -33,76 +40,169 @@ replace = '''
     pub(super) fn restart(&mut self) {}'''
 
 [[plant]]
-name = "lost-queue: what the old process had queued holds the turns of the process that resumed, and the reopen's answer is never the result"
-meant = "a_claude_workers_answer_to_a_reopen_is_its_result_though_its_window_closed_with_a_notification_queued"
+name = "lost-queue: the agents the closed process's last turn left running outlive the relaunch"
+meant = "a_window_opened_again_after_a_turn_that_left_agents_running_is_not_at_rest_before_its_first_prompt"
+runs = ["lost-queue-adapter", "lost-queue-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record.rs"
+find = '''
+            if let Some(Terminal::Derived { agents, .. }) = self.terminal.as_mut() {
+                *agents = false;
+            }'''
+replace = ""
+
+[[plant]]
+name = "lost-queue: a look's relaunch reaches no reader"
+meant = "a_window_opened_again_reads_its_own_turn_at_rest_though_the_closed_process_had_a_message_queued"
+runs = ["lost-queue-adapter", "lost-queue-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record.rs"
+find = '''
+        if let Some(at) = options
+            .relaunched_at
+            .filter(|at| *at > self.at.load(Ordering::Relaxed))
+        {
+            self.at.store(at, Ordering::Relaxed);
+            self.reader.retell(|state| state.relaunched(at));
+        }'''
+replace = ""
+
+[[plant]]
+name = "lost-queue: a look's relaunch reaches no reader, and the answer to a reopen of a window that closed at rest with a notification queued is never the result"
+meant = "a_claude_workers_answer_to_a_reopen_is_its_result_though_its_window_closed_at_rest_with_a_notification_queued"
 runs = ["lost-queue-rig"]
 builds = true
 
 [[plant.edit]]
-file = "crates/cf-harness/src/claude/record/queues.rs"
+file = "crates/cf-harness/src/claude/record.rs"
 find = '''
-    pub(super) fn restart(&mut self) {
-        self.queued.clear();
-        self.dequeued.clear();
-        self.popped.clear();
-    }'''
-replace = '''
-    pub(super) fn restart(&mut self) {}'''
+        if let Some(at) = options
+            .relaunched_at
+            .filter(|at| *at > self.at.load(Ordering::Relaxed))
+        {
+            self.at.store(at, Ordering::Relaxed);
+            self.reader.retell(|state| state.relaunched(at));
+        }'''
+replace = ""
 
 [[plant]]
-name = "lost-queue: Claude's close of a cut turn says no restart"
-meant = "a_resume_empties_the_queue_and_nothing_else_of_claudes_own_does"
+name = "lost-queue: the reader empties the queue at every look that tells no relaunch"
+meant = "what_the_new_process_queued_before_its_resume_hook_ran_holds_its_turn_look_after_look"
 runs = ["lost-queue-reader"]
 
 [[plant.edit]]
-file = "crates/cf-harness/src/claude/record/replay.rs"
+file = "crates/cf-harness/src/claude/record.rs"
 find = '''
-        if record.closes_a_cut_turn {
+        let Some(relaunch) = self.relaunch.as_mut() else {
+            return;
+        };'''
+replace = '''
+        let Some(relaunch) = self.relaunch.as_mut() else {
             self.queues.restart();
-        }
-        self.queues.answered();'''
+            return;
+        };'''
+
+[[plant]]
+name = "lost-queue: a relaunch is reached at the end of the look, past what the new process wrote"
+meant = "what_the_new_process_queued_before_its_resume_hook_ran_holds_its_turn_look_after_look"
+runs = ["lost-queue-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record.rs"
+find = '''
+            self.reach(at);
+            self.replay(&record, place, seq)?;'''
 replace = '''
-        self.queues.answered();'''
+            let _ = at;
+            self.replay(&record, place, seq)?;'''
 
 [[plant]]
-name = "lost-queue: a SessionStart hook's run as Claude resumed says no restart"
-meant = "a_resume_empties_the_queue_and_nothing_else_of_claudes_own_does"
+name = "lost-queue: a relaunch told after the new process was read is taken where the reader is"
+meant = "a_relaunch_told_after_the_new_process_was_read_takes_the_record_from_its_start"
 runs = ["lost-queue-reader"]
 
 [[plant.edit]]
-file = "crates/cf-harness/src/claude/record/replay.rs"
-find = "            Projected::Resumed => self.queues.restart(),"
-replace = "            Projected::Resumed => {}"
+file = "crates/cf-harness/src/claude/record.rs"
+find = '''
+        if self.last_at.is_some_and(|last| last >= at) {
+            return false;
+        }'''
+replace = ""
 
 [[plant]]
-name = "lost-queue: any SessionStart hook's run empties the queue, a compaction's and a /clear's too"
-meant = "a_resume_empties_the_queue_and_nothing_else_of_claudes_own_does"
+name = "lost-queue: an earlier relaunch told later takes the latest's place"
+meant = "the_latest_relaunch_holds_and_a_look_that_tells_an_earlier_one_or_none_changes_nothing"
 runs = ["lost-queue-reader"]
 
 [[plant.edit]]
-file = "crates/cf-harness/src/claude/record/project.rs"
-find = '''    if says("hookEvent", "SessionStart") && says("hookName", "SessionStart:resume") {'''
-replace = '''    if says("hookEvent", "SessionStart") {'''
+file = "crates/cf-harness/src/claude/record.rs"
+find = "            .filter(|at| *at > self.at.load(Ordering::Relaxed))"
+replace = "            .filter(|at| *at != self.at.load(Ordering::Relaxed))"
+
+[[plant]]
+name = "lost-queue: the adapter takes no length of the transcript it opens a window again on"
+meant = "a_window_opened_again_reads_its_own_turn_at_rest_though_the_closed_process_had_a_message_queued"
+runs = ["lost-queue-adapter"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = "                length.map(|at| (session.clone(), at))"
+replace = "                length.and(None)"
+
+[[plant]]
+name = "lost-queue: the window's looks tell no relaunch"
+meant = "a_window_opened_again_reads_its_own_turn_at_rest_though_the_closed_process_had_a_message_queued"
+runs = ["lost-queue-adapter"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = "            let options = told(self.relaunched.as_ref(), &session);"
+replace = "            let options = Options::default();"
+
+[[plant]]
+name = "lost-queue: the window tells its relaunch to a conversation it was followed to"
+meant = "a_window_followed_to_another_conversation_tells_it_no_relaunch"
+runs = ["lost-queue-adapter"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = '''
+        relaunched_at: relaunched
+            .filter(|(on, _)| on == session)
+            .map(|(_, at)| *at),'''
+replace = '''
+        relaunched_at: relaunched.map(|(_, at)| *at),'''
+
+[[plant]]
+name = "lost-queue: the daemon's records seam tells no transcript's length, and the answer to a reopen is never the result"
+meant = "a_claude_workers_answer_to_a_reopen_is_its_result_though_its_window_closed_at_rest_with_a_notification_queued"
+runs = ["lost-queue-rig"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/seams/boundary.rs"
+find = '''
+
+    fn transcript_length<'a>(
+        &'a self,
+        harness: Harness,
+        session: &'a str,
+    ) -> Work<'a, Result<Option<u64>, String>> {
+        self.spawn
+            .arrival(self.records.transcript_length(harness, session))
+    }'''
+replace = ""
 
 [[plant]]
 name = "lost-queue: a line keeps no message's model, so no close of a cut turn is seen"
-meant = "a_resume_empties_the_queue_and_nothing_else_of_claudes_own_does"
+meant = "the_close_of_a_cut_turn_is_no_part_of_any_answer"
 runs = ["lost-queue-reader"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/record/keep.rs"
 find = '''    ("model", &Keep::Scalar),
-'''
-replace = ""
-
-[[plant]]
-name = "lost-queue: a line keeps no attachment's hookName, so no resume is seen"
-meant = "a_resume_empties_the_queue_and_nothing_else_of_claudes_own_does"
-runs = ["lost-queue-reader"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/claude/record/keep.rs"
-find = '''    ("hookName", &Keep::Scalar),
 '''
 replace = ""
 

@@ -426,6 +426,18 @@ pub trait Records {
         session: &'a str,
     ) -> Work<'a, Result<bool, String>>;
 
+    /// How many bytes `harness`'s transcript of `session` holds now, where a
+    /// reader of it reads a relaunch (`Options::relaunched_at`, Claude's
+    /// alone): none where it keeps no transcript of it, or a seam that keeps no
+    /// files says none.
+    fn transcript_length<'a>(
+        &'a self,
+        _harness: Harness,
+        _session: &'a str,
+    ) -> Work<'a, Result<Option<u64>, String>> {
+        Box::pin(async { Ok(None) })
+    }
+
     /// Whether `harness`'s record of `session`, read with no window open, ends in
     /// a turn with no end (the turn the app's quit cut, or a Close): yes, or no
     /// where it ends at rest, and none where the record cannot tell. Devin's

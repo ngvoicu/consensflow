@@ -233,4 +233,13 @@ impl Records for DaemonRecords {
         self.spawn
             .arrival(self.records.has_transcript(harness, session))
     }
+
+    fn transcript_length<'a>(
+        &'a self,
+        harness: Harness,
+        session: &'a str,
+    ) -> Work<'a, Result<Option<u64>, String>> {
+        self.spawn
+            .arrival(self.records.transcript_length(harness, session))
+    }
 }

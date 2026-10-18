@@ -4,7 +4,7 @@
 //! (`keep`). A row is a scenario, the record of it that changes, and how.
 
 use super::projection::{interrupt, projected};
-use super::restart::{closed, session_start};
+use super::restart::closed;
 use super::*;
 
 const LATER: &str = "2026-09-20T11:30:00.000Z";
@@ -189,20 +189,8 @@ fn prompted() -> Vec<Value> {
     ]
 }
 
-/// A message queued while a turn ran, then the run of a `SessionStart` hook as a
-/// new process resumed the conversation, whose queue began empty.
-fn resumed() -> Vec<Value> {
-    vec![
-        hello(),
-        queue("enqueue", json!("m")),
-        answer("a1", "u1"),
-        duration("d1", "a1"),
-        session_start("h1", "d1", "SessionStart:resume"),
-    ]
-}
-
-/// A message queued while a turn ran, a turn cut, and Claude Code's close of it
-/// as a new process resumed the conversation, then a turn that ends.
+/// A turn cut, and Claude Code's close of it as the conversation was resumed,
+/// then a turn that ends.
 fn closed_on_resume() -> Vec<Value> {
     let again = assistant(
         "a3",
@@ -213,7 +201,6 @@ fn closed_on_resume() -> Vec<Value> {
     );
     vec![
         hello(),
-        queue("enqueue", json!("m")),
         answer("a1", "u1"),
         duration("d1", "a1"),
         user("u2", json!("d1"), json!("Cut")),
@@ -462,35 +449,21 @@ fn read() -> Vec<Row> {
             in_the_attachment("content", json!(["other"])),
         ),
         (
-            "attachment.hookName, of a resume",
-            resumed,
-            4,
-            in_the_attachment("hookName", json!("SessionStart:startup")),
-        ),
-        (
-            "attachment.hookEvent, of a resume",
-            resumed,
-            4,
-            in_the_attachment("hookEvent", json!("Stop")),
-        ),
-        ("sessionId, of a resume", resumed, 4, other()),
-        ("isSidechain, of a resume", resumed, 4, sidechain()),
-        (
             "message.model, of the close of a cut turn",
             closed_on_resume,
-            5,
+            4,
             in_the_message("model", json!("claude-opus-5-5")),
         ),
         (
             "isApiErrorMessage, of the close of a cut turn",
             closed_on_resume,
-            5,
+            4,
             is("isApiErrorMessage", json!(true)),
         ),
         (
             "block.text, of the close of a cut turn",
             closed_on_resume,
-            5,
+            4,
             blocks(json!([text(json!("No response needed."))])),
         ),
     ]

@@ -36,7 +36,6 @@ static MESSAGE: Keep = Keep::Members(&[
 static ATTACHMENT: Keep = Keep::Members(&[
     ("type", &Keep::Scalar),
     ("hookEvent", &Keep::Scalar),
-    ("hookName", &Keep::Scalar),
     ("content", &Keep::Items(&Keep::Scalar)),
 ]);
 
