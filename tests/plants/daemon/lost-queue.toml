@@ -21,7 +21,76 @@
 [run]
 lost-queue-reader = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::record"]
 lost-queue-adapter = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "claude::relaunched"]
+lost-queue-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "windows::"]
 lost-queue-rig = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_task_stuck_working_after_its_window_was_resumed::"]
+
+# Round 4 (Astra's review of round 2): the length is taken only where the pane host proved the
+# window's program gone (`Launch::previous_gone`, from the engine's record of the last exit), and the
+# old turn's answer is no candidate past the relaunch.
+
+[[plant]]
+name = "lost-queue: the adapter takes the length though the program before may still run"
+meant = "a_window_opened_again_after_a_program_the_host_could_not_end_is_told_no_relaunch"
+runs = ["lost-queue-adapter"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = "            let relaunched = if resumable && launch.previous_gone {"
+replace = "            let relaunched = if resumable {"
+
+[[plant]]
+name = "lost-queue: a launch is told the program before is gone though the host named a survivor"
+meant = "a_window_opened_again_is_told_the_program_before_it_is_gone_only_where_the_host_proved_it"
+runs = ["lost-queue-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown.rs"
+find = "        self.is_known().then_some(self.survivor.is_none())"
+replace = "        self.is_known().then_some(true)"
+
+[[plant]]
+name = "lost-queue: a launch is told the program before is gone where the host said nothing of its end"
+meant = "a_window_opened_again_is_told_the_program_before_it_is_gone_only_where_the_host_proved_it"
+runs = ["lost-queue-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown.rs"
+find = "        self.is_known().then_some(self.survivor.is_none())"
+replace = "        Some(self.survivor.is_none())"
+
+[[plant]]
+name = "lost-queue: the host's word on a window the engine closed itself is not heard"
+meant = "the_hosts_word_on_a_window_the_engine_closed_itself_is_what_its_next_launch_is_told"
+runs = ["lost-queue-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "            self.heard_exit(pane, &shown);\n"
+replace = ""
+
+[[plant]]
+name = "lost-queue: no launch is told its window before was gone, and the answer to a reopen of a window that closed at rest with a notification queued is never the result"
+meant = "a_claude_workers_answer_to_a_reopen_is_its_result_though_its_window_closed_at_rest_with_a_notification_queued"
+runs = ["lost-queue-rig"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = "            .is_some_and(|(_, gone)| *gone == Some(true));"
+replace = "            .is_some_and(|_| false);"
+
+[[plant]]
+name = "lost-queue: the old turn's answer stays the candidate past the relaunch"
+meant = "a_late_turn_end_of_the_old_program_never_reads_the_busy_new_window_at_rest"
+runs = ["lost-queue-adapter", "lost-queue-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record.rs"
+find = '''
+            self.queues.restart();
+            self.candidate = None;'''
+replace = '''
+            self.queues.restart();'''
 
 [[plant]]
 name = "lost-queue: a relaunch empties nothing"

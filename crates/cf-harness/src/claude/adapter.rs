@@ -29,11 +29,12 @@
 //!   message to begin it is read at rest by that status while its record holds
 //!   no more than it held when the window was opened ([`LeftOpen`]).
 //! - A window opened again on a conversation runs a process of its own, the
-//!   one before gone with its window: what that one had queued in its memory
-//!   and not begun went with it, though its record still says it is queued
-//!   (T-442). The transcript's length when the window is prepared is where the
-//!   new process began, and every look the window takes says so
-//!   (`Options::relaunched_at`).
+//!   one before gone with its window where the pane host proved it gone: what
+//!   that one had queued in its memory and not begun went with it, though its
+//!   record still says it is queued (T-442). The transcript's length when the
+//!   window is prepared is where the new process began, and every look the
+//!   window takes says so (`Options::relaunched_at`). Where the host could not
+//!   end the old program, or the engine never heard how it ended, none is told.
 //! - The window's Claude process is the pane's own child when a status names
 //!   it, so the first look already sees a /clear. Otherwise (Claude may run
 //!   as another process the child starts) it is the process whose status
@@ -125,10 +126,13 @@ impl Adapter for ClaudeAdapter {
                 None => false,
             };
             // What the record holds before this window exists is the old
-            // process's, which the engine closed with its window: what it had
-            // queued and not begun went with it, and every look of this window
-            // says where the new one began (`Options::relaunched_at`).
-            let relaunched = if resumable {
+            // process's, gone with its window where the pane host proved it
+            // (`Launch::previous_gone`): what it had queued and not begun went
+            // with it, and every look of this window says where the new one
+            // began (`Options::relaunched_at`). One the host could not end may
+            // still write to the record, and what it writes past the length
+            // taken would be read as the new process's: no length is taken.
+            let relaunched = if resumable && launch.previous_gone {
                 let length = self
                     .records
                     .transcript_length(Harness::Claude, &session)

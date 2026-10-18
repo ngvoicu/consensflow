@@ -671,8 +671,13 @@ impl Dispatcher {
                 .cloned()
         };
         let Some(record) = record else {
+            // The host's word on a window the engine's own close settled already.
+            self.heard_exit(pane, &shown);
             return Ok(());
         };
+        // Whether its program is gone, for the next launch on its conversation
+        // (`Launch::previous_gone`).
+        record.window.borrow_mut().last_exit = Some((pane.clone(), shown.gone()));
         // Still opening: its launch takes the exit once it has the window.
         if !ended(record.window.borrow().pane.as_ref()) {
             if let Some(opening) = record.window.borrow_mut().opening.as_mut() {
@@ -846,6 +851,24 @@ impl Dispatcher {
         }
         self.changed();
         Ok(())
+    }
+
+    /// What the host said of the end of `pane`, where its window was settled
+    /// before (the engine's own close, which knows nothing of how it ended): its
+    /// record learns whether the program is gone, where the host said.
+    fn heard_exit(&self, pane: &Pane, shown: &Shown) {
+        let Some(gone) = shown.gone() else {
+            return;
+        };
+        let records = self.records.borrow();
+        for record in records.values() {
+            let mut window = record.window.borrow_mut();
+            if let Some((last, said)) = window.last_exit.as_mut() {
+                if last == pane {
+                    *said = Some(gone);
+                }
+            }
+        }
     }
 
     /// One participant's step.

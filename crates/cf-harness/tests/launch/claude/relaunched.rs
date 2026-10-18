@@ -141,6 +141,70 @@ fn a_window_opened_again_after_a_turn_that_left_agents_running_is_not_at_rest_be
     assert!(at_rest(&window), "its turn is over");
 }
 
+/// A turn's duration at second `n`, with an agent it left running.
+fn duration_with_an_agent(n: u32) -> String {
+    record(
+        SESSION,
+        n,
+        &json!({
+            "type": "system", "subtype": "turn_duration", "isSidechain": false,
+            "durationMs": 42_000, "messageCount": 3, "pendingBackgroundAgentCount": 1,
+        }),
+    )
+}
+
+#[test]
+fn a_late_turn_end_of_the_old_program_never_reads_the_busy_new_window_at_rest() {
+    // Both reviews of round 2 (Astra's sequence): the old turn answered and its
+    // stop hooks ran, a notification was queued, and the window was opened
+    // again with no message. The old program then writes its turn's duration,
+    // an agent running, past the length taken.
+    let home = Home::new();
+    let mut lines = vec![
+        user_line(SESSION, 1, TASK),
+        answer_line(SESSION, 2, "Done"),
+        stop_line(SESSION, 3),
+        queued_line(SESSION, 4),
+    ];
+    home.transcript(SESSION, &lines);
+    let window = window(&home.adapter(), &Request::resumed(SESSION));
+    home.status(SESSION, &json!({ "status": "busy" }), me());
+    assert!(!at_rest(&window), "busy");
+    lines.push(duration_with_an_agent(5));
+    home.transcript(SESSION, &lines);
+    let observed = finished(window.observe()).unwrap();
+    assert!(!observed.settled, "busy is no prompt of its own");
+    assert!(!observed.agents_pending());
+}
+
+#[test]
+fn a_window_opened_again_after_a_program_the_host_could_not_end_is_told_no_relaunch() {
+    // The old program may still run, and write past any length taken: the record
+    // is read as it was before relaunches were told, the queued message held.
+    let home = Home::new();
+    let mut lines = vec![
+        user_line(SESSION, 1, TASK),
+        answer_line(SESSION, 2, "Done"),
+        stop_line(SESSION, 3),
+        queued_line(SESSION, 4),
+    ];
+    home.transcript(SESSION, &lines);
+    let request = Request {
+        message: Some(REOPENED.to_owned()),
+        previous_gone: false,
+        ..Request::resumed(SESSION)
+    };
+    let window = window(&home.adapter(), &request);
+    lines.extend([
+        user_line(SESSION, 5, REOPENED),
+        answer_line(SESSION, 6, "Done again"),
+        stop_line(SESSION, 7),
+    ]);
+    home.transcript(SESSION, &lines);
+    home.status(SESSION, &json!({ "status": "idle" }), me());
+    assert!(!at_rest(&window), "the queued message is still to come");
+}
+
 #[test]
 fn a_window_followed_to_another_conversation_tells_it_no_relaunch() {
     // Where the window's program began writing is a place in the transcript it

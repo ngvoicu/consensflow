@@ -423,6 +423,32 @@ fn the_agents_the_closed_process_left_running_went_with_it() {
     assert!(read.agents_pending);
 }
 
+#[test]
+fn a_record_the_old_process_wrote_past_the_relaunch_ends_none_of_its_turns_again() {
+    // An old program that outlived its window writes its turn's duration, with an
+    // agent running, after the length was taken (both reviews of round 2; where
+    // the host could not prove the program gone, no length is taken at all).
+    let records = vec![
+        hello(),
+        answer("a1", "u1"),
+        summary("s1", "a1"),
+        queue("enqueue", json!("stale")),
+        having(
+            duration("d1", "s1"),
+            json!({ "pendingBackgroundAgentCount": 1 }),
+        ),
+    ];
+    let relaunch = relaunched(&records, 4);
+    let read = record_told(&records, &relaunch);
+    assert!(!read.agents_pending, "no agent of the new process runs");
+    // Read as it was written, the old turn's duration after the relaunch's look.
+    let mut stage = Stage::new();
+    stage.write(&records[..4]);
+    assert!(!known(&stage.look_told(&relaunch)).agents_pending);
+    stage.append(&records[4..]);
+    assert!(!known(&stage.look_told(&relaunch)).agents_pending);
+}
+
 /// The attachment a `SessionStart` hook's run writes, as `name` names it.
 pub(super) fn session_start(uuid: &str, parent: &str, name: &str) -> Value {
     of_session(json!({

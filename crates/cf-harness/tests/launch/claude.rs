@@ -133,6 +133,9 @@ struct Request {
     handle: &'static str,
     instructions: &'static str,
     resume: Option<String>,
+    /// The program of the window before was proven gone: the pane host named
+    /// none it could not end.
+    previous_gone: bool,
     message: Option<String>,
     agent: Option<Agent<'static>>,
     /// The Specmint variant a chief is given, where its project has specs on.
@@ -146,6 +149,7 @@ impl Default for Request {
             handle: "zeus",
             instructions: "# ConsensFlow worker\n\nRole text for the test.",
             resume: None,
+            previous_gone: true,
             message: Some(TASK.to_owned()),
             agent: Some(Agent {
                 model: Some("claude-sonnet-5"),
@@ -192,6 +196,7 @@ fn prepare(adapter: &ClaudeAdapter, request: &Request) -> Result<Prepared, Strin
         role: request.role,
         directory: "/work/app",
         resume: request.resume.as_deref(),
+        previous_gone: request.previous_gone,
         message: request.message.as_deref(),
         agent: request.agent,
         instructions: request.instructions,

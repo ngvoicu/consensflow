@@ -238,7 +238,9 @@ impl Transcript {
 
     /// Replay is at the byte `at`: the process that wrote what came before
     /// the latest relaunch is gone, and so is what it had queued, and the
-    /// background agents its last turn left running.
+    /// background agents its last turn left running. Its last answer is no
+    /// candidate of what follows: no record past the relaunch ends that turn
+    /// again, or says agents of it run.
     fn reach(&mut self, at: u64) {
         let Some(relaunch) = self.relaunch.as_mut() else {
             return;
@@ -246,6 +248,7 @@ impl Transcript {
         if !relaunch.reached && relaunch.at <= at {
             relaunch.reached = true;
             self.queues.restart();
+            self.candidate = None;
             if let Some(Terminal::Derived { agents, .. }) = self.terminal.as_mut() {
                 *agents = false;
             }
