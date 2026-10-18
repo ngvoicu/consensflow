@@ -92,8 +92,9 @@ pub(super) fn answer(chain: &Chain, wires: &Wires) -> Record {
 /// so a first message Devin stored with the command kept, whose launch a start swept,
 /// is read as stored: no paste, it goes back to its queue and is given again. Devin
 /// 3000.11.92 keeps no `/bypass` in what the product gives it; were one to, the live
-/// check of a resumed Devin window says so (`live_devin_resume`'s `back.rs`, its
-/// `Opening::Note` cases: the daemon's reader has the note behind other words).
+/// check of a resumed Devin window fails, naming this limit: its `Opening::Note` cases
+/// read the note as Devin's store has it, which must be with its header first
+/// (`live_devin_resume`'s `turn.rs`, `stored_fault`).
 fn behind_bypass<'a>(text: &'a str, wires: &Wires) -> Option<&'a str> {
     let rest = text.trim_start().strip_prefix(BYPASS)?;
     let prompt = rest.trim_start();

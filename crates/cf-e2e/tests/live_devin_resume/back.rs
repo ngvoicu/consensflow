@@ -21,7 +21,7 @@ use crate::case::{Case, Opening, Step, BYPASS, NOTE};
 use crate::drive::{command_running, wire_of, Run};
 use crate::outcome::{sightings_said, turn_line};
 use crate::scene::{Dialog, Scene, LOOK};
-use crate::turn::{read_header_first, reading, stored_shape, tail};
+use crate::turn::{read_header_first, reading, stored_fault, stored_shape, tail};
 use crate::words::marker_of;
 use crate::{LONG, SETTLE, WATCH};
 
@@ -37,6 +37,9 @@ const AFTER_SWITCH: Duration = Duration::from_secs(3);
 /// How long the daemon's readiness is driven: as long as the product gives a window to
 /// leave the normal mode (30 s), and a little more, so that its own end shows.
 const READINESS: Duration = Duration::from_secs(35);
+
+/// How long Devin's store is read again for the first message, while its writer has it.
+const STORED: Duration = Duration::from_secs(5);
 
 /// How long a dialog is given to go once the app's interrupt was pressed into it.
 const RELEASE: Duration = Duration::from_secs(20);
@@ -162,17 +165,27 @@ fn opening(case: Case, scene: &mut Scene, again: &mut Again, said: &mut Account)
             &turn,
         ));
         // How Devin stores a prompt it ran under `/bypass`, which the daemon puts a
-        // resumed window's first message behind, and that the daemon reads it as the
-        // paste either way. Behind the case's own `/bypass` too, the window was given
-        // what ConsensFlow never gives one, which the daemon reads as Devin stored it.
+        // resumed window's first message behind. The product's own must be stored with
+        // its header first: the daemon's reader takes off a kept `/bypass` only while
+        // the launch folder lasts (the limit beside `behind_bypass`). Behind the case's
+        // own `/bypass` the window was given what ConsensFlow never gives one, and how
+        // Devin stored it is only said. The store is read again while its writer has it.
         let header = marker_of(NOTE);
+        let messages = until(scene.life.cap(STORED), LOOK, || {
+            let messages = scene.watch.messages(window);
+            stored_shape(&messages, &header).map(|_| messages)
+        })
+        .unwrap_or_default();
         said.say(format!(
             "Devin's store has the note {}",
-            stored_shape(&scene.watch.messages(window), &header)
+            stored_shape(&messages, &header)
                 .as_deref()
                 .unwrap_or("nowhere")
         ));
         let products = case.opening == Opening::Note;
+        if let Some(fault) = stored_fault(&messages, &header).filter(|_| turn.arrived && products) {
+            said.fail(fault);
+        }
         if turn.arrived && products && !read_header_first(window.record().as_ref(), &header) {
             said.fail(format!(
                 "the daemon's reader has the note behind other words: {}",
