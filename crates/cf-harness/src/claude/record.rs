@@ -13,6 +13,13 @@
 //! ran (a `turn_duration`, or a `stop_hook_summary` that did not prevent
 //! continuation). A turn that has begun and not ended is in flight.
 //!
+//! A queued message holds the turn until a prompt takes it, and the queue is
+//! the process's own: a process that resumes the conversation begins with
+//! none (`queues`). The record says a restart where Claude Code closes the turn
+//! the old process was cut in (`No response requested.`, which is no answer:
+//! the item is the harness's commentary), or a `SessionStart` hook runs as it
+//! resumes.
+//!
 //! A turn that ended may have left background agents or workflows running, which
 //! its `turn_duration` says by its counts (`pendingBackgroundAgentCount`,
 //! `pendingWorkflowCount`, left out when none). It is settled all the same, and

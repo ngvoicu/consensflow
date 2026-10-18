@@ -1,5 +1,10 @@
 //! The messages Claude Code's queue operations say are waiting, taken, or
 //! taken back, by their content. A turn is not over while any is.
+//!
+//! The queue is the process's own, in its memory: a process that resumes the
+//! conversation begins with none, and what the one before held went with it,
+//! with no operation to say so (T-442, Claude Code 2.1.302: a notification
+//! queued as the window closed held every turn after the reopen).
 
 use std::collections::VecDeque;
 
@@ -54,6 +59,16 @@ impl Queues {
 
     /// An assistant's record: what was taken back is sent, or never will be.
     pub(super) fn answered(&mut self) {
+        self.popped.clear();
+    }
+
+    /// A new process resumed the conversation: nothing waits. What it queued
+    /// before the record said it resumed (Claude Code writes the sign late) is
+    /// taken as any: a dequeue of nothing is a message taken all the same, and
+    /// a prompt with nothing taken takes nothing.
+    pub(super) fn restart(&mut self) {
+        self.queued.clear();
+        self.dequeued.clear();
         self.popped.clear();
     }
 

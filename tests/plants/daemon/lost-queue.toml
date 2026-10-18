@@ -1,0 +1,133 @@
+# A task stuck "working" after its window was resumed (T-442, poker-lab, ConsensFlow 3.0.4, Claude
+# Code 2.1.302): the worker's window closed with a job's notification queued, the chief's reopen
+# resumed it, and the reopen's turn never read as over, since the record still had that message to
+# come. Claude's queue is the process's own, in memory; a process that resumes the conversation says
+# so by closing the turn it found cut (`<synthetic>`, `No response requested.`, which is no answer:
+# the harness's commentary) or by a `SessionStart:resume` hook's run, and Claude's reader empties the
+# queue there (`crates/cf-harness/src/claude/record/queues.rs`). The reader's test is
+# `crates/cf-harness/src/claude/record/tests/restart.rs`, on T-442's shape
+# (`crates/cf-harness/tests/fixtures/claude/restart-left-a-queued-notification.jsonl`); the case is
+# `crates/cf-e2e/tests/regressions/a_task_stuck_working_after_its_window_was_resumed.rs`, which builds
+# the native `cf` from the sources as they are planted, so its plant says `builds`.
+#
+# Every name holds `lost-queue`, so `npm run plants:daemon -- "lost-queue"` runs them all.
+
+[run]
+lost-queue-reader = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::record"]
+lost-queue-rig = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_task_stuck_working_after_its_window_was_resumed::"]
+
+[[plant]]
+name = "lost-queue: what the old process had queued holds the turns of the process that resumed (the reader)"
+meant = "a_notification_the_old_process_had_queued_holds_no_turn_of_the_process_that_resumed"
+runs = ["lost-queue-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/queues.rs"
+find = '''
+    pub(super) fn restart(&mut self) {
+        self.queued.clear();
+        self.dequeued.clear();
+        self.popped.clear();
+    }'''
+replace = '''
+    pub(super) fn restart(&mut self) {}'''
+
+[[plant]]
+name = "lost-queue: what the old process had queued holds the turns of the process that resumed, and the reopen's answer is never the result"
+meant = "a_claude_workers_answer_to_a_reopen_is_its_result_though_its_window_closed_with_a_notification_queued"
+runs = ["lost-queue-rig"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/queues.rs"
+find = '''
+    pub(super) fn restart(&mut self) {
+        self.queued.clear();
+        self.dequeued.clear();
+        self.popped.clear();
+    }'''
+replace = '''
+    pub(super) fn restart(&mut self) {}'''
+
+[[plant]]
+name = "lost-queue: Claude's close of a cut turn says no restart"
+meant = "a_resume_empties_the_queue_and_nothing_else_of_claudes_own_does"
+runs = ["lost-queue-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/replay.rs"
+find = '''
+        if record.closes_a_cut_turn {
+            self.queues.restart();
+        }
+        self.queues.answered();'''
+replace = '''
+        self.queues.answered();'''
+
+[[plant]]
+name = "lost-queue: a SessionStart hook's run as Claude resumed says no restart"
+meant = "a_resume_empties_the_queue_and_nothing_else_of_claudes_own_does"
+runs = ["lost-queue-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/replay.rs"
+find = "            Projected::Resumed => self.queues.restart(),"
+replace = "            Projected::Resumed => {}"
+
+[[plant]]
+name = "lost-queue: any SessionStart hook's run empties the queue, a compaction's and a /clear's too"
+meant = "a_resume_empties_the_queue_and_nothing_else_of_claudes_own_does"
+runs = ["lost-queue-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/project.rs"
+find = '''    if says("hookEvent", "SessionStart") && says("hookName", "SessionStart:resume") {'''
+replace = '''    if says("hookEvent", "SessionStart") {'''
+
+[[plant]]
+name = "lost-queue: a line keeps no message's model, so no close of a cut turn is seen"
+meant = "a_resume_empties_the_queue_and_nothing_else_of_claudes_own_does"
+runs = ["lost-queue-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/keep.rs"
+find = '''    ("model", &Keep::Scalar),
+'''
+replace = ""
+
+[[plant]]
+name = "lost-queue: a line keeps no attachment's hookName, so no resume is seen"
+meant = "a_resume_empties_the_queue_and_nothing_else_of_claudes_own_does"
+runs = ["lost-queue-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/keep.rs"
+find = '''    ("hookName", &Keep::Scalar),
+'''
+replace = ""
+
+[[plant]]
+name = "lost-queue: a refusal for quota that says the close's words is taken for Claude's close"
+meant = "the_close_of_a_cut_turn_is_no_part_of_any_answer"
+runs = ["lost-queue-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/project.rs"
+find = '''
+    let closes_a_cut_turn = !refused
+        && in_message("model")'''
+replace = '''
+    let closes_a_cut_turn = in_message("model")'''
+
+[[plant]]
+name = "lost-queue: Claude's close of a cut turn is read as the worker's words, and begins its result"
+meant = "the_close_of_a_cut_turn_is_no_part_of_any_answer"
+runs = ["lost-queue-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/replay.rs"
+find = '''
+        if record.closes_a_cut_turn {
+            self.items.commentary(item);
+        }'''
+replace = ""

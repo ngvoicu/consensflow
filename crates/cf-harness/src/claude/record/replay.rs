@@ -25,6 +25,7 @@ impl Transcript {
         match record {
             Projected::Other => {}
             Projected::Hook(hook) => self.hook_context(hook, seq)?,
+            Projected::Resumed => self.queues.restart(),
             Projected::Enqueue(content) => self.queues.enqueue(content.clone()?),
             Projected::Dequeue => self.queues.dequeue(),
             Projected::PopAll(content) => self.queues.pop_all(content.clone()?),
@@ -52,10 +53,15 @@ impl Transcript {
 
     /// An assistant's record: a fragment of a message, the tool calls it
     /// makes and the results it holds; its refusal when the API refused; and
-    /// its answer, if it ended the turn.
+    /// its answer, if it ended the turn. Claude Code's own close of a turn it
+    /// found cut says a new process resumed the conversation, and is no one's
+    /// answer.
     fn assistant(&mut self, record: &Assistant, seq: usize) -> Result<(), String> {
         let number = Value::from(seq);
         let at = record.at.as_ref().unwrap_or(&number);
+        if record.closes_a_cut_turn {
+            self.queues.restart();
+        }
         self.queues.answered();
         let named = record.message_id.as_deref();
         if self
@@ -81,6 +87,9 @@ impl Transcript {
         let message_id = id_of(record.message_id.as_ref(), "claude message", seq)?;
         self.active_assistant = Some(Arc::clone(&message_id));
         let item = self.items.assistant(Arc::clone(&message_id), at, seq);
+        if record.closes_a_cut_turn {
+            self.items.commentary(item);
+        }
         // The record's uuid is asked for even of a record that says nothing.
         let uuid = id_of(record.uuid.as_ref(), "claude record", seq)?;
         self.items.fragment(item, Arc::clone(&uuid), &record.text);
