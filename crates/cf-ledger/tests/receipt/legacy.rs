@@ -421,6 +421,79 @@ fn a_row_that_joined_a_carrier_an_earlier_build_pasted_again_is_not_taken_for_re
     lets_go_of_the_answer(&mut w, carrier, answer);
 }
 
+/// Both reviews of 2026-10-17: on 3.0.4 the carrier's first paste was late, the
+/// delivery timed out and the carrier waited again, `queued`, and the chief's answer
+/// joined it then. The home is upgraded while it waits. This build's retry of the
+/// carrier begins and stops before it pastes; the next start finds the window's record
+/// showing the first paste, which never held the answer, under the carrier's marker.
+#[test]
+fn an_answer_that_joined_a_carrier_waiting_again_after_a_late_paste_is_not_taken_for_received_by_that_paste(
+) {
+    const AT: &str = "2026-10-15T12:00:00.000Z";
+    let (dir, db) = a_home_at(18);
+    a_carrier_on_its_way_left_in(&db);
+    db.execute_batch(&format!(
+        "UPDATE message SET state = 'queued' WHERE id = 3;
+         UPDATE task SET state = 'queued' WHERE id = 1;
+         INSERT INTO event (project_id, at, kind, data) VALUES
+           (1, '{AT}', 'delivery.retried', '{{\"message\":3,\"reason\":\"the harness record never showed it\"}}');"
+    ))
+    .unwrap();
+    let (mut w, carrier, answer) = opened(dir, db);
+    assert_eq!(
+        let_go(&w),
+        [serde_json::json!({ "carrier": carrier, "released": [answer] })],
+        "what the carrier carried is let go of though it waits"
+    );
+    assert_eq!(w.next("zeus"), Some(carrier));
+    let begun = w.begin(carrier);
+    assert!(begun.carried.is_empty(), "the paste carries nothing of it");
+    // The start after it: the record shows the first paste, under the carrier's marker.
+    w.edit(|_| {});
+    assert_eq!(ids(&w.ledger.in_flight().unwrap()), [carrier]);
+    w.confirm(carrier);
+    assert_eq!(
+        w.states(&[carrier, answer]),
+        ["delivered", "queued"],
+        "the answer no paste held is not received"
+    );
+    assert_eq!(w.state(1), "waiting", "and its question has no answer yet");
+    assert_eq!(w.next("zeus"), Some(answer));
+    let begun = w.deliver(answer);
+    assert!(begun.carried.is_empty(), "it rides in nothing");
+    assert_eq!(w.states(&[answer]), ["delivered"]);
+}
+
+/// Astra's review of 2026-10-17: the start that took a home alpha.82 left past
+/// migration 0019 stopped after its commit and before the tasks of what it let go of
+/// were reconciled; the next start read schema 19 and reconciled nothing, and Node's
+/// `working` stood for a task whose answer was never received. Each start reconciles
+/// what the log says was let go of and not yet reconciled, and says so, once.
+#[test]
+fn a_start_after_one_that_stopped_between_migration_19_and_its_reconcile_reconciles_what_was_let_go_of_once(
+) {
+    let (dir, db) = a_home_at(11);
+    a_carrier_on_its_way_left_in(&db);
+    migrate(&db, &MIGRATIONS).unwrap();
+    let (mut w, carrier, answer) = opened(dir, db);
+    lets_go_of_the_answer(&mut w, carrier, answer);
+    let reconciled = |w: &World| -> Vec<serde_json::Value> {
+        w.ledger
+            .events(w.project, 0, 500)
+            .expect("the log")
+            .iter()
+            .filter(|event| event.kind == "message.reconciled")
+            .map(|event| event.data.clone())
+            .collect()
+    };
+    let said = reconciled(&w);
+    assert_eq!(said.len(), 1, "{said:?}");
+    // The starts after it reconcile it no more.
+    w.edit(|_| {});
+    w.edit(|_| {});
+    assert_eq!(reconciled(&w), said);
+}
+
 /// A carrier this build began froze its set at its first paste: its rows were in
 /// every paste of it, and the start settles them with it (a review of 2026-10-16:
 /// let go of, they were pasted again on their own).
@@ -702,12 +775,12 @@ fn a_populated_version_11_ledger_is_migrated_to_12_and_again_as_it_was_and_has_r
     assert!(refused(task(10, "checker")).contains("task_pool_check"));
 }
 
-/// Migration 0019 lets go of what rides in each carrier on its way, and of nothing
-/// else: the rows of a carrier that waits ride in it still, and those of one that is
-/// over are left to the start (`release_stranded`). The log says what it let go of,
-/// one line per carrier, and a second run finds nothing to do.
+/// Migration 0019 lets go of what rides in each carrier an earlier build wrote,
+/// whatever the carrier's state (on its way, waiting, over), and of nothing else.
+/// The log says what it let go of, one line per carrier, and a second run finds
+/// nothing to do.
 #[test]
-fn a_populated_version_18_ledger_is_migrated_to_19_and_again_with_only_what_rode_in_a_carrier_on_its_way_let_go_of(
+fn a_populated_version_18_ledger_is_migrated_to_19_and_again_with_what_rode_in_every_carrier_let_go_of(
 ) {
     const AT: &str = "2026-10-15T12:00:00.000Z";
     let (_dir, db) = a_home_at(18);
@@ -763,22 +836,30 @@ fn a_populated_version_18_ledger_is_migrated_to_19_and_again_with_only_what_rode
             (4, None),
             (5, None),
             (6, None),
-            (7, Some(6)),
+            (7, None),
             (8, None),
-            (9, Some(8))
+            (9, None)
         ]
     );
     let logged = uncarried(&db);
-    assert_eq!(logged.len(), 1, "{logged:?}");
-    let (project, at, data) = &logged[0];
+    let said: Vec<(i64, &serde_json::Value)> = logged
+        .iter()
+        .map(|(project, _, data)| (*project, data))
+        .collect();
     assert_eq!(
-        (*project, data),
-        (1, &serde_json::json!({ "carrier": 3, "released": [4, 5] }))
+        said,
+        [
+            (1, &serde_json::json!({ "carrier": 3, "released": [4, 5] })),
+            (1, &serde_json::json!({ "carrier": 6, "released": [7] })),
+            (1, &serde_json::json!({ "carrier": 8, "released": [9] })),
+        ]
     );
-    assert!(
-        at.len() == 24 && at.as_bytes()[10] == b'T' && at.ends_with('Z'),
-        "an instant as the ledger writes one: {at}"
-    );
+    for (_, at, _) in &logged {
+        assert!(
+            at.len() == 24 && at.as_bytes()[10] == b'T' && at.ends_with('Z'),
+            "an instant as the ledger writes one: {at}"
+        );
+    }
     assert_eq!(
         rows_of(&db, &["project", "participant", "task"]),
         before,

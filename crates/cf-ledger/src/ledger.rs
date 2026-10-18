@@ -18,7 +18,7 @@ use cf_base::time::{Clock, SystemClock};
 use rusqlite::{Connection, ErrorCode};
 use serde_json::Value;
 
-use crate::messages::{reconcile_released, release_stranded, RELEASED_AT};
+use crate::messages::{reconcile_released, release_stranded};
 use crate::model::LedgerError;
 use crate::names;
 use crate::schema::{migrate, MIGRATIONS};
@@ -68,10 +68,10 @@ pub struct Ledger {
 /// as does a file that is no ledger (`ledger-unreadable`) and one a newer
 /// build wrote (`ledger-newer`). A file the Node daemon last held is taken
 /// as it left it: rows it left under a carrier it never knew of are queued
-/// messages of their own again (`messages::release_stranded`). A start that
-/// takes a file past migration 0019, which let go of what rode in every carrier
-/// an earlier build was pasting, reconciles their tasks
-/// (`messages::reconcile_released`).
+/// messages of their own again (`messages::release_stranded`). The tasks of what
+/// was let go of, there or by migration 0019 (what rode in every carrier an
+/// earlier build wrote), are reconciled once, by the first start after it that
+/// gets that far (`messages::reconcile_released`).
 pub fn open_ledger(file: &Path, options: Options) -> Result<Ledger, LedgerError> {
     let db = Connection::open(file)?;
     // SQLite's own default waits five seconds for a lock: a second instance
@@ -85,22 +85,15 @@ pub fn open_ledger(file: &Path, options: Options) -> Result<Ledger, LedgerError>
         db.execute_batch("BEGIN EXCLUSIVE; COMMIT")?;
         db.execute_batch("PRAGMA journal_mode = WAL")?;
         db.execute_batch("PRAGMA synchronous = FULL")?;
-        let written_at: i64 = db.query_row("PRAGMA user_version", [], |row| row.get(0))?;
-        migrate(&db, &MIGRATIONS)?;
-        Ok(written_at)
+        migrate(&db, &MIGRATIONS)
     })();
-    let written_at = match ready {
-        Ok(written_at) => written_at,
-        Err(cause) => {
-            drop(db);
-            return Err(opening_refusal(file, cause));
-        }
-    };
+    if let Err(cause) = ready {
+        drop(db);
+        return Err(opening_refusal(file, cause));
+    }
     let mut store = Store::new(db, options.clock, options.names, options.trace);
     release_stranded(&mut store)?;
-    if written_at < RELEASED_AT {
-        reconcile_released(&mut store)?;
-    }
+    reconcile_released(&mut store)?;
     Ok(Ledger {
         store,
         #[cfg(feature = "test-support")]

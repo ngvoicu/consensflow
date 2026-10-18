@@ -1,5 +1,7 @@
 //! What Devin's main chain says: the messages from the chain's head up to its
-//! first, oldest first, and whether Devin's question tool waits for an answer.
+//! first, oldest first, and whether Devin's question tool waits for an answer. A
+//! user's message that ran under `/bypass` is read as the prompt it ran: the paste it
+//! is, its header first, however Devin stores the command.
 //!
 //! A message's fields are read as Node read them: what V8 threw on (a
 //! message that is null, tool calls that are no list) fails the look here
@@ -12,6 +14,7 @@ use cf_base::js;
 use serde_json::Value;
 
 use super::store::{Row, Store};
+use crate::devin::adapter::BYPASS;
 use crate::shared::record::key::{Key, Keys};
 use crate::shared::record::reading::{Item, Role};
 use crate::shared::record::sqlite::{text_of, Cell};
@@ -74,6 +77,11 @@ impl Chain {
                 Some(Value::Array(parts)) => parts_text(parts)?,
                 _ => String::new(),
             };
+            let text = if role == Role::User {
+                behind_bypass(&text).map_or(text.clone(), str::to_owned)
+            } else {
+                text
+            };
             let at = metadata("created_at")
                 .filter(|at| !at.is_null())
                 .cloned()
@@ -108,6 +116,24 @@ impl Chain {
             asking: asking != Key::Null,
         })
     }
+}
+
+/// The prompt a user's message ran under Devin's command that switches to full
+/// permission, `/bypass <prompt>`, where it begins so, as many times as it does: what
+/// the window was given, as the daemon gives a resumed window its first message
+/// (`adapter::first_message`), is the prompt, whether Devin stores the command with it
+/// or not. None for any other.
+fn behind_bypass(text: &str) -> Option<&str> {
+    fn once(text: &str) -> Option<&str> {
+        let rest = text.trim_start().strip_prefix(BYPASS)?;
+        let prompt = rest.trim_start();
+        (prompt.len() < rest.len() && !prompt.is_empty()).then_some(prompt)
+    }
+    let mut prompt = once(text)?;
+    while let Some(behind) = once(prompt) {
+        prompt = behind;
+    }
+    Some(prompt)
 }
 
 /// The rows from the head up to the chain's first, the head's first.

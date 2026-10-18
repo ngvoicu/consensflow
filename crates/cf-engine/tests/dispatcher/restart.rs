@@ -67,6 +67,72 @@ fn gives_a_message_its_window_never_showed_back_to_the_queue_with_its_attempt_an
     );
 }
 
+/// Astra's review of 2026-10-17: the start that took a home alpha.82 left past
+/// migration 0019 stopped after its commit, before the tasks of what it let go of were
+/// reconciled. Node had left T-1 `working`, though the chief's answer to its worker's
+/// question rode in words Node was pasting and was never received. The next start read
+/// schema 19 and reconciled nothing, the words' marker was not in the record, and on
+/// the human's Resume the task was finished from the worker's reply before the answer.
+#[test]
+fn a_task_whose_answer_a_stopped_start_let_go_of_is_not_finished_from_its_old_reply_on_resume() {
+    let context = Context::new();
+    // The worker's window comes back on its conversation, its record as it was.
+    context.adapter.resumes_records.set(true);
+    let project = context.with_staff(&["zeus"]);
+    context.pass().unwrap();
+    context.give(project.id, "zeus", "Write the parser");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(context.task(project.id, 1).task.state, "working");
+    // Its worker asks the chief, and its turn ends there; the chief answers.
+    let question = context.ask(project.id, "zeus", "chief", 1, "Which format?");
+    context
+        .adapter
+        .answer("zeus", "I asked the chief which format to use.");
+    let answer = context.answer(project.id, question.id, "JSON");
+    // Node was pasting words that carried the answer, T-1 `working` as its own confirm
+    // left it; 0019 let go of the answer, and the start stopped there.
+    context.edit_ledger(|file| {
+        let db = rusqlite::Connection::open(file).unwrap();
+        db.execute_batch(&format!(
+            "INSERT INTO message (project_id, recipient_id, kind, task_id, body, state, attempts, created_at)
+               SELECT project_id, recipient_id, 'task', task_id, 'Go on with T-1.', 'delivering', 1, created_at
+                 FROM message WHERE id = {answer};
+             INSERT INTO event (project_id, at, kind, data)
+               SELECT project_id, created_at, 'delivery.begun',
+                      json_object('message', (SELECT max(id) FROM message), 'attempt', 1)
+                 FROM message WHERE id = {answer};
+             INSERT INTO event (project_id, at, kind, data)
+               SELECT project_id, created_at, 'message.uncarried',
+                      json_object('carrier', (SELECT max(id) FROM message), 'released', json_array(id))
+                 FROM message WHERE id = {answer};
+             UPDATE task SET state = 'working' WHERE id = (SELECT task_id FROM message WHERE id = {answer});",
+            answer = answer.id
+        ))
+        .unwrap();
+    });
+    assert_eq!(
+        context.task(project.id, 1).task.state,
+        "waiting",
+        "the start after it reconciles T-1: its question has no answer received"
+    );
+
+    context.ledger.borrow_mut().suspend_for_restart().unwrap();
+    let after = context.make();
+    after.settle_after_restart().unwrap();
+    after.resume_project(project.id).unwrap();
+    for _ in 0..4 {
+        after.pass().unwrap();
+    }
+    assert_eq!(context.message(answer.id).state, "delivered");
+    assert_eq!(
+        context.task(project.id, 1).task.state,
+        "working",
+        "not finished from the reply before its answer"
+    );
+    context.close();
+}
+
 #[test]
 fn sends_nothing_again_that_its_harness_took_though_the_copy_of_its_window_missed_it() {
     let context = Context::new();

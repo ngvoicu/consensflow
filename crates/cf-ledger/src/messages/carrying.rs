@@ -199,10 +199,6 @@ pub(crate) fn release_carried(store: &Store, task_id: i64) -> Result<(), LedgerE
     Ok(())
 }
 
-/// The schema of the migration (0019) that let go of what rode in every carrier on
-/// its way when a build before this one stopped (`release_stranded`).
-pub(crate) const RELEASED_AT: i64 = 19;
-
 /// What a daemon that knows no carriers left riding in one. A row is in the
 /// paste of a carrier while the carrier waits for it (`queued` or `gated`) and
 /// while it goes in (`delivering`), and this ledger settles a carrier's set in
@@ -211,25 +207,23 @@ pub(crate) const RELEASED_AT: i64 = 19;
 /// a row `queued` under a carrier it delivered, cancelled or failed. Skipped as
 /// carried, such a row would never be delivered here: when the ledger is opened,
 /// the start of this daemon, each is an ordinary queued message again, delivered
-/// in the order of its id. The tasks they are about are reconciled (`receipt`),
-/// once each: Node moved one on when it counted a queued answer as received, and
-/// that answer is still to be. A row Node was pasting on its own when it stopped
-/// is `delivering`, not `queued`: it is left to the delivery that settles it, and
-/// `retry_delivery` lets it go of its carrier then.
+/// in the order of its id, and the tasks they are about are reconciled after
+/// (`reconcile_released`): Node moved one on when it counted a queued answer as
+/// received, and that answer is still to be. A row Node was pasting on its own
+/// when it stopped is `delivering`, not `queued`: it is left to the delivery that
+/// settles it, and `retry_delivery` lets it go of its carrier then.
 ///
 /// A carrier this daemon was pasting when it stopped keeps its set: the rows rode
 /// in its paste, and the start settles them with it, received with it where the
 /// window's record shows its marker and queued again with it where it does not.
 /// Let go of it here, they went again on their own after a paste that had them (a
 /// review of 2026-10-16: the answers kept for a window pasted twice). Only a carrier
-/// this ledger began is so: it froze the set at the first paste. One an earlier
-/// build was pasting may hold a row its paste never had (the Node daemon of
-/// 3.0.0-alpha.82 pasted a carrier's words alone, and up to 3.0.4 a row could join a
-/// carrier whose first paste was late and that waited again), and migration 0019 let
-/// go of what each such carrier carried, in the step that wrote its version, as
-/// every earlier build's start did (the reviews of 2026-10-16: a marker found then
-/// took an answer no paste had held for received). The tasks those rows are about
-/// are reconciled by the start that ran it (`reconcile_released`).
+/// this ledger wrote is so: it froze the set at the first paste. What rode in a
+/// carrier an earlier build wrote, whatever its state, migration 0019 let go of, in
+/// the step that wrote its version (the reviews of 2026-10-16 and 2026-10-17: the
+/// Node daemon of 3.0.0-alpha.82 pasted a carrier's words alone, and up to 3.0.4 a
+/// row could join a carrier whose first paste was late and that waited again, so a
+/// marker found took an answer no paste had held for received).
 pub(crate) fn release_stranded(store: &mut Store) -> Result<(), LedgerError> {
     store.write(|store| {
         let carriers: Vec<(i64, i64)> = store
@@ -242,23 +236,12 @@ pub(crate) fn release_stranded(store: &mut Store) -> Result<(), LedgerError> {
             )?
             .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
             .collect::<rusqlite::Result<_>>()?;
-        let mut tasks = Vec::new();
         for (carrier, project) in carriers {
             let released = ids(
                 store,
                 "SELECT id FROM message WHERE carried_by = ? AND state = 'queued' ORDER BY id",
                 [carrier],
             )?;
-            for task in ids(
-                store,
-                "SELECT DISTINCT task_id FROM message
-                 WHERE carried_by = ? AND state = 'queued' AND task_id IS NOT NULL",
-                [carrier],
-            )? {
-                if !tasks.contains(&task) {
-                    tasks.push(task);
-                }
-            }
             store.db.execute(
                 "UPDATE message SET carried_by = NULL WHERE carried_by = ? AND state = 'queued'",
                 [carrier],
@@ -269,31 +252,58 @@ pub(crate) fn release_stranded(store: &mut Store) -> Result<(), LedgerError> {
                 json!({ "carrier": carrier, "released": released }),
             )?;
         }
-        for task in tasks {
-            reconcile(store, task)?;
-        }
         Ok(())
     })
 }
 
-/// The tasks of the rows migration 0019 let go of, reconciled once each by the start
-/// that ran it, as the start of an earlier build reconciled what it let go of: a row
-/// the log says was let go of that waits still, on its own. Run at a start that took
-/// the ledger past [`RELEASED_AT`]; one that stopped before this goes on to the
-/// carrier's own settling, whose receipt reconciles the same task.
+/// The tasks of what was let go of (`message.uncarried`, by migration 0019 or by
+/// [`release_stranded`]) and not yet reconciled, reconciled at each start, once
+/// each, as the start of an earlier build reconciled what it let go of: a row the
+/// log says was let go of that waits still, on its own. The log says which lets-go
+/// were reconciled (`message.reconciled`), in the same step, so a start that stops
+/// before this leaves them to the next (Astra's review of 2026-10-17: a start that
+/// stopped after 0019's commit left Node's `working` to a task whose answer was
+/// never received, and the next read the schema and reconciled nothing).
 pub(crate) fn reconcile_released(store: &mut Store) -> Result<(), LedgerError> {
     store.write(|store| {
-        let tasks = ids(
-            store,
-            "SELECT DISTINCT m.task_id FROM event e, json_each(e.data, '$.released') r
-             JOIN message m ON m.id = r.value
-             WHERE e.kind = 'message.uncarried' AND m.state = 'queued'
-               AND m.carried_by IS NULL AND m.task_id IS NOT NULL
-             ORDER BY m.task_id",
-            [],
-        )?;
-        for task in tasks {
-            reconcile(store, task)?;
+        let unreconciled: Vec<(i64, i64)> = store
+            .db
+            .prepare(
+                "SELECT e.project_id, e.id FROM event e
+                 WHERE e.kind = 'message.uncarried'
+                   AND NOT EXISTS (SELECT 1 FROM event r, json_each(r.data, '$.uncarried') u
+                                   WHERE r.kind = 'message.reconciled' AND u.value = e.id)
+                 ORDER BY e.id",
+            )?
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect::<rusqlite::Result<_>>()?;
+        for (_, event) in &unreconciled {
+            for task in ids(
+                store,
+                "SELECT DISTINCT m.task_id FROM event e, json_each(e.data, '$.released') r
+                 JOIN message m ON m.id = r.value
+                 WHERE e.id = ? AND m.state = 'queued'
+                   AND m.carried_by IS NULL AND m.task_id IS NOT NULL
+                 ORDER BY m.task_id",
+                [event],
+            )? {
+                reconcile(store, task)?;
+            }
+        }
+        let mut projects: Vec<i64> = unreconciled.iter().map(|(project, _)| *project).collect();
+        projects.sort_unstable();
+        projects.dedup();
+        for project in projects {
+            let events: Vec<i64> = unreconciled
+                .iter()
+                .filter(|(of, _)| *of == project)
+                .map(|(_, event)| *event)
+                .collect();
+            store.log(
+                project,
+                "message.reconciled",
+                json!({ "uncarried": events }),
+            )?;
         }
         Ok(())
     })

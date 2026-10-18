@@ -54,6 +54,9 @@ pub struct FakeAgent {
     pub arrive: bool,
     /// Whether the harness's own queue takes a delivery.
     pub queued: bool,
+    /// The harness says, after the hand-over, that it put the delivery to its
+    /// agent (`Window::took`).
+    pub took: bool,
     /// The harness holds the delivery in a turn it is in still (`Window::held`).
     pub held: bool,
     pub failed: bool,
@@ -189,6 +192,10 @@ pub struct FakeAdapter {
     /// each goes before its harness takes it, where the fake of Node's suite recorded
     /// it as it prepared the launch.
     pub forgets_first_messages: Cell<bool>,
+    /// A window resumed on a conversation reads that conversation's record as the
+    /// last window on it left it, as a harness's `--resume` does: not, as the fake of
+    /// Node's suite, whose every window began with an empty record.
+    pub resumes_records: Cell<bool>,
 }
 
 impl FakeAdapter {
@@ -233,6 +240,7 @@ impl FakeAdapter {
             cut_holds: Holds::default(),
             wraps_pastes: Cell::new(false),
             forgets_first_messages: Cell::new(false),
+            resumes_records: Cell::new(false),
         })
     }
 
@@ -508,11 +516,16 @@ impl Asked {
         let native = launch
             .resume
             .map_or_else(|| format!("native-{id}"), str::to_owned);
+        let resumed = launch
+            .resume
+            .filter(|_| fake.resumes_records.get())
+            .and_then(|session| fake.record_of(session))
+            .map(|(items, _)| items);
         let mut agent = FakeAgent {
             launch: id.clone(),
             handle: launch.handle.to_owned(),
             native: native.clone(),
-            items: Vec::new(),
+            items: resumed.unwrap_or_default(),
             settled: true,
             agents_pending: false,
             waiting: None,
@@ -520,6 +533,7 @@ impl Asked {
             admit: true,
             arrive: true,
             queued: false,
+            took: false,
             held: false,
             failed: false,
             shows: None,

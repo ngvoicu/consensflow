@@ -550,6 +550,12 @@ impl Window for DevinWindow {
         true
     }
 
+    fn took(&self) -> bool {
+        self.wire
+            .read(self.time.wall_ms())
+            .is_ok_and(|wire| wire.sent)
+    }
+
     fn held(&self) -> bool {
         self.wire
             .read(self.time.wall_ms())

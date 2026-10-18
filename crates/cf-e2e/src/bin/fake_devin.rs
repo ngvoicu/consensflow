@@ -43,7 +43,9 @@
 //! wire says the mode in the configuration it opens with, and each change of it. In the
 //! normal mode a call of the prompt file's turn is refused ("User skipped this tool
 //! call") and a pasted turn's opens a dialog, which Enter answers (its first option,
-//! approve once) and Escape leaves; `/bypass` switches it.
+//! approve once) and Escape leaves; `/bypass` switches it. Its store keeps the prompt a
+//! message ran under `/bypass`, or the message as it was given where
+//! `FAKE_DEVIN_STORES_COMMANDS` says so: how Devin stores one is not known.
 //!
 //! The terminal and the signals are the other stand-in's own (`fake_agent/`).
 
@@ -186,12 +188,15 @@ fn run(launch: &Launch, signals: signals::Signals) -> Result<Infallible, String>
             .filter(|_| launch.resume.is_none()),
     );
     let folder = std::env::current_dir().map_err(said)?;
+    let stores_commands =
+        own_var(turn::STORES_COMMANDS_VARIABLE).is_some_and(|stores| !stores.is_empty());
     {
         let (stop, permission) = (Arc::clone(&stop), Arc::clone(&permission));
         thread::spawn(move || {
             let mut window = Window::new(store, wire, stop, io::stdout(), pace)
                 .in_mode(permission, folder)
-                .crashing_on(crash);
+                .crashing_on(crash)
+                .storing_commands(stores_commands);
             if let Some(folder) = jobs {
                 window = window.leaving_jobs_in(folder, std::process::id(), command::THINKING);
             }

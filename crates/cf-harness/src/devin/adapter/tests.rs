@@ -404,6 +404,45 @@ fn a_message_pasted_is_held_in_the_turn_of_the_tuis_prompt_its_line_begins_and_n
     assert!(!window.held());
 }
 
+/// Its agent has the paste once the TUI put it to its agent in a prompt its line begins,
+/// whatever came of that turn; words that quote the line put nothing to it, and the
+/// next paste is another's to say.
+#[test]
+fn the_agent_has_a_paste_once_the_tuis_prompt_its_line_begins_is_read_and_ever_after() {
+    let dir = tempfile::tempdir().unwrap();
+    let wire = dir.path().join("wire.jsonl");
+    fs::write(&wire, shows("mild-coin")).unwrap();
+    let fakes = Fakes::new(&Env::default());
+    let window = window_at_rest(&fakes, &wire, Env::default());
+    let host = crate::testing::AnsweringHost::new(|_| Ok(serde_json::json!({ "ok": true })));
+    let pane = Pane {
+        id: "s1-zeus".to_owned(),
+        generation: 2,
+    };
+    let text = "[ConsensFlow m-9 · T-1 · note from ConsensFlow]\n@human cancelled T-1";
+    assert!(finished(window.deliver(&host, &pane, text)).is_ok());
+    assert!(!window.took(), "pasted, not yet put to the agent");
+    let pasted = if Env::default().on_windows() {
+        console_text(&window_text(text))
+    } else {
+        text.to_owned()
+    };
+    let line = pasted.lines().next().unwrap();
+    append(
+        &wire,
+        &asks("mild-coin", &format!("Why is \"{line}\" still queued?")),
+    );
+    append(&wire, turn_ends());
+    assert!(!window.took(), "words that quote it are no paste of it");
+    append(&wire, &asks("mild-coin", &pasted));
+    assert!(window.took());
+    append(&wire, turn_ends());
+    assert!(window.took(), "and its turn's end takes nothing back");
+    let next = "[ConsensFlow m-10 · T-1 · note from ConsensFlow]\nlater";
+    assert!(finished(window.deliver(&host, &pane, next)).is_ok());
+    assert!(!window.took(), "the next paste is not yet put to it");
+}
+
 #[test]
 fn a_message_pasted_into_a_turn_whose_agent_has_said_nothing_past_the_gap_is_held_while_the_turn_is_on(
 ) {

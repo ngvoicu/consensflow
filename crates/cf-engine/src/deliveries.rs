@@ -28,25 +28,20 @@ pub(crate) struct Delivering {
     pub(crate) since: i64,
     /// Since when the window has been at rest without the record showing it:
     /// from the hand-over, but for the turns the window was in since. None
-    /// while it is in one (`arrival`).
+    /// while it is in one, or its harness holds it (`arrival`).
     pub(crate) rested_since: Option<i64>,
+    /// Since when its harness has not held it in a turn: the hand-over, where the
+    /// harness did not hold it then, else the first look that found it held no longer
+    /// after the last that did. None while the harness holds it (`arrival`).
+    pub(crate) free_since: Option<i64>,
     /// It is a launch's first message.
     pub(crate) launch: bool,
     /// It is the chief's first message, a handoff most often, or what a launch put
     /// ahead of it (the replacement of the role): never given up for being slow.
     pub(crate) chief: bool,
-    /// The harness's own queue took it, as it said at the hand-over.
+    /// The harness's own queue took it, as it said at the hand-over or after
+    /// (`Window::took`).
     pub(crate) queued: bool,
-    /// When the latest look found the window at rest: None from a look that found
-    /// it in a turn.
-    pub(crate) rested_last: Option<i64>,
-    /// How long looks have seen the window at rest since the last look that found
-    /// its harness holding it in a turn it is in (`Window::held`), from one look at
-    /// rest to the next: never pasted again while it holds it, and from that turn's
-    /// end its record has a whole arrival window of rest, however long ago it was
-    /// handed over, and the half hour counts this (`arrival`). None where no look
-    /// found it held.
-    pub(crate) rest_after_hold: Option<i64>,
     /// Enter was pressed once more for it.
     pub(crate) entered_again: bool,
 }
@@ -148,11 +143,14 @@ impl Dispatcher {
             return Ok(());
         }
         let since = self.now();
+        // The window was at rest when it was handed over, unless its harness holds what
+        // it was given in the turn it is in (`arrival`).
+        let free = (!window.held()).then_some(since);
         let delivering = Delivering {
             message: message.id,
             since,
-            // The window was at rest when it was handed over.
-            rested_since: Some(since),
+            rested_since: free,
+            free_since: free,
             launch: false,
             // What a chief's launch put ahead of its queue is its first messages.
             chief: self.begins(record, message.id),
@@ -160,8 +158,6 @@ impl Dispatcher {
             // plugin): it shows when the harness gets to it, and sending it
             // again would only make a duplicate.
             queued: matches!(outcome, Admission::Admitted { queued: true }),
-            rested_last: None,
-            rest_after_hold: None,
             entered_again: false,
         };
         if let Admission::Refused { reason } = &outcome {

@@ -16,6 +16,8 @@
 //! stands in for the harnesses of (what the rig tells of its windows, the
 //! records the stand-ins leave in a Claude folder that is the person's, a
 //! window opened as the app opens one, the harness code asked as a process).
+//! So is `devin_bypass_first`: a resumed Devin worker's first message behind
+//! `/bypass`, received once however Devin stores the command.
 //! So is `live_member`: a Devin member's window as `live_devin_resume` opens
 //! one, whole as the adapter prepares it, cut, and opened again on its
 //! conversation with the note in its launch.
@@ -81,6 +83,8 @@ mod daemon_seam;
 mod decided_result;
 #[path = "rig/described.rs"]
 mod described;
+#[path = "rig/devin_bypass_first.rs"]
+mod devin_bypass_first;
 #[path = "rig/help.rs"]
 mod help;
 #[path = "rig/live_base.rs"]

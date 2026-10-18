@@ -5,8 +5,11 @@
 
 use std::time::Duration;
 
+use cf_e2e::devin_store::Message;
 use cf_e2e::live::ask::Record;
 use cf_e2e::live::members::squash;
+
+use crate::case::BYPASS;
 
 /// How the wait for a turn ended.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -50,6 +53,36 @@ pub fn told(record: Option<&Record>, header: &str) -> (bool, bool) {
         .unwrap_or_default();
     let ended = record.settled && last > at && record.items[last].role == "assistant";
     (true, ended)
+}
+
+/// How Devin stored the user's message that holds `header` among `messages` of its
+/// store, the first of them: with the header first, behind `/bypass` (the command that
+/// switches a window to full permission, which a resumed window's first message goes
+/// behind), or behind other words. None where no user's message holds it.
+pub fn stored_shape(messages: &[Message], header: &str) -> Option<String> {
+    let message = messages
+        .iter()
+        .find(|message| message.role == "user" && message.text.contains(header))?;
+    let text = message.text.trim_start();
+    Some(if text.starts_with(header) {
+        "with its header first, /bypass not kept".to_owned()
+    } else if text.starts_with(BYPASS) {
+        format!("behind {BYPASS}, kept: {}", squash(text, 60))
+    } else {
+        format!("behind other words: {}", squash(text, 60))
+    })
+}
+
+/// Whether the daemon's reader has the user's item that holds `header` with the header
+/// first, as the daemon takes a paste of it (`is_paste_of`).
+pub fn read_header_first(record: Option<&Record>, header: &str) -> bool {
+    record.is_some_and(|record| {
+        record
+            .items
+            .iter()
+            .find(|item| item.role == "user" && item.text.contains(header))
+            .is_some_and(|item| item.text.trim_start().starts_with(header))
+    })
 }
 
 /// How the daemon's own reader reads the record, as a line.
@@ -193,6 +226,38 @@ mod tests {
             told(Some(&record(first, true)), "[ConsensFlow m-1 "),
             (false, false)
         );
+    }
+
+    #[test]
+    fn how_devin_stored_a_message_is_its_header_first_behind_bypass_or_behind_other_words() {
+        let header = "[ConsensFlow m-2 ";
+        let stored = |text: &str| Message {
+            id: "u-1".to_owned(),
+            role: "user".to_owned(),
+            text: text.to_owned(),
+            raw: Value::Null,
+        };
+        let note = "[ConsensFlow m-2 · T-1 · note from ConsensFlow]\nGo on where you stopped.";
+        assert_eq!(
+            stored_shape(&[stored(note)], header).as_deref(),
+            Some("with its header first, /bypass not kept")
+        );
+        assert!(
+            stored_shape(&[stored(&format!("/bypass {note}"))], header).is_some_and(
+                |shape| shape.starts_with("behind /bypass, kept: /bypass [ConsensFlow m-2")
+            )
+        );
+        assert!(stored_shape(&[stored(&format!("Look: {note}"))], header)
+            .is_some_and(|shape| shape.starts_with("behind other words")));
+        assert_eq!(stored_shape(&[stored("hello")], header), None);
+        // The reader's item, as the daemon takes a paste.
+        let read = |text: &str| record(vec![item("user", text, true)], true);
+        assert!(read_header_first(Some(&read(note)), header));
+        assert!(!read_header_first(
+            Some(&read(&format!("/bypass {note}"))),
+            header
+        ));
+        assert!(!read_header_first(None, header));
     }
 
     #[test]

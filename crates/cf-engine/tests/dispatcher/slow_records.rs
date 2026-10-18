@@ -11,12 +11,12 @@
 //! pasted again at the first rest past half an hour from its hand-over. A window
 //! whose harness says the paste is in a turn it is in (`Window::held`: the turn it
 //! went into, or the one the harness began with it) is in that turn, however at rest
-//! it reads, as long as the harness says so, and
-//! the paste never goes again meanwhile, however old: once that turn ends, its
-//! record has a whole arrival window of rest, and the half hour is the rest the looks
-//! saw from there, from one look at rest to the next.
-//! The one more Enter a paste is given (`deliveries`) is pressed in the first arrival
-//! window only, whatever the wait after it.
+//! it reads, as long as the harness says so, and the paste never goes again
+//! meanwhile, however old: once that turn ends, its record has a whole arrival window
+//! of rest, and the half hour runs from the first look that found it held no longer.
+//! One whose harness says it put the paste to its agent (`Window::took`) is waited
+//! for until its record shows it. The one more Enter a paste is given (`deliveries`)
+//! is pressed in the first arrival window only, whatever the wait after it.
 //!
 //! The report: 2026-10-13, ConsensFlow 3.0.3, a Devin chief on Windows. The
 //! human cancelled T-17, the chief was sent two notes one right after the
@@ -428,8 +428,11 @@ fn short_turns(context: &Context, rounds: usize) {
 /// The reviews of 2026-10-16: Devin dropped a paste, and the turn the human began next
 /// held it. Once that turn ended, turns of ten seconds twenty seconds apart kept every
 /// rest short of an arrival window, and the paste never went again, its queue behind
-/// it: no half hour was counted once a turn had held it. The half hour is the rest the
-/// looks saw after the last turn that held it, which a second such turn begins again.
+/// it. The half hour runs from the first look that found the paste held no longer, in
+/// time and not in rest, which no such rhythm of turns ever adds up to: a dropped paste
+/// goes again within a bound of the turn that held it (`schedules`' never-for-good,
+/// 41 minutes), which rest the looks saw (round 8's count, an hour here) would break. A
+/// second turn that holds it begins the half hour again.
 #[test]
 fn pastes_again_half_an_hour_after_the_turn_that_held_it_ended_a_paste_short_turns_keep_unshown() {
     let context = Context::new();
@@ -439,21 +442,20 @@ fn pastes_again_half_an_hour_after_the_turn_that_held_it_ended_a_paste_short_tur
     let behind = context.note(project, "zeus", "chief", "behind");
     context.pass().unwrap();
 
-    // A turn holds it, then a quarter of an hour of rest between short turns, then a
-    // turn holds it again.
+    // A turn holds it, then just under half an hour of short turns, then a turn holds
+    // it again.
     held_for_a_minute(&context);
-    short_turns(&context, 60);
+    short_turns(&context, 59);
     held_for_a_minute(&context);
 
-    // Half an hour of rest the looks saw since, between turns that hold nothing, and
-    // nothing shows the paste.
-    short_turns(&context, 120);
+    // Half an hour of short turns since the first look that found it free, and nothing
+    // shows the paste.
+    short_turns(&context, 60);
     assert_eq!(context.message(note.id).attempts, 1);
     assert_eq!(pasted.get(), 1);
     assert_eq!(context.message(behind.id).state, "queued");
 
-    // Past half an hour of it, the next look at rest that follows one pastes it again
-    // and says why.
+    // Past half an hour of it, the next look at rest pastes it again and says why.
     context.adapter.with("chief", |agent| {
         agent.settled = true;
         agent.arrive = true;
@@ -463,14 +465,14 @@ fn pastes_again_half_an_hour_after_the_turn_that_held_it_ended_a_paste_short_tur
     assert_eq!(
         pasted.get(),
         1,
-        "the first look at rest after a turn adds no rest"
+        "half an hour to the millisecond is not past it"
     );
     context.advance(5_000);
     context.pass().unwrap();
     assert_eq!(pasted.get(), 2, "pasted again once");
     assert_eq!(
         why_retried(&context, project),
-        "the harness record never showed it in the 30 min its window was at rest since the turn that held it ended"
+        "the harness record never showed it in the 30 min since the turn that held it ended"
     );
     context.pass().unwrap();
     let delivered = context.message(note.id);
@@ -528,26 +530,109 @@ fn counts_no_rest_in_a_gap_in_the_looks_that_began_in_the_turn_that_held_the_pas
     pasted_again_only_after_a_real_rest(&context, project, &pasted);
 }
 
-/// Nor in a gap that began in a turn that held nothing, after the one that held it.
+/// The same of a hand-over into a turn that holds the paste, with no look between: the
+/// harness says at the hand-over that it holds it, so the time from the hand-over is no
+/// rest of a paste that was free (Astra's review of 2026-10-17: the looks stopped right
+/// after the hand-over, the turn ended just before the next, and the paste went again
+/// while Devin had it queued).
 #[test]
-fn counts_no_rest_in_a_gap_in_the_looks_that_began_in_a_turn_after_the_one_that_held_the_paste() {
+fn counts_no_rest_in_a_gap_in_the_looks_from_a_hand_over_into_a_turn_that_held_the_paste() {
     let context = Context::new();
     let project = holding(&context);
     let pasted = counting(&context);
+    context.adapter.with("chief", |agent| agent.held = true);
+    context.note(project, "zeus", "chief", "hello");
+    context.pass().unwrap();
+    assert_eq!(pasted.get(), 1);
+
+    // No look for 31 minutes, and the turn ends just before the next.
+    context.adapter.with("chief", |agent| agent.held = false);
+    pasted_again_only_after_a_real_rest(&context, project, &pasted);
+}
+
+/// A gap that began after the turn that held the paste ended is time the paste was free:
+/// the half hour counts it. A paste Devin did not drop is in the window by then, and its
+/// harness says so (`Window::took`), so it is never pasted again, however long the looks
+/// stop; one it dropped goes again at the first look at rest past the half hour.
+fn free_then_a_gap(context: &Context, took: bool) -> (i64, Rc<Cell<usize>>) {
+    let project = holding(context);
+    let pasted = counting(context);
     context.note(project, "zeus", "chief", "hello");
     context.pass().unwrap();
     context.adapter.with("chief", |agent| agent.held = true);
     context.advance(ARRIVAL_MS);
     context.pass().unwrap();
-    context.adapter.with("chief", |agent| agent.held = false);
+    // The turn that held it ends, and Devin runs the paste or drops it.
+    context.adapter.with("chief", |agent| {
+        agent.held = false;
+        agent.took = took;
+    });
     context.advance(5_000);
     context.pass().unwrap();
 
-    // A turn that holds nothing, and no look for 31 minutes.
+    // A turn of its own or of the human's, and no look for 31 minutes.
     context.adapter.busy("chief");
     context.advance(5_000);
     context.pass().unwrap();
-    pasted_again_only_after_a_real_rest(&context, project, &pasted);
+    context.advance(31 * 60_000);
+    context.adapter.with("chief", |agent| agent.settled = true);
+    context.pass().unwrap();
+    (project, pasted)
+}
+
+#[test]
+fn pastes_again_after_a_gap_in_the_looks_a_paste_its_harness_dropped_after_the_turn_that_held_it() {
+    let context = Context::new();
+    let (project, pasted) = free_then_a_gap(&context, false);
+    assert_eq!(
+        pasted.get(),
+        2,
+        "pasted again at the first look at rest past the half hour"
+    );
+    assert_eq!(
+        why_retried(&context, project),
+        "the harness record never showed it in the 30 min since the turn that held it ended"
+    );
+}
+
+#[test]
+fn never_pastes_again_after_a_gap_in_the_looks_a_paste_its_harness_took_after_the_turn_that_held_it(
+) {
+    let context = Context::new();
+    let (_, pasted) = free_then_a_gap(&context, true);
+    for _ in 0..4 {
+        context.advance(ARRIVAL_MS);
+        context.pass().unwrap();
+    }
+    context.advance(31 * 60_000);
+    context.pass().unwrap();
+    assert_eq!(pasted.get(), 1, "its record shows it when it does");
+}
+
+/// A paste Devin ran at once between two looks, its record late (Vali's schedules of
+/// 2026-10-17: a regression against main, which waited once the wire said the TUI had
+/// put the paste to its agent): the arrival window from the hand-over is past before
+/// the record shows it, and the harness's word that its agent has it is what waits.
+#[test]
+fn waits_for_the_record_of_a_paste_its_harness_put_to_its_agent_however_late_it_shows() {
+    let context = Context::new();
+    let project = holding(&context);
+    let pasted = counting(&context);
+    let note = context.note(project, "zeus", "chief", "hello");
+    context.pass().unwrap();
+    context.adapter.with("chief", |agent| agent.took = true);
+    for _ in 0..3 {
+        context.advance(ARRIVAL_MS);
+        context.pass().unwrap();
+    }
+    assert_eq!(pasted.get(), 1, "not pasted again");
+    shows(&context, "chief", &context.message(note.id));
+    context.pass().unwrap();
+    let delivered = context.message(note.id);
+    assert_eq!(
+        (delivered.state.as_str(), delivered.attempts),
+        ("delivered", 1)
+    );
 }
 
 #[test]

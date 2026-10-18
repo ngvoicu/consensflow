@@ -77,6 +77,10 @@ pub(super) struct Said {
     pub(super) mode: Option<String>,
     /// Devin's word on its quota, shared with every look that finds it.
     pub(super) quota: Option<Arc<Quota>>,
+    /// The TUI put the message last pasted to its agent, in a prompt whose words begin
+    /// with the paste's line: the agent has it, and its record shows it once the turn
+    /// that prompt began has run, whatever came of it.
+    pub(super) sent: bool,
     /// The message last pasted is in a turn, and a prompt is asked still: it went
     /// into a turn a prompt began, which the agent runs it after, or the TUI put it to
     /// the agent in a prompt of its own, whose turn is running it. Its record shows it
@@ -282,6 +286,7 @@ impl State {
             shown: self.shown.clone(),
             mode: self.mode.clone(),
             quota: self.quota.clone(),
+            sent: self.sent,
             held: self.into_a_turn && !self.asked.is_empty(),
             asked_at: self.asked.last().map(|asked| asked.at_ms),
             prompts: self.prompts,

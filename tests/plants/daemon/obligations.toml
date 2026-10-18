@@ -131,22 +131,8 @@ runs = ["ledger-receipt"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/carrying.rs"
-find = '''
-            reconcile(store, task)?;
-        }
-        Ok(())
-    })
-}
-
-/// The tasks of the rows migration 0019'''
-replace = '''
-            let _ = (task, reconcile);
-        }
-        Ok(())
-    })
-}
-
-/// The tasks of the rows migration 0019'''
+find = "                reconcile(store, task)?;"
+replace = "                let _ = (task, reconcile);"
 
 [[plant]]
 name = "pause: a carrier that was delivered keeps its rows at the start"

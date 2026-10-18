@@ -146,6 +146,22 @@ fn bypass_before_the_prompt_files_message_switches_the_window_before_the_message
 }
 
 #[test]
+fn a_window_that_stores_commands_keeps_the_message_it_ran_under_bypass_as_it_was_given() {
+    let mut case = case(false);
+    case.window = case.window.storing_commands(true);
+    case.window
+        .take_message("/bypass FILE made.txt Reply with exactly: DONE", true)
+        .unwrap();
+    assert!(case.made(), "the prompt ran in full permission");
+    let nodes = case.nodes();
+    assert_eq!(
+        nodes[0]["content"],
+        "/bypass FILE made.txt Reply with exactly: DONE"
+    );
+    assert_eq!(nodes.last().unwrap()["content"], "DONE");
+}
+
+#[test]
 fn a_pasted_call_in_the_normal_mode_waits_at_its_dialog_until_enter_or_escape() {
     for (key, made) in [(Answer::Approved, true), (Answer::Cancelled, false)] {
         let mut case = case(false);

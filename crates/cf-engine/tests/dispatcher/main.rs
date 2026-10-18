@@ -64,6 +64,7 @@ mod resumable;
 mod resume;
 mod review;
 mod role_change;
+mod schedules;
 mod separate_callbacks;
 mod servers;
 mod session_windows;

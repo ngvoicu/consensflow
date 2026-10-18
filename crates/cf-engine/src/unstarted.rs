@@ -153,8 +153,7 @@ impl Dispatcher {
             launch: true,
             chief: participant.role == "chief",
             queued: false,
-            rested_last: None,
-            rest_after_hold: None,
+            free_since: None,
             entered_again: false,
         };
         if participant.role == "chief" {

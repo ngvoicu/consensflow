@@ -46,12 +46,12 @@ replace = ""
 
 [[plant.edit]]
 file = "crates/cf-engine/src/arrival.rs"
-find = "        } = self.rested(record, observed, held);"
+find = "        } = self.rested(record, observed, self.held(record));"
 replace = '''
         } = Rest {
             rested: waited,
             turned: false,
-            ..self.rested(record, observed, held)
+            ..self.rested(record, observed, self.held(record))
         };'''
 
 [[plant]]
@@ -61,12 +61,12 @@ runs = ["engine-slow-records"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/arrival.rs"
-find = "        } = self.rested(record, observed, held);"
+find = "        } = self.rested(record, observed, self.held(record));"
 replace = '''
         } = Rest {
             rested: waited,
             turned: false,
-            ..self.rested(record, observed, held)
+            ..self.rested(record, observed, self.held(record))
         };'''
 
 [[plant]]
@@ -76,8 +76,8 @@ runs = ["engine-slow-records"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/arrival.rs"
-find = "        if observed.settled && observed.waiting.is_none() && !held {"
-replace = "        if observed.settled && !held {"
+find = "        if observed.settled && observed.waiting.is_none() {"
+replace = "        if observed.settled {"
 
 [[plant]]
 name = "notes twice: a message the harness said at the hand-over its own queue holds is tried again all the same"
@@ -209,5 +209,5 @@ runs = ["engine-slow-records"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/arrival.rs"
-find = "        let overdue = unshown > RECONCILE_MS && at_rest && !held;"
-replace = "        let overdue = false && unshown > RECONCILE_MS && at_rest && !held;"
+find = "        let overdue = at_rest && free.is_some_and(|free| now - free > RECONCILE_MS);"
+replace = "        let overdue = false && at_rest && free.is_some_and(|free| now - free > RECONCILE_MS);"

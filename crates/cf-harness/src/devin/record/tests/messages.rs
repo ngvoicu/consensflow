@@ -138,6 +138,54 @@ fn a_message_s_text_parts_are_joined_as_javascript_joins_them() {
     );
 }
 
+/// The texts of the items one look reads.
+fn texts(staged: &Staged) -> Vec<String> {
+    match &*look(&mut staged.reader()) {
+        Reading::Known(record) => record
+            .items
+            .iter()
+            .map(|item| item.text.to_string())
+            .collect(),
+        Reading::Unknown(reason) => panic!("unread: {reason}"),
+    }
+}
+
+/// A resumed window's first message goes behind `/bypass` (`adapter::first_message`),
+/// and Devin may store the command with the prompt it ran, or the prompt alone: either
+/// way the record reads the prompt, its header first, the paste the engine waits for
+/// (`is_paste_of`). A member's note that its turn was cut, and a chief's handoff given
+/// again on the conversation it was given to.
+#[test]
+fn a_users_message_that_ran_under_bypass_is_read_as_the_prompt_it_ran_however_devin_stored_it() {
+    let member = "[ConsensFlow m-2 · T-1 · note from ConsensFlow]\nConsensFlow quit while you were working on T-1. Go on where you stopped.";
+    let chief = "[ConsensFlow m-7 · note from ConsensFlow]\nYou are the chief now of app, switched in from Claude Code.";
+    for note in [member, chief] {
+        // The adapter's one `/bypass`, and two where a window was given one of its own
+        // before it (the live suite's `after-note-bypass`).
+        for stored in [
+            format!("/bypass {note}"),
+            note.to_owned(),
+            format!("  /bypass\n{note}"),
+            format!("/bypass /bypass {note}"),
+        ] {
+            let staged = Staged::new();
+            staged.chain(&[json!({ "message_id": "u-1", "role": "user", "content": stored })]);
+            assert_eq!(texts(&staged), [note], "{stored:?}");
+        }
+    }
+    // Only Devin's command, with a prompt after it, and only in a user's message.
+    for (role, stored) in [
+        ("user", "/bypassed it"),
+        ("user", "/bypass"),
+        ("user", "say /bypass now"),
+        ("assistant", "/bypass [ConsensFlow m-2 · note]"),
+    ] {
+        let staged = Staged::new();
+        staged.chain(&[json!({ "message_id": "m", "role": role, "content": stored })]);
+        assert_eq!(texts(&staged), [stored], "{role}: {stored}");
+    }
+}
+
 #[test]
 fn requests_are_told_apart_as_javascript_keys_them() {
     // Two requests, each answered with a turn's end: the first reply is

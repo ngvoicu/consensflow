@@ -172,7 +172,15 @@ pub struct Window<W: Write> {
     folder: PathBuf,
     /// How many calls its turns have made.
     calls: u64,
+    /// Its store keeps a message that ran under `/bypass` as it was given, the command
+    /// with the prompt, where it keeps the prompt alone otherwise.
+    stores_commands: bool,
 }
+
+/// What a window that stores a message as it was given is told by: how Devin stores a
+/// prompt it ran under `/bypass` is not known (the reviews of 2026-10-17), and the
+/// daemon reads either.
+pub const STORES_COMMANDS_VARIABLE: &str = "FAKE_DEVIN_STORES_COMMANDS";
 
 /// Where the rig looks for the jobs of a window, which window it is (its process), and
 /// how long the agent thinks before it runs its tool: a command a turn leaves is a job.
@@ -196,7 +204,16 @@ impl<W: Write> Window<W> {
             permission: Arc::new(Permission::new(true)),
             folder: std::env::current_dir().unwrap_or_default(),
             calls: 0,
+            stores_commands: false,
         }
+    }
+
+    /// The window's store keeps a message that ran under `/bypass` as it was given,
+    /// where `stores`.
+    #[must_use]
+    pub fn storing_commands(mut self, stores: bool) -> Self {
+        self.stores_commands = stores;
+        self
     }
 
     /// The window ends at the message `crash` meets, once its row and its prompt
@@ -251,10 +268,11 @@ impl<W: Write> Window<W> {
     }
 
     /// A message that is `/bypass` switches the window to full permission, and the
-    /// prompt after it, if any, is a turn; any other message is a turn.
+    /// prompt after it, if any, is a turn, stored as the prompt or as the message was
+    /// given (`stores_commands`); any other message is a turn.
     fn command(&mut self, text: &str, prompt_file: bool) -> Result<(), String> {
         let Some(prompt) = permission::command(text) else {
-            return self.turn(text, prompt_file);
+            return self.turn(text, text, prompt_file);
         };
         if self.permission.to_bypass() {
             self.wire
@@ -265,7 +283,8 @@ impl<W: Write> Window<W> {
         if prompt.is_empty() {
             return Ok(());
         }
-        self.turn(prompt, prompt_file)
+        let stored = if self.stores_commands { text } else { prompt };
+        self.turn(prompt, stored, prompt_file)
     }
 
     /// What the next call of the turn `client` is said with.
@@ -281,7 +300,8 @@ impl<W: Write> Window<W> {
         }
     }
 
-    fn turn(&mut self, text: &str, prompt_file: bool) -> Result<(), String> {
+    /// The turn of the message `text`, which its store keeps as `stored`.
+    fn turn(&mut self, text: &str, stored: &str, prompt_file: bool) -> Result<(), String> {
         self.turns += 1;
         let client = format!("client-{}", self.turns);
         let stream = format!("stream-{}", self.turns);
@@ -289,7 +309,7 @@ impl<W: Write> Window<W> {
             Some(cut) => plan_of(&cut, self.pace).going_on(self.pace),
             None => plan_of(text, self.pace),
         };
-        self.store.user(text, &client)?;
+        self.store.user(stored, &client)?;
         self.wire.prompt(self.turns + 1, text).map_err(said)?;
         if self.crash.meets(text) {
             crate::leave(1);

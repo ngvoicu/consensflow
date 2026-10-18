@@ -4,11 +4,12 @@
 # settles what it carried with it: received with it where the window's record shows the carrier's
 # marker, queued again with it where it does not. Opening the ledger let go of the rows of a carrier
 # that was `delivering`, which a start then pasted again on their own, or sent without their carrier.
-# Only a carrier this ledger began is so: it froze the set at the first paste. A carrier an earlier
-# build was pasting may hold a row its recorded paste never had (Node pasted a carrier's own words
-# alone; up to 3.0.4 a row could join a carrier that waited again after a late first paste), and
-# migration 0019 lets go of what each carried, in the step that writes its version, and the start
-# that ran it reconciles their tasks (the reviews of 2026-10-16).
+# Only a carrier this ledger wrote is so: it froze the set at the first paste. A carrier an earlier
+# build wrote may hold a row its recorded paste never had (Node pasted a carrier's own words alone;
+# up to 3.0.4 a row could join a carrier that waited again after a late first paste), and migration
+# 0019 lets go of what each carried, whatever its state, in the step that writes its version; each
+# start reconciles the tasks of what the log says was let go of and not yet reconciled, and says so
+# (the reviews of 2026-10-16 and 2026-10-17).
 #
 # The cases are `crates/cf-e2e/tests/regressions/rows_a_paste_carried_pasted_again_after_a_restart.rs`
 # (the real daemon and pane host, a Claude worker and a Devin worker, the paste caught by the rig and
@@ -26,6 +27,8 @@ rig-regression-carried-requeued = ["cargo", "test", "--offline", "-p", "cf-e2e",
 rig-lib-devin-store = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "devin_store::"]
 # The engine's start and the human's Resume after it.
 engine-dispatcher-resume = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "resume::"]
+# What a start does with what was on its way, the ledger opened again as a start opens it.
+engine-dispatcher-restart = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "restart::"]
 
 [[plant]]
 name = "carried restart: a start lets go of what a carrier on its way carried, and the window is given the answers again after the paste that had them (main, 2026-10-16)"
@@ -66,18 +69,18 @@ runs = ["ledger-receipt"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/migrations/0019.sql"
-find = "     WHERE m.state = 'queued' AND c.state = 'delivering';"
-replace = "     WHERE m.state = 'queued' AND c.state = 'delivering' AND 0;"
+find = "     WHERE state = 'queued' AND carried_by IS NOT NULL;"
+replace = "     WHERE state = 'queued' AND carried_by IS NOT NULL AND 0;"
 
 [[plant]]
-name = "carried restart: migration 0019 lets go of what rides in a carrier that waits too"
-meant = "a_populated_version_18_ledger_is_migrated_to_19_and_again_with_only_what_rode_in_a_carrier_on_its_way_let_go_of"
+name = "carried restart: migration 0019 lets go only of what rides in a carrier on its way, so an answer that joined one waiting again after a late paste is taken for received by that paste (round 8's rule, both reviews of 2026-10-17)"
+meant = "an_answer_that_joined_a_carrier_waiting_again_after_a_late_paste_is_not_taken_for_received_by_that_paste"
 runs = ["ledger-receipt"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/migrations/0019.sql"
-find = "     WHERE m.state = 'queued' AND c.state = 'delivering';"
-replace = "     WHERE m.state = 'queued' AND c.state IN ('delivering', 'queued');"
+find = "     WHERE state = 'queued' AND carried_by IS NOT NULL;"
+replace = "     WHERE state = 'queued' AND carried_by IN (SELECT id FROM message WHERE state = 'delivering');"
 
 [[plant]]
 name = "carried restart: migration 0019 logs what it let go of under another name, so the start reconciles none of its tasks"
@@ -91,7 +94,7 @@ replace = "strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), 'message.left',"
 
 [[plant]]
 name = "carried restart: migration 0019 logs the carrier for each row it let go of"
-meant = "a_populated_version_18_ledger_is_migrated_to_19_and_again_with_only_what_rode_in_a_carrier_on_its_way_let_go_of"
+meant = "a_populated_version_18_ledger_is_migrated_to_19_and_again_with_what_rode_in_every_carrier_let_go_of"
 runs = ["ledger-receipt"]
 
 [[plant.edit]]
@@ -100,28 +103,119 @@ find = "json_object('carrier', carrier, 'released', json_group_array(id))"
 replace = "json_object('carrier', carrier, 'released', json_group_array(carrier))"
 
 [[plant]]
-name = "carried restart: the start that runs migration 0019 reconciles none of the tasks of what it let go of"
+name = "carried restart: no start reconciles the tasks of what migration 0019 let go of"
 meant = "a_row_that_joined_a_carrier_an_earlier_build_pasted_again_is_not_taken_for_received_by_its_first_paste"
 runs = ["ledger-receipt"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/ledger.rs"
-find = "    if written_at < RELEASED_AT {"
-replace = "    if written_at < 0 {"
+find = "    reconcile_released(&mut store)?;"
+replace = "    let _ = reconcile_released;"
 
+# Round 8's rule: only the start that took the ledger past 0019, by the schema read before
+# migrating, reconciled; one that stopped after 0019's commit left the next nothing to do (Astra's
+# review of 2026-10-17).
 [[plant]]
-name = "carried restart: the schema a ledger was written at is read after it was migrated, so the start that ran migration 0019 reconciles none of the tasks of what it let go of"
-meant = "a_row_left_under_a_carrier_node_began_to_paste_is_not_taken_for_received_with_it"
+name = "carried restart: only the start that ran migration 0019 reconciles what it let go of, by the schema read before (round 8's rule), and one that stopped after its commit leaves Node's working task as it was"
+meant = "a_start_after_one_that_stopped_between_migration_19_and_its_reconcile_reconciles_what_was_let_go_of_once"
 runs = ["ledger-receipt"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/ledger.rs"
 find = '''
-        let written_at: i64 = db.query_row("PRAGMA user_version", [], |row| row.get(0))?;
-        migrate(&db, &MIGRATIONS)?;'''
+        db.execute_batch("PRAGMA synchronous = FULL")?;
+        migrate(&db, &MIGRATIONS)
+    })();
+    if let Err(cause) = ready {
+        drop(db);
+        return Err(opening_refusal(file, cause));
+    }'''
 replace = '''
+        db.execute_batch("PRAGMA synchronous = FULL")?;
+        let written_at: i64 = db.query_row("PRAGMA user_version", [], |row| row.get(0))?;
         migrate(&db, &MIGRATIONS)?;
-        let written_at: i64 = db.query_row("PRAGMA user_version", [], |row| row.get(0))?;'''
+        Ok(written_at)
+    })();
+    let written_at = match ready {
+        Ok(written_at) => written_at,
+        Err(cause) => {
+            drop(db);
+            return Err(opening_refusal(file, cause));
+        }
+    };'''
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/ledger.rs"
+find = "    reconcile_released(&mut store)?;"
+replace = '''
+    if written_at < 19 {
+        reconcile_released(&mut store)?;
+    }'''
+
+[[plant]]
+name = "carried restart: only the start that ran migration 0019 reconciles what it let go of (round 8's rule), and on the human's Resume the task is finished from the reply before its answer"
+meant = "a_task_whose_answer_a_stopped_start_let_go_of_is_not_finished_from_its_old_reply_on_resume"
+runs = ["engine-dispatcher-restart"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/ledger.rs"
+find = '''
+        db.execute_batch("PRAGMA synchronous = FULL")?;
+        migrate(&db, &MIGRATIONS)
+    })();
+    if let Err(cause) = ready {
+        drop(db);
+        return Err(opening_refusal(file, cause));
+    }'''
+replace = '''
+        db.execute_batch("PRAGMA synchronous = FULL")?;
+        let written_at: i64 = db.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+        migrate(&db, &MIGRATIONS)?;
+        Ok(written_at)
+    })();
+    let written_at = match ready {
+        Ok(written_at) => written_at,
+        Err(cause) => {
+            drop(db);
+            return Err(opening_refusal(file, cause));
+        }
+    };'''
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/ledger.rs"
+find = "    reconcile_released(&mut store)?;"
+replace = '''
+    if written_at < 19 {
+        reconcile_released(&mut store)?;
+    }'''
+
+[[plant]]
+name = "carried restart: a start does not say what it reconciled, so every start after reconciles it again"
+meant = "a_start_after_one_that_stopped_between_migration_19_and_its_reconcile_reconciles_what_was_let_go_of_once"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/carrying.rs"
+find = '''
+            store.log(
+                project,
+                "message.reconciled",
+                json!({ "uncarried": events }),
+            )?;'''
+replace = '''
+            let _ = (project, events);'''
+
+[[plant]]
+name = "carried restart: a start reconciles what was let go of whether or not a start before said it had"
+meant = "a_start_after_one_that_stopped_between_migration_19_and_its_reconcile_reconciles_what_was_let_go_of_once"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/carrying.rs"
+find = '''
+                   AND NOT EXISTS (SELECT 1 FROM event r, json_each(r.data, '$.uncarried') u
+                                   WHERE r.kind = 'message.reconciled' AND u.value = e.id)'''
+replace = ""
 
 [[plant]]
 name = "carried restart: a carrier queued again at a start lets go of what it carried"

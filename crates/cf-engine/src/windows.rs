@@ -423,8 +423,7 @@ impl Dispatcher {
             launch: true,
             chief: participant.role == "chief",
             queued: false,
-            rested_last: None,
-            rest_after_hold: None,
+            free_since: None,
             entered_again: false,
         });
         // What fails with a launch that does not come up: its first message, or
