@@ -240,7 +240,9 @@ impl Transcript {
     /// the latest relaunch is gone, and so is what it had queued, and the
     /// background agents its last turn left running. Its last answer is no
     /// candidate of what follows: no record past the relaunch ends that turn
-    /// again, or says agents of it run.
+    /// again, or says agents of it run. What a message of another's would have
+    /// cleaned of it goes as it would (`replay`'s `assistant`): the calls left
+    /// open, and the stop hooks its answer waited on, which never run.
     fn reach(&mut self, at: u64) {
         let Some(relaunch) = self.relaunch.as_mut() else {
             return;
@@ -248,7 +250,10 @@ impl Transcript {
         if !relaunch.reached && relaunch.at <= at {
             relaunch.reached = true;
             self.queues.restart();
-            self.candidate = None;
+            self.open_tools.clear();
+            if let Some(candidate) = self.candidate.take() {
+                self.hooks.remove(&candidate.item_id);
+            }
             if let Some(Terminal::Derived { agents, .. }) = self.terminal.as_mut() {
                 *agents = false;
             }

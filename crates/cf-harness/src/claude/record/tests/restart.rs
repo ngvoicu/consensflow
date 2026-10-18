@@ -449,6 +449,29 @@ fn a_record_the_old_process_wrote_past_the_relaunch_ends_none_of_its_turns_again
     assert!(!known(&stage.look_told(&relaunch)).agents_pending);
 }
 
+#[test]
+fn an_answer_the_old_process_never_ran_its_stop_hooks_for_holds_no_turn_after_the_relaunch() {
+    // Sol's review of round 4: the old process went after its answer, before its
+    // stop hooks' summary; the new one's answer and duration came before the
+    // record of its prompt, an order Claude Code writes
+    // (`tests/engine/fixtures/completion/README.md`).
+    let records = vec![
+        hello(),
+        answer("a1", "u1"),
+        assistant(
+            "a2",
+            "u2",
+            json!("m2"),
+            json!([text(json!("Done"))]),
+            json!("end_turn"),
+        ),
+        duration("d2", "a2"),
+        user("u2", json!("a1"), json!("Again")),
+    ];
+    let read = record_told(&records, &relaunched(&records, 2));
+    assert_eq!(read.settlement, Settlement::Settled);
+}
+
 /// The attachment a `SessionStart` hook's run writes, as `name` names it.
 pub(super) fn session_start(uuid: &str, parent: &str, name: &str) -> Value {
     of_session(json!({

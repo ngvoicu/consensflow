@@ -87,10 +87,24 @@ runs = ["lost-queue-adapter", "lost-queue-reader"]
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/record.rs"
 find = '''
-            self.queues.restart();
-            self.candidate = None;'''
+            if let Some(candidate) = self.candidate.take() {
+                self.hooks.remove(&candidate.item_id);
+            }'''
+replace = ""
+
+[[plant]]
+name = "lost-queue: the stop hooks the old turn's answer waited on still hold the turn past the relaunch"
+meant = "an_answer_the_old_process_never_ran_its_stop_hooks_for_holds_no_turn_after_the_relaunch"
+runs = ["lost-queue-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record.rs"
+find = '''
+            if let Some(candidate) = self.candidate.take() {
+                self.hooks.remove(&candidate.item_id);
+            }'''
 replace = '''
-            self.queues.restart();'''
+            self.candidate = None;'''
 
 [[plant]]
 name = "lost-queue: a relaunch empties nothing"
