@@ -835,3 +835,20 @@ find = '''
     } else {'''
 replace = '''
     } else {'''
+
+# The live suite's guard of the limit beside behind_bypass (GPT-6-Astra on B5): its
+# Opening::Note cases fail on the note as Devin's store has it, not as the daemon's reader,
+# which takes a kept /bypass off while the launch folder lasts, reads it.
+[[plant]]
+name = "results twice: the live suite passes a product's first message Devin stored behind /bypass"
+meant = "the_products_first_message_stored_with_bypass_kept_fails_its_case_naming_the_limit"
+runs = ["live-devin-resume-turn"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_devin_resume/turn.rs"
+find = '''
+    if text.starts_with(header) {
+        None'''
+replace = '''
+    if text.contains(header) {
+        None'''

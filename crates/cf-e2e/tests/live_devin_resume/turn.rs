@@ -73,6 +73,37 @@ pub fn stored_shape(messages: &[Message], header: &str) -> Option<String> {
     })
 }
 
+/// What fails a case whose first message is the product's own (the note, in its prompt
+/// file) in how Devin stored it among `messages`: None where it is stored with its header
+/// first, as the product gave it. The daemon's reader reads it as a paste whatever its
+/// launch folder says only then; stored with `/bypass` kept, a start that swept its
+/// launch folder leaves it no paste, and it is given again: the limit written beside the
+/// Devin record reader's `behind_bypass`, which this check is the proof of.
+pub fn stored_fault(messages: &[Message], header: &str) -> Option<String> {
+    let Some(message) = messages
+        .iter()
+        .find(|message| message.role == "user" && message.text.contains(header))
+    else {
+        return Some("the daemon's reader has the note, Devin's store has it nowhere".to_owned());
+    };
+    let text = message.text.trim_start();
+    if text.starts_with(header) {
+        None
+    } else if text.starts_with(BYPASS) {
+        Some(format!(
+            "Devin stored the product's first message with {BYPASS} kept: {}; a start that \
+             sweeps its launch folder leaves it no paste, and it is given again (the limit \
+             beside behind_bypass, crates/cf-harness/src/devin/record/answer.rs)",
+            squash(text, 60)
+        ))
+    } else {
+        Some(format!(
+            "Devin stored the product's first message behind other words: {}",
+            squash(text, 60)
+        ))
+    }
+}
+
 /// Whether the daemon's reader has the user's item that holds `header` with the header
 /// first, as the daemon takes a paste of it (`is_paste_of`).
 pub fn read_header_first(record: Option<&Record>, header: &str) -> bool {
@@ -258,6 +289,34 @@ mod tests {
             header
         ));
         assert!(!read_header_first(None, header));
+    }
+
+    #[test]
+    fn the_products_first_message_stored_with_bypass_kept_fails_its_case_naming_the_limit() {
+        let header = "[ConsensFlow m-2 ";
+        let stored = |text: &str| Message {
+            id: "u-1".to_owned(),
+            role: "user".to_owned(),
+            text: text.to_owned(),
+            raw: Value::Null,
+        };
+        let note = "[ConsensFlow m-2 · T-1 · note from ConsensFlow]\nGo on where you stopped.";
+        assert_eq!(stored_fault(&[stored(note)], header), None);
+        assert_eq!(stored_fault(&[stored(&format!("\n{note}"))], header), None);
+        let kept = stored_fault(&[stored(&format!("/bypass {note}"))], header)
+            .expect("a first message stored behind /bypass fails its case");
+        assert!(kept.contains("with /bypass kept: /bypass [ConsensFlow m-2"));
+        assert!(kept.contains("behind_bypass, crates/cf-harness/src/devin/record/answer.rs"));
+        assert!(stored_fault(&[stored(&format!("Look: {note}"))], header)
+            .is_some_and(|fault| fault.contains("behind other words: Look: [ConsensFlow m-2")));
+        // Not in the store, or only in another role's words: no proof, which fails too.
+        let other = Message {
+            role: "assistant".to_owned(),
+            ..stored(note)
+        };
+        for messages in [vec![], vec![stored("hello")], vec![other]] {
+            assert!(stored_fault(&messages, header).is_some_and(|fault| fault.ends_with("nowhere")));
+        }
     }
 
     #[test]
