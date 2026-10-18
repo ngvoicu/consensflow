@@ -141,6 +141,7 @@ impl Window for FakeWindow {
                 // A window that said no more than "not yet": the JavaScript fake answered `false`.
                 Ok(Readiness::Held(Held::Unsaid)) => json!(false),
                 Ok(Readiness::Held(held)) => json!(held.sentence()),
+                Ok(Readiness::Unfit(why)) => json!({ "unfit": why }),
                 Err(error) => json!({ "$error": { "message": error } }),
             };
             self.fake.recorder.answered(at, written);
@@ -230,6 +231,11 @@ impl Window for FakeWindow {
             wrapped.after().await;
             Ok(observed)
         })
+    }
+
+    /// Not written down: the JavaScript fake was never asked.
+    fn ready_while_drawing(&self) -> bool {
+        self.fake.ready_while_drawing.get()
     }
 
     /// Not written down: the JavaScript fake was never asked, so the Node

@@ -35,6 +35,13 @@ impl Job {
         self.pid
     }
 
+    /// Its file, without the kind: the job was started with it (`--background-job
+    /// <seconds> <file>`), and it is in the rig's own folder, so that no process but the
+    /// job has it in its command line.
+    pub fn file(&self) -> &Path {
+        &self.file
+    }
+
     /// Whether it was asked to end and said so before it went.
     pub fn released(&self) -> bool {
         self.beside("released").exists()

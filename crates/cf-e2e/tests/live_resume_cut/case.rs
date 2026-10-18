@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 
 use cf_e2e::live::ask::{self, Record};
 use cf_e2e::live::claude::{record, runs, transcript_file, Status};
-use cf_e2e::live::members::{find, Account};
+use cf_e2e::live::members::{end_chosen, find, Account, Ended, Identity, ThisMachine};
 use cf_e2e::live::window::{Open, Window, ANSWER, READY};
 use cf_e2e::live::{seconds, until, Harness, Installed, Log};
 use cf_e2e::rig::Rig;
@@ -58,10 +58,14 @@ impl<'a> Run<'a> {
     }
 }
 
-/// The long command is running: a process of the machine names its mark (the shell
-/// the harness runs it in does, as the command itself does).
-fn command_running() -> bool {
-    LONG.named().is_ok_and(|found| !found.is_empty())
+/// The long command is running in the window whose own process is `own`: a process
+/// that descends from it names the command's mark (the shell the harness runs it in
+/// does, as the command itself does). A process outside the window is none of it.
+fn command_running(own: Option<Identity>) -> bool {
+    own.is_some_and(|own| {
+        LONG.in_window(&ThisMachine, own)
+            .is_ok_and(|found| !found.is_empty())
+    })
 }
 
 /// What the copy of a transcript is called in the folder `--transcripts` names:
@@ -88,10 +92,10 @@ fn keep(run: &Run, window: &Window, (case, when): (Case, &str), session: &str) -
 /// cannot): what a harness does with the turn is the result, and it is said.
 pub fn run(run: &Run, case: Case) -> Result<Account> {
     let mut said = Account::new();
-    let outcome = drive(run, case, &mut said);
-    // What a killed window leaves running is ended for good, whatever came of the case.
-    LONG.end();
-    outcome?;
+    // What the cut left of the long command is ended after the cut, and what the window
+    // opened again runs of it at the end, each in its own window's tree: a case that fails
+    // on the way leaves it to end by itself, in five minutes.
+    drive(run, case, &mut said)?;
     Ok(said)
 }
 
@@ -104,6 +108,8 @@ fn drive(run: &Run, case: Case, said: &mut Account) -> Result<()> {
         said.fail(format!("the window did not open: {screen}"));
         return Ok(());
     }
+    // Which process the window's program is, read as the pane host answered its open.
+    let own = cut.process();
     let watching = cut
         .session()
         .filter(|_| claude)
@@ -118,7 +124,7 @@ fn drive(run: &Run, case: Case, said: &mut Account) -> Result<()> {
         Duration::from_millis(100),
         || {
             Ok(match (case, &watching) {
-                (Case::Command, _) => command_running().then_some(()),
+                (Case::Command, _) => command_running(own).then_some(()),
                 (Case::Early, None) => {
                     unanswered(&cut.recorded(), &Case::Early.message()).then_some(())
                 }
@@ -149,12 +155,18 @@ fn drive(run: &Run, case: Case, said: &mut Account) -> Result<()> {
         return Ok(());
     };
 
-    // The quit: the window's process ends with its turn at work.
+    // The quit: the window's process ends with its turn at work. What the window ran of
+    // the command is chosen while it is the window's, and what the cut left of it is
+    // ended after, each process only while it is still the one chosen: what descended
+    // from the window has no window to descend from once it is cut.
+    let left = own.map(|own| LONG.chosen_in(&ThisMachine, own));
     cut.kill();
     until(Duration::from_secs(30), Duration::from_millis(100), || {
         cut.closed().then_some(())
     });
-    LONG.end();
+    if let Some(left) = left {
+        said_ended(said, "the cut window", left.map(|left| end_chosen(&left)));
+    }
     sleep(Duration::from_secs(1));
     said.say(format!("cut: {}", tail(&cut.recorded(), 3)));
     said.say(reading(run.read(&session).as_ref()));
@@ -249,7 +261,26 @@ fn drive(run: &Run, case: Case, said: &mut Account) -> Result<()> {
         });
         keep(run, &again, (case, "resumed"), &session)?;
     }
+    // A run of the long command the window opened again started is not left behind.
+    if let Some(own) = again.process() {
+        said_ended(said, "the window opened again", LONG.end_in(own));
+    }
     Ok(())
+}
+
+/// What could not be ended of the long command `window` ran, a failure of the case each:
+/// a process that may still run, or a listing of the machine that could not be read.
+fn said_ended(said: &mut Account, window: &str, ended: Result<Ended>) {
+    match ended {
+        Ok(ended) => {
+            for problem in ended.problems() {
+                said.fail(format!("what {window} ran of the long command: {problem}"));
+            }
+        }
+        Err(failed) => said.fail(format!(
+            "what {window} ran of the long command could not be read, and may still run: {failed}"
+        )),
+    }
 }
 
 /// The milliseconds since `since`.

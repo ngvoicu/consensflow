@@ -29,7 +29,7 @@ use crate::process::{own_var, Run};
 use crate::rig::Config;
 use crate::{files, Error, Result};
 
-pub use path::command;
+pub use path::{command, working_command};
 pub use wrapper::{isolated_claude, shimmed_claude, shimmed_claude_with_servers, ISOLATION};
 
 /// What the `.cmd` of a command a window opens on says on Windows, which opens a

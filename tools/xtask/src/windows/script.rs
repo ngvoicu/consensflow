@@ -33,6 +33,48 @@ pub const SYNCED: &str = ".synced-files";
 /// The running script's process id, there, while a run goes on.
 pub const RUNNING: &str = ".windows-run.pid";
 
+/// The batch file the command is written to, there.
+const COMMAND_FILE: &str = ".windows-run.cmd";
+
+/// The script that removes from the copy what is no file of the tree ([`sweep_script`]),
+/// which goes in the tarball beside the list of what went over: the run's own script
+/// reaches the machine on a command line, which has no room for it.
+pub const SWEEP: &str = ".windows-sweep.ps1";
+
+/// What of the copy there is no file of the tree and stays from one run to the next,
+/// from its root, with `/` (a `*` stands for any characters, as PowerShell's `-like`
+/// reads it; a folder is kept whole and not looked into). Every other file there that
+/// the list of what went over ([`SYNCED`]) does not name is removed after the unpack,
+/// wherever it came from: a run of another tree left 87 files there no sync listed,
+/// which a test of the `cli` suite named (zeewin, 2026-10-16).
+pub const KEPT: [&str; 12] = [
+    // The run's own: the list of what went over and the sweep (the tarball holds them
+    // beside the files, and the list names the files only), the lock taken before the
+    // unpack, the command's batch file.
+    SYNCED,
+    SWEEP,
+    RUNNING,
+    COMMAND_FILE,
+    // The packages, which `npm ci` (the build's first two steps) takes away and installs
+    // again from the tree's lockfiles.
+    "node_modules",
+    "app/node_modules",
+    // The workspace's one build folder (`.cargo/config.toml`), which cargo builds again
+    // where the tree changed, the files being unpacked with the time of the unpack: the
+    // pane host and the console host the build puts there, and the tests' own folders.
+    "app/src-tauri/target",
+    // The console host's package, checked each time it is used (`cargo xtask conpty`).
+    "app/.cache",
+    // What `cargo xtask stage` stages for the bundle, written whole by each staging.
+    "app/src-tauri/resources",
+    // What the app's build script (tauri-build) writes each time it runs.
+    "app/src-tauri/gen/schemas",
+    // The native `cf` that `cargo xtask build-cf` puts there (through `stage`), and the
+    // copies it sets aside, as Windows refuses to delete a `cf.exe` a hook still runs.
+    "bin/cf.exe",
+    "bin/cf.exe.old-*",
+];
+
 /// What `--build` runs first: the packages, the page, a pane's cf.exe and the pane host.
 pub const BUILD_STEPS: [&str; 6] = [
     "npm ci --no-audit --no-fund",
@@ -198,7 +240,8 @@ pub fn remote_script(script: &Script) -> String {
         &[
             ("dir", script.dir),
             ("running", RUNNING),
-            ("synced", SYNCED),
+            ("sweep", SWEEP),
+            ("command_file", COMMAND_FILE),
             ("steps", &steps.join(", ")),
             ("given", &given),
             ("inside", script.inside),
@@ -206,6 +249,30 @@ pub fn remote_script(script: &Script) -> String {
             ("crlf", "\r\n"),
             ("exit", EXIT_MARK),
         ],
+    )
+}
+
+/// The sweep ([`SWEEP`]), which the run's script reads and runs in its own scope once
+/// the tarball is unpacked, with `$dir` the copy's folder: every file of the copy that
+/// the list of what went over does not name is removed, and every folder that is then
+/// empty (git sends none), but for what [`KEPT`] names. Each removal is said
+/// (`== removed <name>`), and what could not be removed is said and left in `$failed`,
+/// which ends the run.
+///
+/// - The list is read as UTF-8, as it was written, and names are compared in any case,
+///   as Windows finds a file: a file renamed by its case alone is the tree's.
+/// - A folder that is a link (a junction, a symbolic link) is not looked into, and only
+///   the link is removed: what it points at is no file of the copy.
+/// - Files and folders are removed by .NET's `Delete`, which asks nothing (PowerShell's
+///   `Remove-Item` asks before it takes a folder, and a run cannot answer: it stopped a
+///   run on zeewin, 2026-10-16), a file's read-only mark taken away first.
+/// - A folder [`KEPT`] names is not walked: the build folder holds hundreds of thousands
+///   of files.
+pub fn sweep_script() -> String {
+    let kept: Vec<String> = KEPT.iter().map(|name| quoted(name)).collect();
+    fill(
+        SWEEP_TEMPLATE,
+        &[("synced", SYNCED), ("kept", &kept.join(", "))],
     )
 }
 
@@ -264,14 +331,10 @@ if (Test-Path $running) {
 }
 Set-Content -Path $running -Value $PID
 try {
-$synced = Join-Path $dir '«synced»'
-$before = if (Test-Path $synced) { Get-Content $synced } else { @() }
 tar.exe -xmzf (Join-Path $env:USERPROFILE '«dir».tgz') -C $dir
 if ($LASTEXITCODE -ne 0) { Exit-Run $LASTEXITCODE }
-$now = [Collections.Generic.HashSet[string]]::new([string[]](Get-Content $synced))
-foreach ($file in $before) {
-  if (-not $now.Contains($file)) { Remove-Item -LiteralPath (Join-Path $dir $file) -Force -ErrorAction SilentlyContinue }
-}
+. ([scriptblock]::Create([IO.File]::ReadAllText((Join-Path $dir '«sweep»'))))
+if ($failed.Count) { Exit-Run 1 }
 $env:Path = "C:\Program Files\nodejs;$env:USERPROFILE\.cargo\bin;" + $env:Path
 # Codex's own PATH entry is a junction an SSH session may not cross ("an
 # untrusted mount point"): its release folder, named outright.
@@ -285,13 +348,49 @@ foreach ($step in @(«steps»)) {
   if ($LASTEXITCODE -ne 0) { Exit-Run $LASTEXITCODE }
 }
 «given»Set-Location (Join-Path $dir '«inside»')
-$run = Join-Path $dir '.windows-run.cmd'
+$run = Join-Path $dir '«command_file»'
 [IO.File]::WriteAllText($run, "@echo off«crlf»" + '«command»' + "«crlf»")
 cmd /c "$run 2>&1"
 Exit-Run $LASTEXITCODE
 } finally {
   Remove-Item -LiteralPath $running -Force -ErrorAction SilentlyContinue
 }
+"##;
+
+/// The sweep, with a mark where each part of it goes. `Clear-Stale` answers how many
+/// things it left in the folder it was given, and says nothing else, so what it
+/// removed and could not are kept in lists and said once it is done.
+const SWEEP_TEMPLATE: &str = r##"
+$now = [Collections.Generic.HashSet[string]]::new([string[]](Get-Content -Encoding UTF8 (Join-Path $dir '«synced»')), [StringComparer]::OrdinalIgnoreCase)
+$kept = @(«kept»)
+$removed = [Collections.Generic.List[string]]::new()
+$failed = [Collections.Generic.List[string]]::new()
+function Clear-Stale([IO.DirectoryInfo]$folder) {
+  $left = 0
+  try { $items = $folder.GetFileSystemInfos() } catch { $failed.Add("$($folder.FullName): $($_.Exception.Message)"); return 1 }
+  foreach ($item in $items) {
+    $name = $item.FullName.Substring($base).Replace('\', '/')
+    $deep = $item -is [IO.DirectoryInfo] -and -not ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)
+    if (($kept | Where-Object { $name -like $_ }) -or ($item -is [IO.FileInfo] -and $now.Contains($name)) -or ($deep -and (Clear-Stale $item))) {
+      $left++
+      continue
+    }
+    try {
+      $item.Attributes = $item.Attributes -band -bnot [IO.FileAttributes]::ReadOnly
+      $item.Delete()
+      $removed.Add($name)
+    } catch {
+      $failed.Add("${name}: $($_.Exception.Message)")
+      $left++
+    }
+  }
+  $left
+}
+$root = Get-Item -LiteralPath $dir
+$base = $root.FullName.TrimEnd('\').Length + 1
+$null = Clear-Stale $root
+foreach ($name in $removed) { Write-Output "== removed $name" }
+if ($failed.Count) { Write-Output "What left the tree could not be removed from the copy: $($failed -join '; ')" }
 "##;
 
 /// The script that ends a run, with a mark where each part of it goes. It begins

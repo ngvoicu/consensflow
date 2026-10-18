@@ -1352,11 +1352,8 @@ runs = ["engine-role-change"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
-find = '''        if !says_the_role {
-            record.window.borrow_mut().relaunch = None;
-        }'''
-replace = '''        let _ = says_the_role;
-        record.window.borrow_mut().relaunch = None;'''
+find = '''        if record.delivery.borrow().prelude.is_none() {'''
+replace = '''        if true || record.delivery.borrow().prelude.is_none() {'''
 
 [[plant]]
 name = "codex role: a chief's message that went in after the role is given up for being slow"

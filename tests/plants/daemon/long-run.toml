@@ -39,8 +39,9 @@ fake-agent-reply = ["cargo", "test", "--offline", "-p", "cf-e2e", "--features", 
 fake-agent-compact = ["cargo", "test", "--offline", "-p", "cf-e2e", "--features", "test-support", "--bin", "fake-agent", "a_compaction"]
 # The stand-in Devin's store.
 fake-devin-store = ["cargo", "test", "--offline", "-p", "cf-e2e", "--features", "test-support", "--bin", "fake-devin", "store::"]
-# The rig's stranger, which runs beside every window.
+# The rig's stranger, which runs beside every window: its own tests, and a real rig's close.
 e2e-lib-stranger = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "rig::stranger"]
+rig-stranger = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "stranger::"]
 # The rig's last word, once it has closed: a real daemon and pane host.
 e2e-rig-last-exits = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "last_exits"]
 # The rig's last word when the host's output does not end in time: frames written by hand.
@@ -2211,14 +2212,14 @@ find = '            "type": "system", "subtype": "compact_boundary", "parentUuid
 replace = '            "type": "system", "subtype": "compacted", "parentUuid": null,'
 
 [[plant]]
-name = "long run: the rig's stranger ends by itself after ten minutes, and a run of hours fails its close"
-meant = "a_stranger_outlives_the_longest_run_a_rig_is_kept_for"
-runs = ["e2e-lib-stranger"]
+name = "long run: the rig's stranger ends by itself, and a run of hours fails its close"
+meant = "a_rig_closes_with_the_process_that_is_none_of_any_windows_still_running"
+runs = ["rig-stranger"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/rig/stranger.rs"
-find = 'pub(super) const SLEEP: &str = "exec sleep 86400";'
-replace = 'pub(super) const SLEEP: &str = "exec sleep 600";'
+find = '    "/bin/cat".into()'
+replace = '    "/usr/bin/true".into()'
 
 [[plant]]
 name = "long run: two stand-in Devins that make their store at the same moment, and the second dies on a locked database"

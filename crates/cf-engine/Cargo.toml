@@ -30,8 +30,15 @@ tokio = { workspace = true, features = ["rt"] }
 
 [features]
 # The kit the engine's tests and the daemon's run it with: what a test does
-# with the engine's executor, and the fakes.
+# with the engine's executor, and the fakes; and the binary `engine-ask`.
 test-support = ["cf-harness/test-support", "cf-ledger/test-support", "dep:tempfile"]
+
+# What the live tests of `crates/cf-e2e` ask of the engine's texts: the words the
+# engine gives a window that a live test opens itself (`testing::ask`).
+[[bin]]
+name = "engine-ask"
+path = "src/bin/engine_ask.rs"
+required-features = ["test-support"]
 
 [dev-dependencies]
 cf-engine = { path = ".", features = ["test-support"] }

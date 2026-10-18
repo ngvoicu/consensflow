@@ -246,9 +246,11 @@ mod tests {
         let case = check::run(Who::StandIn, &asked, Path::new(FAKE_AGENT), &log).unwrap();
         assert!(case.held(), "{}", case.text());
         let text = case.text();
+        // The folder as the platform writes it: `projects\integration` on Windows.
+        let folder = Path::new("projects").join("integration");
         assert!(
             text.contains("another run's rig ended: ")
-                && text.contains("projects/integration is taken"),
+                && text.contains(&format!("{} is taken", folder.display())),
             "{text}"
         );
     }
