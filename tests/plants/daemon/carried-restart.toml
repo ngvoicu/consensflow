@@ -305,18 +305,3 @@ runs = ["engine-dispatcher-resume"]
 file = "crates/cf-engine/src/resume.rs"
 find = "        self.resumes.settled().await;"
 replace = "        let _ = &self.resumes;"
-
-# The start sweeps the launch folders once it has settled what was on its way (both reviews of
-# 2026-10-18): a resumed Devin window's first message, stored behind the /bypass it ran under, is
-# read as its paste by its launch's prompt file.
-[[plant]]
-name = "carried restart: a start sweeps the launch folders before it settles what was on its way, and a resumed Devin window's first message stored behind /bypass goes back to its queue (both reviews of 2026-10-18)"
-meant = "a_start_settles_what_was_on_its_way_by_what_its_launch_left_before_it_sweeps_the_launch_folders"
-runs = ["daemon-lib-start"]
-
-[[plant.edit]]
-file = "crates/cf-daemon/src/start.rs"
-find = "    let left = cf_harness::launches_left(&home.to_string_lossy());"
-replace = '''
-    let left = cf_harness::launches_left(&home.to_string_lossy());
-    let _ = cf_harness::sweep_launches(&left);'''

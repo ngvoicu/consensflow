@@ -87,6 +87,13 @@ pub(super) fn answer(chain: &Chain, wires: &Wires) -> Record {
 /// stores the command. None for any other, a human's command before a header
 /// included (Astra's review of 2026-10-18: the human's `/bypass` before an answer's
 /// header, and a question of their own after it, was taken for the answer).
+///
+/// Limit: a start sweeps the launch folders before it settles what was on its way,
+/// so a first message Devin stored with the command kept, whose launch a start swept,
+/// is read as stored: no paste, it goes back to its queue and is given again. Devin
+/// 3000.11.92 keeps no `/bypass` in what the product gives it; were one to, the live
+/// check of a resumed Devin window says so (`live_devin_resume`'s `back.rs`, its
+/// `Opening::Note` cases: the daemon's reader has the note behind other words).
 fn behind_bypass<'a>(text: &'a str, wires: &Wires) -> Option<&'a str> {
     let rest = text.trim_start().strip_prefix(BYPASS)?;
     let prompt = rest.trim_start();

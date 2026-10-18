@@ -3,7 +3,7 @@
 //!
 //! The order matters, and is held: the home and the files with their start
 //! line; the ledger, whose lock refuses a second daemon on the same home; the
-//! launch folders found and the projects that were open suspended, only once
+//! launch folders swept and the projects that were open suspended, only once
 //! this daemon holds the ledger; the agents file folded into
 //! its shape and the members' tiers read again, a failure written down and no
 //! more; the UI token and the HTTP front; the stop armed; then the handle line,
@@ -11,10 +11,8 @@
 //! the bridge, the host, the engine, the pass loop and its throttles and the
 //! page's operations, every handler on before the bridge is first polled and
 //! the pass timer armed before the start's settling begins; and last the
-//! settling of what was on its way into a window, which may read a window's
-//! record by what its launch left, then the sweep of the launch folders found, a
-//! failure written down and no more, and a kick. No project comes back by itself:
-//! what was open waits, suspended, for the human's Resume.
+//! settling of what was on its way into a window, and a kick. No project comes
+//! back by itself: what was open waits, suspended, for the human's Resume.
 //! The engine's work runs on one executor
 //! ([`DaemonSpawn`]), whose driver is spawned once, and the daemon drains it
 //! where Node's event loop went on to its next callback: after the frames of
@@ -118,8 +116,8 @@ impl Options {
 pub enum StartError {
     #[error("ConsensFlow has no folder to keep its things in: set CONSENSFLOW_HOME, or HOME")]
     NoHome,
-    /// The home could not be made, the output not written, a thread not started:
-    /// the system's words.
+    /// The home could not be made, a launch folder not swept, the output not
+    /// written, a thread not started: the system's words.
     #[error("{0}")]
     System(String),
     /// The ledger's own refusals (`another ConsensFlow has <file> open`) and
@@ -218,10 +216,15 @@ async fn run(
         },
     )?;
     let ledger = Rc::new(RefCell::new(ledger));
-    // No window survives a restart: what every launch left in the home goes, once
-    // what was on its way is settled, which may read a window's record by it (the
-    // prompt a Devin launch was given behind `/bypass`), and only what was there now.
-    let left = cf_harness::launches_left(&home.to_string_lossy());
+    // No window survives a restart: what every launch left in the home goes.
+    let swept = cf_harness::sweep_launches(&home.to_string_lossy())
+        .map_err(|failed| StartError::System(failed.to_string()))?;
+    if swept > 0 {
+        log.info(&format!(
+            "swept {swept} launch folder{}",
+            if swept == 1 { "" } else { "s" }
+        ));
+    }
     ledger.borrow_mut().suspend_for_restart()?;
     // What the app ships is what the roster has, with the human's own agents,
     // and every member's tier is read again from its agent. An agents file that
@@ -449,10 +452,9 @@ async fn run(
     errors.spawn("the bridge's task failed", connection);
 
     // What was on its way into a window is settled, and the loop is woken
-    // either way, and the launch folders the start found go after it. Nothing is
-    // opened: what was open waits, suspended, for the human's Resume. It is begun
-    // here, where Node began its resume, and what its first part woke is run to its
-    // end.
+    // either way. Nothing is opened: what was open waits, suspended, for the
+    // human's Resume. It is begun here, where Node began its resume, and what
+    // its first part woke is run to its end.
     let (settling, settle_errors) = (Rc::clone(&dispatcher), Rc::clone(&errors));
     let settle_kick = Rc::clone(&kick);
     let settle = begin(&*spawn, async move {
@@ -465,17 +467,6 @@ async fn run(
                 );
             }
             Err(panicked) => settle_errors.caught("settling what was on its way failed", &panicked),
-        }
-        match cf_harness::sweep_launches(&left) {
-            Ok(0) => {}
-            Ok(swept) => settle_errors.log().info(&format!(
-                "swept {swept} launch folder{}",
-                if swept == 1 { "" } else { "s" }
-            )),
-            Err(failed) => settle_errors.log().error(
-                "a launch folder could not be swept",
-                Some(&failed.to_string()),
-            ),
         }
         settle_kick();
     })

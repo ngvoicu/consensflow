@@ -164,15 +164,16 @@ async fn a_start_settles_what_was_on_its_way_into_a_window_and_it_waits_for_the_
 const DEVIN_SESSION: &str = "calm-river";
 const DEVIN_LAUNCH: &str = "11111111-1111-4111-8111-111111111111";
 
-/// Both reviews of 2026-10-18: the previous daemon stopped while the first message of
-/// a resumed Devin window was on its way, after Devin had stored it with the command it
-/// ran under, `/bypass <message>`. What its launch left (its wire log, and the prompt
-/// file that says ConsensFlow gave it that message behind `/bypass`) is how the record
-/// is read as its paste: the start settles what was on its way first, and sweeps the
-/// launch folders after. Swept first, the message went back to its queue, and the
-/// Resume gave it again.
+/// The limit the Devin record reader names (`devin::record::answer`): the previous daemon
+/// stopped while the first message of a resumed Devin window was on its way, after Devin
+/// had stored it with the command it ran under, `/bypass <message>`. A start sweeps the
+/// launch folders before it settles what was on its way, the launch's prompt file with
+/// them, so the record is read as Devin stored it: no paste, and the message goes back
+/// to its queue, to be given again. (Settled first and swept after, a failed settle
+/// still lost the proof, and a settled reading outlived the wire log it rested on: the
+/// reviews of round 12.)
 #[tokio::test]
-async fn a_start_settles_what_was_on_its_way_by_what_its_launch_left_before_it_sweeps_the_launch_folders(
+async fn a_start_sweeps_the_launch_folders_first_so_a_first_message_devin_stored_behind_bypass_goes_back_to_its_queue(
 ) {
     LocalSet::new()
         .run_until(async {
@@ -260,8 +261,12 @@ async fn a_start_settles_what_was_on_its_way_by_what_its_launch_left_before_it_s
                 .and_then(|messages| messages.iter().find(|message| message["id"] == note.id))
                 .cloned()
                 .unwrap();
-            assert_eq!(settled["state"], "delivered", "{settled}");
-            assert!(!launch.exists(), "the launch's folder went after");
+            assert_eq!(settled["state"], "queued", "{settled}");
+            assert_eq!(
+                settled["reason"], "the daemon stopped before it arrived",
+                "{settled}"
+            );
+            assert!(!launch.exists(), "the launch's folder went");
             daemon.stop("SIGTERM");
             daemon.finished().await;
         })

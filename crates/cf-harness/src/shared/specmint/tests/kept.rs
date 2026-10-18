@@ -235,9 +235,8 @@ fn neither_a_launch_s_end_nor_a_start_s_sweep_removes_the_copy_and_each_variant_
     crate::shared::launch_files::forget_launch(&fake.at("cf"), &id).expect("forgotten");
     assert!(!exists(&launch_folder), "the launch's files went");
     fs::create_dir_all(&launch_folder).expect("a folder");
-    let left = crate::shared::launch_files::launches_left(&fake.at("cf"));
     assert_eq!(
-        crate::shared::launch_files::sweep_launches(&left).expect("swept"),
+        crate::shared::launch_files::sweep_launches(&fake.at("cf")).expect("swept"),
         1,
         "a start sweeps the launch's folder, and nothing else"
     );
