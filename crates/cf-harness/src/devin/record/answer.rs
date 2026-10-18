@@ -5,13 +5,17 @@
 //! request complete with the stored text streamed. A window reopened on the
 //! conversation replays its history with no turn end, so only the store
 //! tells that turn ended. Whether Devin is still on a turn is judged by the
-//! launch whose wire was written last (a resume opens a new one).
+//! launch whose wire was written last (a resume opens a new one). A user's
+//! message that is what ConsensFlow gave a launch behind `/bypass` is read as
+//! the prompt it ran, however Devin stores the command.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use super::chain::Chain;
 use super::comparable::comparable;
 use super::wires::{Cause, Wires};
+use crate::devin::adapter::BYPASS;
 use crate::shared::record::key::Key;
 use crate::shared::record::reading::{Record, Role, Settlement};
 
@@ -31,6 +35,11 @@ pub(super) fn answer(chain: &Chain, wires: &Wires) -> Record {
         .iter()
         .map(|entry| {
             let mut item = entry.item.clone();
+            if item.role == Role::User {
+                if let Some(prompt) = behind_bypass(&item.text, wires).map(Arc::from) {
+                    item.text = prompt;
+                }
+            }
             if item.role == Role::Assistant {
                 let outcome = wires.outcome(&entry.request);
                 // The same text needs no comparing, which every look would do again.
@@ -70,4 +79,17 @@ pub(super) fn answer(chain: &Chain, wires: &Wires) -> Record {
         Settlement::Unknown
     };
     record
+}
+
+/// The prompt a user's message ran under `/bypass`, where it is, whole, what
+/// ConsensFlow gave one of the session's launches as its first message behind the
+/// command ([`Wires::bypassed`]): read as that prompt, the paste it is, however Devin
+/// stores the command. None for any other, a human's command before a header
+/// included (Astra's review of 2026-10-18: the human's `/bypass` before an answer's
+/// header, and a question of their own after it, was taken for the answer).
+fn behind_bypass<'a>(text: &'a str, wires: &Wires) -> Option<&'a str> {
+    let rest = text.trim_start().strip_prefix(BYPASS)?;
+    let prompt = rest.trim_start();
+    let whole = |sent: &str| sent.trim_end() == prompt.trim_end();
+    (prompt.len() < rest.len() && wires.bypassed().any(whole)).then_some(prompt)
 }

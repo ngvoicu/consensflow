@@ -281,3 +281,68 @@ runs = ["engine-dispatcher-resume"]
 file = "crates/cf-engine/src/resume.rs"
 find = "        self.resumes.settled().await;"
 replace = "        let _ = &self.resumes;"
+
+# What 0019 let go of reaches its window before its task can finish, and the result is the turn
+# after it (Sol's review of 2026-10-18: a note that rode in the words that resume a task was let go
+# of, the words went alone, and the task finished from the turn before the note).
+[[plant]]
+name = "carried restart: a task finishes while what 0019 let go of for it waits, and a note that rode in the words that resume it never reaches the worker (Sol's review of 2026-10-18)"
+meant = "a_note_0019_let_go_of_from_the_words_that_resume_a_task_reaches_its_worker_before_the_result"
+runs = ["engine-dispatcher-restart"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = "            Released::Due => return Ok(None),"
+replace = "            Released::Due => {}"
+
+[[plant]]
+name = "carried restart: the result after what 0019 let go of is made from the turn of the words before it, the two turns as one"
+meant = "a_note_0019_let_go_of_from_the_words_that_resume_a_task_reaches_its_worker_before_the_result"
+runs = ["engine-dispatcher-restart"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = "            Released::Pasted(row) => {"
+replace = "            Released::Pasted(row) if row < 0 => {"
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = "            Released::None => {}"
+replace = "            Released::Pasted(_) | Released::None => {}"
+
+[[plant]]
+name = "carried restart: what 0019 let go of holds the result back only while it is queued, and a task finishes while it is on its way"
+meant = "what_0019_let_go_of_holds_its_tasks_result_while_its_window_may_take_it_and_begins_it_once_pasted"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/carrying.rs"
+find = '''
+            "delivering" => return Ok(Released::Due),
+'''
+replace = "\n"
+
+[[plant]]
+name = "carried restart: what 0019 let go of holds the result back while it is queued, whether its window may take it now or not"
+meant = "what_0019_let_go_of_holds_its_tasks_result_while_its_window_may_take_it_and_begins_it_once_pasted"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/carrying.rs"
+find = '''            "queued" if next_delivery_of(store, participant_id, id)?.is_some() => {'''
+replace = '''            "queued" => {'''
+
+[[plant]]
+name = "carried restart: every row of the task counts as what 0019 let go of, a note that rode in nothing too"
+meant = "what_0019_let_go_of_holds_its_tasks_result_while_its_window_may_take_it_and_begins_it_once_pasted"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/carrying.rs"
+find = '''
+              WHERE m.id IN (SELECT r.value FROM event e, json_each(e.data, '$.released') r
+                              WHERE e.project_id = (SELECT project_id FROM task WHERE id = ?1)
+                                AND e.kind = 'message.uncarried')
+                AND m.task_id = ?1'''
+replace = '''
+              WHERE m.task_id = ?1'''

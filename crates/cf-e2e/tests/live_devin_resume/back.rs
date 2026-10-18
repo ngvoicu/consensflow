@@ -163,7 +163,8 @@ fn opening(case: Case, scene: &mut Scene, again: &mut Again, said: &mut Account)
         ));
         // How Devin stores a prompt it ran under `/bypass`, which the daemon puts a
         // resumed window's first message behind, and that the daemon reads it as the
-        // paste either way.
+        // paste either way. Behind the case's own `/bypass` too, the window was given
+        // what ConsensFlow never gives one, which the daemon reads as Devin stored it.
         let header = marker_of(NOTE);
         said.say(format!(
             "Devin's store has the note {}",
@@ -171,7 +172,8 @@ fn opening(case: Case, scene: &mut Scene, again: &mut Again, said: &mut Account)
                 .as_deref()
                 .unwrap_or("nowhere")
         ));
-        if turn.arrived && !read_header_first(window.record().as_ref(), &header) {
+        let products = case.opening == Opening::Note;
+        if turn.arrived && products && !read_header_first(window.record().as_ref(), &header) {
             said.fail(format!(
                 "the daemon's reader has the note behind other words: {}",
                 tail(window.record().as_ref(), 4)

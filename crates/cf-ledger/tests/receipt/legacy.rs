@@ -3,7 +3,7 @@
 //! made as Node made them (what it never wrote is left as the migration made
 //! it), by changing the file where this ledger's own would differ.
 
-use cf_ledger::{migrate, Claim, MIGRATIONS};
+use cf_ledger::{migrate, Claim, Released, MIGRATIONS};
 use rusqlite::Connection;
 
 use crate::fixture::{ids, world, World};
@@ -492,6 +492,69 @@ fn a_start_after_one_that_stopped_between_migration_19_and_its_reconcile_reconci
     w.edit(|_| {});
     w.edit(|_| {});
     assert_eq!(reconciled(&w), said);
+}
+
+/// Sol's review of 2026-10-18: on 3.0.4 T-1 was resumed, the words that send it on,
+/// m-3, waited unpasted, and the chief's note m-4 rode in them. 0019 lets go of the
+/// note. Where it stands for zeus's window is what holds T-1's result back, and where
+/// the result begins (`Released`): while the window may take it or it is on its way,
+/// the result waits; once pasted on its own, the result is what came after it. A row
+/// the window cannot take now holds nothing back, and a note that rode in nothing, the
+/// log's or not, is nothing of it.
+#[test]
+fn what_0019_let_go_of_holds_its_tasks_result_while_its_window_may_take_it_and_begins_it_once_pasted(
+) {
+    const AT: &str = "2026-10-15T12:00:00.000Z";
+    let (dir, db) = a_home_at(18);
+    db.execute_batch(&format!(
+        "INSERT INTO project (id, directory, name, state, gate, created_at, updated_at)
+           VALUES (1, '/work/app', 'app', 'open', 0, '{AT}', '{AT}');
+         INSERT INTO participant (id, project_id, handle, role, roles, agent, harness, tier, created_at) VALUES
+           (1, 1, 'human', 'human', '[]', NULL, NULL, NULL, '{AT}'),
+           (2, 1, 'chief', 'chief', '[]', 'apollo', 'claude-code', NULL, '{AT}'),
+           (3, 1, 'zeus', 'worker', '[\"worker\"]', 'zeus', 'devin', 'standard', '{AT}');
+         INSERT INTO task (id, project_id, number, title, body, requester_id, assignee_id, state, created_at, updated_at)
+           VALUES (1, 1, 1, 'Parser', 'Parser', 2, 3, 'queued', '{AT}', '{AT}');
+         INSERT INTO message (id, project_id, recipient_id, sender_id, kind, task_id, reply_to, body, state, attempts, created_at, carried_by) VALUES
+           (1, 1, 3, 2, 'task', 1, NULL, 'Parser', 'delivered', 1, '{AT}', NULL),
+           (3, 1, 3, 2, 'task', 1, NULL, 'Resumed: Carry on', 'queued', 0, '{AT}', NULL),
+           (4, 1, 3, 2, 'note', 1, NULL, 'Output must be YAML', 'queued', 0, '{AT}', 3);"
+    ))
+    .unwrap();
+    let (mut w, carrier, note) = opened(dir, db);
+    let zeus = w.id("zeus");
+    let released = |w: &World| w.ledger.released(zeus, 1).expect("a read");
+    assert_eq!(
+        let_go(&w),
+        [serde_json::json!({ "carrier": carrier, "released": [note] })]
+    );
+    let begun = w.deliver(carrier);
+    assert!(begun.carried.is_empty(), "the words go alone");
+    assert_eq!(w.state(1), "working");
+    assert_eq!(released(&w), Released::Due, "the window may take the note");
+    // A door that claims it takes it out of the window's queue for now.
+    w.edit(|db| {
+        db.execute("UPDATE message SET claimed_at = ? WHERE id = ?", (AT, note))
+            .unwrap();
+    });
+    assert_eq!(
+        released(&w),
+        Released::None,
+        "the window cannot take it now"
+    );
+    w.edit(|db| {
+        db.execute("UPDATE message SET claimed_at = NULL WHERE id = ?", [note])
+            .unwrap();
+    });
+    w.begin(note);
+    assert_eq!(released(&w), Released::Due, "it is on its way");
+    w.confirm(note);
+    assert_eq!(released(&w), Released::Pasted(note));
+    // A note that comes now rides in nothing, and is no row the log let go of.
+    let later = w.note("chief", "zeus", 1, "Mind the tests").id;
+    assert_eq!(released(&w), Released::Pasted(note));
+    w.deliver(later);
+    assert_eq!(released(&w), Released::Pasted(note));
 }
 
 /// A carrier this build began froze its set at its first paste: its rows were in

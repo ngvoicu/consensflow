@@ -4,7 +4,9 @@
 use serde_json::Value;
 
 use super::Ledger;
-use crate::{messages, Begun, Claim, LedgerError, MessageView, NewNote, NewQuestion, Read};
+use crate::{
+    messages, Begun, Claim, LedgerError, MessageView, NewNote, NewQuestion, Read, Released,
+};
 
 impl Ledger {
     /// One message, or none.
@@ -174,6 +176,12 @@ impl Ledger {
         task_id: i64,
     ) -> Result<Option<MessageView>, LedgerError> {
         messages::last_pasted(&self.store, participant_id, task_id)
+    }
+
+    /// Where what the log says was let go of for a task stands for a participant's
+    /// window, as the window's answer would finish the task.
+    pub fn released(&self, participant_id: i64, task_id: i64) -> Result<Released, LedgerError> {
+        messages::released(&self.store, participant_id, task_id)
     }
 
     /// The first task message a participant's window received about a task on

@@ -732,16 +732,17 @@ find = "            .is_ok_and(|wire| wire.sent)"
 replace = "            .is_ok_and(|wire| wire.sent && false)"
 
 # A resumed window's first message behind /bypass, however Devin stores it (the reviews of
-# 2026-10-17): its record reads the prompt, its header first.
+# 2026-10-17): its record reads the prompt, its header first; and only what ConsensFlow gave
+# a launch of the session behind /bypass, whole (Astra's review of 2026-10-18).
 [[plant]]
 name = "results twice: Devin's record reads a message that ran under /bypass with the command in front, and the paste it is is taken for none"
-meant = "a_users_message_that_ran_under_bypass_is_read_as_the_prompt_it_ran_however_devin_stored_it"
+meant = "a_launchs_first_message_behind_bypass_is_read_as_the_prompt_it_ran_however_devin_stored_it"
 runs = ["harness-devin"]
 
 [[plant.edit]]
-file = "crates/cf-harness/src/devin/record/chain.rs"
-find = "                behind_bypass(&text).map_or(text.clone(), str::to_owned)"
-replace = "                text"
+file = "crates/cf-harness/src/devin/record/answer.rs"
+find = "                if let Some(prompt) = behind_bypass(&item.text, wires).map(Arc::from) {"
+replace = "                if let Some(prompt) = None::<Arc<str>> {"
 
 [[plant]]
 name = "results twice: Devin's record reads a resumed worker's note behind /bypass as Devin stored it, and the note is never received"
@@ -750,22 +751,56 @@ runs = ["rig-devin-bypass-first"]
 builds = true
 
 [[plant.edit]]
-file = "crates/cf-harness/src/devin/record/chain.rs"
-find = "                behind_bypass(&text).map_or(text.clone(), str::to_owned)"
-replace = "                text"
+file = "crates/cf-harness/src/devin/record/answer.rs"
+find = "                if let Some(prompt) = behind_bypass(&item.text, wires).map(Arc::from) {"
+replace = "                if let Some(prompt) = None::<Arc<str>> {"
 
 [[plant]]
-name = "results twice: Devin's record reads one /bypass off a message, and one given two reads with the second in front"
-meant = "a_users_message_that_ran_under_bypass_is_read_as_the_prompt_it_ran_however_devin_stored_it"
+name = "results twice: Devin's record reads every user's message behind /bypass, and a human's command before an answer's header is the answer's paste (round 10's rule, Astra's review of 2026-10-18)"
+meant = "a_humans_message_behind_bypass_is_read_as_it_was_stored"
 runs = ["harness-devin"]
 
 [[plant.edit]]
-file = "crates/cf-harness/src/devin/record/chain.rs"
+file = "crates/cf-harness/src/devin/record/answer.rs"
+find = "    (prompt.len() < rest.len() && wires.bypassed().any(whole)).then_some(prompt)"
+replace = '''
+    let _ = (wires, &whole);
+    (prompt.len() < rest.len() && !prompt.is_empty()).then_some(prompt)'''
+
+[[plant]]
+name = "results twice: Devin's record reads a message behind /bypass that begins with what ConsensFlow gave a launch, and says more, as that"
+meant = "a_humans_message_behind_bypass_is_read_as_it_was_stored"
+runs = ["harness-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/record/answer.rs"
+find = "    let whole = |sent: &str| sent.trim_end() == prompt.trim_end();"
+replace = "    let whole = |sent: &str| prompt.starts_with(sent.trim_end());"
+
+[[plant]]
+name = "results twice: Devin's record takes what any launch was given behind /bypass, another session's too"
+meant = "a_humans_message_behind_bypass_is_read_as_it_was_stored"
+runs = ["harness-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/record/wires.rs"
+find = "                        if log.said.mine && log.bypassed.is_none() {"
+replace = "                        if log.bypassed.is_none() {"
+
+[[plant]]
+name = "results twice: Devin's record takes a launch's prompt file whole, /bypass with it, for what it was given behind the command"
+meant = "a_launchs_first_message_behind_bypass_is_read_as_the_prompt_it_ran_however_devin_stored_it"
+runs = ["harness-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/record/wires.rs"
 find = '''
-    while let Some(behind) = once(prompt) {
-        prompt = behind;
-    }'''
-replace = ""
+        Ok(prompt) => Ok(prompt
+            .strip_prefix(BYPASS)
+            .and_then(|behind| behind.strip_prefix(' '))
+            .map(str::to_owned)),'''
+replace = '''
+        Ok(prompt) => Ok(prompt.starts_with(BYPASS).then_some(prompt)),'''
 
 [[plant]]
 name = "results twice: the stand-in Devin stores the prompt alone whatever it is told"

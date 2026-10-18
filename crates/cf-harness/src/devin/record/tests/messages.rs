@@ -150,29 +150,65 @@ fn texts(staged: &Staged) -> Vec<String> {
     }
 }
 
-/// A resumed window's first message goes behind `/bypass` (`adapter::first_message`),
-/// and Devin may store the command with the prompt it ran, or the prompt alone: either
-/// way the record reads the prompt, its header first, the paste the engine waits for
-/// (`is_paste_of`). A member's note that its turn was cut, and a chief's handoff given
-/// again on the conversation it was given to.
+/// The member's note that its turn was cut, and the chief's handoff given again on the
+/// conversation it was given to: what a resumed window is given first.
+const MEMBER: &str = "[ConsensFlow m-2 · T-1 · note from ConsensFlow]\nConsensFlow quit while you were working on T-1. Go on where you stopped.";
+const CHIEF: &str =
+    "[ConsensFlow m-7 · note from ConsensFlow]\nYou are the chief now of app, switched in from Claude Code.";
+
+/// A resumed window's first message goes behind `/bypass` (`adapter::first_message`), in
+/// its launch's prompt file, and Devin may store the command with the prompt it ran, or
+/// the prompt alone: either way the record reads the prompt, its header first, the paste
+/// the engine waits for (`is_paste_of`).
 #[test]
-fn a_users_message_that_ran_under_bypass_is_read_as_the_prompt_it_ran_however_devin_stored_it() {
-    let member = "[ConsensFlow m-2 · T-1 · note from ConsensFlow]\nConsensFlow quit while you were working on T-1. Go on where you stopped.";
-    let chief = "[ConsensFlow m-7 · note from ConsensFlow]\nYou are the chief now of app, switched in from Claude Code.";
-    for note in [member, chief] {
-        // The adapter's one `/bypass`, and two where a window was given one of its own
-        // before it (the live suite's `after-note-bypass`).
-        for stored in [
-            format!("/bypass {note}"),
-            note.to_owned(),
-            format!("  /bypass\n{note}"),
-            format!("/bypass /bypass {note}"),
+fn a_launchs_first_message_behind_bypass_is_read_as_the_prompt_it_ran_however_devin_stored_it() {
+    for note in [MEMBER, CHIEF] {
+        for (stored, read) in [
+            (format!("/bypass {note}"), note.to_owned()),
+            (note.to_owned(), note.to_owned()),
+            (format!("  /bypass\n{note}\n"), format!("{note}\n")),
         ] {
             let staged = Staged::new();
+            staged.launched_behind_bypass("launch-1", SESSION, note);
             staged.chain(&[json!({ "message_id": "u-1", "role": "user", "content": stored })]);
-            assert_eq!(texts(&staged), [note], "{stored:?}");
+            assert_eq!(texts(&staged), [read], "{stored:?}");
         }
     }
+}
+
+/// Astra's review of 2026-10-18: answer m-42 was on its way, and the human typed
+/// `/bypass` before its header and a question of their own after it, which Devin stored
+/// with the command. Read behind the command, it was the answer's paste. Only what
+/// ConsensFlow gave a launch of the session behind `/bypass`, whole, is read behind it.
+#[test]
+fn a_humans_message_behind_bypass_is_read_as_it_was_stored() {
+    let human = "/bypass [ConsensFlow m-42 · T-1 · answer from @chief]\nWhy is this pending?";
+    // And one that begins with what ConsensFlow gave and says more.
+    let more = format!("/bypass {MEMBER}\nAnd write YAML.");
+    let staged = Staged::new();
+    staged.launched_behind_bypass("launch-1", SESSION, MEMBER);
+    staged.chain(&[
+        json!({ "message_id": "u-1", "role": "user", "content": format!("/bypass {MEMBER}") }),
+        stopped("a-1", "Going on."),
+        json!({ "message_id": "u-2", "role": "user", "content": human }),
+        stopped("a-2", "It waits."),
+        json!({ "message_id": "u-3", "role": "user", "content": more }),
+    ]);
+    assert_eq!(
+        texts(&staged),
+        [MEMBER, "Going on.", human, "It waits.", &more]
+    );
+    // Nor the first message itself where no launch of the session was given it so: one
+    // with no prompt file, or another session's.
+    let stored = format!("/bypass {MEMBER}");
+    let staged = Staged::new();
+    staged.wire(
+        "launch-1",
+        &[json!({ "sessionId": SESSION, "update": { "sessionUpdate": "available_commands_update" } })],
+    );
+    staged.launched_behind_bypass("launch-2", "other-session", MEMBER);
+    staged.chain(&[json!({ "message_id": "u-1", "role": "user", "content": stored })]);
+    assert_eq!(texts(&staged), [stored]);
     // Only Devin's command, with a prompt after it, and only in a user's message.
     for (role, stored) in [
         ("user", "/bypassed it"),
@@ -181,6 +217,7 @@ fn a_users_message_that_ran_under_bypass_is_read_as_the_prompt_it_ran_however_de
         ("assistant", "/bypass [ConsensFlow m-2 · note]"),
     ] {
         let staged = Staged::new();
+        staged.launched_behind_bypass("launch-1", SESSION, MEMBER);
         staged.chain(&[json!({ "message_id": "m", "role": role, "content": stored })]);
         assert_eq!(texts(&staged), [stored], "{role}: {stored}");
     }
