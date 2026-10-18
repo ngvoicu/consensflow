@@ -122,6 +122,9 @@ pub struct FakeAdapter {
     /// milliseconds: kept apart from `prepared`, which is what Node's fake
     /// was asked and is held to Node's traces.
     first_message_ms: RefCell<Vec<i64>>,
+    /// Whether each of those launches was told its window before was proven
+    /// gone, kept apart for the same reason.
+    previous_gone: RefCell<Vec<bool>>,
     /// The test's items are numbered across its adapters.
     items: Rc<Cell<u64>>,
     /// A `ready` of the test's own; without one a window is ready, and
@@ -215,6 +218,7 @@ impl FakeAdapter {
             agents: RefCell::new(Vec::new()),
             prepared: RefCell::new(Vec::new()),
             first_message_ms: RefCell::new(Vec::new()),
+            previous_gone: RefCell::new(Vec::new()),
             items,
             ready: RefCell::new(None),
             started: RefCell::new(None),
@@ -253,6 +257,12 @@ impl FakeAdapter {
     /// milliseconds, in the order they were prepared.
     pub fn first_message_waits(&self) -> Vec<i64> {
         self.first_message_ms.borrow().clone()
+    }
+
+    /// Whether each launch prepared was told the program of the window before
+    /// it was proven gone, in the order they were prepared.
+    pub fn previous_gone(&self) -> Vec<bool> {
+        self.previous_gone.borrow().clone()
     }
 
     /// An item of a conversation, numbered as the test's own: `i-1`, `i-2`…
@@ -512,6 +522,7 @@ impl Asked {
         fake.first_message_ms
             .borrow_mut()
             .push(launch.first_message_ms);
+        fake.previous_gone.borrow_mut().push(launch.previous_gone);
         let id = launch.id.as_str().to_owned();
         let native = launch
             .resume

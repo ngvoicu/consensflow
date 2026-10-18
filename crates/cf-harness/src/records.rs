@@ -104,5 +104,25 @@ pub fn has_transcript(harness: Harness, session: &str, env: &Env) -> Result<bool
     }
 }
 
+/// How many bytes `harness`'s transcript of `session` holds now, where a reader
+/// of it reads a relaunch (Claude's alone): none where it keeps no transcript of
+/// it. A home the places are under, needed and missing, is the failure.
+pub fn transcript_length(
+    harness: Harness,
+    session: &str,
+    env: &Env,
+) -> Result<Option<u64>, String> {
+    let file = match harness {
+        Harness::Claude => claude::paths::transcript(session, env)?,
+        Harness::Codex | Harness::Pi | Harness::Opencode | Harness::Devin => None,
+    };
+    file.map(|file| {
+        std::fs::metadata(&file)
+            .map(|found| found.len())
+            .map_err(|failed| format!("{}: {failed}", file.display()))
+    })
+    .transpose()
+}
+
 #[cfg(test)]
 mod tests;

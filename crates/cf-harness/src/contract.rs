@@ -154,6 +154,12 @@ pub struct Launch<'a> {
     pub directory: &'a str,
     /// The conversation to open again, when the participant has one.
     pub resume: Option<&'a str>,
+    /// The program of the participant's last window was proven gone when that
+    /// window ended: the pane host named no program it could not end. False
+    /// where it named one, and where the engine never heard how it ended (a
+    /// window of a daemon before this one): what the record holds then may still
+    /// be written to by a process ConsensFlow does not hold.
+    pub previous_gone: bool,
     /// The window's first message, as the engine wrote it.
     pub message: Option<&'a str>,
     /// The agent it runs on: none for a chief from before every chief had one.
@@ -425,6 +431,18 @@ pub trait Records {
         harness: Harness,
         session: &'a str,
     ) -> Work<'a, Result<bool, String>>;
+
+    /// How many bytes `harness`'s transcript of `session` holds now, where a
+    /// reader of it reads a relaunch (`Options::relaunched_at`, Claude's
+    /// alone): none where it keeps no transcript of it, or a seam that keeps no
+    /// files says none.
+    fn transcript_length<'a>(
+        &'a self,
+        _harness: Harness,
+        _session: &'a str,
+    ) -> Work<'a, Result<Option<u64>, String>> {
+        Box::pin(async { Ok(None) })
+    }
 
     /// Whether `harness`'s record of `session`, read with no window open, ends in
     /// a turn with no end (the turn the app's quit cut, or a Close): yes, or no

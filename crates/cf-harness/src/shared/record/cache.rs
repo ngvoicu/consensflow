@@ -24,6 +24,11 @@ use super::reading::Reading;
 pub struct Options {
     /// Where Pi's extension keeps its evidence of a window's turns.
     pub pi_settlement: Option<PiSettlement>,
+    /// How many bytes the transcript held when ConsensFlow last started the
+    /// window's program on the conversation, the window it was on closed
+    /// first: what is before it was written by a process that is gone, and the
+    /// rest by the one that runs. Claude's reader reads it (`queues`).
+    pub relaunched_at: Option<u64>,
 }
 
 /// Where Pi's extension keeps its evidence of a window's turns, and which
@@ -229,16 +234,29 @@ mod tests {
                 directory: None,
                 launch_id: Some(launch_id.to_owned()),
             }),
+            relaunched_at: None,
         };
         let first = cache.look(Harness::Pi, "a", &env, &settlement("one"), 5);
         let second = cache.look(Harness::Pi, "a", &env, &settlement("two"), 7);
         let third = cache.look(Harness::Pi, "a", &env, &Options::default(), 9);
+        let relaunched = Options {
+            relaunched_at: Some(12),
+            ..Options::default()
+        };
+        let fourth = cache.look(Harness::Claude, "a", &env, &relaunched, 11);
         assert_eq!(
             said(&first),
-            r#"Options { pi_settlement: Some(PiSettlement { directory: None, launch_id: Some("one") }) } at 5"#
+            r#"Options { pi_settlement: Some(PiSettlement { directory: None, launch_id: Some("one") }), relaunched_at: None } at 5"#
         );
-        assert!(said(&second).ends_with(r#"Some("two") }) } at 7"#));
-        assert_eq!(said(&third), "Options { pi_settlement: None } at 9");
+        assert!(said(&second).ends_with(r#"Some("two") }), relaunched_at: None } at 7"#));
+        assert_eq!(
+            said(&third),
+            "Options { pi_settlement: None, relaunched_at: None } at 9"
+        );
+        assert_eq!(
+            said(&fourth),
+            "Options { pi_settlement: None, relaunched_at: Some(12) } at 11"
+        );
     }
 
     #[test]

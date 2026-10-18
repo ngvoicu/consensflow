@@ -30,7 +30,14 @@ fn both(file: &Path) -> [Result<Vec<(Value, usize)>, String>; 2] {
         };
         let looked = match with {
             None => read_on(file, None, LONG_AFTER_MS, visit, None),
-            Some(parse) => read_on_with(file, None, LONG_AFTER_MS, parse, visit, None),
+            Some(parse) => read_on_with(
+                file,
+                None,
+                LONG_AFTER_MS,
+                parse,
+                &mut |record, index, _| visit(record, index),
+                None,
+            ),
         };
         looked.map(|_| visited).map_err(|stop| stop.reason())
     };

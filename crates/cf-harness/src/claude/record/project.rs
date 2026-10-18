@@ -20,6 +20,10 @@ use serde_json::{Map, Value};
 use super::text::{claude_text, claude_tool_text, is_interrupt};
 use super::{field, kind};
 
+/// What Claude Code says, in a message of its own, as it closes the turn it
+/// found cut when it resumed the conversation.
+const CUT_TURN_CLOSED: &str = "No response requested.";
+
 /// A record, as replay reads it.
 #[derive(Debug, PartialEq)]
 pub(super) enum Projected {
@@ -73,6 +77,9 @@ pub(super) struct Assistant {
     pub(super) blocks: Vec<Block>,
     /// The message stopped as `end_turn` or `stop_sequence`.
     pub(super) ended: bool,
+    /// Claude Code's own close of the turn it found cut as it resumed the
+    /// conversation: no model's words.
+    pub(super) closes_a_cut_turn: bool,
     /// The API refused the request (`isApiErrorMessage`).
     pub(super) refused: bool,
     /// A refusal for quota: a status of 429, or the error `rate_limit`.
@@ -234,17 +241,26 @@ fn assistant(record: &Value) -> Projected {
         })
         .collect();
     let status = record.get("apiErrorStatus").and_then(Value::as_f64);
+    let text = claude_text(content);
+    let refused = record.get("isApiErrorMessage") == Some(&Value::Bool(true));
+    // Claude Code 2.1.296 to 2.1.302 write it with the next message (T-442's
+    // record; `quit-before-a-word-resumed.jsonl`). A refusal for quota may say
+    // the same words, and is the API's.
+    let closes_a_cut_turn = !refused
+        && in_message("model").and_then(Value::as_str) == Some("<synthetic>")
+        && text == CUT_TURN_CLOSED;
     Projected::Assistant(Box::new(Assistant {
         at: timestamp(record),
         message_id: text_id(in_message("id")),
         uuid: text_id(record.get("uuid")),
-        text: claude_text(content),
+        text,
         blocks,
         ended: matches!(
             in_message("stop_reason").and_then(Value::as_str),
             Some("end_turn" | "stop_sequence")
         ),
-        refused: record.get("isApiErrorMessage") == Some(&Value::Bool(true)),
+        closes_a_cut_turn,
+        refused,
         rate_limited: status == Some(429.0)
             || record.get("error").and_then(Value::as_str) == Some("rate_limit"),
     }))

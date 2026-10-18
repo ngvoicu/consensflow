@@ -4,6 +4,7 @@
 //! (`keep`). A row is a scenario, the record of it that changes, and how.
 
 use super::projection::{interrupt, projected};
+use super::restart::closed;
 use super::*;
 
 const LATER: &str = "2026-09-20T11:30:00.000Z";
@@ -185,6 +186,28 @@ fn prompted() -> Vec<Value> {
         prompt,
         answered,
         duration("d2", "a2"),
+    ]
+}
+
+/// A turn cut, and Claude Code's close of it as the conversation was resumed,
+/// then a turn that ends.
+fn closed_on_resume() -> Vec<Value> {
+    let again = assistant(
+        "a3",
+        "u3",
+        json!("m3"),
+        json!([text(json!("Done"))]),
+        json!("end_turn"),
+    );
+    vec![
+        hello(),
+        answer("a1", "u1"),
+        duration("d1", "a1"),
+        user("u2", json!("d1"), json!("Cut")),
+        closed("c1", "u2"),
+        user("u3", json!("c1"), json!("Again")),
+        again,
+        duration("d3", "a3"),
     ]
 }
 
@@ -424,6 +447,24 @@ fn read() -> Vec<Row> {
             hooked,
             0,
             in_the_attachment("content", json!(["other"])),
+        ),
+        (
+            "message.model, of the close of a cut turn",
+            closed_on_resume,
+            4,
+            in_the_message("model", json!("claude-opus-5-5")),
+        ),
+        (
+            "isApiErrorMessage, of the close of a cut turn",
+            closed_on_resume,
+            4,
+            is("isApiErrorMessage", json!(true)),
+        ),
+        (
+            "block.text, of the close of a cut turn",
+            closed_on_resume,
+            4,
+            blocks(json!([text(json!("No response needed."))])),
         ),
     ]
 }

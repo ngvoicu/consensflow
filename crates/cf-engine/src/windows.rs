@@ -167,6 +167,10 @@ pub(crate) struct WindowPart {
     /// The stop it ignored in every round, while it lasts.
     pub(crate) unstopped: Option<Unstopped>,
     pub(crate) activity: Activity,
+    /// The pane of the last window that ended, and whether the host proved its
+    /// program gone ([`Shown::gone`]): none until the host said, which it may
+    /// do after the engine's own close has settled the window.
+    pub(crate) last_exit: Option<(Pane, Option<bool>)>,
 }
 
 impl Default for WindowPart {
@@ -194,6 +198,7 @@ impl Default for WindowPart {
             interrupted: None,
             unstopped: None,
             activity: Activity::of(ActivityState::Closed),
+            last_exit: None,
         }
     }
 }
@@ -763,6 +768,13 @@ impl Dispatcher {
             Some(role) => role,
             None => self.role_text(project, participant, &*adapter)?,
         };
+        // Its last window's program was proven gone: nothing of it writes on.
+        let previous_gone = record
+            .window
+            .borrow()
+            .last_exit
+            .as_ref()
+            .is_some_and(|(_, gone)| *gone == Some(true));
         let launch = Launch {
             id: launch_id,
             project: project.id,
@@ -770,6 +782,7 @@ impl Dispatcher {
             role: &participant.role,
             directory: &project.directory,
             resume,
+            previous_gone,
             message: text.as_deref(),
             agent: saved.as_ref().map(SavedAgent::agent),
             instructions: &instructions,

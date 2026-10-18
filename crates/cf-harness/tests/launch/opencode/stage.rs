@@ -304,6 +304,7 @@ impl Stage {
                 role: wanted.role,
                 directory: &directory,
                 resume: wanted.resume.as_deref(),
+                previous_gone: false,
                 message: wanted.message.as_deref(),
                 agent: Some(agent),
                 instructions: &wanted.instructions,

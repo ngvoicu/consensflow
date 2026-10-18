@@ -25,6 +25,7 @@ fn every_role_enters_every_harness_with_its_whole_text_already_loaded() {
             role: name,
             directory: "/work/app",
             resume: None,
+            previous_gone: false,
             message: None,
             agent: None,
             instructions: &content,

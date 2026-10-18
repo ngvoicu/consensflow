@@ -26,6 +26,7 @@ static BLOCK: Keep = Keep::Members(&[
 static MESSAGE: Keep = Keep::Members(&[
     ("id", &Keep::Scalar),
     ("role", &Keep::Scalar),
+    ("model", &Keep::Scalar),
     ("stop_reason", &Keep::Scalar),
     ("content", &Keep::Items(&BLOCK)),
 ]);
