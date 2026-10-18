@@ -49,7 +49,7 @@ pub use conversations::{ChiefSwitch, TRANSCRIPT_ITEM_MAX};
 #[cfg(feature = "test-support")]
 pub use ledger::Watcher;
 pub use ledger::{open_ledger, Event, Ledger, Options};
-pub use messages::{NewNote, NewQuestion, Read, Released};
+pub use messages::{NewNote, NewQuestion, Read};
 pub use model::LedgerError;
 pub use page_reads::PAGE_BYTES;
 pub use projects::{parse_description, parse_name, NewChief, NewMember, NewProject};

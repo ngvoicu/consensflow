@@ -9,7 +9,7 @@ use std::rc::Rc;
 
 use cf_base::js;
 use cf_harness::contract::{Admission, Held, Observed, PaneHost, Readiness};
-use cf_ledger::{MessageView, NewNote, ParticipantView, ProjectView, Released, TaskView};
+use cf_ledger::{MessageView, NewNote, ParticipantView, ProjectView, TaskView};
 use cf_proto::trace::WindowEvent;
 
 use crate::delivery_text::{delivery_text, marker_of};
@@ -184,9 +184,7 @@ impl Dispatcher {
     }
 
     /// A worker's answer to its task's latest message finishes the task: the task
-    /// as it is once its result is recorded, where it was. What the log says was let
-    /// go of for the task goes into the window first, and the answer after it is the
-    /// result ([`Released`]). Whatever the turn left
+    /// as it is once its result is recorded, where it was. Whatever the turn left
     /// running is no part of it ([`Dispatcher::end_turn_work`]). An answer to the
     /// note that says the worker its role is none of the task's
     /// ([`answers_to_the_task`]): where nothing else answers, there is no result,
@@ -234,33 +232,9 @@ impl Dispatcher {
         // words, and nor are the progress notes a harness marks as its
         // commentary: its final answer is the report.
         let replacements = self.seams.ledger.borrow().role_notes_to(participant.id)?;
-        let mut written = answers_to_the_task(&items[start + 1..], &replacements);
+        let written = answers_to_the_task(&items[start + 1..], &replacements);
         if !written.last().is_some_and(|item| item.complete) {
             return Ok(None);
-        }
-        // What migration 0019 let go of reaches the window before the task can
-        // finish, and the result is what the window wrote after the newest of it
-        // pasted on its own: an earlier build pasted it with the words that sent the
-        // task on (Sol's review of 2026-10-18: a note that rode in a resume was let go
-        // of, the resume went alone, and the task finished before the note went in).
-        match self
-            .seams
-            .ledger
-            .borrow()
-            .released(participant.id, thread.task.id)?
-        {
-            Released::Due => return Ok(None),
-            Released::Pasted(row) => {
-                let marker = marker_of(row);
-                let after = items.iter().position(|item| item.text.contains(&marker));
-                if let Some(after) = after.filter(|after| *after > start) {
-                    written = answers_to_the_task(&items[after + 1..], &replacements);
-                    if !written.last().is_some_and(|item| item.complete) {
-                        return Ok(None);
-                    }
-                }
-            }
-            Released::None => {}
         }
         let words: Vec<&str> = written
             .iter()

@@ -69,8 +69,8 @@ runs = ["ledger-receipt"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/migrations/0019.sql"
-find = "     WHERE state = 'queued' AND carried_by IS NOT NULL;"
-replace = "     WHERE state = 'queued' AND carried_by IS NOT NULL AND 0;"
+find = "     WHERE m.state = 'queued'"
+replace = "     WHERE m.state = 'queued' AND 0"
 
 [[plant]]
 name = "carried restart: migration 0019 lets go only of what rides in a carrier on its way, so an answer that joined one waiting again after a late paste is taken for received by that paste (round 8's rule, both reviews of 2026-10-17)"
@@ -79,8 +79,32 @@ runs = ["ledger-receipt"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/migrations/0019.sql"
-find = "     WHERE state = 'queued' AND carried_by IS NOT NULL;"
-replace = "     WHERE state = 'queued' AND carried_by IN (SELECT id FROM message WHERE state = 'delivering');"
+find = "            OR EXISTS (SELECT 1 FROM event e"
+replace = "            OR 0 AND EXISTS (SELECT 1 FROM event e"
+
+[[plant]]
+name = "carried restart: migration 0019 lets go of what rides in every carrier, one no paste of which began too, and a note that rode in the words that resume a task waits behind them and never goes in (round 10's rule, Sol's review of 2026-10-18)"
+meant = "a_row_in_a_carrier_no_paste_of_which_began_rides_in_its_first_paste_through_0019"
+runs = ["ledger-receipt", "engine-dispatcher-restart"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0019.sql"
+find = "       AND (c.state = 'delivering'"
+replace = "       AND (1"
+
+[[plant]]
+name = "carried restart: migration 0019 takes a carrier's attempts for its past, and an answer that joined one a start gave back with its attempt is taken for received by its first paste"
+meant = "an_answer_that_joined_a_carrier_a_start_gave_back_with_its_attempt_is_not_taken_for_received_by_its_first_paste"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/migrations/0019.sql"
+find = '''
+            OR EXISTS (SELECT 1 FROM event e
+                        WHERE e.project_id = c.project_id AND e.kind = 'delivery.begun'
+                          AND json_extract(e.data, '$.message') = c.id));'''
+replace = '''
+            OR c.attempts > 0);'''
 
 [[plant]]
 name = "carried restart: migration 0019 logs what it let go of under another name, so the start reconciles none of its tasks"
@@ -94,7 +118,7 @@ replace = "strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), 'message.left',"
 
 [[plant]]
 name = "carried restart: migration 0019 logs the carrier for each row it let go of"
-meant = "a_populated_version_18_ledger_is_migrated_to_19_and_again_with_what_rode_in_every_carrier_let_go_of"
+meant = "a_populated_version_18_ledger_is_migrated_to_19_and_again_with_what_rode_in_every_carrier_begun_let_go_of"
 runs = ["ledger-receipt"]
 
 [[plant.edit]]
@@ -282,67 +306,17 @@ file = "crates/cf-engine/src/resume.rs"
 find = "        self.resumes.settled().await;"
 replace = "        let _ = &self.resumes;"
 
-# What 0019 let go of reaches its window before its task can finish, and the result is the turn
-# after it (Sol's review of 2026-10-18: a note that rode in the words that resume a task was let go
-# of, the words went alone, and the task finished from the turn before the note).
+# The start sweeps the launch folders once it has settled what was on its way (both reviews of
+# 2026-10-18): a resumed Devin window's first message, stored behind the /bypass it ran under, is
+# read as its paste by its launch's prompt file.
 [[plant]]
-name = "carried restart: a task finishes while what 0019 let go of for it waits, and a note that rode in the words that resume it never reaches the worker (Sol's review of 2026-10-18)"
-meant = "a_note_0019_let_go_of_from_the_words_that_resume_a_task_reaches_its_worker_before_the_result"
-runs = ["engine-dispatcher-restart"]
+name = "carried restart: a start sweeps the launch folders before it settles what was on its way, and a resumed Devin window's first message stored behind /bypass goes back to its queue (both reviews of 2026-10-18)"
+meant = "a_start_settles_what_was_on_its_way_by_what_its_launch_left_before_it_sweeps_the_launch_folders"
+runs = ["daemon-lib-start"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/deliveries.rs"
-find = "            Released::Due => return Ok(None),"
-replace = "            Released::Due => {}"
-
-[[plant]]
-name = "carried restart: the result after what 0019 let go of is made from the turn of the words before it, the two turns as one"
-meant = "a_note_0019_let_go_of_from_the_words_that_resume_a_task_reaches_its_worker_before_the_result"
-runs = ["engine-dispatcher-restart"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/deliveries.rs"
-find = "            Released::Pasted(row) => {"
-replace = "            Released::Pasted(row) if row < 0 => {"
-
-[[plant.edit]]
-file = "crates/cf-engine/src/deliveries.rs"
-find = "            Released::None => {}"
-replace = "            Released::Pasted(_) | Released::None => {}"
-
-[[plant]]
-name = "carried restart: what 0019 let go of holds the result back only while it is queued, and a task finishes while it is on its way"
-meant = "what_0019_let_go_of_holds_its_tasks_result_while_its_window_may_take_it_and_begins_it_once_pasted"
-runs = ["ledger-receipt"]
-
-[[plant.edit]]
-file = "crates/cf-ledger/src/messages/carrying.rs"
-find = '''
-            "delivering" => return Ok(Released::Due),
-'''
-replace = "\n"
-
-[[plant]]
-name = "carried restart: what 0019 let go of holds the result back while it is queued, whether its window may take it now or not"
-meant = "what_0019_let_go_of_holds_its_tasks_result_while_its_window_may_take_it_and_begins_it_once_pasted"
-runs = ["ledger-receipt"]
-
-[[plant.edit]]
-file = "crates/cf-ledger/src/messages/carrying.rs"
-find = '''            "queued" if next_delivery_of(store, participant_id, id)?.is_some() => {'''
-replace = '''            "queued" => {'''
-
-[[plant]]
-name = "carried restart: every row of the task counts as what 0019 let go of, a note that rode in nothing too"
-meant = "what_0019_let_go_of_holds_its_tasks_result_while_its_window_may_take_it_and_begins_it_once_pasted"
-runs = ["ledger-receipt"]
-
-[[plant.edit]]
-file = "crates/cf-ledger/src/messages/carrying.rs"
-find = '''
-              WHERE m.id IN (SELECT r.value FROM event e, json_each(e.data, '$.released') r
-                              WHERE e.project_id = (SELECT project_id FROM task WHERE id = ?1)
-                                AND e.kind = 'message.uncarried')
-                AND m.task_id = ?1'''
+file = "crates/cf-daemon/src/start.rs"
+find = "    let left = cf_harness::launches_left(&home.to_string_lossy());"
 replace = '''
-              WHERE m.task_id = ?1'''
+    let left = cf_harness::launches_left(&home.to_string_lossy());
+    let _ = cf_harness::sweep_launches(&left);'''

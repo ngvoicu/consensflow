@@ -135,12 +135,14 @@ fn a_task_whose_answer_a_stopped_start_let_go_of_is_not_finished_from_its_old_re
 }
 
 /// Sol's review of 2026-10-18: 3.0.4 stopped with T-1 paused, the words that resume it
-/// queued and never pasted, and the chief's note that came after riding in them. The
-/// upgrade's migration 0019 let go of the note; on the human's Resume the words went in
-/// alone, the worker's turn ended, and its answer was T-1's result while the note still
-/// waited: "Output must be YAML" never reached the worker.
+/// queued with no paste of them begun, and the chief's note that came after riding in
+/// them. The upgrade runs migration 0019, which leaves the note in the words, for no
+/// record holds a paste of them: on the human's Resume they go in with the note, and the
+/// worker's answer after them is T-1's result. (Let go of, the note waited behind the
+/// words, whose turn's answer finished T-1 first: "Output must be YAML" never reached
+/// the worker.)
 #[test]
-fn a_note_0019_let_go_of_from_the_words_that_resume_a_task_reaches_its_worker_before_the_result() {
+fn a_note_that_rode_in_the_words_that_resume_a_task_goes_in_with_them_after_the_upgrade() {
     let context = Context::new();
     context.adapter.resumes_records.set(true);
     let project = context.with_staff(&["zeus"]);
@@ -171,19 +173,10 @@ fn a_note_0019_let_go_of_from_the_words_that_resume_a_task_reaches_its_worker_be
         .into_iter()
         .find(|message| message.body == "Resumed: Carry on")
         .unwrap();
-    // 3.0.4 stops there, and the upgrade's 0019 lets go of the note.
+    // 3.0.4 stops there, and the upgrade runs migration 0019 on what it left.
     context.edit_ledger(|file| {
         let db = rusqlite::Connection::open(file).unwrap();
-        db.execute_batch(&format!(
-            "UPDATE message SET carried_by = NULL WHERE id = {note};
-             INSERT INTO event (project_id, at, kind, data)
-               SELECT project_id, created_at, 'message.uncarried',
-                      json_object('carrier', {words}, 'released', json_array(id))
-                 FROM message WHERE id = {note};",
-            note = note.id,
-            words = words.id
-        ))
-        .unwrap();
+        db.execute_batch("PRAGMA user_version = 18").unwrap();
     });
     context.ledger.borrow_mut().suspend_for_restart().unwrap();
     let after = context.make();
@@ -192,48 +185,36 @@ fn a_note_0019_let_go_of_from_the_words_that_resume_a_task_reaches_its_worker_be
     for _ in 0..3 {
         after.pass().unwrap();
     }
-    assert_eq!(context.message(words.id).state, "delivered");
-    // The words' turn ends with an answer written before the note, and the note's
-    // paste is slow to show.
-    context.adapter.with("zeus", |agent| agent.arrive = false);
-    context.adapter.answer("zeus", "The parser writes JSON.");
-    after.pass().unwrap();
-    after.pass().unwrap();
-    assert_eq!(context.message(note.id).state, "delivering");
     assert_eq!(
-        context.task(project.id, 1).task.state,
-        "working",
-        "not finished while the note is on its way"
+        (
+            context.message(words.id).state,
+            context.message(note.id).state
+        ),
+        ("delivered".to_owned(), "delivered".to_owned()),
+        "the note went in with the words"
     );
-    let shown = context
+    let pasted = context
         .adapter
-        .item(Role::User, &delivery_text(&context.message(note.id), &[]));
-    context.adapter.with("zeus", |agent| {
-        agent.arrive = true;
-        agent.items.push(shown);
-        agent.settled = false;
-    });
-    after.pass().unwrap();
+        .agent("zeus")
+        .items
+        .iter()
+        .rev()
+        .find(|item| item.role == Role::User)
+        .map(|item| item.text.to_string())
+        .unwrap();
+    assert!(pasted.contains("Output must be YAML"), "{pasted}");
     assert_eq!(
-        context.message(note.id).state,
-        "delivered",
-        "the note reached the worker"
+        pasted.matches("[ConsensFlow m-").count(),
+        1,
+        "one paste, under the words' marker: {pasted}"
     );
-    assert_eq!(
-        given(&context, "zeus").last().map(String::as_str),
-        Some("Output must be YAML")
-    );
-    assert_eq!(context.task(project.id, 1).task.state, "working");
     context.adapter.answer("zeus", "The parser writes YAML.");
     after.pass().unwrap();
     after.pass().unwrap();
     let thread = context.task(project.id, 1);
     assert_eq!(thread.task.state, "done");
     let result = thread.messages.iter().find(|m| m.kind == "result").unwrap();
-    assert_eq!(
-        result.body, "The parser writes YAML.",
-        "the result is the turn after the note"
-    );
+    assert_eq!(result.body, "The parser writes YAML.");
     context.close();
 }
 

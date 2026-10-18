@@ -20,7 +20,7 @@ use cf_proto::ledger::MessageView;
 use rusqlite::params;
 use serde_json::json;
 
-use super::delivery::{cancel_message, next_delivery_of};
+use super::delivery::cancel_message;
 use super::messages;
 use super::receipt::reconcile;
 use crate::model::LedgerError;
@@ -219,11 +219,12 @@ pub(crate) fn release_carried(store: &Store, task_id: i64) -> Result<(), LedgerE
 /// Let go of it here, they went again on their own after a paste that had them (a
 /// review of 2026-10-16: the answers kept for a window pasted twice). Only a carrier
 /// this ledger wrote is so: it froze the set at the first paste. What rode in a
-/// carrier an earlier build wrote, whatever its state, migration 0019 let go of, in
-/// the step that wrote its version (the reviews of 2026-10-16 and 2026-10-17: the
-/// Node daemon of 3.0.0-alpha.82 pasted a carrier's words alone, and up to 3.0.4 a
-/// row could join a carrier whose first paste was late and that waited again, so a
-/// marker found took an answer no paste had held for received).
+/// carrier an earlier build began to paste, migration 0019 let go of, in the step that
+/// wrote its version (the reviews of 2026-10-16 and 2026-10-17: the Node daemon of
+/// 3.0.0-alpha.82 pasted a carrier's words alone, and up to 3.0.4 a row could join a
+/// carrier whose first paste was late and that waited again, so a marker found took
+/// an answer no paste had held for received); a carrier no paste of which began kept
+/// its set, which its first paste holds.
 pub(crate) fn release_stranded(store: &mut Store) -> Result<(), LedgerError> {
     store.write(|store| {
         let carriers: Vec<(i64, i64)> = store
@@ -307,57 +308,6 @@ pub(crate) fn reconcile_released(store: &mut Store) -> Result<(), LedgerError> {
         }
         Ok(())
     })
-}
-
-/// Where what the log says was let go of (`message.uncarried`) stands for a task's
-/// window, as the window's answer would finish the task: in an earlier build it rode in
-/// the words that sent the task on, and the result was made from the turn after them.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Released {
-    /// None of it waits, and none was pasted on its own.
-    None,
-    /// A row of it goes into the window now, or may go now: the result waits for it.
-    Due,
-    /// The newest of it pasted into the window on its own: the result is what the
-    /// window wrote after it.
-    Pasted(i64),
-}
-
-/// Where what the log says was let go of for `task_id` stands for `participant_id`'s
-/// window ([`Released`]). A row the window cannot take now (a task's own words while
-/// it works on the task, say) holds nothing back.
-pub(crate) fn released(
-    store: &Store,
-    participant_id: i64,
-    task_id: i64,
-) -> Result<Released, LedgerError> {
-    let rows: Vec<(i64, String)> = store
-        .db
-        .prepare(
-            "SELECT m.id, m.state FROM message m
-              WHERE m.id IN (SELECT r.value FROM event e, json_each(e.data, '$.released') r
-                              WHERE e.project_id = (SELECT project_id FROM task WHERE id = ?1)
-                                AND e.kind = 'message.uncarried')
-                AND m.task_id = ?1 AND m.recipient_id = ?2 AND m.carried_by IS NULL
-                AND m.state IN ('queued', 'delivering', 'delivered')
-              ORDER BY m.id",
-        )?
-        .query_map(params![task_id, participant_id], |row| {
-            Ok((row.get(0)?, row.get(1)?))
-        })?
-        .collect::<rusqlite::Result<_>>()?;
-    let mut pasted = Released::None;
-    for (id, state) in rows {
-        match state.as_str() {
-            "delivering" => return Ok(Released::Due),
-            "queued" if next_delivery_of(store, participant_id, id)?.is_some() => {
-                return Ok(Released::Due)
-            }
-            "delivered" => pasted = Released::Pasted(id),
-            _ => {}
-        }
-    }
-    Ok(pasted)
 }
 
 /// What a task takes on from a window that is gone: the words kept for it,

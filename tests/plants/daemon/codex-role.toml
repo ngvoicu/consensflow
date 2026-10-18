@@ -382,8 +382,8 @@ replace = '''const FOLDERS: [&str; 6] = ["claude", "pi", "devin", "opencode", CO
 
 [[plant.edit]]
 file = "crates/cf-harness/src/shared/launch_files.rs"
-find = '''            if LaunchId::new(&entry.file_name().to_string_lossy()).is_some() {'''
-replace = '''            if LaunchId::new(&entry.file_name().to_string_lossy()).is_some() || true {'''
+find = '''                .filter(|entry| LaunchId::new(&entry.file_name().to_string_lossy()).is_some())'''
+replace = '''                .filter(|entry| LaunchId::new(&entry.file_name().to_string_lossy()).is_some() || true)'''
 
 [[plant]]
 name = "codex role: a manifest's commit that is no hexadecimal name of one is made the name of a folder"
@@ -813,8 +813,9 @@ runs = ["engine-role-change"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
-find = '''        let mut written = answers_to_the_task(&items[start + 1..], &replacements);'''
-replace = '''        let mut written: Vec<_> = items[start + 1..]
+find = '''        let written = answers_to_the_task(&items[start + 1..], &replacements);'''
+replace = '''        let _ = &replacements;
+        let written: Vec<_> = items[start + 1..]
             .iter()
             .filter(|item| item.role == cf_harness::records::Role::Assistant)
             .collect();'''

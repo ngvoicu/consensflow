@@ -2,7 +2,8 @@
 //! settings and integration files written for it, in
 //! `integrations/<harness>/<launch>`. A launch id lives as long as its window,
 //! and nothing else reads these folders, so they go when it does, and every one
-//! at a start. What is kept from one launch to the next is in no harness's
+//! a start finds once it has settled what was on its way, which may read a
+//! window's record by them. What is kept from one launch to the next is in no harness's
 //! folder: ConsensFlow's own copy of Specmint is in `integrations/specmint`
 //! ([`super::specmint`]), which neither a window's end nor a start touches, and
 //! a harness's folder holds launches' folders and nothing else (Devin's wire
@@ -10,7 +11,7 @@
 
 use std::fs;
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use cf_base::env::Env;
 use cf_base::home::config_root;
@@ -77,24 +78,35 @@ pub fn forget_launch(home: &str, launch: &LaunchId) -> io::Result<()> {
     Ok(())
 }
 
-/// At a start, when no window is open: every launch's files go
-/// (`sweepLaunches`), and what is not named by a launch id stays. How many
-/// went; a harness's folder that cannot be read holds none.
-pub fn sweep_launches(home: &str) -> io::Result<usize> {
-    let mut swept = 0;
+/// At a start, when no window is open: every launch's folder in `home`
+/// (`sweepLaunches`), in the order of the harnesses' folders, and nothing that is
+/// not named by a launch id. A harness's folder that cannot be read holds none.
+pub fn launches_left(home: &str) -> Vec<PathBuf> {
+    let mut left = Vec::new();
     for harness in FOLDERS {
         let parent = path::join(&[home, "integrations", harness]);
         let Ok(names) = entries(Path::new(&parent)) else {
             continue;
         };
-        for entry in names {
-            if LaunchId::new(&entry.file_name().to_string_lossy()).is_some() {
-                remove(&entry.path())?;
-                swept += 1;
-            }
-        }
+        left.extend(
+            names
+                .into_iter()
+                .filter(|entry| LaunchId::new(&entry.file_name().to_string_lossy()).is_some())
+                .map(|entry| entry.path()),
+        );
     }
-    Ok(swept)
+    left
+}
+
+/// The launches' folders a start found ([`launches_left`]) go, with all they hold,
+/// once what was on its way is settled, which may read them (the prompt a Devin
+/// launch was given behind `/bypass`): one after the other, a removal that fails
+/// stopping there. How many went.
+pub fn sweep_launches(left: &[PathBuf]) -> io::Result<usize> {
+    for folder in left {
+        remove(folder)?;
+    }
+    Ok(left.len())
 }
 
 /// `rmSync(path, { recursive: true, force: true })`: a folder with all it
@@ -145,14 +157,23 @@ mod tests {
             at(&format!("integrations/claude/{B}")).exists(),
             "another launch stays"
         );
+        let left = launches_left(&home);
         assert_eq!(
-            sweep_launches(&home).unwrap(),
-            1,
-            "B went; nothing else is a launch"
+            left,
+            [at(&format!("integrations/claude/{B}"))],
+            "B is left; nothing else is a launch"
+        );
+        // A window opened after the start found what was left has a folder of its own.
+        fs::create_dir_all(at(&format!("integrations/pi/{A}"))).unwrap();
+        assert_eq!(sweep_launches(&left).unwrap(), 1);
+        assert!(!at(&format!("integrations/claude/{B}")).exists());
+        assert!(
+            at(&format!("integrations/pi/{A}")).exists(),
+            "what was not left stays"
         );
         assert!(at("integrations/claude/not-a-launch").exists());
         assert!(at("extensions/pi").exists());
         let nowhere = path::join(&[&home, "nowhere"]);
-        assert_eq!(sweep_launches(&nowhere).unwrap(), 0);
+        assert!(launches_left(&nowhere).is_empty());
     }
 }

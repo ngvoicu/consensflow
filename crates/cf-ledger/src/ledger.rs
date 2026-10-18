@@ -70,8 +70,8 @@ pub struct Ledger {
 /// as it left it: rows it left under a carrier it never knew of are queued
 /// messages of their own again (`messages::release_stranded`). The tasks of what
 /// was let go of, there or by migration 0019 (what rode in every carrier an
-/// earlier build wrote), are reconciled once, by the first start after it that
-/// gets that far (`messages::reconcile_released`).
+/// earlier build began to paste), are reconciled once, by the first start after
+/// it that gets that far (`messages::reconcile_released`).
 pub fn open_ledger(file: &Path, options: Options) -> Result<Ledger, LedgerError> {
     let db = Connection::open(file)?;
     // SQLite's own default waits five seconds for a lock: a second instance

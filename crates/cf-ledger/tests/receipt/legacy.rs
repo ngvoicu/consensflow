@@ -3,7 +3,7 @@
 //! made as Node made them (what it never wrote is left as the migration made
 //! it), by changing the file where this ledger's own would differ.
 
-use cf_ledger::{migrate, Claim, Released, MIGRATIONS};
+use cf_ledger::{migrate, Claim, MIGRATIONS};
 use rusqlite::Connection;
 
 use crate::fixture::{ids, world, World};
@@ -429,14 +429,30 @@ fn a_row_that_joined_a_carrier_an_earlier_build_pasted_again_is_not_taken_for_re
 #[test]
 fn an_answer_that_joined_a_carrier_waiting_again_after_a_late_paste_is_not_taken_for_received_by_that_paste(
 ) {
+    joined_a_carrier_waiting_again(1, "the harness record never showed it");
+}
+
+/// The same where a start of 3.0.4 found the carrier on its way and could not read the
+/// window's record, so gave it back with its attempt: its attempts say none, and its
+/// first paste is in the record all the same. The log says its delivery began.
+#[test]
+fn an_answer_that_joined_a_carrier_a_start_gave_back_with_its_attempt_is_not_taken_for_received_by_its_first_paste(
+) {
+    joined_a_carrier_waiting_again(0, "the daemon stopped before it arrived");
+}
+
+/// The carrier of [`a_carrier_on_its_way_left_in`] waiting again with `attempts`, given
+/// back for `reason`, and the answer in it, opened by this build: the answer no paste
+/// held goes on its own.
+fn joined_a_carrier_waiting_again(attempts: i64, reason: &str) {
     const AT: &str = "2026-10-15T12:00:00.000Z";
     let (dir, db) = a_home_at(18);
     a_carrier_on_its_way_left_in(&db);
     db.execute_batch(&format!(
-        "UPDATE message SET state = 'queued' WHERE id = 3;
+        "UPDATE message SET state = 'queued', attempts = {attempts} WHERE id = 3;
          UPDATE task SET state = 'queued' WHERE id = 1;
          INSERT INTO event (project_id, at, kind, data) VALUES
-           (1, '{AT}', 'delivery.retried', '{{\"message\":3,\"reason\":\"the harness record never showed it\"}}');"
+           (1, '{AT}', 'delivery.retried', '{{\"message\":3,\"reason\":\"{reason}\"}}');"
     ))
     .unwrap();
     let (mut w, carrier, answer) = opened(dir, db);
@@ -495,15 +511,12 @@ fn a_start_after_one_that_stopped_between_migration_19_and_its_reconcile_reconci
 }
 
 /// Sol's review of 2026-10-18: on 3.0.4 T-1 was resumed, the words that send it on,
-/// m-3, waited unpasted, and the chief's note m-4 rode in them. 0019 lets go of the
-/// note. Where it stands for zeus's window is what holds T-1's result back, and where
-/// the result begins (`Released`): while the window may take it or it is on its way,
-/// the result waits; once pasted on its own, the result is what came after it. A row
-/// the window cannot take now holds nothing back, and a note that rode in nothing, the
-/// log's or not, is nothing of it.
+/// m-3, waited with no paste of them begun, and the chief's note m-4 rode in them. No
+/// record holds a paste of the words, so none can take the note for received with them:
+/// 0019 leaves it in them, and their first paste holds it. (Let go of, it waited behind
+/// the words, and the worker's answer to them finished the task before it went in.)
 #[test]
-fn what_0019_let_go_of_holds_its_tasks_result_while_its_window_may_take_it_and_begins_it_once_pasted(
-) {
+fn a_row_in_a_carrier_no_paste_of_which_began_rides_in_its_first_paste_through_0019() {
     const AT: &str = "2026-10-15T12:00:00.000Z";
     let (dir, db) = a_home_at(18);
     db.execute_batch(&format!(
@@ -522,39 +535,14 @@ fn what_0019_let_go_of_holds_its_tasks_result_while_its_window_may_take_it_and_b
     ))
     .unwrap();
     let (mut w, carrier, note) = opened(dir, db);
-    let zeus = w.id("zeus");
-    let released = |w: &World| w.ledger.released(zeus, 1).expect("a read");
-    assert_eq!(
-        let_go(&w),
-        [serde_json::json!({ "carrier": carrier, "released": [note] })]
-    );
+    assert!(let_go(&w).is_empty(), "0019 lets go of nothing");
+    assert_eq!(w.next("zeus"), Some(carrier), "one paste, the words'");
     let begun = w.deliver(carrier);
-    assert!(begun.carried.is_empty(), "the words go alone");
+    assert_eq!(ids(&begun.carried), [note], "the note rides in it");
+    assert_eq!(w.states(&[carrier, note]), ["delivered", "delivered"]);
+    assert_eq!(w.receipt(note), serde_json::json!({ "carrier": carrier }));
     assert_eq!(w.state(1), "working");
-    assert_eq!(released(&w), Released::Due, "the window may take the note");
-    // A door that claims it takes it out of the window's queue for now.
-    w.edit(|db| {
-        db.execute("UPDATE message SET claimed_at = ? WHERE id = ?", (AT, note))
-            .unwrap();
-    });
-    assert_eq!(
-        released(&w),
-        Released::None,
-        "the window cannot take it now"
-    );
-    w.edit(|db| {
-        db.execute("UPDATE message SET claimed_at = NULL WHERE id = ?", [note])
-            .unwrap();
-    });
-    w.begin(note);
-    assert_eq!(released(&w), Released::Due, "it is on its way");
-    w.confirm(note);
-    assert_eq!(released(&w), Released::Pasted(note));
-    // A note that comes now rides in nothing, and is no row the log let go of.
-    let later = w.note("chief", "zeus", 1, "Mind the tests").id;
-    assert_eq!(released(&w), Released::Pasted(note));
-    w.deliver(later);
-    assert_eq!(released(&w), Released::Pasted(note));
+    assert_eq!(w.next("zeus"), None, "nothing is left to paste");
 }
 
 /// A carrier this build began froze its set at its first paste: its rows were in
@@ -838,25 +826,28 @@ fn a_populated_version_11_ledger_is_migrated_to_12_and_again_as_it_was_and_has_r
     assert!(refused(task(10, "checker")).contains("task_pool_check"));
 }
 
-/// Migration 0019 lets go of what rides in each carrier an earlier build wrote,
-/// whatever the carrier's state (on its way, waiting, over), and of nothing else.
+/// Migration 0019 lets go of what rides in each carrier an earlier build began to
+/// paste (on its way, or its delivery begun as the log says, whatever its state
+/// since), and of nothing else: a carrier no paste of which began keeps its rows.
 /// The log says what it let go of, one line per carrier, and a second run finds
 /// nothing to do.
 #[test]
-fn a_populated_version_18_ledger_is_migrated_to_19_and_again_with_what_rode_in_every_carrier_let_go_of(
+fn a_populated_version_18_ledger_is_migrated_to_19_and_again_with_what_rode_in_every_carrier_begun_let_go_of(
 ) {
     const AT: &str = "2026-10-15T12:00:00.000Z";
     let (_dir, db) = a_home_at(18);
     a_carrier_on_its_way_left_in(&db);
-    // A note rides in the carrier on its way too; m-6 waits with a note in it, and
-    // m-8 was delivered with a note in it still queued.
+    // A note rides in the carrier on its way too; m-6 waits, never begun, with a note
+    // in it, and m-8 was delivered with a note in it still queued.
     db.execute_batch(&format!(
         "INSERT INTO message (id, project_id, recipient_id, sender_id, kind, task_id, body, state, attempts, created_at, carried_by) VALUES
            (5, 1, 3, 2, 'note', 1, 'Mind the tests', 'queued', 0, '{AT}', 3),
            (6, 1, 3, NULL, 'task', 1, 'Go on with T-1.', 'queued', 0, '{AT}', NULL),
            (7, 1, 3, 2, 'note', 1, 'And the docs', 'queued', 0, '{AT}', 6),
            (8, 1, 3, NULL, 'task', 1, 'Go on with T-1.', 'delivered', 1, '{AT}', NULL),
-           (9, 1, 3, 2, 'note', 1, 'Left by Node', 'queued', 0, '{AT}', 8);"
+           (9, 1, 3, 2, 'note', 1, 'Left by Node', 'queued', 0, '{AT}', 8);
+         INSERT INTO event (project_id, at, kind, data)
+           VALUES (1, '{AT}', 'delivery.begun', '{{\"message\":8,\"attempt\":1}}');"
     ))
     .unwrap();
     let carriers = |db: &Connection| -> Vec<(i64, Option<i64>)> {
@@ -899,7 +890,7 @@ fn a_populated_version_18_ledger_is_migrated_to_19_and_again_with_what_rode_in_e
             (4, None),
             (5, None),
             (6, None),
-            (7, None),
+            (7, Some(6)),
             (8, None),
             (9, None)
         ]
@@ -913,7 +904,6 @@ fn a_populated_version_18_ledger_is_migrated_to_19_and_again_with_what_rode_in_e
         said,
         [
             (1, &serde_json::json!({ "carrier": 3, "released": [4, 5] })),
-            (1, &serde_json::json!({ "carrier": 6, "released": [7] })),
             (1, &serde_json::json!({ "carrier": 8, "released": [9] })),
         ]
     );
