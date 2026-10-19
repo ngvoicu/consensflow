@@ -2794,8 +2794,8 @@ runs = ["evals-long-run"]
 
 [[plant.edit]]
 file = "crates/cf-evals/src/long_run/invariants/work.rs"
-find = "            (_, Judged::Broke(found, None)) => Some(found),"
-replace = "            (_, Judged::Broke(found, _)) => Some(found),"
+find = "            Judged::Broke(found, None) => Some(found),"
+replace = "            Judged::Broke(found, _) => Some(found),"
 
 [[plant]]
 name = "long run 1: a Claude window's rest its record did not cover is said nowhere"
@@ -2996,18 +2996,8 @@ runs = ["evals-lib-long-run"]
 
 [[plant.edit]]
 file = "crates/cf-evals/src/long_run/invariants.rs"
-find = "                Some(Gap::Again) => (!found.iter().any(|other| other.key == open.key))"
-replace = "                Some(Gap::Again) => (found.is_empty() && !found.is_empty())"
-
-[[plant]]
-name = "long run 1: a task's rest a later reading reads through is never judged again"
-meant = "a_rest_a_later_reading_reads_through_is_judged_as_of_its_moment"
-runs = ["evals-long-run"]
-
-[[plant.edit]]
-file = "crates/cf-evals/src/long_run/invariants.rs"
-find = "                Some(Gap::Rest(rest)) => work::rest_again(look, settings, rest)"
-replace = "                Some(Gap::Rest(rest)) => work::rest_again(look, settings, rest).and(None)"
+find = "                Some(Gap::Again) if !found.iter().any(|other| other.key == open.key) => {"
+replace = "                Some(Gap::Again) if found.is_empty() && !found.is_empty() => {"
 
 [[plant]]
 name = "long run: the run closes on a reading begun before a result needed it (the reviewers' boundary)"
@@ -3050,8 +3040,8 @@ runs = ["evals-long-run"]
 
 [[plant.edit]]
 file = "crates/cf-evals/src/long_run/invariants/work.rs"
-find = "            look.conversation_open_at(worker.id, look.at)"
-replace = "            look.conversation_at(worker.id, look.at)"
+find = "        look.conversation_open_at(worker.id, at)"
+replace = "        look.conversation_at(worker.id, at)"
 
 [[plant]]
 name = "long run 1: a conversation that ended is taken for the one open"
@@ -3097,47 +3087,21 @@ file = "crates/cf-e2e/src/rig/report.rs"
 find = "    let _ = std::io::stderr().write_all(where_kept.as_bytes());"
 replace = "    let _ = std::io::stderr().write_all(tell.text(&report).as_bytes());"
 
-# The long run, round 14 (both reviewers' look at round 13): an A1 gap keeps the worker, task and
-# conversation it was taken for, and is judged again only on that worker's own record of that
-# conversation, missing evidence keeping it open; a window whose open conversation neither its
-# record nor the copy tells is unresolved, once the task was given and the conversation open for
-# the idle time; a gap a later look fills broke where its check did.
+# The long run, rounds 14 and 15 (both reviewers' looks at rounds 13 and 14): A1 judges a task's
+# rest at its look only, and what that look cannot tell (its window's own record not held to it,
+# or neither the record nor the copy of the conversation open then telling) is unresolved to the
+# run's end, one a task, once the task was given and the conversation open for the idle time; a
+# gap of A2 or A5 a later look fills broke where its check did.
 
 [[plant]]
-name = "long run 1: a rest is taken for held once its task is no longer its worker's (both reviewers')"
-meant = "a_rest_is_judged_again_on_the_worker_it_was_taken_for_whatever_became_of_the_task"
+name = "long run 1: a rest a look could not judge is cleared once a later look no longer finds it so"
+meant = "a_rest_its_own_record_could_not_be_held_to_stays_unresolved_whatever_a_later_reading_says"
 runs = ["evals-long-run"]
 
 [[plant.edit]]
-file = "crates/cf-evals/src/long_run/invariants/work.rs"
-find = "    let worker = look.ledger.participant(rest.worker)?;"
-replace = '''
-    let worker = look.ledger.participant(rest.worker)?;
-    if !look.ledger.tasks.iter().any(|task| task.number == rest.number && task.assignee == Some(worker.id)) {
-        return Some(None);
-    }'''
-
-[[plant]]
-name = "long run 1: a rest is judged again on the conversation open at its moment now (Astra's)"
-meant = "a_rest_is_judged_again_on_the_conversation_it_was_taken_for_whichever_is_open_later"
-runs = ["evals-long-run"]
-
-[[plant.edit]]
-file = "crates/cf-evals/src/long_run/invariants/work.rs"
-find = "    match rest_of(look, settings, &Names::of(look), worker, rest) {"
-replace = '''
-    let rest = &Rest { conversation: look.conversation_open_at(worker.id, rest.at), ..*rest };
-    match rest_of(look, settings, &Names::of(look), worker, rest) {'''
-
-[[plant]]
-name = "long run 1: a rest is judged again on the copy while its window's record is still unread"
-meant = "a_rest_is_judged_again_only_on_its_windows_own_record_whatever_the_copy_says_since"
-runs = ["evals-long-run"]
-
-[[plant.edit]]
-file = "crates/cf-evals/src/long_run/invariants/work.rs"
-find = "        look.record_through(rest.conversation?, rest.at).ok()?;"
-replace = "        let _ = rest.conversation;"
+file = "crates/cf-evals/src/long_run/invariants.rs"
+find = "                Some(Gap::Again) if !found.iter().any(|other| other.key == open.key) => {"
+replace = "                Some(Gap::Again) | None if (open.gap.is_some() || open.invariant == 1) && !found.iter().any(|other| other.key == open.key) => {"
 
 [[plant]]
 name = "long run 1: a window whose open conversation nothing tells is taken for at work (both reviewers')"
@@ -3156,8 +3120,8 @@ runs = ["evals-long-run"]
 
 [[plant.edit]]
 file = "crates/cf-evals/src/long_run/invariants/work.rs"
-find = "        if rest.given.is_some_and(|given| at - given < settings.idle) {"
-replace = "        if rest.given.is_some_and(|given| at - given < 0) {"
+find = "        if given.is_some_and(|given| at - given < settings.idle) {"
+replace = "        if given.is_some_and(|given| at - given < 0) {"
 
 [[plant]]
 name = "long run 1: a relaunched window's conversation is taken to have rested before it opened"
@@ -3166,20 +3130,18 @@ runs = ["evals-long-run"]
 
 [[plant.edit]]
 file = "crates/cf-evals/src/long_run/invariants/work.rs"
-find = "        if opened(look, rest.conversation).is_some_and(|opened| at - opened < settings.idle) {"
-replace = "        if opened(look, rest.conversation).is_some_and(|opened| at - opened < 0) {"
+find = "        if opened(look, conversation).is_some_and(|opened| at - opened < settings.idle) {"
+replace = "        if opened(look, conversation).is_some_and(|opened| at - opened < 0) {"
 
 [[plant]]
-name = "long run 1: an untold rest a later reading still cannot tell is taken for held"
-meant = "a_claude_windows_rest_neither_its_record_nor_the_copy_of_its_open_conversation_tells_is_unresolved"
+name = "long run 1: what a look cannot judge of a task's rest is said again at each moment it stands for"
+meant = "untold_rests_of_a_task_stay_one_unresolved_whatever_a_later_reading_says"
 runs = ["evals-long-run"]
 
 [[plant.edit]]
 file = "crates/cf-evals/src/long_run/invariants/work.rs"
-find = "        Judged::Broke(_, Some(_)) | Judged::Untold(_) => None,"
-replace = '''
-        Judged::Broke(_, Some(_)) => None,
-        Judged::Untold(_) => Some(None),'''
+find = '            Some(Unjudged::new(1, format!("1:T-{}", task.number), said))'
+replace = '            Some(Unjudged::new(1, format!("1:T-{}:{}", task.number, look.at), said))'
 
 [[plant]]
 name = "long run: a gap a later look fills is said to have held whatever its check found (both reviewers')"
@@ -3188,5 +3150,5 @@ runs = ["evals-long-run"]
 
 [[plant.edit]]
 file = "crates/cf-evals/src/long_run/invariants.rs"
-find = "                    .then(|| (self.recorded.contains(&open.key), None)),"
-replace = "                    .then(|| (false, None)),"
+find = "                        broke: self.recorded.contains(&open.key),"
+replace = "                        broke: false,"

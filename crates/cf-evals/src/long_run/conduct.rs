@@ -85,16 +85,16 @@ impl Going {
         let found = invariants::check(&look, settings);
         self.record(floor, look.at, found);
         let open = invariants::unjudged(&look, settings);
-        self.fill(floor, &look, settings, &open);
+        self.fill(floor, &look, &open);
         self.unjudged(floor, look.at, open);
         self.last = Some(look);
     }
 
-    /// The gaps `look` fills (`open`, what it could not judge, with `settings`): each said
-    /// by its key and told in the timeline with what it came to, the break it came to
-    /// recorded; what it was stays in the timeline and the report.
-    fn fill(&mut self, floor: &mut Floor, look: &Look, settings: &Settings, open: &[Unjudged]) {
-        for (filled, broke) in self.keeper.fill(look, settings, open) {
+    /// The gaps `look` fills (`open`, what it could not judge): each said by its key and
+    /// told in the timeline with what it came to; what it was stays in the timeline and the
+    /// report.
+    fn fill(&mut self, floor: &mut Floor, look: &Look, open: &[Unjudged]) {
+        for filled in self.keeper.fill(look, open) {
             let gap = &filled.open;
             let _ = floor.say(format!("RESOLVED {}: {}", gap.invariant, gap.key));
             self.timeline.add(
@@ -106,9 +106,6 @@ impl Going {
                     if filled.broke { "broke" } else { "held" }
                 ),
             );
-            if let Some(broke) = broke {
-                self.record(floor, look.at, vec![broke]);
-            }
         }
     }
 
@@ -453,7 +450,7 @@ fn finish(
     if let Some(look) = after.look {
         let settings = final_settings(settings);
         let found = invariants::unjudged(&look, &settings);
-        run.fill(floor, &look, &settings, &found);
+        run.fill(floor, &look, &found);
         run.unjudged(floor, look.at, found);
         run.last = Some(look);
     }

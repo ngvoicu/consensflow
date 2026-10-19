@@ -220,29 +220,14 @@ pub struct Unjudged {
     pub gap: Option<Gap>,
 }
 
-/// How a gap in what a check could not judge is judged again, on a later look.
+/// How a gap in what a check could not judge is judged again, on a later look. A task's
+/// rest is never one ([`work::idle_unread`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Gap {
     /// Every look judges the same moment again (a result's turn and the settle time after
     /// it, a cut note's): filled at the first look that no longer finds it unjudged, what
     /// that look's checks found standing as it is.
     Again,
-    /// A task's rest, taken at a look's moment (the first) and judged again as of it on
-    /// its worker's own record of the conversation it was taken for, whatever became of
-    /// the task ([`work::rest_again`]).
-    Rest(Rest),
-}
-
-/// A task's rest as a look took it: T-`number`, given at `given` to the participant
-/// `worker`, whose conversation open then was `conversation` (none where none was), as
-/// of `at`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Rest {
-    pub number: i64,
-    pub worker: i64,
-    pub conversation: Option<i64>,
-    pub given: Option<i64>,
-    pub at: i64,
 }
 
 impl Unjudged {
@@ -361,40 +346,26 @@ impl Keeper {
         now
     }
 
-    /// Fills each gap kept open that `look` fills (`found`, what it could not judge):
-    /// one judged again ([`Gap`]) on what the look reads now. Filled, it no longer counts
-    /// against the run, and is kept with when, and whether it came to a break: one its
-    /// look's checks recorded by its key (a gap judged again at every look, the look's
-    /// breaks kept first), or the one it came to, returned with it to be recorded. What
-    /// waits for evidence no look reads stays open: a gap the run's end leaves open blocks
-    /// it.
-    pub fn fill(
-        &mut self,
-        look: &Look,
-        settings: &Settings,
-        found: &[Unjudged],
-    ) -> Vec<(Filled, Option<Break>)> {
+    /// Fills each gap kept open that `look` fills (`found`, what it could not judge): one
+    /// judged again ([`Gap`]) on what the look reads now. Filled, it no longer counts
+    /// against the run, and is kept with when, and whether it came to a break: whether the
+    /// look's checks recorded one by its key (the look's breaks are kept first). What waits
+    /// for evidence no look reads stays open: a gap the run's end leaves open blocks it.
+    pub fn fill(&mut self, look: &Look, found: &[Unjudged]) -> Vec<Filled> {
         let mut filled = Vec::new();
         let mut still = Vec::new();
         for open in std::mem::take(&mut self.unjudged) {
-            let judged = match &open.gap {
-                None => None,
-                Some(Gap::Again) => (!found.iter().any(|other| other.key == open.key))
-                    .then(|| (self.recorded.contains(&open.key), None)),
-                Some(Gap::Rest(rest)) => work::rest_again(look, settings, rest)
-                    .map(|came_to| (came_to.is_some(), came_to)),
-            };
-            match judged {
-                Some((broke, came_to)) => {
+            match open.gap {
+                Some(Gap::Again) if !found.iter().any(|other| other.key == open.key) => {
                     let one = Filled {
+                        broke: self.recorded.contains(&open.key),
                         open,
                         at: look.at,
-                        broke,
                     };
                     self.filled.push(one.clone());
-                    filled.push((one, came_to));
+                    filled.push(one);
                 }
-                None => still.push(open),
+                _ => still.push(open),
             }
         }
         self.unjudged = still;

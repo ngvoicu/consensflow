@@ -1,7 +1,9 @@
 //! 1 (A1): a working task whose window rested with no job held; 2 (A2): a task done
 //! while its Claude Code window's background job still ran.
 
-use cf_evals::long_run::look::{OpenWindow, Process};
+use cf_evals::long_run::invariants::{unjudged, Keeper, Settings};
+use cf_evals::long_run::look::{Look, OpenWindow, Process};
+use cf_evals::long_run::mask::Names;
 use cf_evals::long_run::record::Record;
 use serde_json::json;
 
@@ -10,13 +12,7 @@ use crate::scene::{found, ms, t, Scene, CHIEF};
 /// The worker (3), on `harness`, with T-4 working since 10:00 and a conversation
 /// whose copy ends with a turn that ended at 10:05, whose tool said `tool`.
 fn rested_after(harness: &str, tool: &str) -> (Scene, i64) {
-    rested_among(&[("long-worker", harness)], tool)
-}
-
-/// [`rested_after`], the worker the first of `staff`.
-fn rested_among(staff: &[(&str, &str)], tool: &str) -> (Scene, i64) {
-    let harness = staff[0].1;
-    let scene = Scene::new(staff);
+    let scene = Scene::new(&[("long-worker", harness)]);
     let conversation = scene.conversation(3, harness, "s-worker");
     scene.task(4, 3, "working", &t(0, 0));
     scene.item(
@@ -398,7 +394,7 @@ fn a_claude_windows_rest_its_own_record_was_not_read_through_is_unresolved() {
     let (scene, conversation) = rested("claude-code");
     let look = scene.look(ms(26, 0));
     assert!(found(&look, 1).is_empty(), "{:?}", found(&look, 1));
-    assert_eq!(unjudged_first(&look), [format!("1:T-4:{}", ms(5, 0))]);
+    assert_eq!(unjudged_first(&look), ["1:T-4"]);
     // Read as far as 10:20 before its readings failed: no word of the look's moment.
     let look = scene.look_read(
         ms(26, 0),
@@ -407,7 +403,7 @@ fn a_claude_windows_rest_its_own_record_was_not_read_through_is_unresolved() {
         (ms(20, 0), UNREADABLE),
     );
     assert!(found(&look, 1).is_empty(), "{:?}", found(&look, 1));
-    assert_eq!(unjudged_first(&look), [format!("1:T-4:{}", ms(5, 0))]);
+    assert_eq!(unjudged_first(&look), ["1:T-4"]);
     // Read at the look, and saying nothing the copy does not: judged.
     let look = scene.look_with(ms(26, 0), conversation, Record::claude(""));
     assert_eq!(found(&look, 1).len(), 1);
@@ -464,56 +460,149 @@ fn a_claude_windows_rest_is_read_from_its_conversation_open_now_whatever_the_cop
     scene.item(new, 0, "assistant", "Built: 36 pages.", true, &t(5, 0));
     let look = scene.look(ms(26, 0));
     assert!(found(&look, 1).is_empty(), "{:?}", found(&look, 1));
-    assert_eq!(unjudged_first(&look), [format!("1:T-4:{}", ms(5, 0))]);
+    assert_eq!(unjudged_first(&look), ["1:T-4"]);
+}
+
+/// What a later `look` fills of what `keeper` kept open, by key.
+fn filled_by(keeper: &mut Keeper, look: &Look) -> Vec<String> {
+    let found = unjudged(look, &Settings::default());
+    keeper
+        .fill(look, &found)
+        .into_iter()
+        .map(|filled| filled.open.key)
+        .collect()
+}
+
+/// `look` held to the first and kept, as a run keeps what it could not judge: what it
+/// fills first, then what it keeps open.
+fn hold_first(keeper: &mut Keeper, look: &Look) -> Vec<String> {
+    let filled = filled_by(keeper, look);
+    keeper.keep_unjudged(
+        look.at,
+        unjudged(look, &Settings::default()),
+        &Names::default(),
+    );
+    filled
+}
+
+/// What `keeper` holds open of the first, by key.
+fn open_first(keeper: &Keeper) -> Vec<String> {
+    keeper
+        .unjudged
+        .iter()
+        .filter(|open| open.invariant == 1)
+        .map(|open| open.key.clone())
+        .collect()
 }
 
 #[test]
-fn a_rest_a_later_reading_reads_through_is_judged_as_of_its_moment() {
+fn a_rest_its_own_record_could_not_be_held_to_stays_unresolved_whatever_a_later_reading_says() {
     // The look at 10:26 could not read the worker's record past 10:20; the copy said the
-    // window rested from 10:05. A later look reads it through: as of 10:26, the record
-    // says the window was at rest since 10:05 (a break), or in a turn begun at 10:25.
-    use cf_evals::long_run::invariants::{unjudged, Keeper, Settings};
-    use cf_evals::long_run::mask::Names;
-    let settings = Settings::default();
-    for (record, broke) in [
-        (
-            vec![
-                json!({ "timestamp": t(5, 0), "type": "system", "subtype": "turn_duration", "isSidechain": false, "durationMs": 10000, "messageCount": 2 }),
-            ],
-            true,
-        ),
-        (
-            vec![
-                json!({ "timestamp": t(25, 0), "type": "user", "message": { "role": "user", "content": "[ConsensFlow m-2 · T-4 · note from @chief]\nAnd the tests" } }),
-            ],
-            false,
-        ),
+    // window rested from 10:05. A later look reads it through: the record says the window
+    // was at rest since 10:05, or in a turn begun at 10:25; or the task was let go of
+    // first. Whatever it says, the observation stays unresolved: no moment gone by is
+    // judged again.
+    let rested_record = vec![
+        json!({ "timestamp": t(4, 50), "type": "assistant", "message": { "role": "assistant", "stop_reason": "end_turn", "content": [{ "type": "text", "text": "Built: 36 pages." }] } }),
+        json!({ "timestamp": t(5, 0), "type": "system", "subtype": "turn_duration", "isSidechain": false, "durationMs": 10000, "messageCount": 2 }),
+    ];
+    let working_record = vec![
+        json!({ "timestamp": t(25, 0), "type": "user", "message": { "role": "user", "content": "[ConsensFlow m-2 · T-4 · note from @chief]\nAnd the tests" } }),
+    ];
+    for (record, let_go) in [
+        (&rested_record, false),
+        (&working_record, false),
+        (&rested_record, true),
     ] {
         let (scene, conversation) = rested("claude-code");
-        let record = Record::claude(
-            &record
-                .iter()
-                .map(|line| line.to_string())
-                .collect::<Vec<_>>()
-                .join("\n"),
-        );
         let mut keeper = Keeper::default();
         let first = scene.look_read(
             ms(26, 0),
             conversation,
-            record.clone(),
+            Record::claude(""),
             (ms(20, 0), UNREADABLE),
         );
-        let open = unjudged(&first, &settings);
-        keeper.keep_unjudged(first.at, open, &Names::default());
-        assert_eq!(keeper.unjudged.len(), 1, "{:?}", keeper.unjudged);
-        let later = scene.look_with(ms(27, 0), conversation, record);
-        let filled = keeper.fill(&later, &settings, &unjudged(&later, &settings));
-        assert_eq!(filled.len(), 1, "{filled:?}");
-        assert_eq!(filled[0].1.is_some(), broke, "{filled:?}");
-        assert!(keeper.unjudged.is_empty());
-        assert_eq!(keeper.filled.len(), 1);
+        hold_first(&mut keeper, &first);
+        assert_eq!(open_first(&keeper), ["1:T-4"], "{:?}", keeper.unjudged);
+        if let_go {
+            scene
+                .db
+                .execute(
+                    "UPDATE task SET assignee_id = NULL, state = 'open', updated_at = ?1 WHERE number = 4",
+                    [t(26, 30)],
+                )
+                .unwrap();
+        }
+        let later = scene.look_with(ms(27, 0), conversation, claude_record(record));
+        assert!(hold_first(&mut keeper, &later).is_empty());
+        assert_eq!(open_first(&keeper), ["1:T-4"], "{:?}", keeper.unjudged);
+        assert!(keeper.filled.is_empty());
     }
+}
+
+#[test]
+fn untold_rests_of_a_task_stay_one_unresolved_whatever_a_later_reading_says() {
+    // Both reviewers' (round 14): T-4 given at 10:00, conversation 8 open since 10:02, its
+    // window at rest from 10:05 with no job; its copy empty and its record unreadable at
+    // every look from 10:22 to 10:27. At 10:22 its rest of 17 minutes was no break yet;
+    // from 10:25 it was. At 10:29 a reading holds: the window took a turn at 10:28. The
+    // first look's observation stays, the one of the task: no later reading clears it.
+    let (scene, _, new) = moved_on(&[]);
+    let mut keeper = Keeper::default();
+    for minute in [22, 25, 26, 27] {
+        let look = scene.look_read(
+            ms(minute, 0),
+            new,
+            Record::claude(""),
+            (ms(20, 0), UNREADABLE),
+        );
+        assert!(hold_first(&mut keeper, &look).is_empty());
+    }
+    assert_eq!(open_first(&keeper), ["1:T-4"], "{:?}", keeper.unjudged);
+    let read = scene.look_with(
+        ms(29, 0),
+        new,
+        claude_record(&[
+            json!({ "timestamp": t(4, 50), "type": "assistant", "message": { "role": "assistant", "stop_reason": "end_turn", "content": [{ "type": "text", "text": "Built: 36 pages." }] } }),
+            json!({ "timestamp": t(5, 0), "type": "system", "subtype": "turn_duration", "isSidechain": false, "durationMs": 10000, "messageCount": 2 }),
+            json!({ "timestamp": t(28, 0), "type": "user", "message": { "role": "user", "content": "[ConsensFlow m-2 · T-4 · note from @chief]\nAnd the tests" } }),
+        ]),
+    );
+    assert!(hold_first(&mut keeper, &read).is_empty());
+    assert_eq!(open_first(&keeper), ["1:T-4"], "{:?}", keeper.unjudged);
+}
+
+#[test]
+fn a_rest_nothing_told_of_on_another_harness_stays_unresolved_whatever_runs_later() {
+    // Both reviewers' (round 14): a Codex window given T-4 at 10:00 rested from 10:00:05
+    // with no job; its copy held nothing at 10:20:10. At 10:20:30 a command starts in its
+    // window; at 10:20:40 the copy arrives and says the window rested. The observation
+    // stays unresolved: a job begun later excuses no rest before it.
+    let scene = Scene::new(&[("long-worker", "codex")]);
+    let conversation = scene.conversation(3, "codex", "s-worker");
+    scene.task(4, 3, "working", &t(0, 0));
+    let mut keeper = Keeper::default();
+    hold_first(&mut keeper, &scene.look(ms(20, 10)));
+    assert_eq!(open_first(&keeper), ["1:T-4"], "{:?}", keeper.unjudged);
+    scene.item(conversation, 0, "assistant", "Done.", true, &t(0, 5));
+    let mut later = scene.look(ms(20, 40));
+    later.windows.open.push(OpenWindow {
+        handle: "long-worker".to_owned(),
+        pane: "p1-long-worker-a".to_owned(),
+        generation: 1,
+        pid: Some(4242),
+        running: true,
+        hosted: true,
+        background: vec![Process {
+            pid: 4300,
+            command: "npm test".to_owned(),
+        }],
+        background_total: 1,
+        tree_unread: None,
+        tail: Vec::new(),
+    });
+    assert!(hold_first(&mut keeper, &later).is_empty());
+    assert_eq!(open_first(&keeper), ["1:T-4"], "{:?}", keeper.unjudged);
 }
 
 /// A Claude Code record of `lines`.
@@ -525,103 +614,6 @@ fn claude_record(lines: &[serde_json::Value]) -> Record {
             .collect::<Vec<_>>()
             .join("\n"),
     )
-}
-
-/// A Claude Code record whose window came to rest at 10:05: an answer, and its turn's end.
-fn at_rest_since_five() -> Record {
-    claude_record(&[
-        json!({ "timestamp": t(4, 50), "type": "assistant", "message": { "role": "assistant", "stop_reason": "end_turn", "content": [{ "type": "text", "text": "Built: 36 pages." }] } }),
-        json!({ "timestamp": t(5, 0), "type": "system", "subtype": "turn_duration", "isSidechain": false, "durationMs": 10000, "messageCount": 2 }),
-    ])
-}
-
-#[test]
-fn a_rest_is_judged_again_on_the_worker_it_was_taken_for_whatever_became_of_the_task() {
-    // Both reviewers': at 10:26 T-4's window had rested since 10:05 with no job, its own
-    // record unreadable past 10:20: unresolved. Before a reading holds, the task is let go
-    // of (no worker) or given to another worker, who has no record of then.
-    use cf_evals::long_run::invariants::{unjudged, Keeper, Settings};
-    use cf_evals::long_run::mask::Names;
-    let settings = Settings::default();
-    for change in [
-        "UPDATE task SET assignee_id = NULL, state = 'open', updated_at = ?1 WHERE number = 4",
-        "UPDATE task SET assignee_id = 4, updated_at = ?1 WHERE number = 4",
-    ] {
-        let (scene, conversation) = rested_among(
-            &[
-                ("long-worker", "claude-code"),
-                ("long-other", "claude-code"),
-            ],
-            "npm run build: done",
-        );
-        let mut keeper = Keeper::default();
-        let first = scene.look_read(
-            ms(26, 0),
-            conversation,
-            Record::claude(""),
-            (ms(20, 0), UNREADABLE),
-        );
-        keeper.keep_unjudged(first.at, unjudged(&first, &settings), &Names::default());
-        assert_eq!(keeper.unjudged.len(), 1, "{:?}", keeper.unjudged);
-        scene.db.execute(change, [t(26, 30)]).unwrap();
-        // Still unreadable: the gap stays open, never taken for a rest that held.
-        let later = scene.look_read(
-            ms(27, 0),
-            conversation,
-            Record::claude(""),
-            (ms(20, 0), UNREADABLE),
-        );
-        let filled = keeper.fill(&later, &settings, &unjudged(&later, &settings));
-        assert!(filled.is_empty(), "{change}: {filled:?}");
-        assert_eq!(keeper.unjudged.len(), 1, "{change}");
-        // Read through 10:26 at last: the first worker's rest broke the first.
-        let read = scene.look_with(ms(28, 0), conversation, at_rest_since_five());
-        let filled = keeper.fill(&read, &settings, &unjudged(&read, &settings));
-        assert_eq!(filled.len(), 1, "{change}: {filled:?}");
-        assert!(filled[0].0.broke, "{change}: {filled:?}");
-        assert_eq!(
-            filled[0].1.as_ref().map(|found| found.key.clone()),
-            Some(format!("1:T-4:{}", ms(5, 0))),
-            "{change}"
-        );
-    }
-}
-
-#[test]
-fn a_rest_is_judged_again_only_on_its_windows_own_record_whatever_the_copy_says_since() {
-    // At 10:26 the copy said the window rested from 10:05, its own record unreadable past
-    // 10:20: unresolved. The daemon then copies a prompt it took at 10:25; the record
-    // stays unreadable. The copy alone never fills the gap.
-    use cf_evals::long_run::invariants::{unjudged, Keeper, Settings};
-    use cf_evals::long_run::mask::Names;
-    let settings = Settings::default();
-    let (scene, conversation) = rested("claude-code");
-    let mut keeper = Keeper::default();
-    let first = scene.look_read(
-        ms(26, 0),
-        conversation,
-        Record::claude(""),
-        (ms(20, 0), UNREADABLE),
-    );
-    keeper.keep_unjudged(first.at, unjudged(&first, &settings), &Names::default());
-    assert_eq!(keeper.unjudged.len(), 1, "{:?}", keeper.unjudged);
-    scene.item(
-        conversation,
-        4,
-        "user",
-        "[ConsensFlow m-2 · T-4 · note from @chief]\nAnd the tests",
-        true,
-        &t(25, 0),
-    );
-    let later = scene.look_read(
-        ms(27, 0),
-        conversation,
-        Record::claude(""),
-        (ms(20, 0), UNREADABLE),
-    );
-    let filled = keeper.fill(&later, &settings, &unjudged(&later, &settings));
-    assert!(filled.is_empty(), "{filled:?}");
-    assert_eq!(keeper.unjudged.len(), 1);
 }
 
 /// The worker (3) on Claude Code with T-4 working since 10:00: conversation 7 (the
@@ -669,75 +661,19 @@ fn moved_on_at(opened: u32, copied: &[u32]) -> (Scene, i64, i64) {
 }
 
 #[test]
-fn a_rest_is_judged_again_on_the_conversation_it_was_taken_for_whichever_is_open_later() {
-    // Astra's: at 10:26 conversation 8 was open, its copy at rest since 10:05, its own
-    // record unreadable: unresolved. Then 7 is opened again (its end gone) and 8 ends; 7's
-    // record has a turn at work then. Only 8's says what 10:26 was.
-    use cf_evals::long_run::invariants::{unjudged, Keeper, Settings};
-    use cf_evals::long_run::mask::Names;
-    let settings = Settings::default();
-    let (scene, old, new) = moved_on(&[5]);
-    let mut keeper = Keeper::default();
-    let first = scene.look_read(ms(26, 0), new, Record::claude(""), (ms(20, 0), UNREADABLE));
-    keeper.keep_unjudged(first.at, unjudged(&first, &settings), &Names::default());
-    assert_eq!(
-        keeper
-            .unjudged
-            .iter()
-            .map(|open| open.key.clone())
-            .collect::<Vec<_>>(),
-        [format!("1:T-4:{}", ms(5, 0))]
-    );
-    scene.end_conversation(new, &t(26, 30));
-    scene
-        .db
-        .execute(
-            "UPDATE conversation SET ended_at = NULL WHERE id = ?1",
-            [old],
-        )
-        .unwrap();
-    let mut later = scene.look_with(ms(27, 0), new, at_rest_since_five());
-    later.records.insert(
-        old,
-        claude_record(&[
-            json!({ "timestamp": t(25, 0), "type": "user", "message": { "role": "user", "content": "[ConsensFlow m-2 · T-4 · note from @chief]\nAnd the tests" } }),
-        ]),
-    );
-    let filled = keeper.fill(&later, &settings, &unjudged(&later, &settings));
-    assert_eq!(filled.len(), 1, "{filled:?}");
-    assert!(filled[0].0.broke, "{filled:?}");
-}
-
-#[test]
 fn a_claude_windows_rest_neither_its_record_nor_the_copy_of_its_open_conversation_tells_is_unresolved(
 ) {
     // Both reviewers': conversation 7 ended at 10:02; 8 is open, its window at rest since
     // 10:05 with no job, its copy empty (the daemon still copies 7) and its own record
     // unreadable. At 10:26 nothing tells what the window did: unresolved, never silent.
-    use cf_evals::long_run::invariants::{unjudged, Keeper, Settings};
-    use cf_evals::long_run::mask::Names;
-    let settings = Settings::default();
     let (scene, _, new) = moved_on(&[]);
     let first = scene.look_read(ms(26, 0), new, Record::claude(""), (ms(20, 0), UNREADABLE));
     assert!(found(&first, 1).is_empty(), "{:?}", found(&first, 1));
-    assert_eq!(unjudged_first(&first), [format!("1:T-4:{}", ms(0, 0))]);
+    assert_eq!(unjudged_first(&first), ["1:T-4"]);
     // Never read, or read and saying nothing yet: the same.
-    assert_eq!(
-        unjudged_first(&scene.look(ms(26, 0))),
-        [format!("1:T-4:{}", ms(0, 0))]
-    );
+    assert_eq!(unjudged_first(&scene.look(ms(26, 0))), ["1:T-4"]);
     let silent = scene.look_with(ms(26, 0), new, Record::claude(""));
-    assert_eq!(unjudged_first(&silent), [format!("1:T-4:{}", ms(0, 0))]);
-    // A later reading through 10:26 that still says nothing leaves it open; one that
-    // says judges it: at rest since 10:05, the first broke.
-    let mut keeper = Keeper::default();
-    keeper.keep_unjudged(first.at, unjudged(&first, &settings), &Names::default());
-    let filled = keeper.fill(&silent, &settings, &unjudged(&silent, &settings));
-    assert!(filled.is_empty(), "{filled:?}");
-    let read = scene.look_with(ms(27, 0), new, at_rest_since_five());
-    let filled = keeper.fill(&read, &settings, &unjudged(&read, &settings));
-    assert_eq!(filled.len(), 1, "{filled:?}");
-    assert!(filled[0].0.broke, "{filled:?}");
+    assert_eq!(unjudged_first(&silent), ["1:T-4"]);
     // Given again at 10:10, in 8 open since 10:02: before the idle time had passed since,
     // no rest could be too long.
     scene
@@ -749,10 +685,7 @@ fn a_claude_windows_rest_neither_its_record_nor_the_copy_of_its_open_conversatio
         .unwrap();
     let unread = |at| scene.look_read(at, new, Record::claude(""), (ms(20, 0), UNREADABLE));
     assert!(unjudged_first(&unread(ms(26, 0))).is_empty());
-    assert_eq!(
-        unjudged_first(&unread(ms(30, 0))),
-        [format!("1:T-4:{}", ms(10, 0))]
-    );
+    assert_eq!(unjudged_first(&unread(ms(30, 0))), ["1:T-4"]);
 }
 
 #[test]
@@ -765,10 +698,7 @@ fn a_window_rests_in_its_open_conversation_no_longer_than_that_has_been_open() {
     let unread = |at| scene.look_read(at, new, Record::claude(""), (ms(20, 0), UNREADABLE));
     assert!(unjudged_first(&unread(ms(26, 0))).is_empty());
     assert!(unjudged_first(&scene.look(ms(26, 0))).is_empty());
-    assert_eq!(
-        unjudged_first(&unread(ms(30, 0))),
-        [format!("1:T-4:{}", ms(0, 0))]
-    );
+    assert_eq!(unjudged_first(&unread(ms(30, 0))), ["1:T-4"]);
 }
 
 /// The notification of the end of the job b33m, as Claude Code writes it.

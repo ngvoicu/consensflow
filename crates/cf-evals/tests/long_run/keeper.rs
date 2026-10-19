@@ -50,7 +50,7 @@ fn a_gap_a_later_look_fills_is_said_to_have_broken_where_its_check_broke() {
     // Both reviewers': m-5's turn and m-6's were not in their worker's record at the
     // first look; a later look reads both, and its check finds m-5's job ran on past the
     // result (recorded by the look itself) and m-6 held.
-    use cf_evals::long_run::invariants::{Gap, Settings, Unjudged};
+    use cf_evals::long_run::invariants::{Gap, Unjudged};
     use cf_evals::long_run::mask::Names;
     let scene = Scene::new(&[]);
     let mut keeper = Keeper::default();
@@ -66,17 +66,13 @@ fn a_gap_a_later_look_fills_is_said_to_have_broken_where_its_check_broke() {
             "T-4 was done by m-5 while a job still ran",
         )],
     );
-    let filled = keeper.fill(&later, &Settings::default(), &[]);
+    let filled = keeper.fill(&later, &[]);
     let broke: Vec<(&str, bool)> = filled
         .iter()
-        .map(|(filled, _)| (filled.open.key.as_str(), filled.broke))
+        .map(|filled| (filled.open.key.as_str(), filled.broke))
         .collect();
     assert_eq!(broke, [("2:m-5", true), ("2:m-6", false)]);
-    assert!(
-        filled.iter().all(|(_, found)| found.is_none()),
-        "recorded once, by its check"
-    );
-    assert_eq!(keeper.breaks.len(), 1);
+    assert_eq!(keeper.breaks.len(), 1, "recorded once, by its check");
 }
 
 #[test]
