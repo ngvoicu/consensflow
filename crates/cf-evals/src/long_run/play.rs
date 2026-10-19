@@ -40,6 +40,14 @@ const ENTER: u8 = 13;
 /// The states a task is done in, which a resume of it is refused for.
 const ENDED: [&str; 4] = ["done", "accepted", "cancelled", "failed"];
 
+/// Who the ledger says moved a task when the owner did it on the page.
+const OWNER: &str = "human";
+
+/// How far the daemon's clock, which times the ledger's events, may read behind the
+/// run's, in milliseconds: one machine's, read a moment apart. The owner's pause of an
+/// earlier disruption came minutes before.
+const CLOCKS: i64 = 1_000;
+
 /// What a disruption does to the stage and reads of it.
 pub trait Stagehand {
     /// The project's board, as the page reads it.
@@ -171,6 +179,14 @@ impl Hand<'_> {
         let evidence = self.evidence(task, handle, std::slice::from_ref(&said));
         Outcome::Failed { said, evidence }
     }
+
+    /// Whether the ledger, as the watch last read it, moved T-`number` to paused by `by`
+    /// at `since` or after ([`paused_by`]).
+    fn paused_by(&self, number: i64, by: Option<&str>, since: i64) -> bool {
+        self.watch
+            .last()
+            .is_some_and(|look| paused_by(look, number, by, since))
+    }
 }
 
 /// Plays `disruption` at `target` on `stage`, `watch` looking as it waits.
@@ -241,12 +257,13 @@ fn refusal(asked: Result<Value>) -> Result<Option<String>> {
     }
 }
 
-/// The owner pauses T-`number`, leaves it `hold`, and resumes it: played once it moved to
-/// paused and then went on. Its move to paused is read on the board, or in the ledger as
-/// the watch last read it, where another resumed it before the board was read (the
-/// chief may resume a task at once).
+/// The owner pauses T-`number`, leaves it `hold`, and resumes it: played once its pause
+/// moved it to paused and then it went on. The owner's pause is the ledger's, as the watch
+/// last read it: the task's move to paused by the human, at or after the ask. The board's
+/// word that it is paused does not say whose pause it is, nor does a move by another (the
+/// chief may pause it and resume it on its own): neither proves the owner's took.
 fn pause(hand: &mut Hand<'_>, number: i64, hold: Duration) -> Result<Outcome> {
-    let since = hand.watch.last().map_or(0, last_event);
+    let asked_at = jiff::Timestamp::now().as_millisecond();
     let asked = hand.stage.page("task.pause", json!({ "task": number }));
     if let Some(why) = refusal(asked)? {
         let state = hand.stage.state_of(number)?;
@@ -261,14 +278,7 @@ fn pause(hand: &mut Hand<'_>, number: i64, hold: Duration) -> Result<Outcome> {
             "",
         ));
     }
-    let paused = |hand: &Hand<'_>| {
-        Ok(hand.stage.state_of(number)? == "paused"
-            || hand
-                .watch
-                .last()
-                .is_some_and(|look| moved_to_paused(look, number, since)))
-    };
-    if !hand.wait(paused)? {
+    if !hand.wait(|hand| Ok(hand.paused_by(number, Some(OWNER), asked_at)))? {
         return Ok(hand.failed(
             format!("T-{number} never moved to paused after the owner's pause"),
             Some(number),
@@ -329,16 +339,6 @@ fn resume_task(hand: &mut Hand<'_>, number: i64, said: &str) -> Result<Outcome> 
     )))
 }
 
-/// The id of the last event `look`'s ledger holds; none is 0.
-fn last_event(look: &Look) -> i64 {
-    look.ledger
-        .events
-        .iter()
-        .map(|event| event.id)
-        .max()
-        .unwrap_or(0)
-}
-
 /// T-`number`'s moves in `look`'s ledger, oldest first.
 fn moves_of(look: &Look, number: i64) -> impl Iterator<Item = &crate::long_run::ledger::Event> {
     look.ledger
@@ -347,9 +347,15 @@ fn moves_of(look: &Look, number: i64) -> impl Iterator<Item = &crate::long_run::
         .filter(move |event| event.kind == "task.state" && event.data["task"] == number)
 }
 
-/// Whether `look`'s ledger moved T-`number` to paused after its event `since`.
-fn moved_to_paused(look: &Look, number: i64, since: i64) -> bool {
-    moves_of(look, number).any(|event| event.id > since && event.data["to"] == "paused")
+/// Whether `look`'s ledger moved T-`number` to paused by `by` (a handle; none for
+/// ConsensFlow in its own name) at `since` or after, in milliseconds, give or take
+/// [`CLOCKS`].
+fn paused_by(look: &Look, number: i64, by: Option<&str>, since: i64) -> bool {
+    moves_of(look, number).any(|event| {
+        event.data["to"] == "paused"
+            && event.data["by"].as_str() == by
+            && crate::clock::millis(&event.at).is_some_and(|at| at >= since - CLOCKS)
+    })
 }
 
 /// What moved T-`number` on from its last move to paused, as `look`'s ledger says: the
@@ -370,8 +376,10 @@ fn went_on(look: &Look, number: i64) -> Option<(i64, String)> {
 }
 
 /// `handle`'s window dies: played once its exit is seen and its task paused, which
-/// the owner then resumes.
+/// the owner then resumes. Its task's pause is ConsensFlow's, in its own name: read on the
+/// board, or in the ledger where another resumed it before the board was read.
 fn kill(hand: &mut Hand<'_>, handle: &str, task: Option<i64>, hold: Duration) -> Result<Outcome> {
+    let killed_at = jiff::Timestamp::now().as_millisecond();
     // The window may have closed between the look that chose it and now, and its
     // process is killed only while it is the one the run knew.
     let (pane, generation, said) = match hand.stage.kill(handle) {
@@ -386,7 +394,7 @@ fn kill(hand: &mut Hand<'_>, handle: &str, task: Option<i64>, hold: Duration) ->
     };
     hand.wait(|hand| Ok(hand.stage.state_of(number)? != "working"))?;
     let state = hand.stage.state_of(number)?;
-    if state != "paused" {
+    if state != "paused" && !hand.wait(|hand| Ok(hand.paused_by(number, None, killed_at)))? {
         return Ok(hand.failed(
             format!("{said}; T-{number} went {state}, not paused"),
             Some(number),
