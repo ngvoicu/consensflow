@@ -51,11 +51,19 @@ fn a_run_says_how_it_ended_and_what_it_printed_and_said() {
         stdout: "out".into(),
         stderr: "err".into(),
         timed_out,
+        held: false,
     };
     assert_eq!(
         ran(Some(3), false).to_string(),
         "exit code 3\nstdout:\nout\nstderr:\nerr"
     );
+    let held = Ran {
+        held: true,
+        ..ran(Some(0), false)
+    };
+    assert!(held.to_string().starts_with(
+        "exit code 0; a process it left held its output open, which was not read to its end\n"
+    ));
     assert!(ran(None, false)
         .to_string()
         .starts_with("ended by a signal\n"));
@@ -72,6 +80,7 @@ fn what_a_program_printed_as_json_is_read_and_what_is_not_is_an_error() {
         stdout: stdout.into(),
         stderr: String::new(),
         timed_out: false,
+        held: false,
     };
     assert_eq!(said(r#"{"a":[1]}"#).json().unwrap()["a"][0], 1);
     let failed = said("not json").json().unwrap_err();
@@ -108,8 +117,29 @@ mod shell {
                 stdout: "out".into(),
                 stderr: "err".into(),
                 timed_out: false,
+                held: false,
             }
         );
+    }
+
+    #[test]
+    fn a_program_that_leaves_a_process_holding_its_output_is_read_a_while_and_says_so() {
+        // A wrapper says its version and ends, leaving a helper in the background that
+        // holds its output: the run reads what it wrote, and goes on a few seconds
+        // after its end, not when the helper's does.
+        let started = Instant::now();
+        let ran = sh("printf '1.2.3\\n'; sleep 20 & exit 0").run().unwrap();
+        assert!(
+            started.elapsed() < Duration::from_secs(15),
+            "{:?}",
+            started.elapsed()
+        );
+        assert_eq!(
+            (ran.code, ran.stdout.as_str(), ran.held),
+            (Some(0), "1.2.3\n", true)
+        );
+        // One that leaves nothing holding it is read to its end.
+        assert!(!sh("printf done").run().unwrap().held);
     }
 
     #[test]
