@@ -22,6 +22,10 @@
 //!   nothing is delivered to. An Escape stops it, as it stops Claude's: the turn
 //!   ends there, and the window writes what Claude writes of a turn it was
 //!   interrupted in (`take_turn`).
+//! - A line `HANG <seconds> <words>` is a turn hung that long, as a harness hung
+//!   in its model request is (Pi on zeewin's long run, 2026-10-19): an Escape does
+//!   nothing to it, and only the end of the window ends it before its time. Then it
+//!   does what the words say.
 //! - A line `HOOKS <seconds> <words>` is a first turn still in the hooks of its
 //!   prompt for that long (the words that go in later, with this one carried in
 //!   them, do not put the window back there): Claude's status reads idle, and
@@ -220,6 +224,7 @@ fn shell(command: &str) -> Run {
 /// The answer to `text`.
 pub fn reply_to(text: &str, window: &Window) -> Result<Reply, String> {
     static SLEEP: OnceLock<Regex> = OnceLock::new();
+    static HANG: OnceLock<Regex> = OnceLock::new();
     static JOB: OnceLock<Regex> = OnceLock::new();
     static BACKGROUND: OnceLock<Regex> = OnceLock::new();
     static AGENTS: OnceLock<Regex> = OnceLock::new();
@@ -250,6 +255,11 @@ pub fn reply_to(text: &str, window: &Window) -> Result<Reply, String> {
             return Ok(Reply::Stopped);
         }
         return reply_to(&slow[2], window);
+    }
+    if let Some(hung) = pattern::once(&HANG, r"(?m)^HANG (\d+) (.+)$").captures(text) {
+        let seconds: u64 = hung[1].parse().map_err(|_| format!("HANG {}", &hung[1]))?;
+        thread::sleep(Duration::from_secs(seconds));
+        return reply_to(&hung[2], window);
     }
     if let Some(job) = pattern::once(&JOB, r"(?m)^JOB ((?:--deaf )?)(\d+) (.+)$").captures(text) {
         let seconds: u64 = job[2].parse().map_err(|_| format!("JOB {}", &job[2]))?;
@@ -513,6 +523,22 @@ mod tests {
         let reply = reply_to("SLEEP 30 Reply with exactly: LATE", &window);
         assert_eq!(reply, Ok(Reply::Stopped));
         assert!(started.elapsed() < Duration::from_secs(20));
+        presser.join().unwrap();
+    }
+
+    #[test]
+    fn a_hung_turn_goes_on_through_an_escape_and_does_what_the_rest_says_after_its_time() {
+        let window = window();
+        window.stop.begin();
+        let stop = Arc::clone(&window.stop);
+        let presser = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(100));
+            stop.press();
+        });
+        let started = std::time::Instant::now();
+        let reply = reply_to("HANG 1 Reply with exactly: LATE", &window);
+        assert_eq!(text(reply), "LATE");
+        assert!(started.elapsed() >= Duration::from_secs(1));
         presser.join().unwrap();
     }
 

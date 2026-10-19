@@ -6,7 +6,6 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use cf_engine::testing::Context;
-use cf_engine::Unstopped;
 use serde_json::{json, Value};
 
 use crate::fixtures::assert_match;
@@ -324,41 +323,22 @@ fn pauses_a_working_task_in_its_open_window() {
     );
     context.advance(3_100);
     context.pass().unwrap();
-    context.advance(3_100);
-    context.pass().unwrap();
-    context.advance(3_100);
-    context.pass().unwrap();
     assert_eq!(context.host.inputs().len(), 3, "and then no more");
-    // The three rounds were ignored: the stop is given up on, said once to the
-    // human and to the chief who gave the task, and the board shows it.
-    let zeus = context.id(project.id, "zeus");
-    assert_eq!(
-        context.dispatcher.unstopped(zeus),
-        Some(Unstopped { task: 1, rounds: 3 })
-    );
-    let said = |who: &str| -> Vec<String> {
-        context
-            .inbox(context.id(project.id, who))
-            .into_iter()
-            .filter(|message| message.kind == "note" && message.body.contains("did not stop"))
-            .map(|message| message.body)
-            .collect()
-    };
-    assert_eq!(
-        said("human"),
-        ["@zeus did not stop for T-1: it ignored the interrupt 3 times and is still on its earlier turn. What is for it waits until that turn ends, and what it writes before then is not T-1's result. To stop it now, cancel T-1, or reassign it if it was given by tier."]
-    );
-    assert_eq!(
-        said("chief"),
-        ["T-1's window (@zeus) did not stop: it ignored the interrupt and is still on its earlier turn. Your words wait until that turn ends; what it writes before then is not taken as T-1's result (cf task get T-1 --transcript shows it). To stop it now: cf task cancel T-1."]
-    );
+    // Its turn ends after the third round, before the look that would close it:
+    // paid at rest, and the window stays.
+    context.advance(2_000);
     context.adapter.answer("zeus", "Parser done");
+    context.advance(1_100);
     context.pass().unwrap();
-    assert_eq!(
-        context.dispatcher.unstopped(zeus),
-        None,
-        "paid once the window is at rest"
+    context.advance(3_100);
+    context.pass().unwrap();
+    assert_eq!(context.host.inputs().len(), 3);
+    assert!(
+        context.host.killed().is_empty(),
+        "the window stopped: it stays"
     );
+    let zeus = context.id(project.id, "zeus");
+    assert_eq!(context.dispatcher.unstopped(zeus), None);
     assert_eq!(
         context.task(project.id, 1).task.state,
         "paused",
@@ -377,7 +357,7 @@ fn pauses_a_working_task_in_its_open_window() {
     context.adapter.answer("zeus", "Parser and tests done");
     context.pass().unwrap();
     assert_eq!(context.task(project.id, 1).task.state, "done");
-    // Not held to Node's recording: a stop ignored in every round is said now.
+    // Not held to Node's recording: its stop is pressed in rounds (`stops.rs`).
 }
 
 #[test]

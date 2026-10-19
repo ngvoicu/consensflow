@@ -8,11 +8,15 @@
 //! at work, read from what its harness's record shows and never from what
 //! the board says, it is interrupted: Escape, as many presses as its harness
 //! asks for, again a few seconds later, three rounds in all. A window that
-//! ignores them all has not stopped, and ConsensFlow says so, to the human
-//! and to whoever gave the task, and goes on trying once a minute for as long
-//! as it works: it never kills the window, and what is for it waits until
-//! its turn ends, when it is paid. An agent still at work on a turn about a
-//! task cancelled under it is interrupted the same way, three rounds at most.
+//! ignores them all has not stopped (a harness hung in a model request: the
+//! zeewin long run's Pi of 2026-10-19), and ConsensFlow closes it, which ends
+//! its process as any close does; the task keeps its state, paused or queued
+//! behind the words that resume it, and resumed it reopens on its conversation.
+//! The human, and whoever gave the task, are told why. A window the host would
+//! not close is shown on the board, they are told that once, and the close is
+//! tried again once a minute while it works; it pays the stop if its turn ends
+//! meanwhile. An agent still at work on a turn about a task cancelled under it
+//! is interrupted the same way, three rounds at most, and never closed for it.
 //! A harness that writes no record of a turn it was interrupted in (Claude,
 //! before a word of its answer) is told of each round whose keys the host took
 //! ([`cf_harness::contract::Window::interrupted`]), and reads the looks that
@@ -30,12 +34,13 @@ use crate::record::Record;
 use crate::seams::EngineError;
 use crate::windows::press_interrupt;
 
-/// How many rounds of Escape a stop gets before it is given up on for a
-/// while, and how soon one round follows another.
+/// How many rounds of Escape a stop gets before its window is closed, and how
+/// soon one round follows another.
 const ROUNDS: u32 = 3;
 const ROUND_EVERY_MS: i64 = 3_000;
-/// How often a stop that was ignored in every round is tried again.
-const EXHAUSTED_EVERY_MS: i64 = 60_000;
+/// How often the close of a window that ignored every round, which the host
+/// refused, is tried again.
+const KEPT_EVERY_MS: i64 = 60_000;
 
 /// What a window was interrupted for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -47,17 +52,19 @@ pub(crate) enum StopKey {
 }
 
 /// The rounds one stop has had: how many were pressed, when the last was
-/// (or when the stop was given up on), and whether it was.
+/// (or when the close of its window was last refused), and whether the
+/// window ignored them all and was kept open by the host.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Interrupted {
     key: StopKey,
     rounds: u32,
     at: i64,
-    exhausted: bool,
+    kept: bool,
 }
 
-/// A stop a window ignored in every round, and still has not paid: the
-/// number of its task, and how many times it has been ignored.
+/// A stop a window ignored in every round, and still has not paid, the host
+/// having refused to close it: the number of its task, and how many times it
+/// has been ignored.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Unstopped {
     pub task: i64,
@@ -79,23 +86,48 @@ enum Look {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Round {
     Press,
-    /// Every round was ignored: say so, once, and press none this look.
-    Exhaust,
+    /// Every round was ignored: the window is closed, and no key is pressed.
+    Close,
     Wait,
 }
 
+/// What the notes of a window closed for a stop it ignored say became of its
+/// task T-`number`, as it is once the close was taken (`state`, none for one
+/// deleted): to the human, and to whoever gave it. The close is awaited, and the
+/// task may move meanwhile. Only a task still paused waits for its resume, and
+/// only one queued for this window (`ours`: resumed while it closed) has words
+/// that go in as it reopens; one cancelled, finished or given elsewhere has none.
+fn became_of(number: i64, state: Option<&str>, ours: bool) -> (String, String) {
+    let both = |said: String| (said.clone(), said);
+    match state {
+        Some("paused") => both(format!(
+            "T-{number} stays paused, and its window reopens on its conversation when it is resumed."
+        )),
+        Some("queued") if ours => (
+            format!("The words that resume T-{number} go in once its window reopens on its conversation."),
+            "Your words go in once it reopens on its conversation.".to_owned(),
+        ),
+        Some("cancelled") => both(format!("T-{number} was cancelled.")),
+        Some("failed") => both(format!("T-{number} failed.")),
+        Some("accepted") => both(format!("T-{number} was accepted.")),
+        Some(state) => both(format!("T-{number} is {state}.")),
+        None => both(format!("T-{number} was deleted.")),
+    }
+}
+
 /// The cadence: the first press of a stop is at once; a round follows three
-/// seconds after the last, up to three; three seconds after the third, a
-/// stop of a pause is exhausted, and tried again once a minute; a cancelled
-/// task's turn gets its three rounds and no more.
+/// seconds after the last, up to three; three seconds after the third, the
+/// window of a pause's stop is closed, and where the host refused that, the
+/// close is tried again once a minute; a cancelled task's turn gets its three
+/// rounds and no more.
 fn next_round(done: Option<&Interrupted>, key: StopKey, now: i64) -> Round {
     let Some(done) = done.filter(|done| done.key == key) else {
         return Round::Press;
     };
     let since = now - done.at;
-    if done.exhausted {
-        return if since >= EXHAUSTED_EVERY_MS {
-            Round::Press
+    if done.kept {
+        return if since >= KEPT_EVERY_MS {
+            Round::Close
         } else {
             Round::Wait
         };
@@ -105,15 +137,15 @@ fn next_round(done: Option<&Interrupted>, key: StopKey, now: i64) -> Round {
     } else if done.rounds < ROUNDS {
         Round::Press
     } else if matches!(key, StopKey::Pause { .. }) {
-        Round::Exhaust
+        Round::Close
     } else {
         Round::Wait
     }
 }
 
 impl Dispatcher {
-    /// A stop that a window ignored in every round: none while it is paid
-    /// or was never asked.
+    /// A stop that a window ignored in every round, whose close the host
+    /// refused: none while it is paid, was never asked, or closed its window.
     pub fn unstopped(&self, participant: i64) -> Option<Unstopped> {
         self.record(participant)
             .and_then(|record| record.window.borrow().unstopped)
@@ -224,7 +256,7 @@ impl Dispatcher {
     }
 
     /// The window is at work on a turn the stop is for: a round of Escape if
-    /// the cadence says so; or the stop is given up on this look.
+    /// the cadence says so; or, every round ignored, the window is closed.
     async fn interrupt_for(
         self: &Rc<Self>,
         project: &ProjectView,
@@ -240,13 +272,21 @@ impl Dispatcher {
         match next_round(done.as_ref(), key, self.now()) {
             Round::Wait => Ok(()),
             Round::Press => {
-                self.press_round(record, key, stop.number);
+                self.press_round(record, key);
                 self.press(record).await;
                 Ok(())
             }
-            Round::Exhaust => {
-                let rounds = self.exhaust(record, key, stop.number);
-                self.say_ignored(project, participant, stop.number, rounds)
+            Round::Close => {
+                let rounds = done.as_ref().map_or(0, |done| done.rounds);
+                let told = done.is_some_and(|done| done.kept);
+                if self.retire(record).await? {
+                    return self.say_closed(project, participant, stop.number, rounds);
+                }
+                self.keep(record, key, stop.number, rounds);
+                if told {
+                    return Ok(());
+                }
+                self.say_kept(project, participant, stop.number, rounds)
             }
         }
     }
@@ -283,64 +323,97 @@ impl Dispatcher {
         };
         let done = record.window.borrow().interrupted.clone();
         if next_round(done.as_ref(), key, self.now()) == Round::Press {
-            self.press_round(record, key, cancelled.task.number);
+            self.press_round(record, key);
             self.press(record).await;
         }
         Ok(())
     }
 
-    /// A round is pressed: counted. A stop that was given up on already shows
-    /// its new count to the board; a stop that begins shows none of what the
+    /// A round is pressed: counted. A stop that begins shows none of what the
     /// one before it ignored.
-    fn press_round(&self, record: &Record, key: StopKey, number: i64) {
+    fn press_round(&self, record: &Record, key: StopKey) {
         let now = self.now();
         let changed = {
             let mut part = record.window.borrow_mut();
-            let before = part.interrupted.clone().filter(|done| done.key == key);
-            let rounds = before.as_ref().map_or(0, |done| done.rounds) + 1;
-            let exhausted = before.is_some_and(|done| done.exhausted);
+            let rounds = part
+                .interrupted
+                .as_ref()
+                .filter(|done| done.key == key)
+                .map_or(0, |done| done.rounds)
+                + 1;
             part.interrupted = Some(Interrupted {
                 key,
                 rounds,
                 at: now,
-                exhausted,
+                kept: false,
             });
-            let shown = exhausted.then_some(Unstopped {
-                task: number,
-                rounds,
-            });
-            std::mem::replace(&mut part.unstopped, shown) != shown
+            part.unstopped.take().is_some()
         };
         if changed {
             self.changed();
         }
     }
 
-    /// Every round of the stop was ignored: it is marked, once, and the
-    /// board shows it. How many times it was ignored.
-    fn exhaust(&self, record: &Record, key: StopKey, number: i64) -> u32 {
-        let rounds = {
+    /// Every round of the stop was ignored and the host would not close the
+    /// window: it is marked, and the board shows it, until the close is tried
+    /// again.
+    fn keep(&self, record: &Record, key: StopKey, number: i64, rounds: u32) {
+        {
             let mut part = record.window.borrow_mut();
-            let rounds = part.interrupted.as_ref().map_or(0, |done| done.rounds);
             part.interrupted = Some(Interrupted {
                 key,
                 rounds,
                 at: self.now(),
-                exhausted: true,
+                kept: true,
             });
             part.unstopped = Some(Unstopped {
                 task: number,
                 rounds,
             });
-            rounds
-        };
+        }
         self.changed();
-        rounds
     }
 
     /// The human, and whoever gave the task if it was not the human, are told
-    /// once that the window did not stop and what that means.
-    fn say_ignored(
+    /// that the window did not stop and was closed, and what became of the task
+    /// once the close was taken ([`became_of`]).
+    fn say_closed(
+        &self,
+        project: &ProjectView,
+        participant: &ParticipantView,
+        number: i64,
+        rounds: u32,
+    ) -> Result<(), EngineError> {
+        let handle = &participant.handle;
+        let task = self
+            .seams
+            .ledger
+            .borrow()
+            .task(project.id, number)?
+            .map(|thread| thread.task);
+        let (human, words) = became_of(
+            number,
+            task.as_ref().map(|task| task.state.as_str()),
+            task.as_ref()
+                .is_some_and(|task| task.assignee.as_ref() == Some(handle)),
+        );
+        self.tell_stop(
+            project,
+            number,
+            task.map(|task| task.requester),
+            format!(
+                "@{handle} did not stop for T-{number}: it ignored the interrupt {rounds} times, so ConsensFlow closed its window. {human}"
+            ),
+            format!(
+                "T-{number}'s window (@{handle}) did not stop: it ignored the interrupt, so ConsensFlow closed it. {words}"
+            ),
+        )
+    }
+
+    /// The human, and whoever gave the task if it was not the human, are told
+    /// once that the window did not stop and would not close, and what that
+    /// means.
+    fn say_kept(
         &self,
         project: &ProjectView,
         participant: &ParticipantView,
@@ -354,6 +427,29 @@ impl Dispatcher {
             .borrow()
             .task(project.id, number)?
             .map(|thread| thread.task.requester);
+        self.tell_stop(
+            project,
+            number,
+            requester,
+            format!(
+                "@{handle} did not stop for T-{number}: it ignored the interrupt {rounds} times, and its window would not close. ConsensFlow tries to close it again every minute; until then what is for it waits, and what it writes is not T-{number}'s result."
+            ),
+            format!(
+                "T-{number}'s window (@{handle}) did not stop: it ignored the interrupt, and would not close. ConsensFlow tries again every minute; until then your words wait, and what it writes is not taken as T-{number}'s result (cf task get T-{number} --transcript shows it)."
+            ),
+        )
+    }
+
+    /// A note of T-`number`'s stop to the human, and one to whoever gave the
+    /// task, `requester`, if it was not the human.
+    fn tell_stop(
+        &self,
+        project: &ProjectView,
+        number: i64,
+        requester: Option<String>,
+        human: String,
+        to_requester: String,
+    ) -> Result<(), EngineError> {
         let mut ledger = self.seams.ledger.borrow_mut();
         ledger.note(
             project.id,
@@ -361,9 +457,7 @@ impl Dispatcher {
                 from: None,
                 to: "human".to_owned(),
                 task: Some(number),
-                body: format!(
-                    "@{handle} did not stop for T-{number}: it ignored the interrupt {rounds} times and is still on its earlier turn. What is for it waits until that turn ends, and what it writes before then is not T-{number}'s result. To stop it now, cancel T-{number}, or reassign it if it was given by tier."
-                ),
+                body: human,
             },
         )?;
         if let Some(requester) = requester.filter(|requester| requester != "human") {
@@ -373,9 +467,7 @@ impl Dispatcher {
                     from: None,
                     to: requester,
                     task: Some(number),
-                    body: format!(
-                        "T-{number}'s window (@{handle}) did not stop: it ignored the interrupt and is still on its earlier turn. Your words wait until that turn ends; what it writes before then is not taken as T-{number}'s result (cf task get T-{number} --transcript shows it). To stop it now: cf task cancel T-{number}."
-                    ),
+                    body: to_requester,
                 },
             )?;
         }
@@ -407,12 +499,12 @@ mod tests {
 
     const KEY: StopKey = StopKey::Pause { task: 4, seq: 1 };
 
-    fn done(rounds: u32, at: i64, exhausted: bool) -> Interrupted {
+    fn done(rounds: u32, at: i64, kept: bool) -> Interrupted {
         Interrupted {
             key: KEY,
             rounds,
             at,
-            exhausted,
+            kept,
         }
     }
 
@@ -434,14 +526,19 @@ mod tests {
     }
 
     #[test]
-    fn three_rounds_ignored_exhaust_the_stop_of_a_pause_and_a_cancelled_turn_just_stops() {
+    fn three_rounds_ignored_close_the_window_of_a_pause_and_a_cancelled_turn_just_stops() {
+        assert_eq!(
+            next_round(Some(&done(2, 0, false)), KEY, 3_000),
+            Round::Press,
+            "two rounds ignored are no reason to close it"
+        );
         assert_eq!(
             next_round(Some(&done(3, 0, false)), KEY, 2_999),
             Round::Wait
         );
         assert_eq!(
             next_round(Some(&done(3, 0, false)), KEY, 3_000),
-            Round::Exhaust
+            Round::Close
         );
         let cancelled = StopKey::Cancelled { task: 4 };
         let last = Interrupted {
@@ -452,19 +549,57 @@ mod tests {
     }
 
     #[test]
-    fn an_exhausted_stop_is_tried_again_every_minute_with_no_ceiling() {
+    fn a_close_the_host_refused_is_tried_again_every_minute_with_no_key_and_no_ceiling() {
         assert_eq!(
             next_round(Some(&done(3, 0, true)), KEY, 59_999),
             Round::Wait
         );
         assert_eq!(
             next_round(Some(&done(3, 0, true)), KEY, 60_000),
-            Round::Press
+            Round::Close
         );
         assert_eq!(
-            next_round(Some(&done(40, 0, true)), KEY, 60_000),
-            Round::Press
+            next_round(Some(&done(3, 0, true)), KEY, 40 * 60_000),
+            Round::Close
         );
+    }
+
+    #[test]
+    fn a_closed_windows_notes_promise_words_only_for_a_task_queued_for_it_and_say_how_any_other_ended(
+    ) {
+        let said = |state, ours| became_of(1, state, ours);
+        let both = |text: &str| (text.to_owned(), text.to_owned());
+        assert_eq!(
+            said(Some("paused"), true),
+            both(
+                "T-1 stays paused, and its window reopens on its conversation when it is resumed."
+            )
+        );
+        assert_eq!(
+            said(Some("queued"), true),
+            (
+                "The words that resume T-1 go in once its window reopens on its conversation."
+                    .to_owned(),
+                "Your words go in once it reopens on its conversation.".to_owned()
+            )
+        );
+        for (state, ours, text) in [
+            (Some("queued"), false, "T-1 is queued."),
+            (Some("cancelled"), true, "T-1 was cancelled."),
+            (Some("failed"), true, "T-1 failed."),
+            (Some("done"), true, "T-1 is done."),
+            (Some("accepted"), true, "T-1 was accepted."),
+            (Some("open"), false, "T-1 is open."),
+            (None, false, "T-1 was deleted."),
+        ] {
+            let (human, requester) = said(state, ours);
+            assert_eq!(
+                (human.as_str(), requester.as_str()),
+                (text, text),
+                "{state:?}"
+            );
+            assert!(!human.contains("go in"), "{state:?}");
+        }
     }
 
     #[test]

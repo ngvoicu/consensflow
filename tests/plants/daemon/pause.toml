@@ -260,7 +260,7 @@ replace = '''
 
 [[plant]]
 name = "pause: a stop is tried once, not in three rounds"
-meant = "three_rounds_ignored_exhaust_the_stop_which_is_said_once_tried_again_every_minute_and_paid_at_rest"
+meant = "three_rounds_ignored_close_the_window_the_task_stays_paused_and_its_resume_reopens_it_on_its_conversation"
 runs = ["engine-dispatcher"]
 
 [[plant.edit]]

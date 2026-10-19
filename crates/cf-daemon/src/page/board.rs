@@ -9,7 +9,8 @@ use super::Page;
 /// `board.get`: the ledger's board, each lane with what the dispatcher knows of
 /// its window: after the lane's own fields, in this order, `agentMissing`,
 /// `activity`, `pane`, `hidden`, `switching` and `holding`, and, only while a
-/// stop of its task is ignored in every round, `unstopped`.
+/// stop of its task is ignored in every round and the host would not close its
+/// window, `unstopped`.
 pub(super) async fn get(page: &Page, body: Body<'_>) -> Result<Fields, Said> {
     let board = page.ledger.borrow().board(body.whole("project")?)?;
     let agents = saved(&page.env)?;

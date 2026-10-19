@@ -22,7 +22,8 @@
 //!
 //! Escape stops the turn at work, as it stops Claude's: a turn that works (a
 //! `SLEEP`) ends there, writing the record Claude writes of a turn the user
-//! interrupted, `[Request interrupted by user]`, and no answer; and a turn still
+//! interrupted, `[Request interrupted by user]`, and no answer (a hung one, a
+//! `HANG`, takes no Escape at all); and a turn still
 //! in the hooks of its prompt (`HOOKS`) writes nothing, as Claude writes nothing
 //! of one stopped before a word of its answer. A window with
 //! `CF_TEST_WIND_DOWN_MS` set takes that long to stop, as Claude does when it
