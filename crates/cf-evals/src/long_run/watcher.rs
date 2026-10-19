@@ -54,7 +54,8 @@ struct Grown {
 impl Grown {
     /// What the record's file holds past what was read, its whole lines alone, read
     /// with the run's `names` shown where its words are masked; or why it could not be.
-    /// A reading that holds is taken as of when it began: all the record said by then.
+    /// A reading that holds and ends on a whole line is taken as of when it began: all the
+    /// record said by then. One that ends in the middle of a line moves it no further.
     fn grow(&mut self, config: &std::path::Path, session: &str, names: &Names) {
         let began = jiff::Timestamp::now().as_millisecond();
         if self.file.is_none() {
@@ -80,13 +81,21 @@ impl Grown {
             return;
         }
         self.unread = None;
-        self.through = Some(began);
-        let Some(end) = more.iter().rposition(|byte| *byte == b'\n') else {
+        // A line still being written when the reading ended is no part of what it read:
+        // the record is read through when the reading began only where it read whole lines.
+        let whole = more
+            .iter()
+            .rposition(|byte| *byte == b'\n')
+            .map_or(0, |end| end + 1);
+        if whole == more.len() {
+            self.through = Some(began);
+        }
+        if whole == 0 {
             return;
-        };
+        }
         self.record
-            .add_claude(&String::from_utf8_lossy(&more[..=end]), names);
-        self.read += u64::try_from(end + 1).unwrap_or_default();
+            .add_claude(&String::from_utf8_lossy(&more[..whole]), names);
+        self.read += u64::try_from(whole).unwrap_or_default();
     }
 }
 
@@ -110,6 +119,9 @@ pub struct Watcher {
     /// windows of its own too (Claude's trust of the workspace), which are none of
     /// the project's.
     prefix: String,
+    /// How long after the first result of a Claude Code worker every reading of its
+    /// record is taken as failed, in milliseconds (the dry run's `--drop-reading-sec`).
+    drop: Option<i64>,
 }
 
 impl Watcher {
@@ -126,7 +138,15 @@ impl Watcher {
             unread: Vec::new(),
             claude,
             prefix: format!("p{project}-"),
+            drop: None,
         }
+    }
+
+    /// From now, every reading of the record of the first Claude Code result's worker,
+    /// for `span` after that result, is taken as failed: a gap the readings after it
+    /// fill, as a disk that refused them would leave one (the dry run's).
+    pub fn drop_readings(&mut self, span: Duration) {
+        self.drop = Some(i64::try_from(span.as_millis()).unwrap_or(i64::MAX));
     }
 
     /// The app quit at `at`, and `last` is what its rig said last, read to the end of
@@ -181,17 +201,22 @@ impl Watcher {
                 .unwrap_or_default()
         };
         let names = Names::of_ledger(&ledger);
+        let dropped = self
+            .drop
+            .map(|span| dropped(&ledger, at, span))
+            .unwrap_or_default();
         for conversation in ledger
             .conversations
             .iter()
             .filter(|conversation| conversation.harness == "claude-code")
         {
             if let Some(session) = &conversation.session {
-                self.records.entry(conversation.id).or_default().grow(
-                    &self.claude,
-                    session,
-                    &names,
-                );
+                let grown = self.records.entry(conversation.id).or_default();
+                if dropped.contains(&conversation.id) {
+                    grown.unread = Some(DROPPED.to_owned());
+                } else {
+                    grown.grow(&self.claude, session, &names);
+                }
             }
         }
         let (records, readings) = kept(&self.records);
@@ -360,6 +385,31 @@ impl Watcher {
     }
 }
 
+/// Why a reading the dry run drops failed.
+const DROPPED: &str = "its reading was dropped (--drop-reading-sec)";
+
+/// The conversations of `ledger` whose readings a look at `at` drops: those of the
+/// worker of the first result a Claude Code worker gave, for `span` after it.
+fn dropped(ledger: &Ledger, at: i64, span: i64) -> Vec<i64> {
+    let first = ledger
+        .messages
+        .iter()
+        .filter(|message| message.kind == "result")
+        .find_map(|result| {
+            let worker = ledger.participant(result.sender?)?;
+            (worker.harness.as_deref() == Some("claude-code"))
+                .then_some((worker.id, clock::millis(&result.created_at)?))
+        });
+    match first {
+        Some((worker, given)) if given <= at && at <= given + span => ledger
+            .conversations_of(worker)
+            .iter()
+            .map(|conversation| conversation.id)
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
 /// What a look holds of the records `grown`, by their conversation's row: each as far as
 /// it was ever read, and how far that was, with why its latest reading failed.
 fn kept(grown: &BTreeMap<i64, Grown>) -> (BTreeMap<i64, Record>, BTreeMap<i64, Reading>) {
@@ -424,6 +474,77 @@ mod reading_tests {
     use super::*;
 
     use std::path::Path;
+
+    #[test]
+    fn the_dry_runs_dropped_readings_are_the_first_claude_results_workers_for_its_span() {
+        use crate::long_run::ledger::{Conversation, Message, Participant};
+        let at = |second: u32| format!("2026-10-15T10:00:{second:02}.000Z");
+        let who = |id: i64, harness: &str| Participant {
+            id,
+            handle: format!("w-{id}"),
+            role: "worker".to_owned(),
+            harness: Some(harness.to_owned()),
+            agent: None,
+        };
+        let result = |id: i64, sender: i64, second: u32| Message {
+            id,
+            recipient: 2,
+            sender: Some(sender),
+            kind: "result".to_owned(),
+            task: None,
+            body: String::new(),
+            state: "delivered".to_owned(),
+            created_at: at(second),
+        };
+        let ledger = Ledger {
+            participants: vec![who(3, "devin"), who(4, "claude-code")],
+            conversations: vec![Conversation {
+                id: 7,
+                participant: 4,
+                harness: "claude-code".to_owned(),
+                session: Some("s".to_owned()),
+                ended_at: None,
+            }],
+            messages: vec![result(10, 3, 5), result(11, 4, 10), result(12, 4, 40)],
+            ..Ledger::default()
+        };
+        let looked = |second: u32| dropped(&ledger, clock::millis(&at(second)).unwrap(), 12_000);
+        assert_eq!(looked(15), [7]);
+        assert!(looked(9).is_empty(), "before the first Claude Code result");
+        assert!(looked(23).is_empty(), "after its span");
+    }
+
+    #[test]
+    fn a_reading_that_ends_in_the_middle_of_a_line_reads_the_record_no_further() {
+        // Sol's: the record was read while the line of a job's start was being written.
+        let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+        let mut grown = Grown {
+            file: Some(fixtures.join("record-cut-mid-line.jsonl")),
+            ..Grown::default()
+        };
+        grown.grow(Path::new("/nowhere"), "s-worker", &Names::default());
+        assert_eq!(
+            grown.through, None,
+            "a reading cut mid-line holds nothing past it"
+        );
+        assert_eq!(
+            grown.record.last_said(),
+            crate::clock::millis("2026-10-15T10:01:00.000Z")
+        );
+        // Its readings failing from then on, it is read no further.
+        grown.file = Some(PathBuf::from("/nowhere/s-worker.jsonl"));
+        grown.grow(Path::new("/nowhere"), "s-worker", &Names::default());
+        assert_eq!(grown.through, None);
+        // The line whole at the next reading: read through when that reading began.
+        grown.file = Some(fixtures.join("record-cut-mid-line-whole.jsonl"));
+        let before = jiff::Timestamp::now().as_millisecond();
+        grown.grow(Path::new("/nowhere"), "s-worker", &Names::default());
+        assert!(grown.through.is_some_and(|read| read >= before));
+        assert_eq!(
+            grown.record.last_said(),
+            crate::clock::millis("2026-10-15T10:01:20.000Z")
+        );
+    }
 
     #[test]
     fn a_record_read_once_is_kept_as_far_as_it_was_read_whatever_a_later_reading_says() {

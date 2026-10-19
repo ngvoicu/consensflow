@@ -408,6 +408,89 @@ fn a_claude_windows_rest_its_own_record_was_not_read_through_is_unresolved() {
     assert!(unjudged_first(&look).is_empty());
 }
 
+#[test]
+fn a_claude_windows_rest_is_read_from_its_conversation_open_now_whatever_the_copy_holds() {
+    // Astra's: conversation 7 ended at 10:02 mid-turn; 8 is the one open now, its own
+    // record at rest since 10:05 with no job; the copy is stuck on 7. Both records are
+    // read through the look at 10:26.
+    let scene = Scene::new(&[("long-worker", "claude-code")]);
+    let old = scene.conversation(3, "claude-code", "s-old");
+    scene.task(4, 3, "working", &t(0, 0));
+    scene.item(
+        old,
+        0,
+        "user",
+        "[ConsensFlow m-1 · T-4 · task from @chief]\nBuild it",
+        true,
+        &t(0, 1),
+    );
+    scene.item(old, 1, "assistant", "Building now.", false, &t(1, 0));
+    scene.end_conversation(old, &t(2, 0));
+    let new = scene.conversation(3, "claude-code", "s-new");
+    let entries = |lines: &[serde_json::Value]| {
+        Record::claude(
+            &lines
+                .iter()
+                .map(|line| line.to_string())
+                .collect::<Vec<_>>()
+                .join("\n"),
+        )
+    };
+    let mut look = scene.look(ms(26, 0));
+    look.records.insert(
+        old,
+        entries(&[
+            json!({ "timestamp": t(0, 1), "type": "user", "message": { "role": "user", "content": "[ConsensFlow m-1 · T-4 · task from @chief]\nBuild it" } }),
+        ]),
+    );
+    look.records.insert(
+        new,
+        entries(&[
+            json!({ "timestamp": t(4, 50), "type": "assistant", "message": { "role": "assistant", "stop_reason": "end_turn", "content": [{ "type": "text", "text": "Built: 36 pages." }] } }),
+            json!({ "timestamp": t(5, 0), "type": "system", "subtype": "turn_duration", "isSidechain": false, "durationMs": 10000, "messageCount": 2 }),
+        ]),
+    );
+    let breaks = found(&look, 1);
+    assert_eq!(breaks.len(), 1, "{breaks:?}");
+    assert_eq!(breaks[0].key, format!("1:T-4:{}", ms(5, 0)));
+    // No conversation open at the look: which holds the task's turns cannot be told.
+    scene.end_conversation(new, &t(20, 0));
+    scene.item(new, 0, "assistant", "Built: 36 pages.", true, &t(5, 0));
+    let look = scene.look(ms(26, 0));
+    assert!(found(&look, 1).is_empty(), "{:?}", found(&look, 1));
+    assert_eq!(unjudged_first(&look), [format!("1:T-4:{}", ms(5, 0))]);
+}
+
+#[test]
+fn a_rest_a_later_reading_reads_through_is_judged_as_of_its_moment() {
+    // The look at 10:26 could not read the worker's record past 10:20; the copy said the
+    // window rested from 10:05. A later look reads it through: as of 10:26, the record
+    // says the window was at rest since 10:05 (a break), or in a turn begun at 10:25.
+    use cf_evals::long_run::invariants::{unjudged, Keeper, Settings};
+    use cf_evals::long_run::mask::Names;
+    let settings = Settings::default();
+    for (record, broke) in [
+        (vec![json!({ "timestamp": t(5, 0), "type": "system", "subtype": "turn_duration", "isSidechain": false, "durationMs": 10000, "messageCount": 2 })], true),
+        (vec![json!({ "timestamp": t(25, 0), "type": "user", "message": { "role": "user", "content": "[ConsensFlow m-2 · T-4 · note from @chief]\nAnd the tests" } })], false),
+    ] {
+        let (scene, conversation) = rested("claude-code");
+        let record = Record::claude(
+            &record.iter().map(|line| line.to_string()).collect::<Vec<_>>().join("\n"),
+        );
+        let mut keeper = Keeper::default();
+        let first = scene.look_read(ms(26, 0), conversation, record.clone(), (ms(20, 0), UNREADABLE));
+        let open = unjudged(&first, &settings);
+        keeper.keep_unjudged(first.at, open, &Names::default());
+        assert_eq!(keeper.unjudged.len(), 1, "{:?}", keeper.unjudged);
+        let later = scene.look_with(ms(27, 0), conversation, record);
+        let filled = keeper.fill(&later, &settings, &unjudged(&later, &settings));
+        assert_eq!(filled.len(), 1, "{filled:?}");
+        assert_eq!(filled[0].1.is_some(), broke, "{filled:?}");
+        assert!(keeper.unjudged.is_empty());
+        assert_eq!(keeper.filled.len(), 1);
+    }
+}
+
 /// The notification of the end of the job b33m, as Claude Code writes it.
 const B33M_ENDED: &str =
     "<task-notification>\n<task-id>b33m</task-id>\n<status>completed</status>\n</task-notification>";

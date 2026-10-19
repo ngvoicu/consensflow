@@ -1,8 +1,9 @@
 //! What a failed case tells of the rig: the windows' screens, the programs'
 //! error output and the daemon's log, for the person who reads the failure; what
 //! the stand-in agents wrote of themselves, which is all the daemon reads of a
-//! window; and what the daemon says of its lanes and inboxes. And how a
-//! window's bytes become the text on its screen.
+//! window; and what the daemon says of its lanes and inboxes. It is kept in a file
+//! beside the rig's home, on the machine it ran on, and the error output says only
+//! where. And how a window's bytes become the text on its screen.
 
 use std::fs;
 use std::io::Write;
@@ -13,7 +14,7 @@ use regex::Regex;
 use serde_json::{json, Value};
 
 use super::Rig;
-use crate::{pattern, process};
+use crate::{files, pattern, process};
 
 /// How much of a window's screen a failure shows.
 const SCREEN: usize = 1_500;
@@ -290,7 +291,29 @@ pub(super) fn say(rig: &Rig) {
     if !stray.is_empty() {
         report.push_str(&format!("lines that are no frame: {stray:?}\n"));
     }
-    let _ = std::io::stderr().write_all(tell.text(&report).as_bytes());
+    let where_kept = keep(&rig.root, &tell.text(&report));
+    let _ = std::io::stderr().write_all(where_kept.as_bytes());
+}
+
+/// Keeps `report`, what a rig dropped unclosed says of itself, in a file beside its home
+/// `root` (the home goes with the rig), on the machine it ran on; and what its error
+/// output says instead: where the report is, and none of its words. Whatever runs a rig
+/// (an agent's tool, another machine's runner) takes its error output off the machine,
+/// and the report holds what its windows showed.
+fn keep(root: &Path, report: &str) -> String {
+    let name = root
+        .file_name()
+        .map_or_else(|| "rig".into(), |name| name.to_string_lossy());
+    let file = root.with_file_name(format!("{name}-left.txt"));
+    match files::write(&file, report) {
+        Ok(()) => format!(
+            "\n--- the rig, as the failed case left it, is kept in {}\n",
+            file.display()
+        ),
+        Err(unkept) => {
+            format!("\n--- the rig, as the failed case left it, could not be kept: {unkept}\n")
+        }
+    }
 }
 
 /// The last [`LOG`] lines of the daemon's log `log`, told whole first, each a line
@@ -382,6 +405,31 @@ impl Tell<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_dropped_rigs_report_is_kept_beside_its_home_and_its_error_output_says_only_where() {
+        // A screen with a value no masker knows, its name cut off above the window's tail.
+        let folder = tempfile::tempdir().unwrap();
+        let root = folder.path().join("consensflow-integration-AbC123");
+        let report = "--- p1-long-claude-1: \"correct horse battery staple\"\n";
+        let said = keep(&root, report);
+        let file = folder
+            .path()
+            .join("consensflow-integration-AbC123-left.txt");
+        assert_eq!(fs::read_to_string(&file).unwrap(), report);
+        assert_eq!(
+            said,
+            format!(
+                "\n--- the rig, as the failed case left it, is kept in {}\n",
+                file.display()
+            )
+        );
+        assert!(!said.contains("horse"), "{said}");
+        // A file that cannot be written: said so, with none of the report either.
+        let said = keep(&file.join("home"), report);
+        assert!(said.contains("could not be kept"), "{said}");
+        assert!(!said.contains("horse"), "{said}");
+    }
 
     /// A masker as an owner's is, by what is around a secret: the quoted value of
     /// `DB_PASSWORD=` (whatever white space comes between), and `hunter2hunter2`

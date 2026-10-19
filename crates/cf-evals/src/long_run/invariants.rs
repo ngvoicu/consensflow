@@ -202,7 +202,8 @@ impl Break {
 
 /// What a check could not judge from what the run reads: no break, and never taken
 /// for one that held. The [`Keeper`] says each once, in the timeline, and a run with
-/// one does not pass: its verdict is `UNRESOLVED`, where nothing broke.
+/// one does not pass: its verdict is `UNRESOLVED`, where nothing broke. One that waits
+/// for evidence a later look may read (a gap) is judged again then ([`Keeper::fill`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Unjudged {
     pub invariant: u8,
@@ -214,6 +215,25 @@ pub struct Unjudged {
     pub twice: bool,
     /// When it was first found, in milliseconds (the keeper's).
     pub at: i64,
+    /// What a later look's evidence fills it with, where one may: a record read through
+    /// the moment it needs.
+    pub gap: Option<Gap>,
+}
+
+/// How a gap in what a check could not judge is judged again, on a later look.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Gap {
+    /// Every look judges the same moment again (a result's turn and the settle time after
+    /// it, a cut note's): filled at the first look that no longer finds it unjudged, what
+    /// that look's checks found standing as it is.
+    Again,
+    /// A task's rest, judged at a look's moment (the first): T-`number`, given to its
+    /// window at `given`, judged again as of `at` ([`work::rest_again`]).
+    Rest {
+        number: i64,
+        given: Option<i64>,
+        at: i64,
+    },
 }
 
 impl Unjudged {
@@ -225,8 +245,25 @@ impl Unjudged {
             said: said.into(),
             twice: false,
             at: 0,
+            gap: None,
         }
     }
+
+    /// What could not be judged, a gap that `gap` says how to fill.
+    #[must_use]
+    pub fn gap(mut self, gap: Gap) -> Self {
+        self.gap = Some(gap);
+        self
+    }
+}
+
+/// A gap a later look filled: what could not be judged (as it was kept), when it was
+/// filled, and whether it came to a break.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Filled {
+    pub open: Unjudged,
+    pub at: i64,
+    pub broke: bool,
 }
 
 /// Every invariant but the end's, against one look.
@@ -268,8 +305,11 @@ pub struct Keeper {
     /// What the last look found that waits for a second look.
     waiting: BTreeSet<String>,
     pub breaks: Vec<Break>,
-    /// What the run could not judge, each when it was first found.
+    /// What the run could not judge, each when it was first found: what counts against
+    /// it.
     pub unjudged: Vec<Unjudged>,
+    /// The gaps a later look filled, kept for the report and no more counted.
+    pub filled: Vec<Filled>,
     /// What the last look could not judge that waits for a second look.
     waiting_unjudged: BTreeSet<String>,
 }
@@ -312,10 +352,56 @@ impl Keeper {
         now
     }
 
+    /// Fills each gap kept open that `look` fills (`found`, what it could not judge):
+    /// one judged again ([`Gap`]) on what the look reads now. Filled, it no longer counts
+    /// against the run, and is kept with when, and whether it came to a break, which is
+    /// returned with it to be recorded. What waits for evidence no look reads stays open:
+    /// a gap the run's end leaves open blocks it.
+    pub fn fill(
+        &mut self,
+        look: &Look,
+        settings: &Settings,
+        found: &[Unjudged],
+    ) -> Vec<(Filled, Option<Break>)> {
+        let mut filled = Vec::new();
+        let mut still = Vec::new();
+        for open in std::mem::take(&mut self.unjudged) {
+            let judged = match &open.gap {
+                None => None,
+                Some(Gap::Again) => {
+                    (!found.iter().any(|other| other.key == open.key)).then_some(None)
+                }
+                Some(Gap::Rest { number, given, at }) => {
+                    work::rest_again(look, settings, *number, *given, *at)
+                }
+            };
+            match judged {
+                Some(broke) => {
+                    let one = Filled {
+                        open,
+                        at: look.at,
+                        broke: broke.is_some(),
+                    };
+                    self.filled.push(one.clone());
+                    filled.push((one, broke));
+                }
+                None => still.push(open),
+            }
+        }
+        self.unjudged = still;
+        filled
+    }
+
+    /// Whether a gap kept open waits for a record to be read: one more look may fill it.
+    pub fn waits_for_a_reading(&self) -> bool {
+        self.unjudged.iter().any(|open| open.gap.is_some())
+    }
+
     /// Takes what a look at `at` could not judge: what was not said before, to be
     /// said now and kept, with the look's time and what looks like a key or a token in
     /// its words hidden (the run's `names` shown); what counts at two looks in a row
-    /// waits for the second. Once kept it stays: a later look clears nothing.
+    /// waits for the second. Once kept it stays, but for a gap a later look fills
+    /// ([`Keeper::fill`]).
     pub fn keep_unjudged(&mut self, at: i64, found: Vec<Unjudged>, names: &Names) -> Vec<Unjudged> {
         let mut now = Vec::new();
         let mut still = BTreeSet::new();

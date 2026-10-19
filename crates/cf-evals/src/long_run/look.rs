@@ -182,6 +182,23 @@ impl Look {
             })
     }
 
+    /// The conversation of `participant` open at `at`, as the ledger names it: the first
+    /// not ended by then (a participant has one open at a time, a new one ending the one
+    /// before). None where every one had ended.
+    pub fn conversation_open_at(&self, participant: i64, at: i64) -> Option<i64> {
+        self.ledger
+            .conversations_of(participant)
+            .into_iter()
+            .find(|conversation| {
+                conversation
+                    .ended_at
+                    .as_deref()
+                    .and_then(crate::clock::millis)
+                    .is_none_or(|ended| ended > at)
+            })
+            .map(|conversation| conversation.id)
+    }
+
     /// The record of `conversation` where the run read it through `at` (a reading taken
     /// then or after); else why it did not: never read, read only as far as before
     /// `at`, or its latest reading failed before it was read that far.

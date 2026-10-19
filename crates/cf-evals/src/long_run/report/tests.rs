@@ -87,6 +87,7 @@ fn kept<'a>(scene: &'a Scene, breaks: &'a [Break], error: Option<String>) -> Kep
         schedule: &scene.schedule,
         breaks,
         unresolved: &[],
+        filled: &[],
         timeline: &scene.timeline,
         ending: "the project is done".to_owned(),
         error,

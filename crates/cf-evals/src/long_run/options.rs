@@ -9,7 +9,12 @@
 //!                       [--quiet] [--pause] [--kill] [--switch] [--compact]
 //!                       [--restart] [--devin-cut] [--suspend]
 //!                       [--ask real|stand-in] [--reports DIR]
+//!                       [--settle-sec 60] [--drop-reading-sec N]
 //! ```
+//!
+//! `--drop-reading-sec` is the dry run's: the watch takes every reading of the record of
+//! the first Claude Code result's worker as failed for that long after the result, a gap
+//! the readings after it fill, so that the run shows a gap filled.
 //!
 //! The chief and the staff are flags, as in the evals; the staff is every harness
 //! unless it names fewer. Each disruption is a flag: none named plays them all,
@@ -28,7 +33,7 @@ use crate::plan::harness;
 use crate::{Error, Result};
 
 /// The flags of `long`.
-const FLAGS: [Flag; 25] = [
+const FLAGS: [Flag; 26] = [
     Flag::or("chief", "claude"),
     Flag::or("staff", "claude,codex,pi,opencode,devin"),
     Flag::value("models"),
@@ -59,6 +64,9 @@ const FLAGS: [Flag; 25] = [
     Flag::value("reports"),
     // How long a result is let be before it is judged against the record, in seconds.
     Flag::or("settle-sec", "60"),
+    // The dry run's: how long after the first result of a Claude Code worker every reading
+    // of that worker's own record is taken as failed, a gap the readings after fill.
+    Flag::value("drop-reading-sec"),
 ];
 
 /// What a long run is asked to do.
@@ -89,6 +97,9 @@ pub struct Options {
     pub switch_to: Option<String>,
     pub ask: Ask,
     pub reports: PathBuf,
+    /// How long after the first result of a Claude Code worker every reading of its
+    /// record is taken as failed (the dry run's: a gap the readings after it fill).
+    pub drop_reading: Option<Duration>,
 }
 
 impl Options {
@@ -173,6 +184,10 @@ impl Options {
             reports: flags
                 .get("reports")
                 .map_or_else(|| checkout::path("evals/reports/long"), PathBuf::from),
+            drop_reading: match flags.get("drop-reading-sec") {
+                Some(_) => Some(Duration::from_secs_f64(number("drop-reading-sec")?)),
+                None => None,
+            },
         })
     }
 

@@ -7,7 +7,7 @@ use super::*;
 use crate::long_run::disruptions::{Disruption, Target, NO_IDLE_COMPACTION};
 use crate::long_run::invariants::Evidence;
 use crate::long_run::ledger::{Conversation, Event, Item, Message, Participant, Task};
-use crate::long_run::look::{Process, Stranger, Unread};
+use crate::long_run::look::{Process, Reading, Stranger, Unread};
 use crate::long_run::record::Record;
 
 /// The choice of `disruption` at a `how` moment, lacking nothing.
@@ -75,6 +75,223 @@ fn message(
         body: body.to_owned(),
         state: "delivered".to_owned(),
         created_at: iso(minute, second),
+    }
+}
+
+/// [`ledger`] where the worker (3, on Claude Code) was given T-14 (m-120, its delivery
+/// begun at 10:00:30) in its conversation 7, answered "Done." at 10:01:50, and its
+/// result m-131 was taken at 10:02: the worker's own record of it is `answered_record`.
+fn answered() -> Ledger {
+    let mut ledger = ledger("done");
+    ledger.conversations.push(Conversation {
+        id: 7,
+        participant: 3,
+        harness: "claude-code".to_owned(),
+        session: Some("s-worker".to_owned()),
+        ended_at: None,
+    });
+    ledger.messages.push(Message {
+        recipient: 3,
+        ..message(120, Some(2), "task", "Run them", 0, 30)
+    });
+    ledger.events.push(Event {
+        id: 1,
+        at: iso(0, 30),
+        kind: "delivery.begun".to_owned(),
+        data: serde_json::json!({ "message": 120, "attempt": 1 }),
+    });
+    let item = |seq: i64, role: &str, text: &str, at: String| Item {
+        conversation: 7,
+        id: format!("i-7-{seq}"),
+        seq,
+        role: role.to_owned(),
+        text: text.to_owned(),
+        complete: true,
+        at: Some(at.clone()),
+        copied_at: at,
+    };
+    ledger.items.push(item(
+        0,
+        "user",
+        "[ConsensFlow m-120 · T-14 · task from @chief]\nRun them",
+        iso(0, 30),
+    ));
+    ledger.items.push(item(1, "assistant", "Done.", iso(1, 50)));
+    ledger
+        .messages
+        .push(message(131, Some(3), "result", "Done.", 2, 0));
+    ledger
+}
+
+/// The worker's own record of [`answered`]: its answer at 10:01:50.
+fn answered_record() -> Record {
+    Record::claude(
+        &serde_json::json!({ "timestamp": iso(1, 50), "type": "assistant", "message": { "role": "assistant", "stop_reason": "end_turn", "content": [{ "type": "text", "text": "Done." }] } })
+            .to_string(),
+    )
+}
+
+/// A look at `at` of `ledger`, with the record of the conversation 7 (or 9) `record`,
+/// read as far as `reading` says (none: read at the look).
+fn read_look(
+    at: i64,
+    ledger: Ledger,
+    (id, record): (i64, Record),
+    reading: Option<Reading>,
+) -> Look {
+    Look {
+        at,
+        ledger,
+        records: std::collections::BTreeMap::from([(id, record)]),
+        readings: reading.map(|reading| (id, reading)).into_iter().collect(),
+        ..Look::default()
+    }
+}
+
+/// The keys of what the run could not judge, as its keeper holds them now.
+fn open_keys(run: &Going) -> Vec<String> {
+    run.keeper
+        .unjudged
+        .iter()
+        .map(|open| open.key.clone())
+        .collect()
+}
+
+#[test]
+fn a_gap_a_later_reading_fills_is_judged_then_and_stays_in_the_timeline() {
+    // Sol's: m-131 comes of age at 10:03, and the reading of the worker's record at that
+    // look failed, the record read last at 10:02:55; the next look's reading holds, and
+    // the result is the healthy one it was.
+    let mut said = Vec::new();
+    let mut run = going();
+    let mut floor = run.edge.floor(&mut said);
+    let failed = Reading {
+        through: Some(at(2, 55)),
+        failed: Some("its record could not be read: Input/output error (os error 5)".to_owned()),
+    };
+    run.hold(
+        &mut floor,
+        &Settings::default(),
+        read_look(at(3, 0), answered(), (7, answered_record()), Some(failed)),
+    );
+    assert_eq!(open_keys(&run), ["2:m-131"]);
+    run.hold(
+        &mut floor,
+        &Settings::default(),
+        read_look(at(3, 3), answered(), (7, answered_record()), None),
+    );
+    assert!(open_keys(&run).is_empty(), "{:?}", open_keys(&run));
+    assert!(run.keeper.breaks.is_empty(), "{:?}", run.keeper.breaks);
+    // Its observation stays in the timeline, and so does what filled it.
+    let moments: Vec<(&str, &str)> = run
+        .timeline
+        .moments
+        .iter()
+        .map(|moment| (moment.kind, moment.text.as_str()))
+        .collect();
+    assert!(
+        moments
+            .iter()
+            .any(|(kind, text)| *kind == "unresolved" && text.starts_with("2: m-131's turn")),
+        "{moments:?}"
+    );
+    assert!(
+        moments
+            .iter()
+            .any(|(kind, text)| *kind == "resolved" && text.starts_with("2:m-131: ")),
+        "{moments:?}"
+    );
+}
+
+#[test]
+fn a_cut_note_a_later_reading_reads_through_is_judged_then() {
+    // Astra's: the chief was told at 10:10 its turn was cut, and it was (its prompt of
+    // 10:09 had no answer); one look's reading of its record had read it only as far as
+    // 10:09:30, the next one's read it through.
+    let mut ledger = ledger("done");
+    ledger.conversations.push(Conversation {
+        id: 9,
+        participant: 2,
+        harness: "claude-code".to_owned(),
+        session: Some("s-chief".to_owned()),
+        ended_at: None,
+    });
+    ledger.messages.push(Message {
+        task: None,
+        ..message(
+            2063,
+            None,
+            "note",
+            "ConsensFlow stopped in the middle of your turn, which was cut. Go on where you stopped.",
+            10,
+            0,
+        )
+    });
+    let in_turn = Record::claude(
+        &serde_json::json!({ "timestamp": iso(9, 0), "type": "user", "message": { "role": "user", "content": "[ConsensFlow m-2050 · result from @long-worker]\nDone." } })
+            .to_string(),
+    );
+    let mut said = Vec::new();
+    let mut run = going();
+    let mut floor = run.edge.floor(&mut said);
+    let behind = Reading {
+        through: Some(at(9, 30)),
+        failed: Some("its record could not be read: Input/output error (os error 5)".to_owned()),
+    };
+    run.hold(
+        &mut floor,
+        &Settings::default(),
+        read_look(
+            at(11, 0),
+            ledger.clone(),
+            (9, in_turn.clone()),
+            Some(behind),
+        ),
+    );
+    assert_eq!(open_keys(&run), ["5:m-2063"]);
+    run.hold(
+        &mut floor,
+        &Settings::default(),
+        read_look(at(11, 3), ledger, (9, in_turn), None),
+    );
+    assert!(open_keys(&run).is_empty(), "{:?}", open_keys(&run));
+    assert!(run.keeper.breaks.is_empty(), "{:?}", run.keeper.breaks);
+}
+
+#[test]
+fn the_run_reads_once_more_before_it_closes_where_a_reading_began_before_a_result_needed_it() {
+    // The reviewers' boundary: m-131 at 10:02, a job's end told up to 10:03; the last
+    // look began its reading of the worker's record at 10:02:59.999 and ended at
+    // 10:03:00.001. Healthy: one more reading reads it through.
+    for (look_at, began) in [(at(3, 0) + 1, at(3, 0) - 1), (at(3, 0) - 1, at(3, 0) - 2)] {
+        let mut said = Vec::new();
+        let mut run = going();
+        let mut floor = run.edge.floor(&mut said);
+        let reading = Reading {
+            through: Some(began),
+            failed: None,
+        };
+        run.hold(
+            &mut floor,
+            &Settings::default(),
+            read_look(look_at, answered(), (7, answered_record()), Some(reading)),
+        );
+        let mut looked = false;
+        read_once_more(&mut run, &mut floor, &Settings::default(), || {
+            looked = true;
+            Ok(read_look(
+                at(3, 2),
+                answered(),
+                (7, answered_record()),
+                None,
+            ))
+        });
+        assert!(looked, "one more look at {look_at}");
+        assert!(open_keys(&run).is_empty(), "{:?}", open_keys(&run));
+        // Read through all it needs: no look more.
+        read_once_more(&mut run, &mut floor, &Settings::default(), || {
+            panic!("no look more")
+        });
     }
 }
 
@@ -342,6 +559,7 @@ fn a_findings_screen_and_words_stay_in_the_local_report_and_the_console_says_its
         schedule: &run.schedule,
         breaks: &run.keeper.breaks,
         unresolved: &run.keeper.unjudged,
+        filled: &run.keeper.filled,
         timeline: &run.timeline,
         ending: DONE.to_owned(),
         error: Some(format!("the rig could not close: {secret}")),

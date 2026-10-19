@@ -64,8 +64,8 @@ runs = ["evals-long-run"]
 
 [[plant.edit]]
 file = "crates/cf-evals/src/long_run/invariants/work.rs"
-find = "        if look.at - since < settings.idle {"
-replace = "        if look.at - since < settings.idle * 1000 {"
+find = "    if at - since < settings.idle {"
+replace = "    if at - since < settings.idle * 1000 {"
 
 [[plant]]
 name = "long run 1: a job a Claude window's record started is not seen, and a task its job holds is called idle"
@@ -381,9 +381,10 @@ runs = ["evals-lib-long-run"]
 [[plant.edit]]
 file = "crates/cf-evals/src/long_run/conduct.rs"
 find = '''
-        self.unjudged(floor, look.at, invariants::unjudged(&look, settings));
+        self.unjudged(floor, look.at, open);
         self.last = Some(look);'''
 replace = '''
+        let _ = open;
         self.last = Some(look);'''
 
 # 4 (A4)
@@ -2793,8 +2794,8 @@ runs = ["evals-long-run"]
 
 [[plant.edit]]
 file = "crates/cf-evals/src/long_run/invariants/work.rs"
-find = "        .filter_map(|(found, unread)| unread.is_none().then_some(found))"
-replace = "        .filter_map(|(found, _)| Some(found))"
+find = "                Some((found, None)) => Some(found),"
+replace = "                Some((found, _)) => Some(found),"
 
 [[plant]]
 name = "long run 1: a Claude window's rest its record did not cover is said nowhere"
@@ -2981,3 +2982,117 @@ runs = ["evals-lib-long-run"]
 file = "crates/cf-evals/src/long_run/edge.rs"
 find = '                "the long run stopped before its report; what stopped it is kept in {}",'
 replace = '                "the long run stopped before its report ({said}); what stopped it is kept in {}",'
+
+# The long run, round 13 (both reviewers' look at round 12): a gap a later look's evidence fills
+# is judged then and no more counts, kept in the report; the run reads once more before it
+# closes where a reading began before a result needed it; A1 reads the conversation the ledger
+# has open at its moment; a reading cut mid-line reads the record no further; a dropped rig's
+# report is kept beside its home, its error output saying only where.
+
+[[plant]]
+name = "long run: a gap a later look fills is never cleared, and a healthy run stays unresolved (both reviewers')"
+meant = "a_gap_a_later_reading_fills_is_judged_then_and_stays_in_the_timeline"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/invariants.rs"
+find = "                    (!found.iter().any(|other| other.key == open.key)).then_some(None)"
+replace = "                    None"
+
+[[plant]]
+name = "long run 1: a task's rest a later reading reads through is never judged again"
+meant = "a_rest_a_later_reading_reads_through_is_judged_as_of_its_moment"
+runs = ["evals-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/invariants.rs"
+find = "                    work::rest_again(look, settings, *number, *given, *at)"
+replace = "                    work::rest_again(look, settings, *number, *given, *at).and(None)"
+
+[[plant]]
+name = "long run: the run closes on a reading begun before a result needed it (the reviewers' boundary)"
+meant = "the_run_reads_once_more_before_it_closes_where_a_reading_began_before_a_result_needed_it"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/conduct.rs"
+find = """
+    if waits {
+        if let Ok(look) = look() {"""
+replace = """
+    if waits && false {
+        if let Ok(look) = look() {"""
+
+[[plant]]
+name = "long run: the run reads once more only for a gap open now, and leaves one its end will find"
+meant = "the_run_reads_once_more_before_it_closes_where_a_reading_began_before_a_result_needed_it"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/conduct.rs"
+find = "            invariants::unjudged(last, &final_settings(settings))"
+replace = "            invariants::unjudged(last, settings)"
+
+[[plant]]
+name = "long run: a reading cut mid-line reads the record through when it began (Sol's)"
+meant = "a_reading_that_ends_in_the_middle_of_a_line_reads_the_record_no_further"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/watcher.rs"
+find = "        if whole == more.len() {"
+replace = "        if whole <= more.len() {"
+
+[[plant]]
+name = "long run 1: a Claude window's rest is read from the conversation of the last copied item (Astra's)"
+meant = "a_claude_windows_rest_is_read_from_its_conversation_open_now_whatever_the_copy_holds"
+runs = ["evals-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/invariants/work.rs"
+find = "        match look.conversation_open_at(worker.id, at) {"
+replace = "        match look.conversation_at(worker.id, at) {"
+
+[[plant]]
+name = "long run 1: a conversation that ended is taken for the one open"
+meant = "a_claude_windows_rest_is_read_from_its_conversation_open_now_whatever_the_copy_holds"
+runs = ["evals-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/look.rs"
+find = "                    .is_none_or(|ended| ended > at)"
+replace = "                    .is_none_or(|ended| ended > at || ended <= at)"
+
+[[plant]]
+name = "long run: the dry run's dropped readings drop none"
+meant = "the_dry_runs_dropped_readings_are_the_first_claude_results_workers_for_its_span"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/watcher.rs"
+find = "        Some((worker, given)) if given <= at && at <= given + span => ledger"
+replace = "        Some((worker, given)) if given <= at && at <= given + span && span < 0 => ledger"
+
+[[plant]]
+name = "the rig: a dropped rig's report says its words on the error output beside where it is kept"
+meant = "a_dropped_rigs_report_is_kept_beside_its_home_and_its_error_output_says_only_where"
+runs = ["e2e-lib-report"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/report.rs"
+find = '''
+        Ok(()) => format!(
+            "\n--- the rig, as the failed case left it, is kept in {}\n",'''
+replace = '''
+        Ok(()) => format!(
+            "\n--- the rig, as the failed case left it, is kept in {} {report}\n",'''
+
+[[plant]]
+name = "the rig: a dropped rig writes its report on the error output whole"
+meant = "what_stops_the_run_and_what_its_rig_says_leave_through_the_edge"
+runs = ["evals-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/report.rs"
+find = "    let _ = std::io::stderr().write_all(where_kept.as_bytes());"
+replace = "    let _ = std::io::stderr().write_all(tell.text(&report).as_bytes());"

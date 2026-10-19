@@ -84,8 +84,32 @@ impl Going {
         self.edge.knows(&self.timeline.names);
         let found = invariants::check(&look, settings);
         self.record(floor, look.at, found);
-        self.unjudged(floor, look.at, invariants::unjudged(&look, settings));
+        let open = invariants::unjudged(&look, settings);
+        self.fill(floor, &look, settings, &open);
+        self.unjudged(floor, look.at, open);
         self.last = Some(look);
+    }
+
+    /// The gaps `look` fills (`open`, what it could not judge, with `settings`): each said
+    /// by its key and told in the timeline with what it came to, the break it came to
+    /// recorded; what it was stays in the timeline and the report.
+    fn fill(&mut self, floor: &mut Floor, look: &Look, settings: &Settings, open: &[Unjudged]) {
+        for (filled, broke) in self.keeper.fill(look, settings, open) {
+            let gap = &filled.open;
+            let _ = floor.say(format!("RESOLVED {}: {}", gap.invariant, gap.key));
+            self.timeline.add(
+                look.at,
+                "resolved",
+                format!(
+                    "{}: a later look read what it needed, and it {}",
+                    gap.key,
+                    if filled.broke { "broke" } else { "held" }
+                ),
+            );
+            if let Some(broke) = broke {
+                self.record(floor, look.at, vec![broke]);
+            }
+        }
     }
 
     /// What a look at `at` could not judge (`found`): each not said before is said by
@@ -246,6 +270,9 @@ fn run(words: &[String], out: &mut dyn Write, edge: &Edge) -> Result<i32> {
     let opened = setup::open(&options, &cast, &scenario, &mut floor, edge.masker())?;
     let daemon = opened.daemon.clone();
     let mut stage = Stage::new(opened.rig, opened.config, opened.project, opened.claude);
+    if let Some(span) = options.drop_reading {
+        stage.watcher.drop_readings(span);
+    }
     let started = now();
     let mut run = Going {
         keeper: Keeper::default(),
@@ -302,6 +329,7 @@ fn run(words: &[String], out: &mut dyn Write, edge: &Edge) -> Result<i32> {
         schedule: &run.schedule,
         breaks: &run.keeper.breaks,
         unresolved: &run.keeper.unjudged,
+        filled: &run.keeper.filled,
         timeline: &run.timeline,
         ending: run.ending.clone(),
         error,
@@ -365,6 +393,7 @@ fn finish(
             }
         }
     }
+    read_once_more(run, floor, settings, || Stagehand::look(stage));
     let closed = stage.close();
     let at = now();
     let after = match &closed {
@@ -422,7 +451,9 @@ fn finish(
     }
     run.record(floor, at, after.found);
     if let Some(look) = after.look {
-        let found = invariants::unjudged(&look, &final_settings(settings));
+        let settings = final_settings(settings);
+        let found = invariants::unjudged(&look, &settings);
+        run.fill(floor, &look, &settings, &found);
         run.unjudged(floor, look.at, found);
         run.last = Some(look);
     }
@@ -433,6 +464,30 @@ fn finish(
     };
     run.schedule.close(why);
     closed.map(|closed| closed.root)
+}
+
+/// One more look before the app closes, taken with `look`, where a gap a reading may fill
+/// is open, or the last look leaves one as the run's end will judge it: a record a result
+/// needs, read only as far as before the settle time after it (by a reading begun before
+/// then, however late its look ended). The time it needs has passed by now, and a reading
+/// begun now reads through it; the clock alone is no reading.
+fn read_once_more(
+    run: &mut Going,
+    floor: &mut Floor,
+    settings: &Settings,
+    look: impl FnOnce() -> Result<Look>,
+) {
+    let waits = run.keeper.waits_for_a_reading()
+        || run.last.as_ref().is_some_and(|last| {
+            invariants::unjudged(last, &final_settings(settings))
+                .iter()
+                .any(|open| open.gap.is_some())
+        });
+    if waits {
+        if let Ok(look) = look() {
+            run.hold(floor, settings, look);
+        }
+    }
 }
 
 /// How long, from `now`, the newest result of `look` is still younger than `settle`:

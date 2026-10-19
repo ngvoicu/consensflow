@@ -20,7 +20,7 @@ use std::path::{Path, PathBuf};
 use serde_json::{json, Value};
 
 use super::disruptions::{Schedule, State};
-use super::invariants::{Break, Unjudged, INVARIANTS};
+use super::invariants::{Break, Filled, Unjudged, INVARIANTS};
 use super::known::{self, Known, KNOWN};
 use super::options::Options;
 use super::staff::{Found, LeftOut};
@@ -56,6 +56,9 @@ pub struct Kept<'a> {
     pub breaks: &'a [Break],
     /// What the watch could not judge.
     pub unresolved: &'a [Unjudged],
+    /// What it could not judge at first that a later look's evidence judged: kept, and
+    /// counted against nothing.
+    pub filled: &'a [Filled],
     pub timeline: &'a Timeline,
     /// How the run ended: `the project is done`, `time ran out`…
     pub ending: String,
@@ -298,6 +301,14 @@ impl Kept<'_> {
                 "key": open.key,
                 "at": super::invariants::iso(open.at),
                 "said": open.said,
+            })).collect::<Vec<_>>(),
+            "resolved": self.filled.iter().map(|filled| json!({
+                "invariant": filled.open.invariant,
+                "key": filled.open.key,
+                "at": super::invariants::iso(filled.open.at),
+                "said": filled.open.said,
+                "resolvedAt": super::invariants::iso(filled.at),
+                "broke": filled.broke,
             })).collect::<Vec<_>>(),
             "timeline": self.timeline.to_value(),
             "log": masked(&self.log, self.timeline),

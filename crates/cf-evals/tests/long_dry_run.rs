@@ -14,6 +14,11 @@
 //! `claude` sets), so that the project reaches its end: every task accepted, and
 //! the owner told after the last.
 //!
+//! The watch drops its readings of the first Claude Code result's worker's record for
+//! 12 s after that result (`--drop-reading-sec`), as a disk that refused them would: the
+//! result is unjudged a while, and the readings after fill the gap, which the report
+//! keeps among what was resolved and which counts against nothing.
+//!
 //! What is held is that the run gets to its end (9), plays every disruption with its
 //! effect seen (10; the stand-in compacts as Claude Code does at `/compact`), and keeps
 //! a report of the shape it always keeps (JSON and Markdown, the harnesses and their
@@ -154,7 +159,7 @@ fn the_long_run_is_played_against_the_stand_ins_to_its_end_with_every_disruption
             "1.5",
         ])
         .args(["--look-sec", "3", "--quiet-min", "1.5", "--wake-min", "5"])
-        .args(["--settle-sec", "5"])
+        .args(["--settle-sec", "5", "--drop-reading-sec", "12"])
         .arg("--reports")
         .arg(&reports)
         .inheriting_env()
@@ -281,6 +286,17 @@ fn the_long_run_is_played_against_the_stand_ins_to_its_end_with_every_disruption
     }
     // Each break the watch found is kept with what it found it by, and said by its key
     // alone.
+    // The readings of the first Claude Code result's worker dropped for 12 s after it
+    // left that result unjudged a while: filled by the readings after, kept in the report,
+    // counted against nothing.
+    let resolved = report["resolved"].as_array().unwrap();
+    assert!(
+        resolved
+            .iter()
+            .any(|filled| filled["invariant"] == 2 && filled["broke"] == false),
+        "{report}"
+    );
+    assert_eq!(report["unresolved"], serde_json::json!([]), "{report}");
     for found in report["breaks"].as_array().unwrap() {
         assert!(
             found["said"].is_string() && found["evidence"].is_object(),

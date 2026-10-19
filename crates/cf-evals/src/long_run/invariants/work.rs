@@ -18,7 +18,7 @@ use std::sync::OnceLock;
 use cf_e2e::pattern;
 use regex::Regex;
 
-use super::{iso, plain, Break, Evidence, Settings, Unjudged};
+use super::{iso, plain, Break, Evidence, Gap, Settings, Unjudged};
 use crate::clock;
 use crate::long_run::ledger::{Item, Message, Participant, Task};
 use crate::long_run::look::Look;
@@ -37,90 +37,156 @@ const DELIVERY: &str = "[ConsensFlow m-";
 
 /// 1: a working task whose window came to rest and has done nothing since, holding
 /// no job, for longer than the run lets it. One of a Claude Code window whose own
-/// record was not read through the look is unresolved instead ([`idle_unread`]).
+/// record could not be held to it is unresolved instead ([`idle_unread`]).
 pub fn idle(look: &Look, settings: &Settings) -> Vec<Break> {
-    idle_found(look, settings)
-        .into_iter()
-        .filter_map(|(found, unread)| unread.is_none().then_some(found))
+    let names = Names::of(look);
+    working(look)
+        .filter_map(
+            |task| match idle_of(look, settings, &names, task, given(task), look.at) {
+                Some((found, None)) => Some(found),
+                _ => None,
+            },
+        )
         .collect()
 }
 
 /// 1, unresolved: a working task of a Claude Code window that the copy of its
 /// conversation says came to rest past the idle time holding no job, whose own record
-/// (the window's word on its turns and its jobs) was not read through the look.
+/// (the window's word on its turns and its jobs) could not be held to it: not read
+/// through the look, or no conversation of the window open. A gap a later look may fill
+/// ([`rest_again`]).
 pub fn idle_unread(look: &Look, settings: &Settings) -> Vec<Unjudged> {
-    idle_found(look, settings)
-        .into_iter()
-        .filter_map(|(found, unread)| {
-            let why = unread?;
-            Some(Unjudged::new(
-                1,
-                found.key,
-                format!(
-                    "{}, as the copy of its conversation says; its own record was not read through the look ({why}): whether it was at rest cannot be judged",
-                    found.said
-                ),
-            ))
+    let names = Names::of(look);
+    working(look)
+        .filter_map(|task| {
+            let (found, why) = idle_of(look, settings, &names, task, given(task), look.at)?;
+            let why = why?;
+            Some(
+                Unjudged::new(
+                    1,
+                    found.key,
+                    format!(
+                        "{}, as the copy of its conversation says; its own record could not be held to it ({why}): whether it was at rest cannot be judged",
+                        found.said
+                    ),
+                )
+                .gap(Gap::Rest {
+                    number: task.number,
+                    given: given(task),
+                    at: look.at,
+                }),
+            )
         })
         .collect()
 }
 
-/// The breaks of the first, each with why its window's own record was not held to it:
-/// a Claude Code window's not read through the look, the copy of its conversation read
-/// instead.
-fn idle_found(look: &Look, settings: &Settings) -> Vec<(Break, Option<String>)> {
-    let working = look
+/// The first, of a gap [`idle_unread`] left open: T-`number` as of `at`, given to its
+/// window at `given`, judged again on `look`, which may hold its window's own record read
+/// through `at` since. None while it does not (or the look holds no such task); else the
+/// break it came to, if any.
+pub fn rest_again(
+    look: &Look,
+    settings: &Settings,
+    number: i64,
+    given: Option<i64>,
+    at: i64,
+) -> Option<Option<Break>> {
+    let task = look
         .ledger
         .tasks
         .iter()
-        .filter(|task| task.state == "working" && !task.deleted);
-    let names = Names::of(look);
-    let mut found = Vec::new();
-    for task in working {
-        let Some(worker) = task.assignee.and_then(|id| look.ledger.participant(id)) else {
-            continue;
-        };
-        let read = Look::is_claude(worker).then(|| record_by(look, worker, look.at, look.at));
-        let own = read.as_ref().and_then(|read| read.as_ref().ok().copied());
-        let unread = read.and_then(Result::err);
-        let Some((rested, record)) = rested_at(look, worker, own, &names) else {
-            continue;
-        };
-        let held = jobs_held(look, worker, look.at, own);
-        if !held.is_empty() {
-            continue;
-        }
-        // A task given to a window at rest is waited for from when it was given.
-        let since = clock::millis(&task.updated_at).map_or(rested, |given| given.max(rested));
-        if look.at - since < settings.idle {
-            continue;
-        }
-        let minutes = (look.at - since) / 60_000;
-        let screen = look
-            .window_of(&worker.handle)
-            .map(|window| window.tail.clone())
-            .unwrap_or_default();
-        found.push((
-            Break::new(
-                1,
-                format!("1:T-{}:{since}", task.number),
-                format!(
-                    "T-{} is working, and @{}'s window has been at rest for {minutes} min with no job held",
-                    task.number, worker.handle
-                ),
-            )
-            .with(Evidence {
-                rows: vec![
-                    row_of(task, worker, &names),
-                    format!("at rest since {}", iso(rested)),
-                ],
-                screen,
-                record,
-            }),
-            unread,
-        ));
+        .find(|task| task.number == number)?;
+    match idle_of(look, settings, &Names::of(look), task, given, at) {
+        None => Some(None),
+        Some((found, None)) => Some(Some(found)),
+        Some((_, Some(_))) => None,
     }
-    found
+}
+
+/// The tasks of the look at work.
+fn working(look: &Look) -> impl Iterator<Item = &Task> {
+    look.ledger
+        .tasks
+        .iter()
+        .filter(|task| task.state == "working" && !task.deleted)
+}
+
+/// When `task` was given to its window, as its row says.
+fn given(task: &Task) -> Option<i64> {
+    clock::millis(&task.updated_at)
+}
+
+/// The first, of `task` as of `at`, given to its window at `given`: its break where the
+/// window came to rest and did nothing since, holding no job, for longer than the run
+/// lets it; none where it held. A Claude Code window is read from its own record of the
+/// conversation open at `at` (whatever the copy holds: the daemon may still be copying
+/// one that ended), read through `at`, and from the copy of that conversation where the
+/// record says nothing; where the record could not be held to it (not read through `at`,
+/// or no conversation open then, which leaves the task's turns untold), the break comes
+/// with why, judged on the copy.
+fn idle_of(
+    look: &Look,
+    settings: &Settings,
+    names: &Names,
+    task: &Task,
+    given: Option<i64>,
+    at: i64,
+) -> Option<(Break, Option<String>)> {
+    let worker = task.assignee.and_then(|id| look.ledger.participant(id))?;
+    let (own, unread, conversation) = if Look::is_claude(worker) {
+        match look.conversation_open_at(worker.id, at) {
+            Some(conversation) => match look.record_through(conversation, at) {
+                Ok(record) => (Some(record), None, Some(conversation)),
+                Err(why) => (None, Some(why), Some(conversation)),
+            },
+            None => (
+                None,
+                Some(format!(
+                    "no conversation of @{}'s was open then, and which holds T-{}'s turns cannot be told",
+                    worker.handle, task.number
+                )),
+                None,
+            ),
+        }
+    } else {
+        (None, None, None)
+    };
+    let (rested, record) = rested_at(look, worker, own, conversation, at, names)?;
+    if !jobs_held(look, worker, at, own).is_empty() {
+        return None;
+    }
+    // A task given to a window at rest is waited for from when it was given.
+    let since = given.map_or(rested, |given| given.max(rested));
+    if at - since < settings.idle {
+        return None;
+    }
+    let minutes = (at - since) / 60_000;
+    let screen = if at == look.at {
+        look.window_of(&worker.handle)
+            .map(|window| window.tail.clone())
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+    Some((
+        Break::new(
+            1,
+            format!("1:T-{}:{since}", task.number),
+            format!(
+                "T-{} is working, and @{}'s window has been at rest for {minutes} min with no job held",
+                task.number, worker.handle
+            ),
+        )
+        .with(Evidence {
+            rows: vec![
+                row_of(task, worker, names),
+                format!("at rest since {}", iso(rested)),
+            ],
+            screen,
+            record,
+        }),
+        unread,
+    ))
 }
 
 /// `worker`'s own record of its conversation at `at`, where the run read it through
@@ -259,38 +325,47 @@ pub fn unread_records(look: &Look, settings: &Settings) -> Vec<Unjudged> {
             },
         };
         if let Some(why) = why {
-            found.push(Unjudged::new(
-                2,
-                format!("2:m-{}", result.id),
-                format!(
-                    "m-{}'s turn is not in @{}'s own record ({why}): whether a background job still ran when it was written cannot be judged",
-                    result.id, worker.handle
-                ),
-            ));
+            found.push(
+                Unjudged::new(
+                    2,
+                    format!("2:m-{}", result.id),
+                    format!(
+                        "m-{}'s turn is not in @{}'s own record ({why}): whether a background job still ran when it was written cannot be judged",
+                        result.id, worker.handle
+                    ),
+                )
+                .gap(Gap::Again),
+            );
         }
     }
     found
 }
 
-/// When `worker`'s window came to rest, if it is at rest now, with the record's
-/// last lines; none while a turn of it is at work, or where nothing says. Its own
-/// record (`own`, read through the look) says, where it says anything; else the copy.
+/// When `worker`'s window came to rest, if it was at rest at `at`, with the record's
+/// last lines; none while a turn of it was at work, or where nothing says. Its own
+/// record (`own`, read through `at`) says, where it says anything; else the copy, of the
+/// `conversation` open then where one is named.
 fn rested_at(
     look: &Look,
     worker: &Participant,
     own: Option<&Record>,
+    conversation: Option<i64>,
+    at: i64,
     names: &Names,
 ) -> Option<(i64, Vec<String>)> {
     if let Some(record) = own {
-        if let Some((stood, entry)) = record.stood_at(look.at) {
+        if let Some((stood, entry)) = record.stood_at(at) {
             return (stood == Stood::AtRest)
-                .then(|| (entry.at.unwrap_or(look.at), record.lines_by(look.at, 4)));
+                .then(|| (entry.at.unwrap_or(at), record.lines_by(at, 4)));
         }
     }
-    let items = look.items_by(worker.id, look.at);
+    let mut items = look.items_by(worker.id, at);
+    if let Some(conversation) = conversation {
+        items.retain(|item| item.conversation == conversation);
+    }
     let last = items.last()?;
     let at_rest = last.role == "assistant" && last.complete;
-    at_rest.then(|| (last.millis().unwrap_or(look.at), lines_of(&items, 4, names)))
+    at_rest.then(|| (last.millis().unwrap_or(at), lines_of(&items, 4, names)))
 }
 
 /// The jobs `worker`'s window holds at `at`: what its record (`own`, its own) and the

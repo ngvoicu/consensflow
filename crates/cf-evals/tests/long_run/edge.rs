@@ -124,7 +124,9 @@ fn what_stops_the_run_and_what_its_rig_says_leave_through_the_edge() {
         .filter(|line| line.contains("stderr()"))
         .collect();
     assert_eq!(written.len(), 1, "{written:?}");
-    assert!(written[0].contains("tell.text(&report)"), "{written:?}");
+    // What it says of itself is kept in a file, told first; its error output says where.
+    assert!(written[0].contains("where_kept.as_bytes()"), "{written:?}");
+    assert!(report.contains("let where_kept = keep(&rig.root, &tell.text(&report));"));
     assert!(report.contains("let tell = Tell(rig.masker.as_ref());"));
 }
 
@@ -236,7 +238,7 @@ const TAKEN: [(&str, &str, &str); 46] = [
     ),
     (
         "long_run/watcher.rs",
-        ".add_claude(&String::from_utf8_lossy(&more[..=end]), names);",
+        ".add_claude(&String::from_utf8_lossy(&more[..whole]), names);",
         "a record's whole lines, each entry masked as it is read",
     ),
     (

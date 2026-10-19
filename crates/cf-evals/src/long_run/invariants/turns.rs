@@ -11,7 +11,7 @@
 
 use super::order::message_row;
 use super::work::lines_of;
-use super::{Break, Evidence, Unjudged};
+use super::{Break, Evidence, Gap, Unjudged};
 use crate::clock;
 use crate::long_run::look::Look;
 use crate::long_run::mask::Names;
@@ -59,14 +59,17 @@ fn cut_notes(look: &Look) -> (Vec<Break>, Vec<Unjudged>) {
             match read {
                 Ok(record) => Some(record),
                 Err(why) => {
-                    unread.push(Unjudged::new(
-                        5,
-                        format!("5:m-{}", note.id),
-                        format!(
-                            "@{} was told its turn was cut (m-{}), and its own record was not read through then ({why}): whether a turn was cut cannot be judged",
-                            window.handle, note.id
-                        ),
-                    ));
+                    unread.push(
+                        Unjudged::new(
+                            5,
+                            format!("5:m-{}", note.id),
+                            format!(
+                                "@{} was told its turn was cut (m-{}), and its own record was not read through then ({why}): whether a turn was cut cannot be judged",
+                                window.handle, note.id
+                            ),
+                        )
+                        .gap(Gap::Again),
+                    );
                     continue;
                 }
             }
