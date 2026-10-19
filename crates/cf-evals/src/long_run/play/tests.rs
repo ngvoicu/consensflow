@@ -43,11 +43,13 @@ fn a_refusal_of_the_owners_ask_is_said_and_a_page_that_failed_is_the_error() {
 #[test]
 fn a_wait_looks_between_its_asks_and_asks_once_more_when_its_time_is_up() {
     // The watch goes on in a disruption's waits: a dialog that waits too long while
-    // a switch waits is found then, not when the switch is over.
+    // a switch waits is found then, not when the switch is over. The wait that comes
+    // has ample time: on a loaded runner two 10 ms sleeps once took all of 50 ms, and
+    // it ran out before its third look (macOS CI, 2026-10-19).
     let mut looks = 0;
     let came = wait_ticking(
         &mut looks,
-        Duration::from_millis(50),
+        Duration::from_secs(10),
         Duration::from_millis(10),
         |looks| *looks += 1,
         |looks| Ok(*looks >= 3),
