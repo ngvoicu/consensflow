@@ -91,6 +91,30 @@ enum Round {
     Wait,
 }
 
+/// What the notes of a window closed for a stop it ignored say became of its
+/// task T-`number`, as it is once the close was taken (`state`, none for one
+/// deleted): to the human, and to whoever gave it. The close is awaited, and the
+/// task may move meanwhile. Only a task still paused waits for its resume, and
+/// only one queued for this window (`ours`: resumed while it closed) has words
+/// that go in as it reopens; one cancelled, finished or given elsewhere has none.
+fn became_of(number: i64, state: Option<&str>, ours: bool) -> (String, String) {
+    let both = |said: String| (said.clone(), said);
+    match state {
+        Some("paused") => both(format!(
+            "T-{number} stays paused, and its window reopens on its conversation when it is resumed."
+        )),
+        Some("queued") if ours => (
+            format!("The words that resume T-{number} go in once its window reopens on its conversation."),
+            "Your words go in once it reopens on its conversation.".to_owned(),
+        ),
+        Some("cancelled") => both(format!("T-{number} was cancelled.")),
+        Some("failed") => both(format!("T-{number} failed.")),
+        Some("accepted") => both(format!("T-{number} was accepted.")),
+        Some(state) => both(format!("T-{number} is {state}.")),
+        None => both(format!("T-{number} was deleted.")),
+    }
+}
+
 /// The cadence: the first press of a stop is at once; a round follows three
 /// seconds after the last, up to three; three seconds after the third, the
 /// window of a pause's stop is closed, and where the host refused that, the
@@ -351,9 +375,8 @@ impl Dispatcher {
     }
 
     /// The human, and whoever gave the task if it was not the human, are told
-    /// that the window did not stop and was closed, and what comes of the task:
-    /// it stays paused, or the words that resumed it meanwhile wait for the
-    /// window to reopen.
+    /// that the window did not stop and was closed, and what became of the task
+    /// once the close was taken ([`became_of`]).
     fn say_closed(
         &self,
         project: &ProjectView,
@@ -368,18 +391,12 @@ impl Dispatcher {
             .borrow()
             .task(project.id, number)?
             .map(|thread| thread.task);
-        let paused = task.as_ref().is_some_and(|task| task.state == "paused");
-        let (human, words) = if paused {
-            let goes_on = format!(
-                "T-{number} stays paused, and its window reopens on its conversation when it is resumed."
-            );
-            (goes_on.clone(), goes_on)
-        } else {
-            (
-                format!("The words that resume T-{number} go in once its window reopens on its conversation."),
-                "Your words go in once it reopens on its conversation.".to_owned(),
-            )
-        };
+        let (human, words) = became_of(
+            number,
+            task.as_ref().map(|task| task.state.as_str()),
+            task.as_ref()
+                .is_some_and(|task| task.assignee.as_ref() == Some(handle)),
+        );
         self.tell_stop(
             project,
             number,
@@ -545,6 +562,44 @@ mod tests {
             next_round(Some(&done(3, 0, true)), KEY, 40 * 60_000),
             Round::Close
         );
+    }
+
+    #[test]
+    fn a_closed_windows_notes_promise_words_only_for_a_task_queued_for_it_and_say_how_any_other_ended(
+    ) {
+        let said = |state, ours| became_of(1, state, ours);
+        let both = |text: &str| (text.to_owned(), text.to_owned());
+        assert_eq!(
+            said(Some("paused"), true),
+            both(
+                "T-1 stays paused, and its window reopens on its conversation when it is resumed."
+            )
+        );
+        assert_eq!(
+            said(Some("queued"), true),
+            (
+                "The words that resume T-1 go in once its window reopens on its conversation."
+                    .to_owned(),
+                "Your words go in once it reopens on its conversation.".to_owned()
+            )
+        );
+        for (state, ours, text) in [
+            (Some("queued"), false, "T-1 is queued."),
+            (Some("cancelled"), true, "T-1 was cancelled."),
+            (Some("failed"), true, "T-1 failed."),
+            (Some("done"), true, "T-1 is done."),
+            (Some("accepted"), true, "T-1 was accepted."),
+            (Some("open"), false, "T-1 is open."),
+            (None, false, "T-1 was deleted."),
+        ] {
+            let (human, requester) = said(state, ours);
+            assert_eq!(
+                (human.as_str(), requester.as_str()),
+                (text, text),
+                "{state:?}"
+            );
+            assert!(!human.contains("go in"), "{state:?}");
+        }
     }
 
     #[test]

@@ -45,6 +45,21 @@ fn workers_windows(rig: &Rig, project: &Project) -> Vec<Value> {
         .collect()
 }
 
+/// Whether the daemon closed `window` (its `pane.open`): it asked the pane host
+/// to, and the host told it the window ended.
+fn closed_by_the_daemon(rig: &Rig, window: &Value) -> bool {
+    let this =
+        |frame: &Value| frame["id"] == window["id"] && frame["generation"] == window["generation"];
+    rig.kills().iter().any(this) && rig.exits().iter().any(this)
+}
+
+/// Waits for the worker's window to come back: one more opened than `first`.
+fn comes_back(rig: &Rig, project: &Project, first: &[Value]) -> cf_e2e::Result<()> {
+    rig.wait_for("the worker's window to come back", secs(60), || {
+        Ok(workers_windows(rig, project).len() == first.len() + 1)
+    })
+}
+
 /// `cf` with `words`, run in the chief's window as its agent runs it.
 fn cf(rig: &Rig, chief: &Value, words: &[&str]) -> cf_e2e::Result<()> {
     let ran = rig.cf_in_window(chief, words)?;
@@ -117,27 +132,33 @@ fn paused_then_resumed(at_once: bool) -> Outcome {
         .and_then(|window| after(window, "--session-id"))
         .ok_or("the worker's window has no session")?
         .to_owned();
+    let window = first.last().ok_or("the worker has no window")?.clone();
     let chief = rig.open_frame(&format!("p{}-chief", project.id()), OPEN)?;
     let resume = ["task", "resume", "T-1", "Reply with exactly: RESUMED_OK"];
 
     // The chief pauses T-1, and the window ignores every key.
     cf(&rig, &chief, &["task", "pause", "T-1"])?;
     if at_once {
+        // Resumed in the rounds, the window comes back by itself once it is closed: the
+        // case looks at the close only after that, as a loaded runner's look may come.
         cf(&rig, &chief, &resume)?;
+        comes_back(&rig, &project, &first)?;
     }
-    // The notes come once the host has ended the window, which its exit can come before.
+    // What the host was asked and told stays, however soon a window opens after it;
+    // the notes come once the host has ended the window, which its exit can come before.
     rig.wait_for(
-        "the window that ignored the pause to be closed, and the notes that say so",
+        "the daemon to have closed the window that ignored the pause, and the notes that say so",
         secs(60),
         || {
             let [human, to_chief] = told(&rig, &project)?;
-            Ok(project.lane("worker")?["pane"].is_null()
-                && !human.is_empty()
-                && !to_chief.is_empty())
+            Ok(closed_by_the_daemon(&rig, &window) && !human.is_empty() && !to_chief.is_empty())
         },
     )?;
-    let state = if at_once { "queued" } else { "paused" };
-    assert_eq!(project.task(1)?["state"], state);
+    if at_once {
+        assert_ne!(project.task(1)?["state"], "paused", "resumed, it stays so");
+    } else {
+        assert_eq!(project.task(1)?["state"], "paused");
+    }
     let [human, to_chief] = told(&rig, &project)?;
     assert!(
         human.len() == 1 && human[0].contains("so ConsensFlow closed its window"),
@@ -153,14 +174,18 @@ fn paused_then_resumed(at_once: bool) -> Outcome {
         assert_eq!(workers_windows(&rig, &project).len(), first.len());
         assert_eq!(project.task(1)?["state"], "paused");
         cf(&rig, &chief, &resume)?;
+        comes_back(&rig, &project, &first)?;
     }
 
-    // What the chief should have seen: the window opens again on its conversation,
-    // and the worker goes on with the resume's words.
-    rig.wait_for("the worker's window to come back", secs(60), || {
-        Ok(workers_windows(&rig, &project).len() == first.len() + 1)
-    })?;
+    // What the chief should have seen: the window opens again, after the one closed,
+    // on its conversation, and the worker goes on with the resume's words.
     let again = workers_windows(&rig, &project).remove(first.len());
+    assert!(
+        again["generation"].as_u64() > window["generation"].as_u64(),
+        "the window came back after the one closed: {} then {}",
+        window["generation"],
+        again["generation"]
+    );
     assert_eq!(
         resumed_on(&again),
         Some(session.as_str()),

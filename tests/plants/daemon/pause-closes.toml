@@ -12,7 +12,12 @@
 # - a window that ignores every round is left open, as on main (the engine's tests,
 #   and the rig's case);
 # - a window that did stop is closed;
-# - the close loses the paused state: the task goes on by itself.
+# - the close loses the paused state: the task goes on by itself;
+# - the notes promise words to a task cancelled or ended while its window closed, or
+#   queued for another window (Astra on round 1);
+# - a window whose member is out of quota is never closed;
+# - the rig's case reads the close by sampling the lane for its closed pane, which a
+#   look that comes after the window came back never sees (both reviewers on round 1).
 #
 # Every name holds `pause closes`, so `cargo xtask plants daemon "pause closes"` runs
 # them all.
@@ -20,6 +25,8 @@
 [run]
 # The case of the regressions that is the long run's, found by the start of its module's name.
 rig-regression-hung-pause = { command = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_pause_a_hung_worker_ignored_stranded_its_task::"], builds = true }
+# The engine's own tests of the stops.
+engine-lib-stops = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "stops::"]
 
 [[plant]]
 name = "pause closes: a window that ignores every round is left open"
@@ -71,3 +78,60 @@ replace = '''
                 if self.retire(record).await? {
                     self.seams.ledger.borrow_mut().resume_task(project.id, stop.number, None, "Go on")?;
                     return'''
+
+[[plant]]
+name = "pause closes: the notes promise words to a task that ended while its window closed"
+meant = "a_task_cancelled_while_its_window_is_closed_is_said_to_be_cancelled_and_no_words_are_promised"
+runs = ["engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/stops.rs"
+find = '        Some("queued") if ours => ('
+replace = '        Some(_) if ours => ('
+
+[[plant]]
+name = "pause closes: the notes promise words to a task queued for another window"
+meant = "a_closed_windows_notes_promise_words_only_for_a_task_queued_for_it_and_say_how_any_other_ended"
+runs = ["engine-lib-stops"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/stops.rs"
+find = '        Some("queued") if ours => ('
+replace = '        Some("queued") => ('
+
+[[plant]]
+name = "pause closes: a window whose member is out of quota is never closed"
+meant = "a_window_held_for_quota_that_ignores_the_rounds_is_closed_and_the_reset_reopens_it_and_gives_the_words_once"
+runs = ["engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/stops.rs"
+find = '''
+            Round::Close => {'''
+replace = '''
+            Round::Close if self.is_out(&self.member_of(project, participant)) => Ok(()),
+            Round::Close => {'''
+
+[[plant]]
+name = "pause closes: the rig case samples the lane for the closed window"
+meant = "a_worker_hung_in_its_turn_resumed_before_its_pause_closed_it_goes_on_in_the_window_that_opens_again"
+runs = ["rig-regression-hung-pause"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/regressions/a_pause_a_hung_worker_ignored_stranded_its_task.rs"
+find = '''
+            Ok(closed_by_the_daemon(&rig, &window) && !human.is_empty() && !to_chief.is_empty())
+        },
+    )?;
+    if at_once {
+        assert_ne!(project.task(1)?["state"], "paused", "resumed, it stays so");
+    } else {
+        assert_eq!(project.task(1)?["state"], "paused");
+    }'''
+replace = '''
+            Ok(project.lane("worker")?["pane"].is_null() && !human.is_empty() && !to_chief.is_empty())
+        },
+    )?;
+    let state = if at_once { "queued" } else { "paused" };
+    assert_eq!(project.task(1)?["state"], state);'''

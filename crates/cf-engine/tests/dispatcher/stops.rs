@@ -5,7 +5,7 @@
 //! rules are those of `stops.rs`. None of these tests is held to a Node
 //! recording: the rule is Node's no more.
 
-use cf_engine::testing::Context;
+use cf_engine::testing::{Context, Gate};
 use cf_engine::{ActivityState, Unstopped};
 use cf_harness::contract::Pane;
 use serde_json::{json, Value};
@@ -250,6 +250,110 @@ fn a_task_resumed_while_its_window_ignores_the_rounds_has_its_words_go_into_the_
     context.adapter.answer("zeus", "Parser, finished");
     context.pass().unwrap();
     assert_eq!(context.task(project, 1).task.state, "done");
+}
+
+#[test]
+fn a_window_held_for_quota_that_ignores_the_rounds_is_closed_and_the_reset_reopens_it_and_gives_the_words_once(
+) {
+    let context = Context::new();
+    let project = working(&context);
+    let native = context.adapter.agent("zeus").native;
+    let launches = context.adapter.prepared().len();
+    // Out of quota, its harness hung in the turn: the task is held, and the window
+    // never rests.
+    context.adapter.busy("zeus");
+    let resets_at = after(&context, 2 * 3_600_000);
+    context
+        .adapter
+        .quota("zeus", Some(exhausted(None, Some(&resets_at))));
+    context.pass().unwrap();
+    assert_eq!(context.task(project, 1).task.state, "paused", "held");
+    let pane = pane_of(&context, "zeus");
+    for _ in 0..3 {
+        context.pass().unwrap();
+        context.advance(3_100);
+    }
+    assert_eq!(context.host.inputs(), vec![escape(&pane); 3]);
+    context.host.exits_showing(Some(0), None, None);
+    context.pass().unwrap();
+    assert_eq!(
+        context.host.killed(),
+        [pane],
+        "closed while its member is out"
+    );
+    assert_eq!(context.task(project, 1).task.state, "paused");
+    assert_eq!(
+        told(&context, project),
+        CLOSED_PAUSED.map(|said| vec![said.to_owned()])
+    );
+
+    // Held until the reset: no window opens, and nothing goes in.
+    context.advance(60 * 60_000);
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(context.adapter.prepared().len(), launches);
+    assert_eq!(context.task(project, 1).task.state, "paused");
+
+    // The reset: the daemon resumes the task, and the window reopens on its
+    // conversation with the hold's words as its first message.
+    context.advance(60 * 60_000 + 1_000);
+    context.pass().unwrap();
+    let back = context.adapter.prepared().pop().unwrap();
+    assert_eq!(context.adapter.prepared().len(), launches + 1);
+    assert_eq!(back["resume"], json!(native), "the same conversation");
+    assert_match(
+        back["message"].as_str().unwrap(),
+        r"T-1 · task from ConsensFlow\]\nResumed: Go on where you stopped\.$",
+    );
+    context.pass().unwrap();
+    assert_eq!(context.task(project, 1).task.state, "working");
+    context.adapter.answer("zeus", "Parser, finished");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(context.task(project, 1).task.state, "done");
+    let given = context
+        .adapter
+        .agent("zeus")
+        .items
+        .iter()
+        .filter(|item| item.text.contains("Resumed: Go on where you stopped"))
+        .count();
+    assert_eq!(given, 1, "the words went in once");
+    assert_eq!(
+        context.host.inputs().len(),
+        3,
+        "and no key into the new window"
+    );
+}
+
+#[test]
+fn a_task_cancelled_while_its_window_is_closed_is_said_to_be_cancelled_and_no_words_are_promised() {
+    // Astra's order on round 1: the close is asked of the host, which takes its
+    // time, and the task is cancelled before it answers.
+    let context = Context::new();
+    let project = working(&context);
+    let pane = ignored_three_rounds(&context, project);
+    let held = Gate::default();
+    *context.host.hold_kill.borrow_mut() = Some((pane.generation, held.clone()));
+    let stepping = context.begin_pass();
+    context.settle();
+    context
+        .ledger
+        .borrow_mut()
+        .cancel_task(project, 1, "human")
+        .unwrap();
+    held.open();
+    context.settle();
+    stepping.take().unwrap().unwrap();
+    assert_eq!(context.host.killed(), [pane]);
+    assert_eq!(context.task(project, 1).task.state, "cancelled");
+    assert_eq!(
+        told(&context, project),
+        [
+            vec!["@zeus did not stop for T-1: it ignored the interrupt 3 times, so ConsensFlow closed its window. T-1 was cancelled.".to_owned()],
+            vec!["T-1's window (@zeus) did not stop: it ignored the interrupt, so ConsensFlow closed it. T-1 was cancelled.".to_owned()],
+        ]
+    );
 }
 
 #[test]
