@@ -1,0 +1,73 @@
+# A pause closes a window that ignores it (the zeewin long run of 2026-10-19: a Pi
+# worker hung in a model request ignored the pause's Escape, its window read working
+# for good, and the words that resumed its task waited 1 h 48 min with 0 attempts).
+# Every round of Escape ignored, the window of the pause's task is closed, the task
+# stays paused, and the notes say why; resumed, the window opens again on its
+# conversation. The engine's tests are in `crates/cf-engine/tests/dispatcher/stops.rs`;
+# the case of the regressions, `crates/cf-e2e/tests/regressions/
+# a_pause_a_hung_worker_ignored_stranded_its_task.rs`, is the real daemon and pane host
+# on a stand-in whose turn takes no Escape (`HANG`), and its run builds the native `cf`
+# from the sources as they are planted, so its plant says `builds`.
+#
+# - a window that ignores every round is left open, as on main (the engine's tests,
+#   and the rig's case);
+# - a window that did stop is closed;
+# - the close loses the paused state: the task goes on by itself.
+#
+# Every name holds `pause closes`, so `cargo xtask plants daemon "pause closes"` runs
+# them all.
+
+[run]
+# The case of the regressions that is the long run's, found by the start of its module's name.
+rig-regression-hung-pause = { command = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_pause_a_hung_worker_ignored_stranded_its_task::"], builds = true }
+
+[[plant]]
+name = "pause closes: a window that ignores every round is left open"
+meant = "three_rounds_ignored_close_the_window_the_task_stays_paused_and_its_resume_reopens_it_on_its_conversation"
+runs = ["engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/stops.rs"
+find = "                if self.retire(record).await? {"
+replace = "                if false {"
+
+[[plant]]
+name = "pause closes: a window that ignores every round is left open, on the rig"
+meant = "a_worker_hung_in_its_turn_is_closed_by_its_pause_and_goes_on_in_the_window_its_resume_opens"
+runs = ["rig-regression-hung-pause"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/stops.rs"
+find = "                if self.retire(record).await? {"
+replace = "                if false {"
+
+[[plant]]
+name = "pause closes: a window that stopped is closed at rest"
+meant = "a_window_that_stops_at_its_second_round_is_never_closed_and_nobody_is_told"
+runs = ["engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/stops.rs"
+find = '''
+                    self.pay(record, &stop);
+                    Ok(())'''
+replace = '''
+                    self.pay(record, &stop);
+                    self.retire(record).await?;
+                    Ok(())'''
+
+[[plant]]
+name = "pause closes: the close resumes the task by itself"
+meant = "three_rounds_ignored_close_the_window_the_task_stays_paused_and_its_resume_reopens_it_on_its_conversation"
+runs = ["engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/stops.rs"
+find = '''
+                if self.retire(record).await? {
+                    return'''
+replace = '''
+                if self.retire(record).await? {
+                    self.seams.ledger.borrow_mut().resume_task(project.id, stop.number, None, "Go on")?;
+                    return'''

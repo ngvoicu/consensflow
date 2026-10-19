@@ -147,8 +147,8 @@ fn a_member_paused_while_its_command_runs_stops_with_it_and_the_hosts_tree_says_
 
 /// T-5's shape: the turn goes on through the rounds while its command runs (the
 /// stand-in takes a minute and a half to wind its turn down, and leaves the command
-/// running), so the daemon says the window did not stop, the case does not hold, and it
-/// says each round all the same, with the command running at each look and at the end.
+/// running), so the daemon closes the window that did not stop, the case does not hold,
+/// and it says each round all the same, with the command running at each look.
 #[test]
 fn a_member_whose_turn_goes_on_while_its_command_runs_is_a_stop_the_case_fails_and_says_each_round_of(
 ) {
@@ -177,22 +177,27 @@ fn a_member_whose_turn_goes_on_while_its_command_runs_is_a_stop_the_case_fails_a
         said.contains("FAIL the daemon read the window at rest, and paid the stop there: its reading of the window never turned idle in the "),
         "{said}"
     );
+    // The window that did not stop was closed after its third round (whether the notes
+    // that say so had landed by the end of the watch is the host's grace's).
     assert!(
-        said.contains("FAIL it is not said to have ignored the stop: unstopped on its lane: {"),
+        said.contains("     the lane over the stop: working at +0.0 s, closed at +"),
         "{said}"
     );
-    // At each of the three looks, at the end, and in the line that tells it, the command
-    // is there.
+    // At each of the three looks the command is there.
     assert_eq!(
         said.matches("the host's tree still has the command (")
             .count(),
-        3 + 1 + 1,
+        3,
         "{said}"
     );
     assert!(!said.contains("no longer has the command"), "{said}");
-    assert!(said.contains("; it was never read gone"), "{said}");
-    // The watch was not ended by the board's word: it ran to the end of its time.
-    assert!(said.contains("     at the end, +15."), "{said}");
+    // The watch ended once the closed lane had rested, as a window at rest ends it.
+    assert!(
+        said.lines()
+            .any(|line| line.starts_with("     at the end, +")
+                && line.contains(" s: the lane read closed;")),
+        "{said}"
+    );
     members.close().unwrap();
 }
 

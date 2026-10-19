@@ -289,13 +289,20 @@ fn drive(ctx: &Ctx, case: &mut Account, name: &str, chosen: &mut Vec<Running>) -
         sleep(Duration::from_millis(500));
     }
     let presses = members.rig().presses(window.id(), &[27]);
-    let exhausted = seen.iter().any(|word| word.contains("unstopped"));
     let human_inbox = members.inbox(None)?;
     let requester_inbox = members.inbox(Some("chief"))?;
     let (human, requester) = (
         told_the_human(&human_inbox),
         told_the_requester(&requester_inbox),
     );
+    // A window that ignored every round is closed, and the notes say so; one the
+    // host would not close shows `unstopped` on its lane.
+    let closed = human.iter().any(|note| {
+        note["body"]
+            .as_str()
+            .is_some_and(|body| body.contains("so ConsensFlow closed its window"))
+    });
+    let exhausted = closed || seen.iter().any(|word| word.contains("unstopped"));
     let gaps = crate::slow::gaps(&presses);
     case.say(format!(
         "{} Escapes: {}{}; the lane over the stop: {}",
@@ -343,7 +350,12 @@ fn drive(ctx: &Ctx, case: &mut Account, name: &str, chosen: &mut Vec<Running>) -
     };
     if exhausted {
         case.say(format!(
-            "{name} kept working through its presses (the exhausted stop of §1.3): {} note to the human ({}), {} to the requester ({})",
+            "{name} kept working through its presses, and {}: {} note to the human ({}), {} to the requester ({})",
+            if closed {
+                "the daemon closed its window"
+            } else {
+                "the host would not close its window"
+            },
             human.len(),
             words(&human),
             requester.len(),
@@ -360,7 +372,8 @@ fn drive(ctx: &Ctx, case: &mut Account, name: &str, chosen: &mut Vec<Running>) -
         ));
     }
     say_events(case, members, number);
-    // Either end is an answer: a window that ignores (told to the human and the requester) or one that stops.
+    // Either end is an answer: a window that ignores (closed, and told to the human and the
+    // requester) or one that stops.
     case.require(!exhausted || (human.len() == 1 && requester.len() == 1));
     Ok(())
 }
