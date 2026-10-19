@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use serde_json::json;
 
 use super::*;
-use crate::long_run::ledger::{Conversation, Participant};
+use crate::long_run::ledger::{Conversation, Event, Participant};
 use crate::long_run::record::Record;
 
 #[test]
@@ -43,11 +43,13 @@ fn a_refusal_of_the_owners_ask_is_said_and_a_page_that_failed_is_the_error() {
 #[test]
 fn a_wait_looks_between_its_asks_and_asks_once_more_when_its_time_is_up() {
     // The watch goes on in a disruption's waits: a dialog that waits too long while
-    // a switch waits is found then, not when the switch is over.
+    // a switch waits is found then, not when the switch is over. The wait that comes
+    // has ample time: on a loaded runner two 10 ms sleeps once took all of 50 ms, and
+    // it ran out before its third look (macOS CI, 2026-10-19).
     let mut looks = 0;
     let came = wait_ticking(
         &mut looks,
-        Duration::from_millis(50),
+        Duration::from_secs(10),
         Duration::from_millis(10),
         |looks| *looks += 1,
         |looks| Ok(*looks >= 3),
@@ -143,6 +145,12 @@ struct Script {
     /// The windows the app opens again at the Resume after a restart.
     reopens: Vec<String>,
     opened: RefCell<Vec<String>>,
+    /// The state the task is in after the owner's pause, by the time the board is read
+    /// (queued, where another resumed it since); none where the pause never takes.
+    paused_to: Option<&'static str>,
+    /// The state T-7 goes to when the worker's window is killed; none where it cannot be.
+    killed_then: Option<&'static str>,
+    killed: bool,
 }
 
 impl Script {
@@ -155,6 +163,17 @@ impl Script {
             resume,
             reopens: Vec::new(),
             opened: RefCell::new(Vec::new()),
+            paused_to: None,
+            killed_then: None,
+            killed: false,
+        }
+    }
+
+    /// [`Script::new`], T-7 in `to` after the owner's pause.
+    fn pausing(resume: Resume, to: Option<&'static str>) -> Self {
+        Self {
+            paused_to: to,
+            ..Self::new(resume)
         }
     }
 }
@@ -199,10 +218,22 @@ impl Stagehand for Script {
                     .borrow_mut()
                     .extend(self.reopens.iter().cloned());
             }
+            "task.pause" => {
+                let number = body["task"].as_i64().unwrap_or_default();
+                if let Some(to) = self.paused_to {
+                    self.states.borrow_mut().insert(number, to.to_owned());
+                }
+            }
             "task.resume" => {
                 let number = body["task"].as_i64().unwrap_or_default();
                 let mut states = self.states.borrow_mut();
                 let state = states.entry(number).or_default();
+                // The daemon resumes only a paused task.
+                if state != "paused" {
+                    return Err(Error::Refused(format!(
+                        "task.resume: {{\"ok\":false,\"error\":\"cannot resume T-{number}: it is {state}\"}}"
+                    )));
+                }
                 match self.resume {
                     Resume::GoesOn => *state = "working".to_owned(),
                     Resume::StaysPaused => {}
@@ -238,11 +269,20 @@ impl Stagehand for Script {
     }
 
     fn kill(&mut self, handle: &str) -> Result<(String, i64, String)> {
-        Err(Error::Refused(format!("@{handle} has no window to kill")))
+        let Some(state) = self.killed_then else {
+            return Err(Error::Refused(format!("@{handle} has no window to kill")));
+        };
+        self.killed = true;
+        self.states.borrow_mut().insert(7, state.to_owned());
+        Ok((
+            "p1-long-devin-1".to_owned(),
+            1,
+            format!("@{handle}'s window was killed"),
+        ))
     }
 
     fn exited(&self, _: &str, _: i64) -> bool {
-        false
+        self.killed
     }
 
     fn opened(&self, pane: &str) -> bool {
@@ -356,6 +396,185 @@ fn a_suspend_whose_tasks_went_on_was_played() {
             "the owner closed the project, and resumed it 0 s later; the close paused T-7, and the owner resumed them"
                 .to_owned()
         )
+    );
+}
+
+/// A move of T-7 in the ledger: its event's id, the state it left, the one it went to,
+/// who moved it, and when, in seconds from now (the owner's ask comes about now).
+type Move = (i64, &'static str, &'static str, Option<&'static str>, i64);
+
+/// A look whose ledger holds the moves of T-7 `moves`.
+fn moves_of_seven(moves: &[Move]) -> Look {
+    let now = jiff::Timestamp::now().as_millisecond();
+    let mut look = Look::default();
+    look.ledger.events = moves
+        .iter()
+        .map(|(id, from, to, by, secs)| Event {
+            id: *id,
+            at: crate::clock::iso(jiff::Timestamp::from_millisecond(now + secs * 1000).unwrap()),
+            kind: "task.state".to_owned(),
+            data: json!({ "task": 7, "from": from, "to": to, "by": by }),
+        })
+        .collect();
+    look
+}
+
+#[test]
+fn a_pause_another_resumed_before_the_owner_was_played_and_the_owners_refused_resume_is_said() {
+    // zeewin's run on 0cedce70: the owner paused T-2 (working → paused, event 75); the
+    // Codex chief resumed it itself 16 s later (paused → queued, event 80, message 10); the
+    // owner's resume at +60 s was refused ("cannot resume T-2: it is queued"). The pause
+    // took effect: no break.
+    let mut watch = Looks {
+        last: Some(moves_of_seven(&[BEFORE, PAUSE, CHIEFS])),
+        then: None,
+    };
+    let outcome = played(
+        &mut Script::pausing(Resume::GoesOn, Some("queued")),
+        &mut watch,
+        Disruption::Pause,
+        &Target::Task(7),
+    );
+    assert!(matches!(outcome, Outcome::Played(_)), "{outcome:?}");
+    assert!(
+        said(&outcome).contains("by @chief (event 80)"),
+        "{}",
+        said(&outcome)
+    );
+    assert!(
+        said(&outcome).contains("the owner's resume was refused: task.resume:"),
+        "{}",
+        said(&outcome)
+    );
+}
+
+/// zeewin's moves of the task (as T-7): the one before the pause, the owner's pause (the
+/// page's, by the human), and the chief's resume 16 s later.
+const BEFORE: Move = (74, "queued", "working", None, -60);
+const PAUSE: Move = (75, "working", "paused", Some("human"), 1);
+const CHIEFS: Move = (80, "paused", "queued", Some("chief"), 17);
+
+#[test]
+fn a_pause_the_owners_ask_did_not_make_is_a_break_whoever_else_paused_the_task() {
+    // Both reviewers' (round 16): the watch last read the ledger to event 74; the chief
+    // paused and resumed T-7 at 75 and 80 before the owner's pause, which was taken and did
+    // nothing. Nor is a pause of the chief's after the ask, or one of the owner's in an
+    // earlier disruption, the owner's pause of this one: a break, never played.
+    let cases: [&[Move]; 3] = [
+        &[
+            BEFORE,
+            (75, "working", "paused", Some("chief"), -30),
+            (80, "paused", "queued", Some("chief"), -20),
+        ],
+        &[
+            BEFORE,
+            (75, "working", "paused", Some("chief"), 1),
+            (80, "paused", "queued", Some("chief"), 2),
+        ],
+        &[
+            (60, "working", "paused", Some("human"), -300),
+            (61, "paused", "queued", Some("human"), -290),
+            BEFORE,
+        ],
+    ];
+    for moves in cases {
+        let mut watch = Looks {
+            last: Some(moves_of_seven(&[BEFORE])),
+            then: Some(moves_of_seven(moves)),
+        };
+        let mut stage = Script::pausing(Resume::GoesOn, None);
+        stage.states.borrow_mut().insert(7, "queued".to_owned());
+        let outcome = played(&mut stage, &mut watch, Disruption::Pause, &Target::Task(7));
+        assert!(
+            matches!(outcome, Outcome::Failed { .. }),
+            "{moves:?}: {outcome:?}"
+        );
+    }
+}
+
+#[test]
+fn a_kill_whose_task_another_resumed_before_any_read_of_it_is_proven_by_consensflows_pause() {
+    // Astra's (filed in round 16): @long-devin-1's window is killed; ConsensFlow pauses T-7
+    // in its own name (event 75), and the chief resumes it (event 80) before the run reads
+    // the board. The ledger's pause proves the kill's; the owner's refused resume is said.
+    let target = Target::Window {
+        handle: "long-devin-1".to_owned(),
+        task: Some(7),
+    };
+    let mut watch = Looks {
+        last: Some(moves_of_seven(&[BEFORE])),
+        then: Some(moves_of_seven(&[
+            BEFORE,
+            (75, "working", "paused", None, 1),
+            CHIEFS,
+        ])),
+    };
+    let mut stage = Script::new(Resume::GoesOn);
+    stage.killed_then = Some("queued");
+    let outcome = played(&mut stage, &mut watch, Disruption::Kill, &target);
+    assert!(matches!(outcome, Outcome::Played(_)), "{outcome:?}");
+    assert!(
+        said(&outcome).contains("by @chief (event 80)"),
+        "{}",
+        said(&outcome)
+    );
+    // Gone on to waiting with no pause of ConsensFlow's: the kill's effect was not seen.
+    let mut watch = Looks {
+        last: Some(moves_of_seven(&[BEFORE])),
+        then: Some(moves_of_seven(&[
+            BEFORE,
+            (75, "working", "waiting", None, 1),
+        ])),
+    };
+    let mut stage = Script::new(Resume::GoesOn);
+    stage.killed_then = Some("waiting");
+    let outcome = played(&mut stage, &mut watch, Disruption::Kill, &target);
+    assert!(matches!(outcome, Outcome::Failed { .. }), "{outcome:?}");
+    assert!(
+        said(&outcome).ends_with("T-7 went waiting, not paused"),
+        "{}",
+        said(&outcome)
+    );
+}
+
+#[test]
+fn a_pause_resumed_by_another_before_any_read_of_it_is_proven_by_its_move_to_paused() {
+    // The chief resumed it before the run read it paused: the ledger's move proves it.
+    let mut watch = Looks {
+        last: Some(moves_of_seven(&[BEFORE])),
+        then: Some(moves_of_seven(&[BEFORE, PAUSE, CHIEFS])),
+    };
+    let outcome = played(
+        &mut Script::pausing(Resume::GoesOn, Some("queued")),
+        &mut watch,
+        Disruption::Pause,
+        &Target::Task(7),
+    );
+    assert!(matches!(outcome, Outcome::Played(_)), "{outcome:?}");
+}
+
+#[test]
+fn a_pause_that_never_moved_the_task_to_paused_failed() {
+    // The owner's pause was taken, and T-7 went on working: no read of it and no move of it
+    // says paused, a move elsewhere (to waiting) none either.
+    let mut watch = Looks {
+        last: Some(moves_of_seven(&[BEFORE])),
+        then: Some(moves_of_seven(&[
+            BEFORE,
+            (75, "working", "waiting", Some("human"), 1),
+        ])),
+    };
+    let outcome = played(
+        &mut Script::pausing(Resume::GoesOn, None),
+        &mut watch,
+        Disruption::Pause,
+        &Target::Task(7),
+    );
+    assert!(matches!(outcome, Outcome::Failed { .. }), "{outcome:?}");
+    assert!(
+        said(&outcome).contains("after the owner's pause"),
+        "{}",
+        said(&outcome)
     );
 }
 

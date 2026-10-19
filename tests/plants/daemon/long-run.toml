@@ -3152,3 +3152,96 @@ runs = ["evals-long-run"]
 file = "crates/cf-evals/src/long_run/invariants.rs"
 find = "                        broke: self.recorded.contains(&open.key),"
 replace = "                        broke: false,"
+
+# The long run, rounds 16 and 17 (zeewin's 2-hour run on 0cedce70, and both reviewers' look at
+# round 16): the owner's pause is proven by its own move of the task to paused in the ledger, by
+# the human at or after the ask; a killed window's task by ConsensFlow's pause, on the board or in
+# the ledger; an owner's resume refused because another resumed the task first is the effect
+# played, the refusal said.
+
+[[plant]]
+name = "long run 10: an owner's resume refused because another resumed the task first is a break (zeewin's)"
+meant = "a_pause_another_resumed_before_the_owner_was_played_and_the_owners_refused_resume_is_said"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/play.rs"
+find = '        if state != "paused" {'
+replace = '        if state != "paused" && state.is_empty() {'
+
+[[plant]]
+name = "long run 10: the owner's pause is never proven by the ledger"
+meant = "a_pause_resumed_by_another_before_any_read_of_it_is_proven_by_its_move_to_paused"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/play.rs"
+find = "    if !hand.wait(|hand| Ok(hand.paused_by(number, Some(OWNER), asked_at)))? {"
+replace = "    if !hand.wait(|hand| Ok(hand.paused_by(number, Some(OWNER), asked_at) && asked_at < 0))? {"
+
+[[plant]]
+name = "long run 10: a pause the owner's ask was taken for is taken for one that took"
+meant = "a_pause_that_never_moved_the_task_to_paused_failed"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/play.rs"
+find = "    if !hand.wait(|hand| Ok(hand.paused_by(number, Some(OWNER), asked_at)))? {"
+replace = "    if !hand.wait(|hand| Ok(hand.paused_by(number, Some(OWNER), asked_at) || asked_at > 0))? {"
+
+[[plant]]
+name = "long run 10: any move of a task after its pause is taken for its move to paused"
+meant = "a_pause_that_never_moved_the_task_to_paused_failed"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/play.rs"
+find = '        event.data["to"] == "paused"'
+replace = '        event.data["to"] != "nowhere"'
+
+[[plant]]
+name = "long run 10: the owner's pause is proven by any move to paused since the watch's last look (both reviewers')"
+meant = "a_pause_the_owners_ask_did_not_make_is_a_break_whoever_else_paused_the_task"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/play.rs"
+find = "    let asked_at = jiff::Timestamp::now().as_millisecond();"
+replace = '''
+    let asked_at = jiff::Timestamp::now().as_millisecond();
+    let since = hand.watch.last().map_or(0, |look| look.ledger.events.iter().map(|event| event.id).max().unwrap_or(0));'''
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/play.rs"
+find = "    if !hand.wait(|hand| Ok(hand.paused_by(number, Some(OWNER), asked_at)))? {"
+replace = '''    if !hand.wait(|hand| Ok(hand.watch.last().is_some_and(|look| moves_of(look, number).any(|event| event.id > since && event.data["to"] == "paused"))))? {'''
+
+[[plant]]
+name = "long run 10: a pause by anyone is taken for the owner's"
+meant = "a_pause_the_owners_ask_did_not_make_is_a_break_whoever_else_paused_the_task"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/play.rs"
+find = '            && event.data["by"].as_str() == by'
+replace = "            && by.is_some_and(str::is_empty) == by.is_some_and(str::is_empty)"
+
+[[plant]]
+name = "long run 10: an owner's pause of an earlier disruption is taken for this one's"
+meant = "a_pause_the_owners_ask_did_not_make_is_a_break_whoever_else_paused_the_task"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/play.rs"
+find = "            && crate::clock::millis(&event.at).is_some_and(|at| at >= since - CLOCKS)"
+replace = "            && crate::clock::millis(&event.at).is_some_and(|at| at >= since - CLOCKS || at < since)"
+
+[[plant]]
+name = "long run 10: a killed window's task another resumed before the board was read is a break (Astra's)"
+meant = "a_kill_whose_task_another_resumed_before_any_read_of_it_is_proven_by_consensflows_pause"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/play.rs"
+find = '    if state != "paused" && !hand.wait(|hand| Ok(hand.paused_by(number, None, killed_at)))? {'
+replace = '    if state != "paused" {'
