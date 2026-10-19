@@ -13,7 +13,7 @@
 //! owner resumed them. An effect not seen within the time a disruption waits is a
 //! failure, said with its evidence (the rows of the board, the window's screen, the
 //! record); a refusal of what the owner asked is a failure too, unless the task had
-//! ended by then. A moment that passed before it could be played (the task ended
+//! ended by then, or another had resumed it first. A moment that passed before it could be played (the task ended
 //! between the look and the pause, the window went) is missed, and played at the next.
 //!
 //! The watch goes on while a disruption waits: every wait looks at the project as
@@ -241,9 +241,12 @@ fn refusal(asked: Result<Value>) -> Result<Option<String>> {
     }
 }
 
-/// The owner pauses T-`number`, leaves it `hold`, and resumes it: played once it read
-/// paused and then went on.
+/// The owner pauses T-`number`, leaves it `hold`, and resumes it: played once it moved to
+/// paused and then went on. Its move to paused is read on the board, or in the ledger as
+/// the watch last read it, where another resumed it before the board was read (the
+/// chief may resume a task at once).
 fn pause(hand: &mut Hand<'_>, number: i64, hold: Duration) -> Result<Outcome> {
+    let since = hand.watch.last().map_or(0, last_event);
     let asked = hand.stage.page("task.pause", json!({ "task": number }));
     if let Some(why) = refusal(asked)? {
         let state = hand.stage.state_of(number)?;
@@ -258,9 +261,16 @@ fn pause(hand: &mut Hand<'_>, number: i64, hold: Duration) -> Result<Outcome> {
             "",
         ));
     }
-    if !hand.wait(|hand| Ok(hand.stage.state_of(number)? == "paused"))? {
+    let paused = |hand: &Hand<'_>| {
+        Ok(hand.stage.state_of(number)? == "paused"
+            || hand
+                .watch
+                .last()
+                .is_some_and(|look| moved_to_paused(look, number, since)))
+    };
+    if !hand.wait(paused)? {
         return Ok(hand.failed(
-            format!("T-{number} never read paused after the owner's pause"),
+            format!("T-{number} never moved to paused after the owner's pause"),
             Some(number),
             "",
         ));
@@ -277,13 +287,27 @@ fn pause(hand: &mut Hand<'_>, number: i64, hold: Duration) -> Result<Outcome> {
 }
 
 /// The owner resumes T-`number`, which a disruption paused: played once it went on,
-/// `said` being what was done before.
+/// `said` being what was done before. A resume refused because another resumed it first
+/// (the chief, the daemon) is played too, the refusal said: it went on.
 fn resume_task(hand: &mut Hand<'_>, number: i64, said: &str) -> Result<Outcome> {
     if let Some(why) = refusal(hand.stage.page("task.resume", json!({ "task": number })))? {
         let state = hand.stage.state_of(number)?;
         if ENDED.contains(&state.as_str()) {
             return Ok(Outcome::Played(format!(
                 "{said}; T-{number} went {state} in the hold"
+            )));
+        }
+        if state != "paused" {
+            let by = hand
+                .watch
+                .last()
+                .and_then(|look| went_on(look, number))
+                .map_or_else(
+                    || "another".to_owned(),
+                    |(event, by)| format!("{by} (event {event})"),
+                );
+            return Ok(Outcome::Played(format!(
+                "{said}; T-{number} went on from paused, to {state}, by {by} first, and the owner's resume was refused: {why}"
             )));
         }
         return Ok(hand.failed(
@@ -303,6 +327,46 @@ fn resume_task(hand: &mut Hand<'_>, number: i64, said: &str) -> Result<Outcome> 
         "{said}; it went {}",
         hand.stage.state_of(number)?
     )))
+}
+
+/// The id of the last event `look`'s ledger holds; none is 0.
+fn last_event(look: &Look) -> i64 {
+    look.ledger
+        .events
+        .iter()
+        .map(|event| event.id)
+        .max()
+        .unwrap_or(0)
+}
+
+/// T-`number`'s moves in `look`'s ledger, oldest first.
+fn moves_of(look: &Look, number: i64) -> impl Iterator<Item = &crate::long_run::ledger::Event> {
+    look.ledger
+        .events
+        .iter()
+        .filter(move |event| event.kind == "task.state" && event.data["task"] == number)
+}
+
+/// Whether `look`'s ledger moved T-`number` to paused after its event `since`.
+fn moved_to_paused(look: &Look, number: i64, since: i64) -> bool {
+    moves_of(look, number).any(|event| event.id > since && event.data["to"] == "paused")
+}
+
+/// What moved T-`number` on from its last move to paused, as `look`'s ledger says: the
+/// event, and who (`@handle`, or the daemon in its own name).
+fn went_on(look: &Look, number: i64) -> Option<(i64, String)> {
+    let moves: Vec<_> = moves_of(look, number).collect();
+    let paused = moves
+        .iter()
+        .rposition(|event| event.data["to"] == "paused")?;
+    let on = moves
+        .iter()
+        .skip(paused + 1)
+        .find(|event| event.data["from"] == "paused")?;
+    let by = on.data["by"]
+        .as_str()
+        .map_or_else(|| "the daemon".to_owned(), |by| format!("@{by}"));
+    Some((on.id, by))
 }
 
 /// `handle`'s window dies: played once its exit is seen and its task paused, which

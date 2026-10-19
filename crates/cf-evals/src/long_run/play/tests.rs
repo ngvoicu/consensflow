@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use serde_json::json;
 
 use super::*;
-use crate::long_run::ledger::{Conversation, Participant};
+use crate::long_run::ledger::{Conversation, Event, Participant};
 use crate::long_run::record::Record;
 
 #[test]
@@ -143,6 +143,10 @@ struct Script {
     /// The windows the app opens again at the Resume after a restart.
     reopens: Vec<String>,
     opened: RefCell<Vec<String>>,
+    /// The states the owner's pause takes the task through, the next at each read of
+    /// it (another resuming it after it was read paused); none where the pause never
+    /// takes.
+    paused_then: RefCell<Vec<&'static str>>,
 }
 
 impl Script {
@@ -155,7 +159,15 @@ impl Script {
             resume,
             reopens: Vec::new(),
             opened: RefCell::new(Vec::new()),
+            paused_then: RefCell::new(Vec::new()),
         }
+    }
+
+    /// [`Script::new`], the owner's pause taking T-7 through `states`.
+    fn pausing(resume: Resume, states: &[&'static str]) -> Self {
+        let script = Self::new(resume);
+        *script.paused_then.borrow_mut() = states.to_vec();
+        script
     }
 }
 
@@ -199,10 +211,25 @@ impl Stagehand for Script {
                     .borrow_mut()
                     .extend(self.reopens.iter().cloned());
             }
+            "task.pause" => {
+                let number = body["task"].as_i64().unwrap_or_default();
+                let mut then = self.paused_then.borrow_mut();
+                if !then.is_empty() {
+                    self.states
+                        .borrow_mut()
+                        .insert(number, then.remove(0).to_owned());
+                }
+            }
             "task.resume" => {
                 let number = body["task"].as_i64().unwrap_or_default();
                 let mut states = self.states.borrow_mut();
                 let state = states.entry(number).or_default();
+                // The daemon resumes only a paused task.
+                if state != "paused" {
+                    return Err(Error::Refused(format!(
+                        "task.resume: {{\"ok\":false,\"error\":\"cannot resume T-{number}: it is {state}\"}}"
+                    )));
+                }
                 match self.resume {
                     Resume::GoesOn => *state = "working".to_owned(),
                     Resume::StaysPaused => {}
@@ -221,12 +248,14 @@ impl Stagehand for Script {
     }
 
     fn state_of(&self, number: i64) -> Result<String> {
-        Ok(self
-            .states
-            .borrow()
-            .get(&number)
-            .cloned()
-            .unwrap_or_default())
+        let mut states = self.states.borrow_mut();
+        let state = states.get(&number).cloned().unwrap_or_default();
+        // Read once, the task goes on to the next state the pause takes it through.
+        let mut then = self.paused_then.borrow_mut();
+        if state == "paused" && !then.is_empty() {
+            states.insert(number, then.remove(0).to_owned());
+        }
+        Ok(state)
     }
 
     fn screen(&self, _: &Value) -> Vec<String> {
@@ -356,6 +385,98 @@ fn a_suspend_whose_tasks_went_on_was_played() {
             "the owner closed the project, and resumed it 0 s later; the close paused T-7, and the owner resumed them"
                 .to_owned()
         )
+    );
+}
+
+/// A look whose ledger holds the moves of T-7 `moves`: each its event's id, the state
+/// it left, the one it went to, and who moved it.
+fn moves_of_seven(moves: &[(i64, &str, &str, Option<&str>)]) -> Look {
+    let mut look = Look::default();
+    look.ledger.events = moves
+        .iter()
+        .map(|(id, from, to, by)| Event {
+            id: *id,
+            at: "2026-10-19T17:40:00.000Z".to_owned(),
+            kind: "task.state".to_owned(),
+            data: json!({ "task": 7, "from": from, "to": to, "by": by }),
+        })
+        .collect();
+    look
+}
+
+#[test]
+fn a_pause_another_resumed_before_the_owner_was_played_and_the_owners_refused_resume_is_said() {
+    // zeewin's run on 0cedce70: the owner paused T-2 (working → paused, event 75); the
+    // Codex chief resumed it itself 16 s later (paused → queued, event 80, message 10); the
+    // owner's resume at +60 s was refused ("cannot resume T-2: it is queued"). The pause
+    // took effect: no break.
+    let mut watch = Looks {
+        last: Some(moves_of_seven(&[BEFORE, PAUSE, CHIEFS])),
+        then: None,
+    };
+    let outcome = played(
+        &mut Script::pausing(Resume::GoesOn, &["paused", "queued"]),
+        &mut watch,
+        Disruption::Pause,
+        &Target::Task(7),
+    );
+    assert!(matches!(outcome, Outcome::Played(_)), "{outcome:?}");
+    assert!(
+        said(&outcome).contains("by @chief (event 80)"),
+        "{}",
+        said(&outcome)
+    );
+    assert!(
+        said(&outcome).contains("the owner's resume was refused: task.resume:"),
+        "{}",
+        said(&outcome)
+    );
+}
+
+/// zeewin's moves of the task (as T-7): the one before the pause, the owner's pause, and
+/// the chief's resume.
+const BEFORE: (i64, &str, &str, Option<&str>) = (74, "queued", "working", None);
+const PAUSE: (i64, &str, &str, Option<&str>) = (75, "working", "paused", None);
+const CHIEFS: (i64, &str, &str, Option<&str>) = (80, "paused", "queued", Some("chief"));
+
+#[test]
+fn a_pause_resumed_by_another_before_any_read_of_it_is_proven_by_its_move_to_paused() {
+    // The chief resumed it before the run read it paused: the ledger's move proves it.
+    let mut watch = Looks {
+        last: Some(moves_of_seven(&[BEFORE])),
+        then: Some(moves_of_seven(&[BEFORE, PAUSE, CHIEFS])),
+    };
+    let outcome = played(
+        &mut Script::pausing(Resume::GoesOn, &["queued"]),
+        &mut watch,
+        Disruption::Pause,
+        &Target::Task(7),
+    );
+    assert!(matches!(outcome, Outcome::Played(_)), "{outcome:?}");
+}
+
+#[test]
+fn a_pause_that_never_moved_the_task_to_paused_failed() {
+    // The owner's pause was taken, and T-7 went on working: no read of it and no move of it
+    // says paused, a move elsewhere (to waiting) none either.
+    let mut watch = Looks {
+        last: Some(moves_of_seven(&[(74, "queued", "working", None)])),
+        then: Some(moves_of_seven(&[
+            (74, "queued", "working", None),
+            (75, "working", "waiting", None),
+        ])),
+    };
+    let outcome = played(
+        &mut Script::pausing(Resume::GoesOn, &[]),
+        &mut watch,
+        Disruption::Pause,
+        &Target::Task(7),
+    );
+    assert!(matches!(outcome, Outcome::Failed { .. }), "{outcome:?}");
+    assert!(
+        said(&outcome).contains("after the owner's pause"),
+        "{}",
+        said(&outcome)
     );
 }
 

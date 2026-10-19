@@ -331,7 +331,7 @@ fn a_disruption_whose_effect_was_not_seen_is_failed_and_a_break_of_the_tenth_wit
         &choice(Disruption::Pause, "strict"),
         Duration::from_secs(70),
         Outcome::Failed {
-            said: "T-3 never read paused after the owner's pause".to_owned(),
+            said: "T-3 never moved to paused after the owner's pause".to_owned(),
             evidence: evidence.clone(),
         },
     )
@@ -340,7 +340,7 @@ fn a_disruption_whose_effect_was_not_seen_is_failed_and_a_break_of_the_tenth_wit
         run.schedule.planned[0].state,
         State::Failed {
             at: Duration::from_secs(70),
-            said: "strict: T-3 never read paused after the owner's pause".to_owned()
+            said: "strict: T-3 never moved to paused after the owner's pause".to_owned()
         }
     );
     assert_eq!(run.keeper.breaks.len(), 1);
@@ -348,7 +348,7 @@ fn a_disruption_whose_effect_was_not_seen_is_failed_and_a_break_of_the_tenth_wit
     assert_eq!((found.invariant, found.key.as_str()), (10, "10:pause"));
     assert_eq!(
         found.said,
-        "pause: T-3 never read paused after the owner's pause"
+        "pause: T-3 never moved to paused after the owner's pause"
     );
     assert_eq!(found.evidence, evidence);
     // The next is due the interval after it.

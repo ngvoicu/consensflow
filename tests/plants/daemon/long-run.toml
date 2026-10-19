@@ -3152,3 +3152,47 @@ runs = ["evals-long-run"]
 file = "crates/cf-evals/src/long_run/invariants.rs"
 find = "                        broke: self.recorded.contains(&open.key),"
 replace = "                        broke: false,"
+
+# The long run, round 16 (zeewin's 2-hour run on 0cedce70): a pause is proven by the task's move to
+# paused, read on the board or in the ledger, and an owner's resume refused because another
+# resumed the task first is the effect played, the refusal said.
+
+[[plant]]
+name = "long run 10: an owner's resume refused because another resumed the task first is a break (zeewin's)"
+meant = "a_pause_another_resumed_before_the_owner_was_played_and_the_owners_refused_resume_is_said"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/play.rs"
+find = '        if state != "paused" {'
+replace = '        if state != "paused" && state.is_empty() {'
+
+[[plant]]
+name = "long run 10: a pause is proven only by a read of the task paused"
+meant = "a_pause_resumed_by_another_before_any_read_of_it_is_proven_by_its_move_to_paused"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/play.rs"
+find = '    moves_of(look, number).any(|event| event.id > since && event.data["to"] == "paused")'
+replace = '    moves_of(look, number).any(|event| event.id > since && event.data["to"] == "paused") && since < 0'
+
+[[plant]]
+name = "long run 10: a pause the owner's ask was taken for is taken for one that took"
+meant = "a_pause_that_never_moved_the_task_to_paused_failed"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/play.rs"
+find = "    if !hand.wait(paused)? {"
+replace = "    if !hand.wait(|hand| paused(hand).map(|_| true))? {"
+
+[[plant]]
+name = "long run 10: any move of a task after its pause is taken for its move to paused"
+meant = "a_pause_that_never_moved_the_task_to_paused_failed"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/play.rs"
+find = '    moves_of(look, number).any(|event| event.id > since && event.data["to"] == "paused")'
+replace = "    moves_of(look, number).any(|event| event.id > since)"
