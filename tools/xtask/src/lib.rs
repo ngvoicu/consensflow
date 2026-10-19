@@ -24,7 +24,8 @@
 //! - the mutation tests: `plants`, with their data in `tests/plants`;
 //! - what spends real quota and is no part of the gate: `live` (one command for
 //!   every live test of `crates/cf-e2e`, whatever its name) and `evals` (`eval`,
-//!   `eval summary` and `watch`, which hand their words to `crates/cf-evals`);
+//!   `eval summary`, `eval long` and `watch`, which hand their words to
+//!   `crates/cf-evals`);
 //! - the Windows machine: `windows` (`windows` and `windows-matrix`: a command,
 //!   and the matrix of the chief evals, run there over ssh), with `stops`, what
 //!   ends a run early, which it shares with `plants`;

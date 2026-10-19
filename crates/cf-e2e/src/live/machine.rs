@@ -168,15 +168,23 @@ impl Installed {
         } else {
             "--version"
         };
-        Run::new(&self.command)
+        let ran = Run::new(&self.command)
             .arg(word)
             .inheriting_env()
             .run()
             .ok()
-            .filter(|ran| ran.code == Some(0))
+            .filter(|ran| ran.code == Some(0));
+        let line = ran
+            .as_ref()
             .and_then(|ran| ran.stdout.lines().next().map(|line| line.trim().to_owned()))
             .filter(|line| !line.is_empty())
-            .unwrap_or_else(|| "unknown".to_owned())
+            .unwrap_or_else(|| "unknown".to_owned());
+        // A process it left held its output open: what it said is all that was read.
+        if ran.is_some_and(|ran| ran.held) {
+            format!("{line} (a process it left held its output open)")
+        } else {
+            line
+        }
     }
 
     /// The folders its windows need on their `PATH`: its command's, and Node's
