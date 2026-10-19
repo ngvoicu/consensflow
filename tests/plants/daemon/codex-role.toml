@@ -600,13 +600,15 @@ meant = "a_replacement_in_flight_when_the_daemon_stopped_is_recorded_as_told_onc
 runs = ["engine-role-change"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/deliveries.rs"
-find = '''                    self.confirm_delivered(&message, &json!({ "item": item }))?;
+file = "crates/cf-engine/src/in_flight.rs"
+find = '''                self.confirm_delivered(&message, &json!({ "item": item }))?;
+            }
 '''
-replace = '''                    self.seams
-                        .ledger
-                        .borrow_mut()
-                        .confirm_delivery(message.id, Some(&json!({ "item": item })))?;
+replace = '''                self.seams
+                    .ledger
+                    .borrow_mut()
+                    .confirm_delivery(message.id, Some(&json!({ "item": item })))?;
+            }
 '''
 
 [[plant]]
@@ -815,7 +817,7 @@ find = '''        let written = answers_to_the_task(&items[start + 1..], &replac
 replace = '''        let _ = &replacements;
         let written: Vec<_> = items[start + 1..]
             .iter()
-            .filter(|item| item.role == Role::Assistant)
+            .filter(|item| item.role == cf_harness::records::Role::Assistant)
             .collect();'''
 
 # Where this meets the ending of what a turn left running (a worker's answer is its task's
@@ -918,9 +920,9 @@ meant = "a_replacement_the_window_never_took_is_still_withdrawn_when_the_record_
 runs = ["engine-role-change"]
 
 [[plant.edit]]
-file = "crates/cf-engine/src/role_change.rs"
-find = '''                .recorded_item_with(participant.id, &marker_of(note.id))'''
-replace = '''                .recorded_item_with(participant.id, "[ConsensFlow m-")'''
+file = "crates/cf-engine/src/in_flight.rs"
+find = '''                item.role == Role::User && is_paste_of(&item.text, message, first.as_deref())'''
+replace = '''                item.role == Role::User && item.text.contains("[ConsensFlow m-")'''
 
 [[plant]]
 name = "codex role: a replacement found in the record is not taken out of the launch's first message, which is told it again"
@@ -1125,7 +1127,7 @@ find = '''                of_the_role =
             }'''
 replace = '''                of_the_role = replacements
                     .iter()
-                    .any(|message| item.text.contains(&marker_of(*message)));
+                    .any(|message| item.text.contains(&crate::delivery_text::marker_of(*message)));
             }'''
 
 [[plant]]
@@ -1175,6 +1177,36 @@ runs = ["engine-role-change"]
 file = "crates/cf-engine/src/dispatcher.rs"
 find = '''            if project.state == "open" && !own && !launch_owed {'''
 replace = '''            if project.state == "open" && !own {'''
+
+[[plant]]
+name = "codex role: a chief's window that went once its record showed the role is taken for a launch that never came up, and leaves its project open without its chief (Sol, 2026-10-16)"
+meant = "a_chiefs_window_that_went_once_its_record_showed_the_role_closes_its_project_as_a_chief_that_came_up"
+runs = ["engine-role-change"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "            Some(prelude) => self.still_owed(prelude)?,"
+replace = "            Some(prelude) => Some(prelude),"
+
+[[plant]]
+name = "codex role: a member's window that went once its record showed the role is taken for a launch that never came up, and its follow-up fails"
+meant = "a_members_window_that_exits_once_its_record_showed_the_role_came_up_and_its_follow_up_does_not_fail"
+runs = ["engine-role-change"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "            Some(prelude) => self.still_owed(prelude)?,"
+replace = "            Some(prelude) => Some(prelude),"
+
+[[plant]]
+name = "codex role: a chief whose record showed the role told before its window went is said to have closed before it came up"
+meant = "a_chiefs_window_that_went_once_its_record_showed_the_role_closes_its_project_as_a_chief_that_came_up"
+runs = ["engine-role-change"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "                let came_up = match first.or(said_first) {"
+replace = "                let came_up = match first.or(said_first.filter(|_| false)) {"
 
 [[plant]]
 name = "codex role: a chief's window that exits before the role was told is not tried again"

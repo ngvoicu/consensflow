@@ -10,6 +10,7 @@ use std::collections::BTreeSet;
 
 use cf_base::json::{from_slice_lossy, from_slice_lossy_keeping};
 
+use super::restart::closed;
 use super::*;
 use keep::RECORD;
 
@@ -119,7 +120,6 @@ fn noisy(mut record: Value) -> Value {
             message,
             &[
                 "usage",
-                "model",
                 "type",
                 "stop_sequence",
                 "stop_details",
@@ -190,6 +190,7 @@ fn made() -> Vec<Value> {
             json!([tool_result(json!("t1"), json!("out"))]),
         ),
         hook(json!(["context", "more"]), Some("h1")),
+        closed("c1", "u1"),
         attachment("at1", "u1"),
         queue("enqueue", json!("later")),
         queue("dequeue", Value::Null),

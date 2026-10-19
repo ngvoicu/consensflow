@@ -86,7 +86,7 @@ fn write_roster(rig: &Rig) -> cf_e2e::Result {
 }
 
 /// Where the stand-in Devin keeps its store in the rig's home.
-fn store_of(rig: &Rig) -> PathBuf {
+pub(crate) fn store_of(rig: &Rig) -> PathBuf {
     let home = rig
         .var("HOME")
         .or_else(|| rig.var("USERPROFILE"))
@@ -120,7 +120,7 @@ fn delivered(project: &Project, id: i64) -> cf_e2e::Result<bool> {
 /// Waits until the store has held as many messages for `still` as it holds now,
 /// for up to three minutes. A look the store does not answer (its writer has it a
 /// moment) is no change.
-fn until_still(store: &Path, still: Duration) -> cf_e2e::Result<()> {
+pub(crate) fn until_still(store: &Path, still: Duration) -> cf_e2e::Result<()> {
     let (mut held, mut since) = (0, Instant::now());
     let begun = Instant::now();
     loop {

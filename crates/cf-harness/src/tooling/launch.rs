@@ -92,6 +92,7 @@ fn prepared(question: &Value, services: &Services) -> Result<Value, String> {
         role: text(question, "role")?,
         directory: text(question, "directory")?,
         resume: optional(question, "resume"),
+        previous_gone: false,
         message: optional(question, "message"),
         agent: Some(Agent {
             model: optional(agent, "model"),

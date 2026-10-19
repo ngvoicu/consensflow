@@ -9,6 +9,10 @@
 //! were asked by no one on the other side. A terminal asks where the cursor
 //! is, and ConPTY asks before a program may print at all; the page's xterm
 //! answers, and with no page the rig does.
+//!
+//! And a case can catch one paste of the daemon's ([`Catch`]): passed to the pane
+//! host or kept from it, its answer never reaches the daemon, which goes on
+//! waiting for it, as a daemon stopped between a paste and its receipt left it.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -109,6 +113,23 @@ pub(super) struct Seen {
     pub host_ended: bool,
 }
 
+/// Where the paste a case catches goes ([`crate::rig::Rig::catch_paste`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Pasted {
+    /// To the pane host, which pastes it into the window.
+    IntoTheWindow,
+    /// Nowhere: the window never has it.
+    Nowhere,
+}
+
+/// The paste a case set out to catch: what it holds and where it goes, until one
+/// is caught, and the request caught, whose answer stops here.
+#[derive(Debug, Default)]
+pub(super) struct Catch {
+    armed: Option<(String, Pasted)>,
+    caught: Option<String>,
+}
+
 /// What the routers share with the case.
 #[derive(Debug, Default)]
 pub(super) struct Shared {
@@ -117,6 +138,7 @@ pub(super) struct Shared {
     /// The numbers of the requests made of the daemon and of the pane host.
     pages: AtomicU64,
     hosts: AtomicU64,
+    catch: Mutex<Catch>,
 }
 
 impl Shared {
@@ -134,8 +156,52 @@ impl Shared {
         format!("{HOST}{}", self.hosts.fetch_add(1, Ordering::Relaxed) + 1)
     }
 
+    /// The daemon's next paste that holds `words` is caught, and goes as `pasted`
+    /// says; a catch set before replaces one not yet made.
+    pub fn catch_paste(&self, words: &str, pasted: Pasted) {
+        let mut catch = self.catch.lock().unwrap_or_else(PoisonError::into_inner);
+        catch.armed = Some((words.to_owned(), pasted));
+        catch.caught = None;
+    }
+
+    /// Whether the paste set out to be caught was.
+    pub fn paste_caught(&self) -> bool {
+        self.catch
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .caught
+            .is_some()
+    }
+
+    /// Whether `frame`, a frame of the daemon's, is the paste set out to be caught:
+    /// where it goes, once it is caught.
+    fn caught(&self, frame: &Value) -> Option<Pasted> {
+        if frame["kind"] != "req" || frame["op"] != "pane.write_paste" {
+            return None;
+        }
+        let mut catch = self.catch.lock().unwrap_or_else(PoisonError::into_inner);
+        let holds = |words: &str| {
+            frame["body"]["body"]
+                .as_str()
+                .is_some_and(|body| body.contains(words))
+        };
+        let (_, pasted) = catch.armed.take_if(|(words, _)| holds(words))?;
+        catch.caught = frame["id"].as_str().map(str::to_owned);
+        Some(pasted)
+    }
+
+    /// Whether `frame`, a frame of the pane host's, answers the paste caught.
+    fn answers_the_caught(&self, frame: &Value) -> bool {
+        let catch = self.catch.lock().unwrap_or_else(PoisonError::into_inner);
+        frame["kind"] == "res"
+            && catch
+                .caught
+                .as_deref()
+                .is_some_and(|caught| frame["id"] == caught)
+    }
+
     /// A line the daemon wrote: kept, and passed to the pane host unless it is
-    /// the answer to a request of the case's.
+    /// the answer to a request of the case's, or a paste caught to go nowhere.
     pub fn route_daemon(&self, line: &str, host: &Sink) {
         let Ok(frame) = serde_json::from_str::<Value>(line) else {
             self.seen().stray.push(line.to_owned());
@@ -170,12 +236,15 @@ impl Shared {
         {
             return;
         }
+        if self.caught(&frame) == Some(Pasted::Nowhere) {
+            return;
+        }
         host.send(format!("{line}\n"));
     }
 
     /// A line the pane host wrote: kept, a pane's output gathered and the
     /// cursor query answered, and passed to the daemon unless it is the answer
-    /// to a request of the case's.
+    /// to a request of the case's, or to the paste caught.
     pub fn route_host(&self, line: &str, host: &Sink, daemon: &Sink) {
         let Ok(frame) = serde_json::from_str::<Value>(line) else {
             self.seen().stray.push(line.to_owned());
@@ -228,6 +297,9 @@ impl Shared {
         if frame["kind"] == "res"
             && (self.pending.answer(id, &frame["body"]) || id.starts_with(HOST))
         {
+            return;
+        }
+        if self.answers_the_caught(&frame) {
             return;
         }
         daemon.send(format!("{line}\n"));
@@ -468,6 +540,72 @@ mod tests {
             passed,
             [printed.to_string(), more.to_string(), exit.to_string()]
         );
+    }
+
+    /// A `pane.write_paste` of the daemon's, numbered `id`, of `body`, and the host's
+    /// answer to it.
+    fn paste(id: &str, body: &str) -> (String, String) {
+        (
+            json!({"v":1,"id":id,"kind":"req","op":"pane.write_paste","body":{"id":"p1-zeus","generation":1,"body":body}}).to_string(),
+            json!({"v":1,"id":id,"kind":"res","op":"pane.write_paste","body":{"ok":true}}).to_string(),
+        )
+    }
+
+    #[test]
+    fn a_paste_caught_into_the_window_goes_to_the_host_and_its_answer_never_to_the_daemon() {
+        let shared = Shared::default();
+        let (host, host_lines, daemon, daemon_lines) = sinks();
+        shared.catch_paste("Resumed:", Pasted::IntoTheWindow);
+        // A paste that does not hold the words goes, and its answer comes back.
+        let (other, answered) = paste("n-1", "[ConsensFlow m-3]\nhello");
+        shared.route_daemon(&other, &host);
+        assert_eq!(
+            host_lines.recv_timeout(Duration::from_secs(10)).unwrap(),
+            other
+        );
+        shared.route_host(&answered, &host, &daemon);
+        assert_eq!(
+            daemon_lines.recv_timeout(Duration::from_secs(10)).unwrap(),
+            answered
+        );
+        assert!(!shared.paste_caught());
+
+        let (caught, answer) = paste("n-2", "[ConsensFlow m-4]\nResumed: Go on");
+        shared.route_daemon(&caught, &host);
+        assert_eq!(
+            host_lines.recv_timeout(Duration::from_secs(10)).unwrap(),
+            caught
+        );
+        assert!(shared.paste_caught());
+        shared.route_host(&answer, &host, &daemon);
+        assert!(daemon_lines
+            .recv_timeout(Duration::from_millis(100))
+            .is_err());
+
+        // It is caught once: the next that holds the words goes, answer and all.
+        let (again, answered) = paste("n-3", "[ConsensFlow m-5]\nResumed: Go on");
+        shared.route_daemon(&again, &host);
+        assert_eq!(
+            host_lines.recv_timeout(Duration::from_secs(10)).unwrap(),
+            again
+        );
+        shared.route_host(&answered, &host, &daemon);
+        assert_eq!(
+            daemon_lines.recv_timeout(Duration::from_secs(10)).unwrap(),
+            answered
+        );
+    }
+
+    #[test]
+    fn a_paste_caught_to_go_nowhere_never_reaches_the_host() {
+        let shared = Shared::default();
+        let (host, host_lines, _daemon, _) = sinks();
+        shared.catch_paste("Resumed:", Pasted::Nowhere);
+        let (caught, _) = paste("n-1", "[ConsensFlow m-4]\nResumed: Go on");
+        shared.route_daemon(&caught, &host);
+        assert!(shared.paste_caught());
+        assert!(host_lines.recv_timeout(Duration::from_millis(100)).is_err());
+        assert_eq!(shared.seen().daemon, 1, "it is counted, as every frame is");
     }
 
     #[test]

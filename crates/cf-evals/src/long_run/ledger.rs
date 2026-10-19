@@ -38,6 +38,7 @@ pub struct Conversation {
     pub harness: String,
     /// The harness's own id of it: Claude Code's session, Devin's…
     pub session: Option<String>,
+    pub started_at: Option<String>,
     pub ended_at: Option<String>,
 }
 
@@ -155,7 +156,8 @@ impl Ledger {
             )?,
             conversations: rows(
                 db,
-                "SELECT c.id, c.participant_id, c.harness, c.native_session, c.ended_at
+                "SELECT c.id, c.participant_id, c.harness, c.native_session, c.started_at,
+                        c.ended_at
                  FROM conversation c JOIN participant p ON p.id = c.participant_id
                  WHERE p.project_id = ?1 ORDER BY c.id",
                 id,
@@ -165,7 +167,8 @@ impl Ledger {
                         participant: row.get(1)?,
                         harness: row.get(2)?,
                         session: row.get(3)?,
-                        ended_at: row.get(4)?,
+                        started_at: row.get(4)?,
+                        ended_at: row.get(5)?,
                     })
                 },
             )?,

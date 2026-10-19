@@ -20,7 +20,7 @@ use cf_proto::trace::WindowEvent;
 use serde_json::{json, Value};
 
 use crate::deliveries::Delivering;
-use crate::delivery_text::{delivery_text, marker_of};
+use crate::delivery_text::{brief_first, delivery_text};
 use crate::dispatcher::Dispatcher;
 use crate::host::{EngineHost, Killed, OpenPane, Opened};
 use crate::record::Record;
@@ -122,6 +122,12 @@ pub(crate) struct WindowPart {
     pub(crate) harness: String,
     pub(crate) pane: Option<Pane>,
     pub(crate) opening: Option<Opening>,
+    /// How many times a window was asked for it, counted as its window is asked for
+    /// ([`Dispatcher::open_soon`]) and as each launch begins, before either waits on
+    /// anything. The exit of an earlier window that read its record with no window
+    /// open compares the count it began with: a window asked for meanwhile, up, on its
+    /// way or given up, is no business of that exit's (`in_flight`).
+    pub(crate) launches: u64,
     pub(crate) launch_id: Option<LaunchId>,
     /// The window's token, for its `cf`.
     pub(crate) token: Option<String>,
@@ -161,6 +167,10 @@ pub(crate) struct WindowPart {
     /// The stop it ignored in every round, while it lasts.
     pub(crate) unstopped: Option<Unstopped>,
     pub(crate) activity: Activity,
+    /// The pane of the last window that ended, and whether the host proved its
+    /// program gone ([`Shown::gone`]): none until the host said, which it may
+    /// do after the engine's own close has settled the window.
+    pub(crate) last_exit: Option<(Pane, Option<bool>)>,
 }
 
 impl Default for WindowPart {
@@ -172,6 +182,7 @@ impl Default for WindowPart {
             harness: String::new(),
             pane: None,
             opening: None,
+            launches: 0,
             launch_id: None,
             token: None,
             retiring: false,
@@ -187,6 +198,7 @@ impl Default for WindowPart {
             interrupted: None,
             unstopped: None,
             activity: Activity::of(ActivityState::Closed),
+            last_exit: None,
         }
     }
 }
@@ -358,7 +370,11 @@ impl Dispatcher {
     /// conversation its harness holds nothing of opens afresh, and has no role to
     /// be told ([`Dispatcher::conversation_to_go_on_with`]). One that does not come
     /// up says why ([`Dispatcher::launch_failed`]); a participant forgotten while
-    /// its launch waits gets nothing more under its ids.
+    /// its launch waits gets nothing more under its ids. It is counted before
+    /// anything ([`WindowPart::launches`]): its preparation waits on its harness, and
+    /// an earlier window's exit that reads its record meanwhile is to see a window on
+    /// its way (a review of 2026-10-16: the exit of a session's window paused the task
+    /// the window the human opened again was being prepared for).
     pub(crate) async fn launch(
         self: &Rc<Self>,
         record: &Rc<Record>,
@@ -366,6 +382,7 @@ impl Dispatcher {
         participant: &ParticipantView,
         message: Option<MessageView>,
     ) -> Result<(), EngineError> {
+        record.window.borrow_mut().launches += 1;
         let harness = participant.harness.clone().unwrap_or_default();
         // A role the window took before it closed, though its arrival was never
         // seen, is what the conversation was told: the ledger learns it first.
@@ -405,13 +422,13 @@ impl Dispatcher {
         let generation = self.next_generation();
         let delivering = first.as_ref().map(|first| Delivering {
             message: first.id,
-            marker: marker_of(first.id),
             since: self.now(),
             // A launch's first message is waited for by the launch's own time.
             rested_since: None,
             launch: true,
             chief: participant.role == "chief",
             queued: false,
+            free_since: None,
             entered_again: false,
         });
         // What fails with a launch that does not come up: its first message, or
@@ -740,7 +757,7 @@ impl Dispatcher {
         // or the chief its own.
         let text = begun
             .as_ref()
-            .map(|begun| self.launch_text(project, participant, begun, resume))
+            .map(|begun| self.launch_text(begun, resume))
             .transpose()?;
         // A chief whose project has specs on is told where its Specmint skill
         // is, and its window is given the skill there.
@@ -751,6 +768,13 @@ impl Dispatcher {
             Some(role) => role,
             None => self.role_text(project, participant, &*adapter)?,
         };
+        // Its last window's program was proven gone: nothing of it writes on.
+        let previous_gone = record
+            .window
+            .borrow()
+            .last_exit
+            .as_ref()
+            .is_some_and(|(_, gone)| *gone == Some(true));
         let launch = Launch {
             id: launch_id,
             project: project.id,
@@ -758,6 +782,7 @@ impl Dispatcher {
             role: &participant.role,
             directory: &project.directory,
             resume,
+            previous_gone,
             message: text.as_deref(),
             agent: saved.as_ref().map(SavedAgent::agent),
             instructions: &instructions,
@@ -878,41 +903,42 @@ impl Dispatcher {
     }
 
     /// What a window's first message reads, which `begin_delivery` told: a
-    /// member's fresh session starts from nothing, so when its first message is
-    /// not the task's own brief (a reopening, an answer) the brief goes in
-    /// first, as it was received with what its paste carried; a brief that
-    /// was never received, held for the human's approval or not, is not the
-    /// window's to read before it is. A resumed conversation has it already.
-    fn launch_text(
-        &self,
-        project: &ProjectView,
-        participant: &ParticipantView,
-        first: &Begun,
-        resume: Option<&str>,
-    ) -> Result<String, EngineError> {
+    /// member's fresh session starts from nothing, so the brief its task's
+    /// window received goes in first ([`Dispatcher::brief_given_first`]). A
+    /// resumed conversation has it already.
+    fn launch_text(&self, first: &Begun, resume: Option<&str>) -> Result<String, EngineError> {
         let text = delivery_text(&first.message, &first.carried);
-        let Some(number) = first
-            .message
+        Ok(match self.brief_given_first(&first.message)? {
+            Some(brief) if resume.is_none() => format!("{brief}{text}"),
+            _ => text,
+        })
+    }
+
+    /// What a member's fresh window is given ahead of `message`, its first, when
+    /// that is not its task's own brief (a reopening, an answer): the brief it
+    /// received, as it was received with what its paste carried, and a blank line
+    /// ([`brief_first`]). A brief that was never received, held for the human's
+    /// approval or not, is not the window's to read before it is; only a brief
+    /// that arrived is found, so it is neither `message` nor one that rides in it.
+    /// None for the chief's, and where no brief of the task was received. The
+    /// paste of `message` in its record is behind it (`is_paste_of`).
+    pub(crate) fn brief_given_first(
+        &self,
+        message: &MessageView,
+    ) -> Result<Option<String>, EngineError> {
+        let Some(number) = message
             .task_number
-            .filter(|_| resume.is_none() && participant.role != "chief")
+            .filter(|_| message.recipient_role != "chief")
         else {
-            return Ok(text);
+            return Ok(None);
         };
         let ledger = self.seams.ledger.borrow();
-        let Some(thread) = ledger.task(project.id, number)? else {
-            return Ok(text);
+        let Some(thread) = ledger.task(message.project_id, number)? else {
+            return Ok(None);
         };
-        // Only a brief that arrived is found, so it is neither the message
-        // being sent now nor one that rides in it.
-        Ok(
-            match ledger.first_received(participant.id, thread.task.id)? {
-                Some(brief) => format!(
-                    "{}\n\n{text}",
-                    delivery_text(&brief.message, &brief.carried)
-                ),
-                None => text,
-            },
-        )
+        Ok(ledger
+            .first_received(message.recipient_id, thread.task.id)?
+            .map(|brief| brief_first(&brief.message, &brief.carried)))
     }
 
     /// A launch that did not come up. A member's first message fails with

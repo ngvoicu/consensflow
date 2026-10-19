@@ -51,6 +51,7 @@ use crate::{cf, checkout, files, wire, Error, Result};
 pub use forget::project_name;
 pub use jobs::Job;
 pub use project::{write_staff, Project};
+pub use route::Pasted;
 
 pub(crate) use observe::events_of;
 

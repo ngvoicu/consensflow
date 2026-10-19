@@ -35,6 +35,7 @@ fn a_look_carries_its_options_and_the_time_of_the_engines_clock() {
             directory: None,
             launch_id: Some(id.to_owned()),
         }),
+        ..Options::default()
     };
     let told = on_engine(async {
         let first = thread.look(Harness::Pi, "a", &launch("one")).await;

@@ -8,9 +8,10 @@
 //! they look at: the ids and texts of the records (`texts`), what ends a turn
 //! (`boundaries`), the agents a turn left running (`agents`, which departs from
 //! Node's reading), the tool calls and how the items are ordered (`items`),
-//! the messages queued (`queues`), the API's refusals (`refusals`), the
-//! output of a `/clear` (`clear`), an interrupt (`interrupts`), and the
-//! records read late (`ancestry`). What a record waits as, and the line it is
+//! the messages queued (`queues`) and a relaunch, which empties the queue
+//! (`restart`), the API's refusals (`refusals`), the output of a `/clear`
+//! (`clear`), an interrupt (`interrupts`), and the records read late
+//! (`ancestry`). What a record waits as, and the line it is
 //! built from, are held to what replay reads of a record: what nothing reads
 //! changes nothing (`projection`), and each field replay reads changes the
 //! reading (`fields`). A long transcript, made like a big one (`synthetic`),
@@ -28,6 +29,7 @@ mod memory;
 mod projection;
 mod queues;
 mod refusals;
+mod restart;
 mod scale;
 mod synthetic;
 mod texts;
@@ -100,6 +102,11 @@ impl Stage {
     fn look(&mut self) -> String {
         show(&self.reader.look(&Options::default(), 0))
     }
+
+    /// A look told `options`.
+    fn look_told(&mut self, options: &Options) -> Arc<Reading> {
+        self.reader.look(options, 0)
+    }
 }
 
 /// What one look at a transcript of `records` reads.
@@ -139,7 +146,8 @@ fn looks(batches: &[&[Value]]) -> Vec<String> {
 
 /// A reading as the Node probe printed it: its reason, or its items and what
 /// they say of the turn, and that agents are pending where it says so (as a
-/// reading is serialized: no reading of Node's has it).
+/// reading is serialized: no reading of Node's has it), and an item that is the
+/// harness's commentary (none of Node's was).
 fn show(reading: &Reading) -> String {
     let record = match reading {
         Reading::Unknown(reason) => return format!("unknown: {reason}"),
@@ -148,7 +156,13 @@ fn show(reading: &Reading) -> String {
     let items: Vec<Value> = record
         .items
         .iter()
-        .map(|item| json!([&*item.id, item.role, &*item.text, item.complete, item.at]))
+        .map(|item| {
+            let mut shown = json!([&*item.id, item.role, &*item.text, item.complete, item.at]);
+            if item.commentary {
+                shown.as_array_mut().unwrap().push(json!("commentary"));
+            }
+            shown
+        })
         .collect();
     let state = match record.settlement {
         Settlement::Unknown => "unknown",

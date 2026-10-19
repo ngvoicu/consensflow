@@ -165,6 +165,80 @@ fn a_worker_window_whose_program_could_not_be_ended_says_so_in_its_pause_note() 
     );
 }
 
+/// Whether each launch of `handle` was told the program of its window before was
+/// proven gone, in the order prepared.
+fn told_gone(context: &Context, handle: &str) -> Vec<bool> {
+    context
+        .adapter
+        .prepared()
+        .iter()
+        .zip(context.adapter.previous_gone())
+        .filter(|(launch, _)| launch["participant"]["handle"] == handle)
+        .map(|(_, gone)| gone)
+        .collect()
+}
+
+/// A window opened again on its conversation is told whether the program of the
+/// window before it is gone (`Launch::previous_gone`), which a Claude window
+/// takes the record's length for: only where the host said how it ended and named
+/// no program it could not end. T-442's reviews: one that may still run would
+/// write past the length taken, as the new process's.
+#[test]
+fn a_window_opened_again_is_told_the_program_before_it_is_gone_only_where_the_host_proved_it() {
+    let reopened = |says: &dyn Fn(&Context)| {
+        let context = Context::new();
+        let project = context.with_staff(&["zeus"]);
+        context.give(project.id, "zeus", "Parser");
+        context.pass().unwrap();
+        context.pass().unwrap();
+        says(&context);
+        context.exit("zeus");
+        context.resume_task(project.id, 1, "Carry on");
+        context.pass().unwrap();
+        told_gone(&context, "zeus")
+    };
+    let ended = |context: &Context| context.host.exits_showing(Some(0), None, None);
+    assert_eq!(reopened(&ended), [false, true], "ended, and gone");
+    let outlived = |context: &Context| {
+        ended(context);
+        context.host.exits_with_a_survivor(4242);
+    };
+    assert_eq!(reopened(&outlived), [false, false], "may still run");
+    assert_eq!(
+        reopened(&|_: &Context| {}),
+        [false, false],
+        "a host that said nothing of the end"
+    );
+}
+
+/// The engine's own close settles a window before the host says how it ended: the
+/// host's word, when it comes, is what the next launch is told.
+#[test]
+fn the_hosts_word_on_a_window_the_engine_closed_itself_is_what_its_next_launch_is_told() {
+    let closed_then = |word: bool| {
+        let context = Context::new();
+        let project = context.with_staff(&["zeus"]);
+        context.give(project.id, "zeus", "Parser");
+        context.pass().unwrap();
+        context.pass().unwrap();
+        context.host.exits_showing(Some(0), None, None);
+        context.host.hold_exits.set(true);
+        context.close_project(project.id).unwrap();
+        context.host.hold_exits.set(false);
+        if word {
+            context.exit("zeus");
+        }
+        context.resume_project(project.id).unwrap();
+        context.pass().unwrap();
+        context.resume_task(project.id, 1, "Carry on");
+        context.pass().unwrap();
+        context.pass().unwrap();
+        told_gone(&context, "zeus")
+    };
+    assert_eq!(closed_then(true), [false, true]);
+    assert_eq!(closed_then(false), [false, false]);
+}
+
 /// What the close ended goes between how the window ended and its screen.
 #[test]
 fn a_worker_window_that_ends_mid_task_with_work_running_says_both() {

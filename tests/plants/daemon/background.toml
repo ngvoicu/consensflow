@@ -102,6 +102,8 @@ regression-never-exits = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test"
 regression-reporting-command = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_command_that_goes_on_reporting"]
 # Claude Code's own status line, told as work its window left (T-42, 3.0.3, 2026-10-14): the three cases of its regression.
 regression-status-line = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "claude_status_line"]
+# A worker's build that leaves its daemon running when it ends (A1 of 2026-10-15, 3.0.3): the two cases of its regression.
+regression-build-daemon = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_builds_daemon_held_a_workers_task"]
 
 # The result is the turn's end, whatever the turn left running.
 
@@ -2225,3 +2227,64 @@ replace = '''
             if let Some(ending) = None::<Ending> {
                 return ending;
             }'''
+
+# A1 of the field reports of 2026-10-15 (3.0.3): a worker's build left its daemon running, a child
+# of the build's that outlives it, and the worker's task stayed working after it had finished. The
+# daemon is no work of the turn: no chain of processes that run leads from it to a shell the harness
+# started, its build and the build's shell having ended (`crates/cf-e2e/tests/regressions/
+# a_builds_daemon_held_a_workers_task.rs`). What the plants widen the turn's work to is what the
+# window's tree holds, under the bound: the rig's own processes.
+[[plant]]
+name = "background regression: a build's daemon, its build ended, is taken for the turn's work and told as left"
+meant = "a_workers_build_that_leaves_its_daemon_running_has_its_task_done_and_the_daemon_is_neither_waited_for_nor_ended"
+runs = ["regression-build-daemon"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-panes/src/background/work.rs"
+find = '            None => return at.parent.is_some() && runs_a_shell(at),'
+replace = '            None => return at.parent.is_none() || runs_a_shell(at),'
+
+[[plant]]
+name = "background regression: a build's daemon holds the worker's task, as on 3.0.3"
+meant = "a_workers_build_that_leaves_its_daemon_running_has_its_task_done_and_the_daemon_is_neither_waited_for_nor_ended"
+runs = ["regression-build-daemon"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-panes/src/background/work.rs"
+find = '            None => return at.parent.is_some() && runs_a_shell(at),'
+replace = '            None => return at.parent.is_none() || runs_a_shell(at),'
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '            } else if let Some(task) = self.collect(project, participant, &observed)? {'
+replace = '''
+            } else if let Some(task) = ({
+                // Held for the work the turn left, as before 2026-10-13: no result while any runs.
+                let pane = record.window.borrow().pane.clone();
+                let left = match pane {
+                    Some(pane) => self
+                        .seams
+                        .background
+                        .end(&pane)
+                        .await
+                        .map_or(0, |ending| ending.left.total),
+                    None => 0,
+                };
+                if left > 0 {
+                    None
+                } else {
+                    self.collect(project, participant, &observed)?
+                }
+            }) {'''
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/turn.rs"
+find = '        Ok(tree.end(&baseline, self.close_grace)?)'
+replace = '''
+        let _ = self.close_grace;
+        Ok(Ending {
+            left: baseline.left_running(&tree.members()?),
+            ..Ending::default()
+        })'''

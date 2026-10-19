@@ -23,8 +23,10 @@ jobs:
       matrix:
         os: [macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
-    # A hang fails the job in an hour, not GitHub's six.
-    timeout-minutes: 60
+    # A hang fails the job in an hour and a half, not GitHub's six. (An hour
+    # until B5's regressions, 2026-10-18: Windows' job had taken about 45
+    # minutes, and they add about 10.)
+    timeout-minutes: 90
     defaults:
       run:
         shell: bash
@@ -62,8 +64,10 @@ jobs:
       # rig's: the daemon and the pane host in real terminals, with
       # stand-in agents in the windows, and the regressions': a case for each
       # bug the owner hit in real use, on that rig.
+      # Windows' runner took 21 minutes here before B5 (2026-10-18), whose
+      # regressions ran it past 30 with nothing hung.
       - run: npm run test:daemons
-        timeout-minutes: 30
+        timeout-minutes: 50
       # The CLI's suites against the native cf, which answers every verb.
       - run: npm run test:clis
         timeout-minutes: 15

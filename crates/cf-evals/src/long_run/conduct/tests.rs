@@ -88,6 +88,7 @@ fn answered() -> Ledger {
         participant: 3,
         harness: "claude-code".to_owned(),
         session: Some("s-worker".to_owned()),
+        started_at: None,
         ended_at: None,
     });
     ledger.messages.push(Message {
@@ -214,6 +215,7 @@ fn a_cut_note_a_later_reading_reads_through_is_judged_then() {
         participant: 2,
         harness: "claude-code".to_owned(),
         session: Some("s-chief".to_owned()),
+        started_at: None,
         ended_at: None,
     });
     ledger.messages.push(Message {
@@ -699,6 +701,7 @@ fn the_last_look_lets_a_jobs_end_be_told_within_the_settle_time_of_its_result() 
         participant: 3,
         harness: "claude-code".to_owned(),
         session: None,
+        started_at: None,
         ended_at: None,
     });
     for (seq, role, text, minute, second) in [
@@ -790,6 +793,7 @@ fn what_the_app_wrote_as_it_closed_is_held_in_the_last_look() {
         participant: 3,
         harness: "claude-code".to_owned(),
         session: None,
+        started_at: None,
         ended_at: None,
     });
     for (seq, role, text, second) in [

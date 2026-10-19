@@ -346,8 +346,13 @@ fn a_turn_the_agent_ends_or_a_prompt_it_answers_ends_the_turn_its_tui_began_in_t
     assert!(finished(window.observe()).unwrap().settled);
 }
 
+/// The end of the turn the window's conversation is in, as Devin's agent writes it.
+fn turn_ends() -> &'static str {
+    "{\"cause\":\"complete\",\"sessionId\":\"mild-coin\"}\n"
+}
+
 #[test]
-fn a_message_pasted_is_the_agents_own_when_a_request_of_its_tui_holds_the_line_that_begins_it() {
+fn a_message_pasted_is_held_in_the_turn_of_the_tuis_prompt_its_line_begins_and_no_longer() {
     let dir = tempfile::tempdir().unwrap();
     let wire = dir.path().join("wire.jsonl");
     fs::write(&wire, shows("mild-coin")).unwrap();
@@ -362,31 +367,151 @@ fn a_message_pasted_is_the_agents_own_when_a_request_of_its_tui_holds_the_line_t
     assert_eq!(
         finished(window.deliver(&host, &pane, text)),
         Ok(Admission::Admitted { queued: false }),
-        "the paste is the window's, and no word of the agent's queue yet"
+        "the paste is the window's, and no word of the agent's queue"
     );
-    assert!(!window.took());
-    // Another message's request, and the agent's own words, are not it.
-    append(
-        &wire,
-        &asks(
-            "mild-coin",
-            "[ConsensFlow m-8 · T-1 · note from ConsensFlow]\nelse",
-        ),
-    );
-    assert!(!window.took());
-    // The TUI's request holds what was pasted: on Windows, what the console carried
+    assert!(!window.held(), "pasted at rest");
+    // What was pasted, as the TUI has it: on Windows, what the console carried
     // (Windows CI, 2026-10-15: the middle dots).
     let pasted = if Env::default().on_windows() {
         console_text(&window_text(text))
     } else {
         text.to_owned()
     };
+    let line = pasted.lines().next().unwrap();
+    // The human's prompt that quotes its line is no paste of it (the reviews of
+    // 2026-10-16): a turn begun after the paste, which may hold it, while it is on.
+    append(
+        &wire,
+        &asks("mild-coin", &format!("Why is \"{line}\" still queued?")),
+    );
+    assert!(window.held());
+    append(&wire, turn_ends());
+    assert!(!window.held(), "its turn is over");
+    // None of the TUI's prompts was the paste, and a turn ended since: a prompt asked
+    // now is no turn it went into.
+    append(&wire, &asks("mild-coin", "and now?"));
+    assert!(!window.held());
+    append(&wire, turn_ends());
+    // The TUI's prompt of what was pasted: the agent runs it in that prompt's turn,
+    // and its record shows it when the turn ends.
     append(&wire, &asks("mild-coin", &pasted));
-    assert!(window.took());
-    // The next paste is another message: told by its own request.
+    assert!(window.held());
+    append(&wire, turn_ends());
+    assert!(!window.held());
+    // The next paste is another message, pasted at rest.
     let next = "[ConsensFlow m-10 · T-1 · note from ConsensFlow]\nlater";
     assert!(finished(window.deliver(&host, &pane, next)).is_ok());
-    assert!(!window.took());
+    assert!(!window.held());
+}
+
+/// Its agent has the paste once the TUI put it to its agent in a prompt its line begins,
+/// whatever came of that turn; words that quote the line put nothing to it, and the
+/// next paste is another's to say.
+#[test]
+fn the_agent_has_a_paste_once_the_tuis_prompt_its_line_begins_is_read_and_ever_after() {
+    let dir = tempfile::tempdir().unwrap();
+    let wire = dir.path().join("wire.jsonl");
+    fs::write(&wire, shows("mild-coin")).unwrap();
+    let fakes = Fakes::new(&Env::default());
+    let window = window_at_rest(&fakes, &wire, Env::default());
+    let host = crate::testing::AnsweringHost::new(|_| Ok(serde_json::json!({ "ok": true })));
+    let pane = Pane {
+        id: "s1-zeus".to_owned(),
+        generation: 2,
+    };
+    let text = "[ConsensFlow m-9 · T-1 · note from ConsensFlow]\n@human cancelled T-1";
+    assert!(finished(window.deliver(&host, &pane, text)).is_ok());
+    assert!(!window.took(), "pasted, not yet put to the agent");
+    let pasted = if Env::default().on_windows() {
+        console_text(&window_text(text))
+    } else {
+        text.to_owned()
+    };
+    let line = pasted.lines().next().unwrap();
+    append(
+        &wire,
+        &asks("mild-coin", &format!("Why is \"{line}\" still queued?")),
+    );
+    append(&wire, turn_ends());
+    assert!(!window.took(), "words that quote it are no paste of it");
+    append(&wire, &asks("mild-coin", &pasted));
+    assert!(window.took());
+    append(&wire, turn_ends());
+    assert!(window.took(), "and its turn's end takes nothing back");
+    let next = "[ConsensFlow m-10 · T-1 · note from ConsensFlow]\nlater";
+    assert!(finished(window.deliver(&host, &pane, next)).is_ok());
+    assert!(!window.took(), "the next paste is not yet put to it");
+}
+
+#[test]
+fn a_message_pasted_into_a_turn_whose_agent_has_said_nothing_past_the_gap_is_held_while_the_turn_is_on(
+) {
+    let dir = tempfile::tempdir().unwrap();
+    let wire = dir.path().join("wire.jsonl");
+    fs::write(&wire, shows("mild-coin")).unwrap();
+    let fakes = Fakes::new(&Env::default());
+    let window = window_at_rest(&fakes, &wire, Env::default());
+    let host = crate::testing::AnsweringHost::new(|_| Ok(serde_json::json!({ "ok": true })));
+    let pane = Pane {
+        id: "s1-zeus".to_owned(),
+        generation: 2,
+    };
+    // The TUI put a prompt to its agent, which says nothing past the gap: the window
+    // reads at rest, as its record does, and a message goes in.
+    append(&wire, &asks("mild-coin", "hello"));
+    assert!(!finished(window.observe()).unwrap().settled, "a turn begun");
+    fakes.time.settle_at(EPOCH_MS + PROMPT_GAP_MS);
+    assert!(finished(window.observe()).unwrap().settled);
+    assert!(finished(window.ready(&host, &pane)).is_ok());
+    let text = "[ConsensFlow m-9 · T-1 · result from @worker]\nRESULT_ONE";
+    assert!(finished(window.deliver(&host, &pane, text)).is_ok());
+    // The turn is on still: Devin holds the message, and has said nothing of it.
+    assert!(window.held());
+    // The turn ends: the message is held no longer, and the next paste, at rest, is
+    // held by nothing.
+    append(
+        &wire,
+        "{\"cause\":\"complete\",\"sessionId\":\"mild-coin\"}\n",
+    );
+    assert!(!window.held());
+    let next = "[ConsensFlow m-10 · T-2 · result from @worker]\nRESULT_TWO";
+    assert!(finished(window.deliver(&host, &pane, next)).is_ok());
+    assert!(!window.held());
+}
+
+#[test]
+fn a_message_pasted_as_a_prompt_begins_while_it_is_handed_over_is_held_in_its_turn() {
+    let dir = tempfile::tempdir().unwrap();
+    let wire = dir.path().join("wire.jsonl");
+    fs::write(&wire, shows("mild-coin")).unwrap();
+    let fakes = Fakes::new(&Env::default());
+    let window = window_at_rest(&fakes, &wire, Env::default());
+    // The human's prompt begins after readiness read the wire at rest, as the paste is
+    // handed over (a review of 2026-10-16). One begun while the screen is looked at holds
+    // the window (B1's second read of the wire).
+    let human = std::cell::Cell::new(false);
+    let host = crate::testing::AnsweringHost::new(|op| {
+        if op == "pane.write_paste" && !human.replace(true) {
+            append(&wire, &asks("mild-coin", "a message of the human's"));
+        }
+        Ok(serde_json::json!({ "ok": true }))
+    });
+    let pane = Pane {
+        id: "s1-zeus".to_owned(),
+        generation: 2,
+    };
+    assert!(finished(window.observe()).unwrap().settled);
+    assert!(matches!(
+        finished(window.ready(&host, &pane)),
+        Ok(Readiness::Ready)
+    ));
+    let text = "[ConsensFlow m-9 · T-1 · result from @worker]\nRESULT_ONE";
+    assert!(finished(window.deliver(&host, &pane, text)).is_ok());
+    assert!(human.get(), "the prompt began as the paste was handed over");
+    // The TUI queued the paste behind the human's turn: held, however long its agent
+    // says nothing.
+    fakes.time.settle_at(EPOCH_MS + PROMPT_GAP_MS);
+    assert!(window.held());
 }
 
 #[test]
@@ -403,9 +528,15 @@ fn on_windows_a_message_is_told_by_its_first_line_as_the_console_carries_it_to_d
     };
     let text = "[ConsensFlow m-9 · T-1 · note from ConsensFlow]\n@human cancelled T-1";
     assert!(finished(window.deliver(&host, &pane, text)).is_ok());
-    // The TUI had what the console carried: the middle dots are bars.
+    // The TUI had what the console carried: the middle dots are bars. A turn begun after
+    // the paste may be the one it went into; once it ends, words with the dots are no
+    // paste of it, and their turn holds nothing.
+    append(&wire, &asks("mild-coin", "a message of the human's"));
+    assert!(window.held(), "the turn it may have gone into");
+    append(&wire, turn_ends());
     append(&wire, &asks("mild-coin", text));
-    assert!(!window.took(), "words that were not pasted");
+    assert!(!window.held(), "words that were not pasted");
+    append(&wire, turn_ends());
     append(
         &wire,
         &asks(
@@ -413,5 +544,9 @@ fn on_windows_a_message_is_told_by_its_first_line_as_the_console_carries_it_to_d
             "[ConsensFlow m-9 | T-1 | note from ConsensFlow]\n@human cancelled T-1",
         ),
     );
-    assert!(window.took());
+    assert!(window.held(), "in its own prompt's turn");
+    append(&wire, turn_ends());
+    // The TUI put it to its agent: a prompt after it is no turn it waits behind.
+    append(&wire, &asks("mild-coin", "and now?"));
+    assert!(!window.held());
 }

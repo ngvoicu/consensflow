@@ -82,6 +82,7 @@ fn chief_look(lines: &[Value]) -> Look {
         participant: 2,
         harness: "claude-code".to_owned(),
         session: Some("s-chief".to_owned()),
+        started_at: None,
         ended_at: None,
     });
     let text: Vec<String> = lines.iter().map(Value::to_string).collect();

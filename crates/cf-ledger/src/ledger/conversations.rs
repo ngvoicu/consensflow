@@ -130,6 +130,16 @@ impl Ledger {
         conversations::copied_item_with(&self.store, participant_id, text)
     }
 
+    /// Every item of the participant's current conversation it was given that contains
+    /// `text`, in order: its id and its words.
+    pub fn copied_items_with(
+        &self,
+        participant_id: i64,
+        text: &str,
+    ) -> Result<Vec<(String, String)>, LedgerError> {
+        conversations::copied_items_with(&self.store, participant_id, text)
+    }
+
     /// A window the human switched to another conversation: the participant's is that one now.
     pub fn follow_conversation(
         &mut self,

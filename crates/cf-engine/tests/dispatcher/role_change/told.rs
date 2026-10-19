@@ -28,6 +28,18 @@ fn told_in_part(context: &Context, project: i64) -> Vec<MessageView> {
         .collect()
 }
 
+/// The human closes the project as the chief's harness takes what it was given, which
+/// its record shows only once the window is gone: the window's end, which reads the
+/// record, finds nothing of it, and what the next launch reads, with no window open,
+/// holds it.
+fn closes_before_its_record_shows_it(context: &Context, project: i64) {
+    let written = context
+        .codex
+        .with("chief", |agent| std::mem::take(&mut agent.items));
+    context.close_project(project).unwrap();
+    context.codex.with("chief", |agent| agent.items = written);
+}
+
 #[test]
 fn a_replacement_the_window_took_before_it_closed_is_what_the_conversation_was_told_whatever_the_ledger_says_and_the_role_the_human_went_back_to_is_said_again(
 ) {
@@ -43,8 +55,10 @@ fn a_replacement_the_window_took_before_it_closed_is_what_the_conversation_was_t
     assert_eq!(context.message(paste.id).state, "delivering");
     assert_eq!(said_to_the_chief(&context).len(), 1);
 
-    // The window closes before the daemon saw it arrive: the note waits for the next.
-    context.close_project(project.id).unwrap();
+    // The window closes before the daemon saw it arrive, and its record shows the note
+    // only once the window is gone (its harness wrote it late): the note waits for the
+    // next.
+    closes_before_its_record_shows_it(&context, project.id);
     assert_eq!(context.message(paste.id).state, "queued");
     assert_eq!(
         recorded(&context, chief).as_deref(),
@@ -94,10 +108,10 @@ fn a_replacement_the_record_shows_is_not_made_the_first_message_of_the_launch_th
     relaunch(&context, project.id);
     context.pass().unwrap();
     let paste = replacements(&context, chief).remove(0);
-    // The window closes before the daemon saw the note arrive, and the project is
-    // open again with no window for its chief (a Resume that a step has overtaken):
-    // the head of the chief's queue is the note.
-    context.close_project(project.id).unwrap();
+    // The window closes before the daemon saw the note arrive, or its record showed
+    // it, and the project is open again with no window for its chief (a Resume that a
+    // step has overtaken): the head of the chief's queue is the note.
+    closes_before_its_record_shows_it(&context, project.id);
     assert_eq!(context.message(paste.id).state, "queued");
     context
         .ledger

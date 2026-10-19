@@ -107,6 +107,24 @@ impl Staged {
         fs::write(folder.join("wire.jsonl"), lines).unwrap();
     }
 
+    /// A launch on `session` that ConsensFlow gave `prompt` as its first message behind
+    /// `/bypass`, in its prompt file as the adapter writes it, and whose wire log names
+    /// the session.
+    fn launched_behind_bypass(&self, launch: &str, session: &str, prompt: &str) {
+        self.wire(
+            launch,
+            &[json!({
+                "sessionId": session,
+                "update": { "sessionUpdate": "available_commands_update" },
+            })],
+        );
+        fs::write(
+            self.launch(launch).join("prompt.txt"),
+            format!("{} {prompt}", crate::devin::adapter::BYPASS),
+        )
+        .unwrap();
+    }
+
     fn reader(&self) -> Box<dyn Look + Send> {
         reader(SESSION, &self.env)
     }

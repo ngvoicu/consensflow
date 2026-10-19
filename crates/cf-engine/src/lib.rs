@@ -22,6 +22,7 @@ pub mod delivery_text;
 pub mod dispatcher;
 pub mod handoff;
 pub mod host;
+mod in_flight;
 mod record;
 mod resume;
 mod role_change;

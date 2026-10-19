@@ -25,13 +25,21 @@
 // The cases are in `tests/regressions/`: cargo looks for the modules of a test's
 // root file beside it, where each would be a suite of its own.
 // The stand-in's command is a shell of a Unix machine.
+#[path = "regressions/a_builds_daemon_held_a_workers_task.rs"]
+mod a_builds_daemon_held_a_workers_task;
 #[cfg(unix)]
 #[path = "regressions/a_command_that_goes_on_reporting_held_a_devin_workers_result.rs"]
 mod a_command_that_goes_on_reporting_held_a_devin_workers_result;
 #[path = "regressions/a_command_that_never_exits_held_a_workers_result.rs"]
 mod a_command_that_never_exits_held_a_workers_result;
+#[path = "regressions/a_result_delivered_twice_to_a_devin_chief.rs"]
+mod a_result_delivered_twice_to_a_devin_chief;
+#[path = "regressions/a_result_pasted_again_after_its_window_went.rs"]
+mod a_result_pasted_again_after_its_window_went;
 #[path = "regressions/a_resumed_devin_worker_skipped_every_call.rs"]
 mod a_resumed_devin_worker_skipped_every_call;
+#[path = "regressions/a_task_stuck_working_after_its_window_was_resumed.rs"]
+mod a_task_stuck_working_after_its_window_was_resumed;
 // The stand-in's status line is a `bash`.
 #[cfg(unix)]
 #[path = "regressions/claude_status_line_taken_for_background_work.rs"]
@@ -65,6 +73,8 @@ mod opencode_updated_itself_to_2;
 mod resume_of_a_chief_with_no_turn;
 #[path = "regressions/resume_of_a_turn_the_daemon_never_copied.rs"]
 mod resume_of_a_turn_the_daemon_never_copied;
+#[path = "regressions/rows_a_paste_carried_pasted_again_after_a_restart.rs"]
+mod rows_a_paste_carried_pasted_again_after_a_restart;
 
 use std::time::Duration;
 

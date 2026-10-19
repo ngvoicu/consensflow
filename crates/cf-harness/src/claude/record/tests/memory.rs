@@ -95,7 +95,7 @@ impl Subject {
     }
 
     fn transcript(&self) -> Transcript {
-        Transcript::new(Arc::from(self.session.as_str()), local())
+        Transcript::new(Arc::from(self.session.as_str()), local(), 0)
     }
 
     /// A transcript followed from look to look.
@@ -103,7 +103,7 @@ impl Subject {
         let (file, session) = (self.file.clone(), self.session.clone());
         Followed::new(
             Box::new(move || Ok(Some(file.clone()))),
-            Box::new(move || Transcript::new(Arc::from(session.as_str()), local())),
+            Box::new(move || Transcript::new(Arc::from(session.as_str()), local(), 0)),
         )
     }
 
@@ -218,7 +218,7 @@ fn first_look_parts() {
         None,
         LONG_AFTER_MS,
         Transcript::parse,
-        &mut |record, index| transcript.visit(record, index),
+        &mut |record, index, at| transcript.visit_at(record, index, at),
         None,
     );
     let parse = started.elapsed();

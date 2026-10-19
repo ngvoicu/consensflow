@@ -39,6 +39,9 @@ pub fn location(
     data.join("devin").join("cli").join("sessions.db")
 }
 
+/// How long a read waits on the store while SQLite holds it.
+const HELD_FOR: Duration = Duration::from_secs(5);
+
 /// A message of the store: the id Devin gave it, who it is from, and its words.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Message {
@@ -103,7 +106,11 @@ impl Message {
 
 /// The messages the store in `file` holds, of every session, each once, in the
 /// order the first of its rows was written and as its last row says it. The store
-/// is opened as the daemon opens it: read-only, and never waiting on a writer.
+/// is opened read-only, as the daemon opens it, but waits a moment where it is held:
+/// a window of Devin's that opens or goes takes the store for as long as SQLite sets
+/// its log right, and a case that read it then failed with "database is locked" (the
+/// rig's Devin worker opened again after a restart, 2026-10-16), where the daemon's
+/// look takes the record for unread and looks again.
 pub fn messages(file: &Path) -> Result<Vec<Message>> {
     read(file, None)
 }
@@ -123,7 +130,7 @@ fn read(file: &Path, session: Option<&str>) -> Result<Vec<Message>> {
         OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
     )
     .map_err(said)?;
-    db.busy_timeout(Duration::ZERO).map_err(said)?;
+    db.busy_timeout(HELD_FOR).map_err(said)?;
     let mut rows = db
         .prepare(
             "SELECT chat_message FROM message_nodes WHERE (?1 IS NULL OR session_id = ?1) \
@@ -262,6 +269,22 @@ mod tests {
         assert_eq!(found[0].text, "[ConsensFlow m-7 · note]");
         assert_eq!(found[0].times("[ConsensFlow m-7 "), 1);
         assert_eq!(found[1].text, "");
+    }
+
+    #[test]
+    fn a_store_held_for_a_moment_is_read_once_it_is_let_go() {
+        let (_folder, file) =
+            store_of(&[json!({ "message_id": "a", "role": "user", "content": "first" })]);
+        let writer = Connection::open(&file).unwrap();
+        writer.execute_batch("BEGIN EXCLUSIVE").unwrap();
+        let reading = std::thread::spawn({
+            let file = file.clone();
+            move || messages(&file)
+        });
+        std::thread::sleep(Duration::from_millis(300));
+        writer.execute_batch("COMMIT").unwrap();
+        let found = reading.join().unwrap().unwrap();
+        assert_eq!(found.len(), 1, "read, not a locked store");
     }
 
     #[test]

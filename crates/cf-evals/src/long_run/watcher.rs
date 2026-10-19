@@ -503,6 +503,7 @@ mod reading_tests {
                 participant: 4,
                 harness: "claude-code".to_owned(),
                 session: Some("s".to_owned()),
+                started_at: None,
                 ended_at: None,
             }],
             messages: vec![result(10, 3, 5), result(11, 4, 10), result(12, 4, 40)],

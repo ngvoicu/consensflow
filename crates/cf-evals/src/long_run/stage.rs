@@ -386,6 +386,7 @@ mod tests {
             participant: 2,
             harness: "claude-code".to_owned(),
             session: Some("s".to_owned()),
+            started_at: None,
             ended_at: None,
         });
         look.records.insert(
