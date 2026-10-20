@@ -616,6 +616,78 @@ fn a_header_a_later_prompt_quotes_never_ends_a_turn() {
 }
 
 #[test]
+fn a_header_a_person_quotes_in_a_fence_is_never_the_lost_delivery_that_began_a_turn() {
+    // GPT-6-Astra's review of round b2: m-120's delivery began and never reached the window;
+    // a later message quotes its header on a line of its own, in a fence, and its answer is
+    // taken for T-14's result. Its turn is in no copy: unresolved, never held.
+    let scene = Scene::new(&[("long-worker", "claude-code")]);
+    let task = task(&scene);
+    let conversation = scene.conversation(3, "claude-code", "s-worker");
+    scene.item(
+        conversation,
+        0,
+        "user",
+        "Why is this one stuck?\n```\n[ConsensFlow m-120 · T-14 · task from @chief]\nFix the rounding\n```",
+        true,
+        &t(0, 30),
+    );
+    let answer = "It never reached me; I changed nothing.";
+    scene.item(conversation, 1, "assistant", answer, true, &t(1, 0));
+    scene.message(
+        131,
+        (CHIEF, Some(3)),
+        "result",
+        Some(task),
+        answer,
+        &t(1, 5),
+    );
+    let look = scene.look(ms(5, 0));
+    assert!(found(&look, 4).is_empty(), "{:?}", found(&look, 4));
+    assert_eq!(
+        unanswered(&look),
+        [(
+            "4:m-131".to_owned(),
+            "m-131's turn is not in the copy of @long-worker's conversation, which holds no prompt of m-120 after its delivery attempt 1 began: whether it is the turn's final answer cannot be judged".to_owned()
+        )]
+    );
+}
+
+#[test]
+fn a_final_answer_its_progress_said_first_is_taken_out_where_it_stands_and_turn_ends_a4_is_known() {
+    // GPT-6-Astra's review of round b2: the answer's words open a progress line too, and the
+    // result is that line and the answer. Taken out at its first place, the answer left the
+    // progress cut and a false FAIL; it stands last, after the progress.
+    let scene = Scene::new(&[("long-worker", "claude-code")]);
+    let task = task(&scene);
+    let conversation = scene.conversation(3, "claude-code", "s-worker");
+    scene.item(
+        conversation,
+        0,
+        "user",
+        "[ConsensFlow m-120 · T-14 · task from @chief]\nFix the rounding",
+        true,
+        &t(0, 0),
+    );
+    let progress = "All 61 tests pass. Checking the diff now.";
+    scene.item(conversation, 1, "assistant", progress, false, &t(0, 20));
+    scene.item(conversation, 2, "tool", "2 files changed", true, &t(0, 21));
+    let answer = "All 61 tests pass.";
+    scene.item(conversation, 3, "assistant", answer, true, &t(1, 0));
+    scene.message(
+        131,
+        (CHIEF, Some(3)),
+        "result",
+        Some(task),
+        &format!("{progress}\n\n{answer}"),
+        &t(1, 5),
+    );
+    let breaks = found(&scene.look(ms(5, 0)), 4);
+    assert_eq!(breaks.len(), 1, "{breaks:?}");
+    assert_eq!(breaks[0].said, "m-131 holds 1 line of its turn's progress");
+    assert_eq!(breaks[0].shape, Some("progress-lines"));
+}
+
+#[test]
 fn a_delivery_claude_code_kept_wrapped_as_a_paste_begins_its_turn() {
     // Claude Code 2.1.303 keeps a long paste wrapped in its record, and the copy with it
     // (the Mac's run of 2026-10-19): the task's delivery is the prompt that opens with its

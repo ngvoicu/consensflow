@@ -156,15 +156,29 @@ fn a_compact_summary_or_a_reviewers_history_that_quotes_a_delivery_is_none_and_h
         conversation,
         2,
         "user",
-        &format!(
-            "The following is the Codex agent history whose request action you are assessing.\n\n\
-             >>> TRANSCRIPT START\n[1] user: {FIRST}\n[2] user: {SECOND}\n>>> TRANSCRIPT END\n"
-        ),
+        &reviewer(&format!("{FIRST}\n{SECOND}"), ""),
         true,
         &t(3, 30),
     );
     assert!(found(&scene.look(ms(4, 0)), 7).is_empty());
     assert!(undecided(&scene.look(ms(4, 0))).is_empty());
+}
+
+/// The prompt Codex gives its approval reviewer, in its shape on the owner's machine
+/// (October 2026; made-up words): the history the agent was given (`history`, a line of it
+/// each) between its markers, the request between its own, and `after` the request's end.
+fn reviewer(history: &str, after: &str) -> String {
+    let entries: Vec<String> = history
+        .lines()
+        .enumerate()
+        .map(|(at, line)| format!("[{}] user: {line}", at + 1))
+        .collect();
+    format!(
+        "The following is the Codex agent history whose request action you are assessing.\n\
+         >>> TRANSCRIPT START\n{}\n>>> TRANSCRIPT END\n\nAssess the request.\n\
+         >>> APPROVAL REQUEST START\nnpm test\n>>> APPROVAL REQUEST END\n{after}",
+        entries.join("\n")
+    )
 }
 
 /// What a look could not judge of the seventh: each key, and what it says.
@@ -252,6 +266,141 @@ fn a_header_after_other_words_on_its_line_is_unresolved_never_dropped() {
     let look = scene.look(ms(4, 0));
     assert!(said_of(&look).is_empty());
     assert!(undecided(&look).is_empty());
+}
+
+/// A scene whose chief, on `harness`, was given m-246 (`FIRST`) at 10:01:02, then `second`:
+/// what the seventh found of it, and what it could not judge.
+fn after_first(harness: &str, second: &str) -> (Vec<String>, Vec<(String, String)>) {
+    let scene = Scene::new(&[("long-worker", harness)]);
+    let conversation = chief_on(&scene, harness);
+    scene.item(conversation, 0, "user", FIRST, true, &t(1, 2));
+    scene.item(conversation, 1, "assistant", "Noted.", true, &t(1, 10));
+    scene.item(conversation, 2, "user", second, true, &t(2, 2));
+    let look = scene.look(ms(4, 0));
+    (said_of(&look), undecided(&look))
+}
+
+const TWICE: &str = "@chief was given m-246 2 times";
+
+#[test]
+fn a_synthetic_block_hides_only_itself_and_only_in_the_harness_that_writes_it() {
+    // Both reviewers of round b2: an exemption hid the whole row. Sol's: Claude Code's
+    // notification of a job's end, closed, and m-246 again after it.
+    let notification = "<task-notification>\n<task-id>b1</task-id>\n<status>completed</status>\n</task-notification>";
+    let (said, open) = after_first("claude-code", &format!("{notification}\n{FIRST}"));
+    assert_eq!((said, open), (vec![TWICE.to_owned()], Vec::new()));
+    // Astra's: a Devin draft that holds such a notification, and the retried m-246 after it.
+    // Devin writes none of it: nothing of the row is exempt.
+    let (said, open) = after_first("devin", &format!("{notification}\n{FIRST}"));
+    assert_eq!((said, open), (vec![TWICE.to_owned()], Vec::new()));
+    // The history Codex gives its approval reviewer, and m-246 after the request's end.
+    let (said, open) = after_first("codex", &reviewer("the brief", &format!("{FIRST}\n")));
+    assert_eq!((said, open), (vec![TWICE.to_owned()], Vec::new()));
+    // Only the harness that writes a block has it: in a Devin row, a notification and a
+    // reviewer's prompt are words like any, a header in them judged where it stands.
+    let inside = format!("<task-notification>\n{FIRST}\n</task-notification>");
+    let (said, open) = after_first("devin", &inside);
+    assert_eq!((said, open), (vec![TWICE.to_owned()], Vec::new()));
+    let (said, open) = after_first("devin", &reviewer(FIRST, ""));
+    assert!(said.is_empty(), "{said:?}");
+    assert_eq!(open.len(), 1, "{open:?}");
+    assert!(
+        open[0].1.ends_with(" holds m-246's header after other words on its line: whether it went in behind them or they quote it, the copy does not say"),
+        "{open:?}"
+    );
+    // Inside each, nothing is given.
+    let quoted = format!("<task-notification>\n<output>\n{FIRST}\n</output>\n</task-notification>");
+    assert_eq!(
+        after_first("claude-code", &quoted),
+        (Vec::new(), Vec::new())
+    );
+    assert_eq!(
+        after_first("codex", &reviewer(FIRST, "")),
+        (Vec::new(), Vec::new())
+    );
+}
+
+#[test]
+fn a_synthetic_block_whose_end_the_copy_does_not_show_is_unresolved() {
+    // A notification that does not close, the reviewer's history with no end, and the words
+    // a summary opens with in a harness that writes none: whether the header after them went
+    // in, the copy does not say.
+    for (harness, second, after) in [
+        (
+            "claude-code",
+            format!("<task-notification>\n<task-id>b1</task-id>\n{FIRST}"),
+            "Claude Code's notification of a job's end, which does not close",
+        ),
+        (
+            "codex",
+            format!(
+                "The following is the Codex agent history whose request action you are assessing.\n\
+                 >>> TRANSCRIPT START\n[1] user: {FIRST}"
+            ),
+            "the history Codex gives its approval reviewer, which does not end",
+        ),
+        (
+            "codex",
+            format!(
+                "The following is the Codex agent history whose request action you are assessing.\n\
+                 >>> TRANSCRIPT START\n[1] user: the brief\n>>> TRANSCRIPT END\n\
+                 >>> APPROVAL REQUEST START\n{FIRST}"
+            ),
+            "the request Codex gives its approval reviewer, which does not end",
+        ),
+    ] {
+        let (said, open) = after_first(harness, &second);
+        assert!(said.is_empty(), "{harness}: {said:?}");
+        assert_eq!(
+            open,
+            [(
+                "7:undecided:1:i-1-2".to_owned(),
+                format!("@chief's prompt i-1-2 holds m-246's header after {after}: whether it went in, the copy does not say")
+            )],
+            "{harness}"
+        );
+    }
+    let summary = format!(
+        "This session is being continued from a previous conversation that ran out of context.\n{FIRST}"
+    );
+    assert_eq!(
+        after_first("devin", &summary),
+        (vec![TWICE.to_owned()], Vec::new())
+    );
+}
+
+#[test]
+fn a_header_in_a_fenced_block_or_a_quoted_line_is_no_delivery_and_unresolved() {
+    // GPT-6-Astra's review of round b2: a person's words that quote a header on its own line,
+    // inside a fence, were taken for a delivery.
+    for (second, why) in [
+        (
+            format!("Look at this:\n```\n{FIRST}\n```"),
+            "in a quotation (a fenced block or a quoted line)",
+        ),
+        (
+            format!("Look at this:\n~~~text\n{FIRST}\n~~~"),
+            "in a quotation (a fenced block or a quoted line)",
+        ),
+        (
+            format!("Look at this:\n> {FIRST}"),
+            "in a quotation (a fenced block or a quoted line)",
+        ),
+    ] {
+        let (said, open) = after_first("devin", &second);
+        assert!(said.is_empty(), "{second}: {said:?}");
+        assert_eq!(
+            open,
+            [(
+                "7:undecided:1:i-1-2".to_owned(),
+                format!("@chief's prompt i-1-2 holds m-246's header {why}: whether it went in, the copy does not say")
+            )],
+            "{second}"
+        );
+    }
+    // A fence that closed before it leaves the header outside it.
+    let (said, open) = after_first("devin", &format!("```\nnpm test\n```\n{FIRST}"));
+    assert_eq!((said, open), (vec![TWICE.to_owned()], Vec::new()));
 }
 
 #[test]

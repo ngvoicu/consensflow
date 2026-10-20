@@ -283,8 +283,8 @@ pub fn check(look: &Look, settings: &Settings) -> Vec<Break> {
 /// of their worker's conversation does not hold (4); the cut notes to a Claude Code
 /// window whose own record was not read through them (5); what the watch could not see
 /// of a window's tree, or of a task's state when its window closed by itself (6); and the
-/// prompts whose first header comes after other words on its line, a paste glued behind
-/// them or a quote (7).
+/// prompts that hold a header the copy does not show went in or not: after other words on
+/// its line, in a quotation, or after a harness's own block that does not end (7).
 pub fn unjudged(look: &Look, settings: &Settings) -> Vec<Unjudged> {
     let mut found = work::idle_unread(look, settings);
     found.extend(work::unread_records(look, settings));

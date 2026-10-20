@@ -3,15 +3,17 @@
 //! Windows). Every delivery opens with its header, `[ConsensFlow m-12 · T-3 · result
 //! from @x]`, which is also how the daemon knows it arrived; so a conversation's copy
 //! that holds a message's header in two prompts was given it twice, and a prompt
-//! that holds the headers of two messages was given them as one. Every user's item whose
-//! first header begins a line is a prompt, whether the header opens it (on the line after
-//! the tag Claude Code wraps a long paste in) or stands behind other words (Devin pastes
-//! behind what its input box holds), but the rows a harness writes of the conversation
-//! itself, each named by what it opens with: the summary of a compaction (which quoted
-//! m-13 on the Mac's 2-hour run of 2026-10-19), the history Codex gives its approval
-//! reviewer, Claude Code's notification of a job's end. One whose first header comes after
-//! other words on its line may be a paste glued behind them or a quote: unresolved, never
-//! dropped (GPT-6.1-Sol's review of round b1). (A message that
+//! that holds the headers of two messages was given them as one. Each header of a user's
+//! item is judged where it stands ([`read_prompt`]): one that begins a line is a delivery,
+//! whether it opens the item (on the line after the tag Claude Code wraps a long paste in)
+//! or stands behind other words (Devin pastes behind what its input box holds); one inside
+//! what a harness writes of the conversation itself is none, each block bounded to its own
+//! end and taken only from the harness that writes it (Claude Code's summary of a
+//! compaction, which quoted m-13 on the Mac's 2-hour run of 2026-10-19, and its
+//! notification of a job's end; the history Codex gives its approval reviewer); one after
+//! such a block whose end the copy does not show, in a quotation (a fenced block, a quoted
+//! line), or after other words on its line may have gone in or not: unresolved, never
+//! dropped (GPT-6.1-Sol's and GPT-6-Astra's reviews of rounds b1 and b2). (A message that
 //! carries others is one paste under its own header, and what quotes a delivery
 //! defuses its header: neither counts. Nor does a header a message's own words quote,
 //! as a worker's result may quote the brief it was given: a header inside the words
@@ -82,22 +84,6 @@ fn said_until(text: &str, body: &str) -> usize {
     }
 }
 
-/// The messages a prompt was given, in order: each header of it but those inside the
-/// words of a message delivered before it in the prompt (`body` of a message, by its
-/// id), where they stand after that message's header.
-fn given_in<'b>(text: &str, body: impl Fn(i64) -> Option<&'b str>) -> Vec<i64> {
-    let mut given: Vec<i64> = Vec::new();
-    let mut quoting_until = 0;
-    for (id, start, end) in headers(text) {
-        if start < quoting_until {
-            continue;
-        }
-        given.push(id);
-        quoting_until = body(id).map_or(end, |said| end + said_until(&text[end..], said));
-    }
-    given
-}
-
 /// The words of the message `id`, as the ledger holds them.
 fn body_in(look: &Look, id: i64) -> Option<&str> {
     look.ledger
@@ -107,99 +93,234 @@ fn body_in(look: &Look, id: i64) -> Option<&str> {
         .map(|message| message.body.as_str())
 }
 
-/// The words a row opens with that a harness writes of the conversation itself as a user's
-/// item, quoting deliveries it was never given: Claude Code's summary of a compaction (the
-/// prompts before it quoted whole: m-13 on the Mac's 2-hour run of 2026-10-19), the history
-/// Codex gives its approval reviewer, and Claude Code's notification of a job's end (the
-/// job's output in it).
-const SYNTHETIC: [&str; 3] = [
-    "This session is being continued from a previous conversation",
-    "The following is the Codex agent history whose request action you are assessing",
-    "<task-notification>",
-];
+/// What Claude Code's summary of a compaction opens with: a record of its own, one item of
+/// the copy, quoting the prompts before it whole (m-13 on the Mac's 2-hour run of
+/// 2026-10-19).
+const SUMMARY: &str = "This session is being continued from a previous conversation";
 
-/// What a user's item that holds a delivery's header is.
+/// Claude Code's notification of a job's end, the job's output in it: from its opening tag
+/// to its closing one.
+const NOTIFICATION: [&str; 2] = ["<task-notification>", "</task-notification>"];
+
+/// What the prompt Codex gives its approval reviewer opens with, the marker of the history
+/// in it and of the request (each ending at its `END` line), as Codex wrote them on the
+/// owner's machine (October 2026).
+const REVIEWER: &str =
+    "The following is the Codex agent history whose request action you are assessing";
+const HISTORY: [&str; 2] = [">>> TRANSCRIPT START", ">>> TRANSCRIPT END"];
+const REQUEST: [&str; 2] = [">>> APPROVAL REQUEST START", ">>> APPROVAL REQUEST END"];
+
+/// What a harness writes of the conversation itself into a user's item, quoting deliveries
+/// it was never given, each where its harness writes it alone and to its own end: Claude
+/// Code's summary of a compaction (the item whole), its notifications of a job's end, and
+/// the prompt Codex gives its approval reviewer (to the end of its request, or of its
+/// history where no request follows). The parts of the text they cover; and where one
+/// begins whose end the copy does not show, with what it is.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct Synthetic {
+    blocks: Vec<(usize, usize)>,
+    open: Option<(usize, &'static str)>,
+}
+
+/// The [`Synthetic`] parts of `text`, an item of a conversation on `harness`.
+fn synthetic(text: &str, harness: &str) -> Synthetic {
+    let start = text.len() - text.trim_start().len();
+    let mut found = Synthetic::default();
+    match harness {
+        "claude-code" if text[start..].starts_with(SUMMARY) => found.blocks.push((0, text.len())),
+        "claude-code" => {
+            let mut from = 0;
+            while let Some(open) = text[from..].find(NOTIFICATION[0]).map(|at| from + at) {
+                let Some(close) = text[open..].find(NOTIFICATION[1]) else {
+                    found.open = Some((
+                        open,
+                        "Claude Code's notification of a job's end, which does not close",
+                    ));
+                    break;
+                };
+                from = open + close + NOTIFICATION[1].len();
+                found.blocks.push((open, from));
+            }
+        }
+        "codex" if text[start..].starts_with(REVIEWER) => {
+            let end_of = |marker: &str| text.rfind(marker).map(|at| at + marker.len());
+            match (
+                end_of(HISTORY[1]),
+                text.find(REQUEST[0]),
+                end_of(REQUEST[1]),
+            ) {
+                (Some(_), Some(_), Some(end)) | (Some(end), None, _) => found.blocks.push((0, end)),
+                (Some(end), Some(request), None) => {
+                    found.blocks.push((0, end));
+                    found.open = Some((
+                        request,
+                        "the request Codex gives its approval reviewer, which does not end",
+                    ));
+                }
+                (None, ..) => {
+                    found.open = Some((
+                        start,
+                        "the history Codex gives its approval reviewer, which does not end",
+                    ));
+                }
+            }
+        }
+        _ => {}
+    }
+    found
+}
+
+/// Whether the header at `at` of `text` stands in a quotation: on a quoted line (one that
+/// opens with `>`), or inside a fenced block (a line opening with three backticks or tildes
+/// opens one, the next such line of the same kind closes it).
+fn quoted(text: &str, at: usize) -> bool {
+    let line = text[..at].rfind('\n').map_or(0, |end| end + 1);
+    if text[line..at].trim_start().starts_with('>') {
+        return true;
+    }
+    let mut fence: Option<&str> = None;
+    for one in text[..line].lines().map(str::trim_start) {
+        match fence {
+            Some(kind) if one.starts_with(kind) => fence = None,
+            None => {
+                fence = ["```", "~~~"]
+                    .into_iter()
+                    .find(|kind| one.starts_with(kind))
+            }
+            Some(_) => {}
+        }
+    }
+    fence.is_some()
+}
+
+/// Why a header of a user's item is taken neither for a delivery nor for none.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Prompt {
-    /// The window was given a delivery in it: its first header begins a line, as a paste
-    /// does at the start of the prompt, on the line after the tag Claude Code wraps a long
-    /// paste in (2.1.303: `<pasted_content id="…">`), or behind what the input box held
-    /// (Devin's) or what Claude Code wrapped with it.
-    Delivery,
-    /// A row the harness writes of the conversation itself ([`SYNTHETIC`]): none.
-    Synthetic,
-    /// Its first header comes after other words on its line: a paste glued behind them, or
-    /// words that quote it, which the copy does not tell apart.
-    Undecided,
+enum Undecided {
+    /// It comes after other words on its line, and no delivery before it in the item: a
+    /// paste glued behind them, or words that quote it.
+    Glued,
+    /// It stands in a quotation ([`quoted`]).
+    Quoted,
+    /// It comes after a block a harness writes whose end the copy does not show.
+    Unbounded(&'static str),
 }
 
-/// What `item` is, where it is a user's item that holds a delivery's header.
-fn prompt_of(item: &Item) -> Option<Prompt> {
+impl Undecided {
+    /// Where the header of `id` stands, said: what an item holding it could not be judged by.
+    fn said(self, id: i64) -> String {
+        match self {
+            Self::Glued => format!("m-{id}'s header after other words on its line: whether it went in behind them or they quote it, the copy does not say"),
+            Self::Quoted => format!("m-{id}'s header in a quotation (a fenced block or a quoted line): whether it went in, the copy does not say"),
+            Self::Unbounded(what) => format!("m-{id}'s header after {what}: whether it went in, the copy does not say"),
+        }
+    }
+}
+
+/// What a user's item says of deliveries.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct Reading {
+    /// The messages it was given, in order.
+    given: Vec<i64>,
+    /// The first header of it taken neither for a delivery nor for none, and why.
+    undecided: Option<(i64, Undecided)>,
+}
+
+/// What `text`, a user's item of a conversation on `harness`, was given, each header of it
+/// judged where it stands: none inside what its harness writes of the conversation itself
+/// ([`synthetic`]), nor inside the words of a message delivered before it in the item (`body`
+/// of a message, by its id), where they stand after that message's header; undecided after
+/// a synthetic block whose end the copy does not show, in a quotation, or after other words
+/// on its line with no delivery before it in the item; else given: a header that begins a
+/// line (at the start of the item, on the line after the tag Claude Code wraps a long paste
+/// in, or behind what the input box held: Devin pastes there), or one glued after a delivery
+/// (B5's shape).
+fn read_prompt<'b>(text: &str, harness: &str, body: impl Fn(i64) -> Option<&'b str>) -> Reading {
+    let synthetic = synthetic(text, harness);
+    let mut reading = Reading::default();
+    let mut quoting_until = 0;
+    for (id, start, end) in headers(text) {
+        if start < quoting_until
+            || synthetic
+                .blocks
+                .iter()
+                .any(|(from, to)| (*from..*to).contains(&start))
+        {
+            continue;
+        }
+        let line = text[..start].rfind('\n').map_or(0, |end| end + 1);
+        let why = match synthetic.open {
+            Some((from, what)) if start >= from => Some(Undecided::Unbounded(what)),
+            _ if quoted(text, start) => Some(Undecided::Quoted),
+            _ if reading.given.is_empty() && !text[line..start].trim().is_empty() => {
+                Some(Undecided::Glued)
+            }
+            _ => None,
+        };
+        if let Some(why) = why {
+            reading.undecided.get_or_insert((id, why));
+            continue;
+        }
+        reading.given.push(id);
+        quoting_until = body(id).map_or(end, |said| end + said_until(&text[end..], said));
+    }
+    reading
+}
+
+/// The harness of the conversation of `item`, as the ledger names it.
+fn harness_of<'l>(look: &'l Look, item: &Item) -> &'l str {
+    look.ledger
+        .conversations
+        .iter()
+        .find(|conversation| conversation.id == item.conversation)
+        .map_or("", |conversation| conversation.harness.as_str())
+}
+
+/// What `item` says of deliveries ([`read_prompt`]): nothing where it is no user's.
+fn reading_of(look: &Look, item: &Item) -> Reading {
     if item.role != "user" {
-        return None;
+        return Reading::default();
     }
-    let (_, first, _) = *headers(&item.text).first()?;
-    let opening = item.text.trim_start();
-    if SYNTHETIC.iter().any(|marker| opening.starts_with(marker)) {
-        return Some(Prompt::Synthetic);
-    }
-    let before = item.text[..first].rsplit('\n').next().unwrap_or_default();
-    Some(if before.trim().is_empty() {
-        Prompt::Delivery
-    } else {
-        Prompt::Undecided
-    })
+    read_prompt(&item.text, harness_of(look, item), |id| body_in(look, id))
 }
 
-/// Whether `item` is a prompt the window was given a delivery in ([`Prompt::Delivery`]).
-pub(super) fn is_delivery(item: &Item) -> bool {
-    prompt_of(item) == Some(Prompt::Delivery)
-}
-
-/// 7, unresolved: each prompt whose first header comes after other words on its line
-/// ([`Prompt::Undecided`]), which is never taken for a delivery nor for none.
+/// 7, unresolved: each user's item that holds a header taken neither for a delivery nor for
+/// none ([`Undecided`]), said by the first such header.
 pub fn undecided(look: &Look) -> Vec<Unjudged> {
     look.ledger
         .items
         .iter()
-        .filter(|item| prompt_of(item) == Some(Prompt::Undecided))
         .filter_map(|item| {
-            let (id, ..) = *headers(&item.text).first()?;
+            let (id, why) = reading_of(look, item).undecided?;
             let handle = look
                 .ledger
                 .conversations
                 .iter()
                 .find(|conversation| conversation.id == item.conversation)
-                .map_or("?", |conversation| look.ledger.handle(conversation.participant));
+                .map_or("?", |conversation| {
+                    look.ledger.handle(conversation.participant)
+                });
             Some(Unjudged::new(
                 7,
                 format!("7:undecided:{}:{}", item.conversation, item.id),
-                format!(
-                    "@{handle}'s prompt {} holds m-{id}'s header after other words on its line: whether it went in behind them or they quote it, the copy does not say",
-                    item.id
-                ),
+                format!("@{handle}'s prompt {} holds {}", item.id, why.said(id)),
             ))
         })
         .collect()
 }
 
-/// The messages `item` delivered to `worker`, in order: none where it is no delivery
-/// ([`is_delivery`]); else each message it was given ([`given_in`]: a header its words
-/// quote is none) that the ledger holds as one to `worker`.
+/// The messages `item` delivered to `worker`, in order: each it was given ([`read_prompt`])
+/// that the ledger holds as one to `worker`.
 pub(super) fn delivered_to<'l>(look: &'l Look, item: &Item, worker: i64) -> Vec<&'l Message> {
-    if !is_delivery(item) {
-        return Vec::new();
-    }
-    given_in(&item.text, |id| body_in(look, id))
+    reading_of(look, item)
+        .given
         .into_iter()
         .filter_map(|id| look.ledger.messages.iter().find(|message| message.id == id))
         .filter(|message| message.recipient == worker)
         .collect()
 }
 
-/// 7: per conversation, a message whose header is in two of its prompts, and a
-/// prompt that holds the headers of two messages; a prompt being one the window was
-/// given a delivery in ([`is_delivery`]).
+/// 7: per conversation, a message given in two of its prompts, and a prompt that was given
+/// two messages ([`read_prompt`]).
 pub fn twice_or_joined(look: &Look) -> Vec<Break> {
     let body = |id: i64| body_in(look, id);
     let names = Names::of(look);
@@ -210,10 +331,10 @@ pub fn twice_or_joined(look: &Look) -> Vec<Break> {
             .ledger
             .items
             .iter()
-            .filter(|item| item.conversation == conversation.id && is_delivery(item));
+            .filter(|item| item.conversation == conversation.id && item.role == "user");
         let mut given: BTreeMap<i64, Vec<String>> = BTreeMap::new();
         for item in prompts {
-            let named = given_in(&item.text, body);
+            let named = read_prompt(&item.text, &conversation.harness, body).given;
             for id in &named {
                 given.entry(*id).or_default().push(item.id.clone());
             }
@@ -291,6 +412,11 @@ mod tests {
 
     fn ids(text: &str) -> Vec<i64> {
         headers(text).into_iter().map(|(id, ..)| id).collect()
+    }
+
+    /// The messages a prompt of a harness that writes nothing of its own was given.
+    fn given_in<'b>(text: &str, body: impl Fn(i64) -> Option<&'b str>) -> Vec<i64> {
+        read_prompt(text, "", body).given
     }
 
     #[test]
