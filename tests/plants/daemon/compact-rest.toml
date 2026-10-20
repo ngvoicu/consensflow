@@ -1,0 +1,153 @@
+# A command typed at an idle Claude's prompt read as a turn that never ended (the Mac's live
+# long run of 2026-10-19, Claude Code 2.1.303: `/compact` typed into the idle chief, which read at
+# work for the 80 minutes left, and T-13's result was never handed to it). Claude Code writes the
+# command's records as user's records (the bare `/compact` as it is typed, the words before a
+# command, the command) and then what it printed (`<local-command-stdout>`), and runs no model.
+# Claude's reader ends the command's turn at what it printed, where it follows the command with
+# nothing open (`crates/cf-harness/src/claude/record/replay.rs`, `project.rs`, `patterns.rs`), and
+# the long run's watch reads it the same way (`crates/cf-evals/src/long_run/record.rs`). The
+# reader's own tests are `crates/cf-harness/src/claude/record/tests/commands.rs`; the case is
+# `crates/cf-e2e/tests/regressions/a_compact_typed_into_an_idle_chief_held_a_workers_result.rs`,
+# whose stand-in compacts as 2.1.303 does.
+#
+# The case builds the native `cf` from the sources as they are planted, so its plant says
+# `builds`. Every name holds `compact-rest`, so `npm run plants:daemon -- "compact-rest"` runs them
+# all.
+
+[run]
+compact-rest-reader = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::record"]
+compact-rest-rig = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_compact_typed_into_an_idle_chief_held_a_workers_result::"]
+compact-rest-watch = ["cargo", "test", "--offline", "-p", "cf-evals", "--lib", "long_run::record"]
+
+[[plant]]
+name = "compact-rest: what a command typed at the prompt printed begins a turn, as Node read it, and the chief given a /compact is never handed its worker's result"
+meant = "a_claude_chief_given_a_compact_while_idle_is_at_rest_after_it_and_is_handed_its_workers_result"
+runs = ["compact-rest-rig"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/replay.rs"
+find = '''
+        if ends {
+            self.ended_natively();
+            return Ok(());
+        }
+'''
+replace = ""
+
+[[plant]]
+name = "compact-rest: the reader reads what a command typed at the prompt printed as a prompt, as Node read it"
+meant = "a_compact_typed_while_idle_is_at_rest_once_claude_says_what_it_printed"
+runs = ["compact-rest-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/replay.rs"
+find = '''
+        if ends {
+            self.ended_natively();
+            return Ok(());
+        }
+'''
+replace = ""
+
+[[plant]]
+name = "compact-rest: what a command printed ends the turn whatever record it is the child of"
+meant = "the_output_ends_the_turn_only_where_it_follows_its_command_with_nothing_open"
+runs = ["compact-rest-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/replay.rs"
+find = "            .is_some_and(|parent| self.follows_its_command(parent, &COMMAND));"
+replace = "            .is_some();"
+
+[[plant]]
+name = "compact-rest: what is printed ends the turn whatever the user's record it follows says"
+meant = "the_output_ends_the_turn_only_where_it_follows_its_command_with_nothing_open"
+runs = ["compact-rest-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/patterns.rs"
+find = '''compile(r"^<command-name>/[^<]+</command-name>")'''
+replace = '''compile(r"")'''
+
+[[plant]]
+name = "compact-rest: what a command printed ends the turn with a call or the stop hooks of an answer open"
+meant = "an_output_waits_while_the_stop_hooks_or_a_call_of_a_fragment_after_its_command_are_open"
+runs = ["compact-rest-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/replay.rs"
+find = '''
+                && command.is_match(&last.text)
+                && self.open_tools.is_empty()
+                && self.hooks.is_empty()
+'''
+replace = '''
+                && command.is_match(&last.text)
+'''
+
+[[plant]]
+name = "compact-rest: what is printed in another session or on a sidechain ends the main conversation's turn"
+meant = "the_output_ends_the_turn_only_where_it_follows_its_command_with_nothing_open"
+runs = ["compact-rest-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/project.rs"
+find = "        .filter(|_| of_main_conversation(record, session) && OUTPUT.is_match(&text))"
+replace = "        .filter(|_| OUTPUT.is_match(&text))"
+
+[[plant]]
+name = "compact-rest: any user's record that follows a command is read as what it printed"
+meant = "the_output_ends_the_turn_only_where_it_follows_its_command_with_nothing_open"
+runs = ["compact-rest-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/patterns.rs"
+find = '''compile(r"^<local-command-(?:stdout|stderr)>")'''
+replace = '''compile(r"")'''
+
+[[plant]]
+name = "compact-rest: the watch reads what a command typed at the prompt printed as a prompt"
+meant = "a_compact_typed_at_the_prompt_ends_at_what_it_printed_and_the_record_ends_in_its_compaction"
+runs = ["compact-rest-watch"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/record.rs"
+find = '''
+                Kind::Output if last.is_some_and(|said| follows_its_command(said, entry)) => {
+                    (open, candidate, ended, agents) = (false, None, None, 0);
+                }
+'''
+replace = ""
+
+[[plant]]
+name = "compact-rest: the watch's output ends the turn whatever it follows"
+meant = "a_compact_typed_at_the_prompt_ends_at_what_it_printed_and_the_record_ends_in_its_compaction"
+runs = ["compact-rest-watch"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/record.rs"
+find = '''
+    last.kind == Kind::Prompt
+        && last.content.starts_with(COMMAND)
+        && last.uuid.is_some()
+        && last.uuid == output.parent
+'''
+replace = '''
+    last.kind == Kind::Prompt
+'''
+
+[[plant]]
+name = "compact-rest: the watch says a record a /compact typed at the prompt ends ends in no compaction, and the restart after it is never played"
+meant = "a_compact_typed_at_the_prompt_ends_at_what_it_printed_and_the_record_ends_in_its_compaction"
+runs = ["compact-rest-watch"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/record.rs"
+find = '''
+        if said.next_if(|entry| entry.kind == Kind::Output).is_some() {
+            said.next_if(|entry| prompt(entry, COMMAND));
+            said.next_if(|entry| prompt(entry, CAVEAT));
+        }
+'''
+replace = ""

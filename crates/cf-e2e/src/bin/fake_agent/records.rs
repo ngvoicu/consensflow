@@ -85,6 +85,12 @@ impl Records {
         self.ordinal
     }
 
+    /// The `uuid` of the record the window `pid` wrote last: the parent of the
+    /// next, where Claude says one.
+    pub fn last_uuid(&self, pid: u32) -> String {
+        format!("{}-{pid}-{}", self.session, self.ordinal)
+    }
+
     /// Writes one record: the session, the version, the time and a `uuid` of
     /// its own, then `fields`. A user's message that comes to a conversation
     /// that was cut closes the turn that was cut first.
@@ -217,6 +223,7 @@ mod tests {
         assert_eq!(written[0]["version"], "2.1.277");
         assert_eq!(written[0]["uuid"], "sess-1-4242-1");
         assert_eq!(written[1]["uuid"], "sess-1-4242-2");
+        assert_eq!(records.last_uuid(4242), "sess-1-4242-2");
         let at = written[0]["timestamp"].as_str().unwrap();
         assert!(
             at.len() == 24 && at.ends_with('Z') && at.as_bytes()[10] == b'T',

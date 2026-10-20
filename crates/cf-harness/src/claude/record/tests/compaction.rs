@@ -8,7 +8,7 @@
 use super::*;
 
 /// The `compact_boundary` record `uuid`, after the record `logical`.
-fn compacted(uuid: &str, logical: &str) -> Value {
+pub(super) fn compacted(uuid: &str, logical: &str) -> Value {
     of_session(json!({
         "type": "system", "subtype": "compact_boundary", "uuid": uuid, "parentUuid": null,
         "logicalParentUuid": logical, "content": "Conversation compacted", "isMeta": false,
@@ -17,7 +17,7 @@ fn compacted(uuid: &str, logical: &str) -> Value {
 }
 
 /// The summary a compaction writes, under the boundary `parent`.
-fn compact_summary(uuid: &str, parent: &str) -> Value {
+pub(super) fn compact_summary(uuid: &str, parent: &str) -> Value {
     having(
         user(
             uuid,

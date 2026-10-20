@@ -36,8 +36,9 @@
 //! and, as the line says, the command with it or not. A turn that runs a build
 //! (`BUILD`, in `build`) waits for it as for a command, and the build leaves a
 //! daemon running, as Gradle's does: the program is the build too (`--build`).
-//! `/compact` typed alone compacts the conversation as Claude Code does while idle:
-//! its boundary and its summary in the record, and no turn.
+//! `/compact` typed alone compacts the conversation as Claude Code 2.1.303 does
+//! while idle: the bare command as it is typed, its boundary and its summary, then
+//! the command's own records and what it printed, in the record, and no turn.
 //!
 //! It is the program of the suites that stands in a window, so it reads the
 //! environment a window is given and runs `cf` as an agent does, both through
@@ -290,11 +291,13 @@ const COMPACT: &str = "/compact";
 const COMPACT_SUMMARY: &str =
     "This session is being continued from a previous conversation that ran out of context.";
 
+/// What Claude Code writes before a command typed at its prompt, as a meta record.
+const CAVEAT: &str = "<local-command-caveat>The messages below were made by a command the user ran; do not answer them.</local-command-caveat>";
+
 /// One message: the window works on it and is idle again once it is answered
 /// or an Escape stopped it. `/compact` typed alone is no message: the window
-/// compacts its conversation as Claude Code does while idle, writing the
-/// `compact_boundary` and the summary (`isCompactSummary`), and no turn (the long
-/// run's compaction, which its watch finds in the record).
+/// compacts its conversation as Claude Code does while idle (`compact`), and runs
+/// no turn (the long run's compaction, which its watch finds in the record).
 fn take_turn(records: &mut Records, pid: u32, window: &Window, text: &str) -> Result<(), String> {
     if text.trim() == COMPACT {
         return compact(records, pid);
@@ -305,31 +308,61 @@ fn take_turn(records: &mut Records, pid: u32, window: &Window, text: &str) -> Re
     done
 }
 
-/// The conversation compacted while idle: busy while it compacts, then the two
-/// records Claude Code writes of it, and idle again.
+/// The conversation compacted while idle, as Claude Code 2.1.303 writes it (the
+/// long run of 2026-10-19, whose chief read at work after it for 80 minutes): busy
+/// while it compacts, with the bare `/compact` written as it is typed; then the
+/// boundary, whose chain starts afresh, the summary, the words before the command,
+/// the command and what it printed, each the child of the one before it, and the
+/// hook that ran as the conversation began again; and idle.
 fn compact(records: &mut Records, pid: u32) -> Result<(), String> {
     let failed = |cause: io::Error| cause.to_string();
     records.status(pid, "busy").map_err(failed)?;
-    for record in compaction_records() {
+    records
+        .append(pid, user(COMPACT, json!({})))
+        .map_err(failed)?;
+    let boundary = json!({
+        "type": "system", "subtype": "compact_boundary", "isSidechain": false,
+        "parentUuid": null, "logicalParentUuid": records.last_uuid(pid),
+        "content": "Conversation compacted", "level": "info",
+        "compactMetadata": { "trigger": "manual" },
+    });
+    records.append(pid, boundary).map_err(failed)?;
+    let command = format!(
+        "<command-name>{COMPACT}</command-name>\n            <command-message>compact</command-message>\n            <command-args></command-args>"
+    );
+    let hook = json!({
+        "type": "attachment", "isSidechain": false,
+        "attachment": { "type": "hook_success", "hookEvent": "SessionStart", "hookName": "SessionStart:compact" },
+    });
+    for mut record in [
+        user(
+            COMPACT_SUMMARY,
+            json!({ "isCompactSummary": true, "isVisibleInTranscriptOnly": true }),
+        ),
+        user(CAVEAT, json!({ "isMeta": true })),
+        user(&command, json!({})),
+        user(
+            "<local-command-stdout>\u{1b}[2mCompacted \u{1b}[22m</local-command-stdout>",
+            json!({ "repeatsCompactSummary": true }),
+        ),
+        hook,
+    ] {
+        record["parentUuid"] = json!(records.last_uuid(pid));
         records.append(pid, record).map_err(failed)?;
     }
     records.status(pid, "idle").map_err(failed)
 }
 
-/// What Claude Code writes of a compaction while idle, as the product's reader
-/// is tested with (`cf-harness`'s `record/tests/compaction.rs`).
-fn compaction_records() -> [serde_json::Value; 2] {
-    [
-        json!({
-            "type": "system", "subtype": "compact_boundary", "parentUuid": null,
-            "content": "Conversation compacted", "isMeta": false, "level": "info",
-            "compactMetadata": { "trigger": "manual" },
-        }),
-        json!({
-            "type": "user", "isCompactSummary": true, "isVisibleInTranscriptOnly": true,
-            "message": { "role": "user", "content": COMPACT_SUMMARY },
-        }),
-    ]
+/// A user's record of the main conversation saying `content`, with `fields` besides.
+fn user(content: &str, fields: serde_json::Value) -> serde_json::Value {
+    let mut record = json!({
+        "type": "user", "isSidechain": false,
+        "message": { "role": "user", "content": content },
+    });
+    if let (Some(record), serde_json::Value::Object(fields)) = (record.as_object_mut(), fields) {
+        record.extend(fields);
+    }
+    record
 }
 
 /// A turn: the window is busy (not in the hooks of its prompt, where Claude's
@@ -479,7 +512,7 @@ mod tests {
     }
 
     #[test]
-    fn a_compaction_writes_its_boundary_and_the_summary_in_claudes_shape_and_no_turn() {
+    fn a_compaction_writes_claude_2_1_303s_records_each_the_child_of_the_one_before_and_no_turn() {
         let config = tempfile::tempdir().unwrap();
         let mut records = Records::new(config.path(), "s", 7).unwrap();
         compact(&mut records, 7).unwrap();
@@ -489,12 +522,47 @@ mod tests {
                 .lines()
                 .map(|line| serde_json::from_str(line).unwrap())
                 .collect();
-        assert_eq!(written.len(), 2);
+        let said = |record: &serde_json::Value| {
+            let content = record["message"]["content"].as_str().unwrap_or_default();
+            let words = content.split('>').next().unwrap_or_default().to_owned();
+            format!(
+                "{}{}",
+                record["subtype"]
+                    .as_str()
+                    .unwrap_or(record["type"].as_str().unwrap()),
+                if words.is_empty() {
+                    String::new()
+                } else {
+                    format!(" {words}")
+                }
+            )
+        };
         assert_eq!(
-            (&written[0]["type"], &written[0]["subtype"]),
-            (&json!("system"), &json!("compact_boundary"))
+            written.iter().map(said).collect::<Vec<_>>(),
+            [
+                "user /compact",
+                "compact_boundary",
+                "user This session is being continued from a previous conversation that ran out of context.",
+                "user <local-command-caveat",
+                "user <command-name",
+                "user <local-command-stdout",
+                "attachment",
+            ]
         );
-        assert_eq!(written[1]["isCompactSummary"], true);
+        assert!(written.iter().all(|record| record["isSidechain"] == false));
+        // The boundary starts the chain afresh, after the bare command; each record after
+        // it is the child of the one before.
+        assert_eq!(written[1]["parentUuid"], serde_json::Value::Null);
+        assert_eq!(written[1]["logicalParentUuid"], written[0]["uuid"]);
+        for pair in written[1..].windows(2) {
+            assert_eq!(pair[1]["parentUuid"], pair[0]["uuid"]);
+        }
+        assert_eq!(written[2]["isCompactSummary"], true);
+        assert_eq!(written[3]["isMeta"], true);
+        assert!(written[4]["message"]["content"]
+            .as_str()
+            .unwrap()
+            .starts_with("<command-name>/compact</command-name>"));
         assert!(written.iter().all(|record| record["type"] != "assistant"));
         let status: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(records.status_file()).unwrap()).unwrap();

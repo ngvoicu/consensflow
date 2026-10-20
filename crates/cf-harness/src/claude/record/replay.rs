@@ -5,9 +5,10 @@
 use std::sync::Arc;
 
 use cf_base::{js, time};
+use regex::Regex;
 use serde_json::Value;
 
-use super::patterns::CLEAR;
+use super::patterns::{CLEAR, COMMAND};
 use super::project::{Assistant, Block, Boundary, Hook, Projected, ToolResult, User};
 use super::{Candidate, Terminal, Transcript};
 use crate::shared::quota::exhausted_quota;
@@ -150,6 +151,15 @@ impl Transcript {
     /// open: Claude Code compacts a conversation while it is idle, and runs no
     /// turn after (the owner's report of 2026-10-15, a Resume that told a chief
     /// at rest its turn was cut). One in a turn, as Node read it.
+    ///
+    /// What a command typed at Claude's prompt printed (`/compact`, `/model`)
+    /// is an item as any, and a native end of the command's turn where it
+    /// follows the command, with nothing open: the command, the words Claude
+    /// Code writes before it (`<local-command-caveat>`, and the bare `/compact`
+    /// of 2.1.303) and the summary of a compaction read as a prompt each, and
+    /// no model runs after (the long run of 2026-10-19, a chief at rest after
+    /// a `/compact` read at work for 80 minutes). Departs from Node's reader,
+    /// which read the output as a prompt too.
     fn user(&mut self, record: &User, place: Option<usize>, seq: usize) -> Result<(), String> {
         let number = Value::from(seq);
         let at = record.at.as_ref().unwrap_or(&number);
@@ -171,8 +181,16 @@ impl Transcript {
         if js::trim(&record.text).is_empty() {
             return Ok(());
         }
+        let ends = record
+            .output_of
+            .as_deref()
+            .is_some_and(|parent| self.follows_its_command(parent, &COMMAND));
         let id = id_of(record.uuid.as_ref(), "claude user", seq)?;
         self.items.push(id, Role::User, &record.text, at, seq);
+        if ends {
+            self.ended_natively();
+            return Ok(());
+        }
         if (record.summary && !self.turn_open) || self.late_ancestor(place) {
             return Ok(());
         }
@@ -206,19 +224,29 @@ impl Transcript {
     /// nothing open: a native end of the turn. `parent` is the uuid of the
     /// record the output is a child of.
     fn clear(&mut self, parent: &str) {
-        let Some(command) = self.items.last() else {
-            return;
-        };
-        let of_the_command = command.role == Role::User
-            && parent == &*command.id
-            && CLEAR.is_match(&command.text)
-            && self.open_tools.is_empty()
-            && self.hooks.is_empty();
-        if of_the_command {
-            self.turn_open = false;
-            self.candidate = None;
-            self.terminal = Some(Terminal::Native);
+        if self.follows_its_command(parent, &CLEAR) {
+            self.ended_natively();
         }
+    }
+
+    /// Whether an output, a child of the record `parent`, follows the command
+    /// it is the output of: the user's turn last pushed is that record, a
+    /// command `command` matches, and nothing is open.
+    fn follows_its_command(&self, parent: &str, command: &Regex) -> bool {
+        self.items.last().is_some_and(|last| {
+            last.role == Role::User
+                && parent == &*last.id
+                && command.is_match(&last.text)
+                && self.open_tools.is_empty()
+                && self.hooks.is_empty()
+        })
+    }
+
+    /// The turn ended as its record says, with no answer to settle on.
+    fn ended_natively(&mut self) {
+        self.turn_open = false;
+        self.candidate = None;
+        self.terminal = Some(Terminal::Native);
     }
 
     /// The boundary record that says a turn that answered is over, by its

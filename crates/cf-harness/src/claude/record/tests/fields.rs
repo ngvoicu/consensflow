@@ -3,6 +3,7 @@
 //! changed, so the projection holds it, and so does the line it is built from
 //! (`keep`). A row is a scenario, the record of it that changes, and how.
 
+use super::commands::{printed, typed_command};
 use super::projection::{interrupt, projected};
 use super::restart::closed;
 use super::*;
@@ -81,6 +82,16 @@ fn cleared() -> Vec<Value> {
         user("u1", Value::Null, json!(command("", ""))),
         output("u1"),
     ]
+}
+
+/// A turn that ended, then a command typed at the prompt and what it printed.
+fn command_printed() -> Vec<Value> {
+    let mut records = ended();
+    records.extend([
+        typed_command("n1", "d1", "model", "haiku"),
+        printed("o1", "n1", "Set model to Haiku"),
+    ]);
+    records
 }
 
 fn hooked() -> Vec<Value> {
@@ -268,8 +279,38 @@ fn read() -> Vec<Row> {
             1,
             is("parentUuid", json!("X")),
         ),
+        (
+            "parentUuid, of a command's output",
+            command_printed,
+            4,
+            is("parentUuid", json!("u9")),
+        ),
         ("sessionId, of a hook's context", hooked, 0, other()),
         ("sessionId, of a /clear's output", cleared, 1, other()),
+        (
+            "sessionId, of a command's output",
+            command_printed,
+            4,
+            other(),
+        ),
+        (
+            "isSidechain, of a command's output",
+            command_printed,
+            4,
+            sidechain(),
+        ),
+        (
+            "message.content, of a command",
+            command_printed,
+            3,
+            blocks(json!("model haiku")),
+        ),
+        (
+            "message.content, of a command's output",
+            command_printed,
+            4,
+            blocks(json!("Set model to Haiku")),
+        ),
         ("sessionId, of the boundary record", late, 1, other()),
         ("isSidechain, of a hook's context", hooked, 0, sidechain()),
         ("isSidechain, of a /clear's output", cleared, 1, sidechain()),

@@ -279,6 +279,120 @@ fn a_record_ends_in_a_compaction_until_a_turn_comes_after_it() {
     assert!(!record(&went_on).ends_in_compaction());
 }
 
+/// A user's record `uuid`, the child of `parent`, saying `text`, with `fields`.
+fn said_by_claude(second: u32, uuid: &str, parent: &str, text: &str, fields: Value) -> String {
+    let mut record = json!({ "type": "user", "uuid": uuid, "parentUuid": parent, "isSidechain": false,
+        "message": { "role": "user", "content": text } });
+    if let (Some(record), Some(fields)) = (record.as_object_mut(), fields.as_object()) {
+        record.extend(fields.clone());
+    }
+    line(second, record)
+}
+
+/// A `/compact` typed into an idle conversation, as Claude Code 2.1.303 writes it (the
+/// long run of 2026-10-19, whose chief read at work after it): the bare command as it is
+/// typed, then, once it compacted, the boundary, the summary, the words before the
+/// command, the command, and what it printed (`printed`, a child of the command).
+fn compact_typed(printed: String) -> Vec<String> {
+    vec![
+        prompt(0, "Plan the work."),
+        answer(20, "Planned.", "end_turn"),
+        duration(20),
+        said_by_claude(30, "c0", "d1", "/compact", json!({})),
+        line(
+            150,
+            json!({ "type": "system", "subtype": "compact_boundary", "uuid": "b1", "parentUuid": null }),
+        ),
+        said_by_claude(
+            150,
+            "s1",
+            "b1",
+            "This session is being continued.",
+            json!({ "isCompactSummary": true }),
+        ),
+        said_by_claude(
+            150,
+            "k1",
+            "s1",
+            "<local-command-caveat>Run by the user.</local-command-caveat>",
+            json!({ "isMeta": true }),
+        ),
+        said_by_claude(
+            150,
+            "n1",
+            "k1",
+            "<command-name>/compact</command-name>\n<command-message>compact</command-message>\n<command-args></command-args>",
+            json!({}),
+        ),
+        printed,
+        line(
+            151,
+            json!({ "type": "attachment", "uuid": "t1", "parentUuid": "o1",
+                "attachment": { "type": "hook_success", "hookEvent": "SessionStart" } }),
+        ),
+    ]
+}
+
+#[test]
+fn a_compact_typed_at_the_prompt_ends_at_what_it_printed_and_the_record_ends_in_its_compaction() {
+    let printed = |parent: &str, text: &str| said_by_claude(150, "o1", parent, text, json!({}));
+    let compacted = record(&compact_typed(printed(
+        "n1",
+        "<local-command-stdout>Compacted</local-command-stdout>",
+    )));
+    assert_eq!(
+        compacted.stood_at(at(60)).unwrap().0,
+        Stood::InFlight,
+        "it compacts"
+    );
+    let (stood, last) = compacted.stood_at(at(200)).unwrap();
+    assert_eq!(stood, Stood::AtRest, "{last:?}");
+    assert_eq!(last.kind, Kind::Output);
+    assert!(compacted.ends_in_compaction());
+    // An error the command printed ends it too.
+    let failed = printed(
+        "n1",
+        "<local-command-stderr>Not compacted</local-command-stderr>",
+    );
+    assert_eq!(
+        record(&compact_typed(failed)).stood_at(at(200)).unwrap().0,
+        Stood::AtRest
+    );
+    // A prompt after it is a turn at work, and the record no longer ends in the compaction.
+    let mut went_on = compact_typed(printed(
+        "n1",
+        "<local-command-stdout>Compacted</local-command-stdout>",
+    ));
+    went_on.push(prompt(300, "Go on."));
+    assert_eq!(
+        record(&went_on).stood_at(at(400)).unwrap().0,
+        Stood::InFlight
+    );
+    assert!(!record(&went_on).ends_in_compaction());
+    // What is printed of no command that comes just before it ends nothing.
+    let astray = record(&compact_typed(printed(
+        "k1",
+        "<local-command-stdout>Compacted</local-command-stdout>",
+    )));
+    assert_eq!(astray.stood_at(at(200)).unwrap().0, Stood::InFlight);
+    let mut after_a_prompt = compact_typed(printed("n1", "x"));
+    after_a_prompt.truncate(3);
+    after_a_prompt.extend([
+        said_by_claude(30, "u2", "d1", "Hello again", json!({})),
+        said_by_claude(
+            31,
+            "o1",
+            "u2",
+            "<local-command-stdout>x</local-command-stdout>",
+            json!({}),
+        ),
+    ]);
+    assert_eq!(
+        record(&after_a_prompt).stood_at(at(60)).unwrap().0,
+        Stood::InFlight
+    );
+}
+
 #[test]
 fn a_refusal_of_the_provider_ends_the_turn_natively() {
     let refused = record(&[

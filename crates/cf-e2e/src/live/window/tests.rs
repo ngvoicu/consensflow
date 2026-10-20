@@ -5,7 +5,8 @@
 use std::cell::Cell;
 
 use super::open::{
-    asked_for, consensflows_hooks_of, new_session, pasted_into, session_for, trust_line, Member,
+    add_hooks, asked_for, consensflows_hooks_of, new_session, pasted_into, session_for, trust_line,
+    with_hooks, Member,
 };
 use super::*;
 
@@ -270,4 +271,53 @@ fn a_window_has_held_still_when_its_output_stopped_growing_with_something_printe
         hold,
         tiny
     ));
+}
+
+#[test]
+fn a_probes_hooks_go_after_consensflows_own_in_the_launchs_one_settings_file() {
+    let consensflows = json!({ "type": "command", "command": "cf hook stop" });
+    let mut config = json!({
+        "permissions": { "defaultMode": "bypassPermissions" },
+        "hooks": { "Stop": [{ "hooks": [consensflows] }] },
+    });
+    let printing = json!({ "hooks": [{ "type": "command", "command": "echo compacted" }] });
+    let again = json!({ "hooks": [{ "type": "command", "command": "echo stopped" }] });
+    add_hooks(
+        &mut config,
+        &json!({ "PostCompact": [printing], "Stop": [again] }),
+    );
+    assert_eq!(
+        config,
+        json!({
+            "permissions": { "defaultMode": "bypassPermissions" },
+            "hooks": {
+                "Stop": [{ "hooks": [consensflows] }, again],
+                "PostCompact": [printing],
+            },
+        })
+    );
+    // A config with no hooks is given them.
+    let mut bare = json!({});
+    add_hooks(&mut bare, &json!({ "PostCompact": [printing] }));
+    assert_eq!(bare, json!({ "hooks": { "PostCompact": [printing] } }));
+
+    // The file the launch loads is written beside the app's, which stays as it was.
+    let folder = tempfile::tempdir().unwrap();
+    let file = folder.path().join("settings.json");
+    crate::files::write(&file, config.to_string()).unwrap();
+    let words = vec!["--settings".to_owned(), file.to_string_lossy().into_owned()];
+    let loaded = with_hooks(&words, &json!({ "SessionStart": [printing] })).unwrap();
+    assert_eq!(loaded[0], "--settings");
+    assert_eq!(
+        Path::new(&loaded[1]),
+        folder.path().join("settings.hooks.json")
+    );
+    let written: Value =
+        serde_json::from_str(&crate::files::read_string(Path::new(&loaded[1])).unwrap()).unwrap();
+    assert_eq!(written["hooks"]["SessionStart"], json!([printing]));
+    assert_eq!(
+        crate::files::read_string(&file).unwrap(),
+        config.to_string()
+    );
+    assert!(with_hooks(&words[..1], &json!({})).is_err());
 }

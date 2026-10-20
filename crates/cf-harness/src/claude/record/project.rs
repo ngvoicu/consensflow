@@ -17,6 +17,7 @@ use std::sync::Arc;
 use cf_base::js;
 use serde_json::{Map, Value};
 
+use super::patterns::OUTPUT;
 use super::text::{claude_text, claude_tool_text, is_interrupt};
 use super::{field, kind};
 
@@ -118,6 +119,11 @@ pub(super) struct User {
     pub(super) queued: bool,
     /// The summary a compaction writes (`isCompactSummary`): Claude Code's own.
     pub(super) summary: bool,
+    /// The uuid of the record this one is a child of, where it is what a
+    /// command typed at Claude's prompt printed (`OUTPUT`), of the main
+    /// conversation: Claude Code's own words, which end the command's turn
+    /// where they follow it.
+    pub(super) output_of: Option<Arc<str>>,
 }
 
 /// The record `record` of the session `session`, as replay reads it.
@@ -126,7 +132,7 @@ pub(super) fn project(record: &Value, session: &str) -> Projected {
         Some("attachment") => hook(record, session),
         Some("queue-operation") => queue(record),
         Some("assistant") => assistant(record),
-        Some("user") => user(record),
+        Some("user") => user(record, session),
         Some("system") => system(record, session),
         _ => Projected::Other,
     }
@@ -266,8 +272,14 @@ fn assistant(record: &Value) -> Projected {
     }))
 }
 
-fn user(record: &Value) -> Projected {
+fn user(record: &Value, session: &str) -> Projected {
     let content = field(record.get("message"), "content");
+    let text = claude_text(content);
+    let output_of = record
+        .get("parentUuid")
+        .and_then(Value::as_str)
+        .filter(|_| of_main_conversation(record, session) && OUTPUT.is_match(&text))
+        .map(Arc::from);
     Projected::User(Box::new(User {
         at: timestamp(record),
         uuid: text_id(record.get("uuid")),
@@ -276,10 +288,11 @@ fn user(record: &Value) -> Projected {
             .filter(|block| kind(block) == Some("tool_result"))
             .map(tool_result)
             .collect(),
-        text: claude_text(content),
+        text,
         interrupt: is_interrupt(record),
         queued: record.get("promptSource").and_then(Value::as_str) == Some("queued"),
         summary: record.get("isCompactSummary") == Some(&Value::Bool(true)),
+        output_of,
     }))
 }
 

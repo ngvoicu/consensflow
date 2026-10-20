@@ -8,7 +8,8 @@
 //! turn's end.
 //!
 //! A turn is settled once the transcript says it ended, with no tool call or
-//! queued message open: natively (an API error, an interrupt, a `/clear`), or
+//! queued message open: natively (an API error, an interrupt, a `/clear`, the
+//! output of another command typed at Claude's prompt), or
 //! by the boundary record a turn that answered writes after its stop hooks
 //! ran (a `turn_duration`, or a `stop_hook_summary` that did not prevent
 //! continuation). A turn that has begun and not ended is in flight.
@@ -174,7 +175,8 @@ struct Candidate {
 
 /// How the latest turn ended.
 enum Terminal {
-    /// The record says so: an API error, an interrupt, a `/clear`.
+    /// The record says so: an API error, an interrupt, a `/clear`, the output
+    /// of another command.
     Native,
     /// A boundary record came after the candidate. It names the candidate's
     /// item and its own uuid, when that is text, and says whether the turn left

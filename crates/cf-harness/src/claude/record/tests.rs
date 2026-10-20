@@ -10,7 +10,9 @@
 //! Node's reading), the tool calls and how the items are ordered (`items`),
 //! the messages queued (`queues`) and a relaunch, which empties the queue
 //! (`restart`), the API's refusals (`refusals`), the output of a `/clear`
-//! (`clear`), an interrupt (`interrupts`), and the records read late
+//! (`clear`) and of the other commands typed at the prompt (`commands`), a
+//! compaction while idle (`compaction`), an interrupt (`interrupts`), and the
+//! records read late
 //! (`ancestry`). What a record waits as, and the line it is
 //! built from, are held to what replay reads of a record: what nothing reads
 //! changes nothing (`projection`), and each field replay reads changes the
@@ -21,6 +23,7 @@ mod agents;
 mod ancestry;
 mod boundaries;
 mod clear;
+mod commands;
 mod compaction;
 mod fields;
 mod interrupts;
