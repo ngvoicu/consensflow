@@ -182,7 +182,7 @@ fn takes_part(line: &str) -> bool {
 /// `last_lines`, which the chief's wait takes a window's last 40 lines with, a cut
 /// accepted as the pane host's is), a cut it does not know the word of, and whether a
 /// text it lists reaches the run's output at all. It reads lines, not meaning.
-const TAKEN: [(&str, &str, &str); 58] = [
+const TAKEN: [(&str, &str, &str); 50] = [
     (
         "long_run/disruptions.rs",
         "if let Some(next) = self.planned[place + 1..]",
@@ -195,53 +195,13 @@ const TAKEN: [(&str, &str, &str); 58] = [
     ),
     (
         "long_run/invariants/deliveries.rs",
-        "\"claude-code\" if text[start..].starts_with(SUMMARY) => found.blocks.push((0, text.len())),",
-        "where a harness's own block stands in a prompt, read and never said",
+        "let wrapped = text[start..].strip_prefix(PASTED).and_then(|rest| {",
+        "where a delivery begins in a prompt, read and never said",
     ),
     (
         "long_run/invariants/deliveries.rs",
-        "while let Some(open) = text[from..].find(NOTIFICATION[0]).map(|at| from + at) {",
+        "let (attributes, inner) = rest.split_once('>')?;",
         "the same",
-    ),
-    (
-        "long_run/invariants/deliveries.rs",
-        "let Some(close) = text[open..].find(NOTIFICATION[1]) else {",
-        "the same",
-    ),
-    (
-        "long_run/invariants/deliveries.rs",
-        "\"codex\" if text[start..].starts_with(REVIEWER) => {",
-        "the same",
-    ),
-    (
-        "long_run/invariants/deliveries.rs",
-        "let line = text[..at].rfind('\\n').map_or(0, |end| end + 1);",
-        "whether a prompt's header stands in a quotation, read and never said",
-    ),
-    (
-        "long_run/invariants/deliveries.rs",
-        "if text[line..at].trim_start().starts_with('>') {",
-        "the same",
-    ),
-    (
-        "long_run/invariants/deliveries.rs",
-        "for one in text[..line].lines().map(str::trim_start) {",
-        "the same",
-    ),
-    (
-        "long_run/invariants/deliveries.rs",
-        "let line = text[..start].rfind('\\n').map_or(0, |end| end + 1);",
-        "what stands before a prompt's header on its line, read and never said",
-    ),
-    (
-        "long_run/invariants/deliveries.rs",
-        "_ if reading.given.is_empty() && !text[line..start].trim().is_empty() => {",
-        "the same",
-    ),
-    (
-        "long_run/invariants/order.rs",
-        "let mut rest = body.rsplit_once(answer).map_or_else(",
-        "a check reading a result against its turn, nothing it says",
     ),
     (
         "long_run/stalls.rs",

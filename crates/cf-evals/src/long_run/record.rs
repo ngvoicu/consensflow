@@ -216,6 +216,9 @@ pub struct Record {
     pub entries: Vec<Entry>,
     /// Every record's place in the conversation's tree, by its uuid.
     places: BTreeMap<String, Place>,
+    /// The uuids of the user's records Claude Code marks as its summary of a compaction
+    /// (`isCompactSummary: true`): the product copies each as an item of that id.
+    summaries: BTreeSet<String>,
 }
 
 impl Record {
@@ -236,8 +239,19 @@ impl Record {
             .filter_map(|line| serde_json::from_str::<Value>(line).ok())
         {
             self.place(&line);
+            if line["type"] == "user" && line["isCompactSummary"] == true {
+                if let Some(uuid) = line["uuid"].as_str() {
+                    self.summaries.insert(uuid.to_owned());
+                }
+            }
             self.entries.extend(claude_entries(&line, names));
         }
+    }
+
+    /// Whether the record `uuid` is one Claude Code marks as its summary of a compaction,
+    /// by the record's own flag.
+    pub fn is_summary(&self, uuid: &str) -> bool {
+        self.summaries.contains(uuid)
     }
 
     /// The line's place in the tree, where it has a uuid.

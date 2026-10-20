@@ -1,8 +1,9 @@
 //! 3 (A3): an ended notice after its result; 4 (A4): a result that is not its
 //! turn's final answer.
 
+use cf_evals::long_run::invariants::{self, Break};
+use cf_evals::long_run::known;
 use cf_evals::long_run::look::Look;
-use cf_evals::long_run::{invariants, known};
 use serde_json::json;
 
 use crate::scene::{found, ms, t, Scene, CHIEF};
@@ -652,11 +653,9 @@ fn a_header_a_person_quotes_in_a_fence_is_never_the_lost_delivery_that_began_a_t
     );
 }
 
-#[test]
-fn a_final_answer_its_progress_said_first_is_taken_out_where_it_stands_and_turn_ends_a4_is_known() {
-    // GPT-6-Astra's review of round b2: the answer's words open a progress line too, and the
-    // result is that line and the answer. Taken out at its first place, the answer left the
-    // progress cut and a false FAIL; it stands last, after the progress.
+/// T-14's worker's turn: the brief, then each of `progress` said before a tool's call, then
+/// `answer`; and its result m-131 saying `result`. What the fourth finds of it.
+fn progress_then(progress: &[&str], answer: &str, result: &str) -> Vec<Break> {
     let scene = Scene::new(&[("long-worker", "claude-code")]);
     let task = task(&scene);
     let conversation = scene.conversation(3, "claude-code", "s-worker");
@@ -668,23 +667,58 @@ fn a_final_answer_its_progress_said_first_is_taken_out_where_it_stands_and_turn_
         true,
         &t(0, 0),
     );
-    let progress = "All 61 tests pass. Checking the diff now.";
-    scene.item(conversation, 1, "assistant", progress, false, &t(0, 20));
-    scene.item(conversation, 2, "tool", "2 files changed", true, &t(0, 21));
-    let answer = "All 61 tests pass.";
-    scene.item(conversation, 3, "assistant", answer, true, &t(1, 0));
+    let mut seq = 1;
+    for (at, line) in (10..).zip(progress) {
+        scene.item(conversation, seq, "assistant", line, false, &t(0, at));
+        scene.item(conversation, seq + 1, "tool", "ok", true, &t(0, at));
+        seq += 2;
+    }
+    scene.item(conversation, seq, "assistant", answer, true, &t(1, 0));
     scene.message(
         131,
         (CHIEF, Some(3)),
         "result",
         Some(task),
-        &format!("{progress}\n\n{answer}"),
+        result,
         &t(1, 5),
     );
-    let breaks = found(&scene.look(ms(5, 0)), 4);
+    found(&scene.look(ms(5, 0)), 4)
+}
+
+#[test]
+fn a_result_whose_final_answer_its_progress_holds_too_is_never_taken_for_turn_ends_a4() {
+    // GPT-6.1-Sol's review of round b3: the final answer `Done.` opens two progress lines, and
+    // the result holds those two alone, no final answer of its own. Taken out last, `Done.`
+    // came out of the second line and left the result read as turn-end's A4: known, a false
+    // PASS. Taken out where it first stands, words are left: a break that fails a run.
+    let listed = known::KNOWN.as_deref().unwrap();
+    let breaks = progress_then(
+        &[
+            "Done. Checking the diff carefully.",
+            "Done. Reviewing the final changes.",
+            "Reviewing the final changes.",
+        ],
+        "Done.",
+        "Done. Checking the diff carefully.\n\nDone. Reviewing the final changes.",
+    );
     assert_eq!(breaks.len(), 1, "{breaks:?}");
-    assert_eq!(breaks[0].said, "m-131 holds 1 line of its turn's progress");
-    assert_eq!(breaks[0].shape, Some("progress-lines"));
+    assert_eq!(breaks[0].shape, None, "{breaks:?}");
+    assert_eq!(known::of(&breaks[0], listed), None);
+    // The cost, accepted (the lead's line of round b4): a true A4 whose progress opens with
+    // the answer's words leaves words too, and fails a run the lead reads, never the other
+    // way.
+    let progress = "All 61 tests pass. Checking the diff now.";
+    let breaks = progress_then(
+        &[progress],
+        "All 61 tests pass.",
+        &format!("{progress}\n\nAll 61 tests pass."),
+    );
+    assert_eq!(breaks.len(), 1, "{breaks:?}");
+    assert_eq!(
+        breaks[0].said,
+        "m-131 holds 1 line of its turn's progress, and words that are none of its turn's"
+    );
+    assert_eq!(breaks[0].shape, None);
 }
 
 #[test]

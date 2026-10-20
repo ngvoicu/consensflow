@@ -2860,8 +2860,8 @@ runs = ["evals-long-run"]
 
 [[plant.edit]]
 file = "crates/cf-evals/src/long_run/invariants/deliveries.rs"
-find = "    read_prompt(&item.text, harness_of(look, item), |id| body_in(look, id))"
-replace = "    read_prompt(&item.text, harness_of(look, item), |_| None)"
+find = "    given_in(&item.text, |id| body_in(look, id))"
+replace = "    given_in(&item.text, |_| None)"
 
 [[plant]]
 name = "long run 4: a prompt that does not open with a header delivers what it quotes (Astra's notification)"
@@ -2870,13 +2870,8 @@ runs = ["evals-long-run"]
 
 [[plant.edit]]
 file = "crates/cf-evals/src/long_run/invariants/deliveries.rs"
-find = "            while let Some(open) = text[from..].find(NOTIFICATION[0]).map(|at| from + at) {"
-replace = "            while let Some(open) = text[from..].find(NOTIFICATION[0]).map(|at| from + at).filter(|_| false) {"
-
-[[plant.edit]]
-file = "crates/cf-evals/src/long_run/invariants/deliveries.rs"
-find = "            _ if reading.given.is_empty() && !text[line..start].trim().is_empty() => {"
-replace = "            _ if reading.given.is_empty() && !text[line..start].trim().is_empty() && false => {"
+find = "        .is_some_and(|(_, start, _)| *start == delivery_start(&item.text));"
+replace = "        .is_some_and(|(_, start, _)| *start >= delivery_start(&item.text));"
 
 [[plant]]
 name = "long run 4: a delivery to another worker ends this worker's turn (Astra's)"
@@ -3256,9 +3251,10 @@ replace = '    if state != "paused" {'
 
 # The two 2-hour live runs of 2026-10-19 (round 18): turn-end's A4, a result that holds lines of
 # its turn's progress, is a known break (dip-agentos #5, 3.0.6) and nothing else under the fourth
-# is; B5 reads only the prompts a window was given a delivery in, never Claude Code's summary of a
-# compaction that quotes one, and sees a delivery inside the wrapper Claude Code keeps a long
-# paste in; the rows Claude Code writes of a request are no prompt; the owner's /compact whose
+# is; B5 holds every header of a user's item, but in the summary Claude Code marks as its own by
+# its record's flag (round b4: told by words, rounds b2 and b3 were fooled); a delivery that begins
+# a turn (4) opens its prompt, inside the wrapper Claude Code keeps a long paste in; the rows
+# Claude Code writes of a request are no prompt; the owner's /compact whose
 # chief never comes to rest is a disruption whose effect was not seen (10); and a window whose
 # lane reads working or starting past the idle limit, or every window at an end not reached, is
 # kept with its last screen and the ledger's last events, the ledger copied beside the report.
@@ -3302,29 +3298,34 @@ find = '      "shape": "progress-lines",'
 replace = '      "shape": "progress-line",'
 
 [[plant]]
-name = "long run 7: every header of a user's item is a delivery, and a compact summary that quotes m-13 gives it twice (the Mac's run)"
-meant = "a_compact_summary_or_a_reviewers_history_that_quotes_a_delivery_is_none_and_holds_the_seventh"
+name = "long run 7: the summary Claude Code marks by its record's flag is a prompt, and its quote of m-13 gives it twice (the Mac's run; main's reading)"
+meant = "a_summary_claude_code_marks_by_its_records_flag_is_no_prompt_and_holds_the_seventh"
 runs = ["evals-long-run"]
 
 [[plant.edit]]
 file = "crates/cf-evals/src/long_run/invariants/deliveries.rs"
-find = '        "claude-code" if text[start..].starts_with(SUMMARY) => found.blocks.push((0, text.len())),'
-replace = '        "claude-code" if text[start..].starts_with(SUMMARY) && start > text.len() => found.blocks.push((0, text.len())),'
-
-[[plant.edit]]
-file = "crates/cf-evals/src/long_run/invariants/deliveries.rs"
-find = "            _ if reading.given.is_empty() && !text[line..start].trim().is_empty() => {"
-replace = "            _ if reading.given.is_empty() && !text[line..start].trim().is_empty() && false => {"
+find = '            item.conversation == conversation.id && item.role == "user" && !is_summary(look, item)'
+replace = '            item.conversation == conversation.id && item.role == "user"'
 
 [[plant]]
-name = "long run 7: a header must open its prompt, and a wrapped delivery given twice passes"
-meant = "a_message_given_in_two_prompts_breaks_the_seventh_wrapped_as_claude_code_keeps_a_paste_or_not"
-runs = ["evals-long-run"]
+name = "long run 7: Claude Code's flag of a summary is not asked for, and every user's record of it is one"
+meant = "a_summary_of_a_compaction_is_known_by_its_records_flag_and_never_by_its_words"
+runs = ["evals-lib-long-run"]
 
 [[plant.edit]]
-file = "crates/cf-evals/src/long_run/invariants/deliveries.rs"
-find = "        let line = text[..start].rfind('\\n').map_or(0, |end| end + 1);"
-replace = "        let line = 0;"
+file = "crates/cf-evals/src/long_run/record.rs"
+find = '            if line["type"] == "user" && line["isCompactSummary"] == true {'
+replace = '            if line["type"] == "user" {'
+
+[[plant]]
+name = "long run 7: no summary Claude Code marks is kept, and the Mac's m-13 gives it twice"
+meant = "a_summary_claude_code_marks_by_its_records_flag_is_no_prompt_and_holds_the_seventh"
+runs = ["evals-long-run", "evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/record.rs"
+find = "                    self.summaries.insert(uuid.to_owned());"
+replace = "                    let _ = uuid;"
 
 [[plant]]
 name = "long run 4: a delivery Claude Code kept wrapped as a paste begins no turn, and its result is never judged"
@@ -3333,14 +3334,11 @@ runs = ["evals-long-run"]
 
 [[plant.edit]]
 file = "crates/cf-evals/src/long_run/invariants/deliveries.rs"
-find = "        let line = text[..start].rfind('\\n').map_or(0, |end| end + 1);"
-replace = "        let line = 0;"
+find = "        tag.then_some(inner)"
+replace = "        tag.then_some(inner).filter(|_| false)"
 
-# Round b2 (GPT-6.1-Sol's review of b1, two false PASSes): every user's item whose first header
-# begins a line is a delivery, behind other words too, but the rows a harness writes of the
-# conversation itself, each named by what it opens with; a header after other words on its line
-# is unresolved, never dropped; and turn-end's known A4 is only the whole final answer with
-# progress besides.
+# Round b2 (GPT-6.1-Sol's review of b1): turn-end's known A4 is only the whole final answer with
+# progress besides; and a delivery behind other words is one, as B5 holds every header.
 
 [[plant]]
 name = "long run 7: a delivery behind other words is dropped, and m-246 given again behind `continue` passes (Sol's)"
@@ -3349,58 +3347,8 @@ runs = ["evals-long-run"]
 
 [[plant.edit]]
 file = "crates/cf-evals/src/long_run/invariants/deliveries.rs"
-find = "        let line = text[..start].rfind('\\n').map_or(0, |end| end + 1);"
-replace = "        let line = text[..start].len() - text[..start].trim_start().len();"
-
-[[plant]]
-name = "long run 7: a header after other words on its line is dropped unsaid, and the run passes on it"
-meant = "a_header_after_other_words_on_its_line_is_unresolved_never_dropped"
-runs = ["evals-long-run"]
-
-[[plant.edit]]
-file = "crates/cf-evals/src/long_run/invariants/deliveries.rs"
-find = "            let (id, why) = reading_of(look, item).undecided?;"
-replace = "            let (id, why) = reading_of(look, item).undecided.filter(|_| false)?;"
-
-[[plant]]
-name = "long run 7: a header after other words on its line is taken for a delivery"
-meant = "a_header_after_other_words_on_its_line_is_unresolved_never_dropped"
-runs = ["evals-long-run"]
-
-[[plant.edit]]
-file = "crates/cf-evals/src/long_run/invariants/deliveries.rs"
-find = "                Some(Undecided::Glued)"
-replace = "                None"
-
-[[plant]]
-name = "long run 7: Claude Code's summary of a compaction is named no more, and the Mac's m-13 is unresolved"
-meant = "a_compact_summary_or_a_reviewers_history_that_quotes_a_delivery_is_none_and_holds_the_seventh"
-runs = ["evals-long-run"]
-
-[[plant.edit]]
-file = "crates/cf-evals/src/long_run/invariants/deliveries.rs"
-find = 'const SUMMARY: &str = "This session is being continued from a previous conversation";'
-replace = 'const SUMMARY: &str = "This session was continued from a previous conversation";'
-
-[[plant]]
-name = "long run 7: the history Codex gives its approval reviewer is named no more"
-meant = "a_compact_summary_or_a_reviewers_history_that_quotes_a_delivery_is_none_and_holds_the_seventh"
-runs = ["evals-long-run"]
-
-[[plant.edit]]
-file = "crates/cf-evals/src/long_run/invariants/deliveries.rs"
-find = '    "The following is the Codex agent history whose request action you are assessing";'
-replace = '    "The following is the history whose request action you are assessing";'
-
-[[plant]]
-name = "long run 7: Claude Code's notification of a job's end is named no more"
-meant = "a_header_after_other_words_on_its_line_is_unresolved_never_dropped"
-runs = ["evals-long-run"]
-
-[[plant.edit]]
-file = "crates/cf-evals/src/long_run/invariants/deliveries.rs"
-find = 'const NOTIFICATION: [&str; 2] = ["<task-notification>", "</task-notification>"];'
-replace = 'const NOTIFICATION: [&str; 2] = ["<task-notifications>", "</task-notification>"];'
+find = '            item.conversation == conversation.id && item.role == "user" && !is_summary(look, item)'
+replace = '            item.conversation == conversation.id && item.role == "user" && !is_summary(look, item) && item.text.trim_start().starts_with("[ConsensFlow")'
 
 [[plant]]
 name = "long run 4: a result of progress alone takes turn-end's known shape (Sol's)"
@@ -3576,113 +3524,10 @@ replace = '''
             Ok(())
         })?;'''
 
-# Round b3 (GPT-6.1-Sol's and GPT-6-Astra's reviews of b2, false PASSes in the delivery rule):
-# each block a harness writes of the conversation itself hides only itself, to its own end, and
-# only in the harness that writes it, a header after one whose end the copy does not show
-# unresolved; a header in a fenced block or on a quoted line is no delivery, and unresolved; and
-# turn-end's A4 takes the final answer out where it stands, last.
-
-[[plant]]
-name = "long run 7: a notification of a job's end hides the rest of its row, and m-246 after a closed one passes (Sol's)"
-meant = "a_synthetic_block_hides_only_itself_and_only_in_the_harness_that_writes_it"
-runs = ["evals-long-run"]
-
-[[plant.edit]]
-file = "crates/cf-evals/src/long_run/invariants/deliveries.rs"
-find = """
-                from = open + close + NOTIFICATION[1].len();
-                found.blocks.push((open, from));"""
-replace = """
-                from = text.len() + close.min(0);
-                found.blocks.push((open, from));"""
-
-[[plant]]
-name = "long run 7: a notification of a job's end is a block in any harness's row, and a Devin draft hides a header in it"
-meant = "a_synthetic_block_hides_only_itself_and_only_in_the_harness_that_writes_it"
-runs = ["evals-long-run"]
-
-[[plant.edit]]
-file = "crates/cf-evals/src/long_run/invariants/deliveries.rs"
-find = '        "claude-code" => {'
-replace = '        _ if harness != "codex" => {'
-
-[[plant]]
-name = "long run 7: the prompt of Codex's approval reviewer is a block in any harness's row"
-meant = "a_synthetic_block_hides_only_itself_and_only_in_the_harness_that_writes_it"
-runs = ["evals-long-run"]
-
-[[plant.edit]]
-file = "crates/cf-evals/src/long_run/invariants/deliveries.rs"
-find = '        "codex" if text[start..].starts_with(REVIEWER) => {'
-replace = '        _ if text[start..].starts_with(REVIEWER) => {'
-
-[[plant]]
-name = "long run 7: Claude Code's summary of a compaction is a block in any harness's row"
-meant = "a_synthetic_block_whose_end_the_copy_does_not_show_is_unresolved"
-runs = ["evals-long-run"]
-
-[[plant.edit]]
-file = "crates/cf-evals/src/long_run/invariants/deliveries.rs"
-find = '        "claude-code" if text[start..].starts_with(SUMMARY) => found.blocks.push((0, text.len())),'
-replace = '        _ if text[start..].starts_with(SUMMARY) => found.blocks.push((0, text.len())),'
-
-[[plant]]
-name = "long run 7: a notification that does not close hides all after it"
-meant = "a_synthetic_block_whose_end_the_copy_does_not_show_is_unresolved"
-runs = ["evals-long-run"]
-
-[[plant.edit]]
-file = "crates/cf-evals/src/long_run/invariants/deliveries.rs"
-find = """
-                    found.open = Some((
-                        open,
-                        "Claude Code's notification of a job's end, which does not close",
-                    ));"""
-replace = """
-                    found.blocks.push((open, text.len()));"""
-
-[[plant]]
-name = "long run 7: the history of Codex's approval reviewer with no end hides its row"
-meant = "a_synthetic_block_whose_end_the_copy_does_not_show_is_unresolved"
-runs = ["evals-long-run"]
-
-[[plant.edit]]
-file = "crates/cf-evals/src/long_run/invariants/deliveries.rs"
-find = """
-                (None, ..) => {
-                    found.open = Some((
-                        start,
-                        "the history Codex gives its approval reviewer, which does not end",
-                    ));
-                }"""
-replace = """
-                (None, ..) => found.blocks.push((0, text.len())),"""
-
-[[plant]]
-name = "long run 7: the request of Codex's approval reviewer with no end hides its row"
-meant = "a_synthetic_block_whose_end_the_copy_does_not_show_is_unresolved"
-runs = ["evals-long-run"]
-
-[[plant.edit]]
-file = "crates/cf-evals/src/long_run/invariants/deliveries.rs"
-find = """
-                    found.blocks.push((0, end));
-                    found.open = Some((
-                        request,
-                        "the request Codex gives its approval reviewer, which does not end",
-                    ));"""
-replace = """
-                    found.blocks.push((0, text.len() + end.min(request).min(0)));"""
-
-[[plant]]
-name = "long run 7: a header in a fenced block is a delivery (Astra's)"
-meant = "a_header_in_a_fenced_block_or_a_quoted_line_is_no_delivery_and_unresolved"
-runs = ["evals-long-run"]
-
-[[plant.edit]]
-file = "crates/cf-evals/src/long_run/invariants/deliveries.rs"
-find = "    fence.is_some()"
-replace = "    fence.is_some() && line > text.len()"
+# Rounds b3 and b4 (both reviewers of b2 and b3: words that look like a harness's own fooled each
+# rule that told them from a delivery): a delivery that begins a turn opens its prompt, and a
+# person's words that quote one in a fence begin none; and turn-end's A4 takes the final answer out
+# where it first stands, which can only fail a run, never pass one (Sol's `Done.`).
 
 [[plant]]
 name = "long run 4: a header a person quotes in a fence is taken for the lost delivery that began a turn (Astra's)"
@@ -3691,35 +3536,15 @@ runs = ["evals-long-run"]
 
 [[plant.edit]]
 file = "crates/cf-evals/src/long_run/invariants/deliveries.rs"
-find = "    fence.is_some()"
-replace = "    fence.is_some() && line > text.len()"
+find = '    if item.role != "user" || !opens {'
+replace = '    if item.role != "user" || headers(&item.text).is_empty() {'
 
 [[plant]]
-name = "long run 7: a header on a quoted line is a header after other words"
-meant = "a_header_in_a_fenced_block_or_a_quoted_line_is_no_delivery_and_unresolved"
-runs = ["evals-long-run"]
-
-[[plant.edit]]
-file = "crates/cf-evals/src/long_run/invariants/deliveries.rs"
-find = "    if text[line..at].trim_start().starts_with('>') {"
-replace = '    if text[line..at].trim_start().starts_with(">>>>") {'
-
-[[plant]]
-name = "long run 7: a fence never closes, and a header after a closed one is unresolved"
-meant = "a_header_in_a_fenced_block_or_a_quoted_line_is_no_delivery_and_unresolved"
-runs = ["evals-long-run"]
-
-[[plant.edit]]
-file = "crates/cf-evals/src/long_run/invariants/deliveries.rs"
-find = "            Some(kind) if one.starts_with(kind) => fence = None,"
-replace = "            Some(kind) if one.starts_with(kind) && one.is_empty() => fence = None,"
-
-[[plant]]
-name = "long run 4: the final answer is taken out at its first place, and turn-end's A4 whose progress opens with it fails a run (Astra's)"
-meant = "a_final_answer_its_progress_said_first_is_taken_out_where_it_stands_and_turn_ends_a4_is_known"
+name = "long run 4: the final answer is taken out where it last stands, and a result of progress that holds its words is known A4 (Sol's)"
+meant = "a_result_whose_final_answer_its_progress_holds_too_is_never_taken_for_turn_ends_a4"
 runs = ["evals-long-run"]
 
 [[plant.edit]]
 file = "crates/cf-evals/src/long_run/invariants/order.rs"
-find = "    let mut rest = body.rsplit_once(answer).map_or_else("
-replace = "    let mut rest = body.split_once(answer).map_or_else("
+find = '    let mut rest = body.replacen(answer, " ", 1);'
+replace = '    let mut rest = body.rsplit_once(answer).map_or_else(|| body.to_owned(), |(before, after)| format!("{before} {after}"));'

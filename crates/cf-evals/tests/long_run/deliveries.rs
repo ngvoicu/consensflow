@@ -1,8 +1,8 @@
 //! 7 (B5): a message delivered twice into a conversation, or joined to another in
 //! one prompt.
 
-use cf_evals::long_run::invariants;
 use cf_evals::long_run::look::Look;
+use cf_evals::long_run::record::Record;
 use serde_json::json;
 
 use crate::scene::{found, ms, t, Scene, CHIEF};
@@ -43,6 +43,12 @@ fn chief_on(scene: &Scene, harness: &str) -> i64 {
 const FIRST: &str = "[ConsensFlow m-246 · T-9 · result from @long-worker]\nPhase 1 done.";
 const SECOND: &str = "[ConsensFlow m-248 · T-9 · result from @long-worker]\nPhase 2 done.";
 
+const TWICE: &str = "@chief was given m-246 2 times";
+
+fn said_of(look: &Look) -> Vec<String> {
+    found(look, 7).into_iter().map(|found| found.said).collect()
+}
+
 #[test]
 fn a_message_given_twice_and_one_glued_to_the_next_break_the_seventh() {
     let scene = Scene::new(&[("long-worker", "devin")]);
@@ -82,11 +88,7 @@ fn a_message_given_in_two_prompts_breaks_the_seventh_wrapped_as_claude_code_keep
     scene.item(conversation, 0, "user", FIRST, true, &t(1, 2));
     scene.item(conversation, 1, "assistant", "Noted.", true, &t(1, 10));
     scene.item(conversation, 2, "user", FIRST, true, &t(2, 2));
-    let said: Vec<String> = found(&scene.look(ms(4, 0)), 7)
-        .into_iter()
-        .map(|found| found.said)
-        .collect();
-    assert_eq!(said, ["@chief was given m-246 2 times"]);
+    assert_eq!(said_of(&scene.look(ms(4, 0))), [TWICE]);
     // Claude Code 2.1.303 keeps a long paste in its record wrapped, and the copy with it:
     // a wrapped delivery is one, given twice or joined to the next as any is.
     let pasted = |inner: &str| {
@@ -104,64 +106,77 @@ fn a_message_given_in_two_prompts_breaks_the_seventh_wrapped_as_claude_code_keep
         true,
         &t(3, 2),
     );
-    let said: Vec<String> = found(&scene.look(ms(4, 0)), 7)
-        .into_iter()
-        .map(|found| found.said)
-        .collect();
     assert_eq!(
-        said,
-        [
-            "@chief was given m-246 and m-248 as one prompt",
-            "@chief was given m-246 2 times"
-        ]
+        said_of(&scene.look(ms(4, 0))),
+        ["@chief was given m-246 and m-248 as one prompt", TWICE]
     );
 }
 
+/// Claude Code's summary of the conversation at a compaction (made-up words), the prompts
+/// before it quoted whole, m-246 among them.
+fn summary() -> String {
+    format!(
+        "This session is being continued from a previous conversation that ran out of context. \
+         The summary below covers the earlier portion of the conversation.\n\n\
+         Summary:\n1. Primary Request and Intent: plan the phases and put them on the board.\n\
+         2. All user messages:\n   - {FIRST}\n3. Current Work: waiting for T-9.\n"
+    )
+}
+
+/// Claude Code's line of the user's record `uuid` that says `text`, marked as its summary of
+/// a compaction where `flagged` is, as Claude Code marks one.
+fn line(uuid: &str, text: &str, flagged: bool) -> String {
+    let mut line = json!({ "type": "user", "uuid": uuid, "timestamp": t(2, 5),
+        "message": { "role": "user", "content": text } });
+    if flagged {
+        line["isCompactSummary"] = json!(true);
+        line["isVisibleInTranscriptOnly"] = json!(true);
+    }
+    line.to_string()
+}
+
 #[test]
-fn a_compact_summary_or_a_reviewers_history_that_quotes_a_delivery_is_none_and_holds_the_seventh() {
-    // The Mac's 2-hour run of 2026-10-19: the owner's /compact, and Claude Code's summary
-    // of the conversation in the copy as a user's item, the last prompt quoted whole in it
-    // (made-up words here). It is no prompt the window was given.
+fn a_summary_claude_code_marks_by_its_records_flag_is_no_prompt_and_holds_the_seventh() {
+    // The Mac's 2-hour run of 2026-10-19 (7:twice:1:m-13): the owner's /compact, and Claude
+    // Code's summary in the copy as a user's item, the prompts before it quoted whole. Its
+    // record marks it as the summary (`isCompactSummary`), and the copy keeps it under the
+    // record's uuid: no prompt the window was given.
     let scene = Scene::new(&[("long-worker", "claude-code")]);
     let conversation = chief_on(&scene, "claude-code");
     scene.item(conversation, 0, "user", FIRST, true, &t(1, 2));
     scene.item(conversation, 1, "assistant", "Noted.", true, &t(1, 10));
     scene.item(conversation, 2, "user", "/compact", true, &t(2, 0));
-    scene.item(
-        conversation,
-        3,
-        "user",
-        &format!(
-            "This session is being continued from a previous conversation that ran out of context. \
-             The summary below covers the earlier portion of the conversation.\n\n\
-             Summary:\n1. Primary Request and Intent: plan the phases and put them on the board.\n\
-             2. All user messages:\n   - {FIRST}\n3. Current Work: waiting for T-9.\n"
-        ),
-        true,
-        &t(2, 5),
+    scene.item(conversation, 3, "user", &summary(), true, &t(2, 5));
+    let id = format!("i-{conversation}-3");
+    let flagged = Record::claude(&line(&id, &summary(), true));
+    assert!(said_of(&scene.look_with(ms(4, 0), conversation, flagged)).is_empty());
+    // Its record unread, or the row not flagged, it is held as any item is: m-246 given
+    // twice, a FAIL the lead reads.
+    assert_eq!(said_of(&scene.look(ms(4, 0))), [TWICE]);
+    let unflagged = Record::claude(&line(&id, &summary(), false));
+    assert_eq!(
+        said_of(&scene.look_with(ms(4, 0), conversation, unflagged)),
+        [TWICE]
     );
-    assert!(
-        found(&scene.look(ms(4, 0)), 7).is_empty(),
-        "{:?}",
-        found(&scene.look(ms(4, 0)), 7)
-    );
-    assert!(undecided(&scene.look(ms(4, 0))).is_empty());
-    // Codex gives its approval reviewer the agent's history, every delivery's header in it:
-    // none is given again.
-    let scene = Scene::new(&[("long-worker", "codex")]);
-    let conversation = chief_on(&scene, "codex");
+}
+
+#[test]
+fn a_row_with_a_summarys_words_and_no_flag_is_a_prompt_and_a_real_retry_in_it_breaks_the_seventh() {
+    // Both reviewers of round b3: a row that opens with the words a summary opens with, and
+    // holds a real retry of m-246 after them. Its record does not mark it: a prompt.
+    let scene = Scene::new(&[("long-worker", "claude-code")]);
+    let conversation = chief_on(&scene, "claude-code");
     scene.item(conversation, 0, "user", FIRST, true, &t(1, 2));
-    scene.item(conversation, 1, "user", SECOND, true, &t(3, 2));
-    scene.item(
-        conversation,
-        2,
-        "user",
-        &reviewer(&format!("{FIRST}\n{SECOND}"), ""),
-        true,
-        &t(3, 30),
+    scene.item(conversation, 1, "assistant", "Noted.", true, &t(1, 10));
+    let retried = format!(
+        "This session is being continued from a previous conversation that ran out of context.\n{FIRST}"
     );
-    assert!(found(&scene.look(ms(4, 0)), 7).is_empty());
-    assert!(undecided(&scene.look(ms(4, 0))).is_empty());
+    scene.item(conversation, 2, "user", &retried, true, &t(2, 2));
+    let record = Record::claude(&line(&format!("i-{conversation}-2"), &retried, false));
+    assert_eq!(
+        said_of(&scene.look_with(ms(4, 0), conversation, record)),
+        [TWICE]
+    );
 }
 
 /// The prompt Codex gives its approval reviewer, in its shape on the owner's machine
@@ -181,17 +196,15 @@ fn reviewer(history: &str, after: &str) -> String {
     )
 }
 
-/// What a look could not judge of the seventh: each key, and what it says.
-fn undecided(look: &Look) -> Vec<(String, String)> {
-    invariants::unjudged(look, &Default::default())
-        .into_iter()
-        .filter(|open| open.invariant == 7)
-        .map(|open| (open.key, open.said))
-        .collect()
-}
-
-fn said_of(look: &Look) -> Vec<String> {
-    found(look, 7).into_iter().map(|found| found.said).collect()
+/// What the seventh finds of a chief, on `harness`, given m-246 (`FIRST`) at 10:01:02 and
+/// then `second`.
+fn after_first(harness: &str, second: &str) -> Vec<String> {
+    let scene = Scene::new(&[("long-worker", harness)]);
+    let conversation = chief_on(&scene, harness);
+    scene.item(conversation, 0, "user", FIRST, true, &t(1, 2));
+    scene.item(conversation, 1, "assistant", "Noted.", true, &t(1, 10));
+    scene.item(conversation, 2, "user", second, true, &t(2, 2));
+    said_of(&scene.look(ms(4, 0)))
 }
 
 #[test]
@@ -202,6 +215,7 @@ fn a_delivery_behind_other_words_is_one_and_given_again_breaks_the_seventh() {
     // twice.
     for second in [
         format!("continue\n{FIRST}"),
+        format!("continue{FIRST}"),
         format!(
             "\n\n<pasted_content id=\"a1b2\">\ncontinue\n{FIRST}\n</pasted_content id=\"a1b2\">\n"
         ),
@@ -209,198 +223,53 @@ fn a_delivery_behind_other_words_is_one_and_given_again_breaks_the_seventh() {
             "continue\n\n<pasted_content id=\"a1b2\">\n{FIRST}\n</pasted_content id=\"a1b2\">\n"
         ),
     ] {
-        let scene = Scene::new(&[("long-worker", "devin")]);
-        let conversation = chief(&scene);
-        scene.item(conversation, 0, "user", FIRST, true, &t(1, 2));
-        scene.item(conversation, 1, "assistant", "Noted.", true, &t(1, 10));
-        scene.item(conversation, 2, "user", &second, true, &t(2, 2));
-        let look = scene.look(ms(4, 0));
-        assert_eq!(
-            said_of(&look),
-            ["@chief was given m-246 2 times"],
-            "{second}"
-        );
-        assert!(undecided(&look).is_empty(), "{second}");
+        assert_eq!(after_first("devin", &second), [TWICE], "{second}");
     }
 }
 
 #[test]
-fn a_header_after_other_words_on_its_line_is_unresolved_never_dropped() {
-    // Whether a header after other words on its line went in behind them (a paste glued to
-    // what the box held) or is quoted by them, the copy does not say: no break, and no pass.
-    for (prompt, id) in [
-        (format!("continue{FIRST}"), 246),
-        (
-            "Why is \"[ConsensFlow m-248 · T-9 · result from @long-worker]\" queued?".to_owned(),
-            248,
-        ),
-    ] {
-        let scene = Scene::new(&[("long-worker", "devin")]);
-        let conversation = chief(&scene);
-        scene.item(conversation, 0, "user", FIRST, true, &t(1, 2));
-        scene.item(conversation, 1, "user", &prompt, true, &t(2, 2));
-        let look = scene.look(ms(4, 0));
-        assert!(said_of(&look).is_empty(), "{prompt}");
-        assert_eq!(
-            undecided(&look),
-            [(
-                format!("7:undecided:{conversation}:i-{conversation}-1"),
-                format!("@chief's prompt i-{conversation}-1 holds m-{id}'s header after other words on its line: whether it went in behind them or they quote it, the copy does not say")
-            )],
-            "{prompt}"
-        );
-    }
-    // Claude Code's notification of a job's end is its own words, a header in its output
-    // none: no delivery, and judged.
-    let scene = Scene::new(&[("long-worker", "claude-code")]);
-    let conversation = chief_on(&scene, "claude-code");
-    scene.item(conversation, 0, "user", FIRST, true, &t(1, 2));
-    scene.item(
-        conversation,
-        1,
-        "user",
-        &format!("<task-notification>\n<task-id>b1</task-id>\n<output>queued: {FIRST}</output>\n</task-notification>"),
-        true,
-        &t(2, 2),
-    );
-    let look = scene.look(ms(4, 0));
-    assert!(said_of(&look).is_empty());
-    assert!(undecided(&look).is_empty());
-}
-
-/// A scene whose chief, on `harness`, was given m-246 (`FIRST`) at 10:01:02, then `second`:
-/// what the seventh found of it, and what it could not judge.
-fn after_first(harness: &str, second: &str) -> (Vec<String>, Vec<(String, String)>) {
-    let scene = Scene::new(&[("long-worker", harness)]);
-    let conversation = chief_on(&scene, harness);
-    scene.item(conversation, 0, "user", FIRST, true, &t(1, 2));
-    scene.item(conversation, 1, "assistant", "Noted.", true, &t(1, 10));
-    scene.item(conversation, 2, "user", second, true, &t(2, 2));
-    let look = scene.look(ms(4, 0));
-    (said_of(&look), undecided(&look))
-}
-
-const TWICE: &str = "@chief was given m-246 2 times";
-
-#[test]
-fn a_synthetic_block_hides_only_itself_and_only_in_the_harness_that_writes_it() {
-    // Both reviewers of round b2: an exemption hid the whole row. Sol's: Claude Code's
-    // notification of a job's end, closed, and m-246 again after it.
+fn a_row_a_harness_writes_itself_or_a_quotation_holding_a_delivery_is_a_break_never_a_silent_pass()
+{
+    // Rounds b2 and b3 told words that look like a harness's own (a notification of a job's
+    // end, the prompt Codex gives its approval reviewer) or a quotation (a fenced block, a
+    // quoted line) from a delivery by their text, and both reviewers found text that fooled
+    // each such rule. Every header in them counts: m-246 in any is m-246 given twice, a false
+    // FAIL the lead reads, never a double hidden.
     let notification = "<task-notification>\n<task-id>b1</task-id>\n<status>completed</status>\n</task-notification>";
-    let (said, open) = after_first("claude-code", &format!("{notification}\n{FIRST}"));
-    assert_eq!((said, open), (vec![TWICE.to_owned()], Vec::new()));
-    // Astra's: a Devin draft that holds such a notification, and the retried m-246 after it.
-    // Devin writes none of it: nothing of the row is exempt.
-    let (said, open) = after_first("devin", &format!("{notification}\n{FIRST}"));
-    assert_eq!((said, open), (vec![TWICE.to_owned()], Vec::new()));
-    // The history Codex gives its approval reviewer, and m-246 after the request's end.
-    let (said, open) = after_first("codex", &reviewer("the brief", &format!("{FIRST}\n")));
-    assert_eq!((said, open), (vec![TWICE.to_owned()], Vec::new()));
-    // Only the harness that writes a block has it: in a Devin row, a notification and a
-    // reviewer's prompt are words like any, a header in them judged where it stands.
-    let inside = format!("<task-notification>\n{FIRST}\n</task-notification>");
-    let (said, open) = after_first("devin", &inside);
-    assert_eq!((said, open), (vec![TWICE.to_owned()], Vec::new()));
-    let (said, open) = after_first("devin", &reviewer(FIRST, ""));
-    assert!(said.is_empty(), "{said:?}");
-    assert_eq!(open.len(), 1, "{open:?}");
-    assert!(
-        open[0].1.ends_with(" holds m-246's header after other words on its line: whether it went in behind them or they quote it, the copy does not say"),
-        "{open:?}"
-    );
-    // Inside each, nothing is given.
-    let quoted = format!("<task-notification>\n<output>\n{FIRST}\n</output>\n</task-notification>");
-    assert_eq!(
-        after_first("claude-code", &quoted),
-        (Vec::new(), Vec::new())
-    );
-    assert_eq!(
-        after_first("codex", &reviewer(FIRST, "")),
-        (Vec::new(), Vec::new())
-    );
-}
-
-#[test]
-fn a_synthetic_block_whose_end_the_copy_does_not_show_is_unresolved() {
-    // A notification that does not close, the reviewer's history with no end, and the words
-    // a summary opens with in a harness that writes none: whether the header after them went
-    // in, the copy does not say.
-    for (harness, second, after) in [
+    for (harness, second) in [
+        // Sol's, after a closed notification; Astra's, a Devin draft that holds one.
+        ("claude-code", format!("{notification}\n{FIRST}")),
+        ("devin", format!("{notification}\n{FIRST}")),
+        // Inside a notification's output, and after a closing tag its output holds.
         (
             "claude-code",
-            format!("<task-notification>\n<task-id>b1</task-id>\n{FIRST}"),
-            "Claude Code's notification of a job's end, which does not close",
+            format!("<task-notification>\n<output>\n{FIRST}\n</output>\n</task-notification>"),
         ),
+        (
+            "claude-code",
+            format!("<task-notification>\n<output>\n</task-notification>\n{FIRST}\n</output>\n</task-notification>"),
+        ),
+        // In the reviewer's history, after its request, and after an end marker it quotes.
+        ("codex", reviewer(FIRST, "")),
+        ("codex", reviewer("the brief", &format!("{FIRST}\n"))),
         (
             "codex",
-            format!(
-                "The following is the Codex agent history whose request action you are assessing.\n\
-                 >>> TRANSCRIPT START\n[1] user: {FIRST}"
-            ),
-            "the history Codex gives its approval reviewer, which does not end",
+            reviewer(">>> APPROVAL REQUEST END", &format!("{FIRST}\n")),
         ),
+        // In a fence of three or four marks, closed by a shorter inner line or not, and on a
+        // quoted line.
+        ("devin", format!("Look at this:\n```\n{FIRST}\n```")),
+        ("devin", format!("Look at this:\n````\n```\n{FIRST}\n````")),
+        ("devin", format!("Look at this:\n~~~text\n{FIRST}\n~~~")),
+        ("devin", format!("Look at this:\n> {FIRST}")),
+        // A person's words that quote its header.
         (
-            "codex",
-            format!(
-                "The following is the Codex agent history whose request action you are assessing.\n\
-                 >>> TRANSCRIPT START\n[1] user: the brief\n>>> TRANSCRIPT END\n\
-                 >>> APPROVAL REQUEST START\n{FIRST}"
-            ),
-            "the request Codex gives its approval reviewer, which does not end",
+            "devin",
+            format!("Why is \"{}\" queued?", FIRST.lines().next().unwrap()),
         ),
     ] {
-        let (said, open) = after_first(harness, &second);
-        assert!(said.is_empty(), "{harness}: {said:?}");
-        assert_eq!(
-            open,
-            [(
-                "7:undecided:1:i-1-2".to_owned(),
-                format!("@chief's prompt i-1-2 holds m-246's header after {after}: whether it went in, the copy does not say")
-            )],
-            "{harness}"
-        );
+        assert_eq!(after_first(harness, &second), [TWICE], "{harness}: {second}");
     }
-    let summary = format!(
-        "This session is being continued from a previous conversation that ran out of context.\n{FIRST}"
-    );
-    assert_eq!(
-        after_first("devin", &summary),
-        (vec![TWICE.to_owned()], Vec::new())
-    );
-}
-
-#[test]
-fn a_header_in_a_fenced_block_or_a_quoted_line_is_no_delivery_and_unresolved() {
-    // GPT-6-Astra's review of round b2: a person's words that quote a header on its own line,
-    // inside a fence, were taken for a delivery.
-    for (second, why) in [
-        (
-            format!("Look at this:\n```\n{FIRST}\n```"),
-            "in a quotation (a fenced block or a quoted line)",
-        ),
-        (
-            format!("Look at this:\n~~~text\n{FIRST}\n~~~"),
-            "in a quotation (a fenced block or a quoted line)",
-        ),
-        (
-            format!("Look at this:\n> {FIRST}"),
-            "in a quotation (a fenced block or a quoted line)",
-        ),
-    ] {
-        let (said, open) = after_first("devin", &second);
-        assert!(said.is_empty(), "{second}: {said:?}");
-        assert_eq!(
-            open,
-            [(
-                "7:undecided:1:i-1-2".to_owned(),
-                format!("@chief's prompt i-1-2 holds m-246's header {why}: whether it went in, the copy does not say")
-            )],
-            "{second}"
-        );
-    }
-    // A fence that closed before it leaves the header outside it.
-    let (said, open) = after_first("devin", &format!("```\nnpm test\n```\n{FIRST}"));
-    assert_eq!((said, open), (vec![TWICE.to_owned()], Vec::new()));
 }
 
 #[test]

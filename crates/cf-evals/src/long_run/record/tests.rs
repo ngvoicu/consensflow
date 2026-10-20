@@ -433,6 +433,32 @@ fn a_users_record_with_no_words_begins_no_turn() {
 }
 
 #[test]
+fn a_summary_of_a_compaction_is_known_by_its_records_flag_and_never_by_its_words() {
+    let words = "This session is being continued from a previous conversation.";
+    let record = record(&[
+        line(
+            1,
+            json!({ "type": "user", "uuid": "u-flagged", "isCompactSummary": true,
+                "message": { "role": "user", "content": words } }),
+        ),
+        line(
+            2,
+            json!({ "type": "user", "uuid": "u-words",
+                "message": { "role": "user", "content": words } }),
+        ),
+        line(
+            3,
+            json!({ "type": "assistant", "uuid": "a-flagged", "isCompactSummary": true,
+                "message": { "role": "assistant", "content": [{ "type": "text", "text": words }] } }),
+        ),
+    ]);
+    assert!(record.is_summary("u-flagged"));
+    assert!(!record.is_summary("u-words"));
+    assert!(!record.is_summary("a-flagged"));
+    assert!(!record.is_summary("u-none"));
+}
+
+#[test]
 fn the_rows_claude_code_writes_of_a_request_are_no_prompt() {
     // Claude Code 2.1.303 writes beside the prompt rows that echo the request it sent:
     // `api-request-blob` with the prompt as the user's message (made-up words here),

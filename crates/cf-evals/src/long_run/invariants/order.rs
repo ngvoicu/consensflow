@@ -8,9 +8,10 @@
 //! further than the next delivery of another task: a turn of an earlier attempt (a
 //! retry's turn lost, its result the old answer again) or of the next task (a late
 //! result carrying another task's answer) is never taken for its own. A delivery is a
-//! header of a message to the worker in a prompt, read as B5 reads one (`deliveries`): a
-//! header a brief, a job's notification, a quotation or a tool's output holds is none, and
-//! neither begins nor ends a turn. Both read
+//! prompt that opens with the header of a message to the worker (inside the tag Claude
+//! Code wraps a long paste in), read as B5 reads one (`deliveries`): a header a brief, a
+//! job's notification or a tool's output quotes is none, and neither begins nor ends a
+//! turn. Both read
 //! the ledger alone: the messages, the log of the tasks' states and deliveries, and
 //! the daemon's copy of the worker's conversation.
 //!
@@ -232,10 +233,9 @@ fn delivers_another_task(look: &Look, item: &Item, worker: i64, task: Option<i64
 /// ([`attempt_of`]): its prompt is the first that delivered that message to the worker
 /// once the attempt began, never an earlier attempt's of the same message; and what
 /// follows it is the turn's only in that prompt's conversation, and only until a prompt
-/// that delivered the worker another task. A delivery is a header of a message to the
-/// worker in a prompt, read as B5 reads one ([`delivered_to`]): a header its words, a
-/// job's notification, a quotation or a tool's output hold is none, and begins or ends
-/// nothing. Of that,
+/// that delivered the worker another task. A delivery is a prompt that opens with a
+/// header of a message to the worker ([`delivered_to`]): a header its words, a job's
+/// notification or a tool's output quote is none, and begins or ends nothing. Of that,
 /// the last turn ([`last_turn`]).
 fn turn_of<'a>(
     look: &Look,
@@ -274,17 +274,15 @@ fn on_codex(look: &Look, worker: i64) -> bool {
 }
 
 /// What `body` (a result's words, squeezed) says besides the turn's final answer `answer` and
-/// each line of its `progress`: the answer taken out whole where it stands, last, after the
-/// progress (a progress line may open with its words: GPT-6-Astra's review of round b2), and
-/// each line once, the longest first. Nothing, where the result is the answer and progress
-/// alone.
+/// each line of its `progress`, each taken out once, the longest first: nothing, where the
+/// result is the answer and progress alone. The answer is taken out where it first stands,
+/// which can only leave words where a progress line opens with it (a false FAIL), never take
+/// a result for turn-end's A4 that is not (GPT-6.1-Sol's review of round b3: taken out last,
+/// it did).
 fn besides(body: &str, answer: &str, progress: &[&Item]) -> String {
     let mut lines: Vec<String> = progress.iter().map(|line| plain(&line.text)).collect();
     lines.sort_by_key(|words| std::cmp::Reverse(words.len()));
-    let mut rest = body.rsplit_once(answer).map_or_else(
-        || body.to_owned(),
-        |(before, after)| format!("{before} {after}"),
-    );
+    let mut rest = body.replacen(answer, " ", 1);
     for words in lines.iter().filter(|words| !words.is_empty()) {
         rest = rest.replacen(words.as_str(), " ", 1);
     }
