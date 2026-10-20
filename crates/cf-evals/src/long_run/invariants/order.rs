@@ -338,6 +338,20 @@ pub fn final_answer(look: &Look, settings: &Settings) -> Vec<Break> {
             )
         } else if held.is_empty() {
             continue;
+        } else if progress.iter().any(|line| {
+            let words = plain(&line.text);
+            !words.is_empty() && body.contains(&words) && words.contains(&answer)
+        }) {
+            // The final answer inside a line of progress the result holds: which of its words
+            // are the answer's is not told, and none is turn-end's shape (both reviews of round
+            // b4: taken out where it first stood, the answer emptied a result of progress alone).
+            (
+                format!(
+                    "m-{} holds {lines}; its turn's final answer stands inside a progress line it holds",
+                    result.id
+                ),
+                None,
+            )
         } else if besides(&body, &answer, &progress).is_empty() {
             (
                 format!("m-{} holds {lines}", result.id),

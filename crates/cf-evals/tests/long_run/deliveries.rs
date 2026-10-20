@@ -161,6 +161,55 @@ fn a_summary_claude_code_marks_by_its_records_flag_is_no_prompt_and_holds_the_se
 }
 
 #[test]
+fn a_summarys_uuid_another_line_carries_too_is_no_summary_and_a_retry_under_it_breaks_the_seventh()
+{
+    // Both reviewers of round b4: Claude Code's summary is recorded under a uuid, flagged,
+    // and a real retry of m-246 later under the same uuid, unflagged. The product's copy
+    // keeps the later words under that id (its upsert): the flag of one line of two is no
+    // summary's, and m-246 given twice is a break.
+    let scene = Scene::new(&[("long-worker", "claude-code")]);
+    let conversation = chief_on(&scene, "claude-code");
+    scene.item(conversation, 0, "user", FIRST, true, &t(1, 2));
+    scene.item(conversation, 1, "assistant", "Noted.", true, &t(1, 10));
+    scene.copied(conversation, 3, "user", &summary(), &t(2, 5));
+    scene.copied(conversation, 3, "user", FIRST, &t(2, 6));
+    let id = format!("i-{conversation}-3");
+    let reused = Record::claude(&format!(
+        "{}\n{}",
+        line(&id, &summary(), true),
+        line(&id, FIRST, false)
+    ));
+    assert_eq!(
+        said_of(&scene.look_with(ms(4, 0), conversation, reused)),
+        [TWICE]
+    );
+    // Two flagged lines under one uuid, or the uuid in another session's record the watch
+    // reads: no line alone carries it, and the row is held as any item is.
+    let scene = Scene::new(&[("long-worker", "claude-code")]);
+    let conversation = chief_on(&scene, "claude-code");
+    let worker = scene.conversation(3, "claude-code", "s-worker");
+    scene.item(conversation, 0, "user", FIRST, true, &t(1, 2));
+    scene.item(conversation, 1, "assistant", "Noted.", true, &t(1, 10));
+    scene.item(conversation, 3, "user", &summary(), true, &t(2, 5));
+    let id = format!("i-{conversation}-3");
+    let twice = Record::claude(&format!(
+        "{}\n{}",
+        line(&id, &summary(), true),
+        line(&id, &summary(), true)
+    ));
+    assert_eq!(
+        said_of(&scene.look_with(ms(4, 0), conversation, twice)),
+        [TWICE]
+    );
+    let flagged = Record::claude(&line(&id, &summary(), true));
+    let mut look = scene.look_with(ms(4, 0), conversation, flagged);
+    assert!(said_of(&look).is_empty());
+    look.records
+        .insert(worker, Record::claude(&line(&id, "Go on.", false)));
+    assert_eq!(said_of(&look), [TWICE]);
+}
+
+#[test]
 fn a_row_with_a_summarys_words_and_no_flag_is_a_prompt_and_a_real_retry_in_it_breaks_the_seventh() {
     // Both reviewers of round b3: a row that opens with the words a summary opens with, and
     // holds a real retry of m-246 after them. Its record does not mark it: a prompt.

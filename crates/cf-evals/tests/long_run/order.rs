@@ -653,6 +653,44 @@ fn a_header_a_person_quotes_in_a_fence_is_never_the_lost_delivery_that_began_a_t
     );
 }
 
+#[test]
+fn a_header_inside_an_attribute_of_a_paste_wrapper_is_never_the_lost_delivery_that_began_a_turn() {
+    // GPT-6-Astra's review of round b4: m-120's delivery began and never reached the window;
+    // a later row opens with a `<pasted_content` tag whose attribute holds a `>` and m-120's
+    // header. The tag is not Claude Code's shape (a `>` ends it only after its attributes, and
+    // none holds a `>`): no wrapper, and the row opens with no header. Unresolved, never held.
+    let scene = Scene::new(&[("long-worker", "claude-code")]);
+    let task = task(&scene);
+    let conversation = scene.conversation(3, "claude-code", "s-worker");
+    scene.item(
+        conversation,
+        0,
+        "user",
+        "<pasted_content note=\">[ConsensFlow m-120 · T-14 · task from @chief]\">quoted metadata</pasted_content>",
+        true,
+        &t(0, 30),
+    );
+    let answer = "It never reached me; I changed nothing.";
+    scene.item(conversation, 1, "assistant", answer, true, &t(1, 0));
+    scene.message(
+        131,
+        (CHIEF, Some(3)),
+        "result",
+        Some(task),
+        answer,
+        &t(1, 5),
+    );
+    let look = scene.look(ms(5, 0));
+    assert!(found(&look, 4).is_empty(), "{:?}", found(&look, 4));
+    assert_eq!(
+        unanswered(&look),
+        [(
+            "4:m-131".to_owned(),
+            "m-131's turn is not in the copy of @long-worker's conversation, which holds no prompt of m-120 after its delivery attempt 1 began: whether it is the turn's final answer cannot be judged".to_owned()
+        )]
+    );
+}
+
 /// T-14's worker's turn: the brief, then each of `progress` said before a tool's call, then
 /// `answer`; and its result m-131 saying `result`. What the fourth finds of it.
 fn progress_then(progress: &[&str], answer: &str, result: &str) -> Vec<Break> {
@@ -716,9 +754,49 @@ fn a_result_whose_final_answer_its_progress_holds_too_is_never_taken_for_turn_en
     assert_eq!(breaks.len(), 1, "{breaks:?}");
     assert_eq!(
         breaks[0].said,
-        "m-131 holds 1 line of its turn's progress, and words that are none of its turn's"
+        "m-131 holds 1 line of its turn's progress; its turn's final answer stands inside a progress line it holds"
     );
     assert_eq!(breaks[0].shape, None);
+}
+
+#[test]
+fn a_result_whose_progress_lines_hold_its_final_answer_is_never_taken_for_turn_ends_a4() {
+    // Both reviewers of round b4, as given: the final answer `Done.` stands inside the two
+    // progress lines the result holds, and a third line is the rest of the first. Taken out
+    // where it first stands, then the progress lines, nothing was left: known, a false PASS.
+    // A result whose progress lines hold the answer is no turn-end's A4: a break that fails a
+    // run.
+    let listed = known::KNOWN.as_deref().unwrap();
+    let breaks = progress_then(
+        &[
+            "Done. Checking the diff carefully.",
+            "Done. Reviewing the final changes.",
+            "Checking the diff carefully.",
+        ],
+        "Done.",
+        "Done. Checking the diff carefully.\n\nDone. Reviewing the final changes.",
+    );
+    assert_eq!(breaks.len(), 1, "{breaks:?}");
+    assert_eq!(
+        breaks[0].said,
+        "m-131 holds 3 lines of its turn's progress; its turn's final answer stands inside a progress line it holds"
+    );
+    assert_eq!(breaks[0].shape, None, "{breaks:?}");
+    assert_eq!(known::of(&breaks[0], listed), None);
+    // A line of progress too short to be told as held is a line the result holds all the
+    // same.
+    let breaks = progress_then(
+        &[
+            "Done. Ok now.",
+            "Ok now.",
+            "Reviewing the final changes now.",
+        ],
+        "Done.",
+        "Done. Ok now.\n\nReviewing the final changes now.",
+    );
+    assert_eq!(breaks.len(), 1, "{breaks:?}");
+    assert_eq!(breaks[0].shape, None, "{breaks:?}");
+    assert_eq!(known::of(&breaks[0], listed), None);
 }
 
 #[test]

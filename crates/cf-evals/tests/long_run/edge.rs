@@ -195,12 +195,12 @@ const TAKEN: [(&str, &str, &str); 50] = [
     ),
     (
         "long_run/invariants/deliveries.rs",
-        "let wrapped = text[start..].strip_prefix(PASTED).and_then(|rest| {",
+        ".find(&text[start..])",
         "where a delivery begins in a prompt, read and never said",
     ),
     (
         "long_run/invariants/deliveries.rs",
-        "let (attributes, inner) = rest.split_once('>')?;",
+        "let inner = &text[start + tag.end()..];",
         "the same",
     ),
     (

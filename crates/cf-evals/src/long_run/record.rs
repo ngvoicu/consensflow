@@ -266,9 +266,16 @@ impl Record {
     }
 
     /// Whether the record `uuid` is one Claude Code marks as its summary of a compaction,
-    /// by the record's own flag.
+    /// by the record's own flag: one line alone carries the uuid, and it is flagged. A uuid
+    /// another line carries too, flagged or not, is no summary's (the product's copy keeps
+    /// the later line's words under it).
     pub fn is_summary(&self, uuid: &str) -> bool {
-        self.summaries.contains(uuid)
+        self.summaries.contains(uuid) && self.lookup(Some(uuid)).is_some()
+    }
+
+    /// Whether a line of the record carries `uuid`.
+    pub fn carries(&self, uuid: &str) -> bool {
+        self.places.contains_key(uuid)
     }
 
     /// The line's place in the tree, where it has a uuid.

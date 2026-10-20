@@ -3334,8 +3334,8 @@ runs = ["evals-long-run"]
 
 [[plant.edit]]
 file = "crates/cf-evals/src/long_run/invariants/deliveries.rs"
-find = "        tag.then_some(inner)"
-replace = "        tag.then_some(inner).filter(|_| false)"
+find = "        .find(&text[start..])"
+replace = "        .find(&text[start..]).filter(|_| false)"
 
 # Round b2 (GPT-6.1-Sol's review of b1): turn-end's known A4 is only the whole final answer with
 # progress besides; and a delivery behind other words is one, as B5 holds every header.
@@ -3526,8 +3526,9 @@ replace = '''
 
 # Rounds b3 and b4 (both reviewers of b2 and b3: words that look like a harness's own fooled each
 # rule that told them from a delivery): a delivery that begins a turn opens its prompt, and a
-# person's words that quote one in a fence begin none; and turn-end's A4 takes the final answer out
-# where it first stands, which can only fail a run, never pass one (Sol's `Done.`).
+# person's words that quote one in a fence begin none. (b4's plant of the final answer taken out
+# where it last stands went in b5: a result whose progress lines hold the answer is no known A4
+# whichever occurrence is taken out.)
 
 [[plant]]
 name = "long run 4: a header a person quotes in a fence is taken for the lost delivery that began a turn (Astra's)"
@@ -3539,12 +3540,67 @@ file = "crates/cf-evals/src/long_run/invariants/deliveries.rs"
 find = '    if item.role != "user" || !opens {'
 replace = '    if item.role != "user" || headers(&item.text).is_empty() {'
 
+# Round b5 (both reviewers of b4): a summary's exemption holds only where one line alone of the
+# records the watch reads carries its uuid, and that line is flagged; a paste wrapper is Claude
+# Code's tag exactly, no `>` in an attribute's value; and a result whose progress lines hold its
+# turn's final answer is no turn-end's A4.
+
 [[plant]]
-name = "long run 4: the final answer is taken out where it last stands, and a result of progress that holds its words is known A4 (Sol's)"
-meant = "a_result_whose_final_answer_its_progress_holds_too_is_never_taken_for_turn_ends_a4"
+name = "long run 7: a reused uuid keeps the summary's exemption, and a real retry under it is counted once (b4's reading)"
+meant = "a_summarys_uuid_another_line_carries_too_is_no_summary_and_a_retry_under_it_breaks_the_seventh"
+runs = ["evals-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/record.rs"
+find = "        self.summaries.contains(uuid) && self.lookup(Some(uuid)).is_some()"
+replace = "        self.summaries.contains(uuid)"
+
+[[plant]]
+name = "long run 7: a summary's uuid another session's record carries is a summary all the same"
+meant = "a_summarys_uuid_another_line_carries_too_is_no_summary_and_a_retry_under_it_breaks_the_seventh"
+runs = ["evals-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/invariants/deliveries.rs"
+find = "            *conversation == item.conversation || !record.carries(&item.id)"
+replace = "            *conversation == item.conversation || record.carries(&item.id) || true"
+
+[[plant]]
+name = "long run 4: a `>` inside a paste wrapper's attribute ends its tag, and a header quoted there begins a turn (Astra's)"
+meant = "a_header_inside_an_attribute_of_a_paste_wrapper_is_never_the_lost_delivery_that_began_a_turn"
+runs = ["evals-long-run", "evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/invariants/deliveries.rs"
+find = """const PASTED: &str = r#"^<pasted_content(?: [A-Za-z][A-Za-z0-9_-]*="[^">\\n]*")*>"#;"""
+replace = """const PASTED: &str = r#"^<pasted_content(?: [^>\\n]*)?>"#;"""
+
+[[plant]]
+name = "long run 4: a paste wrapper with Claude Code's id is no wrapper, and its delivery begins no turn"
+meant = "a_paste_wrapper_is_claude_codes_tag_and_nothing_that_only_opens_like_it"
+runs = ["evals-long-run", "evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/invariants/deliveries.rs"
+find = """const PASTED: &str = r#"^<pasted_content(?: [A-Za-z][A-Za-z0-9_-]*="[^">\\n]*")*>"#;"""
+replace = """const PASTED: &str = r#"^<pasted_content>"#;"""
+
+[[plant]]
+name = "long run 4: a result whose progress lines hold its final answer is known A4 (both reviewers' `Done.`)"
+meant = "a_result_whose_progress_lines_hold_its_final_answer_is_never_taken_for_turn_ends_a4"
 runs = ["evals-long-run"]
 
 [[plant.edit]]
 file = "crates/cf-evals/src/long_run/invariants/order.rs"
-find = '    let mut rest = body.replacen(answer, " ", 1);'
-replace = '    let mut rest = body.rsplit_once(answer).map_or_else(|| body.to_owned(), |(before, after)| format!("{before} {after}"));'
+find = "            !words.is_empty() && body.contains(&words) && words.contains(&answer)"
+replace = "            !words.is_empty() && body.contains(&words) && words.contains(&answer) && false"
+
+[[plant]]
+name = "long run 4: a progress line too short to be held hides the final answer inside it, and the result is known A4"
+meant = "a_result_whose_progress_lines_hold_its_final_answer_is_never_taken_for_turn_ends_a4"
+runs = ["evals-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/invariants/order.rs"
+find = "            !words.is_empty() && body.contains(&words) && words.contains(&answer)"
+replace = "            words.chars().count() >= PROGRESS && body.contains(&words) && words.contains(&answer)"

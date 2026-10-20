@@ -108,22 +108,23 @@ fn body_in(look: &Look, id: i64) -> Option<&str> {
 }
 
 /// The opening tag Claude Code wraps a long paste in, in its record and so in the copy
-/// (2.1.303: `<pasted_content id="…">`, the paste on the next line).
-const PASTED: &str = "<pasted_content";
+/// (2.1.303 and 2.1.304: `<pasted_content id="…">` or `<pasted_content>`, the paste on the
+/// next line): `<pasted_content`, then each attribute ` name="value"`, its value holding no
+/// `"`, `>` or line break, then `>`.
+const PASTED: &str = r#"^<pasted_content(?: [A-Za-z][A-Za-z0-9_-]*="[^">\n]*")*>"#;
 
 /// Where a delivery in `text` would begin: past its leading white space and, where
-/// Claude Code wrapped the paste, past the wrapper's opening tag (`<pasted_content`, then
-/// nothing or attributes after a space, with no `>` or line break in them, and `>`) and
-/// the white space after it.
+/// Claude Code wrapped the paste, past the wrapper's opening tag ([`PASTED`]) and the white
+/// space after it.
 fn delivery_start(text: &str) -> usize {
+    static TAG: OnceLock<Regex> = OnceLock::new();
     let start = text.len() - text.trim_start().len();
-    let wrapped = text[start..].strip_prefix(PASTED).and_then(|rest| {
-        let (attributes, inner) = rest.split_once('>')?;
-        let tag =
-            (attributes.is_empty() || attributes.starts_with(' ')) && !attributes.contains('\n');
-        tag.then_some(inner)
-    });
-    wrapped.map_or(start, |inner| text.len() - inner.trim_start().len())
+    pattern::once(&TAG, PASTED)
+        .find(&text[start..])
+        .map_or(start, |tag| {
+            let inner = &text[start + tag.end()..];
+            text.len() - inner.trim_start().len()
+        })
 }
 
 /// The messages `item` delivered to `worker`, in order: none where it is no prompt that
@@ -146,12 +147,16 @@ pub(super) fn delivered_to<'l>(look: &'l Look, item: &Item, worker: i64) -> Vec<
 }
 
 /// Whether `item` is a row Claude Code marks as its summary of a compaction, by the
-/// record's own flag, its record read ([`crate::long_run::record::Record::is_summary`]).
-/// Without the record, it is held as any item is.
+/// record's own flag, its record read ([`crate::long_run::record::Record::is_summary`]),
+/// and no other record the watch reads carries its uuid. Without the record, it is held as
+/// any item is.
 fn is_summary(look: &Look, item: &Item) -> bool {
     look.records
         .get(&item.conversation)
         .is_some_and(|record| record.is_summary(&item.id))
+        && look.records.iter().all(|(conversation, record)| {
+            *conversation == item.conversation || !record.carries(&item.id)
+        })
 }
 
 /// 7: per conversation, a message whose header is in two of its prompts, and a
@@ -316,6 +321,32 @@ mod tests {
         // The quote alone is no delivery.
         let alone = format!("[ConsensFlow m-246 · T-9 · result from @w]\n{quoting}");
         assert_eq!(given_in(&alone, |id| (id == 246).then_some(quoting)), [246]);
+    }
+
+    #[test]
+    fn a_paste_wrapper_is_claude_codes_tag_and_nothing_that_only_opens_like_it() {
+        let header = "[ConsensFlow m-120 · T-14 · task from @chief]\nFix the rounding";
+        let opens_with_header =
+            |text: &str| text[delivery_start(text)..].starts_with("[ConsensFlow m-120");
+        // Claude Code 2.1.303 and 2.1.304's tag: bare, or with its id of four hex digits, the
+        // paste on the next line.
+        for tag in ["<pasted_content>", "<pasted_content id=\"f8f1\">"] {
+            let text = format!("\n\n{tag}\n{header}\n</pasted_content>\n");
+            assert!(opens_with_header(&text), "{text}");
+        }
+        // GPT-6-Astra's review of round b4: a `>` inside an attribute ends no tag; and neither
+        // does anything but attributes of Claude Code's shape before the `>`.
+        for tag in [
+            "<pasted_content note=\">[ConsensFlow m-120 · T-14 · task from @chief]\">",
+            "<pasted_content id=\"f8f1\" ",
+            "<pasted_content id=f8f1>",
+            "<pasted_content id=\"f8\nf1\">",
+            "<pasted_contents>",
+            "<pasted_content x>",
+        ] {
+            let text = format!("{tag}\n{header}");
+            assert_eq!(delivery_start(&text), 0, "{tag}");
+        }
     }
 
     #[test]
