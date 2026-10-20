@@ -34,6 +34,7 @@ cf-ledger = { path = "crates/cf-ledger" }
 cf-launcher = { path = "crates/cf-launcher" }
 cf-portable = { path = "crates/cf-portable" }
 cf-release = { path = "tools/cf-release" }
+cf-publish = { path = "tools/cf-publish" }
 base64 = "0.22"
 bytes = "1"
 flate2 = "1"
