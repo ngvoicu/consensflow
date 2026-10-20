@@ -17,6 +17,7 @@ use std::sync::Arc;
 use cf_base::js;
 use serde_json::{Map, Value};
 
+use super::patterns::OUTPUT;
 use super::text::{claude_text, claude_tool_text, is_interrupt};
 use super::{field, kind};
 
@@ -40,8 +41,10 @@ pub(super) enum Projected {
     Remove(Result<String, String>),
     Assistant(Box<Assistant>),
     User(Box<User>),
-    /// The output of a `/clear`, a child of the record with this uuid.
-    Clear(Arc<str>),
+    /// What a command typed at Claude's prompt printed, written as the system's
+    /// record (a `/clear`'s, a `/compact` that found nothing to compact), a
+    /// child of the record with this uuid.
+    Output(Arc<str>),
     /// A boundary record that ends the turn of the answer before it.
     Boundary(Boundary),
 }
@@ -118,6 +121,11 @@ pub(super) struct User {
     pub(super) queued: bool,
     /// The summary a compaction writes (`isCompactSummary`): Claude Code's own.
     pub(super) summary: bool,
+    /// The uuid of the record this one is a child of, where it is what a
+    /// command typed at Claude's prompt printed (`OUTPUT`), of the main
+    /// conversation: Claude Code's own words, which end the command's turn
+    /// where they follow it.
+    pub(super) output_of: Option<Arc<str>>,
 }
 
 /// The record `record` of the session `session`, as replay reads it.
@@ -126,7 +134,7 @@ pub(super) fn project(record: &Value, session: &str) -> Projected {
         Some("attachment") => hook(record, session),
         Some("queue-operation") => queue(record),
         Some("assistant") => assistant(record),
-        Some("user") => user(record),
+        Some("user") => user(record, session),
         Some("system") => system(record, session),
         _ => Projected::Other,
     }
@@ -266,8 +274,14 @@ fn assistant(record: &Value) -> Projected {
     }))
 }
 
-fn user(record: &Value) -> Projected {
+fn user(record: &Value, session: &str) -> Projected {
     let content = field(record.get("message"), "content");
+    let text = claude_text(content);
+    let output_of = record
+        .get("parentUuid")
+        .and_then(Value::as_str)
+        .filter(|_| of_main_conversation(record, session) && OUTPUT.is_match(&text))
+        .map(Arc::from);
     Projected::User(Box::new(User {
         at: timestamp(record),
         uuid: text_id(record.get("uuid")),
@@ -276,18 +290,21 @@ fn user(record: &Value) -> Projected {
             .filter(|block| kind(block) == Some("tool_result"))
             .map(tool_result)
             .collect(),
-        text: claude_text(content),
+        text,
         interrupt: is_interrupt(record),
         queued: record.get("promptSource").and_then(Value::as_str) == Some("queued"),
         summary: record.get("isCompactSummary") == Some(&Value::Bool(true)),
+        output_of,
     }))
 }
 
-/// A system record: a `/clear`, or the boundary record that says a turn that
-/// answered is over.
+/// A system record: what a command typed at the prompt printed, or the
+/// boundary record that says a turn that answered is over.
 fn system(record: &Value, session: &str) -> Projected {
     match record.get("subtype").and_then(Value::as_str) {
-        Some("local_command") => clear(record, session).map_or(Projected::Other, Projected::Clear),
+        Some("local_command") => {
+            output(record, session).map_or(Projected::Other, Projected::Output)
+        }
         // 2.1.263/265/266's root query finalizer emits a `turn_duration` only
         // after query completion, after stop hooks, and when not aborted;
         // candidate/tool/queue/hook guards establish readiness. The exact
@@ -316,15 +333,24 @@ fn boundary(record: &Value, agents: Option<bool>) -> Projected {
 }
 
 /// The uuid of the parent of a `local_command` record that has the shape of
-/// the output of a `/clear`: of the main conversation, not a meta record, at
-/// the level of information, saying nothing. That the parent is the user's
-/// `/clear`, with nothing open, is for replay to tell.
-fn clear(record: &Value, session: &str) -> Option<Arc<str>> {
+/// what a command printed: of the main conversation, not a meta record, at the
+/// level of information, its content the command's output (`OUTPUT`: a
+/// `/clear`'s says nothing, a `/compact` that found nothing to compact says so).
+/// That the parent is the user's command, with nothing open, is for replay to
+/// tell. A command Claude Code writes as the system's record too (`/mcp`,
+/// `/plugin`) began no turn, and its output is the child of no user's record.
+///
+/// Departs from Node's reader on purpose (the live run of 2026-10-20, Claude
+/// Code 2.1.304: a `/compact` typed into a conversation just cleared): Node read
+/// the empty output of a `/clear` alone.
+fn output(record: &Value, session: &str) -> Option<Arc<str>> {
     let shaped = of_main_conversation(record, session)
         && record.get("isMeta") == Some(&Value::Bool(false))
         && record.get("level").and_then(Value::as_str) == Some("info")
-        && record.get("content").and_then(Value::as_str)
-            == Some("<local-command-stdout></local-command-stdout>");
+        && record
+            .get("content")
+            .and_then(Value::as_str)
+            .is_some_and(|content| OUTPUT.is_match(content));
     if !shaped {
         return None;
     }

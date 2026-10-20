@@ -2270,13 +2270,13 @@ replace = "    switched_on.is_some_and(|on| !on.is_empty()) && !participant.is_e
 
 [[plant]]
 name = "long run: the stand-in's compaction writes no boundary Claude Code writes, and the dry run's /compact is never seen done"
-meant = "a_compaction_writes_its_boundary_and_the_summary_in_claudes_shape_and_no_turn"
+meant = "a_compaction_writes_claude_2_1_303s_records_each_the_child_of_the_one_before_and_no_turn"
 runs = ["fake-agent-compact"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/bin/fake_agent.rs"
-find = '            "type": "system", "subtype": "compact_boundary", "parentUuid": null,'
-replace = '            "type": "system", "subtype": "compacted", "parentUuid": null,'
+find = '        "type": "system", "subtype": "compact_boundary", "isSidechain": false,'
+replace = '        "type": "system", "subtype": "compacted", "isSidechain": false,'
 
 [[plant]]
 name = "long run: the rig's stranger ends by itself, and a run of hours fails its close"
