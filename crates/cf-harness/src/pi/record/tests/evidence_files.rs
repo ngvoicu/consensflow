@@ -16,6 +16,7 @@ fn options_of(directory: &Path, launch: &str) -> Options {
             directory: Some(directory.to_str().unwrap().to_owned()),
             launch_id: Some(launch.to_owned()),
         }),
+        ..Options::default()
     }
 }
 
@@ -137,6 +138,7 @@ fn the_launch_is_what_the_options_say_and_the_environment_says_what_they_leave_n
                 directory: directory.map(str::to_owned),
                 launch_id: launch.map(str::to_owned),
             }),
+            ..Options::default()
         };
         is_settled(&mut stage, 1_000, &options)
     };

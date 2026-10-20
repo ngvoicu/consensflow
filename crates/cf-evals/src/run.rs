@@ -25,15 +25,18 @@
 //!   ([`crate::measure::chief_open_question`]).
 
 mod alone;
-mod card;
-mod chief;
-mod floor;
-mod machine;
+// What a long run (`crate::long_run`) is made of too: how the board is read, the
+// chief's window, where a run speaks, the machine and its wrappers, the scripted
+// owner and the workspace.
+pub(crate) mod card;
+pub(crate) mod chief;
+pub(crate) mod floor;
+pub(crate) mod machine;
 mod options;
-mod owner;
+pub(crate) mod owner;
 mod report;
-mod workspace;
-mod wrappers;
+pub(crate) mod workspace;
+pub(crate) mod wrappers;
 
 use std::io::Write;
 use std::path::Path;
@@ -44,7 +47,7 @@ use cf_e2e::rig::Rig;
 
 use floor::Floor;
 use machine::Machine;
-pub use options::{Arm, Options};
+pub use options::{Arm, Crew, Options};
 use wrappers::Wrappers;
 
 use crate::plan::{chief_environment, harness, staff_for, Agent, ChiefSetup, Staff};
@@ -81,8 +84,9 @@ pub fn command(words: &[String], out: &mut dyn Write) -> Result<i32> {
         &chief.model,
         options.chief_effort(),
     );
-    let machine = Machine::of(&options)?;
-    let wrappers = wrappers::write(&machine, &options, &chief)?;
+    let crew = options.crew();
+    let machine = Machine::of(&crew)?;
+    let wrappers = wrappers::write(&machine, &crew, &chief)?;
     let plan = Plan {
         options: &options,
         machine: &machine,
@@ -115,24 +119,36 @@ fn start(plan: &Plan, floor: &mut Floor, workspace: &Path) -> Result<Rig> {
         .claude
         .clone()
         .unwrap_or_else(|| plan.machine.bin().join("claude"));
-    let rig = Rig::start(plan.machine.rig(options, plan.chief, &stand_in))?;
+    let rig = Rig::start(plan.machine.rig(&options.crew(), plan.chief, &stand_in))?;
+    floor.say(format!("daemon: {}", daemon_of(&rig)))?;
+    if options.in_run("claude") {
+        trust(plan.machine, &rig, workspace, floor)?;
+    }
+    Ok(rig)
+}
+
+/// Which daemon a rig runs, as a run says it: `native (rust 1.90.0)`.
+pub(crate) fn daemon_of(rig: &Rig) -> String {
     let daemon = rig.start_line();
-    floor.say(format!(
-        "daemon: {} ({})",
+    format!(
+        "{} ({})",
         match daemon.kind {
             Kind::Native => "native",
             Kind::Node => "node",
         },
         daemon.runtime
-    ))?;
-    if options.in_run("claude") {
-        let claude = plan.machine.install("claude")?;
-        let words: Vec<String> = std::iter::once(claude.command().to_string_lossy().into_owned())
-            .chain(ISOLATION.map(str::to_owned))
-            .collect();
-        let argv = ask::program(&words, rig.environment())?;
-        let trust = window::trust_claude(&rig, &argv, workspace)?;
-        floor.say(format!("trust: {trust}"))?;
-    }
-    Ok(rig)
+    )
+}
+
+/// Claude asked to trust the fresh `workspace`, in a window of the rig's own host
+/// started as the machine's Claude is, and what came of it said.
+pub(crate) fn trust(machine: &Machine, rig: &Rig, workspace: &Path, floor: &mut Floor) -> Result {
+    let claude = machine.install("claude")?;
+    let words: Vec<String> = std::iter::once(claude.command().to_string_lossy().into_owned())
+        .chain(ISOLATION.map(str::to_owned))
+        .collect();
+    let argv = ask::program(&words, rig.environment())?;
+    let trust = window::trust_claude(rig, &argv, workspace)?;
+    floor.say(format!("trust: {trust}"))?;
+    Ok(())
 }

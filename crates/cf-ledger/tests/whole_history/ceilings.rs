@@ -1,10 +1,10 @@
 //! An item's id is its identity: the copy keeps it whole, and so does
-//! migration 0019, however long; the history reads only its head (the id as a
+//! migration 0020, however long; the history reads only its head (the id as a
 //! page shows it, and its fields), never the id. Every other field the history
 //! reads has a ceiling: a time is kept as a store keeps one, a harness or an
 //! agent is cut to [`FIELD_MAX`] bytes, a native session within
 //! [`NATIVE_SESSION_MAX`], and every event a heading reads within
-//! [`HEADING_EVENT_MAX`] bytes; migration 0019 brings once what an older build
+//! [`HEADING_EVENT_MAX`] bytes; migration 0020 brings once what an older build
 //! wrote past them within them, measured in bytes, never by SQLite's `length()`,
 //! which stops at a NUL. So a read goes through short fields alone, each
 //! charged as what it is, and loads no long value: these read under a value

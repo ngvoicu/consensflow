@@ -26,6 +26,7 @@ static BLOCK: Keep = Keep::Members(&[
 static MESSAGE: Keep = Keep::Members(&[
     ("id", &Keep::Scalar),
     ("role", &Keep::Scalar),
+    ("model", &Keep::Scalar),
     ("stop_reason", &Keep::Scalar),
     ("content", &Keep::Items(&BLOCK)),
 ]);
@@ -51,7 +52,7 @@ pub(super) static RECORD: Keep = Keep::Members(&[
     ("message", &MESSAGE),
     ("attachment", &ATTACHMENT),
     ("operation", &Keep::Scalar),
-    // What a queue operation names, whatever it is, and a `/clear`'s output.
+    // What a queue operation names, whatever it is, and what a command printed.
     ("content", &Keep::All),
     ("isApiErrorMessage", &Keep::Scalar),
     ("apiErrorStatus", &Keep::Scalar),

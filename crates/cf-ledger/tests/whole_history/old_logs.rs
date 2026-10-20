@@ -1,6 +1,6 @@
 //! A ledger an older build wrote may hold events whose data is no JSON, JSON
 //! that is no object, or what this build never writes where it writes a
-//! conversation's id or a participant's handle. Migration 0019's indexes and
+//! conversation's id or a participant's handle. Migration 0020's indexes and
 //! the lookups of the log a heading takes read such an event as saying nothing
 //! of any conversation or participant, so the ledger opens on it and the
 //! viewer reads it: a switch whose data says nothing still ended the
@@ -37,7 +37,7 @@ const UNREADABLE: [&str; 12] = [
     "\u{0}",
 ];
 
-/// The kinds of event the viewer reads the log for, each read through an index of 0019.
+/// The kinds of event the viewer reads the log for, each read through an index of 0020.
 const READ: [&str; 4] = [
     "conversation.started",
     "conversation.followed",
@@ -45,18 +45,29 @@ const READ: [&str; 4] = [
     "chief.switched",
 ];
 
-/// A ledger of version 18 in `dir`, as an older build left it: a project
-/// whose chief runs on Codex as diana, its conversations 1 to `conversations`
-/// (the last going on now), each with one item, and the log `events` (a kind
-/// and its data) in order.
+/// A ledger of version 18 in `dir`, as an older build left it (3.0.4): a
+/// project whose chief runs on Codex as diana, its conversations 1 to
+/// `conversations` (the last going on now), each with one item, and the log
+/// `events` (a kind and its data) in order.
 pub(super) fn version_18(
     dir: &tempfile::TempDir,
     conversations: i64,
     events: &[(&str, &str)],
 ) -> PathBuf {
+    of_version(dir, 18, conversations, events)
+}
+
+/// The same ledger, of the schema `version` (18 or 19: 3.0.5 wrote 19, with
+/// B5's migration 0019 and none of the viewer's).
+fn of_version(
+    dir: &tempfile::TempDir,
+    version: usize,
+    conversations: i64,
+    events: &[(&str, &str)],
+) -> PathBuf {
     let file = dir.path().join("consensflow.db");
     let db = Connection::open(&file).expect("a database");
-    migrate(&db, &MIGRATIONS[..18]).expect("version 18");
+    migrate(&db, &MIGRATIONS[..version]).expect("an older version");
     db.execute_batch(&format!(
         "INSERT INTO project (id, directory, name, state, gate, created_at, updated_at)
            VALUES (1, '/work/app', 'app', 'open', 0, '{AT}', '{AT}');
@@ -151,6 +162,115 @@ fn a_version_18_ledger_whose_log_holds_unreadable_events_of_every_kind_migrates_
     );
     drop(ledger);
     open_ledger(&file, Options::default()).expect("and open again");
+}
+
+#[test]
+fn a_ledger_3_0_5_wrote_migrates_to_the_viewer_s_0020_once_and_is_read_and_its_lets_go_stay_reconciled(
+) {
+    let dir = tempfile::tempdir().expect("a folder");
+    // What 3.0.5 left: version 19, B5's migration 0019 (byte for byte, pinned by
+    // the schema's SHA-256s), a carrier's rows it let go of and its start
+    // reconciled, and an item longer than a part.
+    let started = [of("conversation.started", 1), of("conversation.started", 2)];
+    let events: Vec<(&str, &str)> = started
+        .iter()
+        .map(|(kind, data)| (*kind, data.as_str()))
+        .chain([("message.uncarried", r#"{"carrier": 9, "released": []}"#)])
+        .collect();
+    let file = of_version(&dir, 19, 2, &events);
+    let long = "word ".repeat(HISTORY_PART / 4);
+    let db = Connection::open(&file).expect("the file");
+    db.execute_batch(&format!(
+        "INSERT INTO event (project_id, at, kind, data)
+           SELECT 1, '{AT}', 'message.reconciled', json_object('uncarried', json_array(id))
+             FROM event WHERE kind = 'message.uncarried';
+         INSERT INTO transcript (conversation_id, item_id, seq, role, text, complete, at, copied_at)
+           VALUES (2, 'long', 1, 'assistant', '{long}', 1, NULL, '{AT}');"
+    ))
+    .expect("3.0.5's rows");
+    let version = |db: &Connection| -> i64 {
+        db.query_row("PRAGMA user_version", [], |row| row.get(0))
+            .expect("a version")
+    };
+    let heads = |db: &Connection| -> rusqlite::Result<i64> {
+        db.query_row("SELECT COUNT(*) FROM transcript_head", [], |row| row.get(0))
+    };
+    assert_eq!(version(&db), 19);
+    assert!(heads(&db).is_err(), "3.0.5 has no heads' table");
+    drop(db);
+
+    let ledger = open_ledger(&file, Options::default()).expect("migrated and open");
+    // A page holds a long item's first part.
+    let read: Vec<String> = lines(&everything(&ledger, 1, "chief").expect("read"))
+        .into_iter()
+        .map(|line| line.replace(&long[..HISTORY_PART], "(its first part)"))
+        .collect();
+    assert_eq!(
+        read,
+        [
+            r#"codex diana Some(Fresh) ["user: said in 1"]"#,
+            r#"codex diana None ["user: said in 2", "assistant: (its first part)"]"#,
+        ]
+    );
+    drop(ledger);
+    open_ledger(&file, Options::default()).expect("and open again");
+    let db = Connection::open(&file).expect("the file");
+    assert_eq!(version(&db), 20);
+    assert_eq!(heads(&db).expect("the heads"), 3, "one head an item");
+    let parts: i64 = db
+        .query_row(
+            "SELECT p.parts FROM transcript_head p JOIN transcript t ON t.rowid = p.item
+             WHERE t.item_id = 'long'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("the long item's head");
+    assert_eq!(
+        parts,
+        long.len().div_ceil(HISTORY_PART) as i64,
+        "split in parts"
+    );
+    let logged: Vec<String> = db
+        .prepare("SELECT kind FROM event WHERE kind LIKE 'message.%' ORDER BY id")
+        .expect("the log")
+        .query_map([], |row| row.get(0))
+        .expect("its kinds")
+        .collect::<rusqlite::Result<_>>()
+        .expect("each");
+    assert_eq!(
+        logged,
+        ["message.uncarried", "message.reconciled"],
+        "nothing let go of again, nor reconciled twice"
+    );
+}
+
+#[test]
+fn a_fresh_ledger_is_made_at_0020_after_b5_s_0019_with_the_viewer_s_tables() {
+    assert!(
+        MIGRATIONS[18].contains("'message.uncarried'"),
+        "0019 is B5's"
+    );
+    assert!(
+        MIGRATIONS[19].contains("CREATE TABLE transcript_head"),
+        "0020 is the viewer's"
+    );
+    let dir = tempfile::tempdir().expect("a folder");
+    let file = dir.path().join("consensflow.db");
+    drop(open_ledger(&file, Options::default()).expect("made and open"));
+    let db = Connection::open(&file).expect("the file");
+    let version: i64 = db
+        .query_row("PRAGMA user_version", [], |row| row.get(0))
+        .expect("a version");
+    assert_eq!(version, 20);
+    let tables: i64 = db
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master
+             WHERE type = 'table' AND name IN ('transcript_head', 'transcript_part')",
+            [],
+            |row| row.get(0),
+        )
+        .expect("the tables");
+    assert_eq!(tables, 2);
 }
 
 #[test]

@@ -22,7 +22,8 @@
 //!
 //! Escape stops the turn at work, as it stops Claude's: a turn that works (a
 //! `SLEEP`) ends there, writing the record Claude writes of a turn the user
-//! interrupted, `[Request interrupted by user]`, and no answer; and a turn still
+//! interrupted, `[Request interrupted by user]`, and no answer (a hung one, a
+//! `HANG`, takes no Escape at all); and a turn still
 //! in the hooks of its prompt (`HOOKS`) writes nothing, as Claude writes nothing
 //! of one stopped before a word of its answer. A window with
 //! `CF_TEST_WIND_DOWN_MS` set takes that long to stop, as Claude does when it
@@ -32,7 +33,14 @@
 //! its work is done, so that a case can do something while the turn is still open
 //! in the record: quit the app, as a human may at any moment. A turn that runs a
 //! command (`RUN`, in `tool`) works until the command ends, and Escape stops it
-//! and, as the line says, the command with it or not.
+//! and, as the line says, the command with it or not. A turn that runs a build
+//! (`BUILD`, in `build`) waits for it as for a command, and the build leaves a
+//! daemon running, as Gradle's does: the program is the build too (`--build`).
+//! `/compact` typed alone compacts the conversation as Claude Code 2.1.303 does
+//! while idle: the bare command as it is typed, its boundary and its summary, then
+//! the command's own records and what it printed, in the record, and no turn; with
+//! nothing said since the conversation began or was last compacted it compacts
+//! nothing, as 2.1.304 does, and says so as the system's record.
 //!
 //! It is the program of the suites that stands in a window, so it reads the
 //! environment a window is given and runs `cf` as an agent does, both through
@@ -46,6 +54,8 @@ mod agents;
 mod args;
 #[path = "fake_agent/background.rs"]
 mod background;
+#[path = "fake_agent/build.rs"]
+mod build;
 #[path = "fake_agent/records.rs"]
 mod records;
 #[path = "fake_agent/reply.rs"]
@@ -96,6 +106,10 @@ fn main() -> ExitCode {
     // window is launched with: it holds its signals as it needs, not as a window.
     if args.first().map(String::as_str) == Some(background::JOB) {
         return background::run(&args[1..]);
+    }
+    // The build a turn's command runs, which leaves a daemon of its own.
+    if args.first().map(String::as_str) == Some(build::BUILD) {
+        return build::run(&args[1..]);
     }
     // The shell of a command a harness detaches, which a session of its own is made for.
     #[cfg(unix)]
@@ -272,13 +286,124 @@ fn hooks_of(text: &str) -> Option<Duration> {
         .map(Duration::from_secs)
 }
 
+/// What the user types to have the conversation compacted.
+const COMPACT: &str = "/compact";
+
+/// What a compaction writes as the summary of the conversation before it.
+const COMPACT_SUMMARY: &str =
+    "This session is being continued from a previous conversation that ran out of context.";
+
+/// What a `/compact` that found nothing to compact prints.
+const NOTHING_TO_COMPACT: &str = "There is nothing in the conversation to compact yet.";
+
+/// What Claude Code writes before a command typed at its prompt, as a meta record.
+const CAVEAT: &str = "<local-command-caveat>The messages below were made by a command the user ran; do not answer them.</local-command-caveat>";
+
 /// One message: the window works on it and is idle again once it is answered
-/// or an Escape stopped it.
+/// or an Escape stopped it. `/compact` typed alone is no message: the window
+/// compacts its conversation as Claude Code does while idle (`compact`), and runs
+/// no turn (the long run's compaction, which its watch finds in the record).
 fn take_turn(records: &mut Records, pid: u32, window: &Window, text: &str) -> Result<(), String> {
+    if text.trim() == COMPACT {
+        return compact(records, pid);
+    }
     window.stop.begin();
     let done = turn(records, pid, window, text);
     window.stop.end();
     done
+}
+
+/// The conversation compacted while idle, as Claude Code 2.1.303 writes it (the
+/// long run of 2026-10-19, whose chief read at work after it for 80 minutes): busy
+/// while it compacts, with the bare `/compact` written as it is typed; then the
+/// boundary, whose chain starts afresh, the summary, the words before the command,
+/// the command and what it printed, each the child of the one before it, and the
+/// hook that ran as the conversation began again; and idle. A conversation with
+/// nothing said since it began or was last compacted is not compacted
+/// (`nothing_to_compact`).
+fn compact(records: &mut Records, pid: u32) -> Result<(), String> {
+    if !records.said() {
+        return nothing_to_compact(records, pid);
+    }
+    let failed = |cause: io::Error| cause.to_string();
+    records.status(pid, "busy").map_err(failed)?;
+    records
+        .append(pid, user(COMPACT, json!({})))
+        .map_err(failed)?;
+    let boundary = json!({
+        "type": "system", "subtype": "compact_boundary", "isSidechain": false,
+        "parentUuid": null, "logicalParentUuid": records.last_uuid(pid),
+        "content": "Conversation compacted", "level": "info",
+        "compactMetadata": { "trigger": "manual" },
+    });
+    records.append(pid, boundary).map_err(failed)?;
+    let command = compact_command();
+    let hook = json!({
+        "type": "attachment", "isSidechain": false,
+        "attachment": { "type": "hook_success", "hookEvent": "SessionStart", "hookName": "SessionStart:compact" },
+    });
+    for mut record in [
+        user(
+            COMPACT_SUMMARY,
+            json!({ "isCompactSummary": true, "isVisibleInTranscriptOnly": true }),
+        ),
+        user(CAVEAT, json!({ "isMeta": true })),
+        user(&command, json!({})),
+        user(
+            "<local-command-stdout>\u{1b}[2mCompacted \u{1b}[22m</local-command-stdout>",
+            json!({ "repeatsCompactSummary": true }),
+        ),
+        hook,
+    ] {
+        record["parentUuid"] = json!(records.last_uuid(pid));
+        records.append(pid, record).map_err(failed)?;
+    }
+    records.compacted();
+    records.status(pid, "idle").map_err(failed)
+}
+
+/// A `/compact` that found nothing to compact, as Claude Code 2.1.304 writes it
+/// (the live run of 2026-10-20, a `/compact` typed into a conversation just
+/// cleared): no bare command and no compaction; the words before the command, the
+/// command, and what it printed as the system's record (`local_command`), each the
+/// child of the one before it.
+fn nothing_to_compact(records: &mut Records, pid: u32) -> Result<(), String> {
+    let failed = |cause: io::Error| cause.to_string();
+    records.status(pid, "busy").map_err(failed)?;
+    let printed = json!({
+        "type": "system", "subtype": "local_command", "isSidechain": false,
+        "isMeta": false, "level": "info",
+        "content": format!("<local-command-stdout>{NOTHING_TO_COMPACT}</local-command-stdout>"),
+    });
+    for mut record in [
+        user(CAVEAT, json!({ "isMeta": true })),
+        user(&compact_command(), json!({})),
+        printed,
+    ] {
+        record["parentUuid"] = json!(records.last_uuid(pid));
+        records.append(pid, record).map_err(failed)?;
+    }
+    records.compacted();
+    records.status(pid, "idle").map_err(failed)
+}
+
+/// What the user's record of a `/compact` says.
+fn compact_command() -> String {
+    format!(
+        "<command-name>{COMPACT}</command-name>\n            <command-message>compact</command-message>\n            <command-args></command-args>"
+    )
+}
+
+/// A user's record of the main conversation saying `content`, with `fields` besides.
+fn user(content: &str, fields: serde_json::Value) -> serde_json::Value {
+    let mut record = json!({
+        "type": "user", "isSidechain": false,
+        "message": { "role": "user", "content": content },
+    });
+    if let (Some(record), serde_json::Value::Object(fields)) = (record.as_object_mut(), fields) {
+        record.extend(fields);
+    }
+    record
 }
 
 /// A turn: the window is busy (not in the hooks of its prompt, where Claude's
@@ -312,7 +437,7 @@ fn turn(records: &mut Records, pid: u32, window: &Window, text: &str) -> Result<
         }
         records.status(pid, "busy").map_err(failed)?;
     }
-    let reply = match tool::reply(text, window) {
+    let reply = match tool::reply(text, window).or_else(|| build::reply(text, window)) {
         Some(reply) => reply?,
         None => reply_to(text, window)?,
     };
@@ -425,6 +550,128 @@ mod tests {
         ] {
             assert_eq!(hooks_of(text), None, "{text}");
         }
+    }
+
+    /// The records of the conversation `s` in the config folder `config`, from the
+    /// `from`th on.
+    fn written_from(config: &Path, from: usize) -> Vec<serde_json::Value> {
+        std::fs::read_to_string(config.join("projects/integration/s.jsonl"))
+            .unwrap()
+            .lines()
+            .skip(from)
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect()
+    }
+
+    /// A record as its subtype or type, and how its words open, to its first `>`.
+    fn shape(record: &serde_json::Value) -> String {
+        let content = record["message"]["content"]
+            .as_str()
+            .or(record["content"].as_str())
+            .unwrap_or_default();
+        let words = content.split('>').next().unwrap_or_default().to_owned();
+        format!(
+            "{}{}",
+            record["subtype"]
+                .as_str()
+                .unwrap_or(record["type"].as_str().unwrap()),
+            if words.is_empty() {
+                String::new()
+            } else {
+                format!(" {words}")
+            }
+        )
+    }
+
+    /// A user's message, as a turn records it.
+    fn told(records: &mut Records) {
+        records
+            .append(
+                7,
+                json!({ "type": "user", "message": { "role": "user", "content": "Hello" } }),
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn a_compaction_writes_claude_2_1_303s_records_each_the_child_of_the_one_before_and_no_turn() {
+        let config = tempfile::tempdir().unwrap();
+        let mut records = Records::new(config.path(), "s", 7).unwrap();
+        told(&mut records);
+        compact(&mut records, 7).unwrap();
+        let written = written_from(config.path(), 1);
+        assert_eq!(
+            written.iter().map(shape).collect::<Vec<_>>(),
+            [
+                "user /compact",
+                "compact_boundary Conversation compacted",
+                "user This session is being continued from a previous conversation that ran out of context.",
+                "user <local-command-caveat",
+                "user <command-name",
+                "user <local-command-stdout",
+                "attachment",
+            ]
+        );
+        assert!(written.iter().all(|record| record["isSidechain"] == false));
+        // The boundary starts the chain afresh, after the bare command; each record after
+        // it is the child of the one before.
+        assert_eq!(written[1]["parentUuid"], serde_json::Value::Null);
+        assert_eq!(written[1]["logicalParentUuid"], written[0]["uuid"]);
+        for pair in written[1..].windows(2) {
+            assert_eq!(pair[1]["parentUuid"], pair[0]["uuid"]);
+        }
+        assert_eq!(written[2]["isCompactSummary"], true);
+        assert_eq!(written[3]["isMeta"], true);
+        assert!(written[4]["message"]["content"]
+            .as_str()
+            .unwrap()
+            .starts_with("<command-name>/compact</command-name>"));
+        assert!(written.iter().all(|record| record["type"] != "assistant"));
+        let status: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(records.status_file()).unwrap()).unwrap();
+        assert_eq!(status["status"], "idle");
+    }
+
+    #[test]
+    fn a_compaction_with_nothing_said_since_the_last_writes_what_claude_2_1_304_does_and_no_turn() {
+        let config = tempfile::tempdir().unwrap();
+        let mut records = Records::new(config.path(), "s", 7).unwrap();
+        let refused = [
+            "user <local-command-caveat",
+            "user <command-name",
+            "local_command <local-command-stdout",
+        ];
+        // A conversation with nothing said in it.
+        compact(&mut records, 7).unwrap();
+        let written = written_from(config.path(), 0);
+        assert_eq!(written.iter().map(shape).collect::<Vec<_>>(), refused);
+        assert!(written.iter().all(|record| record["isSidechain"] == false));
+        for pair in written.windows(2) {
+            assert_eq!(pair[1]["parentUuid"], pair[0]["uuid"]);
+        }
+        assert_eq!(
+            (&written[2]["isMeta"], &written[2]["level"]),
+            (&json!(false), &json!("info"))
+        );
+        assert_eq!(
+            written[2]["content"],
+            format!("<local-command-stdout>{NOTHING_TO_COMPACT}</local-command-stdout>")
+        );
+        let status: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(records.status_file()).unwrap()).unwrap();
+        assert_eq!(status["status"], "idle");
+        // Something said is compacted; a /compact right after that finds nothing again.
+        told(&mut records);
+        compact(&mut records, 7).unwrap();
+        let compacted = written_from(config.path(), 4);
+        assert_eq!(shape(&compacted[0]), "user /compact");
+        assert_eq!(compacted.len(), 7);
+        compact(&mut records, 7).unwrap();
+        let again = written_from(config.path(), 11);
+        assert_eq!(again.iter().map(shape).collect::<Vec<_>>(), refused);
+        // A conversation the window is resumed on has what was said in it.
+        let resumed = Records::new(config.path(), "s", 8).unwrap();
+        assert!(resumed.said());
     }
 
     #[test]

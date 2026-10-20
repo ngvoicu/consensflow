@@ -162,7 +162,7 @@ pub struct HistoryItem {
     pub at: Option<String>,
     /// The summary a compaction wrote in the user's place: a `user` item that
     /// is the harness's own words, not the human's. Said only when true: an
-    /// item copied before the mark (migration 0019) is a plain `user` one.
+    /// item copied before the mark (migration 0020) is a plain `user` one.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub compaction: bool,
 }

@@ -1,0 +1,163 @@
+# The Windows runner (`cargo xtask windows`): zeewin's results are the tree's and nothing else's
+# (2026-10-16, after 87 files of other trees' runs were found in its copy and a `cli` test named
+# them).
+#
+# - After the unpack, the sweep (`script::sweep_script`, which goes in the tarball beside the list
+#   of what went over) removes every file of the copy the list does not name, and every folder it
+#   leaves empty, but for what `script::KEPT` names (the run's own files and the build's outputs),
+#   which it does not walk. It reads the list as UTF-8 and compares names in any case, does not
+#   look into a folder that is a link, removes with .NET's `Delete` (PowerShell's `Remove-Item`
+#   asks before it takes a folder, which stopped a run), says each removal, and what it could not
+#   remove ends the run, said.
+# - A worker's tree's links `app/.cache` and `app/src-tauri/resources` (into the main checkout) do
+#   not go: `app/.gitignore` names them as files too. Worker trees and their links are the Mac's,
+#   and Windows makes a link only with a privilege, so the test that catches these plants on every
+#   system puts a plain file where the link is, which is what git sees of a link; the links
+#   themselves are tried on Unix.
+#
+# The tests are xtask's library's (`windows::`), which read the scripts' text and pack a tree in a
+# repository made for each test; on Windows one runs the sweep in the machine's PowerShell too.
+# Every name holds `windows runner`, so `npm run plants:release -- "windows runner"` runs them all.
+
+[run]
+xtask-lib-windows = ["cargo", "test", "--offline", "-p", "xtask", "--lib", "windows::"]
+
+# What the copy keeps.
+
+[[plant]]
+name = "windows runner: the build folder is not kept"
+meant = "the_copy_keeps_the_runs_own_files_and_the_builds_outputs_and_nothing_else"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = '    "app/src-tauri/target",'
+replace = '    "app/src-tauri/targets",'
+
+[[plant]]
+name = "windows runner: a kept folder is walked before it is passed over"
+meant = "the_copy_keeps_the_runs_own_files_and_the_builds_outputs_and_nothing_else"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = '    if (($kept | Where-Object { $name -like $_ }) -or ($item -is [IO.FileInfo] -and $now.Contains($name)) -or ($deep -and (Clear-Stale $item))) {'
+replace = '    if (($deep -and (Clear-Stale $item)) -or ($kept | Where-Object { $name -like $_ }) -or ($item -is [IO.FileInfo] -and $now.Contains($name))) {'
+
+# What the list names.
+
+[[plant]]
+name = "windows runner: the list's names are compared in their case"
+meant = "a_file_the_list_names_is_kept_in_any_case_as_the_list_was_written"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = ", [StringComparer]::OrdinalIgnoreCase)"
+replace = ")"
+
+[[plant]]
+name = "windows runner: the list is read in the machine's own code page"
+meant = "a_file_the_list_names_is_kept_in_any_case_as_the_list_was_written"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "Get-Content -Encoding UTF8 (Join-Path $dir"
+replace = "Get-Content (Join-Path $dir"
+
+[[plant]]
+name = "windows runner: the sweep does not go in the tarball"
+meant = "what_goes_over_is_packed_with_the_list_of_it_which_leaves_out_what_was_deleted"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/tree.rs"
+find = "        .chain([SYNCED, SWEEP])"
+replace = "        .chain([SYNCED])"
+
+# Folders.
+
+[[plant]]
+name = "windows runner: a folder that is a link is looked into"
+meant = "a_folder_that_is_a_link_is_not_looked_into_and_one_left_empty_is_removed"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "    $deep = $item -is [IO.DirectoryInfo] -and -not ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)"
+replace = "    $deep = $item -is [IO.DirectoryInfo]"
+
+[[plant]]
+name = "windows runner: a folder left empty is kept"
+meant = "a_folder_that_is_a_link_is_not_looked_into_and_one_left_empty_is_removed"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = " -or ($deep -and (Clear-Stale $item))) {"
+replace = " -or ($deep -and ((Clear-Stale $item) -or $true))) {"
+
+# Removing, and what could not be removed.
+
+[[plant]]
+name = "windows runner: the sweep removes with Remove-Item, which asks"
+meant = "what_is_removed_is_removed_without_a_question_and_said_and_what_is_not_ends_the_run"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "      $item.Delete()\n"
+replace = "      Remove-Item -LiteralPath $item.FullName -Force\n"
+
+[[plant]]
+name = "windows runner: what is removed is not said"
+meant = "what_is_removed_is_removed_without_a_question_and_said_and_what_is_not_ends_the_run"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = 'foreach ($name in $removed) { Write-Output "== removed $name" }'
+replace = 'foreach ($name in $removed) { }'
+
+[[plant]]
+name = "windows runner: a file that could not be removed is let go"
+meant = "what_is_removed_is_removed_without_a_question_and_said_and_what_is_not_ends_the_run"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = '      $failed.Add("${name}: $($_.Exception.Message)")'
+replace = '      $null = "${name}: $($_.Exception.Message)"'
+
+[[plant]]
+name = "windows runner: what the sweep could not remove does not end the run"
+meant = "what_is_removed_is_removed_without_a_question_and_said_and_what_is_not_ends_the_run"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "if ($failed.Count) { Exit-Run 1 }"
+replace = "if ($false) { Exit-Run 1 }"
+
+# A worker's links.
+
+[[plant]]
+name = "windows runner: a worker's link app/.cache goes"
+meant = "the_staged_folders_go_neither_as_the_main_checkouts_folders_nor_as_anything_else_of_their_names"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "app/.gitignore"
+find = "\n/.cache\n"
+replace = "\n"
+
+[[plant]]
+name = "windows runner: a worker's link app/src-tauri/resources goes"
+meant = "the_staged_folders_go_neither_as_the_main_checkouts_folders_nor_as_anything_else_of_their_names"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "app/.gitignore"
+find = "\n/src-tauri/resources\n"
+replace = "\n"

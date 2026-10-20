@@ -132,7 +132,7 @@ pub(crate) const ID_IN_ROW: usize = 4 * ID_SHOWN;
 pub(crate) const PART_TAIL: usize = 2_000;
 
 /// What the history viewer reads of the item at row `item` but its text, as
-/// migration 0019's `transcript_head` holds it.
+/// migration 0020's `transcript_head` holds it.
 struct Head<'a> {
     item: i64,
     conversation_id: i64,
@@ -187,7 +187,7 @@ fn shown_id(id: &str) -> String {
 }
 
 /// Writes the head of every item copied before the copy wrote heads, from its
-/// row: what migration 0019 does past its SQL, before it splits the long items
+/// row: what migration 0020 does past its SQL, before it splits the long items
 /// into parts, which hang from their heads. Its time is kept as a store keeps
 /// one, and written back to its row where that is not how it was written: as
 /// the copy writes it, none where it is no time. An id or a time that is no
@@ -283,7 +283,7 @@ fn write_parts(db: &Connection, item: i64, parts: &[&str]) -> rusqlite::Result<(
 }
 
 /// Keeps in parts every item copied before the copy kept them: what migration
-/// 0019 does past its SQL, once, after it wrote their heads, and writes how many
+/// 0020 does past its SQL, once, after it wrote their heads, and writes how many
 /// to each head. Only a text of more bytes than a part's characters can be
 /// longer than a part, and only those, and the items of ids longer than
 /// [`ID_IN_ROW`], are read, one at a time. A text that is no UTF-8 (neither
@@ -478,23 +478,39 @@ fn header_of(text: &str) -> Option<i64> {
 
 /// The first item ConsensFlow's copy of the participant's current
 /// conversation shows it was given (a user item) that contains `text`, or
-/// none: a delivery's header there proves the delivery arrived.
+/// none.
 pub(crate) fn copied_item_with(
     store: &Store,
     participant_id: i64,
     text: &str,
 ) -> Result<Option<String>, LedgerError> {
+    Ok(copied_items_with(store, participant_id, text)?
+        .into_iter()
+        .next()
+        .map(|(item, _)| item))
+}
+
+/// Every item ConsensFlow's copy of the participant's current conversation
+/// shows it was given (a user item) that contains `text`, in their order: its
+/// id and its words. A delivery's header proves it arrived where it begins
+/// the item as the paste does, which the caller reads in the words.
+pub(crate) fn copied_items_with(
+    store: &Store,
+    participant_id: i64,
+    text: &str,
+) -> Result<Vec<(String, String)>, LedgerError> {
     Ok(store
         .db
-        .query_row(
-            "SELECT t.item_id FROM transcript t JOIN conversation c ON c.id = t.conversation_id
+        .prepare(
+            "SELECT t.item_id, t.text FROM transcript t JOIN conversation c ON c.id = t.conversation_id
        WHERE c.participant_id = ? AND c.ended_at IS NULL AND t.role = 'user'
          AND instr(t.text, ?) > 0
-       ORDER BY t.seq LIMIT 1",
-            params![participant_id, text],
-            |row| row.get("item_id"),
-        )
-        .optional()?)
+       ORDER BY t.seq",
+        )?
+        .query_map(params![participant_id, text], |row| {
+            Ok((row.get("item_id")?, row.get("text")?))
+        })?
+        .collect::<rusqlite::Result<_>>()?)
 }
 
 /// Whether the participant's windows hold words the human typed after the

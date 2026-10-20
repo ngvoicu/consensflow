@@ -27,7 +27,7 @@
 #
 # The fifth round (the reviews of c2d5d1fa) bounds every field the history reads at its source, each
 # with plants that put its bug back: the copy keeps an item's id and time whole, or two long ids as
-# one; migration 0019 leaves what an older build wrote long (an item's id or time, a conversation's
+# one; migration 0020 leaves what an older build wrote long (an item's id or time, a conversation's
 # harness, times or native session, the events a heading reads), or fails on what its cuts would make
 # one; a read charges a field it reads at nothing, or is held by its bound before its first step, or
 # stops inside a long item with nowhere to go on from; and Show the whole item keeps the fold of a
@@ -192,7 +192,7 @@ replace = ""
 
 [[plant]]
 name = "session viewer: the players of Node's recordings keep the table of a long item's parts in what they compare"
-meant = "takes_the_tables_and_the_indexes_migration_0019_made_out_of_a_dump_and_nothing_else"
+meant = "takes_the_tables_and_the_indexes_migration_0020_made_out_of_a_dump_and_nothing_else"
 runs = ["viewer-ledger-held-apart"]
 
 [[plant.edit]]
@@ -204,8 +204,8 @@ find = '''    for table in compaction::made("TABLE") {
 replace = ""
 
 [[plant]]
-name = "session viewer: the players of Node's recordings keep the indexes of migration 0019 in the schema they compare"
-meant = "takes_the_tables_and_the_indexes_migration_0019_made_out_of_a_dump_and_nothing_else"
+name = "session viewer: the players of Node's recordings keep the indexes of migration 0020 in the schema they compare"
+meant = "takes_the_tables_and_the_indexes_migration_0020_made_out_of_a_dump_and_nothing_else"
 runs = ["viewer-ledger-held-apart"]
 
 [[plant.edit]]
@@ -558,17 +558,17 @@ replace = '''"DELETE FROM transcript_part WHERE item = ? AND part >= ? + 1000000
 
 [[plant]]
 name = "session viewer: the long items a ledger copied before the parts' table are never split"
-meant = "a_populated_version_18_ledger_has_its_long_items_split_into_parts_in_migration_19"
+meant = "a_populated_version_19_ledger_has_its_long_items_split_into_parts_in_migration_20"
 runs = ["viewer-ledger-long"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/schema.rs"
-find = "    if version == 19 {"
+find = "    if version == 20 {"
 replace = "    if version == 0 {"
 
 [[plant]]
 name = "session viewer: the split of the long items copied before the parts' table counts their bytes as characters"
-meant = "a_populated_version_18_ledger_has_its_long_items_split_into_parts_in_migration_19"
+meant = "a_populated_version_19_ledger_has_its_long_items_split_into_parts_in_migration_20"
 runs = ["viewer-ledger-long"]
 
 [[plant.edit]]
@@ -930,7 +930,7 @@ meant = "a_version_18_ledger_whose_log_holds_unreadable_events_of_every_kind_mig
 runs = ["viewer-ledger-history"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/migrations/0019.sql"
+file = "crates/cf-ledger/migrations/0020.sql"
 find = "event_activation_index ON event (CASE WHEN json_valid(data) THEN json_extract(data, '$.conversation') END)"
 replace = "event_activation_index ON event (json_extract(data, '$.conversation'))"
 
@@ -940,7 +940,7 @@ meant = "a_version_18_ledger_whose_log_holds_unreadable_events_of_every_kind_mig
 runs = ["viewer-ledger-history"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/migrations/0019.sql"
+file = "crates/cf-ledger/migrations/0020.sql"
 find = "event_ended_index ON event (CASE WHEN json_valid(data) THEN json_extract(data, '$.conversation') END)"
 replace = "event_ended_index ON event (json_extract(data, '$.conversation'))"
 
@@ -950,7 +950,7 @@ meant = "a_version_18_ledger_whose_log_holds_unreadable_events_of_every_kind_mig
 runs = ["viewer-ledger-history"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/migrations/0019.sql"
+file = "crates/cf-ledger/migrations/0020.sql"
 find = "event_participant_index ON event (project_id, CASE WHEN json_valid(data) THEN json_extract(data, '$.participant') END)"
 replace = "event_participant_index ON event (project_id, json_extract(data, '$.participant'))"
 
@@ -973,12 +973,12 @@ meant = "a_switch_an_older_build_logged_long_is_cut_once_to_what_a_heading_reads
 runs = ["viewer-ledger-history"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/migrations/0019.sql"
+file = "crates/cf-ledger/migrations/0020.sql"
 find = "    WHERE kind = 'chief.switched' AND octet_length(data) > 4096;"
 replace = "    WHERE kind = 'chief.switched' AND octet_length(data) > 4096 AND 0;"
 
 [[plant]]
-name = "session viewer: migration 0019 fails on a long text that is no UTF-8"
+name = "session viewer: migration 0020 fails on a long text that is no UTF-8"
 meant = "a_version_18_ledger_holding_a_text_that_is_no_utf_8_migrates_and_is_read_with_replacements"
 runs = ["viewer-ledger-history"]
 
@@ -1236,10 +1236,10 @@ file = "crates/cf-ledger/src/staff/quota.rs"
 find = "    // Kept as a store keeps a time, however it was written."
 replace = "    let given = until;\n    // Kept as a store keeps a time, however it was written."
 
-# Migration 0019's heads, and its cuts of what an older build wrote.
+# Migration 0020's heads, and its cuts of what an older build wrote.
 
 [[plant]]
-name = "session viewer: migration 0019 keeps an older item's time as it was written in its head"
+name = "session viewer: migration 0020 keeps an older item's time as it was written in its head"
 meant = "a_version_18_ledger_s_capped_fields_holding_a_nul_and_a_mebibyte_are_brought_within_their_ceilings_once"
 runs = ["viewer-ledger-history"]
 
@@ -1249,7 +1249,7 @@ find = "        let at = given.as_deref().and_then(time::canonical);"
 replace = "        let at = given.clone();"
 
 [[plant]]
-name = "session viewer: migration 0019 leaves an older item's own time as it was written, for cf history to load"
+name = "session viewer: migration 0020 leaves an older item's own time as it was written, for cf history to load"
 meant = "a_version_18_ledger_s_capped_fields_holding_a_nul_and_a_mebibyte_are_brought_within_their_ceilings_once"
 runs = ["viewer-ledger-history"]
 
@@ -1259,7 +1259,7 @@ find = "        retime.execute(params![item, at])?;"
 replace = "        let _ = (item, at);"
 
 [[plant]]
-name = "session viewer: migration 0019 leaves a conversation an older build bound to a 17 MiB session bound to it"
+name = "session viewer: migration 0020 leaves a conversation an older build bound to a 17 MiB session bound to it"
 meant = "a_newest_conversation_an_older_build_bound_to_a_17_mib_session_is_read_and_older_goes_on_past_it"
 runs = ["viewer-ledger-history"]
 
@@ -1269,7 +1269,7 @@ find = "        crate::conversations::cut_sessions(db)?;\n"
 replace = ""
 
 [[plant]]
-name = "session viewer: migration 0019 counts a native session's bytes as its characters"
+name = "session viewer: migration 0020 counts a native session's bytes as its characters"
 meant = "the_migration_s_cuts_never_fail_on_what_they_would_make_one"
 runs = ["viewer-ledger-history"]
 
@@ -1279,7 +1279,7 @@ find = "        if utf16_len(&session) > NATIVE_SESSION_MAX {"
 replace = "        if session.len() > NATIVE_SESSION_MAX {"
 
 [[plant]]
-name = "session viewer: migration 0019 cuts two conversations' harnesses to one and keeps their session, and fails"
+name = "session viewer: migration 0020 cuts two conversations' harnesses to one and keeps their session, and fails"
 meant = "the_migration_s_cuts_never_fail_on_what_they_would_make_one"
 runs = ["viewer-ledger-history"]
 
@@ -1289,7 +1289,7 @@ find = "           native_session = CASE WHEN ?5 THEN NULL ELSE native_session E
 replace = "           native_session = CASE WHEN ?5 THEN native_session ELSE native_session END"
 
 [[plant]]
-name = "session viewer: migration 0019 leaves a conversation's long times"
+name = "session viewer: migration 0020 leaves a conversation's long times"
 meant = "a_version_18_ledger_s_capped_fields_holding_a_nul_and_a_mebibyte_are_brought_within_their_ceilings_once"
 runs = ["viewer-ledger-history"]
 
@@ -1299,7 +1299,7 @@ find = "        |given: &str| time::canonical(given).unwrap_or_else(|| cut_to(gi
 replace = "        |given: &str| given.to_owned();"
 
 [[plant]]
-name = "session viewer: migration 0019 measures what it cuts by SQLite's length, which stops at a NUL"
+name = "session viewer: migration 0020 measures what it cuts by SQLite's length, which stops at a NUL"
 meant = "a_version_18_ledger_s_capped_fields_holding_a_nul_and_a_mebibyte_are_brought_within_their_ceilings_once"
 runs = ["viewer-ledger-history"]
 
@@ -1309,7 +1309,7 @@ find = "    if text.len() <= most {"
 replace = "    if text.split('\\0').next().unwrap_or_default().chars().count() <= most {"
 
 [[plant]]
-name = "session viewer: migration 0019 leaves a participant's agent as long as an older build wrote it"
+name = "session viewer: migration 0020 leaves a participant's agent as long as an older build wrote it"
 meant = "a_version_18_ledger_s_capped_fields_holding_a_nul_and_a_mebibyte_are_brought_within_their_ceilings_once"
 runs = ["viewer-ledger-history"]
 
@@ -1319,32 +1319,32 @@ find = "            agent.as_deref().map(|agent| cut_to(agent, FIELD_MAX)),"
 replace = "            agent.clone(),"
 
 [[plant]]
-name = "session viewer: migration 0019 leaves the conversations' events an older build logged long, for a heading to load"
+name = "session viewer: migration 0020 leaves the conversations' events an older build logged long, for a heading to load"
 meant = "the_events_an_older_build_logged_long_are_cut_once_to_what_a_heading_reads_of_them"
 runs = ["viewer-ledger-history"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/migrations/0019.sql"
+file = "crates/cf-ledger/migrations/0020.sql"
 find = "    WHERE kind IN ('conversation.started', 'conversation.followed', 'conversation.ended') AND octet_length(data) > 4096;"
 replace = "    WHERE kind IN ('conversation.started', 'conversation.followed', 'conversation.ended') AND octet_length(data) > 4096 AND 0;"
 
 [[plant]]
-name = "session viewer: migration 0019 keeps a switch's name however long it is"
+name = "session viewer: migration 0020 keeps a switch's name however long it is"
 meant = "a_version_18_ledger_s_capped_fields_holding_a_nul_and_a_mebibyte_are_brought_within_their_ceilings_once"
 runs = ["viewer-ledger-history"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/migrations/0019.sql"
+file = "crates/cf-ledger/migrations/0020.sql"
 find = "CASE WHEN octet_length(json_quote(json_extract(data, '$.from.agent'))) <= 258 THEN json_extract(data, '$.from.agent') END"
 replace = "json_extract(data, '$.from.agent')"
 
 [[plant]]
-name = "session viewer: migration 0019 measures a switch's name by SQLite's length, which stops at a NUL"
+name = "session viewer: migration 0020 measures a switch's name by SQLite's length, which stops at a NUL"
 meant = "a_version_18_ledger_s_capped_fields_holding_a_nul_and_a_mebibyte_are_brought_within_their_ceilings_once"
 runs = ["viewer-ledger-history"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/migrations/0019.sql"
+file = "crates/cf-ledger/migrations/0020.sql"
 find = "CASE WHEN octet_length(json_quote(json_extract(data, '$.from.agent'))) <= 258"
 replace = "CASE WHEN length(json_extract(data, '$.from.agent')) <= 256"
 
@@ -1440,7 +1440,7 @@ find = "            let text = item.get(\"text\").and_then(Value::as_str).unwrap
 replace = "            let shown = shown_id(id);\n            let id = shown.as_str();\n            let text = item.get(\"text\").and_then(Value::as_str).unwrap_or_default();"
 
 [[plant]]
-name = "session viewer: migration 0019 writes an older item's head with its id whole"
+name = "session viewer: migration 0020 writes an older item's head with its id whole"
 meant = "a_version_18_ledger_s_capped_fields_holding_a_nul_and_a_mebibyte_are_brought_within_their_ceilings_once"
 runs = ["viewer-ledger-history"]
 
@@ -1550,7 +1550,7 @@ meant = "a_read_takes_as_many_pages_beside_32_mib_ids_roles_names_and_bodies_as_
 runs = ["viewer-ledger-history"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/migrations/0019.sql"
+file = "crates/cf-ledger/migrations/0020.sql"
 find = "ON participant (project_id, handle, left_at IS NULL, role, agent);"
 replace = "ON participant (project_id, handle, left_at IS NULL, role);"
 
@@ -1585,7 +1585,7 @@ find = "            let parts = parts_of(&text, id.len() > ID_IN_ROW);"
 replace = "            let parts = parts_of(&text, id.len() > usize::MAX);"
 
 [[plant]]
-name = "session viewer: migration 0019 keeps a short item of a long id in its row, so its text is read past the id"
+name = "session viewer: migration 0020 keeps a short item of a long id in its row, so its text is read past the id"
 meant = "a_migrated_ledger_s_reads_take_as_many_pages_beside_32_mib_ids_roles_names_and_bodies"
 runs = ["viewer-ledger-history"]
 
@@ -1595,7 +1595,7 @@ find = "       WHERE octet_length(text) > ?1 OR octet_length(item_id) > ?2\","
 replace = "       WHERE octet_length(text) > ?1 AND ?2 = ?2\","
 
 [[plant]]
-name = "session viewer: migration 0019 leaves the time of an event a heading reads as long as an older build wrote it"
+name = "session viewer: migration 0020 leaves the time of an event a heading reads as long as an older build wrote it"
 meant = "a_migrated_ledger_s_reads_take_as_many_pages_beside_32_mib_ids_roles_names_and_bodies"
 runs = ["viewer-ledger-history"]
 
@@ -1610,16 +1610,16 @@ meant = "deleting_a_project_of_1_000_conversations_of_100_000_items_takes_steps_
 runs = ["viewer-ledger-history"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/migrations/0019.sql"
+file = "crates/cf-ledger/migrations/0020.sql"
 find = "  CREATE INDEX transcript_head_conversation_index ON transcript_head (conversation_id);\n"
 replace = ""
 
 [[plant]]
-name = "session viewer: migration 0019 keeps a conversation event's handle however long it is"
+name = "session viewer: migration 0020 keeps a conversation event's handle however long it is"
 meant = "a_version_18_ledger_s_capped_fields_holding_a_nul_and_a_mebibyte_are_brought_within_their_ceilings_once"
 runs = ["viewer-ledger-history"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/migrations/0019.sql"
+file = "crates/cf-ledger/migrations/0020.sql"
 find = "CASE WHEN octet_length(json_quote(json_extract(data, '$.participant'))) <= 258 THEN json_extract(data, '$.participant') END"
 replace = "json_extract(data, '$.participant')"

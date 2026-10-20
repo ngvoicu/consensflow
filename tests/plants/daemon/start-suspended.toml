@@ -130,16 +130,46 @@ replace = '''        .is_some_and(|_| true)'''
 # --- the engine: a start ---
 
 [[plant]]
+name = "start suspended: a message cancelled while the start reads its record is settled all the same, which fails the start's settle and leaves the next brief on its way for good (the reviews of 2026-10-16)"
+meant = "a_task_cancelled_while_the_start_reads_its_briefs_record_leaves_the_next_brief_settled"
+runs = ["engine-resume"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/in_flight.rs"
+find = '''
+        let arrived = self.arrived(message).await?;
+        let Some(message) = self.still_delivering(message.id)? else {
+            return Ok(());
+        };'''
+replace = '''
+        let arrived = self.arrived(message).await?;'''
+
+[[plant]]
+name = "start suspended: one message the start fails to settle ends the settle for the rest"
+meant = "a_brief_the_start_fails_to_settle_leaves_the_next_brief_settled"
+runs = ["engine-resume"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/in_flight.rs"
+find = '''
+            if let Err(cause) = self.settle_one_in_flight(&message).await {'''
+replace = '''
+            self.settle_one_in_flight(&message).await?;
+            if let Err(cause) = Ok::<(), EngineError>(()) {'''
+
+[[plant]]
 name = "start suspended: a start resumes every project that is suspended"
 meant = "a_start_opens_no_window_and_delivers_nothing_and_leaves_the_tasks_and_messages_as_they_were"
 runs = ["engine-resume", "daemon-lib-start"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/resume.rs"
-find = '''        // An `async` method: its answer reaches this a turn after it was made.
+find = '''
         returning(self.settle_in_flight()).await
     }'''
-replace = '''        returning(self.settle_in_flight()).await?;
+replace = '''
+        returning(self.settle_in_flight()).await?;
+        drop(_settling);
         let suspended: Vec<i64> = self
             .seams
             .ledger
@@ -162,9 +192,11 @@ runs = ["engine-dispatcher"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/resume.rs"
-find = '''        returning(self.settle_in_flight()).await
+find = '''
+        returning(self.settle_in_flight()).await
     }'''
-replace = '''        Ok(())
+replace = '''
+        Ok(())
     }'''
 
 [[plant]]
@@ -371,10 +403,12 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-engine/src/resume.rs"
-find = '''        // An `async` method: its answer reaches this a turn after it was made.
+find = '''
         returning(self.settle_in_flight()).await
     }'''
-replace = '''        returning(self.settle_in_flight()).await?;
+replace = '''
+        returning(self.settle_in_flight()).await?;
+        drop(_settling);
         let suspended: Vec<i64> = self
             .seams
             .ledger

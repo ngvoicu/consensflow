@@ -1,17 +1,31 @@
 //! What a case looks at of a running rig besides what the daemon and the pane
 //! host answer it: a window's screen as text, what the daemon wrote as it went,
-//! the keys it pressed into a window and when; and the human's typing into the
-//! chief's terminal.
+//! the keys it pressed into a window and when, and a paste it catches; and the
+//! human's typing into the chief's terminal.
 
 use std::time::Duration;
 
 use serde_json::{json, Map, Value};
 
 use super::report::plain;
+use super::route::Pasted;
 use super::{Project, Rig, IDLE};
 use crate::{files, Error, Result};
 
 impl Rig {
+    /// The daemon's next paste that holds `words` is caught: it goes as `pasted`
+    /// says, into the window or nowhere, and the pane host's answer to it never
+    /// reaches the daemon, which goes on waiting for it as one stopped between the
+    /// paste and its receipt did. A catch set before and not yet made is replaced.
+    pub fn catch_paste(&self, words: &str, pasted: Pasted) {
+        self.shared.catch_paste(words, pasted);
+    }
+
+    /// Whether the paste the case set out to catch was caught.
+    pub fn paste_caught(&self) -> bool {
+        self.shared.paste_caught()
+    }
+
     /// Everything the window `pane` printed so far, as the text on its screen:
     /// control sequences stripped, and Windows' console host's cursor moves left
     /// as the blanks and the line breaks they stand for, so that text reads the
@@ -70,10 +84,29 @@ impl Rig {
         events_of(&text.unwrap_or_default())
     }
 
-    /// What the rig's stand-in `opencode` ([`Config::opencode_2`](super::Config::opencode_2))
-    /// was asked so far, the arguments of each time it was started, oldest first:
-    /// nothing where it never was, or the rig has none.
+    /// What the rig's stand-in `opencode` ([`Config::opencode`](super::Config::opencode),
+    /// [`Config::opencode_2`](super::Config::opencode_2)) was asked so far, the
+    /// arguments of each time it was started, oldest first: nothing where it never
+    /// was, or the rig has none.
     pub fn opencode_asked(&self) -> Vec<Vec<String>> {
+        self.opencode_lines()
+            .into_iter()
+            .filter_map(|line| serde_json::from_value(line).ok())
+            .collect()
+    }
+
+    /// The requests the rig's stand-in OpenCode 1.x ([`Config::opencode`](super::Config::opencode))
+    /// was sent so far on the servers it ran, oldest first: each its `method`, its
+    /// `target` (the path and query) and its `body`, as text.
+    pub fn opencode_requests(&self) -> Vec<Value> {
+        self.opencode_lines()
+            .into_iter()
+            .filter(Value::is_object)
+            .collect()
+    }
+
+    /// The lines of what the stand-in `opencode` wrote down, each as the JSON it is.
+    fn opencode_lines(&self) -> Vec<Value> {
         let text = files::read_finished_lines(&self.root.join("opencode.jsonl"));
         text.unwrap_or_default()
             .lines()

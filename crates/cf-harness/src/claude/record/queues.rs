@@ -1,5 +1,14 @@
 //! The messages Claude Code's queue operations say are waiting, taken, or
 //! taken back, by their content. A turn is not over while any is.
+//!
+//! The queue is the process's own, in its memory: a process that resumes the
+//! conversation begins with none, and what the one before held went with it,
+//! with no operation to say so (T-442, Claude Code 2.1.302: a notification
+//! queued as the window closed held every turn after the reopen). Where the
+//! new process began is ConsensFlow's to say, not the record's: Claude Code
+//! closes a cut turn, and runs a `SessionStart:resume` hook, for a `/resume`
+//! in the window too, which keeps its queue, and writes the hook's record
+//! after what the new process queued first.
 
 use std::collections::VecDeque;
 
@@ -54,6 +63,13 @@ impl Queues {
 
     /// An assistant's record: what was taken back is sent, or never will be.
     pub(super) fn answered(&mut self) {
+        self.popped.clear();
+    }
+
+    /// The process that queued what waits is gone: nothing waits.
+    pub(super) fn restart(&mut self) {
+        self.queued.clear();
+        self.dequeued.clear();
         self.popped.clear();
     }
 

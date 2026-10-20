@@ -387,6 +387,14 @@ impl Records for LocalRecords {
     ) -> Work<'a, Result<bool, String>> {
         Box::pin(async move { records::has_transcript(harness, session, &self.env) })
     }
+
+    fn transcript_length<'a>(
+        &'a self,
+        harness: Harness,
+        session: &'a str,
+    ) -> Work<'a, Result<Option<u64>, String>> {
+        Box::pin(async move { records::transcript_length(harness, session, &self.env) })
+    }
 }
 
 /// A host's answer to a request, or why it never came.
@@ -632,6 +640,10 @@ impl<T> Driver<T> {
 /// When a scenario's clock starts: 2026-09-19T12:00:00Z, as the Node
 /// recorder's does.
 pub const EPOCH_MS: i64 = 1_789_819_200_000;
+
+/// A look long after any file a test writes was written: whatever the file's
+/// time, it is settled ([`cf_base::file::settled`]).
+pub const LONG_AFTER_MS: i64 = i64::MAX;
 
 /// How long a launch given in a test has for its first message: what the
 /// daemon allows by default, three minutes (`Limits::default` of the engine).

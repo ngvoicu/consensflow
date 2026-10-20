@@ -140,6 +140,7 @@ fn prepare(adapter: &PiAdapter, request: &Request) -> Result<Prepared, String> {
         role: request.role,
         directory: "/work/app",
         resume: request.resume.as_deref(),
+        previous_gone: false,
         message: request.message.as_deref(),
         agent: Some(Agent {
             model: Some(MODEL),
@@ -153,6 +154,7 @@ fn prepare(adapter: &PiAdapter, request: &Request) -> Result<Prepared, String> {
             .zip(skill.as_ref())
             .map(|(variant, skill)| Specs { variant, skill }),
         first_message_ms: FIRST_MESSAGE_MS,
+        starts_given_up: 0,
     };
     finished(adapter.prepare(&launch))
 }

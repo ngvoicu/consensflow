@@ -45,6 +45,14 @@ pub enum Error {
     /// programs said meanwhile.
     #[error("{0}")]
     Timeout(String),
+    /// A rig closed, and the pane host's output had not ended in the time it was
+    /// given: what it said, and what was read of its last word, which may not be all
+    /// it told ([`Rig::close_with_the_last_exits_within`](crate::rig::Rig::close_with_the_last_exits_within)).
+    #[error("{said}")]
+    Unread {
+        said: String,
+        last: Box<crate::rig::Last>,
+    },
 }
 
 /// A case that returns an error fails with what the test harness prints of it

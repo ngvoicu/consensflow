@@ -31,10 +31,12 @@
 //! cargo xtask live resume-cut --case command
 //! cargo xtask live resume-cut claude pi                    each of them, one after the other
 //! cargo xtask live resume-cut codex devin pi opencode
-//! cargo xtask live resume-cut --model haiku                another Claude model (the default is sonnet)
+//! cargo xtask live resume-cut --model haiku                another Claude model, over --models claude=…
 //! ```
 //!
-//! The other harnesses run on their cheap models ([`cf_e2e::live::agents`]), plain
+//! Every harness runs on the run's model of it ([`cf_e2e::live::agents`]: its cheap
+//! one unless `--models` names another), Claude on the one `--model` names where it
+//! names one. The harnesses other than Claude are plain
 //! windows in a folder of their own: what is read of them is their record and their
 //! screen, which is what the daemon reads of a Codex, Pi or Devin window (OpenCode's
 //! server says more, and Pi's extension). `--transcripts <folder>` copies each case's
@@ -53,10 +55,11 @@ mod read;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use cf_e2e::live::agents::{self, Models};
 use cf_e2e::live::machine::live_folder_in;
 use cf_e2e::live::members::{named, rig_for, Account, LongCommand};
 use cf_e2e::live::report::{self, Check};
-use cf_e2e::live::{self, agents, ask, installed, Harness, Installed, Log};
+use cf_e2e::live::{self, ask, installed, window, Harness, Installed, Log};
 use cf_e2e::rig::Rig;
 use cf_e2e::{Error, Result};
 use serde_json::{json, Value};
@@ -114,45 +117,52 @@ impl Case {
 struct Options {
     harnesses: Vec<Harness>,
     cases: Vec<Case>,
-    /// The model Claude's windows run on, an alias or a name (`--model`).
-    model: String,
+    /// The model Claude's windows run on where `--model` names one, an alias or a
+    /// name; the run's model of Claude where it does not.
+    model: Option<String>,
     transcripts: Option<PathBuf>,
 }
 
-/// The harnesses and cases the words ask for, or Claude and both cases.
+/// The harnesses and cases the words ask for, or Claude and both cases, each
+/// harness on its agent of the run's `models`. The windows here are opened
+/// without the daemon, so an agent such a window cannot run (OpenCode given an
+/// effort) is the error, before anything is spent ([`window::without_the_daemon`]).
 fn options(
     harnesses: &[String],
     cases: &[String],
-    model: Option<String>,
+    (model, models): (Option<String>, &Models),
     transcripts: Option<String>,
 ) -> Result<Options> {
+    let harnesses = named(
+        harnesses,
+        &Harness::ALL,
+        Harness::name,
+        "harness",
+        &[Harness::Claude],
+    )?;
+    for harness in &harnesses {
+        window::without_the_daemon(&agent_of(*harness, model.as_deref(), models))?;
+    }
     Ok(Options {
-        harnesses: named(
-            harnesses,
-            &Harness::ALL,
-            Harness::name,
-            "harness",
-            &[Harness::Claude],
-        )?,
+        harnesses,
         cases: named(cases, &Case::ALL, Case::name, "case", &Case::ALL)?,
-        model: model.unwrap_or_else(|| "sonnet".to_owned()),
+        model,
         transcripts: transcripts.map(PathBuf::from),
     })
 }
 
-/// The agent a harness's windows run: Claude's model is the one named, the others'
-/// their cheap model.
-fn agent_of(harness: Harness, model: &str) -> Value {
-    if harness == Harness::Claude {
-        json!({ "kind": harness.kind(), "model": model })
-    } else {
-        agents::agent(harness)
+/// The agent a harness's windows run: Claude's model is the one `--model` named,
+/// where it named one; every other is its agent of the run's `models`.
+fn agent_of(harness: Harness, model: Option<&str>, models: &Models) -> Value {
+    match model.filter(|_| harness == Harness::Claude) {
+        Some(model) => json!({ "kind": harness.kind(), "model": model }),
+        None => agents::agent_on(models.of(harness)),
     }
 }
 
 /// The model a harness runs on, for the line that names it.
-fn model_of(harness: Harness, model: &str) -> String {
-    agent_of(harness, model)["model"]
+fn model_of(harness: Harness, model: Option<&str>, models: &Models) -> String {
+    agent_of(harness, model, models)["model"]
         .as_str()
         .unwrap_or_default()
         .to_owned()
@@ -162,13 +172,14 @@ fn model_of(harness: Harness, model: &str) -> String {
 #[ignore = "opt-in: spends the machine's quota on a window of each harness named; cargo xtask live resume-cut (npm run live:resume-cut)"]
 fn a_window_resumed_on_a_conversation_the_quit_cut_is_watched_and_takes_a_second_message() -> Result
 {
-    let log = Log::new("live resume-cut");
+    let log = Log::begin("live resume-cut")?;
     // What a window is opened on is the harness code's to say: built before anything is spent.
     ask::prepare()?;
+    let models = agents::asked()?;
     let options = options(
         &live::list("harness"),
         &live::list("case"),
-        live::option("model"),
+        (live::option("model"), &models),
         live::option("transcripts"),
     )?;
     let installs: Vec<Installed> = options
@@ -209,7 +220,7 @@ fn a_window_resumed_on_a_conversation_the_quit_cut_is_watched_and_takes_a_second
             let run = case::Run {
                 rig: &rig,
                 install,
-                agent: agent_of(harness, &options.model),
+                agent: agent_of(harness, options.model.as_deref(), &models),
                 transcripts: options.transcripts.as_deref(),
                 log: &log,
             };
@@ -234,7 +245,7 @@ fn a_window_resumed_on_a_conversation_the_quit_cut_is_watched_and_takes_a_second
                 format!(
                     "{}, model {}",
                     install.version(),
-                    model_of(harness, &options.model)
+                    model_of(harness, options.model.as_deref(), &models)
                 ),
             ));
         }
@@ -251,23 +262,32 @@ mod tests {
         list.iter().map(|word| (*word).to_owned()).collect()
     }
 
+    /// The models of a run that names none: each harness's cheap one.
+    fn cheap() -> Models {
+        agents::parse(None, None).unwrap()
+    }
+
     #[test]
-    fn claude_and_both_cases_are_run_unless_others_are_named_and_the_model_is_sonnet() {
-        let all = options(&[], &[], None, None).unwrap();
+    fn claude_and_both_cases_are_run_unless_others_are_named_on_the_runs_model_of_claude() {
+        let all = options(&[], &[], (None, &cheap()), None).unwrap();
         assert_eq!(all.harnesses, [Harness::Claude]);
         assert_eq!(all.cases, [Case::Command, Case::Early]);
-        assert_eq!(all.model, "sonnet");
+        assert_eq!(all.model, None);
+        assert_eq!(
+            model_of(Harness::Claude, all.model.as_deref(), &cheap()),
+            "claude-sonnet-5-5"
+        );
         assert!(all.transcripts.is_none());
         let some = options(
             &words(&["pi", "codex"]),
             &words(&["early"]),
-            Some("haiku".to_owned()),
+            (Some("haiku".to_owned()), &cheap()),
             Some("/tmp/cut".to_owned()),
         )
         .unwrap();
         assert_eq!(some.harnesses, [Harness::Pi, Harness::Codex]);
         assert_eq!(some.cases, [Case::Early]);
-        assert_eq!(some.model, "haiku");
+        assert_eq!(some.model.as_deref(), Some("haiku"));
         assert_eq!(some.transcripts, Some(PathBuf::from("/tmp/cut")));
     }
 
@@ -275,12 +295,48 @@ mod tests {
     fn a_harness_or_a_case_that_is_none_is_refused_with_its_name() {
         let failed = |result: Result<Options>| result.err().map(|failed| failed.to_string());
         assert_eq!(
-            failed(options(&words(&["kimi"]), &[], None, None)).as_deref(),
+            failed(options(&words(&["kimi"]), &[], (None, &cheap()), None)).as_deref(),
             Some("no such harness: kimi")
         );
         assert_eq!(
-            failed(options(&[], &words(&["late"]), None, None)).as_deref(),
+            failed(options(&[], &words(&["late"]), (None, &cheap()), None)).as_deref(),
             Some("no such case: late")
+        );
+    }
+
+    #[test]
+    fn an_opencode_effort_is_refused_before_anything_is_spent_for_its_plain_window_takes_none() {
+        let models = agents::parse(Some("opencode=opencode/muse-spark-1.3:high"), None).unwrap();
+        let refused = options(&words(&["claude", "opencode"]), &[], (None, &models), None)
+            .err()
+            .map(|failed| failed.to_string());
+        assert_eq!(
+            refused.as_deref(),
+            Some(
+                "an OpenCode window opened without the daemon is given no effort: OpenCode takes \
+                 it as the variant of the first message the daemon sends to the window's server, \
+                 which this window has not; run opencode=opencode/muse-spark-1.3 with no :high"
+            )
+        );
+        // A run that leaves OpenCode out, or names it no effort, is not refused.
+        assert!(options(&words(&["claude"]), &[], (None, &models), None).is_ok());
+        let plain = agents::parse(Some("opencode=opencode/muse-spark-1.3"), None).unwrap();
+        assert!(options(&words(&["opencode"]), &[], (None, &plain), None).is_ok());
+        // Every other harness takes its effort on its command line.
+        let others = agents::parse(Some("pi=p:high,codex=c:high,claude=a:max"), None).unwrap();
+        let all = words(&["claude", "pi", "codex", "devin"]);
+        assert!(options(&all, &[], (None, &others), None).is_ok());
+    }
+
+    #[test]
+    fn the_report_says_claude_ran_on_the_model_model_named_and_not_the_one_models_gives() {
+        let log = Log::begin("live resume-cut test").unwrap();
+        for harness in [Harness::Claude, Harness::Pi] {
+            log.launched(&agent_of(harness, Some("haiku"), &cheap()));
+        }
+        assert_eq!(
+            log.ran_on().as_deref(),
+            Some("the windows ran on: claude haiku; pi openrouter/meta/muse-spark-1.3")
         );
     }
 
@@ -297,16 +353,26 @@ mod tests {
     }
 
     #[test]
-    fn claude_runs_on_the_model_named_and_the_others_on_their_cheap_one() {
+    fn claude_runs_on_the_model_named_and_the_others_on_the_runs_model_of_each() {
         assert_eq!(
-            agent_of(Harness::Claude, "haiku"),
+            agent_of(Harness::Claude, Some("haiku"), &cheap()),
             json!({ "kind": "claude-code", "model": "haiku" })
         );
-        assert_eq!(model_of(Harness::Claude, "sonnet"), "sonnet");
         assert_eq!(
-            model_of(Harness::Pi, "sonnet"),
+            model_of(Harness::Claude, Some("sonnet"), &cheap()),
+            "sonnet"
+        );
+        assert_eq!(
+            agent_of(Harness::Claude, None, &cheap()),
+            agents::agent(Harness::Claude)
+        );
+        assert_eq!(
+            model_of(Harness::Pi, Some("sonnet"), &cheap()),
             "openrouter/meta/muse-spark-1.3"
         );
-        assert_eq!(agent_of(Harness::Devin, "x")["effort"], "medium");
+        assert_eq!(
+            agent_of(Harness::Devin, Some("x"), &cheap())["effort"],
+            "medium"
+        );
     }
 }

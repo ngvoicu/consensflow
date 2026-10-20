@@ -270,7 +270,7 @@ pub fn project(planned: &Planned, machine: &Machine, options: &Options, log: &Lo
     }
     let mut checks = Vec::new();
     let mut known = Vec::new();
-    let setup = agents::write_roster(&rig, &project::roster(planned))
+    let setup = agents::write_roster(&rig, &project::roster(planned), &log)
         .and_then(|()| settings(&rig, planned, options))
         .and_then(|settings| project::folder(&rig, planned).map(|folder| (settings, folder)));
     match setup {

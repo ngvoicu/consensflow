@@ -20,6 +20,7 @@ use cf_base::file::is_missing;
 use cf_base::{js, path};
 use serde_json::Value;
 
+use crate::devin::adapter::BYPASS;
 use crate::shared::record::find::entries;
 use crate::shared::record::home;
 use crate::shared::record::jsonl::{read_on, Looked, Seen, Stop};
@@ -48,6 +49,11 @@ pub(super) struct Wires {
 struct Log {
     seen: Option<Seen>,
     said: Said,
+    /// What ConsensFlow gave the launch as its first message behind `/bypass`
+    /// (`adapter::first_message`), read from its prompt file once the log said
+    /// something of the session, which the launch writes before its window opens:
+    /// none where it gave the launch none so.
+    bypassed: Option<Option<String>>,
 }
 
 /// What a log said of the session.
@@ -90,8 +96,8 @@ impl Wires {
     /// A look at every launch's log, each read on from where the last look
     /// left it: whether any said something new. A log that is not the one
     /// read so far, or one read before and gone, takes what every log said
-    /// with it, and all are read again.
-    pub(super) fn read(&mut self, session: &str, env: &Env) -> Result<bool, String> {
+    /// with it, and all are read again. `now_ms` is when the look began.
+    pub(super) fn read(&mut self, session: &str, env: &Env, now_ms: i64) -> Result<bool, String> {
         let consensflow = match env.os("CONSENSFLOW_HOME") {
             Some(consensflow) => consensflow.to_string_lossy().into_owned(),
             None => path::join(&[&home(env)?, ".consensflow"]),
@@ -112,6 +118,7 @@ impl Wires {
                 let looked = read_on(
                     Path::new(&file),
                     log.seen.as_ref(),
+                    now_ms,
                     &mut |event, _| log.said.visit(&event, session, outcomes),
                     Some(only.as_bytes()),
                 );
@@ -121,8 +128,16 @@ impl Wires {
                         break;
                     }
                     Ok(looked) => {
-                        if let Looked::Read(seen) = looked {
-                            log.seen = Some(seen);
+                        match looked {
+                            Looked::Read(seen) => {
+                                log.seen = Some(seen);
+                                changed = true;
+                            }
+                            Looked::Held(seen) => log.seen = Some(seen),
+                            Looked::Unchanged | Looked::NotTheFile => {}
+                        }
+                        if log.said.mine && log.bypassed.is_none() {
+                            log.bypassed = Some(bypassed(&root, launch)?);
                             changed = true;
                         }
                         self.logs.insert(launch.clone(), log);
@@ -168,6 +183,14 @@ impl Wires {
             }
         }
         working
+    }
+
+    /// What ConsensFlow gave the session's launches as their first messages behind
+    /// `/bypass`, each as it was behind the command.
+    pub(super) fn bypassed(&self) -> impl Iterator<Item = &str> {
+        self.logs
+            .values()
+            .filter_map(|log| log.bypassed.as_ref()?.as_deref())
     }
 
     /// How the turn of `request` ended, if a log said so.
@@ -260,6 +283,21 @@ impl Said {
         self.active = None;
         self.busy = false;
         Ok(())
+    }
+}
+
+/// What the launch `launch` under `root` was given as its first message behind
+/// `/bypass`, from its prompt file (`install::prepare_prompt`): none where it has none,
+/// or one that is not behind the command.
+fn bypassed(root: &str, launch: &str) -> Result<Option<String>, String> {
+    let file = path::join(&[root, launch, "prompt.txt"]);
+    match std::fs::read_to_string(&file) {
+        Ok(prompt) => Ok(prompt
+            .strip_prefix(BYPASS)
+            .and_then(|behind| behind.strip_prefix(' '))
+            .map(str::to_owned)),
+        Err(error) if is_missing(&error) => Ok(None),
+        Err(error) => Err(format!("{file}: {error}")),
     }
 }
 

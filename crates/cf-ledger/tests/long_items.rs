@@ -1,4 +1,4 @@
-//! A long item is kept in parts as well (migration 0019), so that the history
+//! A long item is kept in parts as well (migration 0020), so that the history
 //! viewer reads a part of it and no more: the items a ledger copied before the
 //! parts' table are split when it is made, once; one no longer than a part, in
 //! characters, is not, however many bytes it takes.
@@ -24,10 +24,10 @@ fn parts(db: &Connection, item: &str) -> Vec<String> {
 }
 
 #[test]
-fn a_populated_version_18_ledger_has_its_long_items_split_into_parts_in_migration_19() {
+fn a_populated_version_19_ledger_has_its_long_items_split_into_parts_in_migration_20() {
     let db = Connection::open_in_memory().expect("a database");
     db.execute_batch("PRAGMA foreign_keys = ON").expect("keys");
-    migrate(&db, &MIGRATIONS[..18]).expect("version 18");
+    migrate(&db, &MIGRATIONS[..19]).expect("version 19");
     db.execute_batch(&format!(
         "INSERT INTO project (id, directory, name, state, gate, created_at, updated_at)
            VALUES (1, '/work/app', 'app', 'open', 0, '{AT}', '{AT}');
@@ -57,8 +57,8 @@ fn a_populated_version_18_ledger_has_its_long_items_split_into_parts_in_migratio
     }
     drop(copy);
 
-    migrate(&db, &MIGRATIONS[..19]).expect("migrated");
-    migrate(&db, &MIGRATIONS[..19]).expect("and again");
+    migrate(&db, &MIGRATIONS[..20]).expect("migrated");
+    migrate(&db, &MIGRATIONS[..20]).expect("and again");
 
     let kept = parts(&db, "long");
     assert_eq!(kept.len(), long.chars().count().div_ceil(HISTORY_PART));
@@ -86,7 +86,7 @@ fn a_populated_version_18_ledger_has_its_long_items_split_into_parts_in_migratio
     );
 }
 
-/// What migration 19 takes on a ledger of 200 MB of items of 4 KB, 100 long
+/// What migration 20 takes on a ledger of 200 MB of items of 4 KB, 100 long
 /// ones of 1 MB and one of 24 MiB, and a log of 200,000 events of the kinds
 /// its indexes read, each JSON checked as it is indexed, every item's head
 /// written, with fields past their ceilings to bring within them (times of a
@@ -96,12 +96,12 @@ fn a_populated_version_18_ledger_has_its_long_items_split_into_parts_in_migratio
 /// `cargo test --release -p cf-ledger --test long_items -- --ignored --nocapture`.
 #[test]
 #[ignore = "builds a 330 MB ledger; run by hand, in release"]
-fn migration_19_splits_a_long_history_s_long_items_in_what_one_read_of_each_takes() {
+fn migration_20_splits_a_long_history_s_long_items_in_what_one_read_of_each_takes() {
     let dir = tempfile::tempdir().expect("a folder");
     let db = Connection::open(dir.path().join("consensflow.db")).expect("a database");
     db.execute_batch("PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL")
         .expect("pragmas");
-    migrate(&db, &MIGRATIONS[..18]).expect("version 18");
+    migrate(&db, &MIGRATIONS[..19]).expect("version 19");
     db.execute_batch(&format!(
         "INSERT INTO project (id, directory, name, state, gate, created_at, updated_at)
            VALUES (1, '/work/app', 'app', 'open', 0, '{AT}', '{AT}');
@@ -196,8 +196,8 @@ fn migration_19_splits_a_long_history_s_long_items_in_what_one_read_of_each_take
     db.execute_batch("COMMIT").expect("committed");
     println!("built: {:?}", started.elapsed());
     let started = std::time::Instant::now();
-    migrate(&db, &MIGRATIONS[..19]).expect("migrated");
-    println!("migration 19: {:?}", started.elapsed());
+    migrate(&db, &MIGRATIONS[..20]).expect("migrated");
+    println!("migration 20: {:?}", started.elapsed());
     // The long items' parts, and the one part of each item of a long id; as
     // many as their heads say.
     let kept: (i64, i64) = db

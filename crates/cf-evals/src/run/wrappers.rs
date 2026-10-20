@@ -33,7 +33,7 @@ use cf_e2e::live::{self, ask, codex, ISOLATION};
 use serde_json::{json, Value};
 
 use super::machine::Machine;
-use super::options::Options;
+use super::options::Crew;
 use crate::plan::{harness, ChiefSetup};
 use crate::{Error, Result};
 
@@ -63,10 +63,10 @@ impl Wrappers {
 
 /// The flags Claude Code is started with in a run: no MCP server and no browser,
 /// and the chief's reasoning level when the chief is Claude.
-pub fn claude_flags(options: &Options) -> Vec<String> {
+pub fn claude_flags(crew: &Crew) -> Vec<String> {
     let mut flags: Vec<String> = ISOLATION.iter().map(|flag| (*flag).to_owned()).collect();
-    if options.chief == "claude" {
-        flags.extend(["--effort".to_owned(), options.effort.clone()]);
+    if crew.chief == "claude" {
+        flags.extend(["--effort".to_owned(), crew.effort.clone()]);
     }
     flags
 }
@@ -74,17 +74,17 @@ pub fn claude_flags(options: &Options) -> Vec<String> {
 /// The flags Codex is started with in a run: the model, the chief's reasoning
 /// level when the chief is Codex, and every MCP server of `servers` (what
 /// `codex mcp list --json` says) switched off.
-pub fn codex_flags(options: &Options, chief: &ChiefSetup, servers: &Value) -> Result<Vec<String>> {
-    let model = if options.chief == "codex" {
+pub fn codex_flags(crew: &Crew, chief: &ChiefSetup, servers: &Value) -> Result<Vec<String>> {
+    let model = if crew.chief == "codex" {
         chief.model.as_str()
     } else {
         harness("codex")?.model
     };
     let mut flags = vec!["-c".to_owned(), format!("model={}", json!(model))];
-    if options.chief == "codex" {
+    if crew.chief == "codex" {
         flags.extend([
             "-c".to_owned(),
-            format!("model_reasoning_effort={}", json!(options.effort)),
+            format!("model_reasoning_effort={}", json!(crew.effort)),
         ]);
     }
     flags.extend(codex::isolation(servers)?);
@@ -183,17 +183,17 @@ fn emit(machine: &Machine, name: &str, real: &Path, flags: &[String]) -> Result<
 
 /// Writes the wrappers a run needs, in a folder of its own, fresh: a wrapper
 /// written for another chief must not outlive its run.
-pub fn write(machine: &Machine, options: &Options, chief: &ChiefSetup) -> Result<Wrappers> {
+pub fn write(machine: &Machine, crew: &Crew, chief: &ChiefSetup) -> Result<Wrappers> {
     let bin = machine.bin();
     // A folder that is not there is already fresh.
     let _ = fs::remove_dir_all(&bin);
     files::make_dir(&bin)?;
     let mut wrappers = Wrappers::default();
-    if options.in_run("claude") {
+    if crew.in_run("claude") {
         let real = machine.install("claude")?.command();
-        wrappers.claude = Some(emit(machine, "claude", real, &claude_flags(options))?);
+        wrappers.claude = Some(emit(machine, "claude", real, &claude_flags(crew))?);
     }
-    if options.chief == "pi" {
+    if crew.chief == "pi" {
         if cfg!(windows) {
             return Err(Error::Refused(
                 "the Pi chief's wrapper is sh: run Pi chiefs on the Mac".to_owned(),
@@ -203,13 +203,13 @@ pub fn write(machine: &Machine, options: &Options, chief: &ChiefSetup) -> Result
         let program = bin.join("pi");
         files::write_executable(
             &program,
-            pi_script(&real.to_string_lossy(), &chief.model, &options.effort),
+            pi_script(&real.to_string_lossy(), &chief.model, &crew.effort),
         )?;
         wrappers.pi = Some(program);
     }
-    if options.in_run("codex") {
+    if crew.in_run("codex") {
         let real = machine.install("codex")?.command();
-        let flags = codex_flags(options, chief, &codex::mcp_servers(real)?)?;
+        let flags = codex_flags(crew, chief, &codex::mcp_servers(real)?)?;
         wrappers.codex = Some(emit(machine, "codex", real, &flags)?);
     }
     Ok(wrappers)

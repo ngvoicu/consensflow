@@ -244,7 +244,7 @@ fn folder() -> Result<PathBuf> {
 #[ignore = "opt-in: spends the machine's Claude quota on one short task; cargo xtask live mcp (npm run live:mcp)"]
 fn a_real_claude_worker_with_an_mcp_server_finishes_its_task_and_the_chief_gets_the_result(
 ) -> Result {
-    let log = Log::new("live mcp");
+    let log = Log::begin("live mcp")?;
     let claude = live::installed(Harness::Claude)?;
     log.say(format!(
         "Claude Code is {} ({}); its login is read from {}",
@@ -252,7 +252,7 @@ fn a_real_claude_worker_with_an_mcp_server_finishes_its_task_and_the_chief_gets_
         claude.version(),
         claude.home().display()
     ));
-    let python = live::command("python3")?;
+    let python = live::working_command("python3", &["--version"])?;
     let made = Path::new(env!("CARGO_TARGET_TMPDIR")).join("live-mcp");
     files::make_dir(&made)?;
     let server = Server::write(&made, &python)?;
@@ -280,7 +280,7 @@ fn a_real_claude_worker_with_an_mcp_server_finishes_its_task_and_the_chief_gets_
             rig.keep_home().display()
         ));
     }
-    live_agents::write_roster(&rig, &roster())?;
+    live_agents::write_roster(&rig, &roster(), &log)?;
     let folder = folder()?;
     rig.forget_claude_memory_of(&folder);
     let trust = live::window::trust_claude(&rig, &[shim.to_string_lossy().into_owned()], &folder)?;

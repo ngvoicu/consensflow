@@ -1,6 +1,6 @@
 //! Deleting a project deletes its participants' conversations, and with each
 //! its items' heads: a cascade of the ledger's keys, each conversation's heads
-//! found by migration 0019's index of them by their conversation. So deleting
+//! found by migration 0020's index of them by their conversation. So deleting
 //! goes through each item once, and takes as many of SQLite's steps as there
 //! are items, never as their square.
 

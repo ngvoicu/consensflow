@@ -1,9 +1,11 @@
 //! The rig: a real daemon and the real pane host, connected as the app connects
 //! them, in a home of the case's own, with a stand-in `claude` in the windows
 //! it opens (and a stand-in `devin`, for a case that asks for one:
-//! [`Config::devin`]; and an `opencode` that has updated itself to 2:
-//! [`Config::opencode_2`]; or each where it installs itself, off a `PATH` that is
-//! the Finder's: [`Config::as_the_finder_starts_it`]). The daemon is `cf ui --json --no-open`; the pane
+//! [`Config::devin`]; an `opencode` 1.x: [`Config::opencode`]; an `opencode`
+//! that has updated itself to 2: [`Config::opencode_2`]; or each where it
+//! installs itself, off a `PATH` that is the Finder's:
+//! [`Config::as_the_finder_starts_it`]). The daemon is `cf ui --json --no-open`;
+//! the pane
 //! host is `consensflow-bridge`, which gives each window a terminal of its own
 //! (a PTY, or ConPTY); they speak the bridge's frames to each other over their
 //! standard streams, and the rig stands between them ([`route`]). It only
@@ -19,9 +21,9 @@
 //! ([`Rig::screen`]), what the daemon wrote as it went ([`Rig::events`]) and the
 //! keys it pressed, and when ([`Rig::presses`]).
 //!
-//! On Unix a process that is none of any window's runs beside them (`stranger`), and
-//! a rig that ends with it gone fails: the pane host ends a window's own and nothing of
-//! the machine's.
+//! A process that is none of any window's runs beside them (`stranger`), and a rig
+//! that finds it ended by something else when it ends fails: the pane host ends a
+//! window's own and nothing of the machine's.
 
 mod forget;
 mod install;
@@ -31,7 +33,6 @@ mod observe;
 mod project;
 mod report;
 mod route;
-#[cfg(unix)]
 mod stranger;
 mod wait;
 
@@ -43,18 +44,19 @@ use serde_json::Value;
 
 use crate::daemon::Daemon;
 use crate::daemon_log::StartLine;
+use crate::live::members::Identity;
 use crate::process::{self, Ran, Run, Sink, Spawned};
 use crate::{cf, checkout, files, wire, Error, Result};
 
 pub use forget::project_name;
 pub use jobs::Job;
 pub use project::{write_staff, Project};
+pub use route::Pasted;
 
 pub(crate) use observe::events_of;
 
 use forget::Forget;
 use route::Shared;
-#[cfg(unix)]
 use stranger::Stranger;
 
 /// How long the daemon or the pane host has to answer a request of the case's.
@@ -65,6 +67,10 @@ const EXIT: Duration = Duration::from_secs(5);
 
 /// How long a process a window started has to be gone once the pane host is.
 const GONE: Duration = Duration::from_secs(3);
+
+/// How long the router is given to read what the pane host wrote last, once the
+/// host has gone.
+const LAST_FRAMES: Duration = Duration::from_secs(10);
 
 /// How long a window's first frame is waited for by default.
 pub const OPEN: Duration = Duration::from_secs(10);
@@ -78,14 +84,60 @@ pub struct Config {
     stand_in: PathBuf,
     vars: Vec<(String, String)>,
     unset: Vec<String>,
+    first: Vec<PathBuf>,
     path: Vec<PathBuf>,
     existing_root: Option<PathBuf>,
     daemon: Option<PathBuf>,
     stand_in_records: Option<PathBuf>,
     codex: Option<PathBuf>,
     devin: Option<PathBuf>,
-    opencode_2: Option<PathBuf>,
+    /// The stand-in `opencode`: of an OpenCode 1.x, or of one that is 2.
+    opencode: Option<PathBuf>,
     finder: bool,
+    masker: Option<Masker>,
+}
+
+/// What a rig passes what it says of itself through, where its owner gives it one
+/// ([`Config::masked_by`]): a run that hides what looks like a key or a token in all
+/// it says. Each text is passed whole, before any of it is cut; a window's screen as
+/// its rows, which the owner masks as one text. A rig with none says it as it is.
+#[derive(Clone)]
+pub struct Masker {
+    text: Arc<dyn Fn(&str) -> String + Send + Sync>,
+    screen: Arc<ScreenMask>,
+}
+
+/// What a masker passes the rows of a window's screen through.
+type ScreenMask = dyn Fn(&[String]) -> Vec<String> + Send + Sync;
+
+impl Masker {
+    /// A masker that passes each text through `text`, and the rows of each window's
+    /// screen through `screen`.
+    pub fn new(
+        text: impl Fn(&str) -> String + Send + Sync + 'static,
+        screen: impl Fn(&[String]) -> Vec<String> + Send + Sync + 'static,
+    ) -> Self {
+        Self {
+            text: Arc::new(text),
+            screen: Arc::new(screen),
+        }
+    }
+
+    /// `text` as it is said.
+    pub fn shown(&self, text: &str) -> String {
+        (self.text)(text)
+    }
+
+    /// The rows of a window's screen as they are said.
+    pub fn screen(&self, rows: &[String]) -> Vec<String> {
+        (self.screen)(rows)
+    }
+}
+
+impl std::fmt::Debug for Masker {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("Masker")
+    }
 }
 
 impl Config {
@@ -96,14 +148,16 @@ impl Config {
             stand_in: stand_in.into(),
             vars: Vec::new(),
             unset: Vec::new(),
+            first: Vec::new(),
             path: Vec::new(),
             existing_root: None,
             daemon: None,
             stand_in_records: None,
             codex: None,
             devin: None,
-            opencode_2: None,
+            opencode: None,
             finder: false,
+            masker: None,
         }
     }
 
@@ -118,6 +172,16 @@ impl Config {
     #[must_use]
     pub fn as_the_finder_starts_it(mut self) -> Self {
         self.finder = true;
+        self
+    }
+
+    /// With what the rig says of itself, when a case leaves it unclosed (its windows'
+    /// screens, the programs' error output, the daemon's log), passed through
+    /// `masker` first: for an owner that hides what looks like a key or a token in all
+    /// it says (the long run of the evals). Every other rig says it as it is.
+    #[must_use]
+    pub fn masked_by(mut self, masker: Masker) -> Self {
+        self.masker = Some(masker);
         self
     }
 
@@ -149,7 +213,19 @@ impl Config {
     /// rig's folder ([`Rig::opencode_asked`]).
     #[must_use]
     pub fn opencode_2(mut self, program: impl Into<PathBuf>) -> Self {
-        self.opencode_2 = Some(program.into());
+        self.opencode = Some(program.into());
+        self
+    }
+
+    /// With the `opencode` the windows find first on their `PATH` the stand-in
+    /// `program` (the `fake-opencode-1` binary of this crate): an OpenCode 1.x the
+    /// daemon launches a window on as it launches one on OpenCode, which serves
+    /// what the launch asks of OpenCode's server and writes down what it is asked
+    /// and the requests it is sent in `opencode.jsonl` of the rig's folder
+    /// ([`Rig::opencode_asked`], [`Rig::opencode_requests`]).
+    #[must_use]
+    pub fn opencode(mut self, program: impl Into<PathBuf>) -> Self {
+        self.opencode = Some(program.into());
         self
     }
 
@@ -179,6 +255,17 @@ impl Config {
     #[must_use]
     pub fn also_on_path(mut self, dir: impl Into<PathBuf>) -> Self {
         self.path.push(dir.into());
+        self
+    }
+
+    /// With the folder `dir` on that `PATH` right after the folder of the stand-in
+    /// `claude`, before the folders [`Config::also_on_path`] adds and the system's:
+    /// for a program of a case's own that is found before the machine's of its
+    /// name (a stand-in `cf`, where the machine has the real one beside the
+    /// folders of its harnesses).
+    #[must_use]
+    pub fn first_on_path(mut self, dir: impl Into<PathBuf>) -> Self {
+        self.first.push(dir.into());
         self
     }
 
@@ -212,6 +299,19 @@ impl Config {
     }
 }
 
+/// What a rig that closed leaves: its root, kept, and the last word of the pane
+/// host on its windows, read to its end: every exit it told, those since a case last
+/// asked among them. (The host tells none of the windows it reaps as it shuts down:
+/// its panes' threads send `pane.exit` after its bridge has closed.)
+#[derive(Debug, Clone, PartialEq)]
+pub struct Last {
+    pub root: PathBuf,
+    /// Every `pane.exit` the host told, with when the rig saw it ([`Rig::timed_exits`]).
+    pub exits: Vec<(Value, i64)>,
+    /// Every `pane.kill` the daemon asked ([`Rig::kills`]).
+    pub kills: Vec<Value>,
+}
+
 /// A process a window's stand-in agent started, as it wrote it down.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Started {
@@ -228,12 +328,13 @@ pub struct Rig {
     shared: Arc<Shared>,
     daemon: Daemon,
     host: Spawned,
-    /// A process none of the windows' is, which has to run still when they are ended.
-    #[cfg(unix)]
+    /// A process none of the windows' is, which nothing may have ended when they are.
     stranger: Stranger,
     /// What the rig takes away of the machine's own Claude folder when it
     /// ends, where its stand-ins write there ([`Config::stand_ins_write_in`]).
     forget: Option<Forget>,
+    /// What it passes what it says of itself through ([`Config::masked_by`]).
+    masker: Option<Masker>,
     /// Whether the home is left when the rig ends: it is not, unless a rig is
     /// to resume on it or a case asked to keep it ([`Rig::keep_home`]).
     keep_root: bool,
@@ -311,8 +412,8 @@ impl Rig {
         let seen = self.shared.seen();
         format!(
             "; daemon frames={} host frames={}; daemon stderr={} host stderr={}",
-            seen.daemon.len(),
-            seen.host.len(),
+            seen.daemon,
+            seen.host,
             self.daemon.errors().trim(),
             self.host.errors().trim()
         )
@@ -341,11 +442,45 @@ impl Rig {
         find().ok_or_else(|| Error::Daemon(format!("the window {id} was opened, and is gone")))
     }
 
+    /// Which process the pane host opened the program of the window `pane` (`id`,
+    /// `generation`) as: the `pid` of its answer to that `pane.open`, read once as the
+    /// answer passed and kept ([`route::Root`]). None until it answered, or where it said
+    /// none, or the process had gone by the time it was read.
+    pub fn window_process(&self, pane: &Value) -> Option<Identity> {
+        window_process_in(&self.shared.seen().roots, pane)
+    }
+
     /// Every `pane.exit` the pane host told so far, in order: which window
     /// ended (`id`, `generation`), how (`exitCode`, `signal`) and the last lines
     /// its screen showed (`tail`).
     pub fn exits(&self) -> Vec<Value> {
         self.shared.seen().exits.clone()
+    }
+
+    /// Every `pane.exit` the pane host told so far, each with when the rig saw it,
+    /// in milliseconds since the epoch: when the window ended, which a case that
+    /// looks every few seconds would otherwise put at its next look.
+    pub fn timed_exits(&self) -> Vec<(Value, i64)> {
+        let seen = self.shared.seen();
+        seen.exits
+            .iter()
+            .cloned()
+            .zip(seen.exit_times.iter().copied())
+            .collect()
+    }
+
+    /// The process each window was opened on, as the pane host answered the
+    /// daemon's `pane.open`: `{ id, generation, pid }`, in the order the host
+    /// answered (a window it could not open has none).
+    pub fn window_pids(&self) -> Vec<Value> {
+        self.shared.seen().pids.clone()
+    }
+
+    /// Every `pane.kill` the daemon asked of the pane host so far, in order: the
+    /// windows it closed itself (`id`, `generation`). A window that exited with
+    /// none asked of it ended by itself, or by someone else's hand.
+    pub fn kills(&self) -> Vec<Value> {
+        self.shared.seen().kills.clone()
     }
 
     /// How many times the daemon pressed the key `bytes` into the window `id`
@@ -462,6 +597,13 @@ impl Rig {
     /// that, and the host gives a program that does not leave ten seconds before
     /// it kills it.
     pub fn close_within(mut self, within: Duration) -> Result<()> {
+        self.shut_down_within(within)
+    }
+
+    /// [`Rig::close_within`], but the rig is kept: what the daemon and the pane
+    /// host did not end in `within` is still running until the rig is dropped,
+    /// which kills them, for a look at what a rig that did not end left.
+    pub fn shut_down_within(&mut self, within: Duration) -> Result<()> {
         self.shutdown(within)
     }
 
@@ -479,6 +621,19 @@ impl Rig {
         Ok(self.root.clone())
     }
 
+    /// [`Rig::close_keeping_the_root_within`], with what the pane host said last of
+    /// its windows, read to the end of its output: every exit it told, which a case
+    /// that took the exits before the close may not have seen yet (a process a
+    /// window's close ended, named in its `pane.exit` and nowhere before). Where the
+    /// router has not read to the end of the host's output a few seconds after the
+    /// host ended, [`Error::Unread`], with what it had read.
+    pub fn close_with_the_last_exits_within(mut self, within: Duration) -> Result<Last> {
+        self.keep_root = true;
+        // The host ends, and the router reads what it wrote to its end after it.
+        self.shutdown(within)?;
+        last_word(&self.shared, self.root.clone(), LAST_FRAMES)
+    }
+
     fn shutdown(&mut self, exit: Duration) -> Result<()> {
         if self.closed {
             return Ok(());
@@ -494,11 +649,11 @@ impl Rig {
             )));
         }
         // What the pane host ended, it ended as the windows' own: a process that is
-        // none of theirs, started beside it, runs on.
-        #[cfg(unix)]
-        if !self.stranger.runs() {
+        // none of theirs, started beside it, was ended by nothing (it may have left
+        // of itself, which is no end the pane host gave it).
+        if let Some(how) = self.stranger.ended_by_another() {
             return Err(Error::Daemon(format!(
-                "a process that is none of any window's was ended with them{}",
+                "a process that is none of any window's was ended with them ({how}){}",
                 self.what_they_said()
             )));
         }
@@ -543,6 +698,48 @@ impl Drop for Rig {
     }
 }
 
+/// The last word of the pane host the routers of `shared` read, once its output has
+/// ended, waited for up to `within`; the rig's root is `root`. Where it has not ended
+/// by then, [`Error::Unread`] with what was read so far: an exit the host tells after
+/// is none of it.
+fn last_word(shared: &Shared, root: PathBuf, within: Duration) -> Result<Last> {
+    let ended = wait::until(within, || shared.seen().host_ended);
+    let seen = shared.seen();
+    let last = Last {
+        root,
+        exits: seen
+            .exits
+            .iter()
+            .cloned()
+            .zip(seen.exit_times.iter().copied())
+            .collect(),
+        kills: seen.kills.clone(),
+    };
+    if ended {
+        return Ok(last);
+    }
+    Err(Error::Unread {
+        said: format!(
+            "the pane host's output had not ended {} s after the host did: what it told after is not read (host frames={})",
+            within.as_secs(),
+            seen.host
+        ),
+        last: Box::new(last),
+    })
+}
+
+/// The process the pane host said, among the windows it answered the open of (`roots`),
+/// it opened the program of the window `pane` (`id`, `generation`) as: as it was read
+/// then, the last where it answered more than once. It is never read again: the number may
+/// be another process's by now.
+fn window_process_in(roots: &[route::Root], pane: &Value) -> Option<Identity> {
+    roots
+        .iter()
+        .rev()
+        .find(|root| root.id == pane["id"] && root.generation == pane["generation"])
+        .and_then(|root| root.identity)
+}
+
 /// The records of the conversation `session` that the stand-in agent wrote
 /// under the Claude config folder `config`, whole ones only.
 fn recorded(config: &str, session: &str) -> String {
@@ -556,6 +753,38 @@ fn recorded(config: &str, session: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_windows_process_is_the_one_read_as_the_host_answered_its_open_and_never_read_again() {
+        use serde_json::json;
+        let root = |id: &str, generation: u64, identity: Option<Identity>| route::Root {
+            id: json!(id),
+            generation: json!(generation),
+            identity,
+        };
+        // The window p1-zeus's first process was this test's number, begun long before this
+        // test: it has gone, and the number is this test's process now. A look that read the
+        // number again took this process for the window's (Astra and Sol on round 6).
+        let gone = Identity {
+            pid: std::process::id(),
+            started: 1,
+        };
+        let other = Identity {
+            pid: 200,
+            started: 20,
+        };
+        let roots = [
+            root("p1-zeus", 1, Some(gone)),
+            root("p1-zeus", 2, Some(other)),
+            root("p1-hera", 1, None),
+        ];
+        let pane = |id: &str, generation: u64| json!({ "id": id, "generation": generation });
+        assert_eq!(window_process_in(&roots, &pane("p1-zeus", 1)), Some(gone));
+        assert_eq!(window_process_in(&roots, &pane("p1-zeus", 2)), Some(other));
+        // A host that said no process of it, and a window it never answered the open of.
+        assert_eq!(window_process_in(&roots, &pane("p1-hera", 1)), None);
+        assert_eq!(window_process_in(&roots, &pane("p1-zeus", 3)), None);
+    }
 
     #[test]
     fn a_conversation_is_read_a_whole_record_at_a_time_while_the_agent_is_still_writing_it() {
@@ -574,5 +803,40 @@ mod tests {
         assert_eq!(recorded(&config, "s-1"), whole);
         // A conversation nothing has been written of is nothing.
         assert_eq!(recorded(&config, "s-2"), "");
+    }
+
+    #[test]
+    fn a_last_word_not_read_to_its_end_in_time_is_an_error_that_holds_what_was_read() {
+        let shared = Arc::new(Shared::default());
+        let root = PathBuf::from("/nowhere");
+        {
+            let mut seen = shared.seen();
+            seen.exits
+                .push(serde_json::json!({ "id": "p1-chief", "generation": 1 }));
+            seen.exit_times.push(1_000);
+        }
+        // The host's last exit comes late: after the wait for its output's end.
+        let late = Arc::clone(&shared);
+        let telling = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(600));
+            let mut seen = late.seen();
+            seen.exits
+                .push(serde_json::json!({ "id": "p1-worker", "generation": 2 }));
+            seen.exit_times.push(2_000);
+            seen.host_ended = true;
+        });
+        let Err(Error::Unread { said, last }) =
+            last_word(&shared, root.clone(), Duration::from_millis(100))
+        else {
+            panic!("the output had not ended, and it was taken for the whole");
+        };
+        assert!(said.contains("had not ended"), "{said}");
+        assert_eq!(last.exits.len(), 1, "what was read: {:?}", last.exits);
+        assert_eq!(last.root, root);
+        // Waited for long enough, the last word holds the late exit.
+        telling.join().unwrap();
+        let whole = last_word(&shared, root, Duration::from_secs(5)).unwrap();
+        assert_eq!(whole.exits.len(), 2);
+        assert_eq!(whole.exits[1].1, 2_000);
     }
 }

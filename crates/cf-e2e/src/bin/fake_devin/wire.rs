@@ -41,12 +41,50 @@ impl Wire {
         self.file.write_all(line.as_bytes())
     }
 
-    /// The window shows this conversation: the TUI configures its mode.
-    pub fn announce(&mut self) -> io::Result<()> {
+    /// The window shows this conversation: the TUI configures it, its permission mode
+    /// `mode` (`normal`, `bypass`) among the options.
+    pub fn announce(&mut self, mode: &str) -> io::Result<()> {
         self.record(json!({
             "update": {
                 "sessionUpdate": "config_option_update",
-                "configOptions": [{ "id": "model" }, { "id": "mode" }],
+                "configOptions": [
+                    { "id": "model", "currentValue": "fake" },
+                    { "id": "mode", "currentValue": mode },
+                ],
+            },
+        }))
+    }
+
+    /// The conversation's mode changed to `mode`: its configuration, and the change on
+    /// its own, as Devin 3000.11.92 says a `/bypass`.
+    pub fn mode_changed(&mut self, mode: &str) -> io::Result<()> {
+        self.announce(mode)?;
+        self.record(json!({
+            "update": { "sessionUpdate": "current_mode_update", "currentModeId": mode },
+        }))
+    }
+
+    /// The call `call` of the turn `client` failed with `words`: refused for its
+    /// permission where `rejected` (Devin's mark), as Devin's agent says a call its user
+    /// skipped or a dialog left with Escape.
+    pub fn call_failed(
+        &mut self,
+        call: &str,
+        words: &str,
+        rejected: bool,
+        client: &str,
+    ) -> io::Result<()> {
+        self.record(json!({
+            "turnClientMessageId": client,
+            "update": {
+                "sessionUpdate": "tool_call_update",
+                "toolCallId": call,
+                "status": "failed",
+                "content": [{ "type": "content", "content": { "type": "text", "text": words } }],
+                "_meta": {
+                    "cognition.ai/inferenceToolName": "exec",
+                    "cognition.ai/rejected": rejected,
+                },
             },
         }))
     }
@@ -143,7 +181,7 @@ mod tests {
         let folder = tempfile::tempdir().unwrap();
         let path = folder.path().join("wire.jsonl");
         let mut wire = Wire::open(&path, "calm-river").unwrap();
-        wire.announce().unwrap();
+        wire.announce("bypass").unwrap();
         wire.prompt(2, "[ConsensFlow m-1 · note]\nhello").unwrap();
         wire.thinking("client-1").unwrap();
         wire.said("DONE", "stream-1", "client-1").unwrap();
@@ -162,7 +200,7 @@ mod tests {
             .as_array()
             .unwrap()
             .iter()
-            .any(|option| option["id"] == "mode"));
+            .any(|option| option["id"] == "mode" && option["currentValue"] == "bypass"));
         // The TUI's request: its id, the conversation in its params, and the words.
         assert_eq!(records[1]["method"], "session/prompt");
         assert_eq!(records[1]["id"], 2);
@@ -221,13 +259,48 @@ mod tests {
     }
 
     #[test]
+    fn a_change_of_mode_and_a_refused_call_are_said_as_devin_says_them() {
+        let folder = tempfile::tempdir().unwrap();
+        let path = folder.path().join("wire.jsonl");
+        let mut wire = Wire::open(&path, "calm-river").unwrap();
+        wire.mode_changed("bypass").unwrap();
+        wire.call_failed(
+            "call-1",
+            "Tool execution was rejected: User skipped this tool call",
+            true,
+            "client-1",
+        )
+        .unwrap();
+        let records = records(&path);
+        assert_eq!(records.len(), 3);
+        assert_eq!(
+            records[0]["update"]["sessionUpdate"],
+            "config_option_update"
+        );
+        assert_eq!(records[1]["update"]["sessionUpdate"], "current_mode_update");
+        assert_eq!(records[1]["update"]["currentModeId"], "bypass");
+        assert_eq!(records[1]["sessionId"], "calm-river");
+        let failed = &records[2]["update"];
+        assert_eq!(failed["status"], "failed");
+        assert_eq!(failed["toolCallId"], "call-1");
+        assert_eq!(
+            failed["content"][0]["content"]["text"],
+            "Tool execution was rejected: User skipped this tool call"
+        );
+        assert_eq!(failed["_meta"]["cognition.ai/rejected"], true);
+    }
+
+    #[test]
     fn a_log_that_is_there_is_gone_on_with_and_not_written_over() {
         let folder = tempfile::tempdir().unwrap();
         let path = folder.path().join("wire.jsonl");
-        Wire::open(&path, "calm-river").unwrap().announce().unwrap();
+        Wire::open(&path, "calm-river")
+            .unwrap()
+            .announce("bypass")
+            .unwrap();
         Wire::open(&path, "brisk-ember")
             .unwrap()
-            .announce()
+            .announce("normal")
             .unwrap();
         let records = records(&path);
         assert_eq!(records.len(), 2);

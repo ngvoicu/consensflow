@@ -114,6 +114,12 @@ impl Items {
         self.list.last().map(|entry| &entry.item)
     }
 
+    /// The message at `place` is no one's words of the conversation: the
+    /// harness's own (`commentary`), which no answer holds.
+    pub(super) fn commentary(&mut self, place: usize) {
+        self.list[place].item.commentary = true;
+    }
+
     /// The assistant's message `id` names is complete, when there is one.
     pub(super) fn complete(&mut self, id: &str) {
         if let Some(&place) = self.assistants.get(id) {

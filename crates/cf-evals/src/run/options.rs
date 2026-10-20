@@ -74,6 +74,25 @@ const FLAGS: [Flag; 14] = [
     Flag::value("reports"),
 ];
 
+/// Who the windows of a run are, as the machine, the rig and the wrappers need it:
+/// the chief's harness and the staff's, the chief's reasoning level, and whether
+/// the chief is given the one-line card. An eval's run says it ([`Options::crew`]),
+/// and so does a long run (`crate::long_run`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Crew {
+    pub chief: String,
+    pub staff: Vec<String>,
+    pub effort: String,
+    pub nocard: bool,
+}
+
+impl Crew {
+    /// Whether a harness has a window in the run, as the chief or on the staff.
+    pub fn in_run(&self, name: &str) -> bool {
+        self.chief == name || self.staff.iter().any(|staff| staff == name)
+    }
+}
+
 /// What a run is asked to do.
 #[derive(Debug)]
 pub struct Options {
@@ -177,7 +196,17 @@ impl Options {
 
     /// Whether a harness has a window in this run, as the chief or on the staff.
     pub fn in_run(&self, name: &str) -> bool {
-        self.chief == name || self.staff.iter().any(|staff| staff == name)
+        self.crew().in_run(name)
+    }
+
+    /// Who the windows of this run are, as the machine and the wrappers need it.
+    pub fn crew(&self) -> Crew {
+        Crew {
+            chief: self.chief.clone(),
+            staff: self.staff.clone(),
+            effort: self.effort.clone(),
+            nocard: self.arm == Arm::NoCard,
+        }
     }
 
     /// The models the staff's harnesses run on where `--…-staff-model` names one.

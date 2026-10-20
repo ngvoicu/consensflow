@@ -6,7 +6,7 @@
 //! of a message a delivery names, for its line (`message_opening`).
 //!
 //! What a read costs is bounded, whatever the size of the history or of one
-//! item in it. It reaches what it reads through the indexes of migration 0019
+//! item in it. It reaches what it reads through the indexes of migration 0020
 //! and scans nothing: one conversation after another, each one's items in the
 //! order they were first copied, from a place a copy made again never moves
 //! ([`HistoryKey`]), until the page is full ([`HistoryAsk::room`], the headings
@@ -17,7 +17,7 @@
 //! tools are left out; a heading is a few lookups of the log, and counts the
 //! tools' outputs only so far; a long item is read a part at a time, from the
 //! parts its copy keeps, never whole. Of an item it reads its text and its head
-//! (migration 0019's `transcript_head`): its role, its size, its parts, its id
+//! (migration 0020's `transcript_head`): its role, its size, its parts, its id
 //! as a page shows it (never the id itself), and the fields its row holds past
 //! its id and its text, never from there. Of the participant it reads what an
 //! index holds of it, and of its project that it is there. A row holds its
@@ -27,7 +27,7 @@
 //! Every field it reads is short whatever an older build wrote: each write keeps
 //! it within its ceiling ([`crate::FIELD_MAX`], [`crate::ID_SHOWN`],
 //! [`crate::NATIVE_SESSION_MAX`], [`crate::HEADING_EVENT_MAX`], a time as a store
-//! keeps one) and migration 0019 brought what was past it within it. No value
+//! keeps one) and migration 0020 brought what was past it within it. No value
 //! is loaded whole that may be long and is not shown: a conversation's role, a
 //! message's body.
 //!
@@ -111,13 +111,13 @@ const PART_COST: usize = 64;
 /// may hold ([`HISTORY_FIND_MAX`]).
 const TAIL_BYTES: usize = 4 * PART_TAIL;
 
-/// What the log says a conversation is, as the indexes of 0019 read it: none
+/// What the log says a conversation is, as the indexes of 0020 read it: none
 /// where the event's data is no JSON. A lookup says it so, word for word, for
 /// SQLite to find it in the index.
 const CONVERSATION_OF: &str =
     "CASE WHEN json_valid(data) THEN json_extract(data, '$.conversation') END";
 
-/// What the log says a participant is, as the index of 0019 reads it.
+/// What the log says a participant is, as the index of 0020 reads it.
 const PARTICIPANT_OF: &str =
     "CASE WHEN json_valid(data) THEN json_extract(data, '$.participant') END";
 

@@ -25,7 +25,7 @@
 //! replacement of a role says), which Node's messages never had: in the rows of
 //! that table and in the text of its schema.
 //!
-//! And migration 0019's column of the `transcript` table (the mark of a
+//! And migration 0020's column of the `transcript` table (the mark of a
 //! compaction's summary), which Node's copies never had: in the rows of that
 //! table and in the text of its schema. And the table it made (a long item's
 //! parts) and its indexes (what the history viewer reads through): the table's
@@ -44,6 +44,8 @@ mod role_text;
 mod specs;
 
 use serde_json::{Map, Value};
+
+pub use compaction::undo_migration_0020;
 
 /// The last schema version Node's ledger had.
 const NODE_LAST_VERSION: i64 = 11;
@@ -94,8 +96,8 @@ fn added_columns() -> impl Iterator<Item = &'static str> {
 /// and its `rows`), without what Node's ledger never writes: the four
 /// columns of migration 0011, the three wake-up columns of migration 0014, the
 /// three of migration 0015, the one of migration 0016, the description of
-/// migration 0017, the one of migration 0018 and the one of migration 0019 (their
-/// name and, in every row, the value at its place), the table migration 0019 made
+/// migration 0017, the one of migration 0018 and the one of migration 0020 (their
+/// name and, in every row, the value at its place), the table migration 0020 made
 /// (a long item's parts), and the stop in the event rows that paused a task. A dump
 /// from before the migrations has none of them, and is left as it is.
 pub fn hold_apart_what_node_never_writes(tables: &mut Map<String, Value>) {
@@ -150,7 +152,7 @@ fn take_column_out(tables: &mut Map<String, Value>, table: &str, column: &str) {
 /// calls, of what it says of specs or of its description in the table of the
 /// projects, and not the column of the role text a conversation was last given,
 /// that of the role text a message says, nor that of the mark of a compaction's
-/// summary in a copy, nor the table and the indexes migration 0019 made. A dump
+/// summary in a copy, nor the table and the indexes migration 0020 made. A dump
 /// of Node's is left as it is.
 pub fn hold_apart_what_node_never_had_in_its_schema(dump: &mut Value) {
     if let Some(version) = dump.get_mut("userVersion") {

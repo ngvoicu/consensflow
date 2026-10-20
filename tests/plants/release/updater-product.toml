@@ -138,7 +138,7 @@ requires = ["app/src-tauri/target/updater-smoke/bridge/ConsensFlow.app"]
 [[plant.edit]]
 file = "app/src-tauri/src/lib.rs"
 find = '''
-            launcher::repair_in_background(app.handle());
+        launcher::repair_in_background(app.handle());
 '''
 replace = ""
 

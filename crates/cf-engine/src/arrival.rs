@@ -1,29 +1,51 @@
 //! Whether a message handed over to a window arrived: its harness's record is
-//! watched for the message's header, which confirms it. A paste the window may
-//! not have sent is given one more Enter, and one the record never showed is
-//! pasted again. Two things keep a record that is late from being taken for
-//! lacking, and the paste from being a second copy of one the window has (a
-//! Devin chief, 2026-10-13: each of two notes twice). A harness may say its own
-//! queue holds the message (`Window::took`), and it is then waited for as one the
-//! harness queued itself is. And a window in a turn may hold what it is given and
-//! write it to its record when it gets to it, so only the window's rest counts
-//! towards the record's time: a record gets a whole arrival window of rest, from
-//! the hand-over or from the end of the last turn the window went into since.
-//! However often the window goes into a turn, a paste the record has not shown
-//! within [`RECONCILE_MS`] of its hand-over is pasted again at the window's next
-//! rest, so unrelated turns never hold the queue behind it for good. What a chief's
-//! launch put ahead of its queue (the role it says first, and the message that
-//! role displaced) is its first messages, as its handoff is on its command line:
-//! waited for as those are, and never pasted again for being slow
+//! watched for the message's paste, an item the message's header begins as the
+//! harness records a paste, which confirms it; a header quoted in other words
+//! proves nothing (`is_paste_of`). A paste the window may not have sent is given
+//! one more Enter, and one the record never showed is pasted again, by this rule:
+//!
+//! - **Taken.** A harness that says its own queue has the message, at the hand-over
+//!   (`Admission::Admitted`'s `queued`) or after it (`Window::took`: Devin's TUI put
+//!   the paste to its agent), has it: the message is waited for until its record
+//!   shows it or the window closes, and never pasted again.
+//! - **Held.** While the harness says the paste is in a turn it is in still
+//!   (`Window::held`: the turn it went into, or the one the harness began with it),
+//!   it is waited for, however long the turn and however at rest the window reads.
+//!   The harness is asked at the hand-over too: a paste that went into a turn is
+//!   held from then, whenever the next look comes.
+//! - **Free.** Otherwise the paste's time runs from when it was last found free:
+//!   the hand-over, where the harness did not hold it then, else the first look that
+//!   found it held no longer. It is pasted again once the record has had a whole
+//!   arrival window of the window's rest since then (a look that finds the window in
+//!   a turn starts that again: the turn may hold what it was given), or at the
+//!   window's first rest past [`RECONCILE_MS`] since then, however turns cut its
+//!   rest, so no turns hold the queue behind it for good.
+//!
+//! So a paste the window did not drop goes once: a turn that holds it ends, Devin
+//! runs it within seconds, and the first look after reads its prompt (taken), before
+//! any arrival window of rest or half hour from the first free look can pass. And a
+//! paste the window dropped goes again within half an hour of the first look after
+//! the turn that held it, however the looks fall (`tests/dispatcher/schedules.rs`
+//! explores both over generated schedules of looks, turns and sleeps). What a
+//! chief's launch put ahead of its queue (the role it says first, and the message
+//! that role displaced) is its first messages, as its handoff is on its command
+//! line: waited for as those are, and never pasted again for being slow
 //! (`Delivering::chief`).
 //!
-//! Limits (Astraeus, 2026-10-14). A harness's word that its queue holds the
-//! message is not withdrawn: a Devin wire log that named the pasted header and
-//! then refused it leaves the message waited for until the window closes; the
-//! header is the message's own, so no other text matches it. The one Enter is
-//! pressed whatever the window shows, as it was before (a quiet dialog may take
-//! it), and the screen is looked at apart from the press, so a human's typing in
-//! between can meet it.
+//! Limits. That a paste the window did not drop goes once rests on the arrival
+//! window being longer than the seconds Devin takes to begin a paste it queued, once
+//! the turn it waited behind ends (the schedules' model gives it 5 s, not measured):
+//! a Devin that waited longer, or a shorter arrival window, could see it pasted again
+//! before its prompt is read. A harness's word that its queue has the message is not
+//! withdrawn: one that then loses it leaves the message waited for until the window
+//! closes. A paste held in a turn that never ends waits with it, and the window's
+//! queue behind it, until the human stops the turn or closes the window. A turn that
+//! begins between the window's readiness and the paste is not known to hold it until
+//! a look reads its prompt; were it to end before the next look, and that look come a
+//! whole arrival window after the hand-over and within seconds of its end, the paste
+//! would go again while Devin had it queued. The one Enter is pressed whatever the
+//! window shows (a quiet dialog may take it), and the screen is looked at apart from
+//! the press, so a human's typing in between can meet it.
 //!
 //! What a hand-over is and how it fails are `deliveries`'; the wait is the part of
 //! the record's delivery part this owns.
@@ -36,6 +58,7 @@ use cf_harness::records::Role;
 use cf_proto::trace::WindowEvent;
 use serde_json::{json, Value};
 
+use crate::delivery_text::is_paste_of;
 use crate::dispatcher::Dispatcher;
 use crate::record::Record;
 use crate::runtime::{begin, returning};
@@ -48,9 +71,22 @@ const ENTER_AGAIN_MS: i64 = 10_000;
 /// How long the window must have printed nothing first: one being typed into,
 /// or drawing, is left be.
 const ENTER_AGAIN_QUIET_MS: f64 = 3_000.0;
-/// How long after its hand-over a paste the record never showed is pasted again
-/// at the window's next rest, however its rest was cut by turns.
+/// How long after it was last found free (`Delivering::free_since`) a paste the
+/// record never showed is pasted again at the window's next rest, however its rest
+/// was cut by turns.
 const RECONCILE_MS: i64 = 30 * 60_000;
+
+/// What a look found of the window's rest since the message on its way was handed over.
+#[derive(Debug, Default)]
+struct Rest {
+    /// How long the window has been at rest since the hand-over or since its last turn.
+    rested: i64,
+    /// A turn was found since the hand-over.
+    turned: bool,
+    /// Since when the paste has been free (`Delivering::free_since`): none while the
+    /// harness holds it.
+    free: Option<i64>,
+}
 
 impl Dispatcher {
     /// Whether the message on its way shows in the window's record; it is
@@ -71,10 +107,15 @@ impl Dispatcher {
             record.delivery.borrow_mut().delivering = None;
             return Ok(true);
         };
-        let arrived = observed
-            .items()
-            .iter()
-            .find(|item| item.role == Role::User && item.text.contains(&delivering.marker));
+        // Only a launch's first message goes in behind the brief its window received.
+        let first = if delivering.launch {
+            self.brief_given_first(&message)?
+        } else {
+            None
+        };
+        let arrived = observed.items().iter().find(|item| {
+            item.role == Role::User && is_paste_of(&item.text, message.id, first.as_deref())
+        });
         let Some(arrived) = arrived else {
             return Ok(false);
         };
@@ -139,15 +180,20 @@ impl Dispatcher {
         if delivering.queued {
             return Ok(());
         }
-        // The harness's own word, once it has one: its queue holds the message.
+        // The harness's own word, once it has one: its agent has the message.
         if self.took(record) {
             self.queued(record);
             return Ok(());
         }
-        let waited = self.now() - delivering.since;
-        let (rested, turned) = self.rested(record, observed);
+        let now = self.now();
+        let waited = now - delivering.since;
+        let Rest {
+            rested,
+            turned,
+            free,
+        } = self.rested(record, observed, self.held(record));
         let at_rest = observed.settled && observed.waiting.is_none();
-        let overdue = waited > RECONCILE_MS && at_rest;
+        let overdue = at_rest && free.is_some_and(|free| now - free > RECONCILE_MS);
         if rested <= self.seams.limits.arrival_ms && !overdue {
             if waited > ENTER_AGAIN_MS
                 && waited <= self.seams.limits.arrival_ms
@@ -168,8 +214,13 @@ impl Dispatcher {
         // reaches the reader. (A message the harness queued itself waits for
         // the record, or for the window to close.)
         let because = if overdue && rested <= self.seams.limits.arrival_ms {
+            let since = if free == Some(delivering.since) {
+                "since it was handed over"
+            } else {
+                "since the turn that held it ended"
+            };
             format!(
-                "the harness record never showed it in the {} min since it was handed over",
+                "the harness record never showed it in the {} min {since}",
                 RECONCILE_MS / 60_000
             )
         } else if turned {
@@ -183,8 +234,7 @@ impl Dispatcher {
         self.settle_failure(delivering, &because, true)
     }
 
-    /// Whether the window's harness says its own queue holds the message on its
-    /// way.
+    /// Whether the window's harness says its agent has the message on its way.
     fn took(&self, record: &Record) -> bool {
         self.window_of(record).0.is_some_and(|window| window.took())
     }
@@ -196,25 +246,51 @@ impl Dispatcher {
         }
     }
 
+    /// Whether the window's harness says the message on its way is in a turn it is
+    /// in still.
+    fn held(&self, record: &Record) -> bool {
+        self.window_of(record).0.is_some_and(|window| window.held())
+    }
+
     /// How long the window has been at rest since the message on its way was
     /// handed over, or since its last turn ended: the time its record has had
     /// to show it. A look that finds the window in a turn starts the count
     /// again, whatever the harness does with what came in meanwhile: it may
     /// hold it until it runs it, which is the record's wait, not its failure. A
-    /// window waiting on a dialog is in its turn still. And whether a turn was
-    /// found since the hand-over.
-    fn rested(&self, record: &Record, observed: &Observed) -> (i64, bool) {
+    /// window waiting on a dialog is in its turn still. One whose harness `held` the
+    /// message is in the turn it went into, and the paste is not free: its time
+    /// starts again at the first look that finds it held no longer. And whether a
+    /// turn was found since the hand-over.
+    fn rested(&self, record: &Record, observed: &Observed, held: bool) -> Rest {
         let now = self.now();
         let mut part = record.delivery.borrow_mut();
         let Some(delivering) = part.delivering.as_mut() else {
-            return (0, false);
+            return Rest::default();
         };
+        if held {
+            delivering.rested_since = None;
+            delivering.free_since = None;
+            return Rest {
+                rested: 0,
+                turned: true,
+                free: None,
+            };
+        }
+        let free = Some(*delivering.free_since.get_or_insert(now));
         if observed.settled && observed.waiting.is_none() {
             let since = *delivering.rested_since.get_or_insert(now);
-            (now - since, since != delivering.since)
+            Rest {
+                rested: now - since,
+                turned: since != delivering.since,
+                free,
+            }
         } else {
             delivering.rested_since = None;
-            (0, true)
+            Rest {
+                rested: 0,
+                turned: true,
+                free,
+            }
         }
     }
 

@@ -27,26 +27,27 @@ pub use history::{
 };
 pub use transcripts::TRANSCRIPT_ITEM_MAX;
 pub(crate) use transcripts::{
-    copied_item_with, copy_transcript, head_copied, split_copied, transcript, typed_since,
+    copied_item_with, copied_items_with, copy_transcript, head_copied, split_copied, transcript,
+    typed_since,
 };
 
 /// The most bytes a name the history reads holds: a conversation's harness, a
 /// participant's agent (a harness's kind is eleven, an agent's id 64 at most at
-/// every write), and a conversation's time that is no time. Migration 0019 cuts
+/// every write), and a conversation's time that is no time. Migration 0020 cuts
 /// what an older build wrote longer to it, at a character, with "…". A time the
 /// history reads is kept as a store keeps one wherever it is written
 /// ([`time::canonical`], a few dozen bytes), never cut.
 pub const FIELD_MAX: usize = 256;
 
 /// The most characters of an item's id a page shows (`id_shown`, in migration
-/// 0019's `transcript_head`): a longer one shows those and "…". An id is an
+/// 0020's `transcript_head`): a longer one shows those and "…". An id is an
 /// item's identity, kept whole where it is stored and matched: a harness's own
 /// are tens of characters, and none is bounded.
 pub const ID_SHOWN: usize = 256;
 
 /// The most characters (as JavaScript counts them) a conversation's native
 /// session holds: a harness's session ids are tens. A longer one is refused
-/// where it is bound; migration 0019 leaves a conversation an older build
+/// where it is bound; migration 0020 leaves a conversation an older build
 /// bound to a longer one bound to none, as one the ledger never learned the
 /// session of.
 pub const NATIVE_SESSION_MAX: usize = 512;
@@ -56,7 +57,7 @@ pub const NATIVE_SESSION_MAX: usize = 512;
 /// build logs of them is a handle, a conversation's id, a native session, and
 /// harnesses and agents, and stays below it whatever they are (a native session
 /// of characters JSON escapes, six bytes each, is 3,072 bytes at most);
-/// migration 0019 writes what an older build logged longer as what a heading
+/// migration 0020 writes what an older build logged longer as what a heading
 /// reads of it, and the size it was (`cutFromBytes`).
 pub const HEADING_EVENT_MAX: usize = 4_096;
 
@@ -127,7 +128,7 @@ pub(crate) fn bind_conversation(
 }
 
 /// Leaves each conversation an older build bound to a native session longer
-/// than [`NATIVE_SESSION_MAX`] characters bound to none: what migration 0019
+/// than [`NATIVE_SESSION_MAX`] characters bound to none: what migration 0020
 /// does past its SQL. No harness gives such a session and none is bound to one
 /// now, so none is lost: the conversation is one the ledger never learned the
 /// session of, as one a window followed onto another's session is.
@@ -153,7 +154,7 @@ pub(crate) fn cut_sessions(db: &Connection) -> rusqlite::Result<()> {
 }
 
 /// Brings within their ceilings, once, what an older build wrote of each
-/// conversation and participant past them: what migration 0019 does past its
+/// conversation and participant past them: what migration 0020 does past its
 /// SQL, measuring each in bytes as it reads. A conversation's harness longer
 /// than [`FIELD_MAX`] is cut to it ([`cut_to`]), and its native session is none,
 /// so that two are never made one; its times are kept as a store keeps one

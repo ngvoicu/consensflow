@@ -86,7 +86,7 @@ impl Look for Reader {
 impl Reader {
     /// What the session says now, or why it cannot be read.
     fn read(&mut self, options: &Options, now_ms: i64) -> Result<Reading, String> {
-        match self.transcript.read().map_err(|stop| stop.reason())? {
+        match self.transcript.read(now_ms).map_err(|stop| stop.reason())? {
             Some(read) => read.state.result(&self.env, options, now_ms, &read.file),
             None => {
                 if !evidence::working(&self.session, &self.env, options)? {

@@ -115,6 +115,12 @@ impl Window for FakeWindow {
         })
     }
 
+    /// The test's word, where it gave one: no call of Node's fake.
+    fn came_up(&self) -> Work<'_, Option<Option<String>>> {
+        let came_up = self.fake.came_up.borrow().clone();
+        Box::pin(async move { came_up.and_then(|came_up| came_up()) })
+    }
+
     fn ready<'a>(
         &'a self,
         _host: &'a dyn PaneHost,
@@ -141,6 +147,7 @@ impl Window for FakeWindow {
                 // A window that said no more than "not yet": the JavaScript fake answered `false`.
                 Ok(Readiness::Held(Held::Unsaid)) => json!(false),
                 Ok(Readiness::Held(held)) => json!(held.sentence()),
+                Ok(Readiness::Unfit(why)) => json!({ "unfit": why }),
                 Err(error) => json!({ "$error": { "message": error } }),
             };
             self.fake.recorder.answered(at, written);
@@ -232,10 +239,20 @@ impl Window for FakeWindow {
         })
     }
 
+    /// Not written down: the JavaScript fake was never asked.
+    fn ready_while_drawing(&self) -> bool {
+        self.fake.ready_while_drawing.get()
+    }
+
     /// Not written down: the JavaScript fake was never asked, so the Node
     /// traces have no such call.
     fn took(&self) -> bool {
         self.fake.of_launch(&self.launch, |agent| agent.took)
+    }
+
+    /// Not written down, as `took` is not.
+    fn held(&self) -> bool {
+        self.fake.of_launch(&self.launch, |agent| agent.held)
     }
 
     /// Counted on the agent, and not written down: the JavaScript fake was

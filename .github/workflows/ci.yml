@@ -23,8 +23,11 @@ jobs:
       matrix:
         os: [macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
-    # A hang fails the job in an hour, not GitHub's six.
-    timeout-minutes: 60
+    # A hang fails the job in two hours, not GitHub's six. (An hour until B5's
+    # regressions, 2026-10-18: Windows' job had taken about 45 minutes, and they
+    # add about 10. An hour and a half until 2026-10-19, when Windows' job ran
+    # 60 to 69 minutes.)
+    timeout-minutes: 120
     defaults:
       run:
         shell: bash
@@ -62,8 +65,10 @@ jobs:
       # rig's: the daemon and the pane host in real terminals, with
       # stand-in agents in the windows, and the regressions': a case for each
       # bug the owner hit in real use, on that rig.
+      # Windows' runner took 21 minutes here before B5 (2026-10-18), whose
+      # regressions ran it past 30 with nothing hung.
       - run: npm run test:daemons
-        timeout-minutes: 30
+        timeout-minutes: 50
       # The CLI's suites against the native cf, which answers every verb.
       - run: npm run test:clis
         timeout-minutes: 15
@@ -81,9 +86,11 @@ jobs:
       # room for a slow runner: the ledger's replay alone has taken from 2 to 7
       # minutes on Windows' (2026-10-06), the step 9 to 15. The black-box suites
       # of crates/cf-e2e ran above, each with a limit of its own; what is left
-      # of that crate is its support and the stand-in agents' own tests.
+      # of that crate is its support and the stand-in agents' own tests. On
+      # 2026-10-19 Windows' step, 19 to 21 minutes in the runs before, passed
+      # 25 with no test failed or hung, in the ledger's replay: hence 40.
       - run: cargo test --workspace --exclude app --exclude cf-e2e
-        timeout-minutes: 25
+        timeout-minutes: 40
       - run: cargo test -p cf-e2e --lib --bins
         timeout-minutes: 10
       # Every crate linted, its tests included.
