@@ -394,6 +394,118 @@ fn a_compact_typed_at_the_prompt_ends_at_what_it_printed_and_the_record_ends_in_
 }
 
 #[test]
+fn a_compact_that_found_nothing_to_compact_ends_at_what_the_system_says_it_printed() {
+    // Claude Code 2.1.304 (the live run of 2026-10-20): the words before the command, the
+    // command, and what it printed as the system's record; no bare command, no compaction.
+    let printed = |fields: Value| {
+        let mut record = json!({ "type": "system", "subtype": "local_command", "uuid": "o1",
+            "parentUuid": "n1", "isMeta": false, "level": "info", "isSidechain": false,
+            "content": "<local-command-stdout>Nothing to compact yet.</local-command-stdout>" });
+        if let (Some(record), Some(fields)) = (record.as_object_mut(), fields.as_object()) {
+            record.extend(fields.clone());
+        }
+        line(40, record)
+    };
+    let refused = |output: String| {
+        record(&[
+            prompt(0, "Plan the work."),
+            answer(20, "Planned.", "end_turn"),
+            duration(20),
+            said_by_claude(
+                30,
+                "k1",
+                "d1",
+                "<local-command-caveat>Run by the user.</local-command-caveat>",
+                json!({ "isMeta": true }),
+            ),
+            said_by_claude(
+                30,
+                "n1",
+                "k1",
+                "<command-name>/compact</command-name>\n<command-message>compact</command-message>\n<command-args></command-args>",
+                json!({}),
+            ),
+            output,
+        ])
+    };
+    let read = refused(printed(json!({})));
+    assert_eq!(read.stood_at(at(35)).unwrap().0, Stood::InFlight, "it runs");
+    let (stood, last) = read.stood_at(at(60)).unwrap();
+    assert_eq!(stood, Stood::AtRest, "{last:?}");
+    assert_eq!(last.kind, Kind::Output);
+    assert!(!read.ends_in_compaction(), "nothing was compacted");
+    // A system record of another kind, a meta one, or one that printed no output ends nothing.
+    for (why, fields) in [
+        ("another subtype", json!({ "subtype": "away_summary" })),
+        ("a meta record", json!({ "isMeta": true })),
+        ("a warning", json!({ "level": "warning" })),
+        ("no output", json!({ "content": "Nothing to compact yet." })),
+        ("of no command", json!({ "parentUuid": "k1" })),
+    ] {
+        assert_eq!(
+            refused(printed(fields)).stood_at(at(60)).unwrap().0,
+            Stood::InFlight,
+            "{why}"
+        );
+    }
+}
+
+/// A summary-only compaction (2026-10-15's), then a command and what it printed.
+fn compacted_then(command: &str) -> Vec<String> {
+    vec![
+        prompt(0, "Plan it."),
+        answer(10, "Planned.", "end_turn"),
+        duration(11),
+        line(
+            20,
+            json!({ "type": "system", "subtype": "compact_boundary", "uuid": "b1" }),
+        ),
+        said_by_claude(
+            21,
+            "s1",
+            "b1",
+            "This session is being continued.",
+            json!({ "isCompactSummary": true }),
+        ),
+        said_by_claude(
+            30,
+            "k1",
+            "s1",
+            "<local-command-caveat>Run by the user.</local-command-caveat>",
+            json!({ "isMeta": true }),
+        ),
+        said_by_claude(30, "n1", "k1", command, json!({})),
+        said_by_claude(
+            31,
+            "o1",
+            "n1",
+            "<local-command-stdout>Done</local-command-stdout>",
+            json!({}),
+        ),
+    ]
+}
+
+#[test]
+fn a_command_that_may_go_on_to_the_model_ends_no_turn_and_no_compaction_is_the_last_thing_after_it()
+{
+    // Sol's look at round 1: 2.1.303's `/plan <description>` prints, then asks the model.
+    let plan = "<command-name>/plan</command-name>\n<command-message>plan</command-message>\n<command-args>a plan</command-args>";
+    let planned = record(&compacted_then(plan));
+    assert_eq!(planned.stood_at(at(60)).unwrap().0, Stood::InFlight);
+    assert!(!planned.ends_in_compaction());
+    // A name that only begins as a quiet one's is none of them.
+    let compacted_more = record(&compacted_then("<command-name>/compacted</command-name>"));
+    assert_eq!(compacted_more.stood_at(at(60)).unwrap().0, Stood::InFlight);
+    assert!(!compacted_more.ends_in_compaction());
+    // One that runs no model leaves the record at rest, and ending in the compaction.
+    let model = record(&compacted_then(
+        "<command-name>/model</command-name>\n<command-args>haiku</command-args>",
+    ));
+    assert_eq!(model.stood_at(at(60)).unwrap().0, Stood::AtRest);
+    assert!(model.ends_in_compaction());
+}
+
+#[test]
 fn a_refusal_of_the_provider_ends_the_turn_natively() {
     let refused = record(&[
         prompt(0, "Fix it."),

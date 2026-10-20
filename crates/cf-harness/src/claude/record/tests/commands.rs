@@ -88,6 +88,16 @@ pub(super) fn printed(uuid: &str, parent: &str, words: &str) -> Value {
     printed_to(uuid, parent, "stdout", words)
 }
 
+/// What a command printed, written as the system's record (`local_command`), a
+/// child of the command `parent`.
+fn printed_by_the_system(uuid: &str, parent: &str, words: &str) -> Value {
+    of_session(json!({
+        "type": "system", "subtype": "local_command", "isMeta": false, "level": "info",
+        "content": format!("<local-command-stdout>{words}</local-command-stdout>"),
+        "uuid": uuid, "parentUuid": parent,
+    }))
+}
+
 /// An attachment of the type `kind`, and of the hook `event` where it names one.
 fn attached(uuid: &str, parent: &str, kind: &str, event: Option<&str>) -> Value {
     let record = in_attachment(attachment(uuid, parent), "type", Some(json!(kind)));
@@ -224,7 +234,7 @@ fn each_command_typed_while_idle_is_at_rest_at_its_output() {
         ),
         (
             "printed nothing",
-            local("cost", "", printed("o1", "n1", "")),
+            local("model", "", printed("o1", "n1", "")),
         ),
         (
             "an error",
@@ -256,6 +266,150 @@ fn each_command_typed_while_idle_is_at_rest_at_its_output() {
         records.push(typed[typed.len() - 1].clone());
         assert_eq!(settlement_of(&records), Settlement::Settled, "{name}");
     }
+}
+
+/// A `/compact` typed into a conversation with nothing to compact, as Claude Code
+/// 2.1.304 writes it (the live run of 2026-10-20, `cancelled`, on a conversation
+/// just cleared): no bare command, the words before the command, the command,
+/// and what it printed as the system's record.
+#[test]
+fn a_compact_that_found_nothing_to_compact_is_at_rest_at_what_the_system_says_it_printed() {
+    let mut records = at_rest();
+    records.extend([
+        own("file-history-snapshot"),
+        caveat("k1", "d1"),
+        typed_command("n1", "k1", "compact", ""),
+    ]);
+    assert_eq!(
+        settlement_of(&records),
+        Settlement::InFlight,
+        "the command runs"
+    );
+    records.push(printed_by_the_system(
+        "o1",
+        "n1",
+        "Nothing here to compact yet.",
+    ));
+    assert_eq!(settlement_of(&records), Settlement::Settled);
+    // The next prompt is the user's, and opens a turn.
+    records.push(user("u2", json!("o1"), json!("Hello again")));
+    assert_eq!(settlement_of(&records), Settlement::InFlight);
+}
+
+#[test]
+fn each_command_whose_output_the_system_writes_is_at_rest_after_it_and_one_it_writes_whole_never_began_a_turn(
+) {
+    // 2.1.219's `/reload-skills`: the command the user's, what it printed the system's.
+    let mut reloaded = at_rest();
+    reloaded.extend([
+        caveat("k1", "d1"),
+        typed_command("n1", "k1", "reload-skills", ""),
+        printed_by_the_system("o1", "n1", "Reloaded the skills"),
+    ]);
+    assert_eq!(settlement_of(&reloaded), Settlement::Settled);
+    // `/mcp`, `/plugin`: the command and what it printed both the system's, no turn.
+    let mut dismissed = at_rest();
+    let mut command = printed_by_the_system("n1", "d1", "x");
+    command["content"] = json!("<command-name>/mcp</command-name>");
+    dismissed.extend([
+        command,
+        printed_by_the_system("o1", "n1", "Dialog dismissed"),
+    ]);
+    assert_eq!(settlement_of(&dismissed), Settlement::Settled);
+}
+
+/// A command that goes on to ask the model what it printed, as 2.1.303's `/plan
+/// <description>` does (Sol's look at round 1): the command, what it printed, and
+/// then the model's turn, whose end ends it. Any command but the ones Claude does
+/// by itself is read so: a skill, a command of the user's own, a name unknown.
+#[test]
+fn a_command_that_goes_on_to_the_model_is_at_work_from_what_it_printed_to_the_end_of_the_turn() {
+    for (name, args) in [
+        ("plan", "a plan for the release"),
+        ("my-skill", ""),
+        ("nonesuch", ""),
+    ] {
+        let mut records = at_rest();
+        records.extend([
+            caveat("k1", "d1"),
+            typed_command("n1", "k1", name, args),
+            printed("o1", "n1", "Planning the release"),
+        ]);
+        assert_eq!(
+            settlement_of(&records),
+            Settlement::InFlight,
+            "/{name}: what it printed"
+        );
+        let mut by_the_system = records.clone();
+        by_the_system.pop();
+        by_the_system.push(printed_by_the_system("o1", "n1", "Planning"));
+        assert_eq!(
+            settlement_of(&by_the_system),
+            Settlement::InFlight,
+            "/{name}: what it printed, as the system's record"
+        );
+        records.push(assistant(
+            "a2",
+            "o1",
+            json!("m2"),
+            json!([text(json!("The plan:"))]),
+            Value::Null,
+        ));
+        assert_eq!(
+            settlement_of(&records),
+            Settlement::InFlight,
+            "/{name}: the model at work"
+        );
+        records.extend([
+            assistant(
+                "a3",
+                "a2",
+                json!("m2"),
+                json!([text(json!("Done."))]),
+                json!("end_turn"),
+            ),
+            duration("d2", "a3"),
+        ]);
+        assert_eq!(settlement_of(&records), Settlement::Settled, "/{name}");
+    }
+}
+
+#[test]
+fn a_model_turn_after_what_a_command_printed_is_at_work_until_its_answer() {
+    // Should a command go on to run the model, its answer's records open the turn
+    // again: the output ends nothing the model does after it.
+    let mut records = at_rest();
+    records.extend([
+        caveat("k1", "d1"),
+        typed_command("n1", "k1", "compact", ""),
+        printed_by_the_system("o1", "n1", "Done"),
+    ]);
+    let working = assistant(
+        "a2",
+        "o1",
+        json!("m2"),
+        json!([tool_use(json!("t1"))]),
+        Value::Null,
+    );
+    records.push(working);
+    assert_eq!(settlement_of(&records), Settlement::InFlight);
+    let answered = assistant(
+        "a3",
+        "a2",
+        json!("m2"),
+        json!([text(json!("Done"))]),
+        json!("end_turn"),
+    );
+    records.extend([
+        user(
+            "r1",
+            json!("a2"),
+            json!([tool_result(json!("t1"), json!("ok"))]),
+        ),
+        answered,
+        duration("d2", "a3"),
+    ]);
+    assert_eq!(settlement_of(&records), Settlement::Settled);
 }
 
 #[test]

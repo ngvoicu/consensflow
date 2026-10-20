@@ -49,13 +49,15 @@ const KEPT: usize = 600;
 /// wraps a cross-session message in (the product's `ENVELOPE`). Group 1 is its name.
 const ENVELOPE: &str = r"^<([A-Za-z][A-Za-z0-9_-]*)(?:\s[^>]*)?>";
 
-/// What a user's record of what a command typed at Claude's prompt printed opens
-/// with (the product's `OUTPUT`).
+/// What a record of what a command typed at Claude's prompt printed opens with,
+/// the user's or the system's (the product's `OUTPUT`).
 const OUTPUTS: [&str; 2] = ["<local-command-stdout>", "<local-command-stderr>"];
 
-/// What the user's record of a command typed at Claude's prompt opens with: its name
-/// (the product's `COMMAND`, `<command-name>/compact</command-name>`).
-const COMMAND: &str = "<command-name>/";
+/// The commands typed at Claude's prompt that run no model after what they printed (the
+/// product's `QUIET_COMMAND`): the user's record of one opens with its name,
+/// `<command-name>/compact</command-name>`. Another (2.1.303's `/plan <description>`)
+/// may go on to ask the model.
+const QUIET: [&str; 5] = ["clear", "compact", "effort", "model", "reload-skills"];
 
 /// What Claude Code writes before a command typed at its prompt, as a meta record.
 const CAVEAT: &str = "<local-command-caveat>";
@@ -83,8 +85,8 @@ pub enum Kind {
     /// Claude Code compacted the conversation: no turn.
     Compaction,
     /// What a command typed at Claude's prompt printed (`<local-command-stdout>`,
-    /// `<local-command-stderr>`): the end, natively, of the turn its command began,
-    /// where it follows the command.
+    /// `<local-command-stderr>`), as the user's record or the system's: the end,
+    /// natively, of the turn its command began, where it follows the command.
     Output,
     /// How many background agents and workflows a root `turn_duration` says its turn
     /// left running (`pendingBackgroundAgentCount`, `pendingWorkflowCount`; none when
@@ -425,9 +427,10 @@ impl Record {
 
     /// Whether the last thing the record says of its turns is a compaction: no turn
     /// since Claude Code compacted the conversation (a job's start or end, or a count
-    /// of agents, aside, and the records of the command that ended there: what it
-    /// printed, the command, and the words before it, which a `/compact` typed at the
-    /// prompt writes after its summary).
+    /// of agents, aside, and the records of each command after it that runs no model:
+    /// what it printed, the command, and the words before it, which a `/compact` typed
+    /// at the prompt writes after its summary). A command that may go on to the model
+    /// is no such thing: a turn may be at work after it.
     pub fn ends_in_compaction(&self) -> bool {
         let mut said = self
             .entries
@@ -440,12 +443,11 @@ impl Record {
                 )
             })
             .peekable();
-        let prompt = |entry: &Entry, opening: &str| {
-            entry.kind == Kind::Prompt && entry.content.starts_with(opening)
-        };
-        if said.next_if(|entry| entry.kind == Kind::Output).is_some() {
-            said.next_if(|entry| prompt(entry, COMMAND));
-            said.next_if(|entry| prompt(entry, CAVEAT));
+        while said.next_if(|entry| entry.kind == Kind::Output).is_some() {
+            if said.next_if(|entry| quiet(entry)).is_none() {
+                return false;
+            }
+            said.next_if(|entry| entry.kind == Kind::Prompt && entry.content.starts_with(CAVEAT));
         }
         said.next()
             .is_some_and(|entry| entry.kind == Kind::Compaction)
@@ -550,14 +552,23 @@ fn is_count(value: &Value) -> bool {
     })
 }
 
-/// Whether `output` follows the command it is what was printed of, as the product
-/// reads it: the entry that last moved the turn is the user's command, and `output`
-/// is its child.
+/// Whether `output` follows the command it is what was printed of, and the command
+/// runs no model after it, as the product reads it: the entry that last moved the
+/// turn is the user's command, one of the quiet ones, and `output` is its child.
 fn follows_its_command(last: &Entry, output: &Entry) -> bool {
-    last.kind == Kind::Prompt
-        && last.content.starts_with(COMMAND)
-        && last.uuid.is_some()
-        && last.uuid == output.parent
+    quiet(last) && last.uuid.is_some() && last.uuid == output.parent
+}
+
+/// Whether `entry` is the user's record of a command that runs no model ([`QUIET`]).
+fn quiet(entry: &Entry) -> bool {
+    entry.kind == Kind::Prompt
+        && QUIET.iter().any(|name| {
+            entry
+                .content
+                .strip_prefix("<command-name>/")
+                .and_then(|rest| rest.strip_prefix(name))
+                .is_some_and(|rest| rest.starts_with("</command-name>"))
+        })
 }
 
 /// Whether a system record is the boundary that ends a turn that answered, as the
@@ -624,6 +635,21 @@ fn claude_entries(line: &Value, names: &Names) -> Vec<Entry> {
         }
         Some("system") if line["subtype"] == "compact_boundary" => {
             vec![entry(Kind::Compaction, "compact_boundary")]
+        }
+        // What a command printed, written as the system's record (a `/clear`'s, a
+        // `/compact` that found nothing to compact), as the product reads one.
+        Some("system")
+            if line["subtype"] == "local_command"
+                && line["isMeta"] == false
+                && line["level"] == "info"
+                && line["content"]
+                    .as_str()
+                    .is_some_and(|text| OUTPUTS.iter().any(|tag| text.starts_with(tag))) =>
+        {
+            vec![entry(
+                Kind::Output,
+                line["content"].as_str().unwrap_or_default(),
+            )]
         }
         Some("system") => Vec::new(),
         Some("queue-operation") => {

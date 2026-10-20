@@ -18,9 +18,14 @@
 //! What should have been seen: the chief at rest once Claude is back at its prompt, and the
 //! worker's result handed to it.
 //!
-//! The case is that shape on the rig: the chief hands a worker a turn of 30 s and ends its
+//! The cases are that shape on the rig: the chief hands a worker a turn of 45 s and ends its
 //! own; `/compact` is typed into its idle window, and its stand-in writes what Claude Code
-//! 2.1.303 writes (`fake_agent`'s `compact`); the worker's result must reach the chief.
+//! 2.1.303 writes (`fake_agent`'s `compact`). In the second, `/compact` is typed again, which
+//! finds nothing to compact, and the stand-in writes what Claude Code 2.1.304 writes of that
+//! (the live run of 2026-10-20: the words before the command, the command, and what it printed
+//! as the system's record, which ConsensFlow read as a turn that never ended too). The worker's
+//! result must reach the chief. Each case holds one way the record ends a command's turn: the
+//! second's own end would hide the first's.
 
 use std::thread::sleep;
 use std::time::Duration;
@@ -40,6 +45,20 @@ fn tier(added: &Value) -> &str {
 const COMPACT: &[u8] = b"/compact";
 const ENTER: &[u8] = b"\r";
 
+/// The human types `/compact` into the chief's window, a key at a time.
+fn type_compact(rig: &Rig, project: &Project) -> Outcome {
+    let pane = project.lane("chief")?["pane"].clone();
+    for keys in [COMPACT, ENTER] {
+        let typed = rig.host(
+            "pane.input",
+            json!({ "id": pane["id"], "generation": pane["generation"], "bytes": keys }),
+        )?;
+        assert_eq!(typed["ok"], true, "{typed}");
+        sleep(Duration::from_millis(600));
+    }
+    Ok(())
+}
+
 /// The chief's result, once it is given one: its id, and whether it is delivered.
 fn result(project: &Project) -> cf_e2e::Result<Option<(i64, bool)>> {
     Ok(project
@@ -57,6 +76,18 @@ fn result(project: &Project) -> cf_e2e::Result<Option<(i64, bool)>> {
 #[test]
 fn a_claude_chief_given_a_compact_while_idle_is_at_rest_after_it_and_is_handed_its_workers_result(
 ) -> Outcome {
+    compacted_and_handed_its_workers_result(false)
+}
+
+#[test]
+fn a_claude_chief_given_a_compact_with_nothing_to_compact_is_at_rest_after_it_and_is_handed_its_workers_result(
+) -> Outcome {
+    compacted_and_handed_its_workers_result(true)
+}
+
+/// A chief whose worker is at work is given `/compact` while idle, and `/compact` again once
+/// it compacted where `again`; then the worker's result must reach it.
+fn compacted_and_handed_its_workers_result(again: bool) -> Outcome {
     let rig = Rig::start(config())?;
     let project = Project::open(&rig, "chief", json!({}))?;
     let added = project.add_member("worker")?;
@@ -68,7 +99,7 @@ fn a_claude_chief_given_a_compact_while_idle_is_at_rest_after_it_and_is_handed_i
     rig.tell(
         project.id(),
         &format!(
-            "DISPATCH --tier {} SLEEP 30 Reply with exactly: WORKER_OK",
+            "DISPATCH --tier {} SLEEP 45 Reply with exactly: WORKER_OK",
             tier(&added)
         ),
     )?;
@@ -77,23 +108,28 @@ fn a_claude_chief_given_a_compact_while_idle_is_at_rest_after_it_and_is_handed_i
     })?;
     wait_for_the_chief(&rig, &project)?;
 
-    // The human types /compact into the chief's idle window, a key at a time.
-    let pane = project.lane("chief")?["pane"].clone();
-    for keys in [COMPACT, ENTER] {
-        let typed = rig.host(
-            "pane.input",
-            json!({ "id": pane["id"], "generation": pane["generation"], "bytes": keys }),
-        )?;
-        assert_eq!(typed["ok"], true, "{typed}");
-        sleep(Duration::from_millis(600));
-    }
+    // The human types /compact into the chief's idle window, and maybe again once it
+    // compacted: nothing is left to compact then.
+    type_compact(&rig, &project)?;
     rig.wait_for("the chief's record to say it compacted", secs(30), || {
         Ok(rig.transcript(&session).contains("<local-command-stdout>"))
     })?;
+    if again {
+        type_compact(&rig, &project)?;
+        rig.wait_for(
+            "the chief's record to say it found nothing to compact",
+            secs(30),
+            || {
+                Ok(rig
+                    .transcript(&session)
+                    .contains("\"subtype\":\"local_command\""))
+            },
+        )?;
+    }
     assert_eq!(
         project.task(1)?["state"],
         "working",
-        "the worker's result came before the compaction: the case holds nothing"
+        "the worker's result came before the compactions: the case holds nothing"
     );
 
     // The worker answers, and its result goes into the chief's window.

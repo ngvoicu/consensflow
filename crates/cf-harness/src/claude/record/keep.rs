@@ -52,7 +52,7 @@ pub(super) static RECORD: Keep = Keep::Members(&[
     ("message", &MESSAGE),
     ("attachment", &ATTACHMENT),
     ("operation", &Keep::Scalar),
-    // What a queue operation names, whatever it is, and a `/clear`'s output.
+    // What a queue operation names, whatever it is, and what a command printed.
     ("content", &Keep::All),
     ("isApiErrorMessage", &Keep::Scalar),
     ("apiErrorStatus", &Keep::Scalar),

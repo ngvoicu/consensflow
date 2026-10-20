@@ -36,6 +36,9 @@ pub struct Records {
     /// The conversation ends in a turn nothing answered, which the next user's
     /// message finds open and closes.
     cut: bool,
+    /// Something was said in the conversation since it began or was last
+    /// compacted: a compaction has something to compact.
+    said: bool,
 }
 
 /// Whether the conversation `text` ends in a turn nothing answered: its last
@@ -64,14 +67,27 @@ impl Records {
                 fs::create_dir_all(folder)?;
             }
         }
-        let cut = fs::read_to_string(&transcript).is_ok_and(|text| ends_cut(&text));
+        let kept = fs::read_to_string(&transcript).unwrap_or_default();
         Ok(Self {
             session: session.to_owned(),
             transcript,
             status_file,
             ordinal: 0,
-            cut,
+            cut: ends_cut(&kept),
+            said: !kept.trim().is_empty(),
         })
+    }
+
+    /// Whether something was said in the conversation since it began or was
+    /// last compacted.
+    pub fn said(&self) -> bool {
+        self.said
+    }
+
+    /// The conversation was compacted, or a compaction found nothing to compact:
+    /// what its own records say is nothing said.
+    pub fn compacted(&mut self) {
+        self.said = false;
     }
 
     /// Where the window's live status is: removed when the window ends.
@@ -112,6 +128,7 @@ impl Records {
             )?;
         }
         self.ordinal += 1;
+        self.said |= fields["type"] == "user";
         let mut record = Map::new();
         record.insert("sessionId".to_owned(), json!(self.session));
         record.insert("version".to_owned(), json!(VERSION));

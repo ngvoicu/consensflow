@@ -8,27 +8,35 @@
 //! the idle chief, which compacted and went back to its prompt, and ConsensFlow read it at
 //! work for the 80 minutes left: Claude Code writes a command typed at its prompt as user's
 //! records (the bare `/compact`, the words before a command, the command) and then what it
-//! printed, which held a `PostCompact` hook's words, and runs no model.
+//! printed, which held a `PostCompact` hook's words, and runs no model. This suite's first
+//! run (2026-10-20, 2.1.304) found a `/compact` with nothing to compact written another way:
+//! what it printed as the system's record.
 //!
 //! One window, in a folder of its own, on Claude's cheap model, with no MCP server, no
-//! browser, and none of the owner's settings (`--setting-sources local`): its hooks are
-//! ConsensFlow's and the run's own, which print words of their own (`PostCompact`, and
+//! browser, and none of the owner's settings read (`--setting-sources local`): its hooks
+//! are ConsensFlow's and the run's own, which print words of their own (`PostCompact`, and
 //! `SessionStart` as the conversation begins, again after a compaction or a `/clear`). A
 //! first message, answered; then each command, typed as a person types it (its keys, then
-//! Enter) at the window idle; once Claude's status has read idle for a few seconds, the
-//! window must read at rest as the daemon reads it: Claude's status idle, and its record
-//! settled. Then a last message, answered, and at rest.
+//! Enter) at the window idle. Each must leave fresh evidence that it ran (below) before the
+//! window is read; then, once Claude's status has read idle for a few seconds, the window
+//! must read at rest as the daemon reads it: Claude's status idle, and its record settled.
+//! The owner's Claude settings file must be byte for byte what it was before each command:
+//! `--setting-sources local` limits what Claude reads, not what it writes, and `/model` and
+//! `/effort` save themselves there as the default for new sessions (the first run changed
+//! the owner's model so), which is why neither is typed here (the reader's tests hold their
+//! shape). Then a last message, answered, and at rest.
 //!
-//! - `compact`    `/compact`, which prints the `PostCompact` hook's words
-//! - `model`      `/model` of the model the window runs on
-//! - `effort`     `/effort medium`
+//! - `compact`    `/compact`: the boundary, and the `PostCompact` hook's words in what it
+//!   printed
 //! - `clear`      `/clear`: the window shows a new conversation, which its status names
-//! - `cancelled`  `/compact`, and Escape a second later: a finding (what Claude wrote of
-//!   it, and how it reads), never a failure
+//! - `refused`    `/clear`, then `/compact` with nothing to compact: what it printed, as the
+//!   system's record
+//! - `cancelled`  a message, answered, then `/compact` and Escape a second later: a record of
+//!   the command, or Claude's status busy after the keys
 //!
 //! ```text
 //! cargo xtask live commands-at-rest                           every command
-//! cargo xtask live commands-at-rest --command compact --command clear
+//! cargo xtask live commands-at-rest --command compact --command cancelled
 //! ```
 
 use std::fs;
@@ -40,7 +48,7 @@ use cf_e2e::live::claude::{self, Entry};
 use cf_e2e::live::members::named;
 use cf_e2e::live::report::{self, Check};
 use cf_e2e::live::window::{Open, Window};
-use cf_e2e::live::{self, agents, ask, Harness, Log};
+use cf_e2e::live::{self, ask, Harness, Log};
 use cf_e2e::rig::Rig;
 use cf_e2e::{Error, Result};
 use serde_json::{json, Value};
@@ -72,44 +80,71 @@ const CANCEL_AFTER: Duration = Duration::from_secs(1);
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Command {
     Compact,
-    Model,
-    Effort,
     Clear,
+    Refused,
     Cancelled,
 }
 
 impl Command {
-    const ALL: [Command; 5] = [
+    const ALL: [Command; 4] = [
         Command::Compact,
-        Command::Model,
-        Command::Effort,
         Command::Clear,
+        Command::Refused,
         Command::Cancelled,
     ];
 
     const fn name(self) -> &'static str {
         match self {
             Command::Compact => "compact",
-            Command::Model => "model",
-            Command::Effort => "effort",
             Command::Clear => "clear",
+            Command::Refused => "refused",
             Command::Cancelled => "cancelled",
         }
     }
 
-    /// What is typed, for a window that runs on `model`.
-    fn typed(self, model: &str) -> String {
+    /// What is typed.
+    const fn typed(self) -> &'static str {
         match self {
-            Command::Compact | Command::Cancelled => "/compact".to_owned(),
-            Command::Model => format!("/model {model}"),
-            Command::Effort => "/effort medium".to_owned(),
-            Command::Clear => "/clear".to_owned(),
+            Command::Clear => "/clear",
+            Command::Compact | Command::Refused | Command::Cancelled => "/compact",
         }
     }
+}
 
-    /// Whether what comes of it is a finding, which fails nothing.
-    fn finding(self) -> bool {
-        self == Command::Cancelled
+/// What the run saw of a command once its keys were typed: what was written in the
+/// conversation the window shows, whether that is a new one, and whether Claude's status
+/// read busy.
+struct Seen {
+    written: Vec<Entry>,
+    new_conversation: bool,
+    busy: bool,
+}
+
+/// Whether what was seen is fresh evidence that `command` ran: a window whose status and
+/// record are as they were before the keys says nothing of a command, which may never
+/// have been taken.
+fn ran(command: Command, seen: &Seen) -> bool {
+    let wrote = |kind: &str| seen.written.iter().any(|entry| entry.kind == kind);
+    let the_command = || {
+        seen.written.iter().any(|entry| {
+            entry.kind == "user"
+                && (entry.text == "/compact"
+                    || entry
+                        .text
+                        .starts_with("<command-name>/compact</command-name>"))
+        })
+    };
+    match command {
+        Command::Compact => {
+            wrote("system/compact_boundary")
+                && seen
+                    .written
+                    .iter()
+                    .any(|entry| entry.text.contains(POST_COMPACT))
+        }
+        Command::Clear => seen.new_conversation,
+        Command::Refused => wrote("system/local_command"),
+        Command::Cancelled => the_command() || seen.busy,
     }
 }
 
@@ -117,6 +152,12 @@ impl Command {
 fn hooks() -> Value {
     let say = |words: &str| json!([{ "hooks": [{ "type": "command", "command": format!("echo {words}") }] }]);
     json!({ "PostCompact": say(POST_COMPACT), "SessionStart": say(SESSION_START) })
+}
+
+/// The owner's Claude settings file under the config folder `config`, as its bytes: none
+/// where there is none.
+fn settings_of(config: &Path) -> Option<Vec<u8>> {
+    fs::read(config.join("settings.json")).ok()
 }
 
 /// The status file of the running Claude whose status names `session`, under the
@@ -170,47 +211,114 @@ fn shape(entry: &Entry) -> String {
     format!("{} {opening}", entry.kind)
 }
 
+/// Types `words` into the window, then Enter, as a person types.
+fn type_keys(window: &Window, words: &str) -> Result {
+    window.press(words.as_bytes())?;
+    sleep(KEYED);
+    window.press(b"\r")?;
+    Ok(())
+}
+
 /// What came of one command: the lines that say it, and whether the window read at rest.
 struct Came {
     at_rest: bool,
     lines: Vec<String>,
 }
 
-/// Types `command` into the idle `window` (whose status file is `status`), waits for it
-/// to be done, and reads the window as the daemon reads it.
-fn type_command(window: &Window, status: &Path, command: Command, model: &str) -> Result<Came> {
+/// What a command needs before it is typed: a conversation just cleared for `refused`,
+/// and one with an exchange to compact for `cancelled`. Whether it was had.
+fn prepare(window: &Window, status: &Path, command: Command) -> Result<bool> {
+    match command {
+        Command::Refused => {
+            let before = window.session().unwrap_or_default();
+            type_keys(window, "/clear")?;
+            let cleared = live::until(DONE, LOOK, || {
+                read(status)["sessionId"]
+                    .as_str()
+                    .filter(|session| *session != before)
+                    .map(str::to_owned)
+            });
+            match cleared {
+                Some(session) => window.follow(&session),
+                None => return Ok(false),
+            }
+        }
+        Command::Cancelled => {
+            let sent = window.send(
+                &window.given("Reply with exactly one line: AGAIN")?,
+                "AGAIN",
+            )?;
+            if !sent.shown {
+                return Ok(false);
+            }
+        }
+        Command::Compact | Command::Clear => {}
+    }
+    Ok(idle_and_held(status))
+}
+
+/// Types `command` into the idle `window` (whose status file is `status`), waits for fresh
+/// evidence that it ran and for Claude to be idle after it, and reads the window as the
+/// daemon reads it; the owner's settings must be as they were.
+fn type_command(window: &Window, status: &Path, command: Command) -> Result<Came> {
+    if !prepare(window, status, command)? {
+        return Ok(Came {
+            at_rest: false,
+            lines: vec![format!(
+                "what `{}` needs first did not come: {}",
+                command.name(),
+                window.tail()
+            )],
+        });
+    }
     let config = window.claude_config();
+    let settings = settings_of(&config);
     let before = window.session().unwrap_or_default();
     let mark = claude::record(&config, &before).len();
-    window.press(command.typed(model).as_bytes())?;
-    sleep(KEYED);
-    window.press(b"\r")?;
+    type_keys(window, command.typed())?;
     if command == Command::Cancelled {
         sleep(CANCEL_AFTER);
         window.press(&[27])?;
     }
-    sleep(KEYED);
-    let done = idle_and_held(status);
-    // A /clear has the window show a conversation of its own, which its status names.
-    let session = read(status)["sessionId"]
-        .as_str()
-        .map_or(before.clone(), str::to_owned);
+    let mut busy = false;
+    let look = || {
+        // A /clear has the window show a conversation of its own, which its status names.
+        let now = read(status);
+        let session = now["sessionId"]
+            .as_str()
+            .map_or(before.clone(), str::to_owned);
+        let written: Vec<Entry> = claude::record(&config, &session)
+            .into_iter()
+            .skip(if session == before { mark } else { 0 })
+            .collect();
+        (session, written, now["status"] == "busy")
+    };
+    let seen = live::until(DONE, LOOK, || {
+        let (session, written, now_busy) = look();
+        busy |= now_busy;
+        let seen = Seen {
+            written,
+            new_conversation: session != before,
+            busy,
+        };
+        ran(command, &seen).then_some((session, seen))
+    });
+    let done = seen.is_some() && idle_and_held(status);
+    let (session, written, _) = look();
     if session != before {
         window.follow(&session);
     }
-    let written = if session == before {
-        claude::record(&config, &session)
-            .into_iter()
-            .skip(mark)
-            .collect()
-    } else {
-        claude::record(&config, &session)
-    };
     let reading = window.record();
     let settled = reading.as_ref().is_some_and(|record| record.settled);
+    let kept = settings_of(&config) == settings;
     let mut lines = vec![format!(
-        "typed `{}`; Claude's status {}; the record reads {}",
-        command.typed(model),
+        "typed `{}`; {}; Claude's status {}; the record reads {}",
+        command.typed(),
+        if seen.is_some() {
+            "it ran"
+        } else {
+            "no fresh evidence that it ran"
+        },
         if done {
             "read idle after it"
         } else {
@@ -224,17 +332,14 @@ fn type_command(window: &Window, status: &Path, command: Command, model: &str) -
         lines.push(format!("the window shows a new conversation: {session}"));
     }
     lines.extend(written.iter().map(|entry| format!("  {}", shape(entry))));
-    if command == Command::Compact {
-        let printed = written
-            .iter()
-            .any(|entry| entry.text.contains(POST_COMPACT));
+    if !kept {
         lines.push(format!(
-            "the PostCompact hook's words are {}in what it wrote",
-            if printed { "" } else { "not " }
+            "FAIL Claude changed the owner's settings, {}",
+            config.join("settings.json").display()
         ));
     }
     Ok(Came {
-        at_rest: done && settled,
+        at_rest: done && settled && kept,
         lines,
     })
 }
@@ -253,10 +358,6 @@ fn each_command_typed_at_an_idle_claudes_prompt_leaves_the_window_at_rest() -> R
         &Command::ALL,
     )?;
     let claude = log.found(Harness::Claude)?;
-    let model = agents::agent(Harness::Claude)["model"]
-        .as_str()
-        .unwrap_or_default()
-        .to_owned();
     let rig = Rig::start(live::rig(std::slice::from_ref(&claude), FAKE_AGENT))?;
     let window = Open::new(&rig, &claude, FOLDER, FOLDER)
         .claude_alone_with_hooks(hooks())
@@ -289,21 +390,16 @@ fn each_command_typed_at_an_idle_claudes_prompt_leaves_the_window_at_rest() -> R
             ));
             continue;
         }
-        let came = type_command(&window, &status, command, &model)?;
+        let came = type_command(&window, &status, command)?;
         log.block(&format!("== {}", command.name()), &came.lines.join("\n"));
-        let said = if came.at_rest {
-            "at rest after it"
-        } else {
-            "not at rest after it"
-        };
         checks.push(Check::new(
             "claude",
             command.name(),
-            came.at_rest || command.finding(),
-            if command.finding() {
-                format!("{said} (a finding)")
+            came.at_rest,
+            if came.at_rest {
+                "it ran, and the window is at rest after it"
             } else {
-                said.to_owned()
+                "not at rest after it, or it never ran, or the owner's settings changed"
             },
         ));
     }
@@ -349,43 +445,93 @@ mod tests {
         )
         .unwrap();
         assert_eq!(some, [Command::Clear, Command::Compact]);
-        let refused = named(
-            &words(&["cost"]),
-            &Command::ALL,
-            Command::name,
-            "command",
-            &Command::ALL,
-        );
-        assert_eq!(
-            refused.err().map(|failed| failed.to_string()).as_deref(),
-            Some("no such command: cost")
-        );
+        // `/model` and `/effort` save themselves in the owner's settings: never typed here.
+        for none in ["model", "effort", "cost"] {
+            let refused = named(
+                &words(&[none]),
+                &Command::ALL,
+                Command::name,
+                "command",
+                &Command::ALL,
+            );
+            assert_eq!(
+                refused.err().map(|failed| failed.to_string()),
+                Some(format!("no such command: {none}"))
+            );
+        }
     }
 
     #[test]
-    fn each_command_is_typed_as_a_person_types_it_and_only_the_cancelled_one_is_a_finding() {
-        let typed: Vec<String> = Command::ALL
-            .iter()
-            .map(|command| command.typed("claude-sonnet-5-5"))
-            .collect();
-        assert_eq!(
-            typed,
-            [
-                "/compact",
-                "/model claude-sonnet-5-5",
-                "/effort medium",
-                "/clear",
-                "/compact"
-            ]
-        );
-        assert_eq!(
-            Command::ALL
-                .iter()
-                .filter(|command| command.finding())
-                .count(),
-            1
-        );
-        assert!(Command::Cancelled.finding());
+    fn each_command_is_typed_as_a_person_types_it() {
+        let typed: Vec<&str> = Command::ALL.iter().map(|command| command.typed()).collect();
+        assert_eq!(typed, ["/compact", "/clear", "/compact", "/compact"]);
+    }
+
+    /// A record of the kind `kind`, saying `text`.
+    fn entry(kind: &str, text: &str) -> Entry {
+        Entry {
+            at_ms: None,
+            kind: kind.to_owned(),
+            text: text.to_owned(),
+            model: None,
+            raw: String::new(),
+        }
+    }
+
+    #[test]
+    fn a_command_ran_only_where_it_left_fresh_evidence_of_its_own() {
+        let seen = |written: Vec<Entry>, new_conversation: bool, busy: bool| Seen {
+            written,
+            new_conversation,
+            busy,
+        };
+        let nothing = || seen(Vec::new(), false, false);
+        // An unchanged window says nothing of any command.
+        for command in Command::ALL {
+            assert!(!ran(command, &nothing()), "{command:?}");
+        }
+        let boundary = || entry("system/compact_boundary", "");
+        let printed = |words: &str| entry("user", &format!("<local-command-stdout>{words}"));
+        assert!(ran(
+            Command::Compact,
+            &seen(vec![boundary(), printed(POST_COMPACT)], false, false)
+        ));
+        assert!(!ran(
+            Command::Compact,
+            &seen(vec![boundary()], false, false)
+        ));
+        assert!(!ran(
+            Command::Compact,
+            &seen(vec![printed(POST_COMPACT)], false, false)
+        ));
+        assert!(ran(Command::Clear, &seen(Vec::new(), true, false)));
+        assert!(!ran(Command::Clear, &seen(vec![boundary()], false, true)));
+        assert!(ran(
+            Command::Refused,
+            &seen(vec![entry("system/local_command", "")], false, false)
+        ));
+        assert!(!ran(
+            Command::Refused,
+            &seen(vec![printed("x")], false, true)
+        ));
+        for written in [
+            vec![entry("user", "/compact")],
+            vec![entry(
+                "user",
+                "<command-name>/compact</command-name> ⏎ <command-args></command-args>",
+            )],
+        ] {
+            assert!(ran(Command::Cancelled, &seen(written, false, false)));
+        }
+        assert!(ran(Command::Cancelled, &seen(Vec::new(), false, true)));
+        assert!(!ran(
+            Command::Cancelled,
+            &seen(
+                vec![entry("user", "<command-name>/clear</command-name>")],
+                false,
+                false
+            )
+        ));
     }
 
     #[test]
@@ -401,6 +547,17 @@ mod tests {
             json!(format!("echo {SESSION_START}"))
         );
         assert_eq!(hooks.as_object().map(serde_json::Map::len), Some(2));
+    }
+
+    #[test]
+    fn the_owners_settings_are_read_as_their_bytes_and_as_none_where_there_are_none() {
+        let config = tempfile::tempdir().unwrap();
+        assert_eq!(settings_of(config.path()), None);
+        fs::write(config.path().join("settings.json"), b"{\"model\":\"x\"}").unwrap();
+        assert_eq!(
+            settings_of(config.path()),
+            Some(b"{\"model\":\"x\"}".to_vec())
+        );
     }
 
     #[test]

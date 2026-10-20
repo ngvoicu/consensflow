@@ -5,10 +5,9 @@
 use std::sync::Arc;
 
 use cf_base::{js, time};
-use regex::Regex;
 use serde_json::Value;
 
-use super::patterns::{CLEAR, COMMAND};
+use super::patterns::QUIET_COMMAND;
 use super::project::{Assistant, Block, Boundary, Hook, Projected, ToolResult, User};
 use super::{Candidate, Terminal, Transcript};
 use crate::shared::quota::exhausted_quota;
@@ -34,7 +33,7 @@ impl Transcript {
             }
             Projected::Assistant(assistant) => self.assistant(assistant, seq)?,
             Projected::User(user) => self.user(user, place, seq)?,
-            Projected::Clear(parent) => self.clear(parent),
+            Projected::Output(parent) => self.output(parent),
             Projected::Boundary(boundary) => self.boundary(boundary),
         }
         Ok(())
@@ -154,7 +153,8 @@ impl Transcript {
     ///
     /// What a command typed at Claude's prompt printed (`/compact`, `/model`)
     /// is an item as any, and a native end of the command's turn where it
-    /// follows the command, with nothing open: the command, the words Claude
+    /// follows the command, which runs no model, with nothing open
+    /// (`follows_its_command`): the command, the words Claude
     /// Code writes before it (`<local-command-caveat>`, and the bare `/compact`
     /// of 2.1.303) and the summary of a compaction read as a prompt each, and
     /// no model runs after (the long run of 2026-10-19, a chief at rest after
@@ -184,7 +184,7 @@ impl Transcript {
         let ends = record
             .output_of
             .as_deref()
-            .is_some_and(|parent| self.follows_its_command(parent, &COMMAND));
+            .is_some_and(|parent| self.follows_its_command(parent));
         let id = id_of(record.uuid.as_ref(), "claude user", seq)?;
         self.items.push(id, Role::User, &record.text, at, seq);
         if ends {
@@ -220,23 +220,29 @@ impl Transcript {
             .is_late(user, uuid.as_deref(), &candidate.uuid)
     }
 
-    /// The output of a `/clear` that is the user's turn last pushed, with
-    /// nothing open: a native end of the turn. `parent` is the uuid of the
-    /// record the output is a child of.
-    fn clear(&mut self, parent: &str) {
-        if self.follows_its_command(parent, &CLEAR) {
+    /// What a command printed, written as the system's record, that follows
+    /// the command with nothing open: a native end of the command's turn, as
+    /// the user's record of it is (`user`). A `/clear`'s says nothing; a
+    /// `/compact` that found nothing to compact (Claude Code 2.1.304, the live
+    /// run of 2026-10-20) or a `/reload-skills` says what it did. `parent` is
+    /// the uuid of the record the output is a child of.
+    fn output(&mut self, parent: &str) {
+        if self.follows_its_command(parent) {
             self.ended_natively();
         }
     }
 
     /// Whether an output, a child of the record `parent`, follows the command
-    /// it is the output of: the user's turn last pushed is that record, a
-    /// command `command` matches, and nothing is open.
-    fn follows_its_command(&self, parent: &str, command: &Regex) -> bool {
+    /// it is the output of, and the command runs no model after it: the user's
+    /// turn last pushed is that record, one of the commands Claude Code does by
+    /// itself (`QUIET_COMMAND`), and nothing is open. What another command
+    /// printed is a prompt's words, as Node read it: the model may be asked
+    /// about it next (2.1.303's `/plan <description>`).
+    fn follows_its_command(&self, parent: &str) -> bool {
         self.items.last().is_some_and(|last| {
             last.role == Role::User
                 && parent == &*last.id
-                && command.is_match(&last.text)
+                && QUIET_COMMAND.is_match(&last.text)
                 && self.open_tools.is_empty()
                 && self.hooks.is_empty()
         })

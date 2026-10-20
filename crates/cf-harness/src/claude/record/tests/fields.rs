@@ -428,10 +428,7 @@ fn read() -> Vec<Row> {
             "content, of a /clear's output",
             cleared,
             1,
-            is(
-                "content",
-                json!("<local-command-stdout>x</local-command-stdout>"),
-            ),
+            is("content", json!("Cleared")),
         ),
         ("durationMs", ended, 2, is("durationMs", json!(-1))),
         ("messageCount", ended, 2, is("messageCount", json!(1.5))),
