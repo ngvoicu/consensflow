@@ -616,9 +616,17 @@ impl Dispatcher {
         // The adapter's `started` is an `async` function, and `.catch(...)`
         // made a promise of its own to wait on.
         let started = caught(planned.window.started()).await;
-        if let (Err(error), Some(delivering)) = (&started, failing) {
+        // A window that never came up is given up, with its first message or
+        // without one: a Codex chief opened again at rest after the app's restart
+        // has none, and read "starting" for good (zeewin, 2026-10-19).
+        if let Err(error) = &started {
+            let first = failing.is_some();
             // What the window shows is asked before it closes: the screen goes with it.
             let (shown, settles) = self.look_before_giving_up(record, Some(&pane)).await;
+            // One with nothing on its way whose exit came meanwhile went as any window goes.
+            if !first && record.window.borrow().pane.as_ref() != Some(&pane) {
+                return Ok(());
+            }
             // The chief's window goes without taking its project with it: the chief is tried again.
             if participant.role == "chief" {
                 self.close_own(record, &pane).await?;
@@ -631,14 +639,18 @@ impl Dispatcher {
                     .await,
                 );
             }
-            let because = format!("the window could not take its first message: {error}");
+            let because = if first {
+                format!("the window could not take its first message: {error}")
+            } else {
+                format!("the window never came up: {error}")
+            };
             // An exit that came while the host answered settled the launch, and logged it.
-            let said = if settles {
+            let said = if settles || !first {
                 self.unstarted_because(record, &because, &shown)
             } else {
                 shown.after(&because)
             };
-            return self.launch_failed(record, project, participant, Some(delivering), &said);
+            return self.launch_failed(record, project, participant, failing, &said);
         }
         if self.forgotten(record) {
             return Ok(());

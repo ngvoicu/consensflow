@@ -73,8 +73,8 @@ fn learns_the_thread_from_its_broker() {
 }
 
 /// How many milliseconds a window opened on `request` waits for its broker to
-/// name a thread before it says that none was named.
-fn waits_for_the_thread(request: &Request) -> i64 {
+/// name a thread before it says `said`, that none was named.
+fn waits_for_the_thread(request: &Request, said: &str) -> i64 {
     let home = Home::new();
     let (adapter, fakes) = adapter(&home);
     let window = prepare(&adapter, request).unwrap().window;
@@ -89,7 +89,6 @@ fn waits_for_the_thread(request: &Request) -> i64 {
         );
         settled = driver.run();
     }
-    let said = "the Codex broker never named the thread it opened";
     assert_eq!(settled, [(0, Err(said.to_owned()))]);
     fakes.time.wall_ms() - began
 }
@@ -97,10 +96,13 @@ fn waits_for_the_thread(request: &Request) -> i64 {
 #[test]
 fn a_thread_never_named_is_an_error_after_a_minute_or_the_time_the_launch_has_if_that_is_less() {
     let for_launch = |first_message_ms| {
-        waits_for_the_thread(&Request {
-            first_message_ms,
-            ..Request::default()
-        })
+        waits_for_the_thread(
+            &Request {
+                first_message_ms,
+                ..Request::default()
+            },
+            "the Codex broker never named the thread it opened",
+        )
     };
     // The launch's wait (`CONSENSFLOW_LAUNCH_TIMEOUT_MS`) cuts the minute short.
     assert_eq!(for_launch(2_000), 2_000);
@@ -111,6 +113,61 @@ fn a_thread_never_named_is_an_error_after_a_minute_or_the_time_the_launch_has_if
     for launch in [60_000, FIRST_MESSAGE_MS, 3_600_000] {
         assert_eq!(for_launch(launch), 60_000, "{launch}");
     }
+}
+
+/// A window opened on a thread its launch named is up once its broker names a
+/// thread, and its launch fails if the broker never does, as a new window's does:
+/// a Codex chief opened again after the app's restart, whose broker never named its
+/// thread, read "starting" for good (zeewin, 2026-10-19).
+#[test]
+fn a_window_opened_on_a_thread_is_up_once_its_broker_names_it_and_its_launch_fails_if_it_never_does(
+) {
+    let home = Home::new();
+    let (adapter, fakes) = adapter(&home);
+    let window = prepare(&adapter, &Request::resuming(THREAD))
+        .unwrap()
+        .window;
+    fakes.loopback.serve(
+        "GET /session",
+        [shows(None, false), shows(Some(THREAD), false)],
+    );
+    let mut driver = Driver::default();
+    let started = Rc::clone(&window);
+    driver.begin(0, async move { started.started().await });
+    assert!(driver.run().is_empty(), "the broker names none yet");
+    assert_eq!(fakes.time.waits(0), [250]);
+    assert!(fakes.time.fire_next(fakes.time.wall_ms() + 250));
+    assert_eq!(
+        driver.run(),
+        [(0, Ok(None))],
+        "named: the thread is the launch's, nothing new"
+    );
+    assert_eq!(
+        finished(window.started()),
+        Ok(None),
+        "nothing more to learn"
+    );
+
+    // A thread other than its own is the window's too: the next look follows it.
+    let other = prepare(&adapter, &Request::resuming(THREAD))
+        .unwrap()
+        .window;
+    fakes
+        .loopback
+        .serve("GET /session", [shows(Some(NEXT), true)]);
+    assert_eq!(finished(other.started()), Ok(None));
+
+    let resuming = |first_message_ms| {
+        waits_for_the_thread(
+            &Request {
+                first_message_ms,
+                ..Request::resuming(THREAD)
+            },
+            &format!("the Codex broker never named the thread {THREAD} it was opened on"),
+        )
+    };
+    assert_eq!(resuming(2_000), 2_000);
+    assert_eq!(resuming(FIRST_MESSAGE_MS), 60_000);
 }
 
 #[test]

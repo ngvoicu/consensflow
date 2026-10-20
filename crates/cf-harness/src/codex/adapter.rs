@@ -17,7 +17,9 @@
 //! file is found and not read, so an empty or corrupt rollout counts as the
 //! record, and a window resumed on it ends as it did before. The engine opens the
 //! window afresh on a thread that has none; the launch itself resumes whatever
-//! thread it is given.
+//! thread it is given. A window opened on a thread has come up once its broker
+//! names it, as a new one has once it names the thread Codex started: within a
+//! minute, or the launch is given up (`started`).
 //!
 //! A thread the app's quit cut in a turn is found with that turn open, and no
 //! process in it. A window opened on one with no message to begin a turn (a
@@ -29,7 +31,7 @@
 //! or closes it writes to the record, and the record is then read as it always
 //! was.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
@@ -176,6 +178,7 @@ impl Adapter for CodexAdapter {
                     loopback: Rc::clone(&services.loopback),
                     channel: launched.channel,
                     thread: RefCell::new(launch.resume.map(str::to_owned)),
+                    named: Cell::new(false),
                     discover_for_ms: DISCOVER_FOR_MS.min(launch.first_message_ms),
                     left_open: RefCell::new(left_open),
                 }),
@@ -239,8 +242,9 @@ struct CodexWindow {
     /// when Codex started it, or the one it was followed to. None until the
     /// broker has named it.
     thread: RefCell<Option<String>>,
-    /// How long the broker has to name the thread of a window that has none
-    /// yet, in milliseconds.
+    /// Whether the broker has named a thread since the window opened.
+    named: Cell<bool>,
+    /// How long the broker has to name the thread of a window, in milliseconds.
     discover_for_ms: i64,
     /// The turn the record had open when the window was opened, while the
     /// window has begun no turn of its own: the old process's.
@@ -264,12 +268,18 @@ impl Window for CodexWindow {
         *self.left_open.borrow_mut() = None;
     }
 
+    /// The window is up once its broker names a thread: the one Codex started,
+    /// which is the window's from then on, or, for a window opened on a thread,
+    /// any (a thread not its own is followed by the next look). A resumed window
+    /// waits for it too: one whose broker never names it reads as starting, and
+    /// has nothing delivered, for good (a Codex chief opened again after the app's
+    /// restart on zeewin, 2026-10-19, read "starting" for 78 minutes).
     fn started(&self) -> Work<'_, Result<Option<String>, String>> {
         Box::pin(async move {
-            let named = self.thread.borrow().is_some();
-            if named {
+            if self.named.get() {
                 return Ok(None);
             }
+            let resumed = self.thread.borrow().clone();
             let deadline = self.time.wall_ms().saturating_add(self.discover_for_ms);
             while self.time.wall_ms() < deadline {
                 if let Some(Shown {
@@ -277,12 +287,21 @@ impl Window for CodexWindow {
                     ..
                 }) = self.shown().await
                 {
+                    self.named.set(true);
+                    if resumed.is_some() {
+                        return Ok(None);
+                    }
                     *self.thread.borrow_mut() = Some(thread.clone());
                     return Ok(Some(thread));
                 }
                 self.time.sleep(DISCOVER_EVERY).await;
             }
-            Err("the Codex broker never named the thread it opened".to_owned())
+            Err(match resumed {
+                Some(thread) => {
+                    format!("the Codex broker never named the thread {thread} it was opened on")
+                }
+                None => "the Codex broker never named the thread it opened".to_owned(),
+            })
         })
     }
 

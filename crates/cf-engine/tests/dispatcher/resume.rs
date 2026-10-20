@@ -6,10 +6,11 @@
 
 use std::rc::Rc;
 
-use cf_engine::testing::{Context, Restarted};
+use cf_engine::testing::{Context, FakeAdapter, Made, Restarted};
 use cf_ledger::{MessageView, RESUME_WORDS};
-use serde_json::Value;
+use serde_json::{json, Value};
 
+use crate::chiefs::to_human;
 use crate::fixtures::{assert_match, fail_next_retry, finished, given, native_of, Tiers};
 
 /// What a worker the quit cut in T-1 is told, and what the chief is told.
@@ -633,4 +634,221 @@ fn a_worker_the_quit_cut_finishes_after_the_note_and_its_result_reaches_the_chie
         .find(|message| message.kind == "result")
         .expect("the result");
     assert_eq!(result.state, "delivered");
+}
+
+/// What a window that never comes up says, as Codex's does when its broker never
+/// names the thread the window was opened on.
+const NEVER_NAMED: &str = "the Codex broker never named the thread it was opened on";
+
+/// Every window of `fake` from now on never comes up.
+fn never_up(fake: &FakeAdapter) {
+    *fake.started.borrow_mut() = Some(Rc::new(|| Err(NEVER_NAMED.to_owned())));
+}
+
+/// A resumed conversation keeps what it held: the window of `handle` that comes back
+/// on `fake` holds what its record held before it (`items`).
+fn keeps_its_record(fake: &Rc<FakeAdapter>, handle: &'static str) {
+    let held = fake.agent(handle).items;
+    let kept = Rc::clone(fake);
+    *fake.after_prepare.borrow_mut() = Some(Rc::new(move |opened| {
+        if opened == handle {
+            let held = held.clone();
+            kept.with(opened, |agent| {
+                let after = std::mem::replace(&mut agent.items, held);
+                agent.items.extend(after);
+            });
+        }
+    }));
+}
+
+/// zeewin's 2-hour live run of 2026-10-19: a Codex chief whose turn ended a second
+/// before the app's restart was opened again at rest, on its thread, with nothing to
+/// begin a turn; its broker never named the thread, and its lane read "starting" for
+/// the 78 minutes left while its worker's result waited for it. A launch whose window
+/// never comes up is given up with or without a first message: the chief's window is
+/// closed, its project stays open, the human is told once, and the chief is opened
+/// again at the backoff with what waits for it.
+#[test]
+fn a_chief_opened_again_at_rest_whose_window_never_comes_up_is_closed_the_human_told_and_its_result_goes_in_with_the_next(
+) {
+    let context = Context::made(Made {
+        codex: true,
+        ..Made::default()
+    });
+    let project = context
+        .open_project(json!({
+            "directory": "/work/app",
+            "name": "app",
+            "chief": { "harness": "codex", "agent": "apollo" },
+            "staff": [{ "agent": "zeus", "harness": "claude-code", "role": "worker", "tier": "standard" }],
+        }))
+        .unwrap()
+        .unwrap()
+        .id;
+    let chief = context.id(project, "chief");
+    context.pass().unwrap();
+    context.note(project, "human", "chief", "Fix the parser");
+    context.pass().unwrap();
+    // The chief's turn ends just before the quit, its worker at work.
+    context.codex.answer("chief", "T-1 is with zeus.");
+    context.give(project, "zeus", "Parser");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(context.task(project, 1).task.state, "working");
+    keeps_its_record(&context.adapter, "zeus");
+    let after = quit_and_start(&context);
+    // The app takes a moment to start again: the windows it opens are of later
+    // generations than the ones the quit ended, which the old engine still holds.
+    context.advance(1_000);
+
+    never_up(&context.codex);
+    let killed = context.host.killed().len();
+    after.resume_project(project).unwrap();
+
+    let launch = context.codex.prepared().last().cloned().unwrap();
+    assert!(launch["resume"].is_string(), "on its thread: {launch}");
+    assert_eq!(
+        launch["message"],
+        Value::Null,
+        "at rest: nothing begins a turn"
+    );
+    let pane = format!("p{project}-chief");
+    assert!(
+        context.host.killed()[killed..]
+            .iter()
+            .any(|killed| killed.id == pane),
+        "its window is closed, not left starting"
+    );
+    assert_eq!(context.project(project).state, "open", "the staff works on");
+    assert_eq!(
+        to_human(&context, project),
+        [format!(
+            "The chief could not start: the window never came up: {NEVER_NAMED}. What comes for the chief waits for it, and ConsensFlow tries again; you may also switch the chief."
+        )]
+    );
+
+    // The worker finishes: its result waits for the chief, not spent on no window.
+    context.adapter.answer("zeus", "Parser done");
+    for _ in 0..3 {
+        after.pass().unwrap();
+    }
+    assert_eq!(context.task(project, 1).task.state, "done");
+    let result = context
+        .inbox(chief)
+        .into_iter()
+        .find(|message| message.kind == "result")
+        .expect("the result");
+    assert_eq!((result.state.as_str(), result.attempts), ("queued", 0));
+
+    // At the backoff the chief is opened again, with the result as its first message.
+    *context.codex.started.borrow_mut() = None;
+    context.advance(5_000);
+    after.pass().unwrap();
+    let again = context.codex.prepared().last().cloned().unwrap();
+    assert_match(
+        again["message"].as_str().unwrap(),
+        &format!(r"^\[ConsensFlow m-{} ", result.id),
+    );
+    for _ in 0..2 {
+        after.pass().unwrap();
+    }
+    assert_eq!(context.message(result.id).state, "delivered");
+    assert_eq!(to_human(&context, project).len(), 1, "told once");
+}
+
+/// A Codex chief opened again at rest on its thread, as above, with a worker's
+/// result waiting for it.
+fn codex_chief_at_rest_after_a_restart(context: &Context) -> (i64, Restarted<'_>) {
+    let project = context
+        .open_project(json!({
+            "directory": "/work/app",
+            "name": "app",
+            "chief": { "harness": "codex", "agent": "apollo" },
+            "staff": [{ "agent": "zeus", "harness": "claude-code", "role": "worker", "tier": "standard" }],
+        }))
+        .unwrap()
+        .unwrap()
+        .id;
+    context.pass().unwrap();
+    context.note(project, "human", "chief", "Fix the parser");
+    context.pass().unwrap();
+    context.codex.answer("chief", "T-1 is with zeus.");
+    context.pass().unwrap();
+    let after = quit_and_start(context);
+    context.advance(1_000);
+    (project, after)
+}
+
+/// A chief's window that exits while it is waited for to come up went as any
+/// chief's window goes: the launch its exit settled is not given up again, its
+/// window not closed twice, and the human not told the chief could not start.
+#[test]
+fn a_chief_window_that_exits_while_it_is_waited_for_to_come_up_is_given_up_no_more() {
+    let context = Context::made(Made {
+        codex: true,
+        ..Made::default()
+    });
+    let (project, after) = codex_chief_at_rest_after_a_restart(&context);
+    let release = context.codex.start_holds.hold(|_| true);
+    never_up(&context.codex);
+    let resuming = after.begin_resume_project(project);
+    context.settle();
+    context.exit("chief");
+    let killed = context.host.killed().len();
+    release.open();
+    context.settle();
+    context.finish(resuming).unwrap();
+
+    assert_eq!(
+        context.host.killed().len(),
+        killed,
+        "the window that went is not closed again"
+    );
+    assert!(
+        to_human(&context, project)
+            .iter()
+            .all(|note| !note.starts_with("The chief could not start")),
+        "{:?}",
+        to_human(&context, project)
+    );
+}
+
+/// The same of a member opened again at rest with its task in hand: its turn ended
+/// before the quit, so nothing begins one in the window the Resume brings back. One
+/// that never comes up is closed, and nobody is left waiting on it unsaid: the human is
+/// told it could not start, and the task is not left at work with no window.
+#[test]
+fn a_member_opened_again_at_rest_whose_window_never_comes_up_is_closed_and_said() {
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    context.give(project.id, "zeus", "Parser");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    // Zeus's turn ended just before the quit: at rest, its task not yet taken as done.
+    context.adapter.answer("zeus", "Parser done");
+    let after = quit_and_start(&context);
+    context.advance(1_000);
+
+    never_up(&context.adapter);
+    after.resume_project(project.id).unwrap();
+    after.pass().unwrap();
+
+    assert_eq!(launch_of(&context, "zeus")["message"], Value::Null);
+    let zeus = format!("p{}-zeus", project.id);
+    assert!(
+        context.host.killed().iter().any(|killed| killed.id == zeus),
+        "its window is closed, not left starting"
+    );
+    let told = to_human(&context, project.id);
+    assert!(
+        told.contains(&format!(
+            "@zeus could not start: the window never came up: {NEVER_NAMED}."
+        )),
+        "{told:?}"
+    );
+    assert_ne!(
+        context.task(project.id, 1).task.state,
+        "working",
+        "not at work with no window"
+    );
 }

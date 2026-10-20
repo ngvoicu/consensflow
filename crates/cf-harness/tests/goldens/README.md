@@ -124,6 +124,18 @@ once, with the reason here and in the commit.
   the old one ended`, step 7, where Node's answer is the window at rest and Rust's
   the window switched to the conversation the new log names.
 
+- **A Codex window opened on a thread waits for its broker to name it**
+  (2026-10-20, zeewin's 2-hour live run of 2026-10-19: a Codex chief opened again
+  at rest after the app's restart read "starting" for 78 minutes, and nothing
+  reached it). Node's `started` of a window opened on a thread answered at once,
+  with no question of the broker, so a broker that never named the thread was
+  never noticed. The Rust adapter asks the broker as it does for a new window,
+  for at most the same minute (`codex/adapter.rs`). `launch/` moved for it in
+  one step of one scenario, in both platforms' recordings: `codex: a conversation
+  Codex kept is resumed on its thread, and its window has nothing to learn`, step
+  2, which is now served the broker's word that the window shows its thread, and
+  records the one `GET /session` it asks; its answer is Node's, `null`.
+
 ## The launch scenarios
 
 A scenario of `launch/scenarios.<platform>.json` is data, and the Rust player

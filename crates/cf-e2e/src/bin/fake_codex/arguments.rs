@@ -4,9 +4,32 @@
 //! is given the words that open it after those the broker adds (`--remote <url>
 //! --remote-auth-token-env <name>`): the thread it resumes (`resume <thread>`) and
 //! the message it begins its first turn with; and it asks to resume the thread as
-//! the real one does.
+//! the real one does. On Windows a window opens on Codex through the shim of an npm
+//! install, which names the stand-in as program and script both, so the first
+//! thing it is given there is its own file, which is none of its arguments.
+
+use std::path::Path;
 
 use serde_json::{json, Value};
+
+/// Whether `arg` names the stand-in's own file (`own`), by its file name: the
+/// script of the shim that opened it, where the system wraps a program in one.
+fn is_own_file(arg: &str, own: Option<&Path>) -> bool {
+    own.and_then(Path::file_name).is_some_and(|mine| {
+        Path::new(arg)
+            .file_name()
+            .is_some_and(|name| name.eq_ignore_ascii_case(mine))
+    })
+}
+
+/// The arguments the stand-in was started with, without its own file where a shim
+/// put it first.
+pub fn asked<'a>(args: &'a [String], own: Option<&Path>) -> &'a [String] {
+    match args.split_first() {
+        Some((first, rest)) if is_own_file(first, own) => rest,
+        _ => args,
+    }
+}
 
 /// The developer instructions the server was given: the JSON string after
 /// `-c developer_instructions=`, as the daemon writes it. None where it was given
@@ -164,6 +187,23 @@ mod tests {
             assert!(request.get(field).is_some_and(Value::is_null), "{field}");
         }
         assert_eq!(request["excludeTurns"], true);
+    }
+
+    #[test]
+    fn the_stand_in_a_shim_names_as_its_script_is_no_argument() {
+        let words = |line: &str| -> Vec<String> { line.split(' ').map(str::to_owned).collect() };
+        let own = Some(Path::new("/bin/fake-codex"));
+        let args = words("/x/y/fake-codex queue --help");
+        assert_eq!(asked(&args, own), ["queue", "--help"]);
+        // However the system writes the name of the file.
+        let args = words("C:/x/FAKE-CODEX app-server");
+        assert_eq!(asked(&args, own), ["app-server"]);
+        // A stand-in that does not know its own file takes nothing for it.
+        let args = words("/x/y/fake-codex --version");
+        assert_eq!(asked(&args, None), args.as_slice());
+        // What it is asked with no shim is asked as it is.
+        let args = words("--remote ws://127.0.0.1:1");
+        assert_eq!(asked(&args, own), args.as_slice());
     }
 
     #[test]
