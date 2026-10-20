@@ -312,6 +312,8 @@ fn going() -> Going {
         ending: String::new(),
         deadline: at(59, 0),
         final_unread: None,
+        stalls: Stalls::default(),
+        ledger: None,
         edge: Edge::default(),
     }
 }
@@ -461,6 +463,99 @@ fn a_notice_the_log_ties_to_no_result_is_said_unresolved_once_and_is_no_break() 
 }
 
 #[test]
+fn a_chief_held_working_past_the_idle_limit_is_told_and_its_screen_kept_in_the_report() {
+    // The Mac's run of 2026-10-19: the chief read working for good after the owner's
+    // /compact. The run tells it once, kept in its log and timeline, and keeps the
+    // chief's last screen; it fails nothing, and the console says none of it.
+    let mut said = Vec::new();
+    let mut run = going();
+    let mut floor = run.edge.floor(&mut said);
+    let held = |minute: u32, row: &str| Look {
+        at: at(minute, 0),
+        ledger: ledger("accepted"),
+        windows: Windows {
+            open: vec![crate::long_run::look::OpenWindow {
+                handle: "chief".to_owned(),
+                pane: "p1-chief".to_owned(),
+                generation: 1,
+                pid: Some(4242),
+                running: true,
+                hosted: true,
+                background: Vec::new(),
+                background_total: 0,
+                tree_unread: None,
+                tail: vec!["✻ Compacting conversation…".to_owned(), row.to_owned()],
+            }],
+            lanes: vec![crate::long_run::look::Lane {
+                handle: "chief".to_owned(),
+                state: "working".to_owned(),
+            }],
+            ..Windows::default()
+        },
+        ..Look::default()
+    };
+    for (minute, row) in [(1, "a"), (22, "b"), (30, "c")] {
+        run.hold(&mut floor, &Settings::default(), held(minute, row));
+    }
+    let log = floor.log().to_string();
+    drop(floor);
+    let stalls: Vec<&str> = run
+        .timeline
+        .moments
+        .iter()
+        .filter(|moment| moment.kind == "stall")
+        .map(|moment| moment.text.as_str())
+        .collect();
+    assert_eq!(
+        stalls,
+        ["@chief's window has read working for 21 min, since 2026-10-15T10:01:00.000Z: its screen and the ledger's last events are kept"]
+    );
+    assert!(
+        log.contains("@chief's window has read working for 21 min"),
+        "{log}"
+    );
+    let printed = String::from_utf8(said).unwrap();
+    assert!(printed.is_empty(), "{printed}");
+    assert!(run.keeper.breaks.is_empty());
+    assert_eq!(run.stalls.kept[0].screen[1], "c");
+    let options = Options::of(&[]).unwrap();
+    let staff = crate::long_run::staff::staff_of(
+        &["claude".to_owned()],
+        &crate::long_run::staff::models_of(None).unwrap(),
+        "medium",
+    )
+    .unwrap();
+    let kept = Kept {
+        options: &options,
+        chief: ChiefKept {
+            harness: "claude".to_owned(),
+            model: "claude-opus-5-5".to_owned(),
+            effort: None,
+        },
+        found: &[],
+        left: &[],
+        staff: &staff,
+        daemon: "native (rust 3.0.5)".to_owned(),
+        home: None,
+        started: at(0, 0),
+        ended: at(30, 0),
+        schedule: &run.schedule,
+        breaks: &run.keeper.breaks,
+        unresolved: &run.keeper.unjudged,
+        filled: &run.keeper.filled,
+        timeline: &run.timeline,
+        stalls: &run.stalls,
+        ending: DONE.to_owned(),
+        error: None,
+        log: serde_json::Value::Null,
+    };
+    let value = kept.value();
+    assert_eq!(value["stalls"]["windows"][0]["handle"], "chief");
+    assert_eq!(value["stalls"]["windows"][0]["screen"][1], "c");
+    assert!(kept.markdown().contains("\n## Stalls\n"));
+}
+
+#[test]
 fn what_the_run_says_is_masked_whatever_says_it_its_own_names_shown() {
     // A wait for the chief that gave up says the chief's screen and how its window was
     // started (`Chief::gave_up`, on the run's floor): a password there is hidden before
@@ -563,6 +658,7 @@ fn a_findings_screen_and_words_stay_in_the_local_report_and_the_console_says_its
         unresolved: &run.keeper.unjudged,
         filled: &run.keeper.filled,
         timeline: &run.timeline,
+        stalls: &run.stalls,
         ending: DONE.to_owned(),
         error: Some(format!("the rig could not close: {secret}")),
         log,

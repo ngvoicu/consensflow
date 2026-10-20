@@ -67,11 +67,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_repositorys_list_is_read_and_holds_a3s_ended_note() {
+    fn the_repositorys_list_is_read_and_holds_a3s_ended_note_and_a4s_progress_lines() {
         let known = KNOWN.as_ref().unwrap();
         let a3 = known.iter().find(|entry| entry.invariant == 3).unwrap();
         assert_eq!(a3.shape, "ended-note");
         assert!(a3.issue.contains("3.0.6"), "{}", a3.issue);
+        let a4: Vec<&Known> = known.iter().filter(|entry| entry.invariant == 4).collect();
+        assert_eq!(a4.len(), 1, "{a4:?}");
+        assert_eq!(a4[0].shape, "progress-lines");
+        assert!(
+            a4[0].issue.contains("dip-agentos #5") && a4[0].issue.contains("3.0.6"),
+            "{}",
+            a4[0].issue
+        );
         // Said whole wherever the run says it: nothing in it has a token's shape.
         let names = crate::long_run::mask::Names::default();
         for entry in known {

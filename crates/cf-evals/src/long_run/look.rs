@@ -127,10 +127,20 @@ pub struct Activity {
     pub reason: Option<String>,
 }
 
+/// A lane of the board: whose, and what its window does as the board reads it
+/// (`starting`, `working`, `idle`, `waiting`…).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Lane {
+    pub handle: String,
+    pub state: String,
+}
+
 /// The windows of the run as the look found them.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Windows {
     pub open: Vec<OpenWindow>,
+    /// Every lane of the board that reads a state, open window or none.
+    pub lanes: Vec<Lane>,
     /// Every window that exited since the app last started.
     pub exits: Vec<Exit>,
     pub strangers: Vec<Stranger>,

@@ -44,6 +44,10 @@ pub const ENDED: [&str; 2] = ["'s turn left background work running", " is let g
 pub const ENDED_NOTE: &str = "ended-note";
 pub const LET_GO_NOTE: &str = "let-go-note";
 
+/// The shape of a break of the fourth whose result holds lines of its turn's progress
+/// (turn-end's A4): one that is not the turn's final answer, whole, has none.
+pub const PROGRESS_LINES: &str = "progress-lines";
+
 /// The states a task is in once an attempt has its result: a move to any other
 /// after a result begins another attempt.
 const AFTER_A_RESULT: [&str; 4] = ["done", "accepted", "cancelled", "failed"];
@@ -293,25 +297,31 @@ pub fn final_answer(look: &Look, settings: &Settings) -> Vec<Break> {
                     && !answer.contains(&words)
             })
             .collect();
-        let said = if !held.is_empty() {
-            format!(
-                "m-{} holds {} line{} of its turn's progress",
-                result.id,
-                held.len(),
-                if held.len() == 1 { "" } else { "s" }
+        let (said, shape) = if !held.is_empty() {
+            (
+                format!(
+                    "m-{} holds {} line{} of its turn's progress",
+                    result.id,
+                    held.len(),
+                    if held.len() == 1 { "" } else { "s" }
+                ),
+                Some(PROGRESS_LINES),
             )
         } else if !body.contains(&answer) {
-            format!("m-{} is not its turn's final answer, whole", result.id)
+            (
+                format!("m-{} is not its turn's final answer, whole", result.id),
+                None,
+            )
         } else {
             continue;
         };
-        found.push(
-            Break::new(4, format!("4:m-{}", result.id), said).with(Evidence {
-                rows: vec![message_row(result, &names)],
-                screen: Vec::new(),
-                record: lines_of(turn, 8, &names),
-            }),
-        );
+        let mut broke = Break::new(4, format!("4:m-{}", result.id), said).with(Evidence {
+            rows: vec![message_row(result, &names)],
+            screen: Vec::new(),
+            record: lines_of(turn, 8, &names),
+        });
+        broke.shape = shape;
+        found.push(broke);
     }
     found
 }

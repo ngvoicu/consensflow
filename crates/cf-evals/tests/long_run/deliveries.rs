@@ -7,7 +7,12 @@ use crate::scene::{found, ms, t, Scene, CHIEF};
 
 /// The chief's conversation, and T-9's results m-246 and m-248 in the ledger once.
 fn chief(scene: &Scene) -> i64 {
-    let conversation = scene.conversation(CHIEF, "devin", "devin-chief");
+    chief_on(scene, "devin")
+}
+
+/// [`chief`], the chief's window on `harness`.
+fn chief_on(scene: &Scene, harness: &str) -> i64 {
+    let conversation = scene.conversation(CHIEF, harness, &format!("{harness}-chief"));
     let task = scene.task(9, 3, "done", &t(3, 0));
     scene.message(
         246,
@@ -65,6 +70,97 @@ fn a_message_given_twice_and_one_glued_to_the_next_break_the_seventh() {
         .rows
         .iter()
         .any(|row| row.contains("delivery.begun")));
+}
+
+#[test]
+fn a_message_given_in_two_prompts_breaks_the_seventh_wrapped_as_claude_code_keeps_a_paste_or_not() {
+    // Two real prompts of m-246: each a delivery, as it went in.
+    let scene = Scene::new(&[("long-worker", "devin")]);
+    let conversation = chief(&scene);
+    scene.item(conversation, 0, "user", FIRST, true, &t(1, 2));
+    scene.item(conversation, 1, "assistant", "Noted.", true, &t(1, 10));
+    scene.item(conversation, 2, "user", FIRST, true, &t(2, 2));
+    let said: Vec<String> = found(&scene.look(ms(4, 0)), 7)
+        .into_iter()
+        .map(|found| found.said)
+        .collect();
+    assert_eq!(said, ["@chief was given m-246 2 times"]);
+    // Claude Code 2.1.303 keeps a long paste in its record wrapped, and the copy with it:
+    // a wrapped delivery is one, given twice or joined to the next as any is.
+    let pasted = |inner: &str| {
+        format!("\n\n<pasted_content id=\"a1b2\">\n{inner}\n</pasted_content id=\"a1b2\">\n")
+    };
+    let scene = Scene::new(&[("long-worker", "claude-code")]);
+    let conversation = chief_on(&scene, "claude-code");
+    scene.item(conversation, 0, "user", &pasted(FIRST), true, &t(1, 2));
+    scene.item(conversation, 1, "assistant", "Noted.", true, &t(1, 10));
+    scene.item(
+        conversation,
+        2,
+        "user",
+        &format!("{}{}", pasted(FIRST), pasted(SECOND)),
+        true,
+        &t(3, 2),
+    );
+    let said: Vec<String> = found(&scene.look(ms(4, 0)), 7)
+        .into_iter()
+        .map(|found| found.said)
+        .collect();
+    assert_eq!(
+        said,
+        [
+            "@chief was given m-246 and m-248 as one prompt",
+            "@chief was given m-246 2 times"
+        ]
+    );
+}
+
+#[test]
+fn a_compact_summary_or_a_reviewers_history_that_quotes_a_delivery_is_none_and_holds_the_seventh() {
+    // The Mac's 2-hour run of 2026-10-19: the owner's /compact, and Claude Code's summary
+    // of the conversation in the copy as a user's item, the last prompt quoted whole in it
+    // (made-up words here). It is no prompt the window was given.
+    let scene = Scene::new(&[("long-worker", "claude-code")]);
+    let conversation = chief_on(&scene, "claude-code");
+    scene.item(conversation, 0, "user", FIRST, true, &t(1, 2));
+    scene.item(conversation, 1, "assistant", "Noted.", true, &t(1, 10));
+    scene.item(conversation, 2, "user", "/compact", true, &t(2, 0));
+    scene.item(
+        conversation,
+        3,
+        "user",
+        &format!(
+            "This session is being continued from a previous conversation that ran out of context. \
+             The summary below covers the earlier portion of the conversation.\n\n\
+             Summary:\n1. Primary Request and Intent: plan the phases and put them on the board.\n\
+             2. All user messages:\n   - {FIRST}\n3. Current Work: waiting for T-9.\n"
+        ),
+        true,
+        &t(2, 5),
+    );
+    assert!(
+        found(&scene.look(ms(4, 0)), 7).is_empty(),
+        "{:?}",
+        found(&scene.look(ms(4, 0)), 7)
+    );
+    // Codex gives its approval reviewer the agent's history, every delivery's header in it:
+    // none is given again.
+    let scene = Scene::new(&[("long-worker", "codex")]);
+    let conversation = chief_on(&scene, "codex");
+    scene.item(conversation, 0, "user", FIRST, true, &t(1, 2));
+    scene.item(conversation, 1, "user", SECOND, true, &t(3, 2));
+    scene.item(
+        conversation,
+        2,
+        "user",
+        &format!(
+            "The following is the Codex agent history whose request action you are assessing.\n\n\
+             >>> TRANSCRIPT START\n[1] user: {FIRST}\n[2] user: {SECOND}\n>>> TRANSCRIPT END\n"
+        ),
+        true,
+        &t(3, 30),
+    );
+    assert!(found(&scene.look(ms(4, 0)), 7).is_empty());
 }
 
 #[test]

@@ -410,8 +410,9 @@ fn kill(hand: &mut Hand<'_>, handle: &str, task: Option<i64>, hold: Duration) ->
 }
 
 /// The owner types `/compact` into the chief's idle window: played once the chief's
-/// own record has a compaction that is new since the keys: one more than it had
-/// before them, written after them.
+/// own record has a compaction that is new since the keys (one more than it had
+/// before them, written after them) and its window has come to rest; failed where
+/// either is not seen within the wait.
 fn compact(hand: &mut Hand<'_>) -> Result<Outcome> {
     let board = hand.stage.board()?;
     let Some(pane) = lane_of(&board, "chief")
@@ -451,13 +452,28 @@ fn compact(hand: &mut Hand<'_>) -> Result<Outcome> {
         Ok(lane_of(&hand.stage.board()?, "chief")
             .is_some_and(|lane| lane["activity"]["state"] == "idle"))
     })?;
+    if !rested {
+        // The Mac's 2-hour run of 2026-10-19: a chief that reads working for good after
+        // the owner's /compact stalls the project.
+        let state = lane_of(&hand.stage.board()?, "chief")
+            .and_then(|lane| lane["activity"]["state"].as_str().map(str::to_owned))
+            .unwrap_or_else(|| "nothing".to_owned());
+        let said = format!(
+            "{said}; its record says it compacted, and it never came to rest within the wait: its window reads {state}"
+        );
+        let mut failed = hand.evidence(None, "chief", std::slice::from_ref(&said));
+        failed.record = hand
+            .watch
+            .last()
+            .and_then(|look| chief_record(look).map(|record| record.lines_by(look.at, 6)))
+            .unwrap_or_default();
+        return Ok(Outcome::Failed {
+            said,
+            evidence: failed,
+        });
+    }
     Ok(Outcome::Played(format!(
-        "{said}; its record says it compacted{}",
-        if rested {
-            ", and it came to rest"
-        } else {
-            " (it did not come to rest within the wait)"
-        }
+        "{said}; its record says it compacted, and it came to rest"
     )))
 }
 

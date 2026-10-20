@@ -433,6 +433,30 @@ fn a_users_record_with_no_words_begins_no_turn() {
 }
 
 #[test]
+fn the_rows_claude_code_writes_of_a_request_are_no_prompt() {
+    // Claude Code 2.1.303 writes beside the prompt rows that echo the request it sent:
+    // `api-request-blob` with the prompt as the user's message (made-up words here),
+    // `api-request`, and `last-prompt`. None is a prompt, nor anything else.
+    let header = "[ConsensFlow m-13 · note from @human]\nDo you still have work to do?";
+    let echoes = [
+        json!({ "type": "api-request-blob", "sessionId": "s-1", "hash": "h-1",
+            "message": { "role": "user", "content": header } }),
+        json!({ "type": "api-request", "sessionId": "s-1",
+            "message": { "role": "user", "content": [{ "type": "text", "text": header }] } }),
+        json!({ "type": "last-prompt", "sessionId": "s-1", "lastPrompt": header }),
+    ];
+    for echo in &echoes {
+        assert!(
+            record(&[line(0, echo.clone())]).entries.is_empty(),
+            "{echo}"
+        );
+    }
+    let mut lines = vec![answer(5, "Done.", "end_turn"), duration(5)];
+    lines.extend(echoes.iter().map(|echo| line(9, echo.clone())));
+    assert_eq!(record(&lines).stood_at(at(30)).unwrap().0, Stood::AtRest);
+}
+
+#[test]
 fn the_agents_a_turn_left_are_that_turns_and_the_next_turn_counts_none_of_them() {
     let ended_with_agents = line(
         11,

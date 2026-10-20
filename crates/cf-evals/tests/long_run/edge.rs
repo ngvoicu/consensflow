@@ -40,6 +40,8 @@ fn writes_out(line: &str) -> bool {
         "stderr()",
         "files::write",
         "fs::write",
+        "fs::copy",
+        "VACUUM INTO",
         "File::create",
         "OpenOptions",
         "write_all",
@@ -180,7 +182,7 @@ fn takes_part(line: &str) -> bool {
 /// `last_lines`, which the chief's wait takes a window's last 40 lines with, a cut
 /// accepted as the pane host's is), a cut it does not know the word of, and whether a
 /// text it lists reaches the run's output at all. It reads lines, not meaning.
-const TAKEN: [(&str, &str, &str); 46] = [
+const TAKEN: [(&str, &str, &str); 50] = [
     (
         "long_run/disruptions.rs",
         "if let Some(next) = self.planned[place + 1..]",
@@ -190,6 +192,26 @@ const TAKEN: [(&str, &str, &str); 46] = [
         "long_run/invariants/deliveries.rs",
         "quoting_until = body(id).map_or(end, |said| end + said_until(&text[end..], said));",
         "a check reading a prompt, nothing it says",
+    ),
+    (
+        "long_run/invariants/deliveries.rs",
+        "let wrapped = text[start..].strip_prefix(PASTED).and_then(|rest| {",
+        "where a delivery begins in a prompt, read and never said",
+    ),
+    (
+        "long_run/invariants/deliveries.rs",
+        "let (attributes, inner) = rest.split_once('>')?;",
+        "the same",
+    ),
+    (
+        "long_run/stalls.rs",
+        ".take(CHANGES)",
+        "the last changes of a window's state, each masked whole and then cut",
+    ),
+    (
+        "long_run/stalls.rs",
+        ".take(EVENTS)",
+        "the ledger's last events, each masked whole and then cut",
     ),
     (
         "long_run/invariants/order.rs",

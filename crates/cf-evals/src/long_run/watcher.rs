@@ -25,7 +25,7 @@ use serde_json::Value;
 
 use super::ledger::Ledger;
 use super::look::{
-    Activity, Exit, Look, OpenWindow, Process, Reading, Stranger, Unread, Unresolved, Windows,
+    Activity, Exit, Lane, Look, OpenWindow, Process, Reading, Stranger, Unread, Unresolved, Windows,
 };
 use super::mask::Names;
 use super::processes;
@@ -227,6 +227,7 @@ impl Watcher {
             ledger,
             windows: Windows {
                 open,
+                lanes: lanes(board),
                 exits: self.exits.clone(),
                 strangers: left_running(found.leftovers),
                 unresolved: found.unresolved,
@@ -449,6 +450,21 @@ fn left_running(leftovers: Vec<Leftover>) -> Vec<Stranger> {
             pane: leftover.pane,
             since: leftover.since,
             began: leftover.began,
+        })
+        .collect()
+}
+
+/// Every lane of `board` that reads a state: whose, and the state.
+fn lanes(board: &Value) -> Vec<Lane> {
+    board["lanes"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|lane| {
+            Some(Lane {
+                handle: lane["participant"]["handle"].as_str()?.to_owned(),
+                state: lane["activity"]["state"].as_str()?.to_owned(),
+            })
         })
         .collect()
 }

@@ -3,7 +3,11 @@
 //! Windows). Every delivery opens with its header, `[ConsensFlow m-12 · T-3 · result
 //! from @x]`, which is also how the daemon knows it arrived; so a conversation's copy
 //! that holds a message's header in two prompts was given it twice, and a prompt
-//! that holds the headers of two messages was given them as one. (A message that
+//! that holds the headers of two messages was given them as one. A prompt is a user's
+//! item that opens with a header, inside the wrapper Claude Code keeps a long paste in:
+//! what a harness writes of the conversation as a user's item and quotes a delivery in
+//! is none (the summary of a compaction, which quoted m-13 on the Mac's 2-hour run of
+//! 2026-10-19; the history Codex gives its approval reviewer). (A message that
 //! carries others is one paste under its own header, and what quotes a delivery
 //! defuses its header: neither counts. Nor does a header a message's own words quote,
 //! as a worker's result may quote the brief it was given: a header inside the words
@@ -99,16 +103,43 @@ fn body_in(look: &Look, id: i64) -> Option<&str> {
         .map(|message| message.body.as_str())
 }
 
-/// The messages `item` delivered to `worker`, in order: none where it is no prompt that
-/// opens with a delivery's header (a job's notification, a tool's output or what a
-/// person typed may quote one anywhere); else each message it was given ([`given_in`]: a
-/// header its words quote is none) that the ledger holds as one to `worker`.
+/// The opening tag Claude Code wraps a long paste in, in its record and so in the copy
+/// (2.1.303: `<pasted_content id="…">`, the paste on the next line).
+const PASTED: &str = "<pasted_content";
+
+/// Where a delivery in `text` would begin: past its leading white space and, where
+/// Claude Code wrapped the paste, past the wrapper's opening tag (`<pasted_content`, then
+/// nothing or attributes after a space, with no `>` or line break in them, and `>`) and
+/// the white space after it.
+fn delivery_start(text: &str) -> usize {
+    let start = text.len() - text.trim_start().len();
+    let wrapped = text[start..].strip_prefix(PASTED).and_then(|rest| {
+        let (attributes, inner) = rest.split_once('>')?;
+        let tag =
+            (attributes.is_empty() || attributes.starts_with(' ')) && !attributes.contains('\n');
+        tag.then_some(inner)
+    });
+    wrapped.map_or(start, |inner| text.len() - inner.trim_start().len())
+}
+
+/// Whether `item` is a prompt the window was given a delivery in: a user's item that
+/// opens with a delivery's header (where Claude Code wrapped the paste, inside the
+/// wrapper). What the harness writes of the conversation as a user's item quotes one
+/// anywhere else and is none: Claude Code's summary of a compaction (the last prompt
+/// quoted whole in it), the history Codex gives its approval reviewer, a job's
+/// notification, a tool's output, what a person typed.
+pub(super) fn is_delivery(item: &Item) -> bool {
+    item.role == "user"
+        && headers(&item.text)
+            .first()
+            .is_some_and(|(_, start, _)| *start == delivery_start(&item.text))
+}
+
+/// The messages `item` delivered to `worker`, in order: none where it is no delivery
+/// ([`is_delivery`]); else each message it was given ([`given_in`]: a header its words
+/// quote is none) that the ledger holds as one to `worker`.
 pub(super) fn delivered_to<'l>(look: &'l Look, item: &Item, worker: i64) -> Vec<&'l Message> {
-    let leading = item.text.len() - item.text.trim_start().len();
-    let opens = headers(&item.text)
-        .first()
-        .is_some_and(|(_, start, _)| *start == leading);
-    if item.role != "user" || !opens {
+    if !is_delivery(item) {
         return Vec::new();
     }
     given_in(&item.text, |id| body_in(look, id))
@@ -119,7 +150,8 @@ pub(super) fn delivered_to<'l>(look: &'l Look, item: &Item, worker: i64) -> Vec<
 }
 
 /// 7: per conversation, a message whose header is in two of its prompts, and a
-/// prompt that holds the headers of two messages.
+/// prompt that holds the headers of two messages; a prompt being one the window was
+/// given a delivery in ([`is_delivery`]).
 pub fn twice_or_joined(look: &Look) -> Vec<Break> {
     let body = |id: i64| body_in(look, id);
     let names = Names::of(look);
@@ -130,7 +162,7 @@ pub fn twice_or_joined(look: &Look) -> Vec<Break> {
             .ledger
             .items
             .iter()
-            .filter(|item| item.conversation == conversation.id && item.role == "user");
+            .filter(|item| item.conversation == conversation.id && is_delivery(item));
         let mut given: BTreeMap<i64, Vec<String>> = BTreeMap::new();
         for item in prompts {
             let named = given_in(&item.text, body);

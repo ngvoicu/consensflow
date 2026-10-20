@@ -15,7 +15,8 @@
 # field's shapes as recorded ledgers: `tests/fixtures/ledgers/field-*.sql`), or by the unit tests
 # of the module it is in.
 #
-# The last plants are of what the run stands on in `crates/cf-e2e`: the rig keeps each window's
+# Some plants are of what the run stands on in `crates/cf-e2e` and `crates/cf-harness` (the
+# product's reader of Claude Code's record, whose copy B5 reads): the rig keeps each window's
 # process, the windows the daemon closed itself (which tell a window that closed by itself, B2's
 # shape, from the daemon's close), the time each exit was told and every exit once it has closed
 # (a real rig: the `last_exits` case of `crates/cf-e2e/tests/rig.rs`), its stranger outlives a run of
@@ -54,6 +55,8 @@ e2e-lib-machine = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live:
 e2e-lib-report = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "rig::report"]
 # A wait for the chief that gave up, and what it says of the chief's window.
 evals-lib-run-chief = ["cargo", "test", "--offline", "-p", "cf-evals", "--lib", "run::chief"]
+# The product's reader of Claude Code's record, whose copy of a conversation B5 reads.
+harness-claude-projection = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::record::tests::projection"]
 
 # 1 (A1)
 
@@ -382,10 +385,10 @@ runs = ["evals-lib-long-run"]
 file = "crates/cf-evals/src/long_run/conduct.rs"
 find = '''
         self.unjudged(floor, look.at, open);
-        self.last = Some(look);'''
+        for (at, said) in self.stalls.look(&look, settings.idle) {'''
 replace = '''
         let _ = open;
-        self.last = Some(look);'''
+        for (at, said) in self.stalls.look(&look, settings.idle) {'''
 
 # 4 (A4)
 
@@ -2867,8 +2870,8 @@ runs = ["evals-long-run"]
 
 [[plant.edit]]
 file = "crates/cf-evals/src/long_run/invariants/deliveries.rs"
-find = "        .is_some_and(|(_, start, _)| *start == leading);"
-replace = "        .is_some_and(|(_, start, _)| *start >= leading);"
+find = "            .is_some_and(|(_, start, _)| *start == delivery_start(&item.text))"
+replace = "            .is_some_and(|(_, start, _)| *start >= delivery_start(&item.text))"
 
 [[plant]]
 name = "long run 4: a delivery to another worker ends this worker's turn (Astra's)"
@@ -3245,3 +3248,220 @@ runs = ["evals-lib-long-run"]
 file = "crates/cf-evals/src/long_run/play.rs"
 find = '    if state != "paused" && !hand.wait(|hand| Ok(hand.paused_by(number, None, killed_at)))? {'
 replace = '    if state != "paused" {'
+
+# The two 2-hour live runs of 2026-10-19 (round 18): turn-end's A4, a result that holds lines of
+# its turn's progress, is a known break (dip-agentos #5, 3.0.6) and nothing else under the fourth
+# is; B5 reads only the prompts a window was given a delivery in, never Claude Code's summary of a
+# compaction that quotes one, and sees a delivery inside the wrapper Claude Code keeps a long
+# paste in; the rows Claude Code writes of a request are no prompt; the owner's /compact whose
+# chief never comes to rest is a disruption whose effect was not seen (10); and a window whose
+# lane reads working or starting past the idle limit, or every window at an end not reached, is
+# kept with its last screen and the ledger's last events, the ledger copied beside the report.
+
+[[plant]]
+name = "long run 4: a result that holds its turn's progress has no shape, and turn-end's known A4 fails a run"
+meant = "a_result_that_holds_the_progress_of_its_turn_or_not_its_final_answer_breaks_the_fourth"
+runs = ["evals-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/invariants/order.rs"
+find = "                Some(PROGRESS_LINES),"
+replace = "                None,"
+
+[[plant]]
+name = "long run 4: a result that is not its turn's final answer, whole, takes A4's known shape and passes"
+meant = "a_result_that_holds_the_progress_of_its_turn_or_not_its_final_answer_breaks_the_fourth"
+runs = ["evals-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/invariants/order.rs"
+find = '''
+                format!("m-{} is not its turn's final answer, whole", result.id),
+                None,'''
+replace = '''
+                format!("m-{} is not its turn's final answer, whole", result.id),
+                Some(PROGRESS_LINES),'''
+
+[[plant]]
+name = "long run 4: the list of known breaks names A4 by another shape, and turn-end's A4 fails a run"
+meant = "the_repositorys_list_is_read_and_holds_a3s_ended_note_and_a4s_progress_lines"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "evals/known-breaks.json"
+find = '      "shape": "progress-lines",'
+replace = '      "shape": "progress-line",'
+
+[[plant]]
+name = "long run 7: every user's item of a conversation is a prompt, and a compact summary that quotes m-13 gives it twice (the Mac's run)"
+meant = "a_compact_summary_or_a_reviewers_history_that_quotes_a_delivery_is_none_and_holds_the_seventh"
+runs = ["evals-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/invariants/deliveries.rs"
+find = "            .filter(|item| item.conversation == conversation.id && is_delivery(item));"
+replace = '            .filter(|item| item.conversation == conversation.id && item.role == "user");'
+
+[[plant]]
+name = "long run 7: Claude Code's paste wrapper is not set aside, and a wrapped delivery given twice passes"
+meant = "a_message_given_in_two_prompts_breaks_the_seventh_wrapped_as_claude_code_keeps_a_paste_or_not"
+runs = ["evals-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/invariants/deliveries.rs"
+find = "    wrapped.map_or(start, |inner| text.len() - inner.trim_start().len())"
+replace = "    wrapped.map_or(start, |_| start)"
+
+[[plant]]
+name = "long run 4: a delivery Claude Code kept wrapped as a paste begins no turn, and its result is never judged"
+meant = "a_delivery_claude_code_kept_wrapped_as_a_paste_begins_its_turn"
+runs = ["evals-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/invariants/deliveries.rs"
+find = "        tag.then_some(inner)"
+replace = "        tag.then_some(inner).filter(|_| false)"
+
+[[plant]]
+name = "long run 7: Claude Code's request echo is read as the user's record, a prompt"
+meant = "the_rows_claude_code_writes_of_a_request_are_no_prompt"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/record.rs"
+find = '        Some("user") => {'
+replace = '        Some("user" | "api-request-blob") => {'
+
+[[plant]]
+name = "long run 7: the product's reader takes Claude Code's request echo for a user's record"
+meant = "the_records_claude_code_writes_of_a_request_are_no_item_of_the_conversation"
+runs = ["harness-claude-projection"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/project.rs"
+find = '        Some("user") => user(record),'
+replace = '        Some("user" | "api-request-blob") => user(record),'
+
+[[plant]]
+name = "long run 10: a chief that never came to rest after the owner's /compact is played, and the stall it is fails nothing (the Mac's run)"
+meant = "a_compact_whose_chief_never_came_to_rest_after_it_failed"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/play.rs"
+find = "    if !rested {"
+replace = "    if !rested && rested {"
+
+[[plant]]
+name = "long run stall: a lane's time in its state is the looks' alone, and a worker the looks saw at work across a moment at rest stalls"
+meant = "a_lane_back_at_work_between_two_looks_is_timed_by_the_trace_and_one_stuck_as_it_opened_by_the_looks"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/stalls.rs"
+find = "            let since = traced_since(look, handle, state).unwrap_or(first);"
+replace = "            let since = traced_since(look, handle, state).map_or(first, |_| first);"
+
+[[plant]]
+name = "long run stall: a window with no change traced never stalls, and zeewin's chief stuck starting is lost"
+meant = "a_lane_back_at_work_between_two_looks_is_timed_by_the_trace_and_one_stuck_as_it_opened_by_the_looks"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/stalls.rs"
+find = "            let since = traced_since(look, handle, state).unwrap_or(first);"
+replace = "            let since = traced_since(look, handle, state).unwrap_or(look.at);"
+
+[[plant]]
+name = "long run stall: a lane at rest or waiting for long is kept as a stall"
+meant = "a_lane_back_at_work_between_two_looks_is_timed_by_the_trace_and_one_stuck_as_it_opened_by_the_looks"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/stalls.rs"
+find = "            if !STALLED.contains(&state) {"
+replace = '            if !STALLED.contains(&state) && !["idle", "waiting"].contains(&state) {'
+
+[[plant]]
+name = "long run stall: a stall keeps the screen it was found with, never its last"
+meant = "a_lane_at_work_past_the_limit_is_kept_with_its_last_screen_until_it_reads_otherwise"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/stalls.rs"
+find = "                open.screen = shown;"
+replace = "                let _ = shown;"
+
+[[plant]]
+name = "long run stall: a window at rest again is never cleared, and a stall that ended reads as one that held to the end"
+meant = "a_lane_at_work_past_the_limit_is_kept_with_its_last_screen_until_it_reads_otherwise"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/stalls.rs"
+find = "                stall.cleared = Some((look.at, now));"
+replace = "                let _ = now;"
+
+[[plant]]
+name = "long run stall: a stalled window's screen is kept unmasked"
+meant = "a_screen_is_kept_masked"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/stalls.rs"
+find = '''
+            let shown = look
+                .window_of(handle)
+                .map(|window| screen(&window.tail, &names))'''
+replace = '''
+            let shown = look
+                .window_of(handle)
+                .map(|window| window.tail.clone())'''
+
+[[plant]]
+name = "long run stall: the windows at the end are kept whatever the end, a project that reached it too"
+meant = "at_an_end_not_reached_every_window_of_the_last_look_is_kept_and_the_ledgers_last_events"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/stalls.rs"
+find = "        if unended {"
+replace = "        if unended || !self.last.is_empty() {"
+
+[[plant]]
+name = "long run stall: the run never looks for a stall, and the Mac's chief at work for good is kept nowhere"
+meant = "a_chief_held_working_past_the_idle_limit_is_told_and_its_screen_kept_in_the_report"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/conduct.rs"
+find = "        for (at, said) in self.stalls.look(&look, settings.idle) {"
+replace = "        for (at, said) in self.stalls.look(&look, i64::MAX) {"
+
+[[plant]]
+name = "long run stall: the report keeps no stall"
+meant = "a_chief_held_working_past_the_idle_limit_is_told_and_its_screen_kept_in_the_report"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/report.rs"
+find = '            "stalls": self.stalls.to_value(self.timeline),'
+replace = '            "stalls": Value::Null,'
+
+[[plant]]
+name = "long run stall: the ledger is copied without its write-ahead log, and its last rows are lost"
+meant = "the_ledger_is_kept_whole_beside_the_report_and_said_by_where_it_is"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/edge.rs"
+find = '''
+        on_copy(file, |db| {
+            db.execute("VACUUM INTO ?1", [kept.to_string_lossy()])?;
+            Ok(())
+        })?;'''
+replace = '''
+        on_copy(file, |_| {
+            std::fs::copy(file, &kept).map_err(|cause| Error::Refused(cause.to_string()))?;
+            Ok(())
+        })?;'''
