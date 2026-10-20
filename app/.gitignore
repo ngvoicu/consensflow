@@ -5,3 +5,7 @@ playwright-report/
 # Staged at build time by `cargo xtask stage`
 .cache/
 src-tauri/resources/
+# The same two as links, which a worker's tree has into the main checkout: a pattern
+# that ends in `/` matches a folder only, and the links would go to the Windows run.
+/.cache
+/src-tauri/resources

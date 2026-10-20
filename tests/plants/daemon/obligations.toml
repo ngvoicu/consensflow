@@ -6,8 +6,9 @@
 
 [run]
 engine-dispatcher-stops = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "stops"]
-# The ledger and the Node daemon on one file: the way back, and forward again.
-ledger-node = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "node"]
+# The way back to Node and forward again is held by the ledger's receipt tests (`legacy`): the
+# suite of the ledger and the Node daemon on one file went with Node's sources, and the run that
+# named it failed to start, which counted every plant of it caught (seen 2026-10-16).
 
 [[plant]]
 name = "pause: a withdrawn question stops obliging when its answer ends unreceived"
@@ -115,8 +116,8 @@ replace = '''
 
 [[plant]]
 name = "pause: this ledger opens with rows still under a carrier Node delivered"
-meant = "a_carrier_node_delivered_leaves_a_late_answer_that_this_ledger_delivers_when_it_starts_again"
-runs = ["ledger-node", "ledger-receipt"]
+meant = "a_row_left_under_a_carrier_node_delivered_cancelled_or_failed_is_a_queued_message_of_its_own"
+runs = ["ledger-receipt"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/ledger.rs"
@@ -125,30 +126,25 @@ replace = "    let _ = release_stranded;"
 
 [[plant]]
 name = "pause: this ledger opens leaving a task working that Node moved on for a queued answer"
-meant = "a_carrier_node_delivered_leaves_a_late_answer_that_this_ledger_delivers_when_it_starts_again"
-runs = ["ledger-node", "ledger-receipt"]
-
-[[plant.edit]]
-file = "crates/cf-ledger/src/messages/carrying.rs"
-find = "            reconcile(store, task)?;"
-replace = "            let _ = (task, reconcile);"
-
-[[plant]]
-name = "pause: a carrier that was delivered or is being pasted keeps its rows at the start"
-meant = "a_carrier_node_delivered_leaves_a_late_answer_that_this_ledger_delivers_when_it_starts_again"
-runs = ["ledger-node", "ledger-receipt"]
-
-[[plant.edit]]
-file = "crates/cf-ledger/src/messages/carrying.rs"
-find = "                 WHERE m.state = 'queued' AND c.state NOT IN ('queued', 'gated')"
-replace = "                 WHERE m.state = 'queued' AND c.state IN ('cancelled', 'failed')"
-
-[[plant]]
-name = "pause: a carrier Node began to paste has its rows settled with it at the start"
-meant = "a_row_left_under_a_carrier_node_began_to_paste_is_not_taken_for_received_with_it"
+meant = "a_row_left_under_a_carrier_node_delivered_cancelled_or_failed_is_a_queued_message_of_its_own"
 runs = ["ledger-receipt"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/carrying.rs"
-find = "                 WHERE m.state = 'queued' AND c.state NOT IN ('queued', 'gated')"
-replace = "                 WHERE m.state = 'queued' AND c.state NOT IN ('queued', 'gated', 'delivering')"
+find = "                reconcile(store, task)?;"
+replace = "                let _ = (task, reconcile);"
+
+[[plant]]
+name = "pause: a carrier that was delivered keeps its rows at the start"
+meant = "a_row_left_under_a_carrier_node_delivered_cancelled_or_failed_is_a_queued_message_of_its_own"
+runs = ["ledger-receipt"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/carrying.rs"
+find = "                 WHERE m.state = 'queued' AND c.state NOT IN ('queued', 'gated', 'delivering')"
+replace = "                 WHERE m.state = 'queued' AND c.state IN ('cancelled', 'failed')"
+
+# A carrier on its way at the start keeps its rows, which are settled with it: the rule that the
+# plant here held the other way round until 2026-10-16 (its rows were let go of, and pasted twice).
+# What a carrier an earlier build was pasting carried, migration 0019 let go of. Their plants are
+# `carried-restart.toml`'s.

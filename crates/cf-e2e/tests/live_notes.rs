@@ -110,7 +110,7 @@ fn chiefs(named: &[String]) -> Result<Vec<Harness>> {
 #[test]
 #[ignore = "opt-in: spends the machine's quota on a chief of each harness named; cargo xtask live notes (npm run live:notes)"]
 fn a_chief_in_a_turn_is_handed_each_of_two_notes_once() -> Result {
-    let log = Log::new("live notes");
+    let log = Log::begin("live notes")?;
     ask::prepare()?;
     let asked = chiefs(&[live::list("chief"), live::list("harness")].concat())?;
     let mut checks = Vec::new();

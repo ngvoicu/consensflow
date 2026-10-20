@@ -39,3 +39,14 @@ anything you left running is stopped then, so wait for what your result needs"
 a worker's answer became its task's result at once and what its turn left running began
 to be ended with it: an agent was seen leaving a check running and answering, which that
 rule now ends.
+
+The same 27 rows have one paragraph Node's did not, after the one about a removal's paths:
+"Others work in this folder too, and not all of their work is committed. Never throw away
+a change you did not make: no `git checkout` or `git restore` that overwrites a file
+(`git restore --staged` of your own change is fine), and no `git reset --hard`,
+`git stash` or `git clean` over work that is not committed; take a change of yours out by
+hand. Say a file is restored only once you have checked it: its diff, or what it holds."
+(`skill/core/staff.md`). It was changed by hand, in those words alone, on
+2026-10-15, when a worker on the owner's Windows machine overwrote a file that held
+uncommitted work with `git checkout`, and other workers said they had restored files they
+had not.

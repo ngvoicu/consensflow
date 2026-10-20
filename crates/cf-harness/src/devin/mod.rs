@@ -12,6 +12,11 @@ mod session_hook;
 mod wire;
 mod wire_log;
 
+// For the live tests' `tooling` alone, which ships with nothing.
+#[cfg(any(test, feature = "test-support"))]
+pub(crate) use adapter::{window_on, wire_readiness};
+#[cfg(any(test, feature = "test-support"))]
+pub(crate) use install::added_hooks;
 pub(crate) use install::{minimum_version, supported_version};
 
 pub use adapter::DevinAdapter;

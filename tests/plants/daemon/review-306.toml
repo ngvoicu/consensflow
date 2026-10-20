@@ -247,3 +247,17 @@ runs = ["ledger-told-edges"]
 file = "crates/cf-ledger/src/tasks/finishing.rs"
 find = "            if told_waiting(store, assignee, task.id)? {"
 replace = "            if false && told_waiting(store, assignee, task.id)? {"
+
+# B3 on main's carriers (the merge of 2026-10-21): words told while the brief waited ride in its
+# paste, and a start keeps them in a brief being pasted (`release_stranded`), which the branch's
+# own rule let go of (the round-4 reviews' restart finding).
+
+[[plant]]
+name = "review 306: a start lets go of the told words in a brief being pasted"
+meant = "told_words_in_a_brief_the_daemon_stopped_while_pasting_go_in_once_after_the_start"
+runs = ["ledger-told-kept"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/carrying.rs"
+find = "WHERE m.state = 'queued' AND c.state NOT IN ('queued', 'gated', 'delivering')"
+replace = "WHERE m.state = 'queued' AND c.state NOT IN ('queued', 'gated')"

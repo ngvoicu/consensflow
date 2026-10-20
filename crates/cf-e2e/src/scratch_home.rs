@@ -5,7 +5,9 @@
 //!
 //! The environment is these variables and no others: `HOME`,
 //! `CONSENSFLOW_HOME`, `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `XDG_CONFIG_HOME`, a
-//! `PATH` of one folder (empty until a case puts a stand-in command in it) and
+//! `PATH` of one folder (empty until a case puts a stand-in command in it), the
+//! system's folders of programs (`CONSENSFLOW_TOOL_FOLDERS`, one that is never
+//! made, so `cf` finds no Homebrew program of the machine's) and
 //! `CONSENSFLOW_BIN_DIR`, all under the folder. Nothing is made in it: `cf`
 //! makes what it needs.
 
@@ -67,6 +69,7 @@ impl ScratchHome {
             ("CODEX_HOME", home.join(".codex")),
             ("XDG_CONFIG_HOME", home.join(".config")),
             ("PATH", self.path_dir()),
+            ("CONSENSFLOW_TOOL_FOLDERS", self.root().join("system-bin")),
             ("CONSENSFLOW_BIN_DIR", self.bin()),
         ]
     }
@@ -130,6 +133,7 @@ mod tests {
                 "CODEX_HOME",
                 "XDG_CONFIG_HOME",
                 "PATH",
+                "CONSENSFLOW_TOOL_FOLDERS",
                 "CONSENSFLOW_BIN_DIR",
             ]
         );

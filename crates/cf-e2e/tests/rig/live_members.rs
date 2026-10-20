@@ -15,7 +15,9 @@ use cf_e2e::live::window::Open;
 use cf_e2e::live::{agents, ask, Harness, Installed, Log};
 use serde_json::json;
 
-use crate::{after, rig, secs, Outcome, FAKE_AGENT};
+use cf_e2e::rig::Rig;
+
+use crate::{after, config, rig, secs, Outcome, FAKE_AGENT, FAKE_OPENCODE};
 
 /// A project of a check whose chief and member are the stand-in agent, in the
 /// folder `folder` of the live folders of the rig's own home.
@@ -367,12 +369,13 @@ fn a_project_that_does_not_end_in_time_says_which_of_the_processes_it_started_we
     let _ = cf_e2e::process::signal(job.pid(), cf_e2e::process::Signal::Kill);
     assert!(failed.starts_with("process did not exit"), "{failed}");
     let left = failed
-        .split("the processes it started, left or last looked at: ")
+        .split("the processes it started that were left: ")
         .nth(1)
         .ok_or(failed.as_str())?;
-    // The pane host, waiting for the window to leave, the shell that runs the worker's
-    // job (its parent gone, it is the machine's: `(1)`; a command is cut to a line) and
-    // the job that would not, under it.
+    // The pane host, waiting for the window to leave (the rig kills it once what was
+    // left is said, and not before), the shell that runs the worker's job (its parent
+    // gone, it is the machine's: `(1)`; a command is cut to a line) and the job that
+    // would not, under it.
     assert!(left.contains("consensflow-bridge"), "{failed}");
     assert!(left.contains("(1) ") && left.contains("sh -c"), "{failed}");
     assert!(
@@ -439,9 +442,16 @@ fn a_window_is_opened_on_a_conversation_the_harness_keeps_as_the_daemon_opens_on
     let rig = rig()?;
     let home = rig.var("HOME").unwrap_or_default().to_owned();
     let install = Installed::at(Harness::Claude, FAKE_AGENT, &home);
+    let log = Log::begin("live members")?;
+    assert_eq!(log.ran_on().as_deref(), Some("no window was launched"));
     let first = Open::new(&rig, &install, "resume", "resume-first")
         .without_trust()
-        .open()?;
+        .open(&log)?;
+    // What the window was launched on is the run's to report: the harness's model.
+    assert_eq!(
+        log.ran_on().as_deref(),
+        Some("the windows ran on: claude claude-sonnet-5-5")
+    );
     assert!(first.still(secs(60)), "{}", first.screen());
     let session = first
         .session()
@@ -459,7 +469,7 @@ fn a_window_is_opened_on_a_conversation_the_harness_keeps_as_the_daemon_opens_on
     let again = Open::new(&rig, &install, "resume", "resume-again")
         .without_trust()
         .resume(&session)
-        .open()?;
+        .open(&log)?;
     // It is opened on `--resume` of that conversation, and not on an id of its own.
     assert_eq!(again.session().as_deref(), Some(session.as_str()));
     let argv = again.argv();
@@ -501,5 +511,113 @@ fn the_harness_code_of_the_product_opens_each_harness_on_a_kept_conversation_by_
     ));
     // A kind with no window of its own is none.
     assert_eq!(ask::resume(&json!({ "kind": "kimi" }), "s")?, None);
+    Ok(())
+}
+
+#[test]
+fn a_window_opened_without_the_daemon_is_never_opened_on_an_opencode_effort_it_would_not_get(
+) -> Outcome {
+    let rig = rig()?;
+    let home = rig.var("HOME").unwrap_or_default().to_owned();
+    let install = Installed::at(Harness::OpenCode, FAKE_AGENT, &home);
+    let log = Log::begin("live members")?;
+    let refused = Open::new(&rig, &install, "effort", "effort-opencode")
+        .agent(json!({ "kind": "opencode", "model": "opencode/x", "effort": "high" }))
+        .without_trust()
+        .open(&log)
+        .err()
+        .map(|failed| failed.to_string());
+    assert_eq!(
+        refused.as_deref(),
+        Some(
+            "an OpenCode window opened without the daemon is given no effort: OpenCode takes \
+             it as the variant of the first message the daemon sends to the window's server, \
+             which this window has not; run opencode=opencode/x with no :high"
+        )
+    );
+    // Nothing was opened, and the run says so.
+    assert!(rig.open_frames().is_empty(), "{:?}", rig.open_frames());
+    assert_eq!(log.ran_on().as_deref(), Some("no window was launched"));
+    rig.close()?;
+    Ok(())
+}
+
+/// A model of OpenCode's that the catalog has no row of, which `--models` names at
+/// an effort. (It was the owner's Nemotron 3.5 Super VL until the catalog took it
+/// as Buri, 2026-10-16; the case holds that it is in no row of the catalog.)
+const MODEL: &str = "opencode/stand-in-no-catalog-row-free";
+const MODEL_ID: &str = "stand-in-no-catalog-row-free";
+
+/// The daemon's launch of a member's OpenCode window, as the stand-in OpenCode
+/// was asked it: the launch on a conversation (`--session`).
+fn window_launch(rig: &Rig) -> Option<Vec<String>> {
+    rig.opencode_asked()
+        .into_iter()
+        .find(|args| args.iter().any(|word| word == "--session"))
+}
+
+/// The first message the daemon posted to an OpenCode window's server, as its body.
+fn first_message(rig: &Rig) -> Option<serde_json::Value> {
+    rig.opencode_requests()
+        .into_iter()
+        .find(|request| {
+            request["target"]
+                .as_str()
+                .is_some_and(|target| target.contains("/prompt_async"))
+        })
+        .and_then(|request| serde_json::from_str(request["body"].as_str()?).ok())
+}
+
+#[test]
+fn a_task_for_a_member_on_a_model_the_flag_names_and_the_catalog_has_not_is_launched_on_it(
+) -> Outcome {
+    let presets = std::fs::read_to_string(cf_e2e::checkout::path(
+        "crates/cf-catalog/data/presets.json",
+    ))?;
+    assert!(
+        !presets.contains(&format!("\"{MODEL}\"")),
+        "the catalog has {MODEL}: the case needs a model it has not"
+    );
+    let models = agents::parse(Some(&format!("opencode={MODEL}:high")), None)?;
+    let row = agents::row_on(models.of(Harness::OpenCode), "light");
+    // The daemon takes the row as the live suites write it: a member of the human's
+    // own, which needs a model and no catalog entry; the run's report says it.
+    let rig = Rig::start(config().opencode(FAKE_OPENCODE))?;
+    let log = Log::begin("live members")?;
+    agents::write_roster(&rig, &[members::stand_in_chief(), row], &log)?;
+    assert_eq!(
+        log.ran_on(),
+        Some(format!("the windows ran on: opencode {MODEL}, effort high"))
+    );
+    let project = cf_e2e::rig::Project::open(&rig, "chief", json!({}))?;
+    let added = project.add_member(&agents::id(Harness::OpenCode))?;
+    assert_eq!(added["member"]["agent"], "live-opencode", "{added}");
+    rig.tell(
+        project.id(),
+        "DISPATCH --tier light Reply with exactly: UNCATALOGUED",
+    )?;
+    // The window the daemon launched for the task: on that model.
+    rig.wait_for("the daemon to launch the member's window", secs(30), || {
+        Ok(window_launch(&rig).is_some())
+    })?;
+    let launch = window_launch(&rig).unwrap_or_default();
+    assert!(
+        launch.windows(2).any(|pair| pair == ["--model", MODEL]),
+        "{launch:?}"
+    );
+    // Its first message, which carries the model and the effort OpenCode runs it on.
+    rig.wait_for(
+        "the daemon to post the task to the window",
+        secs(30),
+        || Ok(first_message(&rig).is_some()),
+    )?;
+    let message = first_message(&rig).unwrap_or_default();
+    assert_eq!(
+        message["model"],
+        json!({ "providerID": "opencode", "modelID": MODEL_ID }),
+        "{message}"
+    );
+    assert_eq!(message["variant"], "high", "{message}");
+    rig.close()?;
     Ok(())
 }

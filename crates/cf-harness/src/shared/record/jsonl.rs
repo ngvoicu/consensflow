@@ -11,7 +11,10 @@
 //! just before where the last look stopped (the edge), the unterminated
 //! record it remembered (the tail), and its size and time of writing. A
 //! file of another identity, or one that no longer holds the edge or the
-//! tail, is not the one read so far: it shrank, or was written over.
+//! tail, is not the one read so far: it shrank, or was written over. Its
+//! size and time alone say it is unchanged only where that time was
+//! [`settled`] when the look that found it began; one within a file time's
+//! step of it is checked for its edge and tail.
 
 mod prefix;
 
@@ -19,7 +22,7 @@ use std::fs::File;
 use std::io::{self, Read, Seek, SeekFrom};
 use std::path::Path;
 
-use cf_base::file::{identity, mtime_ms, Identity};
+use cf_base::file::{identity, mtime_ms, settled, Identity};
 use cf_base::json::{from_slice_lossy, is_json_lossy, DEEPEST};
 use serde_json::Value;
 
@@ -36,6 +39,8 @@ pub(crate) struct Seen {
     identity: Identity,
     size: u64,
     mtime_ms: f64,
+    /// When the look began, in the clock's milliseconds.
+    looked_ms: i64,
     /// The byte after the last whole line.
     offset: u64,
     /// The bytes before `offset`, up to `EDGE_BYTES` of them.
@@ -87,37 +92,52 @@ impl From<io::Error> for Stop {
 pub(crate) enum Looked {
     /// The file did not change: the look that stopped at `seen` is current.
     Unchanged,
+    /// The file did not change, as its bytes said where its time was too near the
+    /// look that found it to: the look that stopped at `seen` is current, and
+    /// this is it with this look's time, which the next look tells by.
+    Held(Seen),
     /// The file read on: the next look starts here.
     Read(Seen),
     /// Another file is in its place, or it no longer holds what was read.
     NotTheFile,
 }
 
-/// Reads on in the JSONL `file` from `seen` (none reads from the start),
-/// handing each record to `visit` with its place among the file's records.
+/// Reads on in the JSONL `file` from `seen` (none reads from the start), in a
+/// look that began at `looked_ms` (read before the file is), handing each
+/// record to `visit` with its place among the file's records.
 /// With `only`, a line that does not hold those bytes is passed over
 /// unparsed: a log of many conversations, read for one, parses that one's
 /// lines alone.
 pub(crate) fn read_on(
     file: &Path,
     seen: Option<&Seen>,
+    looked_ms: i64,
     visit: &mut dyn FnMut(Value, usize) -> Result<(), Stop>,
     only: Option<&[u8]>,
 ) -> Result<Looked, Stop> {
-    read_on_with(file, seen, from_slice_lossy, visit, only)
+    read_on_with(
+        file,
+        seen,
+        looked_ms,
+        from_slice_lossy,
+        &mut |record, index, _| visit(record, index),
+        only,
+    )
 }
 
 /// How a line is read into a record: a parser of the JSON of one line.
 pub(crate) type Parse = fn(&[u8]) -> serde_json::Result<Value>;
 
-/// [`read_on`], each line read by `parse`. It reads as `from_slice_lossy`
-/// does, or fails where that fails: a line it cannot read is a failure of the
-/// look, malformed or too much for a value, said as `read_on` says it.
+/// [`read_on`], each line read by `parse`, and each record handed to `visit`
+/// with the byte its line begins at too. It reads as `from_slice_lossy` does,
+/// or fails where that fails: a line it cannot read is a failure of the look,
+/// malformed or too much for a value, said as `read_on` says it.
 pub(crate) fn read_on_with(
     file: &Path,
     seen: Option<&Seen>,
+    looked_ms: i64,
     parse: Parse,
-    visit: &mut dyn FnMut(Value, usize) -> Result<(), Stop>,
+    visit: &mut dyn FnMut(Value, usize, u64) -> Result<(), Stop>,
     only: Option<&[u8]>,
 ) -> Result<Looked, Stop> {
     let mut handle = File::open(file)?;
@@ -129,7 +149,8 @@ pub(crate) fn read_on_with(
         if file_identity != seen.identity {
             return Ok(Looked::NotTheFile);
         }
-        if size == seen.size && written == seen.mtime_ms {
+        let same = size == seen.size && written == seen.mtime_ms;
+        if same && settled(written, seen.looked_ms) {
             return Ok(Looked::Unchanged);
         }
         let edge_start = seen.offset - seen.edge.len() as u64;
@@ -137,6 +158,13 @@ pub(crate) fn read_on_with(
             || !holds(&mut handle, seen.offset, &seen.tail)?
         {
             return Ok(Looked::NotTheFile);
+        }
+        // As long and as old as it was, and holding what was read: nothing follows it.
+        if same {
+            return Ok(Looked::Held(Seen {
+                looked_ms,
+                ..seen.clone()
+            }));
         }
     }
     let mut offset = seen.map_or(0, |seen| seen.offset);
@@ -168,7 +196,7 @@ pub(crate) fn read_on_with(
                     visited = false;
                     tail.clear();
                 } else if holds_only(&line) {
-                    records = consume_line(&line, records, parse, visit)?;
+                    records = consume_line(&line, records, offset, parse, visit)?;
                 }
                 line.clear();
                 offset = at + end as u64 + 1;
@@ -186,7 +214,7 @@ pub(crate) fn read_on_with(
         let text = String::from_utf8_lossy(&line);
         match parse(text.as_bytes()) {
             Ok(record) => {
-                visit(record, records)?;
+                visit(record, records, offset)?;
                 records += 1;
                 tail = line;
             }
@@ -203,6 +231,7 @@ pub(crate) fn read_on_with(
         identity: file_identity,
         size: at,
         mtime_ms: written,
+        looked_ms,
         offset,
         edge,
         tail,
@@ -210,20 +239,22 @@ pub(crate) fn read_on_with(
     }))
 }
 
-/// One whole line: a record for `visit` at `index`, nothing when blank, a
-/// failure when malformed. A carriage return before the newline is JSON's
-/// white space: a line ended `\r\n` reads as one ended `\n`.
+/// One whole line, which begins at the byte `at`: a record for `visit` at
+/// `index`, nothing when blank, a failure when malformed. A carriage return
+/// before the newline is JSON's white space: a line ended `\r\n` reads as one
+/// ended `\n`.
 fn consume_line(
     raw: &[u8],
     index: usize,
+    at: u64,
     parse: Parse,
-    visit: &mut dyn FnMut(Value, usize) -> Result<(), Stop>,
+    visit: &mut dyn FnMut(Value, usize, u64) -> Result<(), Stop>,
 ) -> Result<usize, Stop> {
     if is_blank(raw) {
         return Ok(index);
     }
     let record = parse(raw).map_err(|_| unread(raw, index))?;
-    visit(record, index)?;
+    visit(record, index, at)?;
     Ok(index + 1)
 }
 

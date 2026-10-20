@@ -19,7 +19,11 @@
 //! harness holds nothing of, which a window opened again does not resume
 //! (`resumable`), and the arrival window counted in the time a window is at
 //! rest, so that a record that is late while its window is in a turn is waited
-//! for, as a message its harness says its own queue holds is (`slow_records`).
+//! for, as a message its harness says its own queue holds is (`slow_records`),
+//! and the paste a window went with, which its harness's record may show it took
+//! (`window_went_with_a_paste`), and a header quoted in a window's words, which is
+//! no paste (`quoted_headers`), and the shapes a harness's record keeps a paste in
+//! (`paste_shapes`).
 
 // The tests' own scaffolding: a failure in it is the test's.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
@@ -50,16 +54,19 @@ mod not_ready;
 mod out_of_quota;
 mod own_steps;
 mod participant_leaves;
+mod paste_shapes;
 mod pause_notes;
 mod pending_agents;
 mod queued_tells;
 mod quota;
+mod quoted_headers;
 mod receipts;
 mod restart;
 mod resumable;
 mod resume;
 mod review;
 mod role_change;
+mod schedules;
 mod separate_callbacks;
 mod servers;
 mod session_windows;
@@ -83,6 +90,7 @@ mod trace_untold;
 mod traces;
 mod turns_at_seams;
 mod undeliverable;
+mod unfit;
 mod unreadable_agents;
 mod unsent;
 mod unstarted;
@@ -91,6 +99,7 @@ mod wake_ups;
 mod window_closes;
 mod window_takes_long;
 mod window_traces;
+mod window_went_with_a_paste;
 mod windows;
 mod withdrawn;
 mod work_in_flight;

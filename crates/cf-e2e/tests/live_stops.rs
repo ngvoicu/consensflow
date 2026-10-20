@@ -37,10 +37,10 @@
 //!
 //! Any harness (`--harness`, or its name):
 //!
-//! - `stuck`     A window that may not stop, pressed until the stop is exhausted (the
-//!   human and the requester are told): a command that ignores `INT`, `TERM` and
-//!   `HUP` is run, then the task paused. When the harness stops anyway, it says so,
-//!   and at which press.
+//! - `stuck`     A window that may not stop, pressed through every round and closed if
+//!   it ignores them all (the human and the requester are told): a command that
+//!   ignores `INT`, `TERM` and `HUP` is run, then the task paused. When the harness
+//!   stops anyway, it says so, and at which press.
 //! - `midturn`   A window in the middle of a turn that runs no command (the member is
 //!   writing a long reply), paused: the daemon's rounds of its harness's interrupt
 //!   must end the turn within them, and the pause be paid. It says for each round the
@@ -205,10 +205,6 @@ fn run(case: Case, harness: Harness, options: &Options, log: &Log) -> Result<Acc
         Case::MidTurn => midturn::run(&ctx, &mut account, harness),
         Case::MidTool => midturn::tool::run(&ctx, &mut account, harness),
     };
-    // What ignores the signals is ended for good, and with it the window.
-    if case == Case::Stuck {
-        stuck::end_the_command();
-    }
     if let Some(folder) = &options.transcripts {
         for file in keep_transcripts(&members, &agent, folder)? {
             log.say(format!("kept {}", file.display()));
@@ -224,7 +220,7 @@ fn run(case: Case, harness: Harness, options: &Options, log: &Log) -> Result<Acc
 #[ignore = "opt-in: spends the machine's quota on a member of the harness each case runs; cargo xtask live stops (npm run live:stops)"]
 fn a_stop_the_daemon_presses_is_paid_at_rest_and_never_said_to_be_ignored_where_the_window_stopped(
 ) -> Result {
-    let log = Log::new("live stops");
+    let log = Log::begin("live stops")?;
     let options = options(
         &live::list("case"),
         live::option("hook").as_deref(),

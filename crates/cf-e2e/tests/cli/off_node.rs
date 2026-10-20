@@ -59,8 +59,10 @@ const NAMED: &str = r"(?-u:\b)src/(?:core|adapters|channels)/|(?-u:\b)src/[a-z/-
 /// of an imagined project); the layout of the bundles older releases shipped,
 /// which the updater and its smoke still meet, and the publisher holds the
 /// bridge to; the command an older build wrote, which names a `cf.mjs` and is read
-/// and repaired; and the plants of this very check, which plant a path of Node's.
-const SAYS_THEM: [&str; 10] = [
+/// and repaired; the plants of this very check, which plant a path of Node's;
+/// and the page's bundles of what others wrote (`app/ui/vendor`), which keep
+/// their licences, one of which links jQuery's own `src/event.js` (Mermaid's).
+const SAYS_THEM: [&str; 11] = [
     r"^crates/[^/]+/tests/(?:goldens|traces)/",
     r"^crates/cf-engine/tests/dispatcher/review\.rs$",
     r"^tests/(?:engine/)?fixtures/",
@@ -71,6 +73,7 @@ const SAYS_THEM: [&str; 10] = [
     r"^crates/cf/tests/cli_goldens/",
     r"^tests/plants/cli/admin\.toml$",
     r"^tests/plants/cli/off-node\.toml$",
+    r"^app/ui/vendor/",
 ];
 
 /// Folders no source lives in: what is built, installed or fetched.

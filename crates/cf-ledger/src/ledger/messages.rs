@@ -257,6 +257,8 @@ impl Ledger {
         reason: &str,
         refund: bool,
     ) -> Result<MessageView, LedgerError> {
+        #[cfg(feature = "test-support")]
+        self.watched("retry_delivery", Some(message_id))?;
         messages::retry_delivery(&mut self.store, message_id, reason, refund)
     }
 

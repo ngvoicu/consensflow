@@ -32,7 +32,13 @@
     "wakeup.set",
     "project.specs",
     "project.rename",
-    "project.describe"
+    "project.describe",
+    "specs.get",
+    "specs.set",
+    "specs.tree",
+    "specs.file",
+    "specs.present",
+    "specs.open"
   ],
   "ping": "{\"ok\":true}"
 }

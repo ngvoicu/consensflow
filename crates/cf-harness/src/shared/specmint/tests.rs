@@ -213,11 +213,13 @@ fn launch<'a>(id: &'a LaunchId, specs: Option<Specs<'a>>) -> Launch<'a> {
         role: "chief",
         directory: "/work",
         resume: None,
+        previous_gone: false,
         message: None,
         agent: None,
         instructions: "role text",
         specs,
         first_message_ms: 1,
+        starts_given_up: 0,
     }
 }
 

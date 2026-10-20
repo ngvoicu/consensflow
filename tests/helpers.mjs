@@ -6,7 +6,9 @@ import { join } from 'node:path'
  * Every test of the page (`app/tests`) runs against a throwaway CONSENSFLOW_HOME
  * and throwaway harness homes. The env object is passed explicitly to every
  * program the test starts, which never reads the machine's own environment: that
- * is what makes this guard airtight.
+ * is what makes this guard airtight. That takes the system's folders of programs
+ * too, which a `cf` otherwise takes for Homebrew's on a Mac: a folder of the
+ * test's own, never made.
  */
 export function tempEnv() {
   const root = mkdtempSync(join(tmpdir(), 'cfv3-'))
@@ -17,6 +19,7 @@ export function tempEnv() {
     CODEX_HOME: join(root, 'home', '.codex'),
     XDG_CONFIG_HOME: join(root, 'home', '.config'),
     PATH: join(root, 'bin'),
+    CONSENSFLOW_TOOL_FOLDERS: join(root, 'system-bin'),
     CONSENSFLOW_BIN_DIR: join(root, 'consensflow', 'bin'),
   }
   return {

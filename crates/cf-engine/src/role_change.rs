@@ -175,7 +175,7 @@ use cf_harness::records::{Item, Role};
 use cf_ledger::{ConversationView, MessageView, NewNote, ParticipantView, ProjectView};
 use serde_json::{json, Value};
 
-use crate::delivery_text::{goes_whole, header_id, marker_of};
+use crate::delivery_text::{goes_whole, header_id};
 use crate::dispatcher::Dispatcher;
 use crate::seams::EngineError;
 use crate::specs::RoleText;
@@ -218,7 +218,7 @@ impl Dispatcher {
         let mut told = Vec::new();
         for note in waiting {
             let shown = self
-                .recorded_item_with(participant.id, &marker_of(note.id))
+                .recorded_paste_of(participant.id, note.id, None)
                 .await?;
             if let Some(item) = shown {
                 let begun = self.seams.ledger.borrow_mut().begin_delivery(note.id)?;

@@ -108,6 +108,39 @@ once, with the reason here and in the commit.
   recording has one (the feed of the one 1.x scenario is offline), so none moved
   for it.
 
+- **A Devin wire log replaced** (2026-10-16, Astra's and Sol's reviews of the fix of
+  the field report B1). Node took a wire log that shrank for one replaced and read it
+  from its start, and any other for the one it had read: one as long as the last was
+  read as nothing new, and one emptied kept the old offset, so what was written in it
+  next was read from where the old one ended. Since a window's readiness reads the
+  permission mode from it, a configuration rewritten from `bypass` to `normal` at its
+  size was read as `bypass`. The Rust reader takes a log that shrank, that begins
+  with other bytes than the ones it read, or that was written to and did not grow,
+  for another, and reads it from its start, the mode of the one before forgotten
+  (`devin/wire_log.rs`). `launch/` moved for it in one step of each of two
+  scenarios, in both platforms' recordings, which now carry a `kept` difference
+  there: `devin: a wire log replaced by one of the same size is not seen to change`,
+  step 5, and `devin: a wire log emptied and written again is read on from where
+  the old one ended`, step 7, where Node's answer is the window at rest and Rust's
+  the window switched to the conversation the new log names.
+
+- **A Codex window opened on a thread waits for its broker to name it**
+  (2026-10-20, zeewin's 2-hour live run of 2026-10-19: a Codex chief opened again
+  at rest after the app's restart read "starting" for 78 minutes, and nothing
+  reached it). Node's `started` of a window opened on a thread answered at once,
+  with no question of the broker, so a broker that never named the thread was
+  never noticed. The Rust adapter asks the broker as it does for a new window,
+  for at most the same minute (`codex/adapter.rs`). `launch/` moved for it in
+  one step of one scenario, in both platforms' recordings: `codex: a conversation
+  Codex kept is resumed on its thread, and its window has nothing to learn`, step
+  2, which is now served the broker's word that the window shows its thread, and
+  records the one `GET /session` it asks; its answer is Node's, `null`. And the
+  broker is asked once more at the deadline (the reviews of round 1: a thread named
+  after the last look before it was the window's, and the chief was closed at
+  work), which moved one more step: `codex: a thread never named in a minute is an
+  error`, step 3, which records one `GET /session` more, at the minute; its answer
+  is Node's.
+
 ## The launch scenarios
 
 A scenario of `launch/scenarios.<platform>.json` is data, and the Rust player

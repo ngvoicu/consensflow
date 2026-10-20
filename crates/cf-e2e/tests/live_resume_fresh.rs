@@ -413,7 +413,7 @@ const CASES: [(&str, Case); 2] = [
 #[ignore = "opt-in: spends the machine's quota on a chief of each harness named; cargo xtask live resume-fresh (npm run live:resume-fresh)"]
 fn a_chief_comes_back_on_the_humans_resume_afresh_if_it_never_had_a_turn_and_on_its_conversation_if_it_did(
 ) -> Result {
-    let log = Log::new("live resume-fresh");
+    let log = Log::begin("live resume-fresh")?;
     // What a window is opened on is the harness code's to say: built before anything is spent.
     ask::prepare()?;
     let chiefs = named(
@@ -477,9 +477,9 @@ mod tests {
             let plan = plan(harness);
             assert_eq!(plan.folder, "resume-fresh");
             assert_eq!(plan.chief, "chief");
-            let (cheap, _) = live::agents::cheap(harness);
+            let model = live::agents::model(harness).name;
             assert_eq!(plan.roster.len(), 1, "{harness:?}");
-            assert_eq!(plan.roster[0]["model"], cheap, "{harness:?}");
+            assert_eq!(plan.roster[0]["model"], model, "{harness:?}");
             assert_eq!(plan.roster[0]["kind"], harness.kind());
             assert_eq!(plan.harnesses(), [harness]);
         }

@@ -39,6 +39,8 @@ pub fn plain(path: PathBuf) -> PathBuf {
 /// `cf args` as the binary at `program` runs it, with `env` added and `input`
 /// on its standard input. The home is a folder of this run's own unless the
 /// case names one: the machine's own `~/.consensflow` is nobody's to write in.
+/// And the system's folders of programs are none unless it names some: a `cf`
+/// takes Homebrew's otherwise, and finds the machine's harnesses there.
 #[allow(clippy::disallowed_methods)] // The tests start cf themselves.
 pub fn cf_at<S: AsRef<OsStr>>(
     program: &Path,
@@ -58,6 +60,7 @@ pub fn cf_at<S: AsRef<OsStr>>(
         }
     }
     command.env("CONSENSFLOW_HOME", home.path());
+    command.env("CONSENSFLOW_TOOL_FOLDERS", "");
     let mut child = command
         .args(args.iter().map(AsRef::as_ref))
         .envs(env.iter().copied())

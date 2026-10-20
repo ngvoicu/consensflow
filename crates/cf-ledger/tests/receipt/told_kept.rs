@@ -2,8 +2,10 @@
 //! the change (2026-10-16) found them misread or lost: a note about the task to
 //! anyone but its window is no such words, and its failure fails nothing; a
 //! resume keeps the order they were told in, whatever order the human passes
-//! them on in; and words whose last paste failed while the task was paused are
-//! kept for its resume.
+//! them on in; words whose last paste failed while the task was paused are
+//! kept for its resume; and words that rode in a brief the daemon stopped while
+//! pasting keep their place in it across the start (the reviews of round 4:
+//! they were let go of and pasted again on their own).
 
 use crate::fixture::{gated_world, ids, world, World};
 use crate::queued_tells::{queued, tell, waiting};
@@ -119,4 +121,42 @@ fn told_words_whose_last_paste_fails_while_the_task_is_paused_are_kept_for_its_r
         "the resume carries them"
     );
     assert!(!waiting(&w, &session, task));
+}
+
+/// Words told while the brief waited ride in its paste, and the daemon stops while
+/// it is being pasted: the start keeps them in the brief (`release_stranded`),
+/// whatever the window's record shows: received with it where the record shows its
+/// marker, and in its paste again, once, where it does not.
+#[test]
+fn told_words_in_a_brief_the_daemon_stopped_while_pasting_go_in_once_after_the_start() {
+    for shown in [true, false] {
+        let mut w = world();
+        let (task, session, brief) = queued(&mut w);
+        let told = tell(&mut w, task, "Use the v2 grammar").id;
+        assert_eq!(
+            ids(&w.begin(brief).carried),
+            [told],
+            "it rides in the brief"
+        );
+        w.edit(|_| {});
+        assert_eq!(ids(&w.ledger.in_flight().unwrap()), [brief]);
+        assert_eq!(
+            w.next(&session),
+            None,
+            "nothing goes on its own while the brief is on its way"
+        );
+        if shown {
+            w.confirm(brief);
+        } else {
+            w.ledger
+                .retry_delivery(brief, "the daemon stopped before it arrived", true)
+                .expect("queued again");
+            assert_eq!(w.next(&session), Some(brief), "one paste, the brief's");
+            assert_eq!(ids(&w.deliver(brief).carried), [told], "in its paste again");
+        }
+        assert_eq!(w.states(&[brief, told]), ["delivered", "delivered"]);
+        assert_eq!(w.receipt(told)["carrier"], brief);
+        assert_eq!(w.next(&session), None, "nothing is pasted again");
+        assert!(!waiting(&w, &session, task), "the window has them");
+    }
 }

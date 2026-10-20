@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 use super::synthetic::{self, Plan};
 use super::*;
 use crate::shared::record::reading::Role;
+use crate::testing::LONG_AFTER_MS;
 
 /// A transcript of about `lines` lines, as text.
 fn transcript(lines: usize, seed: u64) -> (String, synthetic::Made) {
@@ -78,20 +79,23 @@ fn a_record_claiming_a_uuid_a_decision_looked_up_has_the_transcript_read_again()
     let located = file.clone();
     let mut followed = Followed::new(
         Box::new(move || Ok(Some(located.clone()))),
-        Box::new(|| Transcript::new(Arc::from(SESSION), local())),
+        Box::new(|| Transcript::new(Arc::from(SESSION), local(), 0)),
     );
-    assert_eq!(followed.read().unwrap().unwrap().state.count, made.lines);
+    assert_eq!(
+        followed.read(LONG_AFTER_MS).unwrap().unwrap().state.count,
+        made.lines
+    );
     // Another record after them is one more, read on from where the look stopped.
     let mut appended = fs::OpenOptions::new().append(true).open(&file).unwrap();
     let more = |uuid: &str| format!("{{\"type\":\"attachment\",\"uuid\":\"{uuid}\"}}\n");
     std::io::Write::write_all(&mut appended, more("someone-else").as_bytes()).unwrap();
     assert_eq!(
-        followed.read().unwrap().unwrap().state.count,
+        followed.read(LONG_AFTER_MS).unwrap().unwrap().state.count,
         made.lines + 1
     );
     // One that claims the boundary record of the first turn has them all read again.
     std::io::Write::write_all(&mut appended, more(&made.watched).as_bytes()).unwrap();
-    let read = followed.read().unwrap().unwrap();
+    let read = followed.read(LONG_AFTER_MS).unwrap().unwrap();
     assert_eq!(read.state.count, made.lines + 2);
     assert!(read.changed);
 }

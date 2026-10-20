@@ -5,7 +5,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::specs::{SpecsSetting, SpecsView};
+use crate::specs::{AppSpecs, SpecsSetting, SpecsView};
 
 /// A participant of a project: the human, the chief, a member, or a member's session.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -54,11 +54,12 @@ pub struct ProjectView {
 }
 
 impl ProjectView {
-    /// What its chief's launch is given of specs, where `app_default` is
-    /// whether the human turned them on for every project: none where they
-    /// are off for this one.
-    pub fn specs_setting(&self, app_default: bool) -> Option<SpecsSetting> {
-        SpecsView::resolve(self.specs.as_ref(), app_default)
+    /// What its chief's launch is given of specs, where `app` is what the
+    /// human says for every project: the project's own word, else the app's,
+    /// else the documented folder and variant; none where specs are off for
+    /// this one.
+    pub fn specs_setting(&self, app: &AppSpecs) -> Option<SpecsSetting> {
+        SpecsView::resolve(self.specs.as_ref(), app)
     }
 }
 

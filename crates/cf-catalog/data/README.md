@@ -233,6 +233,17 @@ effort on the Nemotron row: Zen's entry for it publishes no reasoning options,
 where OpenRouter's does, which is why Ymir names `high` and this one names
 nothing.
 
+Nemotron 3.5 Super VL (2026-10-16, the owner's decision): Buri, on Zen only
+(`opencode/nemotron-3.5-super-vl-free`, which answers on the Mac and on
+zeewin). Zen's models.dev entry for it, unlike its Nemotron 3 Ultra entry,
+publishes `reasoning_options` effort {none, minimal, low, medium, high, xhigh},
+so the row names its ceiling, `xhigh` (not `max`, a level this model does not
+have). Its label carries no size because the Zen id and Zen's name carry none
+(models.dev's canonical id is `nvidia/nemotron-3.5-super-vl-120b-a12b`). Light
+work, like every free OpenCode row. OpenCode validates no variant, so a run at
+`--variant xhigh` proves the id and the account; the level stands on Zen's
+listing.
+
 ## Model labels
 
 `modelLabels` was reviewed 2026-09-10 (source notes: the agent-catalog-redesign

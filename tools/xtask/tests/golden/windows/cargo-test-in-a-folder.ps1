@@ -14,14 +14,10 @@ if (Test-Path $running) {
 }
 Set-Content -Path $running -Value $PID
 try {
-$synced = Join-Path $dir '.synced-files'
-$before = if (Test-Path $synced) { Get-Content $synced } else { @() }
 tar.exe -xmzf (Join-Path $env:USERPROFILE 'build two.tgz') -C $dir
 if ($LASTEXITCODE -ne 0) { Exit-Run $LASTEXITCODE }
-$now = [Collections.Generic.HashSet[string]]::new([string[]](Get-Content $synced))
-foreach ($file in $before) {
-  if (-not $now.Contains($file)) { Remove-Item -LiteralPath (Join-Path $dir $file) -Force -ErrorAction SilentlyContinue }
-}
+. ([scriptblock]::Create([IO.File]::ReadAllText((Join-Path $dir '.windows-sweep.ps1'))))
+if ($failed.Count) { Exit-Run 1 }
 $env:Path = "C:\Program Files\nodejs;$env:USERPROFILE\.cargo\bin;" + $env:Path
 # Codex's own PATH entry is a junction an SSH session may not cross ("an
 # untrusted mount point"): its release folder, named outright.

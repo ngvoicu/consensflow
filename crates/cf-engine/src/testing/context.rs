@@ -18,6 +18,7 @@ use cf_harness::testing::ManualTime;
 use cf_ledger::{
     open_ledger, Ledger, NewProject, NewTask, Options, ProjectView, TaskCreated, TaskThread,
 };
+use cf_proto::specs::AppSpecs;
 use serde_json::{json, Value};
 
 use super::adapter::FakeAdapter;
@@ -55,6 +56,29 @@ struct TestClock(Rc<ManualTime>);
 impl Clock for TestClock {
     fn now_ms(&mut self) -> i64 {
         self.0.wall_ms()
+    }
+}
+
+/// What a test's ledger is opened with: the test's clock, the names in turn, and each
+/// event it logs written down.
+fn ledger_options(time: &Rc<ManualTime>, recorder: &Recorder) -> Options {
+    let named = Cell::new(0);
+    let told = recorder.clone();
+    Options {
+        clock: Box::new(TestClock(Rc::clone(time))),
+        names: Box::new(move || {
+            let name = NAMES[named.get() % NAMES.len()];
+            named.set(named.get() + 1);
+            name.to_owned()
+        }),
+        trace: Box::new(move |event| {
+            told.event(json!({
+                "at": event.at,
+                "project": event.project,
+                "kind": event.kind,
+                "data": event.data,
+            }));
+        }),
     }
 }
 
@@ -122,28 +146,7 @@ impl Context {
         let recorder = Recorder::default();
         let time = Rc::new(ManualTime::new(START_MS));
         let timers = Rc::new(TestTime::new(Rc::clone(&time), recorder.clone()));
-        let named = Cell::new(0);
-        let told = recorder.clone();
-        let ledger = open_ledger(
-            &file,
-            Options {
-                clock: Box::new(TestClock(Rc::clone(&time))),
-                names: Box::new(move || {
-                    let name = NAMES[named.get() % NAMES.len()];
-                    named.set(named.get() + 1);
-                    name.to_owned()
-                }),
-                trace: Box::new(move |event| {
-                    told.event(json!({
-                        "at": event.at,
-                        "project": event.project,
-                        "kind": event.kind,
-                        "data": event.data,
-                    }));
-                }),
-            },
-        )
-        .expect("a ledger");
+        let ledger = open_ledger(&file, ledger_options(&time, &recorder)).expect("a ledger");
         let ledger = Rc::new(RefCell::new(ledger));
         let executor = Rc::new(Executor::strict());
         let host = FakeHost::new(recorder.clone());
@@ -161,7 +164,8 @@ impl Context {
             designers: RefCell::new(HashSet::new()),
             broken: Cell::new(false),
             model: RefCell::new(None),
-            specs_by_default: Cell::new(false),
+            app_specs: RefCell::new(AppSpecs::default()),
+            app_specs_asked: Cell::new(0),
         });
         let roles = Rc::new(FakeRoles {
             recorder: recorder.clone(),
@@ -362,6 +366,17 @@ impl Context {
     /// Moves the clock on by `ms`.
     pub fn advance(&self, ms: i64) {
         self.time.settle_at(self.time.wall_ms() + ms);
+    }
+
+    /// The ledger's file, changed by `change` while no ledger holds it, as an earlier
+    /// build or a start that stopped partway left it, and opened again as a start
+    /// opens it.
+    pub fn edit_ledger(&self, change: impl FnOnce(&std::path::Path)) {
+        let mut ledger = self.ledger.borrow_mut();
+        ledger.close_in_place().expect("the file is given up");
+        change(&self.file);
+        *ledger = open_ledger(&self.file, ledger_options(&self.time, &self.recorder))
+            .expect("the ledger opens again");
     }
 
     /// The test is over: nothing may have failed unseen, and the engine and

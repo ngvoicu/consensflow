@@ -1,33 +1,116 @@
 //! The environment as the process found it, read once in `main` and handed
-//! to whatever needs a variable, so a test hands it any environment it likes.
+//! to whatever needs a variable, so a test hands it any environment it likes;
+//! and the machine's own folders of programs, which a test has none of unless
+//! it names them. What runs, runs on the PATH with those folders after it
+//! ([`Env::with_tool_folders_on_path`]), and finds there what it needs; a
+//! harness's CLI is looked for on the PATH as it was given
+//! ([`Env::search_path`]), so a Homebrew one is never the first choice over
+//! the human's own and always the last resort.
 
 use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-/// A process's environment variables.
+/// The variable that names the system's folders of programs in place of the
+/// machine's own (see [`Env::tool_folders`]), as a PATH names its folders;
+/// set to nothing, it names none.
+pub const TOOL_FOLDERS: &str = "CONSENSFLOW_TOOL_FOLDERS";
+
+/// The folders a package manager of the system puts its programs in, which a
+/// login shell puts on the PATH and an app the Finder started is not given:
+/// on a Mac, Homebrew's (`/opt/homebrew`, and `/usr/local` on Intel, which the
+/// installers of other programs use too). Elsewhere none: an app started from
+/// the Start menu has the PATH of the user and the machine, which installers
+/// write to, and a Linux desktop session (no app is built for one) has its
+/// login profile's.
+const MACHINE_TOOL_FOLDERS: &[&str] = if cfg!(target_os = "macos") {
+    &["/opt/homebrew/bin", "/opt/homebrew/sbin", "/usr/local/bin"]
+} else {
+    &[]
+};
+
+/// What separates the folders of a PATH.
+const DELIMITER: &str = if cfg!(windows) { ";" } else { ":" };
+
+/// A process's environment variables, and the system's folders of programs.
 #[derive(Debug, Clone, Default)]
 pub struct Env {
     vars: BTreeMap<OsString, OsString>,
+    tool_folders: Vec<PathBuf>,
+    /// The PATH it was given, before the system's folders were put after it.
+    search_path: Option<OsString>,
 }
 
 impl Env {
-    /// The environment this process was started with.
+    /// The environment this process was started with, on this machine: its
+    /// folders of programs are the ones [`TOOL_FOLDERS`] names, else the
+    /// machine's own.
     #[allow(clippy::disallowed_methods)] // The one place the environment is read.
     pub fn from_process() -> Self {
-        Self::from_vars(std::env::vars_os())
+        Self::from_vars(std::env::vars_os()).on_this_machine()
     }
 
-    /// An environment of these variables.
+    /// This environment on this machine: with the machine's own folders of
+    /// programs, unless it names some.
+    fn on_this_machine(mut self) -> Self {
+        if self.os(TOOL_FOLDERS).is_none() {
+            self.tool_folders = MACHINE_TOOL_FOLDERS.iter().map(PathBuf::from).collect();
+        }
+        self
+    }
+
+    /// An environment of these variables, on no machine: its folders of
+    /// programs are the ones [`TOOL_FOLDERS`] names, and none otherwise.
     pub fn from_vars<K: Into<OsString>, V: Into<OsString>>(
         vars: impl IntoIterator<Item = (K, V)>,
     ) -> Self {
+        let vars: BTreeMap<OsString, OsString> = vars
+            .into_iter()
+            .map(|(name, value)| (key(name.into()), value.into()))
+            .collect();
+        let tool_folders = vars
+            .get(&key(TOOL_FOLDERS.into()))
+            .map(|named| {
+                std::env::split_paths(named)
+                    .filter(|folder| !folder.as_os_str().is_empty())
+                    .collect()
+            })
+            .unwrap_or_default();
+        let search_path = vars.get(&key("PATH".into())).cloned();
         Self {
-            vars: vars
-                .into_iter()
-                .map(|(name, value)| (key(name.into()), value.into()))
-                .collect(),
+            vars,
+            tool_folders,
+            search_path,
         }
+    }
+
+    /// The system's own folders of programs, which a login shell puts on the
+    /// PATH and an app the Finder started is not given: where a harness's CLI
+    /// is looked for last, and what the daemon puts after the PATH of
+    /// everything it runs.
+    pub fn tool_folders(&self) -> &[PathBuf] {
+        &self.tool_folders
+    }
+
+    /// This environment as the daemon runs programs on it: its PATH with each of
+    /// the system's folders that is there and not on it after it, so a window
+    /// has Homebrew's `git` and `node` when the login shell gave nothing, and so
+    /// does the npm shim of a harness that runs on that Node. A harness's CLI is
+    /// still looked for on the PATH it was given ([`Env::search_path`]): one the
+    /// human keeps in the home is found before an older one of Homebrew's.
+    #[must_use]
+    pub fn with_tool_folders_on_path(mut self) -> Self {
+        let path = path_with_folders(self.os("PATH").unwrap_or_default(), &self.tool_folders);
+        if !path.is_empty() {
+            self.vars.insert(key("PATH".into()), path);
+        }
+        self
+    }
+
+    /// The PATH a harness's CLI is looked for on first: the one this
+    /// environment was given, before the system's folders were put after it.
+    pub fn search_path(&self) -> Option<&OsStr> {
+        self.search_path.as_deref()
     }
 
     /// The variable's value as the system gave it.
@@ -76,6 +159,29 @@ fn key(name: OsString) -> OsString {
     } else {
         name
     }
+}
+
+/// `path` as it is, and then each of `folders` that is there and not on it
+/// already, written as a PATH writes a folder: Windows quotes one whose name
+/// holds a `;`, and one no PATH can name (a `:` in it elsewhere, a `"` on
+/// Windows) is left out, never put on as two folders that are not there.
+pub fn path_with_folders(path: &OsStr, folders: &[PathBuf]) -> OsString {
+    let mut on_it: Vec<PathBuf> = std::env::split_paths(path).collect();
+    let mut joined = path.to_os_string();
+    for folder in folders {
+        if !folder.is_dir() || on_it.contains(folder) {
+            continue;
+        }
+        let Ok(written) = std::env::join_paths([folder]) else {
+            continue;
+        };
+        if !joined.is_empty() {
+            joined.push(DELIMITER);
+        }
+        joined.push(written);
+        on_it.push(folder.clone());
+    }
+    joined
 }
 
 #[cfg(test)]
@@ -130,6 +236,127 @@ mod tests {
                 (OsStr::new("CONSENSFLOW_URL"), OsStr::new("u")),
             ]
         );
+    }
+
+    #[test]
+    fn the_folders_of_programs_are_the_ones_named_else_the_machines_for_its_own_and_none_for_a_tests(
+    ) {
+        let delimiter = if cfg!(windows) { ";" } else { ":" };
+        let named = Env::from_vars([(TOOL_FOLDERS, format!("/a{delimiter}{delimiter}/b"))]);
+        let both = [PathBuf::from("/a"), PathBuf::from("/b")];
+        assert_eq!(named.tool_folders(), both, "an empty one is none");
+        assert_eq!(named.on_this_machine().tool_folders(), both);
+        // Named as nothing: none, on this machine too.
+        let nothing = Env::from_vars([(TOOL_FOLDERS, "")]);
+        assert!(nothing.tool_folders().is_empty());
+        assert!(nothing.on_this_machine().tool_folders().is_empty());
+        // Named nowhere: none for an environment a test makes, the machine's for its own.
+        let unnamed = Env::from_vars([("PATH", "/usr/bin")]);
+        assert!(unnamed.tool_folders().is_empty());
+        assert!(Env::default().tool_folders().is_empty());
+        let machine: Vec<PathBuf> = if cfg!(target_os = "macos") {
+            ["/opt/homebrew/bin", "/opt/homebrew/sbin", "/usr/local/bin"]
+                .map(PathBuf::from)
+                .into()
+        } else {
+            Vec::new()
+        };
+        assert_eq!(unnamed.on_this_machine().tool_folders(), machine);
+    }
+
+    /// Folders `names` made under `root`, each there.
+    fn made(root: &Path, names: &[&str]) -> Vec<PathBuf> {
+        names
+            .iter()
+            .map(|name| {
+                let folder = root.join(name);
+                std::fs::create_dir(&folder).unwrap();
+                folder
+            })
+            .collect()
+    }
+
+    #[test]
+    fn programs_run_on_the_path_with_the_systems_folders_after_it_and_are_looked_for_on_the_one_given(
+    ) {
+        let machine = tempfile::tempdir().unwrap();
+        let [own, homebrew]: [PathBuf; 2] = made(machine.path(), &["own", "homebrew"])
+            .try_into()
+            .unwrap();
+        let given = own.clone().into_os_string();
+        let folders = std::env::join_paths([&homebrew]).unwrap();
+        let env = Env::from_vars([
+            (OsString::from("PATH"), given.clone()),
+            (OsString::from(TOOL_FOLDERS), folders),
+        ]);
+        assert_eq!(env.search_path(), Some(given.as_os_str()));
+        let running = env.with_tool_folders_on_path();
+        assert_eq!(
+            running.os("PATH"),
+            Some(std::env::join_paths([&own, &homebrew]).unwrap().as_os_str())
+        );
+        assert_eq!(running.search_path(), Some(given.as_os_str()));
+        // With no PATH and no folders of the system's, still none.
+        let bare = Env::from_vars([("HOME", "/home")]).with_tool_folders_on_path();
+        assert_eq!((bare.os("PATH"), bare.search_path()), (None, None));
+    }
+
+    #[test]
+    fn the_systems_folders_go_after_the_path_each_once_and_only_where_they_are() {
+        let machine = tempfile::tempdir().unwrap();
+        let [own, first, second]: [PathBuf; 3] = made(machine.path(), &["own", "first", "second"])
+            .try_into()
+            .unwrap();
+        let missing = machine.path().join("missing");
+        let path = std::env::join_paths([&own, &first]).unwrap();
+        let folders = [missing, first.clone(), second.clone(), second.clone()];
+        assert_eq!(
+            path_with_folders(&path, &folders),
+            std::env::join_paths([&own, &first, &second]).unwrap()
+        );
+        assert_eq!(
+            path_with_folders(OsStr::new(""), std::slice::from_ref(&second)),
+            second.clone().into_os_string()
+        );
+        assert_eq!(path_with_folders(&path, &[]), path);
+    }
+
+    /// A folder whose name holds the PATH's delimiter is put on it as a PATH
+    /// writes such a folder (Windows quotes it), or not at all where none can
+    /// (`:` elsewhere): never as two folders that are not there. And the PATH
+    /// given keeps its own such folder as it wrote it (the reviews of 2026-10-16).
+    #[test]
+    fn a_folder_whose_name_holds_the_delimiter_is_put_on_the_path_whole_or_not_at_all() {
+        let machine = tempfile::tempdir().unwrap();
+        let delimited = if cfg!(windows) {
+            "tools;pinned"
+        } else {
+            "tools:pinned"
+        };
+        let [own, odd, other]: [PathBuf; 3] = made(machine.path(), &["own", delimited, "other"])
+            .try_into()
+            .unwrap();
+        let path = own.clone().into_os_string();
+        let joined = path_with_folders(&path, std::slice::from_ref(&odd));
+        let folders: Vec<PathBuf> = std::env::split_paths(&joined).collect();
+        if cfg!(windows) {
+            assert_eq!(folders, [own.clone(), odd.clone()]);
+            // A PATH that has it, quoted, has it once, and the next one after it.
+            let quoted = std::env::join_paths([&odd]).unwrap();
+            let joined = path_with_folders(&quoted, &[odd.clone(), other.clone()]);
+            assert_eq!(
+                std::env::split_paths(&joined).collect::<Vec<_>>(),
+                [odd, other]
+            );
+        } else {
+            assert_eq!(folders, [own]);
+            assert!(std::env::join_paths([&odd]).is_err(), "no PATH names it");
+            let joined = path_with_folders(&path, &[odd, other.clone()]);
+            assert_eq!(
+                joined,
+                std::env::join_paths([path.as_os_str(), other.as_os_str()]).unwrap()
+            );
+        }
     }
 
     #[test]

@@ -90,12 +90,20 @@ rig-background-pause = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", 
 rig-background-grace = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "background_work::a_job_that_ignores"]
 # The process the rig keeps outside its windows, which it finds still running when it closes.
 rig-stranger = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "stranger::"]
+# How the rig tells the stranger's own end from one it was given.
+e2e-lib-stranger = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "rig::stranger::"]
+# What a project of the live checks that does not end in time says it left.
+rig-members-left = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "live_members::a_project_that_does_not_end_in_time"]
+# How what such a project left is listed, on processes made up.
+e2e-lib-closing = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::members::closing::"]
 # T-15's shape: a command that never exits, and the final answer of the worker that left it.
 regression-never-exits = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_command_that_never_exits"]
 # The same of a Devin worker whose command goes on reporting on its wire after its turn ended (zeewin, 2026-10-14).
 regression-reporting-command = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_command_that_goes_on_reporting"]
 # Claude Code's own status line, told as work its window left (T-42, 3.0.3, 2026-10-14): the three cases of its regression.
 regression-status-line = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "claude_status_line"]
+# A worker's build that leaves its daemon running when it ends (A1 of 2026-10-15, 3.0.3): the two cases of its regression.
+regression-build-daemon = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_builds_daemon_held_a_workers_task"]
 
 # The result is the turn's end, whatever the turn left running.
 
@@ -205,7 +213,7 @@ runs = ["engine-dispatcher-background"]
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
 find = '''
-        let idle = record.delivery.borrow().delivering.is_none()
+        let free = record.delivery.borrow().delivering.is_none()
             && observed.settled'''
 replace = '''
         if participant.role == "chief" && observed.settled {
@@ -214,7 +222,7 @@ replace = '''
                 self.seams.background.end(&pane).await;
             }
         }
-        let idle = record.delivery.borrow().delivering.is_none()
+        let free = record.delivery.borrow().delivering.is_none()
             && observed.settled'''
 
 [[plant]]
@@ -393,8 +401,8 @@ runs = ["engine-dispatcher-background"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
-find = '                let because = if left.is_empty() {'
-replace = '                let because = if true {'
+find = '                let besides = if left.is_empty() {'
+replace = '                let besides = if true {'
 
 # What the daemon makes of the host's answer to an ending, and how long it waits for it.
 
@@ -927,6 +935,7 @@ file = "crates/cf-panes/src/pane_handlers.rs"
 find = '''
         tail: Some(screen.tail(TAIL_LINES)),
         background,
+        survivor,
     };'''
 replace = '''
         tail: Some(screen.tail(TAIL_LINES)),
@@ -934,6 +943,7 @@ replace = '''
             let _ = background;
             Vec::new()
         },
+        survivor,
     };'''
 
 [[plant]]
@@ -1203,8 +1213,119 @@ runs = ["rig-stranger"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/rig/mod.rs"
-find = '        if !self.stranger.runs() {'
-replace = '        if false && !self.stranger.runs() {'
+find = '        if let Some(how) = self.stranger.ended_by_another() {'
+replace = '        if let Some(how) = self.stranger.ended_by_another().filter(|_| false) {'
+
+# A stranger that slept ten minutes ran out by itself under a live suite, and the rig
+# took that for an end the pane host gave it (2026-10-15): its own end is no such end.
+[[plant]]
+name = "background rig: a stranger that left of itself is taken for one ended with the windows"
+meant = "a_stranger_that_left_of_itself_is_not_taken_for_one_ended_with_the_windows"
+runs = ["rig-stranger"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/stranger.rs"
+find = '        given(status.code(), signal, self.released)'
+replace = '        given(status.code(), signal, self.released).or(Some(format!("{status}")))'
+
+# An end a job gave it can say 0 on Windows (Astra on the B1 fix): any end before the rig
+# ended its input was given, whatever its code.
+[[plant]]
+name = "background rig: a stranger that ended with 0 before its input ended is taken for one that left of itself"
+meant = "any_end_before_its_input_ended_was_given_whatever_its_code"
+runs = ["e2e-lib-stranger"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/stranger.rs"
+find = '    if !released {'
+replace = '    if false && !released {'
+
+# A project that did not end in time said it had left no pane host, 3 times in 6 under
+# load (2026-10-17): the rig was dropped, which kills the host still waiting for its
+# windows, before what was left was listed, and a look at the processes made after the
+# kill was the last.
+[[plant]]
+name = "background rig: what a project that did not end left is listed once the rig has killed it"
+meant = "a_project_that_does_not_end_in_time_says_which_of_the_processes_it_started_were_left"
+runs = ["rig-members-left"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/closing.rs"
+find = '    let said = ended(|| rig.shut_down_within(within), listing, LOOK);'
+replace = '    let said = ended(move || rig.close_within(within), listing, LOOK);'
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/closing.rs"
+find = '''
+    drop(rig);
+    said
+}'''
+replace = '''
+    said
+}'''
+
+# The reviews of that fix (Astra and Sol, 2026-10-17): the listing of what was left
+# waited for the looker's look in flight, whose `ps` may run half a minute under load,
+# past the host's grace, after which the host has ended the window's job itself. This
+# plant and the two after it run the library's tests on processes made up, so unlike the
+# closes above they are caught on Windows too.
+[[plant]]
+name = "background rig: what a project that did not end left is listed once the look in flight has ended"
+meant = "what_was_left_is_listed_as_the_shutdown_gives_up_and_not_once_a_look_in_flight_has_ended"
+runs = ["e2e-lib-closing"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/closing.rs"
+find = '''
+        let failed = shut_down().err().map(|failed| (failed, list()));
+        drop(stop);
+        let _ = looking.join();
+'''
+replace = '''
+        let failed = shut_down().err();
+        drop(stop);
+        let _ = looking.join();
+        let failed = failed.map(|failed| (failed, list()));
+'''
+
+# A `ps` that could not run was a listing of nothing: "none" was said to be left while
+# the rig's processes ran on (Astra, 2026-10-17).
+[[plant]]
+name = "background rig: a listing of what was left that failed is said as none left"
+meant = "a_listing_that_fails_as_the_shutdown_gives_up_says_why_and_what_the_last_look_that_could_saw"
+runs = ["e2e-lib-closing"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/closing.rs"
+find = "    match now {"
+replace = "    match Ok::<_, String>(now.unwrap_or_default()) {"
+
+# A shutdown or a listing that panicked skipped the looker's stop, and the scope waited
+# for the looker for ever (Astra and Sol, 2026-10-17): the stop is a guard, set however
+# the call ends.
+[[plant]]
+name = "background rig: the looker of a project that did not end is stopped only when nothing panics"
+meant = "a_shutdown_or_a_listing_that_panics_ends_the_call_with_its_panic_and_the_looker_with_it"
+runs = ["e2e-lib-closing"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/closing.rs"
+find = '''
+        let stop = Stop(&done);
+'''
+replace = '''
+'''
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/closing.rs"
+find = '''
+        drop(stop);
+        let _ = looking.join();
+'''
+replace = '''
+        done.store(true, Ordering::Relaxed);
+        let _ = looking.join();
+'''
 
 # What an ending names of what the bound refuses: the turn's work the chain of processes
 # proved and nothing shows is the window's is not signalled, and is not dropped: the chief is
@@ -1748,6 +1869,7 @@ file = "crates/cf-panes/src/pane_handlers.rs"
 find = '''
         tail: Some(screen.tail(TAIL_LINES)),
         background,
+        survivor,
     };'''
 replace = '''
         tail: Some(screen.tail(TAIL_LINES)),
@@ -1755,6 +1877,7 @@ replace = '''
             let _ = background;
             Vec::new()
         },
+        survivor,
     };'''
 
 [[plant]]
@@ -2104,3 +2227,64 @@ replace = '''
             if let Some(ending) = None::<Ending> {
                 return ending;
             }'''
+
+# A1 of the field reports of 2026-10-15 (3.0.3): a worker's build left its daemon running, a child
+# of the build's that outlives it, and the worker's task stayed working after it had finished. The
+# daemon is no work of the turn: no chain of processes that run leads from it to a shell the harness
+# started, its build and the build's shell having ended (`crates/cf-e2e/tests/regressions/
+# a_builds_daemon_held_a_workers_task.rs`). What the plants widen the turn's work to is what the
+# window's tree holds, under the bound: the rig's own processes.
+[[plant]]
+name = "background regression: a build's daemon, its build ended, is taken for the turn's work and told as left"
+meant = "a_workers_build_that_leaves_its_daemon_running_has_its_task_done_and_the_daemon_is_neither_waited_for_nor_ended"
+runs = ["regression-build-daemon"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-panes/src/background/work.rs"
+find = '            None => return at.parent.is_some() && runs_a_shell(at),'
+replace = '            None => return at.parent.is_none() || runs_a_shell(at),'
+
+[[plant]]
+name = "background regression: a build's daemon holds the worker's task, as on 3.0.3"
+meant = "a_workers_build_that_leaves_its_daemon_running_has_its_task_done_and_the_daemon_is_neither_waited_for_nor_ended"
+runs = ["regression-build-daemon"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-panes/src/background/work.rs"
+find = '            None => return at.parent.is_some() && runs_a_shell(at),'
+replace = '            None => return at.parent.is_none() || runs_a_shell(at),'
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '            } else if let Some(task) = self.collect(project, participant, &observed)? {'
+replace = '''
+            } else if let Some(task) = ({
+                // Held for the work the turn left, as before 2026-10-13: no result while any runs.
+                let pane = record.window.borrow().pane.clone();
+                let left = match pane {
+                    Some(pane) => self
+                        .seams
+                        .background
+                        .end(&pane)
+                        .await
+                        .map_or(0, |ending| ending.left.total),
+                    None => 0,
+                };
+                if left > 0 {
+                    None
+                } else {
+                    self.collect(project, participant, &observed)?
+                }
+            }) {'''
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/turn.rs"
+find = '        Ok(tree.end(&baseline, self.close_grace)?)'
+replace = '''
+        let _ = self.close_grace;
+        Ok(Ending {
+            left: baseline.left_running(&tree.members()?),
+            ..Ending::default()
+        })'''

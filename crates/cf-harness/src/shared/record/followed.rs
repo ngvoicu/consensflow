@@ -10,7 +10,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use cf_base::file::{stat, Stat};
+use cf_base::file::{settled, stat, Stat};
 use cf_base::json::from_slice_lossy;
 use serde_json::Value;
 
@@ -31,6 +31,13 @@ pub(crate) trait Parser {
     /// `Stop::Reread` to have the transcript read again from its start.
     fn visit(&mut self, record: Value, index: usize) -> Result<(), Stop>;
 
+    /// [`Parser::visit`], told the byte the record's line begins at too, which
+    /// a parser that reads no place in the file passes over.
+    fn visit_at(&mut self, record: Value, index: usize, offset: u64) -> Result<(), Stop> {
+        let _ = offset;
+        self.visit(record, index)
+    }
+
     /// The records of a look are all in: what waited for the rest is decided.
     /// Fails with the look's reason; only a record asks for another read.
     fn flush(&mut self) -> Result<(), String> {
@@ -49,8 +56,10 @@ pub(crate) struct Followed<P> {
     file: Option<PathBuf>,
     seen: Option<Seen>,
     state: Option<P>,
-    /// A failure, kept until the file changes (`sameFile`).
-    broken: Option<(Stat, String)>,
+    /// A failure, kept until the file changes (`sameFile`), with when the look
+    /// that found it began: a stat not [`settled`] then may be the same for a
+    /// file written again since.
+    broken: Option<(Stat, i64, String)>,
 }
 
 /// What a look at a followed transcript read.
@@ -74,8 +83,9 @@ impl<P: Parser> Followed<P> {
         }
     }
 
-    /// A look: none when the harness keeps no transcript of the conversation.
-    pub(crate) fn read(&mut self) -> Result<Option<Read<'_, P>>, Stop> {
+    /// A look that began at `now_ms`: none when the harness keeps no transcript
+    /// of the conversation.
+    pub(crate) fn read(&mut self, now_ms: i64) -> Result<Option<Read<'_, P>>, Stop> {
         let mut current = self.file.as_deref().and_then(|file| stat(file).ok());
         if current.is_none() {
             let located = (self.locate)().map_err(Stop::Failed)?;
@@ -93,8 +103,8 @@ impl<P: Parser> Followed<P> {
         let (Some(current), Some(file)) = (current, self.file.clone()) else {
             return Ok(None);
         };
-        if let Some((stat, reason)) = &self.broken {
-            if *stat == current {
+        if let Some((stat, looked_ms, reason)) = &self.broken {
+            if *stat == current && settled(stat.mtime_ms, *looked_ms) {
                 return Err(Stop::Failed(reason.clone()));
             }
         }
@@ -104,8 +114,9 @@ impl<P: Parser> Followed<P> {
             let looked = read_on_with(
                 &file,
                 self.seen.as_ref(),
+                now_ms,
                 P::parse,
-                &mut |record, index| state.visit(record, index),
+                &mut |record, index, offset| state.visit_at(record, index, offset),
                 None,
             )
             .and_then(|looked| match looked {
@@ -113,19 +124,15 @@ impl<P: Parser> Followed<P> {
                 looked => state.flush().map(|()| looked).map_err(Stop::Failed),
             });
             match looked {
-                Ok(Looked::Unchanged) => {
+                Ok(looked @ (Looked::Unchanged | Looked::Held(_) | Looked::Read(_))) => {
+                    let changed = matches!(looked, Looked::Read(_));
+                    if let Looked::Held(seen) | Looked::Read(seen) = looked {
+                        self.seen = Some(seen);
+                    }
                     return Ok(Some(Read {
                         state: self.state.get_or_insert_with(|| (self.parse)()),
                         file,
-                        changed: false,
-                    }))
-                }
-                Ok(Looked::Read(seen)) => {
-                    self.seen = Some(seen);
-                    return Ok(Some(Read {
-                        state: self.state.get_or_insert_with(|| (self.parse)()),
-                        file,
-                        changed: true,
+                        changed,
                     }));
                 }
                 // Another file, or a parser that wants every record again: the
@@ -138,7 +145,7 @@ impl<P: Parser> Followed<P> {
                 Err(stop) => {
                     self.seen = None;
                     self.state = None;
-                    self.broken = Some((current, stop.reason()));
+                    self.broken = Some((current, now_ms, stop.reason()));
                     return Err(stop);
                 }
             }
@@ -169,12 +176,27 @@ impl<P> TranscriptReader<P> {
             answer: None,
         }
     }
+
+    /// Tells the state read so far, if there is one, what `tell` tells it, and
+    /// has the next look answer anew: from that state where `tell` says it
+    /// took it, else from the transcript read again from its start into a
+    /// fresh state.
+    pub(crate) fn retell(&mut self, tell: impl FnOnce(&mut P) -> bool) {
+        self.answer = None;
+        if let Some(state) = self.transcript.state.as_mut() {
+            if !tell(state) {
+                self.transcript.seen = None;
+                self.transcript.state = None;
+            }
+        }
+    }
 }
 
 impl<P: Parser + Answer> Look for TranscriptReader<P> {
-    /// Takes no options and reads no clock: the transcript alone answers.
-    fn look(&mut self, _options: &Options, _now_ms: i64) -> Arc<Reading> {
-        match self.transcript.read() {
+    /// Takes no options, and the clock says only when the look began: the
+    /// transcript alone answers.
+    fn look(&mut self, _options: &Options, now_ms: i64) -> Arc<Reading> {
+        match self.transcript.read(now_ms) {
             // A thread with no transcript yet is unknown: missing history alone proves nothing.
             Ok(None) => {
                 self.answer = None;
@@ -207,6 +229,7 @@ impl<P: Parser + Answer> Look for TranscriptReader<P> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testing::{EPOCH_MS, LONG_AFTER_MS};
     use std::fs;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -237,10 +260,10 @@ mod tests {
             }),
         );
         let counts = || (made.load(Ordering::Relaxed), visits.load(Ordering::Relaxed));
-        let failed = followed.read().err().unwrap().reason();
+        let failed = followed.read(LONG_AFTER_MS).err().unwrap().reason();
         assert_eq!(failed, "malformed JSONL at record 1");
         assert_eq!(counts(), (1, 1));
-        assert_eq!(followed.read().err().unwrap().reason(), failed);
+        assert_eq!(followed.read(LONG_AFTER_MS).err().unwrap().reason(), failed);
         assert_eq!(
             counts(),
             (1, 1),
@@ -248,8 +271,70 @@ mod tests {
         );
         let mut appended = fs::OpenOptions::new().append(true).open(&file).unwrap();
         std::io::Write::write_all(&mut appended, b"{\"b\":2}\n").unwrap();
-        assert_eq!(followed.read().err().unwrap().reason(), failed);
+        assert_eq!(followed.read(LONG_AFTER_MS).err().unwrap().reason(), failed);
         assert_eq!(counts(), (2, 2), "changed: read again from its start");
+    }
+
+    /// Writes `text` to `file`, last written at `at_ms` whatever the file system's clock.
+    fn write_at(file: &std::path::Path, text: &str, at_ms: i64) {
+        fs::write(file, text).unwrap();
+        let at = std::time::UNIX_EPOCH + std::time::Duration::from_millis(at_ms as u64);
+        fs::File::options()
+            .write(true)
+            .open(file)
+            .unwrap()
+            .set_modified(at)
+            .unwrap();
+    }
+
+    #[test]
+    fn a_broken_transcript_mended_at_its_size_within_a_file_times_step_is_read_again() {
+        // Mended in place a second before the look that found it broken, as Windows'
+        // clock gives a file written again within its tick: its stat is the same, and
+        // only its bytes tell.
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("t.jsonl");
+        let looked = EPOCH_MS;
+        let (broken, mended) = ("{\"a\":1}\n{\"b\":!}\n", "{\"a\":1}\n{\"b\":2}\n");
+        assert_eq!(broken.len(), mended.len());
+        write_at(&file, broken, looked - 1_000);
+        let located = file.clone();
+        let mut followed = Followed::new(
+            Box::new(move || Ok(Some(located.clone()))),
+            Box::new(|| Counting(Arc::new(AtomicUsize::new(0)))),
+        );
+        assert!(followed.read(looked).is_err());
+        write_at(&file, mended, looked - 1_000);
+        assert!(followed.read(looked + 10).is_ok());
+        // Broken and settled when the look found it, it is not read again while it stays.
+        write_at(&file, broken, looked - 60_000);
+        assert!(followed.read(looked + 20).is_err());
+        write_at(&file, mended, looked - 60_000);
+        assert!(followed.read(looked + 30).is_err());
+    }
+
+    #[test]
+    fn a_transcript_read_a_moment_after_its_last_write_is_read_to_tell_once_and_then_by_its_time() {
+        // A look each second reads a transcript a moment after it was written: the
+        // look after one that read its bytes to tell takes its time, as for a transcript
+        // last written long before. Written over at its size and time then, it is the
+        // one read (as git takes a clean entry).
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("t.jsonl");
+        let written = EPOCH_MS;
+        write_at(&file, "{\"a\":1}\n{\"a\":2}\n", written);
+        let visits = Arc::new(AtomicUsize::new(0));
+        let (located, visiting) = (file.clone(), Arc::clone(&visits));
+        let mut followed = Followed::new(
+            Box::new(move || Ok(Some(located.clone()))),
+            Box::new(move || Counting(Arc::clone(&visiting))),
+        );
+        let mut look = |at: i64| followed.read(written + at).unwrap().unwrap().changed;
+        assert!(look(500));
+        assert!(!look(2_500), "its bytes as they were");
+        write_at(&file, "{\"b\":1}\n{\"b\":2}\n", written);
+        assert!(!look(3_000), "its time settled: not read");
+        assert_eq!(visits.load(Ordering::Relaxed), 2);
     }
 
     /// A parser that numbers its states, as made, and keeps the places of the
@@ -293,7 +378,7 @@ mod tests {
     /// The state a look read into, as it numbered itself, the places of the
     /// records it was given, and whether the look read anything.
     fn read_into(followed: &mut Followed<Rereading>) -> (usize, Vec<usize>, bool) {
-        let read = followed.read().unwrap().unwrap();
+        let read = followed.read(LONG_AFTER_MS).unwrap().unwrap();
         (read.state.number, read.state.visited.clone(), read.changed)
     }
 

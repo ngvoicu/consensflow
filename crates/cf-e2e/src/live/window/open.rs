@@ -15,7 +15,7 @@ use super::super::machine::{live_folder_in, Harness, Installed, ISOLATION};
 use super::super::{list, Log};
 use super::{trust_claude, Window};
 use crate::rig::Rig;
-use crate::{Error, Result};
+use crate::{cf, files, Error, Result};
 
 /// The launch the live windows' settings are written for: one id, so each is
 /// written over the last.
@@ -91,6 +91,59 @@ pub fn session_for(kind: &str) -> Option<String> {
     (kind == "claude-code" || kind == "pi").then(new_session)
 }
 
+/// A member's window as the daemon launches it: the adapter prepares it, with the
+/// owner's config and the hooks ConsensFlow adds to it, the role's text for a
+/// session of it to start with, and its first message in a prompt file
+/// ([`ask::devin_launch`]). Devin's alone.
+#[derive(Debug, Clone)]
+pub struct Member {
+    role: String,
+    instructions: String,
+    message: Option<String>,
+    alone: bool,
+}
+
+impl Member {
+    /// A member of the role `role` (`worker`) whose sessions start with
+    /// `instructions`, opened with no message.
+    pub fn new(role: &str, instructions: &str) -> Self {
+        Self {
+            role: role.to_owned(),
+            instructions: instructions.to_owned(),
+            message: None,
+            alone: false,
+        }
+    }
+
+    /// With none of the owner's own hooks in the copy of their config that the launch
+    /// runs with, but the ones ConsensFlow adds: for a check that asks whether what a
+    /// window does is the harness's, and not a hook's of the machine's.
+    #[must_use]
+    pub fn without_the_owners_hooks(mut self) -> Self {
+        self.alone = true;
+        self
+    }
+
+    /// Whether the launch has none of the owner's hooks.
+    pub fn is_alone(&self) -> bool {
+        self.alone
+    }
+
+    /// With `message` the window's first, which its launch puts in a prompt file:
+    /// what the daemon does with the task of a new window, and with the note that a
+    /// window the quit cut is told so by when it is opened again.
+    #[must_use]
+    pub fn first_message(mut self, message: &str) -> Self {
+        self.message = Some(message.to_owned());
+        self
+    }
+
+    /// The window's first message, where it has one.
+    pub fn message(&self) -> Option<&str> {
+        self.message.as_deref()
+    }
+}
+
 /// How a window is to be opened.
 pub struct Open<'a> {
     rig: &'a Rig,
@@ -102,6 +155,8 @@ pub struct Open<'a> {
     drop_env: Vec<String>,
     trusting: bool,
     resume: Option<String>,
+    member: Option<Member>,
+    claude_alone: Option<Value>,
 }
 
 impl<'a> Open<'a> {
@@ -119,7 +174,19 @@ impl<'a> Open<'a> {
             drop_env: Vec::new(),
             trusting: true,
             resume: None,
+            member: None,
+            claude_alone: None,
         }
+    }
+
+    /// A Claude window with none of the owner's own settings (their hooks among them:
+    /// `--setting-sources local`, the window's folder's own, which has none), and the
+    /// `hooks` given here (Claude's `hooks` setting, by event) beside ConsensFlow's, in
+    /// the one settings file of the launch. Its trust is asked with none of them either.
+    #[must_use]
+    pub fn claude_alone_with_hooks(mut self, hooks: Value) -> Self {
+        self.claude_alone = Some(hooks);
+        self
     }
 
     /// The window is the one the app opens on the conversation `session`, which
@@ -128,6 +195,15 @@ impl<'a> Open<'a> {
     #[must_use]
     pub fn resume(mut self, session: &str) -> Self {
         self.resume = Some(session.to_owned());
+        self
+    }
+
+    /// The window is a member's as the daemon launches it ([`Member`]): its command
+    /// line, its config and its variables are what the adapter prepares for it,
+    /// whole, and not the flags of a bare window. Each window is a launch of its own.
+    #[must_use]
+    pub fn member(mut self, member: Member) -> Self {
+        self.member = Some(member);
         self
     }
 
@@ -166,34 +242,52 @@ impl<'a> Open<'a> {
     /// [`Open::open`], and what came of asking Claude to trust the folder said in
     /// the `log` where it was asked, as the run of `who` (`claude: trust: trusted`).
     pub fn open_telling(self, log: &Log, who: &str) -> Result<Window<'a>> {
-        let window = self.open()?;
+        let window = self.open(log)?;
         if let Some(trust) = window.trust() {
             log.say(trust_line(who, trust));
         }
         Ok(window)
     }
 
-    /// Opens it. A Claude window is opened after Claude has been asked to trust
-    /// its folder, and says what came of that ([`Window::trust`]).
-    pub fn open(self) -> Result<Window<'a>> {
+    /// What the window opens on: the harness's own flags for a bare window, with the
+    /// program the machine has it at; a member's launch as the adapter prepares it,
+    /// with the program the adapter found. A launch is made once, so each is under
+    /// an id of its own.
+    fn command(
+        &self,
+        agent: &Value,
+        session: Option<&str>,
+        workspace: &Path,
+        env: &[(String, String)],
+    ) -> Result<(ask::Start, String)> {
         let harness = self.install.harness();
-        let home = self
-            .rig
-            .var("HOME")
-            .filter(|home| !home.is_empty())
-            .ok_or_else(|| Error::Daemon("the rig gives its windows no home".to_owned()))?;
-        let workspace = live_folder_in(Path::new(home), &self.folder)?;
-        let agent = self.agent.unwrap_or_else(|| agents::agent(harness));
-        let kind = agent["kind"]
-            .as_str()
-            .unwrap_or_else(|| harness.kind())
-            .to_owned();
-        // A window resumed on a conversation is given its id; one that is not opens on
-        // an id of its harness's kind ([`session_for`]).
-        let session = self.resume.clone().or_else(|| session_for(&kind));
+        if let Some(member) = &self.member {
+            if harness != Harness::Devin {
+                return Err(Error::Daemon(format!(
+                    "a member's launch is prepared for Devin alone, not {}",
+                    harness.name()
+                )));
+            }
+            let start = ask::devin_launch(&ask::DevinLaunch {
+                id: &new_session(),
+                role: &member.role,
+                directory: workspace,
+                resume: self.resume.as_deref(),
+                message: member.message.as_deref(),
+                agent,
+                instructions: &member.instructions,
+                cf: cf::binary()?,
+                env,
+            })?;
+            if member.alone {
+                keep_only_consensflows_hooks(&start.args, cf::binary()?)?;
+            }
+            let program = start.command.clone();
+            return Ok((start, program));
+        }
         let start = match &self.resume {
-            Some(resumed) => ask::resume(&agent, resumed)?,
-            None => ask::start(&agent, session.as_deref(), None)?,
+            Some(resumed) => ask::resume(agent, resumed)?,
+            None => ask::start(agent, session, None)?,
         }
         .ok_or_else(|| {
             Error::Daemon(format!(
@@ -206,11 +300,42 @@ impl<'a> Open<'a> {
                 }
             ))
         })?;
-        let executable = self.install.command().to_string_lossy().into_owned();
+        let program = self.install.command().to_string_lossy().into_owned();
+        Ok((start, program))
+    }
+
+    /// Opens it, and notes in the run's `log` the agent it was launched on
+    /// ([`Log::launched`]). A Claude window is opened after Claude has been asked
+    /// to trust its folder, and says what came of that ([`Window::trust`]). An
+    /// agent a window opened here cannot run is the error, before anything opens
+    /// ([`without_the_daemon`]).
+    pub fn open(self, log: &Log) -> Result<Window<'a>> {
+        let harness = self.install.harness();
+        let home = self
+            .rig
+            .var("HOME")
+            .filter(|home| !home.is_empty())
+            .ok_or_else(|| Error::Daemon("the rig gives its windows no home".to_owned()))?;
+        let workspace = live_folder_in(Path::new(home), &self.folder)?;
+        let agent = self.agent.clone().unwrap_or_else(|| agents::agent(harness));
+        without_the_daemon(&agent)?;
+        let kind = agent["kind"]
+            .as_str()
+            .unwrap_or_else(|| harness.kind())
+            .to_owned();
+        // A window resumed on a conversation is given its id; one that is not opens on
+        // an id of its harness's kind ([`session_for`]).
+        let session = self.resume.clone().or_else(|| session_for(&kind));
         let env = window_env(self.rig, &workspace);
+        let (start, executable) = self.command(&agent, session.as_deref(), &workspace, &env)?;
         let claude = harness == Harness::Claude;
+        let alone: &[&str] = if self.claude_alone.is_some() {
+            &ALONE
+        } else {
+            &[]
+        };
         let trust = if claude && self.trusting {
-            let shut_out = ISOLATION.map(str::to_owned);
+            let shut_out = ISOLATION.iter().chain(alone).map(|word| (*word).to_owned());
             let argv: Vec<String> = std::iter::once(executable.clone())
                 .chain(shut_out)
                 .collect();
@@ -222,8 +347,12 @@ impl<'a> Open<'a> {
         if claude {
             // The settings the app writes for each launch (which skip the full-permission
             // warning), and no MCP server, connector or browser.
-            argv.extend(ask::claude_settings(&env, LAUNCH, false)?);
-            argv.extend(ISOLATION.map(str::to_owned));
+            let settings = ask::claude_settings(&env, LAUNCH, false)?;
+            match &self.claude_alone {
+                Some(hooks) => argv.extend(with_hooks(&settings, hooks)?),
+                None => argv.extend(settings),
+            }
+            argv.extend(ISOLATION.iter().chain(alone).map(|word| (*word).to_owned()));
         }
         argv.extend(start.args);
         let argv = ask::program(&argv, &env).map_err(|failed| {
@@ -255,6 +384,7 @@ impl<'a> Open<'a> {
                 harness.name()
             )));
         }
+        log.launched(&agent);
         Ok(Window {
             rig: self.rig,
             harness,
@@ -268,6 +398,107 @@ impl<'a> Open<'a> {
             trust,
             killed: Cell::new(false),
         })
+    }
+}
+
+/// The words that open a Claude window on none of the owner's settings files: only the
+/// window's folder's own local one, which a live folder has not.
+const ALONE: [&str; 2] = ["--setting-sources", "local"];
+
+/// The arguments that load the launch's settings file (`--settings <file>`), with `hooks`
+/// (by event) added to the hooks it has, written to a file of their own beside it: Claude
+/// takes one `--settings`.
+pub(super) fn with_hooks(settings: &[String], hooks: &Value) -> Result<Vec<String>> {
+    let [flag, file] = settings else {
+        return Err(Error::Daemon(format!(
+            "the launch's settings are not one file: {settings:?}"
+        )));
+    };
+    let mut config: Value = serde_json::from_str(&files::read_string(Path::new(file))?)
+        .map_err(|failed| Error::Daemon(format!("the launch's settings are no JSON: {failed}")))?;
+    add_hooks(&mut config, hooks);
+    let written = Path::new(file).with_extension("hooks.json");
+    files::write(&written, config.to_string())?;
+    Ok(vec![flag.clone(), written.to_string_lossy().into_owned()])
+}
+
+/// `hooks` (Claude's `hooks` setting: entries by event) added after the entries `config`
+/// has of each event.
+pub(super) fn add_hooks(config: &mut Value, hooks: &Value) {
+    let Some(config) = config.as_object_mut() else {
+        return;
+    };
+    let had = config.entry("hooks").or_insert_with(|| json!({}));
+    for (event, entries) in hooks.as_object().into_iter().flatten() {
+        let Some(had) = had.as_object_mut() else {
+            return;
+        };
+        let list = had.entry(event.clone()).or_insert_with(|| json!([]));
+        if let (Some(list), Some(entries)) = (list.as_array_mut(), entries.as_array()) {
+            list.extend(entries.iter().cloned());
+        }
+    }
+}
+
+/// Takes every hook entry that is not one ConsensFlow added out of the hooks of `config`:
+/// what is kept is what `added` says the launch added (each event with its entries, as
+/// the launch's config has them written), and an event that has none left goes. A hook
+/// is not ConsensFlow's for what its command says: one kept by a word in its command was
+/// an owner's that said the word, and could refuse a call (Sol on the B1 fix, the second
+/// look). Only the launch's copy of the owner's config is handled, which the adapter
+/// wrote for it: the owner's own is never touched.
+pub(super) fn consensflows_hooks_of(config: &mut Value, added: &Value) {
+    // `config["hooks"]` on a config that has none would make it one that has a null.
+    let Some(events) = config.get_mut("hooks").and_then(Value::as_object_mut) else {
+        return;
+    };
+    events.retain(|event, entries| {
+        let Some(entries) = entries.as_array_mut() else {
+            return false;
+        };
+        let ours = added[event.as_str()]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        entries.retain(|entry| ours.contains(entry));
+        !entries.is_empty()
+    });
+}
+
+/// [`consensflows_hooks_of`] for the copy of the config a member's launch is opened with
+/// (the file the word after `--config` names), its session hook run by `cf`.
+fn keep_only_consensflows_hooks(args: &[String], cf: &Path) -> Result<()> {
+    let file = args
+        .iter()
+        .position(|word| word == "--config")
+        .and_then(|at| args.get(at + 1))
+        .ok_or_else(|| Error::Daemon("the launch has no config of its own".to_owned()))?;
+    let path = Path::new(file);
+    let mut config: Value = serde_json::from_str(&files::read_string(path)?)
+        .map_err(|failed| Error::Daemon(format!("the launch's config is no JSON: {failed}")))?;
+    consensflows_hooks_of(&mut config, &ask::devin_hooks(cf, true)?);
+    files::write(path, config.to_string())
+}
+
+/// Why a window opened here, without the daemon, cannot run `agent`: an OpenCode
+/// agent given an effort. OpenCode takes its effort as the `variant` of the first
+/// message, which the daemon posts to the window's own server; a window opened
+/// here has no such server (its messages are typed into it) and its command line
+/// has no word for an effort, so it would run on the model's default while the run
+/// said it ran on the effort.
+pub fn without_the_daemon(agent: &Value) -> Result {
+    let text = |key: &str| agent[key].as_str().filter(|text| !text.is_empty());
+    match (
+        agents::harness_of(agent),
+        text("effort").or(text("thinking")),
+    ) {
+        (Some(Harness::OpenCode), Some(effort)) => Err(Error::Daemon(format!(
+            "an OpenCode window opened without the daemon is given no effort: OpenCode takes \
+             it as the variant of the first message the daemon sends to the window's server, \
+             which this window has not; run opencode={} with no :{effort}",
+            text("model").unwrap_or("<model>")
+        ))),
+        _ => Ok(()),
     }
 }
 

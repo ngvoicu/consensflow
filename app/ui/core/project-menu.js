@@ -1,8 +1,10 @@
 /**
  * The menu of a project in the list on the left: Rename… and Description…,
- * each in a small dialog of its own, and Project settings…, which opens the
- * dialog of the board's Project settings button for this project (the page
- * shows the project first, if the board shows another). It opens on a
+ * each in a small dialog of its own, and Project settings… and Specs…, which
+ * open the dialogs of the board's Project settings and Specs buttons for this
+ * project (the page shows the project first, if the board shows another). Specs…
+ * is offered whether or not the project has a specs folder: the viewer says so
+ * where it has none. It opens on a
  * right-click, and from the keyboard on the project that has it (the
  * context-menu key, or Shift+F10). Escape closes it, and so does a click
  * anywhere else, and the keyboard goes back to the project.
@@ -152,7 +154,6 @@ export class ProjectMenu {
   #list
   #menu
   #items
-  #settings
   #page
   #dialogs
   #fallback
@@ -160,37 +161,47 @@ export class ProjectMenu {
   #open = null
   /** Where that project's card was in the list when it was last drawn: where the keyboard goes if it is gone. */
   #at = 0
-  /** The project whose Project settings the menu asked the page to open, until that dialog closes. */
-  #settingsFor = null
+  /**
+   * The dialogs the page opens for a project (Project settings, Specs), by the
+   * item that asks for each: the dialog, how the page opens it, and the project
+   * the menu asked it for, until it closes.
+   */
+  #opened
 
   /**
    * `elements` are the list of projects (each of its items holds its id in
    * `data-project` and its button in `.project-select`), the menu, the two
-   * dialogs of a line of text, the dialog of Project settings, and `fallback`,
-   * the control the keyboard goes to when the project of an open menu is gone
-   * and the list has no other. `page.project(id)` is the project as the page
-   * has it now; `daemon`, `act` and `note` are the page's, as the dialogs use
-   * them; `page.openSettings(id)` shows the project if the board shows another,
-   * and opens Project settings on it.
+   * dialogs of a line of text, the dialogs of Project settings and of Specs, and
+   * `fallback`, the control the keyboard goes to when the project of an open
+   * menu is gone and the list has no other. `page.project(id)` is the project as
+   * the page has it now; `daemon`, `act` and `note` are the page's, as the
+   * dialogs use them; `page.openSettings(id)` and `page.openSpecs(id)` show the
+   * project if the board shows another, and open Project settings or the specs
+   * viewer on it.
    */
-  constructor({ list, menu, rename, describe, settings, fallback }, page) {
+  constructor({ list, menu, rename, describe, settings, specs, fallback }, page) {
     this.#list = list
     this.#menu = menu
     this.#fallback = fallback
     this.#items = [...menu.querySelectorAll('[role="menuitem"]')]
-    this.#settings = settings
     this.#page = page
     const back = (id) => this.#focus(id)
     this.#dialogs = {
       rename: new FieldDialog(rename, FIELDS.rename, page, back),
       describe: new FieldDialog(describe, FIELDS.describe, page, back),
     }
-    // The keyboard goes back to the project whichever way its settings are left.
-    settings.addEventListener('close', () => {
-      const project = this.#settingsFor
-      this.#settingsFor = null
-      if (project !== null) back(project)
-    })
+    this.#opened = {
+      settings: { dialog: settings, open: (id) => page.openSettings(id), for: null },
+      specs: { dialog: specs, open: (id) => page.openSpecs(id), for: null },
+    }
+    // The keyboard goes back to the project whichever way its dialog is left.
+    for (const opened of Object.values(this.#opened)) {
+      opened.dialog.addEventListener('close', () => {
+        const project = opened.for
+        opened.for = null
+        if (project !== null) back(project)
+      })
+    }
     for (const item of this.#items) {
       item.addEventListener('click', () => this.#choose(item.dataset.action))
     }
@@ -327,20 +338,20 @@ export class ProjectMenu {
     const project = this.#page.project(this.#open)
     this.#hide(BACK.nowhere)
     if (project === undefined) return
-    if (action === 'settings') void this.#openSettings(project.id)
+    if (action in this.#opened) void this.#openFor(this.#opened[action], project.id)
     else this.#dialogs[action].open(project)
   }
 
   /**
-   * Project settings on a project: the page shows it first, if the board shows another, and
-   * opens the dialog, which gives the keyboard back to the project as it closes. A dialog the
-   * page could not open (the project is gone, or its board could not be read) leaves nothing
-   * of the ask for the next one.
+   * Project settings or the specs viewer on a project: the page shows it first, if the board
+   * shows another, and opens the dialog, which gives the keyboard back to the project as it
+   * closes. A dialog the page could not open (the project is gone, or its board could not be
+   * read) leaves nothing of the ask for the next one.
    */
-  async #openSettings(id) {
-    this.#settingsFor = id
-    await this.#page.openSettings(id)
-    if (!this.#settings.open) this.#settingsFor = null
+  async #openFor(opened, id) {
+    opened.for = id
+    await opened.open(id)
+    if (!opened.dialog.open) opened.for = null
   }
 
   /** Shuts the menu, and gives the keyboard where `back` says. */

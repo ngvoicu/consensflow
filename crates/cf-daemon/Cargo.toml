@@ -7,6 +7,8 @@ rust-version.workspace = true
 publish = false
 
 [dependencies]
+# An image of a project's specs folder reaches the page as base64 (`page::viewer`).
+base64.workspace = true
 bytes.workspace = true
 cf-base.workspace = true
 # The daemon's end of the bridge, which no other crate turns on.
@@ -40,10 +42,21 @@ tokio = { workspace = true, features = ["io-std", "io-util", "macros", "net", "r
 # A request's target is read as the WHATWG URL standard reads it, as Node's `new URL`.
 url.workspace = true
 
+# The specs viewer opens each name of a project's specs folder through the
+# folder above it, never through a link (`page::viewer::door`).
+[target.'cfg(unix)'.dependencies]
+rustix.workspace = true
+
+# The same on Windows: each folder held while a name in it is opened, and a
+# handle's type and number of names (`page::viewer::door`).
+[target.'cfg(windows)'.dependencies]
+winapi-util.workspace = true
+windows-sys = { workspace = true, features = ["Win32_Storage_FileSystem"] }
+
 [dev-dependencies]
 # The players read Node's traces (gzipped JSON, bodies that are no UTF-8)
-# and compare the ledger's file as the recorder dumped it.
-base64.workspace = true
+# and compare the ledger's file as the recorder dumped it; base64, which they
+# read the bodies with, is a dependency of the daemon's own.
 cf-engine = { workspace = true, features = ["test-support"] }
 cf-harness = { workspace = true, features = ["test-support"] }
 flate2.workspace = true
@@ -52,6 +65,10 @@ regex.workspace = true
 rusqlite.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["io-std", "io-util", "macros", "net", "rt", "signal", "sync", "test-util", "time"] }
+
+# A FIFO in a specs folder, which the viewer must never wait on (`mkfifo`).
+[target.'cfg(unix)'.dev-dependencies]
+nix = { workspace = true, features = ["fs"] }
 
 [lints]
 workspace = true

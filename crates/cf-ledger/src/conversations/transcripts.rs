@@ -5,7 +5,7 @@ use std::collections::HashMap;
 
 use cf_base::time;
 use cf_proto::ledger::{TaskTranscript, TranscriptItem};
-use rusqlite::{params, OptionalExtension};
+use rusqlite::params;
 use serde_json::Value;
 
 use super::known_conversation;
@@ -240,23 +240,39 @@ fn header_of(text: &str) -> Option<i64> {
 
 /// The first item ConsensFlow's copy of the participant's current
 /// conversation shows it was given (a user item) that contains `text`, or
-/// none: a delivery's header there proves the delivery arrived.
+/// none.
 pub(crate) fn copied_item_with(
     store: &Store,
     participant_id: i64,
     text: &str,
 ) -> Result<Option<String>, LedgerError> {
+    Ok(copied_items_with(store, participant_id, text)?
+        .into_iter()
+        .next()
+        .map(|(item, _)| item))
+}
+
+/// Every item ConsensFlow's copy of the participant's current conversation
+/// shows it was given (a user item) that contains `text`, in their order: its
+/// id and its words. A delivery's header proves it arrived where it begins
+/// the item as the paste does, which the caller reads in the words.
+pub(crate) fn copied_items_with(
+    store: &Store,
+    participant_id: i64,
+    text: &str,
+) -> Result<Vec<(String, String)>, LedgerError> {
     Ok(store
         .db
-        .query_row(
-            "SELECT t.item_id FROM transcript t JOIN conversation c ON c.id = t.conversation_id
+        .prepare(
+            "SELECT t.item_id, t.text FROM transcript t JOIN conversation c ON c.id = t.conversation_id
        WHERE c.participant_id = ? AND c.ended_at IS NULL AND t.role = 'user'
          AND instr(t.text, ?) > 0
-       ORDER BY t.seq LIMIT 1",
-            params![participant_id, text],
-            |row| row.get("item_id"),
-        )
-        .optional()?)
+       ORDER BY t.seq",
+        )?
+        .query_map(params![participant_id, text], |row| {
+            Ok((row.get("item_id")?, row.get("text")?))
+        })?
+        .collect::<rusqlite::Result<_>>()?)
 }
 
 /// Whether the participant's windows hold words the human typed after the

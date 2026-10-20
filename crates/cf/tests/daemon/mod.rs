@@ -153,6 +153,12 @@ impl Daemon {
                 root.dir.path().join("home").join(".config"),
             )
             .env("PATH", root.bin())
+            // A folder of the system's programs of its own, which is never made:
+            // no Homebrew program of the machine's.
+            .env(
+                "CONSENSFLOW_TOOL_FOLDERS",
+                root.dir.path().join("system-bin"),
+            )
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());

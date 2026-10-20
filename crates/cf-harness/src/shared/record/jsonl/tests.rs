@@ -1,17 +1,30 @@
 use super::*;
+use crate::testing::{EPOCH_MS, LONG_AFTER_MS};
 use std::fs;
 use std::time::{Duration, SystemTime};
 
-/// Every record a look visits, with its place.
+/// Every record a look visits, with its place, the look long after the file was
+/// written.
 fn collect(
     file: &Path,
     seen: Option<&Seen>,
+    only: Option<&[u8]>,
+) -> (Result<Looked, Stop>, Vec<(Value, usize)>) {
+    collect_at(file, seen, LONG_AFTER_MS, only)
+}
+
+/// Every record a look that began at `looked_ms` visits, with its place.
+fn collect_at(
+    file: &Path,
+    seen: Option<&Seen>,
+    looked_ms: i64,
     only: Option<&[u8]>,
 ) -> (Result<Looked, Stop>, Vec<(Value, usize)>) {
     let mut visited = Vec::new();
     let looked = read_on(
         file,
         seen,
+        looked_ms,
         &mut |record, index| {
             visited.push((record, index));
             Ok(())
@@ -203,6 +216,69 @@ fn a_file_that_shrank_was_written_over_or_was_replaced_is_not_the_one_read() {
 }
 
 #[test]
+fn a_file_written_over_at_its_size_within_a_file_times_step_of_the_look_is_not_the_one_read() {
+    // Written over a second before the look that read it, and its time kept, as
+    // Windows' clock gives a file written again within its tick: only its bytes tell.
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("t.jsonl");
+    let looked = EPOCH_MS;
+    fs::write(&file, "{\"a\":1}\n{\"a\":2}\n").unwrap();
+    stamp(&file, (looked - 1_000) as u64);
+    let seen = read(collect_at(&file, None, looked, None).0);
+    fs::write(&file, "{\"b\":1}\n{\"b\":2}\n").unwrap();
+    stamp(&file, (looked - 1_000) as u64);
+    assert!(matches!(
+        collect_at(&file, Some(&seen), looked + 10, None).0,
+        Ok(Looked::NotTheFile)
+    ));
+    // Not written over, it holds what was read, and nothing is read.
+    fs::write(&file, "{\"a\":1}\n{\"a\":2}\n").unwrap();
+    stamp(&file, (looked - 1_000) as u64);
+    let (looked_again, visited) = collect_at(&file, Some(&seen), looked + 20, None);
+    assert!(matches!(looked_again, Ok(Looked::Held(_))) && visited.is_empty());
+}
+
+#[test]
+fn a_file_found_holding_what_was_read_once_its_time_is_settled_is_not_read_again() {
+    // Read a moment after its last write, as a look each second reads a transcript
+    // being written, and quiet since: one look reads it to tell, and those after it
+    // take its time.
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("t.jsonl");
+    let written = EPOCH_MS;
+    fs::write(&file, "{\"a\":1}\n{\"a\":2}\n").unwrap();
+    stamp(&file, written as u64);
+    let seen = read(collect_at(&file, None, written + 500, None).0);
+    let held = match collect_at(&file, Some(&seen), written + 2_500, None).0 {
+        Ok(Looked::Held(held)) => held,
+        other => panic!("not held: {other:?}"),
+    };
+    assert!(matches!(
+        collect_at(&file, Some(&held), written + 3_000, None).0,
+        Ok(Looked::Unchanged)
+    ));
+}
+
+#[test]
+fn a_file_last_written_well_before_the_look_that_read_it_is_not_read_again_while_its_time_stays() {
+    // Its size and time as the look found them, and that time older than the look by
+    // more than a file time's step: nothing of it is read again. Written over so, it
+    // is the file read before (as git takes a clean entry).
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("t.jsonl");
+    let looked = EPOCH_MS;
+    fs::write(&file, "{\"a\":1}\n{\"a\":2}\n").unwrap();
+    stamp(&file, (looked - 60_000) as u64);
+    let seen = read(collect_at(&file, None, looked, None).0);
+    fs::write(&file, "{\"b\":1}\n{\"b\":2}\n").unwrap();
+    stamp(&file, (looked - 60_000) as u64);
+    assert!(matches!(
+        collect_at(&file, Some(&seen), looked + 10, None).0,
+        Ok(Looked::Unchanged)
+    ));
+}
+
+#[test]
 fn a_file_that_is_not_there_is_an_io_failure() {
     let dir = tempfile::tempdir().unwrap();
     let (looked, _) = collect(&dir.path().join("none.jsonl"), None, None);
@@ -302,6 +378,10 @@ fn reading_on_through_appends_truncations_and_replacements_reads_what_a_whole_re
                     assert_eq!(Ok(records.clone()), expected, "run {run}: {text:?}");
                 }
                 Ok(Looked::Unchanged) => assert_eq!(Ok(records.clone()), expected, "run {run}"),
+                Ok(Looked::Held(next)) => {
+                    seen = Some(next);
+                    assert_eq!(Ok(records.clone()), expected, "run {run}");
+                }
                 Ok(Looked::NotTheFile) => panic!("a read from the start is the file read"),
                 Err(stop) => {
                     assert_eq!(Err(stop.reason()), expected, "run {run}: {text:?}");

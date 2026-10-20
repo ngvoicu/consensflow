@@ -6,25 +6,100 @@
 use std::io;
 use std::path::{Path, PathBuf};
 
-use crate::process::own_var;
+use crate::process::{own_var, Run};
 use crate::{Error, Result};
 
 /// Where the program `name` is, on the `PATH` of this run, as a shell finds it.
 /// A machine that has none is an error that says so.
 pub fn command(name: &str) -> Result<PathBuf> {
     let path = own_var("PATH").unwrap_or_default();
-    find(name, &path, own_var("PATHEXT").as_deref()).ok_or_else(|| Error::Program {
+    find(name, &path, own_var("PATHEXT").as_deref()).ok_or_else(|| not_found(name))
+}
+
+/// The error of a program `name` that is in no folder of the `PATH`.
+fn not_found(name: &str) -> Error {
+    Error::Program {
         action: "find",
         program: name.to_owned(),
         source: io::Error::new(
             io::ErrorKind::NotFound,
             "it is in no folder of the PATH of this run: install it, or put its folder on the PATH",
         ),
+    }
+}
+
+/// Where the program `name` is on the `PATH` of this run, the first of its files there,
+/// in the order a shell looks, that runs: asked `probe`, it ends 0. A file a shell finds
+/// is not always a program: the Microsoft Store's app-execution alias of `python3`, on
+/// the `PATH` of a Windows 11 user who has not turned it off, ends 9009 with "Python was
+/// not found" whatever it is asked (zeewin, 2026-10-16), and may come before a Python
+/// that runs; and a Python the Store installed is an alias of the same kind in the same
+/// folder, so only running it tells the two apart. The `probe` is never empty: the alias
+/// asked nothing opens the Store.
+pub fn working_command(name: &str, probe: &[&str]) -> Result<PathBuf> {
+    let path = own_var("PATH").unwrap_or_default();
+    working(name, &path, own_var("PATHEXT").as_deref(), probe)
+}
+
+/// [`working_command`] on the `path` and the extensions it is given: each file of the
+/// name is run in turn, and none that runs is an error that says how each ended.
+pub(super) fn working(
+    name: &str,
+    path: &str,
+    extensions: Option<&str>,
+    probe: &[&str],
+) -> Result<PathBuf> {
+    let found = candidates(name, path, extensions);
+    if found.is_empty() {
+        return Err(not_found(name));
+    }
+    let mut failed = Vec::new();
+    for candidate in found {
+        match runs(candidate, name, probe) {
+            Ok(program) => return Ok(program),
+            Err(error) => failed.push(error.to_string()),
+        }
+    }
+    Err(Error::Program {
+        action: "run",
+        program: name.to_owned(),
+        source: io::Error::other(format!(
+            "no file of the name on the PATH of this run runs: {}",
+            failed.join("; ")
+        )),
+    })
+}
+
+/// `found`, the program `name`, if it ends 0 when it is asked `probe`; an error that
+/// says how it ended otherwise.
+pub(super) fn runs(found: PathBuf, name: &str, probe: &[&str]) -> Result<PathBuf> {
+    let ran = Run::new(&found)
+        .args(probe)
+        .inheriting_env()
+        .closed_input()
+        .run()?;
+    if ran.code == Some(0) {
+        return Ok(found);
+    }
+    Err(Error::Program {
+        action: "run",
+        program: name.to_owned(),
+        source: io::Error::other(format!(
+            "{} {} is no program that runs: {ran}",
+            found.display(),
+            probe.join(" ")
+        )),
     })
 }
 
 /// [`command`] on the `path` and the extensions it is given.
 pub(super) fn find(command: &str, path: &str, extensions: Option<&str>) -> Option<PathBuf> {
+    candidates(command, path, extensions).into_iter().next()
+}
+
+/// Every file a shell would take for `command` on the `path`, in the order it looks: in
+/// each folder, the first of the extensions it is given (on Windows) that names a file.
+fn candidates(command: &str, path: &str, extensions: Option<&str>) -> Vec<PathBuf> {
     let suffixes: Vec<&str> = if cfg!(windows) {
         extensions
             .unwrap_or(".COM;.EXE;.BAT;.CMD")
@@ -36,12 +111,13 @@ pub(super) fn find(command: &str, path: &str, extensions: Option<&str>) -> Optio
     };
     std::env::split_paths(path)
         .filter(|folder| !holds_no_harness(folder))
-        .find_map(|folder| {
+        .filter_map(|folder| {
             suffixes
                 .iter()
                 .map(|suffix| folder.join(format!("{command}{suffix}")))
                 .find(|candidate| candidate.is_file())
         })
+        .collect()
 }
 
 /// Whether a folder of the `PATH` holds a stand-in for a harness and not the
@@ -158,6 +234,74 @@ mod tests {
         // A folder of another name that ends in `bin` is as good as any.
         assert!(!holds_no_harness(&root.path().join("tools").join("bin")));
         assert!(holds_no_harness(&root.path().join("EVALS").join("Bin")));
+    }
+
+    /// A program of the name `command` in `folder` that says `said` and ends `code`: a
+    /// script on Unix, a batch file on Windows (where a status is not cut to a byte).
+    fn program(folder: &Path, command: &str, said: &str, code: u32) -> PathBuf {
+        let path = folder.join(file_of(command));
+        let text = if cfg!(windows) {
+            format!("@echo {said}\r\n@exit /b {code}\r\n")
+        } else {
+            format!("#!/bin/sh\necho '{said}'\nexit {code}\n")
+        };
+        crate::files::write_executable(&path, text).unwrap();
+        path
+    }
+
+    #[test]
+    fn a_file_of_the_name_that_does_not_run_is_passed_over_for_a_later_one_that_does() {
+        // The Store's alias of `python3`, as zeewin has it first on its PATH: a shell finds
+        // it, and whatever it is asked it ends 9009 and says there is no Python.
+        let (alias, real) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let stub = program(
+            alias.path(),
+            "python3",
+            "Python was not found; run without arguments to install from the Microsoft Store",
+            9009,
+        );
+        let path = path_of(&[alias.path(), real.path()]);
+        assert_eq!(find("python3", &path, Some(".cmd")), Some(stub.clone()));
+        // Alone on the PATH it is no Python, and the error says how it ended.
+        let refused = working("python3", &path, Some(".cmd"), &["--version"]).unwrap_err();
+        let said = refused.to_string();
+        assert!(
+            matches!(&refused, Error::Program { action: "run", program, .. } if program == "python3"),
+            "{said}"
+        );
+        assert!(said.contains("no file of the name on the PATH"), "{said}");
+        assert!(
+            said.contains(&format!(
+                "{} --version is no program that runs",
+                stub.display()
+            )),
+            "{said}"
+        );
+        assert!(said.contains("Python was not found"), "{said}");
+        // A Python that runs, after it on the PATH, is the one taken.
+        let python = program(real.path(), "python3", "Python 3.12.1", 0);
+        assert_eq!(
+            working("python3", &path, Some(".cmd"), &["--version"]).unwrap(),
+            python
+        );
+        // And one first on the PATH is taken without the alias being asked.
+        let first = path_of(&[real.path(), alias.path()]);
+        assert_eq!(
+            working("python3", &first, Some(".cmd"), &["--version"]).unwrap(),
+            python
+        );
+        // None of the name at all is the error that it is in no folder of the PATH.
+        let empty = tempfile::tempdir().unwrap();
+        let none = working(
+            "python3",
+            &path_of(&[empty.path()]),
+            Some(".cmd"),
+            &["--version"],
+        );
+        assert!(
+            matches!(&none, Err(Error::Program { action: "find", .. })),
+            "{none:?}"
+        );
     }
 
     #[test]

@@ -131,8 +131,8 @@ fn a_stand_in_paused_in_the_middle_of_its_turn_is_a_stop_the_daemon_pays_and_eac
 /// The same case against a window that does not stop for the pause: the stand-in takes the
 /// Escape and then a minute and a half to wind its turn down (`CF_TEST_WIND_DOWN_MS`), as
 /// a window does that is slow to end its turn, so the three rounds are ignored, the daemon
-/// says so to the human and the chief, and the case does not hold. It says each round all
-/// the same, which is what it is for.
+/// closes the window and says so to the human and the chief, and the case does not hold.
+/// It says each round all the same, which is what it is for.
 #[test]
 fn a_stand_in_that_goes_on_through_three_rounds_is_a_stop_the_case_fails_and_says_each_round_of() {
     let (members, log) = project(
@@ -168,9 +168,10 @@ fn a_stand_in_that_goes_on_through_three_rounds_is_a_stop_the_case_fails_and_say
         said.contains("FAIL the daemon read the window at rest, and paid the stop there: its reading of the window never turned idle in the "),
         "{said}"
     );
+    // The window that did not stop was closed after its third round (whether the notes
+    // that say so had landed by the end of the watch is the host's grace's).
     assert!(
-        said.contains("FAIL it is not said to have ignored the stop: unstopped on its lane: {")
-            && said.contains("notes that it did not stop: 1 to the human, 1 to the requester"),
+        said.contains("     the lane over the stop: working at +0.0 s, closed at +"),
         "{said}"
     );
     // Each round was looked at, and the window was working at each look.
@@ -213,8 +214,9 @@ fn a_member_whose_window_never_shows_its_first_message_is_said_to_have_failed_as
     // Not the five minutes the case waits at most.
     assert!(started.elapsed() < Duration::from_secs(120), "{said}");
     for words in [
-        // The failure, in the daemon's words, from what the chief was told.
-        "FAIL the member did not write its numbers: its task is failed, and the chief was told: T-1 failed: the window never showed its first message; its screen ended with: \"No API key found",
+        // The failure, in the daemon's words, from what the chief was told: the stand-in's
+        // screen names an API key, so the daemon quotes none of it.
+        "FAIL the member did not write its numbers: its task is failed, and the chief was told: T-1 failed: the window never showed its first message; its last screen lines named a secret, so they are left out",
         "     the task: T-1 is failed",
         "     what the daemon wrote:",
         "     the chief was told (",

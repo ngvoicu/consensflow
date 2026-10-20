@@ -12,6 +12,7 @@ pub(super) fn scenario() -> Scenario {
         id: "simple-fix",
         title: "One wrong word on one page",
         fixture: "site",
+        uncommitted: None,
         prompt: "Pe pagina de evaluare (site/evaluare.html) scrie „un scor între 0 și 100”; scorul e de fapt între 0 și 10. Corectează, te rog.".to_owned(),
         follow_ups: Vec::new(),
         answers: Vec::new(),

@@ -1,0 +1,322 @@
+//! A window that says it never will be ready for a paste (`Readiness::Unfit`: a
+//! Devin left in its normal permission mode, field report B1 of 2026-10-15) is a
+//! launch that did not come up, said on the board: its window closes, a chief's
+//! without its project and to be tried again, the human told once and what waits
+//! for the chief kept; a member's with the message it was to be given, which fails,
+//! and whoever is told why, but for words told to the window about its task, which
+//! its close paused: they are kept for the resume, as words whose paste fails while
+//! the task is paused are. Never a window left to wait. Not held to a Node
+//! recording: Node had no such answer.
+
+use std::cell::Cell;
+use std::rc::Rc;
+
+use cf_engine::testing::Context;
+use cf_harness::contract::{Held, Readiness};
+use cf_ledger::NewNote;
+use serde_json::json;
+
+use crate::fixtures::{closed, Tiers};
+
+/// What the window says of itself, as the Devin adapter says it.
+const WHY: &str = "its Devin window stayed in the normal permission mode, which /bypass did not change within 30 s (every tool call of its would wait for a permission nobody gives)";
+
+/// Every window of the case says it is unfit for work whenever it is asked.
+fn unfit(context: &Context) {
+    *context.adapter.ready.borrow_mut() =
+        Some(std::rc::Rc::new(|| Ok(Readiness::Unfit(WHY.to_owned()))));
+}
+
+#[test]
+fn a_chief_whose_window_is_unfit_for_work_closes_without_its_project_and_the_human_is_told_once() {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    unfit(&context);
+    tiers.open();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let chief = context.host.last("chief").unwrap().pane;
+    context.adapter.answer("zeus", "Parser done.");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(tiers.task(1).task.state, "done");
+    // The result was to go into the chief's window, which said it never will take it.
+    assert!(closed(&context, &chief), "the chief's window is closed");
+    let told = tiers.notes("human");
+    let could_not = told
+        .iter()
+        .filter(|body| body.starts_with("The chief could not start: "))
+        .collect::<Vec<_>>();
+    assert_eq!(could_not.len(), 1, "{told:?}");
+    assert_eq!(
+        *could_not[0],
+        format!("The chief could not start: {WHY}. What comes for the chief waits for it, and ConsensFlow tries again; you may also switch the chief.")
+    );
+    // The result waits for the chief's next window, and the project stays open.
+    let result = context
+        .inbox(tiers.id("chief"))
+        .into_iter()
+        .find(|message| message.kind == "result")
+        .unwrap();
+    assert_eq!(result.state, "queued");
+    assert_eq!(context.project(tiers.project.id).state, "open");
+}
+
+/// A case whose windows never draw their screens (the host says they have printed
+/// nothing) and whose chief's record shows nothing, with words for the chief: what
+/// `ready` was asked, and its pane. Its windows are asked before they draw where
+/// `while_drawing` says so, and say they are unfit at the third ask.
+fn never_drawn(while_drawing: bool) -> (Context, Rc<Cell<u32>>) {
+    let context = Context::new();
+    context.host.set_snapshot(json!({ "outputQuietMs": null }));
+    context.adapter.ready_while_drawing.set(while_drawing);
+    let asked = Rc::new(Cell::new(0));
+    let counted = Rc::clone(&asked);
+    *context.adapter.ready.borrow_mut() = Some(Rc::new(move || {
+        counted.set(counted.get() + 1);
+        Ok(if counted.get() < 3 {
+            Readiness::Held(Held::Because("switching".to_owned()))
+        } else {
+            Readiness::Unfit(WHY.to_owned())
+        })
+    }));
+    (context, asked)
+}
+
+#[test]
+fn a_window_that_never_draws_and_says_it_never_will_be_fit_is_given_up_where_its_harness_bounds_its_readiness(
+) {
+    // Asked only once it had drawn, a Devin window left in its normal mode that never drew
+    // was never asked, its bound never ran, and it held what came for it for ever (Astra on
+    // the B1 fix). Its harness bounds its readiness whether or not it draws: it is asked
+    // as it draws, nothing goes in, and it is given up when it says it never will be fit.
+    let (context, asked) = never_drawn(true);
+    let tiers = Tiers::new(&context, &["zeus"]);
+    context.adapter.with("chief", |agent| agent.settled = true);
+    let chief = context.host.last("chief").unwrap().pane;
+    let words = context.note(tiers.project.id, "human", "chief", "Any news?");
+    for _ in 0..2 {
+        context.pass().unwrap();
+    }
+    assert_eq!(asked.get(), 2, "asked at each look, as it draws");
+    assert_eq!(
+        context.message(words.id).state,
+        "queued",
+        "and given nothing"
+    );
+    assert!(!closed(&context, &chief));
+    context.pass().unwrap();
+    assert!(closed(&context, &chief), "unfit: given up");
+    assert_eq!(told_could_not_start(&tiers), 1);
+    assert_eq!(
+        context.message(words.id).state,
+        "queued",
+        "it waits for the chief"
+    );
+
+    // A harness that does not bound it so is not asked before its window draws.
+    let (context, asked) = never_drawn(false);
+    let tiers = Tiers::new(&context, &["zeus"]);
+    context.adapter.with("chief", |agent| agent.settled = true);
+    let chief = context.host.last("chief").unwrap().pane;
+    context.note(tiers.project.id, "human", "chief", "Any news?");
+    for _ in 0..5 {
+        context.pass().unwrap();
+    }
+    assert_eq!(asked.get(), 0);
+    assert!(!closed(&context, &chief));
+}
+
+/// How many windows the chief has been launched in.
+fn chief_launches(context: &Context) -> usize {
+    context
+        .adapter
+        .prepared()
+        .iter()
+        .filter(|launch| launch["role"] == "chief")
+        .count()
+}
+
+/// How often the human was told the chief could not start.
+fn told_could_not_start(tiers: &Tiers) -> usize {
+    tiers
+        .notes("human")
+        .iter()
+        .filter(|body| body.starts_with("The chief could not start: "))
+        .count()
+}
+
+/// The chief's window opened again: it takes its first message and answers it, and the
+/// next of what waits for it is to go in.
+fn through_its_first_message(context: &Context) {
+    context.pass().unwrap();
+    context.adapter.answer("chief", "Noted.");
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+}
+
+#[test]
+fn a_chief_whose_windows_stay_unfit_is_tried_again_ever_more_slowly_and_the_human_is_told_once_until_one_is_ready(
+) {
+    // Each window it opened again cleared its count of failures as it started: every
+    // failure was the first, tried again after 5 s and told the human again (Sol on the
+    // B1 fix). Its count goes until a window is ready for work.
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    let project = tiers.project.id;
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(chief_launches(&context), 1);
+    unfit(&context);
+    // Each window opened again takes one as its first message, and is to be given the
+    // next when it is asked whether it is ready.
+    for words in ["One?", "Two?", "Three?", "Four?", "Five?"] {
+        context.note(project, "human", "chief", words);
+    }
+    context.pass().unwrap();
+    assert!(closed(&context, &context.host.last("chief").unwrap().pane));
+    assert_eq!(told_could_not_start(&tiers), 1);
+
+    // Tried again after 5 s, then 10, then 20: each window says the same, and the human
+    // is not told again.
+    for wait in [5_000, 10_000, 20_000] {
+        let launches = chief_launches(&context);
+        context.advance(wait - 1);
+        context.pass().unwrap();
+        assert_eq!(chief_launches(&context), launches, "not before {wait} ms");
+        context.advance(1);
+        context.pass().unwrap();
+        assert_eq!(
+            chief_launches(&context),
+            launches + 1,
+            "tried again at {wait} ms"
+        );
+        through_its_first_message(&context);
+        assert!(
+            closed(&context, &context.host.last("chief").unwrap().pane),
+            "the window after {wait} ms was unfit too"
+        );
+        assert_eq!(told_could_not_start(&tiers), 1, "after {wait} ms");
+    }
+
+    // A window that is ready for work came up: its count is over, and a window unfit
+    // after it is a failure the human hears of again.
+    *context.adapter.ready.borrow_mut() = None;
+    context.advance(40_000);
+    context.pass().unwrap();
+    through_its_first_message(&context);
+    let ready = context.host.last("chief").unwrap().pane;
+    assert!(!closed(&context, &ready), "this one is ready, and stays");
+    let five = context
+        .inbox(tiers.id("chief"))
+        .into_iter()
+        .find(|message| message.body == "Five?")
+        .unwrap();
+    assert_ne!(five.state, "queued", "given to it as it was ready");
+    context.adapter.answer("chief", "Noted.");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    unfit(&context);
+    context.note(project, "human", "chief", "Seven?");
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert!(closed(&context, &ready));
+    assert_eq!(told_could_not_start(&tiers), 2);
+    let launches = chief_launches(&context);
+    context.advance(4_999);
+    context.pass().unwrap();
+    assert_eq!(
+        chief_launches(&context),
+        launches,
+        "a first failure again: 5 s"
+    );
+    context.advance(1);
+    context.pass().unwrap();
+    assert_eq!(chief_launches(&context), launches + 1);
+}
+
+#[test]
+fn a_members_window_unfit_for_work_closes_and_the_words_told_to_it_are_kept_for_its_resume() {
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    let project = tiers.project.id;
+    tiers.open();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(tiers.task(1).task.state, "working");
+    let session = tiers.assignee(1);
+    let window = context.host.last(&session).unwrap().pane;
+    // At rest with its task in hand, and a note on its task to be pasted to it.
+    context.adapter.with(&session, |agent| agent.settled = true);
+    unfit(&context);
+    let note = context
+        .ledger
+        .borrow_mut()
+        .note(
+            project,
+            &NewNote {
+                from: Some("chief".to_owned()),
+                to: session.clone(),
+                task: Some(1),
+                body: "Use the grammar in the docs".to_owned(),
+            },
+        )
+        .unwrap();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert!(closed(&context, &window), "the member's window is closed");
+    // The close paused its task, and the note, words told to its window, waits for
+    // the resume with why its paste failed; no failure is told.
+    let kept = context.ledger.borrow().message(note.id).unwrap().unwrap();
+    assert_eq!(
+        (kept.state.as_str(), kept.reason.as_deref()),
+        (
+            "queued",
+            Some(format!("kept for T-1's resume: {WHY}").as_str())
+        )
+    );
+    assert_eq!(tiers.task(1).task.state, "paused");
+    assert!(
+        !tiers
+            .notes("human")
+            .iter()
+            .any(|note| note.contains("did not reach")),
+        "{:?}",
+        tiers.notes("human")
+    );
+    // The resume's window, fit for work, has the note once, before the resume.
+    *context.adapter.ready.borrow_mut() = None;
+    context.resume_task(project, 1, "Carry on");
+    for _ in 0..4 {
+        context.pass().unwrap();
+    }
+    assert_eq!(
+        context
+            .ledger
+            .borrow()
+            .message(note.id)
+            .unwrap()
+            .unwrap()
+            .state,
+        "delivered"
+    );
+    assert_eq!(tiers.task(1).task.state, "working");
+    let given = crate::fixtures::given(&context, &session);
+    assert_eq!(
+        given
+            .iter()
+            .filter(|words| words.contains("Use the grammar in the docs"))
+            .count(),
+        1,
+        "{given:?}"
+    );
+    crate::fixtures::assert_match(
+        given.last().unwrap(),
+        &format!(
+            r"^\[ConsensFlow m-\d+ · T-1 · task from @chief\]\n\(kept for you: note m-{} from @chief\)\nUse the grammar in the docs\n\nResumed: Carry on$",
+            note.id
+        ),
+    );
+}

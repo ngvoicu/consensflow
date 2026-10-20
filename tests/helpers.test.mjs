@@ -5,6 +5,19 @@ import { join } from 'node:path'
 import { after, describe, it } from 'node:test'
 import { fakeExecutable, tempEnv } from './helpers.mjs'
 
+/**
+ * The environment a test gives what it starts: a `cf` looks for a harness's CLI
+ * in the system's folders of programs last, Homebrew's on a Mac unless the
+ * environment names others, so one a test starts names a folder of its own.
+ */
+describe('the environment of a test', () => {
+  it("names a folder of its own for the system's programs, and none of the machine's", () => {
+    const t = tempEnv()
+    after(() => t.cleanup())
+    assert.equal(t.env.CONSENSFLOW_TOOL_FOLDERS, join(t.root, 'system-bin'))
+  })
+})
+
 /** The stand-ins the tests put on PATH in place of a harness's CLI. */
 describe('a stand-in CLI that counts how often it is run', () => {
   const t = tempEnv()

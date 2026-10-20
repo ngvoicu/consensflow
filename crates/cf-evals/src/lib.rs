@@ -13,7 +13,7 @@
 //!
 //! A module for each thing it does:
 //!
-//! - [`scenarios`] are the twelve scenarios, code and not data: what the owner
+//! - [`scenarios`] are the thirteen scenarios, code and not data: what the owner
 //!   says, how it answers, and the expectations, closures over the numbers.
 //! - [`plan`] is the pure part of a run: the staff, the chief's model, the owner's
 //!   answers to the chief's questions.
@@ -24,6 +24,9 @@
 //!   measure are made of.
 //! - [`results`] and [`summarize`] say the reports kept in a table, and [`watch`]
 //!   looks at a project that is running.
+//! - [`long_run`] works a real project for hours with every harness, disrupted on
+//!   a schedule, and holds ConsensFlow to nine invariants the whole time: `watch`'s
+//!   look made continuous, and held to what the field's bugs broke.
 //!
 //! What the rest leans on: the flags every command reads the same way (`cli`),
 //! the stamps of a report (`clock`), the lengths, slices and white space of
@@ -39,6 +42,7 @@ pub mod clock;
 mod error;
 mod js;
 pub mod ledger_file;
+pub mod long_run;
 pub mod measure;
 pub mod plan;
 pub mod results;
@@ -65,6 +69,13 @@ usage: cf-evals <command> [flags]
              [--claude-staff-model M] [--pi-staff-model M] [--effort LEVEL]
              [--staff-effort LEVEL] [--arm card|nocard|bare] [--switch-to HARNESS]
              [--gate] [--repeat N] [--timeout-min N] [--reports DIR]
+  long     work a real project for hours with a chief and a staff of every harness,
+           disrupted on a schedule, and hold ConsensFlow to nine invariants all along
+             [--chief HARNESS] [--staff HARNESS,...] [--models HARNESS=M+M,...] [--model M]
+             [--effort LEVEL] [--staff-effort LEVEL] [--hours N] [--every-min N]
+             [--look-sec N] [--idle-min N] [--dialog-min N] [--quiet-min N] [--wake-min N]
+             [--switch-to HARNESS] [--quiet] [--pause] [--kill] [--switch] [--compact]
+             [--restart] [--devin-cut] [--suspend] [--ask real|stand-in] [--reports DIR]
   summary  write the table of the reports kept in evals/reports (evals/RESULTS.md)
              [--reports DIR] [--results FILE]
   watch    look at a project that is running
@@ -105,6 +116,7 @@ fn dispatch(words: &[String], out: &mut dyn Write) -> Result<i32> {
             Ok(0)
         }
         Some((verb, rest)) if verb == "run" => run::command(rest, out),
+        Some((verb, rest)) if verb == "long" => long_run::command(rest, out),
         Some((verb, rest)) if verb == "summary" => summary(rest, out),
         Some((verb, rest)) if verb == "watch" => watch::command(rest, out),
         Some((verb, _)) => Err(Error::Usage(format!("unknown command: {verb}"))),

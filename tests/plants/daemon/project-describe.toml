@@ -299,9 +299,9 @@ runs = ["daemon-describing-page", "proto-page-describing"]
 
 [[plant.edit]]
 file = "crates/cf-proto/src/page.rs"
-find = '''                | Self::WakeUpGet
+find = '''                | Self::SpecsGet
         )'''
-replace = '''                | Self::WakeUpGet
+replace = '''                | Self::SpecsGet
                 | Self::ProjectRename
         )'''
 
@@ -312,9 +312,9 @@ runs = ["daemon-describing-page", "proto-page-describing"]
 
 [[plant.edit]]
 file = "crates/cf-proto/src/page.rs"
-find = '''                | Self::WakeUpGet
+find = '''                | Self::SpecsGet
         )'''
-replace = '''                | Self::WakeUpGet
+replace = '''                | Self::SpecsGet
                 | Self::ProjectDescribe
         )'''
 

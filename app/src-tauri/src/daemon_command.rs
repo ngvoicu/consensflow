@@ -1,35 +1,50 @@
 //! What the app starts as its daemon: the bundled `cf` running `cf ui --json
-//! --no-open`, on the PATH the human's login shell sets up. The portable
+//! --no-open`, on the PATH the human's login shell sets up, else the app's own.
+//! The daemon puts the system's folders of programs after it for everything it
+//! runs, and looks for a harness on it as given (`cf_base::env`). The portable
 //! Windows app carries the `cf` inside its exe and unpacks it first.
 
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
-use std::sync::mpsc;
+use std::process::{Child, ChildStdout, Command, ExitStatus, Stdio};
+use std::sync::{mpsc, Mutex, MutexGuard};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use cf_base::env::{path_with_folders, Env};
 use tauri::{AppHandle, Manager};
 
 use crate::daemon::DaemonFailure;
 
-/// How long the human's login shell has to say its PATH.
-const LOGIN_PATH_TIMEOUT: Duration = Duration::from_secs(5);
+/// How long the human's login shell has to say its PATH. One answers in well
+/// under a second on a machine at rest; on the owner's, at load 17–18 from
+/// builds, it had not in the five seconds it was given (2026-10-15), and the
+/// daemon ran on the Finder's PATH. It is asked on the daemon's own thread
+/// while the window opens, and only what the board shows waits for it: a
+/// shell that never answers costs each start this long, and the daemon then
+/// runs on the app's PATH and the system's folders.
+const LOGIN_PATH_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// The bundle's `cf` as its folder names it.
 const CF: &str = if cfg!(windows) { "cf.exe" } else { "cf" };
 
 /// The daemon, `cf ui --json --no-open` of the bundled `cf`, on the human's
-/// login PATH. A `cf` missing from the app is not worth another start. Which
-/// `cf` it starts is one line of the app's error log.
-pub(crate) fn daemon_command(app: &AppHandle) -> Result<Command, DaemonFailure> {
+/// login PATH, which `lookup` asks for and the app's quit ends. A `cf` missing
+/// from the app is not worth another start. Which `cf` it starts is one line of
+/// the app's error log, and a login shell that gave no PATH another.
+pub(crate) fn daemon_command(
+    app: &AppHandle,
+    lookup: &LoginLookup,
+) -> Result<Command, DaemonFailure> {
     let cf = bundled_cf(app).map_err(|cause| DaemonFailure {
         cause,
         retry: false,
     })?;
     eprintln!("consensflow: {}", starting(&cf));
     let mut command = command_for(&cf);
-    if let Some(path) = login_path() {
-        command.env("PATH", path);
+    let env = Env::from_process();
+    if let Some(said) = on_login_path(&mut command, &env, LOGIN_PATH_TIMEOUT, lookup) {
+        eprintln!("consensflow: {said}");
     }
     // cf.exe is a console program: started from a windowed app it gets a
     // console window of its own, and every console program it starts shows in
@@ -119,19 +134,152 @@ pub(crate) fn plain_path(path: PathBuf) -> PathBuf {
     path
 }
 
-/// The PATH the human's login shell sets up, where their harness CLIs live,
-/// for the daemon and every pane it opens.
-fn login_path() -> Option<String> {
-    login_path_in(Path::new(&std::env::var_os("SHELL")?), LOGIN_PATH_TIMEOUT)
+/// Gives the daemon's `command` the PATH of the daemon and every pane it opens:
+/// the one the human's login shell (`SHELL` of `env`) sets up, where their
+/// harness CLIs live, else the app's own, as it is. The daemon puts the
+/// system's folders after it itself, and looks for a harness on it as given:
+/// one the human keeps in the home comes before an older one of Homebrew's.
+/// What the app's log is to say when a login shell was asked and gave none
+/// within `timeout`: the PATH the daemon then runs on, with those folders.
+///
+/// On Windows no shell is asked, though `SHELL` names one (Git Bash's): an app
+/// started from the Start menu has the PATH of the user and the machine, which
+/// a terminal there has too, and a POSIX shell's (`/c/…`, joined by `:`) is
+/// none a Windows program can use.
+fn on_login_path(
+    command: &mut Command,
+    env: &Env,
+    timeout: Duration,
+    lookup: &LoginLookup,
+) -> Option<String> {
+    let shell = env.path("SHELL").filter(|_| !env.on_windows());
+    let login = shell.and_then(|shell| login_path_in(shell, timeout, lookup));
+    let given = login
+        .as_deref()
+        .map(OsStr::new)
+        .or_else(|| env.os("PATH"))
+        .unwrap_or_default();
+    if !given.is_empty() {
+        command.env("PATH", given);
+    }
+    let runs_on = path_with_folders(given, env.tool_folders());
+    shell
+        .filter(|_| login.is_none())
+        .map(|shell| unanswered(shell, timeout, &runs_on))
+}
+
+/// What the app's error log says of a login shell that gave no PATH: how long
+/// it was given, and the PATH the daemon runs on instead, which the next
+/// report then shows.
+fn unanswered(shell: &Path, timeout: Duration, path: &OsStr) -> String {
+    format!(
+        "the login shell {} gave no PATH within {} s, and the daemon runs on {}",
+        shell.display(),
+        timeout.as_secs(),
+        path.to_string_lossy()
+    )
+}
+
+/// The login shell a start of the daemon is asking for its PATH, held while it
+/// asks, so that the app's quit ends it: a shell that never answered outlived
+/// the app (the reviews of 2026-10-16). Only the shell, the lookup's own child,
+/// is ever ended: what its login files started (an `ssh-agent -D`, a
+/// `gpg-agent --no-detach` other programs use) is the user's, as when a
+/// terminal's shell ends, and so is anything a login file put in a session of
+/// its own to go on with.
+#[derive(Default)]
+pub(crate) struct LoginLookup {
+    asking: Mutex<Asking>,
+}
+
+/// The shell asked, and whether the app is quitting.
+#[derive(Default)]
+struct Asking {
+    shell: Option<Child>,
+    ended: bool,
+}
+
+impl LoginLookup {
+    fn lock(&self) -> MutexGuard<'_, Asking> {
+        self.asking
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+    }
+
+    /// Starts `shell` and holds it, in one step against the app's quit: its
+    /// output, to read; none once the app is quitting, when no shell is
+    /// started, or where it cannot be.
+    fn start(&self, shell: &mut Command) -> Option<ChildStdout> {
+        let mut asking = self.lock();
+        if asking.ended {
+            return None;
+        }
+        let mut started = shell.spawn().ok()?;
+        let Some(output) = started.stdout.take() else {
+            let _ = started.kill();
+            let _ = started.wait();
+            return None;
+        };
+        asking.shell = Some(started);
+        Some(output)
+    }
+
+    /// How the shell held ended: none while it runs.
+    fn status(&self) -> std::io::Result<Option<ExitStatus>> {
+        match self.lock().shell.as_mut() {
+            Some(shell) => shell.try_wait(),
+            None => Err(std::io::ErrorKind::NotFound.into()),
+        }
+    }
+
+    /// The lookup is over: the shell is ended if it still runs, under the lock,
+    /// and only then let go and waited for. A shell let go first was one a quit
+    /// could find nowhere, and the app could end before anything ended it (the
+    /// third review of 2026-10-16).
+    fn finish(&self) {
+        self.finish_with(|| {});
+    }
+
+    /// [`LoginLookup::finish`], with `between` run once the lock is let go and
+    /// before the shell is waited for: where the app's quit may come, and the
+    /// app end.
+    fn finish_with(&self, between: impl FnOnce()) {
+        let shell = {
+            let mut asking = self.lock();
+            if let Some(shell) = asking.shell.as_mut() {
+                let _ = shell.kill();
+            }
+            asking.shell.take()
+        };
+        between();
+        if let Some(mut shell) = shell {
+            let _ = shell.wait();
+        }
+    }
+
+    /// The app is quitting: the shell asked ends now, and no other is started.
+    pub(crate) fn end(&self) {
+        let mut asking = self.lock();
+        asking.ended = true;
+        if let Some(shell) = asking.shell.as_mut() {
+            let _ = shell.kill();
+        }
+    }
 }
 
 /// A login file may print (`nvm use` does), wait for input or never finish,
 /// and the PATH used to be the shell's whole output, read on the main thread
 /// before the window existed, for as long as the shell took. So the PATH is
-/// read between markers no login file prints, from a shell that exits
-/// cleanly within `timeout`; otherwise there is none, and the daemon keeps
-/// the PATH the app was started with.
-fn login_path_in(shell: &Path, timeout: Duration) -> Option<String> {
+/// read between markers no login file prints, from a shell that exits cleanly,
+/// all within `timeout` and before the app quits (`lookup`); otherwise there
+/// is none, the daemon keeps the PATH the app was started with, and the shell
+/// is ended if it still runs. Only the shell: what its login files started is
+/// the user's ([`LoginLookup`]).
+pub(crate) fn login_path_in(
+    shell: &Path,
+    timeout: Duration,
+    lookup: &LoginLookup,
+) -> Option<String> {
     use std::hash::BuildHasher;
     use std::io::Read;
 
@@ -139,14 +287,13 @@ fn login_path_in(shell: &Path, timeout: Duration) -> Option<String> {
         "<consensflow-path-{:016x}>",
         std::hash::RandomState::new().hash_one(std::process::id())
     );
-    let mut child = Command::new(shell)
+    let mut asked = Command::new(shell);
+    asked
         .args(["-lc", &format!("printf '{marker}%s{marker}' \"$PATH\"")])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .ok()?;
-    let mut output = child.stdout.take()?;
+        .stderr(Stdio::null());
+    let mut output = lookup.start(&mut asked)?;
     let (chunks, printed) = mpsc::channel();
     // Not joined: a process a login file started may hold the output open
     // long after the shell has gone.
@@ -159,183 +306,44 @@ fn login_path_in(shell: &Path, timeout: Duration) -> Option<String> {
         }
     });
     let deadline = Instant::now() + timeout;
-    let succeeded = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break status.success(),
-            Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(10)),
-            _ => {
-                let _ = child.kill();
-                let _ = child.wait();
-                break false;
+    let status = loop {
+        match lookup.status() {
+            Ok(Some(status)) => break Some(status),
+            // The app's quit ends the shell, which then has ended.
+            Ok(None) if Instant::now() < deadline => {
+                thread::sleep(Duration::from_millis(10));
             }
+            _ => break None,
         }
     };
-    if !succeeded {
-        return None;
-    }
-    // The shell has gone, so what it printed is in the pipe, a moment from
-    // the reader at most.
+    let path = status
+        .filter(ExitStatus::success)
+        .and_then(|_| between(&marker, &printed, deadline));
+    lookup.finish();
+    path
+}
+
+/// What the shell printed between the markers, once they are there: none
+/// after a second with nothing more, or by the deadline. The shell has gone,
+/// so what it printed is in the pipe a moment from the reader at most; a
+/// process it started may hold the output open and write on for ever, and is
+/// read no longer than the deadline lets.
+fn between(marker: &str, printed: &mpsc::Receiver<Vec<u8>>, deadline: Instant) -> Option<String> {
     let mut bytes = Vec::new();
     loop {
         let text = String::from_utf8_lossy(&bytes);
-        let mut parts = text.split(marker.as_str());
+        let mut parts = text.split(marker);
         if let (Some(_), Some(path), Some(_)) = (parts.next(), parts.next(), parts.next()) {
             return (!path.is_empty()).then(|| path.to_string());
         }
-        bytes.extend(printed.recv_timeout(Duration::from_secs(1)).ok()?);
+        let left = deadline.checked_duration_since(Instant::now())?;
+        bytes.extend(
+            printed
+                .recv_timeout(left.min(Duration::from_secs(1)))
+                .ok()?,
+        );
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// What a command runs, and with what: its program, words and added variables.
-    fn described(command: &Command) -> (PathBuf, Vec<String>, Vec<(String, String)>) {
-        (
-            PathBuf::from(command.get_program()),
-            command
-                .get_args()
-                .map(|arg| arg.to_string_lossy().into_owned())
-                .collect(),
-            command
-                .get_envs()
-                .filter_map(|(name, value)| {
-                    Some((
-                        name.to_string_lossy().into_owned(),
-                        value?.to_string_lossy().into_owned(),
-                    ))
-                })
-                .collect(),
-        )
-    }
-
-    #[test]
-    fn the_daemon_is_the_bundled_cf_running_ui_and_nothing_of_the_apps_is_added_to_it() {
-        let cf = Path::new("/bundle/cli/bin/cf");
-        assert_eq!(
-            described(&command_for(cf)),
-            (
-                PathBuf::from(cf),
-                vec!["ui".into(), "--json".into(), "--no-open".into()],
-                vec![]
-            )
-        );
-    }
-
-    #[test]
-    fn the_cf_is_the_one_in_the_clis_folder_of_the_bundle_or_the_portable_runtime() {
-        let cf = if cfg!(windows) { "cf.exe" } else { "cf" };
-        assert_eq!(
-            cf_in(Path::new("/bundle")),
-            Path::new("/bundle").join("cli").join("bin").join(cf)
-        );
-    }
-
-    #[test]
-    fn the_log_says_which_cf_the_daemon_is() {
-        assert_eq!(
-            starting(Path::new("/bundle/cli/bin/cf")),
-            "starting the daemon: /bundle/cli/bin/cf ui --json --no-open"
-        );
-    }
-
-    #[test]
-    fn a_cf_that_is_there_is_found_and_one_that_is_not_says_the_app_is_missing_it() {
-        let bundle = tempfile::tempdir().expect("a bundle");
-        let cf = cf_in(bundle.path());
-        let error = present(cf.clone()).expect_err("no cf is there yet");
-        assert!(
-            error.starts_with("the bundled ConsensFlow is missing from this app ("),
-            "{error}"
-        );
-        std::fs::create_dir_all(cf.parent().expect("a folder")).expect("its folder");
-        std::fs::write(&cf, "the program").expect("a cf");
-        assert_eq!(present(cf.clone()), Ok(cf));
-        // A relative name is no place the app was installed in.
-        assert!(present(PathBuf::from("cf")).is_err());
-    }
-
-    /// A stand-in for the human's login shell: `body` runs with the command
-    /// the app gives it (`-lc <command>`) as `$2`.
-    #[cfg(unix)]
-    fn login_shell(home: &Path, body: &str) -> PathBuf {
-        use std::os::unix::fs::PermissionsExt;
-
-        let shell = home.join("login-shell");
-        std::fs::write(&shell, format!("#!/bin/sh\n{body}\n")).expect("write the shell");
-        std::fs::set_permissions(&shell, std::fs::Permissions::from_mode(0o755))
-            .expect("make the shell executable");
-        shell
-    }
-
-    /// What a login file prints (`nvm use` says which Node it took) is not
-    /// part of the PATH.
-    #[cfg(unix)]
-    #[test]
-    fn the_login_path_is_read_past_what_login_files_print() {
-        let home = tempfile::tempdir().expect("home");
-        let shell = login_shell(
-            home.path(),
-            "echo 'Now using node v22.9.0 (npm v10.8.3)'; exec /bin/sh -c \"$2\"",
-        );
-        assert_eq!(
-            login_path_in(&shell, Duration::from_secs(5)),
-            std::env::var("PATH").ok()
-        );
-    }
-
-    /// A login shell that fails, or takes too long, leaves the daemon on the
-    /// PATH the app was started with; the app's start does not wait on it.
-    #[cfg(unix)]
-    #[test]
-    fn a_login_shell_that_fails_or_hangs_gives_no_path() {
-        let home = tempfile::tempdir().expect("home");
-        let failing = login_shell(home.path(), "/bin/sh -c \"$2\"; exit 3");
-        assert_eq!(login_path_in(&failing, Duration::from_secs(5)), None);
-
-        let hanging = login_shell(home.path(), "exec /bin/sleep 3");
-        let started = Instant::now();
-        assert_eq!(login_path_in(&hanging, Duration::from_millis(300)), None);
-        assert!(
-            started.elapsed() < Duration::from_secs(2),
-            "the shell held up the start"
-        );
-    }
-
-    /// Something a login file starts may keep the shell's output open after
-    /// the shell has gone; what the shell printed is read all the same.
-    #[cfg(unix)]
-    #[test]
-    fn a_login_path_is_read_while_a_started_process_holds_the_output() {
-        let home = tempfile::tempdir().expect("home");
-        // The process outlives the read by far, so a loaded machine's slow start is
-        // not taken for a wait on it.
-        let shell = login_shell(home.path(), "/bin/sleep 20 & exec /bin/sh -c \"$2\"");
-        let started = Instant::now();
-        assert_eq!(
-            login_path_in(&shell, Duration::from_secs(15)),
-            std::env::var("PATH").ok()
-        );
-        assert!(
-            started.elapsed() < Duration::from_secs(10),
-            "the read waited for the process"
-        );
-    }
-
-    #[test]
-    fn a_verbatim_windows_path_is_spelled_plainly() {
-        assert_eq!(
-            plain_path(PathBuf::from(r"\\?\C:\Users\me\app\cli\bin\cf.exe")),
-            PathBuf::from(r"C:\Users\me\app\cli\bin\cf.exe")
-        );
-        assert_eq!(
-            plain_path(PathBuf::from(r"\\?\UNC\server\share\cf.exe")),
-            PathBuf::from(r"\\server\share\cf.exe")
-        );
-        assert_eq!(
-            plain_path(PathBuf::from("/Applications/ConsensFlow.app/cf")),
-            PathBuf::from("/Applications/ConsensFlow.app/cf")
-        );
-    }
-}
+mod tests;

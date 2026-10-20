@@ -21,11 +21,7 @@ pub const BRIEF: &str = "This folder is an automated ConsensFlow test. Do exactl
 /// explores for minutes after every result, which each delivery then waits for.
 pub const BENCH_BRIEF: &str = "This folder is an automated ConsensFlow bench. Do exactly what each message asks and nothing more. When a ConsensFlow message arrives, reply with one line that names it and run no tools unless the message tells you to run a command.\n";
 
-/// The model of the agent the stand-in plays for a chief, and for a member: the
-/// shim that starts Claude Code hands a window with either of them to the
-/// stand-in, and every other Claude window to the real one.
-pub const STAND_IN_CHIEF_MODEL: &str = "fake-chief";
-pub const STAND_IN_WORKER_MODEL: &str = "fake";
+pub use super::super::agents::{STAND_IN_CHIEF_MODEL, STAND_IN_WORKER_MODEL};
 
 /// The id of the chief that is the stand-in, and of the worker that is.
 pub const STAND_IN_CHIEF: &str = "chief";
@@ -83,19 +79,7 @@ pub fn member_as(harness: Harness, id: &str) -> Value {
     row
 }
 
-/// The harness a roster row runs on, when it is a real one: the stand-in agent's
-/// rows (a Claude Code agent whose model is a fake one) are none.
-fn harness_of(row: &Value) -> Option<Harness> {
-    let kind = row["kind"].as_str()?;
-    if kind == "claude-code"
-        && [STAND_IN_CHIEF_MODEL, STAND_IN_WORKER_MODEL].contains(&row["model"].as_str()?)
-    {
-        return None;
-    }
-    Harness::ALL
-        .into_iter()
-        .find(|harness| harness.kind() == kind)
-}
+use super::super::agents::harness_of;
 
 /// What a check opens.
 #[derive(Debug, Clone)]

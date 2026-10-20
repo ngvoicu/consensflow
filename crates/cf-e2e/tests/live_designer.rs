@@ -193,8 +193,11 @@ fn attempt(
 #[test]
 #[ignore = "opt-in: spends the machine's Codex quota; cargo xtask live designer (npm run live:designer)"]
 fn a_real_codex_draws_the_image_a_chief_asks_the_image_designer_for() -> Result {
+    let log = Log::own_agents(
+        "live designer",
+        "it runs the catalog's image designer, pygmalion, on Codex's own default model",
+    )?;
     let codex = live::codex()?;
-    let log = Log::new("live designer");
     log.say(format!(
         "Codex is {}; its login is read from {}",
         codex.command().display(),

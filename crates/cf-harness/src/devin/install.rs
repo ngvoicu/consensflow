@@ -97,6 +97,33 @@ fn extend(hooks: &mut Map<String, Value>, event: &str, entry: Option<Value>) -> 
     Ok(())
 }
 
+/// The hooks ConsensFlow adds to the owner's for a launch, each event with the entry it
+/// adds, as it writes them, or none: the session's start, its role text given by the
+/// `cf` the window names `pane_cf`, and, where `board_questions`, the question tool
+/// answered from the board (the event is written all the same, as Node wrote it). A
+/// check that keeps a launch's hooks to ConsensFlow's knows them by these (`tooling`).
+pub(crate) fn added_hooks(
+    pane_cf: &str,
+    board_questions: bool,
+) -> [(&'static str, Option<Value>); 2] {
+    let session_start = json!({
+        "matcher": "",
+        "hooks": [{
+            "type": "command",
+            "command": format!("{} hook devin-session", quote(pane_cf)),
+            "timeout": 5,
+        }],
+    });
+    let question = json!({
+        "matcher": "ask_user_question",
+        "hooks": [{ "type": "command", "command": "cf hook devin", "timeout": QUESTION_HOOK_SECONDS }],
+    });
+    [
+        ("SessionStart", Some(session_start)),
+        ("PreToolUse", board_questions.then_some(question)),
+    ]
+}
+
 /// Writes the config Devin's window of `launch` runs with, one per launch:
 /// the owner's, which is never changed, its hooks first and ours after, and
 /// its own updates off. A session the window shows starts with its role text
@@ -139,20 +166,9 @@ pub(super) async fn integration(
     let Some(Value::Object(hooks)) = configuration.get_mut("hooks") else {
         return Err("the hooks of the native Devin configuration cannot take a hook".to_owned());
     };
-    let session_start = json!({
-        "matcher": "",
-        "hooks": [{
-            "type": "command",
-            "command": format!("{} hook devin-session", quote(&services.bundle.pane_cf)),
-            "timeout": 5,
-        }],
-    });
-    let question = json!({
-        "matcher": "ask_user_question",
-        "hooks": [{ "type": "command", "command": "cf hook devin", "timeout": QUESTION_HOOK_SECONDS }],
-    });
-    extend(hooks, "SessionStart", Some(session_start))?;
-    extend(hooks, "PreToolUse", board_questions.then_some(question))?;
+    for (event, entry) in added_hooks(&services.bundle.pane_cf, board_questions) {
+        extend(hooks, event, entry)?;
+    }
     configuration.insert("auto_update".to_owned(), Value::Bool(false));
     let file = path::join(&[&root, "config.json"]);
     let text = js::stringify(&Value::Object(configuration));
