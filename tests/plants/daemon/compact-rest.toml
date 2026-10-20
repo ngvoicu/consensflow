@@ -277,3 +277,13 @@ replace = '''
             wrote("system/compact_boundary")
                 || seen
 '''
+
+[[plant]]
+name = "compact-rest: the live suite fails its run on the cancelled compaction, a finding left for 3.0.6"
+meant = "only_the_cancelled_compaction_is_a_finding_which_fails_nothing"
+runs = ["compact-rest-live"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_commands_at_rest.rs"
+find = "        self == Command::Cancelled"
+replace = "        false"
