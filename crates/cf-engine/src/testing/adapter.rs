@@ -94,6 +94,11 @@ pub type Ready = Rc<dyn Fn() -> Result<Readiness, String>>;
 /// the window could not take its first message, if it could not.
 pub type Started = Rc<dyn Fn() -> Result<(), String>>;
 
+/// What a test makes `came_up` answer, where it gives the adapter one: the
+/// conversation a window that came up after its `started` gave up says it is on
+/// (`Some(None)` where it says none). Without one, none came up.
+pub type CameUp = Rc<dyn Fn() -> Option<Option<String>>>;
+
 /// What a test makes `prepare` do, where it gives the adapter one: told the
 /// launch as asked, it may fail it, before any window is made.
 pub type Prepare = Rc<dyn Fn(&Value) -> Result<(), String>>;
@@ -125,6 +130,9 @@ pub struct FakeAdapter {
     /// Whether each of those launches was told its window before was proven
     /// gone, kept apart for the same reason.
     previous_gone: RefCell<Vec<bool>>,
+    /// How many windows in a row before each of those launches were given up for
+    /// not coming up, kept apart for the same reason.
+    starts_given_up: RefCell<Vec<u32>>,
     /// The test's items are numbered across its adapters.
     items: Rc<Cell<u64>>,
     /// A `ready` of the test's own; without one a window is ready, and
@@ -132,6 +140,8 @@ pub struct FakeAdapter {
     pub ready: RefCell<Option<Ready>>,
     /// A `started` of the test's own, that fails some windows.
     pub started: RefCell<Option<Started>>,
+    /// A `came_up` of the test's own, that says a window came up after all.
+    pub came_up: RefCell<Option<CameUp>>,
     /// A `prepare` of the test's own, that fails some launches.
     pub prepare: RefCell<Option<Prepare>>,
     /// A `prepare` that does something with the window once the fake's own
@@ -219,9 +229,11 @@ impl FakeAdapter {
             prepared: RefCell::new(Vec::new()),
             first_message_ms: RefCell::new(Vec::new()),
             previous_gone: RefCell::new(Vec::new()),
+            starts_given_up: RefCell::new(Vec::new()),
             items,
             ready: RefCell::new(None),
             started: RefCell::new(None),
+            came_up: RefCell::new(None),
             prepare: RefCell::new(None),
             after_prepare: RefCell::new(None),
             deliver: RefCell::new(None),
@@ -263,6 +275,12 @@ impl FakeAdapter {
     /// it was proven gone, in the order they were prepared.
     pub fn previous_gone(&self) -> Vec<bool> {
         self.previous_gone.borrow().clone()
+    }
+
+    /// How many windows in a row before each launch prepared were given up for not
+    /// coming up, in the order they were prepared.
+    pub fn starts_given_up(&self) -> Vec<u32> {
+        self.starts_given_up.borrow().clone()
     }
 
     /// An item of a conversation, numbered as the test's own: `i-1`, `i-2`…
@@ -523,6 +541,9 @@ impl Asked {
             .borrow_mut()
             .push(launch.first_message_ms);
         fake.previous_gone.borrow_mut().push(launch.previous_gone);
+        fake.starts_given_up
+            .borrow_mut()
+            .push(launch.starts_given_up);
         let id = launch.id.as_str().to_owned();
         let native = launch
             .resume

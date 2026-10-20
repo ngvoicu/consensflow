@@ -115,6 +115,12 @@ impl Window for FakeWindow {
         })
     }
 
+    /// The test's word, where it gave one: no call of Node's fake.
+    fn came_up(&self) -> Work<'_, Option<Option<String>>> {
+        let came_up = self.fake.came_up.borrow().clone();
+        Box::pin(async move { came_up.and_then(|came_up| came_up()) })
+    }
+
     fn ready<'a>(
         &'a self,
         _host: &'a dyn PaneHost,

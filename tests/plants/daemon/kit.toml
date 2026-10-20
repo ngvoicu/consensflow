@@ -10,7 +10,7 @@
 
 run_limit_minutes = 5
 rebuild = ["cargo", "xtask", "build-cf", "--offline"]
-tables = ["run", "front", "parts", "constants", "screens", "support", "players", "launcher", "prepare", "detect", "pause", "pause-notes", "waiting-notes", "decided", "receipt-a", "obligations", "sessions", "review", "claude-rest", "taken-back", "board", "channels", "background", "approval", "pending-agents", "tester", "resumed", "start-suspended", "devin-stop", "wake-ups", "unturned", "notes-twice", "codex-role", "project-describe", "follow-ups-queue", "compaction", "project-settings", "devin-resume", "opencode-2", "long-run", "worker-guardrail", "specs-settings", "windows-close", "drag-drop", "specs-viewer", "start-budget", "results-twice", "carried-restart", "window-went", "quoted-headers", "lost-queue", "pause-closes"]
+tables = ["run", "front", "parts", "constants", "screens", "support", "players", "launcher", "prepare", "detect", "pause", "pause-notes", "waiting-notes", "decided", "receipt-a", "obligations", "sessions", "review", "claude-rest", "taken-back", "board", "channels", "background", "approval", "pending-agents", "tester", "resumed", "start-suspended", "devin-stop", "wake-ups", "unturned", "notes-twice", "codex-role", "project-describe", "follow-ups-queue", "compaction", "project-settings", "devin-resume", "opencode-2", "long-run", "worker-guardrail", "specs-settings", "windows-close", "drag-drop", "specs-viewer", "start-budget", "results-twice", "carried-restart", "window-went", "quoted-headers", "lost-queue", "pause-closes", "compact-rest", "chief-restart"]
 
 [run]
 bridge = ["cargo", "test", "--offline", "-p", "cf-bridge", "--features", "local", "--lib", "local::"]

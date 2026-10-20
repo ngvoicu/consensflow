@@ -164,7 +164,7 @@ fn variant(projected: &Projected) -> &'static str {
         Projected::Remove(_) => "remove",
         Projected::Assistant(_) => "assistant",
         Projected::User(_) => "user",
-        Projected::Clear(_) => "clear",
+        Projected::Output(_) => "output",
         Projected::Boundary(_) => "boundary",
     }
 }
@@ -257,7 +257,7 @@ fn what_nothing_reads_of_a_record_changes_neither_how_it_waits_nor_the_reading()
         "remove",
         "assistant",
         "user",
-        "clear",
+        "output",
         "boundary",
     ];
     assert_eq!(

@@ -60,6 +60,7 @@
     "live:notes": "cargo xtask live notes",
     "live:wake-ups": "cargo xtask live wake-ups",
     "live:specs": "cargo xtask live specs",
+    "live:commands-at-rest": "cargo xtask live commands-at-rest",
     "windows": "cargo xtask windows",
     "check:all": "cargo xtask check"
   },

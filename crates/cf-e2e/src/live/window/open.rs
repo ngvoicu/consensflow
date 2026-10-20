@@ -156,6 +156,7 @@ pub struct Open<'a> {
     trusting: bool,
     resume: Option<String>,
     member: Option<Member>,
+    claude_alone: Option<Value>,
 }
 
 impl<'a> Open<'a> {
@@ -174,7 +175,18 @@ impl<'a> Open<'a> {
             trusting: true,
             resume: None,
             member: None,
+            claude_alone: None,
         }
+    }
+
+    /// A Claude window with none of the owner's own settings (their hooks among them:
+    /// `--setting-sources local`, the window's folder's own, which has none), and the
+    /// `hooks` given here (Claude's `hooks` setting, by event) beside ConsensFlow's, in
+    /// the one settings file of the launch. Its trust is asked with none of them either.
+    #[must_use]
+    pub fn claude_alone_with_hooks(mut self, hooks: Value) -> Self {
+        self.claude_alone = Some(hooks);
+        self
     }
 
     /// The window is the one the app opens on the conversation `session`, which
@@ -317,8 +329,13 @@ impl<'a> Open<'a> {
         let env = window_env(self.rig, &workspace);
         let (start, executable) = self.command(&agent, session.as_deref(), &workspace, &env)?;
         let claude = harness == Harness::Claude;
+        let alone: &[&str] = if self.claude_alone.is_some() {
+            &ALONE
+        } else {
+            &[]
+        };
         let trust = if claude && self.trusting {
-            let shut_out = ISOLATION.map(str::to_owned);
+            let shut_out = ISOLATION.iter().chain(alone).map(|word| (*word).to_owned());
             let argv: Vec<String> = std::iter::once(executable.clone())
                 .chain(shut_out)
                 .collect();
@@ -330,8 +347,12 @@ impl<'a> Open<'a> {
         if claude {
             // The settings the app writes for each launch (which skip the full-permission
             // warning), and no MCP server, connector or browser.
-            argv.extend(ask::claude_settings(&env, LAUNCH, false)?);
-            argv.extend(ISOLATION.map(str::to_owned));
+            let settings = ask::claude_settings(&env, LAUNCH, false)?;
+            match &self.claude_alone {
+                Some(hooks) => argv.extend(with_hooks(&settings, hooks)?),
+                None => argv.extend(settings),
+            }
+            argv.extend(ISOLATION.iter().chain(alone).map(|word| (*word).to_owned()));
         }
         argv.extend(start.args);
         let argv = ask::program(&argv, &env).map_err(|failed| {
@@ -377,6 +398,45 @@ impl<'a> Open<'a> {
             trust,
             killed: Cell::new(false),
         })
+    }
+}
+
+/// The words that open a Claude window on none of the owner's settings files: only the
+/// window's folder's own local one, which a live folder has not.
+const ALONE: [&str; 2] = ["--setting-sources", "local"];
+
+/// The arguments that load the launch's settings file (`--settings <file>`), with `hooks`
+/// (by event) added to the hooks it has, written to a file of their own beside it: Claude
+/// takes one `--settings`.
+pub(super) fn with_hooks(settings: &[String], hooks: &Value) -> Result<Vec<String>> {
+    let [flag, file] = settings else {
+        return Err(Error::Daemon(format!(
+            "the launch's settings are not one file: {settings:?}"
+        )));
+    };
+    let mut config: Value = serde_json::from_str(&files::read_string(Path::new(file))?)
+        .map_err(|failed| Error::Daemon(format!("the launch's settings are no JSON: {failed}")))?;
+    add_hooks(&mut config, hooks);
+    let written = Path::new(file).with_extension("hooks.json");
+    files::write(&written, config.to_string())?;
+    Ok(vec![flag.clone(), written.to_string_lossy().into_owned()])
+}
+
+/// `hooks` (Claude's `hooks` setting: entries by event) added after the entries `config`
+/// has of each event.
+pub(super) fn add_hooks(config: &mut Value, hooks: &Value) {
+    let Some(config) = config.as_object_mut() else {
+        return;
+    };
+    let had = config.entry("hooks").or_insert_with(|| json!({}));
+    for (event, entries) in hooks.as_object().into_iter().flatten() {
+        let Some(had) = had.as_object_mut() else {
+            return;
+        };
+        let list = had.entry(event.clone()).or_insert_with(|| json!([]));
+        if let (Some(list), Some(entries)) = (list.as_array_mut(), entries.as_array()) {
+            list.extend(entries.iter().cloned());
+        }
     }
 }
 

@@ -661,8 +661,13 @@ replace = '''            delivery.delivering = delivering.clone();'''
 
 [[plant.edit]]
 file = "crates/cf-engine/src/windows.rs"
-find = '''        if let (Err(error), Some(delivering)) = (&started, failing) {'''
-replace = '''        if let (Err(error), Some(delivering)) = (&started, delivering) {'''
+find = '''
+                    None => {
+                        let given_up = GivenUp {'''
+replace = '''
+                    None if delivering.is_none() => Ok(None),
+                    None => {
+                        let given_up = GivenUp {'''
 
 [[plant]]
 name = "codex role: a member's launch that fails leaves the replacement written for it waiting for ever"

@@ -135,6 +135,12 @@ impl Window<'_> {
         self.session.borrow().clone()
     }
 
+    /// The window shows the conversation `session` now, as a `/clear` in it has it
+    /// begin one: what [`Window::record`] reads.
+    pub fn follow(&self, session: &str) {
+        *self.session.borrow_mut() = Some(session.to_owned());
+    }
+
     /// Everything it printed so far, as the text on its screen.
     pub fn screen(&self) -> String {
         self.rig.screen(&self.id)

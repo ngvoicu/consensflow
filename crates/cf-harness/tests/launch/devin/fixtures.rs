@@ -289,6 +289,7 @@ pub(super) fn prepare_as(
             .zip(skill.as_ref())
             .map(|(variant, skill)| Specs { variant, skill }),
         first_message_ms: request.first_message_ms,
+        starts_given_up: 0,
     };
     finished(adapter.prepare(&launch))
 }

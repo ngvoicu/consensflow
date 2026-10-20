@@ -154,6 +154,7 @@ fn prepare(adapter: &PiAdapter, request: &Request) -> Result<Prepared, String> {
             .zip(skill.as_ref())
             .map(|(variant, skill)| Specs { variant, skill }),
         first_message_ms: FIRST_MESSAGE_MS,
+        starts_given_up: 0,
     };
     finished(adapter.prepare(&launch))
 }
