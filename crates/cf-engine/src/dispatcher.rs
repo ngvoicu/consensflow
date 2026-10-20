@@ -894,7 +894,26 @@ impl Dispatcher {
             return Ok(());
         }
         let next = self.seams.ledger.borrow().next_delivery(participant.id)?;
-        if let Some(next) = next {
+        // A chief whose window was given up opens again at its time whatever waits for
+        // it: that window may have begun a turn as it was closed, on a first message its
+        // record then holds and nothing gives again, and one closed with nothing left
+        // queued stayed closed (Sol and Astra on round 2 of the chief's restart). A turn
+        // its record holds with no end is told as cut, once, as the human's Resume tells
+        // one the app's quit cut, and the chief goes on from it.
+        let reopens = participant.role == "chief"
+            && record
+                .window
+                .borrow()
+                .relaunch
+                .is_some_and(|relaunch| relaunch.reopens);
+        let first = if reopens {
+            self.cut_note(project, participant, &Coming::Chief)
+                .await?
+                .or(next)
+        } else {
+            next
+        };
+        if first.is_some() || reopens {
             let (this, held, at, who) = (
                 Rc::clone(self),
                 Rc::clone(&record),
@@ -902,7 +921,7 @@ impl Dispatcher {
                 participant.clone(),
             );
             self.act(&record, async move {
-                this.launch(&held, &at, &who, Some(next)).await
+                this.launch(&held, &at, &who, first).await
             })
             .await;
             return Ok(());

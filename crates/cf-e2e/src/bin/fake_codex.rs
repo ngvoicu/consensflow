@@ -11,8 +11,10 @@
 //! Each run writes what it was given, and what it saw, to `CF_TEST_CODEX_LOG`.
 //! `CF_TEST_CODEX_BACKEND` says how the server goes: `fail` at once, `die` once a
 //! thread starts; with `CF_TEST_CODEX_QUESTION` it asks its client a question when
-//! a thread starts. `CF_TEST_CODEX_TUI=wait` has the TUI wait for its window to end
-//! it.
+//! a thread starts; while the file `CF_TEST_CODEX_RESUME_HANGS` names is there, it
+//! never answers a resume, and `CF_TEST_CODEX_RESUME_MS` answers one that many
+//! milliseconds late. `CF_TEST_CODEX_TUI=wait` has the TUI wait for its window to
+//! end it.
 //!
 //! The server listens where it is told, as Codex's does: on a Unix socket
 //! (`unix://<path>`), or on loopback (`ws://127.0.0.1:0`, Windows'), where it
@@ -58,22 +60,24 @@ use tungstenite::stream::MaybeTlsStream;
 use tungstenite::{Message, WebSocket};
 
 use agent::Agent;
-use arguments::{developer_instructions, opening, resume_request};
+use arguments::{asked, developer_instructions, opening, resume_request};
 
 fn main() -> ExitCode {
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    let given: Vec<String> = std::env::args().skip(1).collect();
+    let own = std::env::current_exe().ok();
+    let args = asked(&given, own.as_deref());
     match args.first().map(String::as_str) {
         Some(servers::SERVER) => servers::serve(&args[1..]),
         Some(servers::WORKER) => servers::work(&args[1..]),
         Some("queue") => probes::queue_help(),
         _ if args.iter().any(|arg| arg == "app-server") => {
             if args.iter().any(|arg| arg == "--listen") {
-                server(&args)
+                server(args)
             } else {
                 probes::configuration()
             }
         }
-        _ => tui(&args),
+        _ => tui(args),
     }
 }
 
@@ -245,6 +249,10 @@ fn serve<S: Read + Write>(mut socket: WebSocket<S>, behavior: Behavior, agent: &
         if start {
             record(json!({ "run": "server", "started": request["params"] }));
         }
+        if request["method"] == "thread/resume" && resume_hangs() {
+            record(json!({ "run": "server", "unanswered": request["params"]["threadId"] }));
+            continue;
+        }
         let answer = match request["method"].as_str() {
             Some("thread/start") => result(
                 id,
@@ -289,6 +297,14 @@ fn serve<S: Read + Write>(mut socket: WebSocket<S>, behavior: Behavior, agent: &
     }
 }
 
+/// Whether a request to resume a thread goes unanswered: while the file
+/// `CF_TEST_CODEX_RESUME_HANGS` names is there. A window opened on a thread then
+/// never shows it, as a Codex chief opened again after the app's restart never did
+/// (zeewin, 2026-10-19), and once the file is gone the next window does.
+fn resume_hangs() -> bool {
+    own_var("CF_TEST_CODEX_RESUME_HANGS").is_some_and(|file| std::path::Path::new(&file).exists())
+}
+
 /// The answer to the request `id`: `result`.
 fn result(id: &Value, result: Value) -> Value {
     json!({ "id": id, "result": result })
@@ -301,6 +317,10 @@ fn result(id: &Value, result: Value) -> Value {
 fn resumed(id: &Value, params: &Value, agent: &Arc<Agent>) -> Value {
     let thread = params["threadId"].as_str().unwrap_or_default();
     record(json!({ "run": "server", "resumed": thread, "request": params }));
+    // A long thread takes its time to resume: as long as `CF_TEST_CODEX_RESUME_MS` says.
+    if let Some(slow) = own_var("CF_TEST_CODEX_RESUME_MS").and_then(|ms| ms.parse().ok()) {
+        thread::sleep(Duration::from_millis(slow));
+    }
     if agent.resume(thread) {
         result(
             id,

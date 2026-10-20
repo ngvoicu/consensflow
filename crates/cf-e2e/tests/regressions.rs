@@ -27,6 +27,8 @@
 // The stand-in's command is a shell of a Unix machine.
 #[path = "regressions/a_builds_daemon_held_a_workers_task.rs"]
 mod a_builds_daemon_held_a_workers_task;
+#[path = "regressions/a_codex_chief_opened_again_after_a_restart_read_starting_for_good.rs"]
+mod a_codex_chief_opened_again_after_a_restart_read_starting_for_good;
 #[cfg(unix)]
 #[path = "regressions/a_command_that_goes_on_reporting_held_a_devin_workers_result.rs"]
 mod a_command_that_goes_on_reporting_held_a_devin_workers_result;
@@ -99,7 +101,6 @@ const FAKE_DEVIN: &str = env!("CARGO_BIN_EXE_fake-devin");
 const FAKE_OPENCODE_2: &str = env!("CARGO_BIN_EXE_fake-opencode-2");
 
 /// The stand-in for Codex, which the windows of Codex's agents run.
-#[cfg(unix)]
 const FAKE_CODEX: &str = env!("CARGO_BIN_EXE_fake-codex");
 
 /// The configuration of a rig whose windows run the stand-in agent, to add
@@ -109,7 +110,6 @@ fn config() -> Config {
 }
 
 /// [`config`], and the stand-in Codex for the windows of Codex's agents.
-#[cfg(unix)]
 fn config_with_codex() -> Config {
     config().codex(FAKE_CODEX)
 }

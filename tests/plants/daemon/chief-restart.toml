@@ -1,0 +1,264 @@
+# A chief opened again after the app's restart is not left "starting" (zeewin's 2-hour
+# live run of 2026-10-19: a Codex chief whose turn ended a second before the restart
+# was opened again at rest on its thread, its broker never named the thread, and its
+# lane read "starting" for the 78 minutes left while a worker's result waited for it).
+# A Codex window opened on a thread waits for its broker to name it, asking at the
+# deadline too, for the minute a new window has the first time and twice as long for
+# each window given up before it in a row, to ten minutes
+# (`crates/cf-harness/src/codex/adapter.rs`). A launch whose window never comes up is
+# given up whether or not it had a first message, once its harness was asked again right
+# before the close (`crates/cf-engine/src/windows.rs`, `unstarted.rs`): the chief's
+# window is closed, the human told once, a first message its record shows confirmed, and
+# the chief opened again at the backoff whatever waits for it, told its turn was cut where
+# its record holds one (`dispatcher.rs`); one whose exit came meanwhile is not given up
+# again. The engine's tests are in
+# `crates/cf-engine/tests/dispatcher/resume.rs`, the adapter's in
+# `crates/cf-harness/tests/launch/codex/windows.rs`; the cases of the regressions,
+# `crates/cf-e2e/tests/regressions/a_codex_chief_opened_again_after_a_restart_read_starting_for_good.rs`,
+# are the real daemon and pane host on a stand-in Codex that leaves a resume unanswered
+# or answers it late, and their run builds the native `cf` from the sources as they are
+# planted.
+#
+# Every name holds `chief restart`, so `cargo xtask plants daemon "chief restart"` runs
+# them all.
+
+[run]
+# The cases of the regressions, found by their module's name.
+rig-regression-chief-restart = { command = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_codex_chief_opened_again_after_a_restart_read_starting_for_good::"], builds = true }
+# The tests of a Codex window once it is open.
+harness-launch-codex-windows = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "codex::windows"]
+
+[[plant]]
+name = "chief restart: a launch with no first message whose window never came up is left starting"
+meant = "a_chief_opened_again_at_rest_whose_window_never_comes_up_is_closed_the_human_told_and_its_result_goes_in_with_the_next"
+runs = ["engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '''
+                    None => {
+                        let given_up = GivenUp {'''
+replace = '''
+                    None if failing.is_none() => Ok(None),
+                    None => {
+                        let given_up = GivenUp {'''
+
+[[plant]]
+name = "chief restart: a launch with no first message whose window never came up is left starting, on the rig"
+meant = "a_codex_chief_whose_window_does_not_come_up_after_a_restart_is_closed_the_human_told_and_its_result_goes_in_once_it_can"
+runs = ["rig-regression-chief-restart"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '''
+                    None => {
+                        let given_up = GivenUp {'''
+replace = '''
+                    None if failing.is_none() => Ok(None),
+                    None => {
+                        let given_up = GivenUp {'''
+
+[[plant]]
+name = "chief restart: a member's window that never came up is left open"
+meant = "a_member_opened_again_at_rest_whose_window_never_comes_up_is_closed_and_said"
+runs = ["engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/unstarted.rs"
+find = "                    let _ = this.seams.host.kill(&pane).await;"
+replace = "                    let _ = (&this, &pane);"
+
+[[plant]]
+name = "chief restart: a window whose exit came while it was waited for is given up again"
+meant = "a_chief_window_that_exits_while_it_is_waited_for_to_come_up_is_given_up_no_more"
+runs = ["engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/unstarted.rs"
+find = "        if record.window.borrow().pane.as_ref() != Some(&pane) {"
+replace = "        if false {"
+
+[[plant]]
+name = "chief restart: a window with a first message whose exit came while it was waited for is given up again"
+meant = "a_chief_window_with_a_first_message_that_exits_while_it_is_waited_for_is_given_up_no_more"
+runs = ["engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/unstarted.rs"
+find = "        if record.window.borrow().pane.as_ref() != Some(&pane) {"
+replace = "        if failing.is_none() && record.window.borrow().pane.as_ref() != Some(&pane) {"
+
+[[plant]]
+name = "chief restart: a window that came up as it was given up is closed"
+meant = "a_chief_window_that_comes_up_as_it_is_given_up_is_kept_and_given_what_waits"
+runs = ["engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = "                match returning(planned.window.came_up()).await {"
+replace = "                match returning(planned.window.came_up()).await.filter(|_| false) {"
+
+[[plant]]
+name = "chief restart: a chief's first message its record shows is given back unread"
+meant = "a_chief_first_message_its_record_shows_as_its_window_is_given_up_is_confirmed_and_never_sent_again"
+runs = ["engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/unstarted.rs"
+find = "            Some(delivering) if delivering.chief => {"
+replace = "            Some(delivering) if delivering.chief && false => {"
+
+[[plant]]
+name = "chief restart: a launch is not told how many windows before it were given up"
+meant = "the_next_window_of_a_chief_whose_window_was_given_up_is_given_longer_until_one_comes_up"
+runs = ["engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = "            starts_given_up: record.window.borrow().starts_given_up,"
+replace = "            starts_given_up: 0,"
+
+[[plant]]
+name = "chief restart: a window given up is not counted"
+meant = "the_next_window_of_a_chief_whose_window_was_given_up_is_given_longer_until_one_comes_up"
+runs = ["engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/unstarted.rs"
+find = '''
+        record.window.borrow_mut().starts_given_up += 1;'''
+replace = ""
+
+[[plant]]
+name = "chief restart: a window that came up keeps the count of those given up before it"
+meant = "the_next_window_of_a_chief_whose_window_was_given_up_is_given_longer_until_one_comes_up"
+runs = ["engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '''
+        record.window.borrow_mut().starts_given_up = 0;'''
+replace = ""
+
+[[plant]]
+name = "chief restart: a Codex window opened on a thread has nothing to learn from its broker"
+meant = "a_window_opened_on_a_thread_is_up_once_its_broker_names_it_and_its_launch_fails_if_it_never_does"
+runs = ["harness-launch-codex-windows"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/adapter.rs"
+find = '''
+            if self.named.get() {
+                return Ok(None);'''
+replace = '''
+            if self.named.get() || self.thread.borrow().is_some() {
+                return Ok(None);'''
+
+[[plant]]
+name = "chief restart: a Codex window opened on a thread has nothing to learn from its broker, on the rig"
+meant = "a_codex_chief_whose_window_does_not_come_up_after_a_restart_is_closed_the_human_told_and_its_result_goes_in_once_it_can"
+runs = ["rig-regression-chief-restart"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/adapter.rs"
+find = '''
+            if self.named.get() {
+                return Ok(None);'''
+replace = '''
+            if self.named.get() || self.thread.borrow().is_some() {
+                return Ok(None);'''
+
+[[plant]]
+name = "chief restart: the broker is not asked at the deadline"
+meant = "a_thread_named_after_the_last_look_before_the_deadline_and_by_it_is_the_windows"
+runs = ["harness-launch-codex-windows"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/adapter.rs"
+find = '''
+            loop {
+                if let Some(thread) = self.named_now().await {'''
+replace = '''
+            loop {
+                if self.time.wall_ms() >= deadline {
+                    break;
+                }
+                if let Some(thread) = self.named_now().await {'''
+
+[[plant]]
+name = "chief restart: the time a window has to come up never grows"
+meant = "the_time_a_window_has_to_come_up_doubles_with_each_window_given_up_before_it_to_ten_times_the_first"
+runs = ["harness-launch-codex-windows"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/adapter.rs"
+find = "        .saturating_mul(2_i64.saturating_pow(given_up))"
+replace = "        .saturating_mul(1)"
+
+[[plant]]
+name = "chief restart: the time a window has to come up never grows, on the rig"
+meant = "a_codex_chief_whose_resume_takes_longer_than_the_first_time_a_window_has_comes_up_on_a_later_try_and_is_given_its_result_once"
+runs = ["rig-regression-chief-restart"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/adapter.rs"
+find = "        .saturating_mul(2_i64.saturating_pow(given_up))"
+replace = "        .saturating_mul(1)"
+
+[[plant]]
+name = "chief restart: a chief whose window was given up opens again only for what waits for it"
+meant = "a_chief_whose_window_was_given_up_with_nothing_queued_opens_again_at_the_backoff"
+runs = ["engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''        let reopens = participant.role == "chief"'''
+replace = '''        let reopens = false && participant.role == "chief"'''
+
+[[plant]]
+name = "chief restart: a chief whose window was given up opens again only for what waits for it, on the rig"
+meant = "a_codex_chief_given_up_with_nothing_waiting_for_it_opens_again_at_the_backoff"
+runs = ["rig-regression-chief-restart"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''        let reopens = participant.role == "chief"'''
+replace = '''        let reopens = false && participant.role == "chief"'''
+
+[[plant]]
+name = "chief restart: a give-up does not have the chief open again"
+meant = "a_chief_whose_window_was_given_up_with_nothing_queued_opens_again_at_the_backoff"
+runs = ["engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/unstarted.rs"
+find = "            relaunch.reopens = true;"
+replace = "            relaunch.reopens = false;"
+
+[[plant]]
+name = "chief restart: a launch that fails otherwise after a give-up forgets the chief opens again"
+meant = "a_chief_whose_window_was_given_up_opens_again_until_one_comes_up_though_a_launch_after_fails_otherwise"
+runs = ["engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = "            reopens: before.is_some_and(|relaunch| relaunch.reopens),"
+replace = "            reopens: false,"
+
+[[plant]]
+name = "chief restart: a chief opened again after a give-up is not told its turn was cut"
+meant = "a_chief_window_given_up_after_it_began_a_turn_on_its_result_opens_again_told_the_turn_was_cut_and_goes_on"
+runs = ["engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''
+            self.cut_note(project, participant, &Coming::Chief)
+                .await?
+                .or(next)'''
+replace = '''
+            next'''

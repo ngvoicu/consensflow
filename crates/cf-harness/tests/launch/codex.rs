@@ -105,6 +105,8 @@ struct Request {
     agent: Option<Agent<'static>>,
     instructions: String,
     first_message_ms: i64,
+    /// How many of the participant's windows in a row were given up before this one.
+    starts_given_up: u32,
     /// The Specmint variant a chief is given, where its project has specs on.
     specs: Option<Variant>,
 }
@@ -118,6 +120,7 @@ impl Default for Request {
             agent: Some(LUNA),
             instructions: ROLE.to_owned(),
             first_message_ms: FIRST_MESSAGE_MS,
+            starts_given_up: 0,
             specs: None,
         }
     }
@@ -164,6 +167,7 @@ fn prepare(adapter: &CodexAdapter, request: &Request) -> Result<Prepared, String
             .zip(skill.as_ref())
             .map(|(variant, skill)| Specs { variant, skill }),
         first_message_ms: request.first_message_ms,
+        starts_given_up: request.starts_given_up,
     };
     finished(adapter.prepare(&launch))
 }

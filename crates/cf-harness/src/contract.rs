@@ -174,6 +174,10 @@ pub struct Launch<'a> {
     /// window waits for before that message can show, such as the conversation
     /// its harness names, ends by it.
     pub first_message_ms: i64,
+    /// How many of the participant's windows in a row were given up before this
+    /// one for not coming up in the time they had: a harness whose window takes
+    /// as long as it takes (a Codex resuming a long thread) gives this one longer.
+    pub starts_given_up: u32,
 }
 
 /// The model a window runs on and the levels its harness reads, as the
@@ -235,6 +239,14 @@ pub trait Window {
     /// harness to say it gives up by [`Launch::first_message_ms`], if not
     /// before.
     fn started(&self) -> Work<'_, Result<Option<String>, String>>;
+    /// Once [`Window::started`] gave up, and right before the engine closes the
+    /// window: whether its harness says it came up since, with the conversation it
+    /// started on where it says that itself (`Some(None)` where ConsensFlow named
+    /// it). None where it has not, and where the harness has no such look (the
+    /// default): a window that came up in that last moment is kept.
+    fn came_up(&self) -> Work<'_, Option<Option<String>>> {
+        Box::pin(async { None })
+    }
     /// Whether a delivery may go in now, or why that could not be told.
     fn ready<'a>(
         &'a self,

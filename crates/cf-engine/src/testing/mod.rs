@@ -24,7 +24,9 @@ mod seams;
 mod time;
 mod window;
 
-pub use adapter::{AfterPrepare, Deliver, FakeAdapter, FakeAgent, Prepare, Ready, Started, Taking};
+pub use adapter::{
+    AfterPrepare, CameUp, Deliver, FakeAdapter, FakeAgent, Prepare, Ready, Started, Taking,
+};
 pub use adapters::{FakeAdapters, FakeRecords};
 pub use background::FakeBackground;
 pub use context::{Closed, Context, Made, START_MS};

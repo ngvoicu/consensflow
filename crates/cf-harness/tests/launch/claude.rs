@@ -205,6 +205,7 @@ fn prepare(adapter: &ClaudeAdapter, request: &Request) -> Result<Prepared, Strin
             .zip(skill.as_ref())
             .map(|(variant, skill)| Specs { variant, skill }),
         first_message_ms: FIRST_MESSAGE_MS,
+        starts_given_up: 0,
     };
     finished(adapter.prepare(&launch))
 }
