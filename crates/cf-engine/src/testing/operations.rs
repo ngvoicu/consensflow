@@ -9,6 +9,7 @@
 use std::future::Future;
 use std::rc::{Rc, Weak};
 
+use cf_harness::contract::Pane;
 use cf_ledger::{
     DeletedProject, NewProject, ParticipantView, ProjectView, RemovedMember, TaskReleased,
 };
@@ -20,6 +21,7 @@ use super::executor::Answer;
 use crate::chief_switch::SwitchTo;
 use crate::dispatcher::{Dispatcher, SwitchWhen};
 use crate::seams::EngineError;
+use crate::windows::Activity;
 
 /// What a Switch chief is asked, as `switchChief` is given it.
 fn switch_asked(project: i64, to: &SwitchTo, when: SwitchWhen, note: bool) -> Value {
@@ -300,6 +302,16 @@ pub struct Restarted<'a> {
 impl Restarted<'_> {
     fn engine(&self) -> Rc<Dispatcher> {
         self.engine.upgrade().expect("the context holds the engine")
+    }
+
+    /// What this engine says the participant's window is doing.
+    pub fn activity(&self, participant: i64) -> Activity {
+        self.engine().activity(participant)
+    }
+
+    /// The pane this engine holds the participant's window in, if any.
+    pub fn pane(&self, participant: i64) -> Option<Pane> {
+        self.engine().pane(participant)
     }
 
     /// One pass, everything it began run to stillness.

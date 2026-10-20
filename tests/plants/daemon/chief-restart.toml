@@ -9,8 +9,9 @@
 # given up whether or not it had a first message, once its harness was asked again right
 # before the close (`crates/cf-engine/src/windows.rs`, `unstarted.rs`): the chief's
 # window is closed, the human told once, a first message its record shows confirmed, and
-# the chief opened again at the backoff with what waits for it; one whose exit came
-# meanwhile is not given up again. The engine's tests are in
+# the chief opened again at the backoff whatever waits for it, told its turn was cut where
+# its record holds one (`dispatcher.rs`); one whose exit came meanwhile is not given up
+# again. The engine's tests are in
 # `crates/cf-engine/tests/dispatcher/resume.rs`, the adapter's in
 # `crates/cf-harness/tests/launch/codex/windows.rs`; the cases of the regressions,
 # `crates/cf-e2e/tests/regressions/a_codex_chief_opened_again_after_a_restart_read_starting_for_good.rs`,
@@ -206,3 +207,58 @@ builds = true
 file = "crates/cf-harness/src/codex/adapter.rs"
 find = "        .saturating_mul(2_i64.saturating_pow(given_up))"
 replace = "        .saturating_mul(1)"
+
+[[plant]]
+name = "chief restart: a chief whose window was given up opens again only for what waits for it"
+meant = "a_chief_whose_window_was_given_up_with_nothing_queued_opens_again_at_the_backoff"
+runs = ["engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''        let reopens = participant.role == "chief"'''
+replace = '''        let reopens = false && participant.role == "chief"'''
+
+[[plant]]
+name = "chief restart: a chief whose window was given up opens again only for what waits for it, on the rig"
+meant = "a_codex_chief_given_up_with_nothing_waiting_for_it_opens_again_at_the_backoff"
+runs = ["rig-regression-chief-restart"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''        let reopens = participant.role == "chief"'''
+replace = '''        let reopens = false && participant.role == "chief"'''
+
+[[plant]]
+name = "chief restart: a give-up does not have the chief open again"
+meant = "a_chief_whose_window_was_given_up_with_nothing_queued_opens_again_at_the_backoff"
+runs = ["engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/unstarted.rs"
+find = "            relaunch.reopens = true;"
+replace = "            relaunch.reopens = false;"
+
+[[plant]]
+name = "chief restart: a launch that fails otherwise after a give-up forgets the chief opens again"
+meant = "a_chief_whose_window_was_given_up_opens_again_until_one_comes_up_though_a_launch_after_fails_otherwise"
+runs = ["engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = "            reopens: before.is_some_and(|relaunch| relaunch.reopens),"
+replace = "            reopens: false,"
+
+[[plant]]
+name = "chief restart: a chief opened again after a give-up is not told its turn was cut"
+meant = "a_chief_window_given_up_after_it_began_a_turn_on_its_result_opens_again_told_the_turn_was_cut_and_goes_on"
+runs = ["engine-dispatcher"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''
+            self.cut_note(project, participant, &Coming::Chief)
+                .await?
+                .or(next)'''
+replace = '''
+            next'''

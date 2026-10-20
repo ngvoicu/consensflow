@@ -92,12 +92,13 @@ fn received(rig: &Rig, id: i64) -> cf_e2e::Result<usize> {
 
 /// The field's shape up to the owner's Resume: on a rig made with `config`, a Codex
 /// chief has its worker's first result, which gives its thread a record to be resumed
-/// from, and gives the worker T-2, at work when the app quits, the chief at rest. The app
-/// quits, daemon first, and starts again on the same home, made with `after`; the owner
-/// resumes the project. The rig, and the project's id.
+/// from, and gives the worker T-2, at work when the app quits (where `worker_at_work`
+/// says), the chief at rest. The app quits, daemon first, and starts again on the same
+/// home, made with `after`; the owner resumes the project. The rig, and the project's id.
 fn chief_at_rest_when_the_app_quits(
     config: Config,
     after: Config,
+    worker_at_work: bool,
 ) -> Result<(Rig, i64), Box<dyn std::error::Error>> {
     let mut rig = Rig::start(config)?;
     let roster = json!({
@@ -108,12 +109,10 @@ fn chief_at_rest_when_the_app_quits(
         ],
     });
     files::write(&rig.home().join("agents.json"), format!("{roster}\n"))?;
-    let project = Project::open(&rig, "codex-chief", json!({}))?;
-    let added = project.add_member("worker")?;
-    let tier = added["member"]["tier"]
-        .as_str()
-        .unwrap_or("standard")
-        .to_owned();
+    // The worker is the staff from the start: a member added later changes the chief's
+    // role, which its resumed thread is then told by a note that waits for it.
+    let project = Project::open_with_staff(&rig, "codex-chief", None, &[("worker", "worker")])?;
+    let tier = project.tiers()?.get("worker").cloned().unwrap_or_default();
     let chief = rig.open_frame(&format!("p{}-chief", project.id()), OPEN)?;
     cf(
         &rig,
@@ -136,26 +135,28 @@ fn chief_at_rest_when_the_app_quits(
             )
         },
     )?;
-    cf(
-        &rig,
-        &chief,
-        &[
-            "task",
-            "add",
-            "--tier",
-            &tier,
-            "SLEEP 600 Reply with exactly: WORKED",
-        ],
-    )?;
-    rig.wait_for(
-        "the worker at work on T-2 and the chief at rest",
-        secs(60),
-        || {
-            Ok(project.task(2)?["state"] == "working"
-                && project.lane("worker")?["activity"]["state"] == "working"
-                && project.lane("chief")?["activity"]["state"] == "idle")
-        },
-    )?;
+    if worker_at_work {
+        cf(
+            &rig,
+            &chief,
+            &[
+                "task",
+                "add",
+                "--tier",
+                &tier,
+                "SLEEP 600 Reply with exactly: WORKED",
+            ],
+        )?;
+        rig.wait_for(
+            "the worker at work on T-2 and the chief at rest",
+            secs(60),
+            || {
+                Ok(project.task(2)?["state"] == "working"
+                    && project.lane("worker")?["activity"]["state"] == "working"
+                    && project.lane("chief")?["activity"]["state"] == "idle")
+            },
+        )?;
+    }
     let id = project.id();
     rig.kill_daemon();
     rig.wait_for_daemon_exit(secs(10))?;
@@ -179,7 +180,7 @@ fn a_codex_chief_whose_window_does_not_come_up_after_a_restart_is_closed_the_hum
     // From the restart on, a Codex window opened on its thread never shows it.
     let hanging = || config().var("CF_TEST_CODEX_RESUME_HANGS", hangs.to_string_lossy());
     files::write(&hangs, "")?;
-    let (rig, id) = chief_at_rest_when_the_app_quits(hanging(), hanging())?;
+    let (rig, id) = chief_at_rest_when_the_app_quits(hanging(), hanging(), true)?;
     let project = Project::new(&rig, id);
 
     // The chief's window is opened again on its thread, and given up: the human is told.
@@ -261,7 +262,7 @@ fn a_codex_chief_whose_window_does_not_come_up_after_a_restart_is_closed_the_hum
 fn a_codex_chief_whose_resume_takes_longer_than_the_first_time_a_window_has_comes_up_on_a_later_try_and_is_given_its_result_once(
 ) -> Outcome {
     let slow = config().var("CF_TEST_CODEX_RESUME_MS", "12000");
-    let (rig, id) = chief_at_rest_when_the_app_quits(config(), slow)?;
+    let (rig, id) = chief_at_rest_when_the_app_quits(config(), slow, true)?;
     let project = Project::new(&rig, id);
 
     rig.wait_for("T-2 to be done", secs(90), || {
@@ -287,6 +288,58 @@ fn a_codex_chief_whose_resume_takes_longer_than_the_first_time_a_window_has_come
         (2..=3).contains(&windows),
         "the first window given up and a later one up, not one given up at every try: {windows}"
     );
+    assert_eq!(not_up(&project)?.len(), 1, "told once");
+    rig.close()?;
+    Ok(())
+}
+
+/// Sol and Astra on round 2 of the fix: a chief whose window was given up with nothing
+/// waiting for it stayed closed, as only a message for it opened it again, and a window
+/// that began a turn as it was closed left nothing queued. The chief is opened again at
+/// the backoff whatever waits for it. Here nothing does: the app quits with the chief at
+/// rest and no worker at work, the chief's first window after the restart never shows
+/// its thread, and once Codex's windows come up again the next one does, and reads at
+/// rest.
+#[test]
+fn a_codex_chief_given_up_with_nothing_waiting_for_it_opens_again_at_the_backoff() -> Outcome {
+    let flags = tempfile::tempdir()?;
+    let hangs = hangs_in(flags.path());
+    let hanging = || config().var("CF_TEST_CODEX_RESUME_HANGS", hangs.to_string_lossy());
+    files::write(&hangs, "")?;
+    let (rig, id) = chief_at_rest_when_the_app_quits(hanging(), hanging(), false)?;
+    let project = Project::new(&rig, id);
+    rig.wait_for(
+        "the human to be told the chief could not start",
+        secs(60),
+        || Ok(!not_up(&project)?.is_empty()),
+    )?;
+    let waiting: Vec<Value> = project
+        .inbox("chief")?
+        .into_iter()
+        .filter(|message| matches!(message["state"].as_str(), Some("queued" | "delivering")))
+        .collect();
+    assert!(
+        waiting.is_empty(),
+        "nothing waits for the chief: {waiting:?}"
+    );
+
+    std::fs::remove_file(&hangs)?;
+    let reopened = rig.wait_for(
+        "the chief to be opened again and read idle",
+        secs(120),
+        || {
+            Ok(windows_of(&rig, &project).len() >= 2
+                && project.lane("chief")?["activity"]["state"] == "idle")
+        },
+    );
+    if let Err(failed) = reopened {
+        return Err(format!(
+            "{failed}: the chief's window was opened {} times, and its lane reads {}",
+            windows_of(&rig, &project).len(),
+            project.lane("chief")?["activity"]
+        )
+        .into());
+    }
     assert_eq!(not_up(&project)?.len(), 1, "told once");
     rig.close()?;
     Ok(())

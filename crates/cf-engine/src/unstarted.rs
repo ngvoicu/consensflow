@@ -193,7 +193,10 @@ impl Dispatcher {
     /// A chief's first message that the window's record shows it took went in, as at any
     /// window's end ([`Dispatcher::settle_gone`]), and is confirmed, never given again
     /// (Sol and Astra on round 1: one Codex recorded as its window was given up was
-    /// given back, and sent again on the same thread).
+    /// given back, and sent again on the same thread). The window may have begun a turn
+    /// as it was closed, and no look can tell before the close: the chief opens again at
+    /// the backoff whatever waits for it, told the turn was cut where its record holds one
+    /// (Sol and Astra on round 2: closed with nothing left queued, it stayed closed).
     pub(crate) async fn give_up_unstarted(
         self: &Rc<Self>,
         record: &Rc<Record>,
@@ -248,7 +251,13 @@ impl Dispatcher {
             }
             failing => failing,
         };
-        self.launch_failed(record, project, participant, failing, &said)
+        self.launch_failed(record, project, participant, failing, &said)?;
+        // The chief opens again at its time whatever waits for it, told its turn was cut
+        // where the window had begun one (`Dispatcher::step`).
+        if let Some(relaunch) = record.window.borrow_mut().relaunch.as_mut() {
+            relaunch.reopens = true;
+        }
+        Ok(())
     }
 
     /// Whether `record`'s window is asked whether it is ready before it has drawn

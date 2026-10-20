@@ -7,6 +7,7 @@
 use std::rc::Rc;
 
 use cf_engine::testing::{Context, FakeAdapter, Made, Restarted};
+use cf_engine::ActivityState;
 use cf_ledger::{MessageView, RESUME_WORDS};
 use serde_json::{json, Value};
 
@@ -1007,6 +1008,188 @@ fn a_chief_window_with_a_first_message_that_exits_while_it_is_waited_for_is_give
         ("queued", 0),
         "given back once, for the next window"
     );
+}
+
+/// Sol and Astra on round 2 of the chief's restart: a chief whose window was given up
+/// is opened again at the backoff whatever waits for it. The window may have begun a turn
+/// as it was closed, on a first message its record then holds and that is never given
+/// again; closed with nothing left queued, the chief stayed closed for good.
+#[test]
+fn a_chief_whose_window_was_given_up_with_nothing_queued_opens_again_at_the_backoff() {
+    let context = Context::made(Made {
+        codex: true,
+        ..Made::default()
+    });
+    let (project, after) = codex_chief_at_rest_after_a_restart(&context);
+    let chief = context.id(project, "chief");
+    never_up(&context.codex);
+    after.resume_project(project).unwrap();
+    assert_eq!(after.pane(chief), None, "given up");
+    let launches = context.codex.prepared().len();
+    after.pass().unwrap();
+    assert_eq!(
+        context.codex.prepared().len(),
+        launches,
+        "not again at once"
+    );
+
+    *context.codex.started.borrow_mut() = None;
+    context.advance(5_000);
+    after.pass().unwrap();
+    assert_eq!(
+        context.codex.prepared().len(),
+        launches + 1,
+        "opened again at the backoff, with nothing queued for it"
+    );
+    let launch = context.codex.prepared().last().cloned().unwrap();
+    assert_eq!(
+        launch["message"],
+        Value::Null,
+        "its record ends at rest: it is told nothing"
+    );
+    after.pass().unwrap();
+    assert_ne!(after.pane(chief), None, "up");
+    for _ in 0..3 {
+        context.advance(600_000);
+        after.pass().unwrap();
+    }
+    assert_eq!(
+        context.codex.prepared().len(),
+        launches + 1,
+        "and not opened again once up"
+    );
+}
+
+/// A chief whose window was given up opens again at its time until one comes up, though
+/// a launch after it fails for another reason (its window not prepared, here): with
+/// nothing queued, a chief that lost the mark would stay closed for good.
+#[test]
+fn a_chief_whose_window_was_given_up_opens_again_until_one_comes_up_though_a_launch_after_fails_otherwise(
+) {
+    let context = Context::made(Made {
+        codex: true,
+        ..Made::default()
+    });
+    let (project, after) = codex_chief_at_rest_after_a_restart(&context);
+    let chief = context.id(project, "chief");
+    never_up(&context.codex);
+    after.resume_project(project).unwrap();
+    *context.codex.started.borrow_mut() = None;
+    let failed = Rc::new(std::cell::Cell::new(false));
+    let once = Rc::clone(&failed);
+    *context.codex.prepare.borrow_mut() = Some(Rc::new(move |_| {
+        if once.replace(true) {
+            Ok(())
+        } else {
+            Err("codex is broken".to_owned())
+        }
+    }));
+    context.advance(5_000);
+    after.pass().unwrap();
+    assert!(
+        failed.get(),
+        "the launch after the give-up failed otherwise"
+    );
+    assert_eq!(after.pane(chief), None);
+    context.advance(10_000);
+    after.pass().unwrap();
+    after.pass().unwrap();
+    assert_ne!(after.pane(chief), None, "opened again, and up");
+    assert_eq!(
+        to_human(&context, project).len(),
+        1,
+        "the human told once, at the first"
+    );
+}
+
+/// The consequence of a race no look closes (Sol and Astra on round 2 of the chief's
+/// restart): the chief's window comes up, takes its first message, a worker's result,
+/// and begins its turn on it, between the last look that found no thread and the close.
+/// Its record then holds the result, which is confirmed and never given again, and a turn
+/// with no end. The chief opens again at the backoff, told its turn was cut as the human's
+/// Resume tells one the app's quit cut, goes on, reads at rest after its turn, and its
+/// next step on that result is taken.
+#[test]
+fn a_chief_window_given_up_after_it_began_a_turn_on_its_result_opens_again_told_the_turn_was_cut_and_goes_on(
+) {
+    let context = Context::made(Made {
+        codex: true,
+        ..Made::default()
+    });
+    let project = context
+        .open_project(json!({
+            "directory": "/work/app",
+            "name": "app",
+            "chief": { "harness": "codex", "agent": "apollo" },
+            "staff": [{ "agent": "zeus", "harness": "claude-code", "role": "worker", "tier": "standard" }],
+        }))
+        .unwrap()
+        .unwrap()
+        .id;
+    let chief = context.id(project, "chief");
+    context.pass().unwrap();
+    context.note(project, "human", "chief", "Fix the parser");
+    context.pass().unwrap();
+    context.codex.answer("chief", "T-1 is with zeus.");
+    context.give(project, "zeus", "Parser");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    keeps_its_record(&context.adapter, "zeus");
+    let after = quit_and_start(&context);
+    context.advance(1_000);
+    never_up(&context.codex);
+    after.resume_project(project).unwrap();
+    context.adapter.answer("zeus", "Parser done");
+    for _ in 0..3 {
+        after.pass().unwrap();
+    }
+    let result = context
+        .inbox(chief)
+        .into_iter()
+        .find(|message| message.kind == "result")
+        .expect("the result");
+
+    // Opened again with the result, the window takes it and begins its turn (the
+    // stand-in's record holds a launch's first message), and is given up all the same.
+    context.advance(5_000);
+    after.pass().unwrap();
+    assert_eq!(launches_with(&context, result.id), 1);
+    assert_eq!(context.message(result.id).state, "delivered");
+    assert_eq!(after.pane(chief), None, "given up");
+
+    // At the backoff it opens again, though nothing waits for it, told its turn was cut.
+    *context.codex.started.borrow_mut() = None;
+    context.advance(10_000);
+    after.pass().unwrap();
+    let launch = context.codex.prepared().last().cloned().unwrap();
+    assert_match(
+        launch["message"].as_str().unwrap(),
+        &format!(r"^\[ConsensFlow m-\d+ · note from ConsensFlow\]\n{CHIEF_CUT}$"),
+    );
+    assert_eq!(
+        launches_with(&context, result.id),
+        1,
+        "the result is never pasted again"
+    );
+    assert_eq!(cut_notes(&context, chief).len(), 1, "told once");
+
+    // It goes on, its turn ends, and its next step on the result is taken.
+    context
+        .codex
+        .answer("chief", "Parser checked: T-1 is good.");
+    for _ in 0..2 {
+        after.pass().unwrap();
+    }
+    assert_eq!(cut_notes(&context, chief)[0].state, "delivered");
+    assert_eq!(after.activity(chief).state, ActivityState::Idle);
+    context
+        .ledger
+        .borrow_mut()
+        .accept_task(project, 1, "chief")
+        .unwrap();
+    after.pass().unwrap();
+    assert_eq!(context.task(project, 1).task.state, "accepted");
+    assert_eq!(launches_with(&context, result.id), 1);
 }
 
 /// The same of a member opened again at rest with its task in hand: its turn ended

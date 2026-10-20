@@ -109,6 +109,9 @@ pub(crate) struct Opening {
 pub(crate) struct Relaunch {
     pub(crate) failures: u32,
     pub(crate) at: i64,
+    /// A window of the chief was given up for not coming up since one last came
+    /// up: the next opens at its time whatever waits for it (`Dispatcher::step`).
+    pub(crate) reopens: bool,
 }
 
 /// The record's window part.
@@ -1000,18 +1003,16 @@ impl Dispatcher {
         if let Some(delivering) = delivering {
             self.give_back(delivering, because)?;
         }
-        let failures = record
-            .window
-            .borrow()
-            .relaunch
-            .map_or(0, |relaunch| relaunch.failures)
-            + 1;
+        let before = record.window.borrow().relaunch;
+        let failures = before.map_or(0, |relaunch| relaunch.failures) + 1;
         let wait = RELAUNCH_MS
             .saturating_mul(2_i64.saturating_pow(failures - 1))
             .min(RELAUNCH_MAX_MS);
         record.window.borrow_mut().relaunch = Some(Relaunch {
             failures,
             at: self.now() + wait,
+            // Until a window comes up, as a launch that fails for another reason after it.
+            reopens: before.is_some_and(|relaunch| relaunch.reopens),
         });
         if failures == 1 {
             self.seams.ledger.borrow_mut().note(
