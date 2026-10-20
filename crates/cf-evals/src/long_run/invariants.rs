@@ -281,8 +281,10 @@ pub fn check(look: &Look, settings: &Settings) -> Vec<Break> {
 /// the look (1); the results whose worker's own record was not read through their turn
 /// (2); the ended notices the log ties to no result (3); the results whose turn the copy
 /// of their worker's conversation does not hold (4); the cut notes to a Claude Code
-/// window whose own record was not read through them (5); and what the watch could not
-/// see of a window's tree, or of a task's state when its window closed by itself (6).
+/// window whose own record was not read through them (5); what the watch could not see
+/// of a window's tree, or of a task's state when its window closed by itself (6); and the
+/// prompts whose first header comes after other words on its line, a paste glued behind
+/// them or a quote (7).
 pub fn unjudged(look: &Look, settings: &Settings) -> Vec<Unjudged> {
     let mut found = work::idle_unread(look, settings);
     found.extend(work::unread_records(look, settings));
@@ -291,6 +293,7 @@ pub fn unjudged(look: &Look, settings: &Settings) -> Vec<Unjudged> {
     found.extend(turns::false_cut_unread(look));
     found.extend(windows::gaps(look));
     found.extend(windows::untold_exits(look));
+    found.extend(deliveries::undecided(look));
     found
 }
 

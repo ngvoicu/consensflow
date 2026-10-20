@@ -1,6 +1,8 @@
 //! 7 (B5): a message delivered twice into a conversation, or joined to another in
 //! one prompt.
 
+use cf_evals::long_run::invariants;
+use cf_evals::long_run::look::Look;
 use serde_json::json;
 
 use crate::scene::{found, ms, t, Scene, CHIEF};
@@ -143,6 +145,7 @@ fn a_compact_summary_or_a_reviewers_history_that_quotes_a_delivery_is_none_and_h
         "{:?}",
         found(&scene.look(ms(4, 0)), 7)
     );
+    assert!(undecided(&scene.look(ms(4, 0))).is_empty());
     // Codex gives its approval reviewer the agent's history, every delivery's header in it:
     // none is given again.
     let scene = Scene::new(&[("long-worker", "codex")]);
@@ -161,6 +164,94 @@ fn a_compact_summary_or_a_reviewers_history_that_quotes_a_delivery_is_none_and_h
         &t(3, 30),
     );
     assert!(found(&scene.look(ms(4, 0)), 7).is_empty());
+    assert!(undecided(&scene.look(ms(4, 0))).is_empty());
+}
+
+/// What a look could not judge of the seventh: each key, and what it says.
+fn undecided(look: &Look) -> Vec<(String, String)> {
+    invariants::unjudged(look, &Default::default())
+        .into_iter()
+        .filter(|open| open.invariant == 7)
+        .map(|open| (open.key, open.said))
+        .collect()
+}
+
+fn said_of(look: &Look) -> Vec<String> {
+    found(look, 7).into_iter().map(|found| found.said).collect()
+}
+
+#[test]
+fn a_delivery_behind_other_words_is_one_and_given_again_breaks_the_seventh() {
+    // GPT-6.1-Sol's review of round b1: Devin pastes behind what its input box holds, and
+    // Claude Code keeps a paste wrapped with what was typed with it. A second m-246 behind
+    // `continue`, inside the wrapper behind it, or in a wrapper behind it, is m-246 given
+    // twice.
+    for second in [
+        format!("continue\n{FIRST}"),
+        format!(
+            "\n\n<pasted_content id=\"a1b2\">\ncontinue\n{FIRST}\n</pasted_content id=\"a1b2\">\n"
+        ),
+        format!(
+            "continue\n\n<pasted_content id=\"a1b2\">\n{FIRST}\n</pasted_content id=\"a1b2\">\n"
+        ),
+    ] {
+        let scene = Scene::new(&[("long-worker", "devin")]);
+        let conversation = chief(&scene);
+        scene.item(conversation, 0, "user", FIRST, true, &t(1, 2));
+        scene.item(conversation, 1, "assistant", "Noted.", true, &t(1, 10));
+        scene.item(conversation, 2, "user", &second, true, &t(2, 2));
+        let look = scene.look(ms(4, 0));
+        assert_eq!(
+            said_of(&look),
+            ["@chief was given m-246 2 times"],
+            "{second}"
+        );
+        assert!(undecided(&look).is_empty(), "{second}");
+    }
+}
+
+#[test]
+fn a_header_after_other_words_on_its_line_is_unresolved_never_dropped() {
+    // Whether a header after other words on its line went in behind them (a paste glued to
+    // what the box held) or is quoted by them, the copy does not say: no break, and no pass.
+    for (prompt, id) in [
+        (format!("continue{FIRST}"), 246),
+        (
+            "Why is \"[ConsensFlow m-248 · T-9 · result from @long-worker]\" queued?".to_owned(),
+            248,
+        ),
+    ] {
+        let scene = Scene::new(&[("long-worker", "devin")]);
+        let conversation = chief(&scene);
+        scene.item(conversation, 0, "user", FIRST, true, &t(1, 2));
+        scene.item(conversation, 1, "user", &prompt, true, &t(2, 2));
+        let look = scene.look(ms(4, 0));
+        assert!(said_of(&look).is_empty(), "{prompt}");
+        assert_eq!(
+            undecided(&look),
+            [(
+                format!("7:undecided:{conversation}:i-{conversation}-1"),
+                format!("@chief's prompt i-{conversation}-1 holds m-{id}'s header after other words on its line: whether it went in behind them or they quote it, the copy does not say")
+            )],
+            "{prompt}"
+        );
+    }
+    // Claude Code's notification of a job's end is its own words, a header in its output
+    // none: no delivery, and judged.
+    let scene = Scene::new(&[("long-worker", "claude-code")]);
+    let conversation = chief_on(&scene, "claude-code");
+    scene.item(conversation, 0, "user", FIRST, true, &t(1, 2));
+    scene.item(
+        conversation,
+        1,
+        "user",
+        &format!("<task-notification>\n<task-id>b1</task-id>\n<output>queued: {FIRST}</output>\n</task-notification>"),
+        true,
+        &t(2, 2),
+    );
+    let look = scene.look(ms(4, 0));
+    assert!(said_of(&look).is_empty());
+    assert!(undecided(&look).is_empty());
 }
 
 #[test]

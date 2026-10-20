@@ -3,11 +3,15 @@
 //! Windows). Every delivery opens with its header, `[ConsensFlow m-12 · T-3 · result
 //! from @x]`, which is also how the daemon knows it arrived; so a conversation's copy
 //! that holds a message's header in two prompts was given it twice, and a prompt
-//! that holds the headers of two messages was given them as one. A prompt is a user's
-//! item that opens with a header, inside the wrapper Claude Code keeps a long paste in:
-//! what a harness writes of the conversation as a user's item and quotes a delivery in
-//! is none (the summary of a compaction, which quoted m-13 on the Mac's 2-hour run of
-//! 2026-10-19; the history Codex gives its approval reviewer). (A message that
+//! that holds the headers of two messages was given them as one. Every user's item whose
+//! first header begins a line is a prompt, whether the header opens it (on the line after
+//! the tag Claude Code wraps a long paste in) or stands behind other words (Devin pastes
+//! behind what its input box holds), but the rows a harness writes of the conversation
+//! itself, each named by what it opens with: the summary of a compaction (which quoted
+//! m-13 on the Mac's 2-hour run of 2026-10-19), the history Codex gives its approval
+//! reviewer, Claude Code's notification of a job's end. One whose first header comes after
+//! other words on its line may be a paste glued behind them or a quote: unresolved, never
+//! dropped (GPT-6.1-Sol's review of round b1). (A message that
 //! carries others is one paste under its own header, and what quotes a delivery
 //! defuses its header: neither counts. Nor does a header a message's own words quote,
 //! as a worker's result may quote the brief it was given: a header inside the words
@@ -22,7 +26,7 @@ use std::sync::OnceLock;
 use cf_e2e::pattern;
 use regex::Regex;
 
-use super::{plain, Break, Evidence};
+use super::{plain, Break, Evidence, Unjudged};
 use crate::long_run::ledger::{Item, Message};
 use crate::long_run::look::Look;
 use crate::long_run::mask::{cut, Names};
@@ -103,36 +107,80 @@ fn body_in(look: &Look, id: i64) -> Option<&str> {
         .map(|message| message.body.as_str())
 }
 
-/// The opening tag Claude Code wraps a long paste in, in its record and so in the copy
-/// (2.1.303: `<pasted_content id="…">`, the paste on the next line).
-const PASTED: &str = "<pasted_content";
+/// The words a row opens with that a harness writes of the conversation itself as a user's
+/// item, quoting deliveries it was never given: Claude Code's summary of a compaction (the
+/// prompts before it quoted whole: m-13 on the Mac's 2-hour run of 2026-10-19), the history
+/// Codex gives its approval reviewer, and Claude Code's notification of a job's end (the
+/// job's output in it).
+const SYNTHETIC: [&str; 3] = [
+    "This session is being continued from a previous conversation",
+    "The following is the Codex agent history whose request action you are assessing",
+    "<task-notification>",
+];
 
-/// Where a delivery in `text` would begin: past its leading white space and, where
-/// Claude Code wrapped the paste, past the wrapper's opening tag (`<pasted_content`, then
-/// nothing or attributes after a space, with no `>` or line break in them, and `>`) and
-/// the white space after it.
-fn delivery_start(text: &str) -> usize {
-    let start = text.len() - text.trim_start().len();
-    let wrapped = text[start..].strip_prefix(PASTED).and_then(|rest| {
-        let (attributes, inner) = rest.split_once('>')?;
-        let tag =
-            (attributes.is_empty() || attributes.starts_with(' ')) && !attributes.contains('\n');
-        tag.then_some(inner)
-    });
-    wrapped.map_or(start, |inner| text.len() - inner.trim_start().len())
+/// What a user's item that holds a delivery's header is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Prompt {
+    /// The window was given a delivery in it: its first header begins a line, as a paste
+    /// does at the start of the prompt, on the line after the tag Claude Code wraps a long
+    /// paste in (2.1.303: `<pasted_content id="…">`), or behind what the input box held
+    /// (Devin's) or what Claude Code wrapped with it.
+    Delivery,
+    /// A row the harness writes of the conversation itself ([`SYNTHETIC`]): none.
+    Synthetic,
+    /// Its first header comes after other words on its line: a paste glued behind them, or
+    /// words that quote it, which the copy does not tell apart.
+    Undecided,
 }
 
-/// Whether `item` is a prompt the window was given a delivery in: a user's item that
-/// opens with a delivery's header (where Claude Code wrapped the paste, inside the
-/// wrapper). What the harness writes of the conversation as a user's item quotes one
-/// anywhere else and is none: Claude Code's summary of a compaction (the last prompt
-/// quoted whole in it), the history Codex gives its approval reviewer, a job's
-/// notification, a tool's output, what a person typed.
+/// What `item` is, where it is a user's item that holds a delivery's header.
+fn prompt_of(item: &Item) -> Option<Prompt> {
+    if item.role != "user" {
+        return None;
+    }
+    let (_, first, _) = *headers(&item.text).first()?;
+    let opening = item.text.trim_start();
+    if SYNTHETIC.iter().any(|marker| opening.starts_with(marker)) {
+        return Some(Prompt::Synthetic);
+    }
+    let before = item.text[..first].rsplit('\n').next().unwrap_or_default();
+    Some(if before.trim().is_empty() {
+        Prompt::Delivery
+    } else {
+        Prompt::Undecided
+    })
+}
+
+/// Whether `item` is a prompt the window was given a delivery in ([`Prompt::Delivery`]).
 pub(super) fn is_delivery(item: &Item) -> bool {
-    item.role == "user"
-        && headers(&item.text)
-            .first()
-            .is_some_and(|(_, start, _)| *start == delivery_start(&item.text))
+    prompt_of(item) == Some(Prompt::Delivery)
+}
+
+/// 7, unresolved: each prompt whose first header comes after other words on its line
+/// ([`Prompt::Undecided`]), which is never taken for a delivery nor for none.
+pub fn undecided(look: &Look) -> Vec<Unjudged> {
+    look.ledger
+        .items
+        .iter()
+        .filter(|item| prompt_of(item) == Some(Prompt::Undecided))
+        .filter_map(|item| {
+            let (id, ..) = *headers(&item.text).first()?;
+            let handle = look
+                .ledger
+                .conversations
+                .iter()
+                .find(|conversation| conversation.id == item.conversation)
+                .map_or("?", |conversation| look.ledger.handle(conversation.participant));
+            Some(Unjudged::new(
+                7,
+                format!("7:undecided:{}:{}", item.conversation, item.id),
+                format!(
+                    "@{handle}'s prompt {} holds m-{id}'s header after other words on its line: whether it went in behind them or they quote it, the copy does not say",
+                    item.id
+                ),
+            ))
+        })
+        .collect()
 }
 
 /// The messages `item` delivered to `worker`, in order: none where it is no delivery

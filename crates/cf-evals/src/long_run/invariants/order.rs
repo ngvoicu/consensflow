@@ -8,7 +8,7 @@
 //! further than the next delivery of another task: a turn of an earlier attempt (a
 //! retry's turn lost, its result the old answer again) or of the next task (a late
 //! result carrying another task's answer) is never taken for its own. A delivery is a
-//! prompt that opens with the header of a message to the worker, read as B5 reads one
+//! prompt whose header of a message to the worker begins a line, read as B5 reads one
 //! (`deliveries`): a header a brief, a job's notification or a tool's output quotes is
 //! none, and neither begins nor ends a turn. Both read
 //! the ledger alone: the messages, the log of the tasks' states and deliveries, and
@@ -232,8 +232,8 @@ fn delivers_another_task(look: &Look, item: &Item, worker: i64, task: Option<i64
 /// ([`attempt_of`]): its prompt is the first that delivered that message to the worker
 /// once the attempt began, never an earlier attempt's of the same message; and what
 /// follows it is the turn's only in that prompt's conversation, and only until a prompt
-/// that delivered the worker another task. A delivery is a prompt that opens with a
-/// header of a message to the worker ([`delivered_to`]): a header its words, a job's
+/// that delivered the worker another task. A delivery is a prompt whose header of a
+/// message to the worker begins a line ([`delivered_to`]): a header its words, a job's
 /// notification or a tool's output quote is none, and begins or ends nothing. Of that,
 /// the last turn ([`last_turn`]).
 fn turn_of<'a>(
@@ -272,8 +272,22 @@ fn on_codex(look: &Look, worker: i64) -> bool {
         .is_some_and(|who| who.harness.as_deref() == Some("codex"))
 }
 
-/// 4: a result that holds a line of the progress of its turn the final answer does
-/// not hold too, or not the whole of the turn's final answer.
+/// What `body` (a result's words, squeezed) says besides the turn's final answer `answer` and
+/// each line of its `progress`, each taken out once, the longest first: nothing, where the
+/// result is the answer and progress alone.
+fn besides(body: &str, answer: &str, progress: &[&Item]) -> String {
+    let mut lines: Vec<String> = progress.iter().map(|line| plain(&line.text)).collect();
+    lines.sort_by_key(|words| std::cmp::Reverse(words.len()));
+    let mut rest = body.replacen(answer, " ", 1);
+    for words in lines.iter().filter(|words| !words.is_empty()) {
+        rest = rest.replacen(words.as_str(), " ", 1);
+    }
+    plain(&rest)
+}
+
+/// 4: a result that is not the whole of its turn's final answer, or that holds a line of
+/// the progress of its turn the final answer does not hold too. Only a result that is the
+/// whole answer and progress, nothing else, has turn-end's shape ([`PROGRESS_LINES`]).
 pub fn final_answer(look: &Look, settings: &Settings) -> Vec<Break> {
     let names = Names::of(look);
     let mut found = Vec::new();
@@ -297,23 +311,42 @@ pub fn final_answer(look: &Look, settings: &Settings) -> Vec<Break> {
                     && !answer.contains(&words)
             })
             .collect();
-        let (said, shape) = if !held.is_empty() {
+        let lines = format!(
+            "{} line{} of its turn's progress",
+            held.len(),
+            if held.len() == 1 { "" } else { "s" }
+        );
+        // Turn-end's A4 is the whole final answer with progress besides, and nothing else:
+        // a result without the whole answer, or with words of no part of its turn, is none
+        // of it (GPT-6.1-Sol's review of round b1).
+        let (said, shape) = if !body.contains(&answer) {
+            let holds = if held.is_empty() {
+                String::new()
+            } else {
+                format!(", and holds {lines}")
+            };
             (
                 format!(
-                    "m-{} holds {} line{} of its turn's progress",
-                    result.id,
-                    held.len(),
-                    if held.len() == 1 { "" } else { "s" }
+                    "m-{} is not its turn's final answer, whole{holds}",
+                    result.id
                 ),
-                Some(PROGRESS_LINES),
-            )
-        } else if !body.contains(&answer) {
-            (
-                format!("m-{} is not its turn's final answer, whole", result.id),
                 None,
             )
-        } else {
+        } else if held.is_empty() {
             continue;
+        } else if besides(&body, &answer, &progress).is_empty() {
+            (
+                format!("m-{} holds {lines}", result.id),
+                Some(PROGRESS_LINES),
+            )
+        } else {
+            (
+                format!(
+                    "m-{} holds {lines}, and words that are none of its turn's",
+                    result.id
+                ),
+                None,
+            )
         };
         let mut broke = Break::new(4, format!("4:m-{}", result.id), said).with(Evidence {
             rows: vec![message_row(result, &names)],

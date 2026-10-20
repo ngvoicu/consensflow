@@ -182,7 +182,7 @@ fn takes_part(line: &str) -> bool {
 /// `last_lines`, which the chief's wait takes a window's last 40 lines with, a cut
 /// accepted as the pane host's is), a cut it does not know the word of, and whether a
 /// text it lists reaches the run's output at all. It reads lines, not meaning.
-const TAKEN: [(&str, &str, &str); 50] = [
+const TAKEN: [(&str, &str, &str); 49] = [
     (
         "long_run/disruptions.rs",
         "if let Some(next) = self.planned[place + 1..]",
@@ -195,13 +195,8 @@ const TAKEN: [(&str, &str, &str); 50] = [
     ),
     (
         "long_run/invariants/deliveries.rs",
-        "let wrapped = text[start..].strip_prefix(PASTED).and_then(|rest| {",
-        "where a delivery begins in a prompt, read and never said",
-    ),
-    (
-        "long_run/invariants/deliveries.rs",
-        "let (attributes, inner) = rest.split_once('>')?;",
-        "the same",
+        "let before = item.text[..first].rsplit('\\n').next().unwrap_or_default();",
+        "what stands before a prompt's first header on its line, read and never said",
     ),
     (
         "long_run/stalls.rs",

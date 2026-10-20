@@ -760,6 +760,86 @@ fn a_result_that_holds_the_progress_of_its_turn_or_not_its_final_answer_breaks_t
 }
 
 #[test]
+fn a_result_of_progress_without_its_whole_final_answer_is_no_known_a4() {
+    // GPT-6.1-Sol's review of round b1: the known shape is turn-end's A4 alone, the whole
+    // final answer there and nothing besides it but the turn's progress. Progress alone,
+    // progress and the answer cut, progress and another task's answer, and progress and
+    // the answer with words of no part of the turn each fail a run.
+    let listed = known::KNOWN.as_deref().unwrap();
+    let progress = "Reading src/money.mjs to find the rounding.";
+    for (result, said) in [
+        (
+            progress.to_owned(),
+            "m-131 is not its turn's final answer, whole, and holds 1 line of its turn's progress",
+        ),
+        (
+            format!("{progress}\n\nRounding is half-even now"),
+            "m-131 is not its turn's final answer, whole, and holds 1 line of its turn's progress",
+        ),
+        (
+            format!("{progress}\n\nThe totals are rounded half-even too; 62 tests pass."),
+            "m-131 is not its turn's final answer, whole, and holds 1 line of its turn's progress",
+        ),
+        (
+            format!("{progress}\n\nThe totals are rounded half-even too.\n\n{ANSWER}"),
+            "m-131 holds 1 line of its turn's progress, and words that are none of its turn's",
+        ),
+    ] {
+        let scene = Scene::new(&[("long-worker", "claude-code")]);
+        let (task, _) = worked(&scene);
+        scene.message(
+            131,
+            (CHIEF, Some(3)),
+            "result",
+            Some(task),
+            &result,
+            &t(1, 5),
+        );
+        let breaks = found(&scene.look(ms(5, 0)), 4);
+        assert_eq!(breaks.len(), 1, "{result}: {breaks:?}");
+        assert_eq!(breaks[0].said, said, "{result}");
+        assert_eq!(breaks[0].shape, None, "{result}");
+        assert_eq!(known::of(&breaks[0], listed), None, "{result}");
+    }
+    // The shape, where the result is the whole final answer and progress besides, short
+    // lines among it too.
+    let scene = Scene::new(&[("long-worker", "claude-code")]);
+    let task = task(&scene);
+    let conversation = scene.conversation(3, "claude-code", "s-worker");
+    scene.item(
+        conversation,
+        0,
+        "user",
+        "[ConsensFlow m-120 · T-14 · task from @chief]\nFix the rounding",
+        true,
+        &t(0, 0),
+    );
+    scene.item(conversation, 1, "assistant", progress, false, &t(0, 10));
+    scene.item(
+        conversation,
+        2,
+        "tool",
+        "src/money.mjs: 120 lines",
+        true,
+        &t(0, 11),
+    );
+    scene.item(conversation, 3, "assistant", "Fixing.", false, &t(0, 30));
+    scene.item(conversation, 4, "tool", "ok", true, &t(0, 31));
+    scene.item(conversation, 5, "assistant", ANSWER, true, &t(1, 0));
+    scene.message(
+        131,
+        (CHIEF, Some(3)),
+        "result",
+        Some(task),
+        &format!("{progress}\n\nFixing.\n\n{ANSWER}"),
+        &t(1, 5),
+    );
+    let breaks = found(&scene.look(ms(5, 0)), 4);
+    assert_eq!(breaks.len(), 1, "{breaks:?}");
+    assert_eq!(breaks[0].shape, Some("progress-lines"));
+}
+
+#[test]
 fn a_result_cut_after_the_start_of_its_final_answer_breaks_the_fourth() {
     // The findings are in the part left out: the start alone is no final answer.
     let scene = Scene::new(&[("long-worker", "claude-code")]);
