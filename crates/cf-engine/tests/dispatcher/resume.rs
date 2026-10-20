@@ -813,6 +813,202 @@ fn a_chief_window_that_exits_while_it_is_waited_for_to_come_up_is_given_up_no_mo
     );
 }
 
+/// The engine's pane of the chief of `project`, as it opens its windows.
+fn chief_pane(project: i64) -> String {
+    format!("p{project}-chief")
+}
+
+/// The launches of the chief prepared so far whose first message is `message`'s paste.
+fn launches_with(context: &Context, message: i64) -> usize {
+    let marker = format!("[ConsensFlow m-{message} ");
+    context
+        .codex
+        .prepared()
+        .iter()
+        .filter(|launch| {
+            launch["message"]
+                .as_str()
+                .is_some_and(|text| text.starts_with(&marker))
+        })
+        .count()
+}
+
+/// Sol on round 1 of the chief's restart: Codex can come up in the moment between
+/// the window's last look and its close. Asked once more right before it is closed,
+/// a window whose harness says it came up is kept: nothing is closed, the human is
+/// told nothing, and what comes for the chief goes into that window.
+#[test]
+fn a_chief_window_that_comes_up_as_it_is_given_up_is_kept_and_given_what_waits() {
+    let context = Context::made(Made {
+        codex: true,
+        ..Made::default()
+    });
+    let (project, after) = codex_chief_at_rest_after_a_restart(&context);
+    never_up(&context.codex);
+    *context.codex.came_up.borrow_mut() = Some(Rc::new(|| Some(None)));
+    let killed = context.host.killed().len();
+    after.resume_project(project).unwrap();
+
+    assert!(
+        !context.host.killed()[killed..]
+            .iter()
+            .any(|killed| killed.id == chief_pane(project)),
+        "the window that came up is kept"
+    );
+    assert!(to_human(&context, project).is_empty(), "nobody is told");
+    let launches = context.codex.prepared().len();
+    let result = context.note(project, "zeus", "chief", "Parser done");
+    for _ in 0..3 {
+        after.pass().unwrap();
+    }
+    assert_eq!(context.message(result.id).state, "delivered");
+    assert_eq!(
+        context.codex.prepared().len(),
+        launches,
+        "into the window that came up"
+    );
+}
+
+/// Sol and Astra on round 1 of the chief's restart: a first message the window's
+/// record shows it took went in, though its window is given up as it comes up. It is
+/// confirmed, and never sent again on the same thread.
+#[test]
+fn a_chief_first_message_its_record_shows_as_its_window_is_given_up_is_confirmed_and_never_sent_again(
+) {
+    let context = Context::made(Made {
+        codex: true,
+        ..Made::default()
+    });
+    let (project, after) = codex_chief_at_rest_after_a_restart(&context);
+    never_up(&context.codex);
+    after.resume_project(project).unwrap();
+    // The result waits, and the chief is opened again with it: its window never says
+    // it came up, though its record shows the result (the stand-in records a launch's
+    // first message as it opens).
+    let result = context.note(project, "zeus", "chief", "Parser done");
+    context.advance(5_000);
+    after.pass().unwrap();
+    assert_eq!(launches_with(&context, result.id), 1);
+
+    assert_eq!(
+        context.message(result.id).state,
+        "delivered",
+        "its record shows it: it went in"
+    );
+    for wait in [10_000, 20_000] {
+        context.advance(wait);
+        after.pass().unwrap();
+    }
+    assert_eq!(
+        launches_with(&context, result.id),
+        1,
+        "never sent again on the same thread"
+    );
+}
+
+/// Astra on round 1 of the chief's restart: a slow window must come up in the end. The
+/// next window of a participant whose window was given up is told how many were, in a
+/// row, which its harness gives longer for; one that comes up starts the count again.
+#[test]
+fn the_next_window_of_a_chief_whose_window_was_given_up_is_given_longer_until_one_comes_up() {
+    let context = Context::made(Made {
+        codex: true,
+        ..Made::default()
+    });
+    let (project, after) = codex_chief_at_rest_after_a_restart(&context);
+    // Its record never shows what its windows were given: what waits stays queued.
+    context.codex.forgets_first_messages.set(true);
+    let before = context.codex.starts_given_up().len();
+    never_up(&context.codex);
+    after.resume_project(project).unwrap();
+    let result = context.note(project, "zeus", "chief", "Parser done");
+    for wait in [5_000, 10_000] {
+        context.advance(wait);
+        after.pass().unwrap();
+    }
+    *context.codex.started.borrow_mut() = None;
+    context.advance(20_000);
+    after.pass().unwrap();
+    after.pass().unwrap();
+    assert_eq!(
+        context.codex.starts_given_up()[before..],
+        [0, 1, 2, 3],
+        "each window told how many before it were given up"
+    );
+    // The window came up: the next, after it goes, is given the first time again.
+    assert_eq!(context.message(result.id).state, "delivering");
+    context.exit("chief");
+    assert_eq!(context.project(project).state, "suspended");
+    after.resume_project(project).unwrap();
+    assert_eq!(context.codex.starts_given_up().last(), Some(&0));
+}
+
+/// Astra on round 1 of the chief's restart: the exit of a window waited for is the
+/// launch's end whether or not the launch had a first message. A chief whose turn the
+/// quit cut is opened again with the note that says so; its window exits before it
+/// comes up, which closes its project as a chief's own exit does, and gives the note
+/// back. The launch is not given up again after that: nothing more is closed, and the
+/// human is not told that ConsensFlow tries again.
+#[test]
+fn a_chief_window_with_a_first_message_that_exits_while_it_is_waited_for_is_given_up_no_more() {
+    let context = Context::made(Made {
+        codex: true,
+        ..Made::default()
+    });
+    let project = context
+        .open_project(json!({
+            "directory": "/work/app",
+            "name": "app",
+            "chief": { "harness": "codex", "agent": "apollo" },
+            "staff": [],
+        }))
+        .unwrap()
+        .unwrap()
+        .id;
+    context.pass().unwrap();
+    // The chief is at work on the human's words when the app quits.
+    context.note(project, "human", "chief", "Run the tests");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let after = quit_and_start(&context);
+    context.advance(1_000);
+    context.codex.forgets_first_messages.set(true);
+    let release = context.codex.start_holds.hold(|_| true);
+    never_up(&context.codex);
+    let resuming = after.begin_resume_project(project);
+    context.settle();
+    let launch = context.codex.prepared().last().cloned().unwrap();
+    assert_match(
+        launch["message"].as_str().unwrap(),
+        &format!(r"note from ConsensFlow\]\n{CHIEF_CUT}$"),
+    );
+    context.exit("chief");
+    let killed = context.host.killed().len();
+    release.open();
+    context.settle();
+    context.finish(resuming).unwrap();
+
+    assert_eq!(
+        context.host.killed().len(),
+        killed,
+        "the window that went is not closed again"
+    );
+    assert!(
+        to_human(&context, project)
+            .iter()
+            .all(|note| !note.starts_with("The chief could not start")),
+        "{:?}",
+        to_human(&context, project)
+    );
+    let notes = cut_notes(&context, context.id(project, "chief"));
+    assert_eq!(notes.len(), 1);
+    assert_eq!(
+        (notes[0].state.as_str(), notes[0].attempts),
+        ("queued", 0),
+        "given back once, for the next window"
+    );
+}
+
 /// The same of a member opened again at rest with its task in hand: its turn ended
 /// before the quit, so nothing begins one in the window the Resume brings back. One
 /// that never comes up is closed, and nobody is left waiting on it unsaid: the human is

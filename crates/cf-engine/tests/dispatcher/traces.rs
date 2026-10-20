@@ -274,7 +274,7 @@ const DEPARTED: &[(&str, &str)] = &[
     ),
     (
         "keeps the project open when the new chief cannot take its handoff, and opens it again with it",
-        "before it closes the chief's window, whose harness could not take its handoff, the engine asks the pane host what the window shows (`pane.snapshot` with `tail`), to tell it in the failure, where Node closes it unasked",
+        "before it closes the chief's window, whose harness could not take its handoff, the engine asks the pane host what the window shows (`pane.snapshot` with `tail`), to tell it in the failure, where Node closes it unasked; and before it gives the handoff back it reads the conversation's record (`record`), where one the window took is confirmed and not given again (the reviews of round 1 of the chief's restart), where Node gives it back unread",
     ),
     (
         "a note written 5 turns after a pass whose launch cannot take its first message",

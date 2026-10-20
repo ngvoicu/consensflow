@@ -134,7 +134,12 @@ once, with the reason here and in the commit.
   one step of one scenario, in both platforms' recordings: `codex: a conversation
   Codex kept is resumed on its thread, and its window has nothing to learn`, step
   2, which is now served the broker's word that the window shows its thread, and
-  records the one `GET /session` it asks; its answer is Node's, `null`.
+  records the one `GET /session` it asks; its answer is Node's, `null`. And the
+  broker is asked once more at the deadline (the reviews of round 1: a thread named
+  after the last look before it was the window's, and the chief was closed at
+  work), which moved one more step: `codex: a thread never named in a minute is an
+  error`, step 3, which records one `GET /session` more, at the minute; its answer
+  is Node's.
 
 ## The launch scenarios
 

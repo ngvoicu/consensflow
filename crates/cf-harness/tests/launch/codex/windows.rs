@@ -84,13 +84,160 @@ fn waits_for_the_thread(request: &Request, said: &str) -> i64 {
     let mut settled = driver.run();
     while settled.is_empty() {
         assert!(
-            fakes.time.fire_next(began + 120_000),
-            "no answer in two minutes"
+            fakes.time.fire_next(began + 3_600_000),
+            "no answer in an hour"
         );
         settled = driver.run();
     }
     assert_eq!(settled, [(0, Err(said.to_owned()))]);
     fakes.time.wall_ms() - began
+}
+
+/// What `window` says it started on, its broker serving `served` to its looks: the
+/// answer, and how many milliseconds it took.
+fn started_with(
+    fakes: &Fakes,
+    window: Rc<dyn cf_harness::contract::Window>,
+    served: Vec<Served>,
+) -> (Result<Option<String>, String>, i64) {
+    fakes.loopback.serve("GET /session", served);
+    let mut driver = Driver::default();
+    driver.begin(0, async move { window.started().await });
+    let began = fakes.time.wall_ms();
+    let mut settled = driver.run();
+    while settled.is_empty() {
+        assert!(
+            fakes.time.fire_next(began + 3_600_000),
+            "no answer in an hour"
+        );
+        settled = driver.run();
+    }
+    let (_, answer) = settled.remove(0);
+    (answer, fakes.time.wall_ms() - began)
+}
+
+/// The broker is asked at the deadline too: a thread named after the last look
+/// before it, and by it, is the window's (Sol on round 1 of the chief's restart: at
+/// 60 s the window was given up with no look since 59.75 s, and a chief Codex had
+/// resumed meanwhile was closed at work).
+#[test]
+fn a_thread_named_after_the_last_look_before_the_deadline_and_by_it_is_the_windows() {
+    let home = Home::new();
+    let (adapter, fakes) = adapter(&home);
+    // Two seconds, looked at every quarter of one: eight looks before the deadline.
+    let unnamed = || vec![shows(None, false); 8];
+    let at_the_deadline = |thread| {
+        let mut served = unnamed();
+        served.push(shows(Some(thread), true));
+        served
+    };
+    let resumed = Request {
+        first_message_ms: 2_000,
+        ..Request::resuming(THREAD)
+    };
+    let window = prepare(&adapter, &resumed).unwrap().window;
+    assert_eq!(
+        started_with(&fakes, window, at_the_deadline(THREAD)),
+        (Ok(None), 2_000)
+    );
+    let fresh = Request {
+        first_message_ms: 2_000,
+        ..Request::chief()
+    };
+    let window = prepare(&adapter, &fresh).unwrap().window;
+    assert_eq!(
+        started_with(&fakes, window, at_the_deadline(NEXT)),
+        (Ok(Some(NEXT.to_owned())), 2_000)
+    );
+    // Named at none of them, it was not.
+    let window = prepare(&adapter, &resumed).unwrap().window;
+    let (answer, waited) = started_with(&fakes, window, unnamed());
+    assert!(answer.is_err(), "{answer:?}");
+    assert_eq!(waited, 2_000);
+}
+
+/// A slow window is not given up at every try: the time a window has to come up
+/// doubles with each of its participant's windows given up before it in a row, to at
+/// most ten times the first (Astra on round 1 of the chief's restart: a resume that
+/// takes 65 s was given up at 60 s every time, and what waited for the chief never
+/// reached it).
+#[test]
+fn the_time_a_window_has_to_come_up_doubles_with_each_window_given_up_before_it_to_ten_times_the_first(
+) {
+    let waits = |first_message_ms, starts_given_up| {
+        waits_for_the_thread(
+            &Request {
+                first_message_ms,
+                starts_given_up,
+                ..Request::resuming(THREAD)
+            },
+            &format!("the Codex broker never named the thread {THREAD} it was opened on"),
+        )
+    };
+    let minutes: Vec<i64> = (0..6)
+        .map(|given_up| waits(FIRST_MESSAGE_MS, given_up))
+        .collect();
+    assert_eq!(
+        minutes,
+        [60_000, 120_000, 240_000, 480_000, 600_000, 600_000]
+    );
+    // A launch with less time than the minute grows from what it has.
+    let seconds: Vec<i64> = (0..6).map(|given_up| waits(2_000, given_up)).collect();
+    assert_eq!(seconds, [2_000, 4_000, 8_000, 16_000, 20_000, 20_000]);
+    assert_eq!(waits(2_000, u32::MAX), 20_000, "and never more");
+}
+
+/// A window whose start was given up is asked once more, right before the engine
+/// closes it: one whose broker names a thread now has come up, and is kept.
+#[test]
+fn a_window_whose_start_was_given_up_has_come_up_if_its_broker_names_a_thread_when_asked_once_more()
+{
+    let home = Home::new();
+    let (adapter, fakes) = adapter(&home);
+    let gave_up = |request: &Request| {
+        let window = prepare(&adapter, request).unwrap().window;
+        let (answer, _) = started_with(&fakes, Rc::clone(&window), Vec::new());
+        assert!(answer.is_err(), "{answer:?}");
+        window
+    };
+    let resumed = Request {
+        first_message_ms: 2_000,
+        ..Request::resuming(THREAD)
+    };
+    let window = gave_up(&resumed);
+    fakes.loopback.serve("GET /session", [shows(None, false)]);
+    assert_eq!(finished(window.came_up()), None, "still none");
+    fakes
+        .loopback
+        .serve("GET /session", [shows(Some(THREAD), true)]);
+    assert_eq!(
+        finished(window.came_up()),
+        Some(None),
+        "on the thread its launch named"
+    );
+    assert_eq!(
+        finished(window.started()),
+        Ok(None),
+        "nothing more to learn"
+    );
+
+    let fresh = Request {
+        first_message_ms: 2_000,
+        ..Request::chief()
+    };
+    let window = gave_up(&fresh);
+    fakes
+        .loopback
+        .serve("GET /session", [shows(Some(NEXT), true)]);
+    assert_eq!(finished(window.came_up()), Some(Some(NEXT.to_owned())));
+    fakes
+        .loopback
+        .serve("GET /session", [shows(Some(NEXT), true)]);
+    let observed = finished(window.observe()).unwrap();
+    assert_eq!(
+        observed.switched, None,
+        "the thread Codex started is the window's from then on"
+    );
 }
 
 #[test]

@@ -76,9 +76,12 @@ fn keeps_the_project_open_when_the_new_chief_cannot_take_its_handoff_and_opens_i
     context.give(project.id, "zeus", "Parser");
     context.pass().unwrap();
     let killed = context.host.killed().len();
+    // A window that could not start never took its handoff: its record holds none of it.
+    context.codex.forgets_first_messages.set(true);
     context
         .switch_chief(project.id, to("codex", "astraeus"), SwitchWhen::Now, false)
         .unwrap();
+    context.codex.forgets_first_messages.set(false);
     assert_eq!(
         context.project(project.id).state,
         "open",

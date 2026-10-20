@@ -12,8 +12,9 @@
 //! `CF_TEST_CODEX_BACKEND` says how the server goes: `fail` at once, `die` once a
 //! thread starts; with `CF_TEST_CODEX_QUESTION` it asks its client a question when
 //! a thread starts; while the file `CF_TEST_CODEX_RESUME_HANGS` names is there, it
-//! never answers a resume. `CF_TEST_CODEX_TUI=wait` has the TUI wait for its window
-//! to end it.
+//! never answers a resume, and `CF_TEST_CODEX_RESUME_MS` answers one that many
+//! milliseconds late. `CF_TEST_CODEX_TUI=wait` has the TUI wait for its window to
+//! end it.
 //!
 //! The server listens where it is told, as Codex's does: on a Unix socket
 //! (`unix://<path>`), or on loopback (`ws://127.0.0.1:0`, Windows'), where it
@@ -316,6 +317,10 @@ fn result(id: &Value, result: Value) -> Value {
 fn resumed(id: &Value, params: &Value, agent: &Arc<Agent>) -> Value {
     let thread = params["threadId"].as_str().unwrap_or_default();
     record(json!({ "run": "server", "resumed": thread, "request": params }));
+    // A long thread takes its time to resume: as long as `CF_TEST_CODEX_RESUME_MS` says.
+    if let Some(slow) = own_var("CF_TEST_CODEX_RESUME_MS").and_then(|ms| ms.parse().ok()) {
+        thread::sleep(Duration::from_millis(slow));
+    }
     if agent.resume(thread) {
         result(
             id,

@@ -25,11 +25,12 @@ use crate::dispatcher::Dispatcher;
 use crate::host::{EngineHost, Killed, OpenPane, Opened};
 use crate::record::Record;
 use crate::role_change::{Compared, Prelude};
-use crate::runtime::{begin, caught, returning};
+use crate::runtime::{caught, returning};
 use crate::seams::{EngineError, SavedAgent};
 use crate::shown::Shown;
 use crate::specs::{ChiefSpecs, RoleText};
 use crate::stops::{Interrupted, Unstopped};
+use crate::unstarted::GivenUp;
 
 /// The key that interrupts a harness's current turn, and the gap of a double press.
 const ESCAPE: u8 = 27;
@@ -146,6 +147,10 @@ pub(crate) struct WindowPart {
     /// Whether its last look said its turn settled.
     pub(crate) settled: bool,
     pub(crate) relaunch: Option<Relaunch>,
+    /// How many of its windows in a row were given up for not coming up in the time
+    /// they had: the next is given longer (`Launch::starts_given_up`). One that comes
+    /// up starts the count again.
+    pub(crate) starts_given_up: u32,
     /// It printed, then held still: its screen is drawn.
     pub(crate) drawn: bool,
     /// It named its first conversation.
@@ -192,6 +197,7 @@ impl Default for WindowPart {
             hidden: false,
             settled: false,
             relaunch: None,
+            starts_given_up: 0,
             drawn: false,
             named: false,
             stopped: None,
@@ -615,43 +621,33 @@ impl Dispatcher {
         }
         // The adapter's `started` is an `async` function, and `.catch(...)`
         // made a promise of its own to wait on.
-        let started = caught(planned.window.started()).await;
-        // A window that never came up is given up, with its first message or
-        // without one: a Codex chief opened again at rest after the app's restart
-        // has none, and read "starting" for good (zeewin, 2026-10-19).
-        if let Err(error) = &started {
-            let first = failing.is_some();
-            // What the window shows is asked before it closes: the screen goes with it.
-            let (shown, settles) = self.look_before_giving_up(record, Some(&pane)).await;
-            // One with nothing on its way whose exit came meanwhile went as any window goes.
-            if !first && record.window.borrow().pane.as_ref() != Some(&pane) {
-                return Ok(());
+        let started = match caught(planned.window.started()).await {
+            // A window that never came up is given up, with its first message or
+            // without one: a Codex chief opened again at rest after the app's restart
+            // has none, and read "starting" for good (zeewin, 2026-10-19). What it
+            // shows is asked first, for the screen goes with it, and its harness once
+            // more after that: one that came up in that last moment is kept (Sol on
+            // round 1 of the chief's restart).
+            Err(error) => {
+                let shown = self.look_at(&pane).await;
+                match returning(planned.window.came_up()).await {
+                    Some(native) => Ok(native),
+                    None => {
+                        let given_up = GivenUp {
+                            pane,
+                            failing,
+                            error,
+                            shown,
+                        };
+                        return self
+                            .give_up_unstarted(record, project, participant, given_up)
+                            .await;
+                    }
+                }
             }
-            // The chief's window goes without taking its project with it: the chief is tried again.
-            if participant.role == "chief" {
-                self.close_own(record, &pane).await?;
-            } else {
-                let this = Rc::clone(self);
-                drop(
-                    begin(&*self.seams.spawn, async move {
-                        let _ = this.seams.host.kill(&pane).await;
-                    })
-                    .await,
-                );
-            }
-            let because = if first {
-                format!("the window could not take its first message: {error}")
-            } else {
-                format!("the window never came up: {error}")
-            };
-            // An exit that came while the host answered settled the launch, and logged it.
-            let said = if settles || !first {
-                self.unstarted_because(record, &because, &shown)
-            } else {
-                shown.after(&because)
-            };
-            return self.launch_failed(record, project, participant, failing, &said);
-        }
+            started => started,
+        };
+        record.window.borrow_mut().starts_given_up = 0;
         if self.forgotten(record) {
             return Ok(());
         }
@@ -800,6 +796,7 @@ impl Dispatcher {
             instructions: &instructions,
             specs: specs.as_ref().map(ChiefSpecs::launch),
             first_message_ms: self.seams.limits.launch_ms,
+            starts_given_up: record.window.borrow().starts_given_up,
         };
         // An `async` function: its answer, or its failure, reaches this
         // step a turn after it was made, though Pi's never waits.

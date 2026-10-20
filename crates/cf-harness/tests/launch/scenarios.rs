@@ -565,6 +565,7 @@ fn begin_prepare(played: &mut Played, id: usize, given: &Value) {
             // Node's adapters waited a fixed minute for a thread to be named: the
             // daemon's wait for a first message is three, so the minute holds.
             first_message_ms: FIRST_MESSAGE_MS,
+            starts_given_up: 0,
         };
         match adapter.prepare(&launch).await {
             Ok(prepared) => {

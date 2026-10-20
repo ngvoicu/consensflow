@@ -103,6 +103,7 @@ fn prepared(question: &Value, services: &Services) -> Result<Value, String> {
         instructions: text(question, "instructions")?,
         specs: None,
         first_message_ms: FIRST_MESSAGE_MS,
+        starts_given_up: 0,
     };
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()

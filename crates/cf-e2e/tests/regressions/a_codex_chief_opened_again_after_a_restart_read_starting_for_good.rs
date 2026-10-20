@@ -13,22 +13,26 @@
 //! What the owner should have seen: a chief whose window does not come up is not left
 //! starting. Its window is closed within the time a window has to come up, the human is
 //! told once that the chief could not start, the result waits for it, and the chief is
-//! opened again with the result once it can come up.
+//! opened again with the result once it can come up, which it is given once. And a
+//! window that is slow to come up is not given up at every try (Astra on round 1 of the
+//! fix): each window after one given up has longer, so one that needs more than the
+//! first time comes up in the end.
 //!
 //! Why the real Codex never named its thread is not known: the run's home, with its
 //! ledger and screens, went with the run. The stand-in Codex's server leaves a resume
 //! unanswered while a file is there (`CF_TEST_CODEX_RESUME_HANGS`), which the broker
-//! reads as it reads a resume Codex's TUI never asked for: the window shows no thread.
-//! The case is the field's: a Codex chief whose turn has ended, a worker at work on the
-//! task it gave, the app quit (the daemon killed, then the pane host) and started again
-//! on the same home, and the owner's Resume; the worker finishes, and its result is for
-//! the chief. A launch here has 10 s to come up (`CONSENSFLOW_LAUNCH_TIMEOUT_MS`), not
-//! the minute it has in the app.
+//! reads as it reads a resume Codex's TUI never asked for: the window shows no thread;
+//! or answers it late (`CF_TEST_CODEX_RESUME_MS`). The cases are the field's: a Codex
+//! chief whose turn has ended, a worker at work on the task it gave, the app quit (the
+//! daemon killed, then the pane host) and started again on the same home, and the
+//! owner's Resume; the worker finishes, and its result is for the chief. A launch here
+//! has 10 s to come up (`CONSENSFLOW_LAUNCH_TIMEOUT_MS`), not the minute it has in the
+//! app.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use cf_e2e::rig::{Config, Project, Rig, OPEN};
-use cf_e2e::{files, Error};
+use cf_e2e::{files, rollout, Error};
 use serde_json::{json, Value};
 
 use crate::resume_of_a_chief_with_no_turn::{resumed_on, windows_of};
@@ -38,12 +42,9 @@ use crate::{config_with_codex, secs, Outcome};
 const NOT_UP: &str =
     "The chief could not start: the window never came up: the Codex broker never named the thread";
 
-/// The rig, its launches given 10 s, its stand-in Codex leaving a resume unanswered
-/// while `hangs` is there.
-fn config(hangs: &Path) -> Config {
-    config_with_codex()
-        .var("CONSENSFLOW_LAUNCH_TIMEOUT_MS", "10000")
-        .var("CF_TEST_CODEX_RESUME_HANGS", hangs.to_string_lossy())
+/// The rig, its launches given 10 s.
+fn config() -> Config {
+    config_with_codex().var("CONSENSFLOW_LAUNCH_TIMEOUT_MS", "10000")
 }
 
 /// `cf` in the window `frame`, which must do what it is asked.
@@ -74,12 +75,31 @@ fn result_for(project: &Project, number: i64) -> cf_e2e::Result<Option<Value>> {
         .find(|message| message["kind"] == "result" && message["taskNumber"] == number))
 }
 
-#[test]
-fn a_codex_chief_whose_window_does_not_come_up_after_a_restart_is_closed_the_human_told_and_its_result_goes_in_once_it_can(
-) -> Outcome {
-    let flags = tempfile::tempdir()?;
-    let hangs = flags.path().join("resume-hangs");
-    let rig = Rig::start(config(&hangs))?;
+/// How many times the chief's thread was given the message `id`: the user's items of
+/// the rollouts in the rig's Codex home that are its paste.
+fn received(rig: &Rig, id: i64) -> cf_e2e::Result<usize> {
+    let home = PathBuf::from(rig.var("CODEX_HOME").unwrap_or_default());
+    let marker = format!("[ConsensFlow m-{id} ");
+    let mut times = 0;
+    for path in rollout::rollouts(&home) {
+        times += rollout::said_by(&rollout::read(&path)?, "user")
+            .iter()
+            .filter(|said| said.starts_with(&marker))
+            .count();
+    }
+    Ok(times)
+}
+
+/// The field's shape up to the owner's Resume: on a rig made with `config`, a Codex
+/// chief has its worker's first result, which gives its thread a record to be resumed
+/// from, and gives the worker T-2, at work when the app quits, the chief at rest. The app
+/// quits, daemon first, and starts again on the same home, made with `after`; the owner
+/// resumes the project. The rig, and the project's id.
+fn chief_at_rest_when_the_app_quits(
+    config: Config,
+    after: Config,
+) -> Result<(Rig, i64), Box<dyn std::error::Error>> {
+    let mut rig = Rig::start(config)?;
     let roster = json!({
         "schemaVersion": 1,
         "agents": [
@@ -95,9 +115,6 @@ fn a_codex_chief_whose_window_does_not_come_up_after_a_restart_is_closed_the_hum
         .unwrap_or("standard")
         .to_owned();
     let chief = rig.open_frame(&format!("p{}-chief", project.id()), OPEN)?;
-
-    // The chief has a turn, which gives its thread a record to be resumed from: its
-    // worker's first result.
     cf(
         &rig,
         &chief,
@@ -119,7 +136,6 @@ fn a_codex_chief_whose_window_does_not_come_up_after_a_restart_is_closed_the_hum
             )
         },
     )?;
-    // Its turn gave the worker another task, at work when the app quits; the chief is at rest.
     cf(
         &rig,
         &chief,
@@ -140,18 +156,30 @@ fn a_codex_chief_whose_window_does_not_come_up_after_a_restart_is_closed_the_hum
                 && project.lane("chief")?["activity"]["state"] == "idle")
         },
     )?;
-
-    // The app quits, daemon first, and starts again on the same home; from now on a
-    // Codex window opened on its thread never shows it. The owner resumes the project.
-    files::write(&hangs, "")?;
     let id = project.id();
-    let mut rig = rig;
     rig.kill_daemon();
     rig.wait_for_daemon_exit(secs(10))?;
     let root = rig.close_keeping_the_root()?;
-    let rig = Rig::start(config(&hangs).existing_root(root))?;
+    let rig = Rig::start(after.existing_root(root))?;
     let resumed = rig.page("project.resume", json!({ "project": id }))?;
     assert_eq!(resumed["ok"], true, "{resumed}");
+    Ok((rig, id))
+}
+
+/// The file that, while it is there, has the stand-in Codex leave a resume unanswered.
+fn hangs_in(flags: &Path) -> PathBuf {
+    flags.join("resume-hangs")
+}
+
+#[test]
+fn a_codex_chief_whose_window_does_not_come_up_after_a_restart_is_closed_the_human_told_and_its_result_goes_in_once_it_can(
+) -> Outcome {
+    let flags = tempfile::tempdir()?;
+    let hangs = hangs_in(flags.path());
+    // From the restart on, a Codex window opened on its thread never shows it.
+    let hanging = || config().var("CF_TEST_CODEX_RESUME_HANGS", hangs.to_string_lossy());
+    files::write(&hangs, "")?;
+    let (rig, id) = chief_at_rest_when_the_app_quits(hanging(), hanging())?;
     let project = Project::new(&rig, id);
 
     // The chief's window is opened again on its thread, and given up: the human is told.
@@ -208,14 +236,57 @@ fn a_codex_chief_whose_window_does_not_come_up_after_a_restart_is_closed_the_hum
         "neither delivered nor failed: {waiting}"
     );
 
-    // Codex's windows come up again: the chief is opened again with the result.
+    // Codex's windows come up again: the chief is opened again with the result, once.
     std::fs::remove_file(&hangs)?;
-    rig.wait_for("the result to be delivered to the chief", secs(120), || {
+    rig.wait_for("the result to be delivered to the chief", secs(180), || {
         Ok(result_for(&project, 2)?.is_some_and(|result| result["state"] == "delivered"))
     })?;
     rig.wait_for("the chief to be idle", secs(60), || {
         Ok(project.lane("chief")?["activity"]["state"] == "idle")
     })?;
+    let result = waiting["id"].as_i64().ok_or("the result has no id")?;
+    assert_eq!(received(&rig, result)?, 1, "its thread was given it once");
+    assert_eq!(not_up(&project)?.len(), 1, "told once");
+    rig.close()?;
+    Ok(())
+}
+
+/// Astra on round 1 of the fix: a resume that takes longer than the first time a window
+/// has, and less than ten times it, was given up at every try, and what waited for the
+/// chief never reached it. Here each resume takes 12 s, a window has 10 s the first time:
+/// the first is given up and the human told, and the next, given 20 s, comes up with the
+/// result, which its thread is given once (a runner slow to start Codex's two programs
+/// may take the try after, given 40 s).
+#[test]
+fn a_codex_chief_whose_resume_takes_longer_than_the_first_time_a_window_has_comes_up_on_a_later_try_and_is_given_its_result_once(
+) -> Outcome {
+    let slow = config().var("CF_TEST_CODEX_RESUME_MS", "12000");
+    let (rig, id) = chief_at_rest_when_the_app_quits(config(), slow)?;
+    let project = Project::new(&rig, id);
+
+    rig.wait_for("T-2 to be done", secs(90), || {
+        Ok(project.task(2)?["state"] == "done")
+    })?;
+    let delivered = rig.wait_for("the result to be delivered to the chief", secs(120), || {
+        Ok(result_for(&project, 2)?.is_some_and(|result| result["state"] == "delivered"))
+    });
+    if let Err(failed) = delivered {
+        let windows = windows_of(&rig, &project).len();
+        return Err(format!(
+            "{failed}: the chief's window was opened {windows} times, and its lane reads {}",
+            project.lane("chief")?["activity"]
+        )
+        .into());
+    }
+    let result = result_for(&project, 2)?
+        .and_then(|result| result["id"].as_i64())
+        .ok_or("no result for T-2")?;
+    assert_eq!(received(&rig, result)?, 1, "its thread was given it once");
+    let windows = windows_of(&rig, &project).len();
+    assert!(
+        (2..=3).contains(&windows),
+        "the first window given up and a later one up, not one given up at every try: {windows}"
+    );
     assert_eq!(not_up(&project)?.len(), 1, "told once");
     rig.close()?;
     Ok(())

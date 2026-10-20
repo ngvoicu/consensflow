@@ -419,6 +419,14 @@ fn drive_chief(mut members: Members, log: &Log) -> Result<Account> {
     Ok(case)
 }
 
+/// Whether the app quits now, in a case of a chief at rest: the chief's `lane` at rest
+/// once its member's result was delivered, which is the turn it took on it over, and its
+/// member's `task` at work. Nothing of the lane before is asked for: a turn can be over
+/// before any look finds it working.
+fn quit_now(lane: &Value, task: &Value) -> bool {
+    state_of(lane) == "idle" && task["state"] == "working"
+}
+
 /// The notes to the human that say the chief could not start.
 fn not_up(members: &Members) -> Result<Vec<String>> {
     Ok(members
@@ -454,19 +462,20 @@ fn drive_chief_at_rest(mut members: Members, log: &Log) -> Result<Account> {
         case.closed(members.close());
         return Ok(case);
     }
-    // The member at work on another task, the app quits as the chief's turn ends.
+    // The member at work on another task, the app quits as the chief's turn ends. The
+    // result is delivered once the chief's record holds it, which begins the turn, and the
+    // look that confirms it reads the lane too: a lane at rest from then on is that turn
+    // over, however short it was (Sol and Astra on round 1 of the fix: a turn over before
+    // a look found it working was waited for for good).
     let long = members.give(STAND_IN_WORKER, "SLEEP 600 Reply with exactly: WORKED")?;
-    let mut worked = false;
     let ended = find(
         log,
         "the chief's turn to end, its member at work",
         WORK,
         Duration::from_millis(200),
         || {
-            let state = state_of(&members.lane("chief")?);
-            worked |= state == "working";
-            let at_work = members.task(long)?["state"] == "working";
-            Ok((worked && at_work && state == "idle").then_some(()))
+            let (chief, task) = (members.lane("chief")?, members.task(long)?);
+            Ok(quit_now(&chief, &task).then_some(()))
         },
     )?;
     if ended.is_none() {
@@ -928,6 +937,18 @@ mod tests {
         assert!(!says(&theirs, &worker_cut(3)));
         let result = serde_json::json!({ "kind": "result", "sender": null, "body": worker_cut(3) });
         assert!(!says(&result, &worker_cut(3)));
+    }
+
+    #[test]
+    fn the_app_quits_once_the_chief_reads_at_rest_with_its_member_at_work_whatever_it_read_before()
+    {
+        let lane = |state: &str| serde_json::json!({ "activity": { "state": state } });
+        let task = |state: &str| serde_json::json!({ "state": state });
+        // A turn on the result over before any look found the chief working.
+        assert!(quit_now(&lane("idle"), &task("working")));
+        assert!(!quit_now(&lane("working"), &task("working")));
+        assert!(!quit_now(&lane("idle"), &task("queued")));
+        assert!(!quit_now(&Value::Null, &task("working")));
     }
 
     #[test]
