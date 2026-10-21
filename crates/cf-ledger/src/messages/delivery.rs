@@ -243,6 +243,18 @@ pub(crate) fn begin_delivery(store: &mut Store, message_id: i64) -> Result<Begun
     })
 }
 
+/// The receipt of a delivered message is forgotten (`Ledger::forget_receipt`).
+#[cfg(feature = "test-support")]
+pub(crate) fn forget_receipt(store: &mut Store, message_id: i64) -> Result<(), LedgerError> {
+    store.write(|store| {
+        store.db.execute(
+            "UPDATE message SET receipt = 'null' WHERE id = ?",
+            params![message_id],
+        )?;
+        Ok(())
+    })
+}
+
 /// The harness's own record proves the message arrived: `receipt` is what it
 /// showed. What its paste carried arrived with it, in the same step; then
 /// the task it is about is reconciled once.

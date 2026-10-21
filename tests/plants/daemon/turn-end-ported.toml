@@ -254,8 +254,8 @@ runs = ["tep-turn-end-review-3-claude-reader"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/record/jobs.rs"
-find = "        let Some((place, value)) = field(line) else {\n            break;\n        };"
-replace = "        let Some((place, value)) = field(line) else {\n            continue;\n        };"
+find = "        let Some((place, value)) = field(line) else {\n            head.closes_after_event = at == Some(EVENT)\n                && line == \"</task-notification>\"\n                && lines.all(|after| after.trim().is_empty());\n            break;\n        };"
+replace = "        let Some((place, value)) = field(line) else {\n            head.closes_after_event = at == Some(EVENT)\n                && line == \"</task-notification>\"\n                && lines.all(|after| after.trim().is_empty());\n            continue;\n        };"
 
 [[plant]]
 name = "turn end review 3: a killed end is no end"

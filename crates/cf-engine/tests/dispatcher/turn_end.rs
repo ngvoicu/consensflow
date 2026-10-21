@@ -156,6 +156,37 @@ fn a_task_held_again_in_a_window_opened_again_is_told_again_and_its_lane_says_it
 }
 
 #[test]
+fn a_human_whose_task_goes_on_in_the_background_is_told_of_the_drawers_finish_and_the_chief_of_cf()
+{
+    // Calliope on 0eec91d2: the human finishes a task from its drawer, and has no `cf`.
+    let context = Context::new();
+    context.host.exits_showing(Some(0), None, None);
+    let tiers = Tiers::new(&context, &["zeus", "diana"]);
+    context.create_task(
+        tiers.project.id,
+        NewTask {
+            from: "human".to_owned(),
+            to: Some("zeus".to_owned()),
+            body: "Record the run".to_owned(),
+            ..NewTask::default()
+        },
+    );
+    passes(&context, 2);
+    assert_eq!(tiers.task(1).task.state, "working");
+    context
+        .adapter
+        .answer_leaving("zeus", "Watching the run", A_JOB);
+    context.pass().unwrap();
+    let told = tiers.notes("human");
+    assert_eq!(told.len(), 1, "{told:?}");
+    assert!(
+        told[0].contains("To take what it said last as the result now: Finish in the task's drawer, which does not end it."),
+        "{told:?}"
+    );
+    assert!(!told[0].contains("cf task finish"), "{told:?}");
+}
+
+#[test]
 fn a_turn_woken_while_its_job_still_runs_is_progress_too() {
     // poker-lab's T-442 with its Monitor: each event wakes a turn, and the monitor runs on.
     let context = Context::new();
@@ -238,7 +269,7 @@ fn finish_takes_the_last_complete_answer_of_a_task_whose_record_says_its_turn_is
     assert_eq!(finished.task.state, "done");
     assert_eq!(
         results_of(&tiers, 1),
-        ["Report: the parser is done\n\n(ConsensFlow: Finished at the human's word: what @zeus said last is the result.)"]
+        ["Report: the parser is done\n\n(ConsensFlow: Finished at the human's word: what @zeus said last is the result. @zeus's turn was still under way, so that is what its record had said so far: a job its turn starts from now on is not counted, nor are the background agents or workflows it left, which its harness counts only as a turn ends.)"]
     );
 }
 
@@ -269,6 +300,50 @@ fn finish_takes_the_answer_before_a_turn_its_jobs_end_woke_that_has_written_noth
     let results = results_of(&tiers, 1);
     assert!(
         results[0].starts_with("Watching the run\n\n(ConsensFlow: Finished at @chief's word"),
+        "{results:?}"
+    );
+}
+
+#[test]
+fn finish_of_a_turn_still_under_way_names_the_jobs_its_record_counts_and_says_the_count_may_be_short(
+) {
+    // T-442's shape, finished mid-turn (Astraeus on 0eec91d2): held for its command and its
+    // monitor, the monitor's event woke a turn that is still under way, and the chief
+    // finishes the task. Its record counts both jobs still running.
+    const TWO_JOBS: Pending = Pending {
+        agents: 0,
+        jobs: 2,
+        retired: 0,
+    };
+    let context = Context::new();
+    let tiers = zeus_at_work(&context);
+    context
+        .adapter
+        .answer_leaving("zeus", "Watching the run", TWO_JOBS);
+    context.pass().unwrap();
+    context.adapter.wake(
+        "zeus",
+        "<task-notification>\n<task-id>m1</task-id>\n<summary>Monitor event: \"ticks\"</summary>\n<event>tick 1</event>\n</task-notification>",
+    );
+    context
+        .adapter
+        .with("zeus", |agent| agent.pending = TWO_JOBS);
+    context.pass().unwrap();
+    assert_eq!(tiers.task(1).task.state, "working");
+
+    let finished = context
+        .finish_task(tiers.project.id, 1, "chief")
+        .expect("finished");
+    assert_eq!((finished.jobs, finished.agents), (2, 0));
+    let results = results_of(&tiers, 1);
+    assert!(
+        results[0].starts_with("Watching the run\n\n(ConsensFlow: Finished at @chief's word while @zeus's harness still counted 2 background jobs running"),
+        "{results:?}"
+    );
+    assert!(
+        results[0].contains(
+            "@zeus's turn was still under way, so that is what its record had said so far"
+        ),
         "{results:?}"
     );
 }
@@ -577,6 +652,48 @@ fn a_window_that_will_not_close_keeps_the_next_task_waiting() {
 }
 
 #[test]
+fn a_task_in_another_sessions_hands_is_not_said_to_be_in_the_hands_of_the_window_it_left() {
+    // Calliope on 0eec91d2: whether the window's task is still in its session's hands is told
+    // by whom the task is given to, not by its state alone. T-1 is released from the window
+    // the human keeps open (the ledger's release, as a reassign makes it) and another session
+    // takes it; T-2, for the first session, waits for the window, and its requester is told
+    // it is the human's to let go, not that T-1 is still in its hands.
+    let context = Context::new();
+    let (tiers, session) = session_kept_open(&context);
+    context
+        .ledger
+        .borrow_mut()
+        .release_task(tiers.project.id, 1, "by @human")
+        .unwrap();
+    context.adapter.answer("zeus", "Stopped where I was");
+    passes(&context, 3);
+    assert_ne!(tiers.assignee(1), session, "another session has T-1");
+    assert_eq!(tiers.task(1).task.state, "working");
+    context.create_task(
+        tiers.project.id,
+        NewTask {
+            from: "human".to_owned(),
+            to: Some(session.clone()),
+            body: "Write the docs".to_owned(),
+            ..NewTask::default()
+        },
+    );
+    passes(&context, 3);
+    assert_eq!(tiers.task(2).task.state, "queued");
+    let waiting: Vec<String> = tiers
+        .notes("human")
+        .into_iter()
+        .filter(|note| note.starts_with("T-2 waits"))
+        .collect();
+    assert_eq!(waiting.len(), 1, "{waiting:?}");
+    assert!(!waiting[0].contains("still in its hands"), "{waiting:?}");
+    assert!(
+        waiting[0].contains("the human keeps it open"),
+        "{waiting:?}"
+    );
+}
+
+#[test]
 fn the_next_task_goes_on_in_a_new_conversation_where_the_window_before_closed_with_its_program_alive(
 ) {
     let context = Context::new();
@@ -642,6 +759,55 @@ fn after_a_restart_another_task_goes_on_in_a_new_conversation_and_the_same_task_
 }
 
 #[test]
+fn a_task_held_for_its_monitor_when_the_app_quit_is_held_again_after_the_restart_and_told_how_to_finish_it(
+) {
+    // Calliope on 0eec91d2: the app quits while T-1 is held for its monitor. This daemon
+    // never saw the window close, so nothing proves its program gone, and the monitor's
+    // bookkeeping is not retired (the decision forbids taking the quit for the window's
+    // exit): the window reopened on the same task reads the monitor pending still, the task
+    // is held until Finish, and its requester is told so again.
+    let context = Context::new();
+    let tiers = zeus_at_work(&context);
+    context
+        .adapter
+        .answer_leaving("zeus", "Watching the run", A_JOB);
+    context.pass().unwrap();
+    assert_eq!(tiers.notes("chief").len(), 1);
+    // The conversation's record, which the window opened again reads as it was: the stand-in
+    // keeps a record a window, and is given it back.
+    let record = context.adapter.with("zeus", |agent| agent.items.clone());
+
+    context.ledger.borrow_mut().suspend_for_restart().unwrap();
+    let after = context.make();
+    after.settle_after_restart().unwrap();
+    after.resume_project(tiers.project.id).unwrap();
+    after.pass().unwrap();
+    context.adapter.with("zeus", |agent| {
+        agent.items = record;
+        agent.pending = A_JOB;
+        agent.settled = true;
+    });
+    for _ in 0..3 {
+        after.pass().unwrap();
+    }
+    assert_eq!(tiers.task(1).task.state, "working", "held for its monitor");
+    assert_eq!(results_of(&tiers, 1), Vec::<String>::new());
+    let told: Vec<String> = tiers
+        .notes("chief")
+        .into_iter()
+        .filter(|note| note.starts_with("T-1 goes on in the background"))
+        .collect();
+    assert_eq!(told.len(), 2, "told again after the restart: {told:?}");
+    assert!(told[1].contains("cf task finish T-1"), "{told:?}");
+
+    let finished = after
+        .finish_task(tiers.project.id, 1, "chief")
+        .expect("finished");
+    assert_eq!(finished.task.state, "done");
+    assert_eq!(finished.jobs, 1);
+}
+
+#[test]
 fn a_paused_task_keeps_its_window_and_another_task_waits_for_it() {
     // Astra's review of round 7: reopened and paused, the task's window was closed with its
     // work, as the look at the task in hand took no paused one.
@@ -693,30 +859,38 @@ fn an_answer_the_record_holds_is_its_result_when_the_window_goes_by_itself_right
     assert_eq!(results_of(&tiers, 1), ["Parser done"]);
 }
 
-#[test]
-fn the_result_is_what_follows_the_paste_its_arrival_was_proved_by_never_a_quotation_of_its_header()
-{
-    // A quotation of the latest message's header in the window before it arrived (the
-    // human asked about it), and an answer after that quotation: the answer is to no
-    // message of the task's latest, and no result.
-    let context = Context::new();
-    let tiers = zeus_at_work(&context);
+/// What the ledger keeps of where the words that resume T-1 arrived.
+#[derive(Debug, Clone, Copy)]
+enum Receipt {
+    /// The item of the record that is their paste.
+    Kept,
+    /// Nothing, as Node's ledger left a receipt.
+    Missing,
+    /// An item the record does not hold (the record lost it).
+    ItemMissing,
+}
+
+/// T-1, held for its job, paused and resumed with words that arrive in its window, the
+/// ledger keeping `receipt` of where. The human had asked about the words while they were
+/// queued, quoting their header, and was answered, before the words arrived; the window
+/// settles with nothing written since the words. With `pasted` false, the record holds no
+/// paste of them either: what arrived is the quotation alone, and a reply to it.
+fn quoted_before_the_paste(context: &Context, receipt: Receipt, pasted: bool) -> Tiers<'_> {
+    let tiers = zeus_at_work(context);
     context
         .adapter
         .answer_leaving("zeus", "Started the run", A_JOB);
     context.pass().unwrap();
     context.pause_task(tiers.project.id, 1);
-    passes(&context, 2);
+    passes(context, 2);
     context.resume_task(tiers.project.id, 1, "Go on with the run");
     let words = context
         .inbox(tiers.id("zeus"))
         .into_iter()
         .find(|message| message.body.contains("Go on with the run"))
         .expect("the words that resume it");
-    passes(&context, 2);
+    passes(context, 2);
     assert_eq!(context.message(words.id).state, "delivered");
-    // The human asked about the words while they were queued, quoting their header, and
-    // was answered, before the words arrived.
     let marker = marker_of(words.id);
     let quoted = context
         .adapter
@@ -725,25 +899,70 @@ fn the_result_is_what_follows_the_paste_its_arrival_was_proved_by_never_a_quotat
         .adapter
         .item(Role::Assistant, "It waits for the window to be free");
     context.adapter.with("zeus", |agent| {
-        let pasted = agent
+        let at = agent
             .items
             .iter()
             .position(|item| item.role == Role::User && item.text.contains(&marker))
             .expect("the paste of the words");
-        agent.items.insert(pasted, answered);
-        agent.items.insert(pasted, quoted);
+        if matches!(receipt, Receipt::ItemMissing) {
+            agent.items[at].id = "an-item-the-record-lost".into();
+        }
+        if !pasted {
+            agent.items.remove(at);
+        }
+        agent.items.insert(at, answered);
+        agent.items.insert(at, quoted);
+        agent.settled = true;
     });
-    // The window settles with nothing written since the words: no answer to them yet.
-    context.adapter.with("zeus", |agent| agent.settled = true);
-    passes(&context, 2);
+    if matches!(receipt, Receipt::Missing) {
+        context
+            .ledger
+            .borrow_mut()
+            .forget_receipt(words.id)
+            .unwrap();
+    }
+    passes(context, 2);
+    tiers
+}
+
+#[test]
+fn the_result_is_what_follows_the_paste_its_arrival_was_proved_by_never_a_quotation_of_its_header()
+{
+    // A quotation of the latest message's header in the window before it arrived, and an
+    // answer after that quotation: the answer is to no message of the task's latest, and
+    // no result, whether the ledger names the item the words arrived as (its receipt), or
+    // names none (Node's ledger), or names one the record lost (Astraeus on 0eec91d2: the
+    // quotation was then taken for the delivery, and Finish took the answer to it).
+    for receipt in [Receipt::Kept, Receipt::Missing, Receipt::ItemMissing] {
+        let context = Context::new();
+        let tiers = quoted_before_the_paste(&context, receipt, true);
+        assert_eq!(tiers.task(1).task.state, "working", "{receipt:?}");
+        assert_eq!(results_of(&tiers, 1), Vec::<String>::new(), "{receipt:?}");
+        let refused = context
+            .finish_task(tiers.project.id, 1, "chief")
+            .unwrap_err();
+        assert!(
+            refused.to_string().contains("no complete answer"),
+            "{receipt:?}: {refused}"
+        );
+    }
+}
+
+#[test]
+fn where_no_paste_proves_where_the_latest_message_arrived_there_is_no_result_and_finish_says_why() {
+    // No receipt, and no paste in the record: only the quotation holds the header. Nothing
+    // proves where the words arrived, so nothing is an answer to them.
+    let context = Context::new();
+    let tiers = quoted_before_the_paste(&context, Receipt::Missing, false);
     assert_eq!(tiers.task(1).task.state, "working");
     assert_eq!(results_of(&tiers, 1), Vec::<String>::new());
-    // Nor is the answer before the words Finish's to take.
     let refused = context
         .finish_task(tiers.project.id, 1, "chief")
         .unwrap_err();
     assert!(
-        refused.to_string().contains("no complete answer"),
+        refused
+            .to_string()
+            .contains("holds no proof of where its latest message"),
         "{refused}"
     );
 }

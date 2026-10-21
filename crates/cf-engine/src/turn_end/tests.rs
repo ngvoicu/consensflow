@@ -49,20 +49,20 @@ fn what_a_turn_left_running_is_said_in_a_few_words() {
 #[test]
 fn a_result_says_what_was_left_only_where_there_is_something_to_say() {
     // An answer with nothing pending and nothing retired is its words alone.
-    assert_eq!(leftovers("zeus", pending(0, 0, 0), None), "");
+    assert_eq!(leftovers("zeus", pending(0, 0, 0), None, true), "");
     assert_eq!(with_leftovers("Done".to_owned(), ""), "Done");
     // Finished at someone's word while jobs ran: none of them is ended.
-    let said = leftovers("zeus", pending(1, 0, 0), Some("chief"));
+    let said = leftovers("zeus", pending(1, 0, 0), Some("chief"), true);
     assert_eq!(
         said,
         "Finished at @chief's word while @zeus's harness still counted 1 background job running, which finishing ends none of: it may run on until its window closes, or past it where the host cannot tell what is the window's."
     );
     assert_eq!(
-        leftovers("zeus", pending(0, 0, 0), Some("human")),
+        leftovers("zeus", pending(0, 0, 0), Some("human"), true),
         "Finished at the human's word: what @zeus said last is the result."
     );
     // What an earlier window left that no word says ended is never said to be gone.
-    let said = leftovers("zeus", pending(0, 0, 2), None);
+    let said = leftovers("zeus", pending(0, 0, 2), None, true);
     assert!(
         said.starts_with("no word came that the 2 background jobs an earlier window of @zeus's conversation started had ended"),
         "{said}"

@@ -77,6 +77,8 @@ pub(super) struct Hook {
 #[derive(Debug, PartialEq)]
 pub(super) struct Assistant {
     pub(super) at: Option<Value>,
+    /// When it was written, in milliseconds, where it says.
+    pub(super) at_ms: Option<i64>,
     pub(super) message_id: Option<Arc<str>>,
     pub(super) uuid: Option<Arc<str>>,
     /// The text of the message's content.
@@ -151,13 +153,13 @@ pub(super) struct User {
 }
 
 /// A job a tool's result says it started: a command run in the background
-/// (`backgroundTaskId`), or a monitor (`taskId`), with when it expires, in
-/// milliseconds, where its start says a time (`timeoutMs`) from a record that says
-/// when it was written, and does not say it is `persistent`.
+/// (`backgroundTaskId`), or a monitor (`taskId`), with the time it runs for, in
+/// milliseconds, where its start says one (`timeoutMs`) and does not say it is
+/// `persistent`, and the call it answers, whose record says when the monitor was armed.
 #[derive(Debug, PartialEq)]
 pub(super) struct Job {
     pub(super) id: Arc<str>,
-    pub(super) expires_at: Option<i64>,
+    pub(super) timeout: Option<(i64, Option<Value>)>,
 }
 
 /// The record `record` of the session `session`, as replay reads it.
@@ -321,6 +323,7 @@ fn assistant(record: &Value, session: &str) -> Projected {
         && text == CUT_TURN_CLOSED;
     Projected::Assistant(Box::new(Assistant {
         at: timestamp(record),
+        at_ms: at_ms(record),
         message_id: text_id(in_message("id")),
         uuid: text_id(record.get("uuid")),
         text,
@@ -360,7 +363,7 @@ fn user(record: &Value, session: &str) -> Projected {
         notification: is_notification(record),
         transcript_only: record.get("queueTranscriptOnly") == Some(&Value::Bool(true)),
         job: of_main_conversation(record, session)
-            .then(|| job(record))
+            .then(|| job(record, content))
             .flatten(),
         stopped: of_main_conversation(record, session)
             .then(|| stopped(record, content))
@@ -380,23 +383,24 @@ fn is_notification(record: &Value) -> bool {
 }
 
 /// The job a tool's result says it started (see [`Job`]).
-fn job(record: &Value) -> Option<Job> {
+fn job(record: &Value, content: Option<&Value>) -> Option<Job> {
     let result = record.get("toolUseResult");
     if let Some(id) = text_id(field(result, "backgroundTaskId")) {
-        return Some(Job {
-            id,
-            expires_at: None,
-        });
+        return Some(Job { id, timeout: None });
     }
     // A monitor's start says its task and its time (2.1.305: `taskId`, `timeoutMs`,
     // `persistent`).
     let id = text_id(field(result, "taskId"))?;
     let timeout = field(result, "timeoutMs").and_then(Value::as_i64)?;
     let persistent = field(result, "persistent") == Some(&Value::Bool(true));
-    let expires_at = at_ms(record)
-        .filter(|_| !persistent && timeout > 0)
-        .map(|at| at.saturating_add(timeout));
-    Some(Job { id, expires_at })
+    let call = blocks(content)
+        .iter()
+        .find(|block| kind(block) == Some("tool_result"))
+        .and_then(|block| said(block.get("tool_use_id")));
+    Some(Job {
+        id,
+        timeout: (!persistent && timeout > 0).then_some((timeout, call)),
+    })
 }
 
 /// What a TaskStop call's result says it stopped: the call it answers and the job, where

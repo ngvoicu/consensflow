@@ -22,13 +22,29 @@
 //! - the result of a TaskStop call that names the job it stopped
 //!   (`toolUseResult.task_id`): Claude Code writes no notification of a job or a
 //!   monitor its agent stopped so (2.1.305, the live run of 2026-10-21);
-//! - a monitor's notice that it expired, which Claude Code writes as an event of its
-//!   own, with no status (`<event>[Monitor expired after 15s with no events
-//!   delivered. …]</event>`), and which a line the watched command wrote could say
-//!   word for word: it ends the monitor only where its record is no earlier than a
-//!   second before the time the monitor's start said it expires (the start's record
-//!   and `timeoutMs`), when no event of the command's comes any more. A monitor whose
-//!   start says no time (`persistent`) ends by its status or its stop alone.
+//! - a monitor's notice of its expiry, at or after the time it expires, counted from the
+//!   call that armed it (`timeoutMs` from the record of the call, which comes before the
+//!   monitor began): `[Monitor expired after 40s with 3 events delivered. …]`, or
+//!   `[Monitor timed out — re-arm if needed.]` where Claude Code's `tengu_breezy_crescent`
+//!   is off (2.1.306). Never earlier, and never with a line after the event (2.1.306
+//!   writes one after a command's output where push notifications are on, and none after
+//!   its own notices), so that a line the command wrote ends nothing.
+//!
+//!   **Claude Code's own notices of a monitor cannot be told from its command's output.**
+//!   2.1.306 writes both with one function (`TG` of its bundle): the same envelope, a
+//!   summary that names the monitor, the line in `<event>`, no status; what tells them
+//!   apart (`monitorEvent.kind`, `notice` or `output`) stays in its queue and never reaches
+//!   the record, and the line after a command's output comes only with push notifications
+//!   on (`agentPushNotifEnabled`, off unless set). So a notice is believed only where time
+//!   proves it: the expiry, which a monitor's real one never comes before (the live run of
+//!   2026-10-21: queued 40 000 ms after the start's record, 30 ms more after the call).
+//!   Its other ends have no time to prove them, and end nothing: `[Monitor stopped]` (the
+//!   human stopped it), `[Monitor stopped — too much output (…)]` (2.1.306 stopped a
+//!   command that wrote more than it lets through for half a minute: `FIn`, which writes
+//!   nothing more of it, the live run of 2026-10-21) and `[WebSocket closed: …]`. A task
+//!   held for such a monitor is held until Finish; a monitor's status (its command ended)
+//!   and a TaskStop's result end it as they end any job. A monitor whose start says no
+//!   time (`persistent`) ends by those alone.
 //!
 //! **Only Claude Code's own notification ends a job, never words that look like one**:
 //! a message the user wrote, or ConsensFlow pasted, may quote one whole, from its first
@@ -110,12 +126,8 @@ const EVENT: usize = 6;
 /// it was ended, or the session it ran in ended before it did (`stopped`).
 const OVER: [&str; 4] = ["completed", "failed", "killed", "stopped"];
 
-/// How Claude Code's own event of a monitor that expired begins.
-const EXPIRED: &str = "[Monitor expired after ";
-
-/// How long before the time a monitor's start said it expires its notice of expiry may
-/// be written: the start's record comes a moment after the monitor began.
-const EXPIRY_SLACK_MS: i64 = 1_000;
+/// How Claude Code's own events of a monitor that expired begin (2.1.305, 2.1.306).
+const EXPIRED: [&str; 2] = ["[Monitor expired after ", "[Monitor timed out"];
 
 /// A job, as its records say it goes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -171,19 +183,22 @@ impl Jobs {
             .iter()
             .filter_map(|id| id.strip_prefix(LIVE))
             .collect();
+        let notice = head
+            .event
+            .filter(|_| head.status.is_none() && head.closes_after_event);
         let expired =
-            head.status.is_none() && head.event.is_some_and(|event| event.starts_with(EXPIRED));
+            notice.is_some_and(|event| EXPIRED.iter().any(|said| event.starts_with(said)));
         for job in &mut self.started {
             if job.state == State::Ended {
                 continue;
             }
             let named = head.ids.contains(&&*job.id) && !live.contains(&*job.id);
             let its_expiry = expired
-                && head.ids.first() == Some(&&*job.id)
+                && head.ids.as_slice() == [&*job.id]
                 && job
                     .expires_at
                     .zip(at_ms)
-                    .is_some_and(|(expires, at)| at >= expires - EXPIRY_SLACK_MS);
+                    .is_some_and(|(expires, at)| at >= expires);
             if (over && named) || its_expiry {
                 job.state = State::Ended;
             }
@@ -229,6 +244,10 @@ struct Head<'a> {
     status: Option<&'a str>,
     /// A monitor's event: the line the watched command wrote, or Claude Code's own.
     event: Option<&'a str>,
+    /// The event is the last field, and only the line that closes the notification comes
+    /// after it: no line of a command's output, nor 2.1.306's word after a command's
+    /// event of how to tell the user of it.
+    closes_after_event: bool,
 }
 
 /// The head of the notification `text`: nothing where the text does not open with one.
@@ -243,8 +262,11 @@ fn head(text: &str) -> Head<'_> {
         return head;
     }
     let mut at = None;
-    for line in lines {
+    while let Some(line) = lines.next() {
         let Some((place, value)) = field(line) else {
+            head.closes_after_event = at == Some(EVENT)
+                && line == "</task-notification>"
+                && lines.all(|after| after.trim().is_empty());
             break;
         };
         // Each field once, in its order; only a job's id again.

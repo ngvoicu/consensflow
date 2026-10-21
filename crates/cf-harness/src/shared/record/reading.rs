@@ -59,9 +59,10 @@ pub struct Record {
     pub pending: Pending,
 }
 
-/// What a settled turn left running that its harness wakes its agent for as each
-/// ends (Claude Code does). The window takes input between turns, and the end of one
-/// wakes a turn of its own: a task whose turn ended so is not done.
+/// What a turn left running that its harness wakes its agent for as each ends (Claude
+/// Code does). The window takes input between turns, and the end of one wakes a turn of
+/// its own: a task whose turn ended so is not done. The jobs are known of a turn still
+/// under way too; the agents only of a turn that is over.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Pending {

@@ -40,7 +40,8 @@ use crate::dispatcher::Dispatcher;
 use crate::record::Record;
 use crate::seams::EngineError;
 
-/// The states of a task that a session still has in hand, whose window stays for it.
+/// The states of a task that a session it is given to still has in hand, whose window
+/// stays for it.
 const IN_HAND: [&str; 4] = ["queued", "working", "waiting", "paused"];
 
 impl Dispatcher {
@@ -85,12 +86,17 @@ impl Dispatcher {
         message: &MessageView,
         owner: i64,
     ) -> Result<(), EngineError> {
+        // Still in this session's hands: given to it, and not done with (Calliope on
+        // 0eec91d2: a task another session took is no longer this window's to keep).
         let still = self
             .seams
             .ledger
             .borrow()
             .task(project.id, owner)?
-            .filter(|thread| IN_HAND.contains(&thread.task.state.as_str()));
+            .filter(|thread| {
+                IN_HAND.contains(&thread.task.state.as_str())
+                    && thread.task.assignee.as_deref() == Some(participant.handle.as_str())
+            });
         let (pinned, hidden) = {
             let window = record.window.borrow();
             (window.pinned, window.hidden)

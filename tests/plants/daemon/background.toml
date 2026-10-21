@@ -1807,4 +1807,3 @@ builds = true
 file = "crates/cf-panes/src/background/work.rs"
 find = '            None => return at.parent.is_some() && runs_a_shell(at),'
 replace = '            None => return at.parent.is_none() || runs_a_shell(at),'
-

@@ -63,7 +63,7 @@ mod replay;
 mod tests;
 mod text;
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
@@ -145,6 +145,9 @@ struct Transcript {
     /// The TaskStop calls made in the main conversation, by the id of the block that
     /// made each: the result of one says the job it stopped.
     task_stops: HashSet<Key>,
+    /// When each call of the main conversation was made, by the id of its block: a
+    /// monitor's time counts from the call that armed it (`jobs`).
+    calls_at: HashMap<Key, i64>,
     queues: Queues,
     /// The jobs started in the background that Claude Code has said no end of.
     jobs: Jobs,
@@ -222,6 +225,7 @@ impl Transcript {
             items: Items::default(),
             open_tools: HashSet::new(),
             task_stops: HashSet::new(),
+            calls_at: HashMap::new(),
             queues: Queues::default(),
             jobs: Jobs::default(),
             hooks: HashSet::new(),
@@ -368,20 +372,20 @@ impl Answer for Transcript {
         record.failed = self.failed;
         record.quota = self.quota.clone();
         record.settlement = settlement;
-        // Said of a turn that is over: one with a call open or a message queued
-        // is in flight, whatever its duration said. The agents are the last
-        // boundary's word; the jobs are those Claude Code has said no end of.
-        if settlement == Settlement::Settled {
-            let agents = match self.terminal {
-                Some(Terminal::Derived { agents, .. }) => agents,
-                _ => 0,
-            };
-            record.pending = reading::Pending {
-                agents,
-                jobs: self.jobs.running(),
-                retired: self.jobs.retired(),
-            };
-        }
+        // The jobs are those Claude Code has said no end of, whenever the record is
+        // read: Finish takes a turn still under way, and says what runs (Astraeus on
+        // 0eec91d2: a reading in flight said none). The agents are the word of the
+        // boundary that ends a turn, and said of a turn that is over alone: one with a
+        // call open or a message queued is in flight, whatever its duration said.
+        let agents = match (settlement, &self.terminal) {
+            (Settlement::Settled, Some(Terminal::Derived { agents, .. })) => *agents,
+            _ => 0,
+        };
+        record.pending = reading::Pending {
+            agents,
+            jobs: self.jobs.running(),
+            retired: self.jobs.retired(),
+        };
         Ok(record)
     }
 }

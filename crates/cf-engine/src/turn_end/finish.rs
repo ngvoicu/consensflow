@@ -151,7 +151,15 @@ impl Dispatcher {
         let items = observed.items();
         let start = self
             .delivered_at(participant.id, &thread, items)?
-            .ok_or_else(none)?;
+            .ok_or_else(|| {
+                refused(
+                    "no-delivery",
+                    format!(
+                        "cannot finish T-{number}: @{}'s record holds no proof of where its latest message about it arrived, so no answer can be told to follow it; wait for one, or cancel it",
+                        participant.handle
+                    ),
+                )
+            })?;
         let replacements = self.seams.ledger.borrow().role_notes_to(participant.id)?;
         let run = answers_to_the_task(&items[start + 1..], &replacements)
             .and_then(|answers| answers.complete_run)
@@ -159,7 +167,7 @@ impl Dispatcher {
         let pending = observed.pending();
         let body = with_leftovers(
             words_of(&run),
-            &leftovers(&participant.handle, pending, Some(by)),
+            &leftovers(&participant.handle, pending, Some(by), observed.settled),
         );
         let moved = self
             .seams

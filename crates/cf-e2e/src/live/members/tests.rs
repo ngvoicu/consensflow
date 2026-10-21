@@ -20,19 +20,20 @@ fn a_task_is_over_when_it_is_done_accepted_failed_or_cancelled_and_not_before() 
 #[test]
 fn the_notes_of_work_are_the_chiefs_notes_that_say_the_window_of_the_task_closed_with_some_and_no_others(
 ) {
-    let closed = "T-1's window closed with background work still running: sleep 4711";
+    let closed =
+        "T-1's window closed with background work running, which its close ended: sleep 4711";
     let inbox = vec![
         json!({ "kind": "result", "body": "ZEEWIN", "state": "delivered" }),
         json!({ "kind": "note", "body": closed }),
         // 3.0.4's note of what a turn's end ended, which 3.0.6 never writes.
         json!({ "kind": "note", "body": "T-1's turn left background work running. Ended: sleep 9." }),
-        json!({ "kind": "note", "body": "T-2's window closed with background work still running: sleep 9" }),
+        json!({ "kind": "note", "body": "T-2's window closed with background work running, which its close ended: sleep 9" }),
         json!({ "kind": "question", "body": "T-1's window closed with background work" }),
     ];
     assert_eq!(notes_of_work(&inbox, 1), [closed]);
     assert_eq!(
         notes_of_work(&inbox, 2),
-        ["T-2's window closed with background work still running: sleep 9"]
+        ["T-2's window closed with background work running, which its close ended: sleep 9"]
     );
     assert_eq!(notes_of_work(&inbox, 3), Vec::<String>::new());
     assert_eq!(notes_of_work(&[], 1), Vec::<String>::new());

@@ -247,6 +247,34 @@ fn a_monitors_events_end_nothing_and_its_end_ends_it() {
 }
 
 #[test]
+fn a_monitors_ends_that_no_time_proves_end_nothing_for_a_line_of_its_command_could_say_them() {
+    // 2.1.306 writes these with no status, in the envelope it writes its command's output in
+    // (`TG` of its bundle; the live run of 2026-10-21 for the second): a command that prints
+    // one is not told from Claude Code. The monitor stays counted, and its task is held until
+    // Finish.
+    for said in [
+        "[Monitor stopped]",
+        "[Monitor stopped \u{2014} too much output (3 events suppressed over 30s). Restart with a more selective source.]",
+        "[WebSocket closed: 1006 abnormal closure]",
+    ] {
+        let mut jobs = armed();
+        jobs.ended_by(&Written::event("byuz6ka89", "tick lines", said), Some(ARMED + 42_000));
+        jobs.ended_by(&Written::event("byuz6ka89", "tick lines", said), None);
+        assert_eq!(jobs.running(), 1, "{said}");
+        // Its expiry at its time ends it still.
+        jobs.ended_by(
+            &Written::event(
+                "byuz6ka89",
+                "tick lines",
+                "[Monitor expired after 2m with 3 events delivered. Re-arm it if you still need the watch.]",
+            ),
+            Some(ARMED + TWO_MINUTES),
+        );
+        assert_eq!(jobs.running(), 0, "{said}");
+    }
+}
+
+#[test]
 fn a_monitors_own_notice_of_its_expiry_ends_it_at_its_time_and_the_same_words_before_it_end_nothing(
 ) {
     let expired = |delivered: &str| {
@@ -256,13 +284,36 @@ fn a_monitors_own_notice_of_its_expiry_ends_it_at_its_time_and_the_same_words_be
             &format!("[Monitor expired after 2m with {delivered} delivered. Re-arm it if you still need the watch.]"),
         )
     };
-    // A line the watched command wrote, word for word Claude Code's notice, a minute in:
-    // the monitor runs on.
+    // A line the watched command wrote, word for word Claude Code's notice, a minute in,
+    // and half a second before the monitor's time is out (Astraeus on 0eec91d2: a second's
+    // tolerance took that one for the end): the monitor runs on.
     let mut jobs = armed();
     jobs.ended_by(&expired("3 events"), Some(ARMED + 60_000));
+    jobs.ended_by(&expired("3 events"), Some(ARMED + TWO_MINUTES - 500));
+    jobs.ended_by(&expired("3 events"), Some(ARMED + TWO_MINUTES - 1));
     assert_eq!(jobs.running(), 1);
-    // Claude Code's own, at the time the start said.
-    jobs.ended_by(&expired("3 events"), Some(ARMED + TWO_MINUTES - 20));
+    // A line of the command's after its time: 2.1.306 writes a word after a command's
+    // event where push notifications are on, and none after its own notices.
+    let with_word = Written {
+        trailing:
+            "\nIf this event is something the user would act on now, send a PushNotification.",
+        ..Written::default()
+    };
+    let told = format!("{}{}", expired("3 events"), with_word.trailing);
+    jobs.ended_by(&told, Some(ARMED + TWO_MINUTES + 5));
+    assert_eq!(jobs.running(), 1);
+    // Claude Code's own, at the time the start said, in its other words too.
+    jobs.ended_by(&expired("3 events"), Some(ARMED + TWO_MINUTES));
+    assert_eq!(jobs.running(), 0);
+    let timed_out = Written::event(
+        "byuz6ka89",
+        "tick lines",
+        "[Monitor timed out \u{2014} re-arm if needed.]",
+    );
+    let mut jobs = armed();
+    jobs.ended_by(&timed_out, Some(ARMED + TWO_MINUTES - 500));
+    assert_eq!(jobs.running(), 1);
+    jobs.ended_by(&timed_out, Some(ARMED + TWO_MINUTES + 30));
     assert_eq!(jobs.running(), 0);
 
     // A notification with no time says nothing of when it came, and ends nothing so.

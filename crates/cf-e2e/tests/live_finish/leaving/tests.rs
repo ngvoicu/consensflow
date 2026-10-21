@@ -13,7 +13,8 @@ fn proc(pid: u64, command: &str) -> Proc {
     }
 }
 
-const CLOSED: &str = "T-1's window closed with background work still running: sleep 4711";
+const CLOSED: &str =
+    "T-1's window closed with background work running, which its close ended: sleep 4711";
 
 /// A worker whose command was listed, ended, and told to the chief.
 fn good() -> Left {
@@ -35,7 +36,7 @@ fn a_task_done_with_the_command_listed_gone_and_the_chief_told_of_the_close_pass
     assert_eq!(judge(&good()), Ok(()));
     assert_eq!(
         summary(&good(), &judge(&good())),
-        "T-1 done after 20.0 s; the command (41) was ended by the window's close and the chief told: T-1's window closed with background work still running: sleep 4711"
+        "T-1 done after 20.0 s; the command (41) was ended by the window's close and the chief told: T-1's window closed with background work running, which its close ended: sleep 4711"
     );
 }
 

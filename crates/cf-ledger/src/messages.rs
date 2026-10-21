@@ -35,6 +35,8 @@ pub(crate) use again::tell_sent_back;
 pub(crate) use carrying::{
     adopt, fold, reconcile_released, release_carried, release_stranded, transfer,
 };
+#[cfg(feature = "test-support")]
+pub(crate) use delivery::forget_receipt;
 pub(crate) use delivery::{
     begin_delivery, cancel_message, confirm_delivery, confirm_delivery_telling, fail_delivery,
     first_received, in_flight, last_pasted, next_delivery, next_delivery_of, retry_delivery,

@@ -105,8 +105,9 @@ fn a_worker_that_leaves_a_command_that_never_exits_running_gives_the_chief_its_r
             Ok(project.inbox("chief")?.iter().any(|message| {
                 message["kind"] == "note"
                     && message["body"].as_str().is_some_and(|body| {
-                        body.starts_with("T-1's window closed with background work still running: ")
-                            && body.contains("--background-job")
+                        body.starts_with(
+                        "T-1's window closed with background work running, which its close ended: ",
+                    ) && body.contains("--background-job")
                     })
             }))
         },

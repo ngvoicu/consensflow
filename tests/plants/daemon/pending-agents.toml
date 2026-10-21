@@ -98,12 +98,12 @@ runs = ["claude-reader-agents"]
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/record.rs"
 find = '''
-            let agents = match self.terminal {
-                Some(Terminal::Derived { agents, .. }) => agents,
-                _ => 0,
-            };'''
+        let agents = match (settlement, &self.terminal) {
+            (Settlement::Settled, Some(Terminal::Derived { agents, .. })) => *agents,
+            _ => 0,
+        };'''
 replace = '''
-            let agents = 0;'''
+        let agents = 0;'''
 
 [[plant]]
 name = "pending agents: the reading says the agents of a turn that is still in flight"
@@ -112,8 +112,8 @@ runs = ["claude-reader-agents"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/record.rs"
-find = '        if settlement == Settlement::Settled {'
-replace = '        if true {'
+find = '            (Settlement::Settled, Some(Terminal::Derived { agents, .. })) => *agents,'
+replace = '            (_, Some(Terminal::Derived { agents, .. })) => *agents,'
 
 [[plant]]
 name = "pending agents: a stop hook’s summary says agents are pending"

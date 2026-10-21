@@ -134,7 +134,7 @@ fn a_stand_in_that_leaves_a_job_running_and_answers_has_its_task_done_and_its_wi
     // end ended nothing, and the close found the job.
     assert!(
         text.contains(
-            "what the chief was told of work the turn left:\n    T-1's window closed with background work still running: "
+            "what the chief was told of work the turn left:\n    T-1's window closed with background work running, which its close ended: "
         ),
         "{text}"
     );

@@ -19,7 +19,7 @@ pub(crate) const LOG: &str = "tail -f run.log";
 
 /// What the requester is told when the window of T-1 closed with `LOCK` running.
 const LOCK_CLOSED: &str =
-    "T-1's window closed with background work still running: python3 lock.py record --run 7";
+    "T-1's window closed with background work running, which its close ended: python3 lock.py record --run 7";
 
 /// T-1 given to zeus, whose agent starts a run, answers that it did and ends its
 /// turn: the pass that looks at it is made.
@@ -265,7 +265,9 @@ fn a_cancelled_task_closes_its_window_with_the_work_still_running_and_whoever_ga
 
     assert!(closed(&context, &pane), "cancelling closes the window");
     let told = tiers.notes("chief");
-    let said = format!("T-1's window closed with background work still running: {LOCK}; {LOG}");
+    let said = format!(
+        "T-1's window closed with background work running, which its close ended: {LOCK}; {LOG}"
+    );
     assert!(told.contains(&said), "{told:?}");
 }
 
@@ -282,7 +284,7 @@ fn a_window_closed_after_its_result_with_work_the_host_did_not_end_says_so_too()
     assert_eq!(tiers.task(1).task.state, "done");
     assert!(
         tiers.notes("chief").contains(&format!(
-            "T-1's window closed with background work still running: {LOCK}"
+            "T-1's window closed with background work running, which its close ended: {LOCK}"
         )),
         "{:?}",
         tiers.notes("chief")
@@ -342,7 +344,7 @@ fn what_a_close_note_quotes_of_the_work_has_its_secrets_hidden_and_is_held_to_a_
     let told = tiers.notes("chief");
     let note = told
         .iter()
-        .find(|note| note.contains("background work still running"))
+        .find(|note| note.contains("background work running, which its close ended"))
         .unwrap_or_else(|| panic!("{told:?}"));
     assert!(!note.contains("sk-live-0123456789abcdefABCDEF"), "{note}");
     assert!(note.contains("[masked]"), "{note}");

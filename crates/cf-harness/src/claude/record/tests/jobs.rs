@@ -164,10 +164,12 @@ fn the_notification_of_the_jobs_end_wakes_a_turn_whose_report_leaves_none_pendin
     stage.write(&turn_leaving(JOB));
     assert_eq!(says(&mut stage), (Settlement::Settled, 1));
 
+    // Queued, its notification ends the job only once a turn takes it: in flight, the
+    // job is still counted.
     stage.append(&[queue("enqueue", json!(said))]);
     assert_eq!(
         says(&mut stage),
-        (Settlement::InFlight, 0),
+        (Settlement::InFlight, 1),
         "a turn is about to begin: nothing is said of what the last left"
     );
 
@@ -224,12 +226,13 @@ fn a_notification_ends_its_job_whichever_record_says_it_and_whichever_end_it_say
             "{status}, the user's record alone"
         );
 
-        // Only the queue's: the job ended, and the turn it wakes has not begun.
+        // Only the queue's: the turn it wakes has not begun, and the job is counted until
+        // a turn takes its notification.
         let mut waiting = turn_leaving(JOB);
         waiting.push(queue("enqueue", json!(said)));
         assert_eq!(
             once_says(&waiting),
-            (Settlement::InFlight, 0),
+            (Settlement::InFlight, 1),
             "{status}, only queued"
         );
     }
@@ -346,9 +349,10 @@ fn a_real_notification_queued_at_rest_ends_its_job_when_its_turn_takes_it() {
     ];
     assert_eq!(once_says(&records), (Settlement::Settled, 1));
 
-    // Queued, not yet delivered: a turn is to begin, and no result is taken.
+    // Queued, not yet delivered: a turn is to begin, no result is taken, and the job is
+    // counted still.
     records.push(real[5].clone());
-    assert_eq!(once_says(&records), (Settlement::InFlight, 0));
+    assert_eq!(once_says(&records), (Settlement::InFlight, 1));
 
     let woken = under(&real[7], "s1");
     records.extend([
@@ -474,8 +478,10 @@ fn jobs_are_not_counted_by_the_turn_duration_and_say_themselves_where_it_says_no
 }
 
 #[test]
-fn a_job_is_said_of_a_turn_that_is_over_and_of_none_that_is_open() {
-    // The turn has not ended: a call is open, or the user typed into the window.
+fn a_job_is_said_of_a_turn_that_is_over_and_of_one_still_under_way() {
+    // The turn has not ended: a call is open, or the user typed into the window. The job is
+    // counted all the same, for Finish to say it runs (Astraeus on 0eec91d2: a reading in
+    // flight said none).
     let open = assistant(
         "a2",
         "u2",
@@ -484,11 +490,11 @@ fn a_job_is_said_of_a_turn_that_is_over_and_of_none_that_is_open() {
         json!("tool_use"),
     );
     let mut records = vec![hello(), calling(), started("u2", "a1", "t1", JOB), open];
-    assert_eq!(once_says(&records), (Settlement::InFlight, 0));
+    assert_eq!(once_says(&records), (Settlement::InFlight, 1));
 
     records = turn_leaving(JOB);
     records.push(user("u3", json!("d1"), json!("Go on")));
-    assert_eq!(once_says(&records), (Settlement::InFlight, 0));
+    assert_eq!(once_says(&records), (Settlement::InFlight, 1));
 }
 
 #[test]
@@ -909,8 +915,9 @@ fn a_real_monitor_and_its_command_are_pending_until_each_ends_and_events_end_nei
         read,
         [
             // The turn that armed the monitor ended with its first event queued and taken:
-            // the turn that event begins is next, and nothing is said of what is left.
-            (Settlement::InFlight, 0, "WAITING".to_owned()),
+            // the turn that event begins is next, and the command and the monitor run, as
+            // Finish says of a turn it takes under way.
+            (Settlement::InFlight, 2, "WAITING".to_owned()),
             // Each event woke a turn, and ended nothing.
             settled(2, "NOTED"),
             settled(2, "NOTED"),
@@ -956,6 +963,53 @@ fn a_real_monitors_notice_of_expiry_before_its_time_ends_nothing() {
         at(&records, ended),
         (Settlement::Settled, 1, "ALL-DONE".to_owned())
     );
+}
+
+/// The real records with the monitor's notice of expiry written at `at` (its queuing and
+/// its delivery): what the look after the turn it begins says of the jobs pending.
+fn expired_at(at: &str) -> usize {
+    let records: Vec<Value> = monitor_wait()
+        .into_iter()
+        .map(|mut record| {
+            if record.to_string().contains("[Monitor expired after ") {
+                record["timestamp"] = json!(at);
+            }
+            record
+        })
+        .collect();
+    let expired = records
+        .iter()
+        .position(|record| {
+            record["message"]["content"]
+                .as_array()
+                .is_some_and(|parts| parts.iter().any(|part| part["text"] == "ALL-DONE"))
+        })
+        .unwrap();
+    let ended = records[expired..]
+        .iter()
+        .position(|record| record["subtype"] == "turn_duration")
+        .unwrap()
+        + expired
+        + 1;
+    at_count(&records, ended)
+}
+
+/// The jobs pending at a look at the first `count` of `records`.
+fn at_count(records: &[Value], count: usize) -> usize {
+    at(records, count).1
+}
+
+#[test]
+fn a_real_monitors_time_counts_from_the_call_that_armed_it_and_its_notice_never_ends_it_early() {
+    // The live run: the Monitor call's record at 23:02:30.287, its start's at 30.317, a
+    // timeout of 40 s, and Claude Code's notice of expiry queued at 23:03:10.317. The
+    // monitor began between the call and its start's record, so its time is out no
+    // earlier than 40 s after the call: a notice from then on can be Claude Code's own,
+    // and one before it cannot (Astraeus on 0eec91d2: a second's tolerance was room for a
+    // line of the command's).
+    assert_eq!(expired_at("2026-10-20T23:03:10.287Z"), 0);
+    assert_eq!(expired_at("2026-10-20T23:03:10.286Z"), 1);
+    assert_eq!(expired_at("2026-10-20T23:03:09.787Z"), 1);
 }
 
 #[test]

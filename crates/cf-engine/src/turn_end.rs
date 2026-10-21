@@ -48,7 +48,7 @@ use cf_harness::records::{Item, Pending, Role};
 use cf_ledger::{NewNote, ParticipantView, ProjectView, TaskThread};
 use serde_json::Value;
 
-use crate::delivery_text::marker_of;
+use crate::delivery_text::is_paste_of;
 use crate::dispatcher::Dispatcher;
 use crate::record::Record;
 use crate::role_change::answers_to_the_task;
@@ -148,7 +148,7 @@ impl Dispatcher {
             return Ok(Turn::Held);
         }
         *record.held.borrow_mut() = HeldPart::default();
-        let body = with_leftovers(words, &leftovers(&participant.handle, pending, None));
+        let body = with_leftovers(words, &leftovers(&participant.handle, pending, None, true));
         self.seams
             .ledger
             .borrow_mut()
@@ -160,10 +160,14 @@ impl Dispatcher {
     /// The place among `items`, the window's record, of the latest message of the task
     /// `thread` pasted into the window of the participant: the item its arrival was proved
     /// by (`receipt`). A message whose receipt names no item of the record (one the record
-    /// lost, a receipt of an older build) is found by its header beginning an item of the
-    /// user's, never by a quotation in a tool's output or in the member's words. None
-    /// where the task has no message pasted, or the record does not hold it: the window
-    /// answers nothing of the task yet.
+    /// lost, a receipt of an older build) is found by its paste, as its arrival was
+    /// (`is_paste_of`: its header begins an item of the user's, in Claude Code's wrapper or
+    /// behind the brief a fresh window was given first), the last such, and never by a
+    /// quotation of its header in words of the human's or the member's, nor in a
+    /// compaction's summary (Astraeus on 0eec91d2: a quotation taken for the delivery let
+    /// Finish take an answer to the quotation). None where the task has no message
+    /// pasted, or the record holds no proof of where it arrived: the window answers
+    /// nothing of the task, and Finish has nothing to take.
     pub(crate) fn delivered_at(
         &self,
         participant: i64,
@@ -186,10 +190,12 @@ impl Dispatcher {
         }) {
             return Ok(Some(found));
         }
-        let marker = marker_of(latest.id);
-        Ok(items
-            .iter()
-            .position(|item| item.role == Role::User && item.text.contains(&marker)))
+        let first = self.brief_given_first(&latest)?;
+        Ok(items.iter().rposition(|item| {
+            item.role == Role::User
+                && !item.compaction
+                && is_paste_of(&item.text, latest.id, first.as_deref())
+        }))
     }
 
     /// What the task of the participant's window is held for, while it is.
@@ -216,8 +222,15 @@ impl Dispatcher {
             1 => "it",
             _ => "them",
         };
+        // The human finishes a task from its drawer; the chief, or a member that gave the
+        // task, with `cf` (Calliope on 0eec91d2).
+        let way = if thread.task.requester == "human" {
+            "Finish in the task's drawer".to_owned()
+        } else {
+            format!("cf task finish T-{number}")
+        };
         let body = format!(
-            "T-{number} goes on in the background: @{} ended its turn with {} running, which its harness wakes it for as each ends, and its result comes when a turn of its ends with none left. To take what it said last as the result now: cf task finish T-{number}, which does not end {what}. What it said:\n\n{words}",
+            "T-{number} goes on in the background: @{} ended its turn with {} running, which its harness wakes it for as each ends, and its result comes when a turn of its ends with none left. To take what it said last as the result now: {way}, which does not end {what}. What it said:\n\n{words}",
             participant.handle,
             running(pending),
         );
@@ -261,9 +274,16 @@ pub(crate) fn running(pending: Pending) -> String {
 /// and no longer waits on (dip-agentos #8: these were notes of their own): what was still
 /// running when someone finished the task (`finished_by`), which finishing ends none of;
 /// and the jobs an earlier window of the conversation left that no word says ended
-/// (`Pending::retired`). Nothing where there is nothing to say. What the host finds left
-/// in the window is not here: the window's close says what it ended.
-pub(crate) fn leftovers(handle: &str, pending: Pending, finished_by: Option<&str>) -> String {
+/// (`Pending::retired`). Finished in a turn still under way (`settled` false), what it
+/// counted is what the record had said so far, and the result says so. Nothing where there
+/// is nothing to say. What the host finds left in the window is not here: the window's
+/// close says what it ended.
+pub(crate) fn leftovers(
+    handle: &str,
+    pending: Pending,
+    finished_by: Option<&str>,
+    settled: bool,
+) -> String {
     let mut said = Vec::new();
     if let Some(by) = finished_by {
         let who = if by == "human" {
@@ -280,6 +300,11 @@ pub(crate) fn leftovers(handle: &str, pending: Pending, finished_by: Option<&str
         } else {
             said.push(format!(
                 "Finished at {who}'s word: what @{handle} said last is the result."
+            ));
+        }
+        if !settled {
+            said.push(format!(
+                "@{handle}'s turn was still under way, so that is what its record had said so far: a job its turn starts from now on is not counted, nor are the background agents or workflows it left, which its harness counts only as a turn ends."
             ));
         }
     }

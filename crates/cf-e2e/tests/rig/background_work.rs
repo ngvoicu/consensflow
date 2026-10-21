@@ -133,7 +133,7 @@ fn closed_note() -> &'static Regex {
     static CLOSED: OnceLock<Regex> = OnceLock::new();
     pattern::once(
         &CLOSED,
-        r"^T-1's window closed with background work still running: .*--background-job",
+        r"^T-1's window closed with background work running, which its close ended: .*--background-job",
     )
 }
 

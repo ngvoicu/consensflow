@@ -10,7 +10,9 @@ use cf_engine::{ActivityState, Unstopped};
 use cf_harness::contract::Pane;
 use serde_json::{json, Value};
 
-use crate::fixtures::{after, assert_match, exhausted};
+use cf_ledger::NewTask;
+
+use crate::fixtures::{after, assert_match, exhausted, Tiers};
 
 /// What pressing Escape into `pane` is, as the host is asked it.
 fn escape(pane: &Pane) -> Value {
@@ -836,4 +838,63 @@ fn each_round_of_keys_is_told_to_the_window_and_a_round_given_up_on_is_not() {
     context.pass().unwrap();
     assert_eq!(context.host.inputs().len(), 3);
     assert_eq!(context.adapter.agent("zeus").interrupted, 3);
+}
+
+#[test]
+fn the_words_that_first_reach_a_window_the_human_opened_with_no_task_answer_a_pause_asked_before_them(
+) {
+    // Calliope on 0eec91d2: a session's window the human opens (Show) with no message and
+    // no conversation (its first launch never came up) is no task's window, and another
+    // task's first words go into it. A pause of that task asked before its words arrived
+    // was none the window could stop: its words answer it, and the turn they begin is not
+    // interrupted for it.
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    context.host.refuse.set(true);
+    tiers.open();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(
+        tiers.task(1).task.state,
+        "failed",
+        "its window never came up"
+    );
+    let session = tiers.assignee(1);
+    context.host.refuse.set(false);
+    context.open_window(tiers.project.id, &session).unwrap();
+    context.pass().unwrap();
+    let opened = context.adapter.prepared();
+    let opened = opened.last().unwrap();
+    assert_eq!(
+        (&opened["message"], &opened["resume"]),
+        (&Value::Null, &Value::Null),
+        "opened with nothing, on no conversation"
+    );
+
+    // T-2 for the session, paused before its words reach the window.
+    context.create_task(
+        tiers.project.id,
+        NewTask {
+            from: "chief".to_owned(),
+            to: Some(session.clone()),
+            body: "Write the docs".to_owned(),
+            ..NewTask::default()
+        },
+    );
+    context.pause_task(tiers.project.id, 2);
+    context.pass().unwrap();
+    assert_eq!(tiers.task(2).task.state, "paused");
+    assert_eq!(context.host.inputs(), Vec::<Value>::new());
+
+    // Resumed, its words are the first the window is given.
+    context.resume_task(tiers.project.id, 2, "Go on");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(tiers.task(2).task.state, "working");
+    context.pass().unwrap();
+    assert_eq!(
+        context.host.inputs(),
+        Vec::<Value>::new(),
+        "the turn the words began is not interrupted for a pause that came before them"
+    );
 }

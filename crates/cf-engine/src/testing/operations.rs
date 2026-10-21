@@ -402,6 +402,30 @@ impl Restarted<'_> {
         self.context.run(self.resuming(project))
     }
 
+    /// `by` finishes T-`number` with this engine ([`Context::finish_task`]).
+    pub fn finish_task(
+        &self,
+        project: i64,
+        number: i64,
+        by: &str,
+    ) -> Result<Finished, EngineError> {
+        let (engine, by) = (self.engine(), by.to_owned());
+        let finishing = self.context.operation(
+            "finishTask",
+            json!([project, number, by]),
+            |finished: &Finished| {
+                json!({
+                    "task": finished.task.number,
+                    "state": finished.task.state,
+                    "jobs": finished.jobs,
+                    "agents": finished.agents,
+                })
+            },
+            async move { engine.finish_task(project, number, &by).await },
+        );
+        self.context.run(finishing)
+    }
+
     /// The human's Resume, begun where it is called.
     pub fn begin_resume_project(
         &self,

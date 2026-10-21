@@ -102,14 +102,16 @@ mod tests {
     #[test]
     fn a_chief_told_of_the_server_or_of_any_work_fails_and_names_what_was_said() {
         let mut seen = good();
-        let server = "T-1's window closed with background work still running: sleep 4711; python3 /run/quiet-server.py /run/quiet-server.pid";
+        let server = "T-1's window closed with background work running, which its close ended: sleep 4711; python3 /run/quiet-server.py /run/quiet-server.pid";
         seen.notes = vec![server.to_owned()];
         let problems = judge(&seen).unwrap_err();
         assert_eq!(problems.len(), 1, "{problems:?}");
         assert!(problems[0].ends_with(server), "{problems:?}");
         assert!(problems[0].contains("MCP server"), "{problems:?}");
 
-        let work = "T-1's window closed with background work still running: sleep 4711".to_owned();
+        let work =
+            "T-1's window closed with background work running, which its close ended: sleep 4711"
+                .to_owned();
         seen.notes = vec![work.clone()];
         let problems = judge(&seen).unwrap_err();
         assert_eq!(problems.len(), 1, "{problems:?}");

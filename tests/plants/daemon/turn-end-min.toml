@@ -24,6 +24,7 @@
 
 [run]
 tem-reader = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::record"]
+tem-opencode-record = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "opencode::record"]
 tem-reading = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "shared::record::reading"]
 tem-launch-claude = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "claude::"]
 tem-engine-lib = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "turn_end"]
@@ -95,8 +96,71 @@ runs = ["tem-reader"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/record/jobs.rs"
-find = '                    .is_some_and(|(expires, at)| at >= expires - EXPIRY_SLACK_MS);'
-replace = '                    .is_some_and(|(expires, at)| at >= expires - EXPIRY_SLACK_MS || true);'
+find = '                    .is_some_and(|(expires, at)| at >= expires);'
+replace = '                    .is_some_and(|(expires, at)| at >= expires || true);'
+
+[[plant]]
+name = "turn-end-min reader: a monitor's notice of its expiry ends it a second early, as 0eec91d2 did"
+meant = "a_monitors_own_notice_of_its_expiry_ends_it_at_its_time_and_the_same_words_before_it_end_nothing"
+runs = ["tem-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/jobs.rs"
+find = '                    .is_some_and(|(expires, at)| at >= expires);'
+replace = '                    .is_some_and(|(expires, at)| at >= expires - 1_000);'
+
+[[plant]]
+name = "turn-end-min reader: a monitor's time counts from its start's record, not from the call that armed it"
+meant = "a_real_monitors_time_counts_from_the_call_that_armed_it_and_its_notice_never_ends_it_early"
+runs = ["tem-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/replay.rs"
+find = '                    .and_then(|call| self.calls_at.get(&self.keys.of(Some(call))).copied())'
+replace = '                    .and_then(|call| self.calls_at.get(&self.keys.of(Some(call))).copied().filter(|_| false))'
+
+[[plant]]
+name = "turn-end-min reader: a command's line with a word after it is taken for Claude Code's own notice"
+meant = "a_monitors_own_notice_of_its_expiry_ends_it_at_its_time_and_the_same_words_before_it_end_nothing"
+runs = ["tem-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/jobs.rs"
+find = '''
+            head.closes_after_event = at == Some(EVENT)
+                && line == "</task-notification>"
+                && lines.all(|after| after.trim().is_empty());'''
+replace = '            head.closes_after_event = at == Some(EVENT);'
+
+[[plant]]
+name = "turn-end-min reader: a line saying a monitor stopped or its socket closed ends it, which a command could print"
+meant = "a_monitors_ends_that_no_time_proves_end_nothing_for_a_line_of_its_command_could_say_them"
+runs = ["tem-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/jobs.rs"
+find = '            if (over && named) || its_expiry {'
+replace = '            if (over && named) || its_expiry || notice.is_some_and(|event| event.starts_with("[Monitor stopped") || event.starts_with("[WebSocket closed")) {'
+
+[[plant]]
+name = "turn-end-min reader: a reading in flight says no job runs, as 0eec91d2 did"
+meant = "a_real_monitor_and_its_command_are_pending_until_each_ends_and_events_end_neither"
+runs = ["tem-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record.rs"
+find = '            jobs: self.jobs.running(),'
+replace = '            jobs: if settlement == Settlement::Settled { self.jobs.running() } else { 0 },'
+
+[[plant]]
+name = "turn-end-min finish: a turn finished under way says nothing of a count that may be short"
+meant = "finish_of_a_turn_still_under_way_names_the_jobs_its_record_counts_and_says_the_count_may_be_short"
+runs = ["tem-engine-turn-end"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '        if !settled {'
+replace = '        if !settled && false {'
 
 [[plant]]
 name = "turn-end-min reader: a monitor never expires"
@@ -105,8 +169,8 @@ runs = ["tem-reader"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/record/jobs.rs"
-find = '            head.status.is_none() && head.event.is_some_and(|event| event.starts_with(EXPIRED));'
-replace = '            false && head.status.is_none() && head.event.is_some_and(|event| event.starts_with(EXPIRED));'
+find = '            notice.is_some_and(|event| EXPIRED.iter().any(|said| event.starts_with(said)));'
+replace = '            false && notice.is_some_and(|event| EXPIRED.iter().any(|said| event.starts_with(said)));'
 
 [[plant]]
 name = "turn-end-min reader: a notification that a job waits for input ends it"
@@ -189,10 +253,16 @@ runs = ["tem-reader"]
 file = "crates/cf-harness/src/claude/record/jobs.rs"
 find = '''
         let Some((place, value)) = field(line) else {
+            head.closes_after_event = at == Some(EVENT)
+                && line == "</task-notification>"
+                && lines.all(|after| after.trim().is_empty());
             break;
         };'''
 replace = '''
         let Some((place, value)) = field(line) else {
+            head.closes_after_event = at == Some(EVENT)
+                && line == "</task-notification>"
+                && lines.all(|after| after.trim().is_empty());
             continue;
         };'''
 
@@ -303,8 +373,8 @@ runs = ["tem-reader"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/record.rs"
-find = '                jobs: self.jobs.running(),'
-replace = '                jobs: 0,'
+find = '            jobs: self.jobs.running(),'
+replace = '            jobs: 0,'
 
 [[plant]]
 name = "turn-end-min reading: a reading is written with no word of its jobs"
@@ -386,7 +456,7 @@ runs = ["tem-engine-pending"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end.rs"
-find = '"T-{number} goes on in the background: @{} ended its turn with {} running, which its harness wakes it for as each ends, and its result comes when a turn of its ends with none left. To take what it said last as the result now: cf task finish T-{number}, which does not end {what}. What it said:\n\n{words}",'
+find = '"T-{number} goes on in the background: @{} ended its turn with {} running, which its harness wakes it for as each ends, and its result comes when a turn of its ends with none left. To take what it said last as the result now: {way}, which does not end {what}. What it said:\n\n{words}",'
 replace = '"T-{number} goes on in the background: @{} ended its turn with {} running, which its harness wakes it for as each ends, and its result comes when a turn of its ends with none left; it does not end {what}. What it said:\n\n{words}",'
 
 [[plant]]
@@ -449,23 +519,24 @@ find = '    (last.is_some() || complete_run.is_some()).then_some(Answers {'
 replace = '    last.is_some().then_some(Answers {'
 
 [[plant]]
-name = "turn-end-min: the task's latest message is found by any quotation of its header"
+name = "turn-end-min: the task's latest message is found by any quotation of its header, where its receipt names no item of the record"
 meant = "the_result_is_what_follows_the_paste_its_arrival_was_proved_by_never_a_quotation_of_its_header"
 runs = ["tem-engine-turn-end"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end.rs"
 find = '''
-        let receipt = latest.receipt.get("item").and_then(Value::as_str);
-        if let Some(found) = receipt.and_then(|item| {'''
+        Ok(items.iter().rposition(|item| {
+            item.role == Role::User
+                && !item.compaction
+                && is_paste_of(&item.text, latest.id, first.as_deref())
+        }))'''
 replace = '''
-        let receipt = latest.receipt.get("item").and_then(Value::as_str).filter(|_| false);
-        if let Some(found) = receipt.and_then(|item| {'''
-
-[[plant.edit]]
-file = "crates/cf-engine/src/turn_end.rs"
-find = '            .position(|item| item.role == Role::User && item.text.contains(&marker)))'
-replace = '            .position(|item| item.text.contains(&marker)))'
+        let marker = crate::delivery_text::marker_of(latest.id);
+        let _ = (&first, is_paste_of);
+        Ok(items
+            .iter()
+            .position(|item| item.role == Role::User && item.text.contains(&marker)))'''
 
 [[plant]]
 name = "turn-end-min: a turn the harness failed is a result"
@@ -534,8 +605,8 @@ runs = ["tem-engine-turn-end"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end/finish.rs"
-find = '            &leftovers(&participant.handle, pending, Some(by)),'
-replace = '            &leftovers(&participant.handle, pending, None),'
+find = '            &leftovers(&participant.handle, pending, Some(by), observed.settled),'
+replace = '            &leftovers(&participant.handle, pending, None, observed.settled),'
 
 [[plant]]
 name = "turn-end-min finish: the API answers before the engine reads the window"
@@ -665,8 +736,18 @@ runs = ["tem-engine-turn-end"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/ownership.rs"
-find = '            .filter(|thread| IN_HAND.contains(&thread.task.state.as_str()));'
-replace = '            .filter(|thread| IN_HAND.contains(&thread.task.state.as_str()) && thread.task.state != "paused");'
+find = '                IN_HAND.contains(&thread.task.state.as_str())'
+replace = '                IN_HAND.contains(&thread.task.state.as_str()) && thread.task.state != "paused"'
+
+[[plant]]
+name = "turn-end-min ownership: a task another session took is said to be in the hands of the window it left"
+meant = "a_task_in_another_sessions_hands_is_not_said_to_be_in_the_hands_of_the_window_it_left"
+runs = ["tem-engine-turn-end"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/ownership.rs"
+find = '                    && thread.task.assignee.as_deref() == Some(participant.handle.as_str())'
+replace = '                    && thread.task.assignee.as_deref() == Some(participant.handle.as_str()) || true'
 
 [[plant]]
 name = "turn-end-min ownership: the requester of a task that waits for a window is told at every pass"
@@ -763,6 +844,38 @@ runs = ["tem-engine-turn-end"]
 file = "crates/cf-engine/src/windows.rs"
 find = '        *record.held.borrow_mut() = HeldPart::default();'
 replace = '        let _ = HeldPart::default();'
+
+[[plant]]
+name = "turn-end-min: a human whose task goes on is told to run cf"
+meant = "a_human_whose_task_goes_on_in_the_background_is_told_of_the_drawers_finish_and_the_chief_of_cf"
+runs = ["tem-engine-turn-end"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '        let way = if thread.task.requester == "human" {'
+replace = '        let way = if false {'
+
+[[plant]]
+name = "turn-end-min reader: OpenCode's compaction summary is a reply of the member's"
+meant = "the_summary_a_compaction_writes_is_marked_so_and_the_answer_before_it_is_not"
+runs = ["tem-opencode-record"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/opencode/record/answer.rs"
+find = '''
+        let compaction = message.get("summary") == Some(&Value::Bool(true))
+            || message.get("mode").and_then(Value::as_str) == Some("compaction");'''
+replace = '        let compaction = false;'
+
+[[plant]]
+name = "turn-end-min: the close note says the work runs on"
+meant = "a_free_window_closes_after_its_result_and_its_close_says_what_it_ended"
+runs = ["tem-engine-background"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/background.rs"
+find = '''"T-{number}'s window closed with background work running, which its close ended: {}",'''
+replace = '''"T-{number}'s window closed with background work still running: {}",'''
 
 [[plant]]
 name = "turn-end-min ownership: a window knows no task of the message its launch began with"

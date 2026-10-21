@@ -176,6 +176,13 @@ impl Ledger {
         messages::last_pasted(&self.store, participant_id, task_id)
     }
 
+    /// The receipt of a delivered message is forgotten, as Node's ledger left one
+    /// (`null`): for the engine's tests of a delivery whose arrival nothing names.
+    #[cfg(feature = "test-support")]
+    pub fn forget_receipt(&mut self, message_id: i64) -> Result<(), LedgerError> {
+        messages::forget_receipt(&mut self.store, message_id)
+    }
+
     /// The first task message a participant's window received about a task on
     /// its own, with what its paste carried.
     pub fn first_received(

@@ -111,8 +111,9 @@ fn a_devin_worker_that_leaves_a_command_that_goes_on_reporting_has_its_task_done
             Ok(project.inbox("chief")?.iter().any(|message| {
                 message["kind"] == "note"
                     && message["body"].as_str().is_some_and(|body| {
-                        body.starts_with("T-1's window closed with background work still running: ")
-                            && body.contains("sleep 600")
+                        body.starts_with(
+                        "T-1's window closed with background work running, which its close ended: ",
+                    ) && body.contains("sleep 600")
                     })
             }))
         },

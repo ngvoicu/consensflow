@@ -381,3 +381,62 @@ fn a_time_of_a_column_the_store_has_not_is_left_out_as_json_leaves_it() {
         r#"{"items":[{"id":"m","role":"assistant","text":"","complete":true,"at":9},{"id":"p","role":"tool","text":"ok","complete":true}],"inFlight":false,"asking":false,"failed":false,"quota":null,"settlement":{"state":"settled"}}"#
     );
 }
+
+#[test]
+fn the_summary_a_compaction_writes_is_marked_so_and_the_answer_before_it_is_not() {
+    // OpenCode 1.19.3 writes a compaction's summary as an assistant's message of its own,
+    // `summary: true`, its mode and agent `compaction`, which stops as any reply does
+    // (Calliope on 0eec91d2: it was read as the member's words, and could be joined into a
+    // final answer).
+    let staged = Staged::new();
+    staged.message(
+        "m1",
+        1,
+        &json!({ "role": "user", "time": { "created": 1 } }),
+    );
+    staged.part(
+        "p1",
+        "m1",
+        2,
+        &json!({ "type": "text", "text": "Review T-1" }),
+    );
+    staged.event(1, "message.updated.1", &info("m1", None));
+    staged.event(2, "message.part.updated.1", &part_of("p1", "m1"));
+    reply(&staged, "m2", 10, "stop", "PASS: no findings.", None);
+    let time = json!({ "created": 20, "completed": 24 });
+    staged.message(
+        "m3",
+        20,
+        &json!({
+            "role": "assistant", "time": time, "finish": "stop",
+            "summary": true, "mode": "compaction", "agent": "compaction",
+        }),
+    );
+    staged.part(
+        "m3-text",
+        "m3",
+        21,
+        &json!({ "type": "text", "text": "Summary of the conversation so far" }),
+    );
+    staged.event(20, "message.updated.1", &info("m3", None));
+    staged.event(21, "message.part.updated.1", &part_of("m3-text", "m3"));
+    staged.event(23, "message.updated.1", &info("m3", Some(&time)));
+
+    let reading = look(&mut staged.reader());
+    let Reading::Known(record) = &*reading else {
+        panic!("a reading");
+    };
+    let shape: Vec<(&str, bool)> = record
+        .items
+        .iter()
+        .filter(|item| item.role == Role::Assistant)
+        .map(|item| (&*item.text, item.compaction))
+        .collect();
+    assert_eq!(
+        shape,
+        [
+            ("PASS: no findings.", false),
+            ("Summary of the conversation so far", true),
+        ]
+    );
+}

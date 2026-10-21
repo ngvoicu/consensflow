@@ -109,7 +109,7 @@ impl Dispatcher {
                 to: thread.task.requester.clone(),
                 task: Some(number),
                 body: format!(
-                    "T-{number}'s window closed with background work still running: {}",
+                    "T-{number}'s window closed with background work running, which its close ended: {}",
                     quote(left)
                 ),
             },
