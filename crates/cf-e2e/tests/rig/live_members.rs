@@ -361,8 +361,10 @@ fn a_project_that_does_not_end_in_time_says_which_of_the_processes_it_started_we
 {
     let log = Log::new("live members");
     let (members, job) = with_a_job_that_ignores_the_request_to_end("members-left", &log)?;
+    // The host looks at what a window left running (two looks, two seconds apart) before it asks
+    // the window to end, so the window has left, and the job has not, some seconds after the close.
     let failed = members
-        .close_within(Duration::from_secs(1))
+        .close_within(Duration::from_secs(4))
         .unwrap_err()
         .to_string();
     // What it left running is not the test's to leave.

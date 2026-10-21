@@ -16,6 +16,7 @@ mod close;
 #[cfg(test)]
 mod keys;
 mod output_end;
+mod owed;
 #[cfg(all(any(test, feature = "test-support"), unix))]
 mod sentinel;
 mod turn;
@@ -23,6 +24,7 @@ mod turn;
 pub use close::CLOSE_GRACE;
 use close::{ask_all_to_exit, terminate, terminate_asked, terminate_detached};
 pub(crate) use output_end::Handed;
+pub use owed::ExitOwed;
 #[cfg(all(any(test, feature = "test-support"), unix))]
 pub use sentinel::Sentinel;
 
@@ -80,6 +82,9 @@ pub struct StreamedPane {
     pub screen: Arc<PaneScreen>,
     /// How the window's program ended, once anyone read its status.
     pub ended: Arc<EndedSlot>,
+    /// The window's exit, owed to the daemon until whoever reads `output` is done: the table
+    /// is asked whether every one has been told ([`PaneTable::exits_told_within`]).
+    pub owed: ExitOwed,
 }
 
 /// The child environment carried by `pane.open`: inherit the parent, apply
@@ -348,6 +353,8 @@ pub struct PaneTable {
     next_id: AtomicU64,
     updating: AtomicBool,
     teardown: Arc<Teardown>,
+    /// The exits of the windows whose output is read, which are yet to be told.
+    exits: Arc<owed::ExitsOwed>,
     /// How long a closed window's programs are given to end once asked to
     /// ([`CLOSE_GRACE`]): a test gives less.
     close_grace: Duration,
@@ -409,6 +416,7 @@ impl PaneTable {
             next_id: AtomicU64::new(1),
             updating: AtomicBool::new(false),
             teardown: Arc::new(Teardown::default()),
+            exits: Arc::new(owed::ExitsOwed::default()),
             close_grace: grace,
         }
     }
@@ -661,7 +669,16 @@ impl PaneTable {
             output,
             screen,
             ended,
+            owed: self.exits.owe(),
         })
+    }
+
+    /// Whether the exit of every window whose output is read has been told, waited for
+    /// until `within`: the exit of a window that was ended is told when its output has
+    /// ended and its program is proven gone, a moment after the close that ended it, and a
+    /// host that stops closes its own output only once they are.
+    pub fn exits_told_within(&self, within: Duration) -> bool {
+        self.exits.paid_within(within)
     }
 
     pub fn ack(&self, key: &PaneKey, seq: u64) -> Result<(), PaneError> {
