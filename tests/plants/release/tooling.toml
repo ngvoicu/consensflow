@@ -2577,7 +2577,7 @@ runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
 file = "tools/xtask/src/plants/runs/reporters/playwright.mjs"
-find = '''    if (!this.asserted.has(result)) return `no assertion of its body failed: ${firstLine(result.errors[0])}`
+find = '''    if (!this.asserted(result)) return `no assertion of its body failed: ${firstLine(result.errors[0])}`
 '''
 replace = ''''''
 
@@ -2590,16 +2590,6 @@ runs = ["xtask-lib-plants"]
 file = "tools/xtask/src/plants/runs/reporters/playwright.mjs"
 find = '''!under(step, 'hook', 'fixture')'''
 replace = '''!under(step, 'hook')'''
-
-[[plant]]
-name = "tooling: a Playwright assertion that passed is taken for one that failed"
-meant = "playwright_s_reporter_takes_an_error_of_any_step_in_a_hook_for_the_hook_s"
-runs = ["xtask-lib-plants"]
-
-[[plant.edit]]
-file = "tools/xtask/src/plants/runs/reporters/playwright.mjs"
-find = '''step.category === 'expect' && step.error !== undefined && '''
-replace = '''step.category === 'expect' && '''
 
 [[plant]]
 name = "tooling: a Playwright assertion in a step of the body is no proof"
@@ -2794,14 +2784,14 @@ runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
 file = "tools/xtask/src/plants/driver.rs"
-find = '''            (Err(unrestored), Err(cause)) => Err(Error::PlantedAfter {
+find = '''            Err(unrestored) => Error::PlantedAfter {
                 unrestored: Box::new(unrestored),
                 cause: Box::new(cause),
-            }),'''
-replace = '''            (Err(unrestored), Err(cause)) => Err(Error::PlantedAfter {
+            },'''
+replace = '''            Err(unrestored) => Error::PlantedAfter {
                 unrestored: Box::new(cause),
                 cause: Box::new(unrestored),
-            }),'''
+            },'''
 
 [[plant]]
 name = "tooling: files that could not be put back are said twice where they ended the trial"
@@ -2810,7 +2800,7 @@ runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
 file = "tools/xtask/src/plants/driver.rs"
-find = '''            (Err(unrestored), Err(cause)) if cause.unrestored() => Err(unrestored),
+find = '''            Err(unrestored) if cause.unrestored() => unrestored,
 '''
 replace = ''''''
 
@@ -2824,3 +2814,50 @@ platforms = ["macos", "linux"]
 file = "crates/cf-process/src/table.rs"
 find = '''    if same(identity, session, read) && pinned.send(signal) {'''
 replace = '''    if pinned.send(signal) {'''
+
+# Round 9 (Calliope's look at round 8): a plant that cannot be made whole names what it
+# could not put back; a Playwright run runs each test once whatever repeats are asked for;
+# and an assertion counts only where its error is one the test failed with.
+
+[[plant]]
+name = "tooling: a plant that cannot be made whole leaves its put-back to the drop"
+meant = "a_plant_that_cannot_be_made_whole_names_a_file_it_could_not_put_back_and_its_copy"
+runs = ["xtask-lib-plants"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "tools/xtask/src/plants/driver.rs"
+find = '''            Err(cause) => Err(planting.failed(cause)),'''
+replace = '''            Err(cause) => Err(cause),'''
+
+[[plant]]
+name = "tooling: a Playwright run repeats a test as its config asks"
+meant = "a_playwright_test_that_failed_in_one_repeat_of_it_is_run_once_whatever_asks_for_more"
+runs = ["xtask-lib-plants"]
+
+[[plant.edit]]
+file = "tools/xtask/src/plants/runs/reporters.rs"
+find = '''            "--repeat-each=1".to_owned(),
+'''
+replace = ""
+
+[[plant]]
+name = "tooling: a Playwright command's repeats are kept"
+meant = "playwright_writes_the_plants_report_to_the_run_beside_the_list_it_prints"
+runs = ["xtask-lib-plants"]
+
+[[plant.edit]]
+file = "tools/xtask/src/plants/runs/reporters.rs"
+find = '''        if word == "--retries" || word == "--repeat-each" {'''
+replace = '''        if word == "--retries" {'''
+
+[[plant]]
+name = "tooling: a Playwright assertion that failed counts though the test failed of another error"
+meant = "a_playwright_test_no_assertion_of_whose_body_failed_or_that_was_retried_never_failed_of_itself"
+runs = ["xtask-lib-plants"]
+
+[[plant.edit]]
+file = "tools/xtask/src/plants/runs/reporters/playwright.mjs"
+find = '''    return (this.assertions.get(result) ?? []).some((line) => failed.includes(line))'''
+replace = '''    return (this.assertions.get(result) ?? []).length > 0'''
+

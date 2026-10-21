@@ -112,14 +112,25 @@ impl Copy {
 }
 
 impl Planting {
-    /// Copies each file of `files` into `saved` and writes the plant in its place.
+    /// Copies each file of `files` into `saved` and writes the plant in its place. Where
+    /// a write fails, what was planted is put back (`failed`), and a file that cannot be is
+    /// named with its copy, before the write's error (Calliope's look at round 8: a full
+    /// disk fails both).
     fn make(saved: &Path, files: Vec<Planted>) -> Result<Self, Error> {
         let mut planting = Self { copies: Vec::new() };
+        match planting.plant(saved, files) {
+            Ok(()) => Ok(planting),
+            Err(cause) => Err(planting.failed(cause)),
+        }
+    }
+
+    /// `make`'s writes, each copy before its plant.
+    fn plant(&mut self, saved: &Path, files: Vec<Planted>) -> Result<(), Error> {
         for (index, file) in files.into_iter().enumerate() {
             let copy = saved.join(format!("{index}-{}", file.file.replace('/', "_")));
             fs::write(&copy, &file.original).map_err(Error::files("write a copy at", &copy))?;
             // From here the file is put back, even if the write is what fails.
-            planting.copies.push(Copy {
+            self.copies.push(Copy {
                 path: file.path.clone(),
                 copy,
                 original: file.original,
@@ -127,7 +138,7 @@ impl Planting {
             });
             fs::write(&file.path, file.text).map_err(Error::files("write", &file.path))?;
         }
-        Ok(planting)
+        Ok(())
     }
 
     /// Writes the plant again in each file where it is not, for the runs after one
@@ -166,24 +177,31 @@ impl Planting {
     /// that cannot be put back is never left unsaid: the error names each one still
     /// planted and where its copy is, before the error the trial ended in, if it did.
     fn ended<T>(&self, ended: Result<T, Error>) -> Result<T, Error> {
-        match (self.restore(), ended) {
-            (Ok(()), ended) => ended,
-            (Err(unrestored), Ok(_)) => Err(unrestored),
+        match ended {
+            Ok(ended) => self.restore().map(|()| ended),
+            Err(cause) => Err(self.failed(cause)),
+        }
+    }
+
+    /// `ended` where it came to the error `cause`: the error the run ends with, once
+    /// every file is put back as far as it can be.
+    fn failed(&self, cause: Error) -> Error {
+        match self.restore() {
+            Ok(()) => cause,
             // What ended it was that files could not be put back: they are said again,
             // as they are now.
-            (Err(unrestored), Err(cause)) if cause.unrestored() => Err(unrestored),
-            (Err(unrestored), Err(cause)) => Err(Error::PlantedAfter {
+            Err(unrestored) if cause.unrestored() => unrestored,
+            Err(unrestored) => Error::PlantedAfter {
                 unrestored: Box::new(unrestored),
                 cause: Box::new(cause),
-            }),
+            },
         }
     }
 }
 
 impl Drop for Planting {
-    /// What is not put back yet (a panic unwinding, which has its own words; a plant
-    /// that could not be made whole, whose files were just written; a file that could
-    /// not be put back before, which was said): put back, as well as can be.
+    /// What is not put back yet (a panic unwinding, which has its own words; a file that
+    /// could not be put back before, which was said): put back, as well as can be.
     fn drop(&mut self) {
         let _ = self.restore();
     }

@@ -11,9 +11,10 @@
 //   (`outcome`: `expected`, `unexpected`, `flaky`, `skipped`), and whether its own body
 //   failed (`own`), which only proof says (both reviewers' look at round 7: three rounds
 //   inferred that the body ran from what the errors and the hooks said, and each had a
-//   hole): it had one attempt, which failed, an assertion of its body failed in it (a
+//   hole): it had one attempt, which failed, an assertion of its body failed it (a
 //   step `expect` with an error, under no hook and no fixture: in the body, or in a
-//   `test.step` of it), no step in a hook has an error (anywhere in the hook: a
+//   `test.step` of it; and that error among the attempt's, so not one the body caught,
+//   nor one a retrying `toPass` passed after), no step in a hook has an error (anywhere in the hook: a
 //   fixture's steps are the hooks', which Playwright 1.63 says under `Before Hooks` and
 //   `After Hooks`, a hook's error said again on each step it is in), and its worker did
 //   not exit under it. Anything less is no failure of its own, whatever error came
@@ -39,16 +40,18 @@ const under = (step, ...categories) => {
   return false
 }
 
-// Whether a step is an assertion of the body's own that failed.
-const asserted = (step) =>
+// Whether a step is an assertion of the body's own that failed: what failed the test is
+// said by the attempt's errors (`asserted`).
+const failedAssertion = (step) =>
   step.category === 'expect' && step.error !== undefined && !under(step, 'hook', 'fixture')
 
 export default class Plants {
   constructor() {
     // By the attempt of a test: the first error of a step in a hook.
     this.hooks = new Map()
-    // The attempts of tests in which an assertion of the body's own failed.
-    this.asserted = new Set()
+    // By the attempt of a test: the first lines of the errors of the assertions of the
+    // body's own that failed in it.
+    this.assertions = new Map()
     this.errors = []
   }
 
@@ -58,11 +61,22 @@ export default class Plants {
 
   onStepEnd(test, result, step) {
     if (step.error !== undefined && under(step, 'hook') && !this.hooks.has(result)) this.hooks.set(result, step.error)
-    if (asserted(step)) this.asserted.add(result)
+    if (failedAssertion(step)) {
+      const lines = this.assertions.get(result) ?? []
+      this.assertions.set(result, [...lines, firstLine(step.error)])
+    }
   }
 
   onError(error) {
     this.errors.push(firstLine(error))
+  }
+
+  // Whether an assertion of the body's own failed the attempt `result`: its error is
+  // among the attempt's (Calliope's look at round 8: one caught by the body, or one a
+  // retrying `toPass` passed after, is not).
+  asserted(result) {
+    const failed = result.errors.map(firstLine)
+    return (this.assertions.get(result) ?? []).some((line) => failed.includes(line))
   }
 
   // Why the last attempt of `test` is no failure of its body's own, if it is not: none
@@ -78,7 +92,7 @@ export default class Plants {
     const exited = result.errors.find((error) => firstLine(error).startsWith(WORKER_EXITED))
     if (exited !== undefined) return `its worker exited: ${firstLine(exited)}`
     if (result.status !== 'failed') return `it ended ${result.status}`
-    if (!this.asserted.has(result)) return `no assertion of its body failed: ${firstLine(result.errors[0])}`
+    if (!this.asserted(result)) return `no assertion of its body failed: ${firstLine(result.errors[0])}`
     return null
   }
 

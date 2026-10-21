@@ -429,6 +429,7 @@ fn playwright_writes_the_plants_report_to_the_run_beside_the_list_it_prints() {
             "test",
             "--reporter=list,./app/src-tauri/target/plants-runs/run-7/plants-playwright.mjs",
             "--retries=0",
+            "--repeat-each=1",
             "app/tests/core-page.spec.mjs",
             "-g",
             "file drop",
@@ -454,6 +455,31 @@ fn playwright_writes_the_plants_report_to_the_run_beside_the_list_it_prints() {
                 "test",
                 "--reporter=list,./plants-playwright.mjs",
                 "--retries=0",
+                "--repeat-each=1",
+                "a.spec.mjs"
+            ],
+            "{asked:?}"
+        );
+    }
+    // Each test once, whatever the config or the command says (Calliope's look at round 8:
+    // a test that failed in one of its repeats read as caught): a command's repeats are
+    // given as one.
+    for asked in [&["--repeat-each=2"][..], &["--repeat-each", "3"]] {
+        let command: Vec<String> = ["node", "cli.js", "test"]
+            .iter()
+            .chain(asked)
+            .chain(&["a.spec.mjs"])
+            .map(|word| (*word).to_owned())
+            .collect();
+        assert_eq!(
+            playwright_words(&command, reporter),
+            [
+                "node",
+                "cli.js",
+                "test",
+                "--reporter=list,./plants-playwright.mjs",
+                "--retries=0",
+                "--repeat-each=1",
                 "a.spec.mjs"
             ],
             "{asked:?}"

@@ -2546,7 +2546,7 @@ fn playwright_spec(before: &str, body: &str) -> String {
 /// The specs whose meant test (`a group › the meant one`) fails with the plant though no
 /// assertion of its body failed, or was run more than once: each a file of its own, its
 /// text, and why its meant test did not fail of itself.
-fn playwright_unproven() -> [(&'static str, String, &'static str); 6] {
+fn playwright_unproven() -> [(&'static str, String, &'static str); 8] {
     [
         // Astra's look at round 7: a worker's fixture that fails before the body and before
         // any hook's step.
@@ -2589,6 +2589,24 @@ fn playwright_unproven() -> [(&'static str, String, &'static str); 6] {
                 "expect(planted && test.info().retry === 0).toBe(false)",
             ),
             "it was retried (2 attempts)",
+        ),
+        // Calliope's look at round 8: an assertion that failed and was caught, or failed
+        // in a retrying `toPass` that then passed, is none that failed the test.
+        (
+            "caught-then-throws",
+            playwright_spec(
+                "",
+                "try {\n      expect(planted).toBe(false)\n    } catch {}\n    if (planted) throw new Error('the body throws after')",
+            ),
+            "no assertion of its body failed: Error: the body throws after",
+        ),
+        (
+            "passes-then-throws",
+            playwright_spec(
+                "",
+                "let tries = 0\n    await expect(() => {\n      tries += 1\n      expect(planted && tries < 2).toBe(false)\n    }).toPass()\n    if (planted) throw new Error('the body throws after')",
+            ),
+            "no assertion of its body failed: Error: the body throws after",
         ),
     ]
 }
@@ -2683,6 +2701,40 @@ fn a_playwright_test_no_assertion_of_whose_body_failed_or_that_was_retried_never
                 "    Playwright: an error outside every test: a group › the meant one did not \
                  fail of itself: {why}"
             )),
+            "{name}: {said}"
+        );
+    }
+    assert!(!said.contains("CAUGHT"), "{said}");
+}
+
+#[test]
+fn a_playwright_test_that_failed_in_one_repeat_of_it_is_run_once_whatever_asks_for_more() {
+    // Calliope's look at round 8: with --repeat-each, or a config's repeatEach, a test that
+    // failed in its second repeat read as caught, its repeats taken for one test. Run once
+    // (--repeat-each=1), it passes with the plant: no catch.
+    let body = "expect(planted && test.info().repeatEachIndex === 1).toBe(false)";
+    let (_folder, checkout, mut plants) =
+        playwright_plants(&[("asked", playwright_spec("", body))]);
+    fs::write(
+        checkout.path("repeats.config.mjs"),
+        "export default { testDir: '.', outputDir: './test-results', repeatEach: 2 }\n",
+    )
+    .unwrap();
+    let mut configured = plants[0].clone();
+    configured.name = "p: configured".into();
+    for word in &mut configured.runs[0].command {
+        if word.ends_with("plants.config.mjs") {
+            *word = word.replace("plants.config.mjs", "repeats.config.mjs");
+        }
+    }
+    plants[0].runs[0].command.push("--repeat-each=2".into());
+    plants.push(configured);
+    let (status, said) = driven(&checkout, &plants);
+    assert_eq!(fs::read_to_string(checkout.path("flag.mjs")).unwrap(), FLAG);
+    assert_eq!(status, 1, "{said}");
+    for name in ["asked", "configured"] {
+        assert!(
+            said.contains(&format!("MISSED           p: {name} (")),
             "{name}: {said}"
         );
     }

@@ -21,7 +21,8 @@
 //!   prints: its JSON report says no step of a test, and a test whose `beforeAll`
 //!   threw is `unexpected` there though its body never ran, where the reporter's
 //!   steps say which hook threw (Playwright 1.63, 2026-10-17). Each test is given one
-//!   attempt (`--retries=0`), and a run that asks for more is refused; a group that
+//!   attempt (`--retries=0`) and run once (`--repeat-each=1`), and a run that asks for
+//!   more attempts is refused; a group that
 //!   asks for retries of its own is given them over that, and the reporter says a
 //!   test run more than once (Sol's look at round 7).
 //! - Anything else, every other `cargo xtask …` among them, says no more than its
@@ -605,14 +606,19 @@ fn node_words(command: &[String], reporter: &str, report: &Path) -> Vec<String> 
 /// file says (`--retries=0`), so that the report's word on a test is of the run of it.
 /// A command that asks for retries is refused (`retried`); one that asks for none
 /// is given it once. A group's `test.describe.configure({ retries })` is over this
-/// word, and a test it runs again is no catch (the reporter's `why`).
+/// word, and a test it runs again is no catch (the reporter's `why`). Each test is
+/// run once too (`--repeat-each=1`, over the command's and the config's), its
+/// repeats being one test to the report (Calliope's look at round 8).
 fn playwright_words(command: &[String], reporter: &str) -> Vec<String> {
     let mut words: Vec<String> = Vec::new();
     let mut given = command.iter();
     while let Some(word) = given.next() {
-        if word == "--retries" {
+        if word == "--retries" || word == "--repeat-each" {
             given.next();
-        } else if !word.starts_with("--reporter=") && !word.starts_with("--retries=") {
+        } else if !["--reporter=", "--retries=", "--repeat-each="]
+            .iter()
+            .any(|option| word.starts_with(option))
+        {
             words.push(word.clone());
         }
     }
@@ -625,6 +631,7 @@ fn playwright_words(command: &[String], reporter: &str) -> Vec<String> {
         [
             format!("--reporter=list,{reporter}"),
             "--retries=0".to_owned(),
+            "--repeat-each=1".to_owned(),
         ],
     );
     words

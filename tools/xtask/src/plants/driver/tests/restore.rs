@@ -372,3 +372,43 @@ fn a_run_left_running_still_puts_its_plant_back_and_one_it_cannot_ends_the_run_n
     fs::remove_dir(context.path("src/a.rs")).unwrap();
     fs::remove_dir_all(copies_folder(&said)).unwrap();
 }
+
+#[cfg(unix)]
+#[test]
+fn a_plant_that_cannot_be_made_whole_names_a_file_it_could_not_put_back_and_its_copy() {
+    // Calliope's look at round 8: a plant of two files whose second write failed was
+    // put back by the drop alone, whose error went unsaid. Here the second file's copy
+    // is written over the first's (its path leads there), and the second file cannot be
+    // written: the first, put back from a copy that is not its own, is not as it was.
+    use std::os::unix::fs::{symlink, PermissionsExt};
+    let (_folder, context) = checkout();
+    let saved = tempfile::tempdir().unwrap();
+    let two = plant(
+        "p",
+        &[("src/a.rs", "one", "1"), ("src/b.rs", "three", "3")],
+        &[("x", false)],
+    );
+    let files = two.planted(&context).unwrap();
+    symlink(
+        saved.path().join("0-src_a.rs"),
+        saved.path().join("1-src_b.rs"),
+    )
+    .unwrap();
+    let b = context.path("src/b.rs");
+    fs::set_permissions(&b, fs::Permissions::from_mode(0o444)).unwrap();
+    let said = Planting::make(saved.path(), files)
+        .err()
+        .unwrap()
+        .to_string();
+    fs::set_permissions(&b, fs::Permissions::from_mode(0o644)).unwrap();
+    assert!(
+        said.starts_with(&format!(
+            "{} is not as it was: its copy is {}\nand before that: could not write {}: ",
+            context.path("src/a.rs").display(),
+            saved.path().join("0-src_a.rs").display(),
+            b.display()
+        )),
+        "{said}"
+    );
+    assert_eq!(text(&context, "src/b.rs"), "three\n", "never planted");
+}
