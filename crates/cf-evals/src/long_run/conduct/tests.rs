@@ -9,6 +9,7 @@ use crate::long_run::invariants::Evidence;
 use crate::long_run::ledger::{Conversation, Event, Item, Message, Participant, Task};
 use crate::long_run::look::{Process, Reading, Stranger, Unread};
 use crate::long_run::record::Record;
+use crate::long_run::stalls::held::{Asked, When};
 
 /// The choice of `disruption` at a `how` moment, lacking nothing.
 fn choice(disruption: Disruption, how: &'static str) -> Choice {
@@ -314,6 +315,7 @@ fn going() -> Going {
         final_unread: None,
         stalls: Stalls::default(),
         ledger: None,
+        prober: Box::new(Asked::default()),
         edge: Edge::default(),
     }
 }
@@ -508,7 +510,7 @@ fn a_chief_held_working_past_the_idle_limit_is_told_and_its_screen_kept_in_the_r
         .collect();
     assert_eq!(
         stalls,
-        ["@chief's window has read working for 21 min, since 2026-10-15T10:01:00.000Z: its screen and the ledger's last events are kept"]
+        ["@chief's window has read working for 21 min, since 2026-10-15T10:01:00.000Z: its screen, its processes and the ledger's last events are kept"]
     );
     assert!(
         log.contains("@chief's window has read working for 21 min"),
@@ -518,6 +520,11 @@ fn a_chief_held_working_past_the_idle_limit_is_told_and_its_screen_kept_in_the_r
     assert!(printed.is_empty(), "{printed}");
     assert!(run.keeper.breaks.is_empty());
     assert_eq!(run.stalls.kept[0].screen[1], "c");
+    // What the system says of its window's processes, taken once, when it was found.
+    let held = &run.stalls.kept[0].held;
+    assert_eq!(held.len(), 1, "{held:?}");
+    assert_eq!(held[0].when, When::Found);
+    assert_eq!(held[0].at, at(22, 0));
     let options = Options::of(&[]).unwrap();
     let staff = crate::long_run::staff::staff_of(
         &["claude".to_owned()],

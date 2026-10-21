@@ -516,6 +516,7 @@ version = "3.0.5"
 dependencies = [
  "cf-e2e",
  "jiff",
+ "portable-pty",
  "regex",
  "rusqlite",
  "serde_json",

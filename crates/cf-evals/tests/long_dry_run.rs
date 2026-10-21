@@ -381,17 +381,23 @@ fn a_chief_held_working_past_the_idle_limit_is_kept_with_its_screen_and_the_ledg
         .iter()
         .map(|file| file.file_name().unwrap().to_string_lossy().into_owned())
         .collect();
-    assert_eq!(kept.len(), 3, "{names:?}");
-    assert!(
-        names[0].ends_with("-long-chief-claude-staff-claude-ledger.db"),
-        "{names:?}"
-    );
-    assert!(
-        names[1].ends_with("-long-chief-claude-staff-claude.json"),
-        "{names:?}"
-    );
-    let report: Value = serde_json::from_str(&std::fs::read_to_string(&kept[1]).unwrap()).unwrap();
-    let markdown = std::fs::read_to_string(&kept[2]).unwrap();
+    let file = |end: &str| {
+        let at = names
+            .iter()
+            .position(|name| name.ends_with(end))
+            .unwrap_or_else(|| panic!("no file ending {end}: {names:?}"));
+        kept[at].clone()
+    };
+    let base = "-long-chief-claude-staff-claude";
+    // The report, the ledger and, on the Mac, a sample of the chief's program when its stall
+    // was found and once more at the end.
+    let samples = if cfg!(target_os = "macos") { 2 } else { 0 };
+    assert_eq!(kept.len(), 3 + samples, "{names:?}");
+    let ledger_file = file(&format!("{base}-ledger.db"));
+    let report: Value =
+        serde_json::from_str(&std::fs::read_to_string(file(&format!("{base}.json"))).unwrap())
+            .unwrap();
+    let markdown = std::fs::read_to_string(file(&format!("{base}.md"))).unwrap();
     assert_eq!(report["verdict"], "FAIL", "{report}");
     assert!(
         report["breaks"]
@@ -415,6 +421,26 @@ fn a_chief_held_working_past_the_idle_limit_is_kept_with_its_screen_and_the_ledg
     assert!(!chief["screen"].as_array().unwrap().is_empty(), "{chief}");
     assert!(!chief["events"].as_array().unwrap().is_empty(), "{chief}");
     assert_eq!(chief["cleared"], Value::Null, "{chief}");
+    // What the system said of its window's processes, when the stall was found and once more
+    // at the end: each process of its tree with its state, and the terminal's unread bytes.
+    let held = chief["held"]
+        .as_array()
+        .unwrap_or_else(|| panic!("no processes kept: {chief}"));
+    assert_eq!(held.len(), 2, "{chief}");
+    for (taken, when) in held.iter().zip(["found", "end"]) {
+        assert_eq!(taken["when"], when, "{taken}");
+        assert!(
+            !taken["processes"].as_array().unwrap().is_empty(),
+            "{taken}"
+        );
+        if cfg!(target_os = "macos") {
+            assert!(taken["unread"]["bytes"].is_u64(), "{taken}");
+            let sample = std::path::PathBuf::from(taken["sample"].as_str().unwrap());
+            assert_eq!(sample, file(&format!("{base}-chief-{when}-sample.txt")));
+            assert!(std::fs::metadata(&sample).unwrap().len() > 0, "{taken}");
+        }
+    }
+    assert!(markdown.contains("processes"), "{markdown}");
     // And as it was at the end, beside the ledger's last events.
     let at_the_end = stalls["atTheEnd"].as_array().unwrap();
     assert!(
@@ -427,9 +453,9 @@ fn a_chief_held_working_past_the_idle_limit_is_kept_with_its_screen_and_the_ledg
     // The ledger the app left, whole, beside the report: what the home held.
     assert_eq!(
         stalls["ledger"],
-        Value::from(kept[0].to_string_lossy().into_owned())
+        Value::from(ledger_file.to_string_lossy().into_owned())
     );
-    let ledger = rusqlite::Connection::open(&kept[0]).unwrap();
+    let ledger = rusqlite::Connection::open(&ledger_file).unwrap();
     let events: i64 = ledger
         .query_row("SELECT count(*) FROM event", [], |row| row.get(0))
         .unwrap();
@@ -448,7 +474,10 @@ fn a_chief_held_working_past_the_idle_limit_is_kept_with_its_screen_and_the_ledg
     for part in ["## Stalls", "has read working"] {
         assert!(!ran.stdout.contains(part), "{part} said: {ran}");
     }
-    for line in chief["screen"].as_array().unwrap() {
+    let processes = held
+        .iter()
+        .flat_map(|taken| taken["processes"].as_array().unwrap());
+    for line in chief["screen"].as_array().unwrap().iter().chain(processes) {
         let line = line.as_str().unwrap().trim();
         if line.len() > 8 {
             assert!(!ran.stdout.contains(line), "{line} said: {ran}");

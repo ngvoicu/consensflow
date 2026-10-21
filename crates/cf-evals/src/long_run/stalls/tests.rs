@@ -5,7 +5,8 @@ use serde_json::json;
 
 use super::*;
 use crate::long_run::ledger::Event;
-use crate::long_run::look::{Activity, Lane, OpenWindow, Windows};
+use crate::long_run::look::{Activity, Lane, OpenWindow, Process, Windows};
+use held::{Asked, Prober, Taken, When};
 
 /// 10:mm:ss of 2026-10-19 in milliseconds.
 fn at(minute: u32, second: u32) -> i64 {
@@ -102,7 +103,7 @@ fn a_lane_at_work_past_the_limit_is_kept_with_its_last_screen_until_it_reads_oth
         told,
         [(
             at(26, 0),
-            "@chief's window has read working for 21 min, since 2026-10-19T10:05:00.000Z: its screen and the ledger's last events are kept".to_owned()
+            "@chief's window has read working for 21 min, since 2026-10-19T10:05:00.000Z: its screen, its processes and the ledger's last events are kept".to_owned()
         )]
     );
     assert_eq!(stalls.kept.len(), 1);
@@ -248,7 +249,7 @@ fn at_an_end_not_reached_every_window_of_the_last_look_is_kept_and_the_ledgers_l
         vec![change(50, "chief", "working", None)],
     );
     let mut stalls = Stalls::default();
-    stalls.before_close(Some(&last));
+    stalls.before_close(Some(&last), &mut Asked::default());
     let closed = ledger(45, 59);
     assert!(stalls.after_close(true, Some(&closed)));
     assert_eq!(
@@ -286,7 +287,7 @@ fn at_an_end_not_reached_every_window_of_the_last_look_is_kept_and_the_ledgers_l
     );
     // A project that reached its end, with no stall, keeps none of it.
     let mut ended = Stalls::default();
-    ended.before_close(Some(&last));
+    ended.before_close(Some(&last), &mut Asked::default());
     assert!(!ended.after_close(false, Some(&closed)));
     assert!(ended.at_the_end.is_empty() && ended.events.is_empty());
     assert_eq!(ended.to_value(&timeline), Value::Null);
@@ -301,8 +302,163 @@ fn at_an_end_not_reached_every_window_of_the_last_look_is_kept_and_the_ledgers_l
         &look(21, vec![lane("chief", "working")], Vec::new(), Vec::new()),
         IDLE,
     );
-    stalled.before_close(Some(&last));
+    stalled.before_close(Some(&last), &mut Asked::default());
     assert!(stalled.after_close(false, Some(&closed)));
     assert!(stalled.at_the_end.is_empty());
     assert_eq!(stalled.events.len(), EVENTS);
+}
+
+#[test]
+fn a_stalled_windows_processes_are_taken_when_it_is_found_and_once_more_at_the_end_and_no_others() {
+    // The chief stalls at work; the worker's window, at work for a minute, does not; the
+    // second worker stalls and comes back to rest before the end.
+    let traced = vec![
+        change(5, "chief", "working", Some("prompt")),
+        change(5, "long-worker", "working", Some("prompt")),
+        change(30, "long-worker-2", "idle", None),
+    ];
+    let mut chief = window("chief", &["Working…"]);
+    chief.background = vec![Process {
+        pid: 4343,
+        command: "npm test".to_owned(),
+    }];
+    let mut worker = window("long-worker", &["Working…"]);
+    worker.pid = Some(5151);
+    let mut second = window("long-worker-2", &["Working…"]);
+    second.pid = Some(6161);
+    let at_work = |minute: u32, worker_state: &str, second_state: &str| {
+        look(
+            minute,
+            vec![
+                lane("chief", "working"),
+                lane("long-worker", worker_state),
+                lane("long-worker-2", second_state),
+            ],
+            vec![chief.clone(), worker.clone(), second.clone()],
+            traced.clone(),
+        )
+    };
+    let mut stalls = Stalls::default();
+    let mut prober = Asked::default();
+    for (minute, worker_state, second_state) in [
+        (6, "working", "starting"),
+        (26, "idle", "starting"),
+        (30, "idle", "starting"),
+        (31, "idle", "idle"),
+    ] {
+        let look = at_work(minute, worker_state, second_state);
+        stalls.look(&look, IDLE);
+        stalls.take(&look, &mut prober);
+    }
+    // Found at 10:26 (the chief) and 10:30 (the second worker, starting since 10:06 by the
+    // looks), each taken once then; the worker, at work for less than the limit, never.
+    assert_eq!(
+        prober.asked,
+        [
+            (4242, vec![4343], "chief-found".to_owned()),
+            (6161, vec![], "long-worker-2-found".to_owned()),
+        ]
+    );
+    // At the end the chief still reads at work: taken once more. The second worker came
+    // back to rest: not again.
+    let last = at_work(40, "idle", "idle");
+    stalls.look(&last, IDLE);
+    stalls.take(&last, &mut prober);
+    stalls.before_close(Some(&last), &mut prober);
+    assert_eq!(prober.asked.len(), 3, "{:?}", prober.asked);
+    assert_eq!(prober.asked[2], (4242, vec![4343], "chief-end".to_owned()));
+    let chief = &stalls.kept[0];
+    assert_eq!(chief.handle, "chief");
+    let when: Vec<(When, i64)> = chief.held.iter().map(|held| (held.when, held.at)).collect();
+    assert_eq!(when, [(When::Found, at(26, 0)), (When::End, at(40, 0))]);
+    assert_eq!(
+        chief.held[0].processes,
+        Ok(vec![
+            "4242 1 S - ttys001 pi".to_owned(),
+            "4343 4242 S - ttys001 bash".to_owned()
+        ])
+    );
+    assert_eq!(stalls.kept[1].held.len(), 1);
+    // The report keeps it: each process's line, the unread bytes, and the sample where one
+    // was taken.
+    let timeline = Timeline::new(at(0, 0));
+    let value = stalls.to_value(&timeline);
+    let held = &value["windows"][0]["held"];
+    assert_eq!(held[0]["when"], "found");
+    assert_eq!(held[1]["when"], "end");
+    assert_eq!(held[0]["processes"][0], "4242 1 S - ttys001 pi");
+    assert_eq!(held[0]["unread"]["bytes"], 0);
+    assert_eq!(held[0]["sample"], Value::Null);
+    let text = stalls.markdown(&timeline);
+    assert!(text.contains("\nIts processes (found, +26m00s):\n\n```\n4242 1 S - ttys001 pi\n4343 4242 S - ttys001 bash\n```\n"), "{text}");
+    assert!(
+        text.contains("\nUnread by the pane host: 0 bytes.\n"),
+        "{text}"
+    );
+}
+
+/// A prober that answers what a system with a secret in a command line, no unread count
+/// and a failed sample would.
+struct Telling;
+
+impl Prober for Telling {
+    fn take(&mut self, pid: u32, _: &[u32], _: &str) -> Taken {
+        Taken {
+            processes: Ok(vec![format!(
+                "{pid} 1 S - ttys001 pi --api-key sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789"
+            )]),
+            unread: Err(held::WINDOWS_UNREAD.to_owned()),
+            sample: Some(Err("the sample failed (Some(1)): no access".to_owned())),
+        }
+    }
+}
+
+#[test]
+fn what_the_system_says_of_a_stalled_window_is_kept_masked_and_what_it_could_not_say_with_why() {
+    let traced = vec![change(5, "chief", "working", None)];
+    let stalled =
+        |open: Vec<OpenWindow>| look(26, vec![lane("chief", "working")], open, traced.clone());
+    let mut stalls = Stalls::default();
+    let look = stalled(vec![window("chief", &["Working…"])]);
+    stalls.look(&look, IDLE);
+    stalls.take(&look, &mut Telling);
+    let held = &stalls.kept[0].held[0];
+    let line = &held.processes.as_ref().unwrap()[0];
+    assert!(
+        line.starts_with("4242 1 S - ttys001 pi --api-key "),
+        "{line}"
+    );
+    assert!(!line.contains("abcdefghijklmnopqrstuvwxyz"), "{line}");
+    assert_eq!(held.unread, Err(held::WINDOWS_UNREAD.to_owned()));
+    let value = stalls.to_value(&Timeline::new(at(0, 0)));
+    assert_eq!(
+        value["windows"][0]["held"][0]["unread"]["unknown"],
+        held::WINDOWS_UNREAD
+    );
+    assert_eq!(
+        value["windows"][0]["held"][0]["sample"]["notTaken"],
+        "the sample failed (Some(1)): no access"
+    );
+    // A stalled lane whose window the board shows not, or whose program the pane host
+    // named not: nothing asked, and why kept.
+    let mut prober = Asked::default();
+    let mut stalls = Stalls::default();
+    let look = stalled(Vec::new());
+    stalls.look(&look, IDLE);
+    stalls.take(&look, &mut prober);
+    let mut unnamed = window("chief", &["Working…"]);
+    unnamed.pid = None;
+    let mut named_none = Stalls::default();
+    let look = stalled(vec![unnamed]);
+    named_none.look(&look, IDLE);
+    named_none.take(&look, &mut prober);
+    assert!(prober.asked.is_empty(), "{:?}", prober.asked);
+    assert_eq!(
+        stalls.kept[0].held[0].processes,
+        Err("the board showed it no window".to_owned())
+    );
+    assert_eq!(
+        named_none.kept[0].held[0].processes,
+        Err("the pane host named no process of it".to_owned())
+    );
 }

@@ -130,6 +130,18 @@ impl Edge {
         Ok(kept)
     }
 
+    /// Where a sample of a stalled window's program is kept: `<name>-<label>-sample.txt` in
+    /// `folder` (the reports'), the folder made and the file the run's own, said only by
+    /// where it is. The system's `sample` writes it.
+    pub fn sample_file(&self, folder: &Path, name: &str, label: &str) -> Result<PathBuf> {
+        // One extension: what the edge masks is a name up to its first dot, known as the
+        // file's stem.
+        let file = folder.join(format!("{name}-{label}-sample.txt"));
+        self.knows_files(&[&file]);
+        files::make_dir(folder)?;
+        Ok(file)
+    }
+
     /// What stopped the run before it kept its report, as it leaves it for `cf-evals` to
     /// write on its error output: a usage's error a usage's still, the person's own words
     /// through [`Edge::shown`]; any other kept whole through [`Edge::shown`] in a file of

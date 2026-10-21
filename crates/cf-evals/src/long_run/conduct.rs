@@ -35,6 +35,7 @@ use super::play::{self, Outcome, Stagehand, Watch, With};
 use super::report::{file_name, ChiefKept, Kept, TIME_UP};
 use super::setup::{self, Cast};
 use super::stage::{self, Stage};
+use super::stalls::held::{Prober, System};
 use super::stalls::Stalls;
 use super::timeline::Timeline;
 use crate::measure::{chief_open_question, on_copy};
@@ -78,6 +79,8 @@ struct Going {
     /// The ledger the app left, to be copied beside the report where the stalls keep
     /// anything.
     ledger: Option<PathBuf>,
+    /// What asks the system of a stalled window's processes.
+    prober: Box<dyn Prober>,
     /// Where all the run says and keeps leaves it.
     edge: Edge,
 }
@@ -99,6 +102,7 @@ impl Going {
             let _ = floor.note(&said);
             self.timeline.add(at, "stall", said);
         }
+        self.stalls.take(&look, self.prober.as_mut());
         self.last = Some(look);
     }
 
@@ -298,6 +302,14 @@ fn run(words: &[String], out: &mut dyn Write, edge: &Edge) -> Result<i32> {
         final_unread: None,
         stalls: Stalls::default(),
         ledger: None,
+        prober: Box::new(System::new({
+            let (edge, folder) = (edge.clone(), options.reports.clone());
+            let name = file_name(started, &options.chief, &cast.names);
+            move |label| {
+                edge.sample_file(&folder, &name, label)
+                    .map_err(|failed| failed.to_string())
+            }
+        })),
         edge: edge.clone(),
     };
     for planned in &run.schedule.planned {
@@ -414,7 +426,8 @@ fn finish(
         }
     }
     read_once_more(run, floor, settings, || Stagehand::look(stage));
-    run.stalls.before_close(run.last.as_ref());
+    run.stalls
+        .before_close(run.last.as_ref(), run.prober.as_mut());
     let ledger = stage
         .rig()
         .ok()

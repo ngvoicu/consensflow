@@ -82,8 +82,9 @@
 //! tests turn on: `fake-agent`, `fake-codex`, `fake-devin`, `fake-opencode-2`,
 //! `fake-cf`, `liar-daemon` and the packaged smoke's `smoke-paste-reader`.
 
-// The one module that calls the system itself allows it, block by block: the live checks'
-// hold on a process they end (`live::members::descent`'s native calls).
+// The two modules that call the system themselves allow it, block by block: the live checks'
+// hold on a process they end (`live::members::descent`'s native calls), and the count a
+// terminal keeps of what its reader has not read (`terminal`).
 #![deny(unsafe_code)]
 
 pub mod agents_proof;
@@ -104,6 +105,7 @@ pub mod rollout;
 pub mod scratch_home;
 pub mod serial;
 mod stand_in;
+pub mod terminal;
 pub mod wire;
 
 pub use error::{Error, Result};

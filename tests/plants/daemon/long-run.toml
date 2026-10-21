@@ -3397,8 +3397,8 @@ runs = ["harness-claude-projection"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/record/project.rs"
-find = '        Some("user") => user(record),'
-replace = '        Some("user" | "api-request-blob") => user(record),'
+find = '        Some("user") => user(record, session),'
+replace = '        Some("user" | "api-request-blob") => user(record, session),'
 
 [[plant]]
 name = "long run 10: a chief that never came to rest after the owner's /compact is played, and the stall it is fails nothing (the Mac's run)"
@@ -3604,3 +3604,144 @@ runs = ["evals-long-run"]
 file = "crates/cf-evals/src/long_run/invariants/order.rs"
 find = "            !words.is_empty() && body.contains(&words) && words.contains(&answer)"
 replace = "            words.chars().count() >= PROGRESS && body.contains(&words) && words.contains(&answer)"
+
+# Round b6 (the Pi windows that froze in the 2-hour runs of 2026-10-19 and 2026-10-20): a
+# stalled window keeps what the system says of its processes, when it is found and once more at
+# the end if it still stalls: each process of its tree with its state, on the Mac a sample of
+# its program and its terminal's unread bytes (the terminal opened and closed in one call), on
+# Windows each thread's state and what it waits for.
+[[plant]]
+name = "long run stall: a stalled window's processes are never taken when it is found"
+meant = "a_stalled_windows_processes_are_taken_when_it_is_found_and_once_more_at_the_end_and_no_others"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/stalls.rs"
+find = '            .filter(|stall| stall.cleared.is_none() && stall.held.is_empty())'
+replace = '            .filter(|stall| stall.cleared.is_none() && stall.held.is_empty() && false)'
+[[plant]]
+name = "long run stall: a stalled window's processes are taken again at every look"
+meant = "a_stalled_windows_processes_are_taken_when_it_is_found_and_once_more_at_the_end_and_no_others"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/stalls.rs"
+find = '            .filter(|stall| stall.cleared.is_none() && stall.held.is_empty())'
+replace = '            .filter(|stall| stall.cleared.is_none())'
+[[plant]]
+name = 'long run stall: a window still stalled at the end is not taken again'
+meant = "a_stalled_windows_processes_are_taken_when_it_is_found_and_once_more_at_the_end_and_no_others"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/stalls.rs"
+find = '        self.take_at_end(last, prober);'
+replace = '        let _ = prober;'
+[[plant]]
+name = 'long run stall: a stall that came back to rest is taken again at the end'
+meant = "a_stalled_windows_processes_are_taken_when_it_is_found_and_once_more_at_the_end_and_no_others"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/stalls.rs"
+find = '            .filter(|stall| stall.cleared.is_none() && stall.last == look.at)'
+replace = '            .filter(|stall| stall.last <= look.at)'
+[[plant]]
+name = "long run stall: a process's line is kept unmasked, a key in its command line with it"
+meant = "what_the_system_says_of_a_stalled_window_is_kept_masked_and_what_it_could_not_say_with_why"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/stalls.rs"
+find = '                .map(|lines| lines.iter().map(|line| cut(line, 300, names)).collect())'
+replace = '                .map(|lines| lines)'
+[[plant]]
+name = 'long run stall: the report keeps nothing the system said of a stalled window'
+meant = "a_stalled_windows_processes_are_taken_when_it_is_found_and_once_more_at_the_end_and_no_others"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/stalls.rs"
+find = '                "held": stall.held.iter().map(Held::to_value).collect::<Vec<_>>(),'
+replace = '                "held": Vec::<Value>::new(),'
+[[plant]]
+name = "long run stall: the report's Markdown says nothing the system said of a stalled window"
+meant = "a_stalled_windows_processes_are_taken_when_it_is_found_and_once_more_at_the_end_and_no_others"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/stalls.rs"
+find = '            for held in &stall.held {'
+replace = '            for held in stall.held.iter().take(0) {'
+[[plant]]
+name = 'long run stall: a look that finds a stall asks nothing of the system'
+meant = "a_chief_held_working_past_the_idle_limit_is_told_and_its_screen_kept_in_the_report"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/conduct.rs"
+find = '        self.stalls.take(&look, self.prober.as_mut());'
+replace = '        let _ = &self.prober;'
+[[plant]]
+name = "long run stall: a window's tree is its program alone, a stopped job under it unseen"
+meant = "a_windows_tree_is_its_program_what_the_host_named_and_every_process_under_them"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/stalls/held.rs"
+find = '        next.extend(children.get(&at).into_iter().flatten());'
+replace = '        next.extend(children.get(&at).into_iter().flatten().take(0));'
+[[plant]]
+name = "long run stall: what the pane host named a window's tree runs is not asked, a job whose parent ended unseen"
+meant = "a_windows_tree_is_its_program_what_the_host_named_and_every_process_under_them"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/stalls/held.rs"
+find = '    let mut next: VecDeque<u32> = std::iter::once(pid).chain(others.iter().copied()).collect();'
+replace = '    let mut next: VecDeque<u32> = std::iter::once(pid).chain(others.iter().copied().take(0)).collect();'
+[[plant]]
+name = 'long run stall: a process with no terminal is read as having one, `??` its name'
+meant = "what_ps_says_is_each_process_with_its_parent_its_state_and_its_terminal"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/stalls/held.rs"
+find = '                tty: (!matches!(tty, "??" | "?" | "-")).then(|| tty.to_owned()),'
+replace = '                tty: Some(tty.to_owned()),'
+[[plant]]
+name = "long run stall: a Windows thread's wait is named for a state that is not waiting"
+meant = "a_windows_thread_is_said_by_its_state_and_what_it_waits_for_by_name_and_number"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/stalls/held.rs"
+find = '    if state == 5 {'
+replace = '    if state == 6 {'
+[[plant]]
+name = "long run stall: no sample of a stalled window's program is taken on the Mac"
+meant = "a_program_waiting_in_a_write_nobody_reads_and_one_stopped_are_told_apart"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/stalls/held.rs"
+find = '        let ran = Run::new("sample")'
+replace = '        let ran = Run::new("true")'
+[[plant]]
+name = "long run stall: the terminal's unread bytes are never asked, and read as none"
+meant = "a_program_waiting_in_a_write_nobody_reads_and_one_stopped_are_told_apart"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/stalls/held.rs"
+find = '    asked(terminal_of(listed, pid)?)'
+replace = '    terminal_of(listed, pid).map(|_| 0)'
+[[plant]]
+name = 'long run stall: the terminal asked is held open, and its reader never sees its program end'
+meant = "the_terminal_asked_is_closed_again_and_its_reader_sees_its_program_end"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/terminal.rs"
+find = '    drop(opened);'
+replace = '    std::mem::forget(opened);'

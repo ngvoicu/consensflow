@@ -5,9 +5,11 @@
 //! which kept a screen of it); and of every window, where the project did not reach its
 //! end (9). A stall is no break: there are no time limits on work, and a chief that plans
 //! for long is no fault. It is evidence: the window's last screen while it read so, the
-//! trace's last changes of its state, and the ledger's last events, kept in the local
-//! report; and the ledger itself, copied beside the report before the home goes (zeewin's
-//! went, ledger and all).
+//! trace's last changes of its state, the ledger's last events, and what the system says
+//! of its window's processes when it is found and, still stalled, at the run's end (each
+//! process's state, the call its program waits in, the terminal's unread bytes: [`held`]),
+//! kept in the local report; and the ledger itself, copied beside the report before the
+//! home goes (zeewin's went, ledger and all).
 //!
 //! How long a lane has read a state is the trace's word where its last change of that
 //! window is to the state (from the first of the changes in a row that kept it, whatever
@@ -21,9 +23,10 @@ use std::path::PathBuf;
 
 use serde_json::{json, Value};
 
+use self::held::{Prober, Taken, When};
 use super::invariants::iso;
 use super::ledger::Ledger;
-use super::look::Look;
+use super::look::{Look, OpenWindow};
 use super::mask::{cut, screen, Names};
 use super::timeline::Timeline;
 
@@ -56,6 +59,100 @@ pub struct Stall {
     pub changes: Vec<String>,
     /// The ledger's last events when it was found, masked.
     pub events: Vec<String>,
+    /// What the system said of its window's processes when it was found and, where it
+    /// still read so then, at the run's end.
+    pub held: Vec<Held>,
+}
+
+/// What the system said of a stalled window's processes, masked ([`held::Taken`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Held {
+    pub when: When,
+    pub at: i64,
+    /// A line for each process of its tree, or why there is none.
+    pub processes: Result<Vec<String>, String>,
+    /// The bytes its program wrote that the pane host has not read, or why not known.
+    pub unread: Result<u64, String>,
+    /// Where a sample of its program was kept, or why none was; none where the system has
+    /// no sampler.
+    pub sample: Option<Result<PathBuf, String>>,
+}
+
+impl Held {
+    /// What the system said of the window `window` at `at`, as `prober` asked it, masked.
+    fn of(
+        window: Option<&OpenWindow>,
+        handle: &str,
+        when: When,
+        at: i64,
+        prober: &mut dyn Prober,
+        names: &Names,
+    ) -> Self {
+        let taken = match window.map(|window| (window.pid, window)) {
+            None => Taken::none("the board showed it no window"),
+            Some((None, _)) => Taken::none("the pane host named no process of it"),
+            Some((Some(pid), window)) => {
+                let others: Vec<u32> = window.background.iter().map(|one| one.pid).collect();
+                prober.take(pid, &others, &format!("{handle}-{}", when.word()))
+            }
+        };
+        let masked = |why: String| cut(&why, 300, names);
+        Self {
+            when,
+            at,
+            processes: taken
+                .processes
+                .map(|lines| lines.iter().map(|line| cut(line, 300, names)).collect())
+                .map_err(masked),
+            unread: taken.unread.map_err(masked),
+            sample: taken.sample.map(|kept| kept.map_err(masked)),
+        }
+    }
+
+    fn to_value(&self) -> Value {
+        json!({
+            "when": self.when.word(),
+            "at": iso(self.at),
+            "processes": match &self.processes {
+                Ok(lines) => json!(lines),
+                Err(why) => json!({ "unknown": why }),
+            },
+            "unread": match &self.unread {
+                Ok(bytes) => json!({ "bytes": bytes }),
+                Err(why) => json!({ "unknown": why }),
+            },
+            "sample": match &self.sample {
+                Some(Ok(file)) => json!(file),
+                Some(Err(why)) => json!({ "notTaken": why }),
+                None => Value::Null,
+            },
+        })
+    }
+
+    fn markdown(&self, timeline: &Timeline) -> String {
+        let mut text = format!(
+            "\nIts processes ({}, {}):\n\n```\n",
+            self.when.word(),
+            timeline.offset(self.at)
+        );
+        match &self.processes {
+            Ok(lines) => text.push_str(&lines.join("\n")),
+            Err(why) => text.push_str(&format!("not known: {why}")),
+        }
+        text.push_str("\n```\n");
+        match &self.unread {
+            Ok(bytes) => text.push_str(&format!("\nUnread by the pane host: {bytes} bytes.\n")),
+            Err(why) => text.push_str(&format!("\nUnread by the pane host: not known ({why}).\n")),
+        }
+        match &self.sample {
+            Some(Ok(file)) => {
+                text.push_str(&format!("\nA sample of its program: {}\n", file.display()))
+            }
+            Some(Err(why)) => text.push_str(&format!("\nNo sample of its program: {why}\n")),
+            None => {}
+        }
+        text
+    }
 }
 
 /// A window of the last look before the app closed: whose, what its lane read, its last
@@ -150,7 +247,7 @@ impl Stalls {
             told.push((
                 look.at,
                 format!(
-                    "@{handle}'s window has read {state} for {} min, since {}: its screen and the ledger's last events are kept",
+                    "@{handle}'s window has read {state} for {} min, since {}: its screen, its processes and the ledger's last events are kept",
                     (look.at - since) / 60_000,
                     iso(since)
                 ),
@@ -165,13 +262,50 @@ impl Stalls {
                 screen: shown,
                 changes: changes(look, handle, &names),
                 events: events(&look.ledger, &names),
+                held: Vec::new(),
             });
         }
         told
     }
 
-    /// The windows of `last`, the last look before the app closed: kept for the end.
-    pub fn before_close(&mut self, last: Option<&Look>) {
+    /// What the system says, by `prober`, of the processes of each window `look` found
+    /// stalled: once, when the stall is found.
+    pub fn take(&mut self, look: &Look, prober: &mut dyn Prober) {
+        let names = Names::of(look);
+        for stall in self
+            .kept
+            .iter_mut()
+            .filter(|stall| stall.cleared.is_none() && stall.held.is_empty())
+        {
+            let window = look.window_of(&stall.handle);
+            let held = Held::of(window, &stall.handle, When::Found, look.at, prober, &names);
+            stall.held.push(held);
+        }
+    }
+
+    /// What the system says, by `prober`, of the processes of each window that `last`, the
+    /// last look before the app closes, still read stalled: once more, at the run's end.
+    fn take_at_end(&mut self, last: Option<&Look>, prober: &mut dyn Prober) {
+        let Some(look) = last else {
+            return;
+        };
+        let names = Names::of(look);
+        for stall in self
+            .kept
+            .iter_mut()
+            .filter(|stall| stall.cleared.is_none() && stall.last == look.at)
+        {
+            let window = look.window_of(&stall.handle);
+            let held = Held::of(window, &stall.handle, When::End, look.at, prober, &names);
+            stall.held.push(held);
+        }
+    }
+
+    /// The windows of `last`, the last look before the app closes, kept for the end; and of
+    /// each that still read stalled, what the system says of its processes by `prober`,
+    /// once more ([`Stalls::take_at_end`]).
+    pub fn before_close(&mut self, last: Option<&Look>, prober: &mut dyn Prober) {
+        self.take_at_end(last, prober);
         let Some(look) = last else {
             return;
         };
@@ -236,6 +370,7 @@ impl Stalls {
                 "screen": stall.screen,
                 "changes": stall.changes,
                 "events": stall.events,
+                "held": stall.held.iter().map(Held::to_value).collect::<Vec<_>>(),
             })).collect::<Vec<_>>(),
             "atTheEnd": self.at_the_end.iter().map(window).collect::<Vec<_>>(),
             "events": self.events,
@@ -275,6 +410,9 @@ impl Stalls {
             text.push_str(&block("screen", &stall.screen));
             text.push_str(&block("changes", &stall.changes));
             text.push_str(&block("events", &stall.events));
+            for held in &stall.held {
+                text.push_str(&held.markdown(timeline));
+            }
         }
         if !self.at_the_end.is_empty() {
             text.push_str("\n### The windows at the end\n");
@@ -355,5 +493,6 @@ fn events(ledger: &Ledger, names: &Names) -> Vec<String> {
     said
 }
 
+pub mod held;
 #[cfg(test)]
 mod tests;
