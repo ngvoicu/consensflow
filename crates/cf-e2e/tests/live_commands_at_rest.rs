@@ -233,7 +233,11 @@ fn type_keys(window: &Window, words: &str) -> Result {
 /// After a cancel, the human sends what Claude's input box holds (Enter, nothing typed):
 /// says what that was, a `/compact` put back alone, or nothing sent, and waits for Claude
 /// to be idle after it, the box empty for what comes after.
-fn send_what_the_box_holds(window: &Window, status: &Path, lines: &mut Vec<String>) -> Result {
+fn send_what_the_box_holds(
+    window: &Window,
+    status: &Path,
+    lines: &mut Vec<String>,
+) -> Result<bool> {
     let session = window.session().unwrap_or_default();
     let config = window.claude_config();
     let mark = claude::record(&config, &session).len();
@@ -255,28 +259,43 @@ fn send_what_the_box_holds(window: &Window, status: &Path, lines: &mut Vec<Strin
         ),
         None => "its input box held nothing that was sent".to_owned(),
     });
-    if !idle_and_held(status) {
+    let idle = idle_and_held(status);
+    if !idle {
         lines.push("Claude never held idle after what the box held was sent".to_owned());
     }
-    Ok(())
+    Ok(idle)
 }
 
 /// What came of one command: the lines that say it, whether the window read at rest, and
-/// whether it ran, Claude held idle after it and the owner's settings were kept (all but the
-/// daemon's reading of it).
+/// whether all but the daemon's settling of it came (it ran, Claude held idle after it, the
+/// owner's settings were kept, and the daemon read the window).
 struct Came {
     at_rest: bool,
-    ran_and_kept: bool,
+    all_but_settled: bool,
     lines: Vec<String>,
 }
 
+/// What a command came to: whether it was `done` (it ran, and Claude held idle after it),
+/// whether the daemon `read` its window and read it `settled`, whether the owner's settings
+/// were `kept`; and for the cancelled one, what came once what its box held was sent:
+/// whether Claude held idle after it, and whether the settings were still kept.
+struct Outcome {
+    done: bool,
+    read: bool,
+    settled: bool,
+    kept: bool,
+    after_the_box: Option<(bool, bool)>,
+}
+
 impl Came {
-    /// What came of a command that `done` (it ran, and Claude held idle after it), whose
-    /// record the daemon read `settled`, the owner's settings `kept`, said by `lines`.
-    fn of(done: bool, settled: bool, kept: bool, lines: Vec<String>) -> Self {
+    /// What came of a command whose outcome is `outcome`, said by `lines`.
+    fn of(outcome: &Outcome, lines: Vec<String>) -> Self {
+        let (idle, still) = outcome.after_the_box.unwrap_or((true, true));
+        let done = outcome.done && idle;
+        let kept = outcome.kept && still;
         Self {
-            at_rest: done && settled && kept,
-            ran_and_kept: done && kept,
+            at_rest: done && outcome.read && outcome.settled && kept,
+            all_but_settled: done && outcome.read && kept,
             lines,
         }
     }
@@ -319,10 +338,15 @@ fn prepare(window: &Window, status: &Path, command: Command) -> Result<bool> {
 /// daemon reads it; the owner's settings must be as they were.
 fn type_command(window: &Window, status: &Path, command: Command) -> Result<Came> {
     if !prepare(window, status, command)? {
+        let outcome = Outcome {
+            done: false,
+            read: false,
+            settled: false,
+            kept: true,
+            after_the_box: None,
+        };
         return Ok(Came::of(
-            false,
-            false,
-            true,
+            &outcome,
             vec![format!(
                 "what `{}` needs first did not come: {}",
                 command.name(),
@@ -397,24 +421,45 @@ fn type_command(window: &Window, status: &Path, command: Command) -> Result<Came
             config.join("settings.json").display()
         ));
     }
-    if command == Command::Cancelled {
-        send_what_the_box_holds(window, status, &mut lines)?;
-    }
-    Ok(Came::of(done, settled, kept, lines))
+    // What the cancelled one's box held, sent: Claude must hold idle after it too, and the
+    // owner's settings must still be as they were.
+    let after_the_box = if command == Command::Cancelled {
+        let idle = send_what_the_box_holds(window, status, &mut lines)?;
+        let still = settings_of(&config) == settings;
+        if kept && !still {
+            lines.push(format!(
+                "FAIL Claude changed the owner's settings once what the box held was sent, {}",
+                config.join("settings.json").display()
+            ));
+        }
+        Some((idle, still))
+    } else {
+        None
+    };
+    let outcome = Outcome {
+        done,
+        read: reading.is_some(),
+        settled,
+        kept,
+        after_the_box,
+    };
+    Ok(Came::of(&outcome, lines))
 }
 
 /// The check of `command` from what came of it: it holds where the window read at rest
 /// after it. For the one whose outcome is a finding (`cancelled`), it holds too where only
-/// the daemon's reading is unsettled: the command ran, Claude held idle after it, and the
-/// owner's settings were kept. A message before it that never answered, a command that
-/// never ran or never left Claude idle, and settings Claude changed fail it, finding or not
-/// (Calliope's review of compact-rest round 3).
+/// the daemon's settling of its reading is missing: the command ran, Claude held idle after
+/// it and after what its box held was sent, the owner's settings were kept throughout, and
+/// the daemon read the window. A message before it that never answered, a command that
+/// never ran or never left Claude idle, settings Claude changed, and a window the daemon
+/// could not read fail it, finding or not (Calliope's reviews of compact-rest round 3 and of
+/// round b7).
 fn check_of(command: Command, came: &Came) -> Check {
-    let finding = command.finding() && came.ran_and_kept && !came.at_rest;
+    let finding = command.finding() && came.all_but_settled && !came.at_rest;
     let said = if came.at_rest {
         "it ran, and the window is at rest after it"
     } else if finding {
-        "it ran, Claude held idle after it and the owner's settings were kept, but the window does not read at rest"
+        "it ran, Claude held idle after it, the owner's settings were kept and the daemon read the window, but the window does not read at rest"
     } else {
         "not at rest after it, or it never ran, or the owner's settings changed"
     };
@@ -541,43 +586,78 @@ mod tests {
     #[test]
     fn the_cancelled_finding_passes_only_where_it_ran_held_idle_and_kept_the_owners_settings() {
         // Every outcome of a command: whether it was done (it ran, and Claude held idle after
-        // it), whether the daemon read it settled, whether the owner's settings were kept.
-        for done in [false, true] {
-            for settled in [false, true] {
-                for kept in [false, true] {
-                    let came = Came::of(done, settled, kept, Vec::new());
-                    for command in Command::ALL {
-                        // At rest holds for any command; the finding (`cancelled`) holds too
-                        // where only the daemon's reading is unsettled. A prep message that
-                        // never answered, a command never done, or the settings changed
-                        // fail it all the same.
-                        let holds = (done && settled && kept)
-                            || (command == Command::Cancelled && done && kept);
-                        let check = check_of(command, &came);
-                        assert_eq!(
-                            check.ok, holds,
-                            "{command:?} done {done} settled {settled} kept {kept}: {}",
-                            check.detail
-                        );
+        // it), whether the daemon read its window, and read it settled, whether the owner's
+        // settings were kept; and for the cancelled one, whether Claude held idle once what
+        // its box held was sent, and the settings were still kept then.
+        let flags = [false, true];
+        let afters = [
+            None,
+            Some((true, true)),
+            Some((false, true)),
+            Some((true, false)),
+        ];
+        for done in flags {
+            for read in flags {
+                for settled in flags {
+                    for kept in flags {
+                        for after_the_box in afters {
+                            let outcome = Outcome {
+                                done,
+                                read,
+                                settled,
+                                kept,
+                                after_the_box,
+                            };
+                            let came = Came::of(&outcome, Vec::new());
+                            let (idle, still) = after_the_box.unwrap_or((true, true));
+                            let all_but_settled = done && read && kept && idle && still;
+                            for command in Command::ALL {
+                                // At rest holds for any command; the finding (`cancelled`)
+                                // holds too where only the daemon's settling is missing. A
+                                // prep message that never answered, a command never done,
+                                // the settings changed, Claude never idle after the box, or
+                                // a window the daemon never read fail it all the same.
+                                let holds = (all_but_settled && settled)
+                                    || (command == Command::Cancelled && all_but_settled);
+                                let check = check_of(command, &came);
+                                assert_eq!(
+                                    check.ok, holds,
+                                    "{command:?} {done} {read} {settled} {kept} {after_the_box:?}: {}",
+                                    check.detail
+                                );
+                            }
+                        }
                     }
                 }
             }
         }
-        let finding = check_of(Command::Cancelled, &Came::of(true, false, true, Vec::new()));
+        let outcome = |read: bool, kept: bool| Outcome {
+            done: true,
+            read,
+            settled: false,
+            kept,
+            after_the_box: Some((true, true)),
+        };
+        let finding = check_of(
+            Command::Cancelled,
+            &Came::of(&outcome(true, true), Vec::new()),
+        );
         assert!(
             finding.detail.starts_with("it ran, Claude held idle"),
             "{}",
             finding.detail
         );
-        let failed = check_of(
-            Command::Cancelled,
-            &Came::of(true, false, false, Vec::new()),
-        );
-        assert!(
-            failed.detail.starts_with("not at rest"),
-            "{}",
-            failed.detail
-        );
+        for (read, kept) in [(true, false), (false, true)] {
+            let failed = check_of(
+                Command::Cancelled,
+                &Came::of(&outcome(read, kept), Vec::new()),
+            );
+            assert!(
+                failed.detail.starts_with("not at rest"),
+                "{}",
+                failed.detail
+            );
+        }
     }
 
     #[test]

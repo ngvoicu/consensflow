@@ -206,6 +206,7 @@ impl Watcher {
             at,
             records,
             readings,
+            host: Some(rig.host_pid()),
             ledger,
             windows: Windows {
                 open,

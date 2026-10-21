@@ -481,6 +481,16 @@ fn a_chief_held_working_past_the_idle_limit_is_kept_with_its_screen_and_the_ledg
         .unwrap()
         .iter()
         .any(|moment| moment["kind"] == "stall"));
+    // The records read once more after the close, and said so: each reading held.
+    assert!(
+        report["timeline"].as_array().unwrap().iter().any(|moment| {
+            let text = moment["text"].as_str().unwrap_or_default();
+            moment["kind"] == "run"
+                && text.starts_with("the records were read once more after the close: ")
+                && text.ends_with(", 0 readings failed")
+        }),
+        "{report}"
+    );
     assert!(markdown.contains("\n## Stalls\n"), "{markdown}");
     assert!(
         markdown.contains("\n### The windows at the end\n"),

@@ -164,6 +164,9 @@ pub struct Look {
     /// How far the run read each record it reads ([`Reading`]), by the conversation's
     /// row. A record the look holds with none was read at the look.
     pub readings: BTreeMap<i64, Reading>,
+    /// The pane host's process as of the look (a restart of the app starts another), where
+    /// the app runs: what a stalled window's evidence samples beside its program.
+    pub host: Option<u32>,
 }
 
 /// How far the run read a conversation's own record: when its last reading that held

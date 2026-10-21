@@ -306,8 +306,8 @@ runs = ["compact-rest-live"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/tests/live_commands_at_rest.rs"
-find = '            ran_and_kept: done && kept,'
-replace = '            ran_and_kept: done,'
+find = '            all_but_settled: done && outcome.read && kept,'
+replace = '            all_but_settled: done && outcome.read,'
 [[plant]]
 name = 'compact-rest: the cancelled finding passes though the command never ran or Claude never held idle'
 meant = "the_cancelled_finding_passes_only_where_it_ran_held_idle_and_kept_the_owners_settings"
@@ -315,5 +315,38 @@ runs = ["compact-rest-live"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/tests/live_commands_at_rest.rs"
-find = '            ran_and_kept: done && kept,'
-replace = '            ran_and_kept: kept,'
+find = '            all_but_settled: done && outcome.read && kept,'
+replace = '            all_but_settled: outcome.read && kept,'
+
+# Round b9 (the review of b7): the finding holds only where the daemon read the window, and
+# Claude held idle and kept the settings once what the box held was sent.
+
+[[plant]]
+name = 'compact-rest: the cancelled finding passes though the daemon could not read the window'
+meant = "the_cancelled_finding_passes_only_where_it_ran_held_idle_and_kept_the_owners_settings"
+runs = ["compact-rest-live"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_commands_at_rest.rs"
+find = '            all_but_settled: done && outcome.read && kept,'
+replace = '            all_but_settled: done && kept,'
+
+[[plant]]
+name = 'compact-rest: the cancelled finding passes though Claude never held idle once the box was sent'
+meant = "the_cancelled_finding_passes_only_where_it_ran_held_idle_and_kept_the_owners_settings"
+runs = ["compact-rest-live"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_commands_at_rest.rs"
+find = '        let done = outcome.done && idle;'
+replace = '        let done = outcome.done;'
+
+[[plant]]
+name = 'compact-rest: the cancelled finding passes though Claude changed the settings once the box was sent'
+meant = "the_cancelled_finding_passes_only_where_it_ran_held_idle_and_kept_the_owners_settings"
+runs = ["compact-rest-live"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_commands_at_rest.rs"
+find = '        let kept = outcome.kept && still;'
+replace = '        let kept = outcome.kept;'

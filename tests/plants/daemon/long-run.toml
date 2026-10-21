@@ -3772,22 +3772,24 @@ replace = '        let _ = ledger;'
 # thread's leaf.
 [[plant]]
 name = 'long run stall: the pane host is never sampled beside a program whose terminal holds bytes it has not read'
-meant = "a_program_waiting_in_a_write_nobody_reads_and_one_stopped_are_told_apart"
+meant = "the_pane_host_is_the_looks_sampled_once_a_take_beside_bytes_unread_or_a_program_gone"
 runs = ["evals-lib-long-run"]
 
 [[plant.edit]]
-file = "crates/cf-evals/src/long_run/stalls/held.rs"
-find = '            (Ok(_), Some(host)) => sample(host, &format!("{label}-host"), &mut self.keep),'
-replace = '            (Ok(_), Some(_)) => None,'
+file = "crates/cf-evals/src/long_run/stalls.rs"
+find = '        let host = (unread || gone).then(|| taking.host(label)).flatten();'
+replace = '        let host = gone.then(|| taking.host(label)).flatten();'
+
 [[plant]]
 name = 'long run stall: the pane host is sampled beside a program that left nothing unread'
-meant = "a_program_waiting_in_a_write_nobody_reads_and_one_stopped_are_told_apart"
+meant = "the_pane_host_is_the_looks_sampled_once_a_take_beside_bytes_unread_or_a_program_gone"
 runs = ["evals-lib-long-run"]
 
 [[plant.edit]]
-file = "crates/cf-evals/src/long_run/stalls/held.rs"
-find = '            (Ok(bytes), _) if *bytes == 0 => None,'
-replace = '            (Ok(bytes), _) if *bytes == u64::MAX => None,'
+file = "crates/cf-evals/src/long_run/stalls.rs"
+find = '        let unread = matches!(taken.unread, Ok(bytes) if bytes > 0);'
+replace = '        let unread = matches!(taken.unread, Ok(_));'
+
 [[plant]]
 name = "long run stall: a window that stalls again writes its samples over its first stall's"
 meant = "a_window_that_stalls_again_keeps_each_stalls_samples_and_one_listing_serves_every_window_of_a_look"
@@ -3815,3 +3817,59 @@ runs = ["evals-lib-long-run"]
 file = "crates/cf-evals/src/long_run/stalls/held.rs"
 find = '            .arg(pid.to_string())'
 replace = '            .arg(std::process::id().to_string())'
+
+# Round b9 (the reviews of b7 and b8): the pane host sampled is the look's, once a take, and
+# beside a program gone while its window reads working; the timeline says the records were
+# read once more after the close.
+
+[[plant]]
+name = "long run stall: the pane host sampled is not the look's, and a restart leaves it a gone process"
+meant = "the_pane_host_is_the_looks_sampled_once_a_take_beside_bytes_unread_or_a_program_gone"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/stalls.rs"
+find = '                Some(host) => prober.sample_host(host, &format!("{label}-host")),'
+replace = '                Some(_) => prober.sample_host(100, &format!("{label}-host")),'
+
+[[plant]]
+name = "long run stall: the pane host sampled at the end is not the last look's"
+meant = "the_pane_host_is_the_looks_sampled_once_a_take_beside_bytes_unread_or_a_program_gone"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/stalls.rs"
+find = '''        let mut taking = Taking::new(prober, look.host);
+        let labels = self.labels(When::End);'''
+replace = '''        let mut taking = Taking::new(prober, None);
+        let labels = self.labels(When::End);'''
+
+[[plant]]
+name = 'long run stall: the pane host is sampled again for each window of a take'
+meant = "the_pane_host_is_the_looks_sampled_once_a_take_beside_bytes_unread_or_a_program_gone"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/stalls.rs"
+find = '            .get_or_insert_with(|| match host {'
+replace = '            .insert(match host {'
+
+[[plant]]
+name = 'long run stall: no pane host sample beside a program gone while its window reads working'
+meant = "the_pane_host_is_the_looks_sampled_once_a_take_beside_bytes_unread_or_a_program_gone"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/stalls.rs"
+find = '            state == "working" && taken.processes.as_ref().is_ok_and(|lines| lines.is_empty());'
+replace = '            state == "never" && taken.processes.as_ref().is_ok_and(|lines| lines.is_empty());'
+
+[[plant]]
+name = 'long run: the timeline counts the readings after the close that held as failed'
+meant = "the_timeline_says_the_records_were_read_once_more_after_the_close_and_how_many_readings_failed"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/conduct.rs"
+find = '        .filter(|reading| reading.failed.is_some())'
+replace = '        .filter(|reading| reading.failed.is_none())'

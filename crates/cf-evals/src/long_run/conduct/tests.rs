@@ -972,3 +972,36 @@ fn what_the_app_wrote_as_it_closed_is_held_in_the_last_look() {
     // And the end, which the project of this ledger did not reach.
     assert!(found.iter().any(|found| found.key == "9:end"), "{found:?}");
 }
+
+/// The records of `last`, the last look, as far as it read them: what a closed look holds
+/// where the records were not read again.
+fn records_of(last: Option<&Look>) -> Records {
+    last.map(|look| (look.records.clone(), look.every_reading()))
+        .unwrap_or_default()
+}
+
+#[test]
+fn the_timeline_says_the_records_were_read_once_more_after_the_close_and_how_many_readings_failed()
+{
+    // Calliope's review of round b7: `finish` takes the records read after the close in
+    // place of the last look's; what it says shows that reading ran, and a failed one.
+    let reading = |failed: Option<&str>| Reading {
+        through: failed.is_none().then_some(at(6, 0)),
+        failed: failed.map(str::to_owned),
+    };
+    let readings: BTreeMap<i64, Reading> = [
+        (7, reading(None)),
+        (9, reading(Some("its record could not be read: denied"))),
+    ]
+    .into_iter()
+    .collect();
+    assert_eq!(
+        read_again(&readings),
+        "the records were read once more after the close: 2 conversations, 1 reading failed"
+    );
+    let one: BTreeMap<i64, Reading> = [(7, reading(None))].into_iter().collect();
+    assert_eq!(
+        read_again(&one),
+        "the records were read once more after the close: 1 conversation, 0 readings failed"
+    );
+}

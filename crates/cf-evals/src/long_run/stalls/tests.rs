@@ -5,6 +5,8 @@ use serde_json::json;
 
 use super::*;
 use crate::long_run::ledger::Event;
+use std::path::PathBuf;
+
 use crate::long_run::look::{Activity, Lane, OpenWindow, Process, Windows};
 use held::{Asked, Prober, Taken, When};
 
@@ -418,8 +420,11 @@ impl Prober for Telling {
             )]),
             unread: Err(held::WINDOWS_UNREAD.to_owned()),
             sample: Some(Err("the sample failed (Some(1)): no access".to_owned())),
-            host: Some(Err("the pane host's process is not known".to_owned())),
         }
+    }
+
+    fn sample_host(&mut self, _: u32, _: &str) -> Option<Result<PathBuf, String>> {
+        Some(Err("the sample failed (Some(1)): no access".to_owned()))
     }
 }
 
@@ -552,5 +557,100 @@ fn a_window_that_stalls_again_keeps_each_stalls_samples_and_one_listing_serves_e
             vec!["long-worker-1-found-sample.txt"],
             vec!["chief-2-found-sample.txt", "chief-2-end-sample.txt"],
         ]
+    );
+}
+
+#[test]
+fn the_pane_host_is_the_looks_sampled_once_a_take_beside_bytes_unread_or_a_program_gone() {
+    // Calliope's review of round b8: the pane host's process was taken once, and a restart
+    // of the app (Compact, Restart, DevinCut) starts another; each window that left bytes
+    // unread had the host sampled again; and a window whose program is gone while it reads
+    // working, the pane host's own proof path, had none.
+    let traced = vec![
+        change(5, "chief", "working", None),
+        change(5, "long-worker", "working", None),
+        change(5, "long-worker-2", "starting", None),
+    ];
+    let mut worker = window("long-worker", &["Working…"]);
+    worker.pid = Some(5151);
+    let mut second = window("long-worker-2", &["Starting…"]);
+    second.pid = Some(6161);
+    let open = vec![window("chief", &["Working…"]), worker, second];
+    let lanes = || {
+        vec![
+            lane("chief", "working"),
+            lane("long-worker", "working"),
+            lane("long-worker-2", "starting"),
+        ]
+    };
+    let mut found = look(26, lanes(), open.clone(), traced.clone());
+    found.host = Some(100);
+    let mut stalls = Stalls::default();
+    let mut prober = Asked {
+        unread: 1024,
+        ..Asked::default()
+    };
+    stalls.look(&found, IDLE);
+    stalls.take(&found, &mut prober);
+    // Three windows found, two of them with bytes unread (the third's too, but it reads
+    // starting with its program there): one sample of the host for the take, the first
+    // window's, every entry pointing at it.
+    assert_eq!(prober.hosts, [(100, "chief-1-found-host".to_owned())]);
+    let hosts: Vec<Option<Result<PathBuf, String>>> = stalls
+        .kept
+        .iter()
+        .map(|stall| stall.held[0].host.clone())
+        .collect();
+    let file = Some(Ok(PathBuf::from("chief-1-found-host-sample.txt")));
+    assert_eq!(hosts, [file.clone(), file.clone(), file]);
+    // The app restarted: the last look's pane host is another process. Nothing unread now,
+    // and the second worker's program gone while it reads starting, the chief's while it
+    // reads working: the host sampled for the chief alone, the new one.
+    let mut last = look(40, lanes(), open, traced);
+    last.host = Some(200);
+    prober.unread = 0;
+    prober.gone = vec![4242, 6161];
+    stalls.look(&last, IDLE);
+    stalls.before_close(Some(&last), &mut prober);
+    assert_eq!(
+        prober.hosts,
+        [
+            (100, "chief-1-found-host".to_owned()),
+            (200, "chief-1-end-host".to_owned())
+        ]
+    );
+    let ends: Vec<Option<Result<PathBuf, String>>> = stalls
+        .kept
+        .iter()
+        .map(|stall| stall.held[1].host.clone())
+        .collect();
+    assert_eq!(
+        ends,
+        [
+            Some(Ok(PathBuf::from("chief-1-end-host-sample.txt"))),
+            None,
+            None
+        ]
+    );
+    // Where the look knew no pane host, why is kept.
+    let mut unknown = Stalls::default();
+    let mut orphan = look(
+        26,
+        vec![lane("chief", "working")],
+        vec![window("chief", &["Working…"])],
+        vec![change(5, "chief", "working", None)],
+    );
+    orphan.host = None;
+    unknown.look(&orphan, IDLE);
+    unknown.take(
+        &orphan,
+        &mut Asked {
+            unread: 1,
+            ..Asked::default()
+        },
+    );
+    assert_eq!(
+        unknown.kept[0].held[0].host,
+        Some(Err("the pane host's process is not known".to_owned()))
     );
 }

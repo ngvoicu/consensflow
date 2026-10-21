@@ -190,7 +190,7 @@ const TAKEN: [(&str, &str, &str); 57] = [
     ),
     (
         "long_run/stalls.rs",
-        "asking.take(pid, &others, label)",
+        "taking.take(pid, &others, label)",
         "the same",
     ),
     (

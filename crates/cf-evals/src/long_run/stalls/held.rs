@@ -14,9 +14,11 @@
 //!   (its `wchan` is always `-`), so a `sample` of the program, kept in a file beside the
 //!   report, says where each of its threads is; and the terminal's unread bytes, asked of
 //!   the program's terminal ([`cf_e2e::terminal::unread`]). Where the program wrote bytes
-//!   the pane host has not read, a second sample, of the pane host (the process that holds
-//!   the windows' terminals and reads them, `cf-panes`' `output_end`), says why it is not
-//!   reading: its reader thread on the pane table's lock, gone, or in the middle of a read.
+//!   the pane host has not read, or is gone while its window still reads working (the pane
+//!   host's own proof that a program went), a sample of the pane host (the process that
+//!   holds the windows' terminals and reads them, `cf-panes`' `output_end`; the one of the
+//!   look, a restart of the app starting another), once for all the windows a look takes,
+//!   says why: its reader thread on the pane table's lock, gone, or in the middle of a read.
 //!   In a sample of a second, a program blocked in its write shows the `write` leaf on its
 //!   main thread at the full count of samples; an idle Node program, `kevent` under
 //!   `uv__io_poll`.
@@ -76,9 +78,6 @@ pub struct Taken {
     /// Where a sample of its program's threads was kept, or why none was; none where the
     /// system has no sampler.
     pub sample: Option<Result<PathBuf, String>>,
-    /// Where its program wrote bytes the pane host has not read: where a sample of the pane
-    /// host was kept, or why none was; none otherwise.
-    pub host: Option<Result<PathBuf, String>>,
 }
 
 impl Taken {
@@ -88,7 +87,6 @@ impl Taken {
             processes: Err(why.to_owned()),
             unread: Err(why.to_owned()),
             sample: None,
-            host: None,
         }
     }
 }
@@ -104,9 +102,12 @@ pub trait Prober {
     /// What the system says now of the window's tree, as `listed` lists it: the program
     /// `pid` the pane host opened it on, the processes `others` the host named its tree
     /// runs, and every one under them; a sample of the program kept under `label`
-    /// (`chief-1-found`), and where the program wrote bytes the pane host has not read, a
-    /// sample of the pane host under `{label}-host`.
+    /// (`chief-1-found`).
     fn take(&mut self, listed: &Listing, pid: u32, others: &[u32], label: &str) -> Taken;
+
+    /// A sample of the pane host, the process `host`, kept under `label`
+    /// (`chief-1-found-host`); none where the system has no sampler.
+    fn sample_host(&mut self, host: u32, label: &str) -> Option<Result<PathBuf, String>>;
 }
 
 /// A process as the system lists it: its number, its parent's, its terminal (where it
@@ -313,8 +314,6 @@ Get-CimInstance Win32_Thread | ForEach-Object { 'T {0} {1} {2}' -f $_.ProcessHan
 pub struct System {
     /// Where a sample is kept, and the name it begins with: the report's.
     keep: Box<Keep>,
-    /// The pane host's process, where it is known.
-    host: Option<u32>,
 }
 
 /// What says where a sample of `label` is kept, or why it cannot be.
@@ -322,7 +321,7 @@ type Keep = dyn FnMut(&str) -> Result<PathBuf, String>;
 
 /// How a system is asked for its processes: the program, its words, and what reads its
 /// answer.
-type Asking = (
+type Lister = (
     &'static str,
     &'static [&'static str],
     fn(&str) -> Vec<Listed>,
@@ -330,14 +329,10 @@ type Asking = (
 
 impl System {
     /// The system's word, a sample of `label` kept where `keep` says (the run's edge
-    /// makes the folder and knows the file), the pane host's process `host` where known.
-    pub fn new(
-        keep: impl FnMut(&str) -> Result<PathBuf, String> + 'static,
-        host: Option<u32>,
-    ) -> Self {
+    /// makes the folder and knows the file).
+    pub fn new(keep: impl FnMut(&str) -> Result<PathBuf, String> + 'static) -> Self {
         Self {
             keep: Box::new(keep),
-            host,
         }
     }
 }
@@ -359,18 +354,15 @@ impl Prober for System {
             Err(why) => Err(format!("the system's list could not be read: {why}")),
         };
         let program = sample(pid, label, &mut self.keep);
-        let host = match (&unread, self.host) {
-            (Ok(bytes), _) if *bytes == 0 => None,
-            (Err(_), _) => None,
-            (Ok(_), Some(host)) => sample(host, &format!("{label}-host"), &mut self.keep),
-            (Ok(_), None) => Some(Err("the pane host's process is not known".to_owned())),
-        };
         Taken {
             processes,
             unread,
             sample: program,
-            host,
         }
+    }
+
+    fn sample_host(&mut self, host: u32, label: &str) -> Option<Result<PathBuf, String>> {
+        sample(host, label, &mut self.keep)
     }
 }
 
@@ -381,7 +373,7 @@ const ASKING: Duration = Duration::from_secs(120);
 /// The system's list of every process: `ps` on Unix, the PowerShell of [`WINDOWS_SCRIPT`]
 /// on Windows; or why it could not be had.
 fn list() -> Result<Vec<Listed>, String> {
-    let (program, args, parse): Asking = if cfg!(windows) {
+    let (program, args, parse): Lister = if cfg!(windows) {
         (
             "powershell",
             &["-NoProfile", "-NonInteractive", "-Command", WINDOWS_SCRIPT],
@@ -464,15 +456,22 @@ fn sample(pid: u32, label: &str, keep: &mut Keep) -> Option<Result<PathBuf, Stri
     }))
 }
 
-/// A prober of tests: it keeps what it was asked (the program, the others, the label) and
-/// how many times it listed, and answers each time with the program's line and its
-/// children's, none of them unread, and a sample named by its label.
+/// A prober of tests: it keeps what it was asked (the program, the others, the label), how
+/// many times it listed, and each sample of the pane host (its process and label); it
+/// answers each time with the program's line and its children's (none where the program
+/// is one of `gone`), `unread` bytes unread, and samples named by their labels.
 #[cfg(test)]
 #[derive(Debug, Default)]
 pub struct Asked {
     pub asked: Vec<(u32, Vec<u32>, String)>,
     /// How many times the system's list was asked.
     pub lists: usize,
+    /// Each sample of the pane host: its process, and the label it was kept under.
+    pub hosts: Vec<(u32, String)>,
+    /// What each program wrote that the pane host has not read.
+    pub unread: u64,
+    /// The programs the system lists no more.
+    pub gone: Vec<u32>,
 }
 
 #[cfg(test)]
@@ -484,18 +483,27 @@ impl Prober for Asked {
 
     fn take(&mut self, _: &Listing, pid: u32, others: &[u32], label: &str) -> Taken {
         self.asked.push((pid, others.to_vec(), label.to_owned()));
-        let mut lines = vec![format!("{pid} 1 S - ttys001 pi")];
-        lines.extend(
-            others
-                .iter()
-                .map(|other| format!("{other} {pid} S - ttys001 bash")),
-        );
+        let lines = if self.gone.contains(&pid) {
+            Vec::new()
+        } else {
+            std::iter::once(format!("{pid} 1 S - ttys001 pi"))
+                .chain(
+                    others
+                        .iter()
+                        .map(|other| format!("{other} {pid} S - ttys001 bash")),
+                )
+                .collect()
+        };
         Taken {
             processes: Ok(lines),
-            unread: Ok(0),
+            unread: Ok(self.unread),
             sample: Some(Ok(PathBuf::from(format!("{label}-sample.txt")))),
-            host: None,
         }
+    }
+
+    fn sample_host(&mut self, host: u32, label: &str) -> Option<Result<PathBuf, String>> {
+        self.hosts.push((host, label.to_owned()));
+        Some(Ok(PathBuf::from(format!("{label}-sample.txt"))))
     }
 }
 

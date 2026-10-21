@@ -103,13 +103,10 @@ fn a_windows_tree_is_its_program_what_the_host_named_and_every_process_under_the
     );
 }
 
-/// The system's prober, its samples kept in `folder`, the pane host's process `host`.
-fn system(folder: &std::path::Path, host: Option<u32>) -> System {
+/// The system's prober, its samples kept in `folder`.
+fn system(folder: &std::path::Path) -> System {
     let folder = folder.to_owned();
-    System::new(
-        move |label| Ok(folder.join(format!("{label}.sample.txt"))),
-        host,
-    )
+    System::new(move |label| Ok(folder.join(format!("{label}.sample.txt"))))
 }
 
 /// The first thread's block of a `sample`'s call graph (the main thread's): its header,
@@ -140,11 +137,14 @@ fn main_thread(said: &str) -> (String, u64, Vec<(usize, u64, String)>) {
 }
 
 /// The function of the deepest frame of the main thread at (nearly) every sample, and the
-/// one above it: where the program waited the whole second.
+/// one above it: where the program waited the whole second. Nothing where the sample's first
+/// thread is not the main thread, or there is no sample.
 #[cfg(target_os = "macos")]
 fn waits_in(said: &str) -> (String, String) {
     let (header, total, frames) = main_thread(said);
-    assert!(header.contains("main-thread"), "{header}");
+    if !header.contains("main-thread") {
+        return (String::new(), String::new());
+    }
     let full: Vec<&(usize, u64, String)> = frames
         .iter()
         .filter(|(_, count, _)| count * 10 >= total * 9)
@@ -222,8 +222,7 @@ fn a_program_waiting_in_a_write_nobody_reads_and_one_stopped_are_told_apart() {
     );
     let mut idle = window("node", &["-e", "setInterval(() => {}, 1000)"]);
     let mut stopper = window("/bin/sh", &["-c", "set -m; cat & wait"]);
-    // The pane host's stand-in, whose sample is taken beside a program that wrote bytes it
-    // has not read.
+    // The pane host's stand-in, sampled as the evidence samples the pane host.
     let mut host = cf_e2e::process::Run::new("sleep")
         .arg("120")
         .inheriting_env()
@@ -234,18 +233,19 @@ fn a_program_waiting_in_a_write_nobody_reads_and_one_stopped_are_told_apart() {
         idle.child.process_id().unwrap(),
         stopper.child.process_id().unwrap(),
     );
-    let mut system = system(folder.path(), Some(host.id()));
+    let mut system = system(folder.path());
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
     let (held, rested, taken) = loop {
         let listed = system.list();
         let held = system.take(&listed, writing, &[], "writer-1-found");
         let rested = system.take(&listed, resting, &[], "idle-1-found");
         let taken = system.take(&listed, stopping, &[], "stopped-1-found");
+        // Waited for on all that is asserted after: the writer asleep with bytes unread, the
+        // job stopped, and each Node's main thread where the assertions want it.
         let waits = state_in(&line_of(&held, writing)).starts_with('S')
             && (!cfg!(target_os = "macos") || held.unread.as_ref().is_ok_and(|bytes| *bytes > 0));
         let stopped = taken.processes.as_ref().unwrap().len() == 2;
-        let started = !cfg!(target_os = "macos") || sampled(&rested).contains("uv__io_poll");
-        if (waits && stopped && started) || std::time::Instant::now() > deadline {
+        if (waits && stopped && settled(&held, &rested)) || std::time::Instant::now() > deadline {
             break (held, rested, taken);
         }
         std::thread::sleep(std::time::Duration::from_millis(200));
@@ -253,7 +253,6 @@ fn a_program_waiting_in_a_write_nobody_reads_and_one_stopped_are_told_apart() {
     let _ = writer.child.kill();
     let _ = idle.child.kill();
     let _ = stopper.child.kill();
-    host.kill();
     // The writer asleep in its write, the terminal's queue full and unread (macOS says how
     // much, and where its program and the pane host wait); the other's job stopped, under
     // its program.
@@ -277,20 +276,41 @@ fn a_program_waiting_in_a_write_nobody_reads_and_one_stopped_are_told_apart() {
         assert_eq!((leaf.as_str(), above.as_str()), ("write", "uv__try_write"));
         let (leaf, above) = waits_in(&sampled(&rested));
         assert_eq!((leaf.as_str(), above.as_str()), ("kevent", "uv__io_poll"));
-        // The pane host sampled beside the writer, whose bytes it has not read; not beside
-        // the idle one, which left none.
-        let host = held.host.clone().unwrap().unwrap();
-        assert_eq!(host, folder.path().join("writer-1-found-host.sample.txt"));
-        assert!(std::fs::metadata(&host).unwrap().len() > 0);
         assert_eq!(rested.unread, Ok(0));
-        assert_eq!(rested.host, None);
     }
     #[cfg(not(target_os = "macos"))]
     {
         assert_eq!(held.unread, Err(LINUX_UNREAD.to_owned()));
-        assert_eq!((held.sample, held.host), (None, None));
+        assert_eq!(held.sample, None);
         let _ = rested;
     }
+    // The pane host's stand-in sampled as the pane host is: on macOS, beside the program's.
+    let sampled_host = system.sample_host(host.id(), "writer-1-found-host");
+    host.kill();
+    if cfg!(target_os = "macos") {
+        let file = sampled_host.unwrap().unwrap();
+        assert_eq!(file, folder.path().join("writer-1-found-host.sample.txt"));
+        assert!(std::fs::metadata(&file).unwrap().len() > 0);
+    } else {
+        assert_eq!(sampled_host, None);
+    }
+}
+
+/// Whether each Node's main thread is where the assertions want it: the writer in `write`
+/// under `uv__try_write`, the idle one in `kevent` under `uv__io_poll`, the whole second.
+#[cfg(target_os = "macos")]
+fn settled(held: &Taken, rested: &Taken) -> bool {
+    let wants = |taken: &Taken, leaf: &str, above: &str| {
+        let (found, parent) = waits_in(&sampled(taken));
+        found == leaf && parent == above
+    };
+    wants(held, "write", "uv__try_write") && wants(rested, "kevent", "uv__io_poll")
+}
+
+/// No sample to read off this system.
+#[cfg(all(unix, not(target_os = "macos")))]
+fn settled(_: &Taken, _: &Taken) -> bool {
+    true
 }
 
 /// What the sample `taken` kept says; nothing where none was kept.
@@ -335,7 +355,7 @@ fn the_terminal_asked_is_closed_again_and_its_reader_sees_its_program_end() {
     let mut reader = pair.master.try_clone_reader().unwrap();
     assert_eq!(holding(), 0, "the test holds its program's terminal");
     let pid = child.process_id().unwrap();
-    let mut system = system(folder.path(), None);
+    let mut system = system(folder.path());
     let listed = system.list();
     let taken = system.take(&listed, pid, &[], "ended-1-found");
     if cfg!(target_os = "macos") {
@@ -383,7 +403,7 @@ fn a_program_waiting_in_a_write_nobody_reads_and_one_stopped_are_told_apart() {
         .creation_flags(SUSPENDED)
         .spawn()
         .unwrap();
-    let mut system = system(folder.path(), Some(std::process::id()));
+    let mut system = system(folder.path());
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
     let held = loop {
         let listed = system.list();
@@ -408,5 +428,5 @@ fn a_program_waiting_in_a_write_nobody_reads_and_one_stopped_are_told_apart() {
     let pauses = line_of(&taken, stopped.id());
     assert!(pauses.contains("Waiting/Suspended(5)"), "{pauses}");
     assert_eq!(held.unread, Err(WINDOWS_UNREAD.to_owned()));
-    assert_eq!((held.sample, held.host), (None, None));
+    assert_eq!(held.sample, None);
 }

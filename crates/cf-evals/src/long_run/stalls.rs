@@ -82,17 +82,22 @@ pub struct Held {
 }
 
 /// What a take asks of the system once, for every window it takes: the list of every
-/// process, asked when the first window needs it.
-struct Asking<'p> {
+/// process, asked when the first window needs it; and a sample of the pane host, the look's
+/// (`host`), taken when the first window needs it and pointed at by every window after.
+struct Taking<'p> {
     prober: &'p mut dyn Prober,
     listed: Option<Listing>,
+    host: Option<u32>,
+    hosted: Option<Option<Result<PathBuf, String>>>,
 }
 
-impl<'p> Asking<'p> {
-    fn new(prober: &'p mut dyn Prober) -> Self {
+impl<'p> Taking<'p> {
+    fn new(prober: &'p mut dyn Prober, host: Option<u32>) -> Self {
         Self {
             prober,
             listed: None,
+            host,
+            hosted: None,
         }
     }
 
@@ -101,18 +106,32 @@ impl<'p> Asking<'p> {
         let listed = self.listed.get_or_insert_with(|| self.prober.list());
         self.prober.take(listed, pid, others, label)
     }
+
+    /// The take's sample of the pane host: taken the first time, kept as `{label}-host`.
+    fn host(&mut self, label: &str) -> Option<Result<PathBuf, String>> {
+        let (prober, host) = (&mut self.prober, self.host);
+        self.hosted
+            .get_or_insert_with(|| match host {
+                Some(host) => prober.sample_host(host, &format!("{label}-host")),
+                None => Some(Err("the pane host's process is not known".to_owned())),
+            })
+            .clone()
+    }
 }
 
 impl Held {
-    /// What the system said of the window `window` at `at`, as `asking` asked it, its
-    /// samples kept as `label` (`chief-1-found`: the stall's handle, which of that handle's
-    /// stalls it is, and when), masked.
+    /// What the system said of the window `window` of a stall that reads `state`, at `at`,
+    /// as `taking` asked it, its samples kept as `label` (`chief-1-found`: the stall's
+    /// handle, which of that handle's stalls it is, and when), masked. The pane host is
+    /// sampled beside a program that wrote bytes it has not read, and beside a window still
+    /// reading working whose program the system lists no more (the pane host's own proof
+    /// that a program went).
     fn of(
         window: Option<&OpenWindow>,
-        label: &str,
+        (label, state): (&str, &str),
         when: When,
         at: i64,
-        asking: &mut Asking<'_>,
+        taking: &mut Taking<'_>,
         names: &Names,
     ) -> Self {
         let taken = match window.map(|window| (window.pid, window)) {
@@ -120,9 +139,13 @@ impl Held {
             Some((None, _)) => Taken::none("the pane host named no process of it"),
             Some((Some(pid), window)) => {
                 let others: Vec<u32> = window.background.iter().map(|one| one.pid).collect();
-                asking.take(pid, &others, label)
+                taking.take(pid, &others, label)
             }
         };
+        let unread = matches!(taken.unread, Ok(bytes) if bytes > 0);
+        let gone =
+            state == "working" && taken.processes.as_ref().is_ok_and(|lines| lines.is_empty());
+        let host = (unread || gone).then(|| taking.host(label)).flatten();
         let masked = |why: String| cut(&why, 300, names);
         Self {
             when,
@@ -133,7 +156,7 @@ impl Held {
                 .map_err(masked),
             unread: taken.unread.map_err(masked),
             sample: taken.sample.map(|kept| kept.map_err(masked)),
-            host: taken.host.map(|kept| kept.map_err(masked)),
+            host: host.map(|kept| kept.map_err(masked)),
         }
     }
 
@@ -315,7 +338,7 @@ impl Stalls {
     /// stalled: once, when the stall is found.
     pub fn take(&mut self, look: &Look, prober: &mut dyn Prober) {
         let names = Names::of(look);
-        let mut asking = Asking::new(prober);
+        let mut taking = Taking::new(prober, look.host);
         let labels = self.labels(When::Found);
         for (stall, label) in self
             .kept
@@ -324,7 +347,14 @@ impl Stalls {
             .filter(|(stall, _)| stall.cleared.is_none() && stall.held.is_empty())
         {
             let window = look.window_of(&stall.handle);
-            let held = Held::of(window, &label, When::Found, look.at, &mut asking, &names);
+            let held = Held::of(
+                window,
+                (&label, &stall.state),
+                When::Found,
+                look.at,
+                &mut taking,
+                &names,
+            );
             stall.held.push(held);
         }
     }
@@ -351,7 +381,7 @@ impl Stalls {
             return;
         };
         let names = Names::of(look);
-        let mut asking = Asking::new(prober);
+        let mut taking = Taking::new(prober, look.host);
         let labels = self.labels(When::End);
         for (stall, label) in self
             .kept
@@ -360,7 +390,14 @@ impl Stalls {
             .filter(|(stall, _)| stall.cleared.is_none() && stall.last == look.at)
         {
             let window = look.window_of(&stall.handle);
-            let held = Held::of(window, &label, When::End, look.at, &mut asking, &names);
+            let held = Held::of(
+                window,
+                (&label, &stall.state),
+                When::End,
+                look.at,
+                &mut taking,
+                &names,
+            );
             stall.held.push(held);
         }
     }

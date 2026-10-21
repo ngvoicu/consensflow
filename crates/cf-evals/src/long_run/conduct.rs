@@ -304,17 +304,14 @@ fn run(words: &[String], out: &mut dyn Write, edge: &Edge) -> Result<i32> {
         final_unread: None,
         stalls: Stalls::default(),
         ledger: None,
-        prober: Box::new(System::new(
-            {
-                let (edge, folder) = (edge.clone(), options.reports.clone());
-                let name = file_name(started, &options.chief, &cast.names);
-                move |label| {
-                    edge.sample_file(&folder, &name, label)
-                        .map_err(|failed| failed.to_string())
-                }
-            },
-            stage.rig().ok().map(cf_e2e::rig::Rig::host_pid),
-        )),
+        prober: Box::new(System::new({
+            let (edge, folder) = (edge.clone(), options.reports.clone());
+            let name = file_name(started, &options.chief, &cast.names);
+            move |label| {
+                edge.sample_file(&folder, &name, label)
+                    .map_err(|failed| failed.to_string())
+            }
+        })),
         edge: edge.clone(),
     };
     for planned in &run.schedule.planned {
@@ -443,12 +440,16 @@ fn finish(
         Ok(closed) => {
             let ledger = on_copy(&closed.home.join("consensflow.db"), Ledger::read);
             // The records read once more, as the ledger is: a row copied after the last look
-            // is held to a record read past it. Where the ledger could not be read, no look
-            // holds them.
-            let records = ledger.as_ref().ok().map_or_else(
-                || records_of(run.last.as_ref()),
-                |ledger| stage.watcher.records_after_close(ledger),
-            );
+            // is held to a record read past it.
+            let records = ledger
+                .as_ref()
+                .ok()
+                .map(|ledger| {
+                    let records = stage.watcher.records_after_close(ledger);
+                    run.timeline.add(at, "run", read_again(&records.1));
+                    records
+                })
+                .unwrap_or_default();
             if !closed.left.is_empty() {
                 run.timeline.add(
                     at,
@@ -625,16 +626,27 @@ fn closed_look(at: i64, ledger: Ledger, windows: Windows, (records, readings): R
         },
         records,
         readings,
+        host: None,
     }
 }
 
 /// The harnesses' records a look holds, by conversation, and how far each was read.
 type Records = (BTreeMap<i64, Record>, BTreeMap<i64, Reading>);
 
-/// The records of `last`, the last look, as far as it read them.
-fn records_of(last: Option<&Look>) -> Records {
-    last.map(|look| (look.records.clone(), look.every_reading()))
-        .unwrap_or_default()
+/// What the run's timeline says of the records read once more after the close, each
+/// reading's by its conversation: how many, and how many of those readings failed.
+fn read_again(readings: &BTreeMap<i64, Reading>) -> String {
+    let failed = readings
+        .values()
+        .filter(|reading| reading.failed.is_some())
+        .count();
+    let plural = |count: usize| if count == 1 { "" } else { "s" };
+    format!(
+        "the records were read once more after the close: {} conversation{}, {failed} reading{} failed",
+        readings.len(),
+        plural(readings.len()),
+        plural(failed)
+    )
 }
 
 /// `settings` for a look once the app has closed: a result is judged however young
