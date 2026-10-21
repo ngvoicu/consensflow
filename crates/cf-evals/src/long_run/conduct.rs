@@ -304,14 +304,17 @@ fn run(words: &[String], out: &mut dyn Write, edge: &Edge) -> Result<i32> {
         final_unread: None,
         stalls: Stalls::default(),
         ledger: None,
-        prober: Box::new(System::new({
-            let (edge, folder) = (edge.clone(), options.reports.clone());
-            let name = file_name(started, &options.chief, &cast.names);
-            move |label| {
-                edge.sample_file(&folder, &name, label)
-                    .map_err(|failed| failed.to_string())
-            }
-        })),
+        prober: Box::new(System::new(
+            {
+                let (edge, folder) = (edge.clone(), options.reports.clone());
+                let name = file_name(started, &options.chief, &cast.names);
+                move |label| {
+                    edge.sample_file(&folder, &name, label)
+                        .map_err(|failed| failed.to_string())
+                }
+            },
+            stage.rig().ok().map(cf_e2e::rig::Rig::host_pid),
+        )),
         edge: edge.clone(),
     };
     for planned in &run.schedule.planned {

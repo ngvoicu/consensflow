@@ -392,7 +392,12 @@ fn a_chief_held_working_past_the_idle_limit_is_kept_with_its_screen_and_the_ledg
     // The report, the ledger and, on the Mac, a sample of the chief's program when its stall
     // was found and once more at the end.
     let samples = if cfg!(target_os = "macos") { 2 } else { 0 };
-    assert_eq!(kept.len(), 3 + samples, "{names:?}");
+    // And of the pane host beside a sample of a program whose terminal held bytes unread.
+    let hosts = names
+        .iter()
+        .filter(|name| name.ends_with("-host-sample.txt"))
+        .count();
+    assert_eq!(kept.len(), 3 + samples + hosts, "{names:?}");
     let ledger_file = file(&format!("{base}-ledger.db"));
     let report: Value =
         serde_json::from_str(&std::fs::read_to_string(file(&format!("{base}.json"))).unwrap())
@@ -436,8 +441,19 @@ fn a_chief_held_working_past_the_idle_limit_is_kept_with_its_screen_and_the_ledg
         if cfg!(target_os = "macos") {
             assert!(taken["unread"]["bytes"].is_u64(), "{taken}");
             let sample = std::path::PathBuf::from(taken["sample"].as_str().unwrap());
-            assert_eq!(sample, file(&format!("{base}-chief-{when}-sample.txt")));
+            assert_eq!(sample, file(&format!("{base}-chief-1-{when}-sample.txt")));
             assert!(std::fs::metadata(&sample).unwrap().len() > 0, "{taken}");
+            // The pane host is sampled where the chief's terminal held bytes it had not read.
+            let unread = taken["unread"]["bytes"].as_u64().unwrap();
+            if unread > 0 {
+                let host = std::path::PathBuf::from(taken["host"].as_str().unwrap());
+                assert_eq!(
+                    host,
+                    file(&format!("{base}-chief-1-{when}-host-sample.txt"))
+                );
+            } else {
+                assert_eq!(taken["host"], Value::Null, "{taken}");
+            }
         }
     }
     assert!(markdown.contains("processes"), "{markdown}");

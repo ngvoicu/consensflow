@@ -182,16 +182,21 @@ fn takes_part(line: &str) -> bool {
 /// `last_lines`, which the chief's wait takes a window's last 40 lines with, a cut
 /// accepted as the pane host's is), a cut it does not know the word of, and whether a
 /// text it lists reaches the run's output at all. It reads lines, not meaning.
-const TAKEN: [(&str, &str, &str); 56] = [
+const TAKEN: [(&str, &str, &str); 57] = [
     (
-        "long_run/conduct.rs",
-        "self.stalls.take(&look, self.prober.as_mut());",
+        "long_run/stalls.rs",
+        "self.prober.take(listed, pid, others, label)",
         "the system asked of a stalled window's processes, no text taken",
     ),
     (
         "long_run/stalls.rs",
-        "prober.take(pid, &others, &format!(\"{handle}-{}\", when.word()))",
+        "asking.take(pid, &others, label)",
         "the same",
+    ),
+    (
+        "long_run/conduct.rs",
+        "self.stalls.take(&look, self.prober.as_mut());",
+        "the system asked of a stalled window's processes, no text taken",
     ),
     (
         "long_run/stalls/held.rs",

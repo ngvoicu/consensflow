@@ -355,8 +355,8 @@ fn a_stalled_windows_processes_are_taken_when_it_is_found_and_once_more_at_the_e
     assert_eq!(
         prober.asked,
         [
-            (4242, vec![4343], "chief-found".to_owned()),
-            (6161, vec![], "long-worker-2-found".to_owned()),
+            (4242, vec![4343], "chief-1-found".to_owned()),
+            (6161, vec![], "long-worker-2-1-found".to_owned()),
         ]
     );
     // At the end the chief still reads at work: taken once more. The second worker came
@@ -366,7 +366,10 @@ fn a_stalled_windows_processes_are_taken_when_it_is_found_and_once_more_at_the_e
     stalls.take(&last, &mut prober);
     stalls.before_close(Some(&last), &mut prober);
     assert_eq!(prober.asked.len(), 3, "{:?}", prober.asked);
-    assert_eq!(prober.asked[2], (4242, vec![4343], "chief-end".to_owned()));
+    assert_eq!(
+        prober.asked[2],
+        (4242, vec![4343], "chief-1-end".to_owned())
+    );
     let chief = &stalls.kept[0];
     assert_eq!(chief.handle, "chief");
     let when: Vec<(When, i64)> = chief.held.iter().map(|held| (held.when, held.at)).collect();
@@ -388,7 +391,9 @@ fn a_stalled_windows_processes_are_taken_when_it_is_found_and_once_more_at_the_e
     assert_eq!(held[1]["when"], "end");
     assert_eq!(held[0]["processes"][0], "4242 1 S - ttys001 pi");
     assert_eq!(held[0]["unread"]["bytes"], 0);
-    assert_eq!(held[0]["sample"], Value::Null);
+    assert_eq!(held[0]["sample"], "chief-1-found-sample.txt");
+    assert_eq!(held[1]["sample"], "chief-1-end-sample.txt");
+    assert_eq!(held[0]["host"], Value::Null);
     let text = stalls.markdown(&timeline);
     assert!(text.contains("\nIts processes (found, +26m00s):\n\n```\n4242 1 S - ttys001 pi\n4343 4242 S - ttys001 bash\n```\n"), "{text}");
     assert!(
@@ -402,13 +407,18 @@ fn a_stalled_windows_processes_are_taken_when_it_is_found_and_once_more_at_the_e
 struct Telling;
 
 impl Prober for Telling {
-    fn take(&mut self, pid: u32, _: &[u32], _: &str) -> Taken {
+    fn list(&mut self) -> held::Listing {
+        Err("not asked".to_owned())
+    }
+
+    fn take(&mut self, _: &held::Listing, pid: u32, _: &[u32], _: &str) -> Taken {
         Taken {
             processes: Ok(vec![format!(
                 "{pid} 1 S - ttys001 pi --api-key sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789"
             )]),
             unread: Err(held::WINDOWS_UNREAD.to_owned()),
             sample: Some(Err("the sample failed (Some(1)): no access".to_owned())),
+            host: Some(Err("the pane host's process is not known".to_owned())),
         }
     }
 }
@@ -460,5 +470,87 @@ fn what_the_system_says_of_a_stalled_window_is_kept_masked_and_what_it_could_not
     assert_eq!(
         named_none.kept[0].held[0].processes,
         Err("the pane host named no process of it".to_owned())
+    );
+}
+
+#[test]
+fn a_window_that_stalls_again_keeps_each_stalls_samples_and_one_listing_serves_every_window_of_a_look(
+) {
+    // Calliope's review of round b6: the chief stalls at work, comes back to rest, and
+    // stalls again; its first stall's samples were written over by the second's, and both
+    // entries named the second's. Each of a handle's stalls has its own.
+    let traced = vec![
+        change(5, "chief", "working", None),
+        change(30, "chief", "idle", None),
+        change(31, "chief", "working", None),
+        change(5, "long-worker", "working", None),
+    ];
+    let chief = window("chief", &["Working…"]);
+    let mut worker = window("long-worker", &["Working…"]);
+    worker.pid = Some(5151);
+    let seen = |minute: u32, chief_state: &str, worker_state: &str| {
+        look(
+            minute,
+            vec![
+                lane("chief", chief_state),
+                lane("long-worker", worker_state),
+            ],
+            vec![chief.clone(), worker.clone()],
+            traced.clone(),
+        )
+    };
+    let mut stalls = Stalls::default();
+    let mut prober = Asked::default();
+    // Both found at 10:26: one listing for the two.
+    for (minute, chief_state, worker_state) in [
+        (6, "working", "working"),
+        (26, "working", "working"),
+        (30, "idle", "idle"),
+        (52, "working", "idle"),
+    ] {
+        let look = seen(minute, chief_state, worker_state);
+        stalls.look(&look, IDLE);
+        stalls.take(&look, &mut prober);
+        if minute == 26 {
+            assert_eq!(prober.lists, 1, "one listing for the two windows found");
+        }
+    }
+    // A look that takes nothing lists nothing; the chief's second stall, found at 10:52, one.
+    assert_eq!(prober.lists, 2);
+    let labels: Vec<&str> = prober
+        .asked
+        .iter()
+        .map(|(.., label)| label.as_str())
+        .collect();
+    assert_eq!(
+        labels,
+        ["chief-1-found", "long-worker-1-found", "chief-2-found"]
+    );
+    let last = seen(53, "working", "idle");
+    stalls.look(&last, IDLE);
+    stalls.before_close(Some(&last), &mut prober);
+    assert_eq!(prober.lists, 3);
+    assert_eq!(prober.asked[3].2, "chief-2-end");
+    let value = stalls.to_value(&Timeline::new(at(0, 0)));
+    let samples: Vec<Vec<&str>> = value["windows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|stall| {
+            stall["held"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|held| held["sample"].as_str().unwrap())
+                .collect()
+        })
+        .collect();
+    assert_eq!(
+        samples,
+        [
+            vec!["chief-1-found-sample.txt"],
+            vec!["long-worker-1-found-sample.txt"],
+            vec!["chief-2-found-sample.txt", "chief-2-end-sample.txt"],
+        ]
     );
 }

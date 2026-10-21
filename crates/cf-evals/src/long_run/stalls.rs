@@ -23,7 +23,7 @@ use std::path::PathBuf;
 
 use serde_json::{json, Value};
 
-use self::held::{Prober, Taken, When};
+use self::held::{Listing, Prober, Taken, When};
 use super::invariants::iso;
 use super::ledger::Ledger;
 use super::look::{Look, OpenWindow};
@@ -76,16 +76,43 @@ pub struct Held {
     /// Where a sample of its program was kept, or why none was; none where the system has
     /// no sampler.
     pub sample: Option<Result<PathBuf, String>>,
+    /// Where its program wrote bytes the pane host has not read, where a sample of the pane
+    /// host was kept, or why none was.
+    pub host: Option<Result<PathBuf, String>>,
+}
+
+/// What a take asks of the system once, for every window it takes: the list of every
+/// process, asked when the first window needs it.
+struct Asking<'p> {
+    prober: &'p mut dyn Prober,
+    listed: Option<Listing>,
+}
+
+impl<'p> Asking<'p> {
+    fn new(prober: &'p mut dyn Prober) -> Self {
+        Self {
+            prober,
+            listed: None,
+        }
+    }
+
+    /// What the system says of the program `pid` and `others`, a sample kept as `label`.
+    fn take(&mut self, pid: u32, others: &[u32], label: &str) -> Taken {
+        let listed = self.listed.get_or_insert_with(|| self.prober.list());
+        self.prober.take(listed, pid, others, label)
+    }
 }
 
 impl Held {
-    /// What the system said of the window `window` at `at`, as `prober` asked it, masked.
+    /// What the system said of the window `window` at `at`, as `asking` asked it, its
+    /// samples kept as `label` (`chief-1-found`: the stall's handle, which of that handle's
+    /// stalls it is, and when), masked.
     fn of(
         window: Option<&OpenWindow>,
-        handle: &str,
+        label: &str,
         when: When,
         at: i64,
-        prober: &mut dyn Prober,
+        asking: &mut Asking<'_>,
         names: &Names,
     ) -> Self {
         let taken = match window.map(|window| (window.pid, window)) {
@@ -93,7 +120,7 @@ impl Held {
             Some((None, _)) => Taken::none("the pane host named no process of it"),
             Some((Some(pid), window)) => {
                 let others: Vec<u32> = window.background.iter().map(|one| one.pid).collect();
-                prober.take(pid, &others, &format!("{handle}-{}", when.word()))
+                asking.take(pid, &others, label)
             }
         };
         let masked = |why: String| cut(&why, 300, names);
@@ -106,6 +133,7 @@ impl Held {
                 .map_err(masked),
             unread: taken.unread.map_err(masked),
             sample: taken.sample.map(|kept| kept.map_err(masked)),
+            host: taken.host.map(|kept| kept.map_err(masked)),
         }
     }
 
@@ -121,11 +149,8 @@ impl Held {
                 Ok(bytes) => json!({ "bytes": bytes }),
                 Err(why) => json!({ "unknown": why }),
             },
-            "sample": match &self.sample {
-                Some(Ok(file)) => json!(file),
-                Some(Err(why)) => json!({ "notTaken": why }),
-                None => Value::Null,
-            },
+            "sample": kept(self.sample.as_ref()),
+            "host": kept(self.host.as_ref()),
         })
     }
 
@@ -151,7 +176,25 @@ impl Held {
             Some(Err(why)) => text.push_str(&format!("\nNo sample of its program: {why}\n")),
             None => {}
         }
+        match &self.host {
+            Some(Ok(file)) => text.push_str(&format!(
+                "\nA sample of the pane host: {}\n",
+                file.display()
+            )),
+            Some(Err(why)) => text.push_str(&format!("\nNo sample of the pane host: {why}\n")),
+            None => {}
+        }
         text
+    }
+}
+
+/// A sample as the report keeps it: where it is, or why none was taken; nothing where none
+/// was asked.
+fn kept(sample: Option<&Result<PathBuf, String>>) -> Value {
+    match sample {
+        Some(Ok(file)) => json!(file),
+        Some(Err(why)) => json!({ "notTaken": why }),
+        None => Value::Null,
     }
 }
 
@@ -272,15 +315,33 @@ impl Stalls {
     /// stalled: once, when the stall is found.
     pub fn take(&mut self, look: &Look, prober: &mut dyn Prober) {
         let names = Names::of(look);
-        for stall in self
+        let mut asking = Asking::new(prober);
+        let labels = self.labels(When::Found);
+        for (stall, label) in self
             .kept
             .iter_mut()
-            .filter(|stall| stall.cleared.is_none() && stall.held.is_empty())
+            .zip(labels)
+            .filter(|(stall, _)| stall.cleared.is_none() && stall.held.is_empty())
         {
             let window = look.window_of(&stall.handle);
-            let held = Held::of(window, &stall.handle, When::Found, look.at, prober, &names);
+            let held = Held::of(window, &label, When::Found, look.at, &mut asking, &names);
             stall.held.push(held);
         }
+    }
+
+    /// The label each stall's samples are kept under `when`, in the order the stalls were
+    /// found: its handle, which of that handle's stalls it is, and when (`chief-2-found`), so
+    /// that a window that stalls again keeps the samples of each stall.
+    fn labels(&self, when: When) -> Vec<String> {
+        let mut seen: BTreeMap<&str, usize> = BTreeMap::new();
+        self.kept
+            .iter()
+            .map(|stall| {
+                let nth = seen.entry(stall.handle.as_str()).or_default();
+                *nth += 1;
+                format!("{}-{nth}-{}", stall.handle, when.word())
+            })
+            .collect()
     }
 
     /// What the system says, by `prober`, of the processes of each window that `last`, the
@@ -290,13 +351,16 @@ impl Stalls {
             return;
         };
         let names = Names::of(look);
-        for stall in self
+        let mut asking = Asking::new(prober);
+        let labels = self.labels(When::End);
+        for (stall, label) in self
             .kept
             .iter_mut()
-            .filter(|stall| stall.cleared.is_none() && stall.last == look.at)
+            .zip(labels)
+            .filter(|(stall, _)| stall.cleared.is_none() && stall.last == look.at)
         {
             let window = look.window_of(&stall.handle);
-            let held = Held::of(window, &stall.handle, When::End, look.at, prober, &names);
+            let held = Held::of(window, &label, When::End, look.at, &mut asking, &names);
             stall.held.push(held);
         }
     }
