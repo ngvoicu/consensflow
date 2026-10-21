@@ -29,17 +29,24 @@
 //! owner's MCP servers and browser, and not asked to trust its folder first), in
 //! folders of its own made fresh for the run, below the live folders: a plain folder;
 //! a new repository (`git init`), and the same again once answered; a repository,
-//! then a plain folder and a new repository below it once it is trusted; and a plain
-//! folder of a repository nobody trusted. Its screen is read as the engine reads it
-//! (the last lines the pane host sends, through the harness code's own reader,
+//! then a plain folder and a new repository below it once it is trusted; a plain
+//! folder of a repository nobody trusted; and a linked worktree (`git worktree add`)
+//! of a repository nobody trusted. Its screen is read as the engine reads it (the
+//! last lines the pane host sends, through the harness code's own reader,
 //! `harness-ask trust`); a window that asks is answered with the keys the engine
-//! presses, and must then be at its prompt. A screen that speaks of trust the reader
-//! does not read as the question, and a harness that asks where it should not or does
-//! not where it should, are failures. **projects**: for Claude Code and Codex, a
-//! project in a new repository nobody trusted, through the daemon: its chief a real
-//! window of the harness, then a worker of it given a task beside a stand-in chief.
-//! The chief must come up idle and the worker's task be done, and the human's notes
-//! must say that ConsensFlow answered yes once for Claude Code, and never for Codex.
+//! presses, and must then be at its prompt. Claude Code must keep the yes for the
+//! folder the engine says a yes trusts, and for no other (read from its own record of
+//! folders, which the run never writes): in a linked worktree that is the checkout it
+//! belongs to. A screen that speaks of trust the reader does not read as the
+//! question, and a harness that asks where it should not or does not where it
+//! should, are failures. **projects**: for Claude Code and Codex, a project through
+//! the daemon in a new repository nobody trusted: its chief a real window of the
+//! harness; a worker of it given a task beside a stand-in chief; and a worker whose
+//! first task is done in a plain folder, which is then made a repository, and whose
+//! follow-up opens its window again on its conversation. The chief must come up idle,
+//! the tasks be done and the follow-up's window be a resumed one, and the human's
+//! notes must say that ConsensFlow answered yes once for Claude Code, and never for
+//! Codex.
 //!
 //! What Claude Code writes of a yes is taken back with `claude purge` at the end;
 //! the run says which folders it could not have it forget. Codex writes nothing here.
@@ -50,6 +57,7 @@
 //! cargo xtask live folder-trust --part windows        one part
 //! ```
 
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::thread::sleep;
 use std::time::Duration;
@@ -103,10 +111,12 @@ enum Case {
     RepositoryBelow,
     /// A plain folder of a repository nobody trusted.
     Untrusted,
+    /// A linked worktree of a repository nobody trusted (`git worktree add`).
+    Worktree,
 }
 
 impl Case {
-    const ALL: [Case; 7] = [
+    const ALL: [Case; 8] = [
         Case::Fresh,
         Case::Repository,
         Case::Again,
@@ -114,6 +124,7 @@ impl Case {
         Case::Below,
         Case::RepositoryBelow,
         Case::Untrusted,
+        Case::Worktree,
     ];
 
     const fn name(self) -> &'static str {
@@ -125,6 +136,7 @@ impl Case {
             Case::Below => "plain below",
             Case::RepositoryBelow => "repository below",
             Case::Untrusted => "untrusted's folder",
+            Case::Worktree => "linked worktree",
         }
     }
 
@@ -138,6 +150,8 @@ impl Case {
             Case::Below => ("parent/below", None),
             Case::RepositoryBelow => ("parent/repository", Some("parent/repository")),
             Case::Untrusted => ("untrusted/folder", Some("untrusted")),
+            // Its repository is the checkout it belongs to, made with it (`worktree`).
+            Case::Worktree => ("worktree", None),
         }
     }
 }
@@ -148,7 +162,11 @@ fn must_ask(harness: Harness, case: Case) -> bool {
     harness == Harness::Claude
         && matches!(
             case,
-            Case::Repository | Case::Parent | Case::RepositoryBelow | Case::Untrusted
+            Case::Repository
+                | Case::Parent
+                | Case::RepositoryBelow
+                | Case::Untrusted
+                | Case::Worktree
         )
 }
 
@@ -161,12 +179,70 @@ fn speaks_of_trust(screen: &[String]) -> bool {
 /// The key the engine presses next into a window of `harness` showing `screen`: none
 /// where it reads no question there.
 fn engine_key(harness: Harness, screen: &[String]) -> Result<Option<Vec<u8>>> {
-    let key = ask::question(&json!({ "op": "trust", "kind": harness.kind(), "screen": screen }))?;
-    Ok(match key.as_str() {
+    let read = ask::question(&json!({ "op": "trust", "kind": harness.kind(), "screen": screen }))?;
+    Ok(match read["key"].as_str() {
         Some("enter") => Some(b"\r".to_vec()),
         Some("down") => Some(b"\x1b[B".to_vec()),
         _ => None,
     })
+}
+
+/// The folder the engine says a yes trusts, for a window opened in the project's
+/// folder `directory`, and whether it is the project's.
+fn predicted(directory: &Path) -> Result<(String, bool)> {
+    let read = ask::question(&json!({
+        "op": "trust", "kind": Harness::Claude.kind(), "screen": [], "directory": directory,
+    }))?;
+    let trusts = &read["trusts"];
+    Ok((
+        trusts["folder"].as_str().unwrap_or_default().to_owned(),
+        trusts["inside"] == true,
+    ))
+}
+
+/// The folders Claude Code keeps a yes for in its own record of them (`.claude.json`
+/// in `home`), read and never written: below `under` alone.
+fn claude_trusted(home: &Path, under: &str) -> Vec<String> {
+    let record: serde_json::Value = fs::read_to_string(home.join(".claude.json"))
+        .ok()
+        .and_then(|text| serde_json::from_str(&text).ok())
+        .unwrap_or_default();
+    record["projects"]
+        .as_object()
+        .map(|projects| {
+            projects
+                .iter()
+                .filter(|(folder, entry)| {
+                    folder.starts_with(under) && entry["hasTrustDialogAccepted"] == true
+                })
+                .map(|(folder, _)| folder.clone())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// `git` with `words` in `folder`, which must do what it is asked.
+fn git(folder: &Path, words: &[&str]) -> Result {
+    let ran = Run::new(Path::new("git"))
+        .arg("-C")
+        .arg(folder)
+        .args([
+            "-c",
+            "user.name=probe",
+            "-c",
+            "user.email=probe@example.invalid",
+        ])
+        .args(words)
+        .inheriting_env()
+        .run()?;
+    if ran.code == Some(0) {
+        Ok(())
+    } else {
+        Err(Error::Daemon(format!(
+            "git {words:?} in {}: {ran}",
+            folder.display()
+        )))
+    }
 }
 
 /// The last lines of the window's screen, as the engine asks the pane host for them.
@@ -200,7 +276,14 @@ fn look(rig: &Rig, install: &Installed, base: &str, case: Case, log: &Log) -> Re
     let home = PathBuf::from(rig.var("HOME").unwrap_or_default());
     let (folder, repository) = case.folder();
     let name = format!("{base}/{folder}");
-    live_folder_in(&home, &name)?;
+    if case == Case::Worktree {
+        let main = live_folder_in(&home, &format!("{base}/worktree-main"))?;
+        git(&main, &["init", "-q"])?;
+        git(&main, &["commit", "-q", "--allow-empty", "-m", "first"])?;
+        let tree = home.join(".consensflow-candidate/live").join(&name);
+        git(&main, &["worktree", "add", "-q", &tree.to_string_lossy()])?;
+    }
+    let directory = live_folder_in(&home, &name)?;
     if let (Some(repository), false) = (repository, case == Case::Again) {
         let at = live_folder_in(&home, &format!("{base}/{repository}"))?;
         let made = Run::new(Path::new("git"))
@@ -217,6 +300,11 @@ fn look(rig: &Rig, install: &Installed, base: &str, case: Case, log: &Log) -> Re
         harness.name(),
         case.name().replace([' ', '\''], "-")
     );
+    // What Claude Code keeps a yes for below the run's folders, before the window.
+    let under = live_folder_in(&home, FOLDER)?
+        .to_string_lossy()
+        .into_owned();
+    let trusted_before = claude_trusted(install.home(), &under);
     let window = Open::new(rig, install, &name, &id)
         .without_trust()
         .open(log)?;
@@ -251,10 +339,24 @@ fn look(rig: &Rig, install: &Installed, base: &str, case: Case, log: &Log) -> Re
     }
     window.kill();
     sleep(Duration::from_secs(1));
+    // Claude Code keeps the yes for the folder the engine says a yes trusts, and
+    // nothing else: what tells the engine whether a yes is the project's.
+    let mut kept_where_said = true;
+    if asked && harness == Harness::Claude {
+        let (folder, inside) = predicted(&directory)?;
+        let kept: Vec<String> = claude_trusted(install.home(), &under)
+            .into_iter()
+            .filter(|folder| !trusted_before.contains(folder))
+            .collect();
+        kept_where_said = kept == [folder.clone()];
+        lines.push(format!(
+            "the engine says a yes trusts {folder} (the project's: {inside}); Claude Code kept it for {kept:?}"
+        ));
+    }
     Ok(Seen {
         asked,
         keys,
-        held: asked == must_ask(harness, case) && at_prompt && !unread,
+        held: asked == must_ask(harness, case) && at_prompt && !unread && kept_where_said,
         lines,
     })
 }
@@ -297,7 +399,7 @@ fn windows(
     let made = Case::ALL
         .into_iter()
         .map(|case| case.folder().0)
-        .chain(["untrusted"]);
+        .chain(["untrusted", "worktree-main"]);
     for folder in made {
         let path = live_folder_in(&home, &format!("{base}/{folder}"))?;
         folders.push(path.to_string_lossy().into_owned());
@@ -305,9 +407,13 @@ fn windows(
     Ok(checks)
 }
 
-/// The notes to the human that speak of trusting the project's folder.
+/// The notes to the human that speak of trusting the project's folder, which they
+/// name as the system names it.
 fn trust_notes(members: &Members) -> Result<Vec<String>> {
-    let folder = members.folder().to_string_lossy().into_owned();
+    let folder = fs::canonicalize(members.folder())
+        .unwrap_or_else(|_| members.folder().to_path_buf())
+        .to_string_lossy()
+        .into_owned();
     Ok(members
         .project()
         .inbox("human")?
@@ -321,13 +427,40 @@ fn trust_notes(members: &Members) -> Result<Vec<String>> {
 /// How long a worker's task has to be done.
 const DONE: Duration = Duration::from_secs(300);
 
-/// The roles a project of the projects part puts the harness in.
-const ROLES: [&str; 2] = ["chief", "worker"];
+/// The roles a project of the projects part puts the harness in: its chief, a
+/// worker, and a worker whose follow-up opens its window again on its conversation
+/// after the folder was made a repository (dip-agentos's T-13, T-14 and T-15).
+const ROLES: [&str; 3] = ["chief", "worker", "follow-up"];
+
+/// The words of `cf task add` that give a task to a member of `tier`.
+fn plan_words(tier: &str) -> Vec<String> {
+    cf_e2e::live::members::tier_flag(tier)
+}
+
+/// A worker's task, T-`number`, given by the stand-in chief with the words of `cf task
+/// add` before `brief`, done within [`DONE`]: whether it was.
+fn done_task(members: &Members, number: i64, words: &[String], brief: &str) -> Result<bool> {
+    let mut asked: Vec<&str> = vec!["task", "add"];
+    asked.extend(words.iter().map(String::as_str));
+    asked.push(brief);
+    let added = members.as_chief(&asked)?;
+    if added.code != Some(0) {
+        return Err(Error::Daemon(format!("cf task add: {added}")));
+    }
+    Ok(live::until(DONE, Duration::from_secs(1), || {
+        members
+            .task(number)
+            .ok()
+            .filter(|task| task["state"] == "done")
+    })
+    .is_some())
+}
 
 /// The projects part for `harness` as `role`: a project in a new repository nobody
-/// trusted, whose folder is added to `folders`. The chief must come up idle, a
-/// worker's task be done, and the notes speak of a yes once for Claude Code and
-/// never for a harness that does not ask.
+/// trusted (a follow-up's is made one after the first task), whose folder is added
+/// to `folders`. The chief must come up idle, a worker's tasks be done, a follow-up's
+/// window be opened again on its conversation, and the notes speak of a yes once
+/// for Claude Code and never for a harness that does not ask.
 fn project(
     harness: Harness,
     role: &str,
@@ -337,12 +470,13 @@ fn project(
 ) -> Check {
     let who = format!("{} {role}", harness.name());
     let folder = format!("{FOLDER}-project/{stamp}-{}-{role}", harness.name());
-    let plan = if role == "chief" {
-        Plan::new(&folder, member_as(harness, "chief"))
-    } else {
-        Plan::new(&folder, stand_in_chief()).with(member(harness))
-    }
-    .in_a_new_repository();
+    let plan = match role {
+        "chief" => Plan::new(&folder, member_as(harness, "chief")).in_a_new_repository(),
+        "worker" => Plan::new(&folder, stand_in_chief())
+            .with(member(harness))
+            .in_a_new_repository(),
+        _ => Plan::new(&folder, stand_in_chief()).with(member(harness)),
+    };
     let scoped = log.scoped(&who);
     let came = Members::open(&plan, Path::new(FAKE_AGENT), &scoped).and_then(|mut members| {
         folders.push(members.folder().to_string_lossy().into_owned());
@@ -350,15 +484,26 @@ fn project(
             true
         } else {
             let agent = agents::id(harness);
-            members.add(&agent, &[])?;
-            let task = members.give(&agent, "Reply with exactly: TRUST_OK")?;
-            live::until(DONE, Duration::from_secs(1), || {
-                members
-                    .task(task)
-                    .ok()
-                    .filter(|task| task["state"] == "done")
-            })
-            .is_some()
+            let tier = members.add(&agent, &[])?;
+            let mut words = plan_words(&tier);
+            let first = done_task(&members, 1, &words, "Reply with exactly: TRUST_OK")?;
+            if role == "worker" || !first {
+                first
+            } else {
+                git(members.folder(), &["init", "-q"])?;
+                let opened = members.windows_opened_for(&agent).len();
+                words = vec!["--after".to_owned(), "T-1".to_owned()];
+                let again = done_task(&members, 2, &words, "Reply with exactly: AGAIN_OK")?;
+                let resumed = members.windows_opened_for(&agent)[opened..]
+                    .iter()
+                    .any(|frame| {
+                        frame["argv"].as_array().is_some_and(|argv| {
+                            argv.iter()
+                                .any(|word| word == "--resume" || word == "resume")
+                        })
+                    });
+                again && resumed
+            }
         };
         let notes = trust_notes(&members)?;
         let tail = members.tail(&format!("p{}-chief", members.project_id()));
@@ -385,7 +530,11 @@ fn project(
             "project",
             format!(
                 "{}; notes of the folder's trust: {} (expected {expected}); the chief's screen: {tail}",
-                if done { "its work done" } else { "its task never done" },
+                if done {
+                    "its work done"
+                } else {
+                    "its tasks never done, or a follow-up's window not opened again"
+                },
                 notes.len()
             ),
         ),
@@ -459,7 +608,8 @@ mod tests {
                 "repository",
                 "parent",
                 "repository below",
-                "untrusted's folder"
+                "untrusted's folder",
+                "linked worktree"
             ]
         );
         for case in Case::ALL {

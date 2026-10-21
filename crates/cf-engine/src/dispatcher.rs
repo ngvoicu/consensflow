@@ -989,7 +989,8 @@ impl Dispatcher {
         let starting = drawing || (unnamed && !record.window.borrow().named);
         // An out member's window says so, and nothing else, until the reset.
         if !self.is_out(&owner) {
-            let activity = if asking {
+            // The reason is given once the question is on its screen.
+            let activity = if record.window.borrow().trust == Trusting::Asked {
                 Activity::because(ActivityState::Starting, trust::HELD)
             } else if starting {
                 Activity::of(ActivityState::Starting)

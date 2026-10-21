@@ -5,9 +5,13 @@
 //! on "No, exit" ends the window; Down moves to the yes, which Enter confirms, and
 //! Claude Code writes the trust down for the root of the folder's git repository
 //! and goes on to its prompt, and to the first message it was opened with. Before
-//! 2.1.287 the yes came first, numbered: the choice is read by its words.
+//! 2.1.287 the yes came first, numbered: the choice is read by its words. Its prompt,
+//! once it is past the question, is told by the line under its input box.
 
 use crate::shared::trust::{chosen, shows, DOWN, ENTER};
+
+/// What Claude's prompt shows as ConsensFlow opens it, in full-permission mode.
+const PROMPT: &str = "bypass permissions on";
 
 /// The choice that trusts the folder, and the one that ends the window.
 const YES: &str = "Yes, I trust this folder";
@@ -26,6 +30,13 @@ pub(crate) fn toward_trust(screen: &[String]) -> Option<&'static [u8]> {
             DOWN
         },
     )
+}
+
+/// Whether `screen` is Claude's prompt, as ConsensFlow opens its windows: the
+/// line under its input box that says it is in full-permission mode ("⏵⏵ bypass
+/// permissions on", 2.1.305), and no question.
+pub(crate) fn shows_prompt(screen: &[String]) -> bool {
+    shows(screen, PROMPT) && toward_trust(screen).is_none()
 }
 
 #[cfg(test)]
@@ -50,6 +61,16 @@ mod tests {
         // Before 2.1.287 the yes came first, numbered.
         let numbered = lines("❯ 1. Yes, I trust this folder\n  2. No, exit");
         assert_eq!(toward_trust(&numbered), Some(ENTER));
+    }
+
+    #[test]
+    fn its_prompt_is_the_line_under_its_input_box_in_full_permission_mode() {
+        // As Claude Code 2.1.305 draws it.
+        let prompt = lines(" ❯ Try \"how do I log an error?\"\n   fresh Sonnet   0 tokens\n   ⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents");
+        assert!(shows_prompt(&prompt));
+        let asked = lines(" Quick safety check\n ❯ No, exit\n   Yes, I trust this folder");
+        assert!(!shows_prompt(&asked));
+        assert!(!shows_prompt(&lines(" Accessing workspace:\n /work")));
     }
 
     #[test]

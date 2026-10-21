@@ -200,8 +200,12 @@ fn run(
     } else {
         "started"
     };
-    say(&format!("fake agent {said} on {}\n", launch.session))
-        .map_err(|failed| failed.to_string())?;
+    // Claude's prompt says so under its input box, in full-permission mode.
+    say(&format!(
+        "fake agent {said} on {} · bypass permissions on\n",
+        launch.session
+    ))
+    .map_err(|failed| failed.to_string())?;
 
     let (turns, queued) = mpsc::channel::<String>();
     let stop = Arc::new(Stop::default());

@@ -8,11 +8,18 @@
 //! prompt, and Enter on "No, exit", or Escape, ends the window. What is pasted is
 //! nothing to it, and the Enter after a paste is the Enter of its choice. It draws a
 //! first line a second before the question, as a harness draws its first frames, so
-//! that a screen read before it held still holds no question yet. After a yes it
+//! that a screen read before it held still holds no question yet (longer with
+//! `CF_TEST_TRUST_FIRST_FRAME_MS` set, as a harness under load holds a first frame
+//! still before its question; and then a window of that participant that asks
+//! nothing holds it as long before its prompt). After a yes it
 //! clears its screen and goes on at once, or, with `CF_TEST_TRUST_STARTS_MS` set,
 //! draws its prompt and takes that long to go on, its screen still meanwhile, as
 //! Claude Code may draw its prompt and write the first message it was opened with
-//! seconds later.
+//! seconds later. With `CF_TEST_TRUST_EXIT_MS` set, a No says so on its screen and
+//! the window takes that long to end. With `CF_TEST_TRUST_REDRAW_MS` set it takes
+//! that long to move its `❯` for a Down, its screen as it was meanwhile; and it
+//! writes down each key it was given (`trust-keys`, a word a line, in its config
+//! folder).
 
 use std::fs;
 use std::io::{self, Read, Write};
@@ -24,12 +31,30 @@ use cf_e2e::process::own_var;
 
 use super::terminal;
 
-/// The file of the folders the stand-in trusts, in its config folder.
+/// The file of the folders the stand-in trusts, in its config folder, and the one
+/// of the keys its question was given.
 const TRUSTED: &str = "trusted-folders";
+const KEYS: &str = "trust-keys";
 
 /// The keys it reads.
 const DOWN: &str = "\u{1b}[B";
 const UP: &str = "\u{1b}[A";
+
+/// The milliseconds the variable `name` says, where it is set.
+fn millis(name: &str) -> Option<Duration> {
+    own_var(name)
+        .and_then(|ms| ms.parse().ok())
+        .map(Duration::from_millis)
+}
+
+/// Appends `line` to the file `name` in `config`.
+fn append(config: &Path, name: &str, line: &str) -> io::Result<()> {
+    let mut file = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(config.join(name))?;
+    writeln!(file, "{line}")
+}
 
 /// How long the first line stands alone before the question is drawn: less than the
 /// time a screen must hold still to read as drawn.
@@ -85,15 +110,25 @@ fn draw(folder: &Path, yes: bool) -> io::Result<()> {
 pub fn ask(config: &Path, wanted: bool) -> Result<Answer, String> {
     let failed = |cause: io::Error| cause.to_string();
     let folder = std::env::current_dir().map_err(failed)?;
-    let Some(root) = repository_of(&folder).filter(|_| wanted) else {
-        return Ok(Answer::GoOn);
-    };
-    if trusted(config, &root) {
+    if !wanted {
         return Ok(Answer::GoOn);
     }
+    let first_frame = millis("CF_TEST_TRUST_FIRST_FRAME_MS");
+    let opening = |held: Duration| -> Result<(), String> {
+        say("fake agent: opening the folder\r\n").map_err(failed)?;
+        sleep(held);
+        Ok(())
+    };
+    let asks = repository_of(&folder).filter(|root| !trusted(config, root));
+    let Some(root) = asks else {
+        // One that asks nothing holds its first frame as long, before its prompt.
+        if let Some(held) = first_frame {
+            opening(held)?;
+        }
+        return Ok(Answer::GoOn);
+    };
     terminal::raw_mode();
-    say("fake agent: opening the folder\r\n").map_err(failed)?;
-    sleep(FIRST_FRAME);
+    opening(first_frame.unwrap_or(FIRST_FRAME))?;
     let mut yes = false;
     draw(&folder, yes).map_err(failed)?;
     let mut stdin = io::stdin().lock();
@@ -106,34 +141,46 @@ pub fn ask(config: &Path, wanted: bool) -> Result<Answer, String> {
         let keys = String::from_utf8_lossy(&chunk[..read]).into_owned();
         // A paste is nothing to a question but its markers' Escapes.
         let keys = keys.replace("\u{1b}[200~", "").replace("\u{1b}[201~", "");
+        let no = || -> Result<Answer, String> {
+            if let Some(lingers) = millis("CF_TEST_TRUST_EXIT_MS") {
+                say("\u{1b}[2J\u{1b}[H fake agent: the folder is not trusted\r\n")
+                    .map_err(failed)?;
+                sleep(lingers);
+            }
+            Ok(Answer::Exit)
+        };
         if keys.contains(DOWN) {
+            append(config, KEYS, "down").map_err(failed)?;
+            if let Some(redraw) = millis("CF_TEST_TRUST_REDRAW_MS") {
+                sleep(redraw);
+            }
             yes = true;
         } else if keys.contains(UP) {
+            append(config, KEYS, "up").map_err(failed)?;
             yes = false;
         } else if keys.contains('\r') {
+            append(config, KEYS, "enter").map_err(failed)?;
             if !yes {
-                return Ok(Answer::Exit);
+                return no();
             }
-            let mut file = fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(config.join(TRUSTED))
-                .map_err(failed)?;
-            writeln!(file, "{}", root.display()).map_err(failed)?;
+            append(config, TRUSTED, &root.display().to_string()).map_err(failed)?;
             let mut out = io::stdout().lock();
             out.write_all(b"\x1b[2J\x1b[H").map_err(failed)?;
             // One that starts slowly draws its prompt at once, and starts after.
-            let starts = own_var("CF_TEST_TRUST_STARTS_MS").and_then(|ms| ms.parse().ok());
+            let starts = millis("CF_TEST_TRUST_STARTS_MS");
             if starts.is_some() {
-                out.write_all(b" fake agent: the folder is trusted\r\n")
-                    .map_err(failed)?;
+                out.write_all(
+                    b" fake agent: the folder is trusted \xc2\xb7 bypass permissions on\r\n",
+                )
+                .map_err(failed)?;
             }
             out.flush().map_err(failed)?;
             drop(out);
-            sleep(Duration::from_millis(starts.unwrap_or(0)));
+            sleep(starts.unwrap_or_default());
             return Ok(Answer::GoOn);
         } else if keys == "\u{1b}" {
-            return Ok(Answer::Exit);
+            append(config, KEYS, "escape").map_err(failed)?;
+            return no();
         } else {
             continue;
         }

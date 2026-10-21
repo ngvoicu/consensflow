@@ -307,7 +307,7 @@ fn a_turn_is_interrupted_as_the_harness_says() {
 
 #[test]
 fn the_key_toward_a_yes_is_the_one_the_engine_reads_in_a_harnesss_question_about_its_folder() {
-    let key = |kind: &str, screen: &[&str]| {
+    let read = |kind: &str, screen: &[&str]| {
         answer(&ask("trust", json!({ "kind": kind, "screen": screen }))).unwrap()
     };
     let claude = [
@@ -315,7 +315,10 @@ fn the_key_toward_a_yes_is_the_one_the_engine_reads_in_a_harnesss_question_about
         " ❯ No, exit",
         "   Yes, I trust this folder",
     ];
-    assert_eq!(key("claude-code", &claude), json!("down"));
+    assert_eq!(
+        read("claude-code", &claude),
+        json!({ "key": "down", "prompt": false })
+    );
     let codex = [
         "  Trust this folder? Codex can read, edit, and run files here.",
         "› 1. Trust and continue",
@@ -323,13 +326,32 @@ fn the_key_toward_a_yes_is_the_one_the_engine_reads_in_a_harnesss_question_about
     ];
     // A harness that never asks as ConsensFlow opens it reads none, whatever the
     // screen shows: Codex's own question is its window's opened alone.
-    assert_eq!(key("codex", &codex), Value::Null);
+    let none = json!({ "key": null, "prompt": false });
+    assert_eq!(read("codex", &codex), none);
     for kind in ["pi", "opencode", "devin"] {
-        assert_eq!(key(kind, &claude), Value::Null, "{kind}");
+        assert_eq!(read(kind, &claude), none, "{kind}");
     }
+    let home = tempfile::tempdir().unwrap();
+    let directory = home.path().join("project");
+    std::fs::create_dir(&directory).unwrap();
+    let asked = answer(&ask(
+        "trust",
+        json!({ "kind": "claude-code", "screen": claude, "directory": directory }),
+    ))
+    .unwrap();
+    let real = std::fs::canonicalize(&directory).unwrap();
+    let real = real.to_string_lossy();
     assert_eq!(
-        key("claude-code", &["❯ Try \"fix lint errors\""]),
-        Value::Null
+        asked["trusts"],
+        json!({ "folder": real.strip_prefix(r"\\?\").unwrap_or(&real), "inside": true })
+    );
+    let prompt = [
+        "❯ Try \"fix lint errors\"",
+        "  ⏵⏵ bypass permissions on (shift+tab to cycle)",
+    ];
+    assert_eq!(
+        read("claude-code", &prompt),
+        json!({ "key": null, "prompt": true })
     );
 }
 
