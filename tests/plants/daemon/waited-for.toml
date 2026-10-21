@@ -142,3 +142,21 @@ runs = ["ledger-waited-for"]
 file = "crates/cf-ledger/src/tasks/finishing.rs"
 find = 'Ending::Declined => format!("pass T-{number} on"),'
 replace = 'Ending::Declined => format!("let T-{number} finish"),'
+
+[[plant]]
+name = "waited for: a member's removal tells the chief of a waiter right after each cancel, and the second need is never named"
+meant = "a_waiter_of_several_tasks_a_removed_member_held_is_told_to_the_chief_once_naming_each"
+runs = ["ledger-waited-for"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff.rs"
+find = """            store.move_task(task, "cancelled", json!({ "reason": reason }))?;
+        }
+        for (task, _) in &open {
+            tell_stranded_waiters(store, project_id, task)?;
+        }
+"""
+replace = """            store.move_task(task, "cancelled", json!({ "reason": reason }))?;
+            tell_stranded_waiters(store, project_id, task)?;
+        }
+"""

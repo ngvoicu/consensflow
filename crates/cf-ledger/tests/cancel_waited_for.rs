@@ -341,3 +341,29 @@ fn a_member_removed_with_a_task_nothing_waits_for_tells_the_chief_nothing_of_wai
     assert_eq!(removed.cancelled, [1]);
     assert_eq!(notes(&ledger, chief), Vec::<String>::new());
 }
+
+/// A waiter of several of the leaving member's tasks is told once, naming each
+/// (Calliope's check T-126 of 9a7cc704): the removal cancels all its tasks and
+/// then tells, so the note is written when every need of the waiter is
+/// cancelled. Telling right after each cancel would name T-1 only, write the
+/// mark, and leave T-2 out for good.
+#[test]
+fn a_waiter_of_several_tasks_a_removed_member_held_is_told_to_the_chief_once_naming_each() {
+    let dir = tempfile::tempdir().expect("a folder");
+    let mut ledger = open_ledger(&dir.path().join("consensflow.db"), options()).expect("ledger");
+    let view = project(&mut ledger, false);
+    let chief = view.participants[1].id;
+    // T-1 and T-2 are zeus's, and T-3 waits for both.
+    by_name(&mut ledger, 1, "Parser", &[]);
+    by_name(&mut ledger, 1, "Lexer", &[]);
+    open(&mut ledger, 1, "Docs", &[1, 2]);
+
+    let removed = ledger.remove_member(1, "zeus").expect("zeus leaves");
+    assert_eq!(removed.cancelled, [1, 2]);
+    assert_eq!(state(&ledger, 3), "open");
+    assert_eq!(
+        notes(&ledger, chief),
+        ["T-3: T-3 waits on cancelled T-1, T-2 and will never start."],
+        "one note, naming both"
+    );
+}
