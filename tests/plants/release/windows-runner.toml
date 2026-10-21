@@ -35,6 +35,16 @@ find = '    "app/src-tauri/target",'
 replace = '    "app/src-tauri/targets",'
 
 [[plant]]
+name = "windows runner: the evals' reports are not kept"
+meant = "the_copy_keeps_the_runs_own_files_and_the_builds_outputs_and_nothing_else"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = '    "evals/reports",'
+replace = '    "evals/report",'
+
+[[plant]]
 name = "windows runner: a kept folder is walked before it is passed over"
 meant = "the_copy_keeps_the_runs_own_files_and_the_builds_outputs_and_nothing_else"
 runs = ["xtask-lib-windows"]
