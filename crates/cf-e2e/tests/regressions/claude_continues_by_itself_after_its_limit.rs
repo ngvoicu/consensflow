@@ -13,11 +13,12 @@
 //! after its account has quota again), and each case asserts what the owner should
 //! see: the task never fails, its result reaches the chief, and nothing of it is
 //! left in flight. What the cases found (T-95):
-//! - Claude first: the turn it continued by itself gets through, so the member is
-//!   back (`answered_since`) and the held task resumes with the words that resume
-//!   it, pasted after that turn. Their answer is the result, and the report of the
-//!   turn Claude continued by itself is in no result: the chief is asked whether
-//!   it should be.
+//! - Claude first: the turn it continued by itself got through, so the member was
+//!   back and the held task resumed with the words that resume it, pasted after
+//!   that turn; their answer was the result, and the report of the turn Claude
+//!   continued by itself reached the chief in no result. The chief's rule (T-95):
+//!   that turn is the task going on, with no words pasted, and its answer is the
+//!   result.
 //! - ConsensFlow first: its words resume the task, their answer is the one
 //!   result, and the task is over before Claude's timer fires; nothing is doubled
 //!   in what the chief is given.
@@ -30,6 +31,9 @@ use serde_json::{json, Value};
 use tempfile::TempDir;
 
 use crate::{config, secs, Outcome};
+
+/// What the stand-in's meta prompt says, which its answer quotes.
+const CONTINUED: &str = "Your claude.ai usage limit has reset.";
 
 /// The brief the worker's provider refuses while its account is the refused one.
 const BRIEF: &str = "QUOTA-OUT Reply with exactly: WORKER_OK";
@@ -89,7 +93,7 @@ fn results(project: &Project) -> cf_e2e::Result<Vec<Value>> {
 }
 
 #[test]
-fn claude_continuing_before_consensflow_resumes_the_task_ends_once_with_a_result() -> Outcome {
+fn claude_continuing_before_consensflow_resumes_the_task_its_report_is_the_result() -> Outcome {
     let (_folder, refused) = account()?;
     let rig = Rig::start(
         config()
@@ -113,6 +117,28 @@ fn claude_continuing_before_consensflow_resumes_the_task_ends_once_with_a_result
     );
     let given = results(&project)?;
     assert_eq!(given.len(), 1, "one result: {given:?}");
+    assert!(
+        given[0]["body"]
+            .as_str()
+            .unwrap_or_default()
+            .contains(CONTINUED),
+        "the turn Claude continued by itself is the report: {given:?}"
+    );
+    let session = task["assignee"].as_str().unwrap_or_default();
+    let resumed: Vec<Value> = project
+        .inbox(session)?
+        .into_iter()
+        .filter(|m| {
+            m["body"]
+                .as_str()
+                .unwrap_or_default()
+                .starts_with("Resumed:")
+        })
+        .collect();
+    assert!(
+        resumed.iter().all(|m| m["state"] != "delivered"),
+        "no words went in after its own turn: {resumed:?}"
+    );
     rig.close()?;
     Ok(())
 }

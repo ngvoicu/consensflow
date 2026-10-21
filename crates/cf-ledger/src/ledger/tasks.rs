@@ -140,6 +140,18 @@ impl Ledger {
         tasks::resume_task(&mut self.store, project_id, number, by, body)
     }
 
+    /// A task its window went on with by itself, in a turn of its own that got
+    /// through: held for quota, it goes on with no words; resumed with the
+    /// daemon's bare words still queued, they are withdrawn. Anything else is
+    /// refused.
+    pub fn go_on_in_window(
+        &mut self,
+        project_id: i64,
+        number: i64,
+    ) -> Result<TaskView, LedgerError> {
+        tasks::go_on_in_window(&mut self.store, project_id, number)
+    }
+
     /// A follow-up on a finished or failed task, back to its assignee. A
     /// question of the window's whose answer did not stand is still to be
     /// answered, and the one who was asked is told so.

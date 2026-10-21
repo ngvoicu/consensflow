@@ -21,6 +21,7 @@ use cf_ledger::{
 use serde_json::Value;
 
 use crate::deliveries::Delivering;
+use crate::delivery_text::{header_id, marker_of};
 use crate::dispatcher::Dispatcher;
 use crate::record::Record;
 use crate::seams::{EngineError, SavedAgent};
@@ -573,6 +574,82 @@ impl Dispatcher {
             None if !tiered.is_empty() => self.changed(),
             None => {}
         }
+        Ok(())
+    }
+
+    /// A held task's window that went on with it by itself, in a turn of its own
+    /// that got through: Claude Code continues once its limit resets, or the
+    /// human typed into it (T-95). That turn begins with a user's words that are
+    /// no paste of ConsensFlow's, after the latest words the window was given
+    /// about the task, and an answer follows them; a failed turn, or one refused
+    /// again, is none. The task goes on with no words, or with the daemon's bare
+    /// words that resume it withdrawn (`go_on_in_window`), and the turn is its
+    /// turn (`collect`).
+    pub(crate) fn went_on_by_itself(
+        &self,
+        project: &ProjectView,
+        participant: &ParticipantView,
+        record: &Record,
+        observed: &Observed,
+    ) -> Result<(), EngineError> {
+        let refused = observed
+            .quota
+            .as_deref()
+            .is_some_and(|quota| quota.level() == Level::Exhausted);
+        if participant.role == "chief" || observed.failed || refused {
+            return Ok(());
+        }
+        let Some(TaskThread { task, .. }) =
+            self.seams.ledger.borrow().task_in_hand(participant.id)?
+        else {
+            return Ok(());
+        };
+        let held = task.state == "paused" && task.held_until.is_some();
+        if !held && task.state != "queued" {
+            return Ok(());
+        }
+        let latest = self
+            .seams
+            .ledger
+            .borrow()
+            .last_pasted(participant.id, task.id)?;
+        let Some(latest) = latest else {
+            return Ok(());
+        };
+        let items = observed.items();
+        let marker = marker_of(latest.id);
+        let Some(pasted) = items.iter().position(|item| item.text.contains(&marker)) else {
+            return Ok(());
+        };
+        let after = &items[pasted + 1..];
+        if after
+            .iter()
+            .any(|item| item.role == Role::User && header_id(&item.text).is_some())
+        {
+            return Ok(());
+        }
+        let Some(own) = after.iter().rposition(|item| item.role == Role::User) else {
+            return Ok(());
+        };
+        let answered = after[own + 1..]
+            .iter()
+            .any(|item| item.role == Role::Assistant && item.complete);
+        if !answered {
+            return Ok(());
+        }
+        match self
+            .seams
+            .ledger
+            .borrow_mut()
+            .go_on_in_window(project.id, task.number)
+        {
+            Ok(_) => {}
+            // Words that carry more, or are on their way already, go in.
+            Err(LedgerError::Refused(_)) => return Ok(()),
+            Err(failed) => return Err(failed.into()),
+        }
+        record.delivery.borrow_mut().own_turn = Some((task.id, Arc::clone(&after[own].id)));
+        self.changed();
         Ok(())
     }
 

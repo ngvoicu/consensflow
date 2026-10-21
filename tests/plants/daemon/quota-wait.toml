@@ -20,7 +20,11 @@
 # Codex is refused mid-task in Codex's shape, and
 # `claude_continues_by_itself_after_its_limit.rs`, whose stand-in Claude continues
 # by itself once its limit resets; their runs build the native `cf` from the
-# sources as they are planted.
+# sources as they are planted. A held task's window that goes on with it by
+# itself, in a turn of its own that got through, is the task going on: it
+# resumes with no words, or the daemon's bare words that resume it are withdrawn
+# (`crates/cf-ledger/src/tasks/pausing.rs`, `go_on_in_window`), and its answer is
+# the result (`scheduler.rs`, `went_on_by_itself`; `deliveries.rs`, `collect`).
 #
 # Every name holds `quota wait`, so `cargo xtask plants daemon "quota wait"` runs
 # them all.
@@ -234,7 +238,7 @@ replace = "    text.contains(\"QUOTA-OUT-NEVER\")\n"
 
 [[plant]]
 name = "quota wait: the stand-in Claude never continues by itself after its limit resets"
-meant = "claude_continuing_before_consensflow_resumes_the_task_ends_once_with_a_result"
+meant = "claude_continuing_before_consensflow_resumes_the_task_its_report_is_the_result"
 runs = ["quota-wait-continues"]
 
 [[plant.edit]]
@@ -249,3 +253,75 @@ replace = '''
         return Ok(());
     };
 '''
+
+[[plant]]
+name = "quota wait: a held task's window that goes on by itself is taken for nothing, and the words that resume it go in after its turn"
+meant = "a_held_tasks_window_that_goes_on_by_itself_is_the_task_going_on_and_its_answer_is_the_result"
+runs = ["quota-wait-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "            self.went_on_by_itself(project, participant, record, &observed)?;"
+replace = ""
+
+[[plant]]
+name = "quota wait: Claude's own turn after its limit resets reaches the chief in no result (the rig)"
+meant = "claude_continuing_before_consensflow_resumes_the_task_its_report_is_the_result"
+runs = ["quota-wait-continues"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "            self.went_on_by_itself(project, participant, record, &observed)?;"
+replace = ""
+
+[[plant]]
+name = "quota wait: the daemon's bare words that resume a task are pasted after the turn its window went on with by itself"
+meant = "the_words_that_resume_a_task_queued_while_its_window_goes_on_by_itself_are_withdrawn_and_never_pasted"
+runs = ["quota-wait-engine"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = """            "queued" => {"""
+replace = """            "queued-never" => {"""
+
+[[plant]]
+name = "quota wait: the task's turn is read from its latest paste, the refusal before the window's own turn with it"
+meant = "a_held_tasks_window_that_goes_on_by_itself_is_the_task_going_on_and_its_answer_is_the_result"
+runs = ["quota-wait-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = "        let start = own.map_or(pasted, |own| own.max(pasted));"
+replace = "        let start = own.map_or(pasted, |_| pasted);"
+
+[[plant]]
+name = "quota wait: a held task goes on as soon as its window begins a turn of its own, answered or not"
+meant = "the_words_that_resume_a_task_queued_while_its_window_goes_on_by_itself_are_withdrawn_and_never_pasted"
+runs = ["quota-wait-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = "        if !answered {"
+replace = "        if false && !answered {"
+
+[[plant]]
+name = "quota wait: a held task goes on with a turn of its window's own that failed or was refused again"
+meant = "a_turn_of_the_windows_own_that_fails_while_the_words_that_resume_the_task_wait_neither_withdraws_them_nor_fails_the_task"
+runs = ["quota-wait-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = """        if participant.role == "chief" || observed.failed || refused {"""
+replace = """        if participant.role == "chief" {
+            let _ = refused;"""
+
+[[plant]]
+name = "quota wait: a tell answered while the words that resume the task wait is taken for a turn of the window's own"
+meant = "a_tell_answered_while_the_words_that_resume_the_task_wait_is_no_turn_of_the_windows_own"
+runs = ["quota-wait-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = "            .any(|item| item.role == Role::User && header_id(&item.text).is_some())"
+replace = "            .any(|item| item.role == Role::User && header_id(&item.text).is_some() && false)"

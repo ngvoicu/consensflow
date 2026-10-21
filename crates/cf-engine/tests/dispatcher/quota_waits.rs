@@ -268,3 +268,293 @@ fn holds_the_work_of_a_second_window_whose_refusal_is_dated_before_its_member_wa
     assert_eq!(tiers.task(1).task.assignee.as_deref(), Some(one.as_str()));
     assert_eq!(tiers.task(2).task.assignee.as_deref(), Some(two.as_str()));
 }
+
+/// The meta prompt Claude Code sends by itself once its limit resets.
+const CONTINUE: &str =
+    "Your claude.ai usage limit has reset. Continue the task you were working on.";
+
+/// T-1 working with zeus, then held: zeus's harness refused it, its reset two
+/// hours away. The refusal's own words are the window's last.
+fn held_for_two_hours(context: &Context) -> (Tiers<'_>, String) {
+    let tiers = Tiers::new(context, &["zeus"]);
+    tiers.open();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let session = tiers.assignee(1);
+    context.adapter.refuse(
+        &session,
+        exhausted(Some(&now(context)), Some(&after(context, 2 * 3_600_000))),
+    );
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(tiers.task(1).task.state, "paused");
+    (tiers, session)
+}
+
+/// What the window was given about T-1 that says `words`.
+fn pasted_saying(context: &Context, session: &str, words: &str) -> usize {
+    context
+        .adapter
+        .agent(session)
+        .items
+        .iter()
+        .filter(|item| item.role == Role::User && item.text.contains(words))
+        .count()
+}
+
+#[test]
+fn a_held_tasks_window_that_goes_on_by_itself_is_the_task_going_on_and_its_answer_is_the_result() {
+    // Claude Code continues by itself once its account has quota again, before
+    // the reset ConsensFlow holds the task until: its report reached no result,
+    // and the words that resume the task went in after it (T-95).
+    let context = Context::new();
+    let (tiers, session) = held_for_two_hours(&context);
+    context.advance(60_000);
+    context
+        .adapter
+        .begins_its_own_turn(&session, CONTINUE, &now(&context));
+    context.pass().unwrap();
+    context.advance(10_000);
+    context
+        .adapter
+        .ends_its_own_turn(&session, "The parser is done.", &now(&context));
+    for _ in 0..4 {
+        context.pass().unwrap();
+    }
+    let task = tiers.task(1);
+    let results: Vec<&str> = task
+        .messages
+        .iter()
+        .filter(|m| m.kind == "result")
+        .map(|m| m.body.as_str())
+        .collect();
+    assert_eq!(results, ["The parser is done."], "{:?}", task.task.state);
+    assert_eq!(
+        pasted_saying(&context, &session, "Resumed:"),
+        0,
+        "no words were pasted after its own turn"
+    );
+    let notes = tiers.notes("chief");
+    assert_eq!(
+        notes
+            .iter()
+            .filter(|n| n.starts_with("T-1 goes on"))
+            .count(),
+        1,
+        "{notes:?}"
+    );
+}
+
+#[test]
+fn the_words_that_resume_a_task_queued_while_its_window_goes_on_by_itself_are_withdrawn_and_never_pasted(
+) {
+    // The race: the hold ends and the words that resume the task are queued
+    // while the window is in a turn of its own, which they would follow (T-95).
+    let context = Context::new();
+    let (tiers, session) = held_for_two_hours(&context);
+    context.advance(2 * 3_600_000 + 60_000);
+    context.adapter.quota(&session, None);
+    context
+        .adapter
+        .begins_its_own_turn(&session, CONTINUE, &now(&context));
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let words = context
+        .ledger
+        .borrow()
+        .inbox(tiers.id(&session), 100)
+        .unwrap()
+        .into_iter()
+        .find(|m| m.body.starts_with("Resumed:"))
+        .expect("the hold ended and its words were queued");
+    assert_eq!(words.state, "queued", "the window is in its own turn");
+    context.advance(10_000);
+    context
+        .adapter
+        .ends_its_own_turn(&session, "The parser is done.", &now(&context));
+    for _ in 0..4 {
+        context.pass().unwrap();
+    }
+    let gone = context.ledger.borrow().message(words.id).unwrap().unwrap();
+    assert_eq!(gone.state, "cancelled", "{gone:?}");
+    assert_eq!(pasted_saying(&context, &session, "Resumed:"), 0);
+    let task = tiers.task(1);
+    let results: Vec<&str> = task
+        .messages
+        .iter()
+        .filter(|m| m.kind == "result")
+        .map(|m| m.body.as_str())
+        .collect();
+    assert_eq!(results, ["The parser is done."], "{:?}", task.task.state);
+}
+
+#[test]
+fn a_task_resumed_with_words_ends_once_though_its_window_goes_on_by_itself_after() {
+    // ConsensFlow first: its words resume the task and their answer is the
+    // result; the turn the window takes by itself after it gives nothing more.
+    let context = Context::new();
+    let (tiers, session) = held_for_two_hours(&context);
+    context.advance(2 * 3_600_000 + 60_000);
+    context.adapter.quota(&session, None);
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(pasted_saying(&context, &session, "Resumed:"), 1);
+    context
+        .adapter
+        .answer(&session, "Went on: the parser is done.");
+    for _ in 0..2 {
+        context.pass().unwrap();
+    }
+    context
+        .adapter
+        .begins_its_own_turn(&session, CONTINUE, &now(&context));
+    context
+        .adapter
+        .ends_its_own_turn(&session, "Nothing left to do.", &now(&context));
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    let task = tiers.task(1);
+    let results: Vec<&str> = task
+        .messages
+        .iter()
+        .filter(|m| m.kind == "result")
+        .map(|m| m.body.as_str())
+        .collect();
+    assert_eq!(results, ["Went on: the parser is done."]);
+}
+
+#[test]
+fn a_held_tasks_window_whose_own_turn_fails_or_is_refused_again_does_not_go_on() {
+    let context = Context::new();
+    let (tiers, session) = held_for_two_hours(&context);
+    // A turn of its own that fails, as Claude Code writes an API error: an
+    // answer that says so, and the turn failed.
+    context.advance(60_000);
+    context
+        .adapter
+        .begins_its_own_turn(&session, CONTINUE, &now(&context));
+    let error = context
+        .adapter
+        .item(Role::Assistant, "API Error: Can't reach the API server");
+    context.adapter.with(&session, |agent| {
+        agent.items.push(error);
+        agent.settled = true;
+        agent.failed = true;
+    });
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(tiers.task(1).task.state, "paused", "a failed turn");
+    // A turn of its own, looked at before it answers, that its harness then refuses again.
+    context.advance(60_000);
+    context
+        .adapter
+        .begins_its_own_turn(&session, CONTINUE, &now(&context));
+    context.pass().unwrap();
+    context.adapter.refuse(
+        &session,
+        exhausted(Some(&now(&context)), Some(&after(&context, 2 * 3_600_000))),
+    );
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    let task = tiers.task(1);
+    assert_eq!(task.task.state, "paused", "refused again");
+    assert!(task.messages.iter().all(|m| m.kind != "result"));
+    let notes = tiers.notes("chief");
+    assert!(
+        notes.iter().all(|n| !n.starts_with("T-1 goes on")),
+        "it never went on: {notes:?}"
+    );
+}
+
+#[test]
+fn a_tell_answered_while_the_words_that_resume_the_task_wait_is_no_turn_of_the_windows_own() {
+    // A tell goes in on its own, not carried by the words that resume the task:
+    // the window's answer to it is no turn of its own (T-95).
+    let context = Context::new();
+    let (tiers, session) = held_for_two_hours(&context);
+    context.advance(2 * 3_600_000 + 60_000);
+    context.adapter.quota(&session, None);
+    context.tell(tiers.project.id, &session, 1, "Use grammar v2");
+    for _ in 0..3 {
+        if pasted_saying(&context, &session, "Use grammar v2") > 0 {
+            break;
+        }
+        context.pass().unwrap();
+    }
+    let order: Vec<String> = context
+        .adapter
+        .agent(&session)
+        .items
+        .iter()
+        .map(|item| {
+            format!(
+                "{:?}:{}",
+                item.role,
+                item.text.chars().take(50).collect::<String>()
+            )
+        })
+        .collect();
+    assert_eq!(
+        pasted_saying(&context, &session, "Use grammar v2"),
+        1,
+        "{order:?}"
+    );
+    assert_eq!(
+        pasted_saying(&context, &session, "Resumed:"),
+        0,
+        "{order:?}"
+    );
+    context.adapter.answer(&session, "Noted.");
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(
+        pasted_saying(&context, &session, "Resumed:"),
+        1,
+        "the words that resume it go in after the tell"
+    );
+    let task = tiers.task(1);
+    assert!(
+        task.messages.iter().all(|m| m.kind != "result"),
+        "{:?}",
+        task.task.state
+    );
+}
+
+#[test]
+fn a_turn_of_the_windows_own_that_fails_while_the_words_that_resume_the_task_wait_neither_withdraws_them_nor_fails_the_task(
+) {
+    let context = Context::new();
+    let (tiers, session) = held_for_two_hours(&context);
+    context.advance(2 * 3_600_000 + 60_000);
+    context.adapter.quota(&session, None);
+    context
+        .adapter
+        .begins_its_own_turn(&session, CONTINUE, &now(&context));
+    context.pass().unwrap();
+    context.pass().unwrap();
+    // It fails, as Claude Code writes an API error: an answer that says so.
+    let error = context
+        .adapter
+        .item(Role::Assistant, "API Error: Can't reach the API server");
+    context.adapter.with(&session, |agent| {
+        agent.items.push(error);
+        agent.settled = true;
+        agent.failed = true;
+    });
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    let task = tiers.task(1).task;
+    assert_ne!(task.state, "failed", "{task:?}");
+    assert_eq!(
+        pasted_saying(&context, &session, "Resumed:"),
+        1,
+        "the words that resume it go in after the failed turn"
+    );
+}

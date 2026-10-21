@@ -1041,6 +1041,8 @@ impl Dispatcher {
             if self.forgotten(record) {
                 return Ok(());
             }
+            // A held task's window that went on with it by itself: its task goes on.
+            self.went_on_by_itself(project, participant, record, &observed)?;
             // A turn a refusal cut short, its member past it now, failed nothing: its task goes on.
             if self.cut_short(&observed) {
                 self.go_on(project, participant)?;
