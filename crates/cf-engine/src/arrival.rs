@@ -291,6 +291,7 @@ impl Dispatcher {
                     carried,
                     since,
                     unquiet_since: None,
+                    unquiet_last: None,
                 });
                 return Ok(());
             }

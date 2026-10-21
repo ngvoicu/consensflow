@@ -225,6 +225,13 @@ impl Dispatcher {
             .ledger
             .borrow_mut()
             .set_project_state(project, "suspended")?;
+        // A box the engine emptied counts as empty no more: what the human types into
+        // a window the Close could not close goes unseen until the Resume, and an
+        // interrupt of ours may put a prompt back there (Calliope's review of
+        // 2026-10-21, round 13).
+        for participant in &suspended.participants {
+            self.record_of(participant.id).delivery.borrow_mut().emptied = None;
+        }
         let kept = self
             .close_windows(project, &suspended.participants, None)
             .await?;

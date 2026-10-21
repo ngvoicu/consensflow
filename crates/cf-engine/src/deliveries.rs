@@ -94,6 +94,11 @@ pub(crate) struct Uncleared {
     /// Since when, on the engine's clock, the window has not been quiet for the key
     /// that empties its box: none while it was, at the last ask.
     pub(crate) unquiet_since: Option<i64>,
+    /// When a look last found it not quiet: a gap longer than the arrival window
+    /// since (a hold for what the human typed, a closed project, another message
+    /// first, a turn) starts the count again (Calliope's review of 2026-10-21,
+    /// round 13).
+    pub(crate) unquiet_last: Option<i64>,
 }
 
 /// What the Enter pressed once more for a paste does, as the ledger says now
@@ -374,8 +379,17 @@ impl Dispatcher {
                 };
                 if quiet {
                     stale.unquiet_since = None;
+                    stale.unquiet_last = None;
                     None
                 } else {
+                    let arrival_ms = self.seams.limits.arrival_ms;
+                    if stale
+                        .unquiet_last
+                        .is_some_and(|last| now - last > arrival_ms)
+                    {
+                        stale.unquiet_since = None;
+                    }
+                    stale.unquiet_last = Some(now);
                     Some(*stale.unquiet_since.get_or_insert(now))
                 }
             };
@@ -393,6 +407,7 @@ impl Dispatcher {
                 }
                 if let Some(stale) = record.delivery.borrow_mut().uncleared.as_mut() {
                     stale.unquiet_since = None;
+                    stale.unquiet_last = None;
                 }
                 let begun = self.seams.ledger.borrow_mut().begin_delivery(message.id)?;
                 let carried = begun.carried.iter().map(|row| row.id).collect();

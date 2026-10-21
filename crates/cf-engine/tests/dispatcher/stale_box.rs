@@ -617,3 +617,149 @@ fn a_box_the_human_typed_into_since_it_was_emptied_is_not_counted_empty() {
         "the paste after the human typed is not told the box is empty"
     );
 }
+
+/// Calliope's review of 2026-10-21, round 13 (P3-1): the note whose Enter was
+/// withheld while closed came back at the Resume into a window that never went
+/// quiet for the key, and was given up, the human told. The human then sent it
+/// from the box: it was taken for nothing, and read failed though its words
+/// arrived. It reads delivered, its receipt saying it had been given up.
+#[test]
+fn a_paste_given_up_for_a_window_never_quiet_that_the_human_sent_reads_delivered() {
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    context.adapter.with("chief", |agent| agent.arrive = false);
+    let note = context.note(project.id, "zeus", "chief", "hello");
+    context.pass().unwrap();
+    context.host.refuse_kills.set(true);
+    assert!(
+        context.close_project(project.id).is_err(),
+        "its windows stay"
+    );
+    context.host.refuse_kills.set(false);
+    context.advance(11_000);
+    context.host.set_snapshot(json!({ "outputQuietMs": 5_000 }));
+    context.pass().unwrap();
+    assert_eq!(
+        context.message(note.id).state,
+        "queued",
+        "withheld, given back"
+    );
+    let chief = context.host.last("chief").expect("its window").pane.id;
+    let paste = pasted(&context, &chief, note.id);
+
+    context.resume_project(project.id).unwrap();
+    context.host.set_snapshot(json!({ "outputQuietMs": 500 }));
+    for _ in 0..16 {
+        context.advance(11_000);
+        context.pass().unwrap();
+    }
+    assert_eq!(context.message(note.id).state, "failed", "given up");
+
+    human_sends(&context, "chief", &paste);
+    context.host.set_snapshot(json!({ "outputQuietMs": 5_000 }));
+    context.adapter.with("chief", |agent| agent.arrive = true);
+    let next = context.note(project.id, "zeus", "chief", "again");
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    let note = context.message(note.id);
+    assert_eq!(note.state, "delivered", "its words arrived");
+    assert_eq!(note.receipt["failed"], "it had been given up");
+    assert_eq!(
+        times_handed(&context, SEAM, note.id),
+        1,
+        "never pasted again"
+    );
+    assert_eq!(
+        times_handed(&context, SEAM, next.id),
+        1,
+        "the next note goes"
+    );
+    assert_eq!(
+        clears(&context),
+        0,
+        "nothing pressed into the box the human emptied"
+    );
+}
+
+/// The same review (P3-2): the window was not quiet once, then held for what the
+/// human typed for longer than the arrival window; the first look after it that
+/// found the screen printing spent an attempt at once, "never went quiet". A gap
+/// longer than the arrival window starts the count again.
+#[test]
+fn the_wait_for_a_quiet_window_starts_again_after_a_gap_longer_than_the_arrival_window() {
+    let context = Context::new();
+    let (tiers, _, _) = carrier_withheld(&context);
+    let again = resumed_again(&context, &tiers);
+    context.host.set_snapshot(json!({ "outputQuietMs": 500 }));
+    context.pass().unwrap();
+    *context.adapter.ready.borrow_mut() = Some(Rc::new(|| Ok(Readiness::Held(Held::Unsent))));
+    for _ in 0..4 {
+        context.advance(20_000);
+        context.pass().unwrap();
+    }
+    *context.adapter.ready.borrow_mut() = None;
+    context.pass().unwrap();
+    let message = context.message(again.id);
+    assert_eq!(
+        (message.state.as_str(), message.attempts),
+        ("queued", 0),
+        "no attempt spent on the first look after the gap"
+    );
+
+    context.host.set_snapshot(json!({ "outputQuietMs": 5_000 }));
+    context.pass().unwrap();
+    assert_eq!(
+        times_handed(&context, SEAM, again.id),
+        1,
+        "pasted once quiet"
+    );
+}
+
+/// The same review (P3-3): a box the engine emptied, whose paste was refused after
+/// the key, kept counting as empty through a Close: at the Resume, a prompt an
+/// interrupt of ours had put back there would ride with the paste, Claude pressing
+/// no Control-C of its own. The Close ends it.
+#[test]
+fn a_box_emptied_before_a_close_is_not_counted_empty_after_the_resume() {
+    let context = Context::new();
+    let (tiers, _, _) = carrier_withheld(&context);
+    let project = tiers.project.id;
+    let refusals = Rc::new(Cell::new(1_u32));
+    let left = Rc::clone(&refusals);
+    *context.adapter.deliver.borrow_mut() = Some(Rc::new(move |taking| {
+        let refused = left.get() > 0;
+        left.set(left.get().saturating_sub(1));
+        Box::pin(async move {
+            Ok(if refused {
+                Admission::Refused {
+                    reason: "the pane host refused the paste".to_owned(),
+                }
+            } else {
+                taking()
+            })
+        })
+    }));
+    let again = resumed_again(&context, &tiers);
+    context.pass().unwrap();
+    assert_eq!(
+        (refusals.get(), clears(&context)),
+        (0, 1),
+        "emptied, then refused"
+    );
+
+    context.host.refuse_kills.set(true);
+    assert!(context.close_project(project).is_err(), "its windows stay");
+    context.host.refuse_kills.set(false);
+    context.resume_project(project).unwrap();
+    let before = context.adapter.cleared.borrow().len();
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(context.message(again.id).state, "delivered");
+    assert_eq!(
+        context.adapter.cleared.borrow()[before..],
+        [false],
+        "the paste after the Resume is not told the box is empty"
+    );
+}

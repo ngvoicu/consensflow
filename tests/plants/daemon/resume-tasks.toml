@@ -1922,6 +1922,7 @@ find = """
                     carried,
                     since,
                     unquiet_since: None,
+                    unquiet_last: None,
                 });"""
 replace = """
                 let _ = (pane, carried, since);"""
@@ -2083,8 +2084,8 @@ runs = ["engine-stale-box"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/delivery.rs"
-find = "        if !withdrawn && message.state != \"queued\" {"
-replace = "        if withdrawn || message.state != \"queued\" {"
+find = "        if !withdrawn && !given_up && message.state != \"queued\" {"
+replace = "        if withdrawn || !given_up && message.state != \"queued\" {"
 
 [[plant]]
 name = "resume tasks: a row withdrawn after its paste was handed over stays withdrawn when the paste arrives"
@@ -2259,3 +2260,37 @@ find = """
             record.delivery.borrow_mut().emptied = None;
         }"""
 replace = ""
+
+# --- round 13's review (Calliope, 2026-10-21) ---
+
+[[plant]]
+name = "resume tasks: a paste given up that the human sent stays failed"
+meant = "a_paste_given_up_for_a_window_never_quiet_that_the_human_sent_reads_delivered"
+runs = ["engine-stale-box"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = "        let given_up = message.state == \"failed\";"
+replace = "        let given_up = message.state == \"failed\" && message.attempts < 0;"
+
+[[plant]]
+name = "resume tasks: the wait for a quiet window counts on across a gap"
+meant = "the_wait_for_a_quiet_window_starts_again_after_a_gap_longer_than_the_arrival_window"
+runs = ["engine-stale-box"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = """
+                        .is_some_and(|last| now - last > arrival_ms)"""
+replace = """
+                        .is_some_and(|last| now - last > arrival_ms && false)"""
+
+[[plant]]
+name = "resume tasks: a box emptied before a Close counts as empty after the Resume"
+meant = "a_box_emptied_before_a_close_is_not_counted_empty_after_the_resume"
+runs = ["engine-stale-box"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "            self.record_of(participant.id).delivery.borrow_mut().emptied = None;"
+replace = "            let _ = participant;"

@@ -331,6 +331,9 @@ pub(crate) fn received_of(
     Ok(received.into_iter().find(|id| begun_with.contains(id)))
 }
 
+/// What a receipt says of a message that arrived though its delivery was given up.
+const GIVEN_UP: &str = "it had been given up";
+
 /// What a receipt says of a row that arrived though it was withdrawn after the
 /// paste that carried it was handed over.
 pub const WITHDRAWN_AFTER_HANDED: &str = "after it was handed over";
@@ -345,8 +348,9 @@ pub const WITHDRAWN_AFTER_HANDED: &str = "after it was handed over";
 /// paste was begun with) riding in it again and handed with it, a row withdrawn
 /// since among them, and confirmed with `receipt` (`confirm_delivery`, which
 /// marks those rows arrived too; with `telling`, `confirm_delivery_telling`). A
-/// message withdrawn since says so in its receipt. The message confirmed, if it
-/// waited or was withdrawn; none otherwise.
+/// message withdrawn since, or given up since, says so in its receipt. The
+/// message confirmed, if it waited, was withdrawn or was given up; none
+/// otherwise.
 pub(crate) fn confirm_sent_by_hand(
     store: &mut Store,
     message_id: i64,
@@ -358,8 +362,12 @@ pub(crate) fn confirm_sent_by_hand(
         let Some(message) = store.message(message_id)? else {
             return Ok(None);
         };
+        // Withdrawn since, or given up since (a window that never went quiet for
+        // the key that empties its box; Calliope's review of 2026-10-21, round 13),
+        // it arrived all the same.
         let withdrawn = message.state == "cancelled";
-        if !withdrawn && message.state != "queued" {
+        let given_up = message.state == "failed";
+        if !withdrawn && !given_up && message.state != "queued" {
             return Ok(None);
         }
         let at = store.at();
@@ -388,6 +396,9 @@ pub(crate) fn confirm_sent_by_hand(
         let mut receipt = receipt.clone();
         if withdrawn {
             receipt["cancelled"] = json!(WITHDRAWN_AFTER_HANDED);
+        }
+        if given_up {
+            receipt["failed"] = json!(GIVEN_UP);
         }
         let confirmed = if telling {
             confirm_delivery_telling(store, message_id, Some(&receipt))?
