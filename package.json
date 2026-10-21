@@ -61,6 +61,7 @@
     "live:wake-ups": "cargo xtask live wake-ups",
     "live:specs": "cargo xtask live specs",
     "live:commands-at-rest": "cargo xtask live commands-at-rest",
+    "live:folder-trust": "cargo xtask live folder-trust",
     "windows": "cargo xtask windows",
     "check:all": "cargo xtask check"
   },

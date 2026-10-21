@@ -57,6 +57,8 @@ fn every_command_of_the_plan_is_there_once() {
             "smoke",
             "smoke-updater",
             "candidate",
+            "release alpha",
+            "release promote",
             "check",
         ]
     );

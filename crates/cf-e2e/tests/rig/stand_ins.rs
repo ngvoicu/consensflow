@@ -116,6 +116,28 @@ pub(crate) fn until_there(file: &Path) -> bool {
     file.exists()
 }
 
+/// The process the file `file` holds once it holds a whole one, waited for up to ten
+/// seconds: a program that writes its process makes the file before it writes into it,
+/// and a file that is there is not one that is written. Where none comes, it says what
+/// the file held.
+#[cfg(unix)]
+pub(crate) fn pid_in(file: &Path) -> Result<u32, String> {
+    let started = Instant::now();
+    loop {
+        let held = files::read_string(file).unwrap_or_default();
+        if let Ok(pid) = held.trim().parse() {
+            return Ok(pid);
+        }
+        if started.elapsed() > Duration::from_secs(10) {
+            return Err(format!(
+                "no process in {} after ten seconds: it held {held:?}",
+                file.display()
+            ));
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+}
+
 #[test]
 fn the_stand_in_agents_job_writes_its_process_runs_its_seconds_and_says_it_finished() -> Outcome {
     let folder = tempfile::tempdir()?;

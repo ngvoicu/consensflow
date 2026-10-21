@@ -21,8 +21,9 @@ use tungstenite::http::HeaderValue;
 use tungstenite::stream::MaybeTlsStream;
 use tungstenite::{Message, WebSocket};
 
+use crate::stand_ins::beside;
 #[cfg(unix)]
-use crate::stand_ins::{beside, until_there};
+use crate::stand_ins::{pid_in, until_there};
 use crate::Outcome;
 
 const FAKE_CODEX: &str = env!("CARGO_BIN_EXE_fake-codex");
@@ -192,13 +193,8 @@ fn the_stand_in_codexs_plugin_server_leads_a_group_of_its_own_and_starts_its_wor
     server.send("call\n");
     let mut started = Vec::new();
     for number in 1..=2 {
-        assert!(
-            until_there(&beside(&worker(number), "pid")),
-            "worker {number} runs"
-        );
-        let pid: u32 = files::read_string(&beside(&worker(number), "pid"))?
-            .trim()
-            .parse()?;
+        let pid = pid_in(&beside(&worker(number), "pid"))
+            .map_err(|failed| format!("worker {number} does not run: {failed}"))?;
         assert_eq!(
             group_of(pid),
             Some(server.id()),
@@ -221,6 +217,50 @@ fn the_stand_in_codexs_plugin_server_leads_a_group_of_its_own_and_starts_its_wor
         thread::sleep(Duration::from_millis(20));
     }
     assert!(started.iter().all(|pid| !is_alive(*pid)), "{started:?}");
+    Ok(())
+}
+
+/// The process a plugin server and a worker write is whole from the moment its file is
+/// there, so that a case that waits for the file and reads it reads a number: the file
+/// is looked for as often as a case can, and read at once when it is found.
+#[test]
+fn the_stand_in_codexs_plugin_server_and_worker_write_their_process_whole_or_not_at_all() -> Outcome
+{
+    let folder = tempfile::tempdir()?;
+    let (server, worker) = (
+        folder.path().join("server-1"),
+        folder.path().join("worker-1"),
+    );
+    let programs = [
+        (
+            "server",
+            Run::new(FAKE_CODEX).arg("--server").arg(&server).arg("0"),
+            &server,
+        ),
+        (
+            "worker",
+            Run::new(FAKE_CODEX).arg("--worker").arg("30").arg(&worker),
+            &worker,
+        ),
+    ];
+    for (kind, program, file) in programs {
+        let _running = program.spawn()?;
+        let started = Instant::now();
+        let held = loop {
+            if let Ok(held) = std::fs::read_to_string(beside(file, "pid")) {
+                break held;
+            }
+            assert!(
+                started.elapsed() < Duration::from_secs(10),
+                "the {kind} never wrote its process"
+            );
+            thread::yield_now();
+        };
+        assert!(
+            held.trim().parse::<u32>().is_ok(),
+            "the {kind}'s file was there holding {held:?}"
+        );
+    }
     Ok(())
 }
 
