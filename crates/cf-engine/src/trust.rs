@@ -61,8 +61,9 @@ pub(crate) const ASKS_WITHIN_MS: i64 = 30_000;
 const PRESS_AGAIN_LOOKS: u32 = 10;
 
 /// How many looks in a row a window that asked may show neither the question nor its
-/// prompt before it counts as past the question.
-const GONE_LOOKS: u32 = 6;
+/// prompt before it counts as past the question: 12 s, since a resumed window draws
+/// its conversation before its prompt, and a yes is banked only at the prompt.
+const GONE_LOOKS: u32 = 24;
 
 /// How many keys are pressed toward a yes before the question goes to the human:
 /// a screen that is not moved by them is one the engine does not read right.
