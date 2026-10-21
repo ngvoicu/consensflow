@@ -23,7 +23,7 @@ replace = "    Ok(Role::Later)"
 
 [[plant]]
 name = "feeds: a release before the bridge is let through"
-meant = "refuses_a_release_before_the_bridge"
+meant = "after_a_release_is_published_the_files_and_the_feeds_serve_what_the_rule_says::refuses_a_release_before_the_bridge"
 runs = ["feeds"]
 
 [[plant.edit]]
