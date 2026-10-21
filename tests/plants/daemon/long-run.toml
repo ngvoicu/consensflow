@@ -1410,7 +1410,7 @@ replace = "                .is_some_and(|state| !states.contains(&state))"
 # The run's end, the keeper, the report
 
 [[plant]]
-name = "long run: a ledger the app left that cannot be read falls back to the last look's, and a run whose close broke it passes on old evidence"
+name = "long run: a ledger the app left that cannot be read is read as an empty one, and a run whose close broke it passes on no evidence"
 meant = "a_ledger_the_app_left_that_cannot_be_read_fails_the_run_and_no_earlier_copy_is_held"
 runs = ["evals-lib-long-run"]
 
@@ -1418,11 +1418,10 @@ runs = ["evals-lib-long-run"]
 file = "crates/cf-evals/src/long_run/conduct.rs"
 find = '''
         Err(failed) => {
-            let processes = closed_look(at, Ledger::default(), windows, None);'''
+            let processes = closed_look(at, Ledger::default(), windows, Records::default());'''
 replace = '''
-        Err(_) if last.is_some() => {
-            let earlier = last.map(|look| look.ledger.clone()).unwrap_or_default();
-            let look = closed_look(at, earlier, windows, last);
+        Err(_) => {
+            let look = closed_look(at, Ledger::default(), windows, records);
             let found = final_breaks(&look, settings, why, deadline);
             AfterClose {
                 look: Some(look),
@@ -1431,7 +1430,7 @@ replace = '''
             }
         }
         Err(failed) => {
-            let processes = closed_look(at, Ledger::default(), windows, None);'''
+            let processes = closed_look(at, Ledger::default(), windows, Records::default());'''
 
 [[plant]]
 name = "long run: what the close left of the run's processes is not held"
@@ -3578,7 +3577,7 @@ replace = """const PASTED: &str = r#"^<pasted_content(?: [^>\\n]*)?>"#;"""
 [[plant]]
 name = "long run 4: a paste wrapper with Claude Code's id is no wrapper, and its delivery begins no turn"
 meant = "a_paste_wrapper_is_claude_codes_tag_and_nothing_that_only_opens_like_it"
-runs = ["evals-long-run", "evals-lib-long-run"]
+runs = ["evals-lib-long-run", "evals-long-run"]
 
 [[plant.edit]]
 file = "crates/cf-evals/src/long_run/invariants/deliveries.rs"
@@ -3745,3 +3744,24 @@ runs = ["evals-lib-long-run"]
 file = "crates/cf-e2e/src/terminal.rs"
 find = '    drop(opened);'
 replace = '    std::mem::forget(opened);'
+
+# Round b7 (Calliope's review of b5): a summary is exempted only by a record read through the
+# moment its row was copied, and the records are read once more after the app's close.
+[[plant]]
+name = "long run 7: a summary's record read before its row was copied still exempts it, and a retry copied under its uuid passes (Calliope's)"
+meant = "a_summary_whose_record_was_read_before_its_row_was_copied_is_no_summary_and_a_retry_breaks_the_seventh"
+runs = ["evals-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/invariants/deliveries.rs"
+find = '    look.record_through(item.conversation, copied)'
+replace = '    look.record_through(item.conversation, copied.min(i64::MIN))'
+[[plant]]
+name = "long run 7: the records are not read again after the close, and the last look's stale record is all the closed look holds"
+meant = "the_records_are_read_once_more_after_the_close_past_what_the_last_look_read"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/watcher.rs"
+find = '        self.read_records(ledger, jiff::Timestamp::now().as_millisecond());'
+replace = '        let _ = ledger;'

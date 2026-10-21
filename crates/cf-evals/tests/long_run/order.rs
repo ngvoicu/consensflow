@@ -728,7 +728,8 @@ fn a_result_whose_final_answer_its_progress_holds_too_is_never_taken_for_turn_en
     // GPT-6.1-Sol's review of round b3: the final answer `Done.` opens two progress lines, and
     // the result holds those two alone, no final answer of its own. Taken out last, `Done.`
     // came out of the second line and left the result read as turn-end's A4: known, a false
-    // PASS. Taken out where it first stands, words are left: a break that fails a run.
+    // PASS. Since round b5 a result whose progress lines hold its final answer is no
+    // turn-end's A4 at all: a break that fails a run, whichever occurrence is taken out.
     let listed = known::KNOWN.as_deref().unwrap();
     let breaks = progress_then(
         &[
@@ -742,8 +743,8 @@ fn a_result_whose_final_answer_its_progress_holds_too_is_never_taken_for_turn_en
     assert_eq!(breaks.len(), 1, "{breaks:?}");
     assert_eq!(breaks[0].shape, None, "{breaks:?}");
     assert_eq!(known::of(&breaks[0], listed), None);
-    // The cost, accepted (the lead's line of round b4): a true A4 whose progress opens with
-    // the answer's words leaves words too, and fails a run the lead reads, never the other
+    // The cost, accepted (the lead's line of round b4): a true A4 whose progress line holds
+    // the answer's words is read the same, and fails a run the lead reads, never the other
     // way.
     let progress = "All 61 tests pass. Checking the diff now.";
     let breaks = progress_then(

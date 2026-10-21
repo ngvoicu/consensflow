@@ -730,7 +730,7 @@ fn what_the_close_left_of_the_runs_processes_is_a_break_of_the_last_look() {
         at(6, 20),
         Ok(ledger("accepted")),
         windows,
-        Some(&last),
+        records_of(Some(&last)),
         (&Settings::default(), "the project is done", at(30, 0)),
     );
     let look = after.look.as_ref().unwrap();
@@ -780,7 +780,7 @@ fn a_ledger_the_app_left_that_cannot_be_read_fails_the_run_and_no_earlier_copy_i
         at(6, 20),
         Err(crate::Error::Refused("file is not a database".to_owned())),
         windows,
-        Some(&last),
+        records_of(Some(&last)),
         (&Settings::default(), "the project is done", at(30, 0)),
     );
     assert!(after.look.is_none(), "no look on the earlier ledger");
@@ -949,7 +949,12 @@ fn what_the_app_wrote_as_it_closed_is_held_in_the_last_look() {
     ));
     // Taken ten seconds after the result: the closed ledger is all it will be, and
     // a result is judged however young.
-    let look = closed_look(at(3, 10), closed, Windows::default(), Some(&last));
+    let look = closed_look(
+        at(3, 10),
+        closed,
+        Windows::default(),
+        records_of(Some(&last)),
+    );
     let found = final_breaks(
         &look,
         &Settings::default(),

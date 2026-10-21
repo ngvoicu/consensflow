@@ -1,7 +1,7 @@
 //! 7 (B5): a message delivered twice into a conversation, or joined to another in
 //! one prompt.
 
-use cf_evals::long_run::look::Look;
+use cf_evals::long_run::look::{Look, Reading};
 use cf_evals::long_run::record::Record;
 use serde_json::json;
 
@@ -207,6 +207,41 @@ fn a_summarys_uuid_another_line_carries_too_is_no_summary_and_a_retry_under_it_b
     look.records
         .insert(worker, Record::claude(&line(&id, "Go on.", false)));
     assert_eq!(said_of(&look), [TWICE]);
+}
+
+#[test]
+fn a_summary_whose_record_was_read_before_its_row_was_copied_is_no_summary_and_a_retry_breaks_the_seventh(
+) {
+    // Calliope's review of round b5: the record holds Claude Code's flagged summary under a
+    // uuid, read through 10:02:05; m-246's real retry came under the same uuid after it, and
+    // the product's copy keeps it there, copied at 10:02:06; the record was read no further
+    // (as at the run's end, or after a reading that failed). A record that cannot hold the
+    // row is no word on it: the row is held as any is, and m-246 given twice is a break.
+    let scene = Scene::new(&[("long-worker", "claude-code")]);
+    let conversation = chief_on(&scene, "claude-code");
+    scene.item(conversation, 0, "user", FIRST, true, &t(1, 2));
+    scene.item(conversation, 1, "assistant", "Noted.", true, &t(1, 10));
+    scene.copied(conversation, 3, "user", &summary(), &t(2, 5));
+    scene.copied(conversation, 3, "user", FIRST, &t(2, 6));
+    let id = format!("i-{conversation}-3");
+    let read_before = |through: i64| {
+        let mut look = scene.look_with(
+            ms(4, 0),
+            conversation,
+            Record::claude(&line(&id, &summary(), true)),
+        );
+        look.readings.insert(
+            conversation,
+            Reading {
+                through: Some(through),
+                failed: None,
+            },
+        );
+        look
+    };
+    assert_eq!(said_of(&read_before(ms(2, 5))), [TWICE]);
+    // Read through the copy, the record is the word on the row: the summary it flags alone.
+    assert!(said_of(&read_before(ms(2, 6))).is_empty());
 }
 
 #[test]

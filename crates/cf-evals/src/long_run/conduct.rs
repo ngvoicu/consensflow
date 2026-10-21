@@ -17,6 +17,7 @@
 //! harnesses it found, each break's and each unresolved's key as it is found, the
 //! summary, where the report is), and the report keeps the rest.
 
+use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::thread::sleep;
@@ -28,10 +29,11 @@ use super::disruptions::{Choice, Schedule};
 use super::edge::Edge;
 use super::invariants::{self, end, Break, Keeper, Settings, Unjudged, EFFECT, END};
 use super::ledger::Ledger;
-use super::look::{Look, Windows};
+use super::look::{Look, Reading, Windows};
 use super::mask::cut;
 use super::options::Options;
 use super::play::{self, Outcome, Stagehand, Watch, With};
+use super::record::Record;
 use super::report::{file_name, ChiefKept, Kept, TIME_UP};
 use super::setup::{self, Cast};
 use super::stage::{self, Stage};
@@ -437,6 +439,13 @@ fn finish(
     let after = match &closed {
         Ok(closed) => {
             let ledger = on_copy(&closed.home.join("consensflow.db"), Ledger::read);
+            // The records read once more, as the ledger is: a row copied after the last look
+            // is held to a record read past it. Where the ledger could not be read, no look
+            // holds them.
+            let records = ledger.as_ref().ok().map_or_else(
+                || records_of(run.last.as_ref()),
+                |ledger| stage.watcher.records_after_close(ledger),
+            );
             if !closed.left.is_empty() {
                 run.timeline.add(
                     at,
@@ -463,7 +472,7 @@ fn finish(
                 at,
                 ledger,
                 windows,
-                run.last.as_ref(),
+                records,
                 (settings, &run.ending, run.deadline),
             )
         }
@@ -561,7 +570,8 @@ struct AfterClose {
     unread: Option<String>,
 }
 
-/// What the run holds once the app has closed at `at`, its ledger read as `ledger`
+/// What the run holds once the app has closed at `at`, its ledger read as `ledger`, its
+/// records as `records` (read once more after the close, or as the last look read them)
 /// and its windows as the close left them, held with `settings` and to the end of a
 /// run that ended `why` by `deadline`. A ledger that could not be read leaves no look:
 /// what the close left of the run's processes, which needs no ledger, is held all the
@@ -570,12 +580,12 @@ fn after_close(
     at: i64,
     ledger: Result<Ledger>,
     windows: Windows,
-    last: Option<&Look>,
+    records: Records,
     (settings, why, deadline): (&Settings, &str, i64),
 ) -> AfterClose {
     match ledger {
         Ok(ledger) => {
-            let look = closed_look(at, ledger, windows, last);
+            let look = closed_look(at, ledger, windows, records);
             let found = final_breaks(&look, settings, why, deadline);
             AfterClose {
                 look: Some(look),
@@ -584,7 +594,7 @@ fn after_close(
             }
         }
         Err(failed) => {
-            let processes = closed_look(at, Ledger::default(), windows, None);
+            let processes = closed_look(at, Ledger::default(), windows, Records::default());
             AfterClose {
                 look: None,
                 found: invariants::check(&processes, &final_settings(settings)),
@@ -599,9 +609,9 @@ fn after_close(
 /// The look at the project once the app has closed, at `at`: its ledger as the app
 /// left it, the `windows` as the close left them (none open: every exit the run saw,
 /// the processes of the run that were left and those it could not judge, and every
-/// close whose host's last word was not read whole), and the records of the last look,
-/// read as far as that look read them.
-fn closed_look(at: i64, ledger: Ledger, windows: Windows, last: Option<&Look>) -> Look {
+/// close whose host's last word was not read whole), and `records`, each with how far it
+/// was read.
+fn closed_look(at: i64, ledger: Ledger, windows: Windows, (records, readings): Records) -> Look {
     Look {
         at,
         ledger,
@@ -610,9 +620,18 @@ fn closed_look(at: i64, ledger: Ledger, windows: Windows, last: Option<&Look>) -
             activity: Vec::new(),
             ..windows
         },
-        records: last.map(|look| look.records.clone()).unwrap_or_default(),
-        readings: last.map(Look::every_reading).unwrap_or_default(),
+        records,
+        readings,
     }
+}
+
+/// The harnesses' records a look holds, by conversation, and how far each was read.
+type Records = (BTreeMap<i64, Record>, BTreeMap<i64, Reading>);
+
+/// The records of `last`, the last look, as far as it read them.
+fn records_of(last: Option<&Look>) -> Records {
+    last.map(|look| (look.records.clone(), look.every_reading()))
+        .unwrap_or_default()
 }
 
 /// `settings` for a look once the app has closed: a result is judged however young

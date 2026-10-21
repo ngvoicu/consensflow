@@ -261,10 +261,25 @@ fn send_what_the_box_holds(window: &Window, status: &Path, lines: &mut Vec<Strin
     Ok(())
 }
 
-/// What came of one command: the lines that say it, and whether the window read at rest.
+/// What came of one command: the lines that say it, whether the window read at rest, and
+/// whether it ran, Claude held idle after it and the owner's settings were kept (all but the
+/// daemon's reading of it).
 struct Came {
     at_rest: bool,
+    ran_and_kept: bool,
     lines: Vec<String>,
+}
+
+impl Came {
+    /// What came of a command that `done` (it ran, and Claude held idle after it), whose
+    /// record the daemon read `settled`, the owner's settings `kept`, said by `lines`.
+    fn of(done: bool, settled: bool, kept: bool, lines: Vec<String>) -> Self {
+        Self {
+            at_rest: done && settled && kept,
+            ran_and_kept: done && kept,
+            lines,
+        }
+    }
 }
 
 /// What a command needs before it is typed: a conversation just cleared for `refused`,
@@ -304,14 +319,16 @@ fn prepare(window: &Window, status: &Path, command: Command) -> Result<bool> {
 /// daemon reads it; the owner's settings must be as they were.
 fn type_command(window: &Window, status: &Path, command: Command) -> Result<Came> {
     if !prepare(window, status, command)? {
-        return Ok(Came {
-            at_rest: false,
-            lines: vec![format!(
+        return Ok(Came::of(
+            false,
+            false,
+            true,
+            vec![format!(
                 "what `{}` needs first did not come: {}",
                 command.name(),
                 window.tail()
             )],
-        });
+        ));
     }
     let config = window.claude_config();
     let settings = settings_of(&config);
@@ -383,10 +400,34 @@ fn type_command(window: &Window, status: &Path, command: Command) -> Result<Came
     if command == Command::Cancelled {
         send_what_the_box_holds(window, status, &mut lines)?;
     }
-    Ok(Came {
-        at_rest: done && settled && kept,
-        lines,
-    })
+    Ok(Came::of(done, settled, kept, lines))
+}
+
+/// The check of `command` from what came of it: it holds where the window read at rest
+/// after it. For the one whose outcome is a finding (`cancelled`), it holds too where only
+/// the daemon's reading is unsettled: the command ran, Claude held idle after it, and the
+/// owner's settings were kept. A message before it that never answered, a command that
+/// never ran or never left Claude idle, and settings Claude changed fail it, finding or not
+/// (Calliope's review of compact-rest round 3).
+fn check_of(command: Command, came: &Came) -> Check {
+    let finding = command.finding() && came.ran_and_kept && !came.at_rest;
+    let said = if came.at_rest {
+        "it ran, and the window is at rest after it"
+    } else if finding {
+        "it ran, Claude held idle after it and the owner's settings were kept, but the window does not read at rest"
+    } else {
+        "not at rest after it, or it never ran, or the owner's settings changed"
+    };
+    Check::new(
+        "claude",
+        command.name(),
+        came.at_rest || finding,
+        if command.finding() {
+            format!("{said} (a finding, left for 3.0.6: its lines above say what Claude wrote and what its box held)")
+        } else {
+            said.to_owned()
+        },
+    )
 }
 
 #[test]
@@ -437,21 +478,7 @@ fn each_command_typed_at_an_idle_claudes_prompt_leaves_the_window_at_rest() -> R
         }
         let came = type_command(&window, &status, command)?;
         log.block(&format!("== {}", command.name()), &came.lines.join("\n"));
-        let said = if came.at_rest {
-            "it ran, and the window is at rest after it"
-        } else {
-            "not at rest after it, or it never ran, or the owner's settings changed"
-        };
-        checks.push(Check::new(
-            "claude",
-            command.name(),
-            came.at_rest || command.finding(),
-            if command.finding() {
-                format!("{said} (a finding, left for 3.0.6: its lines above say what Claude wrote and what its box held)")
-            } else {
-                said.to_owned()
-            },
-        ));
+        checks.push(check_of(command, &came));
     }
     // And the window takes a message after them all, and is at rest after its answer.
     let last = window.send(
@@ -509,6 +536,48 @@ mod tests {
                 Some(format!("no such command: {none}"))
             );
         }
+    }
+
+    #[test]
+    fn the_cancelled_finding_passes_only_where_it_ran_held_idle_and_kept_the_owners_settings() {
+        // Every outcome of a command: whether it was done (it ran, and Claude held idle after
+        // it), whether the daemon read it settled, whether the owner's settings were kept.
+        for done in [false, true] {
+            for settled in [false, true] {
+                for kept in [false, true] {
+                    let came = Came::of(done, settled, kept, Vec::new());
+                    for command in Command::ALL {
+                        // At rest holds for any command; the finding (`cancelled`) holds too
+                        // where only the daemon's reading is unsettled. A prep message that
+                        // never answered, a command never done, or the settings changed
+                        // fail it all the same.
+                        let holds = (done && settled && kept)
+                            || (command == Command::Cancelled && done && kept);
+                        let check = check_of(command, &came);
+                        assert_eq!(
+                            check.ok, holds,
+                            "{command:?} done {done} settled {settled} kept {kept}: {}",
+                            check.detail
+                        );
+                    }
+                }
+            }
+        }
+        let finding = check_of(Command::Cancelled, &Came::of(true, false, true, Vec::new()));
+        assert!(
+            finding.detail.starts_with("it ran, Claude held idle"),
+            "{}",
+            finding.detail
+        );
+        let failed = check_of(
+            Command::Cancelled,
+            &Came::of(true, false, false, Vec::new()),
+        );
+        assert!(
+            failed.detail.starts_with("not at rest"),
+            "{}",
+            failed.detail
+        );
     }
 
     #[test]

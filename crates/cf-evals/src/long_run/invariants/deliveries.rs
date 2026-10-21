@@ -17,8 +17,12 @@
 //! double hidden. Text that only looks like a harness's own is never told from a delivery
 //! by its words (rounds b2 and b3 each found new words that fooled such a rule). The one
 //! row left out is the one Claude Code marks itself as its summary of a compaction, by the
-//! record's own flag (`isCompactSummary`), its record read: it quotes the prompts before it
-//! whole (m-13 on the Mac's 2-hour run of 2026-10-19), and was given none.
+//! record's own flag (`isCompactSummary`): it quotes the prompts before it whole (m-13 on
+//! the Mac's 2-hour run of 2026-10-19), and was given none. It is left out only where its
+//! uuid is unambiguous (one line alone of the records the watch reads carries it, and that
+//! line is flagged, round b5) and its record was read through the moment the row was copied
+//! (round b7: a record read before a retry was copied under the summary's uuid could not
+//! hold it); a summary copied after the record's last reading is held as any row is.
 
 use std::collections::BTreeMap;
 use std::sync::OnceLock;
@@ -147,13 +151,14 @@ pub(super) fn delivered_to<'l>(look: &'l Look, item: &Item, worker: i64) -> Vec<
 }
 
 /// Whether `item` is a row Claude Code marks as its summary of a compaction, by the
-/// record's own flag, its record read ([`crate::long_run::record::Record::is_summary`]),
-/// and no other record the watch reads carries its uuid. Without the record, it is held as
-/// any item is.
+/// record's own flag ([`crate::long_run::record::Record::is_summary`]), its record read
+/// through the moment the row was copied (a record read before then cannot hold what the
+/// daemon copied under that uuid since), and no other record the watch reads carries its
+/// uuid. Without such a record, it is held as any item is.
 fn is_summary(look: &Look, item: &Item) -> bool {
-    look.records
-        .get(&item.conversation)
-        .is_some_and(|record| record.is_summary(&item.id))
+    let copied = crate::clock::millis(&item.copied_at).unwrap_or(i64::MAX);
+    look.record_through(item.conversation, copied)
+        .is_ok_and(|record| record.is_summary(&item.id))
         && look.records.iter().all(|(conversation, record)| {
             *conversation == item.conversation || !record.carries(&item.id)
         })
