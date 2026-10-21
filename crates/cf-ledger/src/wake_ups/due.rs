@@ -16,9 +16,9 @@
 //!   chain of open tasks. What waits for the chief is the chief's own work and
 //!   a wake-up goes for it: a task done and waiting for its decision, a
 //!   question it has not answered (every question on the board is put to the
-//!   chief), a task someone paused or whose hold the daemon ended, a task open
-//!   behind one of these or behind one that failed or was called off, and a
-//!   board with nothing on it. One that is held back for work is skipped, not
+//!   chief), a task it holds itself (`cf task add --self`), a task someone
+//!   paused or whose hold the daemon ended, a task open behind one of these or
+//!   behind one that failed or was called off, and a board with nothing on it. One that is held back for work is skipped, not
 //!   owed: the skip is logged (`project.wake_up_skipped`) and the interval
 //!   counts again from it, so the next comes an interval later, on the same
 //!   rule, and not the moment the board clears;
@@ -137,7 +137,9 @@ const WITH_ITS_WINDOW: [&str; 2] = ["queued", "working"];
 /// the daemon clears when it cannot); and, down any chain, those open behind a
 /// task that is itself on its way (a task open behind one that is done and
 /// undecided, failed or called off waits for the chief, and the recursion ends
-/// where the tasks do: nothing is circular).
+/// where the tasks do: nothing is circular). A task the chief holds itself is
+/// none of these, whatever its state: the chief's turn can end in the middle of
+/// it, and nobody else has it to go on with, so it is the chief's own work.
 fn work_on_its_way(store: &Store, project_id: i64) -> Result<Vec<i64>, LedgerError> {
     let with_its_window = sql_list(&WITH_ITS_WINDOW);
     Ok(store
@@ -152,6 +154,8 @@ fn work_on_its_way(store: &Store, project_id: i64) -> Result<Vec<i64>, LedgerErr
                                         AND a.kind = 'answer'
                                         AND a.state IN ('gated', 'queued', 'delivering')))
                       OR (t.state = 'paused' AND t.held_until IS NOT NULL))
+                 AND NOT EXISTS (SELECT 1 FROM participant c
+                                 WHERE c.id = t.assignee_id AND c.role = 'chief')
                UNION
                SELECT w.id FROM task w
                  JOIN task_need n ON n.task_id = w.id

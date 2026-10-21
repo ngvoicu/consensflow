@@ -1,14 +1,15 @@
 //! A wake-up is given only when the chief has nothing on its way: no task
 //! working or queued for its window, none waiting for an answer that is on its
-//! way, none held for its member's quota, none open behind one of those (down a
-//! chain of open tasks). A task done and waiting for the chief's decision, a
-//! question the chief has not answered, a task the chief paused, and a board
-//! with nothing on it are the chief's own work. A wake-up skipped is not owed:
-//! the interval counts again from the skip.
+//! way (one the gate holds for the human among them), none held for its
+//! member's quota, none open behind one of those (down a chain of open tasks).
+//! A task done and waiting for the chief's decision, a question the chief has
+//! not answered, a task the chief paused, a task the chief holds itself, and a
+//! board with nothing on it are the chief's own work. A wake-up skipped is not
+//! owed: the interval counts again from the skip.
 
 use cf_ledger::{NewChief, NewMember, NewProject, NewTask, WakeUpUnit};
 
-use crate::world::{world, World, DAY, MINUTE};
+use crate::world::{gated_world, world, World, DAY, MINUTE};
 
 /// A world with the calls on, a minute apart, and the first wake-up delivered.
 fn after_the_first() -> World {
@@ -311,4 +312,67 @@ fn work_on_its_way_in_another_project_holds_nothing_back() {
         .expect("a task of its own");
     w.advance(MINUTE);
     assert!(w.due().is_some(), "that project's work is that chief's");
+}
+
+#[test]
+fn an_answer_the_gate_holds_for_the_human_is_on_its_way_and_holds_the_wake_up_back() {
+    let mut w = gated_world();
+    w.turn_on(1, WakeUpUnit::Minutes);
+    w.advance(MINUTE);
+    w.wake_and_deliver();
+    let given = w.give(&[]);
+    assert_eq!(given.message.as_ref().unwrap().state, "gated");
+    w.approve(given.message.as_ref().unwrap());
+    w.start(&given);
+    let question = w.ask(given.task.number);
+    let answer = w.answer(&question);
+    assert_eq!(
+        answer.state, "gated",
+        "the chief answered; the human decides"
+    );
+    assert_eq!(w.state(given.task.number), "waiting");
+    w.advance(DAY);
+    assert!(
+        w.due().is_none(),
+        "the chief has done its part: the answer waits for the human"
+    );
+    assert_eq!(w.held_by(), [given.task.number]);
+}
+
+#[test]
+fn a_task_the_chief_holds_itself_and_works_on_is_the_chiefs_own_and_gets_a_wake_up() {
+    let mut w = after_the_first();
+    let own = w.give_self(&[]);
+    w.start(&own);
+    w.advance(MINUTE);
+    assert!(
+        w.due().is_some(),
+        "the chief's turn can end in the middle of its own task: nobody else has it"
+    );
+}
+
+#[test]
+fn a_task_the_chief_holds_itself_does_not_let_the_staffs_work_go_unprotected() {
+    let mut w = after_the_first();
+    let own = w.give_self(&[]);
+    w.start(&own);
+    let theirs = w.give(&[]);
+    w.start(&theirs);
+    w.advance(MINUTE);
+    assert!(w.due().is_none(), "zeus's task is on its way");
+    assert_eq!(w.held_by(), [theirs.task.number]);
+}
+
+#[test]
+fn a_task_open_behind_one_the_chief_holds_itself_waits_for_the_chief_too() {
+    let mut w = after_the_first();
+    let own = w.give_self(&[]);
+    w.start(&own);
+    let behind = w.give(&[own.task.number as u64]);
+    assert_eq!(w.state(behind.task.number), "open");
+    w.advance(MINUTE);
+    assert!(
+        w.due().is_some(),
+        "the chief's task is all the other waits for"
+    );
 }

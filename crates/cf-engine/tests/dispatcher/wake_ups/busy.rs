@@ -220,3 +220,30 @@ fn a_board_with_nothing_left_on_it_gets_its_wake_up() {
     passes(&context);
     assert_eq!(given(&context), 2);
 }
+
+#[test]
+fn a_task_the_chief_holds_itself_is_the_chiefs_own_and_its_turn_that_ended_in_the_middle_of_it_is_woken(
+) {
+    let (context, project) = woken_once();
+    context.create_task(
+        project.id,
+        NewTask {
+            from: "chief".to_owned(),
+            to: Some("chief".to_owned()),
+            body: "Write the changelog".to_owned(),
+            ..NewTask::default()
+        },
+    );
+    working(&context, &project, 1);
+    // The chief's turn ends in the middle of its task, on a limit say.
+    context.adapter.answer("chief", "Out of quota.");
+    passes(&context);
+    assert_eq!(state(&context, &project, 1), "working");
+    context.advance(MINUTE);
+    passes(&context);
+    assert_eq!(
+        given(&context),
+        2,
+        "nobody else has the task: the wake-up is how the chief goes on"
+    );
+}

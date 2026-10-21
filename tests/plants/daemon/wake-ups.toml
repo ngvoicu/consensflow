@@ -4,8 +4,9 @@
 # chief, queued when the interval has passed since the latest of the last wake-up, the last
 # Resume and the last change of the setting; never while one is on its way, never to a
 # chief in a turn, waiting, out of quota or held for words the human typed, and never while a
-# task is queued, working, waiting for an answer on its way, held for its member's quota or open
-# behind one of those (a question the chief has not answered is the chief's own and is woken for;
+# task is queued, working, waiting for an answer on its way (or at the gate), held for its member's
+# quota or open behind one of those (a question the chief has not answered, a task the chief holds
+# itself, and what it paused are the chief's own and are woken for;
 # a skip is logged and the interval counts from it); a quiet board is not asked twice, and the
 # first after an enable or a Resume always goes. One plant takes one rule out; a test of it fails. The ledger's plants run its own tests
 # (`crates/cf-ledger/tests/wake_ups/` and the unit tests of `wake_ups`), the engine's the
@@ -384,6 +385,46 @@ runs = ["engine-wake-ups"]
 file = "crates/cf-ledger/src/wake_ups/due.rs"
 find = "OR (t.state = 'paused' AND t.held_until IS NOT NULL))"
 replace = "OR (t.state = 'paused'))"
+
+[[plant]]
+name = "wake-up: a task the chief holds itself holds the wake-up back"
+meant = "a_task_the_chief_holds_itself_and_works_on_is_the_chiefs_own_and_gets_a_wake_up"
+runs = ["ledger-wake-ups"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups/due.rs"
+find = "WHERE c.id = t.assignee_id AND c.role = 'chief')"
+replace = "WHERE c.id = t.assignee_id AND c.role = 'never')"
+
+[[plant]]
+name = "wake-up engine: a task the chief holds itself holds the wake-up back"
+meant = "a_task_the_chief_holds_itself_is_the_chiefs_own_and_its_turn_that_ended_in_the_middle_of_it_is_woken"
+runs = ["engine-wake-ups"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups/due.rs"
+find = "WHERE c.id = t.assignee_id AND c.role = 'chief')"
+replace = "WHERE c.id = t.assignee_id AND c.role = 'never')"
+
+[[plant]]
+name = "wake-up: the staff's tasks are the chief's own too"
+meant = "a_task_the_chief_holds_itself_does_not_let_the_staffs_work_go_unprotected"
+runs = ["ledger-wake-ups"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups/due.rs"
+find = "AND c.role = 'chief')"
+replace = "AND c.role IS NOT NULL)"
+
+[[plant]]
+name = "wake-up: an answer the gate holds for the human is the chief's still"
+meant = "an_answer_the_gate_holds_for_the_human_is_on_its_way_and_holds_the_wake_up_back"
+runs = ["ledger-wake-ups"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups/due.rs"
+find = "AND a.state IN ('gated', 'queued', 'delivering')))"
+replace = "AND a.state IN ('queued', 'delivering')))"
 
 [[plant]]
 name = "wake-up: the first after the calls are turned on goes into work on its way"

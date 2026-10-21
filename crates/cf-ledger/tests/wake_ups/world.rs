@@ -37,6 +37,16 @@ pub struct World {
 
 /// A project at /work/app: apollo its chief, zeus a worker.
 pub fn world() -> World {
+    world_with(false)
+}
+
+/// The same project with the gate on: every word from one agent to another waits
+/// for the human to pass it on.
+pub fn gated_world() -> World {
+    world_with(true)
+}
+
+fn world_with(gate: bool) -> World {
     let dir = tempfile::tempdir().expect("a home");
     let now = Rc::new(Cell::new(START));
     let mut ledger = open_ledger(
@@ -62,7 +72,7 @@ pub fn world() -> World {
                 roles: vec!["worker".to_owned()],
                 tier: "standard".to_owned(),
             }],
-            gate: false,
+            gate,
             wake_up: None,
             specs: None,
         })
@@ -152,6 +162,30 @@ impl World {
                 },
             )
             .expect("a task")
+    }
+
+    /// The chief gives itself a task, as `cf task add --self` does, waiting for
+    /// the tasks numbered `needs` to be accepted.
+    pub fn give_self(&mut self, needs: &[u64]) -> TaskCreated {
+        self.ledger
+            .create_task(
+                self.project.id,
+                &NewTask {
+                    from: "chief".to_owned(),
+                    to: Some("chief".to_owned()),
+                    body: "Write the changelog".to_owned(),
+                    needs: needs.to_vec(),
+                    ..NewTask::default()
+                },
+            )
+            .expect("a task of its own")
+    }
+
+    /// The human passes on a word the gate holds.
+    pub fn approve(&mut self, message: &MessageView) {
+        self.ledger
+            .approve_message(message.id, "human")
+            .expect("passed on");
     }
 
     /// The task reaches zeus's window and is received: it is working.
