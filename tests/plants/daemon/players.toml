@@ -73,8 +73,8 @@ replace = "const POLL_WAIT: Duration = Duration::from_secs(21);"
 
 [[plant]]
 name = "players: cf asks for a transcript of ten items whatever it was asked for"
-meant = "every_run_of_cf_against_the_api_prints_what_it_printed_against_node"
-runs = ["daemon-api"]
+meant = "a_transcript_is_asked_for_as_many_items_as_the_chief_wants"
+runs = ["cf-lib-board"]
 
 [[plant.edit]]
 file = "crates/cf/src/board/task.rs"

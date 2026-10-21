@@ -17,7 +17,7 @@ use crate::model::{
 };
 use crate::queue::{queue, send, Queued, Sent};
 use crate::staff::{
-    continuable_session, has_members_of_tier, nearest_tier, require_free, require_member_row,
+    follow_up_session, has_members_of_tier, nearest_tier, require_free, require_member_row,
     start_session, Giving,
 };
 use crate::store::Store;
@@ -142,7 +142,9 @@ fn distinct(numbers: &[u64], field: &str) -> Result<Vec<i64>, LedgerError> {
 }
 
 /// A task, from the chief or the human. Given `to`, it is queued for that
-/// participant at once (the chief, the human, or the requester itself).
+/// participant at once (the chief, the human, or the requester itself). Given
+/// `after`, it is queued for the session that did that task at once, or, when the
+/// task is still on its work, waits on the board for it to be accepted.
 /// Given a pool and tier instead, it opens for the daemon to assign to a
 /// member of that pool and tier. A task on the board may need other tasks:
 /// it waits until each is accepted. With `before`, tasks still on the board
@@ -178,18 +180,32 @@ pub(crate) fn create_task(
                 403,
             ));
         }
-        // A follow-up on a finished task goes to the session that did it, while
-        // it is still there and free: the one case a coordinator names a window.
-        // A task named for a session is held to the same rule, whether it goes
-        // to the window now or waits on the board for what it needs.
+        // A follow-up goes to the session that did the task followed, while it
+        // is still there: the one case a coordinator names a window. For a task
+        // whose result is in, the session must be free; for one still on its
+        // work, the follow-up waits on the board behind it, T-`after` being one
+        // of the tasks it needs. A task named for a session is held to the free
+        // rule, whether it goes to the window now or waits on the board for what
+        // it needs.
+        let mut behind = None;
         let assignee = match (request.after, &request.to) {
-            (Some(after), _) => Some(continuable_session(store, project_id, after)?),
+            (Some(after), _) => {
+                let follow_up = follow_up_session(store, project_id, after)?;
+                if follow_up.behind {
+                    behind = Some(after);
+                }
+                Some(follow_up.session)
+            }
             (None, Some(to)) => {
                 let named = store.participant_by_handle(project_id, to)?;
                 require_free(store, &named, Giving::Task)?;
                 Some(named)
             }
             (None, None) => None,
+        };
+        let needed = match behind {
+            Some(after) if !needed.contains(&after) => [needed.as_slice(), &[after]].concat(),
+            _ => needed.clone(),
         };
         // A tier nobody on the staff holds goes to the nearest one somebody does,
         // the next one up first: light work with only critical members still goes.

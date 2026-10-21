@@ -336,7 +336,7 @@ fn says_so_when_the_staff_is_empty() {
 }
 
 #[test]
-fn tells_the_chief_a_worker_starts_fresh_unless_its_window_is_continued_and_that_only_a_busy_window_refuses(
+fn tells_the_chief_a_worker_starts_fresh_unless_its_window_is_continued_and_that_a_window_at_work_takes_the_follow_up_behind_its_task(
 ) {
     let text = instructions("chief", &[zeus()]);
     assert!(found(
@@ -344,7 +344,15 @@ fn tells_the_chief_a_worker_starts_fresh_unless_its_window_is_continued_and_that
         &text
     ));
     assert!(found(
-        r"A window still busy refuses\s+and tells you to open the task for its tier instead\.",
+        r"A window still at work on T-3\s+takes it too: it waits for T-3 to be accepted and goes in then\.",
+        &text
+    ));
+    assert!(found(
+        r"A window on\s+another task refuses and tells you to open the task for its tier instead\.",
+        &text
+    ));
+    assert!(found(
+        r#"cf task edit T-3 "…"\s+replace the brief of a task no window has yet"#,
         &text
     ));
     assert!(

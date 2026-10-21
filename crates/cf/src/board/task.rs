@@ -30,7 +30,9 @@ const GET: Shape = Shape {
 };
 
 /// The commands that move a task, which stands first among their words.
-const MOVES: [&str; 6] = ["done", "accept", "cancel", "reopen", "pause", "resume"];
+const MOVES: [&str; 7] = [
+    "done", "accept", "cancel", "reopen", "edit", "pause", "resume",
+];
 
 pub fn command(words: &[String], board: &Board, input: &mut dyn Read) -> Result<Said, Failure> {
     let (action, rest) = match words.split_first() {
@@ -64,7 +66,7 @@ pub fn command(words: &[String], board: &Board, input: &mut dyn Read) -> Result<
             moved(action, number, rest.get(1..).unwrap_or_default(), board, input)
         }
         other => Err(Failure::Usage(format!(
-            "unknown task command {}: use add, list, get, done, accept, reopen, cancel, pause or resume",
+            "unknown task command {}: use add, list, get, done, accept, reopen, edit, cancel, pause or resume",
             quoted(other.unwrap_or_default())
         ))),
     }
@@ -319,9 +321,10 @@ fn moved(
     input: &mut dyn Read,
 ) -> Result<Said, Failure> {
     let text = text_of(split(rest, Shape::TEXT).text, input)?;
-    if matches!(action, "done" | "reopen" | "resume") && js::trim(&text).is_empty() {
+    if matches!(action, "done" | "reopen" | "edit" | "resume") && js::trim(&text).is_empty() {
         let what = match action {
             "done" => "your result",
+            "edit" => "the new brief",
             "resume" => "what to do now",
             _ => "the follow-up",
         };
@@ -344,6 +347,10 @@ fn moved(
             a_pool(task.get("pool"), task.get("tier"))
         ),
         "resume" => format!("T-{number} resumes in @{} with your words.", js::text(task.get("assignee"))),
+        "edit" => format!(
+            "T-{number} has your new brief; no window had the old one, and the ledger keeps it. {}",
+            task_line(&task)
+        ),
         _ => task_line(&task),
     };
     Ok(Said::new(task, said))
@@ -452,6 +459,99 @@ mod tests {
         );
         let (posted, _) = added(&["--tier", "light", "Write it"], &answer);
         assert_eq!(posted, Some(json!({ "tier": "light", "body": "Write it" })));
+    }
+
+    /// What `cf task edit words…` posted and printed, the board answering with `answer`.
+    fn edited(
+        words: &[&str],
+        input: &str,
+        answer: &Value,
+    ) -> (Vec<(String, Option<Value>)>, String) {
+        let api = scripted(vec![reply(200, answer.clone())]);
+        let words: Vec<String> = words.iter().map(|word| (*word).to_owned()).collect();
+        let said = command(
+            &[vec!["edit".to_owned()], words].concat(),
+            &Board::new(Some(&api.url), "tok"),
+            &mut input.as_bytes(),
+        )
+        .unwrap();
+        let posted = api
+            .received()
+            .into_iter()
+            .map(|got| (got.path.clone(), got.json()))
+            .collect();
+        (posted, said.text)
+    }
+
+    #[test]
+    fn a_new_brief_is_posted_to_the_task_and_said_to_be_the_tasks_now() {
+        let answer = json!({ "task": card(2, "open", Some("zeus-pale")) });
+        let (posted, said) = edited(&["T-2", "Parse the new way"], "", &answer);
+        assert_eq!(
+            posted,
+            [(
+                "/api/tasks/2/edit".to_owned(),
+                Some(json!({ "body": "Parse the new way" }))
+            )]
+        );
+        assert_eq!(
+            said,
+            "T-2 has your new brief; no window had the old one, and the ledger keeps it. T-2 [open] @zeus-pale ← @chief: Task 2"
+        );
+        // Or on the standard input, as a heredoc gives it: its last newline is its own.
+        let (posted, _) = edited(&["T-2", "-"], "Parse\nthe new way\n", &answer);
+        assert_eq!(posted[0].1, Some(json!({ "body": "Parse\nthe new way" })));
+    }
+
+    #[test]
+    fn a_new_brief_is_asked_for_before_the_board_is_asked_anything() {
+        let api = scripted(vec![]);
+        let said = command(
+            &["edit".to_owned(), "T-2".to_owned()],
+            &Board::new(Some(&api.url), "tok"),
+            &mut std::io::empty(),
+        );
+        assert!(
+            matches!(&said, Err(Failure::Usage(usage)) if usage == "cf task edit T-2 \"the new brief\""),
+            "a usage line was expected"
+        );
+        assert!(api.received().is_empty());
+    }
+
+    #[test]
+    fn a_transcript_is_asked_for_as_many_items_as_the_chief_wants() {
+        let task = json!({ "task": card(3, "working", Some("zeus-pale")) });
+        let transcript = json!({ "items": [], "total": 0 });
+        let api = scripted(vec![reply(200, task), reply(200, transcript)]);
+        command(
+            &[
+                "get".to_owned(),
+                "T-3".to_owned(),
+                "--transcript".to_owned(),
+                "--last".to_owned(),
+                "30".to_owned(),
+            ],
+            &Board::new(Some(&api.url), "tok"),
+            &mut std::io::empty(),
+        )
+        .unwrap();
+        let paths: Vec<String> = api.received().into_iter().map(|got| got.path).collect();
+        assert_eq!(paths, ["/api/tasks/3", "/api/tasks/3/transcript?last=30"]);
+    }
+
+    #[test]
+    fn a_follow_up_behind_a_window_at_work_says_what_it_waits_for() {
+        let answer = json!({
+            "task": { "number": 5, "state": "open", "assignee": "zeus-pale", "requester": "chief",
+                "title": "Tests", "blockedBy": [3], "pool": null, "tier": null },
+            "message": null, "gated": false,
+        });
+        let (posted, said) = added(&["--after", "T-3", "Tests"], &answer);
+        assert_eq!(posted, Some(json!({ "after": 3, "body": "Tests" })));
+        assert_eq!(
+            said,
+            "T-5 continues in @zeus-pale, the window that did T-3; its result arrives in your inbox. It waits until T-3 is accepted."
+        );
     }
 
     #[test]

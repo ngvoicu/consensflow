@@ -71,7 +71,9 @@ enum Outcome {
 /// task's wait moved: Node leaves one queued when another member takes the
 /// task or it is taken back, and tells its requester nothing when a hold ends;
 /// and the 4 that name `WAITED_FOR`, which the refusal of a cancel moved: Node
-/// cancels a task that open tasks wait for, and they stay blocked for good.
+/// cancels a task that open tasks wait for, and they stay blocked for good;
+/// and the one that names `FOLLOW_UP_BEHIND_WORK`, which the follow-up queued
+/// behind a window's work moved: Node refuses it.
 /// Departed traces that Node's suite recorded only off Windows: the test
 /// that wrote `home-copies-004` was skipped there, as Windows holds an open
 /// ledger's files. Elsewhere each must be there.
@@ -138,7 +140,7 @@ const DEPARTED: &[(&str, usize, &str)] = &[
     ("ledger-schema-025", 15, KEPT_IN_BRIEF),
     ("ledger-schema-027", 14, KEPT_IN_BRIEF),
     ("ledger-staff-008", 13, KEPT_BY_PAUSE),
-    ("ledger-staff-015", 25, RESULT_ACCEPTED),
+    ("ledger-staff-015", 8, FOLLOW_UP_BEHIND_WORK),
     ("ledger-staff-016", 17, RESULT_ACCEPTED),
     ("ledger-staff-017", 20, RESULT_ACCEPTED),
     ("ledger-staff-018", 17, RESULT_SENT_BACK),
@@ -163,6 +165,10 @@ const DEPARTED: &[(&str, usize, &str)] = &[
     ("ledger-tiered-014", 22, WINDOW_ENDED),
 ];
 
+/// A follow-up of a task still on its work is taken, and waits on the board
+/// for that task to be accepted.
+const FOLLOW_UP_BEHIND_WORK: &str =
+    "the chief queues a follow-up (`--after T-1`) while T-1's window is still on T-1: it is taken, open and waiting for T-1 to be accepted, where Node refused it `session-busy`; the trace's later departure (the chief accepting the task while its result is still queued for it, `RESULT_ACCEPTED`) is no longer reached";
 /// A task that open tasks wait for is not cancelled: they are released when it
 /// is accepted, so they would be blocked for good.
 const WAITED_FOR: &str =

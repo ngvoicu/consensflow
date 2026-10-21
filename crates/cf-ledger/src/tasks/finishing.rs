@@ -133,7 +133,9 @@ fn require_result_received(store: &Store, task: &TaskRow, by: &str) -> Result<()
 /// taken back for its tier. It refuses nothing of its own, which would fail
 /// that step for something else's sake. A session can have several waiting:
 /// a door refuses it only while it has a task in hand (`require_free`), and
-/// `--before` orders them by what each needs.
+/// `--before` orders them by what each needs. A follow-up of a task still on its
+/// work is one of them: that task is among what it needs, and the window is
+/// given the follow-up once the task is accepted.
 pub(crate) fn release_ready(store: &mut Store, project_id: i64) -> Result<(), LedgerError> {
     let waiting = store
         .db
@@ -425,6 +427,11 @@ pub(crate) fn note_stranded_waits(store: &mut Store) -> Result<(), LedgerError> 
 }
 
 /// The daemon gives up on a task: its pane died, or its launch never came up.
+/// The tasks that wait for it (a follow-up queued behind it, a task that
+/// needs it) stay on the board: they are released when it is accepted, which
+/// a reopening can still bring about. Each one's requester is told once that
+/// it waits for a failed task, and what to do: cancel the waiter, or reopen
+/// the task.
 pub(crate) fn fail_task(
     store: &mut Store,
     project_id: i64,
@@ -439,6 +446,23 @@ pub(crate) fn fail_task(
         drop_queued(store, task.id)?;
         store.move_task(&task, "failed", json!({ "reason": reason }))?;
         release_ready(store, project_id)?;
+        for waiting in waiters(store, &task)? {
+            let waiter = store.task_row(project_id, waiting)?;
+            let requester = store.participant_row(waiter.requester_id)?;
+            send(
+                store,
+                project_id,
+                &Sent {
+                    to: &requester.handle,
+                    task: Some(waiting),
+                    kind: "note",
+                    body: &format!(
+                        "T-{waiting} waits for T-{number}, which failed: cancel T-{waiting}, or reopen T-{number} and let it finish."
+                    ),
+                    ..Sent::default()
+                },
+            )?;
+        }
         task_by_id(store, task.id)
     })
 }

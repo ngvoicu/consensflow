@@ -1,5 +1,5 @@
 //! One task: `GET /api/tasks/<n>`, its `/transcript`, and the `POST`s that move
-//! it (`done`, `accept`, `reopen`, `cancel`, `pause`, `resume`, `tell`). It
+//! it (`done`, `accept`, `reopen`, `edit`, `cancel`, `pause`, `resume`, `tell`). It
 //! reads the task first, so an unknown one is 404 before anything else is
 //! asked; and it takes the task as it was then, awaiting the body after: who
 //! may do what is decided on the task as it was read, and the ledger decides on
@@ -262,6 +262,7 @@ fn moved(
     let moved = match action {
         TaskAction::Accept => ledger.accept_task(project, number, by)?,
         TaskAction::Cancel => ledger.cancel_task(project, number, by)?,
+        TaskAction::Edit => ledger.edit_task(project, number, by, words)?,
         TaskAction::Pause => ledger.pause_task(project, number, Some(by), None)?,
         TaskAction::Resume => ledger.resume_task(project, number, Some(by), words)?.task,
         // `reopen`; and what Node's last branch took any other word for, which
@@ -287,6 +288,7 @@ fn word(action: TaskAction) -> &'static str {
         TaskAction::Done => "done",
         TaskAction::Accept => "accept",
         TaskAction::Reopen => "reopen",
+        TaskAction::Edit => "edit",
         TaskAction::Cancel => "cancel",
         TaskAction::Pause => "pause",
         TaskAction::Resume => "resume",

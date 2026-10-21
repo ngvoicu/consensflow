@@ -121,14 +121,26 @@ pub(crate) fn bring_back(
     store.participant_row(session.id)
 }
 
-/// The session that did T-`after`, free to take another task
-/// (`require_free`): on the board, or brought back to it if the human had
-/// deleted it.
-pub(crate) fn continuable_session(
+/// The session that did T-`after`, and whether a follow-up for it goes behind
+/// that task.
+pub(crate) struct FollowUp {
+    pub session: ParticipantRow,
+    /// The window is still on T-`after` (or will be: it waits for its needs, or
+    /// is paused): the follow-up waits for it to be accepted, as it would for
+    /// any task it needs, and goes into the window then.
+    pub behind: bool,
+}
+
+/// The session that did T-`after`, on the board (brought back if the human had
+/// deleted it) for a follow-up. A follow-up of a task whose result is not in
+/// goes behind it (`FollowUp::behind`) and asks nothing of the session. One of
+/// a task whose result is in goes to the session now, and is refused while the
+/// session has another task in hand (`require_free`).
+pub(crate) fn follow_up_session(
     store: &mut Store,
     project_id: i64,
     after: i64,
-) -> Result<ParticipantRow, LedgerError> {
+) -> Result<FollowUp, LedgerError> {
     let previous = store.task_row(project_id, after)?;
     let found = previous
         .assignee_id
@@ -147,8 +159,18 @@ pub(crate) fn continuable_session(
             ))
         }
     };
-    require_free(store, &session, Giving::Task)?;
-    bring_back(store, session)
+    // A session the human ended is not on a task's work: a task of its that is
+    // paused waits for its resumption, not for a follow-up.
+    let behind = session.left_at.is_none()
+        && (HELD_TASK_STATES.contains(&previous.state.as_str())
+            || matches!(previous.state.as_str(), "open" | "paused"));
+    if !behind {
+        require_free(store, &session, Giving::Task)?;
+    }
+    Ok(FollowUp {
+        session: bring_back(store, session)?,
+        behind,
+    })
 }
 
 /// How a task comes to a session, which is what a refusal can tell it to do
@@ -170,8 +192,10 @@ pub(crate) enum Giving {
 }
 
 /// A member session takes one task at a time, and this is the one rule that
-/// every door giving a session a task holds it to: a follow-up (`--after`), a
-/// task sent back to it (a reopen) and a task named for it are refused
+/// every door giving a session a task holds it to: a follow-up (`--after`, but
+/// for one of the task the window is still on: that waits behind it,
+/// `follow_up_session`), a task sent back to it (a reopen) and a task named for
+/// it are refused
 /// `session-busy` while it has a task in hand ([`has_task_in_hand`]), and so is
 /// a paused task resumed into its window while it has another, so that its
 /// window is never at work on one task while the board speaks of another.

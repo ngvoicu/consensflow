@@ -33,3 +33,9 @@ recordings in four ways, none of them by recording again.
   check without the tester, as Node's ledger had them (migration 0012 added the
   tester). They are not rewritten: the player holds the database this ledger left to
   them as Node's schema had it (`cf_ledger::testing::hold_apart_what_node_never_had_in_its_schema`).
+
+`cf task edit` (board task T-110, 3.0.6) moved the usage `cf` prints once more, and the
+sentence it says of a task verb it does not know: the usage has the entry `cf task edit
+T-3 "…"` and one more line under `--after`, in `cf-board-028` and `-029`, and the sentence
+names `edit`, in `cf-board-022`. Changed by hand, in those words alone. The recordings of
+the crates' own goldens (`crates/cf/tests/goldens/board.json`) were changed with them.

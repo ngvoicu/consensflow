@@ -65,7 +65,7 @@ fn board_usage() -> String {
 
 /// Each board command's words (the ones that name it), and the lines of the
 /// usage it answers with.
-const BOARD: [(&[&str], &str); 17] = [
+const BOARD: [(&[&str], &str); 18] = [
     (
         &["task", "add"],
         concat!(
@@ -84,7 +84,8 @@ const BOARD: [(&[&str], &str); 17] = [
             "  cf task add --design \"…\"          an image from the image designer: what to draw, what\n",
             "                                    to use as reference, where to save it\n",
             "  cf task add --after T-3 \"…\"       a follow-up for the window that did T-3, which\n",
-            "                                    keeps its context; only when that context matters\n",
+            "                                    keeps its context; only when that context matters;\n",
+            "                                    while T-3 is at work it waits for T-3's acceptance\n",
             "  cf task add --self --needs T-3 \"…\" your own later step: its brief comes back to you when T-3 is accepted\n",
             "  … --needs T-3,T-4                 the task waits on the board until T-3 and T-4 are accepted\n",
             "  … --before T-9,T-10               T-9 and T-10 (still on the board) wait for this task\n",
@@ -116,6 +117,10 @@ const BOARD: [(&[&str], &str); 17] = [
     (
         &["task", "reopen"],
         "  cf task reopen T-3 \"…\"            send a finished or failed task back with a follow-up\n",
+    ),
+    (
+        &["task", "edit"],
+        "  cf task edit T-3 \"…\"              replace the brief of a task no window has yet (open, blocked or queued)\n",
     ),
     (
         &["task", "pause"],

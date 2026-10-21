@@ -26,6 +26,18 @@ parentheses. Changed by hand, in those words alone, when the tester was added; t
 daemon's traces of the same words (`crates/cf-daemon/tests/goldens`) were changed with
 them.
 
+## The usage after `cf task edit`
+
+`board.json` holds the usage again (the six prints named above) and the sentence `cf
+task` says of a verb it does not know (`unknown task command "frobnicate": use add,
+list, get, done, accept, reopen, edit, cancel, pause or resume`). Each names the new
+verb, `cf task edit T-3 "…"`, which replaces the brief of a task no window has been
+given yet (board task T-110, 3.0.6), and the `--after` entry says one more line: while
+T-3 is at work the follow-up waits for T-3 to be accepted, where Node refused it. The
+six prints have the entry and the line as `crates/cf/src/board/usage.txt` has them, and
+the sentence has the verb: changed by hand, in those words alone. The daemon's traces
+of the same words (`crates/cf-daemon/tests/goldens`) were changed with them.
+
 ## Two cases changed by hand after Node
 
 In `cli.darwin.json` and `cli.win32.json`, the cases `unknown command: -h`

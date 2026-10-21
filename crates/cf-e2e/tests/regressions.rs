@@ -25,6 +25,8 @@
 // The cases are in `tests/regressions/`: cargo looks for the modules of a test's
 // root file beside it, where each would be a suite of its own.
 // The stand-in's command is a shell of a Unix machine.
+#[path = "regressions/a_brief_could_not_be_edited_once_added.rs"]
+mod a_brief_could_not_be_edited_once_added;
 #[path = "regressions/a_builds_daemon_held_a_workers_task.rs"]
 mod a_builds_daemon_held_a_workers_task;
 #[path = "regressions/a_codex_chief_opened_again_after_a_restart_read_starting_for_good.rs"]
@@ -36,6 +38,8 @@ mod a_command_that_goes_on_reporting_held_a_devin_workers_result;
 mod a_command_that_never_exits_held_a_workers_result;
 #[path = "regressions/a_compact_typed_into_an_idle_chief_held_a_workers_result.rs"]
 mod a_compact_typed_into_an_idle_chief_held_a_workers_result;
+#[path = "regressions/a_follow_up_could_not_be_queued_behind_its_windows_own_work.rs"]
+mod a_follow_up_could_not_be_queued_behind_its_windows_own_work;
 #[path = "regressions/a_pause_a_hung_worker_ignored_stranded_its_task.rs"]
 mod a_pause_a_hung_worker_ignored_stranded_its_task;
 #[path = "regressions/a_result_delivered_twice_to_a_devin_chief.rs"]
