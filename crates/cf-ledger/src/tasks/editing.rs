@@ -42,12 +42,34 @@ pub(crate) fn edit_task(
             "UPDATE task SET body = ?, title = ?, updated_at = ? WHERE id = ?",
             params![body, title_of(body), at, task.id],
         )?;
+        let old = delivery_body(&task);
         let words = delivery_body(&task_row_by_id(store, task.id)?);
-        store.db.execute(
-            "UPDATE message SET body = ? WHERE task_id = ? AND kind = 'task'
-               AND state IN ('queued', 'gated')",
-            params![words, task.id],
-        )?;
+        // Only the rows that say the brief: a row that is it (the brief as it was
+        // queued), or starts with it and a blank line (a resume that carries it); a
+        // row of the resume's words alone, or any other, is left as it is.
+        let rows: Vec<(i64, String)> = store
+            .db
+            .prepare(
+                "SELECT id, body FROM message WHERE task_id = ? AND kind = 'task'
+                   AND state IN ('queued', 'gated')",
+            )?
+            .query_map([task.id], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect::<rusqlite::Result<_>>()?;
+        for (id, row) in rows {
+            let renewed = if row == old {
+                Some(words.clone())
+            } else {
+                row.strip_prefix(old.as_str())
+                    .and_then(|rest| rest.strip_prefix("\n\n"))
+                    .map(|rest| format!("{words}\n\n{rest}"))
+            };
+            if let Some(renewed) = renewed {
+                store.db.execute(
+                    "UPDATE message SET body = ? WHERE id = ?",
+                    params![renewed, id],
+                )?;
+            }
+        }
         store.log(
             project_id,
             "task.edited",

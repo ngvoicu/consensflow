@@ -5,7 +5,7 @@
 # taken, waits on the board with T-3 among what it needs, and goes into that window once T-3 is
 # accepted; two behind one window go in order, a task that fails tells the chief once of what waits
 # for it, and a cancel of a task a follow-up waits for is refused (T-74). And `cf task edit T-n`
-# replaces the brief of a task no window has (open, blocked or queued but not yet delivered), keeping
+# replaces the brief of a task no window has (open, blocked, queued or paused, but not yet delivered), keeping
 # the old brief in the log; a task a window has is refused and told what to do instead. One plant
 # takes one fix out, and a test of it fails. The rig's cases build the native `cf` and the daemon
 # from the sources as planted, so their plants say `builds`.
@@ -94,8 +94,8 @@ runs = ["ledger-replay"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/staff/sessions.rs"
-find = "    let behind = session.left_at.is_none()\n        && (HELD_TASK_STATES.contains(&previous.state.as_str())\n"
-replace = "    let behind = (HELD_TASK_STATES.contains(&previous.state.as_str())\n"
+find = "    let behind = session.left_at.is_none() && (at_work || others_wait);\n"
+replace = "    let behind = at_work || others_wait;\n"
 
 [[plant]]
 name = "behind work: two follow-ups of one window go to it together"
@@ -330,7 +330,7 @@ runs = ["cf-help"]
 
 [[plant.edit]]
 file = "crates/cf/src/board/usage.txt"
-find = "  cf task edit T-3 \"…\"              replace the brief of a task no window has yet (open, blocked or queued)\n"
+find = "  cf task edit T-3 \"…\"              replace the brief of a task no window has yet (open, queued, or paused)\n"
 replace = ""
 
 [[plant]]
@@ -340,7 +340,7 @@ runs = ["engine-text-roles"]
 
 [[plant.edit]]
 file = "skill/core/chief.md"
-find = "    cf task edit T-3 \"…\"          replace the brief of a task no window has yet (open, blocked or queued)\n"
+find = "    cf task edit T-3 \"…\"          replace the brief of a task no window has yet (open, queued, or paused)\n"
 replace = ""
 
 [[plant]]
@@ -404,3 +404,135 @@ runs = ["ledger-behind-work"]
 file = "crates/cf-ledger/src/tasks/finishing.rs"
 find = "        for waiting in waiters(store, &task)? {\n"
 replace = "        let mut fresh = Vec::new();\n        for each in waiters(store, &task)? {\n            let told = store.db.prepare(\"SELECT 1 FROM message m JOIN task t ON t.id = m.task_id WHERE t.project_id = ? AND t.number = ? AND m.kind = 'note'\")?.exists(params![project_id, each])?;\n            if !told {\n                fresh.push(each);\n            }\n        }\n        for waiting in fresh {\n"
+
+# Round 2 (T-158): Calliope's review of the merge (T-154).
+
+[[plant]]
+name = "behind work: a removal leaves the follow-ups bound to the sessions it closes"
+meant = "a_member_removed_with_follow_ups_bound_to_its_session_cancels_them_and_nothing_is_queued_for_the_left_session"
+runs = ["ledger-behind-work"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff.rs"
+find = "           AND t.state IN ('open', 'queued', 'working', 'waiting')\n"
+replace = "           AND t.state IN ('queued', 'working', 'waiting')\n"
+
+[[plant]]
+name = "behind work: a removal leaves the follow-up behind a paused task bound to the window that goes"
+meant = "a_follow_up_behind_a_task_paused_in_a_removed_members_window_is_cancelled_and_the_task_goes_to_another_member"
+runs = ["ledger-behind-work"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff.rs"
+find = "           AND t.state IN ('open', 'queued', 'working', 'waiting')\n"
+replace = "           AND t.state IN ('queued', 'working', 'waiting')\n"
+
+[[plant]]
+name = "behind work: a release queues a follow-up for a session that left"
+meant = "a_follow_up_bound_to_a_session_that_left_in_an_older_build_is_cancelled_when_it_would_go_and_the_chief_is_told"
+runs = ["ledger-behind-work"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = "        if assignee.member_id.is_some() && assignee.left_at.is_some() {\n"
+replace = "        if false && assignee.member_id.is_some() && assignee.left_at.is_some() {\n"
+
+[[plant]]
+name = "behind work: a release brings back a session whose member left the staff"
+meant = "a_follow_up_bound_to_a_session_that_left_in_an_older_build_is_cancelled_when_it_would_go_and_the_chief_is_told"
+runs = ["ledger-behind-work"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = "            if can_continue(store, &assignee)? {\n"
+replace = "            if true {\n"
+
+[[plant]]
+name = "behind work: a release cancels a follow-up bound to a session the human deleted"
+meant = "a_follow_up_bound_to_a_session_the_human_deleted_brings_it_back_as_any_follow_up_does"
+runs = ["ledger-behind-work"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = "            if can_continue(store, &assignee)? {\n"
+replace = "            if false {\n"
+
+[[plant]]
+name = "behind work: a follow-up added with the result in overtakes the ones already waiting"
+meant = "a_follow_up_added_after_the_result_but_before_the_acceptance_lines_up_behind_the_ones_waiting"
+runs = ["ledger-behind-work"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff/sessions.rs"
+find = "        previous.state == \"done\" && others_wait_for(store, &previous, session.id, before)?;\n"
+replace = "        false && others_wait_for(store, &previous, session.id, before)?;\n"
+
+[[plant]]
+name = "behind work: a follow-up put before the ones waiting for a task with its result in waits behind them"
+meant = "a_follow_up_put_before_the_ones_waiting_for_a_task_with_its_result_in_goes_to_the_window_now"
+runs = ["ledger-behind-work"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff/sessions.rs"
+find = "    Ok(waiting.iter().any(|number| !before.contains(number)))\n"
+replace = "    Ok(!waiting.is_empty())\n"
+
+[[plant]]
+name = "behind work: an edit gives every queued task message the new brief again"
+meant = "a_task_held_for_quota_and_resumed_by_the_daemon_is_edited_in_its_brief_alone"
+runs = ["ledger-edited-brief"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/editing.rs"
+find = "            let renewed = if row == old {\n"
+replace = "            let renewed = if true {\n"
+
+[[plant]]
+name = "behind work: an edit leaves the brief of a resume that carries it as it was"
+meant = "a_task_paused_and_resumed_by_the_chief_is_edited_in_the_brief_its_words_follow"
+runs = ["ledger-edited-brief"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/editing.rs"
+find = "                row.strip_prefix(old.as_str())\n"
+replace = "                None::<&str>\n"
+
+[[plant]]
+name = "behind work: a release names no follow-up still bound to the window that lost the task"
+meant = "a_task_taken_back_from_a_window_names_the_follow_ups_still_bound_to_it_to_its_requester"
+runs = ["ledger-behind-work"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/giving.rs"
+find = "               WHERE n.needs_id = ? AND t.state IN ('open', 'paused') AND t.assignee_id = ?\n"
+replace = "               WHERE n.needs_id = ? AND t.state IN ('nothing') AND t.assignee_id = ?\n"
+
+[[plant]]
+name = "behind work: a follow-up of a task nobody has taken is told its session has ended"
+meant = "a_follow_up_of_a_task_nobody_has_taken_yet_is_told_to_wait_for_it_with_needs"
+runs = ["ledger-behind-work"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff/sessions.rs"
+find = "            \"no-window-yet\",\n"
+replace = "            \"session-ended\",\n"
+
+[[plant]]
+name = "brief edit: the usage says a task paused before any window had it is not editable"
+meant = "every_board_command_answers_help_with_its_usage_and_asks_the_board_nothing"
+runs = ["cf-help"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/usage.txt"
+find = "(open, queued, or paused)"
+replace = "(open, blocked or queued)"
+
+[[plant]]
+name = "brief edit: the chief's role text says a task paused before any window had it is not editable"
+meant = "tells_the_chief_a_worker_starts_fresh_unless_its_window_is_continued_and_that_a_window_at_work_takes_the_follow_up_behind_its_task"
+runs = ["engine-text-roles"]
+
+[[plant.edit]]
+file = "skill/core/chief.md"
+find = "replace the brief of a task no window has yet (open, queued, or paused)"
+replace = "replace the brief of a task no window has yet (open, blocked or queued)"

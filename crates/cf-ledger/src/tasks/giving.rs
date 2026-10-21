@@ -190,7 +190,7 @@ pub(crate) fn create_task(
         let mut behind = None;
         let assignee = match (request.after, &request.to) {
             (Some(after), _) => {
-                let follow_up = follow_up_session(store, project_id, after)?;
+                let follow_up = follow_up_session(store, project_id, after, &blocking)?;
                 if follow_up.behind {
                     behind = Some(after);
                 }
@@ -522,6 +522,34 @@ pub(crate) fn release_task(
                 "T-{number} is back on the board ({because}) and waits for {}.",
                 a_pool(pool, tier)
             ),
+        };
+        // The follow-ups bound to the window that lost the task stay bound to it, which
+        // never finished it: they are named, with what to do.
+        let bound: Vec<String> = match &member {
+            Some(member) => store
+                .db
+                .prepare(
+                    "SELECT t.number FROM task t JOIN task_need n ON n.task_id = t.id
+               WHERE n.needs_id = ? AND t.state IN ('open', 'paused') AND t.assignee_id = ?
+               ORDER BY t.number",
+                )?
+                .query_map(params![task.id, member.id], |row| {
+                    Ok(format!("T-{}", row.get::<_, i64>(0)?))
+                })?
+                .collect::<rusqlite::Result<_>>()?,
+            None => Vec::new(),
+        };
+        let note = match (&member, bound.as_slice()) {
+            (Some(member), [only]) => format!(
+                "{note} {only} stays bound to @{}, which no longer has T-{number}: cancel it, or add it again for a tier with --needs T-{number}.",
+                member.handle
+            ),
+            (Some(member), [_, _, ..]) => format!(
+                "{note} {} stay bound to @{}, which no longer has T-{number}: cancel them, or add them again for a tier with --needs T-{number}.",
+                bound.join(", "),
+                member.handle
+            ),
+            _ => note,
         };
         send(
             store,

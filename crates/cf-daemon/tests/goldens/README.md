@@ -39,3 +39,5 @@ sentence it says of a task verb it does not know: the usage has the entry `cf ta
 T-3 "…"` and one more line under `--after`, in `cf-board-028` and `-029`, and the sentence
 names `edit`, in `cf-board-022`. Changed by hand, in those words alone. The recordings of
 the crates' own goldens (`crates/cf/tests/goldens/board.json`) were changed with them.
+Round 2 of the same task (T-158) changed one phrase of that entry, by hand, in `cf-board-028`
+and `-029`: `(open, blocked or queued)` became `(open, queued, or paused)`.

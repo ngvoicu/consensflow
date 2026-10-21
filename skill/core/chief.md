@@ -29,7 +29,7 @@ reply does nothing.
     cf task add --self --needs T-3 "…"  your own later step: its brief comes back to you when T-3 is accepted
     cf task done T-3 "…"          finish your own task with its result
     cf task accept T-3 · cf task reopen T-3 "…" · cf task cancel T-3
-    cf task edit T-3 "…"          replace the brief of a task no window has yet (open, blocked or queued)
+    cf task edit T-3 "…"          replace the brief of a task no window has yet (open, queued, or paused)
     cf task pause T-3             stop a worker's task: the agent stops, its window and work wait
     cf task resume T-3 "…"        go on with it: the same window, with your words
     cf tell T-3 "…"               stop T-3 and put this to its window: its answer arrives as a message; then resume it

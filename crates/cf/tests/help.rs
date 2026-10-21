@@ -120,7 +120,7 @@ const BOARD: [(&[&str], &str); 18] = [
     ),
     (
         &["task", "edit"],
-        "  cf task edit T-3 \"…\"              replace the brief of a task no window has yet (open, blocked or queued)\n",
+        "  cf task edit T-3 \"…\"              replace the brief of a task no window has yet (open, queued, or paused)\n",
     ),
     (
         &["task", "pause"],

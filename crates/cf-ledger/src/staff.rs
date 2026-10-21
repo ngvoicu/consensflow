@@ -262,9 +262,15 @@ pub(crate) fn set_roles<S: AsRef<str>>(
 
 /// A member leaves the staff. Its open tasks are cancelled, with the
 /// messages still on their way to it and its unread questions; whoever
-/// asked for those tasks is told, if its window runs. The removal is not
-/// refused for the tasks that wait for what is cancelled: the chief is told
-/// of each of them in the same step, as they will never start.
+/// asked for those tasks is told, if its window runs. The tasks it holds are
+/// the queued, working and waiting ones, and the open ones given to it or to
+/// one of its sessions that wait on the board for what they need (a follow-up
+/// behind its window's work): such a task has no pool and no other window, so
+/// its calling off is its only end, and it would otherwise be queued, once its
+/// needs were accepted, for a window nothing opens again. A paused task is
+/// left for its resumption. The removal is not refused for the tasks that wait
+/// for what is cancelled: the chief is told of each of them in the same step,
+/// as they will never start.
 pub(crate) fn remove_member(
     store: &mut Store,
     project_id: i64,
@@ -289,7 +295,7 @@ pub(crate) fn remove_member(
             .prepare(&format!(
                 "SELECT t.*, q.handle AS requester FROM task t JOIN participant q ON q.id = t.requester_id
          WHERE t.assignee_id IN ({})
-           AND t.state IN ('queued', 'working', 'waiting')
+           AND t.state IN ('open', 'queued', 'working', 'waiting')
          ORDER BY t.number",
                 vec!["?"; windows.len()].join(", ")
             ))?

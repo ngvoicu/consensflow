@@ -352,7 +352,7 @@ fn tells_the_chief_a_worker_starts_fresh_unless_its_window_is_continued_and_that
         &text
     ));
     assert!(found(
-        r#"cf task edit T-3 "…"\s+replace the brief of a task no window has yet"#,
+        r#"cf task edit T-3 "…"\s+replace the brief of a task no window has yet \(open, queued, or paused\)"#,
         &text
     ));
     assert!(

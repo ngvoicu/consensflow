@@ -153,7 +153,19 @@ pub(crate) fn release_ready(store: &mut Store, project_id: i64) -> Result<(), Le
         .query_map([project_id], TaskRow::read)?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     for task in waiting {
-        let assignee = store.participant_of(task.assignee_id)?;
+        let mut assignee = store.participant_of(task.assignee_id)?;
+        // Never queued for a session that has left, which no window opens for: the
+        // session the human deleted comes back for it, as for any follow-up, and
+        // one whose member left cannot, so the task ends here (a removal cancels
+        // such tasks itself; this is for a ledger an older build left).
+        if assignee.member_id.is_some() && assignee.left_at.is_some() {
+            if can_continue(store, &assignee)? {
+                assignee = bring_back(store, assignee)?;
+            } else {
+                cancel_unreachable(store, project_id, &task, &assignee)?;
+                continue;
+            }
+        }
         if assignee.member_id.is_some() && has_task_in_hand(store, assignee.id)? {
             continue;
         }
@@ -173,6 +185,39 @@ pub(crate) fn release_ready(store: &mut Store, project_id: i64) -> Result<(), Le
         store.move_task(&task, "queued", json!({ "message": message_id }))?;
     }
     Ok(())
+}
+
+/// A task that waited on the board for its needs and cannot go to its window,
+/// whose member left the staff: it is cancelled, its requester told, and the
+/// tasks that wait for it are told to the chief as stranded.
+fn cancel_unreachable(
+    store: &mut Store,
+    project_id: i64,
+    task: &TaskRow,
+    window: &ParticipantRow,
+) -> Result<(), LedgerError> {
+    drop_queued(store, task.id)?;
+    store.move_task(
+        task,
+        "cancelled",
+        json!({ "reason": format!("@{} has left the staff", window.handle) }),
+    )?;
+    let requester = store.participant_row(task.requester_id)?;
+    send(
+        store,
+        project_id,
+        &Sent {
+            to: &requester.handle,
+            task: Some(task.number),
+            kind: "note",
+            body: &format!(
+                "T-{} was cancelled: @{} has left the staff, so no window can take it.",
+                task.number, window.handle
+            ),
+            ..Sent::default()
+        },
+    )?;
+    tell_stranded_waiters(store, project_id, task)
 }
 
 /// A follow-up on a finished or failed task: it goes back to its assignee's

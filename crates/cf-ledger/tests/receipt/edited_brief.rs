@@ -276,3 +276,58 @@ fn an_empty_brief_is_refused_and_a_task_that_is_not_there_is_not_edited() {
         .expect_err("no such task");
     assert_eq!(missing.code(), Some("unknown-task"));
 }
+
+/// What the window is pasted for `carrier`: its own words, and the rows it carries.
+fn pasted(w: &mut World, carrier: i64) -> String {
+    let begun = w.deliver(carrier);
+    std::iter::once(begun.message.body)
+        .chain(begun.carried.into_iter().map(|row| row.body))
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
+
+#[test]
+fn a_task_held_for_quota_and_resumed_by_the_daemon_is_edited_in_its_brief_alone() {
+    let mut w = world();
+    let created = w.give("zeus", "Parser, old");
+    let task = created.task.number;
+    // The member runs out of quota before the brief is pasted; the daemon resumes it.
+    w.hold(task);
+    let carrier = w.daemon_resumes(task).message.expect("its words").id;
+
+    w.ledger
+        .edit_task(w.project, task, "chief", "Parser, new")
+        .expect("no window has the brief yet");
+    let said = pasted(&mut w, carrier);
+    assert_eq!(
+        said.matches("Parser, new").count(),
+        1,
+        "the brief once: {said}"
+    );
+    assert_eq!(
+        said.matches("Go on where you stopped.").count(),
+        1,
+        "and the words that resume it: {said}"
+    );
+    assert!(!said.contains("Parser, old"), "{said}");
+}
+
+#[test]
+fn a_task_paused_and_resumed_by_the_chief_is_edited_in_the_brief_its_words_follow() {
+    let mut w = world();
+    let task = w.give("zeus", "Parser, old").task.number;
+    w.pause(task);
+    let carrier = w.resume(task, "Use JSON").message.expect("its words").id;
+
+    w.ledger
+        .edit_task(w.project, task, "chief", "Parser, new")
+        .expect("no window has the brief yet");
+    let said = pasted(&mut w, carrier);
+    assert_eq!(
+        said.matches("Parser, new").count(),
+        1,
+        "the brief once: {said}"
+    );
+    assert_eq!(said.matches("Resumed: Use JSON").count(), 1, "{said}");
+    assert!(!said.contains("Parser, old"), "{said}");
+}

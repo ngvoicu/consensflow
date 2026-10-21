@@ -37,6 +37,10 @@ T-3 is at work the follow-up waits for T-3 to be accepted, where Node refused it
 six prints have the entry and the line as `crates/cf/src/board/usage.txt` has them, and
 the sentence has the verb: changed by hand, in those words alone. The daemon's traces
 of the same words (`crates/cf-daemon/tests/goldens`) were changed with them.
+Round 2 of the same task (T-158) changed one phrase of that entry, by hand, in the same six
+prints: `(open, blocked or queued)` became `(open, queued, or paused)`, since a task paused
+before any window had it is editable too (the same number of characters, so the role text's
+documented sizes did not move).
 
 ## Two cases changed by hand after Node
 
