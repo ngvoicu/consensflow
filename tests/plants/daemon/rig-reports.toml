@@ -1,0 +1,161 @@
+# What the rig tells of a case that failed, and of none that passed, and what CI keeps of it
+# (T-143, 3.0.6; the Windows run of 2026-10-21, 39616304894). A rig dropped unclosed keeps
+# its report beside its home (`crates/cf-e2e/src/rig/report.rs`); fourteen cases that passed
+# had dropped theirs, and the one report that mattered was lost with the runner, which
+# `.github/workflows/ci.yml` now uploads for a failed job. The tests are
+# `crates/cf-e2e/tests/rig/reports.rs`; the plants of the rig's own `Drop` and of the
+# report's say-so are theirs, as are those of the cases that must close and of the
+# workflow's two steps. The runs build the rig suite's own programs only.
+
+[run]
+reports-closed = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "reports::a_rig_its_case_closed"]
+reports-error = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "reports::a_rig_its_case_left"]
+reports-check = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "reports::a_rig_shut_down"]
+reports-said = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "reports::where_a_report"]
+reports-closes = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "reports::every_case"]
+reports-ci = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "reports::ci_uploads"]
+
+[[plant]]
+name = "rig reports: a rig whose case closed it keeps a report all the same"
+meant = "a_rig_its_case_closed_leaves_no_report"
+runs = ["reports-closed"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/mod.rs"
+find = "        if std::thread::panicking() || !self.closed {"
+replace = "        if true {"
+
+[[plant]]
+name = "rig reports: a rig whose case returned an error and left it keeps no report"
+meant = "a_rig_its_case_left_on_an_error_it_returned_keeps_its_report"
+runs = ["reports-error"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/mod.rs"
+find = "        if std::thread::panicking() || !self.closed {"
+replace = "        if std::thread::panicking() {"
+
+[[plant]]
+name = "rig reports: a rig shut down, whose case then failed a check, keeps no report"
+meant = "a_rig_shut_down_and_dropped_while_a_check_fails_keeps_its_report"
+runs = ["reports-check"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/mod.rs"
+find = "        if std::thread::panicking() || !self.closed {"
+replace = "        if !self.closed {"
+
+[[plant]]
+name = "rig reports: where a report is kept is said past the output a test run holds, for a case that passed"
+meant = "where_a_report_is_kept_is_said_in_the_output_of_the_case_that_failed_and_of_no_other"
+runs = ["reports-said"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/report.rs"
+find = "use std::fs;\nuse std::path::Path;"
+replace = "use std::fs;\nuse std::io::Write;\nuse std::path::Path;"
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/report.rs"
+find = '    eprint!("{where_kept}");'
+replace = "    let _ = std::io::stderr().write_all(where_kept.as_bytes());"
+
+[[plant]]
+name = "rig reports: a folder-trust case ends without closing its rig"
+meant = "every_case_of_the_rig_and_the_regressions_that_starts_a_rig_closes_it"
+runs = ["reports-closes"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/regressions/a_trust_question_after_git_init_stopped_every_launch.rs"
+find = '''
+    assert_eq!(keys_given(&rig), ["down", "enter"]);
+    rig.close()?;
+'''
+replace = '''
+    assert_eq!(keys_given(&rig), ["down", "enter"]);
+'''
+
+[[plant]]
+name = "rig reports: the folder-trust case that starts its rig again closes only the first"
+meant = "every_case_of_the_rig_and_the_regressions_that_starts_a_rig_closes_it"
+runs = ["reports-closes"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/regressions/a_trust_question_after_git_init_stopped_every_launch.rs"
+find = '''
+        Ok(result_for(&project, 1)?.is_some_and(|result| result["state"] == "delivered"))
+    })?;
+    rig.close()?;
+'''
+replace = '''
+        Ok(result_for(&project, 1)?.is_some_and(|result| result["state"] == "delivered"))
+    })?;
+'''
+
+[[plant]]
+name = "rig reports: the follow-up case ends without closing its rig"
+meant = "every_case_of_the_rig_and_the_regressions_that_starts_a_rig_closes_it"
+runs = ["reports-closes"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/regressions/follow_up_refused_behind_a_waiting_follow_up.rs"
+find = '''
+    assert_eq!(task(&project, 4)?.1, session, "the same window");
+    rig.close()?;
+'''
+replace = '''
+    assert_eq!(task(&project, 4)?.1, session, "the same window");
+'''
+
+[[plant]]
+name = "rig reports: CI uploads the reports of every job, a passing one's too"
+meant = "ci_uploads_for_a_failed_job_the_reports_a_failed_case_keeps_and_no_other_file"
+runs = ["reports-ci"]
+
+[[plant.edit]]
+file = ".github/workflows/ci.yml"
+find = '''
+      - if: failure()
+        uses: actions/upload-artifact@'''
+replace = '''
+      - uses: actions/upload-artifact@'''
+
+[[plant]]
+name = "rig reports: CI fails a job that wrote no report, where it should say nothing"
+meant = "ci_uploads_for_a_failed_job_the_reports_a_failed_case_keeps_and_no_other_file"
+runs = ["reports-ci"]
+
+[[plant.edit]]
+file = ".github/workflows/ci.yml"
+find = "          if-no-files-found: ignore\n"
+replace = "          if-no-files-found: error\n"
+
+[[plant]]
+name = "rig reports: CI takes the action by a tag that can move, not a commit"
+meant = "ci_uploads_for_a_failed_job_the_reports_a_failed_case_keeps_and_no_other_file"
+runs = ["reports-ci"]
+
+[[plant.edit]]
+file = ".github/workflows/ci.yml"
+find = "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2"
+replace = "actions/upload-artifact@v7"
+
+[[plant]]
+name = "rig reports: CI looks for the reports in the runner's own folder, not where the rig writes them"
+meant = "ci_uploads_for_a_failed_job_the_reports_a_failed_case_keeps_and_no_other_file"
+runs = ["reports-ci"]
+
+[[plant.edit]]
+file = ".github/workflows/ci.yml"
+find = '''$(node -p "require('os').tmpdir()")'''
+replace = '''$(node -p "process.env.RUNNER_TEMP")'''
+
+[[plant]]
+name = "rig reports: CI looks for files the rig never writes"
+meant = "ci_uploads_for_a_failed_job_the_reports_a_failed_case_keeps_and_no_other_file"
+runs = ["reports-ci"]
+
+[[plant.edit]]
+file = ".github/workflows/ci.yml"
+find = "consensflow-integration-*-left.txt"
+replace = "consensflow-integration-*-kept.txt"

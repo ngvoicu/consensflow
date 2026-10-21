@@ -6,7 +6,6 @@
 //! where. And how a window's bytes become the text on its screen.
 
 use std::fs;
-use std::io::Write;
 use std::path::Path;
 use std::sync::OnceLock;
 
@@ -257,7 +256,9 @@ fn said_by_the_daemon(rig: &Rig, tell: &Tell) -> String {
 }
 
 /// Says on the standard error what the rig showed: for a case that failed
-/// with the rig still up.
+/// with the rig still up. Through `eprint!`, which a test's output holds for the
+/// case that failed and says nothing of for one that passed.
+#[allow(clippy::print_stderr)] // Said in the output of the test that failed.
 pub(super) fn say(rig: &Rig) {
     let tell = Tell(rig.masker.as_ref());
     let mut report = String::from("\n--- the rig, as the failed case left it\n");
@@ -292,7 +293,7 @@ pub(super) fn say(rig: &Rig) {
         report.push_str(&format!("lines that are no frame: {stray:?}\n"));
     }
     let where_kept = keep(&rig.root, &tell.text(&report));
-    let _ = std::io::stderr().write_all(where_kept.as_bytes());
+    eprint!("{where_kept}");
 }
 
 /// Keeps `report`, what a rig dropped unclosed says of itself, in a file beside its home

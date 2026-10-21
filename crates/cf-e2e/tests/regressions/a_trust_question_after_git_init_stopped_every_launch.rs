@@ -138,6 +138,7 @@ fn a_worker_asked_to_trust_the_projects_new_repository_is_answered_yes_and_does_
     let notes = notes_of(&project, folder)?;
     assert_eq!(notes.len(), 1, "the human is told once: {notes:?}");
     assert!(notes[0].contains("answered yes"), "{notes:?}");
+    rig.close()?;
     Ok(())
 }
 
@@ -157,6 +158,7 @@ fn a_chief_asked_to_trust_the_projects_new_repository_is_answered_yes_and_takes_
         notes[0].contains("@chief") && notes[0].contains("answered yes"),
         "{notes:?}"
     );
+    rig.close()?;
     Ok(())
 }
 
@@ -225,6 +227,7 @@ fn a_worker_whose_yes_would_trust_a_folder_outside_the_project_waits_for_the_hum
     }
     rig.wait_for("T-1 and T-2 to be done", secs(90), || both_done(&project))?;
     assert_eq!(notes_of(&project, &root)?.len(), 1, "told once");
+    rig.close()?;
     Ok(())
 }
 
@@ -266,6 +269,7 @@ fn a_worker_the_human_said_yes_in_that_starts_slowly_has_its_first_messages_whol
         assert_ne!(state, "failed", "T-1 failed after the yes");
         Ok(state == "done")
     })?;
+    rig.close()?;
     Ok(())
 }
 
@@ -335,6 +339,7 @@ fn a_worker_opened_again_on_its_conversation_after_git_init_is_answered_yes_and_
     let notes = notes_of(&project, rig.workspace())?;
     assert_eq!(notes.len(), 1, "the human is told once: {notes:?}");
     assert!(notes[0].contains("answered yes"), "{notes:?}");
+    rig.close()?;
     Ok(())
 }
 
@@ -352,6 +357,7 @@ fn a_worker_whose_first_frame_holds_still_before_the_question_is_still_answered(
         .to_owned();
     a_task(&rig, &project, &tier, 1, "STILL_DONE")?;
     assert_eq!(notes_of(&project, rig.workspace())?.len(), 1);
+    rig.close()?;
     Ok(())
 }
 
@@ -368,6 +374,7 @@ fn a_question_slow_to_redraw_is_given_one_key_at_a_time() -> Outcome {
         .to_owned();
     a_task(&rig, &project, &tier, 1, "SLOW_REDRAW_DONE")?;
     assert_eq!(keys_given(&rig), ["down", "enter"]);
+    rig.close()?;
     Ok(())
 }
 
@@ -394,6 +401,7 @@ fn a_window_that_asks_nothing_never_reads_as_asking() -> Outcome {
         );
         Ok(project.task(1)?["state"] == "done")
     })?;
+    rig.close()?;
     Ok(())
 }
 
@@ -424,6 +432,7 @@ fn a_humans_no_in_one_window_is_no_yes_for_the_others() -> Outcome {
         "a key toward yes went into the other window: {:?}",
         keys_given(&rig)
     );
+    rig.close()?;
     Ok(())
 }
 
@@ -477,6 +486,7 @@ fn a_project_on_a_linked_worktree_leaves_the_main_checkouts_trust_to_the_human()
         notes[0].contains("outside the project's folder"),
         "{notes:?}"
     );
+    rig.close()?;
     Ok(())
 }
 
@@ -508,6 +518,7 @@ fn a_link_in_the_projects_path_leaves_the_repository_it_leads_into_to_the_human(
     sleep(Duration::from_secs(4));
     assert!(keys_given(&rig).is_empty(), "{:?}", keys_given(&rig));
     assert_eq!(trusted(&rig), "");
+    rig.close()?;
     Ok(())
 }
 
@@ -563,6 +574,7 @@ fn a_window_opened_again_that_asks_is_given_nothing_until_the_human_has_answered
         assert_ne!(state, "failed", "T-2 failed");
         Ok(state == "done")
     })?;
+    rig.close()?;
     Ok(())
 }
 
@@ -661,5 +673,6 @@ fn a_chief_opened_again_at_rest_that_asks_is_handed_nothing_until_the_human_has_
     rig.wait_for("T-1's result to reach the chief", secs(60), || {
         Ok(result_for(&project, 1)?.is_some_and(|result| result["state"] == "delivered"))
     })?;
+    rig.close()?;
     Ok(())
 }

@@ -121,11 +121,15 @@ fn what_stops_the_run_and_what_its_rig_says_leave_through_the_edge() {
     let report = read(&rig.join("report.rs"));
     let written: Vec<&str> = report
         .lines()
-        .filter(|line| line.contains("stderr()"))
+        .filter(|line| !line.trim_start().starts_with("//"))
+        .filter(|line| line.contains("stderr()") || line.contains("eprint"))
         .collect();
     assert_eq!(written.len(), 1, "{written:?}");
     // What it says of itself is kept in a file, told first; its error output says where.
-    assert!(written[0].contains("where_kept.as_bytes()"), "{written:?}");
+    assert!(
+        written[0].contains(r#"eprint!("{where_kept}")"#),
+        "{written:?}"
+    );
     assert!(report.contains("let where_kept = keep(&rig.root, &tell.text(&report));"));
     assert!(report.contains("let tell = Tell(rig.masker.as_ref());"));
 }

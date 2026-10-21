@@ -103,3 +103,24 @@ jobs:
       - run: cargo test -p cf-bridge --features local
         timeout-minutes: 15
       - run: cargo clippy -p cf-bridge --features local --all-targets -- -D warnings
+
+      # A rig case that fails keeps a report of what its windows showed beside
+      # its home, in the runner's temp folder (cf-e2e's rig/report.rs, `keep`),
+      # which goes with the runner: so a failure that does not reproduce at home
+      # is read from these (2026-10-21: Windows' folder-trust case). Node names
+      # the folder as the Rust that wrote there does (TMPDIR on the Mac's
+      # runner, TEMP on Windows'); `runner.temp` is another folder. The reports
+      # hold the stand-in agents' output and the daemon's log, from a rig whose
+      # environment is its own (cf-e2e's rig/install.rs): no real harness, home
+      # or token. The step that names the folder runs only for a failed job, and
+      # the upload, for one that wrote none, says nothing.
+      - name: Where the rig keeps the reports of its failed cases
+        if: failure()
+        run: echo "RIG_TEMP=$(node -p "require('os').tmpdir()")" >> "$GITHUB_ENV"
+      - if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: rig-reports-${{ matrix.os }}
+          path: ${{ env.RIG_TEMP }}/consensflow-integration-*-left.txt
+          if-no-files-found: ignore
+          retention-days: 7
