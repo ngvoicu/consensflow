@@ -723,8 +723,35 @@ fn the_wait_for_a_quiet_window_starts_again_after_a_gap_longer_than_the_arrival_
 #[test]
 fn a_box_emptied_before_a_close_is_not_counted_empty_after_the_resume() {
     let context = Context::new();
-    let (tiers, _, _) = carrier_withheld(&context);
-    let project = tiers.project.id;
+    let (project, again) = emptied_then_refused(&context);
+    context.host.refuse_kills.set(true);
+    assert!(context.close_project(project).is_err(), "its windows stay");
+    context.host.refuse_kills.set(false);
+    resumed_told_not_empty(&context, project, &again);
+}
+
+/// Calliope's review of 2026-10-21 (T-81): the same Close made by the chief's own
+/// window ending, which suspends the project and closes every other window, kept
+/// the mark on zeus's window the close could not kill. That Close ends it too.
+#[test]
+fn a_box_emptied_before_the_chiefs_window_ended_is_not_counted_empty_after_the_resume() {
+    let context = Context::new();
+    let (project, again) = emptied_then_refused(&context);
+    context.host.refuse_kills.set(true);
+    context.exit("chief");
+    context.host.refuse_kills.set(false);
+    assert_eq!(
+        context.project(project).state,
+        "suspended",
+        "the chief's exit closed it"
+    );
+    resumed_told_not_empty(&context, project, &again);
+}
+
+/// zeus's box emptied of the words whose Enter was withheld, and the paste of the
+/// words that resume T-1 again refused after the key: the project and those words.
+fn emptied_then_refused(context: &Context) -> (i64, MessageView) {
+    let (tiers, _, _) = carrier_withheld(context);
     let refusals = Rc::new(Cell::new(1_u32));
     let left = Rc::clone(&refusals);
     *context.adapter.deliver.borrow_mut() = Some(Rc::new(move |taking| {
@@ -740,17 +767,19 @@ fn a_box_emptied_before_a_close_is_not_counted_empty_after_the_resume() {
             })
         })
     }));
-    let again = resumed_again(&context, &tiers);
+    let again = resumed_again(context, &tiers);
     context.pass().unwrap();
     assert_eq!(
-        (refusals.get(), clears(&context)),
+        (refusals.get(), clears(context)),
         (0, 1),
         "emptied, then refused"
     );
+    (tiers.project.id, again)
+}
 
-    context.host.refuse_kills.set(true);
-    assert!(context.close_project(project).is_err(), "its windows stay");
-    context.host.refuse_kills.set(false);
+/// The human resumes `project`: the paste of `again` that follows is not told the
+/// box is empty.
+fn resumed_told_not_empty(context: &Context, project: i64, again: &MessageView) {
     context.resume_project(project).unwrap();
     let before = context.adapter.cleared.borrow().len();
     for _ in 0..3 {

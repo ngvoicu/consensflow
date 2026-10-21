@@ -530,7 +530,8 @@ fn a_ledger_3_0_5_wrote_migrates_to_the_resume_s_0021_and_0022_after_the_viewer_
 }
 
 /// A ledger the next release would write before the Resume lands, version 20 with
-/// the viewer's 0020, opens at 22 with the Resume's columns.
+/// the viewer's 0020, opens at 22 with the Resume's columns. A second open migrates
+/// nothing again.
 #[test]
 fn a_ledger_at_the_viewer_s_0020_migrates_to_the_resume_s_0022() {
     let dir = tempfile::tempdir().expect("a folder");
@@ -541,6 +542,10 @@ fn a_ledger_at_the_viewer_s_0020_migrates_to_the_resume_s_0022() {
 
     drop(open_ledger(&file, Options::default()).expect("migrated and open"));
     assert_eq!(resume_columns(&file), (22, Some(0), Some(None)));
+    let schema = schema_of(&file);
+    drop(open_ledger(&file, Options::default()).expect("and open again"));
+    assert_eq!(resume_columns(&file), (22, Some(0), Some(None)));
+    assert_eq!(schema_of(&file), schema, "nothing migrated again");
 }
 
 /// A fresh ledger is made at 22: main's 0019 and 0020 (B5's, the viewer's), then

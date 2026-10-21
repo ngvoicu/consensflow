@@ -143,10 +143,17 @@ fn a_chiefs_window_that_ends_leaves_the_project_the_human_closed_and_resumed_whi
         !context.host.killed().contains(&chief),
         "the chief's window the Resume opened runs"
     );
+    let opened: Vec<String> = context
+        .host
+        .opened()
+        .into_iter()
+        .map(|open| open.pane.id)
+        .collect();
     assert_eq!(
-        context.host.opened().len(),
-        4,
-        "the chief's, zeus's, and each again: the Resume brings back T-1, which the Close paused"
+        opened,
+        ["p1-chief", "p1-zeus", "p1-zeus", "p1-chief"],
+        "the chief's, zeus's, and each again, once: the Resume brings back T-1, which the \
+         Close paused, and the chief's launch waits on the read of its record"
     );
 }
 

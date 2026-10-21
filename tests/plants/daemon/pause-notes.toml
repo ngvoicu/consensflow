@@ -179,8 +179,9 @@ runs = ["pause-notes-engine"]
 file = "crates/cf-engine/src/dispatcher.rs"
 find = '''
         let _burst = self.stalls.begin_burst();
-        let parts: Vec<Closing> = participants'''
-replace = "        let parts: Vec<Closing> = participants"
+        // A box the engine emptied counts as empty no more: what the human types into'''
+replace = '''
+        // A box the engine emptied counts as empty no more: what the human types into'''
 
 [[plant]]
 name = "pause notes: what a burst told outlives it"

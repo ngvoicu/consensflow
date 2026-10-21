@@ -228,13 +228,6 @@ impl Dispatcher {
             .ledger
             .borrow_mut()
             .set_project_state(project, "suspended")?;
-        // A box the engine emptied counts as empty no more: what the human types into
-        // a window the Close could not close goes unseen until the Resume, and an
-        // interrupt of ours may put a prompt back there (Calliope's review of
-        // 2026-10-21, round 13).
-        for participant in &suspended.participants {
-            self.record_of(participant.id).delivery.borrow_mut().emptied = None;
-        }
         let kept = self
             .close_windows(project, &suspended.participants, None)
             .await?;
@@ -271,6 +264,13 @@ impl Dispatcher {
         because: Option<&str>,
     ) -> Result<Vec<String>, EngineError> {
         let _burst = self.stalls.begin_burst();
+        // A box the engine emptied counts as empty no more: what the human types into
+        // a window the close could not close goes unseen until the Resume, and an
+        // interrupt of ours may put a prompt back there. The human's Close and the
+        // chief's own exit alike (Calliope's reviews of 2026-10-21, rounds 13 and 14).
+        for participant in participants {
+            self.record_of(participant.id).delivery.borrow_mut().emptied = None;
+        }
         let parts: Vec<Closing> = participants
             .iter()
             .map(|_| self.closings.begin(project))

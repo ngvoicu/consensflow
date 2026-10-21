@@ -2294,3 +2294,15 @@ runs = ["engine-stale-box"]
 file = "crates/cf-engine/src/dispatcher.rs"
 find = "            self.record_of(participant.id).delivery.borrow_mut().emptied = None;"
 replace = "            let _ = participant;"
+
+# --- round 15: Calliope's review of the merge (T-81) ---
+
+[[plant]]
+name = "resume tasks: the chief's own exit leaves a box emptied counted empty"
+meant = "a_box_emptied_before_the_chiefs_window_ended_is_not_counted_empty_after_the_resume"
+runs = ["engine-stale-box"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "        for participant in participants {"
+replace = "        for participant in participants.iter().filter(|_| because.is_none()) {"

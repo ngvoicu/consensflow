@@ -36,8 +36,8 @@ use crate::views::TaskRow;
 /// How a continuation begins, before the tasks it names.
 const STOPPED: &str = "ConsensFlow stopped while you were working on ";
 
-/// How builds before 3.0.5 began one, which a ledger may still hold queued for a
-/// window that never came.
+/// How 3.0.5 and the builds before it began one, which a ledger may still hold
+/// queued for a window that never came.
 const QUIT: &str = "ConsensFlow quit while you were working on ";
 
 /// The words of a continuation of task `number`.
@@ -45,10 +45,10 @@ pub fn continuation(number: i64) -> String {
     format!("{STOPPED}{}. {RESUME_WORDS}", named(&[number]))
 }
 
-/// The tasks a continuation names, in its words or in those of builds before
-/// 3.0.5, which named every task a window held; none for any other text. Only
-/// the words those builds and [`continuation`] write are read, so no other note
-/// is taken for one.
+/// The tasks a continuation names, in its words or in those of 3.0.5 and the
+/// builds before it, which named every task a window held; none for any other
+/// text. Only the words those builds and [`continuation`] write are read, so no
+/// other note is taken for one.
 pub fn continuation_tasks(body: &str) -> Option<Vec<i64>> {
     let (start, rest) = [STOPPED, QUIT]
         .into_iter()
@@ -171,9 +171,9 @@ pub(crate) fn drop_continuations(
 
 /// Why `message`, a continuation, is no longer to be given to its window: its
 /// task is not at work there (working, or waiting for an answer), or it names
-/// several tasks, as builds before 3.0.5 wrote them. None while its task is at
-/// work there, for one no longer to be given at all (given already, or
-/// withdrawn), and for any other message.
+/// several tasks, as 3.0.5 and the builds before it wrote them. None while its
+/// task is at work there, for one no longer to be given at all (given already,
+/// or withdrawn), and for any other message.
 fn stale(store: &Store, message: &MessageView) -> Result<Option<String>, LedgerError> {
     if message.kind != "note"
         || message.sender.is_some()
@@ -235,8 +235,8 @@ pub(crate) fn withdraw_stale_among(store: &mut Store, ids: &[i64]) -> Result<(),
 /// The human's Resume of a project, in the write that opens it: what an earlier
 /// build or an earlier Resume left queued telling a window to go on goes unless it
 /// names the one task its window holds, at work. A continuation that names several
-/// is a build's before 3.0.5, and this one tells a window that holds several to go
-/// on with none; one whose task stands otherwise is for work as it was. Of several
+/// is 3.0.5's or an earlier build's, and this one tells a window that holds
+/// several to go on with none; one whose task stands otherwise is for work as it was. Of several
 /// left for the same task, the oldest stays and the others go: the window is told
 /// once (Sol's review of 2026-10-17). The Resume writes one anew where it is due.
 pub(crate) fn withdraw_stale(store: &mut Store, project_id: i64) -> Result<(), LedgerError> {

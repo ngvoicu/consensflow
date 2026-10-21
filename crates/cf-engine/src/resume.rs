@@ -152,8 +152,8 @@ impl Coming {
     }
 
     /// Whether `body` is the note that tells the window its turn was cut: these
-    /// words, or a member's as builds before 3.0.5 wrote them, which a ledger may
-    /// still hold queued for a window that never came.
+    /// words, or a member's as 3.0.5 and the builds before it wrote them, which a
+    /// ledger may still hold queued for a window that never came.
     fn told_in(&self, body: &str) -> bool {
         match self {
             Coming::Chief => body == self.words(),

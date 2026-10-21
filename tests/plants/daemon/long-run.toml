@@ -3245,3 +3245,15 @@ runs = ["evals-lib-long-run"]
 file = "crates/cf-evals/src/long_run/play.rs"
 find = '    if state != "paused" && !hand.wait(|hand| Ok(hand.paused_by(number, None, killed_at)))? {'
 replace = '    if state != "paused" {'
+
+[[plant]]
+name = "long run: a member's cut note in the engine's words is no cut note"
+meant = "a_members_cut_note_in_the_words_the_engine_writes_is_judged"
+runs = ["evals-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/invariants/turns.rs"
+find = """
+    "ConsensFlow stopped while you were working on","""
+replace = """
+    "ConsensFlow quit while you were working on","""
