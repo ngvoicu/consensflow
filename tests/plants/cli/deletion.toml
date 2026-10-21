@@ -113,10 +113,10 @@ runs = ["runnable"]
 [[plant.edit]]
 file = "crates/cf-process/src/runnable.rs"
 find = '''
-    on_path("node", env)
+    on_path_as_program("node", env)
 }'''
 replace = '''
-    on_path("node", env).or_else(|| env.path("CONSENSFLOW_NODE").map(Path::to_path_buf))
+    on_path_as_program("node", env).or_else(|| env.path("CONSENSFLOW_NODE").map(Path::to_path_buf))
 }'''
 
 [[plant]]
@@ -178,7 +178,7 @@ runs = ["runnable"]
 
 [[plant.edit]]
 file = "crates/cf-process/src/runnable.rs"
-find = "        None => Program::Node,"
+find = "        None => Program::BareNode,"
 replace = '        None => Program::Named(PathBuf::from("node")),'
 
 [[plant]]
@@ -373,3 +373,54 @@ find = "const CONSOLE_ASCII = new Map("
 replace = '''
 import { join } from 'node:path'
 const CONSOLE_ASCII = new Map('''
+
+# The Node a bare `node` runs on, for an app started before Pi's installer put its own on the
+# PATH (T-34, P3-1), what follows a shim's script (P3-2) and what a Node is (P3-4).
+[[plant]]
+name = "deletion: the Node Pi's installer put is not looked for"
+meant = "pis_shim_finds_the_node_pis_installer_put_though_the_app_started_before_it_was_on_the_path"
+runs = ["runnable"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/runnable.rs"
+find = "                Program::BareNode => pi_node(env),"
+replace = "                Program::BareNode => None,"
+
+[[plant]]
+name = "deletion: an npm shim is run on the Node Pi's installer put"
+meant = "the_node_pis_installer_put_is_for_a_bare_node_and_no_npm_shim_s"
+runs = ["runnable"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/runnable.rs"
+find = '''
+                Program::BareNode => pi_node(env),
+                _ => None,
+'''
+replace = '''
+                _ => pi_node(env),
+'''
+
+[[plant]]
+name = "deletion: a word after a shim's script is read over"
+meant = "a_word_after_the_script_makes_a_line_no_shim_to_read_but_for_the_arguments"
+runs = ["runnable"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/runnable.rs"
+find = '    if after.trim() != "%*" {'
+replace = '    if after.is_empty() && false {'
+
+[[plant]]
+name = "deletion: a node.cmd is a Node a window can start"
+meant = "a_node_cmd_first_on_the_path_is_passed_over_for_a_node_a_window_can_start"
+runs = ["runnable"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/runnable.rs"
+find = '''
+    on_path_as_program("node", env)
+}'''
+replace = '''
+    crate::search::on_path("node", env)
+}'''

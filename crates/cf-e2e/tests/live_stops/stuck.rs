@@ -49,19 +49,26 @@ pub fn brief() -> String {
     format!("Run exactly this one shell command, then stop: sh ./{SCRIPT}")
 }
 
+/// A program as a command line names it: by its path or not, with either separator, with
+/// `.exe` or without, in any case, and, on Windows, in double quotes where the path holds a
+/// space (`"C:\Program Files\Git\usr\bin\sh.exe" ./x`, as zeewin lists Git Bash's).
+fn program(name: &str) -> String {
+    format!(r#"(?:"(?:[^"]*[\\/])?(?i:{name}(?:\.exe)?)"|(?:\S*[\\/])?(?i:{name}(?:\.exe)?))"#)
+}
+
 /// The command line of the script: `sh ./<script>`, the shell named by its path or not.
 fn script_pattern() -> &'static Regex {
     static SCRIPT_RE: OnceLock<Regex> = OnceLock::new();
     pattern::once(
         &SCRIPT_RE,
-        &format!(r"^(\S*/)?sh\s+\./{}$", regex::escape(SCRIPT)),
+        &format!(r"^{}\s+\./{}$", program("sh"), regex::escape(SCRIPT)),
     )
 }
 
 /// The command line of the script's sleep: `sleep <seconds>`, and nothing more.
 fn sleep_pattern() -> &'static Regex {
     static SLEEP_RE: OnceLock<Regex> = OnceLock::new();
-    pattern::once(&SLEEP_RE, &format!(r"^(\S*/)?sleep\s+{STUCK_S}$"))
+    pattern::once(&SLEEP_RE, &format!(r"^{}\s+{STUCK_S}$", program("sleep")))
 }
 
 /// The command's own processes among `found`: the script and its sleep, not the harness
@@ -427,6 +434,85 @@ mod tests {
         ];
         assert_eq!(pids(&of_the_command(&found)), [10, 11, 20, 21]);
         assert!(of_the_command(&[running(20, 2, 10, "sleep 200")]).is_empty());
+    }
+
+    /// Windows lists a process by the command line it was started with, which for Git Bash's
+    /// own programs names them by their path, with `\`, `.exe`, and in double quotes where the
+    /// path holds a space; the first two lines are what zeewin listed for `sh ./<script>`
+    /// run by a harness's bash, and for its sleep (2026-10-21). The case found nothing of the
+    /// command on Windows for it (T-2: "the member never ran the command in 300 s").
+    #[test]
+    fn the_commands_processes_are_found_by_the_command_lines_windows_lists_for_them_too() {
+        let found = vec![
+            running(
+                10,
+                1,
+                1,
+                r#""C:\Program Files\Git\usr\bin\sh.exe" ./ignore-signals-cf-stops-live.sh"#,
+            ),
+            // The path unquoted (it holds no space), another spelling of the same, in capitals.
+            running(
+                11,
+                1,
+                1,
+                r"C:\msys64\usr\bin\sh.exe ./ignore-signals-cf-stops-live.sh",
+            ),
+            running(
+                12,
+                1,
+                1,
+                "C:/Git/usr/bin/sh ./ignore-signals-cf-stops-live.sh",
+            ),
+            running(
+                13,
+                1,
+                1,
+                r#""C:\GIT\USR\BIN\SH.EXE" ./ignore-signals-cf-stops-live.sh"#,
+            ),
+            // Not the command's: the bash the harness ran it in, which holds its text; another
+            // program by a name that ends in `sh`; and the script run with more.
+            running(
+                14,
+                1,
+                1,
+                r#""C:\Program Files\Git\bin\bash.exe" -c "sh ./ignore-signals-cf-stops-live.sh""#,
+            ),
+            running(
+                15,
+                1,
+                1,
+                r#""C:\Program Files\Git\usr\bin\bash.exe" ./ignore-signals-cf-stops-live.sh"#,
+            ),
+            running(
+                16,
+                1,
+                1,
+                r#""C:\Program Files\Git\usr\bin\sh.exe" ./ignore-signals-cf-stops-live.sh extra"#,
+            ),
+            running(
+                17,
+                1,
+                1,
+                r"C:\tools\ssh.exe ./ignore-signals-cf-stops-live.sh",
+            ),
+            running(20, 2, 10, r#""C:\Program Files\Git\usr\bin\sleep.exe" 200"#),
+            running(21, 2, 11, r"C:\msys64\usr\bin\sleep.exe 200"),
+            running(22, 2, 12, "C:/Git/usr/bin/sleep 200"),
+            running(23, 2, 13, r#""C:\GIT\USR\BIN\SLEEP.EXE" 200"#),
+            // Another's sleep; one of other seconds; and more than the seconds.
+            running(24, 2, 99, r#""C:\Program Files\Git\usr\bin\sleep.exe" 200"#),
+            running(25, 2, 10, r#""C:\Program Files\Git\usr\bin\sleep.exe" 20"#),
+            running(
+                26,
+                2,
+                10,
+                r#""C:\Program Files\Git\usr\bin\sleep.exe" 200 and more"#,
+            ),
+        ];
+        assert_eq!(
+            pids(&of_the_command(&found)),
+            [10, 11, 12, 13, 20, 21, 22, 23]
+        );
     }
 
     #[test]

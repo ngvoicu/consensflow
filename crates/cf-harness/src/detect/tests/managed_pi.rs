@@ -82,6 +82,58 @@ fn it_is_looked_in_after_every_place_a_pi_was_looked_for_before_so_no_machine_fi
     }
 }
 
+/// Both installers read `PI_CODING_AGENT_DIR` as the agent folder (`install.ps1` when it holds
+/// something, `install.sh` as `${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}`), and put the launcher
+/// in its `bin`. The folder named is looked in before the default, which an install made
+/// before the variable was set may still be in; both after every other place.
+#[test]
+fn a_managed_pi_in_the_agent_folder_the_human_named_is_found_and_the_default_is_still_looked_in() {
+    let machine = Machine::new();
+    let named = machine.root.path().join("work").join("pi-agent");
+    let custom = text(&named);
+    let env = machine.env(&[("PI_CODING_AGENT_DIR", Some(custom.as_str()))]);
+    assert_eq!(harness_path(Harness::Pi, &env), None);
+    let in_named = named.join("bin").join("pi.cmd");
+    startable_with(&in_named, MANAGED_CMD);
+    assert_eq!(harness_path(Harness::Pi, &env), Some(in_named.clone()));
+    assert_eq!(executable(Harness::Pi, &env), Ok(text(&in_named)));
+    // Without the variable, or with it empty, as the installers take it, it is not looked in.
+    for changes in [
+        &[][..],
+        &[("PI_CODING_AGENT_DIR", None)][..],
+        &[("PI_CODING_AGENT_DIR", Some(""))][..],
+    ] {
+        assert_eq!(harness_path(Harness::Pi, &machine.env(changes)), None);
+    }
+    // The default is still looked in, and after the one named.
+    let in_default = agent_bin(&machine.home()).join("pi.cmd");
+    startable_with(&in_default, MANAGED_CMD);
+    assert_eq!(harness_path(Harness::Pi, &env), Some(in_named.clone()));
+    assert_eq!(
+        harness_path(Harness::Pi, &machine.env(&[])),
+        Some(in_default.clone())
+    );
+    fs::remove_file(&in_named).unwrap();
+    assert_eq!(harness_path(Harness::Pi, &env), Some(in_default));
+    // A trailing separator on the variable names the same folder.
+    startable_with(&in_named, MANAGED_CMD);
+    let slashed = format!("{custom}{}", std::path::MAIN_SEPARATOR);
+    assert_eq!(
+        harness_path(
+            Harness::Pi,
+            &machine.env(&[("PI_CODING_AGENT_DIR", Some(slashed.as_str()))])
+        ),
+        Some(in_named)
+    );
+    // It is after every other place a Pi was looked for, as the default is, and it is Pi's alone.
+    let env = machine.env(&[("PI_CODING_AGENT_DIR", Some(custom.as_str()))]);
+    let npm = machine.npm().join("pi.cmd");
+    startable(&npm);
+    assert_eq!(harness_path(Harness::Pi, &env), Some(npm));
+    startable(&named.join("bin").join("claude.cmd"));
+    assert_eq!(harness_path(Harness::Claude, &env), None);
+}
+
 #[test]
 fn the_launcher_the_unix_installer_writes_is_found_there_too_and_is_pis_alone() {
     let root = tempfile::tempdir().unwrap();

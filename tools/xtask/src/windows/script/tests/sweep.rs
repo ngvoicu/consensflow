@@ -79,12 +79,13 @@ fn a_file_the_list_names_is_kept_in_any_case_as_the_list_was_written() {
 #[test]
 fn a_folder_that_is_a_link_is_not_looked_into_and_one_left_empty_is_removed() {
     let text = sweep_script();
-    assert!(
-        text.contains(
+    // Neither walk looks into a link: the tree's, and the reports' that is pruned by age.
+    let walks = text
+        .matches(
             "$deep = $item -is [IO.DirectoryInfo] -and -not ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)"
-        ),
-        "{text}"
-    );
+        )
+        .count();
+    assert_eq!(walks, 2, "{text}");
     // A folder is walked, and kept only where something is left in it.
     let condition = line_with(&text, "$kept | Where-Object");
     assert!(
@@ -134,11 +135,102 @@ fn what_is_removed_is_removed_without_a_question_and_said_and_what_is_not_ends_t
     assert!(run.find("Exit-Run 1").unwrap() < run.find("foreach ($step in").unwrap());
 }
 
+/// The reports a run leaves (`evals/reports`) are kept from one run to the next, and there
+/// were no bounds to what that kept (T-34, P3-6): the sweep removes, in that folder alone,
+/// what was last written more than two weeks before it. It runs under the lock, before
+/// the run's script does anything else, so no run is going on; and what is newer than the
+/// limit is never touched, a run's own files being written now.
+#[test]
+fn the_reports_a_run_left_are_kept_for_two_weeks_and_nothing_newer_is_touched() {
+    let text = sweep_script();
+    assert!(
+        text.contains("$cutoff = (Get-Date).ToUniversalTime().AddDays(-14)"),
+        "{text}"
+    );
+    // Only that folder is walked, and only what is in it is removed, never the folder.
+    assert!(
+        text.contains("Clear-Old (Get-Item -LiteralPath (Join-Path $dir 'evals/reports'))"),
+        "{text}"
+    );
+    // After the tree's stale files, and before what was removed is said.
+    let (stale, old, said) = (
+        text.find("$null = Clear-Stale $root").unwrap(),
+        text.find("Clear-Old (Get-Item").unwrap(),
+        text.find("foreach ($name in $removed)").unwrap(),
+    );
+    assert!(stale < old && old < said, "{text}");
+    // A file or a folder as new as the limit stays, and so does a folder with something
+    // left in it. Every folder is walked first, whatever its own time, which is when an entry
+    // was last added to it: a `long` folder a recent run wrote into holds old reports too.
+    assert_eq!(
+        line_with(&text, "Clear-Old $item"),
+        "    $inside = if ($deep) { Clear-Old $item } else { 0 }"
+    );
+    assert_eq!(
+        line_with(&text, "$inside -or"),
+        "    if ($inside -or $written -ge $cutoff) {"
+    );
+    assert!(
+        text.find("$written = ").unwrap() < text.find("$inside = ").unwrap(),
+        "the folder's own time is read before its entries are removed: {text}"
+    );
+    // A report that cannot be removed is said and the run goes on: it is no file of the tree.
+    let body = text
+        .split_once("function Clear-Old")
+        .and_then(|(_, rest)| rest.split_once("\n}\n"))
+        .map(|(body, _)| body)
+        .unwrap();
+    assert!(!body.contains("$failed"), "{body}");
+    assert!(
+        text.contains("$unpruned = [Collections.Generic.List[string]]::new()"),
+        "{text}"
+    );
+    assert!(
+        text.contains("if ($unpruned.Count) { Write-Output \"What the reports held past their age could not be removed: $($unpruned -join '; ')\" }"),
+        "{text}"
+    );
+    // The limit is the sweep's own to say.
+    assert!(!text.contains("«days»"), "{text}");
+}
+
 #[test]
 fn the_sweep_has_no_mark_left_and_is_plain_text() {
     let text = sweep_script();
     assert!(!text.contains('«'), "{text}");
     assert!(text.is_ascii(), "{text}");
+}
+
+/// A file of the copy `name` (its path from `root`, with `/`), made with its folders.
+#[cfg(windows)]
+fn write(root: &std::path::Path, name: &str) {
+    let path = root.join(name);
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(path, name).unwrap();
+}
+
+/// A script run by the machine's PowerShell, as the sweep's own test runs it.
+#[cfg(windows)]
+fn powershell(script: &str) -> crate::process::Captured {
+    use cf_base::env::Env;
+
+    use crate::process::{self, Invocation};
+
+    process::capture(
+        &Invocation::new("powershell", ".")
+            .args(["-NoProfile", "-NonInteractive", "-EncodedCommand"])
+            .arg(encode_script(script).unwrap()),
+        &Env::from_process(),
+    )
+    .unwrap()
+}
+
+/// The sweep run on the copy `dir`, which holds the list and the sweep it reads.
+#[cfg(windows)]
+fn run_sweep(dir: &std::path::Path) -> crate::process::Captured {
+    powershell(&format!(
+        "$ErrorActionPreference = 'Stop'\n$dir = '{}'\n. ([scriptblock]::Create([IO.File]::ReadAllText((Join-Path $dir '{SWEEP}'))))\nif ($failed.Count) {{ exit 1 }}\n",
+        dir.display()
+    ))
 }
 
 /// The sweep run by the machine's PowerShell on a copy made for it: what the tree has
@@ -150,17 +242,10 @@ fn the_sweep_has_no_mark_left_and_is_plain_text() {
 fn powershell_removes_from_the_copy_what_the_tree_has_not_and_says_what_it_could_not() {
     use std::fs;
     use std::os::windows::fs::OpenOptionsExt;
-    use std::path::Path;
 
     use cf_base::env::Env;
 
     use crate::process::{self, Invocation};
-
-    fn write(root: &Path, name: &str) {
-        let path = root.join(name);
-        fs::create_dir_all(path.parent().unwrap()).unwrap();
-        fs::write(path, name).unwrap();
-    }
 
     let copy = tempfile::tempdir().unwrap();
     let elsewhere = tempfile::tempdir().unwrap();
@@ -198,20 +283,6 @@ fn powershell_removes_from_the_copy_what_the_tree_has_not_and_says_what_it_could
     fs::write(dir.join(SYNCED), "src/lib.rs\nnotes.txt\n").unwrap();
     fs::write(dir.join(SWEEP), sweep_script()).unwrap();
 
-    let run = |dir: &Path| {
-        let script = format!(
-            "$ErrorActionPreference = 'Stop'\n$dir = '{}'\n. ([scriptblock]::Create([IO.File]::ReadAllText((Join-Path $dir '{SWEEP}'))))\nif ($failed.Count) {{ exit 1 }}\n",
-            dir.display()
-        );
-        process::capture(
-            &Invocation::new("powershell", ".")
-                .args(["-NoProfile", "-NonInteractive", "-EncodedCommand"])
-                .arg(encode_script(&script).unwrap()),
-            &Env::from_process(),
-        )
-        .unwrap()
-    };
-
     // A file of the tree's held open with no sharing: it cannot go, and the run ends.
     let stale_held = dir.join("crates/cf-e2e/tests/stale_probe.rs");
     let held = fs::OpenOptions::new()
@@ -219,7 +290,7 @@ fn powershell_removes_from_the_copy_what_the_tree_has_not_and_says_what_it_could
         .share_mode(0)
         .open(&stale_held)
         .unwrap();
-    let ran = run(dir);
+    let ran = run_sweep(dir);
     assert_eq!(ran.code, 1, "{}{}", ran.stdout, ran.stderr);
     assert!(
         ran.stdout.contains("What left the tree could not be removed from the copy: crates/cf-e2e/tests/stale_probe.rs: "),
@@ -228,7 +299,7 @@ fn powershell_removes_from_the_copy_what_the_tree_has_not_and_says_what_it_could
     );
     drop(held);
 
-    let ran = run(dir);
+    let ran = run_sweep(dir);
     assert_eq!(ran.code, 0, "{}{}", ran.stdout, ran.stderr);
     for gone in [
         "crates/cf-e2e/tests/stale_probe.rs",
@@ -263,7 +334,116 @@ fn powershell_removes_from_the_copy_what_the_tree_has_not_and_says_what_it_could
     // The folder the link pointed at is no file of the copy.
     assert!(elsewhere.path().join("outside.txt").exists());
     // And a second sweep finds nothing to remove.
-    let again = run(dir);
+    let again = run_sweep(dir);
+    assert_eq!(again.code, 0, "{}{}", again.stdout, again.stderr);
+    assert!(!again.stdout.contains("== removed"), "{}", again.stdout);
+}
+
+/// The sweep's prune of the reports run by the machine's PowerShell: what was last written
+/// more than the limit ago goes (a file, and a folder left empty that was old itself, but not
+/// `evals/reports`); every folder is walked, one written within the limit too (a `long` folder
+/// that a recent run wrote into holds old reports), and stays where something newer is left in
+/// it; and nothing outside the reports is judged by its age.
+#[cfg(windows)]
+#[test]
+fn powershell_removes_reports_past_their_age_and_nothing_newer_or_outside_them() {
+    use std::fs;
+
+    let copy = tempfile::tempdir().unwrap();
+    let dir = copy.path();
+    let old = [
+        "evals/reports/2026-09-25T20-09-20-351Z-six-decisions.json",
+        "evals/reports/long/2026-09-26T04-46-26-635Z-long.md",
+        "evals/reports/long/2026-09-26T04-46-26-635Z-long.json",
+        "evals/reports/long/2026-09-26T04-46-26-635Z-long-ledger.db",
+        "evals/reports/windows/2026-09-26T10-02-54-255Z/run.json",
+        "evals/reports/windows/2026-09-27T10-02-54-255Z/old.json",
+        "evals/reports/windows/2026-09-28T10-02-54-255Z/old.json",
+    ];
+    let new = [
+        "evals/reports/2026-10-20T20-09-20-351Z-six-decisions.json",
+        "evals/reports/long/2026-10-20T12-25-35-830Z-long.md",
+        "evals/reports/long/2026-10-20T12-25-35-830Z-long-ledger.db",
+        "evals/reports/windows/2026-09-27T10-02-54-255Z/new.json",
+        "evals/reports/windows/2026-09-28T10-02-54-255Z/new.json",
+    ];
+    for name in old.iter().chain(&new) {
+        write(dir, name);
+    }
+    // Not a report, and old: outside the reports it is the list's to keep.
+    write(dir, "notes.txt");
+    fs::create_dir_all(dir.join("evals/reports/windows/empty-old")).unwrap();
+    fs::create_dir_all(dir.join("evals/reports/windows/empty-new")).unwrap();
+    fs::write(dir.join(SYNCED), "notes.txt\n").unwrap();
+    fs::write(dir.join(SWEEP), sweep_script()).unwrap();
+    // Their times as runs of days ago left them. The folders are aged last: making a file
+    // in one wrote it now. `long`, `windows` and `2026-09-27...` stay as the newer files made
+    // in them left them, as they are where a recent run has written.
+    let aged = |names: &[&str]| -> String {
+        let list: Vec<String> = names.iter().map(|name| format!("'{name}'")).collect();
+        format!(
+            "foreach ($name in @({})) {{ (Get-Item -LiteralPath (Join-Path $dir $name)).LastWriteTime = (Get-Date).AddDays(-40) }}\n",
+            list.join(", ")
+        )
+    };
+    let times = format!(
+        "$ErrorActionPreference = 'Stop'\n$dir = '{}'\n{}{}{}",
+        dir.display(),
+        aged(&old),
+        aged(&["notes.txt"]),
+        aged(&[
+            "evals/reports/windows/empty-old",
+            "evals/reports/windows/2026-09-26T10-02-54-255Z",
+            "evals/reports/windows/2026-09-28T10-02-54-255Z",
+        ])
+    );
+    let set = powershell(&times);
+    assert_eq!(set.code, 0, "{}{}", set.stdout, set.stderr);
+
+    let ran = run_sweep(dir);
+    assert_eq!(ran.code, 0, "{}{}", ran.stdout, ran.stderr);
+    for gone in [
+        "evals/reports/2026-09-25T20-09-20-351Z-six-decisions.json",
+        "evals/reports/long/2026-09-26T04-46-26-635Z-long.md",
+        "evals/reports/long/2026-09-26T04-46-26-635Z-long.json",
+        "evals/reports/long/2026-09-26T04-46-26-635Z-long-ledger.db",
+        "evals/reports/windows/2026-09-26T10-02-54-255Z/run.json",
+        // The folder it leaves empty, old itself, goes with it; so does an empty old one.
+        "evals/reports/windows/2026-09-26T10-02-54-255Z",
+        "evals/reports/windows/empty-old",
+        // An old file in a folder that something newer is left in, whether the folder is old
+        // itself (`2026-09-28`) or was written within the limit (`2026-09-27`).
+        "evals/reports/windows/2026-09-28T10-02-54-255Z/old.json",
+        "evals/reports/windows/2026-09-27T10-02-54-255Z/old.json",
+    ] {
+        assert!(!dir.join(gone).exists(), "{gone}: {}", ran.stdout);
+    }
+    assert!(
+        ran.stdout
+            .contains("== removed evals/reports/long/2026-09-26T04-46-26-635Z-long-ledger.db"),
+        "{}",
+        ran.stdout
+    );
+    for kept in [
+        "evals/reports/2026-10-20T20-09-20-351Z-six-decisions.json",
+        "evals/reports/long/2026-10-20T12-25-35-830Z-long.md",
+        "evals/reports/long/2026-10-20T12-25-35-830Z-long-ledger.db",
+        "evals/reports/long",
+        "evals/reports/windows/2026-09-28T10-02-54-255Z/new.json",
+        "evals/reports/windows/2026-09-28T10-02-54-255Z",
+        "evals/reports/windows/2026-09-27T10-02-54-255Z/new.json",
+        "evals/reports/windows",
+        // New, though nothing is in it.
+        "evals/reports/windows/empty-new",
+        "evals/reports",
+        "notes.txt",
+        SYNCED,
+        SWEEP,
+    ] {
+        assert!(dir.join(kept).exists(), "{kept}: {}", ran.stdout);
+    }
+    // And a second sweep finds nothing more to remove.
+    let again = run_sweep(dir);
     assert_eq!(again.code, 0, "{}{}", again.stdout, again.stderr);
     assert!(!again.stdout.contains("== removed"), "{}", again.stdout);
 }

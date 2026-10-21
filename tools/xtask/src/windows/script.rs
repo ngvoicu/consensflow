@@ -75,9 +75,21 @@ pub const KEPT: [&str; 13] = [
     "bin/cf.exe.old-*",
     // What a run there writes for the one who reads it afterwards: the evals' reports and
     // ledgers (a long run's are `evals/reports/long/...`). They are no file of the tree, so
-    // the next run's sweep took a long run's from the copy (zeewin, 2026-10-20).
+    // the next run's sweep took a long run's from the copy (zeewin, 2026-10-20). What is
+    // older than [`REPORTS_KEPT_DAYS`] is removed there, by its own pass of the sweep.
     "evals/reports",
 ];
+
+/// How long what a run left in `evals/reports` stays there, in days: a file or a folder last
+/// written longer ago than this is removed by the next run's sweep. The folder is
+/// [`KEPT`], so the sweep does not judge its files as the tree's, and with no bound it
+/// held every matrix run's logs and every long run's report and ledger from then on
+/// (T-34, P3-6). The rule is age and not a count of runs: a run's files (a long run's
+/// `.md`, `.json` and ledger, a matrix run's folder) are written within hours of each
+/// other and age out together, and no file written within the limit is ever touched, a
+/// run going on among them; none does while the sweep runs, which is under the lock,
+/// before the run's script does anything else.
+pub const REPORTS_KEPT_DAYS: u32 = 14;
 
 /// What `--build` runs first: the packages, the page, a pane's cf.exe and the pane host.
 pub const BUILD_STEPS: [&str; 6] = [
@@ -272,11 +284,21 @@ pub fn remote_script(script: &Script) -> String {
 ///   run on zeewin, 2026-10-16), a file's read-only mark taken away first.
 /// - A folder [`KEPT`] names is not walked: the build folder holds hundreds of thousands
 ///   of files.
+/// - Then `evals/reports`, which is kept, is pruned by age ([`REPORTS_KEPT_DAYS`]): a file
+///   last written before the cutoff goes, and a folder that was old itself and has nothing
+///   left in it. Every folder is walked, whatever its own time: a folder's time is when an
+///   entry was last added to it, so a `long` or `windows` folder that a recent run wrote
+///   into would otherwise keep every old report in it for ever. What cannot be removed
+///   there is said and does not end the run: it is no file of the tree.
 pub fn sweep_script() -> String {
     let kept: Vec<String> = KEPT.iter().map(|name| quoted(name)).collect();
     fill(
         SWEEP_TEMPLATE,
-        &[("synced", SYNCED), ("kept", &kept.join(", "))],
+        &[
+            ("synced", SYNCED),
+            ("kept", &kept.join(", ")),
+            ("days", &REPORTS_KEPT_DAYS.to_string()),
+        ],
     )
 }
 
@@ -390,11 +412,38 @@ function Clear-Stale([IO.DirectoryInfo]$folder) {
   }
   $left
 }
+$cutoff = (Get-Date).ToUniversalTime().AddDays(-«days»)
+$unpruned = [Collections.Generic.List[string]]::new()
+function Clear-Old([IO.DirectoryInfo]$folder) {
+  $left = 0
+  try { $items = $folder.GetFileSystemInfos() } catch { $unpruned.Add("$($folder.FullName): $($_.Exception.Message)"); return 1 }
+  foreach ($item in $items) {
+    $name = $item.FullName.Substring($base).Replace('\', '/')
+    $written = $item.LastWriteTimeUtc
+    $deep = $item -is [IO.DirectoryInfo] -and -not ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)
+    $inside = if ($deep) { Clear-Old $item } else { 0 }
+    if ($inside -or $written -ge $cutoff) {
+      $left++
+      continue
+    }
+    try {
+      $item.Attributes = $item.Attributes -band -bnot [IO.FileAttributes]::ReadOnly
+      $item.Delete()
+      $removed.Add($name)
+    } catch {
+      $unpruned.Add("${name}: $($_.Exception.Message)")
+      $left++
+    }
+  }
+  $left
+}
 $root = Get-Item -LiteralPath $dir
 $base = $root.FullName.TrimEnd('\').Length + 1
 $null = Clear-Stale $root
+if (Test-Path -LiteralPath (Join-Path $dir 'evals/reports') -PathType Container) { $null = Clear-Old (Get-Item -LiteralPath (Join-Path $dir 'evals/reports')) }
 foreach ($name in $removed) { Write-Output "== removed $name" }
 if ($failed.Count) { Write-Output "What left the tree could not be removed from the copy: $($failed -join '; ')" }
+if ($unpruned.Count) { Write-Output "What the reports held past their age could not be removed: $($unpruned -join '; ')" }
 "##;
 
 /// The script that ends a run, with a mark where each part of it goes. It begins

@@ -21,6 +21,7 @@
 e2e-live-path = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::machine::path::"]
 e2e-live-command = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::members::command::"]
 e2e-stops-tool = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_stops", "midturn::tool::"]
+e2e-stops-stuck = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_stops", "stuck::"]
 
 # Which program on the PATH is taken.
 
@@ -198,3 +199,37 @@ runs = ["e2e-stops-tool"]
 file = "crates/cf-e2e/tests/live_stops/midturn/tool.rs"
 find = "    pid.parse::<u64>().ok().map(|_| line)"
 replace = "    pid.parse::<u64>().ok().map(|_| process)"
+
+# What the `stuck` case reads of the machine's processes (T-2, T-75): Git Bash's `sh.exe` and
+# `sleep.exe` are listed by their path, with backslashes, and in double quotes where it holds a
+# space (`"C:\Program Files\Git\usr\bin\sh.exe" ./ignore-signals-cf-stops-live.sh`, zeewin,
+# 2026-10-21).
+[[plant]]
+name = "live windows: the stuck case reads a program's path with a slash only"
+meant = "the_commands_processes_are_found_by_the_command_lines_windows_lists_for_them_too"
+runs = ["e2e-stops-stuck"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_stops/stuck.rs"
+find = '''(?:"(?:[^"]*[\\/])?(?i:{name}(?:\.exe)?)"|(?:\S*[\\/])?(?i:{name}(?:\.exe)?))'''
+replace = '''(?:"(?:[^"]*/)?(?i:{name}(?:\.exe)?)"|(?:\S*/)?(?i:{name}(?:\.exe)?))'''
+
+[[plant]]
+name = "live windows: the stuck case reads a program without its extension only"
+meant = "the_commands_processes_are_found_by_the_command_lines_windows_lists_for_them_too"
+runs = ["e2e-stops-stuck"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_stops/stuck.rs"
+find = '''(?:"(?:[^"]*[\\/])?(?i:{name}(?:\.exe)?)"|(?:\S*[\\/])?(?i:{name}(?:\.exe)?))'''
+replace = '''(?:"(?:[^"]*[\\/])?(?i:{name})"|(?:\S*[\\/])?(?i:{name}))'''
+
+[[plant]]
+name = "live windows: the stuck case reads a quoted path as no program"
+meant = "the_commands_processes_are_found_by_the_command_lines_windows_lists_for_them_too"
+runs = ["e2e-stops-stuck"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_stops/stuck.rs"
+find = '''(?:"(?:[^"]*[\\/])?(?i:{name}(?:\.exe)?)"|(?:\S*[\\/])?(?i:{name}(?:\.exe)?))'''
+replace = '''(?:\S*[\\/])?(?i:{name}(?:\.exe)?)'''

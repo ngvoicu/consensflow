@@ -95,8 +95,12 @@ runs = ["xtask-lib-windows"]
 
 [[plant.edit]]
 file = "tools/xtask/src/windows/script.rs"
-find = "    $deep = $item -is [IO.DirectoryInfo] -and -not ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)"
-replace = "    $deep = $item -is [IO.DirectoryInfo]"
+find = '''
+    $deep = $item -is [IO.DirectoryInfo] -and -not ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)
+    if (($kept'''
+replace = '''
+    $deep = $item -is [IO.DirectoryInfo]
+    if (($kept'''
 
 [[plant]]
 name = "windows runner: a folder left empty is kept"
@@ -117,8 +121,16 @@ runs = ["xtask-lib-windows"]
 
 [[plant.edit]]
 file = "tools/xtask/src/windows/script.rs"
-find = "      $item.Delete()\n"
-replace = "      Remove-Item -LiteralPath $item.FullName -Force\n"
+find = '''
+      $item.Delete()
+      $removed.Add($name)
+    } catch {
+      $failed.Add("${name}'''
+replace = '''
+      Remove-Item -LiteralPath $item.FullName -Force
+      $removed.Add($name)
+    } catch {
+      $failed.Add("${name}'''
 
 [[plant]]
 name = "windows runner: what is removed is not said"
@@ -171,3 +183,79 @@ runs = ["xtask-lib-windows"]
 file = "app/.gitignore"
 find = "\n/src-tauri/resources\n"
 replace = "\n"
+
+# What the reports a run left keep (`script::REPORTS_KEPT_DAYS`, T-34 P3-6): older than the limit
+# is removed by the sweep, in that folder alone, and nothing newer is touched.
+[[plant]]
+name = "windows runner: the reports are never pruned"
+meant = "the_reports_a_run_left_are_kept_for_two_weeks_and_nothing_newer_is_touched"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "if (Test-Path -LiteralPath (Join-Path $dir 'evals/reports') -PathType Container) { $null = Clear-Old (Get-Item -LiteralPath (Join-Path $dir 'evals/reports')) }\n"
+replace = ""
+
+[[plant]]
+name = "windows runner: what is newer than the limit is pruned"
+meant = "the_reports_a_run_left_are_kept_for_two_weeks_and_nothing_newer_is_touched"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = '    if ($inside -or $written -ge $cutoff) {'
+replace = '    if ($inside -or $written -lt $cutoff) {'
+
+[[plant]]
+name = "windows runner: the reports are kept a day"
+meant = "the_reports_a_run_left_are_kept_for_two_weeks_and_nothing_newer_is_touched"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "pub const REPORTS_KEPT_DAYS: u32 = 14;"
+replace = "pub const REPORTS_KEPT_DAYS: u32 = 1;"
+
+[[plant]]
+name = "windows runner: a report that cannot be removed ends the run"
+meant = "the_reports_a_run_left_are_kept_for_two_weeks_and_nothing_newer_is_touched"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = '      $unpruned.Add("${name}: $($_.Exception.Message)")'
+replace = '      $failed.Add("${name}: $($_.Exception.Message)")'
+
+[[plant]]
+name = "windows runner: a folder that is a link is looked into when the reports are pruned"
+meant = "a_folder_that_is_a_link_is_not_looked_into_and_one_left_empty_is_removed"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = '''
+    $deep = $item -is [IO.DirectoryInfo] -and -not ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)
+    $inside = if'''
+replace = '''
+    $deep = $item -is [IO.DirectoryInfo]
+    $inside = if'''
+
+[[plant]]
+name = "windows runner: a folder written within the limit is not looked into when the reports are pruned"
+meant = "the_reports_a_run_left_are_kept_for_two_weeks_and_nothing_newer_is_touched"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = '    $inside = if ($deep) { Clear-Old $item } else { 0 }'
+replace = '    $inside = if ($deep -and $written -lt $cutoff) { Clear-Old $item } else { 0 }'
+
+[[plant]]
+name = "windows runner: a folder is removed with what is left in it"
+meant = "the_reports_a_run_left_are_kept_for_two_weeks_and_nothing_newer_is_touched"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = '    if ($inside -or $written -ge $cutoff) {'
+replace = '    if ($written -ge $cutoff) {'

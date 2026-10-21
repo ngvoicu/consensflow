@@ -8,10 +8,12 @@
 //!
 //! An npm shim runs on a Node: the one beside it, else the one on the PATH
 //! it is started with, as npm's own shim finds it; so does the `pi.cmd` that
-//! Pi's own Windows installer writes, whose `node` is bare. ConsensFlow
-//! bundles none to fall back on, so a shim for which none is to be found is
-//! refused, in words that say what to do ([`runnable`], [`pane_argv`]): that
-//! is a limit, not a failure to retry.
+//! Pi's own Windows installer writes, whose `node` is bare, and which has the
+//! Node that installer puts for a machine that has none as its last place. A
+//! Node is a program (`.exe`, `.com`), never a `node.cmd`. ConsensFlow bundles
+//! none to fall back on, so a shim for which none is to be found is refused,
+//! in words that say what to do ([`runnable`], [`pane_argv`]): that is a
+//! limit, not a failure to retry.
 
 use std::ffi::OsString;
 use std::fs;
@@ -20,7 +22,7 @@ use std::process::Command;
 
 use cf_base::env::Env;
 
-use crate::search::on_path;
+use crate::search::on_path_as_program;
 
 /// cmd.exe's own special characters; each is escaped with a caret.
 const CMD_META: [char; 18] = [
@@ -190,9 +192,12 @@ enum Shim {
 /// The program an npm-style shim runs its script with.
 enum Program {
     /// `%_prog%` or `%NODE_EXE%`, which npm's own shim sets to the node beside
-    /// it, else to the one on the PATH; or a bare `node`, which Pi's installer
-    /// leaves to cmd.exe's search and is found here the same way.
+    /// it, else to the one on the PATH.
     Node,
+    /// A bare `node`, which Pi's installer leaves to cmd.exe's search: found
+    /// as [`Program::Node`] is, and last in the folder that installer puts a
+    /// Node in for a machine that has none ([`pi_node`]).
+    BareNode,
     /// A program the shim names outright.
     Named(PathBuf),
 }
@@ -202,22 +207,44 @@ fn read_shim(shim: &Path, env: &Env) -> Shim {
     match shim_target(shim) {
         None => Shim::Opaque,
         Some((Program::Named(program), script)) => Shim::Runs { program, script },
-        Some((Program::Node, script)) => match node_for(shim, env) {
-            Some(program) => Shim::Runs { program, script },
-            None => Shim::NeedsNode,
-        },
+        Some((node, script)) => {
+            let found = node_for(shim, env).or_else(|| match node {
+                Program::BareNode => pi_node(env),
+                _ => None,
+            });
+            match found {
+                Some(program) => Shim::Runs { program, script },
+                None => Shim::NeedsNode,
+            }
+        }
     }
 }
 
 /// The Node an npm shim runs on, as npm's own shim finds it: the `node.exe`
-/// beside it, else the node on `env`'s PATH. There is no other: ConsensFlow
-/// bundles none, and an environment variable names none.
+/// beside it, else the node on `env`'s PATH, a program and not a script of
+/// that name. There is no other: ConsensFlow bundles none, and an environment
+/// variable names none.
 fn node_for(shim: &Path, env: &Env) -> Option<PathBuf> {
     let beside = shim.parent()?.join("node.exe");
     if beside.exists() {
         return Some(beside);
     }
-    on_path("node", env)
+    on_path_as_program("node", env)
+}
+
+/// The Node Pi's own Windows installer puts for a machine that has none,
+/// `%LOCALAPPDATA%\pi-node\current\node.exe`, which it also puts first on
+/// the user's PATH. An app started before it ran has the PATH it had, and the
+/// `pi.cmd` that installer wrote (found without the PATH, T-33) would be
+/// refused for want of a Node that is there. Looked for after the PATH, so a
+/// Node the app sees is the one, and for Pi's bare `node` alone: an npm shim
+/// asked for no such Node (T-34, P3-1).
+fn pi_node(env: &Env) -> Option<PathBuf> {
+    let local = env.path("LOCALAPPDATA")?;
+    let node = ["pi-node", "current", "node.exe"]
+        .iter()
+        .fold(local.to_path_buf(), |folder, part| folder.join(part));
+    (!local.as_os_str().is_empty() && node.is_file()).then_some(node)
 }
 
 /// What is said of an npm shim that runs on a Node when none is to be found,
@@ -237,8 +264,10 @@ fn needs_node(shim: &Path) -> String {
 /// and the script may begin with `%dp0%` or `%~dp0`, the shim's own folder. A
 /// bare `node` before the one quoted script is a Node too, as Pi's own Windows
 /// installer writes its `pi.cmd` (`node "%~dp0pi-launcher.js" %*`); any other
-/// unquoted program is not read. None when the shim is not of that shape, or
-/// names a script that is not there.
+/// unquoted program is not read. The script's closing quote is followed by
+/// `%*` and nothing else: a word after the script is run by cmd.exe, and
+/// dropped by running the script alone. None when the shim is not of that
+/// shape, or names a script that is not there.
 fn shim_target(shim: &Path) -> Option<(Program, PathBuf)> {
     let text = String::from_utf8_lossy(&fs::read(shim).ok()?).into_owned();
     let line = text
@@ -246,7 +275,11 @@ fn shim_target(shim: &Path) -> Option<(Program, PathBuf)> {
         .map(|line| line.strip_suffix('\r').unwrap_or(line))
         .rev()
         .find(|line| line.contains("%*"))?;
-    let (program, script) = match quoted_parts(line).as_slice() {
+    let (parts, after) = quoted_parts(line);
+    if after.trim() != "%*" {
+        return None;
+    }
+    let (program, script) = match parts.as_slice() {
         [.., program, script] => (Some(*program), *script),
         [script] if begins_with_bare_node(line) => (None, *script),
         _ => return None,
@@ -273,7 +306,7 @@ fn shim_target(shim: &Path) -> Option<(Program, PathBuf)> {
         return None;
     }
     let program = match program {
-        None => Program::Node,
+        None => Program::BareNode,
         Some(program)
             if ["%_prog%", "%NODE_EXE%"]
                 .iter()
@@ -301,21 +334,24 @@ fn begins_with_bare_node(line: &str) -> bool {
 
 /// Each `"…"` of a line that holds something, found as JavaScript's
 /// `/"([^"]+)"/g` finds them: an empty `""` matches nothing, and its second
-/// quote may open the next.
-fn quoted_parts(line: &str) -> Vec<&str> {
+/// quote may open the next. And what follows the last of them (the whole line
+/// where there is none).
+fn quoted_parts(line: &str) -> (Vec<&str>, &str) {
     let mut parts = Vec::new();
     let mut at = 0;
+    let mut after = 0;
     while let Some(open) = line[at..].find('"').map(|found| at + found) {
         match line[open + 1..].find('"') {
             Some(0) => at = open + 1,
             Some(length) => {
                 parts.push(&line[open + 1..open + 1 + length]);
                 at = open + 2 + length;
+                after = at;
             }
             None => break,
         }
     }
-    parts
+    (parts, &line[after..])
 }
 
 #[cfg(test)]
@@ -387,10 +423,13 @@ mod tests {
     fn reads_a_shims_quoted_parts_as_the_javascript_regex_did() {
         assert_eq!(
             quoted_parts(r#""%_prog%"  "%dp0%\x.js" %*"#),
-            [r"%_prog%", r"%dp0%\x.js"]
+            (vec![r"%_prog%", r"%dp0%\x.js"], " %*")
         );
-        assert_eq!(quoted_parts(r#""" "x" %*"#), [" "]);
-        assert_eq!(quoted_parts(r#"no quotes %*"#), Vec::<&str>::new());
+        assert_eq!(quoted_parts(r#""" "x" %*"#), (vec![" "], r#"x" %*"#));
+        assert_eq!(
+            quoted_parts(r#"no quotes %*"#),
+            (Vec::<&str>::new(), "no quotes %*")
+        );
     }
 
     mod shims {
@@ -619,6 +658,192 @@ mod tests {
             let bare = Env::from_vars([("OS", "Windows_NT"), ("PATH", ""), ("PATHEXT", ".EXE")]);
             assert_eq!(runnable(&shim, &[], &bare), Err(refusal(&shim)));
             assert_eq!(pane_argv(&argv[..1], &bare), Err(refusal(&shim)));
+        }
+
+        /// An app started before Pi's installer put its own Node (`%LOCALAPPDATA%\pi-node\current`,
+        /// where it puts one when the machine has none) on the user's PATH has the old PATH, and
+        /// the managed `pi.cmd` it finds (T-33) must still open a window: the installer's Node is
+        /// looked for where the installer puts it, after every place `pi.cmd`'s own `node` is
+        /// found by cmd.exe's search, and for a bare `node` alone.
+        #[test]
+        fn pis_shim_finds_the_node_pis_installer_put_though_the_app_started_before_it_was_on_the_path(
+        ) {
+            let root = tempfile::tempdir().unwrap();
+            let (bin, shim, launcher) = pi_managed(root.path());
+            let local = root.path().join("local");
+            let installed = local.join("pi-node").join("current").join("node.exe");
+            fs::create_dir_all(installed.parent().unwrap()).unwrap();
+            fs::write(&installed, "").unwrap();
+            startable(&installed);
+            let vars = |path: &str| {
+                Env::from_vars([
+                    ("OS", "Windows_NT"),
+                    ("PATH", path),
+                    ("PATHEXT", ".EXE"),
+                    ("LOCALAPPDATA", local.to_str().unwrap()),
+                ])
+            };
+            let text = |path: &Path| path.to_string_lossy().into_owned();
+            // The PATH the app started with holds no Node: the installer's is the one.
+            let env = vars("");
+            assert_eq!(
+                runnable(&shim, &args(&["--version"]), &env),
+                Ok(Run {
+                    program: installed.clone(),
+                    args: vec![launcher.clone().into_os_string(), "--version".into()],
+                    verbatim: false,
+                })
+            );
+            assert_eq!(
+                pane_argv(&[text(&shim)], &env).unwrap(),
+                [text(&installed), text(&launcher)]
+            );
+            // A Node the app can see comes before it, and one beside the shim before both.
+            let seen = root.path().join("seen");
+            fs::create_dir_all(&seen).unwrap();
+            fs::write(seen.join("node.exe"), "").unwrap();
+            startable(&seen.join("node.exe"));
+            assert_eq!(
+                runnable(&shim, &[], &vars(seen.to_str().unwrap()))
+                    .unwrap()
+                    .program,
+                seen.join("node.exe")
+            );
+            fs::write(bin.join("node.exe"), "").unwrap();
+            assert_eq!(
+                runnable(&shim, &[], &env).unwrap().program,
+                bin.join("node.exe")
+            );
+            fs::remove_file(bin.join("node.exe")).unwrap();
+            // With no folder named for it, or none holding it, it is the refusal as before.
+            let unnamed = Env::from_vars([("OS", "Windows_NT"), ("PATH", ""), ("PATHEXT", ".EXE")]);
+            assert_eq!(runnable(&shim, &[], &unnamed), Err(refusal(&shim)));
+            fs::remove_file(&installed).unwrap();
+            assert_eq!(runnable(&shim, &[], &env), Err(refusal(&shim)));
+            assert_eq!(pane_argv(&[text(&shim)], &env), Err(refusal(&shim)));
+        }
+
+        /// The installer's Node is Pi's, for Pi's bare `node` alone: an npm shim, whose Node is
+        /// the one beside it or on the PATH, is not run on it.
+        #[test]
+        fn the_node_pis_installer_put_is_for_a_bare_node_and_no_npm_shim_s() {
+            let root = tempfile::tempdir().unwrap();
+            let (_, shim, _) = npm(root.path());
+            let local = root.path().join("local");
+            let installed = local.join("pi-node").join("current").join("node.exe");
+            fs::create_dir_all(installed.parent().unwrap()).unwrap();
+            fs::write(&installed, "").unwrap();
+            startable(&installed);
+            let env = Env::from_vars([
+                ("OS", "Windows_NT"),
+                ("PATH", ""),
+                ("PATHEXT", ".EXE"),
+                ("LOCALAPPDATA", local.to_str().unwrap()),
+            ]);
+            assert_eq!(runnable(&shim, &[], &env), Err(refusal(&shim)));
+        }
+
+        /// What follows the script's closing quote is the shim's to pass on, and only `%*`
+        /// does: a word after the script (or after `%*`) is run by cmd.exe and dropped by
+        /// reading the line as the program and its script, so such a line is no shim to read.
+        #[test]
+        fn a_word_after_the_script_makes_a_line_no_shim_to_read_but_for_the_arguments() {
+            let root = tempfile::tempdir().unwrap();
+            let bin = root.path().join("bin");
+            fs::create_dir_all(&bin).unwrap();
+            fs::write(bin.join("x.js"), "").unwrap();
+            fs::write(bin.join("node.exe"), "").unwrap();
+            let env = Env::from_vars([("OS", "Windows_NT"), ("PATH", ""), ("PATHEXT", ".EXE")]);
+            let refused = |line: &str| {
+                let shim = bin.join("x.cmd");
+                fs::write(&shim, format!("@ECHO off\r\n{line}\r\n")).unwrap();
+                let named = shim.to_string_lossy().into_owned();
+                assert!(runnable(&shim, &[], &env).unwrap().verbatim, "{line}");
+                assert_eq!(
+                    pane_argv(std::slice::from_ref(&named), &env),
+                    Err(format!(
+                        "{named} is not an npm shim, and only cmd.exe could run it in a window"
+                    )),
+                    "{line}"
+                );
+            };
+            for line in [
+                // The bare node, and a named program, each with a word before `%*`.
+                "node \"%~dp0x.js\" --flag %*",
+                "\"%_prog%\"  \"%dp0%\\x.js\" --flag %*",
+                "\"%NODE_EXE%\" \"%~dp0x.js\" --flag %*",
+                // And with one after it.
+                "node \"%~dp0x.js\" %* --flag",
+                "\"%_prog%\"  \"%dp0%\\x.js\" %* & echo done",
+                // The arguments passed twice.
+                "node \"%~dp0x.js\" %* %*",
+            ] {
+                refused(line);
+            }
+            // Spaces or a tab around the `%*` are no word.
+            for line in [
+                "node \"%~dp0x.js\" %*",
+                "node \"%~dp0x.js\"   %*  ",
+                "\"%_prog%\"  \"%dp0%\\x.js\"\t%*",
+            ] {
+                let shim = bin.join("x.cmd");
+                fs::write(&shim, format!("@ECHO off\r\n{line}\r\n")).unwrap();
+                let run = runnable(&shim, &[], &env).unwrap();
+                assert!(!run.verbatim, "{line}");
+                assert_eq!(run.program, bin.join("node.exe"), "{line}");
+            }
+        }
+
+        /// A `node.cmd` is a script for cmd.exe, which a window cannot host; the program is
+        /// the first `.exe` or `.com` of the PATH, whatever PATHEXT lists before them.
+        #[test]
+        fn a_node_cmd_first_on_the_path_is_passed_over_for_a_node_a_window_can_start() {
+            let root = tempfile::tempdir().unwrap();
+            let (_, shim, _) = npm(root.path());
+            let (scripts, program, com) = (
+                root.path().join("scripts"),
+                root.path().join("program"),
+                root.path().join("com"),
+            );
+            for folder in [&scripts, &program, &com] {
+                fs::create_dir_all(folder).unwrap();
+            }
+            for file in [
+                scripts.join("node.cmd"),
+                scripts.join("node.bat"),
+                program.join("node.exe"),
+                com.join("node.com"),
+            ] {
+                fs::write(&file, "").unwrap();
+                startable(&file);
+            }
+            let env = |folders: &[&Path]| {
+                let path = std::env::join_paths(folders).unwrap();
+                Env::from_vars([
+                    ("OS", "Windows_NT"),
+                    ("PATH", path.to_str().unwrap()),
+                    ("PATHEXT", ".COM;.EXE;.BAT;.CMD"),
+                ])
+            };
+            assert_eq!(
+                runnable(&shim, &[], &env(&[&scripts, &program]))
+                    .unwrap()
+                    .program,
+                program.join("node.exe")
+            );
+            assert_eq!(
+                runnable(&shim, &[], &env(&[&scripts, &com, &program]))
+                    .unwrap()
+                    .program,
+                com.join("node.com")
+            );
+            // A PATH holding only scripts has no Node for the shim.
+            let only = env(&[&scripts]);
+            assert_eq!(runnable(&shim, &args(&[]), &only), Err(refusal(&shim)));
+            assert_eq!(
+                pane_argv(&[shim.to_string_lossy().into_owned()], &only),
+                Err(refusal(&shim))
+            );
         }
 
         #[test]

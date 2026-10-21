@@ -289,6 +289,20 @@ fn each_harness_s_own_installer_is_told_by_its_folder_in_either_spelling() {
             "Pi's installer",
             &["update", "--self"][..],
         ),
+        // Pi's managed install, which its installer today writes (`bin` of the agent folder),
+        // is updated by `pi update` as the installer says.
+        (
+            Harness::Pi,
+            "/Users/me/.pi/agent/bin/pi",
+            "Pi's installer",
+            &["update"][..],
+        ),
+        (
+            Harness::Pi,
+            r"C:\Users\me\.pi\agent\bin\pi.cmd",
+            "Pi's installer",
+            &["update"][..],
+        ),
         (
             Harness::Devin,
             "/Users/me/.local/share/devin/cli/_versions/current/bin/devin",
@@ -314,6 +328,25 @@ fn each_harness_s_own_installer_is_told_by_its_folder_in_either_spelling() {
     // Claude has no installer of this kind.
     let claude = source(Harness::Claude, "/Users/me/.claude/bin/claude", &env);
     assert_eq!(claude.distribution, None);
+}
+
+/// The launcher Pi's Unix installer links from a folder of the PATH is told by where the link
+/// goes, not by where it is.
+#[cfg(unix)]
+#[test]
+fn a_link_to_pis_managed_launcher_is_updated_as_pis_own_install() {
+    let root = tempfile::tempdir().unwrap();
+    let launcher = root.path().join(".pi").join("agent").join("bin").join("pi");
+    fs::create_dir_all(launcher.parent().unwrap()).unwrap();
+    fs::write(&launcher, "").unwrap();
+    let linked = root.path().join("bin").join("pi");
+    fs::create_dir_all(linked.parent().unwrap()).unwrap();
+    std::os::unix::fs::symlink(&launcher, &linked).unwrap();
+    let executable = linked.to_string_lossy().into_owned();
+    let found = source(Harness::Pi, &executable, &Env::default());
+    // Run as it was found, the link; the install is told by where that goes.
+    assert_eq!(found.distribution.as_deref(), Some("Pi's installer"));
+    assert_eq!(found.update, Some(vec![executable, "update".to_owned()]));
 }
 
 #[test]

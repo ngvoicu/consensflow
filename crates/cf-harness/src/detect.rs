@@ -90,25 +90,34 @@ fn npm_global(env: &Env) -> Option<PathBuf> {
 
 /// Where Pi's own installers (`install.ps1`, `install.sh`) put the launcher of
 /// a managed install, under the home: `bin` of the agent folder, which is
-/// `~/.pi/agent` unless the human named another. On Windows it is the only
-/// place, and the installer puts it first on the user's PATH, which an app
-/// started before that keeps the old one of; elsewhere the installer also
-/// links it from the first folder of the PATH it may write in, and the
-/// launcher is there all the same.
+/// `~/.pi/agent` unless the human named another (`PI_CODING_AGENT_DIR`, [`managed`]).
+/// On Windows it is the only place, and the installer puts it first on the
+/// user's PATH, which an app started before that keeps the old one of;
+/// elsewhere the installer also links it from the first folder of the PATH it
+/// may write in, and the launcher is there all the same.
 const MANAGED_PI: [&str; 3] = [".pi", "agent", "bin"];
 
-/// The folder of `harness`'s managed install, which only Pi has, under the
-/// home; none where the environment has no home.
-fn managed(harness: Harness, env: &Env) -> Option<PathBuf> {
+/// The variable both installers read for the agent folder: `install.ps1` when it
+/// holds something, `install.sh` as `${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}`, an
+/// empty one being none in both.
+const AGENT_DIR: &str = "PI_CODING_AGENT_DIR";
+
+/// The folders of `harness`'s managed install, which only Pi has: `bin` of the
+/// agent folder the human named, then of the default one under the home (an install
+/// made before the variable was set is still there). A relative folder is read
+/// against the working folder, where the installers read it against theirs; none
+/// where the environment names no folder and has no home.
+fn managed(harness: Harness, env: &Env) -> Vec<PathBuf> {
     if harness != Harness::Pi {
-        return None;
+        return Vec::new();
     }
-    let home = home(env).ok()?;
-    Some(
+    let named = set(env, AGENT_DIR).map(|agent| PathBuf::from(agent).join("bin"));
+    let default = home(env).ok().map(|home| {
         MANAGED_PI
             .iter()
-            .fold(PathBuf::from(home), |folder, part| folder.join(part)),
-    )
+            .fold(PathBuf::from(home), |folder, part| folder.join(part))
+    });
+    named.into_iter().chain(default).collect()
 }
 
 /// The absolute path `harness`'s CLI resolves to here, or none: a pane opens
