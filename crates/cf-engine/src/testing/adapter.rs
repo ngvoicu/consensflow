@@ -22,7 +22,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use cf_harness::contract::{
-    Adapter, Admission, Interrupt, Launch, Prepared, Readiness, Skill, Waiting, Window, Work,
+    Adapter, Admission, Input, Interrupt, Launch, Prepared, Readiness, Skill, Waiting, Window, Work,
 };
 use cf_harness::records::{Item, Quota, Role};
 use cf_proto::panes::Servers;
@@ -178,6 +178,10 @@ pub struct FakeAdapter {
     /// told the conversation as `[session]`: what the harness says is its own
     /// when the ask is let go. Node's dispatcher asked nothing of the kind.
     pub resumable_holds: Holds,
+    /// Whether the host said, at each delivery in order, that the engine emptied
+    /// the window's input box just before it (`PaneHost::cleared`). Not written
+    /// down in the traces: Node's dispatcher emptied no box.
+    pub cleared: RefCell<Vec<bool>>,
 }
 
 impl FakeAdapter {
@@ -219,6 +223,7 @@ impl FakeAdapter {
             specmint_installed: RefCell::new(None),
             specmint_asked: RefCell::new(Vec::new()),
             resumable_holds: Holds::default(),
+            cleared: RefCell::new(Vec::new()),
         })
     }
 
@@ -645,6 +650,16 @@ impl Adapter for Asked {
     /// seeds, as OpenCode does.
     fn first_message_once_up(&self) -> bool {
         self.fake.seeds.get()
+    }
+
+    /// Not a call of Node's adapter: nothing is written down of it in the
+    /// traces. As the harness it answers for takes it: Claude Code and Devin
+    /// pasted, their boxes emptied with Control-C, the others over a channel.
+    fn input(&self) -> Input {
+        match self.harness.as_str() {
+            "claude-code" | "devin" => Input::Pasted { clear: &[0x03] },
+            _ => Input::Channel,
+        }
     }
 
     /// Not a call of Node's adapter: nothing is written down of it in the

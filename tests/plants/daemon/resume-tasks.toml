@@ -54,6 +54,10 @@ ledger-pause-words = ["cargo", "test", "--offline", "-p", "cf-ledger", "--lib", 
 harness-first-message = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "first_message::"]
 # The words of a continuation, written and read back.
 ledger-continuation-words = ["cargo", "test", "--offline", "-p", "cf-ledger", "--lib", "messages::continuations"]
+# The Enter pressed once more for a paste never sends words twice (round 11).
+engine-withheld-enter = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "withheld_enter::"]
+# What the live tools are told of each harness's windows.
+harness-tooling = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "tooling::"]
 # The owner's shape on the rig: two tasks at work and one the human paused, closed and resumed.
 rig-regression-resume-tasks = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "tasks_left_paused_by_a_close_and_resume::"]
 
@@ -560,8 +564,8 @@ runs = ["engine-closed-given-nothing"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/arrival.rs"
-find = "        if !self.enter_admitted(record, message)? {"
-replace = "        if false {"
+find = "        match self.enter_admitted(record, message)? {"
+replace = "        match self.enter_admitted(record, message).map(|_| Enter::Go)? {"
 
 [[plant]]
 name = "resume tasks: the Resume writes the note to go on for work paused while it read the record"
@@ -1511,8 +1515,12 @@ runs = ["engine-closed-given-nothing"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
-find = '''        let admitting = Admitting::new(self, project).handing(message, carried);'''
-replace = '''        let admitting = Admitting::new(self, project);
+find = '''
+        let admitting = Admitting::new(self, project)
+            .handing(message, carried)
+            .again();'''
+replace = '''
+        let admitting = Admitting::new(self, project).again();
         let _ = carried;'''
 
 [[plant]]
@@ -1547,12 +1555,11 @@ runs = ["engine-closed-given-nothing"]
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
 find = '''
-        if admitting.withdrawn.get() {
-            self.give_back(message, admitting.because())?;
-        }
-        Ok(false)'''
+        self.give_back(message, because)?;
+        Ok(Enter::Withheld)'''
 replace = '''
-        Ok(false)'''
+        let _ = because;
+        Ok(Enter::Withheld)'''
 
 [[plant]]
 name = "resume tasks: a paste admitted once is withdrawn when the Enter pressed once more admits it again"
@@ -1668,10 +1675,11 @@ runs = ["engine-closed-given-nothing"]
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
 find = '''
-        let admitting =
-            Admitting::new(self, message.project_id).handing(message.id, carried.clone());'''
+        let admitting = Admitting::new(self, message.project_id)
+            .handing(message.id, carried.clone())
+            .cleared(cleared);'''
 replace = '''
-        let admitting = Admitting::new(self, message.project_id);'''
+        let admitting = Admitting::new(self, message.project_id).cleared(cleared);'''
 
 [[plant]]
 name = "resume tasks: a paste that went back for a row withdrawn from it is said to have gone back for the Close"
@@ -1881,3 +1889,132 @@ file = "crates/cf-daemon/src/api/waits.rs"
 find = '''
             && message.sender.as_deref() != Some(self.reader)'''
 replace = ""
+
+# --- round 11: the Enter pressed once more never sends words twice (both reviews of 2026-10-20) ---
+
+[[plant]]
+name = "resume tasks: the Enter pressed once more goes into a window its harness hands words to over a channel"
+meant = "an_uncertain_hand_over_to_codex_is_never_given_back_by_an_enter_and_arrives_once"
+runs = ["engine-withheld-enter"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = """
+                && !delivering.entered_again
+                && self.pasted(record)"""
+replace = """
+                && !delivering.entered_again
+                && (self.pasted(record) || true)"""
+
+[[plant]]
+name = "resume tasks: an Enter withheld leaves nothing to empty from the box"
+meant = "a_paste_whose_enter_was_withheld_is_cleared_from_the_box_before_anything_is_pasted_there"
+runs = ["engine-withheld-enter"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = "                record.delivery.borrow_mut().uncleared = Some(pane);"
+replace = "                let _ = pane;"
+
+[[plant]]
+name = "resume tasks: a paste goes into a box whose keys the host did not take"
+meant = "a_paste_whose_enter_was_withheld_is_cleared_from_the_box_before_anything_is_pasted_there"
+runs = ["engine-withheld-enter"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = "        let cleared = match self.clear_box(record, &pane).await {"
+replace = "        let cleared = match self.clear_box(record, &pane).await.map(|_| true) {"
+
+[[plant]]
+name = "resume tasks: a box emptied stays to be emptied again"
+meant = "a_paste_whose_enter_waited_for_the_resume_past_its_arrival_window_goes_once"
+runs = ["engine-withheld-enter"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = "        if taken && part.uncleared.as_ref() == Some(pane) {"
+replace = "        if taken && part.uncleared.as_ref() == Some(pane) && false {"
+
+[[plant]]
+name = "resume tasks: the adapter is not told the engine just emptied the box"
+meant = "a_paste_whose_enter_was_withheld_is_cleared_from_the_box_before_anything_is_pasted_there"
+runs = ["engine-withheld-enter"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = """
+            .handing(message.id, carried.clone())
+            .cleared(cleared);"""
+replace = """
+            .handing(message.id, carried.clone())
+            .cleared(false && cleared);"""
+
+[[plant]]
+name = "resume tasks: Claude empties a box the engine just emptied, a second Control-C"
+meant = "a_box_the_engine_just_emptied_is_not_emptied_again_by_claude"
+runs = ["harness-launch-claude-stops"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = "            if self.restored.get() && !host.cleared() {"
+replace = "            if self.restored.get() {"
+
+[[plant]]
+name = "resume tasks: an Enter withheld for a closed project leaves the paste on its way in the box"
+meant = "a_paste_left_unsent_in_a_window_the_close_could_not_close_gets_no_enter_until_the_resume"
+runs = ["engine-closed-given-nothing"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = """
+        self.give_back(message, because)?;
+        Ok(Enter::Withheld)"""
+replace = """
+        if admitting.withdrawn.get() {
+            self.give_back(message, because)?;
+        }
+        Ok(Enter::Withheld)"""
+
+[[plant]]
+name = "resume tasks: a row the window read since is taken for one withdrawn"
+meant = "a_paste_a_row_of_which_was_read_while_the_screen_was_looked_at_is_taken_for_arrived"
+runs = ["engine-withheld-enter"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = "             WHERE carried_by = ? AND state IN ('read', 'delivered') ORDER BY id\","
+replace = "             WHERE carried_by = ? AND state IN ('delivered') ORDER BY id\","
+
+[[plant]]
+name = "resume tasks: the Enter pressed once more asks nothing of what the window has"
+meant = "a_paste_a_row_of_which_was_read_while_the_screen_was_looked_at_is_taken_for_arrived"
+runs = ["engine-withheld-enter"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = """
+            .handing(message, carried)
+            .again();"""
+replace = """
+            .handing(message, carried);"""
+
+[[plant]]
+name = "resume tasks: a paste the window has is given back"
+meant = "a_paste_a_row_of_which_was_read_while_the_screen_was_looked_at_is_taken_for_arrived"
+runs = ["engine-withheld-enter"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = "        if let Some(row) = admitting.received.get() {"
+replace = "        if let Some(row) = admitting.received.get().filter(|_| false) {"
+
+[[plant]]
+name = "resume tasks: Devin's box is emptied with Control-U"
+meant = "a_window_takes_what_it_is_handed_pasted_or_over_a_channel_as_the_harness_says"
+runs = ["harness-tooling"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/adapter.rs"
+find = "const CLEAR_INPUT: [u8; 1] = [0x03];"
+replace = "const CLEAR_INPUT: [u8; 1] = [0x15];"

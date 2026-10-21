@@ -216,6 +216,17 @@ impl Ledger {
         messages::admit(&mut self.store, message_id, carried)
     }
 
+    /// The first row of `carried` (what the paste of `message_id`, handed over
+    /// already, was begun with) that its window has since, read or delivered: a
+    /// sign the window took the paste. None while it has none of them.
+    pub fn received_of(
+        &self,
+        message_id: i64,
+        carried: &[i64],
+    ) -> Result<Option<i64>, LedgerError> {
+        messages::received_of(&self.store, message_id, carried)
+    }
+
     /// The messages of a project whose hand-over has begun at their window and is
     /// not over: let go by their transport, or claimed by a question's door.
     pub fn handed_over(&self, project_id: i64) -> Result<Vec<i64>, LedgerError> {

@@ -1019,7 +1019,10 @@ fn a_resume_waits_for_every_kill_of_the_close_though_another_window_s_close_fail
 }
 
 /// Astra's review of 2026-10-16, round 4: Enter sends what waits in the input
-/// box, and a window the Close could not close was given it while closed.
+/// box, and a window the Close could not close was given it while closed. No key
+/// that sends goes while closed; the paste goes back to its queue, and goes again
+/// once the project is open, into a box emptied first (both reviews of
+/// 2026-10-20, round 10: one left in the box went with the next).
 #[test]
 fn a_paste_left_unsent_in_a_window_the_close_could_not_close_gets_no_enter_until_the_resume() {
     let context = Context::new();
@@ -1039,9 +1042,26 @@ fn a_paste_left_unsent_in_a_window_the_close_could_not_close_gets_no_enter_until
     context.pass().unwrap();
     assert_eq!(enters(&context), 0, "no key that sends, while closed");
 
+    assert_eq!(
+        context.message(note.id).state,
+        "queued",
+        "it waits for the Resume"
+    );
+
     context.resume_project(project.id).unwrap();
     context.pass().unwrap();
-    assert_eq!(enters(&context), 1, "pressed once the project is open");
+    let cleared = context
+        .host
+        .inputs()
+        .iter()
+        .filter(|body| body["bytes"] == json!([3]))
+        .count();
+    assert_eq!(
+        (enters(&context), cleared),
+        (0, 1),
+        "its box emptied once the project is open"
+    );
+    assert_eq!(context.message(note.id).state, "delivering", "pasted again");
 }
 
 /// Both reviews of 2026-10-17, round 9: zeus's continuation was handed over and

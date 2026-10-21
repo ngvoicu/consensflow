@@ -275,6 +275,26 @@ fn a_turn_is_interrupted_as_the_harness_says() {
 }
 
 #[test]
+fn a_window_takes_what_it_is_handed_pasted_or_over_a_channel_as_the_harness_says() {
+    let input = |kind: &str| answer(&ask("input", json!({ "kind": kind }))).unwrap();
+    // Pasted, and the box emptied with Control-C.
+    for kind in ["claude-code", "devin"] {
+        assert_eq!(
+            input(kind),
+            json!({ "pasted": true, "clear": [3] }),
+            "{kind}"
+        );
+    }
+    for kind in ["codex", "pi", "opencode"] {
+        assert_eq!(
+            input(kind),
+            json!({ "pasted": false, "clear": null }),
+            "{kind}"
+        );
+    }
+}
+
+#[test]
 fn a_claude_window_gets_the_settings_file_of_its_launch() {
     let home = tempfile::tempdir().unwrap();
     let settings = |board_questions: bool| {

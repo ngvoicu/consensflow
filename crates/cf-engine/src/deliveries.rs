@@ -8,7 +8,9 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use cf_base::js;
-use cf_harness::contract::{Admission, Held, HostError, Observed, PaneHost, Readiness, Work};
+use cf_harness::contract::{
+    Admission, Held, HostError, Input, Observed, Pane, PaneHost, Readiness, Work,
+};
 use cf_harness::records::{Options, Reading, Role};
 use cf_ledger::{HandOver, MessageView, NewNote, ParticipantView, ProjectView, TaskView};
 use cf_proto::agents::Harness;
@@ -64,6 +66,24 @@ pub(crate) struct DeliveryPart {
     /// ([`Dispatcher::owed`]). Each launch says it anew, and none that opened a
     /// window leaves it as it was.
     pub(crate) prelude: Option<Prelude>,
+    /// The pane whose input box may hold a paste whose Enter was withheld
+    /// (`arrival`): nothing is pasted into it until the host has taken the keys
+    /// that empty it ([`Dispatcher::clear_box`]). A window opened since has a box
+    /// of its own, which holds nothing of it.
+    pub(crate) uncleared: Option<Pane>,
+}
+
+/// What the Enter pressed once more for a paste does, as the ledger says now
+/// ([`Dispatcher::enter_admitted`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Enter {
+    /// It goes: the paste is admitted as it was at its hand-over.
+    Go,
+    /// No key goes, and the paste went back to its queue: what it held was
+    /// withdrawn since, or its project closed. It stays in the input box.
+    Withheld,
+    /// No key goes: the window has the paste, and it is taken for arrived.
+    Arrived,
 }
 
 /// The pane host as a window is handed it for a hand-over (a delivery, or the
@@ -78,8 +98,9 @@ pub(crate) struct DeliveryPart {
 /// ([`cf_ledger::Ledger::admit`]): it goes while its project is open and nothing
 /// of its paste was withdrawn since it was begun (a continuation whose task moved
 /// on, round 7), and from then on a reader of a closed project reads its text. An
-/// Enter that sends what waits in an input box, a message handed already, asks
-/// whether the project is open alone.
+/// Enter that sends what waits in an input box, a paste handed already, is asked
+/// for as its hand-over was, and a row of it its window has since says it arrived
+/// ([`Admitting::again`]).
 pub(crate) struct Admitting<'a> {
     dispatcher: &'a Dispatcher,
     /// The window's project.
@@ -87,6 +108,12 @@ pub(crate) struct Admitting<'a> {
     /// The message it hands over, and the rows its paste carries, where it hands
     /// over one begun.
     handing: Option<(i64, Vec<i64>)>,
+    /// What it hands over is a paste handed over already, which an Enter sends.
+    again: bool,
+    /// The engine emptied the window's input box just before the hand-over.
+    cleared: bool,
+    /// A row of the paste its window has since, which says the window took it.
+    received: Cell<Option<i64>>,
     /// It said no, or could not tell: what was to go in did not.
     refused: Cell<bool>,
     /// It said no because what was to go in was withdrawn since it was begun.
@@ -102,6 +129,9 @@ impl<'a> Admitting<'a> {
             dispatcher,
             project,
             handing: None,
+            again: false,
+            cleared: false,
+            received: Cell::new(None),
             refused: Cell::new(false),
             withdrawn: Cell::new(false),
             failed: RefCell::new(None),
@@ -111,6 +141,19 @@ impl<'a> Admitting<'a> {
     /// The host for the hand-over of `message`, begun with the rows `carried`.
     pub(crate) fn handing(mut self, message: i64, carried: Vec<i64>) -> Self {
         self.handing = Some((message, carried));
+        self
+    }
+
+    /// The host for a paste handed over already, which an Enter sends: a row of it
+    /// its window has since is no row withdrawn.
+    pub(crate) fn again(mut self) -> Self {
+        self.again = true;
+        self
+    }
+
+    /// The host for a hand-over the engine emptied the input box for just before.
+    pub(crate) fn cleared(mut self, cleared: bool) -> Self {
+        self.cleared = cleared;
         self
     }
 
@@ -134,6 +177,18 @@ impl<'a> Admitting<'a> {
         let Some((message, carried)) = &self.handing else {
             return self.dispatcher.in_open_project(self.project);
         };
+        if self.again {
+            let received = self
+                .dispatcher
+                .seams
+                .ledger
+                .borrow()
+                .received_of(*message, carried)?;
+            if received.is_some() {
+                self.received.set(received);
+                return Ok(false);
+            }
+        }
         let handed = self
             .dispatcher
             .seams
@@ -148,6 +203,10 @@ impl<'a> Admitting<'a> {
 impl PaneHost for Admitting<'_> {
     fn request<'b>(&'b self, op: &'b str, body: Value) -> Work<'b, Result<Value, HostError>> {
         self.dispatcher.seams.host.request(op, body)
+    }
+
+    fn cleared(&self) -> bool {
+        self.cleared
     }
 
     fn admits(&self) -> bool {
@@ -225,6 +284,37 @@ impl Dispatcher {
             }
             return Ok(());
         }
+        // A paste whose Enter was withheld waits in the input box, where this one
+        // would go in beside it, to be sent with it: the box is emptied first, and
+        // nothing goes in until the host has taken the keys (both reviews of
+        // 2026-10-20, round 10). What was asked before is asked again after it.
+        let cleared = match self.clear_box(record, &pane).await {
+            None => false,
+            Some(true) => true,
+            Some(false) => {
+                let first = record.delivery.borrow().held != Some(message.id);
+                if first {
+                    record.delivery.borrow_mut().held = Some(message.id);
+                    self.trace_window(
+                        record,
+                        WindowEvent::DeliveryHeld {
+                            message: message.id,
+                            reason: "its input box may hold a paste whose Enter was withheld, and the keys that empty it were not taken".to_owned(),
+                        },
+                    )?;
+                }
+                return Ok(());
+            }
+        };
+        if cleared
+            && (self.forgotten(record)
+                || !self.in_open_project(message.project_id)?
+                || self
+                    .next_in_line(record)?
+                    .is_none_or(|next| next.id != message.id))
+        {
+            return Ok(());
+        }
         record.delivery.borrow_mut().held = None;
         let (Some(window), Some(pane)) = self.window_of(record) else {
             return Ok(());
@@ -241,8 +331,9 @@ impl Dispatcher {
         // The adapter asks the ledger at its hand-over whether the project is still
         // open and nothing of the paste was withdrawn since it was begun.
         let carried: Vec<i64> = begun.carried.iter().map(|row| row.id).collect();
-        let admitting =
-            Admitting::new(self, message.project_id).handing(message.id, carried.clone());
+        let admitting = Admitting::new(self, message.project_id)
+            .handing(message.id, carried.clone())
+            .cleared(cleared);
         let outcome = match returning(window.deliver(&admitting, &pane, &text)).await {
             Ok(admission) => admission,
             // An adapter that failed never handed it over, and its error must show.
@@ -367,23 +458,24 @@ impl Dispatcher {
         Ok(Some(moved.task))
     }
 
-    /// Whether one more Enter may go for `message`, the paste on its way into
-    /// `record`'s window, after the look at its screen: the Enter sends it, so it
-    /// goes only as the paste's hand-over went, as the ledger admits it now, with
-    /// the rows the paste was begun with (`cf_ledger`'s `admit`). Its project
-    /// closed since, it waits for the Resume, and the next look after it presses
-    /// it. Withdrawn since (a continuation whose task was paused or cancelled while
-    /// the screen was looked at), or a row of its paste withdrawn, no key goes:
-    /// what is left of it goes back to its queue, to go again without what was
-    /// withdrawn, as a paste turned away at its hand-over does (both reviews of
-    /// 2026-10-17, round 9: the Enter sent a word to go on with a task paused
-    /// since). The text stays in the window's input box: nothing the engine does
-    /// clears it there.
+    /// What one more Enter for `message`, the paste on its way into `record`'s
+    /// window, does after the look at its screen: the Enter sends it, so it goes
+    /// only as the paste's hand-over went, as the ledger admits it now, with the
+    /// rows the paste was begun with (`cf_ledger`'s `admit`). Its project closed
+    /// since, or what it held withdrawn since (a continuation whose task was
+    /// paused or cancelled while the screen was looked at, or a row of its paste),
+    /// no key goes: it goes back to its queue, to go again without what was
+    /// withdrawn, or once its project is open, as a paste turned away at its
+    /// hand-over does (both reviews of 2026-10-17, round 9). The paste stays in the
+    /// input box, which the next paste empties first (`arrival`). A row of the
+    /// paste its window has since (read, or delivered) says the window took it: no
+    /// key goes, and it is confirmed with that row for its receipt (Sol's review of
+    /// 2026-10-20, round 10: the words were taken for withdrawn and went twice).
     pub(crate) fn enter_admitted(
         &self,
         record: &Record,
         message: i64,
-    ) -> Result<bool, EngineError> {
+    ) -> Result<Enter, EngineError> {
         let carried = record
             .delivery
             .borrow()
@@ -392,23 +484,53 @@ impl Dispatcher {
             .filter(|delivering| delivering.message == message)
             .map(|delivering| delivering.carried.clone())
             .unwrap_or_default();
-        let project = self
-            .seams
-            .ledger
-            .borrow()
-            .message(message)?
-            .map_or(0, |message| message.project_id);
-        let admitting = Admitting::new(self, project).handing(message, carried);
+        let found = self.seams.ledger.borrow().message(message)?;
+        let project = found.as_ref().map_or(0, |found| found.project_id);
+        let admitting = Admitting::new(self, project)
+            .handing(message, carried)
+            .again();
         if admitting.admits() {
-            return Ok(true);
+            return Ok(Enter::Go);
+        }
+        if let Some(row) = admitting.received.get() {
+            if let Some(found) = found.filter(|found| found.state == "delivering") {
+                self.confirm_delivered(&found, &json!({ "read": row }))?;
+            }
+            record.delivery.borrow_mut().delivering = None;
+            self.changed();
+            return Ok(Enter::Arrived);
         }
         if let Some(Some(failed)) = admitting.turned_away() {
             return Err(failed);
         }
-        if admitting.withdrawn.get() {
-            self.give_back(message, admitting.because())?;
+        let because = if admitting.withdrawn.get() {
+            admitting.because()
+        } else {
+            "its project was closed before its Enter was pressed"
+        };
+        self.give_back(message, because)?;
+        Ok(Enter::Withheld)
+    }
+
+    /// Empties `pane`'s input box of a paste whose Enter was withheld
+    /// ([`DeliveryPart::uncleared`]), with the keys of its harness
+    /// ([`Input::Pasted`]): whether the host took them, which is when the box
+    /// counts as empty. None where nothing waits there.
+    pub(crate) async fn clear_box(&self, record: &Record, pane: &Pane) -> Option<bool> {
+        if record.delivery.borrow().uncleared.as_ref() != Some(pane) {
+            return None;
         }
-        Ok(false)
+        let Input::Pasted { clear } = record.window.borrow().input else {
+            return None;
+        };
+        let body = json!({ "id": pane.id, "generation": pane.generation, "bytes": clear });
+        let answer = returning(self.seams.host.request("pane.input", body)).await;
+        let taken = answer.is_ok_and(|answer| answer.get("ok") == Some(&Value::Bool(true)));
+        let mut part = record.delivery.borrow_mut();
+        if taken && part.uncleared.as_ref() == Some(pane) {
+            part.uncleared = None;
+        }
+        Some(taken)
     }
 
     /// What a window was to receive goes back to its queue with its attempt:

@@ -45,8 +45,8 @@ use super::record;
 use super::wire::selected_session;
 use super::wire_log::{WireLog, PROMPT_GAP_MS};
 use crate::contract::{
-    Adapter, Admission, Held, Interrupt, Launch, Observed, Pane, PaneHost, Prepared, Readiness,
-    Records, Skill, Window, Work,
+    Adapter, Admission, Held, Input, Interrupt, Launch, Observed, Pane, PaneHost, Prepared,
+    Readiness, Records, Skill, Window, Work,
 };
 use crate::detect::executable;
 use crate::records::{Options, Reading, Role};
@@ -93,6 +93,13 @@ impl DevinAdapter {
         }
     }
 }
+
+/// The keys that empty Devin's input box of a paste whose Enter was withheld:
+/// Control-C, once. It empties the whole box and does no harm to an empty one at
+/// rest, where Control-U empties the cursor's line only (the message's header
+/// stays) and one Escape leaves the box as it is (`cargo xtask live unsent-box`,
+/// Devin 3000.11.92, 2026-10-21).
+const CLEAR_INPUT: [u8; 1] = [0x03];
 
 impl Adapter for DevinAdapter {
     fn prepare<'a>(&'a self, launch: &'a Launch<'a>) -> Work<'a, Result<Prepared, String>> {
@@ -191,6 +198,13 @@ impl Adapter for DevinAdapter {
         Interrupt {
             presses: 2,
             close_after: Some(Duration::from_secs(1)),
+        }
+    }
+
+    /// Pasted, and its box cleared with [`CLEAR_INPUT`].
+    fn input(&self) -> Input {
+        Input::Pasted {
+            clear: &CLEAR_INPUT,
         }
     }
 

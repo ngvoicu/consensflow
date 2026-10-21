@@ -9,7 +9,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 use std::time::Duration;
 
-use cf_harness::contract::{Interrupt, Launch, LaunchId, Observed, Pane, Window};
+use cf_harness::contract::{Input, Interrupt, Launch, LaunchId, Observed, Pane, Window};
 use cf_harness::seams::Time;
 use cf_ledger::{
     Begun, ConversationView, HandOver, MessageView, NewNote, ParticipantView, ProjectView, Stop,
@@ -126,6 +126,9 @@ pub(crate) struct WindowPart {
     pub(crate) window: Option<Rc<dyn Window>>,
     /// The keys that interrupt a turn in it (its adapter's `interrupt`).
     pub(crate) keys: Option<Interrupt>,
+    /// How it takes what it is handed (its adapter's `input`): pasted into its
+    /// input box, or over a channel of its harness's own.
+    pub(crate) input: Input,
     /// How its harness keeps its own processes (its adapter's `servers`), and
     /// which harness it is, which the pane host is told where a turn begins.
     pub(crate) servers: Servers,
@@ -180,6 +183,7 @@ impl Default for WindowPart {
         Self {
             window: None,
             keys: None,
+            input: Input::Channel,
             servers: Servers::Unknown,
             harness: String::new(),
             pane: None,
@@ -258,13 +262,14 @@ fn assign(env: &mut Vec<(String, String)>, key: &str, value: &str) {
 }
 
 /// What a launch was prepared with: the window, the keys that interrupt it,
-/// how its harness keeps its own processes and which harness it is, how its pane
+/// how it takes what it is handed, how its harness keeps its own processes and which harness it is, how its pane
 /// opens, the conversation it goes on with if there is one, and the stop its task
 /// had asked when the first message was begun, which the new window owes nothing
 /// for.
 struct Planned {
     window: Rc<dyn Window>,
     keys: Interrupt,
+    input: Input,
     servers: Servers,
     harness: String,
     argv: Vec<String>,
@@ -447,7 +452,8 @@ impl Dispatcher {
             .clone()
             .or_else(|| self.displaced(participant, prelude.as_ref()));
         // Boxed, so that the work of an operation that launches stays small
-        // (`dispatcher::tests`): the plan asks the harness and prepares the window.
+        // (`dispatcher::tests`): the plan asks the harness and prepares the window,
+        // and what it comes to is held on the heap through the waits after it.
         let planned = match Box::pin(self.plan(
             record,
             project,
@@ -461,7 +467,7 @@ impl Dispatcher {
         ))
         .await
         {
-            Ok(Some(planned)) => planned,
+            Ok(Some(planned)) => Box::new(planned),
             Ok(None) => return Ok(()),
             Err(cause) => {
                 // An adapter may fail after writing the launch's files; no window will read them.
@@ -603,6 +609,7 @@ impl Dispatcher {
             let mut part = record.window.borrow_mut();
             part.window = Some(Rc::clone(&planned.window));
             part.keys = Some(planned.keys);
+            part.input = planned.input;
             part.servers = planned.servers;
             part.harness.clone_from(&planned.harness);
             part.pane = Some(pane.clone());
@@ -834,6 +841,7 @@ impl Dispatcher {
         Ok(Some(Planned {
             window: prepared.window,
             keys: adapter.interrupt(),
+            input: adapter.input(),
             servers: adapter.servers(),
             // The name the harness's own programs go by (`codex-…`): the roster's kind
             // is `claude-code` for the harness whose binary is `claude`.

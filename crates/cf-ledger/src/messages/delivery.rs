@@ -309,6 +309,28 @@ pub(crate) fn admit(
     })
 }
 
+/// The first row of `begun_with` (what the paste of `message_id`, handed over
+/// already, was begun with) that its window has since: read, or delivered, while
+/// it rode in the paste. A row the window has is no row withdrawn: the window took
+/// the paste, and ran `cf` with it (Sol's review of 2026-10-20, round 10: an
+/// answer `cf task get` marked read was taken for withdrawn, and the words that
+/// carried it went again). None while the window has none of them.
+pub(crate) fn received_of(
+    store: &Store,
+    message_id: i64,
+    begun_with: &[i64],
+) -> Result<Option<i64>, LedgerError> {
+    let received: Vec<i64> = store
+        .db
+        .prepare(
+            "SELECT id FROM message
+             WHERE carried_by = ? AND state IN ('read', 'delivered') ORDER BY id",
+        )?
+        .query_map([message_id], |row| row.get(0))?
+        .collect::<rusqlite::Result<_>>()?;
+    Ok(received.into_iter().find(|id| begun_with.contains(id)))
+}
+
 /// The messages of a project whose hand-over has begun at their window and is not
 /// over: one on its way that its transport let go ([`admit`]), and an answer a
 /// question's door claimed for its harness (`claim_answer`). Every other message

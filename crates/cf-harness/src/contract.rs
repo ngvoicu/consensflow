@@ -99,6 +99,12 @@ pub trait Adapter {
         false
     }
 
+    /// How its windows take the words they are handed: over a channel of the
+    /// harness's own, or pasted into the window's input box ([`Input`]).
+    fn input(&self) -> Input {
+        Input::Channel
+    }
+
     /// Where the window of a chief given specs finds the Specmint skill of
     /// `variant`, asked before the window is prepared, as its role text names
     /// the file. The copy the human installed where this harness looks for
@@ -148,6 +154,20 @@ pub struct Specs<'a> {
 pub struct Interrupt {
     pub presses: u8,
     pub close_after: Option<Duration>,
+}
+
+/// How a harness's windows take the words they are handed.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Input {
+    /// Over a channel of the harness's own (Codex's broker, OpenCode's server,
+    /// Pi's inbox): nothing handed over waits in the window's input box, and no
+    /// key the engine presses sends it.
+    #[default]
+    Channel,
+    /// Pasted into the window's input box, and sent by an Enter (Claude Code,
+    /// Devin): what an Enter withheld leaves in the box, `clear` takes out, the
+    /// keys that empty the box and do no harm to an empty one.
+    Pasted { clear: &'static [u8] },
 }
 
 /// A window to launch (`adapter.prepare`'s argument).
@@ -311,6 +331,14 @@ pub trait PaneHost {
     /// comes while it is on its way.
     fn admits(&self) -> bool {
         true
+    }
+
+    /// Whether the engine emptied the window's input box just before this
+    /// hand-over, with the keys of its [`Input::Pasted`]: an adapter that would
+    /// empty it itself presses nothing more (a second Control-C in a row ends
+    /// Claude Code). A host that says nothing emptied nothing.
+    fn cleared(&self) -> bool {
+        false
     }
 }
 

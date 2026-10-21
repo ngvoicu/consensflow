@@ -1,7 +1,9 @@
 //! Whether a message handed over to a window arrived: its harness's record is
 //! watched for the message's header, which confirms it. A paste the window may
 //! not have sent is given one more Enter, and one the record never showed is
-//! pasted again. Two things keep a record that is late from being taken for
+//! pasted again; what a harness takes over a channel of its own gets no Enter,
+//! its record alone saying whether it arrived. An Enter withheld leaves its paste
+//! in the input box, which the next paste empties first (`deliveries`). Two things keep a record that is late from being taken for
 //! lacking, and the paste from being a second copy of one the window has (a
 //! Devin chief, 2026-10-13: each of two notes twice). A harness may say its own
 //! queue holds the message (`Window::took`), and it is then waited for as one the
@@ -31,11 +33,12 @@
 use std::rc::Rc;
 
 use cf_base::js;
-use cf_harness::contract::Observed;
+use cf_harness::contract::{Input, Observed};
 use cf_harness::records::Role;
 use cf_proto::trace::WindowEvent;
 use serde_json::{json, Value};
 
+use crate::deliveries::Enter;
 use crate::dispatcher::Dispatcher;
 use crate::record::Record;
 use crate::runtime::{begin, returning};
@@ -149,9 +152,13 @@ impl Dispatcher {
         let at_rest = observed.settled && observed.waiting.is_none();
         let overdue = waited > RECONCILE_MS && at_rest;
         if rested <= self.seams.limits.arrival_ms && !overdue {
+            // Only a paste waits in an input box for an Enter: what a harness took
+            // over its own channel is reconciled by its record alone, however
+            // uncertain its hand-over (Astra's review of 2026-10-20, round 10).
             if waited > ENTER_AGAIN_MS
                 && waited <= self.seams.limits.arrival_ms
                 && !delivering.entered_again
+                && self.pasted(record)
             {
                 self.enter_again(record, delivering.message).await?;
             }
@@ -181,6 +188,11 @@ impl Dispatcher {
             "the harness record never showed it".to_owned()
         };
         self.settle_failure(delivering, &because, true)
+    }
+
+    /// Whether the window takes what it is handed pasted into its input box.
+    fn pasted(&self, record: &Record) -> bool {
+        matches!(record.window.borrow().input, Input::Pasted { .. })
     }
 
     /// Whether the window's harness says its own queue holds the message on its
@@ -258,10 +270,17 @@ impl Dispatcher {
         }
         // Enter sends what waits in the input box: only as the ledger admits the
         // paste now, its project open and nothing of it withdrawn while the screen
-        // was looked at (`deliveries`).
-        if !self.enter_admitted(record, message)? {
-            self.entered_again(record, message, false);
-            return Ok(());
+        // was looked at (`deliveries`). Withheld, the paste stays in the box, and
+        // the next paste into the window empties it first: else it would go in
+        // beside it, and its Enter send both (both reviews of 2026-10-20, round 10).
+        match self.enter_admitted(record, message)? {
+            Enter::Go => {}
+            Enter::Withheld => {
+                self.entered_again(record, message, false);
+                record.delivery.borrow_mut().uncleared = Some(pane);
+                return Ok(());
+            }
+            Enter::Arrived => return Ok(()),
         }
         let input = json!({ "id": pane.id, "generation": pane.generation, "bytes": [ENTER] });
         // A key the host did not take is pressed again at the next look's

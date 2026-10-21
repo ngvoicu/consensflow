@@ -175,6 +175,7 @@ impl Window for FakeWindow {
         pane: &'a Pane,
         text: &'a str,
     ) -> Work<'a, Result<Admission, String>> {
+        self.fake.cleared.borrow_mut().push(host.cleared());
         let args = json!([{
             "launch": self.bag(),
             "pane": { "id": pane.id, "generation": pane.generation },

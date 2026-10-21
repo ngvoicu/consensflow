@@ -58,8 +58,8 @@ use super::status::{self, State, Status};
 use super::stopped::{self, Pressed};
 use super::{install, paths};
 use crate::contract::{
-    Adapter, Admission, Held, Launch, Observed, Pane, PaneHost, Prepared, Readiness, Records,
-    Skill, Waiting, Window, Work,
+    Adapter, Admission, Held, Input, Launch, Observed, Pane, PaneHost, Prepared, Readiness,
+    Records, Skill, Waiting, Window, Work,
 };
 use crate::detect::executable;
 use crate::records::{Options, Reading, Settlement};
@@ -188,6 +188,13 @@ impl Adapter for ClaudeAdapter {
             Servers::Unknown
         } else {
             Servers::InGroup
+        }
+    }
+
+    /// Pasted, and its box cleared with Control-C ([`stopped::CLEAR_INPUT`]).
+    fn input(&self) -> Input {
+        Input::Pasted {
+            clear: &stopped::CLEAR_INPUT,
         }
     }
 
@@ -334,8 +341,9 @@ impl Window for ClaudeWindow {
         Box::pin(async move {
             // A window read at rest by an interrupt of ours has the message it
             // was given in its input box again, and this one would be pasted
-            // after it, to go as one: the box is cleared first.
-            if self.restored.get() {
+            // after it, to go as one: the box is cleared first, unless the engine
+            // just cleared it.
+            if self.restored.get() && !host.cleared() {
                 if let Err(cause) = pane::write_keys(host, pane, &stopped::CLEAR_INPUT).await {
                     let reason = format!("the window's input box could not be cleared: {cause}");
                     return Ok(Admission::Refused { reason });

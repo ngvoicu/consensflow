@@ -40,7 +40,7 @@ pub use delivery::HandOver;
 pub(crate) use delivery::{
     admit, begin_delivery, cancel_message, confirm_delivery, confirm_delivery_telling,
     fail_delivery, first_received, handed_over, in_flight, last_pasted, next_delivery,
-    next_delivery_of, retry_delivery, take_back, with_work,
+    next_delivery_of, received_of, retry_delivery, take_back, with_work,
 };
 pub(crate) use gate::{approve_message, decline_message, mark_read};
 pub(crate) use holds::{note_hold, tell_goes_on};
