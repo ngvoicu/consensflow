@@ -122,13 +122,14 @@ impl Dispatcher {
     /// given up as one that did not. What the window shows is asked first, for the
     /// screen goes with it, and the window is closed. A chief's goes without its
     /// project, and the chief is tried again at the backoff, the human told once
-    /// ([`Dispatcher::launch_failed`]); a window the host would not kill is looked at
-    /// again at the next pass, and nothing goes in meanwhile. A member's exit is
-    /// settled at the close, which pauses its task, and then the message it was to be
-    /// given goes, failing as a launch's first message does, so that whoever gave it
-    /// hears why and no launch follows at the next pass; words told to the window
-    /// about the task are kept for its resume instead, the requester and the human
-    /// told why. A launch that was to say the role first, and has not, is given up
+    /// ([`Dispatcher::launch_failed`]); a chief's window the host would not kill is
+    /// looked at again at the next pass, and nothing goes in meanwhile. A member's exit
+    /// is settled at the close, which pauses its task, and then the message it was to
+    /// be given goes, failing as a launch's first message does, so that whoever gave it
+    /// hears why and no launch follows at the next pass; words told to the window about
+    /// the task are kept for its resume instead, the requester and the human told why.
+    /// A member's window the host would not kill has no exit to pause its task: its
+    /// message goes all the same, and fails. A launch that was to say the role first, and has not, is given up
     /// as one that cannot ([`Dispatcher::abandon_launch`]): what fails is the message
     /// the role went ahead of, and not the note that says the role, which goes with
     /// the launch (a member's task stayed queued, and was launched for again at
@@ -175,7 +176,10 @@ impl Dispatcher {
             Some(pane) => self.close_own(record, pane).await?,
             None => true,
         };
-        if !closed {
+        // A chief's window the host would not kill is looked at again; a member's
+        // message goes all the same, its task never paused by an exit that never came
+        // (T-47 P3-1: left at work, asked and killed again at every pass, nobody told).
+        if !closed && participant.role == "chief" {
             return Ok(());
         }
         self.launch_failed(record, &project, &participant, Some(failing), &said)

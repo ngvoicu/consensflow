@@ -375,3 +375,64 @@ fn a_members_window_unfit_for_work_closes_and_the_words_told_to_it_are_kept_for_
         ),
     );
 }
+
+/// A member's unfit window whose kill the host refuses: its exit never comes, so its
+/// task is never paused, and the message it was to be given goes all the same, as
+/// before the exit was settled first (Calliope on 876286f4, T-47 P3-1: it was left
+/// working, its window asked and killed again at every pass, nobody told). Told words
+/// fail their task, and the chief and the human hear why, once each.
+#[test]
+fn a_members_unfit_window_whose_kill_is_refused_goes_with_its_message_and_whoever_is_told_hears_why(
+) {
+    let context = Context::new();
+    context.host.refuse_kills.set(true);
+    let tiers = Tiers::new(&context, &["zeus"]);
+    let project = tiers.project.id;
+    tiers.open();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(tiers.task(1).task.state, "working");
+    let session = tiers.assignee(1);
+    context.adapter.with(&session, |agent| agent.settled = true);
+    unfit(&context);
+    let note = context
+        .ledger
+        .borrow_mut()
+        .note(
+            project,
+            &NewNote {
+                from: Some("chief".to_owned()),
+                to: session.clone(),
+                task: Some(1),
+                body: "Use the grammar in the docs".to_owned(),
+            },
+        )
+        .unwrap();
+    for _ in 0..4 {
+        context.pass().unwrap();
+    }
+    let failed = context.ledger.borrow().message(note.id).unwrap().unwrap();
+    assert_eq!(failed.state, "failed");
+    assert_eq!(tiers.task(1).task.state, "failed", "not left at work");
+    let named = |handle: &str| -> Vec<String> {
+        tiers
+            .notes(handle)
+            .into_iter()
+            .filter(|said| said.contains(&format!("m-{},", note.id)))
+            .collect()
+    };
+    assert_eq!(
+        named("chief"),
+        [format!(
+            "T-1 failed: what @chief told its window, m-{}, did not reach it ({WHY}). Reopen it with: cf task reopen T-1 \"…\"",
+            note.id
+        )]
+    );
+    assert_eq!(
+        named("human"),
+        [format!(
+            "m-{}, a note from @chief on T-1, did not reach @{session}: {WHY}.",
+            note.id
+        )]
+    );
+}

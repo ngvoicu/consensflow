@@ -45,8 +45,12 @@ runs = ["ledger-self-steps", "engine-own-steps"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/delivery.rs"
-find = "            if withdrawn_late(store, &message, &task)? {"
-replace = "            if false && withdrawn_late(store, &message, &task)? {"
+find = '''
+            if withdrawn_late(store, &message, &task)? {
+                return known_message(store, message_id);'''
+replace = '''
+            if false && withdrawn_late(store, &message, &task)? {
+                return known_message(store, message_id);'''
 
 [[plant]]
 name = "review 306: a brief given up for a step done while it was pasted fails, not withdrawn"
@@ -56,11 +60,11 @@ runs = ["ledger-self-steps"]
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/delivery.rs"
 find = '''
-            if withdrawn_late(store, &message, &task)?
-                ||'''
+            if withdrawn_late(store, &message, &task)? {
+                return Ok((known_message(store, message_id)?, GivenUp::Withdrawn));'''
 replace = '''
-            if (false && withdrawn_late(store, &message, &task)?)
-                ||'''
+            if false && withdrawn_late(store, &message, &task)? {
+                return Ok((known_message(store, message_id)?, GivenUp::Withdrawn));'''
 
 [[plant]]
 name = "review 306: no brief of the chief's own step is withdrawn late, whatever became of the step"
@@ -237,13 +241,8 @@ runs = ["engine-queued-tells"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
-find = "        if settled.state == \"queued\" {"
-replace = "        if false && settled.state == \"queued\" {"
-
-[[plant.edit]]
-file = "crates/cf-engine/src/deliveries.rs"
-find = "        if settled.state != \"failed\" {"
-replace = "        if false && settled.state != \"failed\" {"
+find = "            GivenUp::Kept => return self.tell_kept(message, because),"
+replace = "            GivenUp::Kept => {}"
 
 [[plant]]
 name = "review 306: a done while told words are on their way finishes the task without them"
@@ -324,8 +323,8 @@ runs = ["engine-dispatcher-unfit", "engine-queued-tells"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
-find = "            return self.tell_kept(message, because);"
-replace = "            return Ok(());"
+find = "            GivenUp::Kept => return self.tell_kept(message, because),"
+replace = "            GivenUp::Kept => return Ok(()),"
 
 [[plant]]
 name = "review 306: a member's unfit window is given up before its exit is settled"
@@ -338,7 +337,10 @@ find = """        let closed = match &pane {
             Some(pane) => self.close_own(record, pane).await?,
             None => true,
         };
-        if !closed {
+        // A chief's window the host would not kill is looked at again; a member's
+        // message goes all the same, its task never paused by an exit that never came
+        // (T-47 P3-1: left at work, asked and killed again at every pass, nobody told).
+        if !closed && participant.role == "chief" {
             return Ok(());
         }
         self.launch_failed(record, &project, &participant, Some(failing), &said)"""
@@ -347,3 +349,27 @@ replace = """        let (this, held) = (Rc::clone(self), Rc::clone(record));
         self.launch_failed(record, &project, &participant, Some(failing), &said)?;
         closing.await?;
         Ok(())"""
+
+# Calliope's look at 876286f4 (T-47): a member's unfit window whose kill the host refuses goes with
+# its message all the same (P3-1, `give_up_unfit`); and the ledger says what a delivery given up came
+# to, `GivenUp`, which the engine tells by, never by the state it left (P3-2, `give_up_delivery`).
+
+[[plant]]
+name = "review 306: a member's unfit window whose kill is refused is left at work, untold"
+meant = "a_members_unfit_window_whose_kill_is_refused_goes_with_its_message_and_whoever_is_told_hears_why"
+runs = ["engine-dispatcher-unfit"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/unstarted.rs"
+find = "        if !closed && participant.role == \"chief\" {"
+replace = "        if !closed {"
+
+[[plant]]
+name = "review 306: the ledger says words it kept for a resume failed"
+meant = "told_words_whose_last_paste_fails_while_the_task_is_paused_are_kept_for_its_resume"
+runs = ["ledger-told-kept", "engine-queued-tells", "engine-dispatcher-unfit"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = "                return Ok((known_message(store, message_id)?, GivenUp::Kept));"
+replace = "                return Ok((known_message(store, message_id)?, GivenUp::Failed));"

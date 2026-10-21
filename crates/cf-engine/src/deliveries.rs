@@ -9,7 +9,7 @@ use std::rc::Rc;
 
 use cf_base::js;
 use cf_harness::contract::{Admission, Held, Observed, PaneHost, Readiness};
-use cf_ledger::{is_told, MessageView, NewNote, ParticipantView, ProjectView, TaskView};
+use cf_ledger::{is_told, GivenUp, MessageView, NewNote, ParticipantView, ProjectView, TaskView};
 use cf_proto::trace::WindowEvent;
 
 use crate::delivery_text::{delivery_text, marker_of};
@@ -317,18 +317,18 @@ impl Dispatcher {
     /// that the ledger kept for their task's resume did not fail: its requester
     /// hears why and which words wait (the ledger's `tell_kept`), and the human,
     /// once, as of a failure, that they wait for the resume ([`Dispatcher::tell_kept`]).
-    /// What the ledger withdrew did not fail, and nobody hears of it.
+    /// What the ledger withdrew did not fail, and nobody hears of it. The ledger says
+    /// which it did ([`GivenUp`]): no state is read for it.
     fn fail_delivery(&self, message: &MessageView, because: &str) -> Result<(), EngineError> {
-        let settled = self
+        let (_, given_up) = self
             .seams
             .ledger
             .borrow_mut()
-            .fail_delivery(message.id, because)?;
-        if settled.state == "queued" {
-            return self.tell_kept(message, because);
-        }
-        if settled.state != "failed" {
-            return Ok(());
+            .give_up_delivery(message.id, because)?;
+        match given_up {
+            GivenUp::Failed => {}
+            GivenUp::Kept => return self.tell_kept(message, because),
+            GivenUp::Withdrawn => return Ok(()),
         }
         let project = self.known_project(message.project_id)?;
         if let Some(number) = message.task_number {

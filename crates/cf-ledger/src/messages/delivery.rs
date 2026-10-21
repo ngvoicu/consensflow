@@ -405,14 +405,38 @@ pub(crate) fn fail_delivery(
     message_id: i64,
     reason: &str,
 ) -> Result<MessageView, LedgerError> {
+    give_up_delivery(store, message_id, reason).map(|(message, _)| message)
+}
+
+/// What a delivery given up came to ([`give_up_delivery`]), which only the ledger
+/// knows: whoever tells of it says what was done, never what a state suggests.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GivenUp {
+    /// The message failed (`failed`), and so did what it fails with it.
+    Failed,
+    /// Words told to the window, kept for their paused task's resume
+    /// (`kept_for_resume`): they wait, `queued`, and did not fail.
+    Kept,
+    /// A brief of the chief's own step done while it was on its way
+    /// (`withdrawn_late`): cancelled, and no failure.
+    Withdrawn,
+}
+
+/// [`fail_delivery`], saying what it did ([`GivenUp`]).
+pub(crate) fn give_up_delivery(
+    store: &mut Store,
+    message_id: i64,
+    reason: &str,
+) -> Result<(MessageView, GivenUp), LedgerError> {
     model::require_text(reason, "reason", 1000)?;
     store.write(|store| {
         let message = require_message(store, message_id, "delivering")?;
         if let Some(task) = message_task(store, message_id)? {
-            if withdrawn_late(store, &message, &task)?
-                || kept_for_resume(store, &message, &task, reason)?
-            {
-                return known_message(store, message_id);
+            if withdrawn_late(store, &message, &task)? {
+                return Ok((known_message(store, message_id)?, GivenUp::Withdrawn));
+            }
+            if kept_for_resume(store, &message, &task, reason)? {
+                return Ok((known_message(store, message_id)?, GivenUp::Kept));
             }
         }
         store.db.execute(
@@ -435,7 +459,7 @@ pub(crate) fn fail_delivery(
                 tell_failed_answer(store, &message, &task, reason)?;
             }
         }
-        known_message(store, message_id)
+        Ok((known_message(store, message_id)?, GivenUp::Failed))
     })
 }
 

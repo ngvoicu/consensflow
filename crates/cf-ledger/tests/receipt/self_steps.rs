@@ -9,7 +9,7 @@
 //! goes on. A task the human gives the chief is no such step: its result is the
 //! human's to decide.
 
-use cf_ledger::NewTask;
+use cf_ledger::{GivenUp, NewTask};
 
 use crate::fixture::{world, World};
 
@@ -163,7 +163,13 @@ fn a_brief_on_its_way_when_the_step_was_done_goes_no_further_whether_its_paste_i
         let refused = "refused by the window";
         let answer = match settled {
             "tried again" => w.ledger.retry_delivery(brief, refused, false),
-            "given up" => w.ledger.fail_delivery(brief, refused),
+            "given up" => w
+                .ledger
+                .give_up_delivery(brief, refused)
+                .map(|(answer, given_up)| {
+                    assert_eq!(given_up, GivenUp::Withdrawn, "said as withdrawn");
+                    answer
+                }),
             _ => w
                 .ledger
                 .retry_delivery(brief, "the window went before it landed", true),

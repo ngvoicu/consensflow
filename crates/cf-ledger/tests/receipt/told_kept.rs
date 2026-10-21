@@ -7,6 +7,8 @@
 //! pasting keep their place in it across the start (the reviews of round 4:
 //! they were let go of and pasted again on their own).
 
+use cf_ledger::GivenUp;
+
 use crate::fixture::{gated_world, ids, world, World};
 use crate::queued_tells::{newest, queued, tell, waiting};
 
@@ -18,9 +20,11 @@ fn a_workers_note_to_the_chief_that_never_arrives_fails_nothing_of_its_task() {
     assert_eq!(w.state(task), "working");
     let note = w.note(&session, "chief", task, "Halfway there");
     w.begin(note.id);
-    w.ledger
-        .fail_delivery(note.id, "refused by the window")
+    let (_, given_up) = w
+        .ledger
+        .give_up_delivery(note.id, "refused by the window")
         .expect("given up");
+    assert_eq!(given_up, GivenUp::Failed, "said as failed");
     assert_eq!(w.message(note.id).state, "failed");
     assert_eq!(
         w.state(task),
@@ -97,10 +101,15 @@ fn told_words_whose_last_paste_fails_while_the_task_is_paused_are_kept_for_its_r
     w.ledger
         .pause_task(w.project, task, Some("human"), None)
         .expect("the human pauses");
-    let settled = w
+    let (settled, given_up) = w
         .ledger
-        .fail_delivery(told.id, "refused by the window")
+        .give_up_delivery(told.id, "refused by the window")
         .expect("settled");
+    assert_eq!(
+        given_up,
+        GivenUp::Kept,
+        "said as kept, not read from its state"
+    );
     assert_eq!(
         (settled.state.as_str(), settled.reason.as_deref()),
         (

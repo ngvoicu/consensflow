@@ -4,7 +4,9 @@
 use serde_json::Value;
 
 use super::Ledger;
-use crate::{messages, Begun, Claim, LedgerError, MessageView, NewNote, NewQuestion, Read};
+use crate::{
+    messages, Begun, Claim, GivenUp, LedgerError, MessageView, NewNote, NewQuestion, Read,
+};
 
 impl Ledger {
     /// One message, or none.
@@ -280,6 +282,16 @@ impl Ledger {
         reason: &str,
     ) -> Result<MessageView, LedgerError> {
         messages::fail_delivery(&mut self.store, message_id, reason)
+    }
+
+    /// [`Ledger::fail_delivery`], saying what it did: failed, kept for the task's
+    /// resume, or withdrawn ([`GivenUp`]).
+    pub fn give_up_delivery(
+        &mut self,
+        message_id: i64,
+        reason: &str,
+    ) -> Result<(MessageView, GivenUp), LedgerError> {
+        messages::give_up_delivery(&mut self.store, message_id, reason)
     }
 
     /// Every message on its way to a window, oldest first.
