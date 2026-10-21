@@ -1,0 +1,118 @@
+# A task other tasks wait for is not cancelled, and the chief reads the brief it wrote (T-74, 3.0.6;
+# the chief of 2026-10-21, running this project on 3.0.5): `--needs T-n` is released when T-n is
+# accepted, so a cancel of T-n left its waiters "blocked by T-n" for good, and nothing told anyone.
+# The cancel is refused in the words of `waited-for` while an open or paused task waits for the
+# task: through `cf`, the API and the page's Cancel, and the human's decline of a brief; a ledger
+# 3.0.5 left with such a waiter tells its chief once, at its opening. And a brief that waits at the
+# human's gate was cleared for every caller of the task's route, the chief who wrote it included;
+# now only for a caller who may not move the task (Node's recording `cf-board-010` gives the chief
+# the body). One plant takes one fix out, and a test of it fails. The rig's case builds the native
+# `cf` from the sources as planted, so its plants say `builds`.
+#
+# Every name holds `waited for` or `brief gate`, so `npm run plants:daemon -- "waited for"` runs the
+# first and `-- "brief gate"` the second.
+
+[run]
+ledger-waited-for = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "cancel_waited_for"]
+rig-regression-waited-for = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_task_waiting_on_a_cancelled_task_stayed_blocked_for_good"]
+
+[[plant]]
+name = "waited for: a cancel of a task that open tasks wait for goes through"
+meant = "a_task_open_tasks_wait_for_is_not_cancelled_until_they_are"
+runs = ["ledger-waited-for", "ledger-replay"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = "    require_unawaited(store, &task)?;\n"
+replace = ""
+
+[[plant]]
+name = "waited for: the human's decline of a brief that open tasks wait for goes through"
+meant = "the_humans_decline_of_a_brief_other_tasks_wait_for_is_refused_the_same_way"
+runs = ["ledger-waited-for"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = "    require_unawaited(store, &task)?;\n"
+replace = ""
+
+[[plant]]
+name = "waited for: the chief's cancel and the page's Cancel go through in the field's shape"
+meant = "a_task_open_tasks_wait_for_is_not_cancelled_by_the_chief_or_the_page_until_they_are"
+runs = ["rig-regression-waited-for"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = "    require_unawaited(store, &task)?;\n"
+replace = ""
+
+[[plant]]
+name = "waited for: a paused task that waits for the task does not hold its cancel"
+meant = "a_task_open_tasks_wait_for_is_not_cancelled_until_they_are"
+runs = ["ledger-waited-for"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = "WHERE n.needs_id = ? AND t.state IN ('open', 'paused') ORDER BY t.number"
+replace = "WHERE n.needs_id = ? AND t.state = 'open' ORDER BY t.number"
+
+[[plant]]
+name = "waited for: a task that waits for the task holds its cancel though it is already cancelled"
+meant = "a_task_open_tasks_wait_for_is_not_cancelled_until_they_are"
+runs = ["ledger-waited-for"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = "WHERE n.needs_id = ? AND t.state IN ('open', 'paused') ORDER BY t.number"
+replace = "WHERE n.needs_id = ? ORDER BY t.number"
+
+[[plant]]
+name = "waited for: no opening tells the chief of a task that waits for a cancelled one"
+meant = "a_ledger_that_holds_a_task_waiting_for_a_cancelled_one_tells_the_chief_once"
+runs = ["ledger-waited-for"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/ledger.rs"
+find = "    note_stranded_waits(&mut store)?;\n"
+replace = ""
+
+[[plant]]
+name = "waited for: every opening tells the chief of the task again"
+meant = "a_ledger_that_holds_a_task_waiting_for_a_cancelled_one_tells_the_chief_once"
+runs = ["ledger-waited-for"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = "                \"task.stranded\",\n"
+replace = "                \"task.stranded-again\",\n"
+
+[[plant]]
+name = "waited for: the chief is told of a task that waits for a cancelled one though it was cancelled itself"
+meant = "a_ledger_with_no_task_waiting_for_a_cancelled_one_tells_the_chief_nothing"
+runs = ["ledger-waited-for"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = "           WHERE t.state IN ('open', 'paused')\n             AND EXISTS (SELECT 1 FROM task_need n JOIN task d"
+replace = "           WHERE t.state != 'accepted'\n             AND EXISTS (SELECT 1 FROM task_need n JOIN task d"
+
+[[plant]]
+name = "brief gate: the chief who wrote the brief that waits at the gate is not given it"
+meant = "the_chief_reads_the_brief_it_wrote_while_it_waits_at_the_gate_and_a_member_does_not"
+runs = ["daemon-lib-routes-task"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/task.rs"
+find = "        if held_back && !may_move(caller, &task) {"
+replace = "        if held_back {"
+
+[[plant]]
+name = "brief gate: Node's recording of the chief reading its gated task is not answered as Node answered it"
+meant = "every_run_of_cf_against_the_api_prints_what_it_printed_against_node"
+runs = ["daemon-api"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/task.rs"
+find = "        if held_back && !may_move(caller, &task) {"
+replace = "        if held_back {"

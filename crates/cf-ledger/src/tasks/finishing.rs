@@ -5,7 +5,11 @@
 //! it, in the decision's own transaction: accepting and sending back do
 //! (`withdraw_result`). A cancel has no such step to take: a task is called
 //! off only before it is done, and `call_off` withdraws every message of it
-//! still on its way, a result an older build left among them.
+//! still on its way, a result an older build left among them. A task is not
+//! called off while an open task waits for it (`require_unawaited`): what
+//! waits for a task is released when it is accepted, so the waiter would be
+//! blocked for good. A ledger an older build left with such a waiter tells the
+//! chief at its opening (`note_stranded_waits`).
 
 use cf_proto::ledger::{TaskMoved, TaskView};
 use rusqlite::params;
@@ -234,7 +238,8 @@ pub(crate) fn reopen_task(
 /// A task is called off, and whoever asked for it hears so in the same
 /// step, unless it cancelled the task itself: what was cancelled, and the
 /// window that was stopped when a member's had begun on it (the daemon
-/// stops that window on its next look).
+/// stops that window on its next look). Refused, `waited-for`, while an
+/// open task waits for it.
 pub(crate) fn cancel_task(
     store: &mut Store,
     project_id: i64,
@@ -269,7 +274,9 @@ pub(crate) fn cancel_task(
 /// its way, a delivery into a window included, is withdrawn, so nothing of
 /// it is delivered or tried again. The task as it was, and the member's
 /// window that had begun on it, if one had: its brief or the words that
-/// resume it went in.
+/// resume it went in. Refused, `waited-for`, while an open task waits for it,
+/// the human's decline of its brief included: the waiter is released when the
+/// task is accepted, never when it is cancelled.
 pub(crate) fn call_off(
     store: &mut Store,
     project_id: i64,
@@ -280,6 +287,7 @@ pub(crate) fn call_off(
     let task = store.task_row(project_id, number)?;
     let cancellable = [&["open", "queued"], &ACTIVE_TASK_STATES[..], &["paused"]].concat();
     require_task_state(&task, &cancellable, "cancel")?;
+    require_unawaited(store, &task)?;
     let assignee = task
         .assignee_id
         .map(|id| store.participant_row(id))
@@ -304,6 +312,116 @@ pub(crate) fn call_off(
     store.move_task(&task, "cancelled", json!({ "by": by }))?;
     release_ready(store, project_id)?;
     Ok((task, assignee.filter(|_| began)))
+}
+
+/// The tasks that wait for `task`, oldest first: those still open or paused
+/// (a paused one goes back to the board when resumed) with `task` among what
+/// they need. One that has gone to a window had everything it needed
+/// accepted, and one cancelled or failed waits for nothing.
+fn waiters(store: &Store, task: &TaskRow) -> Result<Vec<i64>, LedgerError> {
+    Ok(store
+        .db
+        .prepare(
+            "SELECT t.number FROM task_need n JOIN task t ON t.id = n.task_id
+       WHERE n.needs_id = ? AND t.state IN ('open', 'paused') ORDER BY t.number",
+        )?
+        .query_map([task.id], |row| row.get::<_, i64>(0))?
+        .collect::<rusqlite::Result<_>>()?)
+}
+
+/// "T-2, T-3": task numbers in a sentence.
+fn task_numbers(numbers: &[i64]) -> String {
+    let names: Vec<String> = numbers.iter().map(|number| format!("T-{number}")).collect();
+    names.join(", ")
+}
+
+/// A task an open task waits for is not called off: the waiter is released
+/// when the task is accepted, so it would read "blocked by" it for good and
+/// nothing would tell anyone. Whoever cancels names the waiters to cancel
+/// first, or lets the task finish.
+fn require_unawaited(store: &Store, task: &TaskRow) -> Result<(), LedgerError> {
+    let waiting = waiters(store, task)?;
+    if waiting.is_empty() {
+        return Ok(());
+    }
+    let (verb, them) = match waiting.as_slice() {
+        [only] => ("waits", format!("T-{only}")),
+        _ => ("wait", "them".to_owned()),
+    };
+    Err(LedgerError::refused_with(
+        "waited-for",
+        format!(
+            "T-{number} cannot be cancelled while {names} {verb} for it: cancel {them} first, or let T-{number} finish",
+            number = task.number,
+            names = task_numbers(&waiting),
+        ),
+        409,
+    ))
+}
+
+/// What a ledger an older build left with a task waiting for a cancelled one
+/// says at its opening: up to 3.0.5 a cancel was never refused for the tasks
+/// that waited for it, and the waiter read "blocked by" it for good. Each such
+/// open or paused task is told to its project's chief once, in a note that
+/// names what it waits on, and the log keeps that it was (`task.stranded`,
+/// in the same step), so no opening says it twice.
+pub(crate) fn note_stranded_waits(store: &mut Store) -> Result<(), LedgerError> {
+    store.write(|store| {
+        let stranded: Vec<(i64, i64, i64)> = store
+            .db
+            .prepare(
+                "SELECT t.project_id, t.id, t.number FROM task t
+           WHERE t.state IN ('open', 'paused')
+             AND EXISTS (SELECT 1 FROM task_need n JOIN task d ON d.id = n.needs_id
+                         WHERE n.task_id = t.id AND d.state = 'cancelled')
+             AND NOT EXISTS (SELECT 1 FROM event e
+                             WHERE e.kind = 'task.stranded' AND e.project_id = t.project_id
+                               AND json_extract(e.data, '$.task') = t.number)
+           ORDER BY t.project_id, t.number",
+            )?
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
+            .collect::<rusqlite::Result<_>>()?;
+        for (project, id, number) in stranded {
+            let chief: Option<String> = store
+                .db
+                .prepare(
+                    "SELECT handle FROM participant
+               WHERE project_id = ? AND role = 'chief' AND left_at IS NULL ORDER BY id DESC",
+                )?
+                .query_map([project], |row| row.get(0))?
+                .next()
+                .transpose()?;
+            let Some(chief) = chief else { continue };
+            let cancelled: Vec<i64> = store
+                .db
+                .prepare(
+                    "SELECT d.number FROM task_need n JOIN task d ON d.id = n.needs_id
+               WHERE n.task_id = ? AND d.state = 'cancelled' ORDER BY d.number",
+                )?
+                .query_map([id], |row| row.get(0))?
+                .collect::<rusqlite::Result<_>>()?;
+            let told = send(
+                store,
+                project,
+                &Sent {
+                    to: &chief,
+                    task: Some(number),
+                    kind: "note",
+                    body: &format!(
+                        "T-{number} waits on cancelled {} and will never start.",
+                        task_numbers(&cancelled)
+                    ),
+                    ..Sent::default()
+                },
+            )?;
+            store.log(
+                project,
+                "task.stranded",
+                json!({ "task": number, "needs": cancelled, "message": told.id }),
+            )?;
+        }
+        Ok(())
+    })
 }
 
 /// The daemon gives up on a task: its pane died, or its launch never came up.

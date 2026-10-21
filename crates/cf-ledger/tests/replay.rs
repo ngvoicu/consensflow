@@ -69,7 +69,9 @@ enum Outcome {
 /// decision it asked for; and the 7 that name `TAKEN_BEFORE_GIVEN`,
 /// `LEFT_THE_PAUSE`, `WAIT_NOTE_TAKEN` or `GOES_ON`, which the notes of a
 /// task's wait moved: Node leaves one queued when another member takes the
-/// task or it is taken back, and tells its requester nothing when a hold ends.
+/// task or it is taken back, and tells its requester nothing when a hold ends;
+/// and the 4 that name `WAITED_FOR`, which the refusal of a cancel moved: Node
+/// cancels a task that open tasks wait for, and they stay blocked for good.
 /// Departed traces that Node's suite recorded only off Windows: the test
 /// that wrote `home-copies-004` was skipped there, as Windows holds an open
 /// ledger's files. Elsewhere each must be there.
@@ -94,6 +96,7 @@ const DEPARTED: &[(&str, usize, &str)] = &[
     ("core-dispatcher-090", 93, DECIDED_BEFORE_PASTED),
     ("core-dispatcher-107", 122, KEPT_IN_BRIEF),
     ("core-page-014", 9, REASON_RELEASE),
+    ("core-page-023", 8, WAITED_FOR),
     ("evals-measure-001", 20, RESULT_ACCEPTED),
     ("evals-measure-015", 32, RESULT_ACCEPTED),
     ("home-copies-001", 34, KEPT_IN_BRIEF),
@@ -122,6 +125,7 @@ const DEPARTED: &[(&str, usize, &str)] = &[
     ("ledger-schema-007", 15, KEPT_IN_BRIEF),
     ("ledger-schema-010", 14, KEPT_IN_BRIEF),
     ("ledger-schema-011", 15, KEPT_IN_BRIEF),
+    ("ledger-schema-012", 1, WAITED_FOR),
     ("ledger-schema-013", 14, KEPT_IN_BRIEF),
     ("ledger-schema-014", 15, KEPT_IN_BRIEF),
     ("ledger-schema-016", 14, KEPT_IN_BRIEF),
@@ -146,6 +150,7 @@ const DEPARTED: &[(&str, usize, &str)] = &[
     ("ledger-tasks-010", 15, RESULT_ACCEPTED),
     ("ledger-tasks-011", 17, RESULT_ACCEPTED),
     ("ledger-tasks-012", 20, RESULT_ACCEPTED),
+    ("ledger-tasks-015", 5, WAITED_FOR),
     ("ledger-tasks-016", 10, KEPT_BY_PAUSE),
     ("ledger-tasks-018", 16, KEPT_BY_PAUSE),
     ("ledger-tasks-020", 19, REASON_PAUSE),
@@ -153,10 +158,15 @@ const DEPARTED: &[(&str, usize, &str)] = &[
     ("ledger-tasks-024", 13, STOP_IN_EVENT),
     ("ledger-tasks-025", 12, RESULT_ACCEPTED),
     ("ledger-tasks-026", 29, STOP_IN_EVENT),
+    ("ledger-tasks-027", 6, WAITED_FOR),
     ("ledger-tiered-013", 13, KEPT_IN_BRIEF),
     ("ledger-tiered-014", 22, WINDOW_ENDED),
 ];
 
+/// A task that open tasks wait for is not cancelled: they are released when it
+/// is accepted, so they would be blocked for good.
+const WAITED_FOR: &str =
+    "the chief or the human cancels a task that an open task waits for: the cancel is refused (`waited-for`) until the waiters are cancelled, where Node cancels it and they stay blocked for good";
 /// A result the chief had not been given when it accepted the task is
 /// withdrawn, never pasted after the decision it asked for.
 const RESULT_ACCEPTED: &str =
