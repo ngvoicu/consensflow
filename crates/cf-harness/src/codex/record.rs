@@ -10,7 +10,9 @@
 //! The latest turn decides. It is in flight while it has started and not
 //! ended, or holds a tool call or a subagent open. It is settled once it
 //! ended: cancelled or failed, or complete with a final answer the rollout
-//! holds, as `task_complete` names it.
+//! holds, as `task_complete` names it. A turn whose error is Codex's usage limit
+//! (`usage_limit_exceeded`) failed for quota: it says the quota while it is the
+//! latest, whatever the rate limits said last.
 //!
 //! The rollout's ids key the reader's maps as they keyed Node's (see
 //! [`Key`]), so a record that says something odd is read as Node read it.
@@ -30,7 +32,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use cf_base::env::Env;
-use cf_base::js;
+use cf_base::{js, time};
 use serde_json::Value;
 
 use self::fields::{content_text, field, is_whole, nullish_or, or_empty};
@@ -74,6 +76,9 @@ fn handed_out(item: &Item) -> Item {
         },
     }
 }
+
+/// The `codex_error_info` of a turn Codex ended for its usage limit.
+const USAGE_LIMIT: &str = "usage_limit_exceeded";
 
 /// What a rollout said so far.
 struct Rollout {
@@ -128,8 +133,9 @@ enum End {
     /// `task_complete`, and the final answer it names (`last_agent_message`,
     /// none when it names none).
     Complete(Option<Value>),
-    /// `task_complete` with an error.
-    Failed,
+    /// `task_complete` with an error, and the refusal it is when the error is
+    /// Codex's usage limit.
+    Failed(Option<Arc<Quota>>),
     /// `turn_aborted`.
     Cancelled,
 }
@@ -264,8 +270,9 @@ impl Rollout {
             }
             Some("task_complete") => {
                 self.latest_turn = named.clone();
-                let end = if js::truthy(field(payload, "error")) {
-                    End::Failed
+                let error = field(payload, "error");
+                let end = if js::truthy(error) {
+                    End::Failed(self.refusal(error, &at))
                 } else {
                     End::Complete(field(payload, "last_agent_message").cloned())
                 };
@@ -282,6 +289,30 @@ impl Rollout {
             _ => {}
         }
         Ok(())
+    }
+
+    /// The refusal a turn's `error` is, where it is Codex's usage limit: at the
+    /// time of its record, until the reset the rate limits named, where that
+    /// comes after it.
+    fn refusal(&self, error: Option<&Value>, at: &Value) -> Option<Arc<Quota>> {
+        if field(error, "codex_error_info").and_then(Value::as_str) != Some(USAGE_LIMIT) {
+            return None;
+        }
+        let at = at.as_str().and_then(time::parse);
+        let resets_at = self
+            .quota
+            .as_deref()
+            .and_then(Quota::resets_at)
+            .filter(|reset| {
+                time::parse(reset)
+                    .zip(at)
+                    .is_some_and(|(reset, at)| reset > at)
+            })
+            .map(str::to_owned);
+        Some(Arc::new(Quota::Exhausted {
+            at: at.map(time::iso),
+            resets_at,
+        }))
     }
 
     /// The turn a turn's own event names: one that names none fails the
@@ -530,8 +561,11 @@ impl Answer for Rollout {
             .map(|kept| handed_out(&kept.item))
             .collect();
         record.in_flight = in_flight;
-        record.failed = matches!(end, Some((_, End::Failed)));
-        record.quota = self.quota.clone();
+        record.failed = matches!(end, Some((_, End::Failed(_))));
+        record.quota = match end {
+            Some((_, End::Failed(Some(refusal)))) => Some(Arc::clone(refusal)),
+            _ => self.quota.clone(),
+        };
         record.settlement = match end {
             _ if in_flight => Settlement::InFlight,
             // A task_complete whose final answer cannot be matched proves nothing.

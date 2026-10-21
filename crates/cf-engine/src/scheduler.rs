@@ -1,8 +1,8 @@
 //! Who takes which task, and who is out of quota: each open tiered task goes to
 //! the best free member, its requester told once when nobody is free; a
-//! window's refusal takes its member out until the reset, its work held or
-//! given back; held work goes on, and work of a member whose agent is gone goes
-//! back to the board. The ledger says what may happen to a task; this says
+//! window's refusal takes its member out until the reset, its work held with
+//! its window; held work goes on there, and work of a member whose agent is
+//! gone goes back to the board. The ledger says what may happen to a task; this says
 //! which, and to whom. It owns the record's quota part and the tasks whose
 //! requesters were told they wait.
 
@@ -24,9 +24,6 @@ use crate::deliveries::Delivering;
 use crate::dispatcher::Dispatcher;
 use crate::record::Record;
 use crate::seams::{EngineError, SavedAgent};
-
-/// A reset this near holds a task with its window rather than sending it back to the board.
-const HOLD_MS: i64 = 30 * 60_000;
 
 /// How long a quota lasts when its harness names no reset.
 const UNKNOWN_RESET_MS: i64 = 60 * 60_000;
@@ -307,54 +304,33 @@ impl Dispatcher {
     }
 
     /// The work a window of a member out of quota until `until` holds, once
-    /// its harness refused it. Near the reset, or with nobody else to take
-    /// it, a task keeps its window and goes on by itself; otherwise a task
-    /// given to the tier goes back to the board. One given to the member by
-    /// name has nobody else to go to, and waits for it. The chief keeps its
-    /// own tasks.
-    pub(crate) fn hold_or_release(
+    /// its harness refused it: it waits with its window, which has its work,
+    /// and goes on there by itself, whoever else of its tier is free; only the
+    /// human or the chief gives it to another (dip-agentos, 2026-10-19). The
+    /// chief keeps its own tasks.
+    pub(crate) fn hold_work(
         &self,
         project: &ProjectView,
         participant: &ParticipantView,
-        owner: &ParticipantView,
         until: &str,
     ) -> Result<(), EngineError> {
         if participant.role == "chief" {
             return Ok(());
         }
-        let soon = time::parse(until).is_some_and(|until| until - self.now() <= HOLD_MS);
         for task in self.active_work(project, participant)? {
-            let teammate = task.pool.is_some()
-                && self
-                    .seams
-                    .ledger
-                    .borrow()
-                    .candidates(project.id, task.number)?
-                    .iter()
-                    .any(|member| {
-                        member.member.id != owner.id && self.why_not_free(member).is_none()
-                    });
-            if soon || !teammate {
-                self.seams.ledger.borrow_mut().hold_task(
-                    project.id,
-                    task.number,
-                    until,
-                    "out of quota",
-                )?;
-                self.seams.ledger.borrow_mut().note_hold(
-                    project.id,
-                    &task.requester,
-                    task.number,
-                    &participant.handle,
-                    until,
-                )?;
-            } else {
-                self.seams.ledger.borrow_mut().release_task(
-                    project.id,
-                    task.number,
-                    "ran out of quota after starting",
-                )?;
-            }
+            self.seams.ledger.borrow_mut().hold_task(
+                project.id,
+                task.number,
+                until,
+                "out of quota",
+            )?;
+            self.seams.ledger.borrow_mut().note_hold(
+                project.id,
+                &task.requester,
+                task.number,
+                &participant.handle,
+                until,
+            )?;
         }
         Ok(())
     }

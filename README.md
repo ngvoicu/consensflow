@@ -33,8 +33,9 @@ and needs no API keys.
   so a plan of many tasks runs in its own order, in parallel where it can.
 - **Pause, resume and tell.** Stop any task and keep its window and work, or
   send an urgent word into a window mid-task.
-- **Quota-aware.** When an agent runs out of quota, its task waits for the
-  reset or goes to another member of the same tier.
+- **Quota-aware.** When an agent runs out of quota, its task waits in its
+  window, with its work, and goes on there at the reset or when you say the
+  agent is back.
 - **Your approval, if you want it.** Turn on human approval for a project,
   and every message between agents waits for you to pass it on.
 - **Switch the chief anytime.** Move the chief to another agent or harness.

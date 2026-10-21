@@ -38,6 +38,8 @@ mod a_command_that_never_exits_held_a_workers_result;
 mod a_compact_typed_into_an_idle_chief_held_a_workers_result;
 #[path = "regressions/a_pause_a_hung_worker_ignored_stranded_its_task.rs"]
 mod a_pause_a_hung_worker_ignored_stranded_its_task;
+#[path = "regressions/a_quota_wait_ended_failed.rs"]
+mod a_quota_wait_ended_failed;
 #[path = "regressions/a_result_delivered_twice_to_a_devin_chief.rs"]
 mod a_result_delivered_twice_to_a_devin_chief;
 #[path = "regressions/a_result_pasted_again_after_its_window_went.rs"]

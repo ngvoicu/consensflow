@@ -1006,7 +1006,7 @@ impl Dispatcher {
         self.record_quota(record, &owner, observed.quota.clone());
         if self.refused_here(record, &owner) {
             return self
-                .out_of_quota(project, participant, record, &owner)
+                .out_of_quota(project, participant, record, &owner, &observed)
                 .await;
         }
         let mut out = self.is_out(&owner);
@@ -1182,14 +1182,16 @@ impl Dispatcher {
     }
 
     /// A window whose harness just refused it: its member is out until the
-    /// reset; what the window was receiving is queued again, its work goes
-    /// back to the board or waits with it.
+    /// reset; what the window was receiving arrived if its record shows it
+    /// (the refusal answered it), else it is queued again with its attempt,
+    /// and its work waits with it.
     async fn out_of_quota(
         self: &Rc<Self>,
         project: &ProjectView,
         participant: &ParticipantView,
         record: &Rc<Record>,
         owner: &ParticipantView,
+        observed: &Observed,
     ) -> Result<(), EngineError> {
         self.handled(record);
         let reported = record.quota.borrow().reported.clone();
@@ -1204,11 +1206,12 @@ impl Dispatcher {
             record,
             Activity::because(ActivityState::Out, format!("out of quota until {until}")),
         )?;
+        self.confirm_arrival(record, observed)?;
         let delivering = record.delivery.borrow_mut().delivering.take();
         if let Some(delivering) = delivering {
-            self.settle_failure(delivering, "the harness ran out of quota", true)?;
+            self.give_back(delivering, "the harness ran out of quota")?;
         }
-        self.hold_or_release(project, participant, owner, &until)?;
+        self.hold_work(project, participant, &until)?;
         if participant.role != "chief" {
             self.close_if_free(record).await?;
         }

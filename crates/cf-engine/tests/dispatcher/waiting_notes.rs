@@ -85,13 +85,14 @@ fn withdraws_the_note_that_says_a_task_was_taken_back_when_another_member_takes_
         ("working", Some("zeus-amber-pine"))
     );
 
-    // The chief is in the middle of a turn when zeus runs out of quota, its
-    // reset far enough that diana, who is free, takes the task.
+    // The chief is in the middle of a turn when the human gives the task back
+    // to the board, and diana, who is free, takes it.
     context.adapter.busy("chief");
     context
-        .adapter
-        .quota("zeus", Some(exhausted(None, Some(&soon(&context, 2)))));
-    context.pass().unwrap();
+        .ledger
+        .borrow_mut()
+        .release_task(1, 1, "by @human")
+        .unwrap();
     let notes = notes_saying(&context, &tiers, "was taken back");
     assert_eq!(
         notes.len(),
@@ -134,10 +135,20 @@ fn leaves_the_note_that_says_a_task_was_taken_back_once_its_reader_has_been_give
     tiers.open();
     context.pass().unwrap();
     context.pass().unwrap();
+    // Nobody is free when the human gives the task back to the board.
+    for member in ["zeus", "diana"] {
+        let id = tiers.id(member);
+        context
+            .ledger
+            .borrow_mut()
+            .mark_out(id, &soon(&context, 2), "out of quota")
+            .unwrap();
+    }
     context
-        .adapter
-        .quota("zeus", Some(exhausted(None, Some(&soon(&context, 2)))));
-    context.pass().unwrap();
+        .ledger
+        .borrow_mut()
+        .release_task(1, 1, "by @human")
+        .unwrap();
     let notes = notes_saying(&context, &tiers, "was taken back");
     assert_eq!(notes.len(), 1);
 
@@ -150,6 +161,8 @@ fn leaves_the_note_that_says_a_task_was_taken_back_once_its_reader_has_been_give
         "delivered",
         "the chief was given it"
     );
+    context.back_from_quota(tiers.project.id, "diana").unwrap();
+    context.pass().unwrap();
     assert_eq!(
         tiers.task(1).task.assignee.as_deref(),
         Some("diana-brisk-birch")
