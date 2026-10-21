@@ -20,17 +20,19 @@
 //! | `specmint` | `kind`, `variant`, `env`: where the harness has the Specmint variant installed for its user (the adapter's own look, in the places the harness reads), with a home that is the one `env` names | `{installed, skill}`: whether the harness has it, and the file of its `SKILL.md` (where ConsensFlow's own copy would be written, for a launch of a made-up id, where it has none) |
 //! | `devin_launch` | `launch` (a lowercase uuid), `role`, `directory`, `resume`, `message`, `agent` (`model`, `effort`), `instructions` (the role's text), `cf` (the `cf` its session hook runs), `env`: a Devin window as the adapter prepares it for that role | `{command, args, env, dropEnv, session}` as `start` answers, the command being the program the adapter found: its `--config` (the owner's, with ConsensFlow's hooks) and the launch's files are written under the ConsensFlow home `env` names, and Devin is asked its version, as it is at every launch |
 //! | `devin_ready` | `wire`: the wire log of a Devin window's launch | `{shown, mode, command}`: what the daemon's readiness reads of it (the conversation the window shows, the permission mode it is in) and the command the window is given before it is ready for work (`/bypass` where the wire says the normal mode), or null |
+//! | `devin_took` | `wire`, `pasted`: the wire log of a Devin window's launch, and the text the window was given as it was pasted | `{took, prompts}`: whether the TUI put that text to its agent, as the engine asks the window after a paste (a prompt of the conversation shown whose text begins with it whole), and how many prompts of the conversation shown the log holds |
 //! | `devin_readiness` | `wire`, `session`, `pane` (`id`, `generation`), `withinMs`, `everyMs`: a Devin window that is open, asked whether it is ready as the engine asks it, until it is ready or unfit or the time is up; the pane host it asks is the asker's, a request a line of the output and its answer a line of the input (`readiness`) | `{answers, ready}`: what the looks answered, in order (`ready`, `held: …`, `unfit: …`, one that came again in a row said once), and whether the last was ready |
 //! | `devin_hooks` | `cf`, `member`: the hooks ConsensFlow adds to the owner's in a Devin launch (a member's, or the chief's), its session hook run by `cf` | `{event: [entry]}`: each event with the entries added, as the launch's config has them written |
 //!
-//! The last seven are the evals' and the live tests' own: the program a window
+//! The last eight are the evals' and the live tests' own: the program a window
 //! opens on, which the daemon asks `cf_process::pane_argv` for, the
 //! conversation a window of a harness that names its own opened, which only
 //! its store says, the Specmint skill a chief's window is given, which the
 //! live test of specs names the copy it was given by, the Devin window a
 //! member is given, whole, which `start` leaves bare (no config, no hooks, no
-//! first message), and what the daemon's readiness makes of that window's
-//! permission mode, read and then done.
+//! first message), what the daemon's readiness makes of that window's
+//! permission mode, read and then done, and whether its TUI put a paste to its
+//! agent, as the engine reads it after the paste.
 
 mod launch;
 mod readiness;
@@ -67,10 +69,11 @@ pub fn answer(question: &Value) -> Result<Value, String> {
         "specmint" => specmint(question),
         "devin_launch" => launch::devin_launch(question),
         "devin_ready" => launch::devin_ready(question),
+        "devin_took" => launch::devin_took(question),
         "devin_readiness" => readiness::devin_readiness(question),
         "devin_hooks" => launch::devin_hooks(question),
         other => Err(format!(
-            "the question asks for {other}, which is none of records, start, window_text, console_text, claude_settings, interrupt, program, newest_session, specmint, devin_launch, devin_ready, devin_readiness and devin_hooks"
+            "the question asks for {other}, which is none of records, start, window_text, console_text, claude_settings, interrupt, program, newest_session, specmint, devin_launch, devin_ready, devin_took, devin_readiness and devin_hooks"
         )),
     }
 }

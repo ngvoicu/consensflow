@@ -29,6 +29,7 @@ use cf_base::env::Env;
 use crate::shared::record::cache::{Look, Options};
 use crate::shared::record::key::Keys;
 use crate::shared::record::reading::Reading;
+pub(super) use chain::parts_text;
 use store::Store;
 pub(crate) use store::MISSING_SESSION;
 use wires::Wires;

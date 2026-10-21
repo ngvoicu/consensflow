@@ -11,19 +11,24 @@
 //! (`session/prompt`, with the conversation in its params) before the agent has
 //! said a word of it: it is asked until the agent ends a turn (`cause`) or answers
 //! its request, or the window shows another conversation. And the message last
-//! pasted, whose first line the log is told to expect ([`WireLog::expect`]), is held
+//! pasted, which the log is told to expect ([`WireLog::expect`]), is held
 //! in a turn for as long as a prompt is asked, however long its agent says nothing:
 //! one pasted while a prompt was asked went into that turn, and Devin runs what it is
 //! handed in a turn when the turn ends. So did one that a prompt of other words was
 //! put to the agent ahead of, read after the paste and before the TUI put the message
 //! to it, while no turn had ended since the paste: that turn began while the window
 //! was found ready, or as the message was handed over. And one the TUI put to its
-//! agent in a prompt of its own, whose words begin with the paste's line as the paste
-//! does, is in the turn that prompt began. Its record shows it once that turn ends,
-//! and the message is held no longer: words that quote its line elsewhere are no paste
-//! of it, and a turn begun after the one the paste went into is none it waits behind
-//! (the reviews of 2026-10-16: a paste Devin dropped was held in every turn the human
-//! began after it, and never went again).
+//! agent in a prompt of its own, of the conversation shown, whose text (its parts
+//! joined as Devin's record joins them) begins with the whole paste, is in the turn that
+//! prompt began. Its record shows it once that turn ends, and the message is held no
+//! longer: words that quote it elsewhere, a later part of a prompt, a request that is
+//! no prompt, a prompt of another conversation, are no paste of it (the reviews of
+//! 2026-10-18: any text of any request that began with the paste's first line was
+//! taken for it, and a paste Devin dropped was waited for for good), and a turn begun
+//! after the one the paste went into is none it waits behind (the reviews of
+//! 2026-10-16: a paste Devin dropped was held in every turn the human began after it,
+//! and never went again). A turn that held it and ended is said once, to the next look
+//! that asks ([`WireLog::released`]), whether or not a look saw it begin.
 //!
 //! Kept from Node on purpose:
 //! - where V8 threw (a line that is JSON `null`, or a configuration that is
@@ -48,6 +53,7 @@ use jiff::tz::TimeZone;
 use regex::Regex;
 use serde_json::Value;
 
+use super::record::parts_text;
 use super::wire::{mode_in, shown_in};
 use crate::shared::pattern::compile;
 use crate::shared::quota::{exhausted_quota, Quota};
@@ -77,8 +83,8 @@ pub(super) struct Said {
     pub(super) mode: Option<String>,
     /// Devin's word on its quota, shared with every look that finds it.
     pub(super) quota: Option<Arc<Quota>>,
-    /// The TUI put the message last pasted to its agent, in a prompt whose words begin
-    /// with the paste's line: the agent has it, and its record shows it once the turn
+    /// The TUI put the message last pasted to its agent, in a prompt whose text begins
+    /// with the whole paste: the agent has it, and its record shows it once the turn
     /// that prompt began has run, whatever came of it.
     pub(super) sent: bool,
     /// The message last pasted is in a turn, and a prompt is asked still: it went
@@ -123,7 +129,7 @@ struct State {
     shown: Option<String>,
     mode: Option<String>,
     quota: Option<Arc<Quota>>,
-    /// The first line of the message last pasted, which the TUI's words are read for.
+    /// The message last pasted, as it was pasted, which the TUI's prompts are read for.
     expected: Option<String>,
     /// The TUI put the message last pasted to its agent.
     sent: bool,
@@ -133,6 +139,9 @@ struct State {
     /// A turn ended since the message last pasted: a prompt of other words read
     /// after it began after the TUI had the message, and is no turn it went into.
     turn_ended: bool,
+    /// A turn the message last pasted went into ended since a look last asked
+    /// ([`WireLog::released`]).
+    released: bool,
     /// The prompts of the shown conversation that no turn's end or answer closed.
     asked: Vec<Asked>,
     /// How many prompts of the shown conversation have been read.
@@ -160,19 +169,28 @@ impl WireLog {
         &self.file
     }
 
-    /// The message about to be pasted begins with `text` (its first line, which
-    /// holds its id): a prompt of the TUI's whose words begin with it, read from now
-    /// on, is the message put to the agent. And it goes into a turn where a prompt
+    /// The message about to be pasted is `text`, as it is pasted: a prompt of the TUI's
+    /// whose text begins with it whole, read from now on, is the message put to the
+    /// agent. And it goes into a turn where a prompt
     /// was asked as the last look read the log: the turn that prompt began is at
     /// work, its agent silent as it may be (a Devin resumed after a cut sat at
     /// "Thinking" for minutes, 3000.11.92 on 2026-10-15). A prompt the next look
     /// reads may show it went into one all the same (`put_to_the_agent`).
     pub(super) fn expect(&self, text: &str) {
         let mut state = self.state.borrow_mut();
-        state.expected = Some(text.to_owned()).filter(|text| !text.is_empty());
+        state.expected = Some(js::trim(text).to_owned()).filter(|text| !text.is_empty());
         state.sent = false;
         state.into_a_turn = !state.asked.is_empty();
         state.turn_ended = false;
+        state.released = false;
+    }
+
+    /// Whether a turn the message last pasted went into ended since the last time this
+    /// was asked, by what the looks have read of the log: a turn that held it, and that
+    /// no look may have found holding it, begun and over between two looks. Each look
+    /// asks once, after its read.
+    pub(super) fn released(&self) -> bool {
+        std::mem::take(&mut self.state.borrow_mut().released)
     }
 
     /// What the log says now, read from where the last look stopped: a log
@@ -322,6 +340,7 @@ impl State {
         }
         // The turn the message last pasted went into is over once no prompt is asked.
         if self.asked.is_empty() {
+            self.released |= self.into_a_turn;
             self.into_a_turn = false;
             self.turn_ended |= asking;
         }
@@ -348,9 +367,9 @@ impl State {
         Ok(())
     }
 
-    /// A request of the TUI to its agent, read at `at_ms`: one whose words are the
-    /// paste expected is the message put to the agent, and a prompt of the shown
-    /// conversation is a turn begun. The message is in the turn its own prompt begins,
+    /// A request of the TUI to its agent, read at `at_ms`: a prompt of the shown
+    /// conversation is a turn begun, and one whose text begins with the whole paste
+    /// expected is the message put to the agent. The message is in the turn its own prompt begins,
     /// for as long as that is asked. A prompt of other words, read after the message
     /// last pasted and before any request of the TUI held it or any turn ended, began
     /// before the TUI had the message, which it queued behind that turn: the message
@@ -364,18 +383,17 @@ impl State {
     /// reviews of 2026-10-16: the human's words that quoted a header Devin had dropped
     /// were taken for its paste, and the message was waited for for good).
     fn put_to_the_agent(&mut self, method: &str, request: &Value, at_ms: i64) {
-        let pasted = self
-            .expected
-            .as_deref()
-            .is_some_and(|text| begins_with(request, text));
-        if pasted {
-            self.sent = true;
-        }
-        let session = request
-            .get("params")
+        let params = request.get("params");
+        let session = params
             .and_then(|params| params.get("sessionId"))
             .and_then(Value::as_str);
         if method == "session/prompt" && session.is_some() && session == self.shown.as_deref() {
+            let pasted = self.expected.as_deref().is_some_and(|text| {
+                prompt_text(params).is_some_and(|words| words.trim_start().starts_with(text))
+            });
+            if pasted {
+                self.sent = true;
+            }
             if self.expected.is_some() && (pasted || (!self.sent && !self.turn_ended)) {
                 self.into_a_turn = true;
             }
@@ -402,17 +420,15 @@ impl State {
     }
 }
 
-/// Whether a text in `value` begins with `text`, the first line of the paste, as the
-/// paste does: what the engine takes for a paste in a record (`is_paste_of`), its
-/// header first. A launch's first message goes in the prompt file, and is never told
-/// to the log.
-fn begins_with(value: &Value, text: &str) -> bool {
-    match value {
-        Value::String(words) => words.trim_start().starts_with(text),
-        Value::Array(items) => items.iter().any(|item| begins_with(item, text)),
-        Value::Object(fields) => fields.values().any(|field| begins_with(field, text)),
-        _ => false,
-    }
+/// The text of a prompt's `params`: its parts of text, joined as Devin's record joins
+/// a message's ([`parts_text`]), with a window's line ends. None where it holds no list
+/// of parts, or one that record would not read. A launch's first message goes in the
+/// prompt file, and is never told to the log.
+fn prompt_text(params: Option<&Value>) -> Option<String> {
+    let parts = params?.get("prompt")?.as_array()?;
+    parts_text(parts)
+        .ok()
+        .map(|text| text.replace("\r\n", "\n"))
 }
 
 /// Whether a JSON-RPC error refuses the prompt for the quota: by its code,

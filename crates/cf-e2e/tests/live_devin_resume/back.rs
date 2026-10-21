@@ -9,7 +9,9 @@
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
+use cf_e2e::devin_store::Message;
 use cf_e2e::live::ask;
+use cf_e2e::live::ask::Record;
 use cf_e2e::live::members::Account;
 use cf_e2e::live::window::READY;
 use cf_e2e::live::{secs, until};
@@ -182,15 +184,13 @@ fn opening(case: Case, scene: &mut Scene, again: &mut Again, said: &mut Account)
                 .as_deref()
                 .unwrap_or("nowhere")
         ));
-        let products = case.opening == Opening::Note;
-        if let Some(fault) = stored_fault(&messages, &header).filter(|_| turn.arrived && products) {
-            said.fail(fault);
-        }
-        if turn.arrived && products && !read_header_first(window.record().as_ref(), &header) {
-            said.fail(format!(
-                "the daemon's reader has the note behind other words: {}",
-                tail(window.record().as_ref(), 4)
-            ));
+        if case.opening == Opening::Note {
+            let within = scene.life.cap(STORED);
+            for fault in note_faults(turn.arrived, &messages, &header, within, LOOK, || {
+                window.record()
+            }) {
+                said.fail(fault);
+            }
         }
     }
     let record = window.record();
@@ -206,6 +206,40 @@ fn opening(case: Case, scene: &mut Scene, again: &mut Again, said: &mut Account)
         scene.watch.modes.since(0)
     ));
     Ok(())
+}
+
+/// What fails a case whose first message is the product's own (the note, in its prompt
+/// file): how Devin stored it among `messages`, whether or not the wait for its turn saw
+/// it arrive (`arrived`), and, where it arrived or Devin stored it, how the daemon's
+/// reader has it, by `read`, read every `step` within `within` while it reads no record.
+/// The wait's last read of the record, and the reader's, meet the lock Devin's writer
+/// holds on its store at times, and read as none: a lock at the wait's end skipped the
+/// store's check, and a note kept behind `/bypass` passed (both reviewers of
+/// 2026-10-18); and a lock on the one read of the reader failed a case Devin stored
+/// right (Astra, the same day).
+pub fn note_faults(
+    arrived: bool,
+    messages: &[Message],
+    header: &str,
+    within: Duration,
+    step: Duration,
+    mut read: impl FnMut() -> Option<Record>,
+) -> Vec<String> {
+    let mut faults: Vec<String> = stored_fault(messages, header).into_iter().collect();
+    if arrived || stored_shape(messages, header).is_some() {
+        match until(within, step, &mut read) {
+            Some(record) if read_header_first(Some(&record), header) => {}
+            Some(record) => faults.push(format!(
+                "the daemon's reader has the note behind other words: {}",
+                tail(Some(&record), 4)
+            )),
+            None => faults.push(format!(
+                "the daemon's reader read no record of the note in {} s",
+                secs(within)
+            )),
+        }
+    }
+    faults
 }
 
 /// The window is left alone for [`WATCH`], to be seen doing what it does by itself: a run
@@ -448,5 +482,104 @@ mod tests {
         assert_eq!(STILL, secs(5));
         // A whole run of the command, and the rest of its turn, fit in the wait for rest.
         assert_eq!(REST, secs(LONG.seconds() + 60));
+    }
+
+    const HEADER: &str = "[ConsensFlow m-2 ";
+    const NOTE: &str = "[ConsensFlow m-2 · T-1 · note from ConsensFlow]\nGo on where you stopped.";
+
+    fn stored(text: &str) -> Message {
+        Message {
+            id: "u-1".to_owned(),
+            role: "user".to_owned(),
+            text: text.to_owned(),
+            raw: serde_json::Value::Null,
+        }
+    }
+
+    fn read(text: &str) -> Record {
+        Record {
+            items: vec![cf_e2e::live::ask::Item {
+                id: String::new(),
+                role: "user".to_owned(),
+                text: text.to_owned(),
+                complete: true,
+            }],
+            settled: true,
+            settlement: "settled".to_owned(),
+            failed: serde_json::Value::Null,
+            quota: serde_json::Value::Null,
+        }
+    }
+
+    /// Faults of the note as the case finds them, with the reader read by `read`.
+    fn faults(
+        arrived: bool,
+        messages: &[Message],
+        read: impl FnMut() -> Option<Record>,
+    ) -> Vec<String> {
+        note_faults(
+            arrived,
+            messages,
+            HEADER,
+            Duration::from_millis(200),
+            Duration::ZERO,
+            read,
+        )
+    }
+
+    /// Both reviewers of 2026-10-18: the store was asked only where the wait for the
+    /// note's turn saw it arrive, so a lock on the record at that wait's last read skipped
+    /// it, and a note stored with /bypass kept passed.
+    #[test]
+    fn how_devin_stored_the_note_is_asked_whether_or_not_the_wait_for_its_turn_saw_it_arrive() {
+        let kept = [stored(&format!("/bypass {NOTE}"))];
+        for arrived in [true, false] {
+            let found = faults(arrived, &kept, || Some(read(NOTE)));
+            assert!(
+                found
+                    .iter()
+                    .any(|fault| fault.contains("with /bypass kept")),
+                "arrived {arrived}: {found:?}"
+            );
+        }
+        // Stored with its header first, and the reader has it so: nothing fails.
+        assert_eq!(
+            faults(false, &[stored(NOTE)], || Some(read(NOTE))),
+            Vec::<String>::new()
+        );
+        // Stored nowhere: that fails, as it says.
+        let nowhere = faults(false, &[], || None);
+        assert!(nowhere
+            .iter()
+            .any(|fault| fault.contains("Devin's store has the note nowhere")));
+    }
+
+    /// Astra, 2026-10-18: the reader was read once after the store, and a record its
+    /// store's writer held locked read as none, which failed the case.
+    #[test]
+    fn the_daemons_reader_is_read_again_while_the_record_cannot_be_read_and_judged_once_it_is() {
+        let locked = std::cell::Cell::new(2);
+        let found = faults(true, &[stored(NOTE)], || {
+            if locked.get() > 0 {
+                locked.set(locked.get() - 1);
+                return None;
+            }
+            Some(read(NOTE))
+        });
+        assert_eq!(found, Vec::<String>::new(), "read again past the lock");
+        assert_eq!(locked.get(), 0);
+        // Once it is read, it is judged: a reader that has the note behind other words fails.
+        let reads = std::cell::Cell::new(0);
+        let behind = faults(true, &[stored(NOTE)], || {
+            reads.set(reads.get() + 1);
+            Some(read(&format!("Look: {NOTE}")))
+        });
+        assert_eq!(reads.get(), 1, "read once it can be");
+        assert!(behind
+            .iter()
+            .any(|fault| fault.contains("behind other words")));
+        // A record never read in the time is said so.
+        let never = faults(true, &[stored(NOTE)], || None);
+        assert_eq!(never.len(), 1, "{never:?}");
     }
 }

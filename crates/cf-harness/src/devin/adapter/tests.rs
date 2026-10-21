@@ -26,6 +26,7 @@ fn window(fakes: &Fakes, wire: &Path, session: Option<&str>) -> Rc<DevinWindow> 
         discover_for_ms: MINUTE_MS,
         switch: Cell::default(),
         looked: Cell::default(),
+        released: Cell::default(),
     })
 }
 
@@ -228,6 +229,7 @@ fn a_look_takes_the_wires_word_on_the_quota_never_the_records_and_the_rest_from_
         discover_for_ms: MINUTE_MS,
         switch: Cell::default(),
         looked: Cell::default(),
+        released: Cell::default(),
     });
     let observed = finished(window.observe()).unwrap();
     assert_eq!(observed.quota, None, "the log says nothing of the quota");
@@ -266,6 +268,7 @@ fn window_reading(fakes: &Fakes, wire: &Path, env: Env, record: Record) -> Rc<De
         discover_for_ms: MINUTE_MS,
         switch: Cell::default(),
         looked: Cell::default(),
+        released: Cell::default(),
     })
 }
 
@@ -515,7 +518,7 @@ fn a_message_pasted_as_a_prompt_begins_while_it_is_handed_over_is_held_in_its_tu
 }
 
 #[test]
-fn on_windows_a_message_is_told_by_its_first_line_as_the_console_carries_it_to_devin() {
+fn on_windows_a_message_is_told_as_the_console_carries_it_to_devin() {
     let dir = tempfile::tempdir().unwrap();
     let wire = dir.path().join("wire.jsonl");
     fs::write(&wire, shows("mild-coin")).unwrap();
@@ -549,4 +552,96 @@ fn on_windows_a_message_is_told_by_its_first_line_as_the_console_carries_it_to_d
     // The TUI put it to its agent: a prompt after it is no turn it waits behind.
     append(&wire, &asks("mild-coin", "and now?"));
     assert!(!window.held());
+}
+
+/// The reviews of 2026-10-18: the TUI's prompt of the paste's first line with other
+/// words after it was taken for the paste. The window tells the wire the whole paste.
+#[test]
+fn the_agent_has_a_paste_only_once_a_prompt_of_the_tui_begins_with_the_whole_of_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let wire = dir.path().join("wire.jsonl");
+    fs::write(&wire, shows("mild-coin")).unwrap();
+    let fakes = Fakes::new(&Env::default());
+    let window = window_at_rest(&fakes, &wire, Env::default());
+    let host = crate::testing::AnsweringHost::new(|_| Ok(serde_json::json!({ "ok": true })));
+    let pane = Pane {
+        id: "s1-zeus".to_owned(),
+        generation: 2,
+    };
+    let text = "[ConsensFlow m-9 · T-1 · result from @worker]\nRESULT_ONE";
+    assert!(finished(window.deliver(&host, &pane, text)).is_ok());
+    let pasted = if Env::default().on_windows() {
+        console_text(&window_text(text))
+    } else {
+        text.to_owned()
+    };
+    let line = pasted.lines().next().unwrap();
+    append(
+        &wire,
+        &asks("mild-coin", &format!("{line}\nnot what was pasted")),
+    );
+    append(&wire, turn_ends());
+    assert!(!window.took(), "its first line, and other words");
+    append(&wire, &asks("mild-coin", &pasted));
+    assert!(window.took());
+}
+
+/// The reviews of 2026-10-18: a turn the human began as the paste was handed over, and
+/// that ended before any look read the wire, held the paste; the look after says so.
+#[test]
+fn a_look_says_a_turn_that_held_the_paste_ended_since_the_look_before_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let wire = dir.path().join("wire.jsonl");
+    fs::write(&wire, shows("mild-coin")).unwrap();
+    let fakes = Fakes::new(&Env::default());
+    let window = window_at_rest(&fakes, &wire, Env::default());
+    let human = std::cell::Cell::new(false);
+    let host = crate::testing::AnsweringHost::new(|op| {
+        if op == "pane.write_paste" && !human.replace(true) {
+            append(&wire, &asks("mild-coin", "a message of the human's"));
+        }
+        Ok(serde_json::json!({ "ok": true }))
+    });
+    let pane = Pane {
+        id: "s1-zeus".to_owned(),
+        generation: 2,
+    };
+    assert!(finished(window.observe()).unwrap().settled);
+    assert!(!window.released(), "nothing pasted");
+    let text = "[ConsensFlow m-9 · T-1 · result from @worker]\nRESULT_ONE";
+    assert!(finished(window.deliver(&host, &pane, text)).is_ok());
+    assert!(human.get(), "the prompt began as the paste was handed over");
+    // Its turn ends before the next look, which comes half an hour on.
+    append(&wire, turn_ends());
+    fakes.time.settle_at(EPOCH_MS + 31 * MINUTE_MS);
+    assert!(finished(window.observe()).unwrap().settled);
+    assert!(!window.held());
+    assert!(window.released(), "the look that read its end");
+    assert!(window.released(), "as long as that look is the last");
+    assert!(finished(window.observe()).unwrap().settled);
+    assert!(!window.released(), "the look after it");
+}
+
+/// What the live tests ask of a window they pasted into themselves: the wire's word that
+/// the TUI put the paste to its agent, by the same rule the engine reads it by.
+#[test]
+fn the_live_tests_read_a_paste_taken_from_the_wire_as_the_engine_does() {
+    let dir = tempfile::tempdir().unwrap();
+    let wire = dir.path().join("wire.jsonl");
+    let pasted = "[ConsensFlow m-9 · T-1 · note from @chief]\nRun this.";
+    fs::write(&wire, shows("mild-coin")).unwrap();
+    append(
+        &wire,
+        &asks(
+            "mild-coin",
+            "[ConsensFlow m-9 · T-1 · note from @chief]\nother words",
+        ),
+    );
+    assert_eq!(super::wire_took(&wire, pasted).unwrap(), (false, 1));
+    append(&wire, &asks("mild-coin", pasted));
+    assert_eq!(super::wire_took(&wire, pasted).unwrap(), (true, 2));
+    assert_eq!(
+        super::wire_took(&dir.path().join("none.jsonl"), pasted).unwrap(),
+        (false, 0)
+    );
 }

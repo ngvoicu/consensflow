@@ -165,6 +165,7 @@ impl Dispatcher {
             queued: false,
             free_since: None,
             entered_again: false,
+            session: None,
         };
         if participant.role == "chief" {
             let closed = match &pane {

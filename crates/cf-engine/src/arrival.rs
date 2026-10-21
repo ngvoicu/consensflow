@@ -15,11 +15,19 @@
 //!   held from then, whenever the next look comes.
 //! - **Free.** Otherwise the paste's time runs from when it was last found free:
 //!   the hand-over, where the harness did not hold it then, else the first look that
-//!   found it held no longer. It is pasted again once the record has had a whole
+//!   found it held no longer, or that the harness says a turn which held it ended
+//!   before (`Window::released`: one no look found, begun as the paste went in and
+//!   over by the next look, however late that came). It is pasted again once the record has had a whole
 //!   arrival window of the window's rest since then (a look that finds the window in
 //!   a turn starts that again: the turn may hold what it was given), or at the
 //!   window's first rest past [`RECONCILE_MS`] since then, however turns cut its
 //!   rest, so no turns hold the queue behind it for good.
+//! - **Left.** A paste whose window the human switched to another conversation
+//!   (`/new`, `/resume`, `/clear`) before its record showed it went into the one left
+//!   (`Delivering::session`): that record, read with no window open, confirms it, or
+//!   gives it back to its queue, with its attempt, once it has read at rest without it
+//!   for a whole arrival window. The harness's word on its queue was that
+//!   conversation's.
 //!
 //! So a paste the window did not drop goes once: a turn that holds it ends, Devin
 //! runs it within seconds, and the first look after reads its prompt (taken), before
@@ -38,12 +46,10 @@
 //! a Devin that waited longer, or a shorter arrival window, could see it pasted again
 //! before its prompt is read. A harness's word that its queue has the message is not
 //! withdrawn: one that then loses it leaves the message waited for until the window
-//! closes. A paste held in a turn that never ends waits with it, and the window's
-//! queue behind it, until the human stops the turn or closes the window. A turn that
-//! begins between the window's readiness and the paste is not known to hold it until
-//! a look reads its prompt; were it to end before the next look, and that look come a
-//! whole arrival window after the hand-over and within seconds of its end, the paste
-//! would go again while Devin had it queued. The one Enter is pressed whatever the
+//! closes, and one left in a conversation whose record reads a turn at work for good
+//! (one the switch cut, as the harness writes it) waits with it. A paste held in a
+//! turn that never ends waits with it, and the window's
+//! queue behind it, until the human stops the turn or closes the window. The one Enter is pressed whatever the
 //! window shows (a quiet dialog may take it), and the screen is looked at apart from
 //! the press, so a human's typing in between can meet it.
 //!
@@ -54,10 +60,11 @@ use std::rc::Rc;
 
 use cf_base::js;
 use cf_harness::contract::Observed;
-use cf_harness::records::Role;
+use cf_harness::records::{Reading, Role, Settlement};
 use cf_proto::trace::WindowEvent;
 use serde_json::{json, Value};
 
+use crate::deliveries::Delivering;
 use crate::delivery_text::is_paste_of;
 use crate::dispatcher::Dispatcher;
 use crate::record::Record;
@@ -177,6 +184,11 @@ impl Dispatcher {
             closing.await?;
             return Ok(());
         }
+        // The human switched the window away from the conversation it was pasted into:
+        // that conversation's record says what came of it, the queued one's too.
+        if let Some(left) = self.left(record, &delivering)? {
+            return self.watch_left(record, delivering, &left).await;
+        }
         if delivering.queued {
             return Ok(());
         }
@@ -191,7 +203,7 @@ impl Dispatcher {
             rested,
             turned,
             free,
-        } = self.rested(record, observed, self.held(record));
+        } = self.rested(record, observed, self.held(record), self.released(record));
         let at_rest = observed.settled && observed.waiting.is_none();
         let overdue = at_rest && free.is_some_and(|free| now - free > RECONCILE_MS);
         if rested <= self.seams.limits.arrival_ms && !overdue {
@@ -234,6 +246,89 @@ impl Dispatcher {
         self.settle_failure(delivering, &because, true)
     }
 
+    /// The conversation the message on its way was pasted into, where the window is on
+    /// another now (the human ran `/new` or `/resume` in it, or `/clear`).
+    fn left(
+        &self,
+        record: &Record,
+        delivering: &Delivering,
+    ) -> Result<Option<String>, EngineError> {
+        let Some(pasted) = &delivering.session else {
+            return Ok(None);
+        };
+        let now = self
+            .seams
+            .ledger
+            .borrow()
+            .current_conversation(record.id)?
+            .and_then(|conversation| conversation.native_session);
+        Ok(now.filter(|now| now != pasted).map(|_| pasted.clone()))
+    }
+
+    /// The message on its way went into the conversation `left`, which its window
+    /// shows no longer: no look at the window reads its record again, and the harness's
+    /// word of its own queue was of that conversation. Its record, read with no window
+    /// open, confirms it where it shows it; one that has read at rest without it for a
+    /// whole arrival window gives it back to its queue, with its attempt, for the
+    /// conversation the window shows now (the reviews of 2026-10-18: a paste the
+    /// harness had queued was waited for in the new conversation's record, which never
+    /// shows it, and everything behind it waited for good). A record that cannot be
+    /// read, or is at work, is waited for.
+    async fn watch_left(
+        &self,
+        record: &Record,
+        delivering: Delivering,
+        left: &str,
+    ) -> Result<(), EngineError> {
+        let reading = self.record_left(record.id, left).await?;
+        let Some(message) = self.seams.ledger.borrow().message(delivering.message)? else {
+            return Ok(());
+        };
+        if message.state != "delivering" {
+            return Ok(());
+        }
+        let Some(Reading::Known(found)) = reading.as_deref() else {
+            return Ok(());
+        };
+        let arrived = found
+            .items
+            .iter()
+            .find(|item| item.role == Role::User && is_paste_of(&item.text, message.id, None));
+        if let Some(arrived) = arrived {
+            self.confirm_delivered(&message, &json!({ "item": &*arrived.id }))?;
+            record.delivery.borrow_mut().delivering = None;
+            self.changed();
+            return Ok(());
+        }
+        let at_rest = found.settlement == Settlement::Settled
+            || (found.settlement != Settlement::InFlight
+                && found.items.is_empty()
+                && !found.in_flight);
+        let now = self.now();
+        let rested = {
+            let mut part = record.delivery.borrow_mut();
+            let Some(delivering) = part.delivering.as_mut() else {
+                return Ok(());
+            };
+            if at_rest {
+                now - *delivering.rested_since.get_or_insert(now)
+            } else {
+                delivering.rested_since = None;
+                0
+            }
+        };
+        if rested <= self.seams.limits.arrival_ms {
+            return Ok(());
+        }
+        record.delivery.borrow_mut().delivering = None;
+        self.give_back(
+            delivering,
+            "its window was switched to another conversation, whose record never showed it",
+        )?;
+        self.changed();
+        Ok(())
+    }
+
     /// Whether the window's harness says its agent has the message on its way.
     fn took(&self, record: &Record) -> bool {
         self.window_of(record).0.is_some_and(|window| window.took())
@@ -252,6 +347,14 @@ impl Dispatcher {
         self.window_of(record).0.is_some_and(|window| window.held())
     }
 
+    /// Whether the window's harness says a turn that held the message on its way
+    /// ended since the last look.
+    fn released(&self, record: &Record) -> bool {
+        self.window_of(record)
+            .0
+            .is_some_and(|window| window.released())
+    }
+
     /// How long the window has been at rest since the message on its way was
     /// handed over, or since its last turn ended: the time its record has had
     /// to show it. A look that finds the window in a turn starts the count
@@ -259,9 +362,14 @@ impl Dispatcher {
     /// hold it until it runs it, which is the record's wait, not its failure. A
     /// window waiting on a dialog is in its turn still. One whose harness `held` the
     /// message is in the turn it went into, and the paste is not free: its time
-    /// starts again at the first look that finds it held no longer. And whether a
-    /// turn was found since the hand-over.
-    fn rested(&self, record: &Record, observed: &Observed, held: bool) -> Rest {
+    /// starts again at the first look that finds it held no longer, and at one whose
+    /// harness says a turn that held it was `released` since the last look, though no
+    /// look found it held: one that began as the paste went in and ended before the
+    /// next look, however long after the hand-over that came (the reviews of
+    /// 2026-10-18: a look half an hour on found the window at rest and pasted again,
+    /// seconds before Devin ran the paste it had queued). And whether a turn was found
+    /// since the hand-over.
+    fn rested(&self, record: &Record, observed: &Observed, held: bool, released: bool) -> Rest {
         let now = self.now();
         let mut part = record.delivery.borrow_mut();
         let Some(delivering) = part.delivering.as_mut() else {
@@ -275,6 +383,10 @@ impl Dispatcher {
                 turned: true,
                 free: None,
             };
+        }
+        if released {
+            delivering.free_since = Some(now);
+            delivering.rested_since = None;
         }
         let free = Some(*delivering.free_since.get_or_insert(now));
         if observed.settled && observed.waiting.is_none() {

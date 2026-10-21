@@ -44,6 +44,10 @@ pub(crate) struct Delivering {
     pub(crate) queued: bool,
     /// Enter was pressed once more for it.
     pub(crate) entered_again: bool,
+    /// The conversation it was pasted into (its harness's session), where it was
+    /// pasted into an open window's: one the human switched the window away from
+    /// before its record showed it says what came of it (`arrival`).
+    pub(crate) session: Option<String>,
 }
 
 /// The record's delivery part.
@@ -130,6 +134,13 @@ impl Dispatcher {
             self.pay_with_words(record)?;
         }
         let text = delivery_text(&begun.message, &begun.carried);
+        // The conversation the window shows as it is handed over, which the paste goes into.
+        let session = self
+            .seams
+            .ledger
+            .borrow()
+            .current_conversation(record.id)?
+            .and_then(|conversation| conversation.native_session);
         // A turn begins with this message: what the window's tree runs now came before it.
         self.mark_turn(record, &pane).await;
         let outcome = match returning(window.deliver(host, &pane, &text)).await {
@@ -159,6 +170,7 @@ impl Dispatcher {
             // again would only make a duplicate.
             queued: matches!(outcome, Admission::Admitted { queued: true }),
             entered_again: false,
+            session,
         };
         if let Admission::Refused { reason } = &outcome {
             return self.settle_failure(delivering, reason, true);

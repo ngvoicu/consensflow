@@ -439,6 +439,7 @@ impl Dispatcher {
             queued: false,
             free_since: None,
             entered_again: false,
+            session: None,
         });
         // What fails with a launch that does not come up: its first message, or
         // the one that would have been, which the role goes ahead of. A member's

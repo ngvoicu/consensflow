@@ -181,7 +181,7 @@ fn question_call<'a>(message: &'a Value, row: &Row) -> Result<Option<&'a Value>,
 /// (`.filter((part) => part.type === 'text').map((part) => part.text).join('')`):
 /// or why V8 threw, on a part that is null or a text with a `toString` of its
 /// own.
-fn parts_text(parts: &[Value]) -> Result<String, String> {
+pub(in crate::devin) fn parts_text(parts: &[Value]) -> Result<String, String> {
     if parts.iter().any(Value::is_null) {
         return Err("a Devin message's content holds a part that is null".to_owned());
     }

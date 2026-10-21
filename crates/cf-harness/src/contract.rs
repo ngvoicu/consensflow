@@ -292,6 +292,16 @@ pub trait Window {
     fn held(&self) -> bool {
         false
     }
+    /// Whether a turn that held the message last handed to the window (`held`) ended
+    /// since the engine's last look at it: one that began and ended between two looks
+    /// too, which neither look found holding it (a review of 2026-10-18: the human's
+    /// turn began as the paste went in, no look came for half an hour, and it ended a
+    /// moment before the look that woke). The record has had no time to show the message
+    /// before that end, so its wait is counted from the look that finds it. Read once a
+    /// look, after it: the next look says what came since.
+    fn released(&self) -> bool {
+        false
+    }
     /// The engine pressed the interrupt keys into the window, and the host
     /// took them: the turn it shows at work is the one they were for. A
     /// harness whose record says how an interrupted turn ended has no use for

@@ -1001,6 +1001,11 @@ impl Dispatcher {
             if record.delivery.borrow().delivering.is_some() {
                 self.confirm_arrival(record, &observed)?;
             }
+            // What is on its way still went into the conversation left: its rest is that
+            // record's from the next look (`arrival`).
+            if let Some(delivering) = record.delivery.borrow_mut().delivering.as_mut() {
+                delivering.rested_since = None;
+            }
             return self.follow(participant, record, session);
         }
         self.record_quota(record, &owner, observed.quota.clone());

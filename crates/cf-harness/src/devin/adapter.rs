@@ -144,6 +144,19 @@ pub(crate) fn wire_readiness(wire: &std::path::Path) -> Result<WireReadiness, St
     })
 }
 
+/// Whether the wire log `wire` says the TUI put `pasted`, the text a window was given as
+/// it was pasted, to its agent: what the engine asks a window after a paste
+/// (`Window::took`), read from the log's start; and how many prompts of the conversation
+/// it shows the log holds. For the live tests (`tooling`), which paste into Devin's
+/// windows themselves.
+#[cfg(any(test, feature = "test-support"))]
+pub(crate) fn wire_took(wire: &std::path::Path, pasted: &str) -> Result<(bool, u64), String> {
+    let log = WireLog::new(&wire.to_string_lossy(), jiff::tz::TimeZone::UTC);
+    log.expect(pasted);
+    let said = log.read(0)?;
+    Ok((said.sent, said.prompts))
+}
+
 /// The window of a Devin launch that is open, its wire log `wire`, on the conversation
 /// `session`, as the adapter makes one for the daemon (`prepare`). For the live tests
 /// (`tooling`), which open Devin's windows themselves and drive the window's readiness
@@ -348,6 +361,9 @@ struct DevinWindow {
     /// How many prompts of its conversation the wire had read at the engine's last
     /// look at the window (`observe`), which found it at rest or not.
     looked: Cell<Option<u64>>,
+    /// The wire said at the engine's last look that a turn which held the message last
+    /// pasted ended since the look before (`Window::released`).
+    released: Cell<bool>,
 }
 
 impl DevinWindow {
@@ -363,6 +379,7 @@ impl DevinWindow {
             discover_for_ms,
             switch: Cell::default(),
             looked: Cell::default(),
+            released: Cell::default(),
         }
     }
 
@@ -534,10 +551,9 @@ impl Window for DevinWindow {
             } else {
                 window_text(text)
             };
-            // Its first line holds the message's id: the TUI's prompt whose words begin
-            // with it is the message put to the agent (`held`).
-            let first = body.lines().find(|line| !js::trim(line).is_empty());
-            self.wire.expect(first.unwrap_or_default());
+            // The TUI's prompt whose text begins with it whole is the message put to the
+            // agent (`took`, `held`).
+            self.wire.expect(&body);
             let session = self.session.borrow().clone();
             let sent = channel::send(host, pane, self.wire.path(), session.as_deref(), &body).await;
             Ok(admission(&sent, "Devin refused the paste", false))
@@ -560,6 +576,10 @@ impl Window for DevinWindow {
         self.wire
             .read(self.time.wall_ms())
             .is_ok_and(|wire| wire.held)
+    }
+
+    fn released(&self) -> bool {
+        self.released.get()
     }
 
     fn observe(&self) -> Work<'_, Result<Observed, String>> {
@@ -586,6 +606,7 @@ impl Window for DevinWindow {
             .await;
             let wire = wire?;
             self.looked.set(Some(wire.prompts));
+            self.released.set(self.wire.released());
             let mut observed = record_state(reading);
             observed.waiting = dialog_waiting(observed.reading.as_deref());
             observed.quota = wire.quota;

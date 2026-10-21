@@ -60,6 +60,16 @@ pub(super) fn devin_ready(question: &Value) -> Result<Value, String> {
     Ok(json!({ "shown": read.shown, "mode": read.mode, "command": read.command }))
 }
 
+/// Whether the wire log of a Devin window (the question's `wire`) says its TUI put the
+/// text `pasted` to its agent, as the engine asks the window after the paste.
+pub(super) fn devin_took(question: &Value) -> Result<Value, String> {
+    let (took, prompts) = crate::devin::wire_took(
+        Path::new(text(question, "wire")?),
+        text(question, "pasted")?,
+    )?;
+    Ok(json!({ "took": took, "prompts": prompts }))
+}
+
 /// The hooks ConsensFlow adds to the owner's in a Devin launch (`member`: a member's,
 /// whose question tool is answered from the board; else the chief's), its session hook
 /// run by the question's `cf`: each event with the entries added, as the launch's config

@@ -59,11 +59,17 @@ pub struct FakeAgent {
     pub took: bool,
     /// The harness holds the delivery in a turn it is in still (`Window::held`).
     pub held: bool,
+    /// A turn that held the delivery ended since the engine's last look
+    /// (`Window::released`).
+    pub released: bool,
     pub failed: bool,
     /// The conversation the window shows, when the human switched it.
     pub shows: Option<String>,
     /// Each conversation's record, once the window switched away from it.
     pub records: HashMap<String, Vec<Item>>,
+    /// Whether each of those records, read with no window open, reads at rest: as the
+    /// window was when it switched away, unless the test says otherwise.
+    pub records_settled: HashMap<String, bool>,
     /// Why the window has not said which conversation it shows yet.
     pub unnamed: Option<String>,
     /// How often the engine told the window it pressed the interrupt keys.
@@ -416,6 +422,7 @@ impl FakeAdapter {
         self.with(handle, |agent| {
             let shown = agent.shows.clone().unwrap_or_else(|| agent.native.clone());
             let items = std::mem::take(&mut agent.items);
+            agent.records_settled.insert(shown.clone(), agent.settled);
             agent.records.insert(shown, items);
             agent.items = agent.records.get(native).cloned().unwrap_or_default();
             agent.shows = Some(native.to_owned());
@@ -467,7 +474,16 @@ impl FakeAdapter {
             .iter()
             .rev()
             .find(|agent| agent.native == session)
-            .map(|agent| (agent.items.clone(), agent.settled))
+            .map(
+                |agent| match agent.shows.as_ref().filter(|shows| *shows != session) {
+                    // A conversation the window switched away from is its record as it was left.
+                    Some(_) => (
+                        agent.records.get(session).cloned().unwrap_or_default(),
+                        agent.records_settled.get(session).copied().unwrap_or(true),
+                    ),
+                    None => (agent.items.clone(), agent.settled),
+                },
+            )
     }
 
     /// A delivery into `launch`'s window, as the fake takes it.
@@ -567,9 +583,11 @@ impl Asked {
             queued: false,
             took: false,
             held: false,
+            released: false,
             failed: false,
             shows: None,
             records: HashMap::new(),
+            records_settled: HashMap::new(),
             unnamed: None,
             interrupted: 0,
             stops_when_interrupted: false,

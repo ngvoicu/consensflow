@@ -780,3 +780,147 @@ fn pastes_a_note_about_a_task_its_recipient_has_no_task_message_for_alone_and_a_
         assert_eq!(text.matches("[ConsensFlow m-").count(), 1, "{text}");
     }
 }
+
+/// The reviews of 2026-10-18: the human's Enter reached Devin just before the paste, so
+/// the turn it began held the paste though the hand-over could not know it; no look came
+/// for 31 minutes, the turn ended 0.3 s before the look that woke, and that look, finding
+/// the window at rest and nothing held, pasted again 4.7 s before Devin ran the paste it
+/// had queued. The harness's word that a turn which held it ended since the last look
+/// (`Window::released`) starts its time at that look.
+fn released_after_a_sleep(context: &Context) -> (i64, MessageView, Rc<Cell<usize>>) {
+    let project = holding(context);
+    let pasted = counting(context);
+    let note = context.note(project, "zeus", "chief", "hello");
+    context.pass().unwrap();
+    assert_eq!(pasted.get(), 1);
+    context.advance(31 * 60_000);
+    context.adapter.with("chief", |agent| agent.released = true);
+    context.pass().unwrap();
+    assert_eq!(pasted.get(), 1, "not pasted again at the look that wakes");
+    context
+        .adapter
+        .with("chief", |agent| agent.released = false);
+    (project, note, pasted)
+}
+
+#[test]
+fn waits_from_the_look_that_finds_ended_a_turn_that_held_the_paste_however_late_that_look_comes() {
+    let context = Context::new();
+    let (_, note, pasted) = released_after_a_sleep(&context);
+    // Devin runs the paste it queued: its TUI puts it to its agent, and its record shows it.
+    context.advance(5_000);
+    context.adapter.with("chief", |agent| agent.took = true);
+    context.pass().unwrap();
+    context.advance(ARRIVAL_MS);
+    context.pass().unwrap();
+    assert_eq!(pasted.get(), 1, "never pasted again");
+    shows(&context, "chief", &context.message(note.id));
+    context.pass().unwrap();
+    let delivered = context.message(note.id);
+    assert_eq!(
+        (delivered.state.as_str(), delivered.attempts),
+        ("delivered", 1)
+    );
+}
+
+#[test]
+fn pastes_again_a_paste_dropped_behind_a_turn_no_look_saw_after_an_arrival_window_of_rest_from_the_look_that_found_it_ended(
+) {
+    let context = Context::new();
+    let (project, _, pasted) = released_after_a_sleep(&context);
+    context.advance(ARRIVAL_MS - 1_000);
+    context.pass().unwrap();
+    assert_eq!(pasted.get(), 1, "the record's arrival window is not over");
+    context.advance(2_000);
+    context.pass().unwrap();
+    assert_eq!(pasted.get(), 2, "pasted again once it is");
+    assert_eq!(
+        why_retried(&context, project),
+        "the harness record never showed it in the 30 s its window was at rest since its last turn"
+    );
+}
+
+/// The reviews of 2026-10-18: Devin's TUI put the paste to its agent (`Window::took`), and
+/// the human ran `/new` before the record showed it. The window was followed to the new
+/// conversation with the paste still on its way, whose record never shows it, and the
+/// window's queue waited behind it for good. The conversation it went into says what
+/// came of it.
+fn taken_then_switched(context: &Context) -> (i64, MessageView, Rc<Cell<usize>>, String) {
+    let project = holding(context);
+    let pasted = counting(context);
+    let note = context.note(project, "zeus", "chief", "hello");
+    context.pass().unwrap();
+    context.adapter.with("chief", |agent| agent.took = true);
+    context.advance(5_000);
+    context.pass().unwrap();
+    let left = context.adapter.with("chief", |agent| agent.native.clone());
+    context.adapter.switch_to("chief", "native-new");
+    context.advance(1_000);
+    context.pass().unwrap();
+    assert_eq!(pasted.get(), 1);
+    (project, note, pasted, left)
+}
+
+#[test]
+fn gives_back_to_its_queue_a_paste_taken_in_a_conversation_the_human_left_once_its_record_rests_without_it(
+) {
+    let context = Context::new();
+    let (project, note, pasted, _) = taken_then_switched(&context);
+    // The first look on the conversation it shows now reads the one left at rest.
+    context.advance(1_000);
+    context.pass().unwrap();
+    context.advance(ARRIVAL_MS - 1_000);
+    context.pass().unwrap();
+    assert_eq!(
+        pasted.get(),
+        1,
+        "its record has had no arrival window of rest yet"
+    );
+    context.advance(2_000);
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(
+        pasted.get(),
+        2,
+        "pasted into the conversation the window shows now"
+    );
+    assert_eq!(
+        why_retried(&context, project),
+        "its window was switched to another conversation, whose record never showed it"
+    );
+    let again = context.message(note.id);
+    assert_eq!(
+        (again.state.as_str(), again.attempts),
+        ("delivering", 1),
+        "given back with its attempt"
+    );
+}
+
+#[test]
+fn confirms_a_paste_taken_in_a_conversation_the_human_left_when_its_record_shows_it() {
+    let context = Context::new();
+    let (_, note, pasted, left) = taken_then_switched(&context);
+    // The conversation left runs it: its record, at work, shows it, however late.
+    context.adapter.with("chief", |agent| {
+        agent.records_settled.insert(left.clone(), false);
+    });
+    for _ in 0..4 {
+        context.advance(ARRIVAL_MS);
+        context.pass().unwrap();
+    }
+    assert_eq!(pasted.get(), 1, "a record at work is waited for");
+    assert_eq!(context.message(note.id).state, "delivering");
+    let item = context
+        .adapter
+        .item(Role::User, &delivery_text(&context.message(note.id), &[]));
+    context.adapter.with("chief", |agent| {
+        agent.records.entry(left.clone()).or_default().push(item);
+    });
+    context.pass().unwrap();
+    let delivered = context.message(note.id);
+    assert_eq!(
+        (delivered.state.as_str(), delivered.attempts),
+        ("delivered", 1)
+    );
+    assert_eq!(pasted.get(), 1, "never pasted again");
+}

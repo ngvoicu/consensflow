@@ -78,12 +78,12 @@ replace = ""
 
 [[plant.edit]]
 file = "crates/cf-engine/src/arrival.rs"
-find = "        } = self.rested(record, observed, self.held(record));"
+find = "        } = self.rested(record, observed, self.held(record), self.released(record));"
 replace = '''
         } = Rest {
             rested: waited,
             turned: false,
-            ..self.rested(record, observed, self.held(record))
+            ..self.rested(record, observed, self.held(record), self.released(record))
         };'''
 
 [[plant]]
@@ -99,12 +99,12 @@ replace = ""
 
 [[plant.edit]]
 file = "crates/cf-engine/src/arrival.rs"
-find = "        } = self.rested(record, observed, self.held(record));"
+find = "        } = self.rested(record, observed, self.held(record), self.released(record));"
 replace = '''
         } = Rest {
             rested: waited,
             turned: false,
-            ..self.rested(record, observed, self.held(record))
+            ..self.rested(record, observed, self.held(record), self.released(record))
         };'''
 
 [[plant]]
@@ -127,8 +127,8 @@ runs = ["engine-slow-records"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/arrival.rs"
-find = "        } = self.rested(record, observed, self.held(record));"
-replace = "        } = self.rested(record, observed, self.held(record) && false);"
+find = "        } = self.rested(record, observed, self.held(record), self.released(record));"
+replace = "        } = self.rested(record, observed, self.held(record) && false, self.released(record));"
 
 [[plant]]
 name = "results twice: a paste held in a turn is pasted again past half an hour, into the turn that holds it (round 4, the reviews of 2026-10-16)"
@@ -170,8 +170,8 @@ runs = ["engine-slow-records"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/arrival.rs"
-find = "        } = self.rested(record, observed, self.held(record));"
-replace = "        } = self.rested(record, observed, self.held(record) || delivering.free_since != Some(delivering.since));"
+find = "        } = self.rested(record, observed, self.held(record), self.released(record));"
+replace = "        } = self.rested(record, observed, self.held(record) || delivering.free_since != Some(delivering.since), self.released(record));"
 
 [[plant]]
 name = "results twice: round 6's rule put back, once a turn held a paste no half hour is counted, and turns that hold nothing keep it waited for for good (the reviews of 2026-10-16)"
@@ -237,9 +237,11 @@ runs = ["harness-devin"]
 file = "crates/cf-harness/src/devin/wire_log.rs"
 find = '''
         if self.asked.is_empty() {
+            self.released |= self.into_a_turn;
             self.into_a_turn = false;'''
 replace = '''
-        if self.asked.is_empty() {'''
+        if self.asked.is_empty() {
+            self.released |= self.into_a_turn;'''
 
 [[plant]]
 name = "results twice: a paste the TUI put to its agent is held for good, past the turn of its own prompt"
@@ -268,8 +270,8 @@ runs = ["harness-devin"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/devin/wire_log.rs"
-find = "        Value::String(words) => words.trim_start().starts_with(text),"
-replace = "        Value::String(words) => words.contains(text),"
+find = "                prompt_text(params).is_some_and(|words| words.trim_start().starts_with(text))"
+replace = "                prompt_text(params).is_some_and(|words| words.contains(text.lines().next().unwrap_or_default()))"
 
 [[plant]]
 name = "results twice: words that begin with a paste's line after a blank line are its paste"
@@ -278,8 +280,8 @@ runs = ["harness-devin"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/devin/wire_log.rs"
-find = "        Value::String(words) => words.trim_start().starts_with(text),"
-replace = "        Value::String(words) => words.lines().any(|line| line.starts_with(text)),"
+find = "                prompt_text(params).is_some_and(|words| words.trim_start().starts_with(text))"
+replace = '''                prompt_text(params).is_some_and(|words| words.trim_start().starts_with(text) || words.lines().any(|line| line.starts_with(text.lines().next().unwrap_or_default())))'''
 
 [[plant]]
 name = "results twice: round 5's rule put back, the human's words that quote the header of a paste Devin dropped are Devin's word for good that it has the paste, and it never goes again (the reviews of 2026-10-16)"
@@ -289,8 +291,8 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-harness/src/devin/wire_log.rs"
-find = "        Value::String(words) => words.trim_start().starts_with(text),"
-replace = "        Value::String(words) => words.contains(text),"
+find = "                prompt_text(params).is_some_and(|words| words.trim_start().starts_with(text))"
+replace = "                prompt_text(params).is_some_and(|words| words.contains(text.lines().next().unwrap_or_default()))"
 
 [[plant.edit]]
 file = "crates/cf-harness/src/devin/wire_log.rs"
@@ -464,8 +466,8 @@ replace = "        let free = Some(since);"
 
 [[plant.edit]]
 file = "crates/cf-engine/src/arrival.rs"
-find = "        } = self.rested(record, observed, self.held(record));"
-replace = "        } = self.rested(record, observed, self.held(record) || delivering.free_since != Some(delivering.since));"
+find = "        } = self.rested(record, observed, self.held(record), self.released(record));"
+replace = "        } = self.rested(record, observed, self.held(record) || delivering.free_since != Some(delivering.since), self.released(record));"
 
 [[plant]]
 name = "results twice: round 7's rule, the half hour from the last look that found the paste held (no word that the agent has it, none asked at the hand-over)"
@@ -490,6 +492,13 @@ find = '''
 replace = '''
             delivering.free_since = Some(now);
             return Rest {'''
+
+# The word that a turn which held the paste ended (`released`, T-53) keeps the paste once on
+# its own over the schedules: it is taken out too, or the plant takes out only one of two.
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = "        if released {"
+replace = "        if false && released {"
 
 [[plant]]
 name = "results twice: round 8's rule, the half hour after a hold the rest between two looks in a row at rest (no word that the agent has it, none asked at the hand-over)"
@@ -561,7 +570,7 @@ find = '''
             rested,
             turned,
             free,
-        } = self.rested(record, observed, self.held(record));
+        } = self.rested(record, observed, self.held(record), self.released(record));
         let at_rest = observed.settled && observed.waiting.is_none();
         let overdue = at_rest && free.is_some_and(|free| now - free > RECONCILE_MS);'''
 replace = '''
@@ -570,7 +579,7 @@ replace = '''
             rested,
             turned,
             free,
-        } = self.rested(record, observed, held);
+        } = self.rested(record, observed, held, self.released(record));
         let at_rest = observed.settled && observed.waiting.is_none();
         let overdue = free.unwrap_or(waited) > RECONCILE_MS && at_rest && !held;'''
 
@@ -585,6 +594,10 @@ find = '''
                 turned: true,
                 free: None,
             };
+        }
+        if released {
+            delivering.free_since = Some(now);
+            delivering.rested_since = None;
         }
         let free = Some(*delivering.free_since.get_or_insert(now));
         if observed.settled && observed.waiting.is_none() {
@@ -603,6 +616,7 @@ find = '''
             }
         }'''
 replace = '''
+        let _ = released;
         if held {
             delivering.rest_after_hold = Some(0);
         }
@@ -639,6 +653,13 @@ file = "crates/cf-engine/src/arrival.rs"
 find = "        if self.took(record) {"
 replace = "        if false && self.took(record) {"
 
+# The word that a turn which held the paste ended (`released`, T-53) keeps the paste once on
+# its own over the schedules: it is taken out too, or the plant takes out only one of two.
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = "        if released {"
+replace = "        if false && released {"
+
 [[plant]]
 name = "results twice: no word of the harness's that its agent has the paste, and a record later than the arrival window has it pasted again"
 meant = "waits_for_the_record_of_a_paste_its_harness_put_to_its_agent_however_late_it_shows"
@@ -658,6 +679,13 @@ runs = ["engine-schedules"]
 file = "crates/cf-engine/src/deliveries.rs"
 find = "        let free = (!window.held()).then_some(since);"
 replace = "        let free = Some(since);"
+
+# The word that a turn which held the paste ended (`released`, T-53) keeps the paste once on
+# its own over the schedules: it is taken out too, or the plant takes out only one of two.
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = "        if released {"
+replace = "        if false && released {"
 
 [[plant]]
 name = "results twice: the harness is not asked at the hand-over, and a gap in the looks from a hand-over into a turn that held the paste counts as rest"
@@ -681,6 +709,13 @@ find = '''
             return Rest {'''
 replace = '''
             return Rest {'''
+
+# The word that a turn which held the paste ended (`released`, T-53) keeps the paste once on
+# its own over the schedules: it is taken out too, or the plant takes out only one of two.
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = "        if released {"
+replace = "        if false && released {"
 
 [[plant]]
 name = "results twice: a look that finds the paste held does not start its free time again, and a gap in the looks that began in the hold counts towards the half hour"
@@ -709,6 +744,13 @@ find = '''
 replace = '''
         if held {
             delivering.free_since = None;'''
+
+# The word that a turn which held the paste ended (`released`, T-53) keeps the paste once on
+# its own over the schedules: it is taken out too, or the plant takes out only one of two.
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = "        if released {"
+replace = "        if false && released {"
 
 [[plant]]
 name = "results twice: the half hour counts from the hand-over, not from the first look that found the paste free"

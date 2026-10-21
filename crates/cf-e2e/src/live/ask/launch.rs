@@ -35,6 +35,27 @@ pub fn devin_ready(wire: &Path) -> Result<DevinReady> {
     })
 }
 
+/// What the daemon reads of a paste in a Devin window's wire log.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DevinTook {
+    /// The TUI put the paste to its agent (`Window::took`).
+    pub took: bool,
+    /// How many prompts of the conversation the window shows the log holds.
+    pub prompts: u64,
+}
+
+/// What the wire log `wire` of a Devin window says of `pasted`, the text the window was
+/// given as it was pasted, as the daemon reads the window after a paste.
+pub fn devin_took(wire: &Path, pasted: &str) -> Result<DevinTook> {
+    let answer = question(&json!({ "op": "devin_took", "wire": wire, "pasted": pasted }))?;
+    match (answer["took"].as_bool(), answer["prompts"].as_u64()) {
+        (Some(took), Some(prompts)) => Ok(DevinTook { took, prompts }),
+        _ => Err(Error::Daemon(format!(
+            "harness-ask said nothing of a paste taken: {answer}"
+        ))),
+    }
+}
+
 /// The hooks ConsensFlow adds to the owner's in a Devin launch (`member`'s, or the
 /// chief's), its session hook run by `cf`: each event with the entries added, as the
 /// launch's config has them written.

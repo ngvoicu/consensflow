@@ -15,6 +15,7 @@
 //! or a Close cut it.
 
 use std::rc::Rc;
+use std::sync::Arc;
 
 use cf_harness::records::{Options, Reading, Role};
 use cf_ledger::MessageView;
@@ -193,6 +194,27 @@ impl Dispatcher {
                 item.role == Role::User && is_paste_of(&item.text, message, first.as_deref())
             })
             .map(|item| item.id.to_string()))
+    }
+
+    /// The record of `session`, a conversation of a participant's harness other than the
+    /// one it is on now, read with no window open: none where its harness is none an
+    /// adapter opens, or the participant has no conversation.
+    pub(crate) async fn record_left(
+        &self,
+        participant: i64,
+        session: &str,
+    ) -> Result<Option<Arc<Reading>>, EngineError> {
+        let Some((harness, _)) = self.readable(participant)? else {
+            return Ok(None);
+        };
+        Ok(Some(
+            caught(
+                self.seams
+                    .records
+                    .look(harness, session, &Options::default()),
+            )
+            .await,
+        ))
     }
 
     /// Whether a participant's harness's record of its current conversation,
