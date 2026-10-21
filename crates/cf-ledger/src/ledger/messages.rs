@@ -227,6 +227,19 @@ impl Ledger {
         messages::received_of(&self.store, message_id, carried)
     }
 
+    /// The window's record shows a paste whose Enter the engine withheld: the human
+    /// sent what the box held. A message waiting again is begun as though pasted
+    /// now, with the rows of `held` riding in it again, to be confirmed; one
+    /// withdrawn after its hand-over reads arrived at once, `receipt` its receipt.
+    pub fn begin_sent_by_hand(
+        &mut self,
+        message_id: i64,
+        held: &[i64],
+        receipt: &Value,
+    ) -> Result<Option<MessageView>, LedgerError> {
+        messages::begin_sent_by_hand(&mut self.store, message_id, held, receipt)
+    }
+
     /// The messages of a project whose hand-over has begun at their window and is
     /// not over: let go by their transport, or claimed by a question's door.
     pub fn handed_over(&self, project_id: i64) -> Result<Vec<i64>, LedgerError> {

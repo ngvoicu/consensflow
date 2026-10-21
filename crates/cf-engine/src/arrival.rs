@@ -38,7 +38,7 @@ use cf_harness::records::Role;
 use cf_proto::trace::WindowEvent;
 use serde_json::{json, Value};
 
-use crate::deliveries::Enter;
+use crate::deliveries::{Enter, Uncleared};
 use crate::dispatcher::Dispatcher;
 use crate::record::Record;
 use crate::runtime::{begin, returning};
@@ -50,7 +50,7 @@ const ENTER: u8 = 13;
 const ENTER_AGAIN_MS: i64 = 10_000;
 /// How long the window must have printed nothing first: one being typed into,
 /// or drawing, is left be.
-const ENTER_AGAIN_QUIET_MS: f64 = 3_000.0;
+pub(crate) const ENTER_AGAIN_QUIET_MS: f64 = 3_000.0;
 /// How long after its hand-over a paste the record never showed is pasted again
 /// at the window's next rest, however its rest was cut by turns.
 const RECONCILE_MS: i64 = 30 * 60_000;
@@ -277,7 +277,18 @@ impl Dispatcher {
             Enter::Go => {}
             Enter::Withheld => {
                 self.entered_again(record, message, false);
-                record.delivery.borrow_mut().uncleared = Some(pane);
+                let mut part = record.delivery.borrow_mut();
+                let carried = part
+                    .delivering
+                    .as_ref()
+                    .filter(|delivering| delivering.message == message)
+                    .map(|delivering| delivering.carried.clone())
+                    .unwrap_or_default();
+                part.uncleared = Some(Uncleared {
+                    pane,
+                    message,
+                    carried,
+                });
                 return Ok(());
             }
             Enter::Arrived => return Ok(()),

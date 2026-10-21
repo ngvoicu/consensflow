@@ -32,7 +32,8 @@
 //! pressed, each sends the first message with the second, as one; Control-C
 //! empties the whole box of each and does no harm to an empty one at rest. On
 //! Devin, Control-U empties the cursor's line only (the first message's header
-//! went with the second) and one Escape leaves the box as it is.
+//! went with the second) and one Escape leaves the box as it is. Devin 3000.11.92
+//! on Windows does the same with each key (2026-10-21).
 
 #[path = "live_unsent_box/flow.rs"]
 mod flow;

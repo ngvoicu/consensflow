@@ -67,6 +67,7 @@ mod sessions;
 mod several_roles;
 mod slow_records;
 mod specs;
+mod stale_box;
 mod stops;
 mod switched_conversation;
 mod switching;

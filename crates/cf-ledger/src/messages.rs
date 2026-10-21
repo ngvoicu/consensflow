@@ -36,12 +36,12 @@ pub(crate) use again::tell_sent_back;
 pub(crate) use carrying::{adopt, fold, release_carried, release_stranded, transfer};
 pub use continuations::{continuation, continuation_tasks};
 pub(crate) use continuations::{withdraw_continuations, withdraw_stale};
-pub use delivery::HandOver;
 pub(crate) use delivery::{
-    admit, begin_delivery, cancel_message, confirm_delivery, confirm_delivery_telling,
-    fail_delivery, first_received, handed_over, in_flight, last_pasted, next_delivery,
-    next_delivery_of, received_of, retry_delivery, take_back, with_work,
+    admit, begin_delivery, begin_sent_by_hand, cancel_message, confirm_delivery,
+    confirm_delivery_telling, fail_delivery, first_received, handed_over, in_flight, last_pasted,
+    next_delivery, next_delivery_of, received_of, retry_delivery, take_back, with_work,
 };
+pub use delivery::{HandOver, WITHDRAWN_AFTER_HANDED};
 pub(crate) use gate::{approve_message, decline_message, mark_read};
 pub(crate) use holds::{note_hold, tell_goes_on};
 pub use pauses::MAY_STILL_RUN;

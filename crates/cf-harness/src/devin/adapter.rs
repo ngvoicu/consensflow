@@ -98,7 +98,7 @@ impl DevinAdapter {
 /// Control-C, once. It empties the whole box and does no harm to an empty one at
 /// rest, where Control-U empties the cursor's line only (the message's header
 /// stays) and one Escape leaves the box as it is (`cargo xtask live unsent-box`,
-/// Devin 3000.11.92, 2026-10-21).
+/// Devin 3000.11.92 on macOS and on Windows, 2026-10-21).
 const CLEAR_INPUT: [u8; 1] = [0x03];
 
 impl Adapter for DevinAdapter {

@@ -163,3 +163,107 @@ fn an_answer_a_door_claimed_is_handed_over() {
     assert!(matches!(claimed, Claim::Answered(..)));
     assert_eq!(w.ledger.handed_over(w.project).unwrap(), [answer.id]);
 }
+
+/// Calliope's review of 2026-10-21, round 11: a row the chief took back after the
+/// paste that carried it was handed over went in the paste all the same. Once the
+/// paste arrives, the row reads delivered, its receipt naming the paste and saying
+/// it was withdrawn after its hand-over: the record says what happened.
+#[test]
+fn a_row_withdrawn_after_its_paste_was_handed_over_reads_delivered_once_the_paste_arrives() {
+    let mut w = world();
+    let (words, note) = resumed_with_a_note(&mut w);
+    assert_eq!(w.ledger.admit(words, &[note]).unwrap(), HandOver::Admitted);
+    w.ledger
+        .cancel_message(note, "the chief took it back")
+        .expect("withdrawn");
+
+    w.confirm(words);
+
+    assert_eq!(w.states(&[words, note]), ["delivered", "delivered"]);
+    let receipt = w.ledger.message(note).unwrap().expect("the note").receipt;
+    assert_eq!(receipt["carrier"], words);
+    assert_eq!(receipt["cancelled"], "after it was handed over");
+}
+
+/// A row withdrawn from a paste that went back to its queue was in no paste that
+/// arrived: it stays withdrawn when the paste that goes then arrives.
+#[test]
+fn a_row_withdrawn_from_a_paste_sent_back_stays_withdrawn_when_the_next_paste_arrives() {
+    let mut w = world();
+    let (words, note) = resumed_with_a_note(&mut w);
+    w.ledger.admit(words, &[note]).unwrap();
+    w.ledger
+        .cancel_message(note, "the chief took it back")
+        .expect("withdrawn");
+    w.ledger
+        .retry_delivery(words, "its Enter was withheld", true)
+        .expect("tried again");
+    let begun = w.begin(words);
+    assert!(begun.carried.is_empty(), "the paste goes again without it");
+    assert_eq!(w.ledger.admit(words, &[]).unwrap(), HandOver::Admitted);
+
+    w.confirm(words);
+
+    assert_eq!(w.states(&[words, note]), ["delivered", "cancelled"]);
+}
+
+/// A paste that arrived and that its window then took back: a row of it that read
+/// delivered only because the paste arrived after it was withdrawn is withdrawn
+/// again, never kept to go once more.
+#[test]
+fn a_paste_taken_back_leaves_a_row_withdrawn_after_its_hand_over_withdrawn() {
+    let mut w = world();
+    let (words, note) = resumed_with_a_note(&mut w);
+    w.ledger.admit(words, &[note]).unwrap();
+    w.ledger
+        .cancel_message(note, "the chief took it back")
+        .expect("withdrawn");
+    w.confirm(words);
+
+    w.ledger
+        .take_back(words, "the window took it back")
+        .expect("taken back");
+
+    assert_eq!(w.states(&[words, note]), ["queued", "cancelled"]);
+}
+
+/// Words whose Enter was withheld went back to their queue, and the words of the
+/// next resume took them in (`fold`); then the window's record showed the human
+/// sent them from the box. They are begun out of that carrier and arrive alone,
+/// with the row their paste held: the carrier, taken back later by its window,
+/// keeps nothing of them to go again.
+#[test]
+fn words_the_human_sent_from_the_box_leave_the_carrier_that_took_them_since() {
+    let mut w = world();
+    let (words, note) = resumed_with_a_note(&mut w);
+    w.ledger.admit(words, &[note]).unwrap();
+    w.pause(1);
+    w.ledger
+        .retry_delivery(words, "its Enter was withheld", true)
+        .expect("given back");
+    let next = w.resume(1, "Go on again").message.expect("its words").id;
+    assert_eq!(w.states(&[words, note]), ["queued", "cancelled"]);
+
+    let begun = w
+        .ledger
+        .begin_sent_by_hand(words, &[note], &serde_json::json!({ "item": "u-1" }))
+        .unwrap()
+        .expect("begun");
+    assert_eq!(begun.state, "delivering");
+    w.confirm(words);
+    assert_eq!(w.states(&[words, note]), ["delivered", "delivered"]);
+
+    assert!(
+        w.begin(next).carried.is_empty(),
+        "nothing of them rides again"
+    );
+    w.ledger.admit(next, &[]).unwrap();
+    w.confirm(next);
+    w.ledger
+        .take_back(next, "the window took it back")
+        .expect("taken back");
+    assert_eq!(
+        w.states(&[words, note, next]),
+        ["delivered", "delivered", "queued"]
+    );
+}

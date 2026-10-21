@@ -20,10 +20,10 @@ use crate::deliveries::enters;
 use crate::resume::at_work;
 
 /// Control-C, the key that clears Claude's input box.
-const CLEAR: u8 = 3;
+pub(crate) const CLEAR: u8 = 3;
 
 /// How many times Control-C was asked of the host, taken or not.
-fn clears(context: &Context) -> usize {
+pub(crate) fn clears(context: &Context) -> usize {
     context
         .host
         .inputs()
@@ -33,12 +33,12 @@ fn clears(context: &Context) -> usize {
 }
 
 /// The texts `seam`'s windows were handed, in order.
-fn handed(context: &Context, seam: &str) -> Vec<String> {
+pub(crate) fn handed(context: &Context, seam: &str) -> Vec<String> {
     handed_where(context, seam, |_| true)
 }
 
 /// The texts handed to the window of `pane` of `seam`, in order.
-fn handed_to(context: &Context, seam: &str, pane: &str) -> Vec<String> {
+pub(crate) fn handed_to(context: &Context, seam: &str, pane: &str) -> Vec<String> {
     handed_where(context, seam, |args| args[0]["pane"]["id"] == pane)
 }
 
@@ -53,7 +53,7 @@ fn handed_where(context: &Context, seam: &str, to: impl Fn(&Value) -> bool) -> V
 }
 
 /// How many times `message` was handed to a window of `seam`.
-fn times_handed(context: &Context, seam: &str, message: i64) -> usize {
+pub(crate) fn times_handed(context: &Context, seam: &str, message: i64) -> usize {
     handed(context, seam)
         .iter()
         .filter(|text| text.contains(&marker_of(message)))
@@ -61,7 +61,7 @@ fn times_handed(context: &Context, seam: &str, message: i64) -> usize {
 }
 
 /// A note to `to` on T-1, from `from` (ConsensFlow's own for none).
-fn note_from(
+pub(crate) fn note_from(
     context: &Context,
     project: i64,
     from: Option<&str>,
@@ -84,13 +84,13 @@ fn note_from(
 }
 
 /// The chief's note to `to` on T-1.
-fn note(context: &Context, project: i64, to: &str, body: &str) -> MessageView {
+pub(crate) fn note(context: &Context, project: i64, to: &str, body: &str) -> MessageView {
     note_from(context, project, Some("chief"), to, body)
 }
 
 /// The Enter pressed once more for the paste on its way into the window of
 /// `pane`, ten seconds on: `during` runs while the window's screen is looked at.
-fn enter_again_with(context: &Context, pane: &str, during: impl FnOnce()) {
+pub(crate) fn enter_again_with(context: &Context, pane: &str, during: impl FnOnce()) {
     context.advance(11_000);
     context.host.set_snapshot(json!({ "outputQuietMs": 5_000 }));
     let pane: Value = json!(pane);
@@ -173,6 +173,28 @@ fn a_paste_whose_enter_was_withheld_is_cleared_from_the_box_before_anything_is_p
     let again = tiers.task(1).messages.last().cloned().expect("the words");
     context.pass().unwrap();
     assert_eq!(context.message(again.id).state, "delivered");
+
+    // Emptied once, the box is not emptied again, though the record never shows
+    // the words left there (they rode in the new ones): zeus asks, the chief
+    // answers, and the answer goes in with nothing pressed before it.
+    let question = context.ask(project, "zeus-amber-pine", "chief", 1, "Which format?");
+    let answer = context.answer(project, question.id, "JSON");
+    context
+        .adapter
+        .with("zeus-amber-pine", |agent| agent.settled = true);
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(
+        times_handed(&context, seam, answer.id),
+        1,
+        "the answer goes"
+    );
+    assert_eq!(
+        clears(&context),
+        asked + 1,
+        "with nothing pressed before it"
+    );
 }
 
 /// The same of a continuation withdrawn while the screen was looked at: its task

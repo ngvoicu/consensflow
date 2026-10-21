@@ -58,6 +58,8 @@ ledger-continuation-words = ["cargo", "test", "--offline", "-p", "cf-ledger", "-
 engine-withheld-enter = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "withheld_enter::"]
 # What the live tools are told of each harness's windows.
 harness-tooling = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "tooling::"]
+# What the input box holds after a withheld Enter (round 12).
+engine-stale-box = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "stale_box::"]
 # The owner's shape on the rig: two tasks at work and one the human paused, closed and resumed.
 rig-regression-resume-tasks = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "tasks_left_paused_by_a_close_and_resume::"]
 
@@ -1256,8 +1258,10 @@ replace = '''
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/delivery.rs"
-find = '''            "UPDATE message SET handed_at = NULL WHERE carried_by = ? AND state = 'queued'",'''
-replace = '''            "UPDATE message SET handed_at = handed_at WHERE carried_by = ? AND state = 'queued'",'''
+find = '''            "UPDATE message SET handed_at = NULL
+             WHERE carried_by = ? AND state IN ('queued', 'cancelled')",'''
+replace = '''            "UPDATE message SET handed_at = handed_at
+             WHERE carried_by = ? AND state IN ('queued', 'cancelled')",'''
 
 [[plant]]
 name = "resume tasks: what a carrier given up carried stays handed"
@@ -1913,8 +1917,14 @@ runs = ["engine-withheld-enter"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/arrival.rs"
-find = "                record.delivery.borrow_mut().uncleared = Some(pane);"
-replace = "                let _ = pane;"
+find = """
+                part.uncleared = Some(Uncleared {
+                    pane,
+                    message,
+                    carried,
+                });"""
+replace = """
+                let _ = (pane, carried);"""
 
 [[plant]]
 name = "resume tasks: a paste goes into a box whose keys the host did not take"
@@ -1923,18 +1933,29 @@ runs = ["engine-withheld-enter"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
-find = "        let cleared = match self.clear_box(record, &pane).await {"
-replace = "        let cleared = match self.clear_box(record, &pane).await.map(|_| true) {"
+find = """
+            && !self.clear_box(record, &pane).await
+        {"""
+replace = """
+            && !(self.clear_box(record, &pane).await || true)
+        {"""
 
 [[plant]]
 name = "resume tasks: a box emptied stays to be emptied again"
-meant = "a_paste_whose_enter_waited_for_the_resume_past_its_arrival_window_goes_once"
+meant = "a_paste_whose_enter_was_withheld_is_cleared_from_the_box_before_anything_is_pasted_there"
 runs = ["engine-withheld-enter"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
-find = "        if taken && part.uncleared.as_ref() == Some(pane) {"
-replace = "        if taken && part.uncleared.as_ref() == Some(pane) && false {"
+find = """
+            if part
+                .uncleared
+                .as_ref()
+                .is_some_and(|stale| &stale.pane == pane)
+            {
+                part.uncleared = None;
+            }"""
+replace = ""
 
 [[plant]]
 name = "resume tasks: the adapter is not told the engine just emptied the box"
@@ -2018,3 +2039,133 @@ runs = ["harness-tooling"]
 file = "crates/cf-harness/src/devin/adapter.rs"
 find = "const CLEAR_INPUT: [u8; 1] = [0x03];"
 replace = "const CLEAR_INPUT: [u8; 1] = [0x15];"
+
+# --- round 12: what the box holds after a withheld Enter (Calliope's review of 2026-10-21) ---
+
+[[plant]]
+name = "resume tasks: a paste the human sent from the box is pasted again"
+meant = "words_the_human_sent_from_the_box_are_taken_for_arrived_and_never_pasted_again"
+runs = ["engine-stale-box"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = "            if let Some(item) = copied {"
+replace = "            if let Some(item) = copied.filter(|_| false) {"
+
+[[plant]]
+name = "resume tasks: a paste the human sent is begun inside the carrier that took it since"
+meant = "words_the_human_sent_from_the_box_leave_the_carrier_that_took_them_since"
+runs = ["ledger-handed"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = """
+            "UPDATE message SET carried_by = NULL WHERE id = ?",
+            [message_id],"""
+replace = """
+            "UPDATE message SET carried_by = carried_by WHERE id = ?",
+            [message_id],"""
+
+[[plant]]
+name = "resume tasks: the rows a paste the human sent held are not put back in it"
+meant = "words_the_human_sent_from_the_box_are_taken_for_arrived_and_never_pasted_again"
+runs = ["engine-stale-box"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = "                 WHERE id = ?3 AND id != ?1 AND state IN ('queued', 'cancelled')\","
+replace = "                 WHERE id = ?3 AND id != ?1 AND state IN ('queued')\","
+
+[[plant]]
+name = "resume tasks: a withdrawn paste the human sent stays withdrawn"
+meant = "a_withdrawn_continuation_the_human_sent_from_the_box_is_never_pasted_again"
+runs = ["engine-stale-box"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = "                 WHERE id = ? AND state = 'cancelled' AND handed_at IS NOT NULL\","
+replace = "                 WHERE id = ? AND state = 'cancelled' AND handed_at IS NULL\","
+
+[[plant]]
+name = "resume tasks: a row withdrawn after its paste was handed over stays withdrawn when the paste arrives"
+meant = "a_row_withdrawn_after_its_paste_was_handed_over_reads_delivered_once_the_paste_arrives"
+runs = ["ledger-handed"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = "         WHERE carried_by = ? AND state = 'cancelled' AND handed_at IS NOT NULL\","
+replace = "         WHERE carried_by = ? AND state = 'cancelled' AND handed_at IS NULL\","
+
+[[plant]]
+name = "resume tasks: a row withdrawn from a paste sent back stays handed"
+meant = "a_row_withdrawn_from_a_paste_sent_back_stays_withdrawn_when_the_next_paste_arrives"
+runs = ["ledger-handed"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = "             WHERE carried_by = ? AND state IN ('queued', 'cancelled')\","
+replace = "             WHERE carried_by = ? AND state IN ('queued')\","
+
+[[plant]]
+name = "resume tasks: a paste taken back keeps a row it carried that was withdrawn after its hand-over"
+meant = "a_paste_taken_back_leaves_a_row_withdrawn_after_its_hand_over_withdrawn"
+runs = ["ledger-handed"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = "                        THEN json_extract(receipt, '$.cancelled') END IS NOT NULL\","
+replace = "                        THEN json_extract(receipt, '$.cancelled') END IS NULL AND 0\","
+
+[[plant]]
+name = "resume tasks: the key that empties the box goes into a window that prints or holds what the human typed"
+meant = "the_box_is_emptied_only_while_the_window_is_quiet_and_holds_nothing_typed"
+runs = ["engine-stale-box"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = "            if !self.may_press(&pane).await {"
+replace = "            if !(self.may_press(&pane).await || true) {"
+
+[[plant]]
+name = "resume tasks: the key that empties the box goes into a window holding what the human typed"
+meant = "the_box_is_emptied_only_while_the_window_is_quiet_and_holds_nothing_typed"
+runs = ["engine-stale-box"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = """
+                && !js::truthy(snapshot.get("unsent"))"""
+replace = ""
+
+[[plant]]
+name = "resume tasks: a box emptied counts as empty only for the paste right after the key"
+meant = "a_box_emptied_counts_as_empty_until_a_paste_goes_in"
+runs = ["engine-stale-box"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = """
+        if !matches!(outcome, Admission::Refused { .. }) {
+            record.delivery.borrow_mut().emptied = None;
+        }"""
+replace = """
+        record.delivery.borrow_mut().emptied = None;"""
+
+[[plant]]
+name = "resume tasks: a key the host did not take spends no attempt"
+meant = "a_box_that_will_not_take_its_key_fails_its_delivery_as_a_refused_paste_does"
+runs = ["engine-stale-box"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = """
+            let delivering = self.delivering(record, message.id, carried);
+            return self.settle_failure(
+                delivering,
+                "its window's input box could not be emptied of a paste whose Enter was withheld",
+                true,
+            );"""
+replace = """
+            let _ = carried;
+            self.give_back(message.id, "its window's input box could not be emptied")?;
+            return Ok(());"""

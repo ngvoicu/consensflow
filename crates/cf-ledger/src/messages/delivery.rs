@@ -331,6 +331,77 @@ pub(crate) fn received_of(
     Ok(received.into_iter().find(|id| begun_with.contains(id)))
 }
 
+/// What a receipt says of a row that arrived though it was withdrawn after the
+/// paste that carried it was handed over.
+pub const WITHDRAWN_AFTER_HANDED: &str = "after it was handed over";
+
+/// The window's record shows a paste it was handed whose Enter the engine
+/// withheld, the message given back to its queue or withdrawn since (`arrival`):
+/// the human sent what the box held (Calliope's review of 2026-10-21, round 11:
+/// the engine then pasted it again). A message waiting again is begun as though
+/// pasted now, out of any carrier that took it since (`fold`), with the rows of
+/// `held` (what its paste was begun with) riding in it again, a row withdrawn
+/// since among them, so that its confirmation marks them arrived
+/// (`confirm_delivery`). A message withdrawn after it was handed over arrived,
+/// and reads so at once, `receipt` its receipt, saying it was withdrawn after
+/// its hand-over. The message begun, if it was.
+pub(crate) fn begin_sent_by_hand(
+    store: &mut Store,
+    message_id: i64,
+    held: &[i64],
+    receipt: &Value,
+) -> Result<Option<MessageView>, LedgerError> {
+    store.write(|store| {
+        let Some(message) = store.message(message_id)? else {
+            return Ok(None);
+        };
+        let at = store.at();
+        if message.state == "cancelled" {
+            let mut receipt = receipt.clone();
+            receipt["cancelled"] = json!(WITHDRAWN_AFTER_HANDED);
+            let marked = store.db.execute(
+                "UPDATE message SET state = 'delivered', delivered_at = ?, receipt = ?
+                 WHERE id = ? AND state = 'cancelled' AND handed_at IS NOT NULL",
+                params![at, js_order(receipt).to_string(), message_id],
+            )?;
+            if marked > 0 {
+                store.log(
+                    message.project_id,
+                    "delivery.confirmed",
+                    json!({ "message": message_id, "cancelled": WITHDRAWN_AFTER_HANDED }),
+                )?;
+            }
+            return Ok(None);
+        }
+        if message.state != "queued" {
+            return Ok(None);
+        }
+        store.db.execute(
+            "UPDATE message SET carried_by = NULL WHERE id = ?",
+            [message_id],
+        )?;
+        for row in held {
+            store.db.execute(
+                "UPDATE message SET carried_by = ?1, handed_at = ?2
+                 WHERE id = ?3 AND id != ?1 AND state IN ('queued', 'cancelled')",
+                params![message_id, at, row],
+            )?;
+        }
+        store.db.execute(
+            "UPDATE message SET state = 'delivering', attempts = attempts + 1, reason = NULL,
+               handed_at = ?1
+             WHERE id = ?2",
+            params![at, message_id],
+        )?;
+        store.log(
+            message.project_id,
+            "delivery.begun",
+            json!({ "message": message_id, "attempt": message.attempts + 1, "sentByHand": true }),
+        )?;
+        Ok(Some(known_message(store, message_id)?))
+    })
+}
+
 /// The messages of a project whose hand-over has begun at their window and is not
 /// over: one on its way that its transport let go ([`admit`]), and an answer a
 /// question's door claimed for its harness (`claim_answer`). Every other message
@@ -374,9 +445,35 @@ pub(crate) fn confirm_delivery(
          WHERE carried_by = ? AND state = 'queued'",
             params![at, json!({ "carrier": message_id }).to_string(), message_id],
         )?;
+        // A row withdrawn after the paste that carried it was handed over (a pause
+        // or a cancel took it back) went in the paste all the same: the record says
+        // it arrived, and why it reads so (the chief's decision on Calliope's review
+        // of 2026-10-21, round 11). One withdrawn before the hand-over was in no
+        // paste, and stays withdrawn.
+        let late: Vec<i64> = store
+            .db
+            .prepare(
+                "SELECT id FROM message
+                 WHERE carried_by = ? AND state = 'cancelled' AND handed_at IS NOT NULL
+                 ORDER BY id",
+            )?
+            .query_map([message_id], |row| row.get(0))?
+            .collect::<rusqlite::Result<_>>()?;
+        store.db.execute(
+            "UPDATE message SET state = 'delivered', delivered_at = ?, receipt = ?
+         WHERE carried_by = ? AND state = 'cancelled' AND handed_at IS NOT NULL",
+            params![
+                at,
+                json!({ "carrier": message_id, "cancelled": WITHDRAWN_AFTER_HANDED }).to_string(),
+                message_id
+            ],
+        )?;
         let mut data = json!({ "message": message_id });
         if !rode.is_empty() {
             data["carried"] = json!(rode);
+        }
+        if !late.is_empty() {
+            data["withdrawnAfterHanded"] = json!(late);
         }
         store.log(message.project_id, "delivery.confirmed", data)?;
         if let Some(task) = message_task(store, message_id)? {
@@ -485,8 +582,12 @@ pub(crate) fn retry_delivery(
          WHERE id = ?",
             params![reason, i64::from(refund), message_id],
         )?;
+        // Nothing of the paste stays handed over, a row withdrawn since among it: the
+        // paste goes again without that row, and the row never reads delivered by
+        // the confirmation of the paste that goes then (`confirm_delivery`).
         store.db.execute(
-            "UPDATE message SET handed_at = NULL WHERE carried_by = ? AND state = 'queued'",
+            "UPDATE message SET handed_at = NULL
+             WHERE carried_by = ? AND state IN ('queued', 'cancelled')",
             [message_id],
         )?;
         store.log(
@@ -549,6 +650,15 @@ pub(crate) fn take_back(
                handed_at = COALESCE(handed_at, delivered_at)
          WHERE id = ?",
             params![reason, message_id],
+        )?;
+        // A row that read delivered only because the paste that carried it arrived
+        // after it was withdrawn is withdrawn again, not kept (`confirm_delivery`).
+        store.db.execute(
+            "UPDATE message SET state = 'cancelled', delivered_at = NULL, receipt = NULL
+             WHERE carried_by = ? AND state = 'delivered'
+               AND CASE WHEN json_valid(receipt)
+                        THEN json_extract(receipt, '$.cancelled') END IS NOT NULL",
+            [message_id],
         )?;
         let kept: Vec<i64> = store
             .db
