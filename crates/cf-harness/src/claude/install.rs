@@ -20,9 +20,13 @@ const QUESTION_HOOK_SECONDS: u32 = 3600;
 /// Writes the settings file every Claude window launches with, one per
 /// launch (like Devin's and Pi's integrations), and says how the window
 /// loads it. Each turn ends in a Stop hook, so Claude records
-/// `stop_hook_summary` for every finished turn: its own `turn_duration`
-/// record is missing on some turns (every Calliope turn on 2.1.274), and
-/// those answers never counted as done. A member's question tool is
+/// `stop_hook_summary` for every finished turn, and a turn is over by it
+/// where its own `turn_duration` is not written: 2.1.274 left it off every
+/// Calliope turn and 2.1.285 most turns of one long interactive session, a
+/// headless `claude -p` never writes it (2.1.304), and 2.1.305, the newest
+/// seen, holds it back while swarm tasks or detached tool calls run, so the
+/// summary is then the only end record. Without the hook those answers never
+/// counted as done. A member's question tool is
 /// answered from the board (`board_questions`); the chief's shows Claude's
 /// own dialog, where the human answers it.
 pub(crate) fn settings(

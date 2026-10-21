@@ -85,7 +85,7 @@ fn every_look_node_took_is_read_whole_and_counted_harness_by_harness() {
         counted,
         [
             ("sequences", 46, 1131),
-            ("suite", 173, 201),
+            ("suite", 173, 199),
             ("sweep", 180, 180)
         ]
     );
@@ -95,7 +95,7 @@ fn every_look_node_took_is_read_whole_and_counted_harness_by_harness() {
             ("claude-code".to_owned(), 650),
             ("codex".to_owned(), 262),
             ("devin".to_owned(), 273),
-            ("opencode".to_owned(), 100),
+            ("opencode".to_owned(), 98),
             ("pi".to_owned(), 227),
         ]
     );
@@ -112,5 +112,5 @@ fn every_look_node_took_reads_through_the_switch_what_node_read() {
             played += 1;
         }
     }
-    assert_eq!((played, answered), (399, 1512));
+    assert_eq!((played, answered), (399, 1510));
 }

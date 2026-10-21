@@ -1831,6 +1831,16 @@ file = "crates/cf-evals/src/long_run/timeline.rs"
 find = '        "project.wake_up" => Some(format!('
 replace = '        "project.wake_up.never" => Some(format!('
 
+[[plant]]
+name = "long run: the timeline says no wake-up call held back for work"
+meant = "a_wake_up_call_held_back_while_work_was_on_its_way_is_told_with_the_tasks_that_held_it"
+runs = ["evals-lib-long-run"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/long_run/timeline.rs"
+find = '        "project.wake_up_skipped" => Some(format!('
+replace = '        "project.wake_up_skipped.never" => Some(format!('
+
 # The owner's ask: the long run's project, as the evals' workspace is made of a scenario, with none
 # of the owner's work uncommitted
 

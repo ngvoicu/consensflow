@@ -15,6 +15,7 @@ use serde_json::json;
 
 use crate::fixtures::soon;
 
+mod busy;
 mod ending;
 
 const MINUTE: i64 = 60_000;
@@ -74,6 +75,17 @@ fn queued(context: &Context, project: &ProjectView) -> usize {
         .iter()
         .filter(|event| event.kind == "project.wake_up")
         .count()
+}
+
+/// Something moves on the board and leaves nothing on its way: the chief gives
+/// zeus a task and calls it off.
+fn moved(context: &Context, project: &ProjectView) {
+    let task = context.give(project.id, "zeus", "Write the parser").task;
+    context
+        .ledger
+        .borrow_mut()
+        .cancel_task(project.id, task.number, "chief")
+        .unwrap();
 }
 
 /// Passes enough for a delivery to be handed over and seen in the record.
@@ -351,8 +363,7 @@ fn a_wake_up_that_changed_nothing_waits_for_the_board_to_move_and_then_goes() {
         1,
         "a quiet board: the same question is not asked again"
     );
-    // A task moves.
-    context.give(project.id, "zeus", "Write the parser");
+    moved(&context, &project);
     passes(&context);
     context.advance(MINUTE);
     passes(&context);

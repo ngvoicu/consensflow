@@ -42,6 +42,10 @@
 //! nothing said since the conversation began or was last compacted it compacts
 //! nothing, as 2.1.304 does, and says so as the system's record.
 //!
+//! The window of a participant `CF_TEST_TRUST` names, opened in a git repository it
+//! was never told to trust, asks whether to trust it first, as Claude Code does
+//! (`trust`).
+//!
 //! It is the program of the suites that stands in a window, so it reads the
 //! environment a window is given and runs `cf` as an agent does, both through
 //! `cf_e2e::process`, the one place a program starts and the environment is read.
@@ -71,6 +75,8 @@ mod stop;
 mod terminal;
 #[path = "fake_agent/tool.rs"]
 mod tool;
+#[path = "fake_agent/trust.rs"]
+mod trust;
 
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -182,6 +188,10 @@ fn run(
         leave(&status_file, 0);
     }
 
+    // Claude Code's question about a folder it was never told to trust comes first.
+    if let trust::Answer::Exit = trust::ask(Path::new(&config), named("CF_TEST_TRUST"))? {
+        leave(&status_file, 0);
+    }
     records
         .status(pid, "idle")
         .map_err(|failed| failed.to_string())?;
@@ -190,8 +200,12 @@ fn run(
     } else {
         "started"
     };
-    say(&format!("fake agent {said} on {}\n", launch.session))
-        .map_err(|failed| failed.to_string())?;
+    // Claude's prompt says so under its input box, in full-permission mode.
+    say(&format!(
+        "fake agent {said} on {} · bypass permissions on\n",
+        launch.session
+    ))
+    .map_err(|failed| failed.to_string())?;
 
     let (turns, queued) = mpsc::channel::<String>();
     let stop = Arc::new(Stop::default());

@@ -1,7 +1,10 @@
 //! Live: a real harness as the chief of a project whose wake-up calls the human
 //! turned on a minute apart: the nudge reaches it once, in its own record, and
 //! it answers; nothing goes into a turn it is in; a quiet board is not nudged
-//! again; a task that moves and words that are edited bring the next, whole. It
+//! again; a task that moves (the stand-in worker answers it at once, and a result
+//! the chief has not decided is the chief's own) and words that are edited bring
+//! the next, whole; a wake-up is not given while work is on its way, which the
+//! engine's and the ledger's tests hold, as the quota here is spent on idling. It
 //! is opt-in (`cargo xtask live wake-ups`, `npm run live:wake-ups`): it spends
 //! the machine's quota on a chief of each harness named for about nine minutes
 //! of a cheap model's idling and answering, and needs each installed and logged
