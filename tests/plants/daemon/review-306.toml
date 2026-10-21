@@ -33,6 +33,8 @@ cf-brief-checks = ["cargo", "test", "--offline", "-p", "cf", "--test", "brief_fi
 cf-lib-brief = ["cargo", "test", "--offline", "-p", "cf", "--lib", "board::brief"]
 cf-transcript-pages = ["cargo", "test", "--offline", "-p", "cf", "--test", "transcript_pages"]
 daemon-own-steps = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "routes::task::tests::own_steps"]
+engine-dispatcher-unfit = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "unfit::"]
+ledger-lib-pauses = ["cargo", "test", "--offline", "-p", "cf-ledger", "--lib", "messages::pauses::"]
 
 # B4: a brief on its way when the chief's own step is done.
 
@@ -230,8 +232,13 @@ replace = "    if true || task.state != \"paused\" || !is_told(message, assignee
 
 [[plant]]
 name = "review 306: the engine tells of a failure the ledger kept for a resume"
-meant = "words_whose_last_paste_fails_while_the_human_pauses_are_kept_for_the_resume_and_no_failure_is_told"
+meant = "words_whose_last_paste_fails_while_the_human_pauses_are_kept_for_the_resume_and_why_is_told_and_no_failure"
 runs = ["engine-queued-tells"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = "        if settled.state == \"queued\" {"
+replace = "        if false && settled.state == \"queued\" {"
 
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
@@ -261,3 +268,82 @@ runs = ["ledger-told-kept"]
 file = "crates/cf-ledger/src/messages/carrying.rs"
 find = "WHERE m.state = 'queued' AND c.state NOT IN ('queued', 'gated', 'delivering')"
 replace = "WHERE m.state = 'queued' AND c.state NOT IN ('queued', 'gated')"
+
+# B3 and main's B1 (T-46, 2026-10-21): told words kept for their task's resume, as their paste
+# failed while the task was paused, are no silent wait: the requester hears why and which words
+# wait, in ConsensFlow's queued note of the pause or in a note of its own (`tell_kept` in
+# `crates/cf-ledger/src/messages/pauses.rs`), and the human once, as main told it of a failure
+# (`tell_kept` in `crates/cf-engine/src/deliveries.rs`). A member's window given up as unfit has
+# its exit settled first (`give_up_unfit`), so its task is paused before the message goes: the
+# bridge host answers a kill before the exit comes (the merge's review, T-16 F1).
+
+[[plant]]
+name = "review 306: the requester is not told of told words kept for the resume"
+meant = "told_words_whose_last_paste_fails_while_the_task_is_paused_are_kept_for_its_resume"
+runs = ["ledger-told-kept", "engine-queued-tells", "engine-dispatcher-unfit"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/told.rs"
+find = "    tell_kept(store, task, message, reason)?;"
+replace = ""
+
+[[plant]]
+name = "review 306: kept words are told apart from the queued note of the pause"
+meant = "told_words_kept_as_consensflow_pauses_their_task_are_named_in_its_pause_note"
+runs = ["ledger-told-kept", "engine-dispatcher-unfit"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/pauses.rs"
+find = "    for (id, body) in queued {"
+replace = "    for (id, body) in queued.into_iter().take(0) {"
+
+[[plant]]
+name = "review 306: kept words with no queued note of the pause are told to nobody"
+meant = "told_words_whose_last_paste_fails_while_the_task_is_paused_are_kept_for_its_resume"
+runs = ["ledger-told-kept", "engine-queued-tells"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/pauses.rs"
+find = "    let requester = store.participant_row(task.requester_id)?.handle;"
+replace = "    if true { return Ok(()); }\n    let requester = store.participant_row(task.requester_id)?.handle;"
+
+[[plant]]
+name = "review 306: a pause note says the why again for each word kept"
+meant = "the_words_kept_for_a_resume_are_named_after_the_why_said_once_and_read_back"
+runs = ["ledger-lib-pauses", "ledger-told-kept"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/pauses.rs"
+find = "    if because.contains(KEPT) {"
+replace = "    if false && because.contains(KEPT) {"
+
+[[plant]]
+name = "review 306: the human is not told of told words kept for the resume"
+meant = "a_members_window_unfit_for_work_closes_and_the_words_told_to_it_are_kept_for_its_resume"
+runs = ["engine-dispatcher-unfit", "engine-queued-tells"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = "            return self.tell_kept(message, because);"
+replace = "            return Ok(());"
+
+[[plant]]
+name = "review 306: a member's unfit window is given up before its exit is settled"
+meant = "a_members_window_unfit_for_work_closes_and_the_words_told_to_it_are_kept_for_its_resume"
+runs = ["engine-dispatcher-unfit"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/unstarted.rs"
+find = """        let closed = match &pane {
+            Some(pane) => self.close_own(record, pane).await?,
+            None => true,
+        };
+        if !closed {
+            return Ok(());
+        }
+        self.launch_failed(record, &project, &participant, Some(failing), &said)"""
+replace = """        let (this, held) = (Rc::clone(self), Rc::clone(record));
+        let closing = begin(&*self.seams.spawn, async move { this.retire(&held).await }).await;
+        self.launch_failed(record, &project, &participant, Some(failing), &said)?;
+        closing.await?;
+        Ok(())"""

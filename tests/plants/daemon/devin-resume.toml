@@ -872,5 +872,5 @@ runs = ["engine-dispatcher-unfit"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/unstarted.rs"
-find = '''                Some(pane) => self.close_own(record, pane).await?,'''
-replace = '''                Some(_) => true,'''
+find = '''            Some(pane) => self.close_own(record, pane).await?,'''
+replace = '''            Some(_) => true,'''

@@ -24,6 +24,7 @@ use rusqlite::params;
 use serde_json::json;
 
 use super::carrying::{adopt, carried_into};
+use super::pauses::tell_kept;
 use super::{message_task, messages};
 use crate::model::{self, LedgerError, HELD_TASK_STATES, MAX_BODY, MEMBER_ROLES};
 use crate::queue::{send, Sent};
@@ -148,7 +149,8 @@ pub(super) fn fail_for(
 /// was paused: they are kept for the window, as a pause keeps what was kept for
 /// it, and the words that resume the task carry them (the second review,
 /// 2026-10-16: they were given up, and the window resumed without them). They
-/// keep the attempts they had. Whether they were kept.
+/// keep the attempts they had, and the task's requester hears why and which words
+/// wait ([`tell_kept`]). Whether they were kept.
 pub(super) fn kept_for_resume(
     store: &mut Store,
     message: &MessageView,
@@ -171,6 +173,7 @@ pub(super) fn kept_for_resume(
         json!({ "message": message.id, "reason": reason }),
     )?;
     adopt(store, message.id)?;
+    tell_kept(store, task, message, reason)?;
     Ok(true)
 }
 

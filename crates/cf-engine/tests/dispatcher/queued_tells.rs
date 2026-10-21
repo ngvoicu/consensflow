@@ -187,7 +187,7 @@ fn words_the_window_took_back_at_a_pause_go_in_again_with_the_words_that_resume_
 }
 
 #[test]
-fn words_whose_last_paste_fails_while_the_human_pauses_are_kept_for_the_resume_and_no_failure_is_told(
+fn words_whose_last_paste_fails_while_the_human_pauses_are_kept_for_the_resume_and_why_is_told_and_no_failure(
 ) {
     let context = Context::new();
     let (tiers, session, told) = told_on_its_way(&context);
@@ -233,6 +233,28 @@ fn words_whose_last_paste_fails_while_the_human_pauses_are_kept_for_the_resume_a
             .any(|note| note.contains("failed")),
         "{:?}",
         tiers.notes("chief")
+    );
+    // Whoever is told hears why the words wait, once each: the chief in a note of
+    // its own, there being no note of a pause the human made; the human as main
+    // told it, but with no "did not reach".
+    let named = |handle: &str| -> Vec<String> {
+        tiers
+            .notes(handle)
+            .into_iter()
+            .filter(|said| said.starts_with(&format!("m-{told},")))
+            .collect()
+    };
+    assert_eq!(
+        named("chief"),
+        [format!(
+            "m-{told}, what @chief told T-1's window, waits for T-1's resume: refused by the test."
+        )]
+    );
+    assert_eq!(
+        named("human"),
+        [format!(
+            "m-{told}, a note from @chief on T-1, waits for T-1's resume to reach @{session}: refused by the test."
+        )]
     );
 
     context.adapter.with("zeus", |agent| agent.admit = true);

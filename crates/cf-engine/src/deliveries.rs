@@ -313,14 +313,20 @@ impl Dispatcher {
     /// whoever gave it hears why; so do words told to the window while its
     /// task waits on it (`is_told`): an answer the window gave without them is
     /// no result. Whoever waits on any other kind would wait forever, so the
-    /// human hears, once, what it was, for whom and why. What the ledger kept
-    /// for a resume, or withdrew, did not fail, and nobody hears of it.
+    /// human hears, once, what it was, for whom and why. Words told to the window
+    /// that the ledger kept for their task's resume did not fail: its requester
+    /// hears why and which words wait (the ledger's `tell_kept`), and the human,
+    /// once, as of a failure, that they wait for the resume ([`Dispatcher::tell_kept`]).
+    /// What the ledger withdrew did not fail, and nobody hears of it.
     fn fail_delivery(&self, message: &MessageView, because: &str) -> Result<(), EngineError> {
         let settled = self
             .seams
             .ledger
             .borrow_mut()
             .fail_delivery(message.id, because)?;
+        if settled.state == "queued" {
+            return self.tell_kept(message, because);
+        }
         if settled.state != "failed" {
             return Ok(());
         }
@@ -348,18 +354,6 @@ impl Dispatcher {
                 }
             }
         }
-        let kind = if message.kind == "answer" {
-            "an answer".to_owned()
-        } else {
-            format!("a {}", message.kind)
-        };
-        let from = message
-            .sender
-            .as_ref()
-            .map_or_else(|| "ConsensFlow".to_owned(), |sender| format!("@{sender}"));
-        let on = message
-            .task_number
-            .map_or_else(String::new, |number| format!(" on T-{number}"));
         self.seams.ledger.borrow_mut().note(
             project.id,
             &NewNote {
@@ -367,8 +361,40 @@ impl Dispatcher {
                 to: "human".to_owned(),
                 task: message.task_number,
                 body: format!(
-                    "m-{}, {kind} from {from}{on}, did not reach @{}: {because}.",
-                    message.id, message.recipient
+                    "m-{}, {}, did not reach @{}: {because}.",
+                    message.id,
+                    described(message),
+                    message.recipient
+                ),
+            },
+        )?;
+        Ok(())
+    }
+
+    /// Words told to a window, kept for their task's resume as their paste failed
+    /// `because`: the human hears it once, as main told it of words that did not
+    /// reach the window, which these do at the resume. A task the human gave was
+    /// told of it already: that note was theirs.
+    fn tell_kept(&self, message: &MessageView, because: &str) -> Result<(), EngineError> {
+        let Some(number) = message.task_number else {
+            return Ok(());
+        };
+        let project = self.known_project(message.project_id)?;
+        let task = self.seams.ledger.borrow().task(project.id, number)?;
+        if task.is_some_and(|thread| thread.task.requester == "human") {
+            return Ok(());
+        }
+        self.seams.ledger.borrow_mut().note(
+            project.id,
+            &NewNote {
+                from: None,
+                to: "human".to_owned(),
+                task: Some(number),
+                body: format!(
+                    "m-{}, {}, waits for T-{number}'s resume to reach @{}: {because}.",
+                    message.id,
+                    described(message),
+                    message.recipient
                 ),
             },
         )?;
@@ -408,4 +434,22 @@ impl Dispatcher {
         )?;
         Ok(())
     }
+}
+
+/// What `message` is to the human: its kind, who wrote it, and its task
+/// (`an answer from @chief on T-1`).
+fn described(message: &MessageView) -> String {
+    let kind = if message.kind == "answer" {
+        "an answer".to_owned()
+    } else {
+        format!("a {}", message.kind)
+    };
+    let from = message
+        .sender
+        .as_ref()
+        .map_or_else(|| "ConsensFlow".to_owned(), |sender| format!("@{sender}"));
+    let on = message
+        .task_number
+        .map_or_else(String::new, |number| format!(" on T-{number}"));
+    format!("{kind} from {from}{on}")
 }

@@ -3,12 +3,12 @@
 //! anyone but its window is no such words, and its failure fails nothing; a
 //! resume keeps the order they were told in, whatever order the human passes
 //! them on in; words whose last paste failed while the task was paused are
-//! kept for its resume; and words that rode in a brief the daemon stopped while
+//! kept for its resume, and its requester hears why and which words wait; and words that rode in a brief the daemon stopped while
 //! pasting keep their place in it across the start (the reviews of round 4:
 //! they were let go of and pasted again on their own).
 
 use crate::fixture::{gated_world, ids, world, World};
-use crate::queued_tells::{queued, tell, waiting};
+use crate::queued_tells::{newest, queued, tell, waiting};
 
 #[test]
 fn a_workers_note_to_the_chief_that_never_arrives_fails_nothing_of_its_task() {
@@ -114,6 +114,14 @@ fn told_words_whose_last_paste_fails_while_the_task_is_paused_are_kept_for_its_r
         waiting(&w, &session, task),
         "the window is still to have them"
     );
+    // The human's pause wrote the chief no note to name them in: one of their own.
+    assert_eq!(
+        newest(&w, "chief").body,
+        format!(
+            "m-{0}, what @chief told T-{task}'s window, waits for T-{task}'s resume: refused by the window.",
+            told.id
+        )
+    );
     let resumed = w.resume(task, "Go on").message.expect("its words").id;
     assert_eq!(
         ids(&w.deliver(resumed).carried),
@@ -159,4 +167,99 @@ fn told_words_in_a_brief_the_daemon_stopped_while_pasting_go_in_once_after_the_s
         assert_eq!(w.next(&session), None, "nothing is pasted again");
         assert!(!waiting(&w, &session, task), "the window has them");
     }
+}
+
+/// ConsensFlow pauses the task as its window closes, and its note to the chief is
+/// queued: the words told the window whose pastes then fail are named in that note,
+/// with why, the first with the why and the next added to it, and in no other.
+#[test]
+fn told_words_kept_as_consensflow_pauses_their_task_are_named_in_its_pause_note() {
+    let mut w = world();
+    let (task, _, brief) = queued(&mut w);
+    w.begin(brief);
+    let first = tell(&mut w, task, "Use the v2 grammar").id;
+    let second = tell(&mut w, task, "And keep the old tests").id;
+    w.confirm(brief);
+    w.begin(first);
+    let closed = "@zeus's window closed";
+    w.ledger
+        .pause_task(w.project, task, None, Some(closed))
+        .expect("paused");
+    let note = w
+        .ledger
+        .note_pause(w.project, "chief", task, closed)
+        .expect("told")
+        .id;
+    w.ledger
+        .fail_delivery(first, "unfit for work")
+        .expect("kept");
+    // The second's paste was under way too, and fails after.
+    w.begin(second);
+    w.ledger
+        .fail_delivery(second, "unfit for work")
+        .expect("kept");
+    assert_eq!(w.states(&[first, second]), ["queued", "queued"]);
+    assert_eq!(
+        w.message(note).body,
+        format!(
+            "T-{task} is paused: {closed}: unfit for work; the words told its window wait for the resume: m-{first}, m-{second}. Resume it with: cf task resume T-{task} \"…\"; its window comes back on its own conversation."
+        )
+    );
+    assert_eq!(newest(&w, "chief").id, note, "no note of their own");
+}
+
+/// The same in a note that names several tasks paused together: the clause of the
+/// task names its words, and the note still reads as one of a pause.
+#[test]
+fn told_words_kept_in_a_pause_of_several_tasks_are_named_in_their_tasks_line() {
+    let mut w = world();
+    let (task, _, brief) = queued(&mut w);
+    w.begin(brief);
+    let told = tell(&mut w, task, "Use the v2 grammar").id;
+    w.confirm(brief);
+    w.begin(told);
+    let other = w.give("diana", "Lexer").task.number;
+    let closed = "@zeus's window closed";
+    for number in [task, other] {
+        w.ledger
+            .pause_task(w.project, number, None, Some(closed))
+            .expect("paused");
+    }
+    let note = w
+        .ledger
+        .note_pause(w.project, "chief", task, closed)
+        .expect("told")
+        .id;
+    w.ledger
+        .join_pause_note(note, other, "@diana's window closed")
+        .expect("joined")
+        .expect("it takes the other");
+    w.ledger
+        .fail_delivery(told, "unfit for work")
+        .expect("kept");
+    let (low, high) = (task.min(other), task.max(other));
+    let line = |number: i64| {
+        if number == task {
+            format!("T-{task} is paused: {closed}: unfit for work; the words told its window wait for the resume: m-{told}. Resume it with: cf task resume T-{task} \"…\"")
+        } else {
+            format!("T-{other} is paused: @diana's window closed. Resume it with: cf task resume T-{other} \"…\"")
+        }
+    };
+    assert_eq!(
+        w.message(note).body,
+        format!(
+            "{}\n{}\nEach window comes back on its own conversation.",
+            line(low),
+            line(high)
+        )
+    );
+    // It is a pause note still: a resume takes the task out of it.
+    w.resume(task, "Go on");
+    assert_eq!(
+        w.message(note).body,
+        format!(
+            "{}; its window comes back on its own conversation.",
+            line(other)
+        )
+    );
 }
