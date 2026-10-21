@@ -11,6 +11,12 @@ recorder that played them went with Node; they are in the flip release
 follows is the provenance as it was written while the fixtures were captured, and
 a Node test or module it names is history.
 
+The versions named below are those the fixtures were captured from. A section
+that says "the newest seen" was read again on 2026-10-21 against the harnesses
+installed then (Claude Code 2.1.305, Codex 0.163.0, Pi 1.3.0, OpenCode 1.19.3),
+and names the newest that still writes its shape; one that no later version was
+seen to write says so.
+
 Prepared 2026-09-06 and extended 2026-09-07 from the native stores on this
 machine. Every JSONL line and every SQLite row selected below is a complete
 source record: records not needed by a case are omitted, but fields inside a
@@ -56,6 +62,12 @@ throwaway SQLite database. Production stores are never written.
 - `big-answer.jsonl` — complete records at ordinals 0, 2477, 2480, and
   2481 from the `completed.jsonl` source. Only the final answer text leaf is
   replaced by exactly 60,000 `B` characters.
+
+Codex 0.163.0, the newest seen, still writes the fields read here:
+`aggregated_output` of a command, `call_id` of a call, `agent_thread_id` of a
+sub-agent's activity (in its binary; no rollout since 0.153.4 holds one) and a
+content part's `text`. `errored-task-complete.jsonl` also holds
+`formatted_output` once, beside `aggregated_output`; it is not read.
 
 ## Claude Code — session JSONL, versions `2.1.241`, `2.1.247`, and `2.1.250`
 
@@ -150,6 +162,11 @@ Combined fixture/completion GREEN: 56/56, exit 0. This is native finalizer
 evidence; text ending, elapsed quiet and `away_summary` alone remain
 insufficient.
 
+Still written: the root `turn_duration` after a tool loop is in 3,783 hooked
+interactive turns of the Mac's transcripts, 2.1.305, the newest seen, among them.
+2.1.305 holds it back while swarm tasks or detached tool calls run; a Stop
+hook's `stop_hook_summary` is then the turn's only end record.
+
 **Departed from on 2026-10-11** (the Rust reader, on the owner's decision). The
 pending counts were then defensive schema checks, and are live evidence now: Claude
 Code 2.1.296 writes `pendingBackgroundAgentCount` on the `turn_duration` of a turn
@@ -183,6 +200,14 @@ names a 60,000 ms maximum at
 `/opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/dist/core/settings-manager.js:610–615`;
 completion therefore uses twice that value, 120,000 ms, as its derived
 quiet-window boundary and never labels Pi settlement native.
+
+Read again against Pi 1.3.0, the newest seen: the cap on the agent's own retry,
+`retry.maxAgentDelayMs` (60,000 ms), is from Pi 0.86.0, not 0.85.1; the 60,000 ms
+read above is the provider retry's, which 1.3.0 still caps
+(`retry.provider.maxRetryDelayMs`: a longer delay a server asks for fails the
+request at once). The agent waits 2, 4 and 8 s by default, each bounded by the
+cap, so two waits of the cap's length without an append (120,000 ms) still say no
+retry is coming. No Pi 1.x record measures it.
 
 No Pi user-cancellation marker was captured, so there is no synthetic
 cancellation fixture and provider errors are not reclassified as cancellation.
@@ -239,7 +264,8 @@ at 167795358 retains messageCount and optional pending-work counts. These
 match the established 2.1.263 guards. A future version is still rejected.
 RED: 3/4 failed because 2.1.265 was unsupported. GREEN with the existing
 2.1.263 fixture suite: 15/15, exit 0. This proves completion parsing; native
-queue admission and preservation of a human draft are separate checks.
+queue admission and preservation of a human draft are separate checks. The
+shape is still written by 2.1.305, the newest seen.
 
 ### Claude 2.1.266 and OpenCode 1.18.30 (2026-09-09)
 
@@ -249,8 +275,10 @@ captured from isolated ConsensFlow-owned native chief conversations. Each ran
 unready until its root `turn_duration`; OpenCode preserved `tool-calls` then
 its final `stop` and completion time. Paths were sanitized; reasoning text and
 unrelated diagnostics were omitted. Neither fixture comes from a worker's
-private thread. Node's test of the current native versions exercised the real
-parsers.
+private thread. Node's test of the native versions of that day exercised the real
+parsers. Both shapes are still written: the root `turn_duration` after a tool
+loop by Claude 2.1.305, and a `tool-calls` step then a final `stop` by OpenCode
+1.19.3, the newest seen.
 
 A fresh Claude 2.1.266 pane also accepted `CF_PEER266_DELIVERED` through its
 native peer queue while retaining the unsent draft `CF_UNSENT_DRAFT_266` in
@@ -264,7 +292,8 @@ worker-to-chief path, separately from completion parsing and direct ingress.
 
 ## Claude Code 2.1.268 fresh /clear
 
-`claude-code/v268-clear.jsonl` preserves all five native records from an isolated local-provider CLI probe on 2026-09-11. Only the temporary workspace cwd is replaced with `/fixture/workspace`. The native `system.local_command` parent UUID links to the exact preceding `/clear` user command; no model answer is added. Used to verify readiness before the first model turn and reject missing, foreign, sidechain, wrongly linked or followed-by-work boundaries.
+`claude-code/v268-clear.jsonl` preserves all five native records from an isolated local-provider CLI probe on 2026-09-11. Only the temporary workspace cwd is replaced with `/fixture/workspace`. The native `system.local_command` parent UUID links to the exact preceding `/clear` user command; no model answer is added. Used to verify readiness before the first model turn and reject missing, foreign, sidechain, wrongly linked or followed-by-work boundaries. The `local_command` of `/clear` is still written:
+2.1.304, the newest seen with one.
 
 ## Claude Code 2.1.268 — late-written user ancestors (TEST-PANE-243)
 
@@ -277,3 +306,8 @@ Assistant record 3 and turn_duration record 4 precede initiating user record 6
 and its four attachment ancestors 7–10. UUIDs, parents, timestamps, native
 fields and full message content are preserved. The provider was local with
 no artificial delay. Negative tests mutate temporary fixture copies only.
+
+A 2.1.268 capture, not confirmed since: no assistant record naming a parent that
+comes later was found in any Claude Code transcript on the Mac from 2.1.269 to
+2.1.305, the newest seen. Only `user` (2.1.285), `system` (2.1.280, 2.1.282) and
+`attachment` records (to 2.1.302) have a parent that comes later.

@@ -43,6 +43,9 @@ pub struct Detected {
 fn locations(harness: Harness) -> &'static [&'static [&'static str]] {
     match harness {
         Harness::Devin => &[&[".local", "bin"]],
+        // `.claude/local` is the old local installer's place, a legacy one: Claude
+        // Code 2.1.305, the newest seen, still updates and diagnoses an install
+        // there, but nothing installs there fresh (it installs to `.local/bin`).
         Harness::Claude => &[&[".local", "bin"], &[".claude", "local"]],
         Harness::Codex => &[&[".codex", "bin"], &[".local", "bin"]],
         Harness::Opencode => &[&[".opencode", "bin"], &[".local", "bin"]],

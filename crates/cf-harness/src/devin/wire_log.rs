@@ -53,7 +53,12 @@ use crate::shared::pattern::compile;
 use crate::shared::quota::{exhausted_quota, Quota};
 
 /// What Devin's own messages say when it refuses for its quota: `/rate
-/// limit|usage limit|quota exhausted|quota has been exhausted/i`.
+/// limit|usage limit|quota exhausted|quota has been exhausted/i`. The words
+/// come from Devin's server, not from its binary (Devin 3000.11.92, the newest
+/// seen, holds none of them but "Quota exhausted: "), and no refusal in the
+/// shape of a message is on record: only a real quota hit shows it. Kept for
+/// that; the JSON-RPC error and the turn's end below are the shapes the binary
+/// holds.
 static REFUSAL: LazyLock<Regex> = LazyLock::new(|| {
     compile("(?i-u:rate limit|usage limit|quota exhausted|quota has been exhausted)")
 });
@@ -335,13 +340,16 @@ impl State {
             self.quota = Some(exhausted(text, at_ms, zone)?);
         }
         // Or a refusal of the prompt itself, as Devin 3000.11 writes one: a
-        // JSON-RPC error, "Quota exhausted." (-32011, resource_exhausted).
+        // JSON-RPC error, "Quota exhausted." (-32011, resource_exhausted), the
+        // error object itself in the binary of Devin 3000.11.92, the newest seen.
         if let Some(refused) = event.get("error").filter(|error| refuses(error)) {
             self.quota = Some(exhausted(&words(refused.get("message"))?, at_ms, zone)?);
         }
         // Or the turn's own end for it, as Devin wrote it on a Pro plan
         // (2026-10-03): cause quota_exhausted, its words in errorMessage
-        // ("Your daily usage quota has been exhausted.").
+        // ("Your daily usage quota has been exhausted."). `quota_exhausted` is
+        // in the binary of Devin 3000.11.92, the newest seen, among the causes
+        // a turn ends with.
         if event.get("cause").and_then(Value::as_str) == Some("quota_exhausted") {
             self.quota = Some(exhausted(&words(event.get("errorMessage"))?, at_ms, zone)?);
         }
@@ -415,8 +423,9 @@ fn begins_with(value: &Value, text: &str) -> bool {
     }
 }
 
-/// Whether a JSON-RPC error refuses the prompt for the quota: by its code,
-/// by its kind, or by its words.
+/// Whether a JSON-RPC error refuses the prompt for the quota: by its code or
+/// its kind (both in the binary of Devin 3000.11.92), or by its words (as
+/// unproven as [`REFUSAL`]).
 fn refuses(error: &Value) -> bool {
     error.get("code").and_then(Value::as_f64) == Some(-32011.0)
         || error
