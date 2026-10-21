@@ -163,7 +163,21 @@ fn a_chief_asked_to_trust_the_projects_new_repository_is_answered_yes_and_takes_
 #[test]
 fn a_worker_whose_yes_would_trust_a_folder_outside_the_project_waits_for_the_human_and_goes_on_after(
 ) -> Outcome {
-    let rig = Rig::start(asking())?;
+    outside_answered_by_the_human(&[])
+}
+
+#[test]
+fn a_worker_that_reads_the_humans_keys_late_takes_their_yes_and_goes_on_after() -> Outcome {
+    // main's Windows CI, 2026-10-21 (run 39616304894): on a slow runner the case above
+    // timed out after the human's yes. A window that reads its terminal late finds the
+    // human's Down and Enter in one read.
+    outside_answered_by_the_human(&[("CF_TEST_TRUST_READS_LATE_MS", "1500")])
+}
+
+/// Two of the worker's windows ask of a folder outside the project; the human says
+/// yes in one, with the stand-in set by `vars` besides, and both tasks go on.
+fn outside_answered_by_the_human(vars: &[(&str, &str)]) -> Outcome {
+    let rig = asking_with(vars)?;
     // The repository is the workspace; the project's folder is below it.
     let root = rig.workspace().to_path_buf();
     git_init(&root)?;
@@ -223,7 +237,28 @@ fn a_worker_whose_yes_would_trust_a_folder_outside_the_project_waits_for_the_hum
         assert_eq!(pressed["ok"], true, "{pressed}");
         sleep(Duration::from_millis(600));
     }
-    rig.wait_for("T-1 and T-2 to be done", secs(90), || both_done(&project))?;
+    // Each step is bound from the one before it, so a stall says where it was: the
+    // human's window takes their yes, the yes is carried to the other window, which
+    // takes it too, and then both tasks are done.
+    rig.wait_for("the human's window to take their yes", secs(30), || {
+        Ok(!trusted(&rig).is_empty())
+    })?;
+    rig.wait_for(
+        "the yes to be carried to the other window",
+        secs(30),
+        || {
+            Ok(keys_given(&rig)
+                .iter()
+                .filter(|key| *key == "enter")
+                .count()
+                == 2)
+        },
+    )?;
+    rig.wait_for(
+        "T-1 and T-2 to be done once both took the yes",
+        secs(60),
+        || both_done(&project),
+    )?;
     assert_eq!(notes_of(&project, &root)?.len(), 1, "told once");
     Ok(())
 }

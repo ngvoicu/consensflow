@@ -196,7 +196,10 @@ fn run(
         trust::bring_the_record_back(records.transcript());
     }
     let grows = asking && own_var("CF_TEST_RECORD_GROWS_ON_NO").is_some();
-    let answer = trust::ask(Path::new(&config), asking, || {
+    // Its terminal is read from the start, raw, as a TUI reads it: the question
+    // before the prompt takes its keys from the same reader.
+    let mut keys = Keys::start();
+    let answer = trust::ask(Path::new(&config), asking, &mut keys, || {
         if !grows {
             return Ok(());
         }
@@ -283,7 +286,6 @@ fn run(
 
     // Raw input, like a real TUI: a bracketed paste is text, Enter outside one
     // submits, and an Escape that nothing follows is the key.
-    let mut keys = Keys::start();
     loop {
         // The terminal is gone.
         let Some(events) = keys.read() else {

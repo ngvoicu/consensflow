@@ -46,6 +46,8 @@ folder-trust-rig-quoted = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test
 folder-trust-rig-grows = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_record_that_grows_as_a_no"]
 folder-trust-rig-record-away = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_window_opened_again_whose_record_cannot_be_read"]
 folder-trust-rig-chief-plain = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_chief_opened_again_at_rest_whose_prompt"]
+folder-trust-rig-reads-late = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_worker_that_reads_the_humans_keys_late"]
+folder-trust-stand-in = ["cargo", "test", "--offline", "-p", "cf-e2e", "--features", "test-support", "--bin", "fake-agent", "trust::"]
 folder-trust-rig-chief = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_chief"]
 
 [[plant]]
@@ -429,3 +431,27 @@ builds = true
 file = "crates/cf-engine/src/trust.rs"
 find = "                                *looks >= PRESS_AGAIN_LOOKS"
 replace = "                                *looks >= u32::MAX"
+
+[[plant]]
+name = "folder trust: the stand-in takes one key a read, and drops the human's Enter that came with their Down (main's Windows CI, 2026-10-21)"
+meant = "a_worker_that_reads_the_humans_keys_late_takes_their_yes_and_goes_on_after"
+runs = ["folder-trust-rig-reads-late"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_agent/trust.rs"
+find = "        for key in keys_in(&given) {"
+replace = "        for key in keys_in(&given).into_iter().take(1) {"
+
+[[plant]]
+name = "folder trust: the stand-in writes a line and its end apart, and two windows' yeses share a line (main's Windows CI rerun, 2026-10-21)"
+meant = "two_windows_that_append_at_once_leave_two_whole_lines"
+runs = ["folder-trust-stand-in"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_agent/trust.rs"
+find = '    file.write_all(format!("{line}\n").as_bytes())'
+replace = '''
+    file.write_all(line.as_bytes())?;
+    sleep(Duration::from_millis(200));
+    file.write_all(b"\n")'''
