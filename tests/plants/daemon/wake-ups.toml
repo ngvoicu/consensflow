@@ -3,9 +3,10 @@
 # that stopped while work is left carries on). A wake-up is a note from the human to the
 # chief, queued when the interval has passed since the latest of the last wake-up, the last
 # Resume and the last change of the setting; never while one is on its way, never to a
-# chief in a turn, waiting, out of quota or held for words the human typed; a quiet board
-# is not asked twice, and the first after an enable or a Resume always goes. One plant takes
-# one rule out; a test of it fails. The ledger's plants run its own tests
+# chief in a turn, waiting, out of quota or held for words the human typed, and never while a
+# task is working, queued, waiting or open behind another not yet done (a skip is logged and
+# the interval counts from it); a quiet board is not asked twice, and the first after an enable
+# or a Resume always goes. One plant takes one rule out; a test of it fails. The ledger's plants run its own tests
 # (`crates/cf-ledger/tests/wake_ups/` and the unit tests of `wake_ups`), the engine's the
 # dispatcher's (`tests/dispatcher/wake_ups.rs` and `wake_ups/ending.rs`), the page's the operations'
 # (`crates/cf-daemon/src/page/tests/wake_up.rs`) and the dialog's the browser's; the
@@ -192,6 +193,156 @@ runs = ["ledger-wake-ups"]
 file = "crates/cf-ledger/src/wake_ups/due.rs"
 find = '        if !begun_since(store, project_id, last)? && !changed_since(store, project_id, last)? {'
 replace = '        if false {'
+
+[[plant]]
+name = "wake-up: a task queued for its window is no work on its way"
+meant = "a_task_queued_for_its_window_holds_the_wake_up_back"
+runs = ["ledger-wake-ups"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups/due.rs"
+find = '    let held = sql_list(&HELD_TASK_STATES);'
+replace = '    let held = sql_list(&["working", "waiting"]);'
+
+[[plant]]
+name = "wake-up engine: a task queued for its window is no work on its way"
+meant = "a_task_queued_for_its_window_holds_the_wake_up_back"
+runs = ["engine-wake-ups"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups/due.rs"
+find = '    let held = sql_list(&HELD_TASK_STATES);'
+replace = '    let held = sql_list(&["working", "waiting"]);'
+
+[[plant]]
+name = "wake-up: a task working is no work on its way"
+meant = "a_task_working_holds_the_wake_up_back"
+runs = ["ledger-wake-ups"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups/due.rs"
+find = '    let held = sql_list(&HELD_TASK_STATES);'
+replace = '    let held = sql_list(&["queued", "waiting"]);'
+
+[[plant]]
+name = "wake-up engine: a task working is no work on its way"
+meant = "a_task_working_holds_the_wake_up_back_and_it_is_not_owed_when_the_work_is_over"
+runs = ["engine-wake-ups"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups/due.rs"
+find = '    let held = sql_list(&HELD_TASK_STATES);'
+replace = '    let held = sql_list(&["queued", "waiting"]);'
+
+[[plant]]
+name = "wake-up: a task waiting on a question is no work on its way"
+meant = "a_task_waiting_on_a_question_holds_the_wake_up_back"
+runs = ["ledger-wake-ups"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups/due.rs"
+find = '    let held = sql_list(&HELD_TASK_STATES);'
+replace = '    let held = sql_list(&["queued", "working"]);'
+
+[[plant]]
+name = "wake-up engine: a task waiting on a question is no work on its way"
+meant = "a_task_waiting_on_a_question_holds_the_wake_up_back"
+runs = ["engine-wake-ups"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups/due.rs"
+find = '    let held = sql_list(&HELD_TASK_STATES);'
+replace = '    let held = sql_list(&["queued", "working"]);'
+
+[[plant]]
+name = "wake-up: a task open behind one not yet done is no work on its way"
+meant = "a_task_open_behind_one_that_is_not_yet_done_holds_the_wake_up_back"
+runs = ["ledger-wake-ups"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups/due.rs"
+find = "                    OR (t.state = 'open'"
+replace = "                    OR (t.state = 'never'"
+
+[[plant]]
+name = "wake-up: a task open behind one done and undecided is work on its way"
+meant = "a_task_open_behind_one_done_and_undecided_waits_for_the_chief_too_and_gets_a_wake_up"
+runs = ["ledger-wake-ups"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups/due.rs"
+find = '    let over = sql_list(&[&["done"][..], &FINISHED_TASK_STATES[..]].concat());'
+replace = '    let over = sql_list(&FINISHED_TASK_STATES);'
+
+[[plant]]
+name = "wake-up engine: a task open behind one done and undecided is work on its way"
+meant = "a_task_done_and_undecided_is_the_chiefs_own_and_so_is_one_open_behind_it"
+runs = ["engine-wake-ups"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups/due.rs"
+find = '    let over = sql_list(&[&["done"][..], &FINISHED_TASK_STATES[..]].concat());'
+replace = '    let over = sql_list(&FINISHED_TASK_STATES);'
+
+[[plant]]
+name = "wake-up: a task open behind one that failed or was called off is work on its way"
+meant = "a_task_open_behind_one_that_failed_or_was_called_off_is_the_chiefs_to_settle"
+runs = ["ledger-wake-ups"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups/due.rs"
+find = '    let over = sql_list(&[&["done"][..], &FINISHED_TASK_STATES[..]].concat());'
+replace = '    let over = sql_list(&["done", "accepted"]);'
+
+[[plant]]
+name = "wake-up: the first after the calls are turned on goes into work on its way"
+meant = "the_first_wake_up_after_the_calls_are_turned_on_is_held_back_by_work_on_its_way_too"
+runs = ["ledger-wake-ups"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups/due.rs"
+find = '    if !tasks.is_empty() {'
+replace = '    if last.is_some() && !tasks.is_empty() {'
+
+[[plant]]
+name = "wake-up: work in another project holds this project's wake-up back"
+meant = "work_on_its_way_in_another_project_holds_nothing_back"
+runs = ["ledger-wake-ups"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups/due.rs"
+find = '            "SELECT t.number FROM task t WHERE t.project_id = ?1'
+replace = '            "SELECT t.number FROM task t WHERE ?1 = ?1'
+
+[[plant]]
+name = "wake-up: a skipped wake-up is owed the moment the board clears"
+meant = "a_wake_up_skipped_is_not_owed_and_the_next_comes_an_interval_after_the_skip"
+runs = ["ledger-wake-ups"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups/due.rs"
+find = "           AND (kind IN ('project.wake_up', 'project.wake_up_skipped', 'project.wake_up_setting')"
+replace = "           AND (kind IN ('project.wake_up', 'project.wake_up_setting')"
+
+[[plant]]
+name = "wake-up engine: a skipped wake-up is owed the moment the board clears"
+meant = "a_task_working_holds_the_wake_up_back_and_it_is_not_owed_when_the_work_is_over"
+runs = ["engine-wake-ups"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups/due.rs"
+find = "           AND (kind IN ('project.wake_up', 'project.wake_up_skipped', 'project.wake_up_setting')"
+replace = "           AND (kind IN ('project.wake_up', 'project.wake_up_setting')"
+
+[[plant]]
+name = "wake-up: a skip is not logged"
+meant = "a_skip_is_logged_once_for_an_interval_however_often_it_is_asked_and_again_at_the_next"
+runs = ["ledger-wake-ups"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups/due.rs"
+find = '                "project.wake_up_skipped",'
+replace = '                "project.wake_up_skipped.never",'
 
 [[plant]]
 name = "wake-up: the first after the calls are turned on again waits for the board to move"

@@ -1,14 +1,14 @@
 //! What the tests share: a project at a clock the test moves, and the few
 //! things a test does to it (turn the calls on, ask what is due, deliver a
-//! wake-up, move a task, type to the chief).
+//! wake-up, give a task and take it through its states, type to the chief).
 
 use std::cell::Cell;
 use std::rc::Rc;
 
 use cf_base::time::Clock;
 use cf_ledger::{
-    open_ledger, Ledger, MessageView, NewChief, NewMember, NewNote, NewProject, NewTask, NewWakeUp,
-    Options, ProjectView, WakeUpUnit,
+    open_ledger, Ledger, MessageView, NewChief, NewMember, NewNote, NewProject, NewQuestion,
+    NewTask, NewWakeUp, Options, ProjectView, TaskCreated, WakeUpUnit,
 };
 use serde_json::{json, Value};
 
@@ -137,8 +137,9 @@ impl World {
         sent
     }
 
-    /// The chief gives zeus a task: something moves on the board.
-    pub fn move_a_task(&mut self) {
+    /// The chief gives zeus a task, waiting for the tasks numbered `needs` to be
+    /// accepted: queued for its window, or open on the board behind them.
+    pub fn give(&mut self, needs: &[u64]) -> TaskCreated {
         self.ledger
             .create_task(
                 self.project.id,
@@ -146,10 +147,69 @@ impl World {
                     from: "chief".to_owned(),
                     to: Some("zeus".to_owned()),
                     body: "Write the parser".to_owned(),
+                    needs: needs.to_vec(),
                     ..NewTask::default()
                 },
             )
-            .expect("a task");
+            .expect("a task")
+    }
+
+    /// The task reaches zeus's window and is received: it is working.
+    pub fn start(&mut self, given: &TaskCreated) {
+        let message = given.message.as_ref().expect("the task went to its window");
+        self.deliver(message);
+        assert_eq!(self.state(given.task.number), "working");
+    }
+
+    /// zeus asks the chief about the task and waits for the answer.
+    pub fn ask(&mut self, number: i64) {
+        self.ledger
+            .ask(
+                self.project.id,
+                &NewQuestion {
+                    from: Some("zeus".to_owned()),
+                    to: "chief".to_owned(),
+                    body: Some("Which parser?".to_owned()),
+                    task: Some(number),
+                    ..NewQuestion::default()
+                },
+            )
+            .expect("a question");
+        assert_eq!(self.state(number), "waiting");
+    }
+
+    /// The task's state, as the board has it.
+    pub fn state(&self, number: i64) -> String {
+        self.ledger
+            .task(self.project.id, number)
+            .expect("a read")
+            .expect("the task")
+            .task
+            .state
+    }
+
+    /// zeus ends the task with its result: it is done, and waits for the chief to decide.
+    pub fn finish(&mut self, number: i64) {
+        self.ledger
+            .record_result(self.project.id, number, "The parser is written")
+            .expect("a result");
+        assert_eq!(self.state(number), "done");
+    }
+
+    /// The task is accepted: over.
+    pub fn accept(&mut self, number: i64) {
+        self.ledger
+            .accept_task(self.project.id, number, "human")
+            .expect("accepted");
+    }
+
+    /// Something moves on the board and leaves nothing on its way: the chief
+    /// gives zeus a task and calls it off.
+    pub fn move_a_task(&mut self) {
+        let given = self.give(&[]);
+        self.ledger
+            .cancel_task(self.project.id, given.task.number, "chief")
+            .expect("called off");
     }
 
     /// A note from one participant to another: a message is sent.

@@ -9,6 +9,14 @@
 //! - the project is open and its calls are on;
 //! - none is still on its way (a wake-up queued or being delivered is the
 //!   only one: they never stack, whatever the clock says);
+//! - the chief has nothing else on its way: no task is working, queued for its
+//!   window or waiting on a question, and none is open behind a task that is
+//!   not yet done (`work_on_its_way`). A task done and waiting for the chief's
+//!   decision is the chief's own work, and so is a board with nothing on it: a
+//!   wake-up goes for them. One that is held back for work is skipped, not
+//!   owed: the skip is logged (`project.wake_up_skipped`) and the interval
+//!   counts again from it, so the next comes an interval later, on the same
+//!   rule, and not the moment the board clears;
 //! - and, unless it is the first since the calls were turned on or the project
 //!   resumed, something happened since the last one: a task moved, a message
 //!   was sent, or the human typed to the chief in its own window. A quiet
@@ -23,7 +31,7 @@ use serde_json::json;
 use super::setting;
 use crate::conversations::typed_since;
 use crate::messages::cancel_message;
-use crate::model::LedgerError;
+use crate::model::{sql_list, LedgerError, FINISHED_TASK_STATES, HELD_TASK_STATES};
 use crate::queue::{send, Sent};
 use crate::store::Store;
 
@@ -77,8 +85,8 @@ fn on_its_way(store: &Store, last: &Last) -> Result<bool, LedgerError> {
 }
 
 /// What the interval counts from, in milliseconds: the latest of the last
-/// wake-up's queuing and delivery, the last Resume and the last change of the
-/// setting; the project's creation where the log holds none of them.
+/// wake-up's queuing and delivery or skip, the last Resume and the last change
+/// of the setting; the project's creation where the log holds none of them.
 fn origin_ms(
     store: &Store,
     project_id: i64,
@@ -87,7 +95,7 @@ fn origin_ms(
 ) -> Result<i64, LedgerError> {
     let logged: Option<String> = store.db.query_row(
         "SELECT MAX(at) FROM event WHERE project_id = ?1
-           AND (kind IN ('project.wake_up', 'project.wake_up_setting')
+           AND (kind IN ('project.wake_up', 'project.wake_up_skipped', 'project.wake_up_setting')
                 OR (kind = 'project.state' AND json_extract(data, '$.to') = 'open'))",
         [project_id],
         |row| row.get(0),
@@ -111,6 +119,29 @@ fn origin_ms(
         .max()
         .or_else(|| time::parse(created_at))
         .unwrap_or(0))
+}
+
+/// The numbers of the tasks the chief has on their way, oldest first: those
+/// queued for a window, working or waiting on a question, and those open
+/// behind a task that is not yet done. A task done and waiting for the chief's
+/// decision is no work on its way (it is the chief's), and a task that failed
+/// or was called off is not going to be done: one open behind it waits for the
+/// chief, and is no work on its way either.
+fn work_on_its_way(store: &Store, project_id: i64) -> Result<Vec<i64>, LedgerError> {
+    let held = sql_list(&HELD_TASK_STATES);
+    let over = sql_list(&[&["done"][..], &FINISHED_TASK_STATES[..]].concat());
+    Ok(store
+        .db
+        .prepare(&format!(
+            "SELECT t.number FROM task t WHERE t.project_id = ?1
+               AND (t.state IN ({held})
+                    OR (t.state = 'open'
+                        AND EXISTS (SELECT 1 FROM task_need n JOIN task d ON d.id = n.needs_id
+                                    WHERE n.task_id = t.id AND d.state NOT IN ({over}))))
+             ORDER BY t.number"
+        ))?
+        .query_map([project_id], |row| row.get(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
 /// Whether the calls were turned on, or the project resumed, since `last`.
@@ -170,6 +201,19 @@ pub(crate) fn queue_if_due(
     }
     let origin = origin_ms(store, project_id, last.as_ref(), &project.created_at)?;
     if now_ms < origin.saturating_add(wake_up.every_ms) {
+        return Ok(None);
+    }
+    // A chief with work on its way is not asked whether it has any, the first
+    // wake-up or the hundredth: the skip is logged and the interval counts from it.
+    let tasks = work_on_its_way(store, project_id)?;
+    if !tasks.is_empty() {
+        store.write(|store| {
+            store.log(
+                project_id,
+                "project.wake_up_skipped",
+                json!({ "tasks": tasks }),
+            )
+        })?;
         return Ok(None);
     }
     if let Some(last) = &last {
