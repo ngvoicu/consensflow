@@ -109,11 +109,12 @@ jobs:
       # which goes with the runner: so a failure that does not reproduce at home
       # is read from these (2026-10-21: Windows' folder-trust case). Node names
       # the folder as the Rust that wrote there does (TMPDIR on the Mac's
-      # runner, TEMP on Windows'); `runner.temp` is another folder. The reports
-      # hold the stand-in agents' output and the daemon's log, from a rig whose
-      # environment is its own (cf-e2e's rig/install.rs): no real harness, home
-      # or token. The step that names the folder runs only for a failed job, and
-      # the upload, for one that wrote none, says nothing.
+      # runner; on Windows', TMP, which Rust reads first and the runner sets as
+      # it does TEMP, which Node reads); `runner.temp` is another folder. The
+      # reports hold the stand-in agents' output and the daemon's log, from a
+      # rig whose environment is its own (cf-e2e's rig/install.rs): no real
+      # harness, home or token. The step that names the folder runs only for a
+      # failed job, and the upload, for one that wrote none, says nothing.
       - name: Where the rig keeps the reports of its failed cases
         if: failure()
         run: echo "RIG_TEMP=$(node -p "require('os').tmpdir()")" >> "$GITHUB_ENV"

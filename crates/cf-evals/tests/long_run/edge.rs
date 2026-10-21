@@ -130,7 +130,9 @@ fn what_stops_the_run_and_what_its_rig_says_leave_through_the_edge() {
         written[0].contains(r#"eprint!("{where_kept}")"#),
         "{written:?}"
     );
-    assert!(report.contains("let where_kept = keep(&rig.root, &tell.text(&report));"));
+    assert!(report.contains(
+        "let where_kept = keep(&rig.root, &tell.text(&report), rig.reports.as_deref());"
+    ));
     assert!(report.contains("let tell = Tell(rig.masker.as_ref());"));
 }
 

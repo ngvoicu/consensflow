@@ -12,7 +12,12 @@ reports-closed = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig",
 reports-error = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "reports::a_rig_its_case_left"]
 reports-check = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "reports::a_rig_shut_down"]
 reports-said = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "reports::where_a_report"]
-reports-closes = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "reports::every_case"]
+reports-closes = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "reports::every_function"]
+reports-scan = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "reports::the_scan"]
+reports-close-fails = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "reports::a_rig_whose_close_fails"]
+reports-close-held = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "reports::a_rig_whose_case_holds"]
+reports-live = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "reports::a_live_rigs"]
+reports-lib = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "rig::report"]
 reports-ci = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "reports::ci_uploads"]
 
 [[plant]]
@@ -22,7 +27,7 @@ runs = ["reports-closed"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/rig/mod.rs"
-find = "        if std::thread::panicking() || !self.closed {"
+find = "        if std::thread::panicking() || (!self.closed && !failure_expected) {"
 replace = "        if true {"
 
 [[plant]]
@@ -32,7 +37,7 @@ runs = ["reports-error"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/rig/mod.rs"
-find = "        if std::thread::panicking() || !self.closed {"
+find = "        if std::thread::panicking() || (!self.closed && !failure_expected) {"
 replace = "        if std::thread::panicking() {"
 
 [[plant]]
@@ -42,8 +47,8 @@ runs = ["reports-check"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/rig/mod.rs"
-find = "        if std::thread::panicking() || !self.closed {"
-replace = "        if !self.closed {"
+find = "        if std::thread::panicking() || (!self.closed && !failure_expected) {"
+replace = "        if !self.closed && !failure_expected {"
 
 [[plant]]
 name = "rig reports: where a report is kept is said past the output a test run holds, for a case that passed"
@@ -62,22 +67,24 @@ replace = "    let _ = std::io::stderr().write_all(where_kept.as_bytes());"
 
 [[plant]]
 name = "rig reports: a folder-trust case ends without closing its rig"
-meant = "every_case_of_the_rig_and_the_regressions_that_starts_a_rig_closes_it"
+meant = "every_function_of_the_rig_and_the_regressions_that_starts_a_rig_closes_it_or_hands_it_on"
 runs = ["reports-closes"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/tests/regressions/a_trust_question_after_git_init_stopped_every_launch.rs"
 find = '''
+    a_task(&rig, &project, &tier, 1, "SLOW_REDRAW_DONE")?;
     assert_eq!(keys_given(&rig), ["down", "enter"]);
     rig.close()?;
 '''
 replace = '''
+    a_task(&rig, &project, &tier, 1, "SLOW_REDRAW_DONE")?;
     assert_eq!(keys_given(&rig), ["down", "enter"]);
 '''
 
 [[plant]]
 name = "rig reports: the folder-trust case that starts its rig again closes only the first"
-meant = "every_case_of_the_rig_and_the_regressions_that_starts_a_rig_closes_it"
+meant = "every_function_of_the_rig_and_the_regressions_that_starts_a_rig_closes_it_or_hands_it_on"
 runs = ["reports-closes"]
 
 [[plant.edit]]
@@ -94,7 +101,7 @@ replace = '''
 
 [[plant]]
 name = "rig reports: the follow-up case ends without closing its rig"
-meant = "every_case_of_the_rig_and_the_regressions_that_starts_a_rig_closes_it"
+meant = "every_function_of_the_rig_and_the_regressions_that_starts_a_rig_closes_it_or_hands_it_on"
 runs = ["reports-closes"]
 
 [[plant.edit]]
@@ -159,3 +166,111 @@ runs = ["reports-ci"]
 file = ".github/workflows/ci.yml"
 find = "consensflow-integration-*-left.txt"
 replace = "consensflow-integration-*-kept.txt"
+
+# The round of T-174 (Calliope's review of T-171): a close that fails keeps the report, a case
+# that holds its close to fail says so, a case whose rig comes from a helper is held to the
+# close, and a live rig's report is kept under the checkout's build folder.
+
+[[plant]]
+name = "rig reports: a rig whose close failed is taken for one that closed, and keeps no report"
+meant = "a_rig_whose_close_fails_keeps_its_report"
+runs = ["reports-close-fails"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/mod.rs"
+find = '''
+        let ended = self.end(exit);
+        if ended.is_ok() {
+            self.closed = true;
+        } else {
+            self.close_failed = true;
+        }
+        ended
+'''
+replace = '''
+        let ended = self.end(exit);
+        self.closed = true;
+        ended
+'''
+
+[[plant]]
+name = "rig reports: a failure the case held its close to keeps a report all the same"
+meant = "a_rig_whose_case_holds_its_close_to_fail_keeps_no_report_of_the_failure"
+runs = ["reports-close-held"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/mod.rs"
+find = "            self.close_failed && self.close_expected_to_fail.load(Ordering::Relaxed);"
+replace = "            false && self.close_failed && self.close_expected_to_fail.load(Ordering::Relaxed);"
+
+[[plant]]
+name = "rig reports: a case that holds its close to fail and ends before it keeps no report"
+meant = "a_rig_whose_case_holds_its_close_to_fail_and_never_tries_it_keeps_its_report"
+runs = ["reports-close-held"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/mod.rs"
+find = "            self.close_failed && self.close_expected_to_fail.load(Ordering::Relaxed);"
+replace = "            self.close_expected_to_fail.load(Ordering::Relaxed);"
+
+[[plant]]
+name = "rig reports: a case whose rig comes from a helper ends without closing it"
+meant = "every_function_of_the_rig_and_the_regressions_that_starts_a_rig_closes_it_or_hands_it_on"
+runs = ["reports-closes"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/regressions/a_trust_question_after_git_init_stopped_every_launch.rs"
+find = '''
+    a_task(&rig, &project, &tier, 1, "AGAIN_DONE")?;
+    assert_eq!(keys_given(&rig), ["dropped", "down", "enter"]);
+    rig.close()?;
+'''
+replace = '''
+    a_task(&rig, &project, &tier, 1, "AGAIN_DONE")?;
+    assert_eq!(keys_given(&rig), ["dropped", "down", "enter"]);
+'''
+
+[[plant]]
+name = "rig reports: the scan counts no call of a helper that hands a rig on as a start"
+meant = "the_scan_counts_a_rig_a_helper_hands_on_and_none_a_helper_gives_back_or_a_refused_start"
+runs = ["reports-scan"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/rig/reports.rs"
+find = "        .filter(|function| function.hands_a_rig_on && !function.takes_a_rig)"
+replace = "        .filter(|function| function.hands_a_rig_on && false)"
+
+[[plant]]
+name = "rig reports: the scan counts a helper that takes a rig and gives one back as a start"
+meant = "the_scan_counts_a_rig_a_helper_hands_on_and_none_a_helper_gives_back_or_a_refused_start"
+runs = ["reports-scan"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/rig/reports.rs"
+find = "        .filter(|function| function.hands_a_rig_on && !function.takes_a_rig)"
+replace = "        .filter(|function| function.hands_a_rig_on)"
+
+[[plant]]
+name = "rig reports: a live rig's report is kept in the machine's temp folder"
+meant = "a_live_rigs_report_is_kept_under_the_checkouts_build_folder_and_not_in_the_temp_folder"
+runs = ["reports-live"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/machine.rs"
+find = '''
+        .var("LANG", "en_US.UTF-8")
+        .reports_in(checkout::path(REPORTS));
+'''
+replace = '''
+        .var("LANG", "en_US.UTF-8");
+'''
+
+[[plant]]
+name = "rig reports: a rig given a folder for its report keeps it beside its home"
+meant = "a_live_rigs_report_is_kept_under_the_checkouts_build_folder_and_not_in_the_temp_folder"
+runs = ["reports-live", "reports-lib"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/report.rs"
+find = "        Some(folder) => folder.join(format!(\"{name}-left.txt\")),"
+replace = "        Some(_) => root.with_file_name(format!(\"{name}-left.txt\")),"

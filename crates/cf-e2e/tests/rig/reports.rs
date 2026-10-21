@@ -1,24 +1,36 @@
 //! A rig tells of a case that failed, and of no case that passed. A rig dropped
-//! unclosed is one its case left on the way: by a check that failed (a panic), or
-//! by an error it returned (a case is a `Result`, and the wait that timed out ends
-//! most of the failed ones that way, with no panic in flight when the rig is
-//! dropped). It keeps what its windows showed in a file beside its home
-//! (`<home>-left.txt`, `rig/report.rs`) for the person who reads the failure, and
-//! says where in the output of that case. A case that passes ends by closing its
-//! rig, and the rig has nothing to tell of it.
+//! unclosed is one its case left on the way: by a check that failed (a panic), by an
+//! error it returned (a case is a `Result`, and the wait that timed out ends most of
+//! the failed ones that way, with no panic in flight when the rig is dropped), or by
+//! a close that failed (the rig is closed once a close succeeded, and not before).
+//! It keeps what its windows showed in a file beside its home (`<home>-left.txt`,
+//! `rig/report.rs`) for the person who reads the failure, and says where in the
+//! output of that case. A case that passes ends by closing its rig, and the rig has
+//! nothing to tell of it; a case that holds its close to fail says so
+//! (`Rig::expect_the_close_to_fail`), and a failure it holds to is no report either.
+//! The report of a rig built for the real harnesses (`live::rig`), whose windows
+//! show what a real harness drew with the person's login, is kept under the
+//! checkout's build folder instead, where no run uploads it and a clean takes it away.
+//!
+//! No report is kept of a hang that a step's limit or the job's kills: the process
+//! that would drop the rig is ended with it, and a job that is cancelled is not
+//! `failure()` either, so nothing is uploaded. Most hangs are ended before, by a
+//! case's own wait: its timeout is an error the case returns, which does keep one.
 //!
 //! CI's run of 2026-10-21 said it "kept in" fourteen files for as many cases that
 //! had passed: thirteen of the folder-trust regression's and the follow-up's one
 //! ended without closing their rigs. The rig cannot tell a case that returned `Ok`
 //! and forgot the close from one that returned an error, so the cases are held to
-//! the close here, as they are written.
+//! the close here, as they are written: each function that starts a rig, or calls a
+//! helper of its file that hands one on, closes it.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use cf_e2e::process::Run;
+use cf_e2e::process::{signal, Run, Signal};
 use cf_e2e::rig::Rig;
+use cf_e2e::{checkout, live};
 use regex::Regex;
 
 use crate::Outcome;
@@ -44,6 +56,37 @@ fn a_case_that_waits_for_what_never_comes(home: &mut Option<PathBuf>) -> Outcome
     rig.wait_for("what no window does", Duration::from_millis(200), || {
         Ok(false)
     })?;
+    rig.close()?;
+    Ok(())
+}
+
+/// A case that holds its close to fail, and fails first: the wait for what never
+/// comes ends it, with an error, before it closes the rig.
+fn a_case_that_waits_for_what_never_comes_expecting_its_close_to_fail(
+    home: &mut Option<PathBuf>,
+) -> Outcome {
+    let rig = crate::rig()?;
+    *home = Some(home_of(&rig));
+    rig.expect_the_close_to_fail();
+    rig.wait_for("what no window does", Duration::from_millis(200), || {
+        Ok(false)
+    })?;
+    rig.close()?;
+    Ok(())
+}
+
+/// A case that ends as every passing one does, by closing its rig, and whose close
+/// fails: the process that is none of any window's is ended before the rig is, which
+/// the close finds (the rig's own check of what the pane host ends).
+fn a_case_whose_close_fails(home: &mut Option<PathBuf>, expected: bool) -> Outcome {
+    let rig = crate::rig()?;
+    *home = Some(home_of(&rig));
+    if expected {
+        rig.expect_the_close_to_fail();
+    }
+    signal(rig.stranger_pid(), Signal::Kill)?;
+    // The daemon and the pane host end first, which takes longer than the signal does.
+    std::thread::sleep(Duration::from_secs(1));
     rig.close()?;
     Ok(())
 }
@@ -88,6 +131,98 @@ fn a_rig_its_case_left_on_an_error_it_returned_keeps_its_report() -> Outcome {
     let kept = fs::read_to_string(&report)?;
     assert!(kept.contains(HEADING), "{kept}");
     fs::remove_file(report)?;
+    Ok(())
+}
+
+#[test]
+fn a_rig_whose_close_fails_keeps_its_report() -> Outcome {
+    let mut home = None;
+
+    let failed = a_case_whose_close_fails(&mut home, false);
+
+    assert!(
+        failed.is_err(),
+        "the close of a rig whose stranger was ended ended well"
+    );
+    let report = report_beside(&home.ok_or("the case never started its rig")?);
+    assert!(report.exists(), "a close that failed kept no report");
+    let kept = fs::read_to_string(&report)?;
+    assert!(kept.contains(HEADING), "{kept}");
+    fs::remove_file(report)?;
+    Ok(())
+}
+
+#[test]
+fn a_rig_whose_case_holds_its_close_to_fail_keeps_no_report_of_the_failure() -> Outcome {
+    let mut home = None;
+
+    let failed = a_case_whose_close_fails(&mut home, true);
+
+    assert!(failed.is_err(), "the close of the rig ended well");
+    let report = report_beside(&home.ok_or("the case never started its rig")?);
+    assert!(
+        !report.exists(),
+        "a report was kept of a failure the case held its close to"
+    );
+    Ok(())
+}
+
+#[test]
+fn a_rig_whose_case_holds_its_close_to_fail_and_never_tries_it_keeps_its_report() -> Outcome {
+    let mut home = None;
+
+    let failed = a_case_that_waits_for_what_never_comes_expecting_its_close_to_fail(&mut home);
+
+    assert!(failed.is_err(), "the wait for what never comes ended well");
+    let report = report_beside(&home.ok_or("the case never started its rig")?);
+    assert!(
+        report.exists(),
+        "a case that failed before its close kept no report"
+    );
+    fs::remove_file(report)?;
+    Ok(())
+}
+
+/// Where the report of a rig built for the real harnesses is kept: under the
+/// checkout's build folder, which no run uploads and a clean takes away.
+const LIVE_REPORTS: &str = "app/src-tauri/target/live-reports";
+
+/// A case on a rig built for the real harnesses (with none installed here: its
+/// windows are the stand-in's), failing as most do.
+fn a_live_rigs_case_that_waits_for_what_never_comes(home: &mut Option<PathBuf>) -> Outcome {
+    let rig = Rig::start(live::rig(&[], crate::FAKE_AGENT))?;
+    *home = Some(home_of(&rig));
+    rig.wait_for("what no window does", Duration::from_millis(200), || {
+        Ok(false)
+    })?;
+    rig.close()?;
+    Ok(())
+}
+
+#[test]
+fn a_live_rigs_report_is_kept_under_the_checkouts_build_folder_and_not_in_the_temp_folder(
+) -> Outcome {
+    let mut home = None;
+
+    let failed = a_live_rigs_case_that_waits_for_what_never_comes(&mut home);
+
+    assert!(failed.is_err(), "the wait for what never comes ended well");
+    let beside = report_beside(&home.ok_or("the case never started its rig")?);
+    let kept = checkout::path(LIVE_REPORTS).join(beside.file_name().unwrap_or_default());
+    let (under_target, in_temp) = (kept.exists(), beside.exists());
+    // Taken away before anything is said of them.
+    let _ = fs::remove_file(&kept);
+    let _ = fs::remove_file(&beside);
+    assert!(
+        under_target,
+        "a live rig's report is not in {}",
+        kept.display()
+    );
+    assert!(
+        !in_temp,
+        "a live rig's report, which may hold a real harness's screens, is in the temp folder: {}",
+        beside.display()
+    );
     Ok(())
 }
 
@@ -138,8 +273,8 @@ fn where_a_report_is_kept_is_said_in_the_output_of_the_case_that_failed_and_of_n
     Ok(())
 }
 
-/// What starts a rig in a case: the rig's own `start`, and the suite's `rig()` (not
-/// a `.rig()` of a project's members, which is one already started). A case that
+/// What starts a rig in a function: the rig's own `start`, and the suite's `rig()` (not a
+/// `.rig()` of a project's members, which is one already started). A function that
 /// expects the start to be refused, `let Err(…) = Rig::start(…)`, has none to close.
 const STARTS: &str = r"\bRig::start\(|(?:^|[^.\w])rig\(\)";
 const REFUSED: &str = r"let Err\(";
@@ -147,36 +282,52 @@ const REFUSED: &str = r"let Err\(";
 /// What ends one: a close of any of its kinds. (`shut_down_within` keeps the rig.)
 const CLOSES: &str = r"\.close(?:_\w+)?\(";
 
-/// The cases of `text`, each with its name and its lines: the functions under a
-/// `#[test]`, to the line that closes them, which rustfmt puts at the indent of
-/// their `fn`.
-fn cases_of(text: &str) -> Vec<(String, Vec<&str>)> {
+/// The head of a function, and the type a signature names to hand a rig on.
+const HEADER: &str = r"^\s*(?:pub(?:\([a-z]+\))?\s+)?fn (\w+)";
+const RIG: &str = r"\bRig\b";
+
+/// A function of a source file: its name, whether its return type names a `Rig` (it
+/// hands one on, to a case that has it to close), whether its parameters name one too
+/// (the rig it gives is the one it was given, ended and started again), and its lines
+/// after the signature.
+struct Function<'a> {
+    name: String,
+    hands_a_rig_on: bool,
+    takes_a_rig: bool,
+    body: Vec<&'a str>,
+}
+
+/// The functions of `text`, each from its `fn` to the line that closes it, which
+/// rustfmt puts at the indent of the `fn`; the functions inside one are its own.
+fn functions_of<'a>(text: &'a str, header: &Regex, rig: &Regex) -> Vec<Function<'a>> {
     let lines: Vec<&str> = text.lines().collect();
-    let mut cases = Vec::new();
+    let mut found = Vec::new();
     let mut at = 0;
     while at < lines.len() {
-        at += 1;
-        if lines[at - 1].trim() != "#[test]" {
+        let Some(head) = header.captures(lines[at]) else {
+            at += 1;
             continue;
-        }
-        let Some(head) =
-            (at..lines.len()).find(|&line| lines[line].trim_start().starts_with("fn "))
-        else {
-            break;
         };
-        let indent = lines[head].len() - lines[head].trim_start().len();
-        let end = (head..lines.len())
-            .find(|&line| lines[line].starts_with(&format!("{}}}", " ".repeat(indent))))
+        let indent = lines[at].len() - lines[at].trim_start().len();
+        let close = format!("{}}}", " ".repeat(indent));
+        let end = (at..lines.len())
+            .find(|&line| lines[line].starts_with(&close))
             .unwrap_or(lines.len() - 1);
-        let name = lines[head].trim_start()[3..]
-            .split(['(', '<'])
-            .next()
-            .unwrap_or_default()
-            .to_owned();
-        cases.push((name, lines[head..=end].to_vec()));
+        // The signature ends at the line that opens the body.
+        let open = (at..=end)
+            .find(|&line| lines[line].trim_end().ends_with('{'))
+            .unwrap_or(at);
+        let signature = lines[at..=open].join(" ");
+        let (taken, returned) = signature.rsplit_once("->").unwrap_or((&signature, ""));
+        found.push(Function {
+            name: head[1].to_owned(),
+            hands_a_rig_on: rig.is_match(returned),
+            takes_a_rig: rig.is_match(taken),
+            body: lines[open + 1..=end].to_vec(),
+        });
         at = end + 1;
     }
-    cases
+    found
 }
 
 /// The source files under `folder`.
@@ -194,34 +345,82 @@ fn sources_in(folder: &Path) -> Vec<PathBuf> {
     found
 }
 
-#[test]
-fn every_case_of_the_rig_and_the_regressions_that_starts_a_rig_closes_it() -> Outcome {
+/// A function that starts rigs, and how many it starts and closes.
+#[derive(Debug, PartialEq, Eq)]
+struct Starting {
+    name: String,
+    started: usize,
+    closed: usize,
+}
+
+/// Each function of `text` that starts a rig, with what it starts and what it closes.
+/// A call of a helper of the text that hands a rig on starts one, as `Rig::start` does; a
+/// helper that takes a rig and gives one back (the app quit and started again) starts
+/// none, and a `let rig =` is no start.
+fn startings_in(text: &str) -> Result<Vec<Starting>, Box<dyn std::error::Error>> {
     let (starts, refused, closes) = (
         Regex::new(STARTS)?,
         Regex::new(REFUSED)?,
         Regex::new(CLOSES)?,
     );
+    let (header, rig) = (Regex::new(HEADER)?, Regex::new(RIG)?);
+    let functions = functions_of(text, &header, &rig);
+    let helpers = functions
+        .iter()
+        .filter(|function| function.hands_a_rig_on && !function.takes_a_rig)
+        .map(|function| Regex::new(&format!(r"(?:^|[^.\w]){}\(", regex::escape(&function.name))))
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut found = Vec::new();
+    for function in functions.iter().filter(|function| !function.hands_a_rig_on) {
+        let started = function
+            .body
+            .iter()
+            .filter(|line| !refused.is_match(line))
+            .map(|line| {
+                starts.find_iter(line).count()
+                    + helpers
+                        .iter()
+                        .map(|helper| helper.find_iter(line).count())
+                        .sum::<usize>()
+            })
+            .sum::<usize>();
+        let closed = function
+            .body
+            .iter()
+            .map(|line| closes.find_iter(line).count())
+            .sum::<usize>();
+        if started > 0 {
+            found.push(Starting {
+                name: function.name.clone(),
+                started,
+                closed,
+            });
+        }
+    }
+    Ok(found)
+}
+
+#[test]
+fn every_function_of_the_rig_and_the_regressions_that_starts_a_rig_closes_it_or_hands_it_on(
+) -> Outcome {
     let tests = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
     let mut left = Vec::new();
-    let mut seen = 0;
+    let mut starting = 0;
     for folder in ["regressions", "rig"] {
         for file in sources_in(&tests.join(folder)) {
-            let text = fs::read_to_string(&file)?;
-            for (name, lines) in cases_of(&text) {
-                seen += 1;
-                let started = lines
-                    .iter()
-                    .filter(|line| !refused.is_match(line))
-                    .map(|line| starts.find_iter(line).count())
-                    .sum::<usize>();
-                let closed = lines
-                    .iter()
-                    .map(|line| closes.find_iter(line).count())
-                    .sum::<usize>();
-                if started > closed {
+            // This module's own cases leave their rigs unclosed, on purpose.
+            if file.ends_with("reports.rs") {
+                continue;
+            }
+            for function in startings_in(&fs::read_to_string(&file)?)? {
+                starting += 1;
+                if function.started > function.closed {
                     left.push(format!(
-                        "{folder}/{}: {name} starts {started} rigs and closes {closed}",
-                        file.file_name().unwrap_or_default().to_string_lossy()
+                        "{folder}/{}: {} starts {} rigs and closes {}",
+                        file.file_name().unwrap_or_default().to_string_lossy(),
+                        function.name,
+                        function.started,
+                        function.closed
                     ));
                 }
             }
@@ -229,14 +428,86 @@ fn every_case_of_the_rig_and_the_regressions_that_starts_a_rig_closes_it() -> Ou
     }
 
     assert!(
-        seen > 150,
-        "only {seen} cases were found: the scan is blind"
+        starting > 100,
+        "only {starting} functions that start a rig were found: the scan is blind"
     );
     assert!(
         left.is_empty(),
         "a case that passes ends by closing its rig, or its drop keeps a report of a case that did not fail:\n{}",
         left.join("\n")
     );
+    Ok(())
+}
+
+/// A file of a suite, in the shape main's folder-trust cases have: a helper that starts a
+/// rig and hands it on, a case that takes its rig from it, and the app quit and started
+/// again, a helper that takes a rig and gives one back.
+const SUITE: &str = r#"
+fn asking_with(vars: &[(&str, &str)]) -> cf_e2e::Result<Rig> {
+    Rig::start(config())
+}
+
+fn quit_and_start_again(mut rig: Rig) -> cf_e2e::Result<Rig> {
+    let root = rig.close_keeping_the_root()?;
+    Rig::start(config().existing_root(root))
+}
+
+#[test]
+fn a_case_that_takes_its_rig_from_a_helper() -> Outcome {
+    let rig = asking_with(&[("A", "1")])?;
+    rig.close()?;
+    Ok(())
+}
+
+#[test]
+fn a_case_that_restarts() -> Outcome {
+    let rig = Rig::start(config())?;
+    let rig = quit_and_start_again(rig)?;
+    rig.close()?;
+    Ok(())
+}
+
+#[test]
+fn a_case_that_expects_the_start_refused() -> Outcome {
+    let Err(refused) = Rig::start(config().daemon("liar")) else {
+        panic!("started");
+    };
+    Ok(())
+}
+"#;
+
+#[test]
+fn the_scan_counts_a_rig_a_helper_hands_on_and_none_a_helper_gives_back_or_a_refused_start(
+) -> Outcome {
+    let found = startings_in(SUITE)?;
+    let starts = |name: &str| found.iter().find(|function| function.name == name);
+
+    // All three, closed as they should be: the helper's start counts for the case.
+    assert_eq!(
+        starts("a_case_that_takes_its_rig_from_a_helper"),
+        Some(&Starting {
+            name: "a_case_that_takes_its_rig_from_a_helper".to_owned(),
+            started: 1,
+            closed: 1
+        })
+    );
+    // The rig the case gives the helper is the one it gets back: one start.
+    assert_eq!(
+        starts("a_case_that_restarts").map(|case| case.started),
+        Some(1)
+    );
+    // A start the case expects to be refused is none to close.
+    assert_eq!(starts("a_case_that_expects_the_start_refused"), None);
+
+    // The same case without its close is found: it starts one and closes none.
+    let forgotten = SUITE.replacen("    rig.close()?;\n", "", 1);
+    let found = startings_in(&forgotten)?;
+    let left: Vec<&str> = found
+        .iter()
+        .filter(|function| function.started > function.closed)
+        .map(|function| function.name.as_str())
+        .collect();
+    assert_eq!(left, ["a_case_that_takes_its_rig_from_a_helper"]);
     Ok(())
 }
 

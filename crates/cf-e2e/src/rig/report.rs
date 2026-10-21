@@ -292,20 +292,24 @@ pub(super) fn say(rig: &Rig) {
     if !stray.is_empty() {
         report.push_str(&format!("lines that are no frame: {stray:?}\n"));
     }
-    let where_kept = keep(&rig.root, &tell.text(&report));
+    let where_kept = keep(&rig.root, &tell.text(&report), rig.reports.as_deref());
     eprint!("{where_kept}");
 }
 
 /// Keeps `report`, what a rig dropped unclosed says of itself, in a file beside its home
-/// `root` (the home goes with the rig), on the machine it ran on; and what its error
-/// output says instead: where the report is, and none of its words. Whatever runs a rig
-/// (an agent's tool, another machine's runner) takes its error output off the machine,
-/// and the report holds what its windows showed.
-fn keep(root: &Path, report: &str) -> String {
+/// `root` (the home goes with the rig), or in `folder` where the rig is given one
+/// ([`Config::reports_in`]), on the machine it ran on; and what its error output says
+/// instead: where the report is, and none of its words. Whatever runs a rig (an agent's
+/// tool, another machine's runner) takes its error output off the machine, and the report
+/// holds what its windows showed.
+fn keep(root: &Path, report: &str, folder: Option<&Path>) -> String {
     let name = root
         .file_name()
         .map_or_else(|| "rig".into(), |name| name.to_string_lossy());
-    let file = root.with_file_name(format!("{name}-left.txt"));
+    let file = match folder {
+        Some(folder) => folder.join(format!("{name}-left.txt")),
+        None => root.with_file_name(format!("{name}-left.txt")),
+    };
     match files::write(&file, report) {
         Ok(()) => format!(
             "\n--- the rig, as the failed case left it, is kept in {}\n",
@@ -413,7 +417,7 @@ mod tests {
         let folder = tempfile::tempdir().unwrap();
         let root = folder.path().join("consensflow-integration-AbC123");
         let report = "--- p1-long-claude-1: \"correct horse battery staple\"\n";
-        let said = keep(&root, report);
+        let said = keep(&root, report, None);
         let file = folder
             .path()
             .join("consensflow-integration-AbC123-left.txt");
@@ -426,8 +430,14 @@ mod tests {
             )
         );
         assert!(!said.contains("horse"), "{said}");
+        // Given a folder, the file is in it, and the folder is made.
+        let reports = folder.path().join("reports");
+        let said = keep(&root, report, Some(&reports));
+        let file = reports.join("consensflow-integration-AbC123-left.txt");
+        assert_eq!(fs::read_to_string(&file).unwrap(), report);
+        assert!(said.contains(&file.display().to_string()), "{said}");
         // A file that cannot be written: said so, with none of the report either.
-        let said = keep(&file.join("home"), report);
+        let said = keep(&file.join("home"), report, None);
         assert!(said.contains("could not be kept"), "{said}");
         assert!(!said.contains("horse"), "{said}");
     }

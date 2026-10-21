@@ -37,6 +37,7 @@ mod stranger;
 mod wait;
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, MutexGuard};
 use std::time::Duration;
 
@@ -95,6 +96,7 @@ pub struct Config {
     opencode: Option<PathBuf>,
     finder: bool,
     masker: Option<Masker>,
+    reports: Option<PathBuf>,
 }
 
 /// What a rig passes what it says of itself through, where its owner gives it one
@@ -158,6 +160,7 @@ impl Config {
             opencode: None,
             finder: false,
             masker: None,
+            reports: None,
         }
     }
 
@@ -172,6 +175,17 @@ impl Config {
     #[must_use]
     pub fn as_the_finder_starts_it(mut self) -> Self {
         self.finder = true;
+        self
+    }
+
+    /// With the report of a rig a case leaves unclosed kept in `folder`, not beside
+    /// the rig's home in the machine's temp folder: for a rig whose windows are a
+    /// real harness's, whose screens the person's login drew and no masker is sure
+    /// to hide (the lead's decision of 2026-10-16), and which the machine's temp
+    /// folder would keep for good.
+    #[must_use]
+    pub fn reports_in(mut self, folder: impl Into<PathBuf>) -> Self {
+        self.reports = Some(folder.into());
         self
     }
 
@@ -335,10 +349,17 @@ pub struct Rig {
     forget: Option<Forget>,
     /// What it passes what it says of itself through ([`Config::masked_by`]).
     masker: Option<Masker>,
+    /// Where its report is kept, where it is not beside its home ([`Config::reports_in`]).
+    reports: Option<PathBuf>,
     /// Whether the home is left when the rig ends: it is not, unless a rig is
     /// to resume on it or a case asked to keep it ([`Rig::keep_home`]).
     keep_root: bool,
+    /// Whether the rig ended: set when a close succeeded, never by one that failed.
     closed: bool,
+    /// Whether a close was tried and failed.
+    close_failed: bool,
+    /// Whether the case holds its close to fail ([`Rig::expect_the_close_to_fail`]).
+    close_expected_to_fail: AtomicBool,
     _turn: MutexGuard<'static, ()>,
 }
 
@@ -634,11 +655,31 @@ impl Rig {
         last_word(&self.shared, self.root.clone(), LAST_FRAMES)
     }
 
+    /// For a case that holds the close to fail (the rig's checks of what the pane host
+    /// ended, of what a window left running): a close that fails keeps no report of
+    /// the rig, since the failure is what the case is about and it says it. A close
+    /// that fails in any other case does keep one, and so does a case that never
+    /// tries it.
+    pub fn expect_the_close_to_fail(&self) {
+        self.close_expected_to_fail.store(true, Ordering::Relaxed);
+    }
+
+    /// Ends the rig, as [`Rig::close`] says. It is closed once that succeeded: a close
+    /// that failed leaves the rig to be dropped unclosed, which keeps its report.
     fn shutdown(&mut self, exit: Duration) -> Result<()> {
         if self.closed {
             return Ok(());
         }
-        self.closed = true;
+        let ended = self.end(exit);
+        if ended.is_ok() {
+            self.closed = true;
+        } else {
+            self.close_failed = true;
+        }
+        ended
+    }
+
+    fn end(&mut self, exit: Duration) -> Result<()> {
         self.daemon.end_input();
         self.host.end_input();
         let (daemon, host) = (self.daemon.wait(exit)?, self.host.wait(exit)?);
@@ -676,12 +717,14 @@ impl Rig {
 }
 
 impl Drop for Rig {
-    /// A rig not closed (a case that failed on the way, by a check or by an
-    /// error it returned: every case that passes ends by closing it) is ended
-    /// all the same, saying what the windows showed first; and the home goes
+    /// A rig not closed (a case that failed on the way, by a check, by an error it
+    /// returned, or by a close that failed: every case that passes ends by closing it)
+    /// is ended all the same, saying what the windows showed first; and the home goes
     /// unless it is to be kept.
     fn drop(&mut self) {
-        if std::thread::panicking() || !self.closed {
+        let failure_expected =
+            self.close_failed && self.close_expected_to_fail.load(Ordering::Relaxed);
+        if std::thread::panicking() || (!self.closed && !failure_expected) {
             report::say(self);
         }
         let _ = self.shutdown(EXIT);

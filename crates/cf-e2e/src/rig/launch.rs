@@ -4,6 +4,7 @@
 use std::io::BufReader;
 use std::path::Path;
 use std::process::ChildStdout;
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
@@ -85,8 +86,11 @@ impl Rig {
             stranger,
             forget: config.stand_in_records.map(Forget::new),
             masker: config.masker,
+            reports: config.reports,
             keep_root: false,
             closed: false,
+            close_failed: false,
+            close_expected_to_fail: AtomicBool::new(false),
             _turn: turn,
         })
     }

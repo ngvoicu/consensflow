@@ -754,6 +754,7 @@ fn a_window_whose_prompt_is_drawn_otherwise_goes_on_after_the_yes() -> Outcome {
         .to_owned();
     a_task(&rig, &project, &tier, 1, "PLAIN_PROMPT_DONE")?;
     assert_eq!(keys_given(&rig), ["down", "enter"]);
+    rig.close()?;
     Ok(())
 }
 
@@ -769,6 +770,7 @@ fn a_window_that_did_not_take_a_key_is_given_it_again() -> Outcome {
         .to_owned();
     a_task(&rig, &project, &tier, 1, "AGAIN_DONE")?;
     assert_eq!(keys_given(&rig), ["dropped", "down", "enter"]);
+    rig.close()?;
     Ok(())
 }
 
@@ -792,6 +794,7 @@ fn a_screen_that_quotes_the_question_asks_nothing() -> Outcome {
         notes.is_empty(),
         "a quoted question was answered: {notes:?}"
     );
+    rig.close()?;
     Ok(())
 }
 
@@ -850,6 +853,7 @@ fn a_record_that_grows_as_a_no_ends_the_window_is_no_yes() -> Outcome {
         "a key toward yes went into the other window: {:?}",
         keys_given(&rig)
     );
+    rig.close()?;
     Ok(())
 }
 
@@ -897,5 +901,6 @@ fn a_window_opened_again_whose_record_cannot_be_read_at_first_is_still_answered(
         Ok(state == "done")
     })?;
     assert_eq!(notes_of(&project, rig.workspace())?.len(), 1);
+    rig.close()?;
     Ok(())
 }
