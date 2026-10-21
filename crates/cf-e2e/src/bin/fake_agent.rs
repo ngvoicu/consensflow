@@ -44,7 +44,9 @@
 //!
 //! The window of a participant `CF_TEST_TRUST` names, opened in a git repository it
 //! was never told to trust, asks whether to trust it first, as Claude Code does
-//! (`trust`).
+//! (`trust`); with `CF_TEST_SAYS_FIRST` it prints those words before its first line,
+//! and with `CF_TEST_PLAIN_PROMPT` its first line does not say it is in
+//! full-permission mode, as a prompt drawn otherwise.
 //!
 //! It is the program of the suites that stands in a window, so it reads the
 //! environment a window is given and runs `cf` as an agent does, both through
@@ -189,8 +191,39 @@ fn run(
     }
 
     // Claude Code's question about a folder it was never told to trust comes first.
-    if let trust::Answer::Exit = trust::ask(Path::new(&config), named("CF_TEST_TRUST"))? {
+    let asking = named("CF_TEST_TRUST");
+    if asking {
+        trust::bring_the_record_back(records.transcript());
+    }
+    let grows = asking && own_var("CF_TEST_RECORD_GROWS_ON_NO").is_some();
+    // Its terminal is read from the start, raw, as a TUI reads it: the question
+    // before the prompt takes its keys from the same reader.
+    let mut keys = Keys::start();
+    let answer = trust::ask(Path::new(&config), asking, &mut keys, || {
+        if !grows {
+            return Ok(());
+        }
+        // A process before this window's, which the host could not end, writes still.
+        let written = json!({
+            "type": "assistant",
+            "message": {
+                "id": format!("{}-before-{pid}", launch.session),
+                "role": "assistant",
+                "stop_reason": "end_turn",
+                "content": [{ "type": "text", "text": "written by the process before" }],
+            },
+        });
+        records
+            .append(pid, written)
+            .map_err(|failed| failed.to_string())
+    })?;
+    if let trust::Answer::Exit = answer {
         leave(&status_file, 0);
+    }
+    if asking {
+        if let Some(said) = own_var("CF_TEST_SAYS_FIRST") {
+            say(&format!("{said}\n")).map_err(|failed| failed.to_string())?;
+        }
     }
     records
         .status(pid, "idle")
@@ -200,12 +233,15 @@ fn run(
     } else {
         "started"
     };
-    // Claude's prompt says so under its input box, in full-permission mode.
-    say(&format!(
-        "fake agent {said} on {} · bypass permissions on\n",
-        launch.session
-    ))
-    .map_err(|failed| failed.to_string())?;
+    // Claude's prompt says so under its input box, in full-permission mode, unless
+    // the window is one whose prompt says it otherwise.
+    let mode = if asking && own_var("CF_TEST_PLAIN_PROMPT").is_some() {
+        ""
+    } else {
+        " · bypass permissions on"
+    };
+    say(&format!("fake agent {said} on {}{mode}\n", launch.session))
+        .map_err(|failed| failed.to_string())?;
 
     let (turns, queued) = mpsc::channel::<String>();
     let stop = Arc::new(Stop::default());
@@ -250,7 +286,6 @@ fn run(
 
     // Raw input, like a real TUI: a bracketed paste is text, Enter outside one
     // submits, and an Escape that nothing follows is the key.
-    let mut keys = Keys::start();
     loop {
         // The terminal is gone.
         let Some(events) = keys.read() else {
