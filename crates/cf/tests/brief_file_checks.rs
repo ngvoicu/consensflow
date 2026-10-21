@@ -174,6 +174,7 @@ fn ended_within<S: AsRef<OsStr>>(
     let mut child = command
         .args(args)
         .env("CONSENSFLOW_HOME", home.path())
+        .env("CONSENSFLOW_TOOL_FOLDERS", "")
         .env("CONSENSFLOW_URL", &api.url)
         .env("CONSENSFLOW_TOKEN", "tok")
         .stdin(Stdio::null())
