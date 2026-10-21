@@ -84,7 +84,7 @@ runs = ["ledger-approval"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/gate.rs"
-find = '                call_off(store, message.project_id, task.number, by)?;'
+find = '                call_off(store, message.project_id, task.number, by, Ending::Declined)?;'
 replace = ''
 
 [[plant]]

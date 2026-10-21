@@ -3,7 +3,10 @@
 //! T-n is *accepted*, so a task waiting on a task that was cancelled read
 //! "blocked by T-n" for good, and nothing told anyone. The cancel is refused
 //! while an open task waits for the task, in the words of `waited-for`; a
-//! ledger 3.0.5 left with such a task tells the chief once, at its opening.
+//! ledger 3.0.5 left with such a task tells the chief once, at its opening. A
+//! member's removal is not refused for the tasks that wait for what it
+//! cancels (the human who clicks Remove means it): the chief is told of each
+//! of them in the removal's step (Calliope's review of a996f308, T-124).
 
 #![allow(clippy::expect_used)]
 
@@ -184,7 +187,8 @@ fn the_humans_decline_of_a_brief_other_tasks_wait_for_is_refused_the_same_way() 
     assert_eq!(declined.code(), Some("waited-for"));
     assert_eq!(
         declined.to_string(),
-        "T-1 cannot be cancelled while T-2 waits for it: cancel T-2 first, or let T-1 finish"
+        "T-1 cannot be cancelled while T-2 waits for it: cancel T-2 first, or pass T-1 on",
+        "a brief that never started is passed on, not finished"
     );
     assert_eq!(state(&ledger, 1), "queued", "the task was not cancelled");
     let thread = ledger.task(1, 1).expect("a thread").expect("T-1");
@@ -236,9 +240,9 @@ fn notes(ledger: &Ledger, chief: i64) -> Vec<String> {
     found.sort_by_key(|message| message.id);
     found
         .iter()
-        .map(|message| {
-            let task = message.task_number.expect("a note about a task");
-            format!("T-{task}: {}", message.body)
+        .filter_map(|message| {
+            let task = message.task_number?;
+            Some(format!("T-{task}: {}", message.body))
         })
         .collect()
 }
@@ -290,5 +294,50 @@ fn a_ledger_with_no_task_waiting_for_a_cancelled_one_tells_the_chief_nothing() {
         .expect("project 1")
         .participants[1]
         .id;
+    assert_eq!(notes(&ledger, chief), Vec::<String>::new());
+}
+
+#[test]
+fn a_member_removed_with_a_task_others_wait_for_tells_the_chief_in_that_step_and_the_next_opening_says_nothing_more(
+) {
+    let dir = tempfile::tempdir().expect("a folder");
+    let file = dir.path().join("consensflow.db");
+    let mut ledger = open_ledger(&file, options()).expect("a ledger");
+    let view = project(&mut ledger, false);
+    let chief = view
+        .participants
+        .iter()
+        .find(|participant| participant.role == "chief")
+        .expect("its chief")
+        .id;
+    // T-1 is zeus's, and T-2 waits for it.
+    by_name(&mut ledger, 1, "Parser", &[]);
+    open(&mut ledger, 1, "Docs", &[1]);
+
+    // The removal is not refused: the human who clicks Remove means it.
+    let removed = ledger.remove_member(1, "zeus").expect("zeus leaves");
+    assert_eq!(removed.cancelled, [1]);
+    assert_eq!(state(&ledger, 1), "cancelled");
+    assert_eq!(state(&ledger, 2), "open");
+    // And the chief is told in that step, not at the next opening.
+    let expected = ["T-2: T-2 waits on cancelled T-1 and will never start."];
+    assert_eq!(notes(&ledger, chief), expected);
+    ledger.close().expect("the file is given up");
+
+    // The opening does not tell it again.
+    let ledger = open_ledger(&file, options()).expect("opened again");
+    assert_eq!(notes(&ledger, chief), expected);
+}
+
+#[test]
+fn a_member_removed_with_a_task_nothing_waits_for_tells_the_chief_nothing_of_waiters() {
+    let dir = tempfile::tempdir().expect("a folder");
+    let mut ledger = open_ledger(&dir.path().join("consensflow.db"), options()).expect("ledger");
+    let view = project(&mut ledger, false);
+    let chief = view.participants[1].id;
+    by_name(&mut ledger, 1, "Parser", &[]);
+    open(&mut ledger, 1, "Docs", &[]);
+    let removed = ledger.remove_member(1, "zeus").expect("zeus leaves");
+    assert_eq!(removed.cancelled, [1]);
     assert_eq!(notes(&ledger, chief), Vec::<String>::new());
 }

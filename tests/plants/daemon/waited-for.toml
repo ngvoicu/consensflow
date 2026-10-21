@@ -9,6 +9,9 @@
 # the body). One plant takes one fix out, and a test of it fails. The rig's case builds the native
 # `cf` from the sources as planted, so its plants say `builds`.
 #
+# A member's removal cancels the member's tasks around that refusal (the human who clicks Remove
+# means it, so it is not refused), and tells the chief of each task left waiting, in its step.
+#
 # Every name holds `waited for` or `brief gate`, so `npm run plants:daemon -- "waited for"` runs the
 # first and `-- "brief gate"` the second.
 
@@ -23,7 +26,7 @@ runs = ["ledger-waited-for", "ledger-replay"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/finishing.rs"
-find = "    require_unawaited(store, &task)?;\n"
+find = "    require_unawaited(store, &task, ending)?;\n"
 replace = ""
 
 [[plant]]
@@ -33,7 +36,7 @@ runs = ["ledger-waited-for"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/finishing.rs"
-find = "    require_unawaited(store, &task)?;\n"
+find = "    require_unawaited(store, &task, ending)?;\n"
 replace = ""
 
 [[plant]]
@@ -44,7 +47,7 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/finishing.rs"
-find = "    require_unawaited(store, &task)?;\n"
+find = "    require_unawaited(store, &task, ending)?;\n"
 replace = ""
 
 [[plant]]
@@ -84,8 +87,8 @@ runs = ["ledger-waited-for"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/finishing.rs"
-find = "                \"task.stranded\",\n"
-replace = "                \"task.stranded-again\",\n"
+find = "        \"task.stranded\",\n"
+replace = "        \"task.stranded-again\",\n"
 
 [[plant]]
 name = "waited for: the chief is told of a task that waits for a cancelled one though it was cancelled itself"
@@ -116,3 +119,26 @@ runs = ["daemon-api"]
 file = "crates/cf-daemon/src/api/routes/task.rs"
 find = "        if held_back && !may_move(caller, &task) {"
 replace = "        if held_back {"
+
+[[plant]]
+name = "waited for: a member's removal leaves the tasks that waited for its tasks without a word to the chief"
+meant = "a_member_removed_with_a_task_others_wait_for_tells_the_chief_in_that_step_and_the_next_opening_says_nothing_more"
+runs = ["ledger-waited-for"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff.rs"
+find = """        for (task, _) in &open {
+            tell_stranded_waiters(store, project_id, task)?;
+        }
+"""
+replace = ""
+
+[[plant]]
+name = "waited for: the human's decline of a brief is told to finish it, though it never started"
+meant = "the_humans_decline_of_a_brief_other_tasks_wait_for_is_refused_the_same_way"
+runs = ["ledger-waited-for"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = 'Ending::Declined => format!("pass T-{number} on"),'
+replace = 'Ending::Declined => format!("let T-{number} finish"),'
