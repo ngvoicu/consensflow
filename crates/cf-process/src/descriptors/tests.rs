@@ -22,7 +22,7 @@ use std::time::{Duration, Instant};
 use cf_base::env::Env;
 use nix::fcntl::{fcntl, FcntlArg, FdFlag};
 
-use crate::{hand_over, spawn, Run, Streams};
+use crate::{capture, hand_over, spawn, Limits, Run, Streams};
 
 /// What the descriptors are: the three shapes of a descriptor that is open for a moment in
 /// a program that starts others: a file, a listening socket and a pipe's end.
@@ -134,6 +134,144 @@ fn a_program_let_go_holds_no_descriptor_that_was_open_when_it_started() {
         std::thread::sleep(Duration::from_millis(10));
     }
     assert_eq!(std::fs::read_to_string(&said).unwrap(), all_clear(&fds));
+}
+
+#[test]
+fn a_program_run_to_its_end_holds_no_descriptor_that_was_open_when_it_started() {
+    let (_open, fds) = Open::not_yet_close_on_exec();
+    let captured = runtime()
+        .block_on(capture(
+            &asking(&fds, "true"),
+            None,
+            &system_env(),
+            Limits {
+                timeout: Duration::from_secs(60),
+                max_buffer: 1024,
+            },
+            |_| {},
+        ))
+        .unwrap();
+    assert_eq!(captured.stdout, all_clear(&fds));
+}
+
+/// The first of the descriptors a crowded process leaves open: above whatever the test
+/// harness, the runtime and the program asked have open of their own.
+const CROWD_FROM: i32 = 100;
+
+/// How many, from [`CROWD_FROM`] on: more than one listing holds.
+const CROWD: i32 = 4200;
+
+/// One more, far above the rest.
+const FAR: i32 = 5000;
+
+/// What a crowded process's limit on its descriptors is lowered to once they are open.
+const LOWERED: u64 = 256;
+
+/// Runs the test `name` of this binary in a process of its own, for it crowds its
+/// descriptor table and lowers its limits, which no other test beside it would survive.
+#[allow(clippy::disallowed_methods)] // This test binary, run again as libtest runs one.
+fn alone(name: &str) {
+    let ran = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            name,
+            "--ignored",
+            "--nocapture",
+            "--test-threads=1",
+        ])
+        .env(CROWDED, "1")
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    let said = format!(
+        "{}{}",
+        String::from_utf8_lossy(&ran.stdout),
+        String::from_utf8_lossy(&ran.stderr)
+    );
+    assert!(ran.status.success(), "{said}");
+    assert!(said.contains("1 passed"), "the test did not run: {said}");
+}
+
+/// Set for the tests that [`alone`] runs: run otherwise, they do nothing.
+const CROWDED: &str = "CF_PROCESS_CROWDED";
+
+/// Opens [`CROWD`] descriptors from [`CROWD_FROM`] and one at [`FAR`], none close-on-exec,
+/// lowers the limit on descriptors to [`LOWERED`] (the hard one too when `hard`), and
+/// starts a program that lists the descriptors it holds: it holds none of them.
+#[allow(clippy::disallowed_methods)] // Whether [`alone`] runs it: libtest has no other word for it.
+fn crowded(hard: bool) {
+    use nix::sys::resource::{getrlimit, setrlimit, Resource};
+    if std::env::var_os(CROWDED).is_none() {
+        return;
+    }
+    let (_, most) = getrlimit(Resource::RLIMIT_NOFILE).unwrap();
+    setrlimit(Resource::RLIMIT_NOFILE, most.min(16_384), most).unwrap();
+    let null = File::open("/dev/null").unwrap();
+    let crowd: Vec<i32> = (CROWD_FROM..CROWD_FROM + CROWD)
+        .chain([FAR])
+        .map(|fd| nix::unistd::dup2(null.as_raw_fd(), fd).unwrap())
+        .collect();
+    for &fd in &crowd {
+        assert!(!fcntl(fd, FcntlArg::F_GETFD)
+            .map(|flags| flags & libc::FD_CLOEXEC != 0)
+            .unwrap());
+    }
+    setrlimit(
+        Resource::RLIMIT_NOFILE,
+        LOWERED,
+        if hard { LOWERED } else { most },
+    )
+    .unwrap();
+    let runtime = runtime();
+    let _entered = runtime.enter();
+    let listing = Run {
+        program: PathBuf::from("/bin/sh"),
+        args: vec![
+            OsString::from("-c"),
+            OsString::from("echo $(/bin/ls /dev/fd)"),
+        ],
+        verbatim: false,
+    };
+    let child = spawn(&listing, None, &system_env(), Streams::Lines).unwrap();
+    let line = runtime
+        .block_on(child.read_line(64 * 1024))
+        .unwrap()
+        .unwrap();
+    runtime.block_on(child.closed());
+    let held: Vec<i32> = line
+        .split_whitespace()
+        .filter_map(|fd| fd.parse().ok())
+        .filter(|fd| *fd >= CROWD_FROM)
+        .collect();
+    assert!(
+        held.is_empty(),
+        "the program held {} of the crowd: {held:?}",
+        held.len()
+    );
+    // The program's own listing names its streams and the folder it reads: it was read.
+    assert!(line.starts_with("0 1 2"), "{line}");
+}
+
+#[test]
+fn a_program_holds_none_of_a_crowd_of_descriptors_whatever_the_limit_was_lowered_to() {
+    alone("descriptors::tests::crowded_with_the_limit_lowered");
+}
+
+#[test]
+fn a_program_holds_none_of_a_crowd_of_descriptors_whatever_the_hard_limit_was_lowered_to() {
+    alone("descriptors::tests::crowded_with_the_hard_limit_lowered");
+}
+
+#[test]
+#[ignore = "run alone, by the test above it"]
+fn crowded_with_the_limit_lowered() {
+    crowded(false);
+}
+
+#[test]
+#[ignore = "run alone, by the test above it"]
+fn crowded_with_the_hard_limit_lowered() {
+    crowded(true);
 }
 
 /// What a stress of a way of starting programs found.
@@ -283,4 +421,62 @@ fn a_listener_closed_here_is_not_held_by_a_program_started_while_it_was_made() {
         Duration::from_millis(150),
     );
     assert_eq!(found.held, 0);
+}
+
+/// What a start by fork and exec costs against one by `posix_spawn`, the way std starts a
+/// program that has nothing to run first: how long `spawn` takes to return, which is how long
+/// the new program holds every descriptor of this process before its exec lets the
+/// close-on-exec ones go. Measured as this process is, with 256 MiB more of it resident, and
+/// with 4,200 descriptors more open; the median, the 99th of 300 starts and the longest.
+/// `cargo test -p cf-process --lib -- --ignored --nocapture what_a_start_by_fork_costs`.
+#[test]
+#[ignore = "a measurement, which says what it found and checks nothing"]
+#[allow(clippy::disallowed_methods)] // std's own start is what the hook's is measured against.
+fn what_a_start_by_fork_costs() {
+    use nix::sys::resource::{getrlimit, setrlimit, Resource};
+
+    fn measured(way: &str, hooked: bool) {
+        let mut took: Vec<Duration> = (0..300)
+            .map(|_| {
+                let mut command = std::process::Command::new("/usr/bin/true");
+                command
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null());
+                if hooked {
+                    crate::hold_only_the_streams(&mut command);
+                }
+                let started = Instant::now();
+                let mut child = command.spawn().unwrap();
+                let took = started.elapsed();
+                child.wait().unwrap();
+                took
+            })
+            .collect();
+        took.sort();
+        eprintln!(
+            "  {way}: median {:?}, 99th {:?}, longest {:?}",
+            took[took.len() / 2],
+            took[took.len() * 99 / 100],
+            took[took.len() - 1]
+        );
+    }
+    fn both(what: &str) {
+        eprintln!("{what}:");
+        measured("posix_spawn", false);
+        measured("fork and exec, the hook", true);
+    }
+
+    both("this process");
+    let resident = vec![1_u8; 256 << 20];
+    both("256 MiB more resident");
+    drop(resident);
+    let (_, most) = getrlimit(Resource::RLIMIT_NOFILE).unwrap();
+    setrlimit(Resource::RLIMIT_NOFILE, most.min(16_384), most).unwrap();
+    let null = File::open("/dev/null").unwrap();
+    let crowd: Vec<OwnedFd> = (0..CROWD)
+        .map(|_| null.try_clone().unwrap().into())
+        .collect();
+    both("4,200 descriptors more open");
+    drop(crowd);
 }

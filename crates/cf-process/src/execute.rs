@@ -259,14 +259,12 @@ mod tests {
             timeout: Duration::from_millis(300),
             max_buffer: 1024,
         };
-        // The pipe is closed here, and only here: a program being started on another thread
-        // as the pipe was made (fork, macOS) holds a copy of it for a few milliseconds, and
-        // the `echo` that is answered then is one into a pipe that is still read from. That
-        // can make the program answer; a capture that asked it to end with the pipe open
-        // would make it answer every time. So the pipe has to be met closed once in ten.
-        let failed = (0..10)
-            .find_map(|_| run_now(&run, &system_env(), limits).err())
-            .expect("the program never met a closed pipe in ten tries");
+        // The pipe is closed here, and only here: a program another test is starting by fork
+        // holds every descriptor of this process until its exec, this pipe's ends among them,
+        // and an `echo` answered then goes into a pipe that is still read from. What is tested
+        // is the order here, not that moment: no program of another test is in flight while
+        // this one runs.
+        let failed = crate::testing::alone(|| run_now(&run, &system_env(), limits)).unwrap_err();
         assert!(failed.killed);
         assert_eq!(failed.code, None);
         assert_eq!(failed.stdout, "hi\n");

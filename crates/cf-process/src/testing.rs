@@ -3,7 +3,9 @@
 //! system whether each is still there, and whatever a failing test left
 //! running is ended as the test goes, since nothing else would.
 
+use std::cell::Cell;
 use std::path::Path;
+use std::sync::{PoisonError, RwLock, RwLockReadGuard};
 use std::time::{Duration, Instant};
 
 use crate::{alive, terminate, Ending};
@@ -89,4 +91,30 @@ impl Drop for Survivors {
             }
         }
     }
+}
+
+/// The starts of this crate's programs in its tests: each holds it shared from before its
+/// fork to after its exec, and a test that may have no program of another test in flight
+/// takes it whole ([`alone`]). A program being started by fork holds every descriptor of this
+/// process until its exec, and a pipe a test closed is not closed while it does.
+static STARTING: RwLock<()> = RwLock::new(());
+
+thread_local! {
+    /// Whether this thread holds [`STARTING`] whole: its own starts go ahead.
+    static ALONE: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Held while a program of this crate's is started, in its tests.
+pub(crate) fn starting() -> Option<RwLockReadGuard<'static, ()>> {
+    (!ALONE.get()).then(|| STARTING.read().unwrap_or_else(PoisonError::into_inner))
+}
+
+/// Runs `test` once every program of the other tests that is being started has been, and
+/// with none started until it ends.
+pub(crate) fn alone<T>(test: impl FnOnce() -> T) -> T {
+    let _whole = STARTING.write().unwrap_or_else(PoisonError::into_inner);
+    ALONE.set(true);
+    let ran = test();
+    ALONE.set(false);
+    ran
 }

@@ -80,6 +80,8 @@ pub async fn capture(
     started: impl FnOnce(Ender),
 ) -> Result<Captured, CaptureFailed> {
     let mut command = tokio::process::Command::from(run.command());
+    // What it starts may run on after it has answered: an installer's own children.
+    crate::descriptors::hold_only_the_streams(command.as_std_mut());
     command
         .env_clear()
         .envs(env.iter())
@@ -92,6 +94,8 @@ pub async fn capture(
     }
     hide_window(&mut command);
     lead(&mut command);
+    #[cfg(test)]
+    let starting = crate::testing::starting();
     let mut child = command.spawn().map_err(|failed| {
         CaptureFailed::unstarted(format!(
             "spawn {} {}",
@@ -99,6 +103,8 @@ pub async fn capture(
             error_code(&failed)
         ))
     })?;
+    #[cfg(test)]
+    drop(starting);
     crate::job::adopt(&child);
     // Declared after the child, so it is dropped before it: a capture dropped
     // ends the group while its leader is not yet reaped.

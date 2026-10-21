@@ -43,6 +43,8 @@ pub async fn hand_over(run: &Run, env: &Env, within: Duration) -> Result<Handed,
         .stderr(Stdio::null());
     hide_window(&mut command);
     lead(&mut command);
+    #[cfg(test)]
+    let starting = crate::testing::starting();
     let mut child = command.spawn().map_err(|failed| {
         format!(
             "spawn {} {}",
@@ -50,6 +52,8 @@ pub async fn hand_over(run: &Run, env: &Env, within: Duration) -> Result<Handed,
             error_code(&failed)
         )
     })?;
+    #[cfg(test)]
+    drop(starting);
     match tokio::time::timeout(within, child.wait()).await {
         Ok(Ok(status)) => Ok(Handed::Ended(status.code())),
         Ok(Err(failed)) => Err(format!(

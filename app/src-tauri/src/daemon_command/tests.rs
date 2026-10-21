@@ -132,6 +132,31 @@ fn the_login_path_is_read_past_what_login_files_print() {
     );
 }
 
+/// The login shell is asked as the app starts, while its other threads open sockets and
+/// pipes, and what a login file starts may run on after it: here a descriptor is left open and
+/// not close-on-exec while the shell is asked, and the shell says, as its PATH, whether it has it.
+#[cfg(target_os = "macos")]
+#[test]
+fn the_login_shell_holds_nothing_of_the_apps_but_its_streams() {
+    use std::os::fd::AsRawFd;
+
+    let home = tempfile::tempdir().expect("home");
+    let stray = std::fs::File::open("/dev/null").expect("a file");
+    let fd = stray.as_raw_fd();
+    // SAFETY: `fcntl` is asked to clear the flags of a descriptor this test holds.
+    assert_eq!(unsafe { libc::fcntl(fd, libc::F_SETFD, 0) }, 0);
+    let shell = login_shell(
+        home.path(),
+        &format!(
+            "if [ -e /dev/fd/{fd} ]; then PATH=held; else PATH=clear; fi; export PATH; exec /bin/sh -c \"$2\""
+        ),
+    );
+    assert_eq!(
+        login_path_in(&shell, Duration::from_secs(5), &LoginLookup::default()).as_deref(),
+        Some("clear")
+    );
+}
+
 /// The pid a shell wrote in `file`, once it has.
 #[cfg(unix)]
 fn pid_in(file: &Path) -> i32 {

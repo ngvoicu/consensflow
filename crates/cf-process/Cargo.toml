@@ -22,5 +22,9 @@ windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Securit
 tempfile.workspace = true
 tokio = { workspace = true, features = ["rt"] }
 
+[target.'cfg(unix)'.dev-dependencies]
+# `setrlimit`, for a test that crowds its process's descriptor table.
+nix = { workspace = true, features = ["fs", "resource"] }
+
 [lints]
 workspace = true

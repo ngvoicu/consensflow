@@ -1,37 +1,54 @@
 //! What a program started here is left of this one's descriptors: its standard
 //! streams, and nothing else.
 //!
-//! macOS cannot open a socket or a pipe close-on-exec: std opens it, and makes it so
-//! in a second call. A program started on another thread between the two is left the
-//! descriptor, open, and keeps it for as long as it runs. A listener this process closed
-//! goes on taking connections, and nothing serves them; its port cannot be bound again;
-//! the end of a pipe that is closed here is not the end of it, and whoever reads the
-//! other side waits for it. Seen in the tests as a closed feed that still answered, a
-//! free port that was taken, and a host that would not end with its input; nothing in
-//! the product is spared, for the daemon starts programs while its other threads open
-//! sockets and pipes.
+//! macOS cannot open a socket, a pipe or a terminal close-on-exec: std opens a socket or a
+//! pipe and makes it so in a second call, and portable-pty does the same with a terminal. A
+//! program started on another thread between the two is left the descriptor, open, and keeps
+//! it for as long as it runs. A listener this process closed goes on taking connections, and
+//! nothing serves them; its port cannot be bound again; the end of a pipe that is closed here
+//! is not the end of it, and whoever reads the other side waits for it; a terminal whose
+//! window was closed never hangs up. Seen in the tests as a closed feed that still answered, a
+//! free port that was taken, and a host that would not end with its input.
+//!
+//! Where that is in the product is the app, which runs many threads: the pane host's make the
+//! windows' terminals, and the main thread starts the daemon, which runs as long as the app
+//! does and would hold a window's terminal past its close. The daemon's start (the app's
+//! daemon command) is where this matters, and the login shell the app asks for its PATH
+//! beside it, for a login file may start a program that runs on. The daemon and the Codex
+//! supervisor start their programs on the one thread that opens their sockets and pipes, so
+//! no start of theirs falls between the two calls today; every program is started so all the
+//! same, for a second thread there would open the window with nothing to say so, and the app
+//! may start programs through this crate.
 //!
 //! So a program, in the moment between its start and its exec, closes every descriptor it
 //! holds above the standard streams that is not close-on-exec: the copy it was left, which
-//! whatever this process does to its own after is no matter to. (The close-on-exec ones
-//! are left to the exec, as std's own pipe that tells the start's failure must be.) That
-//! is done in the new process, which is why it is started by fork and exec (std does, for
-//! a program that has something to run first): macOS offers `POSIX_SPAWN_CLOEXEC_DEFAULT`
-//! to the same end, through no call std makes.
+//! whatever this process does to its own after is no matter to. (The close-on-exec ones are
+//! left to the exec, as std's own pipe that tells the start's failure must be.) The system
+//! lists them; a process with more than one listing holds has the rest asked for one by one,
+//! as far as its table goes, which the system says too. Not as far as its limit on
+//! descriptors: that is lowered as easily below one that is open as above it, the hard limit
+//! too. That is done in the new process, which is why it is started by fork and exec (std
+//! does, for a program that has something to run first). macOS offers
+//! `POSIX_SPAWN_CLOEXEC_DEFAULT` to the same end, through no call std makes: a start of this
+//! crate's own by `posix_spawn` would be a process outside tokio's, its wait, its streams and
+//! its end when dropped written again, at every place a program starts.
 //!
-//! What this does not do is the moment before: a program that is being started when a
-//! descriptor is closed here holds its copy until it gets to run. A program started by fork
-//! and exec holds every descriptor of this process, close-on-exec or not, from the fork to
-//! the exec, a few milliseconds on a loaded Mac, and one started by `posix_spawn` holds
-//! them for the one call, a fraction of that. Measured on this crate's own tests, a pipe
-//! closed here and asked about a moment after was still held by a program in flight in 36
-//! of 150 runs of the suite when every program was started so, and in 2 of 150 when none
-//! was. That is the price, so it is paid by the programs that run beside this one for as
-//! long as it does ([`crate::spawn`]: the pane host, a harness's server) and by the ones let
-//! go ([`crate::hand_over`]), whose hold would last as long as they do, and not by the
-//! ones run to their end ([`crate::capture`]), whose hold lasts as long as they run. A check
-//! that something is closed, made at once, is made against that: the tests ask the thing
-//! itself, or wait for it.
+//! What this does not do is the moment before. A program started by fork holds every
+//! descriptor of this process, close-on-exec or not, from the fork to the exec; one started by
+//! `posix_spawn` holds them for the one call. Measured on this Mac under load (a load average
+//! of 21 to 27), 300 starts of `/usr/bin/true` three times over (`what_a_start_by_fork_costs`,
+//! in a test build): `posix_spawn` returns in 0.15 ms at the median, 0.2 to 0.5 ms at the 99th
+//! of them; a start by fork, the hook run, in 0.9 to 1.0 ms, 1.3 to 2.3 ms at the 99th. 256
+//! MiB more of this process resident changes neither; 4,200 descriptors more open make them
+//! 0.3 ms and 1.5 to 1.7 ms. So a start costs about a millisecond more, and in that
+//! millisecond the program holds what this process has. A descriptor closed here in that
+//! moment is held until the program gets to run: a listener takes connections into its
+//! backlog, a pipe is not at its end. One of them is std's own: the pipe a start by fork is
+//! told its exec's failure on, read here to its end, is open and not yet close-on-exec for a
+//! moment as it is made, and a program another thread starts in that moment by a start that
+//! does not close what it was left keeps the writing end for as long as it runs: the start
+//! here waits for that program to end. A check that something is closed, made at once, is made
+//! against all that: the tests ask the thing itself, or wait for it.
 //!
 //! Linux makes a socket or a pipe close-on-exec as it opens it, and Windows hands
 //! nothing over that is not asked: there this does nothing.
@@ -39,8 +56,8 @@
 use std::process::Command;
 
 /// Makes `command` start its program with no descriptor of this process's above the
-/// standard streams. The programs started to run beside this one and the ones let go are
-/// so; a command built by hand that starts a program for long (the app's daemon) asks for it.
+/// standard streams. Every program this crate starts is so; a command built by hand asks for
+/// it (the app's daemon and its login shell, Codex's server and TUI).
 pub fn hold_only_the_streams(command: &mut Command) {
     #[cfg(target_os = "macos")]
     macos::hold_only_the_streams(command);
@@ -61,22 +78,41 @@ mod macos {
     /// asking for each. The listing is on the stack, for the new process may not allocate.
     const LISTED: usize = 4096;
 
-    /// How far a program that cannot be listed is looked in for descriptors, at the most.
-    const SCANNED: c_int = 10_240;
-
     pub(super) fn hold_only_the_streams(command: &mut Command) {
+        let ceiling = ceiling();
         // SAFETY: the closure runs in the new process, between fork and exec, where only
         // functions that are safe to call from a signal handler may be called, and it
-        // makes only those: `getpid`, `proc_pidinfo` (a system call), `getdtablesize`
-        // and `fcntl`. It allocates nothing and takes no lock; its listing is on the
-        // stack.
+        // makes only those: `getpid`, `proc_pidinfo` (a system call), `fcntl` and `close`.
+        // It allocates nothing and takes no lock; its listing is on the stack, and the one
+        // thing it is given, `ceiling`, is a number read here, before the fork.
         #[allow(unsafe_code)]
         unsafe {
-            command.pre_exec(close_on_exec_all_above_the_streams);
+            command.pre_exec(move || close_on_exec_all_above_the_streams(ceiling));
         }
     }
 
-    fn close_on_exec_all_above_the_streams() -> io::Result<()> {
+    /// The most descriptors the system lets a process have, `kern.maxfilesperproc`: none
+    /// it was given is above it. Read here, for `sysctlbyname` is not a call the new
+    /// process may make; none when the system will not say.
+    fn ceiling() -> Option<c_int> {
+        let mut most: c_int = 0;
+        let mut size = size_of::<c_int>();
+        // SAFETY: the name is a C string, and the answer's room is one `c_int`, which
+        // `size` says.
+        #[allow(unsafe_code)]
+        let answered = unsafe {
+            libc::sysctlbyname(
+                c"kern.maxfilesperproc".as_ptr(),
+                (&raw mut most).cast::<c_void>(),
+                &raw mut size,
+                std::ptr::null_mut(),
+                0,
+            )
+        };
+        (answered == 0 && most > 0).then_some(most)
+    }
+
+    fn close_on_exec_all_above_the_streams(ceiling: Option<c_int>) -> io::Result<()> {
         let mut listing = [proc_fdinfo {
             proc_fd: 0,
             proc_fdtype: 0,
@@ -93,25 +129,47 @@ mod macos {
                 (size * LISTED) as c_int,
             )
         };
-        // SAFETY: no pointer is passed.
-        #[allow(unsafe_code)]
-        let table = unsafe { libc::getdtablesize() };
         let listed = usize::try_from(bytes).map_or(0, |bytes| bytes / size);
-        if listed == 0 {
-            // The system would not list them.
-            scan(3, table.min(SCANNED));
-            return Ok(());
-        }
-        let mut highest = 2;
-        for entry in &listing[..listed.min(LISTED)] {
-            highest = highest.max(entry.proc_fd);
-            let_go(entry.proc_fd);
-        }
-        if listed >= LISTED {
+        let first = if listed == 0 {
+            // The system would not list them: every one is asked for.
+            3
+        } else {
+            let mut highest = 2;
+            for entry in &listing[..listed.min(LISTED)] {
+                highest = highest.max(entry.proc_fd);
+                let_go(entry.proc_fd);
+            }
+            if listed < LISTED {
+                return Ok(());
+            }
             // A listing that is full may have left some out, above the last it names.
-            scan(highest + 1, table);
-        }
+            highest + 1
+        };
+        // As far as the table goes. Not the limit on descriptors: it is lowered as easily
+        // below one that is open as above it, the hard one too. When neither the table
+        // nor the ceiling is known, the program is not started, rather than started holding
+        // what it may.
+        let end = table().or(ceiling).ok_or_else(io::Error::last_os_error)?;
+        scan(first, end);
         Ok(())
+    }
+
+    /// How many descriptors this process's table has room for, as the system says when it
+    /// is asked how big a listing of them would be: every one open is below it.
+    fn table() -> Option<c_int> {
+        // SAFETY: no buffer is passed, and none is written: the answer is the size one
+        // would need.
+        #[allow(unsafe_code)]
+        let bytes = unsafe {
+            libc::proc_pidinfo(
+                libc::getpid(),
+                libc::PROC_PIDLISTFDS,
+                0,
+                std::ptr::null_mut(),
+                0,
+            )
+        };
+        (bytes > 0).then(|| bytes / size_of::<proc_fdinfo>() as c_int)
     }
 
     /// Every descriptor from `first` to below `end`, asked for one by one.
