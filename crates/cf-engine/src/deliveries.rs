@@ -18,7 +18,11 @@ use crate::record::Record;
 use crate::role_change::{answers_to_the_task, Prelude};
 use crate::runtime::returning;
 use crate::seams::EngineError;
-use crate::shown::after_words;
+use crate::shown::{after_words, Shown};
+
+/// How many of a participant's newest messages are read to tell whether a
+/// failed turn was told already.
+const TOLD_LOOKBACK: i64 = 50;
 
 /// The one message on its way into a window.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -203,6 +207,10 @@ impl Dispatcher {
             .borrow()
             .active_task(participant.id, false)?;
         let Some(thread) = task.filter(|thread| thread.task.state == "working") else {
+            if observed.failed {
+                self.tell_failed_turn(project, participant, record, observed)
+                    .await?;
+            }
             return Ok(None);
         };
         // The last message pasted into the window (one that only rode in a
@@ -267,11 +275,133 @@ impl Dispatcher {
         Ok(Some(moved.task))
     }
 
+    /// A member's turn that failed while its task was not working (waiting on an
+    /// answer, paused, done): whoever gave the task is told why, once, and the
+    /// task stays as it is. Only a turn since the task's last message was pasted
+    /// into the window is the task's; nothing is said where the window was given
+    /// no task.
+    async fn tell_failed_turn(
+        &self,
+        project: &ProjectView,
+        participant: &ParticipantView,
+        record: &Rc<Record>,
+        observed: &Observed,
+    ) -> Result<(), EngineError> {
+        let Some(thread) = self.seams.ledger.borrow().last_task(participant.id)? else {
+            return Ok(());
+        };
+        let latest = self
+            .seams
+            .ledger
+            .borrow()
+            .last_pasted(participant.id, thread.task.id)?;
+        let Some(latest) = latest else {
+            return Ok(());
+        };
+        let marker = marker_of(latest.id);
+        if !observed
+            .items()
+            .iter()
+            .any(|item| item.text.contains(&marker))
+        {
+            return Ok(());
+        }
+        let requester = &thread.task.requester;
+        if self.told_of_failure(project, participant, requester)? {
+            return Ok(());
+        }
+        let because = self.why_it_failed(participant, record, observed).await;
+        // As the task is once the window was looked at.
+        let task = self
+            .seams
+            .ledger
+            .borrow()
+            .task(project.id, thread.task.number)?;
+        let Some(now) = task else {
+            return Ok(());
+        };
+        let number = now.task.number;
+        self.seams.ledger.borrow_mut().note(
+            project.id,
+            &NewNote {
+                from: None,
+                to: requester.clone(),
+                task: Some(number),
+                body: format!(
+                    "A turn of T-{number}'s window failed while T-{number} was {}, as it stays: {because}.",
+                    now.task.state
+                ),
+            },
+        )?;
+        self.changed();
+        Ok(())
+    }
+
+    /// The chief's turn that failed: the human is told why, once, on the board.
+    /// Nothing else of the chief's changes.
+    pub(crate) async fn tell_chief_failed(
+        &self,
+        project: &ProjectView,
+        participant: &ParticipantView,
+        record: &Rc<Record>,
+        observed: &Observed,
+    ) -> Result<(), EngineError> {
+        if self.told_of_failure(project, participant, "human")? {
+            return Ok(());
+        }
+        let because = self.why_it_failed(participant, record, observed).await;
+        if self.forgotten(record) {
+            return Ok(());
+        }
+        self.seams.ledger.borrow_mut().note(
+            project.id,
+            &NewNote {
+                from: None,
+                to: "human".to_owned(),
+                task: None,
+                body: format!("The chief's turn failed: {because}."),
+            },
+        )?;
+        self.changed();
+        Ok(())
+    }
+
+    /// Whether `recipient` was told of a failed turn of `participant`'s since the
+    /// window was last given a message: a failed turn stays the window's last
+    /// word until the next message, look after look and across a restart, and is
+    /// told once. Each such note, and a task's failure, says the harness reported
+    /// a failure. One nobody can be told of counts as told.
+    fn told_of_failure(
+        &self,
+        project: &ProjectView,
+        participant: &ParticipantView,
+        recipient: &str,
+    ) -> Result<bool, EngineError> {
+        let Some(to) = project.participants.iter().find(|p| p.handle == recipient) else {
+            return Ok(true);
+        };
+        let ledger = self.seams.ledger.borrow();
+        let given = ledger
+            .inbox(participant.id, TOLD_LOOKBACK)?
+            .into_iter()
+            .filter(|message| matches!(message.state.as_str(), "delivering" | "delivered" | "read"))
+            .map(|message| message.id)
+            .max()
+            .unwrap_or(0);
+        let said = format!("@{}'s harness reported a failure", participant.handle);
+        Ok(ledger.inbox(to.id, TOLD_LOOKBACK)?.iter().any(|message| {
+            message.id > given
+                && message.kind == "note"
+                && message.sender.is_none()
+                && message.body.contains(&said)
+        }))
+    }
+
     /// Why a member's turn failed, as its note says it: in its harness's own
     /// words where its record has them, and otherwise in the last lines its
     /// window shows, which is where a harness that says nothing in its record
-    /// says why (a crash, a model it does not know). Both are held to a quote's
-    /// bounds ([`after_words`], [`Shown::after`]).
+    /// says why (a crash, a model it does not know), or that it could not be read.
+    /// Both are held to a quote's bounds ([`after_words`], [`Shown::after`]).
     async fn why_it_failed(
         &self,
         participant: &ParticipantView,
@@ -283,9 +413,16 @@ impl Dispatcher {
             return after_words(&failed, words);
         }
         let pane = record.window.borrow().pane.clone();
-        match pane {
-            Some(pane) => self.look_at(&pane).await.after(&failed),
-            None => failed,
+        let shown = match pane {
+            Some(pane) => self.look_at(&pane).await,
+            None => Shown::default(),
+        };
+        // A host that refused the look, or answered it late, said nothing of the
+        // screen: the note says so, not the bare words the field had.
+        if shown.is_known() {
+            shown.after(&failed)
+        } else {
+            format!("{failed}; its screen could not be read")
         }
     }
 

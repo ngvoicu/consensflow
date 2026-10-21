@@ -7,6 +7,7 @@
 //!
 //! What is hidden, each by `[masked]` in its place:
 //! - the user and password of a URL (`https://user:password@host`);
+//! - an email address (`ci-bot@example.com`), whose account it names;
 //! - what follows `Bearer`, eight characters or more of a token; and what
 //!   follows `Basic` when it is base64's (a digit in it, a capital that does
 //!   not begin it, or ending in `=`), for `basic setup` is no credential;
@@ -88,6 +89,12 @@ static RULES: LazyLock<Vec<Rule>> = LazyLock::new(|| {
         rule(
             r"(?i)\b[a-z][a-z0-9+.-]*://([^\s/@:]+:[^\s/@]+)@",
             1,
+            always,
+        ),
+        // An email address: whose account it is.
+        rule(
+            r"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}\b",
+            0,
             always,
         ),
         // Authorization: Bearer <token>, Authorization: Basic <credentials>

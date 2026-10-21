@@ -1059,6 +1059,10 @@ impl Dispatcher {
             if self.close_if_free(record).await? {
                 return Ok(());
             }
+        } else if observed.failed && !self.cut_short(&observed) {
+            // A refusal for quota is the quota's to say; any other failure is the human's to hear.
+            self.tell_chief_failed(project, participant, record, &observed)
+                .await?;
         }
         let free = record.delivery.borrow().delivering.is_none()
             && observed.settled

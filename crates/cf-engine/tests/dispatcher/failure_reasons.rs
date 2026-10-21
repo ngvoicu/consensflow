@@ -73,13 +73,30 @@ fn a_failed_turn_whose_record_says_nothing_says_what_its_window_shows_last() {
 }
 
 #[test]
-fn the_harness_words_are_held_to_a_quotes_bounds() {
+fn the_harness_words_are_held_to_a_quotes_bounds_from_their_first_line() {
+    // An error's headline is its first line: the first six lines are kept.
+    let context = Context::new();
+    let tiers = working(&context);
+    let frames: Vec<String> = (1..=9)
+        .map(|n| format!("    at frame{n} (agent.js:{n})"))
+        .collect();
+    fails(
+        &context,
+        Some(&format!("Error: the agent crashed\n{}", frames.join("\n"))),
+    );
+    assert_eq!(
+        told(&tiers),
+        [failed(
+            &tiers,
+            "@zeus's harness reported a failure; it said: \"Error: the agent crashed / at frame1 (agent.js:1) / at frame2 (agent.js:2) / at frame3 (agent.js:3) / at frame4 (agent.js:4) / at frame5 (agent.js:5)\""
+        )]
+    );
+
+    // A first line too long for the quote is cut, and nothing after it is kept.
     let context = Context::new();
     let tiers = working(&context);
     let long = format!("Internal error: {}", "x".repeat(600));
-    fails(&context, Some(&format!("first line\n{long}")));
-
-    // The last line, cut to the quote's 400 characters, and nothing before it.
+    fails(&context, Some(&format!("{long}\nsecond line")));
     let quoted = format!("{}…", &long[..399]);
     assert_eq!(
         told(&tiers),
@@ -91,16 +108,99 @@ fn the_harness_words_are_held_to_a_quotes_bounds() {
 }
 
 #[test]
-fn harness_words_that_name_a_secret_are_not_quoted() {
+fn a_secret_value_in_the_harness_words_is_masked_and_the_rest_quoted() {
     let context = Context::new();
     let tiers = working(&context);
-    fails(&context, Some("invalid password for user ci-bot: hunter2"));
+    fails(
+        &context,
+        Some("login refused for ci-bot, password: hunter2"),
+    );
 
     assert_eq!(
         told(&tiers),
         [failed(
             &tiers,
-            "@zeus's harness reported a failure; what it said named a secret, so it is left out"
+            "@zeus's harness reported a failure; it said: \"login refused for ci-bot, password: [masked]\" (1 key- or token-like string masked)"
+        )]
+    );
+}
+
+#[test]
+fn a_harness_without_a_login_says_so_in_the_note() {
+    // Pi's words when it has no key: a key named, none held. The fix is the human's /login.
+    let context = Context::new();
+    let tiers = working(&context);
+    let words = "No API key found for the selected model. Use /login to log into a provider.";
+    fails(&context, Some(words));
+
+    assert_eq!(
+        told(&tiers),
+        [failed(
+            &tiers,
+            &format!("@zeus's harness reported a failure; it said: \"{words}\"")
+        )]
+    );
+}
+
+#[test]
+fn an_email_address_in_the_harness_words_is_masked() {
+    let context = Context::new();
+    let tiers = working(&context);
+    fails(
+        &context,
+        Some("Your account ci-bot@example.com has no seats left."),
+    );
+
+    assert_eq!(
+        told(&tiers),
+        [failed(
+            &tiers,
+            "@zeus's harness reported a failure; it said: \"Your account [masked] has no seats left.\" (1 key- or token-like string masked)"
+        )]
+    );
+}
+
+#[test]
+fn a_screen_the_host_would_not_show_is_said_to_be_unread() {
+    let context = Context::new();
+    let tiers = working(&context);
+    context.host.set_snapshot(json!({ "ok": false }));
+    fails(&context, None);
+
+    assert_eq!(
+        told(&tiers),
+        [failed(
+            &tiers,
+            "@zeus's harness reported a failure; its screen could not be read"
+        )]
+    );
+}
+
+#[test]
+fn the_screens_chrome_is_no_line_of_its_quote() {
+    // A composer's box and a footer's rule under the error: none has a letter or digit.
+    let context = Context::new();
+    let tiers = working(&context);
+    context.host.set_snapshot(json!({
+        "tail": [
+            "Working on the parser",
+            "Error: model 'gpt-0-nonesuch' not found",
+            "",
+            "╭──────────────────╮",
+            "│ >                │",
+            "│                  │",
+            "│                  │",
+            "╰──────────────────╯",
+            "────────────────────",
+        ]
+    }));
+    fails(&context, None);
+
+    assert_eq!(
+        told(&tiers),
+        [failed(
+            &tiers,
+            "@zeus's harness reported a failure; its screen ended with: \"Working on the parser / Error: model 'gpt-0-nonesuch' not found\""
         )]
     );
 }
@@ -150,4 +250,86 @@ fn a_task_cancelled_while_its_window_is_looked_at_is_not_failed_after() {
     assert_eq!(tiers.task(1).task.state, "cancelled");
     let told = told(&tiers);
     assert!(told.iter().all(|note| !note.contains("failed")), "{told:?}");
+}
+
+#[test]
+fn a_task_released_to_the_board_while_its_window_is_looked_at_is_not_failed_after() {
+    let context = Context::new();
+    let tiers = working(&context);
+    context
+        .host
+        .set_snapshot(json!({ "tail": ["Error: the agent stopped"] }));
+    context.adapter.with("zeus", |agent| agent.failed = true);
+    context.adapter.answer("zeus", "Starting on the parser");
+    // The pass asks the host what the window shows; the human takes T-1 back to the board meanwhile.
+    let answer = context
+        .host
+        .request_holds
+        .hold(|args| args[0] == "pane.snapshot" && args[1].get("tail").is_some());
+    let passing = context.begin_pass();
+    context.settle();
+    context
+        .ledger
+        .borrow_mut()
+        .release_task(tiers.project.id, 1, "the human took it back")
+        .unwrap();
+    answer.open();
+    context.settle();
+    passing.take().unwrap().unwrap();
+
+    let task = tiers.task(1).task;
+    assert_eq!((task.state.as_str(), task.assignee), ("open", None));
+    let told = told(&tiers);
+    assert!(told.iter().all(|note| !note.contains("failed")), "{told:?}");
+}
+
+#[test]
+fn a_turn_that_fails_while_its_task_waits_tells_whoever_gave_it_once_and_the_task_still_waits() {
+    let context = Context::new();
+    let tiers = working(&context);
+    let zeus = tiers.assignee(1);
+    context.ask(tiers.project.id, &zeus, "chief", 1, "Which format?");
+    assert_eq!(tiers.task(1).task.state, "waiting");
+    fails(&context, Some("The model is busy, try another."));
+    context.pass().unwrap();
+    context.pass().unwrap();
+
+    assert_eq!(tiers.task(1).task.state, "waiting");
+    let failures: Vec<String> = told(&tiers)
+        .into_iter()
+        .filter(|note| note.contains("failed"))
+        .collect();
+    assert_eq!(
+        failures,
+        [format!(
+            "A turn of T-1's window failed while T-1 was waiting, as it stays: @{zeus}'s harness reported a failure; it said: \"The model is busy, try another.\"."
+        )]
+    );
+}
+
+#[test]
+fn a_chiefs_failed_turn_tells_the_human_once() {
+    let context = Context::new();
+    let tiers = working(&context);
+    context.adapter.with("chief", |agent| {
+        agent.failed = true;
+        agent.failure = Some("API Error: 529 Overloaded".to_owned());
+    });
+    context.adapter.answer("chief", "Looking at the board");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    context.pass().unwrap();
+
+    let chief = tiers.participant("chief").unwrap().handle;
+    let failures: Vec<String> = tiers
+        .notes("human")
+        .into_iter()
+        .filter(|note| note.contains("failed"))
+        .collect();
+    assert_eq!(
+        failures,
+        [format!(
+            "The chief's turn failed: @{chief}'s harness reported a failure; it said: \"API Error: 529 Overloaded\"."
+        )]
+    );
 }

@@ -79,10 +79,10 @@ runs = ["failure-reason-engine"]
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
 find = '''
-            Some(pane) => self.look_at(&pane).await.after(&failed),
+            Some(pane) => self.look_at(&pane).await,
 '''
 replace = '''
-            Some(_) => failed,
+            Some(_) => Shown::default(),
 '''
 
 [[plant]]
@@ -97,21 +97,6 @@ find = '''
 '''
 replace = '''
             if !self.forgotten(record) {
-'''
-
-[[plant]]
-name = "failure reason: the harness's words are quoted whole, a secret's name and all"
-meant = "harness_words_that_name_a_secret_are_not_quoted"
-runs = ["failure-reason-engine"]
-
-[[plant.edit]]
-file = "crates/cf-engine/src/shown.rs"
-find = '''
-    if lines.iter().any(|line| names_a_secret(line)) {
-        return format!("{because}; what it said named a secret, so it is left out");
-    }
-'''
-replace = '''
 '''
 
 [[plant]]
@@ -224,7 +209,7 @@ runs = ["failure-reason-opencode"]
 [[plant.edit]]
 file = "crates/cf-harness/src/opencode/record/answer.rs"
 find = '''
-            record.failure = Some(failure).filter(|said| !said.trim().is_empty());
+            record.failure = error_words(error);
 '''
 replace = '''
 '''
@@ -264,4 +249,165 @@ find = '''
 '''
 replace = '''
                     .filter(|said| !said.trim().is_empty())
+'''
+
+[[plant]]
+name = "failure reason: the quote leaves its lines unmasked"
+meant = "a_token_in_the_harness_words_is_masked"
+runs = ["failure-reason-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown.rs"
+find = '''
+            let hidden = mask(line);
+'''
+replace = '''
+            let hidden = mask::Masked {
+                text: line.clone(),
+                count: 0,
+            };
+'''
+
+[[plant]]
+name = "failure reason: an email address is no secret of the masker's"
+meant = "an_email_address_in_the_harness_words_is_masked"
+runs = ["failure-reason-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/mask.rs"
+find = '''
+            r"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}\b",
+'''
+replace = '''
+            r"\A\z[email]",
+'''
+
+[[plant]]
+name = "failure reason: a screen the host would not show leaves the bare note"
+meant = "a_screen_the_host_would_not_show_is_said_to_be_unread"
+runs = ["failure-reason-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''
+        if shown.is_known() {
+            shown.after(&failed)
+'''
+replace = '''
+        if true {
+            shown.after(&failed)
+'''
+
+[[plant]]
+name = "failure reason: the harness's words keep their last lines, not their headline"
+meant = "the_harness_words_are_held_to_a_quotes_bounds_from_their_first_line"
+runs = ["failure-reason-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown.rs"
+find = '''
+            Keep::First => lines.iter().take(QUOTE_LINES).collect(),
+'''
+replace = '''
+            Keep::First => lines.iter().rev().take(QUOTE_LINES).collect(),
+'''
+
+[[plant]]
+name = "failure reason: a screen's chrome takes the place of its error in the quote"
+meant = "the_screens_chrome_is_no_line_of_its_quote"
+runs = ["failure-reason-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown.rs"
+find = '''
+            .filter(|line| line.chars().any(char::is_alphanumeric))
+'''
+replace = '''
+            .filter(|line| !line.trim().is_empty())
+'''
+
+[[plant]]
+name = "failure reason: a task released to the board while its window is looked at is failed after"
+meant = "a_task_released_to_the_board_while_its_window_is_looked_at_is_not_failed_after"
+runs = ["failure-reason-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''
+            if still && !self.forgotten(record) {
+'''
+replace = '''
+            if !self.forgotten(record) {
+'''
+
+[[plant]]
+name = "failure reason: a turn that fails while its task waits says nothing"
+meant = "a_turn_that_fails_while_its_task_waits_tells_whoever_gave_it_once_and_the_task_still_waits"
+runs = ["failure-reason-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''
+            if observed.failed {
+                self.tell_failed_turn(project, participant, record, observed)
+                    .await?;
+            }
+'''
+replace = '''
+'''
+
+[[plant]]
+name = "failure reason: a turn that fails while its task waits is told at every look"
+meant = "a_turn_that_fails_while_its_task_waits_tells_whoever_gave_it_once_and_the_task_still_waits"
+runs = ["failure-reason-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''
+        if self.told_of_failure(project, participant, requester)? {
+'''
+replace = '''
+        if false {
+'''
+
+[[plant]]
+name = "failure reason: a chief's failed turn says nothing"
+meant = "a_chiefs_failed_turn_tells_the_human_once"
+runs = ["failure-reason-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''
+        } else if observed.failed && !self.cut_short(&observed) {
+'''
+replace = '''
+        } else if false {
+'''
+
+[[plant]]
+name = "failure reason: a chief's failed turn is told at every look"
+meant = "a_chiefs_failed_turn_tells_the_human_once"
+runs = ["failure-reason-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''
+        if self.told_of_failure(project, participant, "human")? {
+'''
+replace = '''
+        if false {
+'''
+
+[[plant]]
+name = "failure reason: OpenCode's failed reply quotes its whole error, response and all"
+meant = "a_failed_reply_keeps_the_words_of_its_error"
+runs = ["failure-reason-opencode"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/opencode/record/answer.rs"
+find = '''
+            record.failure = error_words(error);
+'''
+replace = '''
+            record.failure = Some(failure);
 '''

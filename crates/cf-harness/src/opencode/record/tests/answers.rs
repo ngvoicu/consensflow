@@ -305,13 +305,28 @@ fn a_failed_reply_keeps_the_words_of_its_error() {
         said,
         (true, Some("Model not found: nonesuch/gpt-0".to_owned()))
     );
-    // No message: its error, as the text JSON makes of it.
+    // No message: what it is, its name and its response's status, and never the
+    // response's body or headers an SDK's error keeps beside them.
     let named = failure_of(&json!({
+        "role": "assistant",
+        "time": { "created": 3, "completed": 9 },
+        "error": {
+            "name": "APIError",
+            "data": {
+                "statusCode": 500,
+                "isRetryable": false,
+                "responseBody": "{\"error\":{\"message\":\"upstream body\"}}",
+                "responseHeaders": { "set-cookie": "session=abc123def456", "x-request-id": "req_1" },
+            },
+        },
+    }));
+    assert_eq!(named, (true, Some("APIError (status 500)".to_owned())));
+    let bare = failure_of(&json!({
         "role": "assistant",
         "time": { "created": 3, "completed": 9 },
         "error": { "name": "UnknownError" },
     }));
-    assert_eq!(named, (true, Some(r#"{"name":"UnknownError"}"#.to_owned())));
+    assert_eq!(bare, (true, Some("UnknownError".to_owned())));
     let fine = failure_of(&json!({
         "role": "assistant",
         "time": { "created": 3, "completed": 9 },

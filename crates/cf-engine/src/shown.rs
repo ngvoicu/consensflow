@@ -154,7 +154,7 @@ impl Shown {
             said.push_str("; its last screen lines named a secret, so they are left out");
             return said;
         }
-        match Quote::of(tail) {
+        match Quote::of(tail, Keep::Last) {
             None => said.push_str("; its screen was empty"),
             Some(quote) => said.push_str(&quote.after("; its screen ended with")),
         }
@@ -178,14 +178,16 @@ impl Shown {
 /// `because`, and after it what a harness said of it in its own record (an
 /// API's error, a provider's message): `@zeus's harness reported a failure; it
 /// said: "Selected model is at capacity."`. Its words are held to a quote's
-/// bounds and rules as a screen's last lines are: they go to the board, the
-/// chief's window and the log, and words that name a secret are not quoted.
+/// bounds, from their first line, which is an error's headline: they go to the
+/// board, the chief's window and the log. What looks like a key, a token or an
+/// email address is masked in them, and they are quoted whatever secret they
+/// name: an API's or an SDK's error names the key it lacks ("No API key found")
+/// and never holds one in prose, and the login class is the failure whose fix
+/// the note must say (the chief's decision of 2026-10-21, T-135). A screen can
+/// echo anything, and keeps the stricter rule ([`Shown::after_with`]).
 pub(crate) fn after_words(because: &str, words: &str) -> String {
     let lines: Vec<String> = words.lines().map(str::to_owned).collect();
-    if lines.iter().any(|line| names_a_secret(line)) {
-        return format!("{because}; what it said named a secret, so it is left out");
-    }
-    match Quote::of(&lines) {
+    match Quote::of(&lines, Keep::First) {
         None => because.to_owned(),
         Some(quote) => format!("{because}{}", quote.after("; it said")),
     }
@@ -199,7 +201,8 @@ fn plural(count: usize) -> &'static str {
     }
 }
 
-/// The words of a screen's last lines, held to the quote's bounds.
+/// The words of a screen's last lines, or a harness's first, held to the
+/// quote's bounds.
 struct Quote {
     text: String,
     /// How many secrets were hidden in the lines that were kept.
@@ -217,26 +220,31 @@ impl Quote {
         said
     }
 
-    /// The quote of `tail`: none where no line has a word in it. The last
-    /// lines come first: each has its blanks made one, its secrets hidden and
-    /// its quotation marks made apostrophes (a quote is not to end where the
-    /// screen's text says it does), and they are kept while they fit.
-    fn of(tail: &[String]) -> Option<Self> {
-        let lines: Vec<String> = tail
+    /// The quote of `lines`: none where no line has a word in it. A line of no
+    /// letter or digit is a screen's chrome (a box's edge, a footer's rule) and
+    /// is no line of it. The lines `keep` says come first, the last of a screen
+    /// or the first of a harness's words: each has its blanks made one, its
+    /// secrets hidden and its quotation marks made apostrophes (a quote is not to
+    /// end where the text says it does), and they are kept while they fit.
+    fn of(lines: &[String], keep: Keep) -> Option<Self> {
+        let lines: Vec<String> = lines
             .iter()
+            .filter(|line| line.chars().any(char::is_alphanumeric))
             .map(|line| line.split_whitespace().collect::<Vec<_>>().join(" "))
-            .filter(|line| !line.is_empty())
             .collect();
-        let last = &lines[lines.len().saturating_sub(QUOTE_LINES)..];
+        let chosen: Vec<&String> = match keep {
+            Keep::Last => lines.iter().rev().take(QUOTE_LINES).collect(),
+            Keep::First => lines.iter().take(QUOTE_LINES).collect(),
+        };
         let mut kept: Vec<String> = Vec::new();
         let (mut masked, mut used) = (0, 0);
-        for line in last.iter().rev() {
+        for line in chosen {
             let hidden = mask(line);
             let text = hidden.text.replace('"', "'");
             let between = if kept.is_empty() { 0 } else { BETWEEN.len() };
             let length = text.chars().count();
             if used + between + length > QUOTE_CHARS {
-                // Only the last line may be cut; an older one that does not fit is left out.
+                // Only the line kept first may be cut; one after it that does not fit is left out.
                 if kept.is_empty() {
                     kept.push(cut(&text, QUOTE_CHARS));
                     masked += hidden.count;
@@ -247,12 +255,22 @@ impl Quote {
             masked += hidden.count;
             kept.push(text);
         }
-        kept.reverse();
+        if keep == Keep::Last {
+            kept.reverse();
+        }
         (!kept.is_empty()).then(|| Self {
             text: kept.join(BETWEEN),
             masked,
         })
     }
+}
+
+/// Which lines a quote keeps when not all fit: a screen's last, where it said
+/// what it said last; a harness's first, where an error says what it is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Keep {
+    First,
+    Last,
 }
 
 /// The first characters of `text` that, with the mark that says it was cut,

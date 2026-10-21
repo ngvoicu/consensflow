@@ -162,7 +162,7 @@ pub(super) fn answer(read: &Read, local: &TimeZone, keys: &mut Keys) -> Result<R
                 let at_ms = js::to_number(completed_at)?;
                 record.quota = Some(Arc::new(exhausted_quota(&failure, at_ms, local)?));
             }
-            record.failure = Some(failure).filter(|said| !said.trim().is_empty());
+            record.failure = error_words(error);
         }
         closed = closes_turn;
         turn_open = !closes_turn;
@@ -315,5 +315,37 @@ fn ordering(order: Ordering) -> f64 {
         Ordering::Less => -1.0,
         Ordering::Equal => 0.0,
         Ordering::Greater => 1.0,
+    }
+}
+
+/// The words of a failed reply's `error`, as its note says them: its message,
+/// else what it is (its name, and the status of the response it came of). Never
+/// the rest of the error: an SDK's error keeps the response's body and headers
+/// beside them, which are no reason and can say too much.
+fn error_words(error: Option<&Value>) -> Option<String> {
+    let text = |value: Option<&Value>| {
+        value
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|said| !said.is_empty())
+            .map(str::to_owned)
+    };
+    let data = optional(error, "data");
+    if let Some(message) =
+        text(optional(data, "message")).or_else(|| text(optional(error, "message")))
+    {
+        return Some(message);
+    }
+    let status = optional(data, "statusCode")
+        .filter(|status| status.is_number() || status.is_string())
+        .map(|status| match status {
+            Value::String(status) => status.clone(),
+            other => other.to_string(),
+        });
+    match (text(optional(error, "name")), status) {
+        (Some(name), Some(status)) => Some(format!("{name} (status {status})")),
+        (Some(name), None) => Some(name),
+        (None, Some(status)) => Some(format!("status {status}")),
+        (None, None) => None,
     }
 }

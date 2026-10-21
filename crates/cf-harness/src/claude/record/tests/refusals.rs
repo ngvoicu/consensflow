@@ -232,11 +232,21 @@ fn failure_of(records: &[Value]) -> Option<String> {
 
 #[test]
 fn a_refused_turn_keeps_the_words_the_api_refused_it_in_and_the_next_turn_drops_them() {
-    // Not for quota: an error of the API's own, as Claude Code writes it.
-    let refusal = with(r#"{"apiErrorStatus":500,"error":"overloaded"}"#);
+    // A 5xx of the API's own, in the words Claude Code writes it in: no quota.
+    const OVERLOADED: &str = r#"API Error: 529 {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}"#;
+    let refusal = having(
+        assistant(
+            "a1",
+            "u1",
+            json!("m1"),
+            json!([text(json!(OVERLOADED))]),
+            Value::Null,
+        ),
+        json!({ "isApiErrorMessage": true, "apiErrorStatus": 529, "timestamp": AT }),
+    );
     assert_eq!(
         failure_of(&[hello(), refusal.clone()]).as_deref(),
-        Some(LIMIT)
+        Some(OVERLOADED)
     );
     assert_eq!(
         failure_of(&[hello(), with(r#"{"apiErrorStatus":429}"#)]).as_deref(),
