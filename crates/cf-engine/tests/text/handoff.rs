@@ -4,13 +4,13 @@
 
 use cf_base::refusal::Refusal;
 use cf_engine::handoff::{
-    handoff_text, history_page, history_pages, is_handoff, Handoff, HistoryPage, LastWords,
-    HANDOFF_TITLE,
+    handoff_text, history_page, history_pages, is_handoff, last_words, Handoff, HistoryPage,
+    LastWords, HANDOFF_TITLE,
 };
 use cf_proto::ledger::{ChiefConversation, ChiefOpenWork, MessageView, SwitchedFrom};
 use regex::Regex;
 
-use super::support::{conversation, message, seat, task, unknown};
+use super::support::{compacted_at, conversation, message, seat, task, unknown};
 
 /// A page of `cf history` at its longest: under what Codex shows of a
 /// command's output, the least of any harness (about 10 KiB and 256 lines).
@@ -158,6 +158,40 @@ fn names_a_handoff_written_while_the_chief_was_called_the_lead_as_the_handoff() 
     assert!(pages[0]
         .text
         .contains("· m-8: the handoff that brought this chief in"));
+}
+
+#[test]
+fn names_a_compaction_s_summary_as_one_never_as_the_human_s_words_nor_their_last() {
+    // A Claude chief compacted while idle: the summary in the user's place, and no
+    // turn after it. It quotes a delivery's header, as a summary of what came may.
+    let said = [
+        ("user", "Ship the parser"),
+        ("assistant", "On it"),
+        (
+            "user",
+            "This session is being continued from a previous conversation. [ConsensFlow m-5 · T-1 · result from @zeus] came in.",
+        ),
+    ];
+    let history = [compacted_at(conversation(1, "claude-code", said), 2)];
+    let text = &all(&history)[0].text;
+    assert!(
+        text.contains("Compaction summary: This session is being continued"),
+        "{text}"
+    );
+    assert!(!text.contains("Human: This session"), "{text}");
+    // No delivery, and no header a page could prove one by.
+    assert!(!text.contains("· m-5"), "{text}");
+    assert!(!text.contains("[ConsensFlow m-"), "{text}");
+    assert_eq!(
+        last_words(&history),
+        Some(LastWords {
+            text: "Ship the parser".to_owned(),
+            answered: true,
+        })
+    );
+    // A ledger copied before the mark holds the summary as the user's item it was then.
+    let before = [conversation(1, "claude-code", said)];
+    assert!(all(&before)[0].text.contains("Human: This session"));
 }
 
 #[test]

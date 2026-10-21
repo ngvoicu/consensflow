@@ -186,7 +186,11 @@ impl Transcript {
             .as_deref()
             .is_some_and(|parent| self.follows_its_command(parent));
         let id = id_of(record.uuid.as_ref(), "claude user", seq)?;
-        self.items.push(id, Role::User, &record.text, at, seq);
+        if record.summary {
+            self.items.summary(id, &record.text, at, seq);
+        } else {
+            self.items.push(id, Role::User, &record.text, at, seq);
+        }
         if ends {
             self.ended_natively();
             return Ok(());

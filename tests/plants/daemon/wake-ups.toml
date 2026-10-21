@@ -240,8 +240,10 @@ runs = ["ledger-wake-ups"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/conversations/transcripts.rs"
-find = '         WHERE transcript.text != excluded.text OR transcript.complete != excluded.complete",'
-replace = '         WHERE 1",'
+find = '''         WHERE transcript.text != excluded.text OR transcript.complete != excluded.complete
+       RETURNING rowid, compaction",'''
+replace = '''         WHERE 1
+       RETURNING rowid, compaction",'''
 
 [[plant]]
 name = "wake-up: the count does not restart at the Resume"
@@ -361,9 +363,9 @@ runs = ["daemon-wake-up-page", "proto-page"]
 
 [[plant.edit]]
 file = "crates/cf-proto/src/page.rs"
-find = '''                | Self::SpecsGet
+find = '''                | Self::HistoryPart
         )'''
-replace = '''                | Self::SpecsGet
+replace = '''                | Self::HistoryPart
                 | Self::WakeUpSet
         )'''
 

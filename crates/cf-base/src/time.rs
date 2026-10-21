@@ -142,6 +142,31 @@ pub fn parse(text: &str) -> Option<i64> {
     (ms.abs() <= LAST_MS).then_some(ms)
 }
 
+/// The most fractional digits of a second a [`canonical`] time keeps: nanoseconds.
+const FRACTION_KEPT: usize = 9;
+
+/// `text`, a time [`parse`] reads, written as a store keeps a time: its instant
+/// as [`iso`] writes it, with the digits of its fraction past the milliseconds
+/// after them, to the nanosecond (the rest are cut, and zeros at the end are
+/// none), so that however it was written, and however long, what is kept says
+/// the same time in a few dozen characters. What `iso` writes is its own
+/// canonical form. None where `parse` reads no time.
+pub fn canonical(text: &str) -> Option<String> {
+    let ms = parse(text)?;
+    let written = iso(ms);
+    // A time's only `.` is its fraction's; `parse` read its first three digits.
+    let finer = text.split_once('.').map_or("", |(_, fraction)| {
+        let digits = fraction.bytes().take_while(u8::is_ascii_digit).count();
+        let kept = &fraction[..digits.min(FRACTION_KEPT)];
+        kept.get(3..).unwrap_or("").trim_end_matches('0')
+    });
+    if finer.is_empty() {
+        return Some(written);
+    }
+    let (instant, zone) = written.split_at(written.len() - 1);
+    Some(format!("{instant}{finer}{zone}"))
+}
+
 /// `Date.UTC(year, month, day, hour, minute)` for whole numbers, as V8
 /// computes it (`MakeDay`, `MakeTime`, `MakeDate`, `TimeClip`): the instant
 /// that wall clock reads in UTC, in milliseconds since the epoch.
@@ -294,6 +319,43 @@ mod tests {
         assert_eq!(iso(951_782_400_000), "2000-02-29T00:00:00.000Z");
         assert_eq!(iso(253_402_300_800_000), "+010000-01-01T00:00:00.000Z");
         assert_eq!(iso(-62_198_755_200_000), "-000001-01-01T00:00:00.000Z");
+    }
+
+    #[test]
+    fn a_time_is_kept_as_iso_writes_its_instant_with_its_fraction_to_the_nanosecond() {
+        let cases = [
+            ("2026-10-16T12:00:00.000Z", "2026-10-16T12:00:00.000Z"),
+            ("2026-10-16T12:00:00.123456Z", "2026-10-16T12:00:00.123456Z"),
+            (
+                "2026-10-16T12:00:00.123456789123Z",
+                "2026-10-16T12:00:00.123456789Z",
+            ),
+            ("2026-10-16T12:00:00.1234500Z", "2026-10-16T12:00:00.12345Z"),
+            ("2026-10-16T12:00:00.5Z", "2026-10-16T12:00:00.500Z"),
+            ("2026-10-16T14:30:00.25+02:30", "2026-10-16T12:00:00.250Z"),
+            ("2026-10-16T12:00Z", "2026-10-16T12:00:00.000Z"),
+            ("2026-10-16", "2026-10-16T00:00:00.000Z"),
+            ("2026-10-16T24:00:00.000000Z", "2026-10-17T00:00:00.000Z"),
+            ("1969-12-31T23:59:59.9995Z", "1969-12-31T23:59:59.9995Z"),
+            (
+                "+010000-01-01T00:00:00.0000001Z",
+                "+010000-01-01T00:00:00.0000001Z",
+            ),
+        ];
+        for (given, kept) in cases {
+            assert_eq!(canonical(given).as_deref(), Some(kept), "{given}");
+            assert_eq!(canonical(kept).as_deref(), Some(kept), "{kept} is its own");
+        }
+        // Twenty mebibytes of a second's fraction: the nanoseconds of it.
+        let long = format!("2026-10-16T12:00:00.123456789{}Z", "1".repeat(20 << 20));
+        assert_eq!(
+            canonical(&long).as_deref(),
+            Some("2026-10-16T12:00:00.123456789Z")
+        );
+        for none in ["", "x\0", "2026-10-16T24:00:00.000001Z", "2026-13-01"] {
+            assert_eq!(canonical(none), None, "{none:?}");
+        }
+        assert_eq!(canonical(&iso(-1)).as_deref(), Some(iso(-1).as_str()));
     }
 
     #[test]

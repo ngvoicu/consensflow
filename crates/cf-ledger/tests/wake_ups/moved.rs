@@ -100,6 +100,35 @@ fn the_human_typing_to_the_chief_in_its_window_counts_and_what_a_delivery_made_d
 }
 
 #[test]
+fn the_summary_a_compaction_writes_in_the_user_s_place_is_no_typing_and_the_same_words_typed_are() {
+    let mut w = after_the_first();
+    let conversation = w
+        .ledger
+        .start_conversation(w.id("chief"), "claude-code")
+        .unwrap();
+    // Claude Code compacts the chief's conversation while it is idle: the summary
+    // is a user's record, marked by the reader as the harness's own.
+    w.advance(MINUTE);
+    let words = "This session is being continued from a previous conversation.";
+    let mut summary = item("s-1", "user", words);
+    summary["compaction"] = true.into();
+    w.ledger
+        .copy_transcript(conversation.id, std::slice::from_ref(&summary), 0)
+        .unwrap();
+    w.advance(DAY);
+    assert!(
+        w.due().is_none(),
+        "a compaction in the chief's window is not the human typing to it"
+    );
+    w.advance(MINUTE);
+    let typed = item("i-1", "user", words);
+    w.ledger
+        .copy_transcript(conversation.id, &[summary, typed], 0)
+        .unwrap();
+    assert!(w.due().is_some(), "the same words, typed, are the human's");
+}
+
+#[test]
 fn what_a_harness_put_in_its_record_before_the_wake_up_is_no_typing_though_copied_with_it() {
     // Codex writes its `# AGENTS.md instructions` as a user item when its first
     // turn begins: the wake-up's own turn, so it is first copied with it.

@@ -293,6 +293,7 @@ impl FakeAdapter {
             complete: role == Role::Assistant,
             at: None,
             commentary: false,
+            compaction: false,
         }
     }
 

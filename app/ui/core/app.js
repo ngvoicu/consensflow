@@ -3,6 +3,7 @@ import { initializeUpdates } from '../updates.js'
 import { BoardView, TaskDrawer } from './board.js'
 import { NewProjectDialog, ProjectSettingsDialog, SwitchChiefDialog } from './dialogs.js'
 import { listenForFileDrops } from './file-drop.js'
+import { HistoryViewer } from './history-viewer.js'
 import { Layout } from './layout.js'
 import { ProjectMenu } from './project-menu.js'
 import { SpecsSettings } from './specs-settings.js'
@@ -295,6 +296,8 @@ const terminals = new TerminalsView(stage, {
   onChange: () => render(),
   // The chief is switched from its card in the dock, and tried again there when out of quota.
   onSwitchChief: (chief) => act(() => switchChief.open(chief)),
+  // Every card reads its participant's whole history.
+  onHistory: (participant) => void historyViewer.open(participant),
   onTryAgain: (chief) => tryAgain(chief),
   // A session's terminal is hidden from its card as from its lane.
   onHideTerminal: (participant) => hideSession(participant),
@@ -666,6 +669,9 @@ const projectMenu = new ProjectMenu(
 // The specs viewer: the specs folder of the project asked for, read through the daemon. The
 // button asks for the project the board shows; the menu for its own, shown first.
 const specsViewer = new SpecsViewer($('#specs-viewer-dialog'), { daemon })
+
+// The history viewer: everything kept of a participant's conversations, read through the daemon.
+const historyViewer = new HistoryViewer($('#history-dialog'), { daemon })
 specsButton.addEventListener('click', () => {
   const { project } = state.board
   void specsViewer.open(project.id, project.name)

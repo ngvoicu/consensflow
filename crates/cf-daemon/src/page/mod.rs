@@ -35,6 +35,7 @@ mod app_specs;
 mod board;
 mod body;
 mod engine;
+mod history;
 mod messages;
 mod operations;
 mod projects;
