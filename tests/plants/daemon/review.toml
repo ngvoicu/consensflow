@@ -6,6 +6,11 @@
 # out, and a test of it fails. A run written `{ node: [...] }` is `node --test`
 # of those files.
 
+[run]
+# The one case of the fixture with no board: it sets the shell's variables itself, so a run of
+# the plant that takes the fix out never reaches the board of the window it is run in.
+opencode-no-board = ["node", "--test", "--test-reporter=tap", "--test-name-pattern=outside a window means no board", "tests/opencode-extension.test.mjs"]
+
 [[plant]]
 name = "review: a row Node was pasting on its own stays under the carrier it rode in when its delivery goes again"
 meant = "a_row_node_was_pasting_on_its_own_under_a_carrier_that_is_over_goes_again_as_a_row_of_its_own"
@@ -235,3 +240,17 @@ replace = '''
 file = "crates/cf/src/board/mod.rs"
 find = "wrote.filter(|_| cut::seen_whole(&printed))"
 replace = "wrote.filter(|_| cut::seen_whole(&measured))"
+
+[[plant]]
+name = "review: OpenCode's fixture with no board reads the board of the shell it runs in"
+meant = "OpenCode: outside a window means no board in any shell: the board a member window names is not asked"
+runs = ["opencode-no-board"]
+
+[[plant.edit]]
+file = "tests/opencode-extension.test.mjs"
+find = """
+  } else {
+    delete process.env.CONSENSFLOW_URL
+    delete process.env.CONSENSFLOW_TOKEN
+  }"""
+replace = "  }"
