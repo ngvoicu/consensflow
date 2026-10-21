@@ -156,7 +156,7 @@ runs = ["ledger-behind-work"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/finishing.rs"
-find = "    require_unawaited(store, &task)?;\n"
+find = "    require_unawaited(store, &task, ending)?;\n"
 replace = ""
 
 # A brief edited.
@@ -372,3 +372,35 @@ runs = ["ledger-edited-brief"]
 file = "crates/cf-ledger/src/tasks/editing.rs"
 find = "            \"paused\" => tell,\n"
 replace = "            \"paused\" => format!(\"resume it\"),\n"
+
+# The merge with T-125 and T-152 (wt/board-fixes): a removal, a decline and a failure with a follow-up behind a task.
+
+[[plant]]
+name = "behind work: the removal of a member does not tell the chief of the follow-up behind its task"
+meant = "a_member_removed_with_a_task_a_follow_up_waits_behind_tells_the_chief_once_it_will_never_start"
+runs = ["ledger-behind-work"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff.rs"
+find = "            tell_stranded_waiters(store, project_id, task)?;\n"
+replace = ""
+
+[[plant]]
+name = "behind work: the decline of a brief a follow-up waits for says to let the task finish"
+meant = "a_decline_of_the_brief_of_a_task_a_follow_up_waits_for_is_refused_in_the_declines_words"
+runs = ["ledger-behind-work"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = "        Ending::Declined => format!(\"pass T-{number} on\"),\n"
+replace = "        Ending::Declined => format!(\"let T-{number} finish\"),\n"
+
+[[plant]]
+name = "behind work: a follow-up of a task that fails again is told to the chief the first time only"
+meant = "a_follow_up_that_waits_for_a_task_failing_twice_is_told_to_the_chief_each_time"
+runs = ["ledger-behind-work"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = "        for waiting in waiters(store, &task)? {\n"
+replace = "        let mut fresh = Vec::new();\n        for each in waiters(store, &task)? {\n            let told = store.db.prepare(\"SELECT 1 FROM message m JOIN task t ON t.id = m.task_id WHERE t.project_id = ? AND t.number = ? AND m.kind = 'note'\")?.exists(params![project_id, each])?;\n            if !told {\n                fresh.push(each);\n            }\n        }\n        for waiting in fresh {\n"

@@ -8,8 +8,11 @@
 //! still on its way, a result an older build left among them. A task is not
 //! called off while an open task waits for it (`require_unawaited`): what
 //! waits for a task is released when it is accepted, so the waiter would be
-//! blocked for good. A ledger an older build left with such a waiter tells the
-//! chief at its opening (`note_stranded_waits`).
+//! blocked for good. A member's removal cancels the member's tasks whatever
+//! waits for them, and a ledger an older build left with such a waiter has
+//! one too: the chief is told of each waiter once, at the removal's step
+//! (`tell_stranded_waiters`) or at the ledger's opening (`note_stranded_waits`),
+//! and the log keeps that it was (`tell_stranded`).
 
 use cf_proto::ledger::{TaskMoved, TaskView};
 use rusqlite::params;
@@ -241,7 +244,7 @@ pub(crate) fn reopen_task(
 /// step, unless it cancelled the task itself: what was cancelled, and the
 /// window that was stopped when a member's had begun on it (the daemon
 /// stops that window on its next look). Refused, `waited-for`, while an
-/// open task waits for it.
+/// open or paused task waits for it.
 pub(crate) fn cancel_task(
     store: &mut Store,
     project_id: i64,
@@ -249,7 +252,7 @@ pub(crate) fn cancel_task(
     by: &str,
 ) -> Result<TaskView, LedgerError> {
     store.write(|store| {
-        let (task, window) = call_off(store, project_id, number, by)?;
+        let (task, window) = call_off(store, project_id, number, by, Ending::Cancelled)?;
         let requester = store.participant_row(task.requester_id)?;
         if requester.handle != by {
             let stopped = window.map_or_else(String::new, |window| {
@@ -271,25 +274,34 @@ pub(crate) fn cancel_task(
     })
 }
 
+/// How a task is called off: cancelled, or its brief declined at the gate.
+#[derive(Clone, Copy)]
+pub(crate) enum Ending {
+    Cancelled,
+    Declined,
+}
+
 /// The cancel itself, for an operation that tells the requester in its own
 /// words (the human's decline of a brief). Whatever of the task is still on
 /// its way, a delivery into a window included, is withdrawn, so nothing of
 /// it is delivered or tried again. The task as it was, and the member's
 /// window that had begun on it, if one had: its brief or the words that
-/// resume it went in. Refused, `waited-for`, while an open task waits for it,
-/// the human's decline of its brief included: the waiter is released when the
-/// task is accepted, never when it is cancelled.
+/// resume it went in. Refused, `waited-for`, while an open or paused task waits
+/// for it, the human's decline of its brief included: the waiter is released
+/// when the task is accepted, never when it is cancelled. `ending` is how it
+/// ends, which the refusal says in its words.
 pub(crate) fn call_off(
     store: &mut Store,
     project_id: i64,
     number: i64,
     by: &str,
+    ending: Ending,
 ) -> Result<(TaskRow, Option<ParticipantRow>), LedgerError> {
     store.participant_by_handle(project_id, by)?;
     let task = store.task_row(project_id, number)?;
     let cancellable = [&["open", "queued"], &ACTIVE_TASK_STATES[..], &["paused"]].concat();
     require_task_state(&task, &cancellable, "cancel")?;
-    require_unawaited(store, &task)?;
+    require_unawaited(store, &task, ending)?;
     let assignee = task
         .assignee_id
         .map(|id| store.participant_row(id))
@@ -340,8 +352,9 @@ fn task_numbers(numbers: &[i64]) -> String {
 /// A task an open task waits for is not called off: the waiter is released
 /// when the task is accepted, so it would read "blocked by" it for good and
 /// nothing would tell anyone. Whoever cancels names the waiters to cancel
-/// first, or lets the task finish.
-fn require_unawaited(store: &Store, task: &TaskRow) -> Result<(), LedgerError> {
+/// first, or lets the task finish; the human who declines its brief, which
+/// never started, passes it on.
+fn require_unawaited(store: &Store, task: &TaskRow, ending: Ending) -> Result<(), LedgerError> {
     let waiting = waiters(store, task)?;
     if waiting.is_empty() {
         return Ok(());
@@ -350,77 +363,114 @@ fn require_unawaited(store: &Store, task: &TaskRow) -> Result<(), LedgerError> {
         [only] => ("waits", format!("T-{only}")),
         _ => ("wait", "them".to_owned()),
     };
+    let number = task.number;
+    let otherwise = match ending {
+        Ending::Cancelled => format!("let T-{number} finish"),
+        Ending::Declined => format!("pass T-{number} on"),
+    };
     Err(LedgerError::refused_with(
         "waited-for",
         format!(
-            "T-{number} cannot be cancelled while {names} {verb} for it: cancel {them} first, or let T-{number} finish",
-            number = task.number,
+            "T-{number} cannot be cancelled while {names} {verb} for it: cancel {them} first, or {otherwise}",
             names = task_numbers(&waiting),
         ),
         409,
     ))
 }
 
+/// The chief is told, once, that the open or paused task `number` waits for a
+/// cancelled task and will never start: a note that names what it waits on,
+/// and the log keeps that it was (`task.stranded`, in the same step), so no
+/// removal and no opening says it twice. Nothing is said of a task that waits
+/// for no cancelled one, of one already told, or in a project with no chief.
+pub(crate) fn tell_stranded(
+    store: &mut Store,
+    project_id: i64,
+    number: i64,
+) -> Result<(), LedgerError> {
+    let told = store
+        .db
+        .prepare(
+            "SELECT 1 FROM event
+       WHERE kind = 'task.stranded' AND project_id = ? AND json_extract(data, '$.task') = ?",
+        )?
+        .exists(params![project_id, number])?;
+    let chief: Option<String> = store
+        .db
+        .prepare(
+            "SELECT handle FROM participant
+       WHERE project_id = ? AND role = 'chief' AND left_at IS NULL ORDER BY id DESC",
+        )?
+        .query_map([project_id], |row| row.get(0))?
+        .next()
+        .transpose()?;
+    let cancelled: Vec<i64> = store
+        .db
+        .prepare(
+            "SELECT d.number FROM task t JOIN task_need n ON n.task_id = t.id
+         JOIN task d ON d.id = n.needs_id
+       WHERE t.project_id = ? AND t.number = ? AND d.state = 'cancelled' ORDER BY d.number",
+        )?
+        .query_map(params![project_id, number], |row| row.get(0))?
+        .collect::<rusqlite::Result<_>>()?;
+    let Some(chief) = chief.filter(|_| !told && !cancelled.is_empty()) else {
+        return Ok(());
+    };
+    let told = send(
+        store,
+        project_id,
+        &Sent {
+            to: &chief,
+            task: Some(number),
+            kind: "note",
+            body: &format!(
+                "T-{number} waits on cancelled {} and will never start.",
+                task_numbers(&cancelled)
+            ),
+            ..Sent::default()
+        },
+    )?;
+    store.log(
+        project_id,
+        "task.stranded",
+        json!({ "task": number, "needs": cancelled, "message": told.id }),
+    )
+}
+
+/// The chief is told of each task that waits for `task`, which a step that
+/// does not refuse for its waiters has just cancelled (a member's removal).
+/// Called after all the step's cancels, so a waiter of several is told once,
+/// naming each.
+pub(crate) fn tell_stranded_waiters(
+    store: &mut Store,
+    project_id: i64,
+    task: &TaskRow,
+) -> Result<(), LedgerError> {
+    for number in waiters(store, task)? {
+        tell_stranded(store, project_id, number)?;
+    }
+    Ok(())
+}
+
 /// What a ledger an older build left with a task waiting for a cancelled one
 /// says at its opening: up to 3.0.5 a cancel was never refused for the tasks
 /// that waited for it, and the waiter read "blocked by" it for good. Each such
-/// open or paused task is told to its project's chief once, in a note that
-/// names what it waits on, and the log keeps that it was (`task.stranded`,
-/// in the same step), so no opening says it twice.
+/// open or paused task is told to its project's chief once (`tell_stranded`).
 pub(crate) fn note_stranded_waits(store: &mut Store) -> Result<(), LedgerError> {
     store.write(|store| {
-        let stranded: Vec<(i64, i64, i64)> = store
+        let stranded: Vec<(i64, i64)> = store
             .db
             .prepare(
-                "SELECT t.project_id, t.id, t.number FROM task t
+                "SELECT t.project_id, t.number FROM task t
            WHERE t.state IN ('open', 'paused')
              AND EXISTS (SELECT 1 FROM task_need n JOIN task d ON d.id = n.needs_id
                          WHERE n.task_id = t.id AND d.state = 'cancelled')
-             AND NOT EXISTS (SELECT 1 FROM event e
-                             WHERE e.kind = 'task.stranded' AND e.project_id = t.project_id
-                               AND json_extract(e.data, '$.task') = t.number)
            ORDER BY t.project_id, t.number",
             )?
-            .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
             .collect::<rusqlite::Result<_>>()?;
-        for (project, id, number) in stranded {
-            let chief: Option<String> = store
-                .db
-                .prepare(
-                    "SELECT handle FROM participant
-               WHERE project_id = ? AND role = 'chief' AND left_at IS NULL ORDER BY id DESC",
-                )?
-                .query_map([project], |row| row.get(0))?
-                .next()
-                .transpose()?;
-            let Some(chief) = chief else { continue };
-            let cancelled: Vec<i64> = store
-                .db
-                .prepare(
-                    "SELECT d.number FROM task_need n JOIN task d ON d.id = n.needs_id
-               WHERE n.task_id = ? AND d.state = 'cancelled' ORDER BY d.number",
-                )?
-                .query_map([id], |row| row.get(0))?
-                .collect::<rusqlite::Result<_>>()?;
-            let told = send(
-                store,
-                project,
-                &Sent {
-                    to: &chief,
-                    task: Some(number),
-                    kind: "note",
-                    body: &format!(
-                        "T-{number} waits on cancelled {} and will never start.",
-                        task_numbers(&cancelled)
-                    ),
-                    ..Sent::default()
-                },
-            )?;
-            store.log(
-                project,
-                "task.stranded",
-                json!({ "task": number, "needs": cancelled, "message": told.id }),
-            )?;
+        for (project, number) in stranded {
+            tell_stranded(store, project, number)?;
         }
         Ok(())
     })

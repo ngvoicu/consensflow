@@ -11,7 +11,7 @@ use super::{adopt, known_message, message_task, require_message};
 use crate::model::LedgerError;
 use crate::queue::{send, withdraw, Sent};
 use crate::store::Store;
-use crate::tasks::call_off;
+use crate::tasks::{call_off, Ending};
 
 /// The human read a message in the app.
 pub(crate) fn mark_read(store: &mut Store, message_id: i64) -> Result<MessageView, LedgerError> {
@@ -108,7 +108,7 @@ pub(crate) fn decline_message(
         if message.kind == "task" {
             if let Some(task) = &task {
                 told = Some(store.participant_row(task.requester_id)?.handle);
-                call_off(store, message.project_id, task.number, by)?;
+                call_off(store, message.project_id, task.number, by, Ending::Declined)?;
                 word = format!(
                     "@{by} declined T-{} ({}). It is cancelled.",
                     task.number, task.title

@@ -16,6 +16,7 @@ use crate::model::{self, sql_list, LedgerError, MEMBER_ROLES};
 use crate::projects::NewMember;
 use crate::queue::{drop_queued, send, Sent};
 use crate::store::Store;
+use crate::tasks::tell_stranded_waiters;
 use crate::views::{participant_view, ParticipantRow, TaskRow, PARTICIPANT_SELECT};
 
 pub(crate) use pools::{candidates, has_members_of_tier, members, nearest_tier};
@@ -261,7 +262,9 @@ pub(crate) fn set_roles<S: AsRef<str>>(
 
 /// A member leaves the staff. Its open tasks are cancelled, with the
 /// messages still on their way to it and its unread questions; whoever
-/// asked for those tasks is told, if its window runs.
+/// asked for those tasks is told, if its window runs. The removal is not
+/// refused for the tasks that wait for what is cancelled: the chief is told
+/// of each of them in the same step, as they will never start.
 pub(crate) fn remove_member(
     store: &mut Store,
     project_id: i64,
@@ -298,6 +301,9 @@ pub(crate) fn remove_member(
         for (task, _) in &open {
             drop_queued(store, task.id)?;
             store.move_task(task, "cancelled", json!({ "reason": reason }))?;
+        }
+        for (task, _) in &open {
+            tell_stranded_waiters(store, project_id, task)?;
         }
         for id in &windows {
             store.db.execute(

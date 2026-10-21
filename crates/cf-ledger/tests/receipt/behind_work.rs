@@ -8,7 +8,7 @@
 
 use cf_ledger::LedgerError;
 
-use crate::fixture::{world, World};
+use crate::fixture::{gated_world, world, World};
 
 /// A task opened for the standard workers, given to a session of zeus and at
 /// work: the session and the task.
@@ -260,4 +260,108 @@ fn a_task_with_a_follow_up_waiting_is_not_cancelled_until_the_follow_up_is() {
         .expect("and then the task");
     assert_eq!(w.state(a), "cancelled");
     assert_eq!(w.next(&session), None);
+}
+
+#[test]
+fn a_follow_up_that_waits_for_a_task_failing_twice_is_told_to_the_chief_each_time() {
+    // A failure is not final, as a cancel is: a reopened task can fail again, so the
+    // chief is told at each failure, and the once-for-good mark of a cancelled need
+    // (`task.stranded`) is not the follow-up's.
+    let mut w = world();
+    let (_, a) = at_work(&mut w);
+    let b = w
+        .follow_up(a, "Tests", &[])
+        .expect("a follow-up")
+        .task
+        .number;
+
+    w.ledger
+        .fail_task(w.project, a, "its pane died")
+        .expect("failed");
+    let words = w
+        .ledger
+        .reopen_task(w.project, a, "chief", "Again")
+        .expect("reopened")
+        .message
+        .expect("its words");
+    w.deliver(words.id);
+    w.ledger
+        .fail_task(w.project, a, "its pane died again")
+        .expect("failed again");
+    let told = format!(
+        "T-{b} waits for T-{a}, which failed: cancel T-{b}, or reopen T-{a} and let it finish."
+    );
+    assert_eq!(notes_to_the_chief(&w, b), [told.clone(), told]);
+    assert_eq!(w.state(b), "open");
+}
+
+#[test]
+fn a_member_removed_with_a_task_a_follow_up_waits_behind_tells_the_chief_once_it_will_never_start()
+{
+    let mut w = world();
+    let (_, a) = at_work(&mut w);
+    let b = w
+        .follow_up(a, "Tests", &[])
+        .expect("a follow-up")
+        .task
+        .number;
+
+    // The removal is not refused, and cancels the task at work; the follow-up waits
+    // for a cancelled task now, which the chief is told in the same step.
+    let removed = w
+        .ledger
+        .remove_member(w.project, "zeus")
+        .expect("zeus leaves");
+    assert_eq!(removed.cancelled, [a]);
+    assert_eq!(w.state(a), "cancelled");
+    assert_eq!(w.state(b), "open");
+    assert_eq!(
+        notes_to_the_chief(&w, b),
+        [format!(
+            "T-{b} waits on cancelled T-{a} and will never start."
+        )]
+    );
+    // And once: the follow-up's own cancel and a restart say nothing more.
+    w.ledger
+        .cancel_task(w.project, b, "chief")
+        .expect("the chief cancels the follow-up");
+    assert_eq!(notes_to_the_chief(&w, b).len(), 1);
+}
+
+#[test]
+fn a_decline_of_the_brief_of_a_task_a_follow_up_waits_for_is_refused_in_the_declines_words() {
+    let mut w = gated_world();
+    let task = w.open("Parser").task.number;
+    let brief = w.assign(task, "zeus").message.expect("its brief").id;
+    assert_eq!(
+        w.message(brief).state,
+        "gated",
+        "the brief waits for the human"
+    );
+    // The window has not begun on T-1, and its follow-up still waits behind it.
+    let follow_up = w
+        .follow_up(task, "Tests", &[])
+        .expect("a follow-up of a task whose brief waits")
+        .task
+        .number;
+    assert_eq!(w.state(follow_up), "open");
+
+    let declined = w
+        .ledger
+        .decline_message(brief, "human")
+        .expect_err("the follow-up waits for the task");
+    assert_eq!(declined.code(), Some("waited-for"));
+    assert_eq!(
+        declined.to_string(),
+        format!("T-{task} cannot be cancelled while T-{follow_up} waits for it: cancel T-{follow_up} first, or pass T-{task} on")
+    );
+    assert_eq!(w.state(task), "queued", "the task was not cancelled");
+
+    w.ledger
+        .cancel_task(w.project, follow_up, "chief")
+        .expect("the follow-up is cancelled");
+    w.ledger
+        .decline_message(brief, "human")
+        .expect("nothing waits for the task now");
+    assert_eq!(w.state(task), "cancelled");
 }
