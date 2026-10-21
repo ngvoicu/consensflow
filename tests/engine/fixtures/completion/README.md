@@ -66,8 +66,9 @@ throwaway SQLite database. Production stores are never written.
 Codex 0.163.0, the newest seen, still writes the fields read here:
 `aggregated_output` of a command, `call_id` of a call, `agent_thread_id` of a
 sub-agent's activity (in its binary; no rollout since 0.153.4 holds one) and a
-content part's `text`. `errored-task-complete.jsonl` also holds
-`formatted_output` once, beside `aggregated_output`; it is not read.
+content part's `text`. `errored-task-complete.jsonl`, in its record at ordinal
+2020, also holds `formatted_output`, `stdout` and `stderr` beside
+`aggregated_output`; none of the three is read.
 
 ## Claude Code — session JSONL, versions `2.1.241`, `2.1.247`, and `2.1.250`
 

@@ -53,12 +53,13 @@ use crate::shared::pattern::compile;
 use crate::shared::quota::{exhausted_quota, Quota};
 
 /// What Devin's own messages say when it refuses for its quota: `/rate
-/// limit|usage limit|quota exhausted|quota has been exhausted/i`. The words
-/// come from Devin's server, not from its binary (Devin 3000.11.92, the newest
-/// seen, holds none of them but "Quota exhausted: "), and no refusal in the
-/// shape of a message is on record: only a real quota hit shows it. Kept for
-/// that; the JSON-RPC error and the turn's end below are the shapes the binary
-/// holds.
+/// limit|usage limit|quota exhausted|quota has been exhausted/i`. The words are
+/// Devin's own: the binary of Devin 3000.11.92, the newest seen, holds these
+/// words as its own error prefixes and TUI text ("Rate limited: ", "Usage limit
+/// reached", "usage quota has been exhausted"); no refusal in a message's shape
+/// is on record, so whether one reaches an agent_message_chunk is unobserved.
+/// Kept for that; the JSON-RPC error and the turn's end below are the shapes
+/// seen whole in the binary.
 static REFUSAL: LazyLock<Regex> = LazyLock::new(|| {
     compile("(?i-u:rate limit|usage limit|quota exhausted|quota has been exhausted)")
 });

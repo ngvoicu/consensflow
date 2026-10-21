@@ -42,8 +42,9 @@ const JSONL: [(&str, &str); 20] = [
     ("claude-code/provider-429.jsonl", "33383216-87a0-4e6d-a273-07c4b229cdb1"),
     ("claude-code/compaction.jsonl", "1b09fb15-feb1-4595-9f47-5eb9ff768191"),
     // The `vNNN` ones are captures of that Claude Code version, named by it. Their
-    // shapes are still written by 2.1.305, the newest seen (2026-10-21), but the
-    // late ancestors', a 2.1.268 capture that no later version was seen to write.
+    // shapes are still written by 2.1.305, the newest seen (2026-10-21; the /clear
+    // boundary by 2.1.304), but the late ancestors', a 2.1.268 capture that no later
+    // version was seen to write.
     ("claude-code/v263-tool-loop.jsonl", "5cbf8973-f472-448a-8763-59fb4268a9d7"),
     ("claude-code/v265-tool-loop.jsonl", "17499106-8778-48e1-a306-87bd186c9f7e"),
     ("claude-code/v266-tool-loop.jsonl", "47b1090f-b1c7-4d19-95b9-24c09a7f164a"),
