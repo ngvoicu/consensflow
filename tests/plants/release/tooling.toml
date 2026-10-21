@@ -109,22 +109,22 @@ cf-base.workspace = true
 cf-harness.workspace = true
 serde_json.workspace = true'''
 
+# cf-release's dependencies, which no other package lists in this order: the
+# plant names no version, so that a version change leaves it as it is.
 [[plant.edit]]
 file = "Cargo.lock"
 find = '''
-name = "cf-release"
-version = "3.0.5"
-dependencies = [
  "base64 0.22.1",
  "cf-base",
+ "flate2",
+ "plist",
 '''
 replace = '''
-name = "cf-release"
-version = "3.0.5"
-dependencies = [
  "base64 0.22.1",
  "cf-base",
  "cf-harness",
+ "flate2",
+ "plist",
 '''
 
 [[plant]]

@@ -5741,6 +5741,7 @@ dependencies = [
  "cf-base",
  "cf-portable",
  "cf-process",
+ "cf-publish",
  "cf-release",
  "memchr",
  "nix",
