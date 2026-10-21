@@ -1,0 +1,245 @@
+# A harness's question about trusting a folder stopped every launch in a new repository
+# (dip-agentos's T-11, T-13, T-14 and T-15, 2026-10-17 to 10-19, ConsensFlow 3.0.4: Claude Code's
+# "Do you trust this folder?" after `git init`). the owner's decision of 2026-10-20: choosing a
+# folder for a project counts as trusting it. The engine watches a window that may ask from the
+# moment it opens (`crates/cf-engine/src/trust.rs`), reads the question in its last lines through
+# its harness's reader (`crates/cf-harness/src/claude/trust.rs`), and answers
+# yes a key at a time where what a yes trusts (`shared/trust.rs`: the root of the repository the
+# folder is in) is the project's folder or below it, the human told once; a yes that would trust a
+# folder outside it is the human's, told once, and once they said yes in a window the project's
+# other windows that ask of that folder are answered. Nothing goes into the window, and nothing
+# gives its launch up, while the question is on its screen (`dispatcher.rs`, `arrival.rs`).
+#
+# The cases are `crates/cf-e2e/tests/regressions/a_trust_question_after_git_init_stopped_every_launch.rs`
+# (a stand-in that asks as Claude Code 2.1.305 does, the shape the live suite
+# `cargo xtask live folder-trust` found) and the readers' own tests. The rig's cases build the
+# native `cf` from the sources as planted, so their plants say `builds`. Every name holds
+# `folder trust`, so `npm run plants:daemon -- "folder trust"` runs them all.
+
+[run]
+folder-trust-readers = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "trust::"]
+folder-trust-tooling = ["cargo", "test", "--offline", "-p", "cf-harness", "--features", "test-support", "--lib", "tooling::tests::the_key_toward"]
+folder-trust-rig-claude = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_worker_asked"]
+folder-trust-rig-claude-outside = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_worker_whose"]
+folder-trust-rig-slow = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_worker_the_human_said_yes"]
+folder-trust-rig-chief = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_chief"]
+
+[[plant]]
+name = "folder trust: no window is watched for the question, and every launch in a new repository stops at it (main, 2026-10-19)"
+meant = "a_worker_asked_to_trust_the_projects_new_repository_is_answered_yes_and_does_its_tasks"
+runs = ["folder-trust-rig-claude"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = "        self.watch_trust(record, project, participant, &pane).await;\n"
+replace = ""
+
+[[plant]]
+name = "folder trust: no window is watched for the question, and a chief opened in a new repository never takes what it is told (main)"
+meant = "a_chief_asked_to_trust_the_projects_new_repository_is_answered_yes_and_takes_what_it_is_told"
+runs = ["folder-trust-rig-chief"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = "        self.watch_trust(record, project, participant, &pane).await;\n"
+replace = ""
+
+[[plant]]
+name = "folder trust: the project's own folder goes to the human"
+meant = "a_worker_asked_to_trust_the_projects_new_repository_is_answered_yes_and_does_its_tasks"
+runs = ["folder-trust-rig-claude"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/trust.rs"
+find = "let inside = Path::new(&folder).starts_with(&project.directory);"
+replace = "let inside = false;"
+
+[[plant]]
+name = "folder trust: a folder outside the project's is answered for the human"
+meant = "a_worker_whose_yes_would_trust_a_folder_outside_the_project_waits_for_the_human_and_goes_on_after"
+runs = ["folder-trust-rig-claude-outside"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/trust.rs"
+find = "let inside = Path::new(&folder).starts_with(&project.directory);"
+replace = "let inside = true;"
+
+[[plant]]
+name = "folder trust: the human's yes in one window is not carried to the project's other windows that ask"
+meant = "a_worker_whose_yes_would_trust_a_folder_outside_the_project_waits_for_the_human_and_goes_on_after"
+runs = ["folder-trust-rig-claude-outside"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/trust.rs"
+find = "if (inside || accepted) && keys < MOST_KEYS {"
+replace = "if (inside || accepted && false) && keys < MOST_KEYS {"
+
+[[plant]]
+name = "folder trust: the human's yes is never written down"
+meant = "a_worker_whose_yes_would_trust_a_folder_outside_the_project_waits_for_the_human_and_goes_on_after"
+runs = ["folder-trust-rig-claude-outside"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/trust.rs"
+find = "        if asked && keys == 0 {"
+replace = "        if asked && keys == usize::MAX {"
+
+[[plant]]
+name = "folder trust: the watch of an asked window waits for its screen to hold still, which a window that closes after its task never does, and the human's yes is lost"
+meant = "a_worker_whose_yes_would_trust_a_folder_outside_the_project_waits_for_the_human_and_goes_on_after"
+runs = ["folder-trust-rig-claude-outside"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/trust.rs"
+find = '''
+                    if (!asked && self.now() - began > ASKS_WITHIN_MS)
+                        || self.record_begun(window).await
+                    {'''
+replace = '''
+                    if !asked
+                        && (self.now() - began > ASKS_WITHIN_MS || self.record_begun(window).await)
+                    {'''
+
+[[plant]]
+name = "folder trust: every window that asks is told of again"
+meant = "a_worker_asked_to_trust_the_projects_new_repository_is_answered_yes_and_does_its_tasks"
+runs = ["folder-trust-rig-claude"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/trust.rs"
+find = ".insert((project.id, folder.to_owned(), answered))"
+replace = ".insert((project.id, folder.to_owned(), answered)) && false"
+
+[[plant]]
+name = "folder trust: a launch whose window asks is failed at its time while the human has not answered"
+meant = "a_worker_whose_yes_would_trust_a_folder_outside_the_project_waits_for_the_human_and_goes_on_after"
+runs = ["folder-trust-rig-claude-outside"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = '''
+            if record.window.borrow().trust != Trusting::Past {
+                return Ok(());
+            }'''
+replace = ""
+
+[[plant]]
+name = "folder trust: a first message the question held keeps the time it spent waiting"
+meant = "a_worker_the_human_said_yes_in_that_starts_slowly_has_its_first_messages_whole_time_from_then"
+runs = ["folder-trust-rig-slow"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/trust.rs"
+find = "                delivering.since = self.now();"
+replace = "                delivering.since = delivering.since.min(self.now());"
+
+[[plant]]
+name = "folder trust: the board reads a window that asks at rest, and what waits for it goes into the question"
+meant = "a_worker_whose_yes_would_trust_a_folder_outside_the_project_waits_for_the_human_and_goes_on_after"
+runs = ["folder-trust-rig-claude-outside"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "let asking = record.window.borrow().trust != Trusting::Past;"
+replace = "let asking = record.window.borrow().trust != Trusting::Past && false;"
+
+[[plant]]
+name = "folder trust: a key is pressed into a screen still drawing"
+meant = "a_worker_asked_to_trust_the_projects_new_repository_is_answered_yes_and_does_its_tasks"
+runs = ["folder-trust-rig-claude"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/trust.rs"
+find = "Some(quiet) => quiet.as_f64().is_some_and(|quiet| quiet >= QUIET_MS),"
+replace = "Some(_) => true,"
+
+[[plant]]
+name = "folder trust: the engine reads none of the screen's lines"
+meant = "a_worker_asked_to_trust_the_projects_new_repository_is_answered_yes_and_does_its_tasks"
+runs = ["folder-trust-rig-claude"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown.rs"
+find = "        self.tail.as_deref().unwrap_or_default()"
+replace = "        &[]"
+
+[[plant]]
+name = "folder trust: a Claude window says it never asks"
+meant = "a_worker_asked_to_trust_the_projects_new_repository_is_answered_yes_and_does_its_tasks"
+runs = ["folder-trust-rig-claude"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = '''
+    fn trusts(&self) -> Option<&str> {
+        Some(&self.trusts)
+    }'''
+replace = '''
+    fn trusts(&self) -> Option<&str> {
+        None
+    }'''
+
+[[plant]]
+name = "folder trust: Claude's question is answered with Enter on No, exit"
+meant = "the_question_opens_on_no_and_is_answered_with_down_then_enter"
+runs = ["folder-trust-readers"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/trust.rs"
+find = "        if chosen(screen, '❯').is_some_and(|choice| choice.ends_with(YES)) {"
+replace = "        if chosen(screen, '❯').is_none_or(|choice| !choice.ends_with(YES)) {"
+
+[[plant]]
+name = "folder trust: Claude's question is read from its yes alone"
+meant = "a_prompt_or_a_question_with_one_choice_alone_is_no_question_about_the_folder"
+runs = ["folder-trust-readers"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/trust.rs"
+find = "    if !(shows(screen, YES) && shows(screen, NO)) {"
+replace = "    if !shows(screen, YES) {"
+
+[[plant]]
+name = "folder trust: a yes trusts the window's own folder, not its repository's root"
+meant = "a_yes_trusts_the_root_of_the_repository_the_folder_is_in_or_the_folder_out_of_one"
+runs = ["folder-trust-readers"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/trust.rs"
+find = "        .find(|folder| folder.join(\".git\").exists())"
+replace = "        .find(|folder| folder.join(\".git\").exists() && *folder == Path::new(directory))"
+
+[[plant]]
+name = "folder trust: a yes trusts the window's own folder, and a folder outside the project's is answered"
+meant = "a_worker_whose_yes_would_trust_a_folder_outside_the_project_waits_for_the_human_and_goes_on_after"
+runs = ["folder-trust-rig-claude-outside"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/trust.rs"
+find = "        .find(|folder| folder.join(\".git\").exists())"
+replace = "        .find(|folder| folder.join(\".git\").exists() && *folder == Path::new(directory))"
+
+[[plant]]
+name = "folder trust: the live suite's reader of Claude reads no question"
+meant = "the_key_toward_a_yes_is_the_one_the_engine_reads_in_a_harnesss_question_about_its_folder"
+runs = ["folder-trust-tooling"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/tooling.rs"
+find = "        Harness::Claude => crate::claude::trust::toward_trust(&screen),"
+replace = "        Harness::Claude => None::<&'static [u8]>,"

@@ -247,6 +247,19 @@ pub trait Window {
     fn came_up(&self) -> Work<'_, Option<Option<String>>> {
         Box::pin(async { None })
     }
+    /// The folder a yes to its harness's question about trusting the window's folder
+    /// would trust, where the harness may ask one before it starts (Claude Code does
+    /// in a git repository: the repository's root). None where it never asks (the
+    /// default).
+    fn trusts(&self) -> Option<&str> {
+        None
+    }
+    /// The key a person presses next to answer yes to that question, where the
+    /// window's last screen lines `screen` show it (Down, or Enter once the choice
+    /// is on yes); none where they show no such question.
+    fn toward_trust(&self, _screen: &[String]) -> Option<&'static [u8]> {
+        None
+    }
     /// Whether a delivery may go in now, or why that could not be told.
     fn ready<'a>(
         &'a self,

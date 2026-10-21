@@ -306,6 +306,34 @@ fn a_turn_is_interrupted_as_the_harness_says() {
 }
 
 #[test]
+fn the_key_toward_a_yes_is_the_one_the_engine_reads_in_a_harnesss_question_about_its_folder() {
+    let key = |kind: &str, screen: &[&str]| {
+        answer(&ask("trust", json!({ "kind": kind, "screen": screen }))).unwrap()
+    };
+    let claude = [
+        " Quick safety check",
+        " ❯ No, exit",
+        "   Yes, I trust this folder",
+    ];
+    assert_eq!(key("claude-code", &claude), json!("down"));
+    let codex = [
+        "  Trust this folder? Codex can read, edit, and run files here.",
+        "› 1. Trust and continue",
+        "  2. Back to Agent Command Center",
+    ];
+    // A harness that never asks as ConsensFlow opens it reads none, whatever the
+    // screen shows: Codex's own question is its window's opened alone.
+    assert_eq!(key("codex", &codex), Value::Null);
+    for kind in ["pi", "opencode", "devin"] {
+        assert_eq!(key(kind, &claude), Value::Null, "{kind}");
+    }
+    assert_eq!(
+        key("claude-code", &["❯ Try \"fix lint errors\""]),
+        Value::Null
+    );
+}
+
+#[test]
 fn a_claude_window_gets_the_settings_file_of_its_launch() {
     let home = tempfile::tempdir().unwrap();
     let settings = |board_questions: bool| {

@@ -63,7 +63,7 @@ use serde_json::Value;
 
 use super::status::{self, State, Status};
 use super::stopped::{self, Pressed};
-use super::{install, paths};
+use super::{install, paths, trust};
 use crate::contract::{
     Adapter, Admission, Held, Launch, Observed, Pane, PaneHost, Prepared, Readiness, Records,
     Skill, Waiting, Window, Work,
@@ -75,6 +75,7 @@ use crate::shared::admission::admission;
 use crate::shared::left_open::LeftOpen;
 use crate::shared::record_state::switched_to;
 use crate::shared::resumable::transcript_kept;
+use crate::shared::trust::trusted_by_a_yes;
 use crate::shared::{pane, specmint, window_args};
 
 /// Claude Code, as the engine launches its windows.
@@ -186,6 +187,7 @@ impl Adapter for ClaudeAdapter {
                     restored: Cell::new(false),
                     left_open: RefCell::new(left_open),
                     relaunched,
+                    trusts: trusted_by_a_yes(launch.directory),
                 }),
             })
         })
@@ -249,6 +251,8 @@ struct ClaudeWindow {
     /// transcript held then, the window it was on closed: where the program
     /// the window runs began writing.
     relaunched: Option<(String, u64)>,
+    /// What a yes to Claude Code's question about the window's folder trusts.
+    trusts: String,
 }
 
 /// What a look at `session` is told: where the window's program began writing,
@@ -324,6 +328,14 @@ impl Window for ClaudeWindow {
 
     fn started(&self) -> Work<'_, Result<Option<String>, String>> {
         Box::pin(async { Ok(None) })
+    }
+
+    fn trusts(&self) -> Option<&str> {
+        Some(&self.trusts)
+    }
+
+    fn toward_trust(&self, screen: &[String]) -> Option<&'static [u8]> {
+        trust::toward_trust(screen)
     }
 
     /// A paste waits for the window to be readable, on its conversation,

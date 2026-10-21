@@ -46,6 +46,8 @@ mod a_result_pasted_again_after_its_window_went;
 mod a_resumed_devin_worker_skipped_every_call;
 #[path = "regressions/a_task_stuck_working_after_its_window_was_resumed.rs"]
 mod a_task_stuck_working_after_its_window_was_resumed;
+#[path = "regressions/a_trust_question_after_git_init_stopped_every_launch.rs"]
+mod a_trust_question_after_git_init_stopped_every_launch;
 // The stand-in's status line is a `bash`.
 #[cfg(unix)]
 #[path = "regressions/claude_status_line_taken_for_background_work.rs"]
