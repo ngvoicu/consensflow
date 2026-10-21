@@ -37,3 +37,13 @@ runs = ["board-get"]
 file = "crates/cf/src/board/task.rs"
 find = '                && message.get("recipient").and_then(Value::as_str) == Some(window)'
 replace = '                && message.get("recipient").is_some()'
+
+[[plant]]
+name = "task get: cf asks for a transcript of ten items whatever it was asked for"
+meant = "a_transcript_says_nothing_of_any_answer_whether_it_prints_the_thread_or_not"
+runs = ["board-get"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/task.rs"
+find = 'let transcript = format!("/api/tasks/{number}/transcript?last={last}");'
+replace = 'let transcript = format!("/api/tasks/{number}/transcript?last=10");'

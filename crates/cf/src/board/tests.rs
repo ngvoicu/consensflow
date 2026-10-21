@@ -434,7 +434,10 @@ fn an_open_task_given_before_prints_the_brief_it_has_now_and_its_old_messages_af
 
 #[test]
 fn a_task_its_window_has_no_message_of_prints_its_brief_under_its_header() {
-    // `cf task add --self`: the window has the work, and no task message came with it.
+    // A task given by name to @zeus while it is blocked on its needs: the ledger queues no
+    // message for its window until they are accepted and the window is free (giving.rs,
+    // finishing.rs's release_ready). `working` is only what the header prints here: a
+    // blocked task is `open`.
     let mut task = open_task(BRIEF);
     task["task"]["state"] = json!("working");
     task["task"]["assignee"] = json!("zeus");
@@ -465,7 +468,9 @@ fn a_task_whose_only_task_message_went_to_another_window_prints_its_brief_under_
 
 #[test]
 fn a_brief_the_board_withholds_prints_no_brief_block() {
-    // Held at the human's gate, the brief reads "" and its message is left out.
+    // The daemon sends an empty body only for an assigned task whose brief waits at the
+    // human's gate, and leaves that message out (routes/task.rs:61-65). This test models the
+    // CLI's rule for an empty body on an open task, which the daemon never serves.
     let ran = cf(&["task", "get", "T-17"], vec![reply(200, open_task(""))]);
     assert_eq!(
         ran.out,
