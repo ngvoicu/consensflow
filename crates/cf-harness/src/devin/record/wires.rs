@@ -80,6 +80,9 @@ struct Active {
 pub(super) struct Outcome {
     pub(super) text: String,
     pub(super) cause: Cause,
+    /// Why the turn failed, where the turn's end said (`errorMessage`, as a
+    /// quota's end says it).
+    pub(super) error: Option<String>,
 }
 
 /// What ended a turn.
@@ -265,9 +268,15 @@ impl Said {
                 .as_ref()
                 .filter(|request| !request.is_empty())
             {
+                let error = event
+                    .get("errorMessage")
+                    .and_then(Value::as_str)
+                    .filter(|said| cause == Cause::Error && !said.trim().is_empty())
+                    .map(str::to_owned);
                 let outcome = Outcome {
                     text: active.text.clone(),
                     cause,
+                    error,
                 };
                 if outcomes
                     .get(request)

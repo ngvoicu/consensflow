@@ -156,13 +156,7 @@ impl Shown {
         }
         match Quote::of(tail) {
             None => said.push_str("; its screen was empty"),
-            Some(quote) => {
-                said.push_str(&format!("; its screen ended with: \"{}\"", quote.text));
-                if quote.masked > 0 {
-                    let (count, strings) = (quote.masked, plural(quote.masked));
-                    said.push_str(&format!(" ({count} key- or token-like {strings} masked)"));
-                }
-            }
+            Some(quote) => said.push_str(&quote.after("; its screen ended with")),
         }
         said
     }
@@ -178,6 +172,22 @@ impl Shown {
             (None, Some(code)) => Some(format!("exit code {code}")),
             (None, None) => None,
         }
+    }
+}
+
+/// `because`, and after it what a harness said of it in its own record (an
+/// API's error, a provider's message): `@zeus's harness reported a failure; it
+/// said: "Selected model is at capacity."`. Its words are held to a quote's
+/// bounds and rules as a screen's last lines are: they go to the board, the
+/// chief's window and the log, and words that name a secret are not quoted.
+pub(crate) fn after_words(because: &str, words: &str) -> String {
+    let lines: Vec<String> = words.lines().map(str::to_owned).collect();
+    if lines.iter().any(|line| names_a_secret(line)) {
+        return format!("{because}; what it said named a secret, so it is left out");
+    }
+    match Quote::of(&lines) {
+        None => because.to_owned(),
+        Some(quote) => format!("{because}{}", quote.after("; it said")),
     }
 }
 
@@ -197,6 +207,16 @@ struct Quote {
 }
 
 impl Quote {
+    /// The quote after `label`, and how many strings it hid.
+    fn after(&self, label: &str) -> String {
+        let mut said = format!("{label}: \"{}\"", self.text);
+        if self.masked > 0 {
+            let (count, strings) = (self.masked, plural(self.masked));
+            said.push_str(&format!(" ({count} key- or token-like {strings} masked)"));
+        }
+        said
+    }
+
     /// The quote of `tail`: none where no line has a word in it. The last
     /// lines come first: each has its blanks made one, its secrets hidden and
     /// its quotation marks made apostrophes (a quote is not to end where the

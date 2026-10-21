@@ -133,9 +133,12 @@ enum End {
     /// `task_complete`, and the final answer it names (`last_agent_message`,
     /// none when it names none).
     Complete(Option<Value>),
-    /// `task_complete` with an error, and the refusal it is when the error is
-    /// Codex's usage limit.
-    Failed(Option<Arc<Quota>>),
+    /// `task_complete` with an error: the refusal it is when the error is
+    /// Codex's usage limit, and the error's words (`message`) where it has any.
+    Failed {
+        refusal: Option<Arc<Quota>>,
+        said: Option<String>,
+    },
     /// `turn_aborted`.
     Cancelled,
 }
@@ -272,7 +275,10 @@ impl Rollout {
                 self.latest_turn = named.clone();
                 let error = field(payload, "error");
                 let end = if js::truthy(error) {
-                    End::Failed(self.refusal(error, &at))
+                    End::Failed {
+                        refusal: self.refusal(error, &at),
+                        said: Self::error_words(error),
+                    }
                 } else {
                     End::Complete(field(payload, "last_agent_message").cloned())
                 };
@@ -289,6 +295,16 @@ impl Rollout {
             _ => {}
         }
         Ok(())
+    }
+
+    /// The words of a turn's `error`: its `message`, or the error itself where
+    /// it is text. None where it says nothing.
+    fn error_words(error: Option<&Value>) -> Option<String> {
+        let said = match error {
+            Some(Value::String(said)) => said,
+            _ => field(error, "message").and_then(Value::as_str)?,
+        };
+        (!said.trim().is_empty()).then(|| said.to_owned())
     }
 
     /// The refusal a turn's `error` is, where it is Codex's usage limit: at the
@@ -561,9 +577,18 @@ impl Answer for Rollout {
             .map(|kept| handed_out(&kept.item))
             .collect();
         record.in_flight = in_flight;
-        record.failed = matches!(end, Some((_, End::Failed(_))));
+        record.failed = matches!(end, Some((_, End::Failed { .. })));
+        if let Some((_, End::Failed { said, .. })) = end {
+            record.failure.clone_from(said);
+        }
         record.quota = match end {
-            Some((_, End::Failed(Some(refusal)))) => Some(Arc::clone(refusal)),
+            Some((
+                _,
+                End::Failed {
+                    refusal: Some(refusal),
+                    ..
+                },
+            )) => Some(Arc::clone(refusal)),
             _ => self.quota.clone(),
         };
         record.settlement = match end {

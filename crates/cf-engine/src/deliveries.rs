@@ -18,6 +18,7 @@ use crate::record::Record;
 use crate::role_change::{answers_to_the_task, Prelude};
 use crate::runtime::returning;
 use crate::seams::EngineError;
+use crate::shown::after_words;
 
 /// The one message on its way into a window.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -189,10 +190,11 @@ impl Dispatcher {
     /// note that says the worker its role is none of the task's
     /// ([`answers_to_the_task`]): where nothing else answers, there is no result,
     /// and nothing the turn left running is ended.
-    pub(crate) fn collect(
+    pub(crate) async fn collect(
         &self,
         project: &ProjectView,
         participant: &ParticipantView,
+        record: &Rc<Record>,
         observed: &Observed,
     ) -> Result<Option<TaskView>, EngineError> {
         let task = self
@@ -219,8 +221,17 @@ impl Dispatcher {
             return Ok(None);
         };
         if observed.failed {
-            let because = format!("@{}'s harness reported a failure", participant.handle);
-            self.fail_task(project, &thread.task, &because)?;
+            let because = self.why_it_failed(participant, record, observed).await;
+            // The task may have moved on while the window was looked at.
+            let still = self
+                .seams
+                .ledger
+                .borrow()
+                .active_task(participant.id, false)?
+                .is_some_and(|now| now.task.id == thread.task.id && now.task.state == "working");
+            if still && !self.forgotten(record) {
+                self.fail_task(project, &thread.task, &because)?;
+            }
             return Ok(None);
         }
         if !observed.settled {
@@ -254,6 +265,28 @@ impl Dispatcher {
                 .record_result(project.id, thread.task.number, &body)?;
         self.changed();
         Ok(Some(moved.task))
+    }
+
+    /// Why a member's turn failed, as its note says it: in its harness's own
+    /// words where its record has them, and otherwise in the last lines its
+    /// window shows, which is where a harness that says nothing in its record
+    /// says why (a crash, a model it does not know). Both are held to a quote's
+    /// bounds ([`after_words`], [`Shown::after`]).
+    async fn why_it_failed(
+        &self,
+        participant: &ParticipantView,
+        record: &Record,
+        observed: &Observed,
+    ) -> String {
+        let failed = format!("@{}'s harness reported a failure", participant.handle);
+        if let Some(words) = observed.failure() {
+            return after_words(&failed, words);
+        }
+        let pane = record.window.borrow().pane.clone();
+        match pane {
+            Some(pane) => self.look_at(&pane).await.after(&failed),
+            None => failed,
+        }
     }
 
     /// What a window was to receive goes back to its queue with its attempt:

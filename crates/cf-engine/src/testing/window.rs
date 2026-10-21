@@ -276,6 +276,7 @@ fn looked(agent: &FakeAgent, session: &str) -> Observed {
             in_flight: false,
             asking: false,
             failed: false,
+            failure: agent.failure.clone(),
             quota: None,
             settlement: Settlement::Unknown,
             agents_pending: agent.agents_pending,

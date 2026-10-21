@@ -410,6 +410,15 @@ impl Observed {
         }
     }
 
+    /// Why the look's turn failed, in its harness's own words where its record
+    /// has them: none where the turn did not fail, or its record says no more.
+    pub fn failure(&self) -> Option<&str> {
+        match self.reading.as_deref() {
+            Some(Reading::Known(record)) if self.failed => record.failure.as_deref(),
+            _ => None,
+        }
+    }
+
     /// Whether the conversation's turn ended and left background agents or
     /// workflows running: the window takes input between turns, and its agent
     /// is woken when they end.

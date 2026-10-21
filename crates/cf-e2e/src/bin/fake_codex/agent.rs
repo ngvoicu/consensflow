@@ -24,7 +24,10 @@
 //! the usage limit, as the stand-in agent's is (`CF_TEST_QUOTA_OUT` names the
 //! member whose sessions are refused, while `CF_TEST_QUOTA_FILE`, when it is set,
 //! is there): the turn works as long as it says and ends as Codex 0.163 ends one
-//! its limit cut, with `usage_limit_exceeded` and no answer. The thread is the same in every run unless
+//! its limit cut, with `usage_limit_exceeded` and no answer. One that says
+//! `MODEL-BUSY` works as long as it says and fails as a real rollout's turn did when
+//! its model was at capacity: `server_overloaded`, with the error's words and no
+//! answer. The thread is the same in every run unless
 //! `CF_TEST_CODEX_THREADS` says `unique`, which a window the daemon opens needs
 //! (two of them in one `CODEX_HOME` would share a rollout). The servers Codex opens
 //! with its window are `CF_TEST_CODEX_SERVERS` of them, and the first starts
@@ -262,6 +265,22 @@ impl Agent {
                     "error": {
                         "message": "You've hit your usage limit. Try again later.",
                         "codex_error_info": "usage_limit_exceeded",
+                    },
+                    "completed_at": jiff::Timestamp::now().as_second(),
+                }),
+            );
+            return;
+        }
+        if text.contains("MODEL-BUSY") {
+            self.write(
+                "event_msg",
+                json!({
+                    "type": "task_complete",
+                    "turn_id": turn,
+                    "last_agent_message": null,
+                    "error": {
+                        "message": "The stand-in model is busy. Pick another model.",
+                        "codex_error_info": "server_overloaded",
                     },
                     "completed_at": jiff::Timestamp::now().as_second(),
                 }),

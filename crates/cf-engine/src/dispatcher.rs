@@ -1044,7 +1044,10 @@ impl Dispatcher {
             // A turn a refusal cut short, its member past it now, failed nothing: its task goes on.
             if self.cut_short(&observed) {
                 self.go_on(project, participant)?;
-            } else if let Some(task) = self.collect(project, participant, &observed)? {
+            } else if let Some(task) = self
+                .collect(project, participant, record, &observed)
+                .await?
+            {
                 // Its answer is its result at once, whatever the turn left running.
                 // What it left is ended, whoever gave the task told and the window
                 // closed if it is free, as work of the window's own apart from this

@@ -1,0 +1,267 @@
+# Every failure note names its reason (dip-agentos, 2026-10-17 to 19, ConsensFlow
+# 3.0.4: each failure said only "the harness reported a failure", and neither the
+# chief nor the human could tell a crash from a refusal from a bad model name; row 4
+# of `issues/field-reports-2026-10-19-dip-agentos.md` in consensflow-sme). Each
+# harness's record keeps the words its failed turn ended with
+# (`crates/cf-harness/src/*/record*`, `Record::failure`), and the engine's note
+# quotes them, held to a quote's bounds, or else the window's last screen lines
+# (`crates/cf-engine/src/deliveries.rs`, `why_it_failed`; `shown.rs`,
+# `after_words`). The engine's cases are
+# `crates/cf-engine/tests/dispatcher/failure_reasons.rs`; the rig's case, whose
+# stand-in Codex fails a turn in Codex's shape, is
+# `crates/cf-e2e/tests/regressions/a_failure_said_no_reason.rs`, and its run builds
+# the native `cf` from the sources as they are planted.
+#
+# Every name holds `failure reason`, so `cargo xtask plants daemon "failure reason"`
+# runs them all.
+
+[run]
+failure-reason-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "failure_reasons"]
+failure-reason-claude = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::record"]
+failure-reason-codex = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "codex::record"]
+failure-reason-pi = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "pi::record"]
+failure-reason-opencode = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "opencode::record"]
+failure-reason-devin = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "devin::record"]
+failure-reason-rig = { command = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_failure_said_no_reason::"], builds = true }
+
+[[plant]]
+name = "failure reason: a failed Codex turn's words are dropped, and the task fails saying only that the harness reported a failure (the field's)"
+meant = "a_codex_worker_whose_turn_failed_fails_its_task_with_what_codex_said"
+runs = ["failure-reason-rig"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''
+            let because = self.why_it_failed(participant, record, observed).await;
+'''
+replace = '''
+            let because = format!("@{}'s harness reported a failure", participant.handle);
+'''
+
+[[plant]]
+name = "failure reason: the note leaves out what the harness said"
+meant = "a_failed_turn_says_what_its_harness_said_of_it"
+runs = ["failure-reason-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''
+        if let Some(words) = observed.failure() {
+            return after_words(&failed, words);
+        }
+'''
+replace = '''
+        if observed.failure().is_some() {
+            return failed;
+        }
+'''
+
+[[plant]]
+name = "failure reason: a look finds no failure's words in the record"
+meant = "a_failed_turn_says_what_its_harness_said_of_it"
+runs = ["failure-reason-engine"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/contract.rs"
+find = '''
+            Some(Reading::Known(record)) if self.failed => record.failure.as_deref(),
+'''
+replace = '''
+            Some(Reading::Known(_)) if self.failed => None,
+'''
+
+[[plant]]
+name = "failure reason: a record that says nothing of why leaves the window's screen unasked"
+meant = "a_failed_turn_whose_record_says_nothing_says_what_its_window_shows_last"
+runs = ["failure-reason-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''
+            Some(pane) => self.look_at(&pane).await.after(&failed),
+'''
+replace = '''
+            Some(_) => failed,
+'''
+
+[[plant]]
+name = "failure reason: a task cancelled while its window is looked at is failed after"
+meant = "a_task_cancelled_while_its_window_is_looked_at_is_not_failed_after"
+runs = ["failure-reason-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''
+            if still && !self.forgotten(record) {
+'''
+replace = '''
+            if !self.forgotten(record) {
+'''
+
+[[plant]]
+name = "failure reason: the harness's words are quoted whole, a secret's name and all"
+meant = "harness_words_that_name_a_secret_are_not_quoted"
+runs = ["failure-reason-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown.rs"
+find = '''
+    if lines.iter().any(|line| names_a_secret(line)) {
+        return format!("{because}; what it said named a secret, so it is left out");
+    }
+'''
+replace = '''
+'''
+
+[[plant]]
+name = "failure reason: the harness's words are not held to a quote's bounds"
+meant = "the_harness_words_are_held_to_a_quotes_bounds"
+runs = ["failure-reason-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown.rs"
+find = '''
+        Some(quote) => format!("{because}{}", quote.after("; it said")),
+'''
+replace = '''
+        Some(_) => format!("{because}; it said: \"{words}\""),
+'''
+
+[[plant]]
+name = "failure reason: Claude's refused turn keeps none of the API's words"
+meant = "a_refused_turn_keeps_the_words_the_api_refused_it_in_and_the_next_turn_drops_them"
+runs = ["failure-reason-claude"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/replay.rs"
+find = '''
+            self.failure = Some(record.text.clone());
+'''
+replace = '''
+            self.failure = Some(String::new());
+'''
+
+[[plant]]
+name = "failure reason: Codex's failed turn keeps none of its error's words"
+meant = "a_failed_turn_keeps_the_words_of_its_error_and_the_next_turn_drops_them"
+runs = ["failure-reason-codex"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/record.rs"
+find = '''
+                        said: Self::error_words(error),
+'''
+replace = '''
+                        said: None,
+'''
+
+[[plant]]
+name = "failure reason: Codex's error written as text alone is no words of it"
+meant = "a_failed_turn_keeps_the_words_of_its_error_and_the_next_turn_drops_them"
+runs = ["failure-reason-codex"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/record.rs"
+find = '''
+            Some(Value::String(said)) => said,
+'''
+replace = '''
+            Some(Value::String(_)) => return None,
+'''
+
+[[plant]]
+name = "failure reason: Pi's failed step keeps none of its words"
+meant = "a_failed_step_keeps_pis_words_for_it_and_the_next_message_drops_them"
+runs = ["failure-reason-pi"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/record.rs"
+find = '''
+        record.failure = self.failure.clone().filter(|said| !said.trim().is_empty());
+'''
+replace = '''
+'''
+
+[[plant]]
+name = "failure reason: Pi's placeholder for no words is taken for its words"
+meant = "a_failed_step_keeps_pis_words_for_it_and_the_next_message_drops_them"
+runs = ["failure-reason-pi"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/record.rs"
+find = '''
+                let said = !matches!(field("errorMessage"), None | Some(Value::Null));
+                self.failure = said.then(|| failure.clone());
+'''
+replace = '''
+                let said = true;
+                self.failure = said.then(|| failure.clone());
+'''
+
+[[plant]]
+name = "failure reason: the next message keeps Pi's last failure's words"
+meant = "a_failed_step_keeps_pis_words_for_it_and_the_next_message_drops_them"
+runs = ["failure-reason-pi"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/pi/record.rs"
+find = '''
+                self.open_tools.clear();
+                self.failed = false;
+                self.failure = None;
+'''
+replace = '''
+                self.open_tools.clear();
+                self.failed = false;
+'''
+
+[[plant]]
+name = "failure reason: OpenCode's failed reply keeps none of its error's words"
+meant = "a_failed_reply_keeps_the_words_of_its_error"
+runs = ["failure-reason-opencode"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/opencode/record/answer.rs"
+find = '''
+            record.failure = Some(failure).filter(|said| !said.trim().is_empty());
+'''
+replace = '''
+'''
+
+[[plant]]
+name = "failure reason: Devin's turn that ended in an error keeps none of its words"
+meant = "a_turn_that_ended_in_an_error_keeps_the_words_its_end_said"
+runs = ["failure-reason-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/record/answer.rs"
+find = '''
+    record.failure = outcome
+        .filter(|_| failed)
+        .and_then(|outcome| outcome.error.clone());
+'''
+replace = '''
+'''
+
+[[plant]]
+name = "failure reason: Devin's cancelled turn is said to have failed for its words"
+meant = "a_turn_that_ended_in_an_error_keeps_the_words_its_end_said"
+runs = ["failure-reason-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/record/answer.rs"
+find = '''
+        .filter(|_| failed)
+'''
+replace = '''
+'''
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/record/wires.rs"
+find = '''
+                    .filter(|said| cause == Cause::Error && !said.trim().is_empty())
+'''
+replace = '''
+                    .filter(|said| !said.trim().is_empty())
+'''

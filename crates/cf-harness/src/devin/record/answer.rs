@@ -70,6 +70,9 @@ pub(super) fn answer(chain: &Chain, wires: &Wires) -> Record {
         )
     });
     record.failed = failed;
+    record.failure = outcome
+        .filter(|_| failed)
+        .and_then(|outcome| outcome.error.clone());
     record.in_flight = working || (last_open && !cancelled && !failed);
     record.settlement = if working {
         Settlement::InFlight

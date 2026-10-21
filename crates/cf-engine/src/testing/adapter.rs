@@ -60,6 +60,8 @@ pub struct FakeAgent {
     /// The harness holds the delivery in a turn it is in still (`Window::held`).
     pub held: bool,
     pub failed: bool,
+    /// Why the turn failed, in the harness's words, where its record says.
+    pub failure: Option<String>,
     /// The conversation the window shows, when the human switched it.
     pub shows: Option<String>,
     /// Each conversation's record, once the window switched away from it.
@@ -491,6 +493,7 @@ impl FakeAdapter {
                 agent.agents_pending = false;
                 // A message that arrives starts a turn: the one before it ended as it did.
                 agent.failed = false;
+                agent.failure = None;
                 agent.took_back = false;
             }
             Admission::Admitted {
@@ -568,6 +571,7 @@ impl Asked {
             took: false,
             held: false,
             failed: false,
+            failure: None,
             shows: None,
             records: HashMap::new(),
             unnamed: None,

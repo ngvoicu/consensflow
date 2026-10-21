@@ -285,3 +285,37 @@ fn a_time_of_a_column_the_store_has_not_is_left_out_as_json_leaves_it() {
         r#"{"items":[{"id":"m","role":"assistant","text":"","complete":true,"at":9},{"id":"p","role":"tool","text":"ok","complete":true}],"inFlight":false,"asking":false,"failed":false,"quota":null,"settlement":{"state":"settled"}}"#
     );
 }
+
+#[test]
+fn a_failed_reply_keeps_the_words_of_its_error() {
+    let failure_of = |reply: &Value| {
+        let staged = Staged::new();
+        staged.conversation(reply);
+        match &*look(&mut staged.reader()) {
+            Reading::Known(record) => (record.failed, record.failure.clone()),
+            Reading::Unknown(reason) => panic!("unknown: {reason}"),
+        }
+    };
+    let said = failure_of(&json!({
+        "role": "assistant",
+        "time": { "created": 3, "completed": 9 },
+        "error": { "name": "ProviderModelNotFoundError", "data": { "message": "Model not found: nonesuch/gpt-0" } },
+    }));
+    assert_eq!(
+        said,
+        (true, Some("Model not found: nonesuch/gpt-0".to_owned()))
+    );
+    // No message: its error, as the text JSON makes of it.
+    let named = failure_of(&json!({
+        "role": "assistant",
+        "time": { "created": 3, "completed": 9 },
+        "error": { "name": "UnknownError" },
+    }));
+    assert_eq!(named, (true, Some(r#"{"name":"UnknownError"}"#.to_owned())));
+    let fine = failure_of(&json!({
+        "role": "assistant",
+        "time": { "created": 3, "completed": 9 },
+        "finish": "stop",
+    }));
+    assert_eq!(fine, (false, None));
+}

@@ -78,6 +78,7 @@ fn record_of(fake: &FakeAdapter, session: &str) -> Reading {
             in_flight: !settled,
             asking: false,
             failed: false,
+            failure: None,
             quota: None,
             settlement: if settled {
                 Settlement::Settled

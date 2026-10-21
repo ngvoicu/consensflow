@@ -51,6 +51,12 @@ pub struct Record {
     /// Its own question dialog is open: the window waits for the human's answer.
     pub asking: bool,
     pub failed: bool,
+    /// Why the turn failed, in the harness's own words where its record has
+    /// them (an API's error, a provider's message): the reason the engine's
+    /// note gives. None where the record says no more than that it failed. No
+    /// reading Node wrote has it.
+    #[serde(skip)]
+    pub failure: Option<String>,
     pub quota: Option<Arc<Quota>>,
     pub settlement: Settlement,
     /// The turn is settled and left background agents or workflows running,
@@ -70,6 +76,7 @@ impl Record {
             in_flight: false,
             asking: false,
             failed: false,
+            failure: None,
             quota: None,
             settlement: Settlement::Unknown,
             agents_pending: false,

@@ -75,7 +75,7 @@ impl Transcript {
         self.turn_open = true;
         self.terminal = None;
         if !record.refused {
-            self.failed = false;
+            self.failure = None;
         }
         // The latest assistant record has the last word on quota.
         self.quota = None;
@@ -105,7 +105,7 @@ impl Transcript {
             self.hooks.clear();
             self.candidate = None;
             self.turn_open = false;
-            self.failed = true;
+            self.failure = Some(record.text.clone());
             if record.rate_limited {
                 let at_ms = date_parse(record.at.as_ref())?;
                 let quota = exhausted_quota(&record.text, at_ms, &self.local)?;
@@ -198,7 +198,7 @@ impl Transcript {
         self.open_tools.clear();
         self.hooks.clear();
         self.active_assistant = None;
-        self.failed = false;
+        self.failure = None;
         self.turn_open = true;
         self.candidate = None;
         self.terminal = None;

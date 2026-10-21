@@ -117,3 +117,27 @@ fn the_refusal_is_the_same_quota_look_after_look() {
         second.quota.as_ref().unwrap()
     ));
 }
+
+#[test]
+fn a_failed_turn_keeps_the_words_of_its_error_and_the_next_turn_drops_them() {
+    let mut end = failed("t1", "server_overloaded", AT);
+    end["payload"]["error"]["message"] = json!("The model is busy, try another.");
+    let read_once = read(&[started(json!("t1")), end.clone()]).unwrap();
+    assert!(read_once.failed);
+    assert_eq!(
+        read_once.failure.as_deref(),
+        Some("The model is busy, try another.")
+    );
+
+    // An error Codex wrote as text alone is its words too.
+    end["payload"]["error"] = json!("stream disconnected before completion");
+    let plain = read(&[started(json!("t1")), end.clone()]).unwrap();
+    assert_eq!(
+        plain.failure.as_deref(),
+        Some("stream disconnected before completion")
+    );
+
+    let after = read(&[started(json!("t1")), end, started(json!("t2"))]).unwrap();
+    assert!(!after.failed);
+    assert_eq!(after.failure, None);
+}

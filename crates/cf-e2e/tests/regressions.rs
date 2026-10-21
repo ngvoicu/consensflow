@@ -36,6 +36,8 @@ mod a_command_that_goes_on_reporting_held_a_devin_workers_result;
 mod a_command_that_never_exits_held_a_workers_result;
 #[path = "regressions/a_compact_typed_into_an_idle_chief_held_a_workers_result.rs"]
 mod a_compact_typed_into_an_idle_chief_held_a_workers_result;
+#[path = "regressions/a_failure_said_no_reason.rs"]
+mod a_failure_said_no_reason;
 #[path = "regressions/a_pause_a_hung_worker_ignored_stranded_its_task.rs"]
 mod a_pause_a_hung_worker_ignored_stranded_its_task;
 #[path = "regressions/a_quota_wait_ended_failed.rs"]

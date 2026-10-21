@@ -219,3 +219,29 @@ fn a_refusal_is_the_latest_assistant_record_s_to_say_and_a_prompt_does_not_take_
         more
     );
 }
+
+/// What a failed turn's record says of why, after one look at `records`.
+fn failure_of(records: &[Value]) -> Option<String> {
+    let mut stage = Stage::new();
+    stage.write(records);
+    match &*stage.reader.look(&Options::default(), 0) {
+        Reading::Known(record) => record.failure.clone(),
+        Reading::Unknown(reason) => panic!("unknown: {reason}"),
+    }
+}
+
+#[test]
+fn a_refused_turn_keeps_the_words_the_api_refused_it_in_and_the_next_turn_drops_them() {
+    // Not for quota: an error of the API's own, as Claude Code writes it.
+    let refusal = with(r#"{"apiErrorStatus":500,"error":"overloaded"}"#);
+    assert_eq!(
+        failure_of(&[hello(), refusal.clone()]).as_deref(),
+        Some(LIMIT)
+    );
+    assert_eq!(
+        failure_of(&[hello(), with(r#"{"apiErrorStatus":429}"#)]).as_deref(),
+        Some(LIMIT)
+    );
+    let next = user("u2", json!("a1"), json!("Try again"));
+    assert_eq!(failure_of(&[hello(), refusal, next]), None);
+}

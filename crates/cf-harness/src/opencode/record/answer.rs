@@ -89,6 +89,7 @@ pub(super) fn answer(read: &Read, local: &TimeZone, keys: &mut Keys) -> Result<R
             Some("user") => {
                 open_tools.clear();
                 record.failed = false;
+                record.failure = None;
                 if !js::trim(&text).is_empty() {
                     items.push(Placed {
                         item: item(row, Role::User, text, true, at)?,
@@ -103,6 +104,7 @@ pub(super) fn answer(read: &Read, local: &TimeZone, keys: &mut Keys) -> Result<R
             _ => continue,
         }
         record.failed = false;
+        record.failure = None;
         for (part_row, part) in parts {
             if part.get("type").and_then(Value::as_str) != Some("tool") {
                 continue;
@@ -160,6 +162,7 @@ pub(super) fn answer(read: &Read, local: &TimeZone, keys: &mut Keys) -> Result<R
                 let at_ms = js::to_number(completed_at)?;
                 record.quota = Some(Arc::new(exhausted_quota(&failure, at_ms, local)?));
             }
+            record.failure = Some(failure).filter(|said| !said.trim().is_empty());
         }
         closed = closes_turn;
         turn_open = !closes_turn;

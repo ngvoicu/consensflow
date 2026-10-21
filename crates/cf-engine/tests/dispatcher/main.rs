@@ -43,6 +43,7 @@ mod decided_results;
 mod deleted_sessions;
 mod deliveries;
 mod exit_unsettled;
+mod failure_reasons;
 mod fixtures;
 mod follow_ups;
 mod interrupts;

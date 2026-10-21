@@ -64,6 +64,7 @@ fn look(items: Vec<Item>) -> Observed {
             in_flight: false,
             asking: false,
             failed: false,
+            failure: None,
             quota: None,
             settlement: Settlement::Unknown,
             agents_pending: false,
