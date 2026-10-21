@@ -143,7 +143,14 @@ pub(crate) fn refused_for_quota(text: &str) -> bool {
     REFUSED
         .captures(text)
         .is_some_and(|found| quota_status(js::number(&found[1])))
-        || SPENT.is_match(text)
+        || spent_extra_usage(text)
+}
+
+/// Whether a provider's words say Anthropic's extra usage is spent, which it
+/// answers with a 400 (Pi's sessions on this Mac, 2026-10): a refusal for quota
+/// whatever the status, in any harness's words.
+pub(crate) fn spent_extra_usage(text: &str) -> bool {
+    SPENT.is_match(text)
 }
 
 /// A refused request: exhausted, with the reset the text names when it names

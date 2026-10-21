@@ -159,3 +159,112 @@ fn a_message_its_harness_refused_before_taking_it_goes_again_without_counting_an
         "quota is no failure of the window's: its attempt is given back"
     );
 }
+
+#[test]
+fn a_refusal_of_the_words_that_resumed_the_task_holds_it_again_without_telling_the_requester_again_and_tells_the_human_once(
+) {
+    // A reset nobody named is an hour away, and a limit that does not reset by
+    // itself (a plan without the model, a spent balance) is refused again at
+    // each: the chief heard "waits" and "goes on" every hour (the review of
+    // the quota wait, T-88).
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    tiers.open();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let session = tiers.assignee(1);
+    context
+        .adapter
+        .refuse(&session, exhausted(Some(&now(&context)), None));
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(tiers.task(1).task.state, "paused");
+    let waits = |notes: &[String]| notes.iter().filter(|n| n.starts_with("T-1 waits")).count();
+    let goes_on = |notes: &[String]| {
+        notes
+            .iter()
+            .filter(|n| n.starts_with("T-1 goes on"))
+            .count()
+    };
+    let may_need = |notes: &[String]| notes.iter().filter(|n| n.contains("may need you")).count();
+    for round in 0..3 {
+        context.advance(61 * 60_000);
+        for _ in 0..3 {
+            context.pass().unwrap();
+        }
+        assert_eq!(tiers.task(1).task.state, "working", "round {round}");
+        let inbox = context
+            .ledger
+            .borrow()
+            .inbox(tiers.id(&session), 100)
+            .unwrap();
+        assert_match(&inbox[0].body, RESUMED);
+        // Refused again, the moment it goes on.
+        context.advance(1_000);
+        context
+            .adapter
+            .refuse(&session, exhausted(Some(&now(&context)), None));
+        for _ in 0..3 {
+            context.pass().unwrap();
+        }
+        let held = tiers.task(1).task;
+        assert_eq!(
+            (held.state.as_str(), held.assignee.as_deref()),
+            ("paused", Some(session.as_str())),
+            "round {round}"
+        );
+        let chief = tiers.notes("chief");
+        assert_eq!(
+            (waits(&chief), goes_on(&chief)),
+            (1, 1),
+            "round {round}: {chief:?}"
+        );
+        let human = tiers.notes("human");
+        assert_eq!(may_need(&human), 1, "round {round}: {human:?}");
+    }
+    let human = tiers.notes("human");
+    assert_match(
+        human.iter().find(|n| n.contains("may need you")).unwrap(),
+        &format!(
+            r"^T-1 was refused for quota again as soon as it went on: @{session}'s account may need you \(a plan that includes its model, a balance, or another account\)\. It waits, and ConsensFlow tries it again at each reset; say @zeus is back once its account has quota\.$"
+        ),
+    );
+}
+
+#[test]
+fn holds_the_work_of_a_second_window_whose_refusal_is_dated_before_its_member_was_marked_out() {
+    // The second refusal, dated before the daemon marked the member out, read
+    // as history: its task stayed working while its member was out (T-88).
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    tiers.open_body("One");
+    tiers.open_body("Two");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let (one, two) = (tiers.assignee(1), tiers.assignee(2));
+    // Both were refused five seconds ago; the second's record shows it a pass
+    // after the first's took the member out.
+    let resets_at = after(&context, 48 * 3_600_000);
+    let refused_at = after(&context, -5_000);
+    context
+        .adapter
+        .refuse(&one, exhausted(Some(&refused_at), Some(&resets_at)));
+    context.pass().unwrap();
+    assert_eq!(tiers.task(1).task.state, "paused");
+    context
+        .adapter
+        .refuse(&two, exhausted(Some(&refused_at), Some(&resets_at)));
+    context.pass().unwrap();
+    context.pass().unwrap();
+    for number in [1, 2] {
+        let held = tiers.task(number).task;
+        assert_eq!(
+            (held.state.as_str(), held.held_until.as_deref()),
+            ("paused", Some(resets_at.as_str())),
+            "T-{number}"
+        );
+    }
+    assert_eq!(tiers.task(1).task.assignee.as_deref(), Some(one.as_str()));
+    assert_eq!(tiers.task(2).task.assignee.as_deref(), Some(two.as_str()));
+}

@@ -124,26 +124,26 @@ runs = ["waiting-notes-engine"]
 [[plant.edit]]
 file = "crates/cf-engine/src/scheduler.rs"
 find = '''
-            self.seams.ledger.borrow_mut().note_hold(
-                project.id,
-                &task.requester,
-                task.number,
-                &participant.handle,
-                until,
-            )?;'''
+                self.seams.ledger.borrow_mut().note_hold(
+                    project.id,
+                    &task.requester,
+                    task.number,
+                    &participant.handle,
+                    until,
+                )?;'''
 replace = '''
-            self.seams.ledger.borrow_mut().note(
-                project.id,
-                &NewNote {
-                    from: None,
-                    to: task.requester.clone(),
-                    task: Some(task.number),
-                    body: format!(
-                        "T-{} waits with @{}: out of quota until {until}; it goes on by itself then.",
-                        task.number, participant.handle
-                    ),
-                },
-            )?;'''
+                self.seams.ledger.borrow_mut().note(
+                    project.id,
+                    &NewNote {
+                        from: None,
+                        to: task.requester.clone(),
+                        task: Some(task.number),
+                        body: format!(
+                            "T-{} waits with @{}: out of quota until {until}; it goes on by itself then.",
+                            task.number, participant.handle
+                        ),
+                    },
+                )?;'''
 
 [[plant]]
 name = "waiting notes: the daemon resumes a held task and tells its requester nothing"

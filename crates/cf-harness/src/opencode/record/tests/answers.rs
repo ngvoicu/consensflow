@@ -285,3 +285,29 @@ fn a_time_of_a_column_the_store_has_not_is_left_out_as_json_leaves_it() {
         r#"{"items":[{"id":"m","role":"assistant","text":"","complete":true,"at":9},{"id":"p","role":"tool","text":"ok","complete":true}],"inFlight":false,"asking":false,"failed":false,"quota":null,"settlement":{"state":"settled"}}"#
     );
 }
+
+#[test]
+fn anthropics_400_for_spent_extra_usage_is_a_refusal_for_quota_that_names_no_reset() {
+    // Anthropic's spent extra usage is a 400 that says so: a refusal for quota
+    // that names no reset (the words of Pi's sessions on this Mac; T-88).
+    let staged = Staged::new();
+    staged.conversation(&json!({
+        "role": "assistant",
+        "time": { "created": 3, "completed": 1_790_000_000_000_i64 },
+        "finish": "stop",
+        "error": {
+            "name": "APIError",
+            "data": {
+                "message": "You're out of extra usage. Add more at claude.ai/settings/usage and keep going.",
+                "statusCode": 400,
+            },
+        },
+    }));
+    assert_eq!(
+        read_once(&staged),
+        format!(
+            r#"{{"items":{},"inFlight":false,"asking":false,"failed":true,"quota":{{"state":"exhausted","at":"2026-09-21T14:13:20.000Z","resetsAt":null}},"settlement":"settled"}}"#,
+            conversation_items(false, 1_790_000_000_000)
+        )
+    );
+}

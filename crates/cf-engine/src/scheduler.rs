@@ -25,6 +25,10 @@ use crate::dispatcher::Dispatcher;
 use crate::record::Record;
 use crate::seams::{EngineError, SavedAgent};
 
+/// What the note to the human says of an account refused again as soon as its
+/// task went on.
+const MAY_NEED_YOU: &str = "may need you";
+
 /// How long a quota lasts when its harness names no reset.
 const UNKNOWN_RESET_MS: i64 = 60 * 60_000;
 
@@ -236,6 +240,25 @@ impl Dispatcher {
         }
     }
 
+    /// Whether a window of a member already out shows a refusal of its own it has
+    /// not acted on, whose reset has not passed: one its harness dated before the
+    /// daemon marked the member out, which `refused_here` takes for history (two
+    /// windows of a member refused in one pass; the review of the quota wait, T-88).
+    pub(crate) fn refused_while_out(&self, record: &Record) -> bool {
+        let (reported, handled) = {
+            let quota = record.quota.borrow();
+            (quota.reported.clone(), quota.handled.clone())
+        };
+        let Some(quota) = reported.filter(|quota| quota.level() == Level::Exhausted) else {
+            return false;
+        };
+        let passed = quota
+            .resets_at()
+            .and_then(time::parse)
+            .is_some_and(|reset| reset <= self.now());
+        !passed && !same_refusal(handled.as_ref(), &quota)
+    }
+
     /// Marks the refusal a window shows as acted on, so the window acts on it once.
     pub(crate) fn handled(&self, record: &Record) {
         let mut quota = record.quota.borrow_mut();
@@ -307,31 +330,103 @@ impl Dispatcher {
     /// its harness refused it: it waits with its window, which has its work,
     /// and goes on there by itself, whoever else of its tier is free; only the
     /// human or the chief gives it to another (dip-agentos, 2026-10-19). The
-    /// chief keeps its own tasks.
+    /// chief keeps its own tasks. Its requester is told it waits (`tell`),
+    /// unless the refusal answered the words that resumed it: that is the same
+    /// wait going on, which a reset nobody named, or a limit that does not reset
+    /// by itself, would tell again at every hour; the human is told once, then,
+    /// that the account may need them (the review of the quota wait, T-88).
     pub(crate) fn hold_work(
         &self,
         project: &ProjectView,
         participant: &ParticipantView,
+        owner: &ParticipantView,
         until: &str,
+        tell: bool,
     ) -> Result<(), EngineError> {
         if participant.role == "chief" {
             return Ok(());
         }
         for task in self.active_work(project, participant)? {
+            let again = self.refused_its_resume(participant, &task)?;
             self.seams.ledger.borrow_mut().hold_task(
                 project.id,
                 task.number,
                 until,
                 "out of quota",
             )?;
-            self.seams.ledger.borrow_mut().note_hold(
-                project.id,
-                &task.requester,
-                task.number,
-                &participant.handle,
-                until,
-            )?;
+            if !tell {
+                continue;
+            }
+            if again {
+                self.tell_the_human_it_may_need_them(project, participant, owner, &task)?;
+            } else {
+                self.seams.ledger.borrow_mut().note_hold(
+                    project.id,
+                    &task.requester,
+                    task.number,
+                    &participant.handle,
+                    until,
+                )?;
+            }
         }
+        Ok(())
+    }
+
+    /// Whether the last words a window was given about `task` are the
+    /// daemon's own that resumed it.
+    fn refused_its_resume(
+        &self,
+        participant: &ParticipantView,
+        task: &TaskCard,
+    ) -> Result<bool, EngineError> {
+        let last = self
+            .seams
+            .ledger
+            .borrow()
+            .last_pasted(participant.id, task.id)?;
+        Ok(last.is_some_and(|message| {
+            message.sender.is_none() && message.body == format!("Resumed: {RESUME_WORDS}")
+        }))
+    }
+
+    /// The human is told, once for a task, that the account of the member its
+    /// window is refused on again as soon as it goes on may need them.
+    fn tell_the_human_it_may_need_them(
+        &self,
+        project: &ProjectView,
+        participant: &ParticipantView,
+        owner: &ParticipantView,
+        task: &TaskCard,
+    ) -> Result<(), EngineError> {
+        let Some(human) = project.participants.iter().find(|p| p.role == "human") else {
+            return Ok(());
+        };
+        let told = self
+            .seams
+            .ledger
+            .borrow()
+            .inbox(human.id, i64::MAX)?
+            .iter()
+            .any(|message| {
+                message.kind == "note"
+                    && message.task_number == Some(task.number)
+                    && message.body.contains(MAY_NEED_YOU)
+            });
+        if told {
+            return Ok(());
+        }
+        self.seams.ledger.borrow_mut().note(
+            project.id,
+            &NewNote {
+                from: None,
+                to: human.handle.clone(),
+                task: Some(task.number),
+                body: format!(
+                    "T-{} was refused for quota again as soon as it went on: @{}'s account {MAY_NEED_YOU} (a plan that includes its model, a balance, or another account). It waits, and ConsensFlow tries it again at each reset; say @{} is back once its account has quota.",
+                    task.number, participant.handle, owner.handle
+                ),
+            },
+        )?;
         Ok(())
     }
 

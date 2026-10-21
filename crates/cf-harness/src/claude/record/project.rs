@@ -20,6 +20,7 @@ use serde_json::{Map, Value};
 use super::patterns::OUTPUT;
 use super::text::{claude_text, claude_tool_text, is_interrupt};
 use super::{field, kind};
+use crate::shared::quota::spent_extra_usage;
 
 /// What Claude Code says, in a message of its own, as it closes the turn it
 /// found cut when it resumed the conversation.
@@ -85,7 +86,8 @@ pub(super) struct Assistant {
     pub(super) closes_a_cut_turn: bool,
     /// The API refused the request (`isApiErrorMessage`).
     pub(super) refused: bool,
-    /// A refusal for quota: a status of 429, or the error `rate_limit`.
+    /// A refusal for quota: a status of 429, the error `rate_limit`, or words
+    /// that say the account's extra usage is spent.
     pub(super) rate_limited: bool,
 }
 
@@ -251,6 +253,8 @@ fn assistant(record: &Value) -> Projected {
     let status = record.get("apiErrorStatus").and_then(Value::as_f64);
     let text = claude_text(content);
     let refused = record.get("isApiErrorMessage") == Some(&Value::Bool(true));
+    // Anthropic's spent extra usage is a 400 (`invalid_request`), its words the refusal.
+    let spent = spent_extra_usage(&text);
     // Claude Code 2.1.296 to 2.1.302 write it with the next message (T-442's
     // record; `quit-before-a-word-resumed.jsonl`). A refusal for quota may say
     // the same words, and is the API's.
@@ -270,7 +274,8 @@ fn assistant(record: &Value) -> Projected {
         closes_a_cut_turn,
         refused,
         rate_limited: status == Some(429.0)
-            || record.get("error").and_then(Value::as_str) == Some("rate_limit"),
+            || record.get("error").and_then(Value::as_str) == Some("rate_limit")
+            || spent,
     }))
 }
 

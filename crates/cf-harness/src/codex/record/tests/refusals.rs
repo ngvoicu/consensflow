@@ -117,3 +117,47 @@ fn the_refusal_is_the_same_quota_look_after_look() {
         second.quota.as_ref().unwrap()
     ));
 }
+
+#[test]
+fn a_turn_ended_for_a_rate_limit_codex_gave_up_on_is_a_refusal_for_quota_too() {
+    // The chief's rule (T-95): wait on any limit, as Claude's reader does with `rate_limit`.
+    let read = read(&[
+        started(json!("t1")),
+        failed("t1", "rate_limit_exceeded", AT),
+    ])
+    .unwrap();
+    assert!(read.failed);
+    assert_eq!(
+        read.quota.as_deref(),
+        Some(&Quota::Exhausted {
+            at: Some(AT.to_owned()),
+            resets_at: None,
+        })
+    );
+}
+
+#[test]
+fn a_reset_the_limits_name_after_the_refusal_is_its_reset() {
+    // Codex may report its rate limits after it ends the turn its limit cut.
+    let later = read(&[
+        started(json!("t1")),
+        failed("t1", "usage_limit_exceeded", AT),
+        limits(100.0, RESETS),
+    ])
+    .unwrap();
+    assert_eq!(
+        later.quota.as_deref(),
+        Some(&Quota::Exhausted {
+            at: Some(AT.to_owned()),
+            resets_at: Some(cf_base::time::iso(RESETS * 1000)),
+        })
+    );
+    // One that names a reset before the refusal leaves it with none.
+    let earlier = read(&[
+        started(json!("t1")),
+        failed("t1", "usage_limit_exceeded", AT),
+        limits(100.0, 1_792_300_000),
+    ])
+    .unwrap();
+    assert_eq!(earlier.quota.as_deref().and_then(Quota::resets_at), None);
+}

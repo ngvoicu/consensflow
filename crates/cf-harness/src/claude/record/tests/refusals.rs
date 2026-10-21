@@ -219,3 +219,49 @@ fn a_refusal_is_the_latest_assistant_record_s_to_say_and_a_prompt_does_not_take_
         more
     );
 }
+
+#[test]
+fn anthropics_400_for_spent_extra_usage_is_a_refusal_for_quota_that_names_no_reset() {
+    // Claude Code 2.1.306 writes Anthropic's 400 as an API error that is
+    // `invalid_request`; the words are the ones Pi's sessions on this Mac hold
+    // (the review of the quota wait, T-88).
+    let spent = "You're out of extra usage. Add more at claude.ai/settings/usage and keep going.";
+    let record = having(
+        assistant(
+            "a1",
+            "u1",
+            json!("m1"),
+            json!([text(json!(spent))]),
+            Value::Null,
+        ),
+        json!({
+            "isApiErrorMessage": true,
+            "timestamp": AT,
+            "apiErrorStatus": 400,
+            "error": "invalid_request",
+        }),
+    );
+    assert_eq!(
+        once(&[hello(), record]),
+        format!(
+            r#"{{"items":[["u1","user","Hello",true,0],["m1","assistant","{spent}",false,"{AT}"]],"inFlight":false,"asking":false,"failed":true,"quota":{{"state":"exhausted","at":"{AT}","resetsAt":null}},"settlement":"settled"}}"#
+        )
+    );
+    // Another 400 is no refusal for quota.
+    let other = having(
+        assistant(
+            "a1",
+            "u1",
+            json!("m1"),
+            json!([text(json!("Prompt is too long"))]),
+            Value::Null,
+        ),
+        json!({
+            "isApiErrorMessage": true,
+            "timestamp": AT,
+            "apiErrorStatus": 400,
+            "error": "invalid_request",
+        }),
+    );
+    assert!(once(&[hello(), other]).contains(r#""failed":true,"quota":null"#));
+}

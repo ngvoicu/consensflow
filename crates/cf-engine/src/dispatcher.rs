@@ -1118,6 +1118,13 @@ impl Dispatcher {
             record,
             Activity::because(ActivityState::Out, format!("out of quota until {until}")),
         )?;
+        // A refusal of its own, dated before its member was marked out, holds the
+        // window's work as the first did, with no note of its own.
+        if participant.role != "chief" && self.refused_while_out(record) {
+            self.handled(record);
+            self.hold_work(project, participant, owner, &until, false)?;
+            self.changed();
+        }
         // The time a launch waits while its member is out is no slowness of its
         // window: the role it was to say first is told when the quota is back.
         if let Some(prelude) = record.delivery.borrow_mut().prelude.as_mut() {
@@ -1211,7 +1218,7 @@ impl Dispatcher {
         if let Some(delivering) = delivering {
             self.give_back(delivering, "the harness ran out of quota")?;
         }
-        self.hold_work(project, participant, &until)?;
+        self.hold_work(project, participant, owner, &until, true)?;
         if participant.role != "chief" {
             self.close_if_free(record).await?;
         }
