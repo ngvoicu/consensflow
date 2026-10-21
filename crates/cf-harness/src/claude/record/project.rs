@@ -155,11 +155,11 @@ pub(super) struct User {
 /// A job a tool's result says it started: a command run in the background
 /// (`backgroundTaskId`), or a monitor (`taskId`), with the time it runs for, in
 /// milliseconds, where its start says one (`timeoutMs`) and does not say it is
-/// `persistent`, and the call it answers, whose record says when the monitor was armed.
+/// `persistent`: counted from the start's own record (`jobs`).
 #[derive(Debug, PartialEq)]
 pub(super) struct Job {
     pub(super) id: Arc<str>,
-    pub(super) timeout: Option<(i64, Option<Value>)>,
+    pub(super) timeout: Option<i64>,
 }
 
 /// The record `record` of the session `session`, as replay reads it.
@@ -363,7 +363,7 @@ fn user(record: &Value, session: &str) -> Projected {
         notification: is_notification(record),
         transcript_only: record.get("queueTranscriptOnly") == Some(&Value::Bool(true)),
         job: of_main_conversation(record, session)
-            .then(|| job(record, content))
+            .then(|| job(record))
             .flatten(),
         stopped: of_main_conversation(record, session)
             .then(|| stopped(record, content))
@@ -383,7 +383,7 @@ fn is_notification(record: &Value) -> bool {
 }
 
 /// The job a tool's result says it started (see [`Job`]).
-fn job(record: &Value, content: Option<&Value>) -> Option<Job> {
+fn job(record: &Value) -> Option<Job> {
     let result = record.get("toolUseResult");
     if let Some(id) = text_id(field(result, "backgroundTaskId")) {
         return Some(Job { id, timeout: None });
@@ -393,13 +393,9 @@ fn job(record: &Value, content: Option<&Value>) -> Option<Job> {
     let id = text_id(field(result, "taskId"))?;
     let timeout = field(result, "timeoutMs").and_then(Value::as_i64)?;
     let persistent = field(result, "persistent") == Some(&Value::Bool(true));
-    let call = blocks(content)
-        .iter()
-        .find(|block| kind(block) == Some("tool_result"))
-        .and_then(|block| said(block.get("tool_use_id")));
     Some(Job {
         id,
-        timeout: (!persistent && timeout > 0).then_some((timeout, call)),
+        timeout: (!persistent && timeout > 0).then_some(timeout),
     })
 }
 

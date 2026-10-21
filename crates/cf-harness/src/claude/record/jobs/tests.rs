@@ -275,6 +275,22 @@ fn a_monitors_ends_that_no_time_proves_end_nothing_for_a_line_of_its_command_cou
 }
 
 #[test]
+fn a_command_monitor_the_human_stopped_from_claude_codes_tasks_is_over_by_its_status() {
+    // 2.1.306 (`Tmr` of its bundle, behind `tengu_rosy_donut`, on by default): a command's
+    // monitor stopped from its tasks is said `killed`, with the words the human stopped it.
+    let mut jobs = armed();
+    let stopped = Written {
+        task_id: "byuz6ka89",
+        tool_use_id: "toolu_01E4oTDfMmrh2SY1ASkaLxoa",
+        status: "killed",
+        summary: "Task \"tick lines\" was stopped by the user",
+        ..Written::default()
+    };
+    jobs.ended_by(&stopped.text(), Some(ARMED + 30_000));
+    assert_eq!(jobs.running(), 0);
+}
+
+#[test]
 fn a_monitors_own_notice_of_its_expiry_ends_it_at_its_time_and_the_same_words_before_it_end_nothing(
 ) {
     let expired = |delivered: &str| {
@@ -292,15 +308,19 @@ fn a_monitors_own_notice_of_its_expiry_ends_it_at_its_time_and_the_same_words_be
     jobs.ended_by(&expired("3 events"), Some(ARMED + TWO_MINUTES - 500));
     jobs.ended_by(&expired("3 events"), Some(ARMED + TWO_MINUTES - 1));
     assert_eq!(jobs.running(), 1);
-    // A line of the command's after its time: 2.1.306 writes a word after a command's
-    // event where push notifications are on, and none after its own notices.
-    let with_word = Written {
-        trailing:
-            "\nIf this event is something the user would act on now, send a PushNotification.",
-        ..Written::default()
-    };
-    let told = format!("{}{}", expired("3 events"), with_word.trailing);
-    jobs.ended_by(&told, Some(ARMED + TWO_MINUTES + 5));
+    // A line of the command's after its time, as 2.1.306 writes a command's output where
+    // push notifications are on: a line after the event, before the notification closes,
+    // which it writes after none of its own notices (Calliope on 3968dcfb).
+    let pushed = Written::pushed(
+        "byuz6ka89",
+        "tick lines",
+        "[Monitor expired after 2m with 3 events delivered. Re-arm it if you still need the watch.]",
+    );
+    assert!(
+        pushed.ends_with("delivered. Re-arm it if you still need the watch.]</event>\nIf this event is something the user would act on now, send a PushNotification. Routine or benign output doesn't need one.\n</task-notification>"),
+        "{pushed}"
+    );
+    jobs.ended_by(&pushed, Some(ARMED + TWO_MINUTES + 5));
     assert_eq!(jobs.running(), 1);
     // Claude Code's own, at the time the start said, in its other words too.
     jobs.ended_by(&expired("3 events"), Some(ARMED + TWO_MINUTES));

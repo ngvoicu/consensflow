@@ -63,7 +63,7 @@ mod replay;
 mod tests;
 mod text;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
@@ -145,9 +145,6 @@ struct Transcript {
     /// The TaskStop calls made in the main conversation, by the id of the block that
     /// made each: the result of one says the job it stopped.
     task_stops: HashSet<Key>,
-    /// When each call of the main conversation was made, by the id of its block: a
-    /// monitor's time counts from the call that armed it (`jobs`).
-    calls_at: HashMap<Key, i64>,
     queues: Queues,
     /// The jobs started in the background that Claude Code has said no end of.
     jobs: Jobs,
@@ -225,7 +222,6 @@ impl Transcript {
             items: Items::default(),
             open_tools: HashSet::new(),
             task_stops: HashSet::new(),
-            calls_at: HashMap::new(),
             queues: Queues::default(),
             jobs: Jobs::default(),
             hooks: HashSet::new(),

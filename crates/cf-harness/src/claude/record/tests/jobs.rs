@@ -1000,16 +1000,34 @@ fn at_count(records: &[Value], count: usize) -> usize {
 }
 
 #[test]
-fn a_real_monitors_time_counts_from_the_call_that_armed_it_and_its_notice_never_ends_it_early() {
-    // The live run: the Monitor call's record at 23:02:30.287, its start's at 30.317, a
-    // timeout of 40 s, and Claude Code's notice of expiry queued at 23:03:10.317. The
-    // monitor began between the call and its start's record, so its time is out no
-    // earlier than 40 s after the call: a notice from then on can be Claude Code's own,
-    // and one before it cannot (Astraeus on 0eec91d2: a second's tolerance was room for a
-    // line of the command's).
-    assert_eq!(expired_at("2026-10-20T23:03:10.287Z"), 0);
-    assert_eq!(expired_at("2026-10-20T23:03:10.286Z"), 1);
-    assert_eq!(expired_at("2026-10-20T23:03:09.787Z"), 1);
+fn a_real_monitors_time_counts_from_its_starts_record_and_a_line_before_it_ends_nothing() {
+    // The live run of 2026-10-21: the Monitor call's record at 23:02:30.287, its start's
+    // record at 30.317, a time of 40 s, and Claude Code's notice of expiry queued at
+    // 23:03:10.317. 2.1.306 arms the monitor's timer before it writes its start's record
+    // (`jobs`), so a notice from 40 s after that record on comes once the timer has fired,
+    // and one before it may be a line of the command's: between the call's time and the
+    // start's (Astraeus on 3968dcfb, where a slow start widens it), a line saying the
+    // monitor expired ends nothing.
+    assert_eq!(
+        expired_at("2026-10-20T23:03:10.317Z"),
+        0,
+        "the real notice, at its time"
+    );
+    assert_eq!(
+        expired_at("2026-10-20T23:03:10.316Z"),
+        1,
+        "a millisecond before"
+    );
+    assert_eq!(
+        expired_at("2026-10-20T23:03:10.300Z"),
+        1,
+        "inside the call's 30 ms"
+    );
+    assert_eq!(
+        expired_at("2026-10-20T23:03:10.287Z"),
+        1,
+        "at the call's time"
+    );
 }
 
 #[test]

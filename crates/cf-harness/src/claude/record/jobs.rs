@@ -22,13 +22,23 @@
 //! - the result of a TaskStop call that names the job it stopped
 //!   (`toolUseResult.task_id`): Claude Code writes no notification of a job or a
 //!   monitor its agent stopped so (2.1.305, the live run of 2026-10-21);
-//! - a monitor's notice of its expiry, at or after the time it expires, counted from the
-//!   call that armed it (`timeoutMs` from the record of the call, which comes before the
-//!   monitor began): `[Monitor expired after 40s with 3 events delivered. …]`, or
-//!   `[Monitor timed out — re-arm if needed.]` where Claude Code's `tengu_breezy_crescent`
-//!   is off (2.1.306). Never earlier, and never with a line after the event (2.1.306
-//!   writes one after a command's output where push notifications are on, and none after
-//!   its own notices), so that a line the command wrote ends nothing.
+//! - a monitor's notice of its expiry, at or after the time it expires counted from its
+//!   start's record (`timeoutMs` from the record of the Monitor's result):
+//!   `[Monitor expired after 40s with 3 events delivered. …]`, or `[Monitor timed out —
+//!   re-arm if needed.]` where Claude Code's `tengu_breezy_crescent` is off (2.1.306).
+//!   Never earlier, and never with a line after the event (2.1.306 writes one after a
+//!   command's output where push notifications are on, and none after its own notices).
+//!   2.1.306 arms the monitor's timer before that record exists: its Monitor (`Oe`, and
+//!   `callWs` for a socket) awaits the shell's start and the task's registration, then
+//!   arms `setTimeout` and returns the result in the same step, with no wait between; the
+//!   tool's runner makes the result's record of what `call` resolved to, stamped then by
+//!   the clock it is given (`new Date().toISOString()`, the streaming executor's too). So
+//!   the start's record plus the time is never before the timer fires: a line the command
+//!   wrote before then is none of Claude Code's, and ends nothing (Astraeus on 3968dcfb:
+//!   the call's record, before a slow start, let such a line end a monitor that ran on).
+//!   A real notice written within a millisecond of the timer, before that instant, is held
+//!   the other way, and its task waits for Finish (the live runs of 2026-10-21 and -22:
+//!   the start's record plus the time came 0 to 1 ms before the notice).
 //!
 //!   **Claude Code's own notices of a monitor cannot be told from its command's output.**
 //!   2.1.306 writes both with one function (`TG` of its bundle): the same envelope, a
@@ -38,13 +48,16 @@
 //!   on (`agentPushNotifEnabled`, off unless set). So a notice is believed only where time
 //!   proves it: the expiry, which a monitor's real one never comes before (the live run of
 //!   2026-10-21: queued 40 000 ms after the start's record, 30 ms more after the call).
-//!   Its other ends have no time to prove them, and end nothing: `[Monitor stopped]` (the
-//!   human stopped it), `[Monitor stopped — too much output (…)]` (2.1.306 stopped a
+//!   Its other ends have no time to prove them, and end nothing: `[Monitor stopped]` (a
+//!   socket's monitor the human stopped: `nb`, whose status goes to the SDK's stream and
+//!   not to the record), `[Monitor stopped — too much output (…)]` (2.1.306 stopped a
 //!   command that wrote more than it lets through for half a minute: `FIn`, which writes
 //!   nothing more of it, the live run of 2026-10-21) and `[WebSocket closed: …]`. A task
-//!   held for such a monitor is held until Finish; a monitor's status (its command ended)
-//!   and a TaskStop's result end it as they end any job. A monitor whose start says no
-//!   time (`persistent`) ends by those alone.
+//!   held for such a monitor is held until Finish. A monitor's status ends it as it ends any
+//!   job: its command ended, or the human stopped a command's monitor from Claude Code's
+//!   tasks (2.1.306 queues `killed`, "Task … was stopped by the user": `Tmr`, behind
+//!   `tengu_rosy_donut`, on by default); so does a TaskStop's result. A monitor whose start
+//!   says no time (`persistent`) ends by those alone.
 //!
 //! **Only Claude Code's own notification ends a job, never words that look like one**:
 //! a message the user wrote, or ConsensFlow pasted, may quote one whole, from its first
@@ -393,6 +406,21 @@ impl Written<'_> {
             task_id: id,
             summary: &summary,
             event,
+            ..Written::default()
+        }
+        .text()
+    }
+
+    /// A monitor's event of its command's output as 2.1.306 writes it where push
+    /// notifications are on (`H` of its bundle): the event, a line after it that says how
+    /// to tell the user of it, and the line that closes the notification.
+    pub(super) fn pushed(id: &str, description: &str, event: &str) -> String {
+        let summary = format!("Monitor event: \"{description}\"");
+        Written {
+            task_id: id,
+            summary: &summary,
+            event,
+            body: "\nIf this event is something the user would act on now, send a PushNotification. Routine or benign output doesn't need one.",
             ..Written::default()
         }
         .text()

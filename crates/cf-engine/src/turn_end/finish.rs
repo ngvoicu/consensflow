@@ -6,11 +6,14 @@
 //! that is not (T-442, dip-agentos's T-20): a job that runs for ever (a dev server, a
 //! headless browser the harness moved to the background) never wakes its agent, and its
 //! task stays working for as long as it runs; waiting is the default, and work has no time
-//! limit. So it is for **any working task**, held or not, at rest or not: the chief's word
-//! overrides what the reader thinks. It takes the last complete answer the worker wrote
-//! after the task's latest message pasted into its window (`answers_to_the_task`'s
-//! `complete_run`), records it once as the result, with a line of what it knows still runs,
-//! and ends nothing. It is refused, with the reason, where there is no such answer, where
+//! limit. So is a monitor Claude Code stopped by itself, for too much output, or a socket's
+//! monitor the human stopped from its tasks: its notice is told from no line of its
+//! command's, so the monitor stays counted, and its task held, until Finish
+//! (`cf_harness::claude::record::jobs`). So it is for **any working task**, held or not,
+//! at rest or not: the chief's word overrides what the reader thinks. It takes the last
+//! complete answer the worker wrote after the task's latest message pasted into its window
+//! (`answers_to_the_task`'s `complete_run`), records it once as the result, with a line of
+//! what it knows still runs, and ends nothing. It is refused, with the reason, where there is no such answer, where
 //! the task is not working, and where no member's open window works on it; cancel is the
 //! way out then.
 //!
@@ -155,7 +158,7 @@ impl Dispatcher {
                 refused(
                     "no-delivery",
                     format!(
-                        "cannot finish T-{number}: @{}'s record holds no proof of where its latest message about it arrived, so no answer can be told to follow it; wait for one, or cancel it",
+                        "cannot finish T-{number}: no answer can be told to follow its latest message to @{}: the message is not in its window yet, or its record holds no paste of it; wait, send it a message about the task, or cancel it",
                         participant.handle
                     ),
                 )

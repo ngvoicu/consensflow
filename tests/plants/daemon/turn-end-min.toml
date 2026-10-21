@@ -110,14 +110,14 @@ find = '                    .is_some_and(|(expires, at)| at >= expires);'
 replace = '                    .is_some_and(|(expires, at)| at >= expires - 1_000);'
 
 [[plant]]
-name = "turn-end-min reader: a monitor's time counts from its start's record, not from the call that armed it"
-meant = "a_real_monitors_time_counts_from_the_call_that_armed_it_and_its_notice_never_ends_it_early"
+name = "turn-end-min reader: a monitor's time counts from before its start's record, as the call's did on 3968dcfb"
+meant = "a_real_monitors_time_counts_from_its_starts_record_and_a_line_before_it_ends_nothing"
 runs = ["tem-reader"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/record/replay.rs"
-find = '                    .and_then(|call| self.calls_at.get(&self.keys.of(Some(call))).copied())'
-replace = '                    .and_then(|call| self.calls_at.get(&self.keys.of(Some(call))).copied().filter(|_| false))'
+find = '                .map(|(timeout, started)| started.saturating_add(timeout));'
+replace = '                .map(|(timeout, started)| started.saturating_add(timeout).saturating_sub(30));'
 
 [[plant]]
 name = "turn-end-min reader: a command's line with a word after it is taken for Claude Code's own notice"

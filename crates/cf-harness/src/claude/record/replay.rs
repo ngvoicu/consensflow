@@ -100,9 +100,6 @@ impl Transcript {
                         if *task_stop {
                             self.task_stops.insert(call.clone());
                         }
-                        if let Some(at) = record.at_ms {
-                            self.calls_at.insert(call.clone(), at);
-                        }
                         self.open_tools.insert(call);
                     }
                 }
@@ -186,16 +183,12 @@ impl Transcript {
             self.tool_result(result, at, seq)?;
         }
         if let Some(job) = &record.job {
-            // A monitor expires its time after the call that armed it, which comes before
-            // it began; a start whose call the record does not hold counts from its own
-            // record, which comes after.
-            let expires_at = job.timeout.as_ref().and_then(|(timeout, call)| {
-                let armed = call
-                    .as_ref()
-                    .and_then(|call| self.calls_at.get(&self.keys.of(Some(call))).copied())
-                    .or(record.at_ms)?;
-                Some(armed.saturating_add(*timeout))
-            });
+            // A monitor's time is out its time after its start's record, which Claude Code
+            // writes once the monitor's timer is armed (`jobs`).
+            let expires_at = job
+                .timeout
+                .zip(record.at_ms)
+                .map(|(timeout, started)| started.saturating_add(timeout));
             self.jobs.started(Arc::clone(&job.id), expires_at);
         }
         if let Some((call, job)) = &record.stopped {

@@ -962,7 +962,7 @@ fn where_no_paste_proves_where_the_latest_message_arrived_there_is_no_result_and
     assert!(
         refused
             .to_string()
-            .contains("holds no proof of where its latest message"),
+            .contains("the message is not in its window yet, or its record holds no paste of it; wait, send it a message about the task, or cancel it"),
         "{refused}"
     );
 }

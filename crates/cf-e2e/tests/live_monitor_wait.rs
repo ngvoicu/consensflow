@@ -22,8 +22,9 @@
 //! before long, and end its turn; then answer each event with a word, the command's end
 //! with another, and the monitor's expiry with a third. Its second has it start a command
 //! in the background and stop it with TaskStop. Its third has it arm a monitor on a
-//! command that writes three lines and exits; its fourth, on a command that writes ten
-//! lines a second, which Claude Code stops.
+//! command that writes three lines and exits; its fourth, ten monitors of no output whose
+//! time runs out; its fifth, a monitor on a command that writes ten lines a second, which
+//! Claude Code stops.
 //!
 //! - `arming`   at the first look at rest after the monitor was armed, the reader counts
 //!   the command and the monitor pending
@@ -32,9 +33,11 @@
 //! - `expiry`   the monitor's notice that it expired wakes a turn, and ends it: none pending
 //! - `stop`     a command the agent stopped with TaskStop is pending no more, though no
 //!   notification says so
-//! - `expiry-time` Claude Code's notice of expiry comes no earlier than the monitor's call
-//!   plus its time, which the reader takes it for no earlier than; the run says how long
-//!   after that, and after its start's record plus its time
+//! - `ten-expiries` ten monitors' own notices of their expiry come, and the run says, of
+//!   each expiry, how long after its start's record plus its time its notice was queued
+//!   and delivered, and after its call's
+//! - `expiry-time` every real expiry is delivered no earlier than its start's record plus
+//!   its time, which the reader takes it for no earlier than: none is held
 //! - `monitor-exit` a monitor whose watched command exits (T-442's own shape) is said over
 //!   by its status, and is pending no more
 //! - `noisy-stop` a monitor whose command writes more than Claude Code lets through is
@@ -104,6 +107,10 @@ const STOP: &str = "Do exactly this, using your tools. 1) Use the Bash tool with
 /// What it is asked third: T-442's own shape, a monitor that watches the run itself and is
 /// over when the run's command exits, which Claude Code says by the monitor's status.
 const EXITS: &str = "Do exactly this, using your tools. 1) Use Monitor to watch the command: for i in 1 2 3; do echo tick $i; sleep 2; done , with timeout_ms 120000 and description 'run'. 2) End your turn at once, saying only WATCHING. Then, each time a notification wakes you: if it says the monitor or its command completed or ended, reply only RUN-OVER; otherwise reply only NOTED.";
+
+/// What it is asked fourth: ten monitors of no output whose time runs out, so that the run
+/// measures when Claude Code's notices of their expiry come.
+const TEN: &str = "Do exactly this, using your tools. 1) Use Monitor ten times, one after another, each to watch the command: sleep 600 , with timeout_ms 20000, and the descriptions exp-1, exp-2, exp-3, exp-4, exp-5, exp-6, exp-7, exp-8, exp-9 and exp-10. 2) End your turn at once, saying only ARMED. Then, each time a notification wakes you, reply only NOTED.";
 
 /// What it is asked last: a monitor on a command that writes more than Claude Code lets
 /// through (2.1.306: ten events, then one each two seconds), which it stops after half a
@@ -198,12 +205,25 @@ fn written_at(record: &Value) -> Option<i64> {
         .map(|at| at.as_millisecond())
 }
 
-/// How long after the time it expires the monitor described as `description` was said by
-/// Claude Code to have expired, in milliseconds, counted from the call that armed it and
-/// from the record of its start: none where the records do not say.
-fn expiry_margins(raw: &[Value], description: &str) -> Option<(i64, i64)> {
-    // Each call described so, and its time: the agent may call again where a call failed.
-    let calls: Vec<(String, i64)> = raw
+/// A monitor's expiry as the records say it: its description, and how many milliseconds
+/// after its start's record plus its time Claude Code queued its notice and delivered it
+/// (the record the reader dates it by), and after the call that armed it plus its time.
+#[derive(Debug, PartialEq)]
+struct Expiry {
+    description: String,
+    queued: i64,
+    delivered: i64,
+    after_the_call: i64,
+}
+
+/// Whether `text` is Claude Code's notice of a monitor's expiry, in either of its words.
+fn says_expired(text: &str) -> bool {
+    text.contains("[Monitor expired after ") || text.contains("[Monitor timed out")
+}
+
+/// Every expiry of a monitor that `raw` holds the call, the start and the notice of.
+fn expiries(raw: &[Value]) -> Vec<Expiry> {
+    let calls: Vec<(String, String, i64)> = raw
         .iter()
         .flat_map(|record| {
             let at = written_at(record);
@@ -211,42 +231,59 @@ fn expiry_margins(raw: &[Value], description: &str) -> Option<(i64, i64)> {
                 .as_array()
                 .into_iter()
                 .flatten()
-                .filter(|part| {
-                    part["type"] == "tool_use"
-                        && part["name"] == "Monitor"
-                        && part["input"]["description"] == description
+                .filter(|part| part["type"] == "tool_use" && part["name"] == "Monitor")
+                .filter_map(move |part| {
+                    Some((
+                        part["id"].as_str()?.to_owned(),
+                        part["input"]["description"].as_str()?.to_owned(),
+                        at?,
+                    ))
                 })
-                .filter_map(move |part| Some((part["id"].as_str()?.to_owned(), at?)))
         })
         .collect();
-    // The start a call's result says: the call that armed the monitor.
-    let (called, start) = calls.iter().find_map(|(id, called)| {
-        raw.iter()
-            .find(|record| {
-                record["toolUseResult"]["taskId"].is_string()
-                    && record["message"]["content"]
-                        .as_array()
-                        .is_some_and(|parts| {
-                            parts.iter().any(|part| {
-                                part["type"] == "tool_result" && part["tool_use_id"] == id.as_str()
-                            })
-                        })
+    let mut found = Vec::new();
+    for start in raw {
+        let (Some(task), Some(timeout), Some(started)) = (
+            start["toolUseResult"]["taskId"].as_str(),
+            start["toolUseResult"]["timeoutMs"]
+                .as_i64()
+                .filter(|time| *time > 0),
+            written_at(start),
+        ) else {
+            continue;
+        };
+        let call = start["message"]["content"].as_array().and_then(|parts| {
+            parts.iter().find_map(|part| {
+                let id = part["tool_use_id"].as_str()?;
+                calls.iter().find(|(called, _, _)| called == id)
             })
-            .map(|start| (*called, start))
-    })?;
-    let timeout = start["toolUseResult"]["timeoutMs"].as_i64()?;
-    let task = start["toolUseResult"]["taskId"].as_str()?.to_owned();
-    let started = written_at(start)?;
-    let expired = raw
-        .iter()
-        .filter(|record| {
-            let text = record.to_string();
-            text.contains(&format!("<task-id>{task}</task-id>"))
-                && text.contains("[Monitor expired after ")
-        })
-        .filter_map(written_at)
-        .min()?;
-    Some((expired - called - timeout, expired - started - timeout))
+        });
+        let Some((_, description, called)) = call else {
+            continue;
+        };
+        let notices: Vec<&Value> = raw
+            .iter()
+            .filter(|record| {
+                let text = record.to_string();
+                text.contains(&format!("<task-id>{task}</task-id>")) && says_expired(&text)
+            })
+            .collect();
+        let queued = notices.iter().filter_map(|record| written_at(record)).min();
+        let delivered = notices
+            .iter()
+            .filter(|record| record["type"] == "user" || record["type"] == "attachment")
+            .filter_map(|record| written_at(record))
+            .min();
+        if let (Some(queued), Some(delivered)) = (queued, delivered) {
+            found.push(Expiry {
+                description: description.clone(),
+                queued: queued - started - timeout,
+                delivered: delivered - started - timeout,
+                after_the_call: queued - called - timeout,
+            });
+        }
+    }
+    found
 }
 
 /// Whether some look was settled at the agent's words `words`, with `jobs` pending.
@@ -526,38 +563,6 @@ fn a_background_command_and_a_monitor_on_it_are_pending_until_claude_code_says_e
         stopped && settled_at(&stopping, STOPPED, 0),
         "a command the agent stopped with TaskStop was pending no more",
     ));
-    // How a real expiry falls against the time the reader counts it from: never before
-    // the call that armed it plus its time, which the reader takes it for no earlier than.
-    let margins = expiry_margins(&raw, "ticks");
-    if margins.is_none() {
-        let calls: Vec<String> = raw
-            .iter()
-            .filter_map(|record| record["message"]["content"].as_array())
-            .flatten()
-            .filter(|part| part["type"] == "tool_use" && part["name"] == "Monitor")
-            .map(|part| part["input"]["description"].to_string())
-            .collect();
-        let starts = raw
-            .iter()
-            .filter(|record| record["toolUseResult"]["taskId"].is_string())
-            .count();
-        let expiries = raw
-            .iter()
-            .filter(|record| record.to_string().contains("[Monitor expired after "))
-            .count();
-        log.say(format!(
-            "the expiry's margins could not be read: Monitor calls described {calls:?}, {starts} starts, {expiries} records of an expiry"
-        ));
-    }
-    log.say(format!(
-        "the monitor's expiry, against the call that armed it and against its start's record (ms after each plus its time): {margins:?}"
-    ));
-    checks.push(Check::new(
-        "claude",
-        "expiry-time",
-        margins.is_some_and(|(after_the_call, _)| after_the_call >= 0),
-        "Claude Code's notice of the monitor's expiry came no earlier than the call that armed it plus its time",
-    ));
     window.paste(&window.given(EXITS)?)?;
     let exits = watch(&window, RUN_OVER);
     let raw = raw_records(&window);
@@ -575,6 +580,57 @@ fn a_background_command_and_a_monitor_on_it_are_pending_until_claude_code_says_e
         "monitor-exit",
         ended_by_status && settled_at(&exits, RUN_OVER, 0),
         "a monitor whose watched command exits is said over by its status, and is pending no more",
+    ));
+    // Ten monitors whose time runs out: how each real expiry falls against its start's
+    // record plus its time, which the reader takes it for no earlier than.
+    window.paste(&window.given(TEN)?)?;
+    let started = Instant::now();
+    let mut raw = raw_records(&window);
+    while started.elapsed() < WORK
+        && expiries(&raw)
+            .iter()
+            .filter(|expiry| expiry.description.starts_with("exp-"))
+            .count()
+            < 10
+    {
+        sleep(LOOK);
+        raw = raw_records(&window);
+    }
+    let ten = watch(&window, NOTED);
+    let raw = raw_records(&window);
+    let measured = expiries(&raw);
+    let held: Vec<&Expiry> = measured
+        .iter()
+        .filter(|expiry| expiry.delivered < 0)
+        .collect();
+    log.block(
+        "the expiries (ms after the start's record plus its time: queued, delivered; and after the call's)",
+        &measured
+            .iter()
+            .map(|expiry| {
+                format!(
+                    "{}: {}, {}; {}",
+                    expiry.description, expiry.queued, expiry.delivered, expiry.after_the_call
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n"),
+    );
+    checks.push(Check::new(
+        "claude",
+        "ten-expiries",
+        measured
+            .iter()
+            .filter(|expiry| expiry.description.starts_with("exp-"))
+            .count()
+            >= 10,
+        "ten monitors' own notices of their expiry came, and the records say when",
+    ));
+    checks.push(Check::new(
+        "claude",
+        "expiry-time",
+        !measured.is_empty() && held.is_empty() && ten.last().is_some_and(|look| look.jobs == 0),
+        "every real expiry was delivered no earlier than its start's record plus its time, so none was held",
     ));
     window.paste(&window.given(NOISY)?)?;
     let noisy = watch(&window, QUIETED);
@@ -594,7 +650,7 @@ fn a_background_command_and_a_monitor_on_it_are_pending_until_claude_code_says_e
         })
         .unwrap_or_default();
     log.block(
-        "the fourth message",
+        "the fifth message",
         &format!(
             "{}\nthe notice that stopped the monitor: {}\nnotifications with a status after it: {}",
             noisy.iter().map(Look::line).collect::<Vec<_>>().join("\n"),
@@ -699,12 +755,21 @@ mod tests {
 }
 
 #[test]
-fn the_margins_of_the_fixtures_expiry_are_read_from_its_records() {
+fn the_fixtures_expiry_is_read_from_its_records() {
     // The fixture of the live run of 2026-10-21: the call at 23:02:30.287, its start's
-    // record at 30.317, a time of 40 s, and the notice queued at 23:03:10.317.
+    // record at 30.317, a time of 40 s, the notice queued at 23:03:10.317 and delivered at
+    // 10.329.
     let raw: Vec<Value> = include_str!("../../cf-harness/tests/fixtures/claude/monitor-wait.jsonl")
         .lines()
         .map(|line| serde_json::from_str(line).unwrap())
         .collect();
-    assert_eq!(expiry_margins(&raw, "ticks"), Some((30, 0)));
+    assert_eq!(
+        expiries(&raw),
+        [Expiry {
+            description: "ticks".to_owned(),
+            queued: 0,
+            delivered: 12,
+            after_the_call: 30,
+        }]
+    );
 }
