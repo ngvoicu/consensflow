@@ -28,6 +28,36 @@ fn refusal(outcome: Result<String, Error>) -> String {
     }
 }
 
+/// What a refusal says to do about `tag` on upstream, whose Release run is `run`,
+/// written out as a person reads it.
+fn advice(tag: &str, run: Option<u64>) -> String {
+    let feeds = "https://github.com/ngvoicu/consensflow/releases/download";
+    let rerun = match run {
+        Some(id) => format!(
+            "if run {id} failed, rerun it, `gh run rerun {id} --failed --repo ngvoicu/consensflow`"
+        ),
+        None => "find its run, `gh run list --repo ngvoicu/consensflow --workflow release.yml --event push`, \
+                 and if it failed rerun it, `gh run rerun <id> --failed --repo ngvoicu/consensflow`"
+            .to_owned(),
+    };
+    format!(
+        "{rerun}: the publisher finishes from where it stopped; then read the feeds, \
+         {feeds}/feed-alpha/latest.json and {feeds}/feed-stable/latest.json. \
+         A failure that is real spends {}: release the next version",
+        &tag[1..]
+    )
+}
+
+/// What a refusal says of `tag` that the checkout or origin has and upstream does
+/// not: it is `place`, and `undo` takes it away.
+fn not_on_upstream(tag: &str, place: &str, undo: &str) -> String {
+    format!(
+        "{tag} is {place} but not on upstream: a run stopped before upstream had it, and no \
+         Release run started. Push it, `git push upstream {tag}`, and watch its Release run; \
+         or delete it, `{undo}`, and run again"
+    )
+}
+
 #[test]
 fn each_command_takes_its_notes_its_dry_run_and_promote_its_alpha() {
     assert_eq!(

@@ -1,7 +1,7 @@
 //! `release alpha`, run on a checkout with real remotes and GitHub as a script.
 
 use super::fake::{git, Fake, World};
-use super::refusal;
+use super::{advice, not_on_upstream, refusal};
 use crate::release::{alpha, Error, Options};
 
 const ALPHA: &str = "3.0.6-alpha.1";
@@ -154,34 +154,70 @@ fn main_that_is_not_upstreams_is_refused() {
 }
 
 #[test]
-fn a_version_tagged_in_the_checkout_on_origin_or_on_upstream_is_refused() {
+fn a_tag_in_the_checkout_or_on_origin_alone_is_refused_with_how_to_push_or_delete_it() {
     let tag = format!("v{ALPHA}");
-    for (place, said) in [
+    for (places, place, undo) in [
         (
-            "checkout",
-            format!("{tag} is already a tag in the checkout: that version was released, or begun"),
+            &["checkout"][..],
+            "in the checkout",
+            format!("git tag -d {tag}"),
         ),
         (
-            "origin",
-            format!("{tag} is already a tag on origin: that version was released, or begun"),
+            &["origin"][..],
+            "on origin",
+            format!("git push origin --delete {tag}"),
         ),
         (
-            "upstream",
-            format!("{tag} is already a tag on upstream: that version was released, or begun"),
+            &["checkout", "origin"][..],
+            "in the checkout and on origin",
+            format!("git tag -d {tag} && git push origin --delete {tag}"),
         ),
     ] {
         let (world, mut fake) = ready();
         git(&world.root, &["tag", &tag]);
-        if place != "checkout" {
-            git(&world.root, &["push", "-q", place, &tag]);
+        if places.contains(&"origin") {
+            git(&world.root, &["push", "-q", "origin", &tag]);
+        }
+        if !places.contains(&"checkout") {
             git(&world.root, &["tag", "-d", &tag]);
         }
         assert_eq!(
             refusal(released(&world, &mut fake, true).0),
-            said,
+            not_on_upstream(&tag, place, &undo),
             "{place}"
         );
     }
+}
+
+#[test]
+fn a_tag_on_upstream_is_refused_with_its_release_run_to_rerun() {
+    let tag = format!("v{ALPHA}");
+    // A light tag, and no run of it that GitHub lists.
+    let (world, mut fake) = ready();
+    git(&world.root, &["tag", &tag]);
+    git(&world.root, &["push", "-q", "origin", &tag]);
+    git(&world.root, &["push", "-q", "upstream", &tag]);
+    let head = world.head();
+    assert_eq!(
+        refusal(released(&world, &mut fake, true).0),
+        format!(
+            "{tag} is already on upstream, on {}, so its Release run started; {}",
+            &head[..8],
+            advice(&tag, None)
+        )
+    );
+    // An annotated tag, found by the commit it names, and its run.
+    let (world, mut fake) = ready();
+    world.released(ALPHA);
+    let run = fake.start("release.yml", &world.head(), "push");
+    assert_eq!(
+        refusal(released(&world, &mut fake, true).0),
+        format!(
+            "{tag} is already on upstream, on {}, so its Release run started; {}",
+            &world.head()[..8],
+            advice(&tag, Some(run))
+        )
+    );
 }
 
 #[test]
@@ -190,7 +226,6 @@ fn a_version_feed_alpha_does_not_come_before_is_refused_before_ci_is_asked() {
         (Some(ALPHA), format!("feed-alpha serves {ALPHA}, which {ALPHA} does not come after: set a later version")),
         (Some("3.0.6"), format!("feed-alpha serves 3.0.6, which {ALPHA} does not come after: set a later version")),
         (Some("3.0.6-alpha.2"), format!("feed-alpha serves 3.0.6-alpha.2, which {ALPHA} does not come after: set a later version")),
-        (None, format!("feed-alpha serves no release, which {ALPHA} does not come after: set a later version")),
     ] {
         let (world, mut fake) = ready();
         match serves {
@@ -248,7 +283,7 @@ fn ci_that_is_not_green_on_both_platforms_stops_it_before_the_dry_run() {
     assert_eq!(
         said,
         format!(
-            "ci: no new run of ci.yml appeared on {}",
+            "ci: no new run of ci.yml appeared on {}: nothing after it was done",
             &world.head()[..8]
         )
     );
@@ -287,25 +322,56 @@ fn an_older_dry_run_of_the_same_commit_is_not_taken_for_the_new_one() {
 }
 
 #[test]
-fn a_release_run_that_fails_is_the_answer() {
+fn a_release_run_that_fails_says_to_rerun_it_and_a_run_again_says_the_same() {
     let (world, mut fake) = ready();
     fake.conclusions.insert(("release.yml", "push"), "failure");
+    let tag = format!("v{ALPHA}");
     let said = refusal(released(&world, &mut fake, false).0);
     assert_eq!(
         said,
-        "release run 1002 ended failure: nothing after it was done"
+        format!(
+            "release run 1002 ended failure: {tag} stays on upstream; {}",
+            advice(&tag, Some(1002))
+        )
     );
     assert_eq!(fake.serves("feed-alpha").as_deref(), Some("3.0.5"));
+    // Run again, it refuses the tag, and names the same run.
+    let said = refusal(released(&world, &mut fake, false).0);
+    assert_eq!(
+        said,
+        format!(
+            "{tag} is already on upstream, on {}, so its Release run started; {}",
+            &world.head()[..8],
+            advice(&tag, Some(1002))
+        )
+    );
 }
 
 #[test]
-fn a_feed_alpha_that_never_serves_the_alpha_fails_the_release() {
+fn an_older_release_run_of_the_same_commit_is_not_taken_for_the_new_one() {
+    let (world, mut fake) = ready();
+    // A green release run of this commit from before (another tag on it); the new one fails.
+    fake.start("release.yml", &world.head(), "push");
+    fake.conclusions.insert(("release.yml", "push"), "failure");
+    fake.unlisted_for = 1;
+    let said = refusal(released(&world, &mut fake, false).0);
+    assert!(said.starts_with("release run 1003 ended failure"), "{said}");
+}
+
+#[test]
+fn a_feed_alpha_that_never_serves_the_alpha_after_a_green_run_says_the_release_is_published() {
     let (world, mut fake) = ready();
     fake.publishes = false;
     let said = refusal(released(&world, &mut fake, false).0);
     assert_eq!(
         said,
-        format!("feed-alpha does not serve {ALPHA}: it serves 3.0.5")
+        format!(
+            "release run 1002 ended green, its own check of the feeds with it, yet feed-alpha does not serve \
+             {ALPHA} after 5 reads (it serves 3.0.5): the release is published, and GitHub's download links \
+             can lag; read it again in a few minutes, \
+             `curl -sL https://github.com/ngvoicu/consensflow/releases/download/feed-alpha/latest.json`, \
+             and run nothing again"
+        )
     );
     // One look at each of the three runs while it goes on, and a wait between each two of five reads.
     assert_eq!(fake.pauses, 3 + 4);
@@ -318,6 +384,112 @@ fn a_feed_stable_the_alpha_moved_fails_the_release() {
     let said = refusal(released(&world, &mut fake, false).0);
     assert_eq!(
         said,
-        format!("feed-stable changed while {ALPHA} was released: an alpha never moves it")
+        format!(
+            "feed-stable serves {ALPHA}, and served 3.0.5 before {ALPHA} was released: \
+             an alpha never moves it; read the publish job of run 1002"
+        )
+    );
+}
+
+#[test]
+fn a_feed_that_answers_404_or_no_network_for_a_while_is_read_again_and_is_no_alarm() {
+    let (world, mut fake) = ready();
+    fake.feed_lag = 1;
+    // Before the tag: feed-alpha times out once, feed-stable answers 404 once.
+    fake.failing_reads = vec![("feed-alpha", 28), ("feed-stable", 22)];
+    // After it: feed-alpha cannot be resolved once, feed-stable answers 404 twice.
+    fake.failing_after_the_tag = vec![("feed-alpha", 6), ("feed-stable", 22), ("feed-stable", 22)];
+    let done = released(&world, &mut fake, false).0.unwrap();
+    assert!(
+        done.contains("feed-alpha serves it, feed-stable is as it was"),
+        "{done}"
+    );
+}
+
+#[test]
+fn a_feed_alpha_that_answers_no_release_is_an_outage_not_a_version_to_change() {
+    for (failing, last) in [
+        (None, "it serves no release".to_owned()),
+        (
+            Some(6),
+            "curl ended 6: curl: (6) the read failed".to_owned(),
+        ),
+    ] {
+        let (world, mut fake) = ready();
+        match failing {
+            None => {
+                fake.feeds.remove("feed-alpha");
+            }
+            Some(code) => fake.failing_reads = vec![("feed-alpha", code); 5],
+        }
+        assert_eq!(
+            refusal(released(&world, &mut fake, true).0),
+            format!(
+                "feed-alpha answered no release in 5 reads ({last}): an outage of the feed or of GitHub, \
+                 not a version to change; nothing was done, run again later"
+            )
+        );
+        assert!(fake.when("gh").is_none(), "{:#?}", fake.lines());
+    }
+}
+
+#[test]
+fn a_tag_upstream_refuses_says_what_origin_holds_and_a_run_again_says_how_to_finish() {
+    let (world, mut fake) = ready();
+    fake.refuses_pushes = Some("upstream");
+    let tag = format!("v{ALPHA}");
+    let said = refusal(released(&world, &mut fake, false).0);
+    assert_eq!(
+        said,
+        format!(
+            "upstream refused {tag} (! [remote rejected] (pre-receive hook declined)), which origin has, \
+             and no Release run started. Push it again, `git push upstream {tag}`, and watch its Release run; \
+             or delete it, `git tag -d {tag} && git push origin --delete {tag}`, and run again"
+        )
+    );
+    assert!(World::tagged(&world.origin, &tag).is_some());
+    assert!(fake.runs_of("release.yml", "push").is_empty());
+    // Run again with upstream taking pushes: the half pushed tag is named, and how to finish it.
+    fake.refuses_pushes = None;
+    let said = refusal(released(&world, &mut fake, false).0);
+    assert_eq!(
+        said,
+        not_on_upstream(
+            &tag,
+            "in the checkout and on origin",
+            &format!("git tag -d {tag} && git push origin --delete {tag}")
+        )
+    );
+}
+
+#[test]
+fn a_tag_origin_refuses_reaches_no_remote_and_says_to_delete_it() {
+    let (world, mut fake) = ready();
+    fake.refuses_pushes = Some("origin");
+    let tag = format!("v{ALPHA}");
+    let said = refusal(released(&world, &mut fake, false).0);
+    assert_eq!(
+        said,
+        format!(
+            "origin refused {tag} (! [remote rejected] (pre-receive hook declined)): no remote has it; \
+             delete it, `git tag -d {tag}`, and run again"
+        )
+    );
+    assert_eq!(World::tagged(&world.upstream, &tag), None);
+}
+
+#[test]
+fn a_tag_whose_release_run_never_appears_says_what_to_do_with_the_tag() {
+    let (world, mut fake) = ready();
+    fake.tags_start_runs = false;
+    let tag = format!("v{ALPHA}");
+    let said = refusal(released(&world, &mut fake, false).0);
+    assert_eq!(
+        said,
+        format!(
+            "release: no new run of release.yml appeared on {}: {tag} is on upstream; {}",
+            &world.head()[..8],
+            advice(&tag, None)
+        )
     );
 }

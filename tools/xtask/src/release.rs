@@ -14,9 +14,12 @@
 //! cargo xtask release promote X.Y.Z-alpha.N --notes FILE [--dry-run]
 //! ```
 //!
-//! Both run in the main checkout, on `main`, with nothing uncommitted, and `main`
-//! equal to upstream's. Each check that fails stops the run there, before
-//! anything after it is done, and says why (`release: …`, status 1).
+//! Both run in the main checkout. Each check that fails stops the run there,
+//! before anything after it is done, and says why (`release: …`, status 1). A
+//! run that stopped half way (a tag or a branch pushed, a Release run that did
+//! not end green, a feed that does not serve yet) leaves what it pushed, and the
+//! next run's refusal says what to do with it: push the rest, rerun the run, or
+//! delete it and run again.
 //!
 //! `release alpha` releases the version the sources agree on, which must be
 //! `X.Y.Z-alpha.N`:
@@ -25,13 +28,15 @@
 //! 2. the checkout is clean, on `main`, and `main` is upstream's;
 //! 3. no tag `v<version>` is in the checkout, on origin or on upstream;
 //! 4. `feed-alpha` serves a version before this one, which the publisher would
-//!    otherwise leave where it is;
+//!    otherwise leave where it is (a feed that answers no release in all its
+//!    reads is an outage, and refused as one);
 //! 5. CI on `main`'s commit ended green, with both platforms' gates;
 //! 6. the Release workflow's dry run on `main` ended green;
 //! 7. the annotated tag, its message the notes, pushed to origin and upstream;
 //! 8. the Release run of the tag, watched to its end;
 //! 9. `feed-alpha` read until it serves the version, and `feed-stable` checked
-//!    unchanged, byte for byte.
+//!    to serve the release it served before. A feed is read again on a 404 or
+//!    a network error, within its reads.
 //!
 //! `--dry-run` does 1 to 6 and says what it would tag.
 //!
@@ -211,25 +216,58 @@ impl Release<'_> {
         Ok(head)
     }
 
-    /// Refuses `tag` where the checkout, origin or upstream already has it.
+    /// Refuses `tag` where the checkout, origin or upstream already has it,
+    /// saying what to do with what a run that stopped left.
     fn tag_is_new(&mut self, tag: &str) -> Result<(), Error> {
         let reference = format!("refs/tags/{tag}");
-        if self.git_says_yes(&["rev-parse", "-q", "--verify", &reference])? {
+        let on_upstream = self.git(&["ls-remote", "--tags", "upstream", &reference])?;
+        if !on_upstream.is_empty() {
+            // The commit an annotated tag names is its peeled line; a light one names it itself.
+            let peeled = self.git(&["ls-remote", "upstream", &format!("{reference}^{{}}")])?;
+            let commit = first_word(if peeled.is_empty() {
+                &on_upstream
+            } else {
+                &peeled
+            });
+            let run = self.newest_run("release.yml", Some(&commit), Some("push"))?;
             return Err(refused(format!(
-                "{tag} is already a tag in the checkout: that version was released, or begun"
+                "{tag} is already on upstream, on {}, so its Release run started; {}",
+                short(&commit),
+                github::rerun_advice(tag, run)
             )));
         }
-        for remote in ["origin", "upstream"] {
-            if !self
-                .git(&["ls-remote", "--tags", remote, &reference])?
-                .is_empty()
-            {
-                return Err(refused(format!(
-                    "{tag} is already a tag on {remote}: that version was released, or begun"
-                )));
-            }
+        let in_checkout = self.git_says_yes(&["rev-parse", "-q", "--verify", &reference])?;
+        let on_origin = !self
+            .git(&["ls-remote", "--tags", "origin", &reference])?
+            .is_empty();
+        let (place, undo) = match (in_checkout, on_origin) {
+            (false, false) => return Ok(()),
+            (true, false) => ("in the checkout", format!("git tag -d {tag}")),
+            (false, true) => ("on origin", format!("git push origin --delete {tag}")),
+            (true, true) => (
+                "in the checkout and on origin",
+                format!("git tag -d {tag} && git push origin --delete {tag}"),
+            ),
+        };
+        Err(refused(format!(
+            "{tag} is {place} but not on upstream: a run stopped before upstream had it, and no \
+             Release run started. Push it, `git push upstream {tag}`, and watch its Release run; \
+             or delete it, `{undo}`, and run again"
+        )))
+    }
+
+    /// Pushes `reference` to `remote`; when the remote refuses it, what `then`
+    /// makes of git's words is the refusal.
+    fn push(
+        &mut self,
+        remote: &str,
+        reference: &str,
+        then: impl FnOnce(&str) -> String,
+    ) -> Result<(), Error> {
+        match self.git(&["push", "-q", remote, reference]) {
+            Err(Error::Program { said, .. }) => Err(refused(then(&said))),
+            pushed => pushed.map(drop),
         }
-        Ok(())
     }
 
     /// Tags `commit` as `tag` with the notes as its message and pushes it, to
@@ -237,11 +275,29 @@ impl Release<'_> {
     fn tag_and_push(&mut self, tag: &str, notes: &Path, commit: &str) -> Result<(), Error> {
         let notes = notes.to_string_lossy().into_owned();
         self.git(&["tag", "-a", tag, "-F", &notes, commit])?;
-        self.git(&["push", "-q", "origin", tag])?;
-        self.git(&["push", "-q", "upstream", tag])?;
+        self.push("origin", tag, |said| {
+            format!(
+                "origin refused {tag} ({said}): no remote has it; delete it, `git tag -d {tag}`, and run again"
+            )
+        })?;
+        self.push("upstream", tag, |said| {
+            format!(
+                "upstream refused {tag} ({said}), which origin has, and no Release run started. Push it \
+                 again, `git push upstream {tag}`, and watch its Release run; or delete it, \
+                 `git tag -d {tag} && git push origin --delete {tag}`, and run again"
+            )
+        })?;
         self.say(&format!("tag {tag} pushed on {}", short(commit)));
         Ok(())
     }
+}
+
+/// The first word of what git said: the object of a line of `ls-remote`.
+fn first_word(said: &str) -> String {
+    said.split_whitespace()
+        .next()
+        .unwrap_or_default()
+        .to_owned()
 }
 
 /// The plain version an alpha was cut for: `3.0.6` of `3.0.6-alpha.1`. A version

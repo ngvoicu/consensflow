@@ -1,12 +1,14 @@
 //! `release promote`, run on a checkout whose alpha was released, with real
-//! remotes and GitHub as a script.
+//! remotes and GitHub as a script. A promotion always goes on `release/X.Y.Z`
+//! and never writes main, whether main moved on from the alpha or not.
 
 use super::fake::{git, git_says_yes, latest, version_files, write, Fake, World};
-use super::refusal;
+use super::{advice, not_on_upstream, refusal};
 use crate::release::{promote, Error, Options};
 
 const ALPHA: &str = "3.0.6-alpha.1";
 const PLAIN: &str = "3.0.6";
+const BRANCH: &str = "release/3.0.6";
 
 fn options(world: &World, alpha: &str, dry_run: bool) -> Options {
     Options {
@@ -75,6 +77,19 @@ fn no_tree_left(world: &World) {
         .exists());
 }
 
+/// Whether `repository` has the branch of the promotion.
+fn has_branch(repository: &std::path::Path) -> bool {
+    git_says_yes(
+        repository,
+        &[
+            "rev-parse",
+            "-q",
+            "--verify",
+            &format!("refs/heads/{BRANCH}"),
+        ],
+    )
+}
+
 const CHANGED: [&str; 5] = [
     "Cargo.lock",
     "Cargo.toml",
@@ -84,128 +99,90 @@ const CHANGED: [&str; 5] = [
 ];
 
 #[test]
-fn an_alpha_main_still_is_is_promoted_on_main_and_served_by_both_feeds() {
-    let (world, mut fake) = released();
-    fake.feed_lag = 1;
-    let alpha_commit = world.head();
-    let (outcome, said) = promoted(&world, &mut fake, ALPHA, false);
-    let done = outcome.unwrap();
-    let main = git(&world.upstream, &["rev-parse", "main"]);
-    // The version commit sits on the alpha's commit, on main of both remotes and of the checkout.
-    assert_eq!(
-        git(&world.root, &["rev-parse", &format!("{main}^")]),
-        alpha_commit
-    );
-    assert_eq!(git(&world.origin, &["rev-parse", "main"]), main);
-    assert_eq!(world.head(), main);
-    let (names, version) = change_of(&world, &main);
-    assert_eq!(names, CHANGED);
-    assert_eq!(version, PLAIN);
-    // Every version file is the plain version's, and nothing else changed.
-    for (path, text) in version_files(PLAIN) {
+fn a_tested_alpha_is_promoted_from_a_branch_at_its_commit_and_main_is_never_written() {
+    for moved in [false, true] {
+        let (world, mut fake) = if moved { moved_on() } else { released() };
+        fake.feed_lag = 1;
+        let alpha_commit = world.commit_of(&format!("v{ALPHA}"));
+        let main_before = world.head();
+        let (outcome, said) = promoted(&world, &mut fake, ALPHA, false);
+        let done = outcome.unwrap();
+        let promoted = git(&world.upstream, &["rev-parse", BRANCH]);
+        // The branch, in the checkout and on both remotes, holds the version commit on the alpha's.
+        assert_eq!(git(&world.origin, &["rev-parse", BRANCH]), promoted);
+        assert_eq!(git(&world.root, &["rev-parse", BRANCH]), promoted);
         assert_eq!(
-            git(&world.root, &["show", &format!("{main}:{path}")]),
-            text.trim_end(),
-            "{path}"
+            git(&world.root, &["rev-parse", &format!("{promoted}^")]),
+            alpha_commit
         );
-    }
-    for remote in [&world.origin, &world.upstream] {
+        let (names, version) = change_of(&world, &promoted);
+        assert_eq!(names, CHANGED);
+        assert_eq!(version, PLAIN);
+        for (path, text) in version_files(PLAIN) {
+            assert_eq!(
+                git(&world.root, &["show", &format!("{promoted}:{path}")]),
+                text.trim_end(),
+                "{path}"
+            );
+        }
+        // Main is as it was, everywhere, and the checkout is still on it.
+        for repository in [&world.root, &world.origin, &world.upstream] {
+            assert_eq!(
+                git(repository, &["rev-parse", "main"]),
+                main_before,
+                "moved: {moved}"
+            );
+        }
         assert_eq!(
-            World::tagged(remote, &format!("v{PLAIN}")),
-            Some(main.clone())
+            git(&world.root, &["rev-parse", "--abbrev-ref", "HEAD"]),
+            "main"
         );
+        for remote in [&world.origin, &world.upstream] {
+            assert_eq!(
+                World::tagged(remote, &format!("v{PLAIN}")),
+                Some(promoted.clone())
+            );
+        }
+        // The tag's own run is the gate: nothing is started by hand.
+        assert!(
+            fake.when("gh workflow run").is_none(),
+            "{:#?}",
+            fake.lines()
+        );
+        assert_eq!(fake.runs_of("release.yml", "push").len(), 1);
+        assert_eq!(fake.serves("feed-alpha").as_deref(), Some(PLAIN));
+        assert_eq!(fake.serves("feed-stable").as_deref(), Some(PLAIN));
+        no_tree_left(&world);
+        assert_eq!(
+            done,
+            format!(
+                "released {PLAIN} from {ALPHA}'s commit {} as {} on {BRANCH}: feed-alpha and feed-stable serve it\n\
+                 nothing goes back to main: its next alpha needs a version after {PLAIN} (3.0.7-alpha.1 or later)\n",
+                &alpha_commit[..8],
+                &promoted[..8]
+            )
+        );
+        assert!(said.contains("feed-stable serves 3.0.6"), "{said}");
     }
-    assert_eq!(fake.serves("feed-alpha").as_deref(), Some(PLAIN));
-    assert_eq!(fake.serves("feed-stable").as_deref(), Some(PLAIN));
-    // CI's push run on the version commit, the dry run on main, then the tag.
-    assert_eq!(fake.runs_of("ci.yml", "push").len(), 1);
-    assert_eq!(fake.runs_of("ci.yml", "push")[0].commit, main);
-    let dry = fake
-        .when("gh workflow run release.yml --repo ngvoicu/consensflow --ref main")
-        .unwrap();
-    let tag = fake.when(&format!("git tag -a v{PLAIN}")).unwrap();
-    assert!(dry < tag);
-    no_tree_left(&world);
-    assert!(done.contains(&format!(
-        "released {PLAIN} from {ALPHA}'s commit {} as {} on main: feed-alpha and feed-stable serve it",
-        &alpha_commit[..8],
-        &main[..8]
-    )), "{done}");
-    assert!(
-        done.contains(
-            "main is at 3.0.6: its next alpha needs a version after it (3.0.7-alpha.1 or later)"
-        ),
-        "{done}"
-    );
-    assert!(said.contains("feed-stable serves 3.0.6"), "{said}");
 }
 
 #[test]
-fn an_alpha_main_has_moved_past_is_promoted_from_a_branch_at_its_commit() {
-    let (world, mut fake) = moved_on();
-    let alpha_commit = world.commit_of(&format!("v{ALPHA}"));
-    let main_before = world.head();
-    let (outcome, said) = promoted(&world, &mut fake, ALPHA, false);
-    let done = outcome.unwrap();
-    let branch = format!("release/{PLAIN}");
-    let promoted = git(&world.upstream, &["rev-parse", &branch]);
-    assert_eq!(git(&world.origin, &["rev-parse", &branch]), promoted);
-    assert_eq!(git(&world.root, &["rev-parse", &branch]), promoted);
-    assert_eq!(
-        git(&world.root, &["rev-parse", &format!("{promoted}^")]),
-        alpha_commit
-    );
-    let (names, version) = change_of(&world, &promoted);
-    assert_eq!(names, CHANGED);
-    assert_eq!(version, PLAIN);
-    // Main is as it was, everywhere: nothing goes back to it.
-    for repository in [&world.root, &world.origin, &world.upstream] {
-        assert_eq!(git(repository, &["rev-parse", "main"]), main_before);
-    }
-    for remote in [&world.origin, &world.upstream] {
-        assert_eq!(
-            World::tagged(remote, &format!("v{PLAIN}")),
-            Some(promoted.clone())
-        );
-    }
-    // CI by hand on the branch, no dry run (the environment admits main and tags alone).
-    let ci = fake.runs_of("ci.yml", "workflow_dispatch");
-    assert_eq!(ci.len(), 1);
-    assert_eq!(ci[0].commit, promoted);
-    assert!(fake.runs_of("release.yml", "workflow_dispatch").is_empty());
-    assert!(fake
-        .when(&format!(
-            "gh workflow run ci.yml --repo ngvoicu/consensflow --ref {branch}"
-        ))
-        .is_some());
-    assert!(said.contains("no dry run on release/3.0.6"), "{said}");
-    assert_eq!(fake.serves("feed-alpha").as_deref(), Some(PLAIN));
-    assert_eq!(fake.serves("feed-stable").as_deref(), Some(PLAIN));
-    no_tree_left(&world);
-    assert!(
-        done.contains(&format!("as {} on release/3.0.6", &promoted[..8])),
-        "{done}"
-    );
-    assert!(done.contains("nothing goes back to main"), "{done}");
-    assert!(done.contains("3.0.7-alpha.1 or later"), "{done}");
-}
-
-#[test]
-fn a_promotion_dry_run_makes_the_commit_and_pushes_tags_and_dispatches_nothing() {
+fn a_promotion_dry_run_makes_the_commit_and_pushes_and_tags_nothing() {
     for moved in [false, true] {
         let (world, mut fake) = if moved { moved_on() } else { released() };
         let main_before = world.head();
         let (outcome, _) = promoted(&world, &mut fake, ALPHA, true);
         let done = outcome.unwrap();
         assert!(done.starts_with("dry run: every check passed; "), "{done}");
-        let place = if moved {
-            "pushed as release/3.0.6"
-        } else {
-            "pushed to main"
-        };
-        assert!(done.contains(place), "{done}");
+        assert!(
+            done.contains(&format!(
+                "would be {BRANCH} in the checkout and on origin and upstream, tagged v{PLAIN}"
+            )),
+            "{done}"
+        );
         assert!(
             fake.lines().iter().all(|line| !line.starts_with("git push")
+                && !line.starts_with("git branch")
                 && !line.starts_with("gh workflow run")
                 && !line.starts_with("git tag")),
             "{:#?}",
@@ -214,13 +191,20 @@ fn a_promotion_dry_run_makes_the_commit_and_pushes_tags_and_dispatches_nothing()
         for repository in [&world.root, &world.origin, &world.upstream] {
             assert_eq!(git(repository, &["rev-parse", "main"]), main_before);
             assert_eq!(World::tagged(repository, &format!("v{PLAIN}")), None);
-            assert!(!git_says_yes(
-                repository,
-                &["rev-parse", "-q", "--verify", "refs/heads/release/3.0.6"]
-            ));
+            assert!(!has_branch(repository));
         }
         no_tree_left(&world);
     }
+}
+
+#[test]
+fn a_promotion_asks_nothing_of_the_checkouts_own_branch_or_changes() {
+    // It writes no main and reads none: a checkout elsewhere, with changes, promotes the same.
+    let (world, mut fake) = released();
+    git(&world.root, &["checkout", "-q", "-b", "wt/elsewhere"]);
+    write(&world.root.join("README.md"), "an edit not committed\n");
+    promoted(&world, &mut fake, ALPHA, false).0.unwrap();
+    assert!(has_branch(&world.upstream));
 }
 
 #[test]
@@ -255,40 +239,61 @@ fn an_alpha_that_was_never_released_is_refused() {
 }
 
 #[test]
-fn an_alpha_feed_alpha_does_not_serve_is_refused() {
-    for serves in [Some("3.0.6-alpha.2"), Some("3.0.5"), Some(PLAIN), None] {
-        let (world, mut fake) = released();
-        match serves {
-            Some(version) => {
-                fake.feeds.insert("feed-alpha".into(), latest(version));
-            }
-            None => {
-                fake.feeds.remove("feed-alpha");
-            }
+fn a_fetch_of_the_alpha_that_fails_is_gits_error_never_not_released() {
+    let (world, mut fake) = released();
+    fake.tag_fetch_fails = true;
+    match promoted(&world, &mut fake, ALPHA, false).0 {
+        Err(Error::Program { command, said, .. }) => {
+            assert!(
+                command.starts_with("git fetch -q --no-tags upstream"),
+                "{command}"
+            );
+            assert!(said.contains("Could not resolve host"), "{said}");
         }
-        let said = refusal(promoted(&world, &mut fake, ALPHA, false).0);
-        assert_eq!(
-            said,
-            format!(
-                "feed-alpha serves {}, not {ALPHA}: only the alpha it serves, which alpha installs run, is promoted",
-                serves.unwrap_or("no release")
-            )
-        );
-        assert!(fake.when("git worktree add").is_none());
+        other => panic!("not git's error: {other:?}"),
     }
 }
 
 #[test]
+fn an_alpha_feed_alpha_does_not_serve_is_refused() {
+    for serves in ["3.0.6-alpha.2", "3.0.5", PLAIN] {
+        let (world, mut fake) = released();
+        fake.feeds.insert("feed-alpha".into(), latest(serves));
+        let said = refusal(promoted(&world, &mut fake, ALPHA, false).0);
+        assert_eq!(
+            said,
+            format!(
+                "feed-alpha serves {serves}, not {ALPHA}: only the alpha it serves, which alpha installs run, is promoted"
+            )
+        );
+        assert!(fake.when("git worktree add").is_none());
+    }
+    // A feed that answers no release is an outage, said as one.
+    let (world, mut fake) = released();
+    fake.feeds.remove("feed-alpha");
+    let said = refusal(promoted(&world, &mut fake, ALPHA, false).0);
+    assert!(
+        said.starts_with("feed-alpha answered no release in 5 reads"),
+        "{said}"
+    );
+}
+
+#[test]
 fn a_version_already_released_is_refused() {
-    // Its tag, on upstream.
+    // Its tag, on upstream, with its run.
     let (world, mut fake) = released();
     git(&world.root, &["tag", "v3.0.6"]);
     git(&world.root, &["push", "-q", "upstream", "v3.0.6"]);
     git(&world.root, &["tag", "-d", "v3.0.6"]);
+    let run = fake.start("release.yml", &world.head(), "push");
     let said = refusal(promoted(&world, &mut fake, ALPHA, false).0);
     assert_eq!(
         said,
-        "v3.0.6 is already a tag on upstream: that version was released, or begun"
+        format!(
+            "v3.0.6 is already on upstream, on {}, so its Release run started; {}",
+            &world.head()[..8],
+            advice("v3.0.6", Some(run))
+        )
     );
 
     // feed-stable serves it, or a later one, with no tag here.
@@ -304,18 +309,178 @@ fn a_version_already_released_is_refused() {
     }
 }
 
+/// What a refusal says of the branch a promotion left: where it is, at which
+/// commit, and how to start over or finish.
+fn leftover(places: &str, at: &str, undo: &str) -> String {
+    format!(
+        "{BRANCH} is {places}, at {}: a promotion stopped before its tag. Start over: `{undo}`, and run again; \
+         or finish it by hand: `git tag -a v{PLAIN} -F <notes> {BRANCH} && git push origin v{PLAIN} && git push upstream v{PLAIN}`, \
+         then watch its Release run and read both feeds",
+        &at[..8]
+    )
+}
+
 #[test]
-fn a_branch_a_promotion_left_is_refused() {
-    let (world, mut fake) = moved_on();
-    git(
-        &world.root,
-        &["push", "-q", "upstream", "main:refs/heads/release/3.0.6"],
-    );
+fn a_branch_a_promotion_left_is_refused_with_how_to_start_over_or_finish() {
+    for (remotes, local, places, undo) in [
+        (
+            &["upstream"][..],
+            false,
+            "on upstream",
+            format!("git push upstream --delete {BRANCH}"),
+        ),
+        (
+            &["origin"][..],
+            true,
+            "in the checkout and on origin",
+            format!("git push origin --delete {BRANCH} && git branch -D {BRANCH}"),
+        ),
+        (
+            &[][..],
+            true,
+            "in the checkout",
+            format!("git branch -D {BRANCH}"),
+        ),
+    ] {
+        let (world, mut fake) = moved_on();
+        let at = world.head();
+        for remote in remotes {
+            git(
+                &world.root,
+                &["push", "-q", remote, &format!("main:refs/heads/{BRANCH}")],
+            );
+        }
+        if local {
+            git(&world.root, &["branch", BRANCH, "main"]);
+        }
+        let said = refusal(promoted(&world, &mut fake, ALPHA, false).0);
+        assert_eq!(said, leftover(places, &at, &undo), "{places}");
+        assert!(fake.when("git worktree add").is_none());
+    }
+}
+
+#[test]
+fn a_branch_upstream_refuses_says_what_to_delete_and_once_deleted_a_run_again_promotes() {
+    let (world, mut fake) = released();
+    fake.refuses_pushes = Some("upstream");
     let said = refusal(promoted(&world, &mut fake, ALPHA, false).0);
     assert_eq!(
         said,
-        "upstream already has release/3.0.6: a promotion of 3.0.6 was begun; finish it or delete the branch"
+        format!(
+            "upstream refused {BRANCH} (! [remote rejected] (pre-receive hook declined)), which origin has; \
+             delete it, `git push origin --delete {BRANCH} && git branch -D {BRANCH}`, and run again"
+        )
     );
+    assert!(!has_branch(&world.upstream) && has_branch(&world.origin) && has_branch(&world.root));
+    assert!(fake.when("git tag").is_none());
+    // Run again: the half pushed branch is refused with the same deletion.
+    fake.refuses_pushes = None;
+    let at = git(&world.root, &["rev-parse", BRANCH]);
+    let said = refusal(promoted(&world, &mut fake, ALPHA, false).0);
+    assert_eq!(
+        said,
+        leftover(
+            "in the checkout and on origin",
+            &at,
+            &format!("git push origin --delete {BRANCH} && git branch -D {BRANCH}")
+        )
+    );
+    // Done as it says, the promotion goes through.
+    git(&world.root, &["push", "-q", "origin", "--delete", BRANCH]);
+    git(&world.root, &["branch", "-D", BRANCH]);
+    promoted(&world, &mut fake, ALPHA, false).0.unwrap();
+    assert!(has_branch(&world.upstream));
+}
+
+#[test]
+fn a_branch_origin_refuses_reaches_no_remote_and_says_to_delete_the_checkouts() {
+    let (world, mut fake) = released();
+    fake.refuses_pushes = Some("origin");
+    let said = refusal(promoted(&world, &mut fake, ALPHA, false).0);
+    assert_eq!(
+        said,
+        format!(
+            "origin refused {BRANCH} (! [remote rejected] (pre-receive hook declined)): no remote has it; \
+             delete it, `git branch -D {BRANCH}`, and run again"
+        )
+    );
+    assert!(!has_branch(&world.origin) && !has_branch(&world.upstream));
+}
+
+#[test]
+fn a_tag_upstream_refuses_is_named_on_the_run_again_with_how_to_push_it() {
+    let (world, mut fake) = released();
+    let tag = format!("v{PLAIN}");
+    // The branch goes to both remotes; the tag to origin, and upstream refuses it.
+    fake.refuses_pushes = Some("upstream");
+    fake.refused_refs = "v";
+    let said = refusal(promoted(&world, &mut fake, ALPHA, false).0);
+    assert!(
+        said.starts_with(&format!("upstream refused {tag} (! [remote rejected]")),
+        "{said}"
+    );
+    assert!(has_branch(&world.upstream));
+    assert!(fake.runs_of("release.yml", "push").is_empty());
+    fake.refuses_pushes = None;
+    // A run again names the tag first: it is what the run stopped at.
+    let said = refusal(promoted(&world, &mut fake, ALPHA, false).0);
+    assert_eq!(
+        said,
+        not_on_upstream(
+            &tag,
+            "in the checkout and on origin",
+            &format!("git tag -d {tag} && git push origin --delete {tag}")
+        )
+    );
+    // Pushed as it says, its run starts, and the next run says to watch it.
+    let at = git(&world.root, &["rev-parse", BRANCH]);
+    git(&world.root, &["push", "-q", "upstream", &tag]);
+    let said = refusal(promoted(&world, &mut fake, ALPHA, false).0);
+    assert!(
+        said.starts_with(&format!("{tag} is already on upstream, on {}", &at[..8])),
+        "{said}"
+    );
+}
+
+#[test]
+fn a_release_run_that_fails_says_to_rerun_it_and_a_run_again_names_the_same_run() {
+    let (world, mut fake) = released();
+    fake.conclusions.insert(("release.yml", "push"), "failure");
+    let tag = format!("v{PLAIN}");
+    let said = refusal(promoted(&world, &mut fake, ALPHA, false).0);
+    let run = fake.runs_of("release.yml", "push")[0].id;
+    assert_eq!(
+        said,
+        format!(
+            "release run {run} ended failure: {tag} stays on upstream; {}",
+            advice(&tag, Some(run))
+        )
+    );
+    let promoted_commit = git(&world.upstream, &["rev-parse", BRANCH]);
+    let said = refusal(promoted(&world, &mut fake, ALPHA, false).0);
+    assert_eq!(
+        said,
+        format!(
+            "{tag} is already on upstream, on {}, so its Release run started; {}",
+            &promoted_commit[..8],
+            advice(&tag, Some(run))
+        )
+    );
+}
+
+#[test]
+fn feeds_that_do_not_serve_after_a_green_run_say_the_release_is_published() {
+    let (world, mut fake) = released();
+    fake.publishes = false;
+    let said = refusal(promoted(&world, &mut fake, ALPHA, false).0);
+    let run = fake.runs_of("release.yml", "push")[0].id;
+    assert!(
+        said.starts_with(&format!(
+            "release run {run} ended green, its own check of the feeds with it, yet feed-alpha does not serve 3.0.6 after 5 reads (it serves {ALPHA})"
+        )),
+        "{said}"
+    );
+    assert!(said.ends_with("and run nothing again"), "{said}");
 }
 
 #[test]

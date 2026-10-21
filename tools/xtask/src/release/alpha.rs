@@ -5,7 +5,7 @@
 use cf_publish::version::Version;
 use cf_release::version::source_version;
 
-use super::github::{served_text, Watched};
+use super::github::Watched;
 use super::{notes_at, plain_of, refused, short, Error, Options, Release, ALPHA_FEED, STABLE_FEED};
 
 pub(super) fn release(release: &mut Release, options: &Options) -> Result<String, Error> {
@@ -18,15 +18,14 @@ pub(super) fn release(release: &mut Release, options: &Options) -> Result<String
 
     // The publisher never moves a feed backward: a version feed-alpha does not
     // come before would be released and never served.
-    let alpha_served = release.feed_version(ALPHA_FEED)?;
+    let served = release.served_by(ALPHA_FEED)?;
     let ours = Version::parse(&version).map_err(|cause| refused(cause.to_string()))?;
-    let Some(served) = alpha_served.clone().filter(|served| *served < ours) else {
+    if served >= ours {
         return Err(refused(format!(
-            "{ALPHA_FEED} serves {}, which {version} does not come after: set a later version",
-            served_text(alpha_served.as_ref())
+            "{ALPHA_FEED} serves {served}, which {version} does not come after: set a later version"
         )));
-    };
-    let stable_before = release.feed(STABLE_FEED)?;
+    }
+    let stable_before = release.served_by(STABLE_FEED)?;
     release.say(&format!(
         "{version} on {}: {ALPHA_FEED} serves {served}",
         short(&commit)
@@ -39,6 +38,7 @@ pub(super) fn release(release: &mut Release, options: &Options) -> Result<String
         event: None,
         before: None,
         both_platforms: true,
+        tag: None,
     })?;
     let before = release.newest_run("release.yml", Some(&commit), Some("workflow_dispatch"))?;
     release.dispatch("release.yml", "main")?;
@@ -49,6 +49,7 @@ pub(super) fn release(release: &mut Release, options: &Options) -> Result<String
         event: Some("workflow_dispatch"),
         before,
         both_platforms: false,
+        tag: None,
     })?;
     if options.dry_run {
         return Ok(format!(
@@ -60,18 +61,22 @@ pub(super) fn release(release: &mut Release, options: &Options) -> Result<String
 
     let before = release.newest_run("release.yml", Some(&commit), Some("push"))?;
     release.tag_and_push(&tag, &notes, &commit)?;
-    release.watch(&Watched {
+    let run = release.watch(&Watched {
         label: "release",
         workflow: "release.yml",
         commit: &commit,
         event: Some("push"),
         before,
         both_platforms: false,
+        tag: Some(&tag),
     })?;
-    release.wait_for_feed(ALPHA_FEED, &version)?;
-    if release.feed(STABLE_FEED)? != stable_before {
+    release.wait_for_feed(ALPHA_FEED, &version, run)?;
+    // By the release it names, read as the one before was: a 404 is no change.
+    let stable_after = release.served_by(STABLE_FEED)?;
+    if stable_after != stable_before {
         return Err(refused(format!(
-            "{STABLE_FEED} changed while {version} was released: an alpha never moves it"
+            "{STABLE_FEED} serves {stable_after}, and served {stable_before} before {version} was released: \
+             an alpha never moves it; read the publish job of run {run}"
         )));
     }
     Ok(format!(

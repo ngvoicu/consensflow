@@ -5,11 +5,15 @@
 //! workflow (on the commit, by the event) that is not the one that was newest
 //! before it was asked for, then looked at until it has ended. `gh run watch`
 //! can return before a run ends, so only the run's own status is read.
+//!
+//! A feed is read as installed apps read it, and read again on a 404 or a
+//! network error within the reads the pace allows: a feed just swapped can
+//! answer 404 for minutes while GitHub's download links catch up.
 
 use cf_publish::version::{named_release, Version};
 use serde_json::Value;
 
-use super::{refused, short, Error, Release, DOWNLOADS, REPOSITORY};
+use super::{refused, short, Error, Release, ALPHA_FEED, DOWNLOADS, REPOSITORY, STABLE_FEED};
 use crate::process::Invocation;
 
 /// The run to watch: which workflow, on which commit, started by which event.
@@ -24,6 +28,39 @@ pub(super) struct Watched<'a> {
     pub before: Option<u64>,
     /// Whether the run must hold a green gate of each platform (`ci.yml`'s).
     pub both_platforms: bool,
+    /// The tag whose push started the run, which stays on upstream whatever
+    /// the run does: what is said when it does not end green.
+    pub tag: Option<&'a str>,
+}
+
+/// What a person does about a tag on upstream whose Release run `run` did not
+/// end green, or might not have: rerun it, which the publisher finishes from
+/// where it stopped, or take the version as spent.
+pub(super) fn rerun_advice(tag: &str, run: Option<u64>) -> String {
+    let rerun = match run {
+        Some(id) => format!(
+            "if run {id} failed, rerun it, `gh run rerun {id} --failed --repo {REPOSITORY}`"
+        ),
+        None => format!(
+            "find its run, `gh run list --repo {REPOSITORY} --workflow release.yml --event push`, and if it failed rerun it, `gh run rerun <id> --failed --repo {REPOSITORY}`"
+        ),
+    };
+    let version = tag.strip_prefix('v').unwrap_or(tag);
+    format!(
+        "{rerun}: the publisher finishes from where it stopped; then read the feeds, \
+         {DOWNLOADS}/{ALPHA_FEED}/latest.json and {DOWNLOADS}/{STABLE_FEED}/latest.json. \
+         A failure that is real spends {version}: release the next version"
+    )
+}
+
+/// One read of a feed.
+enum Read {
+    /// It serves this release.
+    Serves(Version),
+    /// It answered, with no release in it, or with an HTTP error (404 among them).
+    Nothing,
+    /// It could not be reached: what curl said.
+    Unreachable(String),
 }
 
 /// What a run says of itself.
@@ -136,8 +173,12 @@ impl Release<'_> {
             self.system.pause(self.pace.appear);
         }
         let id = found.ok_or_else(|| {
+            let then = watched.tag.map_or_else(
+                || "nothing after it was done".to_owned(),
+                |tag| format!("{tag} is on upstream; {}", rerun_advice(tag, None)),
+            );
             refused(format!(
-                "{label}: no new run of {workflow} appeared on {}",
+                "{label}: no new run of {workflow} appeared on {}: {then}",
                 short(watched.commit)
             ))
         })?;
@@ -154,8 +195,12 @@ impl Release<'_> {
             self.say(&format!("  {job} {conclusion}"));
         }
         if ended.conclusion != "success" {
+            let then = watched.tag.map_or_else(
+                || "nothing after it was done".to_owned(),
+                |tag| format!("{tag} stays on upstream; {}", rerun_advice(tag, Some(id))),
+            );
             return Err(refused(format!(
-                "{label} run {id} ended {}: nothing after it was done",
+                "{label} run {id} ended {}: {then}",
                 ended.conclusion
             )));
         }
@@ -175,55 +220,81 @@ impl Release<'_> {
         Ok(id)
     }
 
-    /// What the feed `name` serves, as installed apps read it; none where it
-    /// answers no document.
-    pub(super) fn feed(&mut self, name: &str) -> Result<Option<String>, Error> {
-        let address = format!("{DOWNLOADS}/{name}/latest.json");
+    /// The address installed apps read the feed `name` at.
+    pub(super) fn feed_address(name: &str) -> String {
+        format!("{DOWNLOADS}/{name}/latest.json")
+    }
+
+    /// One read of the feed `name`.
+    fn read_feed(&mut self, name: &str) -> Result<Read, Error> {
         let invocation = Invocation::new("curl", &self.root)
             .args(["-sfL", "--max-time", "60"])
-            .arg(&address);
+            .arg(Self::feed_address(name));
         let answered = self.system.capture(&invocation)?;
-        match answered.code {
-            0 => Ok(Some(answered.stdout)),
+        Ok(match answered.code {
+            0 => named_release(answered.stdout.as_bytes()).map_or(Read::Nothing, Read::Serves),
             // curl's status for an HTTP error, 404 among them, with -f.
-            22 => Ok(None),
-            code => Err(Error::Program {
-                command: invocation.display(),
-                code,
-                said: answered.stderr.trim().to_owned(),
-            }),
-        }
+            22 => Read::Nothing,
+            code => Read::Unreachable(format!("curl ended {code}: {}", answered.stderr.trim())),
+        })
     }
 
-    /// The release the feed `name` names, if it serves one.
-    pub(super) fn feed_version(&mut self, name: &str) -> Result<Option<Version>, Error> {
-        Ok(self
-            .feed(name)?
-            .and_then(|body| named_release(body.as_bytes())))
-    }
-
-    /// Reads the feed `name` until it serves `version`, and refuses one that
-    /// still does not after the reads the pace allows.
-    pub(super) fn wait_for_feed(&mut self, name: &str, version: &str) -> Result<(), Error> {
-        let mut served = None;
+    /// Reads the feed `name` until `wanted` says what it serves is the answer,
+    /// within the reads the pace allows: the last thing it served or answered
+    /// when none was.
+    fn read_until(
+        &mut self,
+        name: &str,
+        wanted: impl Fn(&Version) -> bool,
+    ) -> Result<Result<Version, String>, Error> {
+        let mut last = String::from("no answer");
         for attempt in 0..self.pace.feed_attempts {
             if attempt > 0 {
                 self.system.pause(self.pace.feed);
             }
-            served = self.feed_version(name)?;
-            if served.as_ref().map(Version::as_str) == Some(version) {
-                self.say(&format!("{name} serves {version}"));
-                return Ok(());
+            match self.read_feed(name)? {
+                Read::Serves(version) if wanted(&version) => return Ok(Ok(version)),
+                Read::Serves(version) => last = format!("it serves {version}"),
+                Read::Nothing => last = "it serves no release".to_owned(),
+                Read::Unreachable(said) => last = said,
             }
         }
-        Err(refused(format!(
-            "{name} does not serve {version}: it serves {}",
-            served_text(served.as_ref())
-        )))
+        Ok(Err(last))
     }
-}
 
-/// What a feed serves, as it is said.
-pub(super) fn served_text(version: Option<&Version>) -> String {
-    version.map_or_else(|| "no release".to_owned(), ToString::to_string)
+    /// The release the feed `name` serves, read again on a 404 or a network
+    /// error; a feed that never answers one is an outage, and refused.
+    pub(super) fn served_by(&mut self, name: &str) -> Result<Version, Error> {
+        let reads = self.pace.feed_attempts;
+        self.read_until(name, |_| true)?.map_err(|last| {
+            refused(format!(
+                "{name} answered no release in {reads} reads ({last}): an outage of the feed or of GitHub, \
+                 not a version to change; nothing was done, run again later"
+            ))
+        })
+    }
+
+    /// Reads the feed `name` until it serves `version`, after the Release run
+    /// `run` ended green, and says what to do when it still does not.
+    pub(super) fn wait_for_feed(
+        &mut self,
+        name: &str,
+        version: &str,
+        run: u64,
+    ) -> Result<(), Error> {
+        let reads = self.pace.feed_attempts;
+        match self.read_until(name, |served| served.as_str() == version)? {
+            Ok(_) => {
+                self.say(&format!("{name} serves {version}"));
+                Ok(())
+            }
+            Err(last) => Err(refused(format!(
+                "release run {run} ended green, its own check of the feeds with it, yet {name} \
+                 does not serve {version} after {reads} reads ({last}): the release is published, and \
+                 GitHub's download links can lag; read it again in a few minutes, `curl -sL {}`, \
+                 and run nothing again",
+                Self::feed_address(name)
+            ))),
+        }
+    }
 }

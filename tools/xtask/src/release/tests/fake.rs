@@ -266,6 +266,19 @@ pub struct Fake {
     /// lockfile, and a file of its own.
     pub cargo_adds_to_the_lockfile: Option<&'static str>,
     pub cargo_writes: Option<(&'static str, &'static str)>,
+    /// The remote that refuses pushes, as one whose hook declines them, and
+    /// the start of the references it refuses (`""` for all).
+    pub refuses_pushes: Option<&'static str>,
+    pub refused_refs: &'static str,
+    /// Reads of a feed that fail, in order: the feed, and curl's status
+    /// (22 for a 404, 28 for a time-out, 6 for a name that does not resolve).
+    pub failing_reads: Vec<(&'static str, i32)>,
+    /// Reads that fail once a tag is pushed: the feeds' answers during and after the release.
+    pub failing_after_the_tag: Vec<(&'static str, i32)>,
+    /// Whether a fetch of a tag by name fails, as one does when the network does.
+    pub tag_fetch_fails: bool,
+    /// Whether a tag pushed to upstream starts its Release run.
+    pub tags_start_runs: bool,
     /// Every program run, in order.
     pub ran: Vec<Invocation>,
     pub pauses: u32,
@@ -296,6 +309,12 @@ impl Fake {
             alpha_moves_stable: false,
             cargo_adds_to_the_lockfile: None,
             cargo_writes: None,
+            refuses_pushes: None,
+            refused_refs: "",
+            failing_reads: Vec::new(),
+            failing_after_the_tag: Vec::new(),
+            tag_fetch_fails: false,
+            tags_start_runs: true,
             ran: Vec::new(),
             pauses: 0,
         }
@@ -380,6 +399,10 @@ impl Fake {
     fn pushed(&mut self, refspec: &str) {
         let target = refspec.rsplit(':').next().unwrap_or(refspec);
         if let Some(version) = target.strip_prefix('v') {
+            self.failing_reads.append(&mut self.failing_after_the_tag);
+            if !self.tags_start_runs {
+                return;
+            }
             let commit = self.upstream_commit(target);
             let id = self.start("release.yml", &commit, "push");
             let green = self
@@ -481,6 +504,18 @@ impl Fake {
             }
         }
         self.waiting = still;
+        if let Some(at) = self
+            .failing_reads
+            .iter()
+            .position(|(named, _)| *named == feed)
+        {
+            let (_, code) = self.failing_reads.remove(at);
+            return Captured {
+                code,
+                stdout: String::new(),
+                stderr: format!("curl: ({code}) the read failed"),
+            };
+        }
         match self.feeds.get(&feed) {
             Some(body) => said(body),
             None => Captured {
@@ -548,12 +583,33 @@ impl System for Fake {
             .collect();
         match invocation.program.to_string_lossy().as_ref() {
             "git" => {
+                // `push -q <remote> <refspec>`
+                let pushing_to = (args.first().is_some_and(|word| word == "push"))
+                    .then(|| args.get(2).cloned())
+                    .flatten();
+                let refused = args
+                    .get(3)
+                    .is_some_and(|refspec| refspec.starts_with(self.refused_refs));
+                if pushing_to.is_some() && pushing_to.as_deref() == self.refuses_pushes && refused {
+                    return Ok(Captured {
+                        code: 1,
+                        stdout: String::new(),
+                        stderr: "! [remote rejected] (pre-receive hook declined)".to_owned(),
+                    });
+                }
+                let fetching_a_tag = args.first().is_some_and(|word| word == "fetch")
+                    && args.iter().any(|arg| arg.starts_with("+refs/tags/"));
+                if fetching_a_tag && self.tag_fetch_fails {
+                    return Ok(Captured {
+                        code: 128,
+                        stdout: String::new(),
+                        stderr: "fatal: unable to access the remote: Could not resolve host"
+                            .to_owned(),
+                    });
+                }
                 let ran = process::capture(invocation, &Env::from_process())?;
-                if ran.code == 0 && args.first().is_some_and(|word| word == "push") {
-                    // `push -q <remote> <refspec>`
-                    if args.get(2).is_some_and(|remote| remote == "upstream") {
-                        self.pushed(&args[3]);
-                    }
+                if ran.code == 0 && pushing_to.as_deref() == Some("upstream") {
+                    self.pushed(&args[3]);
                 }
                 Ok(ran)
             }
