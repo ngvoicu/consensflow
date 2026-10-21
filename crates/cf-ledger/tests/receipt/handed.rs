@@ -110,23 +110,51 @@ fn what_a_paste_carried_is_handed_no_more_once_its_carrier_is_given_up() {
     assert!(!w.ledger.handed_over(w.project).unwrap().contains(&note));
 }
 
-/// Both reviews of 2026-10-17: a start during an admitted carrier's delivery let
-/// go of what it carried with its marks, and a reader of the closed project read
-/// it as handed. What a start lets go of is handed nothing.
+/// Both reviews of 2026-10-17: a start let go of what a carrier carried with its
+/// marks, and a reader of the closed project read it as handed. What a start lets
+/// go of (rows an earlier build left queued under a carrier it delivered) is handed
+/// nothing.
 #[test]
 fn what_a_start_lets_go_of_is_handed_no_more() {
     let mut w = world();
     let (words, note) = resumed_with_a_note(&mut w);
     w.ledger.admit(words, &[note]).unwrap();
+    w.ledger
+        .write_raw(&format!(
+            "UPDATE message SET state = 'delivered' WHERE id = {words}"
+        ))
+        .expect("as an earlier build left it");
 
-    // The app quits with the words on their way, and the ledger is opened again.
+    // The ledger is opened again.
     w.edit(|_| {});
 
     assert_eq!(w.message(note).state, "queued");
     assert!(!w.ledger.handed_over(w.project).unwrap().contains(&note));
 }
 
-/// Astra's review of 2026-10-17: a message delivered before migration 0020 has
+/// A carrier on its way when the app quit keeps what it carried, handed with it:
+/// the rows rode in its paste, and the start settles them with it (main's B5: let
+/// go of, they went again on their own after a paste that had them). Tried again,
+/// as the start does where the window's record shows nothing of it, nothing of it
+/// stays handed.
+#[test]
+fn what_a_carrier_on_its_way_at_a_stop_carried_stays_handed_until_the_start_settles_it() {
+    let mut w = world();
+    let (words, note) = resumed_with_a_note(&mut w);
+    w.ledger.admit(words, &[note]).unwrap();
+
+    // The app quits with the words on their way, and the ledger is opened again.
+    w.edit(|_| {});
+    assert_eq!(w.states(&[words, note]), ["delivering", "queued"]);
+    assert!(w.ledger.handed_over(w.project).unwrap().contains(&note));
+
+    w.ledger
+        .retry_delivery(words, "the daemon stopped before it arrived", true)
+        .expect("tried again");
+    assert!(w.ledger.handed_over(w.project).unwrap().is_empty());
+}
+
+/// Astra's review of 2026-10-17: a message delivered before migration 0022 has
 /// no mark, and one its window takes back out of its conversation was read as
 /// handed nothing. It was delivered, so it was handed, and so was what its paste
 /// carried: the window holds them in its input box.
@@ -134,7 +162,7 @@ fn what_a_start_lets_go_of_is_handed_no_more() {
 fn a_message_taken_back_was_handed_whether_or_not_its_transport_marked_it() {
     let mut w = world();
     let (words, note) = resumed_with_a_note(&mut w);
-    // Delivered as before 0020: no transport marked it.
+    // Delivered as before 0022: no transport marked it.
     w.confirm(words);
     assert!(w.ledger.handed_over(w.project).unwrap().is_empty());
 

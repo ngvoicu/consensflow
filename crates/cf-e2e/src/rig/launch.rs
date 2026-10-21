@@ -13,7 +13,6 @@ use serde_json::Value;
 use super::forget::Forget;
 use super::install::{environment, var, write_fake_install, write_roster};
 use super::route::Shared;
-#[cfg(unix)]
 use super::stranger::Stranger;
 use super::{Config, Rig};
 use crate::daemon::Daemon;
@@ -66,7 +65,6 @@ impl Rig {
         }
 
         // Beside the pane host, before any window: none of theirs.
-        #[cfg(unix)]
         let stranger = Stranger::start()?;
         let (mut daemon, start_line) = start_daemon(&config, &env)?;
         let (mut host, host_output) = start_host(&env)?;
@@ -84,9 +82,9 @@ impl Rig {
             shared,
             daemon,
             host,
-            #[cfg(unix)]
             stranger,
             forget: config.stand_in_records.map(Forget::new),
+            masker: config.masker,
             keep_root: false,
             closed: false,
             _turn: turn,
@@ -197,15 +195,19 @@ fn route(
         );
     }
     let routed = Arc::clone(&shared);
-    let ended = to_daemon.clone();
+    let (ended, told) = (to_daemon.clone(), Arc::clone(&shared));
     wire::read_each(
         host_output,
         move |line| {
             routed.route_host(&line, &to_host, &to_daemon);
             true
         },
-        // The pane host is gone: the daemon's end of it is too.
-        move || ended.end(),
+        // The pane host is gone: the daemon's end of it is too, and every frame it
+        // wrote is in.
+        move || {
+            told.seen().host_ended = true;
+            ended.end();
+        },
     );
     Ok(shared)
 }

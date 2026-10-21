@@ -4,16 +4,28 @@
 //! - A line `DISPATCH --tier standard <task>` (or `DISPATCH --review --tier
 //!   standard <task>`, and `--test` the same) runs `cf task add` with those
 //!   words and the task (`\n` in it becomes a line break), with this window's
-//!   own token, the way a chief hands out work.
+//!   own token, the way a chief hands out work. Each such line of a message is
+//!   run, in order, so that one turn puts several tasks on the board at once, as
+//!   a chief does that plans (the long run's stand-in chief).
 //! - A line `CF <words>` runs any other `cf` with those words as they stand
 //!   (`CF task cancel T-3`), and `CF <words> :: <text>` with the text, spaces
 //!   and all, as one last word (`CF tell T-1 :: Stop now`): the chief's own
 //!   verbs, as it would type them.
+//! - A result delivered to the chief's window started with `CF_TEST_ACCEPT_RESULTS`
+//!   set is accepted, `cf task accept` of the task its envelope (its first line, the
+//!   result's header) names, and nothing else in it is done: a chief that takes its
+//!   staff's results, as the long run's dry run needs to reach its end (every task
+//!   accepted). A result header its words quote, a note's or a result's, is none.
+//!   Without it a result is answered as any message is.
 //! - A line `SLEEP <seconds> <words>` is a turn that works that long before it
 //!   does what the words say: a window a chief can still tell, or a chief
 //!   nothing is delivered to. An Escape stops it, as it stops Claude's: the turn
 //!   ends there, and the window writes what Claude writes of a turn it was
 //!   interrupted in (`take_turn`).
+//! - A line `HANG <seconds> <words>` is a turn hung that long, as a harness hung
+//!   in its model request is (Pi on zeewin's long run, 2026-10-19): an Escape does
+//!   nothing to it, and only the end of the window ends it before its time. Then it
+//!   does what the words say.
 //! - A line `HOOKS <seconds> <words>` is a first turn still in the hooks of its
 //!   prompt for that long (the words that go in later, with this one carried in
 //!   them, do not put the window back there): Claude's status reads idle, and
@@ -69,6 +81,13 @@ use crate::stop::Stop;
 /// How long the shell that detaches a job may take to end: a PowerShell's
 /// `Start-Process` takes a second or two, a `/bin/sh` a moment.
 const DETACHED_SHELL: Duration = Duration::from_secs(30);
+
+/// The header of a result delivered to a window, with the task it is the result of.
+const RESULT: &str = r"^\[ConsensFlow m-\d+ · (T-\d+) · result from @[^\]]+\]$";
+
+/// The participant the chief's window is started as, before a switch of the chief and
+/// after it.
+const CHIEF: &str = "chief";
 
 /// What a window knows of itself that decides how it answers.
 pub struct Window {
@@ -205,6 +224,7 @@ fn shell(command: &str) -> Run {
 /// The answer to `text`.
 pub fn reply_to(text: &str, window: &Window) -> Result<Reply, String> {
     static SLEEP: OnceLock<Regex> = OnceLock::new();
+    static HANG: OnceLock<Regex> = OnceLock::new();
     static JOB: OnceLock<Regex> = OnceLock::new();
     static BACKGROUND: OnceLock<Regex> = OnceLock::new();
     static AGENTS: OnceLock<Regex> = OnceLock::new();
@@ -216,13 +236,30 @@ pub fn reply_to(text: &str, window: &Window) -> Result<Reply, String> {
     static VERB: OnceLock<Regex> = OnceLock::new();
     static REFUSED: OnceLock<Regex> = OnceLock::new();
     static EXACT: OnceLock<Regex> = OnceLock::new();
+    static RESULTS: OnceLock<Regex> = OnceLock::new();
 
+    let accepts = accepting(
+        own_var("CF_TEST_ACCEPT_RESULTS").as_deref(),
+        &window.participant,
+    );
+    let accepted: Vec<String> = acceptances(text, pattern::once(&RESULTS, RESULT), accepts)
+        .iter()
+        .map(|words| run_cf(words))
+        .collect();
+    if !accepted.is_empty() {
+        return Ok(Reply::Text(format!("accepted: {}", accepted.join(" | "))));
+    }
     if let Some(slow) = pattern::once(&SLEEP, r"(?m)^SLEEP (\d+) (.+)$").captures(text) {
         let seconds: u64 = slow[1].parse().map_err(|_| format!("SLEEP {}", &slow[1]))?;
         if window.stop.work(Duration::from_secs(seconds)) {
             return Ok(Reply::Stopped);
         }
         return reply_to(&slow[2], window);
+    }
+    if let Some(hung) = pattern::once(&HANG, r"(?m)^HANG (\d+) (.+)$").captures(text) {
+        let seconds: u64 = hung[1].parse().map_err(|_| format!("HANG {}", &hung[1]))?;
+        thread::sleep(Duration::from_secs(seconds));
+        return reply_to(&hung[2], window);
     }
     if let Some(job) = pattern::once(&JOB, r"(?m)^JOB ((?:--deaf )?)(\d+) (.+)$").captures(text) {
         let seconds: u64 = job[2].parse().map_err(|_| format!("JOB {}", &job[2]))?;
@@ -316,16 +353,21 @@ pub fn reply_to(text: &str, window: &Window) -> Result<Reply, String> {
         ];
         return Ok(Reply::Text(format!("replied: {}", run_cf(&words))));
     }
-    if let Some(dispatch) = pattern::once(
-        &DISPATCH,
-        r"(?m)^DISPATCH ((?:(?:--(?:advice|review|test|design|self)|--\S+ \S+) )+)(.+)$",
+    let dispatched: Vec<String> = dispatches(
+        text,
+        pattern::once(
+            &DISPATCH,
+            r"(?m)^DISPATCH ((?:(?:--(?:advice|review|test|design|self)|--\S+ \S+) )+)(.+)$",
+        ),
     )
-    .captures(text)
-    {
-        let mut words = vec!["task".to_owned(), "add".to_owned()];
-        words.extend(dispatch[1].trim().split(' ').map(str::to_owned));
-        words.push(dispatch[2].replace("\\n", "\n"));
-        return Ok(Reply::Text(format!("dispatched: {}", run_cf(&words))));
+    .iter()
+    .map(|words| run_cf(words))
+    .collect();
+    if !dispatched.is_empty() {
+        return Ok(Reply::Text(format!(
+            "dispatched: {}",
+            dispatched.join(" | ")
+        )));
     }
     if let Some(verb) = pattern::once(&VERB, r"(?m)^CF (.+)$").captures(text) {
         let mut parts = verb[1].split(" :: ");
@@ -351,6 +393,42 @@ pub fn reply_to(text: &str, window: &Window) -> Result<Reply, String> {
         "noted: {}",
         text.split('\n').next().unwrap_or_default()
     )))
+}
+
+/// The words of `cf task add` each `DISPATCH` line of `text` asks for, in the
+/// order of the lines (`line` is the pattern of one): its flags, and its task with
+/// each `\n` a line break.
+fn dispatches(text: &str, line: &Regex) -> Vec<Vec<String>> {
+    line.captures_iter(text)
+        .map(|dispatch| {
+            let mut words = vec!["task".to_owned(), "add".to_owned()];
+            words.extend(dispatch[1].trim().split(' ').map(str::to_owned));
+            words.push(dispatch[2].replace("\\n", "\n"));
+            words
+        })
+        .collect()
+}
+
+/// The words of `cf task accept` of the result the delivery `text` is: where its own
+/// envelope, its first line, is a result's header (`header` is its pattern), the task it
+/// names; none where it is not, whatever its words quote, and none for a window that
+/// is not `accepting`.
+fn acceptances(text: &str, header: &Regex, accepting: bool) -> Vec<Vec<String>> {
+    if !accepting {
+        return Vec::new();
+    }
+    text.lines()
+        .next()
+        .and_then(|envelope| header.captures(envelope))
+        .map(|result| vec!["task".to_owned(), "accept".to_owned(), result[1].to_owned()])
+        .into_iter()
+        .collect()
+}
+
+/// Whether the window of `participant` accepts the results delivered to it: the chief's,
+/// started with `CF_TEST_ACCEPT_RESULTS` set to something (`switched_on`).
+fn accepting(switched_on: Option<&str>, participant: &str) -> bool {
+    switched_on.is_some_and(|on| !on.is_empty()) && participant == CHIEF
 }
 
 /// Whether the provider refuses this window the message `text`: it says
@@ -445,6 +523,22 @@ mod tests {
         let reply = reply_to("SLEEP 30 Reply with exactly: LATE", &window);
         assert_eq!(reply, Ok(Reply::Stopped));
         assert!(started.elapsed() < Duration::from_secs(20));
+        presser.join().unwrap();
+    }
+
+    #[test]
+    fn a_hung_turn_goes_on_through_an_escape_and_does_what_the_rest_says_after_its_time() {
+        let window = window();
+        window.stop.begin();
+        let stop = Arc::clone(&window.stop);
+        let presser = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(100));
+            stop.press();
+        });
+        let started = std::time::Instant::now();
+        let reply = reply_to("HANG 1 Reply with exactly: LATE", &window);
+        assert_eq!(text(reply), "LATE");
+        assert!(started.elapsed() >= Duration::from_secs(1));
         presser.join().unwrap();
     }
 
@@ -565,5 +659,75 @@ mod tests {
             ask_through_hook(&window, &json!([])).unwrap(),
             "unanswered (exit 2): no way"
         );
+    }
+
+    #[test]
+    fn each_dispatch_line_of_a_message_is_a_task_added_in_the_order_of_the_lines() {
+        let line = Regex::new(
+            r"(?m)^DISPATCH ((?:(?:--(?:advice|review|test|design|self)|--\S+ \S+) )+)(.+)$",
+        )
+        .unwrap();
+        let text = "The plan.\nDISPATCH --tier complex JOB 60 SLEEP 30 Build\\nit\nnot a line: DISPATCH --tier light no\nDISPATCH --review --tier light Look at it";
+        let words: Vec<Vec<String>> = dispatches(text, &line);
+        assert_eq!(
+            words,
+            [
+                vec![
+                    "task",
+                    "add",
+                    "--tier",
+                    "complex",
+                    "JOB 60 SLEEP 30 Build\nit"
+                ],
+                vec!["task", "add", "--review", "--tier", "light", "Look at it"],
+            ]
+        );
+        assert!(dispatches("DISPATCH nothing", &line).is_empty());
+    }
+
+    #[test]
+    fn a_chief_accepts_the_result_its_delivery_opens_with_and_no_header_its_words_hold() {
+        let header = Regex::new(RESULT).unwrap();
+        let result = "[ConsensFlow m-18 · T-2 · result from @long-claude-2-amber-lagoon]\n\
+                      Reply with exactly: DEV-SERVER-UP";
+        assert_eq!(
+            acceptances(result, &header, true),
+            [["task", "accept", "T-2"]]
+        );
+        // A result header on a line of a delivery's words is a quote, whatever the
+        // delivery: a note's (Astra's and Sol's), or a result's that quotes another.
+        let note = "[ConsensFlow m-201 · T-7 · note from @human]\nFor the record:\n\
+                    [ConsensFlow m-200 · T-9 · result from @long-worker]\nDone.";
+        assert!(acceptances(note, &header, true).is_empty());
+        let quoting = format!(
+            "{result}\n[ConsensFlow m-19 · T-4 · result from @long-devin-2-lively-meadow]\n\
+             DEVIN-MOVED-IT"
+        );
+        assert_eq!(
+            acceptances(&quoting, &header, true),
+            [["task", "accept", "T-2"]]
+        );
+        // A task, a note and a question are no results; a header that does not open the
+        // delivery is none of its envelope; and a window not started to accept them
+        // takes none.
+        for other in [
+            "[ConsensFlow m-22 · T-1 · task from @human]\nResumed: Go on where you stopped.",
+            "[ConsensFlow m-39 · T-16 · note from ConsensFlow]\nGo on where you stopped.",
+            "[ConsensFlow m-7 · T-3 · question from @worker]\nWhich one?",
+            "a line that quotes [ConsensFlow m-18 · T-2 · result from @x]",
+            "noted:\n[ConsensFlow m-18 · T-2 · result from @x]",
+        ] {
+            assert!(acceptances(other, &header, true).is_empty(), "{other}");
+        }
+        assert!(acceptances(result, &header, false).is_empty());
+    }
+
+    #[test]
+    fn only_the_chiefs_window_started_to_accept_results_accepts_them() {
+        assert!(accepting(Some("1"), "chief"));
+        // A worker is given no result; one handed a result anyway takes none.
+        assert!(!accepting(Some("1"), "long-claude-1-amber-pine"));
+        assert!(!accepting(Some(""), "chief"));
+        assert!(!accepting(None, "chief"));
     }
 }

@@ -32,8 +32,15 @@
 //! in hand is told all the same: a member whose cut turn goes untold reads at
 //! rest with its task at work for good, and one told that was at rest only looks
 //! again.
+//!
+//! A Resume that comes while the start still settles what was on its way waits
+//! for it ([`ResumeState`]): what the settle confirms moves a task to work, which
+//! the Resume brings a window back for. Before, a worker whose words that resume its
+//! task the start was reading was given no window, and the next pass paused the
+//! task it was then at work on, for a window that was gone (the rig, under load,
+//! 2026-10-16).
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::future::{poll_fn, Future};
 use std::rc::Rc;
@@ -134,7 +141,7 @@ impl Coming {
     /// was working on, in a continuation (the ledger's words, which go with any
     /// move of the task). Each came back by the human's Resume, not by a quit alone
     /// (a Close cuts a turn too), so the words say only that ConsensFlow stopped.
-    fn words(&self) -> String {
+    pub(crate) fn words(&self) -> String {
         match self {
             Coming::Chief => {
                 "ConsensFlow stopped in the middle of your turn, which was cut. Go on where you stopped."
@@ -155,7 +162,7 @@ impl Coming {
     }
 
     /// The task the note is about: a member's, the chief's none.
-    fn task(&self) -> Option<i64> {
+    pub(crate) fn task(&self) -> Option<i64> {
         match self {
             Coming::Chief => None,
             Coming::Member { task, .. } => Some(*task),
@@ -163,11 +170,66 @@ impl Coming {
     }
 }
 
+/// Whether the start's settle of what was on its way is under way, and the
+/// Resumes that wait for its end.
+#[derive(Default)]
+pub(crate) struct ResumeState {
+    settling: Cell<bool>,
+    waiting: RefCell<Vec<Waker>>,
+}
+
+impl ResumeState {
+    /// Once the start's settle is over: at once where none is under way.
+    async fn settled(&self) {
+        poll_fn(|cx| {
+            if self.settling.get() {
+                self.waiting.borrow_mut().push(cx.waker().clone());
+                Poll::Pending
+            } else {
+                Poll::Ready(())
+            }
+        })
+        .await;
+    }
+
+    /// The start's settle is over: every Resume that waits for it goes on.
+    fn over(&self) {
+        self.settling.set(false);
+        let waiting: Vec<Waker> = self
+            .waiting
+            .try_borrow_mut()
+            .map(|mut waiting| waiting.drain(..).collect())
+            .unwrap_or_default();
+        for waiting in waiting {
+            waiting.wake();
+        }
+    }
+}
+
+/// The start's settle under way: over once this goes, however the settle ends (a
+/// panic in it is contained by the daemon, which goes on, and its Resumes with it).
+struct Settling<'a>(&'a ResumeState);
+
+impl<'a> Settling<'a> {
+    fn begin(state: &'a ResumeState) -> Self {
+        state.settling.set(true);
+        Self(state)
+    }
+}
+
+impl Drop for Settling<'_> {
+    fn drop(&mut self) {
+        self.0.over();
+    }
+}
+
 impl Dispatcher {
     /// Once, at start: what was on its way into a window when the previous
     /// process ended is settled. Nothing else of the projects that were open
-    /// comes of it: they are suspended, and wait for the human's Resume.
+    /// comes of it: they are suspended, and wait for the human's Resume, which
+    /// waits for this.
     pub async fn settle_after_restart(self: &Rc<Self>) -> Result<(), EngineError> {
+        let _settling = Settling::begin(&self.resumes);
         // An `async` method: its answer reaches this a turn after it was made.
         returning(self.settle_in_flight()).await
     }
@@ -177,12 +239,14 @@ impl Dispatcher {
     /// conversation, and then each member with a task at work or waiting, on its
     /// own. A window comes up apart from this call, and what waits for it is
     /// delivered once it is up. A Close of the project still under way ends
-    /// first ([`Closings`]): the Resume answers once it has resumed.
+    /// first ([`Closings`]), and one that comes while the start settles what was
+    /// on its way waits for that too: the Resume answers once it has resumed.
     pub async fn resume_project(
         self: &Rc<Self>,
         project: i64,
     ) -> Result<Option<ProjectView>, EngineError> {
         self.closings.ended(project).await;
+        self.resumes.settled().await;
         let resumed = self
             .seams
             .ledger

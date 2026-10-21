@@ -304,7 +304,9 @@ fn riding_with_its_task_paused(w: &mut World, carrier: &str, riding: &str) -> (i
 /// What a carrier carries comes back with it, or is let go of by it: a
 /// continuation among it whose task is not at work is withdrawn in that write,
 /// whichever way it came back: its carrier's admission refused, its carrier tried
-/// again, given up, taken back out of its window, or let go of at a start.
+/// again (as the start settles one on its way when the app quit, which keeps its
+/// set), given up, taken back out of its window, or let go of at a start (left
+/// queued under a carrier an earlier build delivered).
 #[test]
 fn a_continuation_riding_in_a_carrier_that_comes_back_is_withdrawn_unless_its_task_is_at_work() {
     type Back = fn(&mut World, i64, i64);
@@ -330,7 +332,7 @@ fn a_continuation_riding_in_a_carrier_that_comes_back_is_withdrawn_unless_its_ta
                 .take_back(words, "the window took it back")
                 .expect("taken back");
         }),
-        ("let go of at a start", "delivering", "queued", |w, _, _| {
+        ("let go of at a start", "delivered", "queued", |w, _, _| {
             w.edit(|_| {});
         }),
     ];

@@ -14,23 +14,50 @@ use std::path::Path;
 use std::time::Instant;
 
 use cf_process::{alive, terminate, Ending};
+use tokio::task::JoinHandle;
 
 use super::*;
 
 /// How long the system is given to be rid of a process the stop ended.
 const GONE_WITHIN: Duration = Duration::from_secs(20);
 
+/// How long a tree is given to start and write its pids: how soon it starts
+/// is not what is tested, and PowerShell started cold beside the crate's other
+/// tests on a slow runner took longer than the ending is given (CI's Windows,
+/// run 39055885804).
+const STARTS_WITHIN: Duration = Duration::from_secs(120);
+
+/// How long the daemon is given, once stopped, to answer the run and the
+/// capture: ended with it, they fail at once.
+const ENDED_WITHIN: Duration = Duration::from_secs(25);
+
+/// How long the programs of a tree run unless they are ended: longer than all
+/// the test waits while they could run (both starts, the ending, and each of
+/// the four processes gone), so that a tree the stop left is still there when
+/// it is looked for. Were it shorter, a tree that started at once beside one
+/// slow to start would end of itself under a stop that ended its parent alone,
+/// and pass. `Left` ends them as the test ends.
+const LIVES: Duration = Duration::from_secs(600);
+
+// With a minute to spare.
+const _: () = assert!(
+    LIVES.as_secs()
+        > 2 * STARTS_WITHIN.as_secs() + ENDED_WITHIN.as_secs() + 4 * GONE_WITHIN.as_secs() + 60
+);
+
 /// A parent that starts a grandchild, waits for it, and writes the pids of
-/// both to `file`. The grandchild runs for a minute, and holds the parent's
-/// streams unless it `lets_them_go` (on Windows PowerShell's never does).
+/// both to `file`. Both run for [`LIVES`], and the grandchild holds the
+/// parent's streams unless it `lets_them_go` (on Windows PowerShell's never
+/// does).
 fn tree(file: &Path, #[cfg_attr(windows, allow(unused_variables))] lets_them_go: bool) -> Program {
+    let lives = LIVES.as_secs();
     #[cfg(unix)]
     return Program {
         executable: "/bin/sh".into(),
         args: vec![
             "-c".to_owned(),
             format!(
-                "sleep 60 {} & printf '%s %s\\n' \"$$\" \"$!\" > '{}'; wait",
+                "sleep {lives} {} & printf '%s %s\\n' \"$$\" \"$!\" > '{}'; wait",
                 if lets_them_go {
                     "</dev/null >/dev/null 2>&1"
                 } else {
@@ -49,8 +76,8 @@ fn tree(file: &Path, #[cfg_attr(windows, allow(unused_variables))] lets_them_go:
             "-NoProfile".to_owned(),
             "-Command".to_owned(),
             format!(
-                "$p = Start-Process -PassThru -WindowStyle Hidden -FilePath 'C:\\Windows\\System32\\PING.EXE' -ArgumentList '-n','60','127.0.0.1'; \
-                 Set-Content -Path '{}' -Value (@($PID, $p.Id) -join ' '); Start-Sleep 60",
+                "$p = Start-Process -PassThru -WindowStyle Hidden -FilePath 'C:\\Windows\\System32\\PING.EXE' -ArgumentList '-n','{lives}','127.0.0.1'; \
+                 Set-Content -Path '{}' -Value (@($PID, $p.Id) -join ' '); Start-Sleep {lives}",
                 file.display().to_string().replace('\'', "''")
             ),
         ],
@@ -61,9 +88,12 @@ fn tree(file: &Path, #[cfg_attr(windows, allow(unused_variables))] lets_them_go:
 }
 
 /// The pids a tree wrote to `file`, once it has written both: it is running.
-async fn pids_written_to(file: &Path) -> Vec<u32> {
-    let until = Instant::now() + GONE_WITHIN;
+/// One whose `program` ended first fails at once, as such, and not a while
+/// later as one slow to start.
+async fn pids_written_to<T>(file: &Path, program: &JoinHandle<T>) -> Vec<u32> {
+    let until = Instant::now() + STARTS_WITHIN;
     while Instant::now() < until {
+        let ended = program.is_finished();
         let written = std::fs::read_to_string(file).unwrap_or_default();
         let pids: Vec<u32> = written
             .split_whitespace()
@@ -73,6 +103,11 @@ async fn pids_written_to(file: &Path) -> Vec<u32> {
         if pids.len() == 2 && written.ends_with('\n') {
             return pids;
         }
+        assert!(
+            !ended,
+            "the program ended before it wrote its pids to {}",
+            file.display()
+        );
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
     panic!("the program never wrote its pids to {}", file.display());
@@ -90,8 +125,11 @@ fn gone(pid: u32) -> bool {
     true
 }
 
-/// What a test that fails with a tree running ends as it goes: the daemon
-/// that ran it is the test, and a minute is long to leave a sleep.
+/// What a test that fails with a tree running ends as it goes, a panic
+/// included: the daemon that ran it is the test, and ten minutes are long to
+/// leave a sleep. A tree whose pids were never read is ended as the test
+/// unwinds, with the run or the capture dropped: on Unix with its group, on
+/// Windows the program, its grandchild with this process's job.
 struct Left(Vec<u32>);
 
 impl Drop for Left {
@@ -126,21 +164,20 @@ async fn the_whole_trees_of_the_programs_still_running_are_ended_on_the_way_out(
                     async move { capturing.capture(capture_tree, limits).await },
                 );
             let mut left = Left(Vec::new());
-            left.0.extend(pids_written_to(&ran).await);
-            left.0.extend(pids_written_to(&captured).await);
+            left.0.extend(pids_written_to(&ran, &run).await);
+            left.0.extend(pids_written_to(&captured, &capture).await);
             assert!(
                 !run.is_finished() && !capture.is_finished(),
                 "both are running"
             );
 
             rig.stopping.run("SIGTERM").await;
-            // Left running, they would answer in a minute: ended with the
+            // Left running, they would answer in ten minutes: ended with the
             // daemon, they answer now, as failures.
-            let (run, capture) = tokio::time::timeout(Duration::from_secs(25), async {
-                (run.await, capture.await)
-            })
-            .await
-            .expect("both were ended with the daemon");
+            let (run, capture) =
+                tokio::time::timeout(ENDED_WITHIN, async { (run.await, capture.await) })
+                    .await
+                    .expect("both were ended with the daemon");
             assert!(run.expect("the run was polled").is_err(), "run");
             assert!(capture.expect("the capture was polled").is_err(), "capture");
             assert_eq!(*rig.exited.borrow(), [0]);

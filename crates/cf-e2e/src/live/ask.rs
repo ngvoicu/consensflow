@@ -4,11 +4,16 @@
 //! comes of it: this crate depends on no crate of the product, so it asks the
 //! test binary `harness-ask` (`cf_harness::tooling` says what each question
 //! asks and answers), a program of its own, built the first time one is asked
-//! ([`crate::cf::harness_ask`]).
+//! ([`crate::cf::harness_ask`]). What it needs of the engine's texts (the note a
+//! window the human's Resume brings back is given) it asks `engine-ask`
+//! (`cf_engine::testing::ask`) the same way ([`crate::cf::engine_ask`]).
 //!
 //! A question is one JSON object on its input; its answer is the last line of
 //! its output, `{"answered": value}`, or `{"threw": message}` for a question it
 //! could not answer, which is an error here that says why.
+
+mod launch;
+mod readiness;
 
 use std::path::Path;
 use std::time::Duration;
@@ -18,26 +23,40 @@ use serde_json::{json, Map, Value};
 use crate::process::Run;
 use crate::{cf, Error, Result};
 
+pub use launch::{devin_hooks, devin_launch, devin_ready, DevinLaunch, DevinReady};
+pub use readiness::{devin_readiness, DevinReadiness};
+
 /// Builds the test binary if it is not built yet, which the first question would
 /// do, minutes into a run: a live test asks this first, before it spends anything,
 /// so that a build that cannot be made fails the run there and not in the middle of
 /// a window's turn.
 pub fn prepare() -> Result {
-    cf::harness_ask().map(|_| ())
+    cf::harness_ask()?;
+    cf::engine_ask().map(|_| ())
 }
 
 /// One question to the test binary, and what it answered.
 pub fn question(body: &Value) -> Result<Value> {
-    let ran = Run::new(cf::harness_ask()?)
+    ask(cf::harness_ask()?, "harness-ask", body)
+}
+
+/// One question to `engine-ask`, and what it answered.
+pub fn engine_question(body: &Value) -> Result<Value> {
+    ask(cf::engine_ask()?, "engine-ask", body)
+}
+
+/// One question to the test binary `program`, called `name`, and what it answered.
+fn ask(program: &Path, name: &str, body: &Value) -> Result<Value> {
+    let ran = Run::new(program)
         .input(format!("{body}\n"))
         .inheriting_env()
         .run()?;
-    answered(ran.code, &ran.stdout)
+    answered(name, ran.code, &ran.stdout)
 }
 
-/// What a run of the test binary answered: the last line it printed, which is
-/// `{"answered": value}` or `{"threw": message}`.
-fn answered(code: Option<i32>, stdout: &str) -> Result<Value> {
+/// What a run of the test binary `name` answered: the last line it printed, which
+/// is `{"answered": value}` or `{"threw": message}`.
+fn answered(name: &str, code: Option<i32>, stdout: &str) -> Result<Value> {
     let last: Value = stdout
         .trim_end()
         .lines()
@@ -45,20 +64,31 @@ fn answered(code: Option<i32>, stdout: &str) -> Result<Value> {
         .and_then(|line| serde_json::from_str(line).ok())
         .ok_or_else(|| {
             Error::Daemon(format!(
-                "harness-ask ended with {} and said {stdout:?}",
+                "{name} ended with {} and said {stdout:?}",
                 code.map_or_else(|| "a signal".to_owned(), |code| code.to_string())
             ))
         })?;
     match (last.get("threw"), last.get("answered")) {
         (Some(threw), _) => Err(Error::Daemon(format!(
-            "harness-ask could not answer: {}",
+            "{name} could not answer: {}",
             super::text(threw)
         ))),
         (None, Some(answered)) => Ok(answered.clone()),
         (None, None) => Err(Error::Daemon(format!(
-            "harness-ask's last line is neither an answer nor a failure: {last}"
+            "{name}'s last line is neither an answer nor a failure: {last}"
         ))),
     }
+}
+
+/// The note the engine gives a window the human's Resume brings back when its turn
+/// was cut, as the window is given it, the message `message`: a member's about its
+/// `tasks`, the chief's where there are none.
+pub fn cut_note(message: i64, tasks: &[i64]) -> Result<String> {
+    let answer = engine_question(&json!({ "op": "cut_note", "message": message, "tasks": tasks }))?;
+    answer
+        .as_str()
+        .map(str::to_owned)
+        .ok_or_else(|| Error::Daemon(format!("engine-ask's note is no text: {answer}")))
 }
 
 /// `env` as the object a question carries it as: each variable by its name,
@@ -144,7 +174,8 @@ fn record_of(answer: &Value) -> Option<Record> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Start {
     /// The command's name (`claude`): find the program with
-    /// [`super::machine::command`], or take the installed harness's.
+    /// [`super::machine::command`], or take the installed harness's. A launch the
+    /// adapter prepared ([`devin_launch`]) names the program it found, whole.
     pub command: String,
     pub args: Vec<String>,
     /// The variables it is started with besides the window's, and the ones
@@ -363,21 +394,32 @@ mod tests {
     #[test]
     fn the_answer_is_the_last_line_the_binary_printed() {
         let said = "noise\n{\"answered\":{\"a\":1}}\n";
-        assert_eq!(answered(Some(0), said).unwrap(), json!({ "a": 1 }));
+        assert_eq!(
+            answered("harness-ask", Some(0), said).unwrap(),
+            json!({ "a": 1 })
+        );
         // Null is an answer too.
         assert_eq!(
-            answered(Some(0), "{\"answered\":null}\n").unwrap(),
+            answered("harness-ask", Some(0), "{\"answered\":null}\n").unwrap(),
             Value::Null
         );
     }
 
     #[test]
     fn a_question_the_binary_could_not_answer_is_an_error_that_says_why() {
-        let failed = answered(Some(1), "{\"threw\":\"no harness runs as claude\"}\n").unwrap_err();
+        let failed = answered(
+            "harness-ask",
+            Some(1),
+            "{\"threw\":\"no harness runs as claude\"}\n",
+        )
+        .unwrap_err();
         assert_eq!(
             failed.to_string(),
             "harness-ask could not answer: no harness runs as claude"
         );
+        // Each binary is named by its own name.
+        let failed = answered("engine-ask", Some(1), "{\"threw\":\"no op\"}\n").unwrap_err();
+        assert_eq!(failed.to_string(), "engine-ask could not answer: no op");
     }
 
     #[test]
@@ -387,12 +429,14 @@ mod tests {
             (None, ""),
             (Some(0), "{}\n"),
         ] {
-            let failed = answered(code, said).unwrap_err().to_string();
+            let failed = answered("harness-ask", code, said).unwrap_err().to_string();
             assert!(failed.starts_with("harness-ask"), "{failed}");
         }
-        let failed = answered(Some(101), "boom\n").unwrap_err().to_string();
+        let failed = answered("harness-ask", Some(101), "boom\n")
+            .unwrap_err()
+            .to_string();
         assert_eq!(failed, "harness-ask ended with 101 and said \"boom\\n\"");
-        let failed = answered(None, "").unwrap_err().to_string();
+        let failed = answered("harness-ask", None, "").unwrap_err().to_string();
         assert!(failed.contains("a signal"), "{failed}");
     }
 

@@ -4,11 +4,16 @@
 //! with the words that send it on, in one paste with one marker, and what
 //! the paste proves arrived is each of them. The carrier is a top-level task
 //! message (`carried_by IS NULL`) that other rows point at; what it carries
-//! is flat (a constituent is never a carrier), and is told only when its
-//! delivery begins, from the rows still `queued`: the set is frozen from
-//! begin to confirm, and a row that comes later is pasted on its own. A set
-//! that the Node daemon, which knows no carriers, left behind is released when
-//! the ledger is opened (`release_stranded`).
+//! is flat (a constituent is never a carrier), and is told when its first
+//! delivery begins, from the rows still `queued`: from then on the carrier
+//! takes in no row, through every paste of it to its confirm, and a row that
+//! comes later goes in a newer carrier, or is pasted on its own (`adopt`). A
+//! resume that comes while a carrier waits again may still take its rows into
+//! the newer carrier it queues (`fold`): a set never grows after its paste, so a
+//! marker found never confirms a row the paste did not hold. A start that finds
+//! the carrier still on its way settles the set with it. A set that
+//! the Node daemon, which knows no carriers, left behind is released when the
+//! ledger is opened (`release_stranded`).
 
 use cf_base::text::utf16_prefix;
 use cf_proto::ledger::MessageView;
@@ -146,7 +151,14 @@ fn requeue_unreceived_reads(
 /// - an answer or a note joins the newest one;
 /// - a task message joins only one newer than itself;
 /// - one that already carries rows brings them along, so the set stays flat;
-/// - one in flight adopts nothing.
+/// - one in flight adopts nothing, and nor does one whose paste began once and
+///   that waits again: its set is what that paste held, and the marker of the
+///   paste, the same in every one of its pastes, proves each row in the set
+///   arrived. A row that joined it later would be taken for received where the
+///   window's record shows that first paste (a review of 2026-10-16); it goes in
+///   a newer carrier, or on its own. The log says which pastes began
+///   (`delivery.begun`): the attempt a paste counted is given back when the window
+///   went before it could land.
 pub(crate) fn adopt(store: &mut Store, id: i64) -> Result<(), LedgerError> {
     let adopted: Option<i64> = store
         .db
@@ -157,6 +169,9 @@ pub(crate) fn adopt(store: &mut Store, id: i64) -> Result<(), LedgerError> {
                AND m.kind IN ('task', 'answer', 'note')
                AND c.kind = 'task' AND c.carried_by IS NULL AND c.state IN ('queued', 'gated')
                AND c.id != m.id AND (m.kind != 'task' OR c.id > m.id)
+               AND NOT EXISTS (SELECT 1 FROM event e
+                               WHERE e.project_id = c.project_id AND e.kind = 'delivery.begun'
+                                 AND json_extract(e.data, '$.message') = c.id)
              ORDER BY c.id DESC LIMIT 1",
         )?
         .query_map([id], |row| row.get(0))?
@@ -197,21 +212,32 @@ pub(crate) fn release_carried(store: &mut Store, task_id: i64) -> Result<(), Led
 }
 
 /// What a daemon that knows no carriers left riding in one. A row is in the
-/// paste of a carrier only while the carrier waits for it (`queued` or
-/// `gated`), and this ledger settles a carrier's set in the step that
-/// delivers, cancels or fails the carrier. The Node daemon pastes each row as
-/// a message of its own and never reads `carried_by`, so it can leave a row
-/// `queued` under a carrier it delivered, cancelled or failed, or began to
-/// paste when it stopped: what that paste held is not known, so the row goes
-/// again rather than be taken for received with it (a carrier this daemon
-/// began when it stopped has its rows pasted twice, never lost). Skipped as
-/// carried, such a row would never be delivered here: when the ledger is
-/// opened, the start of this daemon, each is an ordinary queued message again,
-/// delivered in the order of its id. The tasks they are about are reconciled
-/// (`receipt`), once each: Node moved one on when it counted a queued answer
-/// as received, and that answer is still to be. A row Node was pasting on its
-/// own when it stopped is `delivering`, not `queued`: it is left to the
-/// delivery that settles it, and `retry_delivery` lets it go of its carrier then.
+/// paste of a carrier while the carrier waits for it (`queued` or `gated`) and
+/// while it goes in (`delivering`), and this ledger settles a carrier's set in
+/// the step that delivers, cancels or fails the carrier. The Node daemon pastes
+/// each row as a message of its own and never reads `carried_by`, so it can leave
+/// a row `queued` under a carrier it delivered, cancelled or failed. Skipped as
+/// carried, such a row would never be delivered here: when the ledger is opened,
+/// the start of this daemon, each is an ordinary queued message again, delivered
+/// in the order of its id, and the tasks they are about are reconciled after
+/// (`reconcile_released`): Node moved one on when it counted a queued answer as
+/// received, and that answer is still to be. A row Node was pasting on its own
+/// when it stopped is `delivering`, not `queued`: it is left to the delivery that
+/// settles it, and `retry_delivery` lets it go of its carrier then.
+///
+/// A carrier this daemon was pasting when it stopped keeps its set: the rows rode
+/// in its paste, and the start settles them with it, received with it where the
+/// window's record shows its marker and queued again with it where it does not.
+/// Let go of it here, they went again on their own after a paste that had them (a
+/// review of 2026-10-16: the answers kept for a window pasted twice). Only a carrier
+/// this ledger wrote is so: it froze the set at the first paste. What rode in a
+/// carrier an earlier build began to paste, migration 0019 let go of, in the step that
+/// wrote its version (the reviews of 2026-10-16 and 2026-10-17: the Node daemon of
+/// 3.0.0-alpha.82 pasted a carrier's words alone, and up to 3.0.4 a row could join a
+/// carrier whose first paste was late and that waited again, so a marker found took
+/// an answer no paste had held for received); a carrier no paste of which began kept
+/// its set, which its first paste holds.
+///
 /// A row let go of is handed nothing, whatever its carrier's transport let go
 /// (both reviews of 2026-10-17: a restart during an admitted carrier's delivery
 /// left its rows marked, and a reader of the closed project read them), and a
@@ -224,28 +250,17 @@ pub(crate) fn release_stranded(store: &mut Store) -> Result<(), LedgerError> {
             .prepare(
                 "SELECT DISTINCT m.carried_by, m.project_id FROM message m
                  JOIN message c ON c.id = m.carried_by
-                 WHERE m.state = 'queued' AND c.state NOT IN ('queued', 'gated')
+                 WHERE m.state = 'queued' AND c.state NOT IN ('queued', 'gated', 'delivering')
                  ORDER BY m.carried_by",
             )?
             .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
             .collect::<rusqlite::Result<_>>()?;
-        let mut tasks = Vec::new();
         for (carrier, project) in carriers {
             let released = ids(
                 store,
                 "SELECT id FROM message WHERE carried_by = ? AND state = 'queued' ORDER BY id",
                 [carrier],
             )?;
-            for task in ids(
-                store,
-                "SELECT DISTINCT task_id FROM message
-                 WHERE carried_by = ? AND state = 'queued' AND task_id IS NOT NULL",
-                [carrier],
-            )? {
-                if !tasks.contains(&task) {
-                    tasks.push(task);
-                }
-            }
             store.db.execute(
                 "UPDATE message SET carried_by = NULL, handed_at = NULL
                  WHERE carried_by = ? AND state = 'queued'",
@@ -258,8 +273,58 @@ pub(crate) fn release_stranded(store: &mut Store) -> Result<(), LedgerError> {
             )?;
             withdraw_stale_among(store, &released)?;
         }
-        for task in tasks {
-            reconcile(store, task)?;
+        Ok(())
+    })
+}
+
+/// The tasks of what was let go of (`message.uncarried`, by migration 0019 or by
+/// [`release_stranded`]) and not yet reconciled, reconciled at each start, once
+/// each, as the start of an earlier build reconciled what it let go of: a row the
+/// log says was let go of that waits still, on its own. The log says which lets-go
+/// were reconciled (`message.reconciled`), in the same step, so a start that stops
+/// before this leaves them to the next (Astra's review of 2026-10-17: a start that
+/// stopped after 0019's commit left Node's `working` to a task whose answer was
+/// never received, and the next read the schema and reconciled nothing).
+pub(crate) fn reconcile_released(store: &mut Store) -> Result<(), LedgerError> {
+    store.write(|store| {
+        let unreconciled: Vec<(i64, i64)> = store
+            .db
+            .prepare(
+                "SELECT e.project_id, e.id FROM event e
+                 WHERE e.kind = 'message.uncarried'
+                   AND NOT EXISTS (SELECT 1 FROM event r, json_each(r.data, '$.uncarried') u
+                                   WHERE r.kind = 'message.reconciled' AND u.value = e.id)
+                 ORDER BY e.id",
+            )?
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect::<rusqlite::Result<_>>()?;
+        for (_, event) in &unreconciled {
+            for task in ids(
+                store,
+                "SELECT DISTINCT m.task_id FROM event e, json_each(e.data, '$.released') r
+                 JOIN message m ON m.id = r.value
+                 WHERE e.id = ? AND m.state = 'queued'
+                   AND m.carried_by IS NULL AND m.task_id IS NOT NULL
+                 ORDER BY m.task_id",
+                [event],
+            )? {
+                reconcile(store, task)?;
+            }
+        }
+        let mut projects: Vec<i64> = unreconciled.iter().map(|(project, _)| *project).collect();
+        projects.sort_unstable();
+        projects.dedup();
+        for project in projects {
+            let events: Vec<i64> = unreconciled
+                .iter()
+                .filter(|(of, _)| *of == project)
+                .map(|(_, event)| *event)
+                .collect();
+            store.log(
+                project,
+                "message.reconciled",
+                json!({ "uncarried": events }),
+            )?;
         }
         Ok(())
     })

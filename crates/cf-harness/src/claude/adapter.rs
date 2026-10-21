@@ -28,6 +28,13 @@
 //!   `npm run live:resume-cut`). A window opened on such a conversation with no
 //!   message to begin it is read at rest by that status while its record holds
 //!   no more than it held when the window was opened ([`LeftOpen`]).
+//! - A window opened again on a conversation runs a process of its own, the
+//!   one before gone with its window where the pane host proved it gone: what
+//!   that one had queued in its memory and not begun went with it, though its
+//!   record still says it is queued (T-442). The transcript's length when the
+//!   window is prepared is where the new process began, and every look the
+//!   window takes says so (`Options::relaunched_at`). Where the host could not
+//!   end the old program, or the engine never heard how it ended, none is told.
 //! - The window's Claude process is the pane's own child when a status names
 //!   it, so the first look already sees a /clear. Otherwise (Claude may run
 //!   as another process the child starts) it is the process whose status
@@ -119,14 +126,27 @@ impl Adapter for ClaudeAdapter {
                 None => false,
             };
             // What the record holds before this window exists is the old
-            // process's: a turn it left open, which a window with no message
+            // process's, gone with its window where the pane host proved it
+            // (`Launch::previous_gone`): what it had queued and not begun went
+            // with it, and every look of this window says where the new one
+            // began (`Options::relaunched_at`). One the host could not end may
+            // still write to the record, and what it writes past the length
+            // taken would be read as the new process's: no length is taken.
+            let relaunched = if resumable && launch.previous_gone {
+                let length = self
+                    .records
+                    .transcript_length(Harness::Claude, &session)
+                    .await?;
+                length.map(|at| (session.clone(), at))
+            } else {
+                None
+            };
+            let options = told(relaunched.as_ref(), &session);
+            // A turn the old process left open, which a window with no message
             // to begin one has to be told apart from by what the record holds
             // later. A window given a message begins its own turn.
             let left_open = if resumable && launch.message.is_none() {
-                let before = self
-                    .records
-                    .look(Harness::Claude, &session, &Options::default())
-                    .await;
+                let before = self.records.look(Harness::Claude, &session, &options).await;
                 LeftOpen::of(&before)
             } else {
                 None
@@ -165,6 +185,7 @@ impl Adapter for ClaudeAdapter {
                     pressed: RefCell::new(None),
                     restored: Cell::new(false),
                     left_open: RefCell::new(left_open),
+                    relaunched,
                 }),
             })
         })
@@ -231,6 +252,21 @@ struct ClaudeWindow {
     /// The turn the record had open when the window was opened, while the
     /// window has begun no turn of its own: the old process's.
     left_open: RefCell<Option<LeftOpen>>,
+    /// The conversation the window was opened again on, and how many bytes its
+    /// transcript held then, the window it was on closed: where the program
+    /// the window runs began writing.
+    relaunched: Option<(String, u64)>,
+}
+
+/// What a look at `session` is told: where the window's program began writing,
+/// when the window was opened again on that conversation.
+fn told(relaunched: Option<&(String, u64)>, session: &str) -> Options {
+    Options {
+        relaunched_at: relaunched
+            .filter(|(on, _)| on == session)
+            .map(|(_, at)| *at),
+        ..Options::default()
+    }
 }
 
 impl ClaudeWindow {
@@ -371,10 +407,8 @@ impl Window for ClaudeWindow {
             // could be older than the status.
             let live = self.status();
             let session = self.session.borrow().clone();
-            let reading = self
-                .records
-                .look(Harness::Claude, &session, &Options::default())
-                .await;
+            let options = told(self.relaunched.as_ref(), &session);
+            let reading = self.records.look(Harness::Claude, &session, &options).await;
             let (empty, settled, failed, quota, agents) = match &*reading {
                 Reading::Known(record) => (
                     record.items.is_empty(),

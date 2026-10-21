@@ -106,6 +106,7 @@ impl Adapter for PiAdapter {
                         directory: Some(configuration.channel.settled.clone()),
                         launch_id: Some(configuration.channel.launch_id.clone()),
                     }),
+                    ..Options::default()
                 };
                 let before = self.records.look(Harness::Pi, &session, &options).await;
                 LeftOpen::of(&before)
@@ -252,6 +253,7 @@ impl Window for PiWindow {
                     directory: Some(self.channel.settled.clone()),
                     launch_id: Some(self.channel.launch_id.clone()),
                 }),
+                ..Options::default()
             };
             // The conversation the window shows first, then its record, which
             // is then never older than the extension's word: the order Node's

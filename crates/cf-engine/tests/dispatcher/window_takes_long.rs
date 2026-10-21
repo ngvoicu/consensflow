@@ -174,11 +174,14 @@ fn closes_a_window_only_once_the_paste_its_harness_is_taking_is_over_and_that_me
     held.open();
     context.finish(closing).unwrap();
     assert_eq!(context.host.killed().len(), 1);
+    // Its harness took it, and its record has it: on its way when the window went,
+    // it is in the conversation that goes on, so it is confirmed, where Node sent it
+    // again (a departure: `traces`' `DEPARTED`).
     let sent = context.message(note.id);
     assert_eq!(
         (sent.state.as_str(), sent.attempts),
-        ("queued", 1),
-        "on its way when the window went: it goes again"
+        ("delivered", 1),
+        "on its way when the window went, and taken: it does not go again"
     );
     held_to(
         context.close(),

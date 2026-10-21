@@ -113,6 +113,14 @@ impl Shown {
     }
 
     /// Whether the host said anything of the window.
+    /// Whether the window's program is gone, as far as the host said: yes where
+    /// it said how the window ended and named no program it could not end, no
+    /// where it named one, none where it said nothing (the engine's own close
+    /// settles its window before the host's word comes).
+    pub(crate) fn gone(&self) -> Option<bool> {
+        self.is_known().then_some(self.survivor.is_none())
+    }
+
     pub fn is_known(&self) -> bool {
         self.code.is_some()
             || self.signal.is_some()

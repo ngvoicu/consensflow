@@ -620,3 +620,28 @@ runs = ["xtask-lib-check", "xtask-test-cli"]
 file = "tools/xtask/src/check.rs"
 find = "steps.push(clippy_windows::lint(context, &[], archiver));"
 replace = 'steps.push(clippy_windows::lint(context, &[OsString::from("app")], archiver));'
+
+[[plant]]
+name = "drivers: check runs a step as it is, with the variables of the window it is in"
+meant = "every_step_is_run_outside_a_window_without_the_variables_a_member_is_given"
+runs = ["xtask-lib-check", "xtask-test-cli"]
+
+[[plant.edit]]
+file = "tools/xtask/src/check.rs"
+find = "let status = run(&outside_a_window(step))?;"
+replace = "let status = run(step)?;"
+
+[[plant]]
+name = "drivers: check leaves a step the board's address of its window"
+meant = "every_step_is_run_outside_a_window_without_the_variables_a_member_is_given"
+runs = ["xtask-lib-check", "xtask-test-cli"]
+
+[[plant.edit]]
+file = "tools/xtask/src/check.rs"
+find = """
+    WINDOW_VARIABLES
+        .into_iter()"""
+replace = """
+    WINDOW_VARIABLES
+        .into_iter()
+        .skip(1)"""

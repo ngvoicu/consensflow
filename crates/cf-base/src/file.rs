@@ -124,6 +124,29 @@ pub fn mtime_ms(metadata: &Metadata) -> io::Result<f64> {
     Ok(sign * (seconds * 1e3 + f64::from(since.subsec_nanos()) / 1e6))
 }
 
+/// The coarsest step a file's time of last writing moves by, of the file
+/// systems a log may be on: FAT's two seconds ("write time has a resolution of
+/// 2 seconds", Microsoft's "File Times"). NTFS keeps 100 ns, but of a system
+/// time that moves at its clock's tick, about 15.6 ms; ext4's moves at the
+/// kernel's tick.
+pub const WRITE_TIME_STEP_MS: f64 = 2_000.0;
+
+/// Whether a file last written at `written_ms`, as a look that began at
+/// `looked_ms` found it, was written before that look by more than
+/// [`WRITE_TIME_STEP_MS`]: while its time stays, it holds what that look read.
+/// One written within the step may have been written again after the look in
+/// the same step, its time unmoved (on Windows, a log rewritten within one
+/// tick), so only its bytes tell: git's racily clean entry, told by its file
+/// time against the index's (git's `Documentation/technical/racy-git`). A time
+/// after the look is never
+/// settled.
+pub fn settled(written_ms: f64, looked_ms: i64) -> bool {
+    // A clock reading is within the 53 bits of a double for millions of years.
+    #[allow(clippy::cast_precision_loss)]
+    let looked = looked_ms as f64;
+    written_ms + WRITE_TIME_STEP_MS < looked
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -193,5 +216,18 @@ mod tests {
             mtime_ms(&file.metadata().unwrap()).unwrap(),
             1_790_000_000_000.5
         );
+    }
+
+    #[test]
+    fn a_file_time_is_settled_only_when_older_than_the_look_by_more_than_its_step() {
+        let looked = 1_790_000_000_000;
+        assert!(settled(1_789_999_997_999.0, looked));
+        assert!(!settled(1_789_999_998_000.0, looked), "a step before");
+        assert!(!settled(1_789_999_999_000.0, looked), "within the step");
+        assert!(
+            !settled(1_790_000_000_000.0, looked),
+            "in the look's own tick"
+        );
+        assert!(!settled(1_790_000_005_000.0, looked), "after it");
     }
 }

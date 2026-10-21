@@ -96,6 +96,45 @@ fn a_log_gone_from_its_launch_takes_what_it_said_with_it_once_the_store_changes(
 }
 
 #[test]
+fn a_log_read_a_moment_after_its_last_write_is_read_to_tell_once_and_then_by_its_time() {
+    // A look each second reads a log a moment after Devin wrote it: the look after one
+    // that read its bytes to tell takes its time, and answers as the one before.
+    // Written over at its size and time then, it is the log read (as git takes a clean
+    // entry).
+    let staged = Staged::new();
+    staged.chain(&[
+        user("u-1", Some(json!("request-1"))),
+        reply("a-1", json!("Done.")),
+    ]);
+    let written = 1_790_000_000_000;
+    let wire_at = |said: &str| {
+        staged.wire(
+            "launch-1",
+            &[chunk(Some(json!(said)), "stream-1"), complete()],
+        );
+        File::options()
+            .write(true)
+            .open(staged.launch("launch-1").join("wire.jsonl"))
+            .unwrap()
+            .set_modified(UNIX_EPOCH + Duration::from_millis(written as u64))
+            .unwrap();
+    };
+    wire_at("Done.");
+    let mut reader = staged.reader();
+    let mut look_at = |at: i64| reader.look(&Options::default(), written + at);
+    let first = look_at(500);
+    assert!(
+        Arc::ptr_eq(&first, &look_at(2_500)),
+        "its bytes as they were"
+    );
+    wire_at("Dune.");
+    assert!(
+        Arc::ptr_eq(&first, &look_at(3_000)),
+        "its time settled: not read"
+    );
+}
+
+#[test]
 fn of_two_logs_written_at_once_the_one_listed_later_says_whether_devin_works() {
     for (busy_first, read) in [
         (

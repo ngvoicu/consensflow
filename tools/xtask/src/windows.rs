@@ -5,8 +5,9 @@
 //! `windows` runs a command on a Windows machine, over SSH, on this working tree
 //! as it is now: every tracked file, and new ones not ignored, go over as one
 //! tarball and are unpacked into a build folder there, each with the time of the
-//! unpack (a file gone from the tree since the last run goes from there too;
-//! `node_modules` and the Rust build stay), so that cargo builds what a switch of
+//! unpack (every other file there goes, wherever it came from, but for the build's
+//! outputs, `node_modules` and the Rust build among them: `script::KEPT`), so that
+//! cargo builds what a switch of
 //! the checkout changed, whatever time the Mac kept of it. The command then runs
 //! in that folder with Node and Cargo on PATH, its output streamed back; its exit
 //! status is this one's, as the machine says it in the last line of the output

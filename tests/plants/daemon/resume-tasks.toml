@@ -1,6 +1,6 @@
 # The work a Close paused goes on with the human's Resume (Gabriel, 2026-10-16: "on resume tasks
 # should resume, right?"). The engine pauses the task of a window it closed itself, and in a
-# suspended project the ledger marks that pause (`paused_with_project`, migration 0019): the
+# suspended project the ledger marks that pause (`paused_with_project`, migration 0021): the
 # human's Close and the chief's window ending close every window of the project so. The write
 # that opens the project again has each marked task at work again (waiting, where its window's
 # question is unanswered), withdraws the note that told the chief it was paused, and leaves a
@@ -10,7 +10,7 @@
 # ledger made before the mark. A window that holds several tasks comes back for none: they stay
 # paused, for the chief to resume one by one, and no word tells it to go on. A word to go on goes
 # with any move of its task out of the work, and a reader of a closed project reads only what a
-# window was handed (migration 0020). The case on the rig is
+# window was handed (migration 0022). The case on the rig is
 # `crates/cf-e2e/tests/regressions/tasks_left_paused_by_a_close_and_resume.rs`, which builds the
 # native `cf` from the sources as planted, so its plants say `builds`.
 #
@@ -140,7 +140,7 @@ meant = "a_ledger_from_before_the_mark_keeps_every_paused_task_paused_through_a_
 runs = ["ledger-suspended"]
 
 [[plant.edit]]
-file = "crates/cf-ledger/migrations/0019.sql"
+file = "crates/cf-ledger/migrations/0021.sql"
 find = "paused_with_project INTEGER NOT NULL DEFAULT 0 CONSTRAINT"
 replace = "paused_with_project INTEGER NOT NULL DEFAULT 1 CONSTRAINT"
 

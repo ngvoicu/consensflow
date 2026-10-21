@@ -15,6 +15,7 @@
     "check": "npm run lint && npm test",
     "eval": "cargo xtask eval",
     "eval:summary": "cargo xtask eval summary",
+    "eval:long": "cargo xtask eval long",
     "watch": "cargo xtask watch",
     "eval:windows": "cargo xtask windows-matrix",
     "test:integration": "cargo xtask test integration",
@@ -43,6 +44,7 @@
     "live:stops": "cargo xtask live stops",
     "live:input-box": "cargo xtask live input-box",
     "live:resume-cut": "cargo xtask live resume-cut",
+    "live:devin-resume": "cargo xtask live devin-resume",
     "live:resume-fresh": "cargo xtask live resume-fresh",
     "live:restart-cut": "cargo xtask live restart-cut",
     "live:door": "cargo xtask live door",
@@ -58,6 +60,7 @@
     "live:notes": "cargo xtask live notes",
     "live:wake-ups": "cargo xtask live wake-ups",
     "live:specs": "cargo xtask live specs",
+    "live:commands-at-rest": "cargo xtask live commands-at-rest",
     "windows": "cargo xtask windows",
     "check:all": "cargo xtask check"
   },

@@ -118,9 +118,10 @@ pub trait Engine {
     /// it has none.
     fn pane(&self, participant: i64) -> Option<Value>;
 
-    /// A stop its window ignored in every round and has not paid:
-    /// `{task, rounds}`, none when there is none, which is nearly always. A
-    /// lane says it only then, so no other board answer moves.
+    /// A stop its window ignored in every round and has not paid, the host
+    /// having refused to close it: `{task, rounds}`, none when there is none,
+    /// which is nearly always. A lane says it only then, so no other board
+    /// answer moves.
     fn unstopped(&self, participant: i64) -> Option<Value>;
 }
 

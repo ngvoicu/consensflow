@@ -100,11 +100,11 @@ pub(super) fn environment(root: &Path, fake_bin: &Path, config: &Config) -> Vec<
 }
 
 /// The `PATH` of the rig: the folder of the stand-in `claude` first, then the
-/// folders a case added ([`Config::also_on_path`]), then the system's own and
-/// no folder a package manager installs into (`/usr/local/bin` is Homebrew's on
-/// an Intel Mac, whose harnesses a daemon of the rig found there); as the
-/// Finder starts it, no stand-in's folder, and the system's as the Finder
-/// gives it.
+/// folders a case wants found before the rest ([`Config::first_on_path`]) and the
+/// ones it added ([`Config::also_on_path`]), then the system's own and no folder a
+/// package manager installs into (`/usr/local/bin` is Homebrew's on an Intel Mac,
+/// whose harnesses a daemon of the rig found there); as the Finder starts it, no
+/// stand-in's folder, and the system's as the Finder gives it.
 fn path(fake_bin: &Path, config: &Config) -> String {
     let system: Vec<String> = if cfg!(windows) {
         let root = own_var("SystemRoot").unwrap_or_else(|| "C:\\Windows".to_owned());
@@ -119,6 +119,7 @@ fn path(fake_bin: &Path, config: &Config) -> String {
     (!config.finder)
         .then_some(fake_bin)
         .into_iter()
+        .chain(config.first.iter().map(PathBuf::as_path))
         .chain(config.path.iter().map(PathBuf::as_path))
         .map(|dir| dir.to_string_lossy().into_owned())
         .chain(system)
@@ -132,7 +133,7 @@ fn path(fake_bin: &Path, config: &Config) -> String {
 /// names the stand-in as both program and script, and the stand-in knows its own
 /// file when it is given it first. The stand-in `devin` beside it, where the rig
 /// has one, the stand-in `opencode` (of a 1.x, or of an OpenCode 2) likewise, and
-/// the stand-in `codex` (Unix's). The folder they are in, which the `PATH` names.
+/// the stand-in `codex`. The folder they are in, which the `PATH` names.
 /// As the Finder starts it, they are where each harness installs itself instead
 /// (see [`Config::as_the_finder_starts_it`]), and that folder holds none.
 pub(super) fn write_fake_install(root: &Path, config: &Config) -> Result<PathBuf> {
@@ -154,8 +155,7 @@ pub(super) fn write_fake_install(root: &Path, config: &Config) -> Result<PathBuf
     if let Some(opencode) = &config.opencode {
         write_shim(&own, "opencode", "CF_TEST_OPENCODE", opencode)?;
     }
-    // The stand-in Codex's is a script, so Unix's.
-    if let Some(codex) = config.codex.as_ref().filter(|_| !cfg!(windows)) {
+    if let Some(codex) = &config.codex {
         write_shim(&system, "codex", "CF_TEST_CODEX", codex)?;
     }
     Ok(fake_bin)
@@ -250,6 +250,22 @@ mod tests {
         let plain: Vec<&str> = var(&plain, "PATH").split(delimiter).collect();
         assert_eq!(plain.len(), folders.len() - 2);
         assert_eq!(folders[3..], plain[1..]);
+    }
+
+    #[test]
+    fn a_folder_a_case_wants_found_first_comes_right_after_the_stand_in_claudes() {
+        let root = Path::new("root");
+        let fake_bin = root.join("fake-bin");
+        let delimiter = if cfg!(windows) { ';' } else { ':' };
+        // Added after the others, it is still ahead of them: the machine's own program
+        // of its name is in one of the others' folders.
+        let added = config()
+            .also_on_path("/real/devin")
+            .first_on_path("/stand-in/cf");
+        let env = environment(root, &fake_bin, &added);
+        let folders: Vec<&str> = var(&env, "PATH").split(delimiter).collect();
+        assert_eq!(folders[0], fake_bin.to_string_lossy());
+        assert_eq!(folders[1..3], ["/stand-in/cf", "/real/devin"]);
     }
 
     #[test]
@@ -397,15 +413,19 @@ mod tests {
             .any(|(name, _)| name.starts_with("CF_TEST_CODEX")));
     }
 
-    #[cfg(unix)]
     #[test]
     fn the_stand_in_codex_runs_the_program_the_environment_names() {
         let root = tempfile::tempdir().unwrap();
         let fake_bin = write_fake_install(root.path(), &config().codex("/the/fake-codex")).unwrap();
-        assert_eq!(
-            files::read_string(&fake_bin.join("codex")).unwrap(),
-            "#!/bin/sh\nexec \"$CF_TEST_CODEX\" \"$@\"\n"
-        );
+        let script = files::read_string(&fake_bin.join(stand_in::program_name("codex"))).unwrap();
+        if cfg!(windows) {
+            assert_eq!(
+                script,
+                "@echo off\r\n\"/the/fake-codex\" \"/the/fake-codex\" %*\r\n"
+            );
+        } else {
+            assert_eq!(script, "#!/bin/sh\nexec \"$CF_TEST_CODEX\" \"$@\"\n");
+        }
     }
 
     /// The stand-ins' folder, then the system's own, and no folder a package

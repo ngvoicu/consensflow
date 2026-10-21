@@ -369,12 +369,13 @@ fn a_project_that_does_not_end_in_time_says_which_of_the_processes_it_started_we
     let _ = cf_e2e::process::signal(job.pid(), cf_e2e::process::Signal::Kill);
     assert!(failed.starts_with("process did not exit"), "{failed}");
     let left = failed
-        .split("the processes it started, left or last looked at: ")
+        .split("the processes it started that were left: ")
         .nth(1)
         .ok_or(failed.as_str())?;
-    // The pane host, waiting for the window to leave, the shell that runs the worker's
-    // job (its parent gone, it is the machine's: `(1)`; a command is cut to a line) and
-    // the job that would not, under it.
+    // The pane host, waiting for the window to leave (the rig kills it once what was
+    // left is said, and not before), the shell that runs the worker's job (its parent
+    // gone, it is the machine's: `(1)`; a command is cut to a line) and the job that
+    // would not, under it.
     assert!(left.contains("consensflow-bridge"), "{failed}");
     assert!(left.contains("(1) ") && left.contains("sh -c"), "{failed}");
     assert!(

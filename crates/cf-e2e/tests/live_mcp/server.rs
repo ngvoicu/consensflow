@@ -173,9 +173,10 @@ mod tests {
     }
 
     /// What the server answers to `lines`, one request a line, and the process it
-    /// wrote: none where this machine has no `python3` to run it.
+    /// wrote: none where this machine has no `python3` that runs (a Windows machine
+    /// may have only the Store's alias of one).
     fn answers(lines: &[&str]) -> Option<(Vec<Value>, String)> {
-        let python = live::command("python3").ok()?;
+        let python = live::working_command("python3", &["--version"]).ok()?;
         let folder = tempfile::tempdir().unwrap();
         let server = Server::write(folder.path(), &python).unwrap();
         let script = folder.path().join("quiet-server.py");

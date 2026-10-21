@@ -1,7 +1,7 @@
 //! Devin's launch arguments, as the daemon gives them to a window: the config it
 //! runs on (`--config`), the conversation it goes on with (`--resume`), the model
-//! and the permission flags, and the file its first message is in
-//! (`--prompt-file`). And the question the daemon asks it before it opens a window
+//! and the permission flags (the mode it is asked to be in), and the file its first
+//! message is in (`--prompt-file`). And the question the daemon asks it before it opens a window
 //! on it: its version.
 //!
 //! On Windows a window opens only on an npm-style shim, `"<program>" "<script>"
@@ -31,12 +31,14 @@ pub enum Asked {
 }
 
 /// What a window was launched with.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Default, PartialEq, Eq)]
 pub struct Launch {
     /// The conversation it goes on with: none for a new one.
     pub resume: Option<String>,
     /// The file the first message is in.
     pub prompt_file: Option<String>,
+    /// The permission mode it was asked to be in (`dangerous` is full permission).
+    pub permission_mode: Option<String>,
 }
 
 /// Whether `arg` names the stand-in's own file (`own`), by its file name: the
@@ -61,10 +63,7 @@ pub fn parse(args: &[String], own: Option<&Path>) -> Asked {
     if matches!(args, [only] if only == "--version") {
         return Asked::Version;
     }
-    let mut launch = Launch {
-        resume: None,
-        prompt_file: None,
-    };
+    let mut launch = Launch::default();
     let mut at = 0;
     while at < args.len() {
         let arg = args[at].as_str();
@@ -73,6 +72,7 @@ pub fn parse(args: &[String], own: Option<&Path>) -> Asked {
             match arg {
                 "--resume" => launch.resume = value,
                 "--prompt-file" => launch.prompt_file = value,
+                "--permission-mode" => launch.permission_mode = value,
                 _ => {}
             }
             at += 1;
@@ -114,6 +114,7 @@ mod tests {
             Asked::Window(Launch {
                 resume: None,
                 prompt_file: Some("/p.txt".to_owned()),
+                permission_mode: Some("dangerous".to_owned()),
             })
         );
     }
@@ -125,7 +126,7 @@ mod tests {
             launch,
             Asked::Window(Launch {
                 resume: Some("calm-river".to_owned()),
-                prompt_file: None,
+                ..Launch::default()
             })
         );
     }
@@ -137,8 +138,8 @@ mod tests {
         assert_eq!(
             launch,
             Asked::Window(Launch {
-                resume: None,
                 prompt_file: Some("/p.txt".to_owned()),
+                ..Launch::default()
             })
         );
     }
@@ -151,7 +152,7 @@ mod tests {
             launch,
             Asked::Window(Launch {
                 resume: Some("abc".to_owned()),
-                prompt_file: None,
+                ..Launch::default()
             })
         );
         // However the system writes the name of the file.
@@ -162,7 +163,7 @@ mod tests {
             super::parse(&args, None),
             Asked::Window(Launch {
                 resume: Some("abc".to_owned()),
-                prompt_file: None,
+                ..Launch::default()
             })
         );
     }

@@ -1,4 +1,4 @@
-//! What migration 0020 added to the `message` table, which Node's messages never
+//! What migration 0022 added to the `message` table, which Node's messages never
 //! had (when the transport let a message's hand-over go to its window): its
 //! column, and the text SQLite wrote for it into the table's schema. The players of
 //! Node's recordings take them out of what this ledger left
@@ -6,14 +6,24 @@
 //! [`super::hold_apart_what_node_never_had_in_its_schema`] for the text of the
 //! table), so that what the two wrote in everything else is compared.
 
-/// The column migration 0020 added to `message`, which Node's messages never
+/// The column migration 0022 added to `message`, which Node's messages never
 /// had: when the transport let its hand-over go.
 pub(super) const COLUMNS: [(&str, &str); 1] = [("message", "handed_at")];
 
 /// What SQLite wrote into the text of the `message` table for that column, as
-/// migration 0020 added it: after the last column and before the table's own
+/// migration 0022 added it: after the last column and before the table's own
 /// checks, with the text it was added with.
 pub(super) const COLUMN_LINES: &str = ", handed_at TEXT";
+
+/// What migration 0022 made taken out of the ledger `db` holds, its column of
+/// `message`, so that a test can take a ledger this build wrote for one an older
+/// build left, whose version it sets, and which migrates to this build's again.
+pub fn undo_migration_0022(db: &rusqlite::Connection) -> rusqlite::Result<()> {
+    for (table, column) in COLUMNS {
+        db.execute_batch(&format!("ALTER TABLE {table} DROP COLUMN {column}"))?;
+    }
+    Ok(())
+}
 
 #[cfg(test)]
 mod tests {
@@ -46,6 +56,29 @@ mod tests {
     }
 
     #[test]
+    fn undoing_migration_0022_leaves_the_schema_0021_left_and_the_ledger_migrates_again() {
+        use crate::schema::{migrate, MIGRATIONS};
+        let schema = |db: &rusqlite::Connection| -> Vec<(String, String)> {
+            db.prepare("SELECT name, sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY name")
+                .unwrap()
+                .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+                .unwrap()
+                .map(Result::unwrap)
+                .collect()
+        };
+        let before = rusqlite::Connection::open_in_memory().unwrap();
+        migrate(&before, &MIGRATIONS[..21]).unwrap();
+        let db = rusqlite::Connection::open_in_memory().unwrap();
+        migrate(&db, &MIGRATIONS[..22]).unwrap();
+        let migrated = schema(&db);
+        super::undo_migration_0022(&db).unwrap();
+        assert_eq!(schema(&db), schema(&before));
+        db.execute_batch("PRAGMA user_version = 21").unwrap();
+        migrate(&db, &MIGRATIONS[..22]).unwrap();
+        assert_eq!(schema(&db), migrated);
+    }
+
+    #[test]
     fn takes_the_column_out_of_the_text_sqlite_wrote_for_the_message_table_and_of_no_other() {
         use crate::schema::{migrate, MIGRATIONS};
         let table_text = |migrations: &[&str]| {
@@ -58,17 +91,17 @@ mod tests {
             )
             .unwrap()
         };
-        // The table as migration 17 left it, and as 0020 left it: the players take
+        // The table as migration 17 left it, and as 0022 left it: the players take
         // 0018's column out too.
         let before = table_text(&MIGRATIONS[..17]);
-        let after = table_text(&MIGRATIONS[..20]);
+        let after = table_text(&MIGRATIONS[..22]);
         assert_ne!(
-            table_text(&MIGRATIONS[..19]),
+            table_text(&MIGRATIONS[..21]),
             after,
             "the migration changed the table's text"
         );
         let mut dump = json!({
-            "userVersion": 20,
+            "userVersion": 22,
             "schema": [
                 { "name": "message", "sql": after },
                 { "name": "participant", "sql": after },

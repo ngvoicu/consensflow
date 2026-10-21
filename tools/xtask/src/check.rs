@@ -17,6 +17,13 @@
 //! from a machine that is not Windows; on Windows the workspace's own clippy is
 //! that, and there is no step of it.
 //!
+//! No step runs with the variables a window gives its member (`CONSENSFLOW_URL`,
+//! `CONSENSFLOW_TOKEN`, `CONSENSFLOW_PARTICIPANT`, `CONSENSFLOW_PROJECT`): the
+//! gate is run in member windows, and a test that reads the board from its
+//! environment would reach the live board as that member and put its fixture
+//! there (2026-10-21: a test question on two tasks' boards, which read
+//! "waiting"). Every step is run outside a window, whichever window it is in.
+//!
 //! xtask's own tests run in a step of their own, in a target folder of their
 //! own. The `xtask` this command is running from is `target/debug/xtask`, the
 //! one `cargo xtask` built, and cargo puts there whichever build of xtask it
@@ -45,6 +52,15 @@ use crate::{app, clippy_windows};
 /// workspace's build folder, not in it. The plants' runs that test xtask whole
 /// name it too (`tests/plants/release`), and a test of theirs holds them to it.
 pub(crate) const XTASK_TARGET: &str = "app/src-tauri/target/xtask-check";
+
+/// What a window gives its member to reach the board with. The tests of the
+/// gate stand on their own boards and read none from the shell they run in.
+const WINDOW_VARIABLES: [&str; 4] = [
+    "CONSENSFLOW_URL",
+    "CONSENSFLOW_TOKEN",
+    "CONSENSFLOW_PARTICIPANT",
+    "CONSENSFLOW_PROJECT",
+];
 
 pub const COMMANDS: &[Command] = &[Command {
     words: &["check"],
@@ -122,8 +138,16 @@ fn steps(context: &Context, archiver: &Path, windows: bool) -> Vec<Invocation> {
     steps
 }
 
+/// `step` as it is run: outside a window, without the variables
+/// [`WINDOW_VARIABLES`] names, after the ones the step sets.
+fn outside_a_window(step: &Invocation) -> Invocation {
+    WINDOW_VARIABLES
+        .into_iter()
+        .fold(step.clone(), Invocation::without)
+}
+
 /// Runs `steps` with `run`, saying each on `err` first: the status of the
-/// first that does not end with 0, else 0.
+/// first that does not end with 0, else 0. Each is run outside a window.
 fn run_steps(
     steps: &[Invocation],
     mut run: impl FnMut(&Invocation) -> Result<i32, process::Failure>,
@@ -133,7 +157,7 @@ fn run_steps(
     for (index, step) in steps.iter().enumerate() {
         let number = index + 1;
         writeln!(err, "xtask check [{number}/{total}]: {}", step.display())?;
-        let status = run(step)?;
+        let status = run(&outside_a_window(step))?;
         if status != 0 {
             writeln!(
                 err,
@@ -325,6 +349,45 @@ mod tests {
             "xtask check [1/3]: one\nxtask check [2/3]: two\nxtask check [3/3]: three\n\
              xtask check: all 3 steps passed\n"
         );
+    }
+
+    #[test]
+    fn every_step_is_run_outside_a_window_without_the_variables_a_member_is_given() {
+        let context = context();
+        let steps = steps(&context, Path::new("xtask"), false);
+        let mut run = Vec::new();
+        let status = run_steps(
+            &steps,
+            |step| {
+                run.push(step.clone());
+                Ok(0)
+            },
+            &mut Vec::new(),
+        )
+        .unwrap();
+        assert_eq!(status, 0);
+        assert_eq!(run.len(), steps.len());
+        let gone = [
+            "CONSENSFLOW_URL",
+            "CONSENSFLOW_TOKEN",
+            "CONSENSFLOW_PARTICIPANT",
+            "CONSENSFLOW_PROJECT",
+        ]
+        .map(|name| (OsString::from(name), None));
+        for (step, was) in run.iter().zip(&steps) {
+            // What the step sets comes first and is as it was; then the four are taken away.
+            assert_eq!(
+                step.vars[..was.vars.len()],
+                was.vars[..],
+                "{}",
+                step.display()
+            );
+            assert_eq!(step.vars[was.vars.len()..], gone, "{}", step.display());
+            assert_eq!(
+                (&step.program, &step.args, &step.cwd),
+                (&was.program, &was.args, &was.cwd)
+            );
+        }
     }
 
     #[test]

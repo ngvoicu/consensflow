@@ -39,10 +39,33 @@ fn help_is_said_on_the_output_and_asks_nothing_to_run() {
     for word in ["help", "--help", "-h"] {
         let (status, out, err) = answer(&[word]);
         assert_eq!((status, err.as_str()), (0, ""), "{word}");
-        for verb in ["  run ", "  summary ", "  watch "] {
+        for verb in ["  run ", "  long ", "  summary ", "  watch "] {
             assert!(out.contains(verb), "{word}: {out}");
         }
         assert!(out.contains("--scenario NAME") && out.contains("--project NAME-OR-ID"));
+        assert!(out.contains("--devin-cut") && out.contains("--hours N"));
+    }
+}
+
+#[test]
+fn a_long_run_whose_words_are_wrong_is_refused_before_anything_is_built_or_spent() {
+    for (line, said) in [
+        (
+            &["long", "--hours", "0"][..],
+            "cf-evals: --hours takes a number above 0\n",
+        ),
+        (
+            &["long", "--chief", "kimi"][..],
+            "cf-evals: no such eval harness: kimi\n",
+        ),
+        (
+            &["long", "--nope"][..],
+            "cf-evals: unknown option --nope: --chief,",
+        ),
+    ] {
+        let (status, out, err) = answer(line);
+        assert_eq!((status, out.as_str()), (2, ""), "{line:?}");
+        assert!(err.starts_with(said), "{line:?}: {err}");
     }
 }
 

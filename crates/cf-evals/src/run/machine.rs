@@ -14,7 +14,7 @@ use cf_e2e::process::own_var;
 use cf_e2e::rig::Config;
 use cf_e2e::{checkout, Error, Result as Support};
 
-use super::options::{Arm, Options};
+use super::options::Crew;
 use crate::plan::ChiefSetup;
 
 /// Where the folders of a run are, below the user's home: one fixed workspace,
@@ -48,10 +48,10 @@ impl Machine {
     /// The machine's harnesses of this run: each found as a shell finds it. One
     /// that is not on the `PATH` is an error that says so; its login is the
     /// window's to ask for (a login page shows on the chief's screen in the report).
-    pub fn of(options: &Options) -> Support<Self> {
+    pub fn of(crew: &Crew) -> Support<Self> {
         let home = live::machine::home()?;
-        let mut names: Vec<&str> = vec![options.chief.as_str()];
-        names.extend(options.staff.iter().map(String::as_str));
+        let mut names: Vec<&str> = vec![crew.chief.as_str()];
+        names.extend(crew.staff.iter().map(String::as_str));
         let node = live::command("node")
             .ok()
             .and_then(|node| node.parent().map(Path::to_path_buf));
@@ -135,7 +135,7 @@ impl Machine {
     /// logins, through the wrappers, with what the arm and the chief's model add.
     /// `stand_in` is the program a rig has first on the `PATH` of the windows it
     /// has no use for here (the rig's own, which the `PATH` below leaves out).
-    pub fn rig(&self, options: &Options, chief: &ChiefSetup, stand_in: &Path) -> Config {
+    pub fn rig(&self, crew: &Crew, chief: &ChiefSetup, stand_in: &Path) -> Config {
         let home = self.home.to_string_lossy().into_owned();
         let mut config = live::rig(&self.installs, stand_in)
             .var("HOME", &home)
@@ -148,7 +148,7 @@ impl Machine {
         if cfg!(windows) {
             config = config.var("USERPROFILE", &home);
         }
-        if options.arm == Arm::NoCard {
+        if crew.nocard {
             config = config.var(
                 "CONSENSFLOW_EVAL_CHIEF_CARD",
                 checkout::path("evals/fixtures/no-card.md")

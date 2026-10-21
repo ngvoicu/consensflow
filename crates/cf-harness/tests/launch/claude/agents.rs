@@ -44,14 +44,17 @@ fn turn(agents: Option<u64>) -> Vec<String> {
 }
 
 /// A window on the conversation of `lines`, its status `word` where Claude
-/// says one.
+/// says one. The window's own process wrote what follows the first line: the
+/// window was opened on the brief alone (opened when the record held the turn,
+/// it would be a process after that turn's, whose agents went with it).
 fn window_on(lines: &[String], word: Option<&str>) -> (Home, Rc<dyn Window>) {
     let home = Home::new();
+    home.transcript(SESSION, &lines[..1]);
+    let window = window(&home.adapter(), &Request::resumed(SESSION));
     home.transcript(SESSION, lines);
     if let Some(word) = word {
         home.status(SESSION, &json!({ "status": word }), me());
     }
-    let window = window(&home.adapter(), &Request::resumed(SESSION));
     (home, window)
 }
 

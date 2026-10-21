@@ -374,7 +374,10 @@ fn options(root: &Path, given: &Map<String, Value>) -> Options {
         options.is_empty(),
         "options the type cannot hold: {options:?}"
     );
-    Options { pi_settlement }
+    Options {
+        pi_settlement,
+        ..Options::default()
+    }
 }
 
 /// A fixture's lines with line `line` written as `text`, each line ended by

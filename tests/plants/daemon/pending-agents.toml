@@ -205,12 +205,9 @@ runs = ["engine-dispatcher-pending-agents"]
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
 find = '''
-            && observed.waiting.is_none()
-            && !drawing;'''
+        let idle = free && !drawing;'''
 replace = '''
-            && observed.waiting.is_none()
-            && !observed.agents_pending()
-            && !drawing;'''
+        let idle = free && !observed.agents_pending() && !drawing;'''
 
 [[plant]]
 name = "pending agents: a worker’s turn that ends with agents pending is no task’s result"
@@ -262,7 +259,7 @@ runs = ["engine-dispatcher-pending-agents"]
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
 find = '''
-        let idle = record.delivery.borrow().delivering.is_none()
+        let free = record.delivery.borrow().delivering.is_none()
             && observed.settled'''
 replace = '''
         if participant.role == "chief" && observed.settled {
@@ -271,7 +268,7 @@ replace = '''
                 self.seams.background.end(&pane).await;
             }
         }
-        let idle = record.delivery.borrow().delivering.is_none()
+        let free = record.delivery.borrow().delivering.is_none()
             && observed.settled'''
 
 [[plant]]
@@ -340,12 +337,9 @@ builds = true
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
 find = '''
-            && observed.waiting.is_none()
-            && !drawing;'''
+        let idle = free && !drawing;'''
 replace = '''
-            && observed.waiting.is_none()
-            && !observed.agents_pending()
-            && !drawing;'''
+        let idle = free && !observed.agents_pending() && !drawing;'''
 
 [[plant]]
 name = "pending agents rig: a worker’s turn that ends with agents pending is no task’s result"

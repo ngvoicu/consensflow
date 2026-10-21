@@ -1,0 +1,113 @@
+date,account,memo,amount,currency,tags
+2025-01-01,6000,Office rent,1200.00,EUR,#fixed
+2025-01-03,4000,Invoice ACME,4200.00,EUR,#client:acme
+2025-01-05,6200,Design tool subscription,89.00,EUR,#software
+2025-01-08,6100,Paper and toner,64.20,EUR,#office
+2025-01-12,6300,Train to Cluj,42.60,EUR,#travel
+2025-01-15,6400,Team lunch,86.40,EUR,#meals
+2025-01-20,4100,Workshop seats,1450.00,EUR,#workshop
+2025-01-26,1100,Petty cash top-up,100.00,EUR,#cash
+2025-02-01,6000,Office rent,1200.00,EUR,#fixed
+2025-02-03,4000,Invoice ACME,3900.00,EUR,#client:acme
+2025-02-05,6200,Design tool subscription,89.00,EUR,#software
+2025-02-08,6100,Paper and toner,48.90,EUR,#office
+2025-02-10,6500,Course: TypeScript,350.00,EUR,#training
+2025-02-12,6300,Train to Cluj,38.90,EUR,#travel
+2025-02-14,6400,"Lunch with ACME, kickoff",64.50,EUR,#meals #client:acme
+2025-02-15,6400,Team lunch,112.30,EUR,#meals
+2025-02-20,4100,Workshop seats,980.00,EUR,#workshop
+2025-02-26,1100,Petty cash top-up,100.00,EUR,#cash
+2025-03-01,6000,Office rent,1200.00,EUR,#fixed
+2025-03-03,4000,Invoice ACME,4650.00,EUR,#client:acme
+2025-03-04,6100,Desk lamp,120.00,EUR,#office
+2025-03-05,6200,Design tool subscription,89.00,EUR,#software
+2025-03-07,6200,Hosting,25.00,USD,#software
+2025-03-11,6100,Chair mat,210.40,EUR,#office
+2025-03-12,6300,Train to Cluj,51.20,EUR,#travel
+2025-03-15,6400,Team lunch,74.80,EUR,#meals
+2025-03-18,6100,Paper and toner,152.00,EUR,#office
+2025-03-20,4100,Workshop seats,1620.00,EUR,#workshop
+2025-03-25,6100,Refund: chair mat returned,-30.00,EUR,#office #refund
+2025-03-26,1100,Petty cash top-up,100.00,EUR,#cash
+2025-04-01,6000,Office rent,1200.00,EUR,#fixed
+2025-04-03,4000,Invoice ACME,4200.00,EUR,#client:acme
+2025-04-05,6200,Design tool subscription,89.00,EUR,#software
+2025-04-08,6100,Paper and toner,71.30,EUR,#office
+2025-04-09,6300,"Flight Bucharest, Cluj",312.00,EUR,#travel
+2025-04-12,6300,Train to Cluj,44.00,EUR,#travel
+2025-04-15,6400,Team lunch,98.20,EUR,#meals
+2025-04-20,4100,Workshop seats,1200.00,EUR,#workshop
+2025-04-26,1100,Petty cash top-up,100.00,EUR,#cash
+2025-05-01,6000,Office rent,1200.00,EUR,#fixed
+2025-05-03,4000,Invoice ACME,5100.00,EUR,#client:acme
+2025-05-05,6200,Design tool subscription,89.00,EUR,#software
+2025-05-08,6100,Paper and toner,39.99,EUR,#office
+2025-05-12,6300,Train to Cluj,47.30,EUR,#travel
+2025-05-15,6400,Team lunch,131.50,EUR,#meals
+2025-05-20,4100,Workshop seats,1890.00,EUR,#workshop
+2025-05-21,6200,"Fonts, licence renewal",45.00,USD,#software
+2025-05-26,1100,Petty cash top-up,100.00,EUR,#cash
+2025-06-01,6000,Office rent,1200.00,EUR,#fixed
+2025-06-03,4000,Invoice ACME,3800.00,EUR,#client:acme
+2025-06-05,6200,Design tool subscription,89.00,EUR,#software
+2025-06-08,6100,Paper and toner,82.10,EUR,#office
+2025-06-12,6300,Train to Cluj,39.80,EUR,#travel
+2025-06-15,6400,Team lunch,69.90,EUR,#meals
+2025-06-20,4100,Workshop seats,760.00,EUR,#workshop
+2025-06-26,1100,Petty cash top-up,100.00,EUR,#cash
+2025-06-30,6500,"Course: testing, part 1",380.00,EUR,#training
+2025-07-01,6000,Office rent,1200.00,EUR,#fixed
+2025-07-03,4000,Invoice ACME,4400.00,EUR,#client:acme
+2025-07-05,6200,Design tool subscription,89.00,EUR,#software
+2025-07-07,6200,Hosting,25.00,USD,#software
+2025-07-08,6100,Paper and toner,45.00,EUR,#office
+2025-07-12,6300,Train to Cluj,52.10,EUR,#travel
+2025-07-15,6400,Team lunch,104.60,EUR,#meals
+2025-07-26,1100,Petty cash top-up,100.00,EUR,#cash
+2025-08-01,6000,Office rent,1200.00,EUR,#fixed
+2025-08-03,4000,Invoice ACME,2900.00,EUR,#client:acme
+2025-08-05,6200,Design tool subscription,89.00,EUR,#software
+2025-08-08,6100,Paper and toner,58.75,EUR,#office
+2025-08-12,6300,Train to Cluj,36.40,EUR,#travel
+2025-08-15,6400,Team lunch,88.00,EUR,#meals
+2025-08-19,6400,"Dinner, workshop speakers",92.30,EUR,#meals #workshop
+2025-08-20,4100,Workshop seats,540.00,EUR,#workshop
+2025-08-26,1100,Petty cash top-up,100.00,EUR,#cash
+2025-09-01,6000,Office rent,1200.00,EUR,#fixed
+2025-09-03,4000,Invoice ACME,4750.00,EUR,#client:acme
+2025-09-05,6200,Design tool subscription,89.00,EUR,#software
+2025-09-08,6100,Paper and toner,93.40,EUR,#office
+2025-09-12,6300,Train to Cluj,48.70,EUR,#travel
+2025-09-15,6400,Team lunch,121.75,EUR,#meals
+2025-09-17,6500,Conference ticket,290.00,EUR,#training
+2025-09-20,4100,Workshop seats,2100.00,EUR,#workshop
+2025-09-26,1100,Petty cash top-up,100.00,EUR,#cash
+2025-10-01,6000,Office rent,1200.00,EUR,#fixed
+2025-10-03,4000,Invoice ACME,5200.00,EUR,#client:acme
+2025-10-05,6200,Design tool subscription,89.00,EUR,#software
+2025-10-07,6300,"Hotel, one night",148.60,EUR,#travel
+2025-10-08,6100,Paper and toner,61.15,EUR,#office
+2025-10-12,6300,Train to Cluj,45.90,EUR,#travel
+2025-10-15,6400,Team lunch,93.30,EUR,#meals
+2025-10-20,4100,Workshop seats,1750.00,EUR,#workshop
+2025-10-22,6400,Offsite catering,131.69,EUR,#meals
+2025-10-26,1100,Petty cash top-up,100.00,EUR,#cash
+2025-11-01,6000,Office rent,1200.00,EUR,#fixed
+2025-11-03,4000,Invoice ACME,4300.00,EUR,#client:acme
+2025-11-05,6200,Design tool subscription,89.00,EUR,#software
+2025-11-08,6100,Paper and toner,77.80,EUR,#office
+2025-11-12,6300,Train to Cluj,41.20,EUR,#travel
+2025-11-15,6400,Team lunch,140.20,EUR,#meals
+2025-11-18,6400,Client dinner,96.00,EUR,#meals #client:acme
+2025-11-20,4100,Workshop seats,1320.00,EUR,#workshop
+2025-11-26,1100,Petty cash top-up,100.00,EUR,#cash
+2025-11-27,6500,"Course: testing, part 2",410.00,EUR,#training
+2025-12-01,6000,Office rent,1200.00,EUR,#fixed
+2025-12-03,4000,Invoice ACME,6100.00,EUR,#client:acme
+2025-12-05,6200,Design tool subscription,89.00,EUR,#software
+2025-12-08,6100,Paper and toner,120.50,EUR,#office
+2025-12-09,6100,Printer,410.00,EUR,#office
+2025-12-12,6300,Train to Cluj,58.00,EUR,#travel
+2025-12-15,6400,Team lunch,236.80,EUR,#meals
+2025-12-20,4100,Workshop seats,950.00,EUR,#workshop
+2025-12-26,1100,Petty cash top-up,100.00,EUR,#cash

@@ -3,14 +3,16 @@
 //! list's length. A migration is SQL run inside one transaction, and it is
 //! never edited once it has shipped: a change is a new file at the end. The
 //! files are the JavaScript's strings byte for byte (a test there holds them
-//! equal while both exist), and each is pinned here by its SHA-256.
+//! equal while both exist), and each is pinned here by its SHA-256. What SQL
+//! cannot do of a migration is done in the same transaction, after it
+//! ([`after`]).
 
 use rusqlite::Connection;
 use serde_json::json;
 
 use crate::model::LedgerError;
 
-pub const MIGRATIONS: [&str; 20] = [
+pub const MIGRATIONS: [&str; 22] = [
     include_str!("../migrations/0001.sql"),
     include_str!("../migrations/0002.sql"),
     include_str!("../migrations/0003.sql"),
@@ -31,6 +33,8 @@ pub const MIGRATIONS: [&str; 20] = [
     include_str!("../migrations/0018.sql"),
     include_str!("../migrations/0019.sql"),
     include_str!("../migrations/0020.sql"),
+    include_str!("../migrations/0021.sql"),
+    include_str!("../migrations/0022.sql"),
 ];
 
 pub const SCHEMA_VERSION: usize = MIGRATIONS.len();
@@ -64,6 +68,7 @@ pub fn migrate(db: &Connection, migrations: &[&str]) -> Result<(), LedgerError> 
             db.execute_batch("BEGIN IMMEDIATE")?;
             let step = (|| {
                 db.execute_batch(migration)?;
+                after(db, from + 1)?;
                 db.execute_batch(&format!("PRAGMA user_version = {}", from + 1))?;
                 let broken = db
                     .prepare("PRAGMA foreign_key_check")?
@@ -98,6 +103,24 @@ pub fn migrate(db: &Connection, migrations: &[&str]) -> Result<(), LedgerError> 
     migrated
 }
 
+/// What the migration to `version` does past its SQL: 0020 writes the head of
+/// each item copied before it (what the history viewer reads of it besides its
+/// text, its time kept as a store keeps one), splits the long ones into the
+/// parts its table keeps, which needs each text read once, whole, where SQL's
+/// own functions would read it once a part; and brings within their ceilings
+/// the native sessions, harnesses, agents and times an older build wrote past
+/// them, measured in bytes and cut at a character, which SQL's `length()` and
+/// `substr()` count only to a NUL.
+fn after(db: &Connection, version: usize) -> Result<(), LedgerError> {
+    if version == 20 {
+        crate::conversations::head_copied(db)?;
+        crate::conversations::split_copied(db)?;
+        crate::conversations::cut_sessions(db)?;
+        crate::conversations::fields_within(db)?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -110,7 +133,7 @@ mod tests {
     #[test]
     fn keeps_each_migration_byte_for_byte_as_it_shipped() {
         use sha2::{Digest, Sha256};
-        const SHIPPED: [&str; 20] = [
+        const SHIPPED: [&str; 22] = [
             "51006450d3168c24b6a42ce41afdcf525994957ea22161b4a82f12bf26b65c01",
             "2c6ed236d1829599fbb378164b0c830893fac89eb9780f634688f9ca40f7f0f0",
             "14165bc20e6cb9d4c3c46a81bee45a95b4962ab759f4622aa1cebb8f8edc1ff2",
@@ -129,6 +152,8 @@ mod tests {
             "33053c05edf05fb28fdfed70def7dd9a93d28763f1b444651d24beeba1654352",
             "d73267cfa36e7769831bc565137149029fdc90c32342e6438816e01db5c68c63",
             "63715a099a8464bb97a304c1c7623cada58ade9effb5418625d6df27da26f2b1",
+            "86c4416dc0bdbd3b84dbd1331bc547f7532a7dd07a3f01e216618f7973501c6f",
+            "48abbcf53e6f7360c0fff369b95b8173117294918ecd069405f039ef4ca024ec",
             "72820f35468b10169b5d0aa2eb9d7bfe7c9371eaf3b86170de02288694fedee0",
             "5fff27067cb3132252c5c8bfbb944b467fa87cca69c9cfabc8078753d24c323e",
         ];

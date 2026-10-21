@@ -635,7 +635,7 @@ pub(crate) fn retry_delivery(
 /// is not moved: it is paused, or queued behind the words that resume it. It
 /// and its rows were handed to the window, which holds them in its input box:
 /// a reader of a closed project reads them still, whether or not their transport
-/// marked them so (one delivered before migration 0020 has no mark, and its
+/// marked them so (one delivered before migration 0022 has no mark, and its
 /// delivery is its mark; Astra's review of 2026-10-17).
 pub(crate) fn take_back(
     store: &mut Store,

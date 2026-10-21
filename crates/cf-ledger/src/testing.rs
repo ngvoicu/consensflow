@@ -25,8 +25,14 @@
 //! replacement of a role says), which Node's messages never had: in the rows of
 //! that table and in the text of its schema.
 //!
-//! And migration 0019's column of the `task` table (the mark that a project's
-//! suspension paused a task), which Node's tasks never had, and migration 0020's
+//! And migration 0020's column of the `transcript` table (the mark of a
+//! compaction's summary), which Node's copies never had: in the rows of that
+//! table and in the text of its schema. And the table it made (a long item's
+//! parts) and its indexes (what the history viewer reads through): the table's
+//! rows, and each of them in the schema.
+//!
+//! And migration 0021's column of the `task` table (the mark that a project's
+//! suspension paused a task), which Node's tasks never had, and migration 0022's
 //! of the `message` table (when a message was handed to its window), which
 //! Node's messages never had: in the rows of those tables and in the text of
 //! their schema.
@@ -37,6 +43,7 @@
 //! its database), which migration 0013 took away, is taken out of what Node
 //! recorded, where this ledger's has none to take out.
 
+mod compaction;
 mod described;
 mod handed;
 mod paused_with_project;
@@ -45,6 +52,10 @@ mod role_text;
 mod specs;
 
 use serde_json::{Map, Value};
+
+pub use compaction::undo_migration_0020;
+pub use handed::undo_migration_0022;
+pub use paused_with_project::undo_migration_0021;
 
 /// The last schema version Node's ledger had.
 const NODE_LAST_VERSION: i64 = 11;
@@ -95,10 +106,11 @@ fn added_columns() -> impl Iterator<Item = &'static str> {
 /// and its `rows`), without what Node's ledger never writes: the four
 /// columns of migration 0011, the three wake-up columns of migration 0014, the
 /// three of migration 0015, the one of migration 0016, the description of
-/// migration 0017, the one of migration 0018, the one of migration 0019 and the
-/// one of migration 0020 (their name and, in every row, the value at its place),
-/// and the stop in the event rows that paused a task. A dump from before the migrations has none of them, and is
-/// left as it is.
+/// migration 0017, the one of migration 0018, the one of migration 0020, the one
+/// of migration 0021 and the one of migration 0022 (their name and, in every row,
+/// the value at its place), the table migration 0020 made (a long item's parts),
+/// and the stop in the event rows that paused a task. A dump from before the
+/// migrations has none of them, and is left as it is.
 pub fn hold_apart_what_node_never_writes(tables: &mut Map<String, Value>) {
     hold_apart_the_stop_of_logged_pauses(tables);
     for (table, column) in NODE_NEVER_WRITES
@@ -106,6 +118,7 @@ pub fn hold_apart_what_node_never_writes(tables: &mut Map<String, Value>) {
         .chain(specs::COLUMNS)
         .chain(role_text::COLUMNS)
         .chain(role_note::COLUMNS)
+        .chain(compaction::COLUMNS)
         .chain(paused_with_project::COLUMNS)
         .chain(handed::COLUMNS)
     {
@@ -113,6 +126,9 @@ pub fn hold_apart_what_node_never_writes(tables: &mut Map<String, Value>) {
     }
     for column in added_columns().filter_map(|definition| definition.split_whitespace().next()) {
         take_column_out(tables, "project", column);
+    }
+    for table in compaction::made("TABLE") {
+        tables.remove(table);
     }
 }
 
@@ -148,9 +164,10 @@ fn take_column_out(tables: &mut Map<String, Value>, table: &str, column: &str) {
 /// name the roles and the pools, none of the columns of a project's wake-up
 /// calls, of what it says of specs or of its description in the table of the
 /// projects, and not the column of the role text a conversation was last given,
-/// that of the role text a message says, that of the mark a project's suspension
-/// leaves on the tasks it paused, nor that of when a message was handed to its
-/// window. A dump of Node's is left as it is.
+/// that of the role text a message says, that of the mark of a compaction's
+/// summary in a copy, the table and the indexes migration 0020 made, that of the
+/// mark a project's suspension leaves on the tasks it paused, nor that of when a
+/// message was handed to its window. A dump of Node's is left as it is.
 pub fn hold_apart_what_node_never_had_in_its_schema(dump: &mut Value) {
     if let Some(version) = dump.get_mut("userVersion") {
         if version.as_i64().is_some_and(|at| at > NODE_LAST_VERSION) {
@@ -160,6 +177,12 @@ pub fn hold_apart_what_node_never_had_in_its_schema(dump: &mut Value) {
     let Some(Value::Array(schema)) = dump.get_mut("schema") else {
         return;
     };
+    schema.retain(|entry| {
+        let name = entry["name"].as_str().unwrap_or_default();
+        !compaction::made("TABLE")
+            .chain(compaction::made("INDEX"))
+            .any(|made| made == name)
+    });
     for entry in schema {
         let name = entry["name"].as_str().map(str::to_owned);
         let Some(Value::String(sql)) = entry.get_mut("sql") else {
@@ -191,6 +214,9 @@ pub fn hold_apart_what_node_never_had_in_its_schema(dump: &mut Value) {
                 *sql = sql
                     .replace(role_note::COLUMN_LINES, "")
                     .replace(handed::COLUMN_LINES, "");
+            }
+            Some("transcript") => {
+                *sql = sql.replace(compaction::COLUMN_LINES, "");
             }
             _ => {}
         }

@@ -1,8 +1,8 @@
 //! The programs under test: the `cf` and the pane host (`consensflow-bridge`),
 //! the release builds of this checkout, each made once for a run of the tests;
-//! and the test binary `harness-ask`, which the live tests ask what they need of
-//! the harness code of the product (and which depends on no crate of ours: it
-//! is a program, started as the others are). They are built, not found: `bin/cf`
+//! and the test binaries `harness-ask` and `engine-ask`, which the live tests ask
+//! what they need of the harness code and of the engine's texts (this crate
+//! depends on no crate of ours: each is a program, started as the others are). They are built, not found: `bin/cf`
 //! is whatever the last `cargo xtask build-cf` left, and a suite that ran that
 //! could pass against sources it never saw (a change in hand not built yet, a
 //! plant). `cargo build` knows when the build is up to date, and then it takes
@@ -46,6 +46,19 @@ pub fn harness_ask() -> Result<&'static Path> {
         &BUILT,
         "cf-harness",
         "harness-ask",
+        &["--features", "test-support"],
+    )
+}
+
+/// The test binary `engine-ask`, which answers what a live test asks of the
+/// engine's texts (the note a window the human's Resume brings back is given): the
+/// engine crate's own, built as `harness-ask` is.
+pub fn engine_ask() -> Result<&'static Path> {
+    static BUILT: Built = OnceLock::new();
+    built(
+        &BUILT,
+        "cf-engine",
+        "engine-ask",
         &["--features", "test-support"],
     )
 }

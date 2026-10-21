@@ -194,6 +194,46 @@ fn a_members_window_that_is_never_ready_for_the_role_is_closed_when_the_time_a_l
 }
 
 #[test]
+fn a_members_window_unfit_for_work_before_the_role_was_told_fails_the_follow_up_it_went_ahead_of_once_and_no_launch_follows(
+) {
+    // The window says it never will be ready (a Devin left in its normal permission
+    // mode): the note that says the role was failed in place of the follow-up, which
+    // stayed queued and was launched for at every pass (Astra on the B1 fix).
+    let context = codex();
+    let (project, session, member) = finished_session(&context);
+    context.roles.rewritten.replace(" (rewritten)".to_owned());
+    let why = "its window stayed in a mode nobody works in";
+    context
+        .codex
+        .ready
+        .replace(Some(Rc::new(move || Ok(Readiness::Unfit(why.to_owned())))));
+    follow_up(&context, &project, "Now the lexer");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(context.codex.prepared().len(), 2);
+    assert_eq!(kills_of(&context, &session), 1, "its window is closed");
+    assert_eq!(
+        context.task(project.id, 2).task.state,
+        "failed",
+        "the follow-up the role went ahead of fails with the launch"
+    );
+    let notes = replacements(&context, member);
+    assert_eq!(notes.len(), 1);
+    assert_eq!(context.message(notes[0].id).state, "cancelled");
+    assert_eq!(told_the_human(&context, project.id, why), 1, "and says why");
+
+    // No launch follows, and no replacement is written for one.
+    for _ in 0..4 {
+        context.advance(60_000);
+        context.pass().unwrap();
+    }
+    assert_eq!(context.codex.prepared().len(), 2, "no other window opens");
+    assert_eq!(replacements(&context, member).len(), 1);
+    assert_eq!(told_the_human(&context, project.id, "did not reach @"), 1);
+    context.close();
+}
+
+#[test]
 fn a_members_window_is_not_closed_for_the_time_a_launch_has_once_the_delivery_of_the_role_began() {
     let context = codex();
     let (project, session, member) = finished_session(&context);
@@ -244,6 +284,8 @@ fn a_members_window_that_exits_with_the_role_on_its_way_fails_the_follow_up_once
     context.roles.rewritten.replace(" (rewritten)".to_owned());
     follow_up(&context, &project, "Now the lexer");
     context.pass().unwrap();
+    // Its harness never records what is pasted.
+    context.codex.with(&session, |agent| agent.arrive = false);
     context.pass().unwrap();
     let notes = replacements(&context, member);
     assert_eq!(notes.len(), 1);
@@ -266,6 +308,62 @@ fn a_members_window_that_exits_with_the_role_on_its_way_fails_the_follow_up_once
         1,
         "no other is written"
     );
+    context.close();
+}
+
+/// A review of 2026-10-16 (a chief's, in `chief_launch`): the window recorded the note
+/// that says its role and went before a look saw it there. The window's end confirms
+/// the note from the record: the launch came up, and the follow-up does not fail with
+/// it.
+#[test]
+fn a_members_window_that_exits_once_its_record_showed_the_role_came_up_and_its_follow_up_does_not_fail(
+) {
+    let context = codex();
+    let (project, session, member) = finished_session(&context);
+    context.roles.rewritten.replace(" (rewritten)".to_owned());
+    follow_up(&context, &project, "Now the lexer");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let notes = replacements(&context, member);
+    assert_eq!(context.message(notes[0].id).state, "delivering");
+
+    context
+        .host
+        .exits_showing(Some(3), None, Some(&["thread 'main' panicked"]));
+    context.exit(&session);
+    assert_eq!(context.message(notes[0].id).state, "delivered");
+    assert_eq!(
+        recorded(&context, member).as_deref(),
+        Some("instructions for worker (rewritten)")
+    );
+    assert_eq!(
+        context.task(project.id, 2).task.state,
+        "queued",
+        "the follow-up waits for the next window"
+    );
+    assert_eq!(
+        told_the_human(&context, project.id, "panicked"),
+        0,
+        "no launch failed"
+    );
+
+    // The next window resumes the session told its role, the follow-up its first
+    // message, and no role is said again.
+    for _ in 0..4 {
+        context.advance(60_000);
+        context.pass().unwrap();
+    }
+    let launches = context.codex.prepared();
+    assert_eq!(launches.len(), 3);
+    assert!(
+        launches[2]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("Now the lexer")),
+        "{}",
+        launches[2]["message"]
+    );
+    assert_eq!(context.task(project.id, 2).task.state, "working");
+    assert_eq!(replacements(&context, member).len(), 1);
     context.close();
 }
 

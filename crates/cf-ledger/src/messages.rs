@@ -33,7 +33,9 @@ use crate::tasks::{pause_task, take_over_pause};
 use crate::views::{message_view, TaskRow, MESSAGE_SELECT};
 
 pub(crate) use again::tell_sent_back;
-pub(crate) use carrying::{adopt, fold, release_carried, release_stranded, transfer};
+pub(crate) use carrying::{
+    adopt, fold, reconcile_released, release_carried, release_stranded, transfer,
+};
 pub use continuations::{continuation, continuation_tasks};
 pub(crate) use continuations::{withdraw_continuations, withdraw_stale};
 pub(crate) use delivery::{

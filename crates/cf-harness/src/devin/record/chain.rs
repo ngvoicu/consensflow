@@ -86,6 +86,7 @@ impl Chain {
                     complete: role != Role::Assistant,
                     at,
                     commentary: false,
+                    compaction: false,
                 },
                 request: request.clone(),
                 stopped: metadata("finish_reason").and_then(Value::as_str) == Some("stop"),

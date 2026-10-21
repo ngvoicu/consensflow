@@ -280,6 +280,7 @@ pub(super) fn prepare_as(
         role: request.role,
         directory: "/work/app",
         resume: request.resume.as_deref(),
+        previous_gone: false,
         message: request.message.as_deref(),
         agent: request.agent,
         instructions: &request.instructions,
@@ -288,6 +289,7 @@ pub(super) fn prepare_as(
             .zip(skill.as_ref())
             .map(|(variant, skill)| Specs { variant, skill }),
         first_message_ms: request.first_message_ms,
+        starts_given_up: 0,
     };
     finished(adapter.prepare(&launch))
 }
@@ -349,6 +351,7 @@ pub(super) fn settled(session: &str) -> Record {
             complete: true,
             at: None,
             commentary: false,
+            compaction: false,
         }],
         in_flight: false,
         asking: false,

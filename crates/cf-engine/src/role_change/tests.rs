@@ -294,6 +294,7 @@ fn said_by(role: Role, text: &str, complete: bool) -> Item {
         complete,
         at: None,
         commentary: false,
+        compaction: false,
     }
 }
 
@@ -401,12 +402,12 @@ fn a_displaced_message_that_rides_in_the_paste_of_another_is_not_begun_and_its_l
         .unwrap();
     let displaced = Delivering {
         message: brief.id,
-        marker: marker_of(brief.id),
         since: 0,
         rested_since: None,
         launch: true,
         chief: false,
         queued: false,
+        free_since: None,
         entered_again: false,
         carried: Vec::new(),
     };

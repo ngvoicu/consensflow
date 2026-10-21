@@ -251,6 +251,37 @@ fn a_window_resumes_the_conversation_the_harness_keeps_when_the_question_says_so
 }
 
 #[test]
+fn a_devin_windows_wire_says_its_mode_and_the_command_the_daemon_gives_it_before_it_is_ready() {
+    let folder = tempfile::tempdir().unwrap();
+    let wire = folder.path().join("wire.jsonl");
+    let ready = || answer(&ask("devin_ready", json!({ "wire": wire }))).unwrap();
+    // A log not written yet says nothing, and the window is given nothing.
+    assert_eq!(
+        ready(),
+        json!({ "shown": null, "mode": null, "command": null })
+    );
+    let configured = json!({ "sessionId": "mild-coin", "update": {
+        "sessionUpdate": "config_option_update",
+        "configOptions": [{ "id": "mode", "currentValue": "normal" }] } });
+    fs::write(&wire, format!("{configured}\n")).unwrap();
+    assert_eq!(
+        ready(),
+        json!({ "shown": "mild-coin", "mode": "normal", "command": "/bypass" })
+    );
+    let changed = json!({ "sessionId": "mild-coin",
+        "update": { "sessionUpdate": "current_mode_update", "currentModeId": "bypass" } });
+    fs::write(&wire, format!("{configured}\n{changed}\n")).unwrap();
+    assert_eq!(
+        ready(),
+        json!({ "shown": "mild-coin", "mode": "bypass", "command": null })
+    );
+    assert!(
+        answer(&ask("devin_ready", json!({}))).is_err(),
+        "it names a wire"
+    );
+}
+
+#[test]
 fn text_is_given_as_a_window_and_the_console_take_it() {
     let said = |op: &str, text: &str| answer(&ask(op, json!({ "text": text }))).unwrap();
     // A CR before a newline goes; a control character is shown as its picture.

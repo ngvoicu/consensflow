@@ -3,6 +3,7 @@
 //! the script.
 
 mod golden;
+mod sweep;
 mod unpack;
 
 use super::*;
@@ -237,8 +238,12 @@ fn every_way_out_of_the_script_goes_through_the_function_that_says_how_it_went()
         leaving,
         [r#"function Exit-Run([int]$code) { Write-Output "== exit $code"; exit $code }"#]
     );
-    // And it is what the lock, the unpacking, a step and the command leave by.
-    assert_eq!(text.matches("Exit-Run ").count(), 4, "{text}");
+    // And it is what the lock, the unpacking, the sweep, a step and the command leave by.
+    assert_eq!(text.matches("Exit-Run ").count(), 5, "{text}");
+    assert!(
+        text.contains("if ($failed.Count) { Exit-Run 1 }\n"),
+        "{text}"
+    );
     assert!(
         text.contains(r#"$($other.Id)): one at a time."; Exit-Run 75 }"#),
         "{text}"

@@ -493,12 +493,14 @@ fn observed(observed: &Observed) -> Value {
 }
 
 /// Whether a window is ready, as Node's adapter answered it: `true`, or why not.
+/// One that never will be (Node had none) is `{"unfit": why}`.
 fn readiness(readiness: &Readiness) -> Value {
     match readiness {
         Readiness::Ready => json!(true),
         // Devin's `false`, which the engine says as `Unsaid`'s sentence.
         Readiness::Held(Held::Unsaid) => json!(false),
         Readiness::Held(held) => json!(held.sentence()),
+        Readiness::Unfit(why) => json!({ "unfit": why }),
     }
 }
 
@@ -554,6 +556,8 @@ fn begin_prepare(played: &mut Played, id: usize, given: &Value) {
             role: &role,
             directory: &directory,
             resume: resume.as_deref(),
+            // Node's launches knew nothing of how a window before them ended.
+            previous_gone: false,
             message: message.as_deref(),
             agent,
             instructions: &instructions,
@@ -561,6 +565,7 @@ fn begin_prepare(played: &mut Played, id: usize, given: &Value) {
             // Node's adapters waited a fixed minute for a thread to be named: the
             // daemon's wait for a first message is three, so the minute holds.
             first_message_ms: FIRST_MESSAGE_MS,
+            starts_given_up: 0,
         };
         match adapter.prepare(&launch).await {
             Ok(prepared) => {

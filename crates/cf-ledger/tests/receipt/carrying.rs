@@ -356,6 +356,99 @@ fn a_carrier_that_fails_lets_go_of_what_it_carried_and_the_reopening_carries_it_
     );
 }
 
+/// T-202's shape, cut by a stop of the daemon: the words that resume the task are
+/// being pasted, with the answer and the note they carry, when the daemon stops, and
+/// it starts again (the ledger is opened again). The carrier, its answer and its note.
+fn stopped_while_pasting_a_carrier() -> (crate::fixture::World, i64, i64, i64, i64) {
+    let mut w = world();
+    let created = w.give("zeus", "Parser");
+    let (task, brief) = (created.task.number, created.message.expect("a brief").id);
+    w.deliver(brief);
+    let question = w.ask("zeus", task, "Which format?");
+    let answer = w.answer(question.id, "JSON").id;
+    let note = w.note("chief", "zeus", task, "Mind the tests").id;
+    w.hold(task);
+    let carrier = w.daemon_resumes(task).message.expect("its words").id;
+    let begun = w.begin(carrier);
+    assert_eq!(
+        ids(&begun.carried),
+        [answer, note],
+        "both ride in its paste"
+    );
+    w.edit(|_| {});
+    assert_eq!(ids(&w.ledger.in_flight().unwrap()), [carrier]);
+    (w, task, carrier, answer, note)
+}
+
+/// The window's record shows the carrier's marker: the start confirms it, and the
+/// rows that rode in its paste were received with it. Let go of it at the start,
+/// they were pasted again on their own (a review of 2026-10-16).
+#[test]
+fn rows_that_rode_in_a_paste_the_daemon_stopped_in_are_received_with_it_when_the_record_shows_it() {
+    let (mut w, task, carrier, answer, note) = stopped_while_pasting_a_carrier();
+    w.confirm(carrier);
+    assert_eq!(
+        w.states(&[carrier, answer, note]),
+        ["delivered", "delivered", "delivered"]
+    );
+    assert_eq!(w.receipt(answer), json!({ "carrier": carrier }));
+    assert_eq!(
+        w.state(task),
+        "working",
+        "its question has an answer received"
+    );
+    assert_eq!(w.next("zeus"), None, "nothing is pasted again");
+}
+
+/// The window's record does not show it: the start queues the carrier again, and the
+/// rows go again in its paste, once.
+#[test]
+fn rows_that_rode_in_a_paste_the_daemon_stopped_in_go_again_in_its_paste_when_the_record_does_not_show_it(
+) {
+    let (mut w, task, carrier, answer, note) = stopped_while_pasting_a_carrier();
+    w.ledger
+        .retry_delivery(carrier, "the daemon stopped before it arrived", true)
+        .expect("queued again");
+    assert_eq!(w.states(&[answer, note]), ["queued", "queued"]);
+    assert_eq!(w.next("zeus"), Some(carrier), "one paste, the carrier's");
+    let begun = w.deliver(carrier);
+    assert_eq!(ids(&begun.carried), [answer, note], "in its paste again");
+    assert_eq!(
+        w.states(&[carrier, answer, note]),
+        ["delivered", "delivered", "delivered"]
+    );
+    assert_eq!(w.state(task), "working");
+    assert_eq!(w.next("zeus"), None);
+}
+
+/// The carrier's paste reached the window, and the start could not read the window's
+/// record, so it queued the carrier again; a note for the window came while it waited,
+/// and the daemon stopped again as the carrier began to go. The next start finds the
+/// first paste's marker: what that paste held was received, and the note, in no
+/// paste, goes on its own. It joined the carrier, it was taken for received with it,
+/// and never pasted (a review of 2026-10-16).
+#[test]
+fn a_row_that_comes_after_a_carriers_first_paste_is_never_taken_for_received_with_it() {
+    let (mut w, task, carrier, answer, note) = stopped_while_pasting_a_carrier();
+    w.ledger
+        .retry_delivery(carrier, "the daemon stopped before it arrived", true)
+        .expect("queued again");
+    let later = w.note("chief", "zeus", task, "And the docs").id;
+    let begun = w.begin(carrier);
+    assert_eq!(
+        ids(&begun.carried),
+        [answer, note],
+        "the set of its first paste"
+    );
+    w.edit(|_| {});
+    w.confirm(carrier);
+    assert_eq!(
+        w.states(&[carrier, answer, note, later]),
+        ["delivered", "delivered", "delivered", "queued"]
+    );
+    assert_eq!(w.next("zeus"), Some(later), "it goes on its own");
+}
+
 #[test]
 fn two_pauses_on_a_clock_that_never_moves_are_two_stops() {
     let mut w = frozen_world();

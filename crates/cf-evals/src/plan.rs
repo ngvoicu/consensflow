@@ -86,6 +86,9 @@ pub struct Agent {
     /// The reasoning level, with the word its harness calls it by: `effort`, or
     /// `thinking` for Pi. Devin has none.
     pub effort: Option<(&'static str, String)>,
+    /// The work tier the daemon gives it tasks by: `standard` in an eval, so that
+    /// any harness may get any task; a long run gives each harness its own.
+    pub tier: &'static str,
 }
 
 impl Agent {
@@ -106,17 +109,25 @@ impl Agent {
                     level.to_owned(),
                 )
             }),
+            tier: "standard",
         }
     }
 
-    /// The row of the roster: every member is standard tier, so the daemon picks
-    /// among them by its own rule and any harness may get any task.
+    /// The agent, of the work tier `tier`.
+    #[must_use]
+    pub fn with_tier(mut self, tier: &'static str) -> Self {
+        self.tier = tier;
+        self
+    }
+
+    /// The row of the roster: of an eval, every member is standard tier, so the
+    /// daemon picks among them by its own rule and any harness may get any task.
     pub fn to_value(&self) -> Value {
         let mut row = json!({
             "id": self.id,
             "kind": self.kind,
             "model": self.model,
-            "workTier": "standard",
+            "workTier": self.tier,
         });
         if let (Some((word, level)), Some(fields)) = (&self.effort, row.as_object_mut()) {
             fields.insert((*word).to_owned(), json!(level));

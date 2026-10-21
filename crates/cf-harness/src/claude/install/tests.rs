@@ -25,11 +25,13 @@ fn every_role_enters_every_harness_with_its_whole_text_already_loaded() {
             role: name,
             directory: "/work/app",
             resume: None,
+            previous_gone: false,
             message: None,
             agent: None,
             instructions: &content,
             specs: None,
             first_message_ms: crate::testing::FIRST_MESSAGE_MS,
+            starts_given_up: 0,
         };
         let args = role(&env, &launch).unwrap();
         let at = args

@@ -37,6 +37,15 @@ fn each_command_is_a_verb_of_the_cf_evals_command_and_the_words_after_it_go_as_t
         )),
         "cargo run --locked --quiet --package cf-evals -- watch --project poker-lab --tokens"
     );
+    // The long run looks at its project for hours: built in release.
+    assert_eq!(
+        said(&invocation(
+            &root,
+            "long",
+            &words("--chief devin --staff claude,devin --hours 3")
+        )),
+        "cargo run --release --locked --quiet --package cf-evals -- long --chief devin --staff claude,devin --hours 3"
+    );
     // A word with a space in it stays one word.
     let spaced = invocation(
         &root,
@@ -53,19 +62,16 @@ fn each_command_is_a_verb_of_the_cf_evals_command_and_the_words_after_it_go_as_t
 }
 
 #[test]
-fn the_commands_are_the_ones_the_scripts_were_and_summary_is_found_before_eval() {
+fn the_commands_are_the_ones_the_scripts_were_and_summary_and_long_are_found_before_eval() {
     let named: Vec<String> = COMMANDS
         .iter()
         .map(|command| command.words.join(" "))
         .collect();
-    assert_eq!(named, ["eval summary", "eval", "watch"]);
-    let summary = COMMANDS
-        .iter()
-        .position(|command| command.words == ["eval", "summary"]);
-    let eval = COMMANDS
-        .iter()
-        .position(|command| command.words == ["eval"]);
-    assert!(summary < eval, "{named:?}");
+    assert_eq!(named, ["eval summary", "eval long", "eval", "watch"]);
+    let at = |words: &[&str]| COMMANDS.iter().position(|command| command.words == words);
+    let eval = at(&["eval"]);
+    assert!(at(&["eval", "summary"]) < eval, "{named:?}");
+    assert!(at(&["eval", "long"]) < eval, "{named:?}");
 }
 
 #[test]
@@ -84,7 +90,35 @@ fn what_each_command_takes_is_what_the_cf_evals_command_takes() {
     ];
     let summary: &[&str] = &["--reports", "--results"];
     let watch: &[&str] = &["--project", "--minutes", "--tokens", "--home"];
-    for (command, flags) in [("eval", eval), ("eval summary", summary), ("watch", watch)] {
+    let long: &[&str] = &[
+        "--chief",
+        "--staff",
+        "--models",
+        "--hours",
+        "--every-min",
+        "--look-sec",
+        "--idle-min",
+        "--dialog-min",
+        "--quiet-min",
+        "--wake-min",
+        "--switch-to",
+        "--quiet",
+        "--pause",
+        "--kill",
+        "--switch",
+        "--compact",
+        "--restart",
+        "--devin-cut",
+        "--suspend",
+        "--ask",
+        "--reports",
+    ];
+    for (command, flags) in [
+        ("eval", eval),
+        ("eval summary", summary),
+        ("eval long", long),
+        ("watch", watch),
+    ] {
         let row = COMMANDS
             .iter()
             .find(|row| row.words.join(" ") == command)

@@ -22,6 +22,7 @@ mod messages;
 /// the parsers a caller reading JSON (the API, the page) checks a request with.
 pub mod model;
 mod names;
+mod openings;
 mod page_reads;
 mod projects;
 mod questions;
@@ -38,14 +39,20 @@ mod views;
 mod wake_ups;
 
 pub use cf_proto::ledger::{
-    Begun, Board, Candidate, ChiefConversation, ChiefOpenWork, Claim, ConversationView, Cut,
-    DeletedProject, EventView, HeldTask, Lane, LastSwitch, LatestMessages, LatestTranscript,
-    MemberView, MessageView, ParticipantView, ProjectView, Question, QuestionOption, RemovedMember,
-    Resume, StaffMember, Stop, TaskCard, TaskCreated, TaskMoved, TaskReleased, TaskThatFits,
-    TaskThread, TaskTranscript, TaskView, TierChange,
+    Begun, Board, Candidate, ChiefConversation, ChiefOpenWork, Claim, ConversationEnd,
+    ConversationView, Cut, DeletedProject, EventView, HeldTask, HistoryEntry, HistoryFrom,
+    HistoryItem, HistoryKey, HistoryRead, HistoryRow, Lane, LastSwitch, LatestMessages,
+    LatestTranscript, MemberView, MessageOpening, MessageView, ParticipantConversation,
+    ParticipantView, ProjectView, Question, QuestionOption, RemovedMember, Resume, Scanned,
+    StaffMember, Stop, TaskCard, TaskCreated, TaskMoved, TaskReleased, TaskThatFits, TaskThread,
+    TaskTranscript, TaskView, TextCut, TextPart, TierChange,
 };
 pub use cf_proto::wake_ups::WakeUpView;
-pub use conversations::{ChiefSwitch, TRANSCRIPT_ITEM_MAX};
+pub use conversations::{
+    ChiefSwitch, HistoryAsk, FIELD_MAX, HEADING_EVENT_MAX, HISTORY_FIND_MAX, HISTORY_PART,
+    HISTORY_SCAN_BYTES, ID_SHOWN, MESSAGE_OPENING, NATIVE_SESSION_MAX, OPENING_COST,
+    TRANSCRIPT_ITEM_MAX,
+};
 #[cfg(feature = "test-support")]
 pub use ledger::Watcher;
 pub use ledger::{open_ledger, Event, Ledger, Options};

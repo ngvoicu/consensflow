@@ -115,12 +115,20 @@ struct Lane {
     flagged: Option<(i64, Value)>,
     /// When it stopped saying so.
     cleared: Option<i64>,
+    /// When the board first showed the window gone: the daemon closes one that
+    /// ignored every round.
+    closed: Option<i64>,
 }
 
+/// How long the lane is looked at once the window is gone, for the notes that
+/// say why to land: the host answers the close once it has ended the window.
+const AFTER_THE_CLOSE_MS: i64 = 10_000;
+
 /// The board's own word on it: `unstopped` on the lane, once every round was
-/// ignored; looked at until it is said and unsaid and the window is idle, or, for
-/// a window that stopped and was never said to have ignored the stop, until it
-/// has nothing more to show.
+/// ignored and the host would not close the window; looked at until it is said
+/// and unsaid and the window is idle, for a little while once the window is
+/// gone, or, for a window that stopped and was never said to have ignored the
+/// stop, until it has nothing more to show.
 fn watch_the_lane(
     members: &Members,
     agent: &str,
@@ -130,15 +138,26 @@ fn watch_the_lane(
     let mut lane = Lane {
         flagged: None,
         cleared: None,
+        closed: None,
     };
     let end = made + i64::try_from((IGNORE_S + 40) * 1_000).unwrap_or(i64::MAX);
     while now_ms() < end {
-        let flag = unstopped(&members.lane(agent)?);
+        let read = members.lane(agent)?;
+        let flag = unstopped(&read);
         if let (Some(flag), None) = (&flag, &lane.flagged) {
             lane.flagged = Some((now_ms(), flag.clone()));
         }
         if flag.is_none() && lane.flagged.is_some() && lane.cleared.is_none() {
             lane.cleared = Some(now_ms());
+        }
+        if read["pane"].is_null() && lane.closed.is_none() {
+            lane.closed = Some(now_ms());
+        }
+        if lane
+            .closed
+            .is_some_and(|closed| now_ms() - closed > AFTER_THE_CLOSE_MS)
+        {
+            break;
         }
         let idle = status
             .samples()
@@ -305,7 +324,7 @@ pub fn run(ctx: &Ctx, case: &mut Account, variant: &Variant) -> Result<()> {
             &told,
         );
     } else {
-        // The window kept working: the exhausted stop of §1.3.
+        // The window kept working through every round: the daemon closes it, and says why.
         case.check(
             "the window kept working through its presses",
             presses.len() >= 3,
@@ -315,26 +334,17 @@ pub fn run(ctx: &Ctx, case: &mut Account, variant: &Variant) -> Result<()> {
             ),
         );
         case.check(
-            "the board says it did not stop",
-            lane.flagged.is_some(),
-            &how,
+            "the daemon closed the window",
+            !pane_open,
+            lane.closed.map_or_else(
+                || format!("its pane is still open; {how}"),
+                |closed| format!("its pane was gone at {}", plus(closed, made)),
+            ),
         );
         case.check("the human is told, once", human.len() == 1, &told);
         case.check("the requester is told, once", requester.len() == 1, &told);
-        case.check(
-            "the window is not killed",
-            pane_open,
-            format!(
-                "its pane {}",
-                if pane_open {
-                    "is still open"
-                } else {
-                    "is gone"
-                }
-            ),
-        );
     }
-    case.say(format!("     the exhausted stop of §1.3, as it ran: {how}"));
+    case.say(format!("     the stop, as it ran: {how}"));
     case.say(format!(
         "     {}",
         settlement_line(ctx.members, &watched.session)

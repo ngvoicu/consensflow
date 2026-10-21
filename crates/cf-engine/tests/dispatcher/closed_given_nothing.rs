@@ -298,8 +298,8 @@ fn a_task_the_human_pauses_while_the_resume_reads_whether_its_turn_was_cut_stays
     context.close_project(project).unwrap();
     let reading = context
         .adapter
-        .record_holds
-        .hold(move |asked| asked[0]["conversation"]["nativeSession"] == native.as_str());
+        .cut_holds
+        .hold(move |asked| asked[0] == native.as_str());
     let before = opened(&context).len();
     context.resume_project(project).unwrap();
     context.human_pause(project, 1);
@@ -346,9 +346,10 @@ fn a_task_the_human_pauses_while_the_resume_s_launch_reads_its_record_stays_paus
             "worker, as it was",
         )
         .unwrap();
-    let looking = context.adapter.record_holds.hold(move |asked| {
-        asked[0]["conversation"]["nativeSession"] == native.as_str() && asked.get(1).is_none()
-    });
+    let looking = context
+        .adapter
+        .record_holds
+        .hold(move |asked| asked[0] == native.as_str());
     let before = opened(&context).len();
     context.resume_project(project).unwrap();
     context.human_pause(project, 1);
