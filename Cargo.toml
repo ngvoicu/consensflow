@@ -35,6 +35,9 @@ cf-launcher = { path = "crates/cf-launcher" }
 cf-portable = { path = "crates/cf-portable" }
 cf-release = { path = "tools/cf-release" }
 cf-publish = { path = "tools/cf-publish" }
+# The error type portable-pty's traits answer with, which the pane host's own
+# Windows pseudoconsole implements (`cf-panes`). Already in the build, through it.
+anyhow = "1"
 base64 = "0.22"
 bytes = "1"
 flate2 = "1"

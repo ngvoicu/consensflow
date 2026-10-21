@@ -69,9 +69,9 @@ const SENDERS: [(&str, &str, &str); 13] = [
         "signal 0 delivers nothing: whether the group has a process",
     ),
     (
-        "pty.rs",
-        "child.kill()",
-        "Windows: the program of a window that could not be owned, as it started",
+        "pty/conpty.rs",
+        "TerminateProcess(process.as_raw_handle(), 1)",
+        "Windows: the window's own program, by the handle it was started with (`Child::kill`)",
     ),
     (
         "pty.rs",

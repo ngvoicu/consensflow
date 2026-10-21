@@ -6,13 +6,17 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Condvar, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
-use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
+#[cfg(unix)]
+use portable_pty::native_pty_system;
+use portable_pty::{Child, CommandBuilder, MasterPty, PtySize};
 
 use crate::background::Baseline;
 use crate::ended::{Ended, EndedSlot};
 use crate::screen::PaneScreen;
 
 mod close;
+#[cfg(windows)]
+mod conpty;
 #[cfg(test)]
 mod keys;
 mod output_end;
@@ -506,7 +510,14 @@ impl PaneTable {
             return Err(PaneError::AlreadyOpen(key));
         }
 
+        // A window whose tree cannot be owned does not open: closing it could not end
+        // what the harness starts. On Windows the harness is started in its job.
+        #[cfg(windows)]
+        let job = Arc::new(crate::job_object::JobObject::new()?);
+        #[cfg(unix)]
         let pty_system = native_pty_system();
+        #[cfg(windows)]
+        let pty_system = conpty::ConPty::joining(Arc::clone(&job));
         let pair = pty_system
             .openpty(size)
             .map_err(|error| PaneError::Pty(error.to_string()))?;
@@ -537,25 +548,11 @@ impl PaneTable {
         let mut process_tree = crate::process_tree::ProcessTree::new();
         #[cfg(target_os = "macos")]
         command.env(crate::process_tree::OWNER_ENV, &process_tree.marker);
-        #[cfg(windows)]
-        let job = Arc::new(crate::job_object::JobObject::new()?);
-        #[cfg_attr(not(windows), allow(unused_mut))]
-        let mut child = pair
+        let child = pair
             .slave
             .spawn_command(command)
             .map_err(|error| PaneError::Pty(error.to_string()))?;
         drop(pair.slave);
-        // A window whose tree cannot be owned does not open: closing it could
-        // not end what the harness starts.
-        #[cfg(windows)]
-        if let Err(error) = child
-            .process_id()
-            .ok_or_else(|| io::Error::other("the harness has no process id"))
-            .and_then(|pid| job.assign(pid))
-        {
-            let _ = child.kill();
-            return Err(PaneError::Io(error));
-        }
 
         #[cfg(unix)]
         let process_group_id = child.process_id().and_then(|pid| i32::try_from(pid).ok());

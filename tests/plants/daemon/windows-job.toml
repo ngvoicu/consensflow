@@ -1,0 +1,71 @@
+# On Windows a window's program joined its Job Object only once it ran (`issues/windows-job-
+# object-is-assigned-after-the-start.md`, found in turn-end's round 6, 2026-10-17): portable-pty
+# started it, and the pane host put it in its job after. A launcher (a `.cmd` shim, an npm wrapper)
+# that started a child in that moment left the child outside the job: the job's inventories did not
+# list it, and the close did not end it. The pane host now starts the program itself, on a
+# pseudoconsole of its own, with the job in the program's attributes
+# (`crates/cf-panes/src/pty/conpty.rs`, `PROC_THREAD_ATTRIBUTE_JOB_LIST`): the program is the job's
+# from its first instruction (T-137, 3.0.6).
+#
+# The case is `pty::conpty::tests`, on zeewin: a launcher that starts a PING at once (`start /b`)
+# and waits, its start held five seconds once it has been made (where the host used to put it in
+# its job), and the window's close. The moment the old code left was a few system calls long, where
+# a launcher needs milliseconds to start anything: nothing outside a held moment loses that race,
+# which is why the fix is the start itself and not a faster join. So the plants hold the moment, as
+# the case does, and put the late join after it.
+#
+# The two of the join run on zeewin, where the code is compiled: `cargo xtask windows --host zeewin
+# -- cargo xtask plants daemon "windows job: the launcher"`. The plant of the audit of who may end a
+# process runs on a Mac: the audit reads the sources of every system, and is a module of the macOS
+# process tree (on zeewin it runs no test, and the plant is missed). Every name holds `windows job`.
+
+[run]
+panes-conpty = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "pty::conpty::"]
+panes-audit = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "process_tree::audit::"]
+
+[[plant]]
+name = "windows job: the launcher joins its job only once it runs, as portable-pty's start had it"
+meant = "a_child_a_launcher_starts_at_once_is_the_jobs_and_the_close_ends_it"
+runs = ["panes-conpty"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/conpty.rs"
+find = "    attributes.jobs(&jobs)?;\n"
+replace = "    let _ = &jobs;\n"
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/conpty.rs"
+find = '''    std::thread::sleep(HOLD_STARTED.get());
+'''
+replace = '''    std::thread::sleep(HOLD_STARTED.get());
+    // SAFETY: planted: both handles are open.
+    if unsafe {
+        windows_sys::Win32::System::JobObjects::AssignProcessToJobObject(
+            job.handle(),
+            process.as_raw_handle(),
+        )
+    } == 0
+    {
+        return Err(io::Error::last_os_error());
+    }
+'''
+
+[[plant]]
+name = "windows job: the launcher is started in no job"
+meant = "a_child_a_launcher_starts_at_once_is_the_jobs_and_the_close_ends_it"
+runs = ["panes-conpty"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/conpty.rs"
+find = "    attributes.jobs(&jobs)?;\n"
+replace = "    let _ = &jobs;\n"
+
+[[plant]]
+name = "windows job: the window's own program is ended by a sender the audit does not name"
+meant = "nothing_but_the_bound_sends_a_signal"
+runs = ["panes-audit"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/conpty.rs"
+find = "TerminateProcess(process.as_raw_handle(), 1)"
+replace = "TerminateProcess(process.as_raw_handle(), 2)"
