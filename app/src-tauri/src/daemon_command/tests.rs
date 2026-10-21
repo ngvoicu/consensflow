@@ -36,6 +36,40 @@ fn the_daemon_is_the_bundled_cf_running_ui_and_nothing_of_the_apps_is_added_to_i
     );
 }
 
+/// The daemon runs as long as the app does, and the app opens sockets and pipes on its other
+/// threads as it starts it. On macOS std makes each close-on-exec in a second step, and a
+/// program started between the two holds it for good: the daemon would hold a connection of the
+/// app's, and what the app closed would not be closed. Here a descriptor is left in that moment
+/// while the daemon starts, and the daemon is asked whether it has it.
+#[cfg(target_os = "macos")]
+#[test]
+fn the_daemon_holds_nothing_of_the_apps_but_its_streams_whatever_was_open_as_it_started() {
+    use std::os::fd::AsRawFd;
+
+    let folder = tempfile::tempdir().expect("a folder");
+    let stray = std::fs::File::open("/dev/null").expect("a file");
+    let fd = stray.as_raw_fd();
+    // SAFETY: `fcntl` is asked to clear the flags of a descriptor this test holds.
+    assert_eq!(unsafe { libc::fcntl(fd, libc::F_SETFD, 0) }, 0);
+    let cf = login_shell(
+        folder.path(),
+        &format!("if [ -e /dev/fd/{fd} ]; then echo held; else echo clear; fi"),
+    );
+    // The script was written a moment ago, and a program started on another thread meanwhile
+    // can hold it open for writing: such a start is refused, and tried again.
+    let said = (0..50)
+        .find_map(|_| match command_for(&cf).output() {
+            Ok(output) => Some(output),
+            Err(refused) if refused.kind() == std::io::ErrorKind::ExecutableFileBusy => {
+                std::thread::sleep(Duration::from_millis(100));
+                None
+            }
+            Err(refused) => panic!("the daemon was not started: {refused}"),
+        })
+        .expect("the daemon started");
+    assert_eq!(String::from_utf8_lossy(&said.stdout), "clear\n");
+}
+
 #[test]
 fn the_cf_is_the_one_in_the_clis_folder_of_the_bundle_or_the_portable_runtime() {
     let cf = if cfg!(windows) { "cf.exe" } else { "cf" };

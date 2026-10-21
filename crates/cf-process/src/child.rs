@@ -51,6 +51,8 @@ pub struct Child {
 /// (`spawn <file> ENOENT`).
 pub fn spawn(run: &Run, cwd: Option<&Path>, env: &Env, streams: Streams) -> Result<Child, String> {
     let mut command = tokio::process::Command::from(run.command());
+    // It runs for as long as this does, and holds what it is left to its end.
+    crate::descriptors::hold_only_the_streams(command.as_std_mut());
     command.env_clear().envs(env.iter());
     match streams {
         Streams::Lines => command

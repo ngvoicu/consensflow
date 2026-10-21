@@ -11,6 +11,7 @@
 mod alive;
 mod capture;
 mod child;
+mod descriptors;
 mod execute;
 mod group;
 mod hand_over;
@@ -25,6 +26,7 @@ mod testing;
 pub use alive::alive;
 pub use capture::{capture, CaptureFailed, Captured};
 pub use child::{spawn, Child, Ender, Streams};
+pub use descriptors::hold_only_the_streams;
 pub use execute::{execute, Failed, Limits};
 pub use hand_over::{hand_over, Handed};
 pub use job::with_required;

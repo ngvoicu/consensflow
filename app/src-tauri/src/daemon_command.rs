@@ -63,6 +63,9 @@ pub(crate) fn daemon_command(
 fn command_for(cf: &Path) -> Command {
     let mut command = Command::new(cf);
     command.args(["ui", "--json", "--no-open"]);
+    // The daemon runs as long as the app does, and the app opens sockets and pipes on its
+    // other threads as it starts it: what it was left of those it would hold to the end.
+    cf_process::hold_only_the_streams(&mut command);
     command
 }
 

@@ -33,6 +33,8 @@ pub enum Handed {
 /// nothing behind when it ends.
 pub async fn hand_over(run: &Run, env: &Env, within: Duration) -> Result<Handed, String> {
     let mut command = tokio::process::Command::from(run.command());
+    // It is let go, and may run on long after this one has ended.
+    crate::descriptors::hold_only_the_streams(command.as_std_mut());
     command
         .env_clear()
         .envs(env.iter())

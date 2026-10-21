@@ -703,7 +703,7 @@ fn stdin_eof_reaps_every_spawned_process() {
         let opened = helper.request(
             "pane.open",
             open_body(
-                "tree=/tmp/cf-eof-tree-$$; \
+                "/bin/sleep 4; tree=/tmp/cf-eof-tree-$$; \
                  /bin/sh -c '/bin/sleep 1000 & grandchild=$!; \
                  printf \"%s\\n\" \"$grandchild\" >\"$1\"; wait' sh \"$tree\" & child=$!; \
                  while [ ! -s \"$tree\" ]; do :; done; grandchild=$(/bin/cat \"$tree\"); \
@@ -719,9 +719,19 @@ fn stdin_eof_reaps_every_spawned_process() {
         ));
     }
 
+    // The programs start a shell that starts a shell that starts a sleep, and say nothing
+    // until the last has: how long that takes is the machine's (the four seconds before it
+    // are a loaded machine's), and a quiet host is not a hung one. A frame that comes is
+    // waited for until all of them have printed, up to a minute.
+    let printed_by = Instant::now() + Duration::from_secs(60);
     while panes.iter().any(|(_, _, bytes)| !bytes.contains(&b'\n')) {
         if events.is_empty() {
-            events.push(helper.receive());
+            let left = printed_by.saturating_duration_since(Instant::now());
+            events.push(
+                helper
+                    .receive_timeout(left)
+                    .expect("the windows printed their processes within a minute"),
+            );
         }
         for event in events.drain(..) {
             for (pane_id, generation, bytes) in &mut panes {
@@ -1101,6 +1111,66 @@ fn helper_is_inert_when_stdin_is_not_a_pipe() {
         .expect("run helper with non-pipe stdin");
     assert!(output.status.success());
     assert!(output.stdout.is_empty());
+}
+
+/// The host holds a descriptor it was left (the program that started it had one open that was
+/// not yet close-on-exec: on macOS std makes each socket and pipe so in a second step), and a
+/// window it opens holds nothing of it: portable-pty closes every descriptor above the standard
+/// streams in the window's program before it runs. The premise is looked at too, with `lsof`.
+#[cfg(target_os = "macos")]
+#[test]
+fn a_window_holds_nothing_of_the_hosts_but_its_terminal_whatever_the_host_was_left() {
+    use std::os::fd::AsRawFd;
+
+    unsafe extern "C" {
+        fn fcntl(fd: i32, command: i32, argument: i32) -> i32;
+    }
+    const F_SETFD: i32 = 2;
+
+    let _pty_guard = serial_headless_test();
+    let stray = std::fs::File::open("/dev/null").expect("a file");
+    let fd = stray.as_raw_fd();
+    // SAFETY: `fcntl` clears the flags of a descriptor this test holds.
+    assert_eq!(unsafe { fcntl(fd, F_SETFD, 0) }, 0);
+    let mut helper = Headless::spawn();
+    let held = Command::new("/usr/sbin/lsof")
+        .args([
+            "-a",
+            "-p",
+            &helper.child.id().to_string(),
+            "-d",
+            &fd.to_string(),
+        ])
+        .output()
+        .expect("lsof");
+    assert!(
+        String::from_utf8_lossy(&held.stdout).contains("/dev/null"),
+        "the host was left the descriptor: {}",
+        String::from_utf8_lossy(&held.stdout)
+    );
+    let mut events = Vec::new();
+    let opened = helper.request(
+        "pane.open",
+        open_body(
+            &format!("if [ -e /dev/fd/{fd} ]; then echo held; else echo clear; fi; sleep 1000"),
+            1024,
+        ),
+        &mut events,
+    );
+    let pane_id = opened["id"].as_str().expect("opened pane id").to_string();
+    let generation = opened["generation"].as_u64().expect("opened generation");
+    let said = output_until(&helper, &mut events, &pane_id, generation, b"clear");
+    assert!(
+        !String::from_utf8_lossy(&said).contains("held"),
+        "{}",
+        String::from_utf8_lossy(&said)
+    );
+    helper.request(
+        "pane.kill",
+        json!({"id":pane_id,"generation":generation}),
+        &mut events,
+    );
+    helper.close_input_and_wait();
 }
 
 fn process_exists(pid: i32) -> bool {

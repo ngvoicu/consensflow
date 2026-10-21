@@ -127,7 +127,8 @@ fn leave_a_daemon(seconds: &str, build: &Path, daemon: &Path) -> Result<(), Stri
     let written = |file: PathBuf, text: String| {
         fs::write(&file, text).map_err(|failed| format!("{}: {failed}", file.display()))
     };
-    written(beside("pid"), std::process::id().to_string())?;
+    cf_e2e::files::say_its_process(build)
+        .map_err(|failed| format!("{}: {failed}", build.display()))?;
     #[cfg(windows)]
     keep_own_handles();
     let program = std::env::current_exe().map_err(|failed| failed.to_string())?;

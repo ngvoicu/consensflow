@@ -18,6 +18,45 @@ use crate::{Ctx, FAKE_AGENT};
 #[path = "stand_in/command.rs"]
 mod command;
 
+/// Whether `said` has the line of a lane that was working at the watch's first look and
+/// closed later: `working at +<first> s, closed at +<later> s`. The first look is not at
+/// the moment of the pause: the watch starts when the case has the pause's answer and
+/// has said it, which a loaded machine takes a fifth of a second over; what the line
+/// holds the case to is that the window was working when the watch began and was
+/// closed after.
+fn lane_worked_and_was_closed(said: &str) -> bool {
+    let line = regex::Regex::new(
+        r"(?m)^     the lane over the stop: working at \+(\d+\.\d) s, closed at \+(\d+\.\d) s",
+    )
+    .unwrap();
+    line.captures(said).is_some_and(|found| {
+        let at = |index: usize| found[index].parse::<f64>().unwrap();
+        at(1) <= at(2)
+    })
+}
+
+#[test]
+fn a_lane_that_worked_when_the_watch_began_and_was_closed_after_is_told_from_one_that_was_not() {
+    let line = |words: &str| format!("     the lane over the stop: {words}");
+    // The first look is when the watch got to it, a fifth of a second late or ten.
+    for words in [
+        "working at +0.0 s, closed at +13.0 s",
+        "working at +0.2 s, closed at +13.0 s",
+        "working at +10.0 s, closed at +10.0 s",
+    ] {
+        assert!(lane_worked_and_was_closed(&line(words)), "{words}");
+    }
+    for words in [
+        "working at +0.2 s",
+        "working at +0.2 s, idle at +1.0 s",
+        "idle at +0.0 s, closed at +13.0 s",
+        "closed at +13.0 s, working at +14.0 s",
+        "working at +14.0 s, closed at +13.0 s",
+    ] {
+        assert!(!lane_worked_and_was_closed(&line(words)), "{words}");
+    }
+}
+
 /// What the stand-in member is given: a turn of two minutes, which the stand-in
 /// spends at work and prints no numbers in.
 const TURN: &str = "SLEEP 120 Reply with exactly: MIDTURN";
@@ -170,10 +209,7 @@ fn a_stand_in_that_goes_on_through_three_rounds_is_a_stop_the_case_fails_and_say
     );
     // The window that did not stop was closed after its third round (whether the notes
     // that say so had landed by the end of the watch is the host's grace's).
-    assert!(
-        said.contains("     the lane over the stop: working at +0.0 s, closed at +"),
-        "{said}"
-    );
+    assert!(lane_worked_and_was_closed(&said), "{said}");
     // Each round was looked at, and the window was working at each look.
     assert_eq!(
         said.matches("s after its last key: the lane read working")

@@ -220,7 +220,7 @@ impl Jobs {
         let file = self
             .folder
             .join(format!("{label}-{}-{number}.pid", self.window));
-        fs::write(&file, format!("{pid}\n"))
+        cf_e2e::files::write_whole(&file, &format!("{pid}\n"))
             .map_err(|failed| format!("{}: {failed}", file.display()))
     }
 
@@ -538,8 +538,7 @@ impl Job {
         // request is never lost.
         #[cfg(unix)]
         self.hear()?;
-        fs::write(self.beside("pid"), std::process::id().to_string())
-            .map_err(|failed| failed.to_string())?;
+        cf_e2e::files::say_its_process(&self.file).map_err(|failed| failed.to_string())?;
         // Held to the end, as the server holds the browser it launched.
         let _browser = self.launch_browser()?;
         thread::sleep(Duration::from_secs(self.seconds));

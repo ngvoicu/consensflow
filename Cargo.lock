@@ -57,6 +57,7 @@ dependencies = [
  "cf-launcher",
  "cf-panes",
  "cf-portable",
+ "cf-process",
  "cf-proto",
  "flate2",
  "libc",

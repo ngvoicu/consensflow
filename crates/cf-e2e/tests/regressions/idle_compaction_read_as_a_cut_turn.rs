@@ -60,10 +60,55 @@ pub(crate) fn compacted_while_idle(config: &str, session: &str) -> std::io::Resu
     writeln!(record, "{summary}")
 }
 
+/// Whether the record holds the chief's answer: an assistant's record that ends the turn
+/// with the word. The prompt has the word too ("Reply with exactly: HELLO"), so the word
+/// in the record is not the answer.
+fn answered(record: &str) -> bool {
+    record
+        .lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .any(|entry| {
+            entry["type"] == "assistant"
+                && entry["message"]["stop_reason"] == "end_turn"
+                && entry["message"]["content"].to_string().contains("HELLO")
+        })
+}
+
+#[test]
+fn only_the_assistants_ended_turn_with_the_word_is_the_chiefs_answer() {
+    let prompt = json!({
+        "type": "user",
+        "message": { "role": "user", "content": "Reply with exactly: HELLO" },
+    });
+    let answer = json!({
+        "type": "assistant",
+        "message": {
+            "role": "assistant",
+            "content": [{ "type": "text", "text": "HELLO" }],
+            "stop_reason": "end_turn",
+        },
+    });
+    let working = json!({
+        "type": "assistant",
+        "message": {
+            "role": "assistant",
+            "content": [{ "type": "text", "text": "HELLO" }],
+            "stop_reason": null,
+        },
+    });
+    assert!(!answered(""));
+    assert!(!answered(&format!("{prompt}\n")));
+    assert!(!answered(&format!("{prompt}\n{working}\n")));
+    assert!(answered(&format!("{prompt}\n{answer}\n")));
+}
+
 #[test]
 fn a_claude_chief_whose_conversation_was_compacted_while_idle_is_given_no_note_at_a_resume(
 ) -> Outcome {
-    let rig = Rig::start(config())?;
+    // The answer is written a moment after the turn begins, so that the record holds the
+    // prompt alone for that long: the order a compaction written at once would meet, and
+    // the one a loaded machine makes of any chief.
+    let rig = Rig::start(config().var("CF_TEST_ANSWER_MS", "3000"))?;
     let project = Project::open(&rig, "chief", json!({}))?;
     wait_for_the_chief(&rig, &project)?;
     let session = windows_of(&rig, &project)
@@ -73,7 +118,7 @@ fn a_claude_chief_whose_conversation_was_compacted_while_idle_is_given_no_note_a
         .to_owned();
     rig.tell(project.id(), "Reply with exactly: HELLO")?;
     rig.wait_for("the chief to answer", secs(60), || {
-        Ok(rig.transcript(&session).contains("HELLO"))
+        Ok(answered(&rig.transcript(&session)))
     })?;
     wait_for_the_chief(&rig, &project)?;
     let claude = rig

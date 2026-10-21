@@ -1,0 +1,81 @@
+# What a program ConsensFlow starts is left of the descriptors of the one that starts it
+# (T-133, 3.0.6): on macOS std makes a socket or a pipe close-on-exec in a second step, and a
+# program started on another thread between the two holds it to its end. A listener that was
+# closed goes on taking connections, a pipe is never at its end, a port cannot be bound.
+# `cf_process::hold_only_the_streams` (`crates/cf-process/src/descriptors.rs`) closes, in the new
+# process and before the exec, every descriptor above the standard streams that is not
+# close-on-exec; the programs `spawn` starts to run beside it and `hand_over` lets go have it, and
+# the app's daemon command asks for it (a program run to its end does not: see the module's words
+# on what a start by fork costs). The window's programs are the pane host's, which portable-pty starts and cleans.
+# One plant takes one rule out; a test fails.
+#
+# Every name holds `descriptors`, so `npm run plants:daemon -- "descriptors:"` runs them all.
+
+[run]
+process-descriptors = ["cargo", "test", "--offline", "-p", "cf-process", "--lib", "descriptors::"]
+app-daemon-descriptors = ["cargo", "xtask", "app", "test", "the_daemon_holds_nothing"]
+
+[[plant]]
+name = "descriptors: a program is left the descriptors its parent had open and not close-on-exec"
+meant = "a_program_run_beside_this_one_holds_no_descriptor_that_was_open_when_it_started"
+runs = ["process-descriptors"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/descriptors.rs"
+find = "if flags >= 0 && flags & libc::FD_CLOEXEC == 0 {"
+replace = "if false && flags >= 0 && flags & libc::FD_CLOEXEC == 0 {"
+
+[[plant]]
+name = "descriptors: the programs cf-process starts to run beside it do not ask for it"
+meant = "a_program_run_beside_this_one_holds_no_descriptor_that_was_open_when_it_started"
+runs = ["process-descriptors"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/child.rs"
+find = '''
+    crate::descriptors::hold_only_the_streams(command.as_std_mut());
+'''
+replace = ""
+
+[[plant]]
+name = "descriptors: the programs cf-process lets go do not ask for it"
+meant = "a_program_let_go_holds_no_descriptor_that_was_open_when_it_started"
+runs = ["process-descriptors"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/hand_over.rs"
+find = '''
+    crate::descriptors::hold_only_the_streams(command.as_std_mut());
+'''
+replace = ""
+
+[[plant]]
+name = "descriptors: the descriptors above the first thousand listed are left to the program"
+meant = "a_program_run_beside_this_one_holds_no_descriptor_that_was_open_when_it_started"
+runs = ["process-descriptors"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/descriptors.rs"
+find = '''
+        for entry in &listing[..listed.min(LISTED)] {
+            highest = highest.max(entry.proc_fd);
+            let_go(entry.proc_fd);
+        }
+'''
+replace = '''
+        for entry in &listing[..listed.min(LISTED)] {
+            highest = highest.max(entry.proc_fd);
+        }
+'''
+
+[[plant]]
+name = "descriptors: the app starts its daemon with whatever the app held"
+meant = "the_daemon_holds_nothing_of_the_apps_but_its_streams_whatever_was_open_as_it_started"
+runs = ["app-daemon-descriptors"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/daemon_command.rs"
+find = '''
+    cf_process::hold_only_the_streams(&mut command);
+'''
+replace = ""

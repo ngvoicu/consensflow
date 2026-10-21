@@ -108,6 +108,7 @@ pub(crate) fn beside(file: &Path, kind: &str) -> PathBuf {
 }
 
 /// Waits until `file` is there, for up to ten seconds.
+#[cfg(unix)]
 pub(crate) fn until_there(file: &Path) -> bool {
     let started = Instant::now();
     while !file.exists() && started.elapsed() < Duration::from_secs(10) {
@@ -120,7 +121,6 @@ pub(crate) fn until_there(file: &Path) -> bool {
 /// seconds: a program that writes its process makes the file before it writes into it,
 /// and a file that is there is not one that is written. Where none comes, it says what
 /// the file held.
-#[cfg(unix)]
 pub(crate) fn pid_in(file: &Path) -> Result<u32, String> {
     let started = Instant::now();
     loop {
@@ -138,16 +138,42 @@ pub(crate) fn pid_in(file: &Path) -> Result<u32, String> {
     }
 }
 
+/// The process a job writes is whole from the moment its file is there, for a case that
+/// waits for the file and reads it at once reads a number: the file is looked for as often
+/// as a case can, and read when it is found.
+#[test]
+fn the_stand_in_agents_job_writes_its_process_whole_or_not_at_all() -> Outcome {
+    let folder = tempfile::tempdir()?;
+    let file = folder.path().join("job-1-1");
+    let _job = start_job("1", &file, false)?;
+    let started = Instant::now();
+    let held = loop {
+        if let Ok(held) = std::fs::read_to_string(beside(&file, "pid")) {
+            break held;
+        }
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "the job never wrote its process"
+        );
+        thread::yield_now();
+    };
+    assert!(
+        held.trim().parse::<u32>().is_ok(),
+        "the job's file was there holding {held:?}"
+    );
+    Ok(())
+}
+
 #[test]
 fn the_stand_in_agents_job_writes_its_process_runs_its_seconds_and_says_it_finished() -> Outcome {
     let folder = tempfile::tempdir()?;
     let file = folder.path().join("job-1-1");
     let mut job = start_job("1", &file, false)?;
 
-    assert!(until_there(&beside(&file, "pid")), "the job says it runs");
     assert_eq!(
-        files::read_string(&beside(&file, "pid"))?,
-        job.id().to_string()
+        pid_in(&beside(&file, "pid"))
+            .map_err(|failed| format!("the job does not run: {failed}"))?,
+        job.id()
     );
     let ended = job
         .wait(Duration::from_secs(10))?
@@ -262,14 +288,8 @@ fn the_stand_in_agents_server_launches_a_browser_that_is_its_child_in_a_group_of
         .closed_input()
         .spawn()?;
     assert!(until_there(&beside(&server_file, "pid")), "the server runs");
-    assert!(
-        until_there(&beside(&browser_file, "pid")),
-        "so does its browser"
-    );
-
-    let browser: u32 = files::read_string(&beside(&browser_file, "pid"))?
-        .trim()
-        .parse()?;
+    let browser = pid_in(&beside(&browser_file, "pid"))
+        .map_err(|failed| format!("its browser does not run: {failed}"))?;
     assert_eq!(
         group_of(browser),
         Some(browser),
