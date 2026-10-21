@@ -158,6 +158,39 @@ find = '''
 '''
 replace = ""
 
+# The `pi.cmd` Pi's own Windows installer writes, `node "%~dp0pi-launcher.js" %*`: a bare node.
+[[plant]]
+name = "deletion: a bare node before a shim's script is not read as a Node"
+meant = "pis_own_installers_shim_runs_its_launcher_on_a_node_found_as_for_an_npm_shim"
+runs = ["runnable"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/runnable.rs"
+find = '''
+        [script] if begins_with_bare_node(line) => (None, *script),
+'''
+replace = ""
+
+[[plant]]
+name = "deletion: a bare node before a shim's script is run as the name node, not the one found"
+meant = "pis_own_installers_shim_runs_its_launcher_on_a_node_found_as_for_an_npm_shim"
+runs = ["runnable"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/runnable.rs"
+find = "        None => Program::Node,"
+replace = '        None => Program::Named(PathBuf::from("node")),'
+
+[[plant]]
+name = "deletion: any program before a shim's lone quoted script is read as a Node"
+meant = "a_program_before_the_script_other_than_a_bare_node_is_still_no_shim_to_read"
+runs = ["runnable"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/runnable.rs"
+find = '.is_some_and(|quote| line[..quote].trim().eq_ignore_ascii_case("node"))'
+replace = ".is_some()"
+
 [[plant]]
 name = "deletion: the refusal does not say the Node can be made visible"
 meant = "an_npm_shim_with_no_node_beside_it_or_on_the_path_is_refused_saying_what_to_do"
