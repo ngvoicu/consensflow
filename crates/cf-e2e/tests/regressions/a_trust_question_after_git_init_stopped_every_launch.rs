@@ -586,6 +586,21 @@ fn result_for(project: &Project, number: i64) -> cf_e2e::Result<Option<Value>> {
 #[test]
 fn a_chief_opened_again_at_rest_that_asks_is_handed_nothing_until_the_human_has_answered() -> Outcome
 {
+    chief_opened_again_at_rest_and_asking(false)
+}
+
+#[test]
+fn a_chief_opened_again_at_rest_whose_prompt_is_drawn_otherwise_is_handed_its_result_after_the_yes(
+) -> Outcome {
+    // Nothing goes into it before it is past the question, so its record cannot grow:
+    // its prompt, drawn otherwise than the reader knows, is all there is to go by.
+    chief_opened_again_at_rest_and_asking(true)
+}
+
+/// The chief opened again at rest after the app's restart asks of a folder outside the
+/// project, its prompt drawn otherwise where `plain`; a worker's result comes for it
+/// meanwhile, and must reach it once the human has said yes.
+fn chief_opened_again_at_rest_and_asking(plain: bool) -> Outcome {
     // A chief opened again on its conversation after the app's restart has nothing to
     // begin a turn with: what comes for it waits for its window to be ready, and a
     // window that asks reads at rest from its record, so the gate is ConsensFlow's.
@@ -623,7 +638,12 @@ fn a_chief_opened_again_at_rest_that_asks_is_handed_nothing_until_the_human_has_
     rig.kill_daemon();
     rig.wait_for_daemon_exit(secs(10))?;
     let kept = rig.close_keeping_the_root()?;
-    let rig = Rig::start(config().var("CF_TEST_TRUST", "chief").existing_root(kept))?;
+    let restarted = config().var("CF_TEST_TRUST", "chief").existing_root(kept);
+    let rig = Rig::start(if plain {
+        restarted.var("CF_TEST_PLAIN_PROMPT", "1")
+    } else {
+        restarted
+    })?;
     let project = Project::new(&rig, id);
     let resumed = rig.page("project.resume", json!({ "project": id }))?;
     assert_eq!(resumed["ok"], true, "{resumed}");
@@ -661,5 +681,173 @@ fn a_chief_opened_again_at_rest_that_asks_is_handed_nothing_until_the_human_has_
     rig.wait_for("T-1's result to reach the chief", secs(60), || {
         Ok(result_for(&project, 1)?.is_some_and(|result| result["state"] == "delivered"))
     })?;
+    Ok(())
+}
+
+/// The rig whose worker's windows ask, its stand-in set by `vars` besides.
+fn asking_with(vars: &[(&str, &str)]) -> cf_e2e::Result<Rig> {
+    Rig::start(
+        vars.iter()
+            .fold(asking(), |config, &(name, value)| config.var(name, value)),
+    )
+}
+
+#[test]
+fn a_window_whose_prompt_is_drawn_otherwise_goes_on_after_the_yes() -> Outcome {
+    // Its prompt never says "bypass permissions on" (a reworded status line, or a
+    // managed setting that keeps the session out of that mode).
+    let rig = asking_with(&[("CF_TEST_PLAIN_PROMPT", "1")])?;
+    git_init(rig.workspace())?;
+    let project = Project::open(&rig, "chief", json!({}))?;
+    let added = project.add_member("worker")?;
+    let tier = added["member"]["tier"]
+        .as_str()
+        .unwrap_or_default()
+        .to_owned();
+    a_task(&rig, &project, &tier, 1, "PLAIN_PROMPT_DONE")?;
+    assert_eq!(keys_given(&rig), ["down", "enter"]);
+    Ok(())
+}
+
+#[test]
+fn a_window_that_did_not_take_a_key_is_given_it_again() -> Outcome {
+    let rig = asking_with(&[("CF_TEST_TRUST_DROPS_FIRST_KEY", "1")])?;
+    git_init(rig.workspace())?;
+    let project = Project::open(&rig, "chief", json!({}))?;
+    let added = project.add_member("worker")?;
+    let tier = added["member"]["tier"]
+        .as_str()
+        .unwrap_or_default()
+        .to_owned();
+    a_task(&rig, &project, &tier, 1, "AGAIN_DONE")?;
+    assert_eq!(keys_given(&rig), ["dropped", "down", "enter"]);
+    Ok(())
+}
+
+#[test]
+fn a_screen_that_quotes_the_question_asks_nothing() -> Outcome {
+    // A plain folder: nothing asks. The window's screen names both choices, as a
+    // conversation about this very dialog does.
+    let rig = asking_with(&[(
+        "CF_TEST_SAYS_FIRST",
+        "Claude offers \"No, exit\" and \"Yes, I trust this folder\" there.",
+    )])?;
+    let project = Project::open(&rig, "chief", json!({}))?;
+    let added = project.add_member("worker")?;
+    let tier = added["member"]["tier"]
+        .as_str()
+        .unwrap_or_default()
+        .to_owned();
+    a_task(&rig, &project, &tier, 1, "QUOTED_DONE")?;
+    let notes = notes_of(&project, rig.workspace())?;
+    assert!(
+        notes.is_empty(),
+        "a quoted question was answered: {notes:?}"
+    );
+    Ok(())
+}
+
+#[test]
+fn a_record_that_grows_as_a_no_ends_the_window_is_no_yes() -> Outcome {
+    // A window opened again on its conversation asks of a folder outside the project,
+    // and so does a new window of the worker. The human says No in the first, and a
+    // process before it, which the host could not end, writes to its record as it
+    // ends: the record grew, and nobody said yes.
+    let rig = asking_with(&[
+        ("CF_TEST_TRUST_EXIT_MS", "4000"),
+        ("CF_TEST_RECORD_GROWS_ON_NO", "1"),
+    ])?;
+    let root = rig.workspace().to_path_buf();
+    let folder = root.join("app");
+    std::fs::create_dir(&folder)?;
+    let project = Project::open(&rig, "chief", json!({ "directory": folder }))?;
+    let added = project.add_member("worker")?;
+    let tier = added["member"]["tier"]
+        .as_str()
+        .unwrap_or_default()
+        .to_owned();
+    a_task(&rig, &project, &tier, 1, "FIRST_DONE")?;
+    git_init(&root)?;
+    let opened = workers(&rig, &project).len();
+    rig.tell(
+        project.id(),
+        "CF task add --after T-1 :: Reply with exactly: AFTER_DONE",
+    )?;
+    rig.tell(
+        project.id(),
+        &format!("DISPATCH --tier {tier} Reply with exactly: NEW_DONE"),
+    )?;
+    rig.wait_for("both of the worker's windows to ask", secs(60), || {
+        Ok(!notes_of(&project, &root)?.is_empty() && workers(&rig, &project).len() == opened + 2)
+    })?;
+    let resumed = workers(&rig, &project)[opened..]
+        .iter()
+        .find(|frame| {
+            frame["argv"]
+                .as_array()
+                .is_some_and(|argv| argv.iter().any(|word| word == "--resume"))
+        })
+        .cloned()
+        .ok_or("no window was opened again on its conversation")?;
+    sleep(Duration::from_secs(2));
+    let pressed = rig.host(
+        "pane.input",
+        json!({ "id": resumed["id"], "generation": resumed["generation"], "bytes": ENTER }),
+    )?;
+    assert_eq!(pressed["ok"], true, "{pressed}");
+    sleep(Duration::from_secs(9));
+    assert_eq!(trusted(&rig), "", "the other window was answered yes");
+    assert!(
+        !keys_given(&rig).iter().any(|key| key == "down"),
+        "a key toward yes went into the other window: {:?}",
+        keys_given(&rig)
+    );
+    Ok(())
+}
+
+#[test]
+fn a_window_opened_again_whose_record_cannot_be_read_at_first_is_still_answered() -> Outcome {
+    // The follow-up's window cannot read its record for its first 1.5 s (it was moved
+    // aside before the window opened, an empty one in its place), and asks after 3 s:
+    // the record found then is the conversation it opened with, and no growth.
+    let rig = asking_with(&[
+        ("CF_TEST_RECORD_AWAY_MS", "1500"),
+        ("CF_TEST_TRUST_FIRST_FRAME_MS", "3000"),
+    ])?;
+    let project = Project::open(&rig, "chief", json!({}))?;
+    let added = project.add_member("worker")?;
+    let tier = added["member"]["tier"]
+        .as_str()
+        .unwrap_or_default()
+        .to_owned();
+    a_task(&rig, &project, &tier, 1, "FIRST_DONE")?;
+    git_init(rig.workspace())?;
+    let session = workers(&rig, &project)
+        .last()
+        .and_then(|frame| {
+            let argv = frame["argv"].as_array()?;
+            let at = argv.iter().position(|word| word == "--session-id")?;
+            argv.get(at + 1)?.as_str().map(str::to_owned)
+        })
+        .ok_or("the worker's window has no session")?;
+    let config = Path::new(rig.var("CLAUDE_CONFIG_DIR").unwrap_or_default()).to_path_buf();
+    let transcript = config
+        .join("projects")
+        .join("integration")
+        .join(format!("{session}.jsonl"));
+    std::fs::rename(&transcript, transcript.with_extension("away"))?;
+    // An empty record in its place: the conversation is there to resume, and its
+    // first looks read nothing of it.
+    std::fs::write(&transcript, "")?;
+    rig.tell(
+        project.id(),
+        "CF task add --after T-1 :: Reply with exactly: SECOND_DONE",
+    )?;
+    rig.wait_for("T-2 to be done", secs(90), || {
+        let state = project.task(2)?["state"].clone();
+        assert_ne!(state, "failed", "T-2 failed");
+        Ok(state == "done")
+    })?;
+    assert_eq!(notes_of(&project, rig.workspace())?.len(), 1);
     Ok(())
 }

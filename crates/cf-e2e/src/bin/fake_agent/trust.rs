@@ -19,7 +19,11 @@
 //! the window takes that long to end. With `CF_TEST_TRUST_REDRAW_MS` set it takes
 //! that long to move its `❯` for a Down, its screen as it was meanwhile; and it
 //! writes down each key it was given (`trust-keys`, a word a line, in its config
-//! folder).
+//! folder). With `CF_TEST_TRUST_DROPS_FIRST_KEY` set it ignores the first key it is
+//! given, as a window that did not take it; with `CF_TEST_RECORD_GROWS_ON_NO` set its
+//! record grows once as a No ends it, as a process before it the host could not end
+//! writes still; and with `CF_TEST_RECORD_AWAY_MS` set a record a case moved aside
+//! comes back that long after the window starts ([`bring_the_record_back`]).
 
 use std::fs;
 use std::io::{self, Read, Write};
@@ -54,6 +58,25 @@ fn append(config: &Path, name: &str, line: &str) -> io::Result<()> {
         .append(true)
         .open(config.join(name))?;
     writeln!(file, "{line}")
+}
+
+/// Puts the window's record back `CF_TEST_RECORD_AWAY_MS` after the window starts,
+/// where a case moved it aside (to `<transcript>.away`, an empty transcript in its
+/// place) before the window opened: the first looks find a record with nothing in it,
+/// which cannot be read, as a transcript being written over cannot be.
+pub fn bring_the_record_back(transcript: &Path) {
+    let Some(away) = millis("CF_TEST_RECORD_AWAY_MS") else {
+        return;
+    };
+    let hidden = transcript.with_extension("away");
+    if !hidden.exists() {
+        return;
+    }
+    let back = transcript.to_path_buf();
+    std::thread::spawn(move || {
+        sleep(away);
+        let _ = fs::rename(hidden, back);
+    });
 }
 
 /// How long the first line stands alone before the question is drawn: less than the
@@ -107,7 +130,11 @@ fn draw(folder: &Path, yes: bool) -> io::Result<()> {
 
 /// Asks the question where the window `wanted` (it is the participant `CF_TEST_TRUST`
 /// names) opened in an untrusted repository, and reads the answer from its terminal.
-pub fn ask(config: &Path, wanted: bool) -> Result<Answer, String> {
+pub fn ask(
+    config: &Path,
+    wanted: bool,
+    mut on_no: impl FnMut() -> Result<(), String>,
+) -> Result<Answer, String> {
     let failed = |cause: io::Error| cause.to_string();
     let folder = std::env::current_dir().map_err(failed)?;
     if !wanted {
@@ -131,6 +158,7 @@ pub fn ask(config: &Path, wanted: bool) -> Result<Answer, String> {
     opening(first_frame.unwrap_or(FIRST_FRAME))?;
     let mut yes = false;
     draw(&folder, yes).map_err(failed)?;
+    let mut drops = own_var("CF_TEST_TRUST_DROPS_FIRST_KEY").is_some();
     let mut stdin = io::stdin().lock();
     let mut chunk = [0_u8; 4096];
     loop {
@@ -141,10 +169,17 @@ pub fn ask(config: &Path, wanted: bool) -> Result<Answer, String> {
         let keys = String::from_utf8_lossy(&chunk[..read]).into_owned();
         // A paste is nothing to a question but its markers' Escapes.
         let keys = keys.replace("\u{1b}[200~", "").replace("\u{1b}[201~", "");
-        let no = || -> Result<Answer, String> {
+        // A window that did not take the first key it was given.
+        if drops && !keys.is_empty() {
+            drops = false;
+            append(config, KEYS, "dropped").map_err(failed)?;
+            continue;
+        }
+        let mut no = || -> Result<Answer, String> {
             if let Some(lingers) = millis("CF_TEST_TRUST_EXIT_MS") {
                 say("\u{1b}[2J\u{1b}[H fake agent: the folder is not trusted\r\n")
                     .map_err(failed)?;
+                on_no()?;
                 sleep(lingers);
             }
             Ok(Answer::Exit)
