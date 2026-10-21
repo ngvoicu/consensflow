@@ -1,8 +1,10 @@
 //! A wake-up is given only when the chief has nothing on its way: no task
-//! working, queued or waiting on a question, none open behind a task that is
-//! not yet done. A task done and waiting for the chief's decision is the
-//! chief's own work, and so is a board with nothing on it. A wake-up skipped
-//! is not owed: the interval counts again from the skip.
+//! working or queued for its window, none waiting for an answer that is on its
+//! way, none held for its member's quota, none open behind one of those (down a
+//! chain of open tasks). A task done and waiting for the chief's decision, a
+//! question the chief has not answered, a task the chief paused, and a board
+//! with nothing on it are the chief's own work. A wake-up skipped is not owed:
+//! the interval counts again from the skip.
 
 use cf_ledger::{NewChief, NewMember, NewProject, NewTask, WakeUpUnit};
 
@@ -46,32 +48,94 @@ fn a_task_working_holds_the_wake_up_back() {
 }
 
 #[test]
-fn a_task_waiting_on_a_question_holds_the_wake_up_back() {
+fn a_question_the_chief_has_not_answered_is_the_chiefs_to_answer_and_gets_a_wake_up() {
     let mut w = after_the_first();
     let given = w.give(&[]);
     w.start(&given);
     w.ask(given.task.number);
+    w.advance(MINUTE);
+    assert!(
+        w.due().is_some(),
+        "the task waits on the chief: nothing is on its way"
+    );
+}
+
+#[test]
+fn a_question_answered_and_the_answer_not_yet_received_holds_the_wake_up_back() {
+    let mut w = after_the_first();
+    let given = w.give(&[]);
+    w.start(&given);
+    let question = w.ask(given.task.number);
+    w.answer(&question);
+    assert_eq!(w.state(given.task.number), "waiting");
     w.advance(DAY);
-    assert!(w.due().is_none());
+    assert!(w.due().is_none(), "the answer is on its way to the window");
+    assert_eq!(w.held_by(), [given.task.number]);
     assert_eq!(w.queued(), 1);
 }
 
 #[test]
-fn a_task_open_behind_one_that_is_not_yet_done_holds_the_wake_up_back() {
+fn a_task_open_behind_one_on_its_way_holds_the_wake_up_back_and_so_does_a_chain_of_them() {
     let mut w = after_the_first();
     let first = w.give(&[]);
     w.start(&first);
-    w.ledger
-        .pause_task(w.project.id, first.task.number, Some("chief"), None)
-        .expect("paused");
-    assert_eq!(w.state(first.task.number), "paused");
-    // A task paused is stopped, not working: the one open behind it is what is on its way.
     let behind = w.give(&[first.task.number as u64]);
     assert_eq!(w.state(behind.task.number), "open");
     assert_eq!(behind.task.blocked_by, [first.task.number]);
+    let last = w.give(&[behind.task.number as u64]);
+    assert_eq!(w.state(last.task.number), "open");
     w.advance(DAY);
     assert!(w.due().is_none());
+    assert_eq!(
+        w.held_by(),
+        [first.task.number, behind.task.number, last.task.number],
+        "the skip names the working task and the two that wait behind it"
+    );
     assert_eq!(w.queued(), 1);
+}
+
+#[test]
+fn a_task_the_chief_paused_is_the_chiefs_to_resume_and_so_is_one_open_behind_it() {
+    let mut w = after_the_first();
+    let first = w.give(&[]);
+    w.start(&first);
+    w.pause(first.task.number);
+    w.advance(MINUTE);
+    let sent = w.due().expect("a task paused is on its way to nobody");
+    w.deliver(&sent);
+    let behind = w.give(&[first.task.number as u64]);
+    assert_eq!(w.state(behind.task.number), "open");
+    w.advance(MINUTE);
+    assert!(
+        w.due().is_some(),
+        "the one open behind it waits for the chief's resume"
+    );
+}
+
+#[test]
+fn a_task_held_for_its_members_quota_goes_on_by_itself_and_holds_the_wake_up_back() {
+    let mut w = after_the_first();
+    let first = w.give(&[]);
+    w.start(&first);
+    w.hold(first.task.number);
+    let behind = w.give(&[first.task.number as u64]);
+    w.advance(MINUTE);
+    assert!(w.due().is_none(), "it resumes at the reset: nobody to ask");
+    assert_eq!(w.held_by(), [first.task.number, behind.task.number]);
+    assert_eq!(w.queued(), 1);
+}
+
+#[test]
+fn a_hold_the_daemon_ended_without_resuming_the_task_is_the_chiefs_again_and_gets_a_wake_up() {
+    let mut w = after_the_first();
+    let first = w.give(&[]);
+    w.start(&first);
+    w.hold(first.task.number);
+    w.advance(MINUTE);
+    assert!(w.due().is_none());
+    w.release(first.task.number);
+    w.advance(MINUTE);
+    assert!(w.due().is_some(), "paused and held by nobody: the chief's");
 }
 
 #[test]
@@ -113,6 +177,30 @@ fn a_task_open_behind_one_done_and_undecided_waits_for_the_chief_too_and_gets_a_
     assert!(
         w.due().is_some(),
         "it waits for the chief to accept the first, which is the chief's to do"
+    );
+}
+
+#[test]
+fn tasks_open_in_a_chain_behind_one_done_and_undecided_get_a_wake_up_too() {
+    let mut w = after_the_first();
+    let first = w.give(&[]);
+    w.start(&first);
+    w.finish(first.task.number);
+    let behind = w.give(&[first.task.number as u64]);
+    let last = w.give(&[behind.task.number as u64]);
+    let beside = w.give(&[first.task.number as u64]);
+    assert_eq!(
+        [
+            w.state(behind.task.number),
+            w.state(last.task.number),
+            w.state(beside.task.number)
+        ],
+        ["open", "open", "open"]
+    );
+    w.advance(MINUTE);
+    assert!(
+        w.due().is_some(),
+        "the chief's decision on the first is all the three wait for"
     );
 }
 

@@ -9,11 +9,16 @@
 //! - the project is open and its calls are on;
 //! - none is still on its way (a wake-up queued or being delivered is the
 //!   only one: they never stack, whatever the clock says);
-//! - the chief has nothing else on its way: no task is working, queued for its
-//!   window or waiting on a question, and none is open behind a task that is
-//!   not yet done (`work_on_its_way`). A task done and waiting for the chief's
-//!   decision is the chief's own work, and so is a board with nothing on it: a
-//!   wake-up goes for them. One that is held back for work is skipped, not
+//! - the chief has nothing else on its way (`work_on_its_way`): no task is
+//!   queued for its window or working; none waits for an answer that is on its
+//!   way to the window; none is held for its member's quota, which it goes on
+//!   from by itself; and none is open behind one of these, however long the
+//!   chain of open tasks. What waits for the chief is the chief's own work and
+//!   a wake-up goes for it: a task done and waiting for its decision, a
+//!   question it has not answered (every question on the board is put to the
+//!   chief), a task someone paused or whose hold the daemon ended, a task open
+//!   behind one of these or behind one that failed or was called off, and a
+//!   board with nothing on it. One that is held back for work is skipped, not
 //!   owed: the skip is logged (`project.wake_up_skipped`) and the interval
 //!   counts again from it, so the next comes an interval later, on the same
 //!   rule, and not the moment the board clears;
@@ -31,7 +36,7 @@ use serde_json::json;
 use super::setting;
 use crate::conversations::typed_since;
 use crate::messages::cancel_message;
-use crate::model::{sql_list, LedgerError, FINISHED_TASK_STATES, HELD_TASK_STATES};
+use crate::model::{sql_list, LedgerError};
 use crate::queue::{send, Sent};
 use crate::store::Store;
 
@@ -121,24 +126,39 @@ fn origin_ms(
         .unwrap_or(0))
 }
 
-/// The numbers of the tasks the chief has on their way, oldest first: those
-/// queued for a window, working or waiting on a question, and those open
-/// behind a task that is not yet done. A task done and waiting for the chief's
-/// decision is no work on its way (it is the chief's), and a task that failed
-/// or was called off is not going to be done: one open behind it waits for the
-/// chief, and is no work on its way either.
+/// The states of a task that is with its window: handed to it, or at work.
+const WITH_ITS_WINDOW: [&str; 2] = ["queued", "working"];
+
+/// The numbers of the tasks the chief has on their way, oldest first: those with
+/// their window (queued or working); those waiting for an answer that is on its
+/// way to the window, since a task reads `waiting` until the answer is received
+/// and, with no answer given, the question is the chief's to answer; those held
+/// for their member's quota (`paused` with a time it goes on by itself, which
+/// the daemon clears when it cannot); and, down any chain, those open behind a
+/// task that is itself on its way (a task open behind one that is done and
+/// undecided, failed or called off waits for the chief, and the recursion ends
+/// where the tasks do: nothing is circular).
 fn work_on_its_way(store: &Store, project_id: i64) -> Result<Vec<i64>, LedgerError> {
-    let held = sql_list(&HELD_TASK_STATES);
-    let over = sql_list(&[&["done"][..], &FINISHED_TASK_STATES[..]].concat());
+    let with_its_window = sql_list(&WITH_ITS_WINDOW);
     Ok(store
         .db
         .prepare(&format!(
-            "SELECT t.number FROM task t WHERE t.project_id = ?1
-               AND (t.state IN ({held})
-                    OR (t.state = 'open'
-                        AND EXISTS (SELECT 1 FROM task_need n JOIN task d ON d.id = n.needs_id
-                                    WHERE n.task_id = t.id AND d.state NOT IN ({over}))))
-             ORDER BY t.number"
+            "WITH RECURSIVE on_its_way(id) AS (
+               SELECT t.id FROM task t WHERE t.project_id = ?1
+                 AND (t.state IN ({with_its_window})
+                      OR (t.state = 'waiting'
+                          AND EXISTS (SELECT 1 FROM message a JOIN message q ON q.id = a.reply_to
+                                      WHERE q.task_id = t.id AND q.kind = 'question'
+                                        AND a.kind = 'answer'
+                                        AND a.state IN ('gated', 'queued', 'delivering')))
+                      OR (t.state = 'paused' AND t.held_until IS NOT NULL))
+               UNION
+               SELECT w.id FROM task w
+                 JOIN task_need n ON n.task_id = w.id
+                 JOIN on_its_way o ON o.id = n.needs_id
+                 WHERE w.project_id = ?1 AND w.state = 'open'
+             )
+             SELECT t.number FROM task t JOIN on_its_way o ON o.id = t.id ORDER BY t.number"
         ))?
         .query_map([project_id], |row| row.get(0))?
         .collect::<rusqlite::Result<Vec<_>>>()?)

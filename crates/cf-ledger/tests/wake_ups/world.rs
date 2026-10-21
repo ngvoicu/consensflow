@@ -5,7 +5,7 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
-use cf_base::time::Clock;
+use cf_base::time::{self, Clock};
 use cf_ledger::{
     open_ledger, Ledger, MessageView, NewChief, NewMember, NewNote, NewProject, NewQuestion,
     NewTask, NewWakeUp, Options, ProjectView, TaskCreated, WakeUpUnit,
@@ -162,8 +162,9 @@ impl World {
     }
 
     /// zeus asks the chief about the task and waits for the answer.
-    pub fn ask(&mut self, number: i64) {
-        self.ledger
+    pub fn ask(&mut self, number: i64) -> MessageView {
+        let question = self
+            .ledger
             .ask(
                 self.project.id,
                 &NewQuestion {
@@ -176,6 +177,58 @@ impl World {
             )
             .expect("a question");
         assert_eq!(self.state(number), "waiting");
+        question
+    }
+
+    /// The chief answers the question: the answer is queued for zeus's window, and
+    /// the task waits until it is received.
+    pub fn answer(&mut self, question: &MessageView) -> MessageView {
+        let chief = self.id("chief");
+        self.ledger
+            .answer(question.id, chief, Some(&json!("The new one")), None)
+            .expect("an answer")
+    }
+
+    /// The chief stops the task: it is paused, and nothing brings it back but the chief.
+    pub fn pause(&mut self, number: i64) {
+        self.ledger
+            .pause_task(self.project.id, number, Some("chief"), None)
+            .expect("paused");
+        assert_eq!(self.state(number), "paused");
+    }
+
+    /// The daemon holds the task until its member's quota is back, a day on.
+    pub fn hold(&mut self, number: i64) {
+        let until = time::iso(self.now() + DAY);
+        self.ledger
+            .hold_task(self.project.id, number, &until, "out of quota")
+            .expect("held");
+        assert_eq!(self.state(number), "paused");
+    }
+
+    /// The daemon ends the hold without resuming the task: it is the chief's again.
+    pub fn release(&mut self, number: i64) {
+        self.ledger
+            .clear_hold(self.project.id, number, "the member did not come back")
+            .expect("hold cleared");
+    }
+
+    /// The numbers of the tasks the latest skip says held the wake-up back.
+    pub fn held_by(&self) -> Vec<i64> {
+        let events = self
+            .ledger
+            .events(self.project.id, 0, 5000)
+            .expect("events");
+        let skip = events
+            .iter()
+            .rfind(|event| event.kind == "project.wake_up_skipped")
+            .expect("a skip was logged");
+        skip.data["tasks"]
+            .as_array()
+            .expect("the tasks")
+            .iter()
+            .map(|task| task.as_i64().expect("a task number"))
+            .collect()
     }
 
     /// The task's state, as the board has it.

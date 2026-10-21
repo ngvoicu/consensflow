@@ -1,12 +1,15 @@
 //! A wake-up is for a chief with nothing on its way: it is not given while a
-//! task is working, queued for its window, waiting on a question, or open
-//! behind a task that is not yet done. A task done and waiting for the chief's
-//! decision, or a board with nothing left on it, is the chief's own, and the
+//! task is working or queued for its window, waits for an answer that is on its
+//! way, is held for its member's quota, or is open behind one of those. A task
+//! done and waiting for the chief's decision, a question the chief has not
+//! answered, or a board with nothing left on it, is the chief's own, and the
 //! chief is woken for it. A wake-up skipped is not owed: the interval counts
 //! again from the skip.
 
 use cf_engine::testing::Context;
 use cf_ledger::{NewTask, ProjectView, WakeUpUnit};
+
+use crate::fixtures::soon;
 
 use super::{at_rest, given, passes, queued, set, woken, HOUR, MINUTE};
 
@@ -98,19 +101,69 @@ fn a_task_working_holds_the_wake_up_back_and_it_is_not_owed_when_the_work_is_ove
 }
 
 #[test]
-fn a_task_waiting_on_a_question_holds_the_wake_up_back() {
+fn a_question_the_chief_has_not_answered_is_the_chiefs_to_answer_and_gets_a_wake_up() {
     let (context, project) = woken_once();
     context.give(project.id, "zeus", "Write the parser");
     working(&context, &project, 1);
     context.ask(project.id, "zeus", "chief", 1, "Which parser?");
     passes(&context);
+    // The chief's turn ends without `cf answer`.
     context.adapter.answer("chief", "Looking.");
+    passes(&context);
+    assert_eq!(state(&context, &project, 1), "waiting");
+    context.advance(MINUTE);
+    passes(&context);
+    assert_eq!(
+        given(&context),
+        2,
+        "the task waits for the chief's answer: nothing is on its way"
+    );
+}
+
+#[test]
+fn a_question_answered_and_the_answer_not_yet_received_holds_the_wake_up_back() {
+    let (context, project) = woken_once();
+    context.give(project.id, "zeus", "Write the parser");
+    working(&context, &project, 1);
+    let question = context.ask(project.id, "zeus", "chief", 1, "Which parser?");
+    passes(&context);
+    context.adapter.answer("chief", "Looking.");
+    passes(&context);
+    // The chief answers, and zeus is in its turn: the answer waits for the window.
+    context.answer(project.id, question.id, "The new one");
     passes(&context);
     assert_eq!(state(&context, &project, 1), "waiting");
     context.advance(HOUR);
     passes(&context);
-    assert_eq!(given(&context), 1, "the task waits for the chief's answer");
+    assert_eq!(given(&context), 1, "the answer is on its way");
     assert_eq!(queued(&context, &project), 1);
+}
+
+#[test]
+fn a_task_held_for_its_members_quota_holds_the_wake_up_back_until_the_hold_ends() {
+    let (context, project) = woken_once();
+    context.give(project.id, "zeus", "Write the parser");
+    working(&context, &project, 1);
+    let until = soon(&context, 100);
+    context
+        .ledger
+        .borrow_mut()
+        .hold_task(project.id, 1, &until, "out of quota")
+        .unwrap();
+    assert_eq!(state(&context, &project, 1), "paused");
+    context.advance(HOUR);
+    passes(&context);
+    assert_eq!(given(&context), 1, "it goes on by itself at the reset");
+    assert_eq!(queued(&context, &project), 1);
+    // The daemon ends the hold without resuming it: the task is the chief's again.
+    context
+        .ledger
+        .borrow_mut()
+        .clear_hold(project.id, 1, "the member did not come back")
+        .unwrap();
+    context.advance(HOUR);
+    passes(&context);
+    assert_eq!(given(&context), 2);
 }
 
 #[test]
@@ -137,13 +190,17 @@ fn a_task_done_and_undecided_is_the_chiefs_own_and_so_is_one_open_behind_it() {
     working(&context, &project, 1);
     done_and_undecided(&context, &project, 1);
     give_behind(&context, &project, &[1]);
-    assert_eq!(state(&context, &project, 2), "open");
+    give_behind(&context, &project, &[2]);
+    assert_eq!(
+        [state(&context, &project, 2), state(&context, &project, 3)],
+        ["open", "open"]
+    );
     context.advance(MINUTE);
     passes(&context);
     assert_eq!(
         given(&context),
         2,
-        "the chief's decision on T-1 is all that holds T-2"
+        "the chief's decision on T-1 is all that holds T-2 and T-3 behind it"
     );
 }
 

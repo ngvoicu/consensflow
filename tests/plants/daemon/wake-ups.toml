@@ -4,9 +4,10 @@
 # chief, queued when the interval has passed since the latest of the last wake-up, the last
 # Resume and the last change of the setting; never while one is on its way, never to a
 # chief in a turn, waiting, out of quota or held for words the human typed, and never while a
-# task is working, queued, waiting or open behind another not yet done (a skip is logged and
-# the interval counts from it); a quiet board is not asked twice, and the first after an enable
-# or a Resume always goes. One plant takes one rule out; a test of it fails. The ledger's plants run its own tests
+# task is queued, working, waiting for an answer on its way, held for its member's quota or open
+# behind one of those (a question the chief has not answered is the chief's own and is woken for;
+# a skip is logged and the interval counts from it); a quiet board is not asked twice, and the
+# first after an enable or a Resume always goes. One plant takes one rule out; a test of it fails. The ledger's plants run its own tests
 # (`crates/cf-ledger/tests/wake_ups/` and the unit tests of `wake_ups`), the engine's the
 # dispatcher's (`tests/dispatcher/wake_ups.rs` and `wake_ups/ending.rs`), the page's the operations'
 # (`crates/cf-daemon/src/page/tests/wake_up.rs`) and the dialog's the browser's; the
@@ -201,8 +202,8 @@ runs = ["ledger-wake-ups"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/wake_ups/due.rs"
-find = '    let held = sql_list(&HELD_TASK_STATES);'
-replace = '    let held = sql_list(&["working", "waiting"]);'
+find = "const WITH_ITS_WINDOW: [&str; 2] = [\"queued\", \"working\"];"
+replace = "const WITH_ITS_WINDOW: [&str; 2] = [\"working\", \"working\"];"
 
 [[plant]]
 name = "wake-up engine: a task queued for its window is no work on its way"
@@ -211,8 +212,8 @@ runs = ["engine-wake-ups"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/wake_ups/due.rs"
-find = '    let held = sql_list(&HELD_TASK_STATES);'
-replace = '    let held = sql_list(&["working", "waiting"]);'
+find = "const WITH_ITS_WINDOW: [&str; 2] = [\"queued\", \"working\"];"
+replace = "const WITH_ITS_WINDOW: [&str; 2] = [\"working\", \"working\"];"
 
 [[plant]]
 name = "wake-up: a task working is no work on its way"
@@ -221,8 +222,8 @@ runs = ["ledger-wake-ups"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/wake_ups/due.rs"
-find = '    let held = sql_list(&HELD_TASK_STATES);'
-replace = '    let held = sql_list(&["queued", "waiting"]);'
+find = "const WITH_ITS_WINDOW: [&str; 2] = [\"queued\", \"working\"];"
+replace = "const WITH_ITS_WINDOW: [&str; 2] = [\"queued\", \"queued\"];"
 
 [[plant]]
 name = "wake-up engine: a task working is no work on its way"
@@ -231,38 +232,68 @@ runs = ["engine-wake-ups"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/wake_ups/due.rs"
-find = '    let held = sql_list(&HELD_TASK_STATES);'
-replace = '    let held = sql_list(&["queued", "waiting"]);'
+find = "const WITH_ITS_WINDOW: [&str; 2] = [\"queued\", \"working\"];"
+replace = "const WITH_ITS_WINDOW: [&str; 2] = [\"queued\", \"queued\"];"
 
 [[plant]]
-name = "wake-up: a task waiting on a question is no work on its way"
-meant = "a_task_waiting_on_a_question_holds_the_wake_up_back"
+name = "wake-up: a question the chief has not answered holds the wake-up back"
+meant = "a_question_the_chief_has_not_answered_is_the_chiefs_to_answer_and_gets_a_wake_up"
 runs = ["ledger-wake-ups"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/wake_ups/due.rs"
-find = '    let held = sql_list(&HELD_TASK_STATES);'
-replace = '    let held = sql_list(&["queued", "working"]);'
+find = "OR (t.state = 'waiting'"
+replace = "OR t.state = 'waiting' OR (t.state = 'waiting'"
 
 [[plant]]
-name = "wake-up engine: a task waiting on a question is no work on its way"
-meant = "a_task_waiting_on_a_question_holds_the_wake_up_back"
+name = "wake-up: an answer on its way to the window is the chief's still"
+meant = "a_question_answered_and_the_answer_not_yet_received_holds_the_wake_up_back"
+runs = ["ledger-wake-ups"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups/due.rs"
+find = "OR (t.state = 'waiting'"
+replace = "OR (t.state = 'never'"
+
+[[plant]]
+name = "wake-up engine: a question the chief has not answered holds the wake-up back"
+meant = "a_question_the_chief_has_not_answered_is_the_chiefs_to_answer_and_gets_a_wake_up"
 runs = ["engine-wake-ups"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/wake_ups/due.rs"
-find = '    let held = sql_list(&HELD_TASK_STATES);'
-replace = '    let held = sql_list(&["queued", "working"]);'
+find = "OR (t.state = 'waiting'"
+replace = "OR t.state = 'waiting' OR (t.state = 'waiting'"
 
 [[plant]]
-name = "wake-up: a task open behind one not yet done is no work on its way"
-meant = "a_task_open_behind_one_that_is_not_yet_done_holds_the_wake_up_back"
+name = "wake-up engine: an answer on its way to the window is the chief's still"
+meant = "a_question_answered_and_the_answer_not_yet_received_holds_the_wake_up_back"
+runs = ["engine-wake-ups"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups/due.rs"
+find = "OR (t.state = 'waiting'"
+replace = "OR (t.state = 'never'"
+
+[[plant]]
+name = "wake-up: a task open behind one on its way is no work on its way"
+meant = "a_task_open_behind_one_on_its_way_holds_the_wake_up_back_and_so_does_a_chain_of_them"
 runs = ["ledger-wake-ups"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/wake_ups/due.rs"
-find = "                    OR (t.state = 'open'"
-replace = "                    OR (t.state = 'never'"
+find = "WHERE w.project_id = ?1 AND w.state = 'open'"
+replace = "WHERE w.project_id = ?1 AND w.state = 'never'"
+
+[[plant]]
+name = "wake-up: a task open behind an open one holds whatever is at the bottom of the chain"
+meant = "tasks_open_in_a_chain_behind_one_done_and_undecided_get_a_wake_up_too"
+runs = ["ledger-wake-ups"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups/due.rs"
+find = "JOIN on_its_way o ON o.id = n.needs_id"
+replace = "JOIN task o ON o.id = n.needs_id AND o.state NOT IN ('done', 'accepted', 'failed', 'cancelled')"
 
 [[plant]]
 name = "wake-up: a task open behind one done and undecided is work on its way"
@@ -271,8 +302,8 @@ runs = ["ledger-wake-ups"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/wake_ups/due.rs"
-find = '    let over = sql_list(&[&["done"][..], &FINISHED_TASK_STATES[..]].concat());'
-replace = '    let over = sql_list(&FINISHED_TASK_STATES);'
+find = "JOIN on_its_way o ON o.id = n.needs_id"
+replace = "JOIN task o ON o.id = n.needs_id AND o.state != 'accepted'"
 
 [[plant]]
 name = "wake-up engine: a task open behind one done and undecided is work on its way"
@@ -281,8 +312,18 @@ runs = ["engine-wake-ups"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/wake_ups/due.rs"
-find = '    let over = sql_list(&[&["done"][..], &FINISHED_TASK_STATES[..]].concat());'
-replace = '    let over = sql_list(&FINISHED_TASK_STATES);'
+find = "JOIN on_its_way o ON o.id = n.needs_id"
+replace = "JOIN task o ON o.id = n.needs_id AND o.state != 'accepted'"
+
+[[plant]]
+name = "wake-up engine: a task open behind an open one holds whatever is at the bottom of the chain"
+meant = "a_task_done_and_undecided_is_the_chiefs_own_and_so_is_one_open_behind_it"
+runs = ["engine-wake-ups"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups/due.rs"
+find = "JOIN on_its_way o ON o.id = n.needs_id"
+replace = "JOIN task o ON o.id = n.needs_id AND o.state NOT IN ('done', 'accepted', 'failed', 'cancelled')"
 
 [[plant]]
 name = "wake-up: a task open behind one that failed or was called off is work on its way"
@@ -291,8 +332,58 @@ runs = ["ledger-wake-ups"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/wake_ups/due.rs"
-find = '    let over = sql_list(&[&["done"][..], &FINISHED_TASK_STATES[..]].concat());'
-replace = '    let over = sql_list(&["done", "accepted"]);'
+find = "JOIN on_its_way o ON o.id = n.needs_id"
+replace = "JOIN task o ON o.id = n.needs_id AND o.state NOT IN ('done', 'accepted')"
+
+[[plant]]
+name = "wake-up: a task held for its member's quota is the chief's to wake"
+meant = "a_task_held_for_its_members_quota_goes_on_by_itself_and_holds_the_wake_up_back"
+runs = ["ledger-wake-ups"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups/due.rs"
+find = "OR (t.state = 'paused' AND t.held_until IS NOT NULL))"
+replace = "OR (t.state = 'paused' AND t.state = 'working'))"
+
+[[plant]]
+name = "wake-up engine: a task held for its member's quota is the chief's to wake"
+meant = "a_task_held_for_its_members_quota_holds_the_wake_up_back_until_the_hold_ends"
+runs = ["engine-wake-ups"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups/due.rs"
+find = "OR (t.state = 'paused' AND t.held_until IS NOT NULL))"
+replace = "OR (t.state = 'paused' AND t.state = 'working'))"
+
+[[plant]]
+name = "wake-up: a task the chief paused goes on by itself"
+meant = "a_task_the_chief_paused_is_the_chiefs_to_resume_and_so_is_one_open_behind_it"
+runs = ["ledger-wake-ups"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups/due.rs"
+find = "OR (t.state = 'paused' AND t.held_until IS NOT NULL))"
+replace = "OR (t.state = 'paused'))"
+
+[[plant]]
+name = "wake-up: a hold the daemon ended goes on by itself"
+meant = "a_hold_the_daemon_ended_without_resuming_the_task_is_the_chiefs_again_and_gets_a_wake_up"
+runs = ["ledger-wake-ups"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups/due.rs"
+find = "OR (t.state = 'paused' AND t.held_until IS NOT NULL))"
+replace = "OR (t.state = 'paused'))"
+
+[[plant]]
+name = "wake-up engine: a hold the daemon ended goes on by itself"
+meant = "a_task_held_for_its_members_quota_holds_the_wake_up_back_until_the_hold_ends"
+runs = ["engine-wake-ups"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/wake_ups/due.rs"
+find = "OR (t.state = 'paused' AND t.held_until IS NOT NULL))"
+replace = "OR (t.state = 'paused'))"
 
 [[plant]]
 name = "wake-up: the first after the calls are turned on goes into work on its way"
@@ -311,8 +402,8 @@ runs = ["ledger-wake-ups"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/wake_ups/due.rs"
-find = '            "SELECT t.number FROM task t WHERE t.project_id = ?1'
-replace = '            "SELECT t.number FROM task t WHERE ?1 = ?1'
+find = "SELECT t.id FROM task t WHERE t.project_id = ?1"
+replace = "SELECT t.id FROM task t WHERE ?1 = ?1"
 
 [[plant]]
 name = "wake-up: a skipped wake-up is owed the moment the board clears"
