@@ -1,0 +1,39 @@
+# `cf task get T-n` prints a task's brief once, under its header: the task's own
+# body when no window of it holds a task message (open, blocked, or taken back to
+# the board), and the window's own message otherwise. One plant takes one piece
+# out; a test of it fails. The thread's printing is the board's (`board.toml`), and
+# the usage of `cf task get` is `help.toml`'s.
+
+[run]
+# `cf task get`, as the board's commands run it against a scripted API.
+board-get = ["cargo", "test", "--offline", "-p", "cf", "--lib", "board::tests::"]
+
+[[plant]]
+name = "task get: an open task's brief is not printed under its header"
+meant = "an_open_task_prints_its_whole_brief_under_its_header"
+runs = ["board-get"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/task.rs"
+find = '    (!carried).then_some(brief)'
+replace = '    (carried && !carried).then_some(brief)'
+
+[[plant]]
+name = "task get: a given task's brief is printed under its header as well as in its message"
+meant = "a_given_task_prints_its_brief_once_in_the_message_that_carries_it"
+runs = ["board-get"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/task.rs"
+find = '    (!carried).then_some(brief)'
+replace = '    (carried || !carried).then_some(brief)'
+
+[[plant]]
+name = "task get: a window counts another window's task message as its own"
+meant = "a_task_whose_only_task_message_went_to_another_window_prints_its_brief_under_its_header"
+runs = ["board-get"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/task.rs"
+find = '                && message.get("recipient").and_then(Value::as_str) == Some(window)'
+replace = '                && message.get("recipient").is_some()'
