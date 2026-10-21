@@ -329,6 +329,94 @@ fn held_whole_a_program_has_ended_when_it_exits_though_what_it_left_holds_its_st
     assert!(!marked.exists(), "nothing it left running wrote after it");
 }
 
+/// A program that leaves a process in a group of its own, in its session, whose output
+/// is elsewhere, which writes its pid to `file` and would run 6 s; it says "said" once
+/// that one is there.
+#[cfg(unix)]
+fn leaves_one_in_a_group_of_its_own(file: &Path) -> Run {
+    shell(&format!(
+        "perl -e 'setpgrp(0, 0); open my $f, \">\", $ARGV[0]; print $f \"$$\\n\"; close $f; sleep 6' '{file}' >/dev/null 2>&1 & \
+         while [ ! -s '{file}' ]; do sleep 0.01; done; echo said",
+        file = file.display()
+    ))
+}
+
+#[cfg(unix)]
+#[test]
+fn held_whole_a_process_that_could_not_be_held_to_be_forced_and_outlived_its_group_fails_the_capture(
+) {
+    // Both reviewers' look at round 7: where Linux opens no pidfd of a process, it is now
+    // sent nothing, and left to its group's end. One in a group of its own outlives that:
+    // the run is not over, and it is said by name.
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("own-group");
+    let answered = runtime().block_on(capture_whole(
+        &leaves_one_in_a_group_of_its_own(&file),
+        None,
+        &tree_env(),
+        ROOMY,
+        |_| {},
+    ));
+    let pids = pids_in(&file, 1).expect("it said where it went");
+    let _left = Survivors(pids.clone());
+    assert_eq!(
+        answered.map(|captured| captured.stdout),
+        Ok("said\n".to_owned()),
+        "held, it is forced with the rest"
+    );
+    assert!(gone_within(pids[0], Duration::from_secs(1)));
+
+    let file = dir.path().join("unpinned");
+    crate::table::UNPINNABLE.set(true);
+    let answered = runtime().block_on(capture_whole(
+        &leaves_one_in_a_group_of_its_own(&file),
+        None,
+        &tree_env(),
+        ROOMY,
+        |_| {},
+    ));
+    crate::table::UNPINNABLE.set(false);
+    let pids = pids_in(&file, 1).expect("it said where it went");
+    let _left = Survivors(pids.clone());
+    let failed = answered.expect_err("not over");
+    assert_eq!(
+        failed.message,
+        format!(
+            "{LEFT_RUNNING}: process {} (the test pins nothing) could not be held to be forced \
+             to end, and had not ended 2 s after its group was",
+            pids[0]
+        )
+    );
+    assert_eq!(failed.stdout, "said\n", "what was read of it is kept");
+    assert!(crate::alive(pids[0]), "it was sent nothing");
+
+    // Out of its time, it is so too.
+    let file = dir.path().join("unpinned-out-of-time");
+    let run = shell(&format!(
+        "perl -e 'setpgrp(0, 0); open my $f, \">\", $ARGV[0]; print $f \"$$\\n\"; close $f; sleep 6' '{file}' >/dev/null 2>&1 & \
+         sleep 30",
+        file = file.display()
+    ));
+    let limits = Limits {
+        timeout: Duration::from_secs(1),
+        max_buffer: 1024,
+    };
+    crate::table::UNPINNABLE.set(true);
+    let answered = runtime().block_on(capture_whole(&run, None, &tree_env(), limits, |_| {}));
+    crate::table::UNPINNABLE.set(false);
+    let pids = pids_in(&file, 1).expect("it said where it went");
+    let _left = Survivors(pids.clone());
+    let failed = answered.expect_err("not over");
+    assert!(
+        failed.message.starts_with(&format!(
+            "{LEFT_RUNNING}: process {} (the test pins nothing) could not be held",
+            pids[0]
+        )),
+        "{failed:?}"
+    );
+    assert!(failed.killed, "its time ran out");
+}
+
 #[cfg(unix)]
 #[test]
 fn held_whole_streams_still_held_after_its_end_by_what_is_out_of_reach_fail_the_capture() {

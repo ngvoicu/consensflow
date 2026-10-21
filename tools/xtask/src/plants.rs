@@ -84,17 +84,31 @@ pub enum Error {
     /// A file that was planted is not as it was once put back.
     #[error("{} is not as it was: its copy is {}", path.display(), copy.display())]
     NotRestored { path: PathBuf, copy: PathBuf },
+    /// A file that was planted that could not be put back: where its copy is, and why.
+    #[error("{} is still planted: put it back from its copy, {} ({cause})", path.display(), copy.display())]
+    StillPlanted {
+        path: PathBuf,
+        copy: PathBuf,
+        cause: io::Error,
+    },
     /// Files that were planted that could not be put back, each as it failed.
     #[error("{} files of a plant are not as they were:\n{}", .0.len(), lines(.0))]
     Unrestored(Vec<Error>),
+    /// Files of a plant that could not be put back once its trial had ended in an error
+    /// (`cause`): they are said first, as no run is to go on over them.
+    #[error("{unrestored}\nand before that: {cause}")]
+    PlantedAfter {
+        unrestored: Box<Error>,
+        cause: Box<Error>,
+    },
     /// A word that no plant's name holds.
     #[error("no plant of {family} has a name that holds `{word}`")]
     NoName { word: String, family: String },
     /// A checkout git says nothing of, where what a run changed cannot be told.
     #[error("plants need a git checkout at {} to tell a changed checkout", root.display())]
     NoCheckout { root: PathBuf },
-    /// What a run started did not end once it was ended: its files are not to be put
-    /// back under it.
+    /// What a run started did not end once it was ended: nothing of the run is over,
+    /// and the plants' run ends, its files put back as far as they can be.
     #[error("{command}: {said}")]
     LeftRunning { command: String, said: String },
     /// A command that could not be started.
@@ -113,6 +127,17 @@ impl Error {
     fn files(what: &'static str, path: &Path) -> impl FnOnce(io::Error) -> Self {
         let path = path.to_path_buf();
         move |cause| Self::Files { what, path, cause }
+    }
+
+    /// Whether it says that files of a plant could not be put back.
+    fn unrestored(&self) -> bool {
+        matches!(
+            self,
+            Self::NotRestored { .. }
+                | Self::StillPlanted { .. }
+                | Self::Unrestored(_)
+                | Self::PlantedAfter { .. }
+        )
     }
 
     fn data(path: &Path, cause: impl Into<String>) -> Self {

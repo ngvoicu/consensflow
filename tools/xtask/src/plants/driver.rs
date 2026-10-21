@@ -89,14 +89,19 @@ struct Copy {
 impl Copy {
     /// Writes the file's bytes from its copy where it is not as it was before the
     /// plant (one that is is left as it is, its times too), and says if it is not as it
-    /// was once written.
+    /// was once written; one that cannot be is said with where its copy is.
     fn put_back(&self) -> Result<(), Error> {
         if fs::read(&self.path).is_ok_and(|now| now == self.original) {
             return Ok(());
         }
-        let saved = fs::read(&self.copy).map_err(Error::files("read the copy of", &self.path))?;
-        fs::write(&self.path, saved).map_err(Error::files("put back", &self.path))?;
-        if fs::read(&self.path).map_err(Error::files("read", &self.path))? != self.original {
+        let planted = |cause| Error::StillPlanted {
+            path: self.path.clone(),
+            copy: self.copy.clone(),
+            cause,
+        };
+        let saved = fs::read(&self.copy).map_err(planted)?;
+        fs::write(&self.path, saved).map_err(planted)?;
+        if fs::read(&self.path).map_err(planted)? != self.original {
             return Err(Error::NotRestored {
                 path: self.path.clone(),
                 copy: self.copy.clone(),
@@ -154,9 +159,31 @@ impl Planting {
     }
 }
 
+impl Planting {
+    /// `ended`, what came of the plant's trial or of a part of it, once every file is
+    /// put back (`restore`), which is tried whatever it came to, an error too (a run
+    /// whose program left a process running, both reviewers' look at round 7). A file
+    /// that cannot be put back is never left unsaid: the error names each one still
+    /// planted and where its copy is, before the error the trial ended in, if it did.
+    fn ended<T>(&self, ended: Result<T, Error>) -> Result<T, Error> {
+        match (self.restore(), ended) {
+            (Ok(()), ended) => ended,
+            (Err(unrestored), Ok(_)) => Err(unrestored),
+            // What ended it was that files could not be put back: they are said again,
+            // as they are now.
+            (Err(unrestored), Err(cause)) if cause.unrestored() => Err(unrestored),
+            (Err(unrestored), Err(cause)) => Err(Error::PlantedAfter {
+                unrestored: Box::new(unrestored),
+                cause: Box::new(cause),
+            }),
+        }
+    }
+}
+
 impl Drop for Planting {
-    /// What is not put back yet (a panic unwinding, an error that ended the trial, a
-    /// file that could not be put back before): put back, as well as can be.
+    /// What is not put back yet (a panic unwinding, which has its own words; a plant
+    /// that could not be made whole, whose files were just written; a file that could
+    /// not be put back before, which was said): put back, as well as can be.
     fn drop(&mut self) {
         let _ = self.restore();
     }
@@ -310,10 +337,10 @@ fn trial(
         return Ok(None);
     };
     let planting = Planting::make(saved, files)?;
-    let ended = tried(plant, runner, built, clean, &unplanted, &planting)?;
-    // Whatever a run without the plant wrote into its files since they were put back.
-    planting.restore()?;
-    match ended {
+    let ended = tried(plant, runner, built, clean, &unplanted, &planting);
+    // Whatever a run without the plant wrote into its files since they were put back,
+    // and the plant itself where the trial ended in an error.
+    match planting.ended(ended)? {
         Ended::Stopped => Ok(None),
         Ended::Trial(trial) => Ok(Some(*trial)),
     }

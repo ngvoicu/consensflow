@@ -307,7 +307,10 @@ fn node_writes_the_plants_report_to_the_run_beside_the_report_it_prints() {
 }
 
 /// Drives the plants' reporter of Playwright's tests by hand: a test whose error is said
-/// by a step two below its hook's step alone, and one whose error is its body's.
+/// by a step two below its hook's step alone, one whose error is its body's assertion's,
+/// one whose failed assertion is a fixture's though no hook holds it, one whose body
+/// threw after an assertion of it passed, and one whose failed assertion is in a step of
+/// its body.
 const PLAYWRIGHT_DRIVEN: &str = r"import Plants from './plants-playwright.mjs'
 
 const plants = new Plants()
@@ -324,7 +327,10 @@ const test = (title) => {
 }
 const [hooked, inHook] = test('hooked')
 const [own, ofItsOwn] = test('own')
-plants.onBegin({}, { allTests: () => [hooked, own] })
+const [fixtured, ofAFixture] = test('fixtured')
+const [thrown, threw] = test('thrown')
+const [stepped, inAStep] = test('stepped')
+plants.onBegin({}, { allTests: () => [hooked, own, fixtured, thrown, stepped] })
 const hook = { category: 'hook', title: 'Before Hooks' }
 const fixture = { category: 'fixture', title: 'a fixture', parent: hook }
 plants.onStepEnd(hooked, inHook, { category: 'expect', title: 'soft', parent: fixture, error: { message: 'Error: inside' } })
@@ -332,6 +338,13 @@ plants.onStepEnd(hooked, inHook, fixture)
 plants.onStepEnd(hooked, inHook, hook)
 plants.onStepEnd(own, ofItsOwn, hook)
 plants.onStepEnd(own, ofItsOwn, { category: 'expect', title: 'toBe', error: { message: 'Error: inside' } })
+const itsFixture = { category: 'fixture', title: 'a worker fixture' }
+plants.onStepEnd(fixtured, ofAFixture, { category: 'expect', title: 'toBe', parent: itsFixture, error: { message: 'Error: inside' } })
+plants.onStepEnd(fixtured, ofAFixture, itsFixture)
+plants.onStepEnd(thrown, threw, { category: 'expect', title: 'toBe' })
+const itsStep = { category: 'test.step', title: 'a step' }
+plants.onStepEnd(stepped, inAStep, { category: 'expect', title: 'toBe', parent: itsStep, error: { message: 'Error: inside' } })
+plants.onStepEnd(stepped, inAStep, { ...itsStep, error: { message: 'Error: inside' } })
 plants.onEnd()
 ";
 
@@ -362,8 +375,24 @@ fn playwright_s_reporter_takes_an_error_of_any_step_in_a_hook_for_the_hook_s() {
             && said.contains(r#""own":false,"why":"a hook failed: Error: inside"}"#),
         "{said}"
     );
+    let test = |name: &str| {
+        let at = said.find(&format!(r#""path":["{name}"],"#)).unwrap();
+        let end = at + said[at..].find('}').unwrap();
+        said[at..=end].to_owned()
+    };
+    assert!(test("own").ends_with(r#""own":true,"why":null}"#), "{said}");
+    // Round 8 (both reviewers' look at round 7): only an assertion of the body's own that
+    // failed is proof, where no hook and no fixture holds it.
+    for name in ["fixtured", "thrown"] {
+        assert!(
+            test(name).ends_with(
+                r#""own":false,"why":"no assertion of its body failed: Error: inside"}"#
+            ),
+            "{name}: {said}"
+        );
+    }
     assert!(
-        said.contains(r#""path":["own"],"#) && said.contains(r#""own":true,"why":null}"#),
+        test("stepped").ends_with(r#""own":true,"why":null}"#),
         "{said}"
     );
 }

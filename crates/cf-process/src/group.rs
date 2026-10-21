@@ -22,8 +22,10 @@
 //! descended from it, and every one that was when it was asked and is still the
 //! process it was, then its group (`end`); each process is read again right before
 //! it is signalled, and signalled only where it is still the one meant
-//! (`table::signal_if_same`). A capture dropped (a stop) asks it so too, and waits
-//! that moment.
+//! (`table::signal_if_same`). One that cannot be held to be signalled (Linux, where no
+//! pidfd of it can be opened) is sent nothing, and is left to its group's end; where it
+//! outlived that, the capture says it (`Group::unpinned`). A capture dropped (a stop)
+//! asks it so too, and waits that moment.
 //!
 //! What is out of reach: a process that starts a session of its own, and is no
 //! longer linked to the program by the time it is looked for. A grandchild that
@@ -102,6 +104,9 @@ pub(crate) struct Group {
     /// Held whole, the processes descended from it when it was asked to end.
     #[cfg(unix)]
     asked: RefCell<Vec<Identity>>,
+    /// Held whole, the processes that could not be held to be forced, and why.
+    #[cfg(unix)]
+    unpinned: RefCell<Vec<(Identity, String)>>,
 }
 
 impl Group {
@@ -116,6 +121,8 @@ impl Group {
             whole,
             #[cfg(unix)]
             asked: RefCell::default(),
+            #[cfg(unix)]
+            unpinned: RefCell::default(),
         }
     }
 
@@ -168,7 +175,48 @@ impl Group {
         let Ok(leader) = i32::try_from(pid) else {
             return;
         };
-        sweep(leader, &self.asked.borrow(), &table::process);
+        let unpinned = sweep(leader, &self.asked.borrow(), &table::process);
+        let mut kept = self.unpinned.borrow_mut();
+        for (identity, why) in unpinned {
+            if !kept.iter().any(|(kept, _)| *kept == identity) {
+                kept.push((identity, why));
+            }
+        }
+    }
+
+    /// Why what the program left is not all ended, where a process of it that could not
+    /// be held to be forced (`sweep`) is still the process it was a moment after its
+    /// group was ended: each named, and why it could not be held.
+    pub(crate) fn unpinned(&self) -> Result<(), String> {
+        #[cfg(unix)]
+        {
+            let until = std::time::Instant::now() + crate::execute::FORCE_AFTER;
+            loop {
+                let left: Vec<String> = self
+                    .unpinned
+                    .borrow()
+                    .iter()
+                    .filter(|(identity, _)| {
+                        table::process(identity.pid).is_some_and(|now| now.identity == *identity)
+                    })
+                    .map(|(identity, why)| format!("process {} ({why})", identity.pid))
+                    .collect();
+                if left.is_empty() {
+                    return Ok(());
+                }
+                if std::time::Instant::now() >= until {
+                    return Err(format!(
+                        "{} could not be held to be forced to end, and had not ended {} s after \
+                         its group was",
+                        left.join(", "),
+                        crate::execute::FORCE_AFTER.as_secs()
+                    ));
+                }
+                std::thread::sleep(ENDED_EVERY);
+            }
+        }
+        #[cfg(not(unix))]
+        Ok(())
     }
 
     /// Whether the program has ended, asked without waiting for it: it is not
@@ -208,9 +256,14 @@ impl Group {
 /// `Group::sweep`'s, of the program `leader`, given the processes `noted` as it was
 /// asked, and how a process is read again before it is signalled (`read`, the system's
 /// but for a test): one found by the session must be in it still, and every one born
-/// when it was.
+/// when it was. Those that could not be held to be signalled, and why.
 #[cfg(unix)]
-fn sweep(leader: i32, noted: &[Identity], read: &dyn Fn(i32) -> Option<table::Process>) {
+fn sweep(
+    leader: i32,
+    noted: &[Identity],
+    read: &dyn Fn(i32) -> Option<table::Process>,
+) -> Vec<(Identity, String)> {
+    let mut unpinned = Vec::new();
     for _ in 0..3 {
         let now = table::processes();
         let mut doomed: Vec<(Identity, Option<i32>)> = now
@@ -232,13 +285,20 @@ fn sweep(leader: i32, noted: &[Identity], read: &dyn Fn(i32) -> Option<table::Pr
             .collect();
         doomed.sort_unstable_by_key(|(identity, session)| (identity.pid, session.is_none()));
         doomed.dedup_by_key(|(identity, _)| *identity);
+        // One that could not be held is found again, and is no more to sweep for.
+        doomed.retain(|(identity, _)| !unpinned.iter().any(|(held, _)| held == identity));
         if doomed.is_empty() {
             break;
         }
         for (identity, session) in doomed {
-            table::signal_if_same(identity, session, libc::SIGKILL, read);
+            if let table::Signalled::Unpinned(why) =
+                table::signal_if_same(identity, session, libc::SIGKILL, read)
+            {
+                unpinned.push((identity, why));
+            }
         }
     }
+    unpinned
 }
 
 impl Drop for Group {
@@ -351,12 +411,12 @@ mod tests {
         // noted is looked at.
         sweep(i32::MAX, &[read.identity], &reborn);
         assert!(
-            !table::signal_if_same(
+            table::signal_if_same(
                 read.identity,
                 Some(read.session + 1),
                 libc::SIGKILL,
                 &table::process
-            ),
+            ) == table::Signalled::NotSent,
             "found by a session it is not in"
         );
         std::thread::sleep(Duration::from_millis(300));

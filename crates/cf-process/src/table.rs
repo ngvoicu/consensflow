@@ -147,67 +147,153 @@ pub(crate) fn process(_pid: i32) -> Option<Process> {
     None
 }
 
+/// What came of a signal meant for a process (`signal_if_same`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Signalled {
+    /// It was still the process meant, and was sent the signal.
+    Sent,
+    /// It was not (it is gone, or its number is another's), or the system would not
+    /// send it: nothing was sent.
+    NotSent,
+    /// It could not be held to be signalled (Linux: no pidfd of it could be opened), so
+    /// it was sent nothing, whatever it is now: why. macOS holds no process so, and
+    /// signals it by its number.
+    #[cfg_attr(not(any(target_os = "linux", test)), allow(dead_code))]
+    Unpinned(String),
+}
+
 /// Sends `signal` to the process `identity` names, where `read` (the system's word,
 /// `process`, but for a test) says right before that it is still that process: born
 /// when it was, and in the session `session` where one is given (it was found by the
-/// session). Whether it was sent: nothing is sent to a process that is not the one
-/// meant, whose number another has taken since (both reviewers' look at round 6).
+/// session). Nothing is sent to a process that is not the one meant, whose number
+/// another has taken since (both reviewers' look at round 6).
 ///
 /// On Linux the process is first held by a pidfd, so that the process read is the one
-/// signalled whatever happens to its number. macOS has none: a process that ends, is
-/// reaped and whose number is given to another in the moment between the read and the
-/// signal is the window left there.
+/// signalled whatever happens to its number; where none can be opened (an older kernel,
+/// no descriptor left), it is sent nothing (both reviewers' look at round 7: a number
+/// signalled then could be another's). macOS has none: a process that ends, is reaped
+/// and whose number is given to another in the moment between the read and the signal
+/// is the window left there.
 pub(crate) fn signal_if_same(
     identity: Identity,
     session: Option<i32>,
     signal: i32,
     read: &dyn Fn(i32) -> Option<Process>,
-) -> bool {
-    let same = || {
-        read(identity.pid).is_some_and(|now| {
-            now.identity == identity && session.is_none_or(|session| now.session == session)
-        })
-    };
+) -> Signalled {
+    #[cfg(test)]
+    if UNPINNABLE.get() {
+        return Signalled::Unpinned("the test pins nothing".to_owned());
+    }
     #[cfg(target_os = "linux")]
+    return signal_pinned(identity, session, signal, read, Pidfd::open);
+    #[cfg(not(target_os = "linux"))]
     {
+        if !same(identity, session, read) {
+            return Signalled::NotSent;
+        }
+        #[allow(unsafe_code)]
+        // SAFETY: kill takes two integers and touches no memory of ours; the number was
+        // read as the process meant just now (the window left is said above).
+        let sent = unsafe { libc::kill(identity.pid, signal) == 0 };
+        if sent {
+            Signalled::Sent
+        } else {
+            Signalled::NotSent
+        }
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Whether no process is pinned to be signalled on this thread, as where Linux opens
+    /// no pidfd: for the tests of what is left of a run so.
+    pub(crate) static UNPINNABLE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Whether `read` says the process `identity` names is still that one, and in the
+/// session `session` where one is given.
+fn same(identity: Identity, session: Option<i32>, read: &dyn Fn(i32) -> Option<Process>) -> bool {
+    read(identity.pid).is_some_and(|now| {
+        now.identity == identity && session.is_none_or(|session| now.session == session)
+    })
+}
+
+/// A process held by a handle of its own, which signals it whatever is given its
+/// number: the handle goes when this is dropped.
+#[cfg(any(target_os = "linux", test))]
+pub(crate) trait Pinned {
+    /// Sends `signal` to the process held: whether it was sent.
+    fn send(&self, signal: i32) -> bool;
+}
+
+/// `signal_if_same` where a process is held to be signalled (`pin`, Linux's pidfd but for
+/// a test): held first, then read, then signalled through what holds it. One that cannot
+/// be held is sent nothing, and why is said; one gone before it is held, nothing.
+#[cfg(any(target_os = "linux", test))]
+pub(crate) fn signal_pinned<P: Pinned>(
+    identity: Identity,
+    session: Option<i32>,
+    signal: i32,
+    read: &dyn Fn(i32) -> Option<Process>,
+    pin: impl FnOnce(i32) -> std::io::Result<P>,
+) -> Signalled {
+    let pinned = match pin(identity.pid) {
+        Ok(pinned) => pinned,
+        Err(gone) if gone.raw_os_error() == Some(libc::ESRCH) => return Signalled::NotSent,
+        Err(why) => return Signalled::Unpinned(format!("no pidfd of it could be opened: {why}")),
+    };
+    if same(identity, session, read) && pinned.send(signal) {
+        Signalled::Sent
+    } else {
+        Signalled::NotSent
+    }
+}
+
+/// A process held by a pidfd.
+#[cfg(target_os = "linux")]
+struct Pidfd(libc::c_int);
+
+#[cfg(target_os = "linux")]
+impl Pidfd {
+    fn open(pid: i32) -> std::io::Result<Self> {
         #[allow(unsafe_code)]
         // SAFETY: pidfd_open takes a pid and flags and touches no memory of ours; it
         // answers a descriptor of ours, or -1.
-        let opened = unsafe { libc::syscall(libc::SYS_pidfd_open, identity.pid, 0) };
-        if let Ok(pidfd) = libc::c_int::try_from(opened) {
-            if pidfd >= 0 {
-                let sent = same() && {
-                    #[allow(unsafe_code)]
-                    // SAFETY: the descriptor is ours, open until it is closed below; no
-                    // siginfo is passed, and the call writes no memory of ours.
-                    let sent = unsafe {
-                        libc::syscall(
-                            libc::SYS_pidfd_send_signal,
-                            pidfd,
-                            signal,
-                            std::ptr::null::<libc::siginfo_t>(),
-                            0,
-                        )
-                    };
-                    sent == 0
-                };
-                #[allow(unsafe_code)]
-                // SAFETY: the descriptor is ours, and closed once.
-                unsafe {
-                    libc::close(pidfd);
-                }
-                return sent;
-            }
+        let opened = unsafe { libc::syscall(libc::SYS_pidfd_open, pid, 0) };
+        match libc::c_int::try_from(opened) {
+            Ok(pidfd) if pidfd >= 0 => Ok(Self(pidfd)),
+            _ => Err(std::io::Error::last_os_error()),
         }
     }
-    if !same() {
-        return false;
+}
+
+#[cfg(target_os = "linux")]
+impl Pinned for Pidfd {
+    fn send(&self, signal: i32) -> bool {
+        #[allow(unsafe_code)]
+        // SAFETY: the descriptor is ours, open until this is dropped; no siginfo is
+        // passed, and the call writes no memory of ours.
+        let sent = unsafe {
+            libc::syscall(
+                libc::SYS_pidfd_send_signal,
+                self.0,
+                signal,
+                std::ptr::null::<libc::siginfo_t>(),
+                0,
+            )
+        };
+        sent == 0
     }
-    #[allow(unsafe_code)]
-    // SAFETY: kill takes two integers and touches no memory of ours; the number was read
-    // as the process meant just now (the window left is said above).
-    unsafe {
-        libc::kill(identity.pid, signal) == 0
+}
+
+#[cfg(target_os = "linux")]
+impl Drop for Pidfd {
+    fn drop(&mut self) {
+        #[allow(unsafe_code)]
+        // SAFETY: the descriptor is ours, and closed once.
+        unsafe {
+            libc::close(self.0);
+        }
     }
 }
 
@@ -235,6 +321,73 @@ mod tests {
 
     use super::*;
     use crate::testing::{pids_written_to, Survivors};
+
+    /// A process "held" by its number alone, as a test holds it.
+    struct Numbered(i32);
+
+    impl Pinned for Numbered {
+        fn send(&self, signal: i32) -> bool {
+            #[allow(unsafe_code)]
+            // SAFETY: kill takes two integers and touches no memory of ours.
+            unsafe {
+                libc::kill(self.0, signal) == 0
+            }
+        }
+    }
+
+    #[test]
+    #[allow(clippy::disallowed_methods)] // The test starts what it ends.
+    fn a_process_that_cannot_be_held_to_be_signalled_is_sent_nothing_and_why_is_said() {
+        // Both reviewers' look at round 7: where Linux opened no pidfd of a process, it
+        // was read and then signalled by its number, which may be another's by then.
+        let mut sleep = std::process::Command::new("/bin/sleep")
+            .arg("30")
+            .spawn()
+            .unwrap();
+        let _left = Survivors(vec![sleep.id()]);
+        let pid = i32::try_from(sleep.id()).unwrap();
+        let read = process(pid).expect("the sleep is in the table");
+        let refused = signal_pinned(read.identity, None, libc::SIGKILL, &process, |_| {
+            Err::<Numbered, _>(std::io::Error::from_raw_os_error(libc::EMFILE))
+        });
+        assert_eq!(
+            refused,
+            Signalled::Unpinned(format!(
+                "no pidfd of it could be opened: {}",
+                std::io::Error::from_raw_os_error(libc::EMFILE)
+            ))
+        );
+        std::thread::sleep(Duration::from_millis(300));
+        assert!(sleep.try_wait().unwrap().is_none(), "it was sent nothing");
+        // Held, it is read again, and is sent nothing where it is not the one it was.
+        let reborn = |pid: i32| {
+            process(pid).map(|now| Process {
+                identity: Identity {
+                    born: now.identity.born + 1,
+                    ..now.identity
+                },
+                ..now
+            })
+        };
+        let other = signal_pinned(read.identity, None, libc::SIGKILL, &reborn, |pid| {
+            Ok(Numbered(pid))
+        });
+        assert_eq!(other, Signalled::NotSent);
+        std::thread::sleep(Duration::from_millis(300));
+        assert!(sleep.try_wait().unwrap().is_none(), "it was sent nothing");
+        // Gone before it could be held: there is nothing to send to, nor to say.
+        let gone = signal_pinned(read.identity, None, libc::SIGKILL, &process, |_| {
+            Err::<Numbered, _>(std::io::Error::from_raw_os_error(libc::ESRCH))
+        });
+        assert_eq!(gone, Signalled::NotSent);
+        // Held, and read as it was, it is signalled through what holds it.
+        let sent = signal_pinned(read.identity, None, libc::SIGKILL, &process, |pid| {
+            Ok(Numbered(pid))
+        });
+        assert_eq!(sent, Signalled::Sent);
+        use std::os::unix::process::ExitStatusExt;
+        assert_eq!(sleep.wait().unwrap().signal(), Some(libc::SIGKILL));
+    }
 
     #[test]
     #[allow(clippy::disallowed_methods)] // The test starts what it reads.

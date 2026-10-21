@@ -329,9 +329,11 @@ struct PlaywrightTest {
     column: u64,
     project: String,
     outcome: Outcome,
-    /// Whether its own body failed, and nothing else of its attempt did.
+    /// Whether its own body failed, an assertion of it, and nothing else of its one
+    /// attempt did.
     own: bool,
-    /// Why its attempt is no failure of its body's own, where it failed and is not.
+    /// Why it is no failure of its body's own, where it failed and is not, or was run
+    /// more than once.
     why: Option<String>,
 }
 
@@ -353,7 +355,9 @@ enum Outcome {
 /// proves it. It ran where its body ran in one (it passed, or failed of itself); else it
 /// neither failed nor passed (`others`): skipped in every project it was given to, or
 /// failed with no proof it was of itself (a hook that failed, a body beside it too, a
-/// worker that exited), which is an error outside it, said with the reporter's why.
+/// worker that exited, no assertion of its body that failed), which is an error outside
+/// it, said with the reporter's why, as is a test run more than once, whatever came of
+/// it in the end.
 pub fn playwright(json: &str) -> Result<Results, String> {
     let report: PlaywrightReport = serde_json::from_str(json).map_err(|cause| cause.to_string())?;
     if !report.end {
@@ -392,10 +396,9 @@ pub fn playwright(json: &str) -> Result<Results, String> {
             || projects
                 .iter()
                 .any(|project| matches!(project.outcome, Outcome::Expected | Outcome::Flaky));
-        for project in projects
-            .iter()
-            .filter(|project| project.outcome == Outcome::Unexpected && !project.own)
-        {
+        for project in projects.iter().filter(|project| {
+            (project.outcome == Outcome::Unexpected && !project.own) || project.why.is_some()
+        }) {
             let place = if project.project.is_empty() {
                 String::new()
             } else {

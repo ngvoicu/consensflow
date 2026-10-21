@@ -21,7 +21,9 @@
 //!   prints: its JSON report says no step of a test, and a test whose `beforeAll`
 //!   threw is `unexpected` there though its body never ran, where the reporter's
 //!   steps say which hook threw (Playwright 1.63, 2026-10-17). Each test is given one
-//!   attempt (`--retries=0`), and a run that asks for more is refused.
+//!   attempt (`--retries=0`), and a run that asks for more is refused; a group that
+//!   asks for retries of its own is given them over that, and the reporter says a
+//!   test run more than once (Sol's look at round 7).
 //! - Anything else, every other `cargo xtask …` among them, says no more than its
 //!   exit status.
 
@@ -600,9 +602,10 @@ fn node_words(command: &[String], reporter: &str, report: &Path) -> Vec<String> 
 /// The words of a Playwright run that also has the plants' reporter (the module
 /// `reporter`) write its report: the list it prints and that report, whatever
 /// reporter the command named; and one attempt of each test, whatever the config
-/// says (`--retries=0`), so that the report's word on a test is of the run of it.
+/// file says (`--retries=0`), so that the report's word on a test is of the run of it.
 /// A command that asks for retries is refused (`retried`); one that asks for none
-/// is given it once.
+/// is given it once. A group's `test.describe.configure({ retries })` is over this
+/// word, and a test it runs again is no catch (the reporter's `why`).
 fn playwright_words(command: &[String], reporter: &str) -> Vec<String> {
     let mut words: Vec<String> = Vec::new();
     let mut given = command.iter();

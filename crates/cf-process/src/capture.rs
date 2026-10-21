@@ -116,8 +116,9 @@ pub async fn capture(
 ///   left is ended first, then its streams are read to their ends, for a moment at
 ///   most.
 /// - Where what it left did not end (a process of its job had not ended a moment
-///   after the job was ended), or its streams are still held open a moment after,
-///   it has failed, whatever it exited with: the message begins with
+///   after the job was ended, a process that could not be held to be forced had not
+///   a moment after its group was), or its streams are still held open a moment
+///   after, it has failed, whatever it exited with: the message begins with
 ///   [`LEFT_RUNNING`].
 pub async fn capture_whole(
     run: &Run,
@@ -422,7 +423,7 @@ async fn held_end(
             // Forced before it is reaped on Unix, its session and descendants with it;
             // on Windows its job is what is left.
             let status = forced(child, group).await;
-            let left = job.map_or(Ok(()), Job::end);
+            let left = job.map_or(Ok(()), Job::end).and(group.unpinned());
             (status, matches!(held, Held::OutOfTime), left)
         }
     }
@@ -453,12 +454,13 @@ async fn exited(
 /// Ends what a program held whole left once it exited of itself: on Unix every process
 /// of its session and every one descended from it, then its group (it is not reaped
 /// yet); on Windows, where it was waited for and its pid may be another's, every process
-/// of its job, waited for until none is left. Why not all of it ended, where not all did.
+/// of its job, waited for until none is left. Why not all of it ended, where not all did
+/// (a process of the job, or one that could not be held to be forced, that outlived it).
 fn end_the_rest(group: &Group, job: Option<&Job>) -> Result<(), String> {
     if cfg!(unix) {
         group.end(Ending::Forced);
     }
-    job.map_or(Ok(()), Job::end)
+    job.map_or(Ok(()), Job::end).and(group.unpinned())
 }
 
 #[cfg(test)]

@@ -103,8 +103,9 @@ fn a_file_that_cannot_be_put_back_leaves_none_of_the_others_planted_and_each_is_
     let said = planting.restore().unwrap_err().to_string();
     assert!(
         said.starts_with(&format!(
-            "could not put back {}: ",
-            context.path("src/a.rs").display()
+            "{} is still planted: put it back from its copy, {} (",
+            context.path("src/a.rs").display(),
+            saved.path().join("0-src_a.rs").display()
         )),
         "{said}"
     );
@@ -119,11 +120,12 @@ fn a_file_that_cannot_be_put_back_leaves_none_of_the_others_planted_and_each_is_
         said.starts_with("2 files of a plant are not as they were:\n"),
         "{said}"
     );
-    for path in ["src/a.rs", "src/c.rs"] {
+    for (path, copy) in [("src/a.rs", "0-src_a.rs"), ("src/c.rs", "2-src_c.rs")] {
         assert!(
             said.contains(&format!(
-                "could not put back {}: ",
-                context.path(path).display()
+                "{} is still planted: put it back from its copy, {} (",
+                context.path(path).display(),
+                saved.path().join(copy).display()
             )),
             "{said}"
         );
@@ -289,4 +291,84 @@ fn a_file_put_back_is_no_older_than_the_plant_made_in_it_so_that_what_was_built_
         "{restored:?} is older than {planted:?}"
     );
     assert_eq!(text(&context, "src/a.rs"), "one\ntwo\n");
+}
+
+#[test]
+fn a_run_left_running_still_puts_its_plant_back_and_one_it_cannot_ends_the_run_naming_it_and_its_copy(
+) {
+    // Both reviewers' look at round 7: a run whose program left a process running ended
+    // the plant's trial before its files were put back, and what then failed to put one
+    // back (a process of it still holding the file) was dropped unsaid.
+    let (_folder, context) = checkout();
+    let left = |command: &[String]| Error::LeftRunning {
+        command: command.join(" "),
+        said: "what the program started did not end: process 7 is left".into(),
+    };
+    // Put back, the run's error is the run's end.
+    let one = family(vec![upper("p: one", &[("first", false)])]);
+    let mut runner = Fake::new(|command| Err(left(command)));
+    let (status, said) = go(&context, &one, &mut runner);
+    assert_eq!(
+        status.unwrap_err().to_string(),
+        "first: what the program started did not end: process 7 is left"
+    );
+    assert_eq!(text(&context, "src/a.rs"), "one\ntwo\n");
+    fs::remove_dir_all(copies_folder(&said)).unwrap();
+
+    // What the run left holds the file (here it made it a folder): the run ends with an
+    // error that names it, still planted, and where its copy is, beside the run's own.
+    let two = family(vec![plant(
+        "p: two files",
+        &[("src/a.rs", "one", "ONE"), ("src/b.rs", "three", "THREE")],
+        &[("first", false)],
+    )]);
+    let mut runner = Fake::new(|command| {
+        fs::remove_file(context.path("src/a.rs")).unwrap();
+        fs::create_dir(context.path("src/a.rs")).unwrap();
+        Err(left(command))
+    });
+    let (status, said) = go(&context, &two, &mut runner);
+    let error = status.unwrap_err().to_string();
+    let copy = copies_folder(&said).join("0-src_a.rs");
+    assert!(
+        error.starts_with(&format!(
+            "{} is still planted: put it back from its copy, {} (",
+            context.path("src/a.rs").display(),
+            copy.display()
+        )),
+        "{error}"
+    );
+    assert!(
+        error.ends_with(
+            "\nand before that: first: what the program started did not end: process 7 is left"
+        ),
+        "{error}"
+    );
+    assert_eq!(fs::read_to_string(&copy).unwrap(), "one\ntwo\n");
+    assert_eq!(text(&context, "src/b.rs"), "three\n", "the other is back");
+    fs::remove_dir(context.path("src/a.rs")).unwrap();
+    fs::write(context.path("src/a.rs"), "one\ntwo\n").unwrap();
+    fs::remove_dir_all(copies_folder(&said)).unwrap();
+
+    // A file that could not be put back is what ended the trial: it is said once, as it
+    // is at the end.
+    let three = family(vec![upper("p: three", &[("first", false)])]);
+    let mut runner = Fake::new(|_| {
+        fs::remove_file(context.path("src/a.rs")).unwrap();
+        fs::create_dir(context.path("src/a.rs")).unwrap();
+        fails("m::the_test")
+    });
+    let (status, said) = go(&context, &three, &mut runner);
+    let error = status.unwrap_err().to_string();
+    let copy = copies_folder(&said).join("0-src_a.rs");
+    assert!(
+        error.starts_with(&format!(
+            "{} is still planted: put it back from its copy, {} (",
+            context.path("src/a.rs").display(),
+            copy.display()
+        )) && !error.contains("\n"),
+        "{error}"
+    );
+    fs::remove_dir(context.path("src/a.rs")).unwrap();
+    fs::remove_dir_all(copies_folder(&said)).unwrap();
 }

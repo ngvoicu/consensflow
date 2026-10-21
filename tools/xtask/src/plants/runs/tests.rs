@@ -2533,6 +2533,182 @@ fn a_playwright_test_whose_hooks_threw_or_whose_worker_exited_never_failed_of_it
     assert!(!said.contains("CAUGHT"), "{said}");
 }
 
+/// A spec of Playwright's whose group `a group` holds the meant test, `before` written
+/// above the group (what it imports, what it uses) and `body` its body: each fails with
+/// the plant alone.
+fn playwright_spec(before: &str, body: &str) -> String {
+    format!(
+        "import {{ expect, test }} from '@playwright/test'\nimport {{ planted }} from './flag.mjs'\n{before}\n\
+         test.describe('a group', () => {{\n  test('the meant one', async () => {{\n    {body}\n  }})\n}})\n"
+    )
+}
+
+/// The specs whose meant test (`a group › the meant one`) fails with the plant though no
+/// assertion of its body failed, or was run more than once: each a file of its own, its
+/// text, and why its meant test did not fail of itself.
+fn playwright_unproven() -> [(&'static str, String, &'static str); 6] {
+    [
+        // Astra's look at round 7: a worker's fixture that fails before the body and before
+        // any hook's step.
+        (
+            "worker-fixture",
+            playwright_spec("test.use({ trace: planted ? () => {} : 'off' })", FAILS),
+            "no assertion of its body failed: Error: \"trace\" option cannot be a function",
+        ),
+        // Sol's: an import that throws in the worker alone, after the specs were collected,
+        // which Playwright gives the test that has not started.
+        (
+            "worker-import",
+            playwright_spec("import './in-worker.mjs'", FAILS),
+            "no assertion of its body failed: Error: the import throws in the worker",
+        ),
+        (
+            "body-throws",
+            playwright_spec("", "if (planted) throw new Error('the body throws')"),
+            "no assertion of its body failed: Error: the body throws",
+        ),
+        // A fixture of the test's own, which fails before its body.
+        (
+            "fixture-throws",
+            "import { expect, test as base } from '@playwright/test'\nimport { planted } from './flag.mjs'\n\n\
+             const test = base.extend({\n  thing: async ({}, use) => {\n    if (planted) throw new Error('the fixture throws')\n    await use(1)\n  },\n})\n\n\
+             test.describe('a group', () => {\n  test('the meant one', async ({ thing }) => {\n    expect(thing).toBe(1)\n  })\n})\n"
+                .to_owned(),
+            "a hook failed: Error: the fixture throws",
+        ),
+        // Sol's: retries a group asks for, over the run's --retries=0.
+        (
+            "retried",
+            playwright_spec("test.describe.configure({ retries: 1 })", FAILS),
+            "it was retried (2 attempts)",
+        ),
+        (
+            "flaky",
+            playwright_spec(
+                "test.describe.configure({ retries: 1 })",
+                "expect(planted && test.info().retry === 0).toBe(false)",
+            ),
+            "it was retried (2 attempts)",
+        ),
+    ]
+}
+
+/// The module `worker-import` imports: it throws with the plant, in Playwright's worker
+/// alone.
+const IN_WORKER: &str = "import { planted } from './flag.mjs'\n\n\
+    if (planted && process.env.TEST_WORKER_INDEX !== undefined) throw new Error('the import throws in the worker')\n";
+
+/// The specs of `playwright_spec`'s whose meant test fails with the plant by an assertion
+/// of its body: each a file of its own, and its meant test's body.
+const PLAYWRIGHT_ASSERTED: [(&str, &str); 3] = [
+    ("asserts", FAILS),
+    (
+        "asserts-in-a-step",
+        "await test.step('a step', () => {\n      expect(planted).toBe(false)\n    })",
+    ),
+    ("asserts-softly", "expect.soft(planted).toBe(false)"),
+];
+
+/// A checkout under the plants' fixtures (where the specs find `@playwright/test`), with
+/// the flag and a config of Playwright's, and the plant of each spec `specs` names, with
+/// its text, meant for `a group › the meant one`; and its folder, which goes with it.
+fn playwright_plants(
+    specs: &[(&str, String)],
+) -> (tempfile::TempDir, Context, Vec<crate::plants::kit::Plant>) {
+    let root = context().root;
+    let cli = "app/node_modules/@playwright/test/cli.js";
+    assert!(
+        root.join(cli).is_file(),
+        "Playwright is not installed: npm ci --prefix app"
+    );
+    let fixtures = plants_fixtures(&root);
+    fs::create_dir_all(&fixtures).unwrap();
+    let folder = tempfile::tempdir_in(&fixtures).unwrap();
+    let checkout = Context {
+        root: folder.path().to_path_buf(),
+        env: Env::default(),
+    };
+    fs::write(checkout.path("flag.mjs"), FLAG).unwrap();
+    fs::write(checkout.path("in-worker.mjs"), IN_WORKER).unwrap();
+    fs::write(
+        checkout.path("plants.config.mjs"),
+        "export default { testDir: '.', outputDir: './test-results' }\n",
+    )
+    .unwrap();
+    let relative = folder.path().strip_prefix(&root).unwrap();
+    let at = |file: &str| relative.join(file).to_string_lossy().replace('\\', "/");
+    let plants = specs
+        .iter()
+        .map(|(name, text)| {
+            let spec = format!("{name}.spec.mjs");
+            fs::write(checkout.path(&spec), text).unwrap();
+            let command = words(&[
+                "node",
+                cli,
+                "test",
+                "--config",
+                &at("plants.config.mjs"),
+                &at(&spec),
+            ]);
+            flagged(&format!("p: {name}"), "a group › the meant one", command)
+        })
+        .collect();
+    (folder, checkout, plants)
+}
+
+#[test]
+fn a_playwright_test_no_assertion_of_whose_body_failed_or_that_was_retried_never_failed_of_itself()
+{
+    // Both reviewers' looks at round 7: three rounds inferred that a body ran from what
+    // the errors and the hooks said, and each had a hole (a worker's fixture that failed
+    // before any hook, an import that threw in the worker alone). A catch now needs a
+    // failed assertion of the body; a body that threw, a fixture, an import, a run
+    // retried (a group's retries are over the run's --retries=0) is BROKEN.
+    let unproven = playwright_unproven();
+    let specs: Vec<(&str, String)> = unproven
+        .iter()
+        .map(|(name, text, _)| (*name, text.clone()))
+        .collect();
+    let (_folder, checkout, plants) = playwright_plants(&specs);
+    let (status, said) = driven(&checkout, &plants);
+    assert_eq!(fs::read_to_string(checkout.path("flag.mjs")).unwrap(), FLAG);
+    assert_eq!(status, 1, "{said}");
+    for (name, _, why) in unproven {
+        assert!(
+            said.contains(&format!("BROKEN           p: {name} (")),
+            "{name}: {said}"
+        );
+        assert!(
+            said.contains(&format!(
+                "    Playwright: an error outside every test: a group › the meant one did not \
+                 fail of itself: {why}"
+            )),
+            "{name}: {said}"
+        );
+    }
+    assert!(!said.contains("CAUGHT"), "{said}");
+}
+
+#[test]
+fn a_playwright_test_whose_body_s_assertion_failed_is_caught_in_a_step_and_softly_too() {
+    // Round 8: the safe side of the rule above keeps the catch of every failed assertion
+    // of the body's own, a step's of it and a soft one's too.
+    let specs: Vec<(&str, String)> = PLAYWRIGHT_ASSERTED
+        .iter()
+        .map(|(name, body)| (*name, playwright_spec("", body)))
+        .collect();
+    let (_folder, checkout, plants) = playwright_plants(&specs);
+    let (status, said) = driven(&checkout, &plants);
+    assert_eq!(fs::read_to_string(checkout.path("flag.mjs")).unwrap(), FLAG);
+    assert_eq!(status, 0, "{said}");
+    for (name, _) in PLAYWRIGHT_ASSERTED {
+        assert!(
+            said.contains(&format!("CAUGHT           p: {name} (")),
+            "{name}: {said}"
+        );
+    }
+}
+
 #[test]
 fn a_plant_whose_command_cannot_be_started_or_fails_without_it_is_not_run_not_caught() {
     // A program that is not there.

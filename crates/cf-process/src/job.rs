@@ -285,25 +285,85 @@ fn ended_within(within: std::time::Duration, left: impl Fn() -> Vec<usize>) -> R
     }
 }
 
+/// What one ask of a job's list of processes, given room for some ids, came to.
+#[cfg(any(windows, test))]
+#[derive(Debug)]
+enum Listed {
+    /// How many processes the job has, and the ids of those that fitted.
+    Ids(usize, Vec<usize>),
+    /// The system said there was not room (`ERROR_MORE_DATA`).
+    More,
+    /// The ask failed: why.
+    Failed(String),
+}
+
+/// How many times a job's list is asked for with more room before it is given up.
+#[cfg(any(windows, test))]
+const LISTED_WITHIN: usize = 16;
+
+/// The ids of every process of a job, as `ask` says them given room for some (256 at
+/// first): asked again with room for all it says it has, and more, until every one of
+/// them fits (as Windows asks: both reviewers' look at round 7, the list held 256 ids
+/// at most). Windows says there is not room rather than list some (zeewin 2026-10-21, a
+/// job of 300 asked with room for 256), which round 7 took for a job of none. Why not,
+/// where an ask fails, or the list outgrows each room it is given.
+#[cfg(any(windows, test))]
+fn listed_whole(mut ask: impl FnMut(usize) -> Listed) -> Result<Vec<usize>, String> {
+    let mut room = 256;
+    for _ in 0..LISTED_WITHIN {
+        match ask(room) {
+            Listed::Ids(assigned, ids) if ids.len() >= assigned => return Ok(ids),
+            Listed::Ids(assigned, _) => room = room.max(assigned) + 64,
+            Listed::More => room *= 2,
+            Listed::Failed(why) => return Err(format!("its processes could not be listed: {why}")),
+        }
+    }
+    Err(format!(
+        "its processes could not be listed: the list outgrew room for {room} ids"
+    ))
+}
+
 /// The processes of a job, each held by a handle that says when it has ended (it is
 /// signalled), opened before the job is ended; closed when this is dropped. A process
-/// that ended before it could be opened is not held.
+/// that ended before it could be opened is not held, nor is one the job does not hold,
+/// which has its id since the list was read (both reviewers' look at round 7: waited
+/// for, a stranger failed the run).
 #[cfg(windows)]
 struct Held(Vec<(usize, usize)>);
 
 #[cfg(windows)]
 impl Held {
-    /// The processes `pids`, those of them still there.
-    fn open(pids: Vec<usize>) -> Self {
-        use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_SYNCHRONIZE};
+    /// The processes `pids` of the job `job`, those of them still there and in it.
+    fn open(job: usize, pids: Vec<usize>) -> Self {
+        use windows_sys::Win32::Foundation::CloseHandle;
+        use windows_sys::Win32::System::JobObjects::IsProcessInJob;
+        use windows_sys::Win32::System::Threading::{
+            OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE,
+        };
         Self(
             pids.into_iter()
                 .filter_map(|pid| {
                     let id = u32::try_from(pid).ok()?;
                     #[allow(unsafe_code)]
-                    // SAFETY: OpenProcess takes plain values and returns a handle or null.
-                    let handle = unsafe { OpenProcess(PROCESS_SYNCHRONIZE, 0, id) };
-                    (!handle.is_null()).then_some((pid, handle as usize))
+                    // SAFETY: OpenProcess takes plain values and returns a handle or null;
+                    // IsProcessInJob reads the two handles, open, and writes `inside`, ours;
+                    // a handle not kept is closed once, here.
+                    unsafe {
+                        let handle = OpenProcess(
+                            PROCESS_SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION,
+                            0,
+                            id,
+                        );
+                        if handle.is_null() {
+                            return None;
+                        }
+                        let mut inside = 0;
+                        if IsProcessInJob(handle, job as _, &mut inside) == 0 || inside == 0 {
+                            CloseHandle(handle);
+                            return None;
+                        }
+                        Some((pid, handle as usize))
+                    }
                 })
                 .collect(),
         )
@@ -352,62 +412,75 @@ impl Job {
     /// (zeewin 2026-10-17: the call took 20 ms; the job then counted none and listed
     /// none, while 7 of 8 processes of 500 threads each had not ended, which all had
     /// 48 ms after it began); nor does a process's exit code say it has ended, which is
-    /// set as its end begins. What is left: a process the job starts in the moment
-    /// between the list and the end is ended and not waited for; and a process listed
-    /// that ends in that moment, its id given to another, is waited for in its stead, as
-    /// long as the wait allows. The list holds 256 processes at most.
+    /// set as its end begins. Each is held only where the job holds it once it is
+    /// opened: a process listed that ended before then, its id given to another, is
+    /// not waited for in its stead (both reviewers' look at round 7). What is left: a
+    /// process the job starts in the moment between the list and the end is ended and
+    /// not waited for. A job whose processes cannot be listed whole is ended all the
+    /// same, and has failed: none of them could be waited for.
     pub(crate) fn end(&self) -> Result<(), String> {
         use windows_sys::Win32::System::JobObjects::TerminateJobObject;
-        let held = Held::open(self.processes());
+        let listed = self.processes();
+        let held = Held::open(self.handle, listed.clone().unwrap_or_default());
         #[allow(unsafe_code)]
         // SAFETY: the handle is the job's, open until the job is dropped; the call
         // writes no memory of ours.
         unsafe {
             TerminateJobObject(self.handle as _, 1);
         }
+        listed?;
         ended_within(JOB_ENDS_WITHIN, || held.left())
     }
 
-    /// The ids of the processes the job holds, as far as the system says them.
-    fn processes(&self) -> Vec<usize> {
+    /// The ids of every process the job holds (`listed_whole`), or why not.
+    fn processes(&self) -> Result<Vec<usize>, String> {
+        listed_whole(|room| self.list(room))
+    }
+
+    /// One ask of the job's list of processes, with room for `room` ids.
+    fn list(&self, room: usize) -> Listed {
+        use windows_sys::Win32::Foundation::ERROR_MORE_DATA;
         use windows_sys::Win32::System::JobObjects::{
-            JobObjectBasicProcessIdList, QueryInformationJobObject,
+            JobObjectBasicProcessIdList, QueryInformationJobObject, JOBOBJECT_BASIC_PROCESS_ID_LIST,
         };
-        /// JOBOBJECT_BASIC_PROCESS_ID_LIST, with room for 256 ids.
-        #[repr(C)]
-        struct Listed {
-            _assigned: u32,
-            listed: u32,
-            ids: [usize; 256],
-        }
-        let mut list = Listed {
-            _assigned: 0,
-            listed: 0,
-            ids: [0; 256],
-        };
-        let Ok(size) = u32::try_from(std::mem::size_of_val(&list)) else {
-            return Vec::new();
+        // JOBOBJECT_BASIC_PROCESS_ID_LIST, its two counts and then the ids, laid out in
+        // words of an id's size, so that the buffer is aligned as the list is.
+        let header = std::mem::offset_of!(JOBOBJECT_BASIC_PROCESS_ID_LIST, ProcessIdList)
+            / std::mem::size_of::<usize>();
+        let mut words = vec![0usize; header + room];
+        let Ok(size) = u32::try_from(words.len() * std::mem::size_of::<usize>()) else {
+            return Listed::Failed(format!("no room for {room} ids can be asked for"));
         };
         #[allow(unsafe_code)]
-        // SAFETY: the buffer is `list`, writable for the `size` bytes passed with it and
-        // laid out as JOBOBJECT_BASIC_PROCESS_ID_LIST, and the call writes no more than
-        // that.
-        let asked = unsafe {
-            QueryInformationJobObject(
+        // SAFETY: the buffer is `words`, writable for the `size` bytes passed with it,
+        // aligned for and laid out as JOBOBJECT_BASIC_PROCESS_ID_LIST with room for
+        // `room` ids, and the call writes no more than that; its counts are read from
+        // it as that struct once it has.
+        let (asked, assigned, listed) = unsafe {
+            let asked = QueryInformationJobObject(
                 self.handle as _,
                 JobObjectBasicProcessIdList,
-                (&raw mut list).cast(),
+                words.as_mut_ptr().cast(),
                 size,
                 std::ptr::null_mut(),
+            );
+            let list = words.as_ptr().cast::<JOBOBJECT_BASIC_PROCESS_ID_LIST>();
+            (
+                asked,
+                (*list).NumberOfAssignedProcesses,
+                (*list).NumberOfProcessIdsInList,
             )
         };
         if asked == 0 {
-            return Vec::new();
+            let error = std::io::Error::last_os_error();
+            return match u32::try_from(error.raw_os_error().unwrap_or(0)) {
+                Ok(ERROR_MORE_DATA) => Listed::More,
+                _ => Listed::Failed(error.to_string()),
+            };
         }
-        let listed = usize::try_from(list.listed)
-            .unwrap_or(0)
-            .min(list.ids.len());
-        list.ids[..listed].to_vec()
+        let count = |count: u32| usize::try_from(count).unwrap_or(usize::MAX);
+        let listed = count(listed).min(room);
+        Listed::Ids(count(assigned), words[header..header + listed].to_vec())
     }
 }
 
@@ -465,6 +538,161 @@ mod tests {
             ended_within(short, || vec![12, 34]),
             Err("processes [12, 34] of its job had not ended 50ms after it was ended".to_owned())
         );
+    }
+
+    #[test]
+    fn a_job_s_list_is_asked_for_again_with_room_for_all_it_has_and_an_ask_that_fails_is_an_error()
+    {
+        // Both reviewers' look at round 7: the list held 256 ids at most, the rest of a
+        // job's processes never waited for; and an ask that failed was an empty list, a
+        // job with nothing to wait for.
+        let job: Vec<usize> = (1..=300).collect();
+        let mut rooms = Vec::new();
+        let listed = listed_whole(|room| {
+            rooms.push(room);
+            Listed::Ids(job.len(), job[..room.min(job.len())].to_vec())
+        });
+        assert_eq!(listed, Ok(job.clone()));
+        assert_eq!(rooms, [256, 364], "asked again with room for all it has");
+        // Told only that there is not room, it is given more.
+        let mut asks = 0;
+        let listed = listed_whole(|room| {
+            asks += 1;
+            if room < job.len() {
+                Listed::More
+            } else {
+                Listed::Ids(job.len(), job.clone())
+            }
+        });
+        assert_eq!((listed, asks), (Ok(job.clone()), 2));
+        assert_eq!(
+            listed_whole(|_| Listed::Failed("Access is denied. (os error 5)".to_owned())),
+            Err("its processes could not be listed: Access is denied. (os error 5)".to_owned())
+        );
+        // One that outgrows each room it is given is given up.
+        let mut grows = 0;
+        let listed = listed_whole(|room| {
+            grows += 1;
+            Listed::Ids(room * 3, Vec::new())
+        });
+        assert!(listed.is_err(), "{listed:?}");
+        assert_eq!(grows, LISTED_WITHIN);
+    }
+
+    /// A job of its own for a test, every process of which is ended when it is dropped,
+    /// and `count` programs put in it, each started suspended (a ping of a minute's,
+    /// which never runs): their ids.
+    #[cfg(windows)]
+    #[allow(clippy::disallowed_methods)] // The test starts what the job ends.
+    fn a_job_of(count: usize) -> (Job, Vec<usize>) {
+        use std::os::windows::io::AsRawHandle;
+        use std::os::windows::process::CommandExt;
+        use windows_sys::Win32::System::JobObjects::{
+            AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
+            SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+            JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+        };
+        use windows_sys::Win32::System::Threading::{CREATE_NO_WINDOW, CREATE_SUSPENDED};
+        #[allow(unsafe_code)]
+        // SAFETY: CreateJobObjectW takes no attributes and no name and returns a handle,
+        // closed by the job's drop; SetInformationJobObject reads `limits`, whole.
+        let job = unsafe {
+            let made = CreateJobObjectW(std::ptr::null(), std::ptr::null());
+            assert!(!made.is_null());
+            let mut limits: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
+            limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+            let size = u32::try_from(std::mem::size_of_val(&limits)).unwrap();
+            let set = SetInformationJobObject(
+                made,
+                JobObjectExtendedLimitInformation,
+                (&raw const limits).cast(),
+                size,
+            );
+            assert_ne!(set, 0);
+            Job {
+                handle: made as usize,
+            }
+        };
+        let ids = (0..count)
+            .map(|_| {
+                let child = std::process::Command::new(r"C:\Windows\System32\PING.EXE")
+                    .args(["-n", "60", "127.0.0.1"])
+                    .creation_flags(CREATE_SUSPENDED | CREATE_NO_WINDOW)
+                    .spawn()
+                    .unwrap();
+                #[allow(unsafe_code)]
+                // SAFETY: both handles are open; the call writes no memory of ours.
+                let put =
+                    unsafe { AssignProcessToJobObject(job.handle as _, child.as_raw_handle()) };
+                assert_ne!(put, 0, "{}", std::io::Error::last_os_error());
+                usize::try_from(child.id()).unwrap()
+            })
+            .collect();
+        (job, ids)
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_job_s_list_names_every_process_of_it_past_the_256_it_once_held() {
+        let (job, mut started) = a_job_of(300);
+        let mut listed = job.processes().unwrap();
+        listed.sort_unstable();
+        started.sort_unstable();
+        assert_eq!(listed.len(), 300);
+        assert_eq!(listed, started);
+        // Each is ended with the job: 300 ended at once take longer than a job's end waits
+        // for them on zeewin (4 were left at 2 s, 2026-10-21), so they are waited for here,
+        // a while longer, each by a handle opened before the end.
+        let held = Held::open(job.handle, listed);
+        let _ = job.end();
+        assert_eq!(
+            ended_within(std::time::Duration::from_secs(60), || held.left()),
+            Ok(())
+        );
+        // A job whose list cannot be asked for (the handle of an event here, no job: a
+        // null one is this process's own job) has not ended: it had none of its processes
+        // to wait for.
+        use windows_sys::Win32::Foundation::CloseHandle;
+        use windows_sys::Win32::System::Threading::CreateEventW;
+        #[allow(unsafe_code)]
+        // SAFETY: CreateEventW takes no attributes and no name and returns a handle, closed
+        // once, below.
+        let event = unsafe { CreateEventW(std::ptr::null(), 1, 0, std::ptr::null()) };
+        assert!(!event.is_null());
+        let none = Job {
+            handle: event as usize,
+        };
+        let ended = none.end();
+        std::mem::forget(none);
+        #[allow(unsafe_code)]
+        // SAFETY: the event's handle is open, and closed once, here.
+        unsafe {
+            CloseHandle(event);
+        }
+        assert!(
+            ended
+                .as_ref()
+                .is_err_and(|why| why.starts_with("its processes could not be listed: ")),
+            "{ended:?}"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_process_listed_that_the_job_does_not_hold_once_it_is_opened_is_not_waited_for() {
+        // Both reviewers' look at round 7: a process of the job's list that ended before it
+        // was opened, its id given to another, was waited for in its stead, and failed the
+        // run. This process, in no job of the test's, is such a one.
+        let (job, ids) = a_job_of(1);
+        let this = usize::try_from(std::process::id()).unwrap();
+        let held = Held::open(job.handle, vec![ids[0], this]);
+        assert_eq!(
+            held.0.iter().map(|(pid, _)| *pid).collect::<Vec<_>>(),
+            [ids[0]],
+            "only the job's own is held"
+        );
+        drop(held);
+        assert_eq!(job.end(), Ok(()));
     }
 
     /// How many processes of `helper_holds_many_threads` the job test starts.

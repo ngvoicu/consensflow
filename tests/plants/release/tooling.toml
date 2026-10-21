@@ -15,9 +15,10 @@
 # run that left the checkout otherwise than it found it too (where git says nothing of the
 # checkout, that is said once, and nothing is unstable for it); a test file that ran no
 # test of its own, an error outside every test, no test found, a test nextest could not
-# start, a Playwright test whose hook failed and whose body never did, a failure that names
-# no test (one cancelled, a Node test file ended while a test of it ran) are BROKEN; a run
-# out of its time HUNG whatever it then exits with, and nothing it started outlives it,
+# start, a Playwright test whose hook failed, whose body ran no assertion that failed, or that
+# was run more than once, a failure that names no test (one cancelled, a Node test file
+# ended while a test of it ran) are BROKEN; a run out of its time HUNG whatever it then
+# exits with, and nothing it started outlives it,
 # the groups nextest gives its tests too (a run leads a session of its own on Unix, and on
 # Windows a job it is put in before it runs); the programs cf-e2e's tests run are taken
 # from where cargo says it put them; the Windows runner's copy is a checkout of git's whose
@@ -2167,8 +2168,8 @@ runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
 file = "tools/xtask/src/plants/runs/reporters/playwright.mjs"
-find = "  for (let at = step; at; at = at.parent) if (at.category === 'hook') return true"
-replace = "  if (step.category === 'hook') return true"
+find = "  for (let at = step; at; at = at.parent) if (categories.includes(at.category)) return true"
+replace = "  if (categories.includes(step.category)) return true"
 
 [[plant]]
 name = "tooling: an error of a Playwright test's own step is taken for a hook's"
@@ -2177,8 +2178,8 @@ runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
 file = "tools/xtask/src/plants/runs/reporters/playwright.mjs"
-find = "  for (let at = step; at; at = at.parent) if (at.category === 'hook') return true\n  return false"
-replace = "  return true"
+find = "step.error !== undefined && under(step, 'hook') && !this.hooks.has(result)"
+replace = "step.error !== undefined && !this.hooks.has(result)"
 
 [[plant]]
 name = "tooling: a Playwright test whose worker exited under it failed of itself"
@@ -2237,8 +2238,10 @@ runs = ["xtask-lib-plants"]
 
 [[plant.edit]]
 file = "tools/xtask/src/plants/runs/results.rs"
-find = "            .filter(|project| project.outcome == Outcome::Unexpected && !project.own)"
-replace = "            .filter(|_| false)"
+find = '''        for project in projects.iter().filter(|project| {
+            (project.outcome == Outcome::Unexpected && !project.own) || project.why.is_some()
+        }) {'''
+replace = "        for project in projects.iter().filter(|_| false) {"
 
 # A test file that failed whole never stands for the meant test, whatever its name.
 
@@ -2427,8 +2430,8 @@ platforms = ["macos"]
 
 [[plant.edit]]
 file = "crates/cf-process/src/table.rs"
-find = "    if !same() {\n        return false;\n    }\n"
-replace = "    let _ = same;\n"
+find = "        if !same(identity, session, read) {\n            return Signalled::NotSent;\n        }\n"
+replace = "        let _ = (session, read);\n"
 
 [[plant]]
 name = "tooling (cf-process): a process found by the session is not read again for its session"
@@ -2438,8 +2441,8 @@ platforms = ["macos", "linux"]
 
 [[plant.edit]]
 file = "crates/cf-process/src/table.rs"
-find = "            now.identity == identity && session.is_none_or(|session| now.session == session)"
-replace = "            now.identity == identity && session.is_none_or(|_| true)"
+find = "        now.identity == identity && session.is_none_or(|session| now.session == session)"
+replace = "        now.identity == identity && session.is_none_or(|_| true)"
 
 [[plant]]
 name = "tooling (cf-process): a process found by the session and descended from the program is read as descended alone"
@@ -2476,13 +2479,13 @@ platforms = ["windows"]
 
 [[plant.edit]]
 file = "crates/cf-process/src/job.rs"
-find = "        let held = Held::open(self.processes());\n"
+find = "        let held = Held::open(self.handle, listed.clone().unwrap_or_default());\n"
 replace = ""
 
 [[plant.edit]]
 file = "crates/cf-process/src/job.rs"
-find = "        ended_within(JOB_ENDS_WITHIN, || held.left())"
-replace = "        let held = Held::open(self.processes());\n        ended_within(JOB_ENDS_WITHIN, || held.left())"
+find = "        listed?;\n"
+replace = "        let held = Held::open(self.handle, self.processes().unwrap_or_default());\n        listed?;\n"
 
 [[plant]]
 name = "tooling (cf-process): a program held whole has ended only once its streams closed"
@@ -2514,8 +2517,8 @@ platforms = ["windows"]
 
 [[plant.edit]]
 file = "crates/cf-process/src/capture.rs"
-find = "    job.map_or(Ok(()), Job::end)\n}"
-replace = "    let _ = job;\n    Ok(())\n}"
+find = "    job.map_or(Ok(()), Job::end).and(group.unpinned())\n}"
+replace = "    let _ = job;\n    group.unpinned()\n}"
 
 [[plant]]
 name = "tooling (cf-process): streams held open after a program held whole ended are let go of"
@@ -2563,3 +2566,261 @@ find = '''    ["app", "src-tauri", "target", "plants-fixtures"]
         .iter()
         .fold(root.to_path_buf(), |path, part| path.join(part))'''
 replace = '''    root.join("app/src-tauri/target/plants-fixtures")'''
+
+# Round 8 (both reviewers' look at round 7): a Playwright test is caught only where an assertion of
+# its body's own failed, under no hook and no fixture; and a test run more than once is no catch.
+
+[[plant]]
+name = "tooling: a Playwright test whose body asserted nothing that failed is caught"
+meant = "a_playwright_test_no_assertion_of_whose_body_failed_or_that_was_retried_never_failed_of_itself"
+runs = ["xtask-lib-plants"]
+
+[[plant.edit]]
+file = "tools/xtask/src/plants/runs/reporters/playwright.mjs"
+find = '''    if (!this.asserted.has(result)) return `no assertion of its body failed: ${firstLine(result.errors[0])}`
+'''
+replace = ''''''
+
+[[plant]]
+name = "tooling: a Playwright assertion a fixture holds is taken for the body's"
+meant = "playwright_s_reporter_takes_an_error_of_any_step_in_a_hook_for_the_hook_s"
+runs = ["xtask-lib-plants"]
+
+[[plant.edit]]
+file = "tools/xtask/src/plants/runs/reporters/playwright.mjs"
+find = '''!under(step, 'hook', 'fixture')'''
+replace = '''!under(step, 'hook')'''
+
+[[plant]]
+name = "tooling: a Playwright assertion that passed is taken for one that failed"
+meant = "playwright_s_reporter_takes_an_error_of_any_step_in_a_hook_for_the_hook_s"
+runs = ["xtask-lib-plants"]
+
+[[plant.edit]]
+file = "tools/xtask/src/plants/runs/reporters/playwright.mjs"
+find = '''step.category === 'expect' && step.error !== undefined && '''
+replace = '''step.category === 'expect' && '''
+
+[[plant]]
+name = "tooling: a Playwright assertion in a step of the body is no proof"
+meant = "a_playwright_test_whose_body_s_assertion_failed_is_caught_in_a_step_and_softly_too"
+runs = ["xtask-lib-plants"]
+
+[[plant.edit]]
+file = "tools/xtask/src/plants/runs/reporters/playwright.mjs"
+find = '''under(step, 'hook', 'fixture')'''
+replace = '''under(step, 'hook', 'fixture', 'test.step')'''
+
+[[plant]]
+name = "tooling: a Playwright test run more than once is taken for one run once"
+meant = "a_playwright_test_no_assertion_of_whose_body_failed_or_that_was_retried_never_failed_of_itself"
+runs = ["xtask-lib-plants"]
+
+[[plant.edit]]
+file = "tools/xtask/src/plants/runs/reporters/playwright.mjs"
+find = '''    if (test.results.length > 1 || test.results.some((result) => result.retry > 0)) {'''
+replace = '''    if (false) {'''
+
+[[plant]]
+name = "tooling: a Playwright test retried that passed in the end is no error"
+meant = "a_playwright_test_no_assertion_of_whose_body_failed_or_that_was_retried_never_failed_of_itself"
+runs = ["xtask-lib-plants"]
+
+[[plant.edit]]
+file = "tools/xtask/src/plants/runs/results.rs"
+find = ''' || project.why.is_some()'''
+replace = ''''''
+
+# Round 8 (both reviewers' look at round 7): a process Linux opens no pidfd of is sent nothing, and
+# one that outlived its group's end then is said; a job's list on Windows is asked for until it is
+# whole, an ask that fails is an error, and a process listed is held only where the job holds it.
+
+[[plant]]
+name = "tooling (cf-process): a process that cannot be held is signalled by its number"
+meant = "a_process_that_cannot_be_held_to_be_signalled_is_sent_nothing_and_why_is_said"
+runs = ["cf-process-lib"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/table.rs"
+find = '''        Err(why) => return Signalled::Unpinned(format!("no pidfd of it could be opened: {why}")),
+'''
+replace = '''        Err(_) => {
+            let _ = std::process::Command::new("/bin/kill").args(["-9", &identity.pid.to_string()]).status();
+            return Signalled::Sent;
+        }
+'''
+
+[[plant]]
+name = "tooling (cf-process): a process gone before it is held is said to be unheld"
+meant = "a_process_that_cannot_be_held_to_be_signalled_is_sent_nothing_and_why_is_said"
+runs = ["cf-process-lib"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/table.rs"
+find = '''        Err(gone) if gone.raw_os_error() == Some(libc::ESRCH) => return Signalled::NotSent,
+'''
+replace = ''''''
+
+[[plant]]
+name = "tooling (cf-process): what could not be held and outlived its group is not said"
+meant = "held_whole_a_process_that_could_not_be_held_to_be_forced_and_outlived_its_group_fails_the_capture"
+runs = ["cf-process-lib"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/capture.rs"
+find = '''    job.map_or(Ok(()), Job::end).and(group.unpinned())
+}'''
+replace = '''    job.map_or(Ok(()), Job::end)
+}'''
+
+[[plant]]
+name = "tooling (cf-process): what could not be held is not said once a run is out of time"
+meant = "held_whole_a_process_that_could_not_be_held_to_be_forced_and_outlived_its_group_fails_the_capture"
+runs = ["cf-process-lib"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/capture.rs"
+find = '''            let left = job.map_or(Ok(()), Job::end).and(group.unpinned());'''
+replace = '''            let left = job.map_or(Ok(()), Job::end);'''
+
+[[plant]]
+name = "tooling (cf-process): the sweep keeps nothing of what it could not hold"
+meant = "held_whole_a_process_that_could_not_be_held_to_be_forced_and_outlived_its_group_fails_the_capture"
+runs = ["cf-process-lib"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/group.rs"
+find = '''                unpinned.push((identity, why));'''
+replace = '''                let _ = (identity, why);'''
+
+[[plant]]
+name = "tooling (cf-process): a job's list is cut at the room it was first given"
+meant = "a_job_s_list_is_asked_for_again_with_room_for_all_it_has_and_an_ask_that_fails_is_an_error"
+runs = ["cf-process-lib"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/job.rs"
+find = '''            Listed::Ids(assigned, _) => room = room.max(assigned) + 64,'''
+replace = '''            Listed::Ids(_, ids) => return Ok(ids),'''
+
+[[plant]]
+name = "tooling (cf-process): a job's list is not given more room where there was none"
+meant = "a_job_s_list_is_asked_for_again_with_room_for_all_it_has_and_an_ask_that_fails_is_an_error"
+runs = ["cf-process-lib"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/job.rs"
+find = '''            Listed::More => room *= 2,'''
+replace = '''            Listed::More => return Ok(Vec::new()),'''
+
+[[plant]]
+name = "tooling (cf-process): a job's list that cannot be asked for is empty"
+meant = "a_job_s_list_is_asked_for_again_with_room_for_all_it_has_and_an_ask_that_fails_is_an_error"
+runs = ["cf-process-lib"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/job.rs"
+find = '''            Listed::Failed(why) => return Err(format!("its processes could not be listed: {why}")),'''
+replace = '''            Listed::Failed(_) => return Ok(Vec::new()),'''
+
+[[plant]]
+name = "tooling (cf-process): a job's list on Windows is not asked for again where its room was too small"
+meant = "a_job_s_list_names_every_process_of_it_past_the_256_it_once_held"
+runs = ["cf-process-lib"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/job.rs"
+find = '''            Listed::More => room *= 2,'''
+replace = '''            Listed::More => return Ok(Vec::new()),'''
+
+[[plant]]
+name = "tooling (cf-process): a job's end on Windows takes a list it could not ask for as empty"
+meant = "a_job_s_list_names_every_process_of_it_past_the_256_it_once_held"
+runs = ["cf-process-lib"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/job.rs"
+find = '''        listed?;
+'''
+replace = '''        let _ = listed;
+'''
+
+[[plant]]
+name = "tooling (cf-process): a process of a job's list is held whatever job holds it"
+meant = "a_process_listed_that_the_job_does_not_hold_once_it_is_opened_is_not_waited_for"
+runs = ["cf-process-lib"]
+platforms = ["windows"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/job.rs"
+find = '''                        if IsProcessInJob(handle, job as _, &mut inside) == 0 || inside == 0 {'''
+replace = '''                        if IsProcessInJob(handle, job as _, &mut inside) == 0 && inside == 0 {'''
+
+# Round 8 (both reviewers' look at round 7): a trial that ended in an error (a run that left a
+# process running) still puts its plant back, and a file that cannot be put back ends the run with
+# where its copy is, and the error before it.
+
+[[plant]]
+name = "tooling: a plant whose trial ended in an error is left to be put back by its drop"
+meant = "a_run_left_running_still_puts_its_plant_back_and_one_it_cannot_ends_the_run_naming_it_and_its_copy"
+runs = ["xtask-lib-plants"]
+
+[[plant.edit]]
+file = "tools/xtask/src/plants/driver.rs"
+find = '''    match planting.ended(ended)? {'''
+replace = '''    match ended? {'''
+
+[[plant]]
+name = "tooling: a file that cannot be put back is said without its copy"
+meant = "a_file_that_cannot_be_put_back_leaves_none_of_the_others_planted_and_each_is_said"
+runs = ["xtask-lib-plants"]
+
+[[plant.edit]]
+file = "tools/xtask/src/plants/driver.rs"
+find = '''        fs::write(&self.path, saved).map_err(planted)?;'''
+replace = '''        fs::write(&self.path, saved).map_err(Error::files("put back", &self.path))?;'''
+
+[[plant]]
+name = "tooling: files left planted after an error are said after it"
+meant = "a_run_left_running_still_puts_its_plant_back_and_one_it_cannot_ends_the_run_naming_it_and_its_copy"
+runs = ["xtask-lib-plants"]
+
+[[plant.edit]]
+file = "tools/xtask/src/plants/driver.rs"
+find = '''            (Err(unrestored), Err(cause)) => Err(Error::PlantedAfter {
+                unrestored: Box::new(unrestored),
+                cause: Box::new(cause),
+            }),'''
+replace = '''            (Err(unrestored), Err(cause)) => Err(Error::PlantedAfter {
+                unrestored: Box::new(cause),
+                cause: Box::new(unrestored),
+            }),'''
+
+[[plant]]
+name = "tooling: files that could not be put back are said twice where they ended the trial"
+meant = "a_run_left_running_still_puts_its_plant_back_and_one_it_cannot_ends_the_run_naming_it_and_its_copy"
+runs = ["xtask-lib-plants"]
+
+[[plant.edit]]
+file = "tools/xtask/src/plants/driver.rs"
+find = '''            (Err(unrestored), Err(cause)) if cause.unrestored() => Err(unrestored),
+'''
+replace = ''''''
+
+[[plant]]
+name = "tooling (cf-process): a process held is signalled without being read again"
+meant = "a_process_that_cannot_be_held_to_be_signalled_is_sent_nothing_and_why_is_said"
+runs = ["cf-process-lib"]
+platforms = ["macos", "linux"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/table.rs"
+find = '''    if same(identity, session, read) && pinned.send(signal) {'''
+replace = '''    if pinned.send(signal) {'''
