@@ -14,6 +14,7 @@ fn a_message_is_answered_with_the_word_it_asks_for_and_otherwise_acknowledged_by
     assert_eq!(
         plan_of("Reply with exactly: WORKER_OK", quick),
         Plan {
+            first_word: Duration::ZERO,
             work: Duration::ZERO,
             background: None,
             file: None,
@@ -42,6 +43,7 @@ fn a_sleep_line_works_that_long_before_it_does_what_the_words_after_it_say() {
     assert_eq!(
         plan,
         Plan {
+            first_word: Duration::ZERO,
             work: Duration::from_secs(120),
             background: None,
             file: None,
@@ -74,6 +76,7 @@ fn a_file_line_has_the_turns_tool_make_the_file_and_a_turn_that_goes_on_takes_no
     assert_eq!(
         plan,
         Plan {
+            first_word: Duration::ZERO,
             work: Duration::from_secs(600),
             background: None,
             file: Some("made.txt".to_owned()),
@@ -82,6 +85,18 @@ fn a_file_line_has_the_turns_tool_make_the_file_and_a_turn_that_goes_on_takes_no
         }
     );
     assert_eq!(plan.going_on(quick).work, Duration::ZERO);
+    // Nor a silence of its own: the turn that goes on is the pace's from its first word.
+    let slow = Pace::of(Some("3000"), Some("14000"));
+    let silent = plan_of(
+        "THINK 150 SLEEP 600 FILE made.txt Reply with exactly: DONE",
+        slow,
+    );
+    let going_on = silent.going_on(slow);
+    assert_eq!(
+        (going_on.first_word, going_on.work),
+        (Duration::from_secs(3), Duration::from_secs(14))
+    );
+    assert_eq!(going_on.file.as_deref(), Some("made.txt"));
     // A line that is no file to make is none.
     assert_eq!(plan_of("say FILE x.txt y", quick).file, None);
 }
@@ -103,6 +118,37 @@ fn a_message_that_asks_for_no_time_works_as_long_as_the_pace_says_and_one_that_d
 }
 
 #[test]
+fn a_think_line_is_a_silence_that_long_before_the_first_word_whatever_the_pace_and_then_what_the_words_say(
+) {
+    let slow = Pace::of(Some("3000"), Some("14000"));
+    assert_eq!(
+        plan_of("THINK 150 SLEEP 2 Reply with exactly: BUSY", slow),
+        Plan {
+            first_word: Duration::from_secs(150),
+            work: Duration::from_secs(2),
+            background: None,
+            file: None,
+            crash: None,
+            answer: "BUSY".to_owned()
+        }
+    );
+    assert_eq!(
+        plan_of("THINK 150 hello", slow).work,
+        Duration::from_secs(14),
+        "the work is the pace's"
+    );
+    // A line that is no silence is none.
+    assert_eq!(
+        plan_of("say THINK 5 x", slow).first_word,
+        Duration::from_secs(3)
+    );
+    assert_eq!(
+        plan_of("THINK soon x", slow).first_word,
+        Duration::from_secs(3)
+    );
+}
+
+#[test]
 fn a_background_line_leaves_a_command_running_that_long_and_does_what_the_words_after_it_say() {
     let quick = Pace::default();
     let plan = plan_of(
@@ -112,6 +158,7 @@ fn a_background_line_leaves_a_command_running_that_long_and_does_what_the_words_
     assert_eq!(
         plan,
         Plan {
+            first_word: Duration::ZERO,
             work: Duration::ZERO,
             background: Some(600),
             file: None,

@@ -14,6 +14,7 @@ fn item(id: &str, role: Role) -> Item {
         complete: false,
         at: None,
         commentary: false,
+        compaction: false,
     }
 }
 

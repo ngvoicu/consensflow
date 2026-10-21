@@ -47,7 +47,7 @@ pub const SWEEP: &str = ".windows-sweep.ps1";
 /// the list of what went over ([`SYNCED`]) does not name is removed after the unpack,
 /// wherever it came from: a run of another tree left 87 files there no sync listed,
 /// which a test of the `cli` suite named (zeewin, 2026-10-16).
-pub const KEPT: [&str; 13] = [
+pub const KEPT: [&str; 14] = [
     // The run's own: the list of what went over and the sweep (the tarball holds them
     // beside the files, and the list names the files only), the lock taken before the
     // unpack, the command's batch file.
@@ -76,6 +76,10 @@ pub const KEPT: [&str; 13] = [
     // copies it sets aside, as Windows refuses to delete a `cf.exe` a hook still runs.
     "bin/cf.exe",
     "bin/cf.exe.old-*",
+    // What a run there writes for the one who reads it afterwards: the evals' reports and
+    // ledgers (a long run's are `evals/reports/long/...`). They are no file of the tree, so
+    // the next run's sweep took a long run's from the copy (zeewin, 2026-10-20).
+    "evals/reports",
 ];
 
 /// What `--build` runs first: the packages, the page, a pane's cf.exe and the pane host.

@@ -3,6 +3,7 @@ use std::path::Path;
 
 use super::*;
 
+mod managed_pi;
 mod npm_global;
 mod tool_folders;
 

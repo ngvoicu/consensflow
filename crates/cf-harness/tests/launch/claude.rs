@@ -29,6 +29,7 @@ use serde_json::{json, Map, Value};
 use tempfile::TempDir;
 
 mod agents;
+mod relaunched;
 mod resumed;
 mod specs;
 mod stops;
@@ -132,6 +133,9 @@ struct Request {
     handle: &'static str,
     instructions: &'static str,
     resume: Option<String>,
+    /// The program of the window before was proven gone: the pane host named
+    /// none it could not end.
+    previous_gone: bool,
     message: Option<String>,
     agent: Option<Agent<'static>>,
     /// The Specmint variant a chief is given, where its project has specs on.
@@ -145,6 +149,7 @@ impl Default for Request {
             handle: "zeus",
             instructions: "# ConsensFlow worker\n\nRole text for the test.",
             resume: None,
+            previous_gone: true,
             message: Some(TASK.to_owned()),
             agent: Some(Agent {
                 model: Some("claude-sonnet-5"),
@@ -191,6 +196,7 @@ fn prepare(adapter: &ClaudeAdapter, request: &Request) -> Result<Prepared, Strin
         role: request.role,
         directory: "/work/app",
         resume: request.resume.as_deref(),
+        previous_gone: request.previous_gone,
         message: request.message.as_deref(),
         agent: request.agent,
         instructions: request.instructions,
@@ -199,6 +205,7 @@ fn prepare(adapter: &ClaudeAdapter, request: &Request) -> Result<Prepared, Strin
             .zip(skill.as_ref())
             .map(|(variant, skill)| Specs { variant, skill }),
         first_message_ms: FIRST_MESSAGE_MS,
+        starts_given_up: 0,
     };
     finished(adapter.prepare(&launch))
 }

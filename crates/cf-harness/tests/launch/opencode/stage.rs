@@ -304,6 +304,7 @@ impl Stage {
                 role: wanted.role,
                 directory: &directory,
                 resume: wanted.resume.as_deref(),
+                previous_gone: false,
                 message: wanted.message.as_deref(),
                 agent: Some(agent),
                 instructions: &wanted.instructions,
@@ -312,6 +313,7 @@ impl Stage {
                     .zip(skill.as_ref())
                     .map(|(variant, skill)| Specs { variant, skill }),
                 first_message_ms: FIRST_MESSAGE_MS,
+                starts_given_up: 0,
             };
             adapter.prepare(&launch).await
         }
@@ -446,6 +448,7 @@ pub(super) fn working_record() -> Record {
             complete: true,
             at: None,
             commentary: false,
+            compaction: false,
         }],
         in_flight: true,
         asking: false,

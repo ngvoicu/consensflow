@@ -18,11 +18,10 @@
 use std::rc::Rc;
 
 use cf_harness::contract::{Pane, PaneHost, Readiness};
-use cf_ledger::{MessageView, NewNote, ProjectView};
+use cf_ledger::{MessageView, NewNote, ParticipantView, ProjectView};
 use cf_proto::panes::{SnapshotRequest, TAIL_LINES};
 
 use crate::deliveries::Delivering;
-use crate::delivery_text::marker_of;
 use crate::dispatcher::Dispatcher;
 use crate::record::Record;
 use crate::role_change::Prelude;
@@ -30,11 +29,21 @@ use crate::runtime::{begin, returning};
 use crate::seams::EngineError;
 use crate::shown::Shown;
 
+/// A launch whose window did not come up in the time it had, about to be given
+/// up: its pane, the message the launch fails with where it has one, why its
+/// harness says it did not come up, and what the window showed.
+pub(crate) struct GivenUp {
+    pub(crate) pane: Pane,
+    pub(crate) failing: Option<Delivering>,
+    pub(crate) error: String,
+    pub(crate) shown: Shown,
+}
+
 impl Dispatcher {
     /// What the window in `pane` shows now, and not how it ended. A host that
     /// cannot answer (the window is gone already, the host does not know the
     /// request) says nothing.
-    async fn look_at(&self, pane: &Pane) -> Shown {
+    pub(crate) async fn look_at(&self, pane: &Pane) -> Shown {
         let request = SnapshotRequest {
             id: pane.id.clone(),
             generation: pane.generation,
@@ -149,12 +158,12 @@ impl Dispatcher {
         let said = self.unstarted_because(record, why, &shown);
         let failing = Delivering {
             message: message.id,
-            marker: marker_of(message.id),
             since: self.now(),
             rested_since: None,
             launch: true,
             chief: participant.role == "chief",
             queued: false,
+            free_since: None,
             entered_again: false,
         };
         if participant.role == "chief" {
@@ -171,6 +180,83 @@ impl Dispatcher {
         let closing = begin(&*self.seams.spawn, async move { this.retire(&held).await }).await;
         self.launch_failed(record, &project, &participant, Some(failing), &said)?;
         closing.await?;
+        Ok(())
+    }
+
+    /// A launch whose window did not come up in the time it had, its harness asked
+    /// once more after its screen was: the window is closed and the launch settled as
+    /// one that did not come up ([`Dispatcher::launch_failed`]), its participant's next
+    /// window given longer (`starts_given_up`). One whose exit came meanwhile went as
+    /// any window goes, and its exit settled it: it is not given up again, whether or
+    /// not it had a first message (Astra on round 1 of the chief's restart: a chief's
+    /// was, and the human told it is tried again after its exit had closed the project).
+    /// A chief's first message that the window's record shows it took went in, as at any
+    /// window's end ([`Dispatcher::settle_gone`]), and is confirmed, never given again
+    /// (Sol and Astra on round 1: one Codex recorded as its window was given up was
+    /// given back, and sent again on the same thread). The window may have begun a turn
+    /// as it was closed, and no look can tell before the close: the chief opens again at
+    /// the backoff whatever waits for it, told the turn was cut where its record holds one
+    /// (Sol and Astra on round 2: closed with nothing left queued, it stayed closed).
+    pub(crate) async fn give_up_unstarted(
+        self: &Rc<Self>,
+        record: &Rc<Record>,
+        project: &ProjectView,
+        participant: &ParticipantView,
+        given_up: GivenUp,
+    ) -> Result<(), EngineError> {
+        let GivenUp {
+            pane,
+            failing,
+            error,
+            shown,
+        } = given_up;
+        if record.window.borrow().pane.as_ref() != Some(&pane) {
+            return Ok(());
+        }
+        let first = failing.is_some();
+        // A member's message that the role went ahead of is no record's: it was given back.
+        let settles = record.delivery.borrow_mut().delivering.take().is_some();
+        record.window.borrow_mut().starts_given_up += 1;
+        // The chief's window goes without taking its project with it: the chief is tried again.
+        if participant.role == "chief" {
+            self.close_own(record, &pane).await?;
+        } else {
+            let this = Rc::clone(self);
+            drop(
+                begin(&*self.seams.spawn, async move {
+                    let _ = this.seams.host.kill(&pane).await;
+                })
+                .await,
+            );
+        }
+        let because = if first {
+            format!("the window could not take its first message: {error}")
+        } else {
+            format!("the window never came up: {error}")
+        };
+        let said = if settles || !first {
+            self.unstarted_because(record, &because, &shown)
+        } else {
+            shown.after(&because)
+        };
+        let failing = match failing {
+            Some(delivering) if delivering.chief => {
+                let mut back = None;
+                self.settle_gone(delivering, |delivering| {
+                    back = Some(delivering);
+                    Ok(())
+                })
+                .await?;
+                back
+            }
+            failing => failing,
+        };
+        self.launch_failed(record, project, participant, failing, &said)?;
+        // The chief opens again at its time whatever waits for it, told its turn was cut
+        // where the window had begun one (`Dispatcher::step`).
+        if let Some(relaunch) = record.window.borrow_mut().relaunch.as_mut() {
+            relaunch.reopens = true;
+        }
         Ok(())
     }
 

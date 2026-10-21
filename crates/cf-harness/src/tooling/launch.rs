@@ -92,6 +92,7 @@ fn prepared(question: &Value, services: &Services) -> Result<Value, String> {
         role: text(question, "role")?,
         directory: text(question, "directory")?,
         resume: optional(question, "resume"),
+        previous_gone: false,
         message: optional(question, "message"),
         agent: Some(Agent {
             model: optional(agent, "model"),
@@ -102,6 +103,7 @@ fn prepared(question: &Value, services: &Services) -> Result<Value, String> {
         instructions: text(question, "instructions")?,
         specs: None,
         first_message_ms: FIRST_MESSAGE_MS,
+        starts_given_up: 0,
     };
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()

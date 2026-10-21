@@ -3,6 +3,7 @@
 
 use std::path::Path;
 
+use super::super::options::Options;
 use super::*;
 use crate::plan::chief_environment;
 
@@ -115,7 +116,7 @@ fn the_rig_a_run_is_on_has_the_users_own_home_the_wrappers_first_and_no_claude_c
     let options = options("--arm nocard");
     let chief = chief_environment("claude", None).unwrap();
     let config = machine.rig(
-        &options,
+        &options.crew(),
         &chief,
         Path::new("/home/u/.consensflow-candidate/evals/bin/claude"),
     );
@@ -132,7 +133,7 @@ fn the_rig_a_run_is_on_has_the_users_own_home_the_wrappers_first_and_no_claude_c
     }
     // The arm with a card has no other card than the product's own.
     let plain = machine.rig(
-        &super::super::options::Options::of(&[]).unwrap(),
+        &super::super::options::Options::of(&[]).unwrap().crew(),
         &chief,
         Path::new("claude"),
     );

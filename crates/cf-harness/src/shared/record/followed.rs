@@ -31,6 +31,13 @@ pub(crate) trait Parser {
     /// `Stop::Reread` to have the transcript read again from its start.
     fn visit(&mut self, record: Value, index: usize) -> Result<(), Stop>;
 
+    /// [`Parser::visit`], told the byte the record's line begins at too, which
+    /// a parser that reads no place in the file passes over.
+    fn visit_at(&mut self, record: Value, index: usize, offset: u64) -> Result<(), Stop> {
+        let _ = offset;
+        self.visit(record, index)
+    }
+
     /// The records of a look are all in: what waited for the rest is decided.
     /// Fails with the look's reason; only a record asks for another read.
     fn flush(&mut self) -> Result<(), String> {
@@ -109,7 +116,7 @@ impl<P: Parser> Followed<P> {
                 self.seen.as_ref(),
                 now_ms,
                 P::parse,
-                &mut |record, index| state.visit(record, index),
+                &mut |record, index, offset| state.visit_at(record, index, offset),
                 None,
             )
             .and_then(|looked| match looked {
@@ -167,6 +174,20 @@ impl<P> TranscriptReader<P> {
             transcript,
             missing,
             answer: None,
+        }
+    }
+
+    /// Tells the state read so far, if there is one, what `tell` tells it, and
+    /// has the next look answer anew: from that state where `tell` says it
+    /// took it, else from the transcript read again from its start into a
+    /// fresh state.
+    pub(crate) fn retell(&mut self, tell: impl FnOnce(&mut P) -> bool) {
+        self.answer = None;
+        if let Some(state) = self.transcript.state.as_mut() {
+            if !tell(state) {
+                self.transcript.seen = None;
+                self.transcript.state = None;
+            }
         }
     }
 }

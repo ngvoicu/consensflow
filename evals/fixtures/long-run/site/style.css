@@ -1,0 +1,23 @@
+body {
+  font-family: system-ui, sans-serif;
+  margin: 2rem auto;
+  max-width: 48rem;
+  color: #1f2328;
+}
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+th,
+td {
+  border-bottom: 1px solid #d0d7de;
+  padding: 0.35rem 0.5rem;
+  text-align: left;
+}
+
+td:last-child,
+th:last-child {
+  text-align: right;
+}

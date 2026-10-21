@@ -16,6 +16,8 @@
 //! stands in for the harnesses of (what the rig tells of its windows, the
 //! records the stand-ins leave in a Claude folder that is the person's, a
 //! window opened as the app opens one, the harness code asked as a process).
+//! So is `devin_bypass_first`: a resumed Devin worker's first message behind
+//! `/bypass`, received once however Devin stores the command.
 //! So is `live_member`: a Devin member's window as `live_devin_resume` opens
 //! one, whole as the adapter prepares it, cut, and opened again on its
 //! conversation with the note in its launch.
@@ -46,7 +48,9 @@
 //! human renames and writes a line under, which are in the event file and which no
 //! window is told of. So is `stranger`: the rig keeps a process that is none of any
 //! window's beside them, which every case that ends a window holds the pane host to
-//! leaving as it was, and whose end of its own is no end the pane host gave it.)
+//! leaving as it was, and whose end of its own is no end the pane host gave it. So is
+//! `last_exits`: the exits the pane host tells as a rig closes, which the long run of
+//! the evals reads after the close.)
 //!
 //! The cases take turns ([`cf_e2e::serial`]): each starts a daemon and a pane
 //! host of its own, with windows in real terminals, and the waits are timed.
@@ -81,8 +85,12 @@ mod daemon_seam;
 mod decided_result;
 #[path = "rig/described.rs"]
 mod described;
+#[path = "rig/devin_bypass_first.rs"]
+mod devin_bypass_first;
 #[path = "rig/help.rs"]
 mod help;
+#[path = "rig/last_exits.rs"]
+mod last_exits;
 #[path = "rig/live_base.rs"]
 mod live_base;
 #[path = "rig/live_member.rs"]

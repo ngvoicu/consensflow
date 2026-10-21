@@ -387,6 +387,14 @@ impl Records for LocalRecords {
     ) -> Work<'a, Result<bool, String>> {
         Box::pin(async move { records::has_transcript(harness, session, &self.env) })
     }
+
+    fn transcript_length<'a>(
+        &'a self,
+        harness: Harness,
+        session: &'a str,
+    ) -> Work<'a, Result<Option<u64>, String>> {
+        Box::pin(async move { records::transcript_length(harness, session, &self.env) })
+    }
 }
 
 /// A host's answer to a request, or why it never came.

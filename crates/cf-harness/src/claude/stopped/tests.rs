@@ -15,6 +15,7 @@ fn item(id: &str, role: Role) -> Item {
         complete: role == Role::Assistant,
         at: None,
         commentary: false,
+        compaction: false,
     }
 }
 

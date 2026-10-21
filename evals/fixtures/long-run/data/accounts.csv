@@ -1,0 +1,11 @@
+code,name,kind
+1000,Bank,asset
+1100,Cash,asset
+4000,Consulting income,income
+4100,Workshop income,income
+6000,Rent,expense
+6100,Office supplies,expense
+6200,Software,expense
+6300,Travel,expense
+6400,Meals,expense
+6500,Training,expense

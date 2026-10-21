@@ -154,6 +154,12 @@ pub struct Launch<'a> {
     pub directory: &'a str,
     /// The conversation to open again, when the participant has one.
     pub resume: Option<&'a str>,
+    /// The program of the participant's last window was proven gone when that
+    /// window ended: the pane host named no program it could not end. False
+    /// where it named one, and where the engine never heard how it ended (a
+    /// window of a daemon before this one): what the record holds then may still
+    /// be written to by a process ConsensFlow does not hold.
+    pub previous_gone: bool,
     /// The window's first message, as the engine wrote it.
     pub message: Option<&'a str>,
     /// The agent it runs on: none for a chief from before every chief had one.
@@ -168,6 +174,10 @@ pub struct Launch<'a> {
     /// window waits for before that message can show, such as the conversation
     /// its harness names, ends by it.
     pub first_message_ms: i64,
+    /// How many of the participant's windows in a row were given up before this
+    /// one for not coming up in the time they had: a harness whose window takes
+    /// as long as it takes (a Codex resuming a long thread) gives this one longer.
+    pub starts_given_up: u32,
 }
 
 /// The model a window runs on and the levels its harness reads, as the
@@ -229,6 +239,14 @@ pub trait Window {
     /// harness to say it gives up by [`Launch::first_message_ms`], if not
     /// before.
     fn started(&self) -> Work<'_, Result<Option<String>, String>>;
+    /// Once [`Window::started`] gave up, and right before the engine closes the
+    /// window: whether its harness says it came up since, with the conversation it
+    /// started on where it says that itself (`Some(None)` where ConsensFlow named
+    /// it). None where it has not, and where the harness has no such look (the
+    /// default): a window that came up in that last moment is kept.
+    fn came_up(&self) -> Work<'_, Option<Option<String>>> {
+        Box::pin(async { None })
+    }
     /// Whether a delivery may go in now, or why that could not be told.
     fn ready<'a>(
         &'a self,
@@ -256,13 +274,22 @@ pub trait Window {
     ) -> Work<'a, Result<Admission, String>>;
     /// What the window's harness says of it now.
     fn observe(&self) -> Work<'_, Result<Observed, String>>;
-    /// Whether the harness says, after the hand-over, that its own queue holds
-    /// the message last handed to it: it took the paste, and its record shows
-    /// it when it gets to it, however long that is. A harness that says so at
-    /// the hand-over ([`Admission::Admitted`]'s `queued`) needs no answer here;
-    /// one that can say it only later, by what it writes (Devin's wire log),
-    /// does. The engine asks at each look until the answer is yes.
+    /// Whether the harness says, after the hand-over, that it put the message last
+    /// handed to it to its agent: its record shows it when it gets to it, however long
+    /// that is. A harness that says so at the hand-over ([`Admission::Admitted`]'s
+    /// `queued`) needs no answer here; one that can say it only later, by what it
+    /// writes (Devin's wire log), does. The engine asks at each look until the answer
+    /// is yes.
     fn took(&self) -> bool {
+        false
+    }
+    /// Whether the message last handed to the window is in a turn the harness is in
+    /// still: one it went into, which a harness that holds what it is given in a turn
+    /// runs it after (Devin), or the one the harness began with it. Its record shows
+    /// it when the turn ends, however long the turn says nothing that would read as
+    /// work: until then, its record has had no time to show it. Once the turn ends,
+    /// its record has the whole wait any record has. Asked at the hand-over too.
+    fn held(&self) -> bool {
         false
     }
     /// The engine pressed the interrupt keys into the window, and the host
@@ -416,6 +443,18 @@ pub trait Records {
         harness: Harness,
         session: &'a str,
     ) -> Work<'a, Result<bool, String>>;
+
+    /// How many bytes `harness`'s transcript of `session` holds now, where a
+    /// reader of it reads a relaunch (`Options::relaunched_at`, Claude's
+    /// alone): none where it keeps no transcript of it, or a seam that keeps no
+    /// files says none.
+    fn transcript_length<'a>(
+        &'a self,
+        _harness: Harness,
+        _session: &'a str,
+    ) -> Work<'a, Result<Option<u64>, String>> {
+        Box::pin(async { Ok(None) })
+    }
 
     /// Whether `harness`'s record of `session`, read with no window open, ends in
     /// a turn with no end (the turn the app's quit cut, or a Close): yes, or no

@@ -115,6 +115,12 @@ impl Window for FakeWindow {
         })
     }
 
+    /// The test's word, where it gave one: no call of Node's fake.
+    fn came_up(&self) -> Work<'_, Option<Option<String>>> {
+        let came_up = self.fake.came_up.borrow().clone();
+        Box::pin(async move { came_up.and_then(|came_up| came_up()) })
+    }
+
     fn ready<'a>(
         &'a self,
         _host: &'a dyn PaneHost,
@@ -242,6 +248,11 @@ impl Window for FakeWindow {
     /// traces have no such call.
     fn took(&self) -> bool {
         self.fake.of_launch(&self.launch, |agent| agent.took)
+    }
+
+    /// Not written down, as `took` is not.
+    fn held(&self) -> bool {
+        self.fake.of_launch(&self.launch, |agent| agent.held)
     }
 
     /// Counted on the agent, and not written down: the JavaScript fake was

@@ -15,6 +15,7 @@
     "check": "npm run lint && npm test",
     "eval": "cargo xtask eval",
     "eval:summary": "cargo xtask eval summary",
+    "eval:long": "cargo xtask eval long",
     "watch": "cargo xtask watch",
     "eval:windows": "cargo xtask windows-matrix",
     "test:integration": "cargo xtask test integration",
@@ -59,6 +60,7 @@
     "live:notes": "cargo xtask live notes",
     "live:wake-ups": "cargo xtask live wake-ups",
     "live:specs": "cargo xtask live specs",
+    "live:commands-at-rest": "cargo xtask live commands-at-rest",
     "windows": "cargo xtask windows",
     "check:all": "cargo xtask check"
   },

@@ -18,7 +18,7 @@ use cf_base::time::{Clock, SystemClock};
 use rusqlite::{Connection, ErrorCode};
 use serde_json::Value;
 
-use crate::messages::release_stranded;
+use crate::messages::{reconcile_released, release_stranded};
 use crate::model::LedgerError;
 use crate::names;
 use crate::schema::{migrate, MIGRATIONS};
@@ -68,7 +68,10 @@ pub struct Ledger {
 /// as does a file that is no ledger (`ledger-unreadable`) and one a newer
 /// build wrote (`ledger-newer`). A file the Node daemon last held is taken
 /// as it left it: rows it left under a carrier it never knew of are queued
-/// messages of their own again (`messages::release_stranded`).
+/// messages of their own again (`messages::release_stranded`). The tasks of what
+/// was let go of, there or by migration 0019 (what rode in every carrier an
+/// earlier build began to paste), are reconciled once, by the first start after
+/// it that gets that far (`messages::reconcile_released`).
 pub fn open_ledger(file: &Path, options: Options) -> Result<Ledger, LedgerError> {
     let db = Connection::open(file)?;
     // SQLite's own default waits five seconds for a lock: a second instance
@@ -90,6 +93,7 @@ pub fn open_ledger(file: &Path, options: Options) -> Result<Ledger, LedgerError>
     }
     let mut store = Store::new(db, options.clock, options.names, options.trace);
     release_stranded(&mut store)?;
+    reconcile_released(&mut store)?;
     Ok(Ledger {
         store,
         #[cfg(feature = "test-support")]
@@ -138,6 +142,25 @@ impl Ledger {
             Some(watcher) => watcher(call, id),
             None => Ok(()),
         }
+    }
+
+    /// Holds each value SQLite makes or loads whole to `bytes` at most
+    /// (`SQLITE_LIMIT_LENGTH`): a read that loads a longer value whole fails,
+    /// "string or blob too big", where one that reads only its size, the
+    /// values before it in its row or its first bytes goes on. What a test
+    /// proves a read never loads a long value by.
+    pub fn limit_value_length(&self, bytes: usize) -> Result<(), LedgerError> {
+        self.store.db.set_limit(
+            rusqlite::limits::Limit::SQLITE_LIMIT_LENGTH,
+            i32::try_from(bytes).unwrap_or(i32::MAX),
+        )?;
+        Ok(())
+    }
+
+    /// The SQLite connection itself: what a test counts the pages and steps a
+    /// read takes by, and writes rows by in bulk.
+    pub fn sqlite(&self) -> &rusqlite::Connection {
+        &self.store.db
     }
 }
 

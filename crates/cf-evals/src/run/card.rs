@@ -267,7 +267,7 @@ fn conduct(
 }
 
 /// The tasks of a board that a lane has or that are open, as the owner counts them.
-fn tasks_of(board: &Value) -> Vec<&Value> {
+pub(crate) fn tasks_of(board: &Value) -> Vec<&Value> {
     board["lanes"]
         .as_array()
         .into_iter()
@@ -318,7 +318,7 @@ fn keep_at_result(
 
 /// What of the board changes when the run is not quiet: the chief's state, the
 /// tasks' and every window's.
-fn signature_of(board: &Value, lane: &Value, tasks: &[&Value]) -> String {
+pub(crate) fn signature_of(board: &Value, lane: &Value, tasks: &[&Value]) -> String {
     json!([
         lane["activity"]["state"],
         tasks
@@ -336,7 +336,7 @@ fn signature_of(board: &Value, lane: &Value, tasks: &[&Value]) -> String {
 }
 
 /// The tasks as the run says them as it goes: `T-1:working T-2:queued`, or `none`.
-fn listed(tasks: &[&Value]) -> String {
+pub(crate) fn listed(tasks: &[&Value]) -> String {
     let said: Vec<String> = tasks
         .iter()
         .map(|task| format!("T-{}:{}", text(&task["number"]), text(&task["state"])))

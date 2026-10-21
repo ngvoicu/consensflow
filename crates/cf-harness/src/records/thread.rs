@@ -38,7 +38,7 @@ use cf_proto::agents::Harness;
 use jiff::tz::TimeZone;
 use tokio::sync::{mpsc, oneshot};
 
-use super::{has_transcript, open, Cache, Open, Options, Reading, IDLE_MS};
+use super::{has_transcript, open, transcript_length, Cache, Open, Options, Reading, IDLE_MS};
 use crate::contract::{Records, Work};
 use crate::seams::Time;
 use reopening::Reopening;
@@ -85,6 +85,11 @@ enum Ask {
         harness: Harness,
         session: String,
         answer: oneshot::Sender<Result<bool, String>>,
+    },
+    TranscriptLength {
+        harness: Harness,
+        session: String,
+        answer: oneshot::Sender<Result<Option<u64>, String>>,
     },
 }
 
@@ -153,6 +158,21 @@ impl Records for Thread {
     ) -> Work<'a, Result<bool, String>> {
         Box::pin(async move {
             let asked = self.ask(|answer| Ask::HasTranscript {
+                harness,
+                session: session.to_owned(),
+                answer,
+            });
+            asked.await.unwrap_or_else(|| Err(ENDED.to_owned()))
+        })
+    }
+
+    fn transcript_length<'a>(
+        &'a self,
+        harness: Harness,
+        session: &'a str,
+    ) -> Work<'a, Result<Option<u64>, String>> {
+        Box::pin(async move {
+            let asked = self.ask(|answer| Ask::TranscriptLength {
                 harness,
                 session: session.to_owned(),
                 answer,
@@ -240,6 +260,17 @@ fn serve(mut waiting: mpsc::Receiver<Ask>, env: &Env, mut caches: Caches) {
                         Err(format!("the transcript check panicked: {panicked}"))
                     });
                 let _ = answer.send(found);
+            }
+            Ask::TranscriptLength {
+                harness,
+                session,
+                answer,
+            } => {
+                let length = panics_to_text(|| transcript_length(harness, &session, env))
+                    .unwrap_or_else(|panicked| {
+                        Err(format!("the transcript's length panicked: {panicked}"))
+                    });
+                let _ = answer.send(length);
             }
         }
     }

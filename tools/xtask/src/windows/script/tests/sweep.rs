@@ -14,7 +14,7 @@ fn line_with<'a>(text: &'a str, what: &str) -> &'a str {
 #[test]
 fn the_copy_keeps_the_runs_own_files_and_the_builds_outputs_and_nothing_else() {
     assert_eq!(
-        KEPT,
+        KEPT[..],
         [
             ".synced-files",
             ".windows-sweep.ps1",
@@ -29,7 +29,8 @@ fn the_copy_keeps_the_runs_own_files_and_the_builds_outputs_and_nothing_else() {
             "app/src-tauri/gen/schemas",
             "bin/cf.exe",
             "bin/cf.exe.old-*",
-        ]
+            "evals/reports",
+        ][..]
     );
     // The sweep is given each of them, as PowerShell reads a string between single quotes.
     let text = sweep_script();
@@ -312,6 +313,8 @@ fn powershell_removes_from_the_copy_what_the_tree_has_not_and_says_what_it_could
         "node_modules/a/index.js",
         "bin/cf.exe.old-1700000000",
         ".windows-run.pid",
+        "evals/reports/long/2026-10-20T12-25-35-830Z-long-ledger.db",
+        "evals/reports/windows/run.json",
     ] {
         write(dir, name);
     }
@@ -387,6 +390,9 @@ fn powershell_removes_from_the_copy_what_the_tree_has_not_and_says_what_it_could
         "node_modules/a/index.js",
         "bin/cf.exe.old-1700000000",
         ".windows-run.pid",
+        // What a run wrote for its reader, a long run's report and ledger among it.
+        "evals/reports/long/2026-10-20T12-25-35-830Z-long-ledger.db",
+        "evals/reports/windows/run.json",
         SYNCED,
         SWEEP,
     ] {

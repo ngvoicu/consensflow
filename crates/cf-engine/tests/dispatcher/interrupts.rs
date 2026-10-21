@@ -6,7 +6,7 @@
 use std::time::Duration;
 
 use cf_engine::testing::Context;
-use cf_engine::{ActivityState, Unstopped};
+use cf_engine::ActivityState;
 use cf_harness::contract::{Interrupt, Pane};
 use serde_json::{json, Value};
 
@@ -79,24 +79,20 @@ fn interrupts_a_task_paused_again_after_a_resume_however_many_rounds_its_first_p
     context.give(project.id, "zeus", "Parser");
     context.pass().unwrap();
     context.pass().unwrap();
-    // A harness that ignores the key: three rounds, then no more for this pause.
+    // A harness slow to take the key: two rounds ignored, and its turn ends.
     context.adapter.busy("zeus");
     context.pause_task(project.id, 1);
-    for _ in 0..4 {
+    for _ in 0..2 {
         context.pass().unwrap();
         context.advance(3_100);
     }
     assert_eq!(
         context.host.inputs().len(),
-        3,
-        "three rounds for the first pause"
+        2,
+        "two rounds for the first pause"
     );
-    // Every round ignored: the stop is given up on, and the board says so.
-    let zeus = context.id(project.id, "zeus");
-    assert_eq!(
-        context.dispatcher.unstopped(zeus),
-        Some(Unstopped { task: 1, rounds: 3 })
-    );
+    context.adapter.answer("zeus", "Stopped");
+    context.pass().unwrap();
     context.resume_task(project.id, 1, "Carry on");
     context.pass().unwrap();
     context.adapter.busy("zeus");
@@ -105,15 +101,26 @@ fn interrupts_a_task_paused_again_after_a_resume_however_many_rounds_its_first_p
     context.pass().unwrap();
     assert_eq!(
         context.host.inputs().len(),
-        4,
+        3,
         "the second pause is a stop of its own"
     );
+    // Its rounds begin again: what the first pause's rounds were is not its, and
+    // the window is closed only once it ignored three rounds of its own.
+    for round in 4..=5 {
+        context.advance(3_100);
+        context.pass().unwrap();
+        assert_eq!(context.host.inputs().len(), round);
+        assert!(context.host.killed().is_empty(), "round {round}");
+    }
+    context.advance(3_100);
+    context.pass().unwrap();
+    assert_eq!(context.host.killed().len(), 1);
+    let zeus = context.id(project.id, "zeus");
     assert_eq!(
-        context.dispatcher.unstopped(zeus),
-        None,
-        "its rounds begin again, and what the first ignored is not its"
+        context.dispatcher.activity(zeus).state,
+        ActivityState::Closed
     );
-    // Not held to Node's recording: the first stop's ignored rounds were said, to the human and the chief.
+    // Not held to Node's recording: Node never closed a window for a stop it ignored.
 }
 
 #[test]

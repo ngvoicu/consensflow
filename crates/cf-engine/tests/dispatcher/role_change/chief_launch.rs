@@ -9,7 +9,7 @@ use cf_ledger::MessageView;
 use super::launch::{kills_of, never_ready, refusing_pastes, told_the_human};
 use super::{
     chief_launches, codex, project_of, recorded, replacements, said_to_the_chief, specs,
-    through_a_turn, REPLACES,
+    through_a_turn, REPLACES, WITH_SPECS,
 };
 
 #[test]
@@ -104,6 +104,56 @@ fn a_chiefs_window_that_exits_before_the_role_was_told_keeps_what_it_displaced_q
     assert_eq!(context.message(notes[1].id).state, "delivered");
     through_a_turn(&context);
     assert_eq!(context.message(waiting.id).state, "delivered");
+    context.close();
+}
+
+/// A review of 2026-10-16: an idle chief's window recorded the note that says its
+/// changed role, and went (a crash) before a look saw it there, with nothing else
+/// queued. The window's end confirms the note from the record: the launch came up, and
+/// its exit closes the project as a chief's does. Taken for a launch that never came
+/// up, the exit left the project open, its workers running, and no launch followed.
+#[test]
+fn a_chiefs_window_that_went_once_its_record_showed_the_role_closes_its_project_as_a_chief_that_came_up(
+) {
+    let context = codex();
+    let project = project_of(&context, "codex");
+    let chief = context.id(project.id, "chief");
+    context.close_project(project.id).unwrap();
+    specs(&context, project.id, true);
+    context.resume_project(project.id).unwrap();
+    context.pass().unwrap();
+    let notes = replacements(&context, chief);
+    assert_eq!(notes.len(), 1);
+    assert_eq!(context.message(notes[0].id).state, "delivering");
+    assert!(said_to_the_chief(&context)[0].contains(REPLACES));
+
+    // Its program crashes, and the host says how.
+    context
+        .host
+        .exits_showing(Some(101), None, Some(&["thread 'main' panicked"]));
+    context.exit("chief");
+    assert_eq!(context.message(notes[0].id).state, "delivered");
+    assert_eq!(recorded(&context, chief).as_deref(), Some(WITH_SPECS));
+    assert_eq!(
+        context.project(project.id).state,
+        "suspended",
+        "a chief that came up closes its project when its window goes"
+    );
+    assert_eq!(
+        told_the_human(&context, project.id, "The chief could not start"),
+        0,
+        "it came up"
+    );
+    assert_eq!(
+        told_the_human(&context, project.id, "panicked"),
+        0,
+        "nor that it closed before it came up"
+    );
+    for _ in 0..3 {
+        context.advance(60_000);
+        context.pass().unwrap();
+    }
+    assert_eq!(chief_launches(&context.codex).len(), 2, "no launch follows");
     context.close();
 }
 

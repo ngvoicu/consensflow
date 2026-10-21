@@ -11,19 +11,37 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use super::*;
-use crate::testing::{gone, gone_within, pids_in, pids_written_to_soon, Survivors};
+use crate::testing::{
+    gone, gone_within, pids_in, pids_written_to_soon, Survivors, GONE_WITHIN, STARTS_WITHIN,
+};
 
-/// How long the capture of a tree that is ended has to end: far less than the
-/// minute its programs run, so that one that is not ended fails the test where
-/// it waits, and is not mistaken for one that was.
+/// How long the capture of a tree that is ended has to end, counted once the
+/// tree has written its pids: far less than its programs run, so that one
+/// that is not ended fails the test where it waits, and is not mistaken for
+/// one that was.
 const ENDS_WITHIN: Duration = Duration::from_secs(25);
 
+/// How long the programs of a tree a test waits for run unless they are
+/// ended: longer than all a test waits while they could run (the start of
+/// [`STARTS_WITHIN`], the wait before the force, the ending, and each process
+/// gone), so that what an end left is still there when it is looked for, and
+/// is not mistaken for what the end ended. `Survivors` ends them as the test
+/// ends.
+const LIVES: Duration = Duration::from_secs(600);
+
+// With a minute to spare.
+const _: () = assert!(
+    LIVES.as_secs()
+        > STARTS_WITHIN.as_secs() + 1 + ENDS_WITHIN.as_secs() + 2 * GONE_WITHIN.as_secs() + 60
+);
+
 /// A parent that starts a grandchild, waits for it, and writes the pids of
-/// both to `file`. The grandchild runs for a minute.
+/// both to `file`. Both run for [`LIVES`].
 fn tree(file: &Path) -> Run {
+    let lives = LIVES.as_secs();
     #[cfg(unix)]
     return shell(&format!(
-        "sleep 60 & printf '%s %s\\n' \"$$\" \"$!\" > '{}'; wait",
+        "sleep {lives} & printf '%s %s\\n' \"$$\" \"$!\" > '{}'; wait",
         file.display()
     ));
     #[cfg(windows)]
@@ -33,8 +51,8 @@ fn tree(file: &Path) -> Run {
             "-NoProfile".to_owned(),
             "-Command".to_owned(),
             format!(
-                "$p = Start-Process -PassThru -WindowStyle Hidden -FilePath 'C:\\Windows\\System32\\PING.EXE' -ArgumentList '-n','60','127.0.0.1'; \
-                 Set-Content -Path '{}' -Value (@($PID, $p.Id) -join ' '); Start-Sleep 60",
+                "$p = Start-Process -PassThru -WindowStyle Hidden -FilePath 'C:\\Windows\\System32\\PING.EXE' -ArgumentList '-n','{lives}','127.0.0.1'; \
+                 Set-Content -Path '{}' -Value (@($PID, $p.Id) -join ' '); Start-Sleep {lives}",
                 file.display().to_string().replace('\'', "''")
             ),
         ]
@@ -54,18 +72,20 @@ fn tree_env() -> Env {
 
 /// What `capture` of `run` came to, the pids its program wrote to `file`, and
 /// whether the capture was still going `wait` after they were written, when
-/// its ender forced it, as a process on its way out does.
+/// its ender forced it, as a process on its way out does. The pids are handed
+/// over as the caller's to end once it has looked for them: ended here, what
+/// the force left would be gone by then, as if the force had ended it.
 fn forced_after(
     run: &Run,
     file: &Path,
     wait: Duration,
-) -> (Result<Captured, CaptureFailed>, Vec<u32>, bool) {
+) -> (Result<Captured, CaptureFailed>, Survivors, bool) {
     let kept: Rc<RefCell<Option<Ender>>> = Rc::default();
     let done = Rc::new(Cell::new(false));
     let env = tree_env();
     let (handed, finished) = (Rc::clone(&kept), Rc::clone(&done));
     let mut left = Survivors::default();
-    let (captured, (pids, going)) = runtime()
+    let (captured, going) = runtime()
         .block_on(async {
             let capturing = async {
                 let captured = capture(run, None, &env, ROOMY, move |ender| {
@@ -75,30 +95,37 @@ fn forced_after(
                 finished.set(true);
                 captured
             };
+            let mut capturing = std::pin::pin!(capturing);
+            // The tree starts in a time of its own, not the ending's: how soon
+            // it starts is not what is tested.
+            let pids = tokio::select! {
+                pids = pids_written_to_soon(file, 2) => pids,
+                captured = &mut capturing => {
+                    panic!("the capture ended before its program wrote its pids: {captured:?}")
+                }
+            };
+            left.0 = pids;
             let ending = async {
-                let pids = pids_written_to_soon(file, 2).await;
-                left.0.clone_from(&pids);
                 tokio::time::sleep(wait).await;
                 let going = !done.get();
                 kept.borrow().as_ref().expect("handed over").force();
-                (pids, going)
+                going
             };
             tokio::time::timeout(ENDS_WITHIN, async { tokio::join!(capturing, ending) }).await
         })
         .expect("the capture ended with the force");
-    (captured, pids, going)
+    (captured, left, going)
 }
 
 #[test]
 fn an_ender_ends_the_whole_tree_of_a_capture_still_running() {
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("pids");
-    let (captured, pids, going) = forced_after(&tree(&file), &file, Duration::from_millis(300));
-    let _left = Survivors(pids.clone());
+    let (captured, left, going) = forced_after(&tree(&file), &file, Duration::from_millis(300));
     assert!(going, "it was running when it was forced");
     assert!(captured.is_err(), "ended, not answered");
-    assert!(gone(pids[0]), "the parent");
-    assert!(gone(pids[1]), "the grandchild went with it");
+    assert!(gone(left.0[0]), "the parent");
+    assert!(gone(left.0[1]), "the grandchild went with it");
 }
 
 #[cfg(unix)]
@@ -110,15 +137,15 @@ fn a_parent_that_ended_before_its_grandchild_leaves_the_grandchild_the_stop_s_to
     let dir = tempfile::tempdir().unwrap();
     let file = dir.path().join("pids");
     let run = shell(&format!(
-        "sleep 60 & printf '%s %s\\n' \"$$\" \"$!\" > '{}'",
+        "sleep {} & printf '%s %s\\n' \"$$\" \"$!\" > '{}'",
+        LIVES.as_secs(),
         file.display()
     ));
-    let (captured, pids, going) = forced_after(&run, &file, Duration::from_millis(500));
-    let _left = Survivors(pids.clone());
+    let (captured, left, going) = forced_after(&run, &file, Duration::from_millis(500));
     assert!(going, "the capture waits for what holds its streams");
     // What its parent said is its answer: the parent had ended with 0.
     assert!(captured.is_ok(), "{captured:?}");
-    assert!(gone(pids[1]), "the grandchild was ended with the stop");
+    assert!(gone(left.0[1]), "the grandchild was ended with the stop");
 }
 
 #[cfg(unix)]

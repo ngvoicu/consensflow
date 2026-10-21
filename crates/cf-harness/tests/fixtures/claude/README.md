@@ -43,4 +43,23 @@ arguments:
   message of Claude's own with no model behind it (`"model": "<synthetic>"`,
   `No response requested.`), written just before the second message.
 
+Made 2026-10-18 from a field record, not a live run, and not by the scrub tool:
+
+- `restart-left-a-queued-notification.jsonl` — T-442 (poker-lab, ConsensFlow
+  3.0.4, Claude Code 2.1.302, the worker `@artemis-silver-thistle`). Made from
+  a content-free copy of the record (each record's type, subtype, origin,
+  timestamps, uuids, parent links, queue operations and the ConsensFlow headers
+  it held) by a script that gave every record made-up words in the place and
+  form Claude writes them; the keys and values of the restart's three records
+  (the close of the cut turn, the `SessionStart:resume` hook's run, the two
+  prompts after it) were read off the real record. It keeps three runs of the
+  record's 1,444 lines, in order: T-442's brief and its first calls (lines
+  0–35), the end of a turn and m-2078 (504–544), and 18:29 to the end
+  (1100–1443), so a parent before a cut is not in the file. The window was closed
+  at 18:30 with the notification of a job ConsensFlow had ended still queued
+  (`bqehk4ozo`, failed) and a notification's turn cut; the chief's reopen
+  resumed it at 18:30:59, and Claude closed the cut turn (`No response
+  requested.`), re-notified the job (stopped) and took m-2081, whose turn ended
+  at 19:25:10.
+
 A new Claude version that writes these otherwise is a new fixture, not an edit.

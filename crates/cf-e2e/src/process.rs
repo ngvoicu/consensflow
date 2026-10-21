@@ -20,8 +20,10 @@
 //! for that, and for the few variables a stand-in program or a suite is told
 //! its settings by ([`own_var`]).
 //!
-//! A program that leaves a child of its own holding its output after it is
-//! ended holds the run too; the verbs of `cf` start none.
+//! A program that leaves a child of its own holding its output after it has ended
+//! (a wrapper's helper started in the background) does not hold the run: what it
+//! wrote is read for a few seconds more ([`HELD`]), and the run says it was not read
+//! to its end ([`Ran::held`]).
 // The one place a program starts and the test's environment is read; see above.
 #![allow(clippy::disallowed_methods)]
 
@@ -35,6 +37,7 @@ use std::fmt;
 use std::io::{self, Read, Write};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
@@ -51,6 +54,11 @@ pub const LIMIT: Duration = Duration::from_secs(30);
 
 /// How often a program that has not ended is looked at again.
 const POLL: Duration = Duration::from_millis(2);
+
+/// How long a program's output is read for once it has ended: what it wrote is in
+/// its pipes by then, and a process it left that holds them open (a helper a
+/// wrapper started in the background) would hold the run for as long as it lives.
+pub const HELD: Duration = Duration::from_secs(5);
 
 /// The variables a program on Windows is given from the test's own environment
 /// where the case names none (libuv's `required_vars`, as cf-process has them).
@@ -306,7 +314,9 @@ impl Run {
         let stdout = drain(child.stdout.take());
         let stderr = drain(child.stderr.take());
         let ended = wait(&mut child, self.limit);
-        let (stdout, stderr) = (collected(stdout), collected(stderr));
+        let by = Instant::now() + HELD;
+        let ((stdout, out_held), (stderr, err_held)) =
+            (collected(stdout, by), collected(stderr, by));
         if let Some(feed) = feed {
             // A program that ended without reading it all has nothing to say of it.
             let _ = feed.join();
@@ -321,6 +331,7 @@ impl Run {
             stdout,
             stderr,
             timed_out,
+            held: out_held || err_held,
         })
     }
 
@@ -403,21 +414,55 @@ fn feed(input: Option<impl Write + Send + 'static>, bytes: Vec<u8>) -> JoinHandl
     })
 }
 
-/// Reads `pipe` to its end on a thread of its own.
-fn drain(pipe: Option<impl Read + Send + 'static>) -> JoinHandle<Vec<u8>> {
-    thread::spawn(move || {
-        let mut bytes = Vec::new();
-        if let Some(mut pipe) = pipe {
-            // A read that fails leaves what was read; the program's end says the rest.
-            let _ = pipe.read_to_end(&mut bytes);
-        }
-        bytes
-    })
+/// A pipe read to its end on a thread of its own, what it read so far kept where
+/// the run can take it whether the thread has ended or not.
+struct Drain {
+    read: Arc<Mutex<Vec<u8>>>,
+    thread: JoinHandle<()>,
 }
 
-/// What a [`drain`] read, as text.
-fn collected(reader: JoinHandle<Vec<u8>>) -> String {
-    String::from_utf8_lossy(&reader.join().unwrap_or_default()).into_owned()
+/// Reads `pipe` to its end on a thread of its own.
+fn drain(pipe: Option<impl Read + Send + 'static>) -> Drain {
+    let read = Arc::new(Mutex::new(Vec::new()));
+    let into = Arc::clone(&read);
+    let thread = thread::spawn(move || {
+        let Some(mut pipe) = pipe else {
+            return;
+        };
+        let mut chunk = [0_u8; 8192];
+        loop {
+            match pipe.read(&mut chunk) {
+                Ok(0) => return,
+                Ok(count) => into
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .extend_from_slice(&chunk[..count]),
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
+                // A read that fails leaves what was read; the program's end says the rest.
+                Err(_) => return,
+            }
+        }
+    });
+    Drain { read, thread }
+}
+
+/// What a [`drain`] read, as text, waited for until `by` at most; and whether its
+/// pipe was still held open then (by a process the program left), so that what came
+/// after is not read. The thread is left to end when the pipe does.
+fn collected(drain: Drain, by: Instant) -> (String, bool) {
+    while !drain.thread.is_finished() && Instant::now() < by {
+        thread::sleep(POLL);
+    }
+    let held = !drain.thread.is_finished();
+    if !held {
+        let _ = drain.thread.join();
+    }
+    let bytes = drain
+        .read
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clone();
+    (String::from_utf8_lossy(&bytes).into_owned(), held)
 }
 
 /// Waits for `child` to end: the code it exited with (none when a signal ended
@@ -454,6 +499,9 @@ pub struct Ran {
     pub stderr: String,
     /// Whether it was ended for running past its limit.
     pub timed_out: bool,
+    /// Whether a process it left still held its output open [`HELD`] after it had
+    /// ended, so that what was written after is not read.
+    pub held: bool,
 }
 
 impl Ran {
@@ -479,6 +527,12 @@ impl fmt::Display for Ran {
             (_, true) => write!(f, "ended for running past its limit")?,
             (Some(code), false) => write!(f, "exit code {code}")?,
             (None, false) => write!(f, "ended by a signal")?,
+        }
+        if self.held {
+            write!(
+                f,
+                "; a process it left held its output open, which was not read to its end"
+            )?;
         }
         write!(f, "\nstdout:\n{}\nstderr:\n{}", self.stdout, self.stderr)
     }

@@ -42,7 +42,6 @@ use std::rc::Rc;
 use cf_ledger::{LedgerError, MessageView, ParticipantView, ProjectView};
 
 use crate::deliveries::Delivering;
-use crate::delivery_text::marker_of;
 use crate::dispatcher::Dispatcher;
 use crate::record::Record;
 use crate::runtime::begin;
@@ -121,9 +120,11 @@ impl Dispatcher {
     /// with.
     pub(crate) fn owed(&self, record: &Record) -> Result<Option<Prelude>, EngineError> {
         let prelude = record.delivery.borrow().prelude.clone();
-        let Some(prelude) = prelude else {
-            return Ok(None);
-        };
+        prelude.map_or(Ok(None), |prelude| self.still_owed(prelude))
+    }
+
+    /// `prelude` while its replacement has not been told, as the ledger has it now.
+    pub(crate) fn still_owed(&self, prelude: Prelude) -> Result<Option<Prelude>, EngineError> {
         let told = self
             .seams
             .ledger
@@ -164,13 +165,13 @@ impl Dispatcher {
         let message = prelude?.displaced?;
         (participant.role != "chief").then(|| Delivering {
             message,
-            marker: marker_of(message),
             since: self.now(),
             // A launch's first message is waited for by the launch's own time.
             rested_since: None,
             launch: true,
             chief: false,
             queued: false,
+            free_since: None,
             entered_again: false,
         })
     }

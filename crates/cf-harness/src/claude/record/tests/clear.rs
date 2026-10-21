@@ -1,6 +1,8 @@
-//! A `/clear`, and each thing that must hold for the output of its command to
-//! end the turn: the output is the main conversation's own, it follows the
-//! user's turn that is the command, and nothing is open.
+//! What a command typed at the prompt printed, written as the system's record
+//! (`local_command`): a `/clear`'s, which says nothing, and a `/compact`'s that
+//! found nothing to compact. Each thing that must hold for it to end the turn:
+//! the output is the main conversation's own, it follows the user's turn that
+//! is the command, and nothing is open.
 
 use super::*;
 
@@ -10,23 +12,29 @@ fn typed(content: &str) -> Value {
 }
 
 #[test]
-fn the_output_of_a_clear_ends_the_turn_when_every_gate_of_it_holds() {
+fn the_output_of_a_command_written_as_the_systems_ends_the_turn_when_every_gate_of_it_holds() {
     let clear = || typed(&command("", ""));
     let said = |records: Vec<Value>| settlement_of(&records);
     let (settled, waiting) = (Settlement::Settled, Settlement::InFlight);
-    // Node's answer for each: the command's text, then the output's record.
+    // The command's text, then the output's record.
     assert_eq!(said(vec![clear(), output("u1")]), settled);
+    // Node read a `/clear` alone, its tags with JavaScript's white space between
+    // them and nothing after; any command is one here, whatever follows its name.
     let texts = [
-        // JavaScript's white space between the tags: a line break, spaces, a no-break space, a byte order mark, a line separator.
         (typed(&command("\n   ", "")), settled),
         (typed(&command("\u{a0}\u{feff}\u{2028}", "")), settled),
-        // Not JavaScript's: U+0085.
-        (typed(&command("\u{85}", "")), waiting),
-        (typed(&command("", "now")), waiting),
-        (typed(&format!("{}\n", command("", ""))), waiting),
-        (typed(&format!("Please {}", command("", ""))), waiting),
+        (typed(&command("\u{85}", "")), settled),
+        (typed(&command("", "now")), settled),
+        (typed(&format!("{}\n", command("", ""))), settled),
         (
             typed(&command("", "").replace("/clear", "/compact")),
+            settled,
+        ),
+        (typed(&format!("Please {}", command("", ""))), waiting),
+        (typed("/clear"), waiting),
+        // One that may go on to ask the model what it printed.
+        (
+            typed(&command("", "a plan").replace("clear", "plan")),
             waiting,
         ),
     ];
@@ -47,13 +55,33 @@ fn the_output_of_a_clear_ends_the_turn_when_every_gate_of_it_holds() {
         (having(output("u1"), json!({ "isMeta": true })), waiting),
         (lacking(output("u1"), "isMeta"), waiting),
         (having(output("u1"), json!({ "level": "warn" })), waiting),
+        // What it printed is any output; words that are none are no output.
         (
             having(
                 output("u1"),
-                json!({ "content": "<local-command-stdout>x</local-command-stdout>" }),
+                json!({ "content": "<local-command-stdout>Not enough messages to compact.</local-command-stdout>" }),
+            ),
+            settled,
+        ),
+        (
+            having(
+                output("u1"),
+                json!({ "content": "<local-command-stderr>Failed</local-command-stderr>" }),
+            ),
+            settled,
+        ),
+        (
+            having(output("u1"), json!({ "content": "Cleared" })),
+            waiting,
+        ),
+        (
+            having(
+                output("u1"),
+                json!({ "content": "<command-name>/mcp</command-name>" }),
             ),
             waiting,
         ),
+        (having(output("u1"), json!({ "content": ["x"] })), waiting),
         (having(output("u1"), json!({ "subtype": "other" })), waiting),
         (output("u9"), waiting),
         (lacking(output("u1"), "parentUuid"), waiting),

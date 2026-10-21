@@ -160,6 +160,119 @@ async fn a_start_settles_what_was_on_its_way_into_a_window_and_it_waits_for_the_
         .await;
 }
 
+/// The session of the Devin window below, and the launch it ran under.
+const DEVIN_SESSION: &str = "calm-river";
+const DEVIN_LAUNCH: &str = "11111111-1111-4111-8111-111111111111";
+
+/// The limit the Devin record reader names (`devin::record::answer`): the previous daemon
+/// stopped while the first message of a resumed Devin window was on its way, after Devin
+/// had stored it with the command it ran under, `/bypass <message>`. A start sweeps the
+/// launch folders before it settles what was on its way, the launch's prompt file with
+/// them, so the record is read as Devin stored it: no paste, and the message goes back
+/// to its queue, to be given again. (Settled first and swept after, a failed settle
+/// still lost the proof, and a settled reading outlived the wire log it rested on: the
+/// reviews of round 12.)
+#[tokio::test]
+async fn a_start_sweeps_the_launch_folders_first_so_a_first_message_devin_stored_behind_bypass_goes_back_to_its_queue(
+) {
+    LocalSet::new()
+        .run_until(async {
+            let root = tempfile::tempdir().unwrap();
+            let (mut ledger, project) = ledger_before_the_start(root.path());
+            let note = ledger
+                .note(
+                    project,
+                    &NewNote {
+                        from: Some("human".to_owned()),
+                        to: "chief".to_owned(),
+                        task: None,
+                        body: "Any news?".to_owned(),
+                    },
+                )
+                .unwrap();
+            let begun = ledger.begin_delivery(note.id).unwrap();
+            ledger
+                .follow_conversation(note.recipient_id, "devin", DEVIN_SESSION)
+                .unwrap();
+            ledger.close().unwrap();
+            let stored = format!(
+                "/bypass {}",
+                cf_engine::delivery_text::delivery_text(&begun.message, &begun.carried)
+            );
+            // Devin's store, the message in it as Devin stored it.
+            let data = if cfg!(windows) {
+                root.path().join("home").join("AppData").join("Roaming")
+            } else {
+                root.path().join("home").join(".local").join("share")
+            };
+            let store = data.join("devin").join("cli");
+            std::fs::create_dir_all(&store).unwrap();
+            let store = rusqlite::Connection::open(store.join("sessions.db")).unwrap();
+            store
+                .execute_batch(
+                    "CREATE TABLE sessions (id TEXT PRIMARY KEY, main_chain_id TEXT);
+                     CREATE TABLE message_nodes (row_id INTEGER PRIMARY KEY, session_id TEXT,
+                       node_id TEXT, parent_node_id TEXT, chat_message TEXT, created_at TEXT)",
+                )
+                .unwrap();
+            store
+                .execute(
+                    "INSERT INTO sessions VALUES (?, 'n-1')",
+                    [DEVIN_SESSION],
+                )
+                .unwrap();
+            let message = json!({ "message_id": "u-1", "role": "user", "content": stored });
+            store
+                .execute(
+                    "INSERT INTO message_nodes (session_id, node_id, parent_node_id, chat_message, created_at)
+                     VALUES (?, 'n-1', NULL, ?, '2026-10-18T10:00:00Z')",
+                    (DEVIN_SESSION, message.to_string()),
+                )
+                .unwrap();
+            drop(store);
+            // The launch's folder: its wire log names the session, and its prompt file
+            // holds what it was given.
+            let launch = root
+                .path()
+                .join("consensflow")
+                .join("integrations")
+                .join("devin")
+                .join(DEVIN_LAUNCH);
+            std::fs::create_dir_all(&launch).unwrap();
+            let line = json!({
+                "sessionId": DEVIN_SESSION,
+                "update": { "sessionUpdate": "available_commands_update" },
+            });
+            std::fs::write(launch.join("wire.jsonl"), format!("{line}\n")).unwrap();
+            std::fs::write(launch.join("prompt.txt"), &stored).unwrap();
+
+            let (options, app, _) = app_that_opens_windows(root.path());
+            let daemon = start(environment(root.path()), options).await.unwrap();
+            ask(&app, "ping", json!({})).await;
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            let inbox = ask(
+                &app,
+                "inbox.get",
+                json!({ "project": project, "participant": "chief" }),
+            )
+            .await;
+            let settled = inbox["messages"]
+                .as_array()
+                .and_then(|messages| messages.iter().find(|message| message["id"] == note.id))
+                .cloned()
+                .unwrap();
+            assert_eq!(settled["state"], "queued", "{settled}");
+            assert_eq!(
+                settled["reason"], "the daemon stopped before it arrived",
+                "{settled}"
+            );
+            assert!(!launch.exists(), "the launch's folder went");
+            daemon.stop("SIGTERM");
+            daemon.finished().await;
+        })
+        .await;
+}
+
 #[tokio::test]
 async fn the_humans_resume_opens_the_chiefs_window_with_the_environment_the_app_expects() {
     LocalSet::new()
