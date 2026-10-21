@@ -228,16 +228,18 @@ impl Ledger {
     }
 
     /// The window's record shows a paste whose Enter the engine withheld: the human
-    /// sent what the box held. A message waiting again is begun as though pasted
-    /// now, with the rows of `held` riding in it again, to be confirmed; one
-    /// withdrawn after its hand-over reads arrived at once, `receipt` its receipt.
-    pub fn begin_sent_by_hand(
+    /// sent what the box held. The message, waiting again or withdrawn since, is
+    /// begun and confirmed in one write, `receipt` its receipt, with the rows of
+    /// `held` riding in it again; with `telling`, its conversation is recorded as
+    /// told the role it says.
+    pub fn confirm_sent_by_hand(
         &mut self,
         message_id: i64,
         held: &[i64],
         receipt: &Value,
+        telling: bool,
     ) -> Result<Option<MessageView>, LedgerError> {
-        messages::begin_sent_by_hand(&mut self.store, message_id, held, receipt)
+        messages::confirm_sent_by_hand(&mut self.store, message_id, held, receipt, telling)
     }
 
     /// The messages of a project whose hand-over has begun at their window and is

@@ -130,6 +130,22 @@ impl Ledger {
         conversations::copied_item_with(&self.store, participant_id, text)
     }
 
+    /// The first item of the participant's current conversation it was given that
+    /// contains `text`, first copied at `since` or after ([`Ledger::now`]).
+    pub fn copied_item_since(
+        &self,
+        participant_id: i64,
+        text: &str,
+        since: &str,
+    ) -> Result<Option<String>, LedgerError> {
+        conversations::copied_item_since(&self.store, participant_id, text, since)
+    }
+
+    /// The time now, as the ledger writes it (a transcript item's `copied_at`).
+    pub fn now(&mut self) -> String {
+        self.store.at()
+    }
+
     /// A window the human switched to another conversation: the participant's is that one now.
     pub fn follow_conversation(
         &mut self,

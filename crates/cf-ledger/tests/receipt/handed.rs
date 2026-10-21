@@ -244,13 +244,12 @@ fn words_the_human_sent_from_the_box_leave_the_carrier_that_took_them_since() {
     let next = w.resume(1, "Go on again").message.expect("its words").id;
     assert_eq!(w.states(&[words, note]), ["queued", "cancelled"]);
 
-    let begun = w
+    let confirmed = w
         .ledger
-        .begin_sent_by_hand(words, &[note], &serde_json::json!({ "item": "u-1" }))
+        .confirm_sent_by_hand(words, &[note], &serde_json::json!({ "item": "u-1" }), false)
         .unwrap()
-        .expect("begun");
-    assert_eq!(begun.state, "delivering");
-    w.confirm(words);
+        .expect("confirmed");
+    assert_eq!(confirmed.state, "delivered");
     assert_eq!(w.states(&[words, note]), ["delivered", "delivered"]);
 
     assert!(
@@ -266,4 +265,85 @@ fn words_the_human_sent_from_the_box_leave_the_carrier_that_took_them_since() {
         w.states(&[words, note, next]),
         ["delivered", "delivered", "queued"]
     );
+}
+
+/// Calliope's review of 2026-10-21, round 12: words whose Enter was withheld went
+/// back to their queue (their hand-over undone) and were withdrawn since, and the
+/// human sent them from the box. The paste was admitted, or nothing would be in
+/// the box: they arrived, and so did the note their paste held.
+#[test]
+fn words_given_back_then_withdrawn_that_the_human_sent_read_delivered_with_their_rows() {
+    let mut w = world();
+    let (words, note) = resumed_with_a_note(&mut w);
+    w.ledger.admit(words, &[note]).unwrap();
+    w.ledger
+        .retry_delivery(words, "its Enter was withheld", true)
+        .expect("given back");
+    w.ledger
+        .cancel_message(words, "superseded")
+        .expect("withdrawn");
+    w.ledger
+        .cancel_message(note, "superseded")
+        .expect("withdrawn");
+
+    let confirmed = w
+        .ledger
+        .confirm_sent_by_hand(words, &[note], &serde_json::json!({ "item": "u-1" }), false)
+        .unwrap()
+        .expect("confirmed");
+
+    assert_eq!(
+        confirmed.receipt["cancelled"],
+        cf_ledger::WITHDRAWN_AFTER_HANDED
+    );
+    assert_eq!(w.states(&[words, note]), ["delivered", "delivered"]);
+}
+
+/// The same review: words withdrawn on their way, the note in their paste with
+/// them, and the human sent them from the box. Both arrived, in one write.
+#[test]
+fn words_withdrawn_on_their_way_that_the_human_sent_read_delivered_with_their_rows() {
+    let mut w = world();
+    let (words, note) = resumed_with_a_note(&mut w);
+    w.ledger.admit(words, &[note]).unwrap();
+    w.ledger
+        .cancel_message(note, "the task was cancelled")
+        .expect("withdrawn");
+    w.ledger
+        .cancel_message(words, "the task was cancelled")
+        .expect("withdrawn");
+
+    w.ledger
+        .confirm_sent_by_hand(words, &[note], &serde_json::json!({ "item": "u-1" }), false)
+        .unwrap()
+        .expect("confirmed");
+
+    assert_eq!(w.states(&[words, note]), ["delivered", "delivered"]);
+    let note = w.ledger.message(note).unwrap().expect("the note");
+    assert_eq!(note.receipt["carrier"], words);
+}
+
+/// The same review: a row reads delivered though withdrawn only if it was handed
+/// with the paste that arrived. A row carried again since an earlier paste (one
+/// taken back, `take_back`, keeps the mark of the paste before) and withdrawn
+/// before the paste that carries it now was in no paste that arrived: it stays
+/// withdrawn. The state is written as such a row would leave it; no path of this
+/// build reaches it yet.
+#[test]
+fn a_row_handed_with_an_earlier_paste_stays_withdrawn_when_its_carrier_arrives() {
+    let mut w = world();
+    let (words, note) = resumed_with_a_note(&mut w);
+    assert_eq!(w.ledger.admit(words, &[note]).unwrap(), HandOver::Admitted);
+    w.ledger
+        .write_raw(&format!(
+            "UPDATE message SET handed_at = '2026-01-01T00:00:00.000Z' WHERE id = {note}"
+        ))
+        .unwrap();
+    w.ledger
+        .cancel_message(note, "the chief took it back")
+        .expect("withdrawn");
+
+    w.confirm(words);
+
+    assert_eq!(w.states(&[words, note]), ["delivered", "cancelled"]);
 }

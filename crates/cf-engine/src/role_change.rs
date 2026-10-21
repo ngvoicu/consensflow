@@ -355,32 +355,49 @@ impl Dispatcher {
         message: &MessageView,
         receipt: &Value,
     ) -> Result<(), EngineError> {
+        let tells = self.tells_a_role(message)?;
+        {
+            let mut ledger = self.seams.ledger.borrow_mut();
+            if tells == Some(true) {
+                ledger.confirm_delivery_telling(message.id, Some(receipt))?;
+            } else {
+                ledger.confirm_delivery(message.id, Some(receipt))?;
+            }
+        }
+        if tells == Some(false) {
+            self.told_in_part(message)?;
+        }
+        Ok(())
+    }
+
+    /// Whether `message` says its recipient's conversation a role: whole (`true`),
+    /// which its confirmation records as told, or cut (`false`), which it does not.
+    /// None for a message that says no role.
+    pub(crate) fn tells_a_role(&self, message: &MessageView) -> Result<Option<bool>, EngineError> {
         let says_a_role = self
             .seams
             .ledger
             .borrow()
             .role_notes_to(message.recipient_id)?
             .contains(&message.id);
-        let mut ledger = self.seams.ledger.borrow_mut();
-        if !says_a_role {
-            ledger.confirm_delivery(message.id, Some(receipt))?;
-        } else if goes_whole(message, &[]) {
-            ledger.confirm_delivery_telling(message.id, Some(receipt))?;
-        } else {
-            ledger.confirm_delivery(message.id, Some(receipt))?;
-            ledger.note(
-                message.project_id,
-                &NewNote {
-                    from: None,
-                    to: "human".to_owned(),
-                    task: message.task_number,
-                    body: format!(
-                        "@{} was told its new role in part: the staff is too large for one message (m-{} was cut at 16,000 characters). It is told again at every Resume until the staff is smaller.",
-                        message.recipient, message.id
-                    ),
-                },
-            )?;
-        }
+        Ok(says_a_role.then(|| goes_whole(message, &[])))
+    }
+
+    /// The human is told on the board that `message`, a role cut to fit in one
+    /// message, told its recipient's conversation its role in part.
+    pub(crate) fn told_in_part(&self, message: &MessageView) -> Result<(), EngineError> {
+        self.seams.ledger.borrow_mut().note(
+            message.project_id,
+            &NewNote {
+                from: None,
+                to: "human".to_owned(),
+                task: message.task_number,
+                body: format!(
+                    "@{} was told its new role in part: the staff is too large for one message (m-{} was cut at 16,000 characters). It is told again at every Resume until the staff is smaller.",
+                    message.recipient, message.id
+                ),
+            },
+        )?;
         Ok(())
     }
 }

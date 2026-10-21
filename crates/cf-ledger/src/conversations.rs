@@ -17,7 +17,9 @@ use crate::views::conversation_view;
 pub use chief::ChiefSwitch;
 pub(crate) use chief::{chief_history, chief_open_work, history_read, last_switch, switch_chief};
 pub use transcripts::TRANSCRIPT_ITEM_MAX;
-pub(crate) use transcripts::{copied_item_with, copy_transcript, transcript, typed_since};
+pub(crate) use transcripts::{
+    copied_item_since, copied_item_with, copy_transcript, transcript, typed_since,
+};
 
 /// A participant's new native conversation; the one before it ends.
 pub(crate) fn start_conversation(

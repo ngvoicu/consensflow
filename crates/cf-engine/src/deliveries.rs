@@ -87,6 +87,13 @@ pub(crate) struct Uncleared {
     pub(crate) message: i64,
     /// The rows it was begun with.
     pub(crate) carried: Vec<i64>,
+    /// When its Enter was withheld, on the ledger's clock ([`cf_ledger::Ledger::now`]):
+    /// only what the window's record was given from then on can be its paste, sent
+    /// by the human.
+    pub(crate) since: String,
+    /// Since when, on the engine's clock, the window has not been quiet for the key
+    /// that empties its box: none while it was, at the last ask.
+    pub(crate) unquiet_since: Option<i64>,
 }
 
 /// What the Enter pressed once more for a paste does, as the ledger says now
@@ -283,8 +290,14 @@ impl Dispatcher {
             Readiness::Ready => None,
             Readiness::Held(held) => Some(held),
         };
-        // Held for what the human typed and has not sent: the board says so.
+        // Held for what the human typed and has not sent: the board says so. A box
+        // the engine emptied holds the human's words now, which an interrupt of ours
+        // may put back there: it is no longer known empty (Calliope's review of
+        // 2026-10-21, round 12).
         record.delivery.borrow_mut().unsent = held == Some(Held::Unsent);
+        if held == Some(Held::Unsent) {
+            record.delivery.borrow_mut().emptied = None;
+        }
         if let Some(held) = held {
             // Said once per message, so a wait is in the trace, not a mystery.
             let first = record.delivery.borrow().held != Some(message.id);
@@ -311,38 +324,40 @@ impl Dispatcher {
             .filter(|stale| stale.pane == pane);
         if let Some(stale) = &stale {
             // The human may have sent it from there: the window's record shows it
-            // given, and it arrived. Nothing of it is pasted again, and nothing is
-            // pressed into a box emptied so (Calliope's review of 2026-10-21, round
-            // 11). The next pass asks what is next.
-            let copied = self
-                .seams
-                .ledger
-                .borrow()
-                .copied_item_with(record.id, &marker_of(stale.message))?;
+            // given since its Enter was withheld, and it arrived. Nothing of it is
+            // pasted again, and nothing is pressed into a box emptied so (Calliope's
+            // review of 2026-10-21, round 11). It is confirmed in one write, and the
+            // mark goes only once the ledger has it: a write that failed leaves it,
+            // for the next pass to ask again (the same, round 12).
+            let copied = self.seams.ledger.borrow().copied_item_since(
+                record.id,
+                &marker_of(stale.message),
+                &stale.since,
+            )?;
             if let Some(item) = copied {
-                record.delivery.borrow_mut().uncleared = None;
                 let receipt = json!({ "item": item });
-                let begun = self.seams.ledger.borrow_mut().begin_sent_by_hand(
+                let found = self.seams.ledger.borrow().message(stale.message)?;
+                let tells = match &found {
+                    Some(found) => self.tells_a_role(found)?,
+                    None => None,
+                };
+                let confirmed = self.seams.ledger.borrow_mut().confirm_sent_by_hand(
                     stale.message,
                     &stale.carried,
                     &receipt,
+                    tells == Some(true),
                 )?;
-                if let Some(begun) = begun {
-                    self.confirm_delivered(&begun, &receipt)?;
+                record.delivery.borrow_mut().uncleared = None;
+                if let Some(confirmed) = confirmed.filter(|_| tells == Some(false)) {
+                    self.told_in_part(&confirmed)?;
                 }
                 self.changed();
                 return Ok(());
             }
             // The key that empties it goes only into a window that printed nothing
             // for a while and holds nothing the human typed since it was read ready:
-            // a second Control-C in a row ends Claude Code (the same review).
-            if !self.may_press(&pane).await {
-                return self.held_once(
-                    record,
-                    message.id,
-                    "its input box may hold a paste whose Enter was withheld, and the window is not quiet, or holds what you typed, for the key that empties it",
-                );
-            }
+            // a second Control-C in a row ends Claude Code (the same review, round 11).
+            let quiet = self.may_press(&pane).await;
             if self.forgotten(record)
                 || !self.in_open_project(message.project_id)?
                 || self
@@ -350,6 +365,43 @@ impl Dispatcher {
                     .is_none_or(|next| next.id != message.id)
             {
                 return Ok(());
+            }
+            let now = self.now();
+            let unquiet_since = {
+                let mut part = record.delivery.borrow_mut();
+                let Some(stale) = part.uncleared.as_mut().filter(|stale| stale.pane == pane) else {
+                    return Ok(());
+                };
+                if quiet {
+                    stale.unquiet_since = None;
+                    None
+                } else {
+                    Some(*stale.unquiet_since.get_or_insert(now))
+                }
+            };
+            if let Some(since) = unquiet_since {
+                // A window that never goes quiet would hold its queue for good: once
+                // the wait outlasts the arrival window, the delivery is begun and this
+                // attempt fails, as a key the host did not take does, and the last
+                // tells the human (the same review, round 12).
+                if now - since <= self.seams.limits.arrival_ms {
+                    return self.held_once(
+                        record,
+                        message.id,
+                        "its input box may hold a paste whose Enter was withheld, and the window is not quiet, or holds what you typed, for the key that empties it",
+                    );
+                }
+                if let Some(stale) = record.delivery.borrow_mut().uncleared.as_mut() {
+                    stale.unquiet_since = None;
+                }
+                let begun = self.seams.ledger.borrow_mut().begin_delivery(message.id)?;
+                let carried = begun.carried.iter().map(|row| row.id).collect();
+                let delivering = self.delivering(record, message.id, carried);
+                return self.settle_failure(
+                    delivering,
+                    "its window never went quiet for the key that empties its input box of a paste whose Enter was withheld",
+                    true,
+                );
             }
         }
         record.delivery.borrow_mut().held = None;

@@ -1258,10 +1258,8 @@ replace = '''
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/delivery.rs"
-find = '''            "UPDATE message SET handed_at = NULL
-             WHERE carried_by = ? AND state IN ('queued', 'cancelled')",'''
-replace = '''            "UPDATE message SET handed_at = handed_at
-             WHERE carried_by = ? AND state IN ('queued', 'cancelled')",'''
+find = '''            "UPDATE message SET handed_at = NULL WHERE carried_by = ? AND state = 'queued'",'''
+replace = '''            "UPDATE message SET handed_at = handed_at WHERE carried_by = ? AND state = 'queued'",'''
 
 [[plant]]
 name = "resume tasks: what a carrier given up carried stays handed"
@@ -1922,9 +1920,11 @@ find = """
                     pane,
                     message,
                     carried,
+                    since,
+                    unquiet_since: None,
                 });"""
 replace = """
-                let _ = (pane, carried);"""
+                let _ = (pane, carried, since);"""
 
 [[plant]]
 name = "resume tasks: a paste goes into a box whose keys the host did not take"
@@ -2083,8 +2083,8 @@ runs = ["engine-stale-box"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/delivery.rs"
-find = "                 WHERE id = ? AND state = 'cancelled' AND handed_at IS NOT NULL\","
-replace = "                 WHERE id = ? AND state = 'cancelled' AND handed_at IS NULL\","
+find = "        if !withdrawn && message.state != \"queued\" {"
+replace = "        if withdrawn || message.state != \"queued\" {"
 
 [[plant]]
 name = "resume tasks: a row withdrawn after its paste was handed over stays withdrawn when the paste arrives"
@@ -2093,18 +2093,8 @@ runs = ["ledger-handed"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/delivery.rs"
-find = "         WHERE carried_by = ? AND state = 'cancelled' AND handed_at IS NOT NULL\","
-replace = "         WHERE carried_by = ? AND state = 'cancelled' AND handed_at IS NULL\","
-
-[[plant]]
-name = "resume tasks: a row withdrawn from a paste sent back stays handed"
-meant = "a_row_withdrawn_from_a_paste_sent_back_stays_withdrawn_when_the_next_paste_arrives"
-runs = ["ledger-handed"]
-
-[[plant.edit]]
-file = "crates/cf-ledger/src/messages/delivery.rs"
-find = "             WHERE carried_by = ? AND state IN ('queued', 'cancelled')\","
-replace = "             WHERE carried_by = ? AND state IN ('queued')\","
+find = "           AND handed_at >= (SELECT handed_at FROM message WHERE id = ?3)\","
+replace = "           AND handed_at < (SELECT handed_at FROM message WHERE id = ?3)\","
 
 [[plant]]
 name = "resume tasks: a paste taken back keeps a row it carried that was withdrawn after its hand-over"
@@ -2123,8 +2113,8 @@ runs = ["engine-stale-box"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
-find = "            if !self.may_press(&pane).await {"
-replace = "            if !(self.may_press(&pane).await || true) {"
+find = "            let quiet = self.may_press(&pane).await;"
+replace = "            let quiet = self.may_press(&pane).await || true;"
 
 [[plant]]
 name = "resume tasks: the key that empties the box goes into a window holding what the human typed"
@@ -2169,3 +2159,103 @@ replace = """
             let _ = carried;
             self.give_back(message.id, "its window's input box could not be emptied")?;
             return Ok(());"""
+
+# --- round 13: Calliope's review of round 12 (2026-10-21) ---
+
+[[plant]]
+name = "resume tasks: a window that never goes quiet for the key holds its queue for good"
+meant = "a_window_that_never_goes_quiet_for_the_key_fails_its_delivery_in_the_end"
+runs = ["engine-stale-box"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = "                if now - since <= self.seams.limits.arrival_ms {"
+replace = "                if now - since <= self.seams.limits.arrival_ms || true {"
+
+[[plant]]
+name = "resume tasks: an earlier copy of a withheld paste is taken for the human sending it"
+meant = "an_earlier_copy_of_a_withheld_paste_is_not_taken_for_the_human_sending_it"
+runs = ["engine-stale-box"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/transcripts.rs"
+find = "         AND instr(t.text, ?) > 0 AND t.copied_at >= ?"
+replace = "         AND instr(t.text, ?) > 0 AND (t.copied_at >= ? OR 1)"
+
+[[plant]]
+name = "resume tasks: the mark of a paste the human sent goes before the ledger has it"
+meant = "a_failed_write_of_words_sent_from_the_box_leaves_them_to_be_taken_for_arrived_next_pass"
+runs = ["engine-stale-box"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = "                let confirmed = self.seams.ledger.borrow_mut().confirm_sent_by_hand("
+replace = """                record.delivery.borrow_mut().uncleared = None;
+                let confirmed = self.seams.ledger.borrow_mut().confirm_sent_by_hand("""
+
+[[plant]]
+name = "resume tasks: words the human sent are begun in one write and confirmed in another"
+meant = "a_failed_write_of_words_sent_from_the_box_leaves_them_to_be_taken_for_arrived_next_pass"
+runs = ["engine-stale-box"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = """
+        let mut receipt = receipt.clone();
+        if withdrawn {
+            receipt["cancelled"] = json!(WITHDRAWN_AFTER_HANDED);
+        }"""
+replace = """
+        store.db.execute_batch("COMMIT; BEGIN IMMEDIATE")?;
+        let mut receipt = receipt.clone();
+        if withdrawn {
+            receipt["cancelled"] = json!(WITHDRAWN_AFTER_HANDED);
+        }"""
+
+[[plant]]
+name = "resume tasks: words given back and withdrawn since that the human sent stay withdrawn"
+meant = "words_superseded_after_the_human_sent_them_from_the_box_read_delivered_with_their_note"
+runs = ["engine-stale-box"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = "        let withdrawn = message.state == \"cancelled\";"
+replace = "        let withdrawn = message.state == \"cancelled\" && message.attempts < 0;"
+
+[[plant]]
+name = "resume tasks: the rows of words withdrawn on their way that the human sent stay withdrawn"
+meant = "words_withdrawn_on_their_way_that_the_human_sent_read_delivered_with_their_rows"
+runs = ["ledger-handed"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = "                 WHERE id = ?3 AND id != ?1 AND state IN ('queued', 'cancelled')\","
+replace = "                 WHERE id = ?3 AND id != ?1 AND state IN ('queued')\","
+
+[[plant]]
+name = "resume tasks: a row handed with an earlier paste reads delivered when its carrier arrives"
+meant = "a_row_handed_with_an_earlier_paste_stays_withdrawn_when_its_carrier_arrives"
+runs = ["ledger-handed"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = "                   AND handed_at >= (SELECT handed_at FROM message WHERE id = ?1)"
+replace = "                   AND handed_at IS NOT NULL"
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = "           AND handed_at >= (SELECT handed_at FROM message WHERE id = ?3)\","
+replace = "           AND handed_at IS NOT NULL AND ?3 = ?3\","
+
+[[plant]]
+name = "resume tasks: a box the human typed into since it was emptied counts as empty"
+meant = "a_box_the_human_typed_into_since_it_was_emptied_is_not_counted_empty"
+runs = ["engine-stale-box"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = """
+        if held == Some(Held::Unsent) {
+            record.delivery.borrow_mut().emptied = None;
+        }"""
+replace = ""

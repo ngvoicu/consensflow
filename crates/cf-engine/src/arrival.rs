@@ -277,6 +277,7 @@ impl Dispatcher {
             Enter::Go => {}
             Enter::Withheld => {
                 self.entered_again(record, message, false);
+                let since = self.seams.ledger.borrow_mut().now();
                 let mut part = record.delivery.borrow_mut();
                 let carried = part
                     .delivering
@@ -288,6 +289,8 @@ impl Dispatcher {
                     pane,
                     message,
                     carried,
+                    since,
+                    unquiet_since: None,
                 });
                 return Ok(());
             }

@@ -1062,8 +1062,8 @@ runs = ["engine-role-change"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/role_change.rs"
-find = '''        } else if goes_whole(message, &[]) {'''
-replace = '''        } else if goes_whole(message, &[]) || true {'''
+find = '''        Ok(says_a_role.then(|| goes_whole(message, &[])))'''
+replace = '''        Ok(says_a_role.then(|| goes_whole(message, &[]) || true))'''
 
 [[plant]]
 name = "codex role: the human is not told that a role went in part"
@@ -1072,8 +1072,8 @@ runs = ["engine-role-change"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/role_change.rs"
-find = '''                    to: "human".to_owned(),'''
-replace = '''                    to: "chief".to_owned(),'''
+find = '''                to: "human".to_owned(),'''
+replace = '''                to: "chief".to_owned(),'''
 
 [[plant]]
 name = "codex role: a message is cut at sixteen thousand units and not past them"

@@ -12,7 +12,7 @@ use std::rc::Rc;
 
 use cf_engine::delivery_text::marker_of;
 use cf_engine::testing::Context;
-use cf_harness::contract::Admission;
+use cf_harness::contract::{Admission, Held, Readiness};
 use cf_harness::records::Role;
 use cf_ledger::MessageView;
 use serde_json::json;
@@ -372,4 +372,248 @@ fn a_box_that_will_not_take_its_key_fails_its_delivery_as_a_refused_paste_does()
         again.reason
     );
     assert_eq!(context.task(tiers.project.id, 1).task.state, "failed");
+}
+
+/// Calliope's review of 2026-10-21, round 12 (P3-1): a window whose screen never
+/// went quiet for the key that empties its box held its queue for good, no attempt
+/// spent, the human told nothing. Once the wait outlasts the arrival window, the
+/// delivery is begun and the attempt fails; the last fails it, as a key the host
+/// did not take does.
+#[test]
+fn a_window_that_never_goes_quiet_for_the_key_fails_its_delivery_in_the_end() {
+    let context = Context::new();
+    let (tiers, _, _) = carrier_withheld(&context);
+    let again = resumed_again(&context, &tiers);
+    context.host.set_snapshot(json!({ "outputQuietMs": 500 }));
+    for _ in 0..16 {
+        context.advance(11_000);
+        context.pass().unwrap();
+    }
+    assert_eq!(
+        clears(&context),
+        0,
+        "nothing pressed into a printing window"
+    );
+    assert_eq!(times_handed(&context, SEAM, again.id), 0, "nothing pasted");
+    let again = context.message(again.id);
+    assert_eq!((again.state.as_str(), again.attempts), ("failed", 3));
+    assert!(
+        again
+            .reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("never went quiet")),
+        "{:?}",
+        again.reason
+    );
+    assert_eq!(context.task(tiers.project.id, 1).task.state, "failed");
+}
+
+/// The same review (P3-2): the window's record, copied by ConsensFlow, held the
+/// note's header from before its Enter was withheld (an earlier copy of it, or the
+/// human quoting it). That was taken for the human sending it from the box: the
+/// note read delivered and was never pasted, the stale text left in the box. Only
+/// what the record was given since the Enter was withheld counts.
+#[test]
+fn an_earlier_copy_of_a_withheld_paste_is_not_taken_for_the_human_sending_it() {
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    context.adapter.with("chief", |agent| agent.arrive = false);
+    let note = context.note(project.id, "zeus", "chief", "hello");
+    context.pass().unwrap();
+    assert_eq!(context.message(note.id).state, "delivering");
+    let chief = context.id(project.id, "chief");
+    let conversation = context
+        .ledger
+        .borrow()
+        .current_conversation(chief)
+        .unwrap()
+        .expect("the chief's conversation")
+        .id;
+    let quoted = format!("{} as I said", marker_of(note.id));
+    context
+        .ledger
+        .borrow_mut()
+        .copy_transcript(
+            conversation,
+            &[json!({ "id": "earlier", "role": "user", "text": quoted })],
+            1_000,
+        )
+        .unwrap();
+    context.host.refuse_kills.set(true);
+    assert!(
+        context.close_project(project.id).is_err(),
+        "its windows stay"
+    );
+    context.host.refuse_kills.set(false);
+    context.advance(11_000);
+    context.host.set_snapshot(json!({ "outputQuietMs": 5_000 }));
+    context.pass().unwrap();
+    assert_eq!(
+        context.message(note.id).state,
+        "queued",
+        "withheld, given back"
+    );
+
+    context.resume_project(project.id).unwrap();
+    context.adapter.with("chief", |agent| agent.arrive = true);
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(
+        (times_handed(&context, SEAM, note.id), clears(&context)),
+        (2, 1),
+        "the box emptied, and the note pasted again"
+    );
+    let note = context.message(note.id);
+    assert_eq!(note.state, "delivered");
+    assert_ne!(note.receipt["item"], "earlier");
+}
+
+/// The same review (P3-3): the window's record showed the words the human sent
+/// from the box, and the write that takes them for arrived failed. The mark was
+/// dropped first, and the next words were pasted carrying the words again. The
+/// mark goes only once the ledger has them arrived, in one write: the next pass
+/// asks again.
+#[test]
+fn a_failed_write_of_words_sent_from_the_box_leaves_them_to_be_taken_for_arrived_next_pass() {
+    let context = Context::new();
+    let (tiers, words, _) = carrier_withheld(&context);
+    human_sends(
+        &context,
+        "zeus-amber-pine",
+        &pasted(&context, ZEUS, words.id),
+    );
+    context.pass().unwrap();
+    // The write that takes them for arrived fails at its last step, as a ledger
+    // that fails inside a write does: nothing of it stays.
+    context
+        .ledger
+        .borrow_mut()
+        .write_raw(&format!(
+            "CREATE TRIGGER injected BEFORE UPDATE OF state ON message
+             WHEN NEW.state = 'delivered' AND OLD.id = {}
+             BEGIN SELECT RAISE(ABORT, 'injected'); END;",
+            words.id
+        ))
+        .unwrap();
+
+    let again = resumed_again(&context, &tiers);
+    let _ = context.pass();
+    assert_eq!(
+        context.message(words.id).state,
+        "queued",
+        "nothing of the failed write stays"
+    );
+    assert_eq!(times_handed(&context, SEAM, again.id), 0, "nothing pasted");
+    context
+        .ledger
+        .borrow_mut()
+        .write_raw("DROP TRIGGER injected;")
+        .unwrap();
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(context.message(words.id).state, "delivered");
+    assert_eq!(said(&context, ZEUS, &words.body), 1, "the words went once");
+    assert_eq!(
+        times_handed(&context, SEAM, again.id),
+        1,
+        "the new words go"
+    );
+    assert_eq!(clears(&context), 0);
+}
+
+/// The same review (P3-4): words whose Enter was withheld went back to their queue
+/// (their hand-over undone), and a wordless resume superseded them; the human had
+/// sent them from the box. They stayed withdrawn, the note in them too, though
+/// both arrived. The paste was admitted, or nothing would be in the box: they read
+/// delivered.
+#[test]
+fn words_superseded_after_the_human_sent_them_from_the_box_read_delivered_with_their_note() {
+    let context = Context::new();
+    let tiers = at_work(&context);
+    let project = tiers.project.id;
+    context.pause_task(project, 1);
+    context.pass().unwrap();
+    context.adapter.with("zeus-amber-pine", |agent| {
+        agent.settled = true;
+        agent.arrive = false;
+    });
+    let note = note(&context, project, "zeus-amber-pine", "Use tabs");
+    context.resume_task(project, 1, cf_ledger::RESUME_WORDS);
+    let words = tiers.task(1).messages.last().cloned().expect("the words");
+    for _ in 0..2 {
+        context.pass().unwrap();
+    }
+    enter_again_with(&context, ZEUS, || context.pause_task(project, 1));
+    assert_eq!(context.message(words.id).state, "queued");
+    human_sends(
+        &context,
+        "zeus-amber-pine",
+        &pasted(&context, ZEUS, words.id),
+    );
+    context.pass().unwrap();
+
+    context.resume_task(project, 1, cf_ledger::RESUME_WORDS);
+    assert_eq!(
+        context.message(words.id).state,
+        "cancelled",
+        "superseded by the new words"
+    );
+    context
+        .adapter
+        .with("zeus-amber-pine", |agent| agent.arrive = true);
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    let (words, note) = (context.message(words.id), context.message(note.id));
+    assert_eq!(
+        (words.state.as_str(), note.state.as_str()),
+        ("delivered", "delivered")
+    );
+    assert_eq!(words.receipt["cancelled"], "after it was handed over");
+    assert_eq!(clears(&context), 0);
+}
+
+/// The same review (P3-6): a box the engine emptied counted as empty after the
+/// human typed into it, so an interrupt of ours that put their message back there
+/// would have it ride with the next paste, Claude pressing no Control-C of its own.
+/// The human's typing ends it: the next paste is not told the box is empty.
+#[test]
+fn a_box_the_human_typed_into_since_it_was_emptied_is_not_counted_empty() {
+    let context = Context::new();
+    let (tiers, _, _) = carrier_withheld(&context);
+    let refusals = Rc::new(Cell::new(1_u32));
+    let left = Rc::clone(&refusals);
+    *context.adapter.deliver.borrow_mut() = Some(Rc::new(move |taking| {
+        let refused = left.get() > 0;
+        left.set(left.get().saturating_sub(1));
+        Box::pin(async move {
+            Ok(if refused {
+                Admission::Refused {
+                    reason: "the pane host refused the paste".to_owned(),
+                }
+            } else {
+                taking()
+            })
+        })
+    }));
+    let again = resumed_again(&context, &tiers);
+    context.pass().unwrap();
+    assert_eq!(refusals.get(), 0, "the paste after the key was refused");
+    assert_eq!(clears(&context), 1);
+
+    *context.adapter.ready.borrow_mut() = Some(Rc::new(|| Ok(Readiness::Held(Held::Unsent))));
+    context.pass().unwrap();
+    *context.adapter.ready.borrow_mut() = None;
+    let before = context.adapter.cleared.borrow().len();
+    for _ in 0..2 {
+        context.pass().unwrap();
+    }
+    assert_eq!(context.message(again.id).state, "delivered");
+    assert_eq!(
+        context.adapter.cleared.borrow()[before..],
+        [false],
+        "the paste after the human typed is not told the box is empty"
+    );
 }
