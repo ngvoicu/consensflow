@@ -154,11 +154,12 @@ pub(crate) fn release_ready(store: &mut Store, project_id: i64) -> Result<(), Le
         .collect::<rusqlite::Result<Vec<_>>>()?;
     for task in waiting {
         let mut assignee = store.participant_of(task.assignee_id)?;
-        // Never queued for a session that has left, which no window opens for: the
-        // session the human deleted comes back for it, as for any follow-up, and
-        // one whose member left cannot, so the task ends here (a removal cancels
-        // such tasks itself; this is for a ledger an older build left).
-        if assignee.member_id.is_some() && assignee.left_at.is_some() {
+        // Never queued for a member's window that has left, which nothing opens: the
+        // session the human deleted comes back for it, as for any follow-up, and a
+        // session whose member left, or a lane that did, cannot, so the task ends
+        // here (a removal cancels such tasks itself; this is for a ledger an older
+        // build left).
+        if a_members_window(&assignee) && assignee.left_at.is_some() {
             if can_continue(store, &assignee)? {
                 assignee = bring_back(store, assignee)?;
             } else {
@@ -187,21 +188,34 @@ pub(crate) fn release_ready(store: &mut Store, project_id: i64) -> Result<(), Le
     Ok(())
 }
 
+/// Whether `window` is a member's: a session, or the member's own lane.
+fn a_members_window(window: &ParticipantRow) -> bool {
+    window.member_id.is_some() || MEMBER_ROLES.contains(&window.role.as_str())
+}
+
 /// A task that waited on the board for its needs and cannot go to its window,
-/// whose member left the staff: it is cancelled, its requester told, and the
-/// tasks that wait for it are told to the chief as stranded.
+/// which left: it is cancelled, its requester told, and the tasks that wait for
+/// it are told to the chief as stranded. The note says what is true: the member
+/// left the staff (a lane, or a session whose member went), or the member stays
+/// and the conversation of the session the human deleted was lost.
 fn cancel_unreachable(
     store: &mut Store,
     project_id: i64,
     task: &TaskRow,
     window: &ParticipantRow,
 ) -> Result<(), LedgerError> {
+    let member_left = match window.member_id {
+        Some(member) => store.participant_row(member)?.left_at.is_some(),
+        None => true,
+    };
+    let why = if member_left {
+        let member = window.member_handle.as_deref().unwrap_or(&window.handle);
+        format!("@{member} left the staff")
+    } else {
+        format!("the conversation of @{} was lost", window.handle)
+    };
     drop_queued(store, task.id)?;
-    store.move_task(
-        task,
-        "cancelled",
-        json!({ "reason": format!("@{} has left the staff", window.handle) }),
-    )?;
+    store.move_task(task, "cancelled", json!({ "reason": why }))?;
     let requester = store.participant_row(task.requester_id)?;
     send(
         store,
@@ -211,8 +225,8 @@ fn cancel_unreachable(
             task: Some(task.number),
             kind: "note",
             body: &format!(
-                "T-{} was cancelled: @{} has left the staff, so no window can take it.",
-                task.number, window.handle
+                "T-{} was cancelled: {why}, so no window can take it.",
+                task.number
             ),
             ..Sent::default()
         },

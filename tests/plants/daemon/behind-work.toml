@@ -434,8 +434,8 @@ runs = ["ledger-behind-work"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/finishing.rs"
-find = "        if assignee.member_id.is_some() && assignee.left_at.is_some() {\n"
-replace = "        if false && assignee.member_id.is_some() && assignee.left_at.is_some() {\n"
+find = "        if a_members_window(&assignee) && assignee.left_at.is_some() {\n"
+replace = "        if false && a_members_window(&assignee) && assignee.left_at.is_some() {\n"
 
 [[plant]]
 name = "behind work: a release brings back a session whose member left the staff"
@@ -514,8 +514,8 @@ runs = ["ledger-behind-work"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/staff/sessions.rs"
-find = "            \"no-window-yet\",\n"
-replace = "            \"session-ended\",\n"
+find = "    if previous.assignee_id.is_none() {\n        return Err(LedgerError::refused_with(\n            \"no-window-yet\",\n"
+replace = "    if previous.assignee_id.is_none() {\n        return Err(LedgerError::refused_with(\n            \"session-ended\",\n"
 
 [[plant]]
 name = "brief edit: the usage says a task paused before any window had it is not editable"
@@ -536,3 +536,65 @@ runs = ["engine-text-roles"]
 file = "skill/core/chief.md"
 find = "replace the brief of a task no window has yet (open, queued, or paused)"
 replace = "replace the brief of a task no window has yet (open, blocked or queued)"
+
+# Round 3 (T-170): Calliope's check of round 2 (T-159).
+
+[[plant]]
+name = "behind work: a release queues a task for a member's lane that left"
+meant = "a_task_given_to_a_member_by_name_whose_member_left_in_an_older_build_is_cancelled_when_it_would_go"
+runs = ["ledger-behind-work"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = "        if a_members_window(&assignee) && assignee.left_at.is_some() {\n"
+replace = "        if assignee.member_id.is_some() && assignee.left_at.is_some() {\n"
+
+[[plant]]
+name = "behind work: the note of a task cancelled for a lane that left says its conversation was lost"
+meant = "a_task_given_to_a_member_by_name_whose_member_left_in_an_older_build_is_cancelled_when_it_would_go"
+runs = ["ledger-behind-work"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = "        None => true,\n    };\n    let why = if member_left {\n"
+replace = "        None => false,\n    };\n    let why = if member_left {\n"
+
+[[plant]]
+name = "behind work: the note of a task cancelled for a lost conversation says its member left"
+meant = "a_follow_up_bound_to_a_session_whose_conversation_was_lost_is_cancelled_with_words_that_say_so"
+runs = ["ledger-behind-work"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/finishing.rs"
+find = "    let why = if member_left {\n"
+replace = "    let why = if member_left || true {\n"
+
+[[plant]]
+name = "behind work: a follow-up of a task given to a member by name is told its session has ended"
+meant = "a_follow_up_of_a_task_given_to_a_member_by_name_is_told_it_has_no_window_of_its_own"
+runs = ["ledger-behind-work"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff/sessions.rs"
+find = "        .filter(|lane| lane.member_id.is_none() && lane.left_at.is_none())\n"
+replace = "        .filter(|lane| lane.member_id.is_some() && lane.left_at.is_none())\n"
+
+[[plant]]
+name = "behind work: a removal after the acceptance leaves the follow-up waiting for the window bound to it"
+meant = "a_member_removed_after_the_acceptance_cancels_the_follow_up_in_its_window_and_the_one_waiting_for_it"
+runs = ["ledger-behind-work"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff.rs"
+find = "           AND t.state IN ('open', 'queued', 'working', 'waiting')\n"
+replace = "           AND t.state IN ('queued', 'working', 'waiting')\n"
+
+[[plant]]
+name = "behind work: a removal does not tell the chief of a task that waits for a follow-up it cancelled"
+meant = "a_task_for_a_tier_that_waits_for_a_follow_up_a_removal_cancels_is_told_to_the_chief"
+runs = ["ledger-behind-work"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/staff.rs"
+find = "        for (task, _) in &open {\n            tell_stranded_waiters(store, project_id, task)?;\n"
+replace = "        for (task, _) in open.iter().filter(|(task, _)| task.state != \"open\") {\n            tell_stranded_waiters(store, project_id, task)?;\n"

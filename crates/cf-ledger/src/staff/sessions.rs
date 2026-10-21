@@ -7,7 +7,7 @@ use rusqlite::{params, OptionalExtension};
 use serde_json::json;
 
 use crate::conversations::current_conversation;
-use crate::model::{sql_list, LedgerError, HELD_TASK_STATES};
+use crate::model::{sql_list, LedgerError, HELD_TASK_STATES, MEMBER_ROLES};
 use crate::projects::known_project;
 use crate::store::Store;
 use crate::views::{ParticipantRow, TaskRow};
@@ -154,11 +154,27 @@ pub(crate) fn follow_up_session(
             409,
         ));
     }
-    let found = previous
+    let assignee = previous
         .assignee_id
         .map(|id| store.participant_row(id))
-        .transpose()?
-        .filter(|session| session.member_id.is_some());
+        .transpose()?;
+    // A task given to a member by name runs in its lane, which is no window to
+    // continue; its follow-up waits for it as a task for a tier.
+    if let Some(lane) = assignee
+        .as_ref()
+        .filter(|lane| lane.member_id.is_none() && lane.left_at.is_none())
+        .filter(|lane| MEMBER_ROLES.contains(&lane.role.as_str()))
+    {
+        return Err(LedgerError::refused_with(
+            "no-window-yet",
+            format!(
+                "T-{after} was given to @{} by name, which has no window of its own to continue. Add the next step for a tier with --needs T-{after}, and it waits until T-{after} is accepted",
+                lane.handle
+            ),
+            409,
+        ));
+    }
+    let found = assignee.filter(|session| session.member_id.is_some());
     let session = match found {
         Some(session) if can_continue(store, &session)? => session,
         _ => {

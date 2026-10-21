@@ -508,7 +508,7 @@ fn a_follow_up_bound_to_a_session_that_left_in_an_older_build_is_cancelled_when_
     assert_eq!(
         notes_to_the_chief(&w, b),
         [format!(
-            "T-{b} was cancelled: @{session} has left the staff, so no window can take it."
+            "T-{b} was cancelled: @zeus left the staff, so no window can take it."
         )]
     );
     assert!(on_its_way(&w, left).is_empty());
@@ -608,5 +608,158 @@ fn a_follow_up_of_a_task_nobody_has_taken_yet_is_told_to_wait_for_it_with_needs(
     assert_eq!(
         refused.to_string(),
         format!("T-{task} has no window yet: nobody has taken it. Add the next step for a tier with --needs T-{task}, and it waits until T-{task} is accepted")
+    );
+}
+
+// Round 3 (T-170): Calliope's check of round 2 (T-159).
+
+#[test]
+fn a_task_given_to_a_member_by_name_whose_member_left_in_an_older_build_is_cancelled_when_it_would_go(
+) {
+    let mut w = world();
+    let a = w.open("Parser").task.number;
+    let moved = w.assign(a, "diana");
+    w.deliver(moved.message.expect("its brief").id);
+    let b = w
+        .give_to("zeus", &[a], "Tests")
+        .expect("a task by name, waiting for T-1")
+        .task
+        .number;
+    assert_eq!(w.state(b), "open");
+    let lane = w.id("zeus");
+    // 3.0.5 let zeus be removed with T-2 waiting on the board for T-1: its lane is gone,
+    // and the task is still open, bound to it.
+    w.edit(|db| {
+        db.execute(
+            "UPDATE participant SET left_at = '2026-10-21T10:00:00.000Z' WHERE handle = 'zeus'",
+            [],
+        )
+        .expect("zeus is gone");
+    });
+
+    finished(&mut w, a);
+    assert_eq!(
+        w.state(b),
+        "cancelled",
+        "not queued for a lane nothing opens"
+    );
+    assert_eq!(
+        notes_to_the_chief(&w, b),
+        [format!(
+            "T-{b} was cancelled: @zeus left the staff, so no window can take it."
+        )]
+    );
+    assert!(on_its_way(&w, lane).is_empty());
+}
+
+#[test]
+fn a_follow_up_bound_to_a_session_whose_conversation_was_lost_is_cancelled_with_words_that_say_so()
+{
+    let mut w = world();
+    let (session, a) = at_work(&mut w);
+    let b = w
+        .follow_up(a, "Tests", &[])
+        .expect("a follow-up")
+        .task
+        .number;
+    let left = w.id(&session);
+    w.ledger
+        .start_conversation(left, "claude-code")
+        .expect("its conversation");
+    // The session is gone and its conversation ended; its member stays on the staff.
+    w.edit(|db| {
+        db.execute(
+            "UPDATE participant SET left_at = '2026-10-21T10:00:00.000Z' WHERE id = ?1",
+            [left],
+        )
+        .expect("the session is gone");
+        db.execute(
+            "UPDATE conversation SET ended_at = '2026-10-21T10:00:00.000Z' WHERE participant_id = ?1",
+            [left],
+        )
+        .expect("its conversation ended");
+    });
+
+    finished(&mut w, a);
+    assert_eq!(w.state(b), "cancelled");
+    assert_eq!(
+        notes_to_the_chief(&w, b),
+        [format!(
+            "T-{b} was cancelled: the conversation of @{session} was lost, so no window can take it."
+        )]
+    );
+    assert!(on_its_way(&w, left).is_empty());
+}
+
+#[test]
+fn a_follow_up_of_a_task_given_to_a_member_by_name_is_told_it_has_no_window_of_its_own() {
+    let mut w = world();
+    let task = w.give("zeus", "Parser").task.number;
+    let refused = w
+        .follow_up(task, "Tests", &[])
+        .expect_err("a lane is no session");
+    assert_eq!(refused.code(), Some("no-window-yet"));
+    assert_eq!(
+        refused.to_string(),
+        format!("T-{task} was given to @zeus by name, which has no window of its own to continue. Add the next step for a tier with --needs T-{task}, and it waits until T-{task} is accepted")
+    );
+}
+
+#[test]
+fn a_member_removed_after_the_acceptance_cancels_the_follow_up_in_its_window_and_the_one_waiting_for_it(
+) {
+    // The shape of T-154: T-2 and T-3 both follow T-1, which is accepted before the removal.
+    let mut w = world();
+    let (session, a) = at_work(&mut w);
+    let b = w
+        .follow_up(a, "First", &[])
+        .expect("a follow-up")
+        .task
+        .number;
+    let c = w.follow_up(a, "Second", &[]).expect("a second").task.number;
+    let left = w.id(&session);
+    finished(&mut w, a);
+    assert_eq!(w.state(b), "queued");
+    assert_eq!(w.state(c), "open", "ready, and waiting for the window");
+
+    let removed = w
+        .ledger
+        .remove_member(w.project, "zeus")
+        .expect("zeus leaves");
+    assert_eq!(removed.cancelled, [b, c]);
+    assert_eq!(w.state(b), "cancelled");
+    assert_eq!(w.state(c), "cancelled");
+
+    // Later work anywhere releases what waits, and queues nothing for the left session.
+    let other = w.open("Lexer").task.number;
+    let moved = w.assign(other, "diana");
+    w.deliver(moved.message.expect("its brief").id);
+    finished(&mut w, other);
+    assert!(on_its_way(&w, left).is_empty());
+}
+
+#[test]
+fn a_task_for_a_tier_that_waits_for_a_follow_up_a_removal_cancels_is_told_to_the_chief() {
+    let mut w = world();
+    let (_, a) = at_work(&mut w);
+    let b = w
+        .follow_up(a, "Tests", &[])
+        .expect("a follow-up")
+        .task
+        .number;
+    let d = w.open_needing("Docs", &[b]).task.number;
+
+    let removed = w
+        .ledger
+        .remove_member(w.project, "zeus")
+        .expect("zeus leaves");
+    assert_eq!(removed.cancelled, [a, b]);
+    assert_eq!(w.state(d), "open");
+    assert_eq!(
+        notes_to_the_chief(&w, d),
+        [format!(
+            "T-{d} waits on cancelled T-{b} and will never start."
+        )],
+        "told once, though the follow-up was cancelled by the removal itself"
     );
 }
