@@ -98,19 +98,25 @@ fn a_devin_worker_that_leaves_a_command_that_goes_on_reporting_has_its_task_done
     })?;
     assert_eq!(results(&project)?[0]["body"], "LEFT_IT");
 
-    // The chief is told what was ended, and the command is gone.
+    // The turn's end ends nothing (turn-end's smallest rule, 2026-10-21): the worker has
+    // nothing more to do, so its window closes at once, the close ends the command, and the
+    // chief is told what the close ended.
     rig.wait_for("the command to be ended", secs(30), || {
         Ok(!is_alive(command.pid()))
     })?;
-    rig.wait_for("the chief to be told what was ended", secs(30), || {
-        Ok(project.inbox("chief")?.iter().any(|message| {
-            message["kind"] == "note"
-                && message["body"].as_str().is_some_and(|body| {
-                    body.starts_with("T-1's turn left background work running. Ended: ")
-                        && body.contains("sleep 600")
-                })
-        }))
-    })?;
+    rig.wait_for(
+        "the chief to be told what the close ended",
+        secs(30),
+        || {
+            Ok(project.inbox("chief")?.iter().any(|message| {
+                message["kind"] == "note"
+                    && message["body"].as_str().is_some_and(|body| {
+                        body.starts_with("T-1's window closed with background work still running: ")
+                            && body.contains("sleep 600")
+                    })
+            }))
+        },
+    )?;
     rig.close()?;
     Ok(())
 }

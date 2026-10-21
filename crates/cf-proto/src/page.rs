@@ -65,12 +65,15 @@ pub enum PageOperation {
     /// An HTML file of a project's specs folder, opened in the browser,
     /// outside ConsensFlow.
     SpecsOpen,
+    /// The human takes what the worker of a working task said last as its result,
+    /// ending nothing it left running (Finish, in the task's drawer).
+    TaskFinish,
 }
 
 impl PageOperation {
     /// Every operation, in the order Node's page listed them, then those this
     /// build added, in the order it added them.
-    pub const ALL: [PageOperation; 39] = [
+    pub const ALL: [PageOperation; 40] = [
         Self::ProjectsList,
         Self::ProjectOpen,
         Self::ProjectResume,
@@ -110,6 +113,7 @@ impl PageOperation {
         Self::SpecsFile,
         Self::SpecsPresent,
         Self::SpecsOpen,
+        Self::TaskFinish,
     ];
 
     /// The name the page, the app and the bridge say it by (`project.open`).
@@ -154,6 +158,7 @@ impl PageOperation {
             Self::SpecsFile => "specs.file",
             Self::SpecsPresent => "specs.present",
             Self::SpecsOpen => "specs.open",
+            Self::TaskFinish => "task.finish",
         }
     }
 
@@ -212,7 +217,7 @@ mod tests {
             .unwrap();
         let mut forwarded: Vec<&str> = list.split('"').skip(1).step_by(2).collect();
         let mut named: Vec<&str> = PageOperation::ALL.map(PageOperation::as_str).to_vec();
-        assert_eq!(named.len(), 39);
+        assert_eq!(named.len(), 40);
         forwarded.sort_unstable();
         named.sort_unstable();
         assert_eq!(named, forwarded);
@@ -267,7 +272,7 @@ mod tests {
             "message.approve",
             "message.decline",
         ];
-        const ADDED: [&str; 11] = [
+        const ADDED: [&str; 12] = [
             "wakeup.get",
             "wakeup.set",
             "project.specs",
@@ -279,6 +284,7 @@ mod tests {
             "specs.file",
             "specs.present",
             "specs.open",
+            "task.finish",
         ];
         let listed: Vec<&str> = PageOperation::ALL.map(PageOperation::as_str).to_vec();
         assert_eq!(listed[..RECORDED.len()], RECORDED);

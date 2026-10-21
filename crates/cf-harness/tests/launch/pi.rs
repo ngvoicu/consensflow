@@ -433,7 +433,7 @@ fn reading(items: Vec<Item>, settlement: Settlement, quota: Option<Arc<Quota>>) 
         failed: false,
         quota,
         settlement,
-        agents_pending: false,
+        pending: Default::default(),
     }))
 }
 
@@ -447,6 +447,7 @@ fn settled_record(text: &str) -> Arc<Reading> {
         complete: true,
         at: None,
         commentary: false,
+        compaction: false,
     };
     let items = vec![item("1", Role::User), item("2", Role::Assistant)];
     reading(items, Settlement::Settled, None)

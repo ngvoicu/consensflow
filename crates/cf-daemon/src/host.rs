@@ -10,7 +10,6 @@
 //! adds no rules of its own, only the Windows shim a window's program may be
 //! ([`cf_process::pane_argv`]) and the bound on the wait for an open.
 
-use std::future::Future;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -23,7 +22,7 @@ use cf_engine::runtime::LocalWork;
 use cf_engine::seams::BackgroundWork;
 use cf_harness::contract::{HostError, Pane, PaneHost, Work};
 use cf_proto::bridge::Role;
-use cf_proto::panes::{EndRequest, Ending, MarkRequest, PaneExit, Servers, ENDING_BOUND};
+use cf_proto::panes::{MarkRequest, PaneExit, Servers};
 use serde_json::{json, Map, Value};
 
 use crate::errors::contain_now;
@@ -32,11 +31,6 @@ use crate::seams::DaemonSpawn;
 /// How long the host has to open a window: the pane's program is started and
 /// watched before it answers (`deadlineMs: 60_000`).
 pub const OPEN_DEADLINE: Duration = Duration::from_secs(60);
-
-/// How long the host has to end what a turn left running and to say so: the bound it
-/// keeps to ([`ENDING_BOUND`]: the grace it gives what it asks to end, and what it
-/// waits after it has killed what ignored it), and a margin for the bridge.
-pub const END_DEADLINE: Duration = Duration::from_secs(ENDING_BOUND.as_secs() + 20);
 
 /// What the engine says to the host of the app, through its bridge.
 pub struct BridgeHost {
@@ -120,47 +114,6 @@ impl BackgroundWork for BridgeHost {
                 let _ = sent.await;
             }
         })
-    }
-
-    fn end<'a>(&'a self, pane: &'a Pane) -> Work<'a, Option<Ending>> {
-        Box::pin(self.ending_within(pane, END_DEADLINE))
-    }
-}
-
-impl BridgeHost {
-    /// The ending of what `pane`'s turn left, asked of the host and waited for up to
-    /// `deadline`: as long as the host takes to end it, which is the bound it keeps to
-    /// and a margin. The default deadline is for requests that answer at once.
-    fn ending_within(
-        &self,
-        pane: &Pane,
-        deadline: Duration,
-    ) -> impl Future<Output = Option<Ending>> + 'static {
-        let request = EndRequest {
-            id: pane.id.clone(),
-            generation: pane.generation,
-        };
-        let sent = serde_json::to_value(&request).ok().map(|body| {
-            self.bridge
-                .request("pane.end_background", body, Some(deadline))
-        });
-        async move { ending(sent?.await.ok()) }
-    }
-}
-
-/// What a host answered to an ending: its word, or that nothing was ended for an
-/// answer that was a refusal (a host that does not know the operation, or has no such
-/// window): nothing is said to be ended that was not, and nothing is known to be left.
-/// None where there was no answer (the deadline passed, or the bridge went), for the
-/// host may be ending still.
-fn ending(answer: Option<Value>) -> Option<Ending> {
-    let answer = answer?;
-    if answer.get("ok") == Some(&Value::Bool(true)) {
-        return Some(serde_json::from_value(answer).unwrap_or_default());
-    }
-    match answer.get("error") {
-        Some(Value::String(error)) if error == "deadline" => None,
-        _ => Some(Ending::default()),
     }
 }
 

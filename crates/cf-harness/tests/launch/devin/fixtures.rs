@@ -351,13 +351,14 @@ pub(super) fn settled(session: &str) -> Record {
             complete: true,
             at: None,
             commentary: false,
+            compaction: false,
         }],
         in_flight: false,
         asking: false,
         failed: false,
         quota: None,
         settlement: Settlement::Settled,
-        agents_pending: false,
+        pending: Default::default(),
     }
 }
 

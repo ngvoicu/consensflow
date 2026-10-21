@@ -14,6 +14,9 @@ use crate::fixtures::{assert_match, closed, given, last_launch, last_message, na
 fn a_follow_up_waiting_for_what_it_needs_keeps_no_window_open_and_goes_to_one_opened_again_on_the_conversation(
 ) {
     let context = Context::new();
+    // The host proves each window's program gone, as the app's does: the follow-up,
+    // another task, goes on with the session's conversation (`ownership`).
+    context.host.exits_showing(Some(0), None, None);
     let tiers = Tiers::new(&context, &["zeus"]);
     let project = tiers.project.id;
     tiers.open();

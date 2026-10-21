@@ -30,6 +30,7 @@ use crate::seams::{EngineError, SavedAgent};
 use crate::shown::Shown;
 use crate::specs::{ChiefSpecs, RoleText};
 use crate::stops::{Interrupted, Unstopped};
+use crate::turn_end::HeldPart;
 use crate::unstarted::GivenUp;
 
 /// The key that interrupts a harness's current turn, and the gap of a double press.
@@ -179,6 +180,11 @@ pub(crate) struct WindowPart {
     /// program gone ([`Shown::gone`]): none until the host said, which it may
     /// do after the engine's own close has settled the window.
     pub(crate) last_exit: Option<(Pane, Option<bool>)>,
+    /// The task whose work the window holds, by its number (`ownership`): no other
+    /// task's message goes into it.
+    pub(crate) owner: Option<i64>,
+    /// The task whose requester was told it waits for this window to close.
+    pub(crate) told_waiting: Option<i64>,
 }
 
 impl Default for WindowPart {
@@ -208,6 +214,8 @@ impl Default for WindowPart {
             unstopped: None,
             activity: Activity::of(ActivityState::Closed),
             last_exit: None,
+            owner: None,
+            told_waiting: None,
         }
     }
 }
@@ -288,6 +296,9 @@ struct Planned {
     /// instructions of its conversations: what a conversation this launch starts
     /// is recorded as begun with.
     first_instructions: Option<String>,
+    /// The task whose work the window holds (`ownership`): its first message's, or
+    /// the one its conversation was last given where it goes on with one.
+    owner: Option<i64>,
 }
 
 impl Dispatcher {
@@ -317,9 +328,14 @@ impl Dispatcher {
             window.stopped = None;
             window.interrupted = None;
             window.unstopped = None;
+            window.owner = None;
+            window.told_waiting = None;
             window.activity = Activity::of(ActivityState::Closed);
             taken
         };
+        // What its task was held for went with it: a task held again in a window opened
+        // again is told again (`turn_end`).
+        *record.held.borrow_mut() = HeldPart::default();
         if let Some(token) = token {
             self.seams.credentials.revoke(&token);
         }
@@ -611,6 +627,7 @@ impl Dispatcher {
             part.drawn = false;
             part.named = false;
             part.stopped = planned.stop.map(|stop| (stop.task_id, stop.seq));
+            part.owner = planned.owner;
         }
         {
             let mut delivery = record.delivery.borrow_mut();
@@ -695,6 +712,13 @@ impl Dispatcher {
         role: Option<RoleText>,
         prelude: Option<Prelude>,
     ) -> Result<Option<Planned>, EngineError> {
+        // The task the session's conversation was last given, before this launch's first
+        // message is begun (`ownership`).
+        let before = if participant.role == "chief" {
+            None
+        } else {
+            self.seams.ledger.borrow().task_given(participant.id)?
+        };
         let begun = first
             .map(|first| self.seams.ledger.borrow_mut().begin_delivery(first.id))
             .transpose()?;
@@ -719,7 +743,19 @@ impl Dispatcher {
             )? {
                 return Ok(None);
             }
-            found
+            self.kept_apart(project, participant, record, found, before.as_ref(), first)?
+        };
+        // The task whose work the window holds: its first message's, or what its
+        // conversation was last given where it goes on with one.
+        let owner = if participant.role == "chief" {
+            None
+        } else {
+            first.and_then(|first| first.task_number).or_else(|| {
+                conversation
+                    .as_ref()
+                    .and(before.as_ref())
+                    .map(|before| before.task.number)
+            })
         };
         // A member's role is compared now that its conversation is known: one its
         // harness holds nothing of is not resumed, and has nothing to be told. Where
@@ -824,6 +860,7 @@ impl Dispatcher {
             stop,
             prelude,
             first_instructions: adapter.keeps_first_instructions().then_some(instructions),
+            owner,
         }))
     }
 

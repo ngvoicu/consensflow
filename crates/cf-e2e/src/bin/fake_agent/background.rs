@@ -24,7 +24,11 @@
 //! agents of the harnesses do when they leave a job (`nohup … &`, `Start-Process`)
 //! and ends a moment after, which leaves the job with no parent: no chain of processes
 //! that run leads from it to a shell the harness started, so the host does not take it
-//! for the turn's work and leaves it running (`cf-panes`' `background`). On Unix that
+//! for the turn's work and leaves it running (`cf-panes`' `background`). A command
+//! whose shell `exec`s it ([`Jobs::start_in_place_of_its_shell`], `exec sleep 120`) is the
+//! shell from then on, in the shell's group, with the harness its parent and no shell above
+//! it (Astra's review of round 1); PowerShell has no `exec`, and on Windows it is a command
+//! as any. On Unix that
 //! shell is in a session of its own, as Pi's Bash tool starts each command (the window's
 //! does not hold it), and the job is started without the marker the pane host puts in
 //! the environment of what a window starts, as a job that is a system program shows
@@ -177,6 +181,8 @@ struct How {
     /// The agent detaches it from that shell (`nohup … &`, `Start-Process`), which
     /// ends at once and leaves it with no parent.
     detached: bool,
+    /// The shell `exec`s it, and is it from then on.
+    in_place: bool,
 }
 
 /// The jobs one window starts.
@@ -243,6 +249,7 @@ impl Jobs {
             browser: self.browser,
             command: false,
             detached: false,
+            in_place: false,
         };
         self.begin(SERVER, SERVER_SECONDS, false, group, how, || {})
             .map(|_| ())
@@ -265,8 +272,27 @@ impl Jobs {
             browser: false,
             command: true,
             detached,
+            in_place: false,
         };
         self.begin(label, seconds, deaf, Group::Own, how, then)
+    }
+
+    /// [`Jobs::start`] of a command whose shell `exec`s it: the job is the shell from
+    /// then on, with the harness its parent (a command run as Claude Code's Bash tool runs
+    /// `exec sleep 120`). PowerShell has no `exec`: on Windows it is a command as any.
+    pub fn start_in_place_of_its_shell(
+        &self,
+        label: &str,
+        seconds: u64,
+        then: impl FnOnce() + Send + 'static,
+    ) -> Result<PathBuf, String> {
+        let how = How {
+            browser: false,
+            command: true,
+            detached: false,
+            in_place: true,
+        };
+        self.begin(label, seconds, false, Group::Own, how, then)
     }
 
     /// [`Jobs::start`], as `how` says: the browser the job launches, if it launches
@@ -329,7 +355,13 @@ impl Jobs {
     /// The program that runs the job `words` say: this one, as it is, or where `how`
     /// says it is a command of the agent's, a shell that runs it ([`in_a_shell`]).
     fn running(program: &Path, words: Vec<OsString>, how: How) -> Result<Run, String> {
-        if how.command {
+        if how.in_place && cfg!(unix) {
+            Ok(Run::new("/bin/sh")
+                .args(["-c", IN_PLACE])
+                .arg(program)
+                .args(words)
+                .own_group())
+        } else if how.command {
             in_a_shell(program, words, how.detached)
         } else {
             Ok(Run::new(program).args(words))
@@ -394,6 +426,10 @@ pub fn in_a_shell(program: &Path, words: Vec<OsString>, detached: bool) -> Resul
         }
     }
 }
+
+/// What the shell of a command that `exec`s it is told to run: the shell is the program
+/// from then on, with the job's words.
+const IN_PLACE: &str = "exec \"$0\" \"$@\"";
 
 /// What the shell of a command is told to run, with the program as its `$0` and the
 /// job's words after it: the program, which the shell waits for and ends with the

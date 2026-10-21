@@ -53,6 +53,7 @@ fn item(id: &str, role: Role, text: &str, complete: bool) -> Item {
         complete,
         at: None,
         commentary: false,
+        compaction: false,
     }
 }
 
@@ -66,7 +67,7 @@ fn look(items: Vec<Item>) -> Observed {
             failed: false,
             quota: None,
             settlement: Settlement::Unknown,
-            agents_pending: false,
+            pending: Default::default(),
         }))),
         settled: true,
         waiting: None,

@@ -27,6 +27,8 @@ cf inside a ConsensFlow window: the board's commands.
   cf task reopen T-3 "…"            send a finished or failed task back with a follow-up
   cf task pause T-3                 stop a worker's task: the agent stops, its window and work wait
   cf task resume T-3 "…"            go on with it: the same window, with your words
+  cf task finish T-3                take what a working task's worker said last as its result;
+                                    what its turn left running is not ended
   cf tell T-3 "…"                   stop T-3 and put this to its window: its answer arrives as
                                     a message; then cf task resume T-3 "…"
   cf inbox [read m-12]              what is waiting for you, or one message in full

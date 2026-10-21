@@ -7,7 +7,7 @@ use serde_json::json;
 use super::*;
 
 const NAME: &str = "ZEEWIN";
-const NOTE: &str = "T-1's turn left background work running. Ended: devin.exe; node.exe.";
+const NOTE: &str = "T-1's window closed with background work still running: devin.exe; node.exe";
 
 fn at(seconds: u64) -> Duration {
     Duration::from_secs(seconds)

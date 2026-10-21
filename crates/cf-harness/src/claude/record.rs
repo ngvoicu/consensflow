@@ -27,13 +27,19 @@
 //! process was cut in (`No response requested.`) is no answer: the item is the
 //! harness's commentary.
 //!
-//! A turn that ended may have left background agents or workflows running, which
-//! its `turn_duration` says by its counts (`pendingBackgroundAgentCount`,
-//! `pendingWorkflowCount`, left out when none). It is settled all the same, and
-//! the reading says the agents are pending (`agents_pending`): the window takes
-//! input between turns, and the end of an agent wakes a turn of its own, whose
-//! record says what is left. (Departs from Node's reader, which took such a
-//! record for no end of the turn, on the owner's decision of 2026-10-11.)
+//! A turn that ended may have left background agents, workflows or jobs running,
+//! and Claude Code wakes its agent for each as it ends. The agents and workflows
+//! are on the `turn_duration` that ends the turn, by its counts
+//! (`pendingBackgroundAgentCount`, `pendingWorkflowCount`, left out when none);
+//! the jobs, which a Bash call run in the background or a Monitor call started,
+//! are not counted there, and the reader counts them itself (`jobs`). The turn is
+//! settled all the same, and the reading says how many are pending (`pending`): the
+//! window takes input between turns, and the end of one wakes a turn of its own,
+//! whose record says what is left. (Departs from Node's reader, which took a
+//! `turn_duration` that names agents for no end of the turn, on the owner's
+//! decision of 2026-10-11.) The relaunch that empties the queue (above) retires
+//! the old process's jobs too: their notifications went with it, and the reading
+//! counts them as retired, not as ended (`jobs`).
 //!
 //! A look's records wait until all of them are in, and are then replayed in
 //! order, so that a decision may rest on a record that comes after the one it
@@ -47,6 +53,7 @@
 
 mod ancestry;
 mod items;
+mod jobs;
 mod keep;
 mod patterns;
 mod project;
@@ -71,9 +78,10 @@ use crate::shared::record::cache::{Look, Options};
 use crate::shared::record::followed::{Answer, Followed, Parser, TranscriptReader};
 use crate::shared::record::jsonl::Stop;
 use crate::shared::record::key::{Key, Keys};
-use crate::shared::record::reading::{null_record, Reading, Record, Settlement};
+use crate::shared::record::reading::{self, null_record, Reading, Record, Settlement};
 use ancestry::Ancestry;
 use items::Items;
+use jobs::Jobs;
 use project::{project, Projected};
 use queues::Queues;
 
@@ -134,7 +142,12 @@ struct Transcript {
     /// The tool calls made and not yet answered in the turn, by the id of the
     /// block that made each.
     open_tools: HashSet<Key>,
+    /// The TaskStop calls made in the main conversation, by the id of the block that
+    /// made each: the result of one says the job it stopped.
+    task_stops: HashSet<Key>,
     queues: Queues,
+    /// The jobs started in the background that Claude Code has said no end of.
+    jobs: Jobs,
     /// The assistant messages that ended their turn, and whose stop hooks
     /// the transcript has not yet said ran, by their item's id.
     hooks: HashSet<Arc<str>>,
@@ -180,12 +193,12 @@ enum Terminal {
     /// that runs no model.
     Native,
     /// A boundary record came after the candidate. It names the candidate's
-    /// item and its own uuid, when that is text, and says whether the turn left
-    /// background agents or workflows running.
+    /// item and its own uuid, when that is text, and says how many background
+    /// agents and workflows the turn left running.
     Derived {
         item_id: Arc<str>,
         uuid: Option<Arc<str>>,
-        agents: bool,
+        agents: usize,
     },
 }
 
@@ -208,7 +221,9 @@ impl Transcript {
             local,
             items: Items::default(),
             open_tools: HashSet::new(),
+            task_stops: HashSet::new(),
             queues: Queues::default(),
+            jobs: Jobs::default(),
             hooks: HashSet::new(),
             turn_open: false,
             candidate: None,
@@ -241,7 +256,8 @@ impl Transcript {
 
     /// Replay is at the byte `at`: the process that wrote what came before
     /// the latest relaunch is gone, and so is what it had queued, and the
-    /// background agents its last turn left running. Its last answer is no
+    /// background agents its last turn left running; the jobs it started are
+    /// retired, as no notification of theirs will come (`jobs`). Its last answer is no
     /// candidate of what follows: no record past the relaunch ends that turn
     /// again, or says agents of it run. What a message of another's would have
     /// cleaned of it goes as it would (`replay`'s `assistant`): the calls left
@@ -253,12 +269,13 @@ impl Transcript {
         if !relaunch.reached && relaunch.at <= at {
             relaunch.reached = true;
             self.queues.restart();
+            self.jobs.retire();
             self.open_tools.clear();
             if let Some(candidate) = self.candidate.take() {
                 self.hooks.remove(&candidate.item_id);
             }
             if let Some(Terminal::Derived { agents, .. }) = self.terminal.as_mut() {
-                *agents = false;
+                *agents = 0;
             }
         }
     }
@@ -352,9 +369,19 @@ impl Answer for Transcript {
         record.quota = self.quota.clone();
         record.settlement = settlement;
         // Said of a turn that is over: one with a call open or a message queued
-        // is in flight, whatever its duration said.
-        record.agents_pending = settlement == Settlement::Settled
-            && matches!(self.terminal, Some(Terminal::Derived { agents: true, .. }));
+        // is in flight, whatever its duration said. The agents are the last
+        // boundary's word; the jobs are those Claude Code has said no end of.
+        if settlement == Settlement::Settled {
+            let agents = match self.terminal {
+                Some(Terminal::Derived { agents, .. }) => agents,
+                _ => 0,
+            };
+            record.pending = reading::Pending {
+                agents,
+                jobs: self.jobs.running(),
+                retired: self.jobs.retired(),
+            };
+        }
         Ok(record)
     }
 }

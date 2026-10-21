@@ -84,7 +84,7 @@ fn record_of(fake: &FakeAdapter, session: &str) -> Reading {
             } else {
                 Settlement::InFlight
             },
-            agents_pending: false,
+            pending: Default::default(),
         }),
     }
 }

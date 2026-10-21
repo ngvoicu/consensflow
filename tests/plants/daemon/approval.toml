@@ -375,10 +375,10 @@ find = '''
         for result in &record.results {
             self.tool_result(result, at, seq)?;
         }
-        if record.interrupt {'''
+        if let Some(job) = &record.job {'''
 replace = '''
         let _ = &record.results;
-        if record.interrupt {'''
+        if let Some(job) = &record.job {'''
 
 # --- end to end: through the real daemon and pane host ---
 

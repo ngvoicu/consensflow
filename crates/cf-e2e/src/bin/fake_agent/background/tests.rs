@@ -142,6 +142,8 @@ fn a_command_of_the_agents_is_run_by_a_shell_that_waits_for_it_or_detaches_it() 
         shell_script(true),
         "unset CF_PANE_PROCESS_OWNER; nohup \"$0\" \"$@\" >/dev/null 2>&1 & sleep 0.3"
     );
+    // One that `exec`s it is the job from then on.
+    assert_eq!(IN_PLACE, "exec \"$0\" \"$@\"");
 }
 
 #[cfg(unix)]

@@ -23,6 +23,7 @@ pub mod dispatcher;
 pub mod handoff;
 pub mod host;
 mod in_flight;
+mod ownership;
 mod record;
 mod resume;
 mod role_change;
@@ -36,6 +37,7 @@ mod stalls;
 mod stops;
 mod taken_back;
 mod transcripts;
+mod turn_end;
 mod unstarted;
 mod wake_ups;
 mod windows;
@@ -43,6 +45,7 @@ mod windows;
 pub use chief_switch::SwitchTo;
 pub use dispatcher::{require_chief_agent, require_open, Dispatcher, SwitchWhen};
 pub use stops::Unstopped;
+pub use turn_end::{Finished, Hold};
 pub use windows::{Activity, ActivityState};
 
 // The kit other crates' tests run the engine with: a failure in it is the

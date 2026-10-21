@@ -407,7 +407,7 @@ impl Window for ClaudeWindow {
                     record.settlement == Settlement::Settled,
                     record.failed,
                     record.quota.clone(),
-                    record.agents_pending,
+                    record.pending.agents > 0,
                 ),
                 Reading::Unknown(_) => (true, false, false, None, false),
             };

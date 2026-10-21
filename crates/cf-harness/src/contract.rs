@@ -18,7 +18,7 @@ use cf_proto::panes::Servers;
 use cf_proto::specs::Variant;
 use serde_json::Value;
 
-use crate::records::{Item, Options, Quota, Reading, Record, Role, Settlement};
+use crate::records::{Item, Options, Pending, Quota, Reading, Record, Role, Settlement};
 
 /// What waits, on the engine's one thread.
 pub type Work<'a, T> = Pin<Box<dyn Future<Output = T> + 'a>>;
@@ -410,11 +410,19 @@ impl Observed {
         }
     }
 
+    /// What the conversation's turn ended and left running: the window takes
+    /// input between turns, and its agent is woken as each ends.
+    pub fn pending(&self) -> Pending {
+        match self.reading.as_deref() {
+            Some(Reading::Known(record)) => record.pending,
+            Some(Reading::Unknown(_)) | None => Pending::default(),
+        }
+    }
+
     /// Whether the conversation's turn ended and left background agents or
-    /// workflows running: the window takes input between turns, and its agent
-    /// is woken when they end.
+    /// workflows running.
     pub fn agents_pending(&self) -> bool {
-        matches!(self.reading.as_deref(), Some(Reading::Known(record)) if record.agents_pending)
+        self.pending().agents > 0
     }
 }
 

@@ -111,7 +111,7 @@ fn a_stand_in_that_detaches_its_job_from_its_shell_escapes_the_ending_and_the_ru
 }
 
 #[test]
-fn a_stand_in_that_leaves_a_job_running_and_answers_has_its_task_done_the_job_ended_and_the_chief_told(
+fn a_stand_in_that_leaves_a_job_running_and_answers_has_its_task_done_and_its_windows_close_ends_the_job_and_tells_the_chief(
 ) -> Result {
     let log = Log::new("live finish test");
     let plan = leaving::plan(Who::StandIn);
@@ -119,7 +119,9 @@ fn a_stand_in_that_leaves_a_job_running_and_answers_has_its_task_done_the_job_en
     let text = finished.case.text();
     assert!(finished.case.held(), "{text}");
     assert!(
-        text.contains("ok   the command was ended with the result, and the chief told: T-1 done "),
+        text.contains(
+            "ok   the command was ended by the window's close after the result, and the chief told: T-1 done "
+        ),
         "{text}"
     );
     // The host listed the job as running while the turn was watched, with the command line
@@ -128,17 +130,17 @@ fn a_stand_in_that_leaves_a_job_running_and_answers_has_its_task_done_the_job_en
         text.contains(&format!("--background-job {} ", leaving::SECONDS)),
         "{text}"
     );
-    // The chief was told what was ended, in the note beside the result.
+    // The chief was told what the window closed with, in the note of its close: the turn's
+    // end ended nothing, and the close found the job.
     assert!(
         text.contains(
-            "what the chief was told of work the turn left:\n    T-1's turn left background work running. Ended: "
+            "what the chief was told of work the turn left:\n    T-1's window closed with background work still running: "
         ),
         "{text}"
     );
-    // The window's close found nothing left: the ending was first.
     assert!(
-        text.contains("(its pane.exit): none"),
-        "what the close ended is not what the exit lists: {text}"
+        !text.contains("(its pane.exit): none"),
+        "the close found the job the turn left: {text}"
     );
     assert!(!text.contains("FAIL"), "{text}");
     assert!(

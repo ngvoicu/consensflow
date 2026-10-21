@@ -13,13 +13,15 @@
 use cf_base::json::Keep;
 
 /// A block of a message's content: its type, the text it says, the ids that
-/// open and close a call, and what a result holds (all of it: it is the
-/// item's text).
+/// open and close a call, the tool a call is of, whether a result is an error,
+/// and what a result holds (all of it: it is the item's text).
 static BLOCK: Keep = Keep::Members(&[
     ("type", &Keep::Scalar),
     ("text", &Keep::Scalar),
     ("id", &Keep::Scalar),
+    ("name", &Keep::Scalar),
     ("tool_use_id", &Keep::Scalar),
+    ("is_error", &Keep::Scalar),
     ("content", &Keep::All),
 ]);
 
@@ -32,12 +34,29 @@ static MESSAGE: Keep = Keep::Members(&[
 ]);
 
 /// An attachment's type and hook, and the parts of a hook's context, which
-/// are texts.
+/// are texts; and of a message brought into a turn under way, what it was
+/// (`commandMode`) and its text.
 static ATTACHMENT: Keep = Keep::Members(&[
     ("type", &Keep::Scalar),
     ("hookEvent", &Keep::Scalar),
     ("content", &Keep::Items(&Keep::Scalar)),
+    ("commandMode", &Keep::Scalar),
+    ("prompt", &Keep::Scalar),
 ]);
+
+/// What a tool's result says besides its text: the id of the job a call that ran in
+/// the background started, the monitor a Monitor call armed and when it expires, and
+/// the job a TaskStop call stopped. A tool whose result is text, or a list, says none.
+static TOOL_USE_RESULT: Keep = Keep::Members(&[
+    ("backgroundTaskId", &Keep::Scalar),
+    ("taskId", &Keep::Scalar),
+    ("timeoutMs", &Keep::Scalar),
+    ("persistent", &Keep::Scalar),
+    ("task_id", &Keep::Scalar),
+]);
+
+/// Where a user's record came from, by its kind (`task-notification`).
+static ORIGIN: Keep = Keep::Members(&[("kind", &Keep::Scalar)]);
 
 /// A record.
 pub(super) static RECORD: Keep = Keep::Members(&[
@@ -51,6 +70,7 @@ pub(super) static RECORD: Keep = Keep::Members(&[
     ("timestamp", &Keep::All),
     ("message", &MESSAGE),
     ("attachment", &ATTACHMENT),
+    ("toolUseResult", &TOOL_USE_RESULT),
     ("operation", &Keep::Scalar),
     // What a queue operation names, whatever it is, and what a command printed.
     ("content", &Keep::All),
@@ -58,8 +78,11 @@ pub(super) static RECORD: Keep = Keep::Members(&[
     ("apiErrorStatus", &Keep::Scalar),
     ("error", &Keep::Scalar),
     ("promptSource", &Keep::Scalar),
+    ("turnOrigin", &Keep::Scalar),
+    ("origin", &ORIGIN),
     ("isMeta", &Keep::Scalar),
     ("isCompactSummary", &Keep::Scalar),
+    ("queueTranscriptOnly", &Keep::Scalar),
     ("level", &Keep::Scalar),
     ("durationMs", &Keep::Scalar),
     ("messageCount", &Keep::Scalar),

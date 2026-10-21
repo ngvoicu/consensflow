@@ -1,0 +1,796 @@
+# Turn-end's smallest rule (the chief's decision of 2026-10-21, on the advisor's answer of T-8;
+# dip-agentos's T-20, poker-lab's T-442 and its Monitor): what is uncertain never completes a task,
+# reuses a window or ends a process.
+#
+# - Claude's reader counts the jobs a turn left that Claude Code wakes its agent for: a command run
+#   in the background (`backgroundTaskId`) and a monitor (`taskId`, `timeoutMs`), until Claude
+#   Code's own word that each is over: a delivered notification whose head says so by its status,
+#   a TaskStop result that names it, or a monitor's own notice of its expiry at its time; a relaunch
+#   ConsensFlow proved retires the old process's jobs, not ended
+#   (`crates/cf-harness/src/claude/record/jobs.rs`, `project.rs`, `replay.rs`, `record.rs`).
+# - A worker's turn that ends with jobs or agents pending keeps its task working, its requester told
+#   once; the result is the final answer after the task's latest message, found by its receipt
+#   (`crates/cf-engine/src/turn_end.rs`, `role_change.rs`).
+# - Finish takes the last complete answer of any working task, once, ending nothing
+#   (`turn_end/finish.rs`; the API, the page and `cf task finish`).
+# - No other task's message goes into a window a task's message went into, whatever released that
+#   task; the window closes first, and a pinned window, a refused close or a task still in hand keeps
+#   the message waiting; a window before that was not proved gone has the other task go on in a new
+#   conversation (`crates/cf-engine/src/ownership.rs`, `windows.rs`, `deliveries.rs`,
+#   `role_change/prelude.rs`, `dispatcher.rs`).
+#
+# The rig's cases build the native `cf` from the sources as planted, so their plants say `builds`.
+# Every name holds `turn-end-min`, so `npm run plants:daemon -- "turn-end-min"` runs them all.
+
+[run]
+tem-reader = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::record"]
+tem-reading = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "shared::record::reading"]
+tem-launch-claude = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "launch", "claude::"]
+tem-engine-lib = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "turn_end"]
+tem-engine-role-change-lib = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "role_change"]
+tem-engine-turn-end = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "turn_end::"]
+tem-engine-final = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "final_answer::"]
+tem-engine-pending = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "pending_agents::"]
+tem-engine-background = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "background::"]
+tem-engine-sessions = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "sessions::"]
+tem-engine-deleted = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "deleted_sessions::"]
+tem-engine-the-dispatcher = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "the_dispatcher::"]
+tem-daemon-routes-task = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "routes::task"]
+tem-daemon-routes = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "api::routes::tests"]
+tem-daemon-page-held = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "page::tests::held"]
+tem-cf-board-task = ["cargo", "test", "--offline", "-p", "cf", "--lib", "board::task"]
+tem-page-finish = ["node", "app/node_modules/@playwright/test/cli.js", "test", "app/tests/core-page.spec.mjs", "-g", "Finish|background"]
+tem-rig-monitor = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_worker_that_waited_on_its_run_with_monitor_lost_it::"]
+tem-rig-still-going = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_workers_still_going_was_given_as_its_result::"]
+tem-rig-progress = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "results_that_began_with_the_workers_progress::"]
+tem-rig-reopen = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_task_stuck_working_after_its_window_was_resumed::a_claude_workers_answer_to_a_reopen_is_its_result_though_its_window_closed_with_its_job_and_monitor_running"]
+tem-rig-finish = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_task_waiting_on_a_job_that_never_ends_was_finished_by_the_chief::"]
+tem-rig-still-ran = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_job_that_still_ran_was_taken_for_ended::"]
+
+[[plant]]
+name = "turn-end-min reader: a command run in the background starts no job"
+meant = "a_turn_that_ends_with_a_job_running_in_the_background_is_settled_and_the_reading_says_it_is_pending"
+runs = ["tem-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/project.rs"
+find = '    if let Some(id) = text_id(field(result, "backgroundTaskId")) {'
+replace = '    if let Some(id) = text_id(field(result, "backgroundTaskId")).filter(|_| false) {'
+
+[[plant]]
+name = "turn-end-min reader: a monitor armed starts no job"
+meant = "a_real_monitor_and_its_command_are_pending_until_each_ends_and_events_end_neither"
+runs = ["tem-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/project.rs"
+find = '    let id = text_id(field(result, "taskId"))?;'
+replace = '    let id = text_id(field(result, "taskId")).filter(|_| false)?;'
+
+[[plant]]
+name = "turn-end-min rig: a worker waiting with Monitor on its run has its task done at its turn end, as T-442 had"
+meant = "a_worker_that_armed_monitor_on_its_run_goes_on_until_the_monitor_ends_and_its_report_is_the_result"
+runs = ["tem-rig-monitor"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/project.rs"
+find = '    let id = text_id(field(result, "taskId"))?;'
+replace = '    let id = text_id(field(result, "taskId")).filter(|_| false)?;'
+
+[[plant]]
+name = "turn-end-min reader: a monitor's event ends it"
+meant = "a_monitors_events_end_nothing_and_its_end_ends_it"
+runs = ["tem-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/jobs.rs"
+find = '        let over = head.status.is_some_and(|status| OVER.contains(&status));'
+replace = '        let over = head.status.is_some_and(|status| OVER.contains(&status)) || head.event.is_some();'
+
+[[plant]]
+name = "turn-end-min reader: a monitor's notice of its expiry ends it whenever it comes"
+meant = "a_monitors_own_notice_of_its_expiry_ends_it_at_its_time_and_the_same_words_before_it_end_nothing"
+runs = ["tem-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/jobs.rs"
+find = '                    .is_some_and(|(expires, at)| at >= expires - EXPIRY_SLACK_MS);'
+replace = '                    .is_some_and(|(expires, at)| at >= expires - EXPIRY_SLACK_MS || true);'
+
+[[plant]]
+name = "turn-end-min reader: a monitor never expires"
+meant = "a_real_monitor_and_its_command_are_pending_until_each_ends_and_events_end_neither"
+runs = ["tem-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/jobs.rs"
+find = '            head.status.is_none() && head.event.is_some_and(|event| event.starts_with(EXPIRED));'
+replace = '            false && head.status.is_none() && head.event.is_some_and(|event| event.starts_with(EXPIRED));'
+
+[[plant]]
+name = "turn-end-min reader: a notification that a job waits for input ends it"
+meant = "a_notification_that_a_job_waits_for_input_ends_none_and_the_job_ends_when_its_end_comes"
+runs = ["tem-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/jobs.rs"
+find = '        let over = head.status.is_some_and(|status| OVER.contains(&status));'
+replace = '        let over = head.status.is_none_or(|status| OVER.contains(&status));'
+
+[[plant]]
+name = "turn-end-min rig: a job Claude Code says waits for input is taken for ended, its wake-up for the result"
+meant = "a_job_claude_code_says_waits_for_input_still_runs_and_the_report_its_end_wakes_is_the_result"
+runs = ["tem-rig-still-ran"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/jobs.rs"
+find = '        let over = head.status.is_some_and(|status| OVER.contains(&status));'
+replace = '        let over = head.status.is_none_or(|status| OVER.contains(&status));'
+
+[[plant]]
+name = "turn-end-min reader: a job its agent stopped with TaskStop runs on"
+meant = "a_job_its_agent_stopped_has_ended_and_a_stop_of_another_ends_none"
+runs = ["tem-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/jobs.rs"
+find = '''
+        if let Some(job) = self.started.iter_mut().find(|job| &*job.id == id) {
+            job.state = State::Ended;
+        }'''
+replace = '        let _ = id;'
+
+[[plant]]
+name = "turn-end-min reader: a TaskStop result ends a job whatever call it answers"
+meant = "a_task_stop_whose_result_names_no_stop_call_or_is_an_error_ends_nothing"
+runs = ["tem-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/replay.rs"
+find = '            if self.task_stops.remove(&self.keys.of(call.as_ref())) {'
+replace = '            if self.task_stops.remove(&self.keys.of(call.as_ref())) || true {'
+
+[[plant]]
+name = "turn-end-min reader: a TaskStop result that is an error ends its job"
+meant = "a_task_stop_whose_result_names_no_stop_call_or_is_an_error_ends_nothing"
+runs = ["tem-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/project.rs"
+find = '''
+    if result.get("is_error") == Some(&Value::Bool(true)) {
+        return None;
+    }'''
+replace = ''
+
+[[plant]]
+name = "turn-end-min reader: a notification queued ends its jobs, though a human may have typed it"
+meant = "a_message_that_quotes_a_whole_notification_ends_no_job_and_only_claude_codes_own_does"
+runs = ["tem-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/replay.rs"
+find = '            Projected::Enqueue(content) => self.queues.enqueue(content.clone()?),'
+replace = '''
+            Projected::Enqueue(content) => {
+                let content = content.clone()?;
+                self.jobs.ended_by(&content, None);
+                self.queues.enqueue(content);
+            }'''
+
+[[plant]]
+name = "turn-end-min reader: the whole text of a notification names its jobs, body and all"
+meant = "what_a_notification_quotes_after_its_close_or_in_its_body_ends_no_job"
+runs = ["tem-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/jobs.rs"
+find = '''
+        let Some((place, value)) = field(line) else {
+            break;
+        };'''
+replace = '''
+        let Some((place, value)) = field(line) else {
+            continue;
+        };'''
+
+[[plant]]
+name = "turn-end-min reader: a summary ends the shell it marks still running"
+meant = "a_summary_ends_the_jobs_it_names_but_those_it_marks_running_and_none_it_does_not_name"
+runs = ["tem-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/jobs.rs"
+find = '            let named = head.ids.contains(&&*job.id) && !live.contains(&*job.id);'
+replace = '            let named = head.ids.contains(&&*job.id) || live.contains(&*job.id);'
+
+[[plant]]
+name = "turn-end-min reader: a relaunch keeps the old process's jobs running, and the reopened task is held for good"
+meant = "the_jobs_the_closed_process_left_are_retired_at_the_relaunch_and_not_ended"
+runs = ["tem-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record.rs"
+find = '''
+            self.queues.restart();
+            self.jobs.retire();'''
+replace = '            self.queues.restart();'
+
+[[plant]]
+name = "turn-end-min rig: a reopened worker whose window closed with its job and monitor running is held for good"
+meant = "a_claude_workers_answer_to_a_reopen_is_its_result_though_its_window_closed_with_its_job_and_monitor_running"
+runs = ["tem-rig-reopen"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record.rs"
+find = '''
+            self.queues.restart();
+            self.jobs.retire();'''
+replace = '            self.queues.restart();'
+
+[[plant]]
+name = "turn-end-min reader: a job retired at a relaunch is said to have ended"
+meant = "a_relaunch_retires_what_runs_and_a_later_word_of_its_end_settles_it"
+runs = ["tem-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/jobs.rs"
+find = '''
+            if job.state == State::Running {
+                job.state = State::Retired;
+            }'''
+replace = '''
+            if job.state == State::Running {
+                job.state = State::Ended;
+            }'''
+
+[[plant]]
+name = "turn-end-min reader: a user's record of the human's ends the jobs it quotes"
+meant = "claude_codes_own_notification_is_told_by_where_its_record_says_it_came_from_in_either_version"
+runs = ["tem-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/project.rs"
+find = '''
+    says(record.get("promptSource"), "system")
+        && (says(record.get("turnOrigin"), "task_notification")'''
+replace = '''
+    (says(record.get("promptSource"), "system") || true)
+        && (says(record.get("turnOrigin"), "task_notification") || true'''
+
+[[plant]]
+name = "turn-end-min reader: a human's message brought into a turn ends the jobs it quotes"
+meant = "a_real_notification_brought_into_a_turn_under_way_ends_its_job_and_its_queued_copy_ends_none"
+runs = ["tem-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/project.rs"
+find = '''
+        && says("type", "queued_command")
+        && says("commandMode", "task-notification");'''
+replace = '        && says("type", "queued_command");'
+
+[[plant]]
+name = "turn-end-min reader: a notification written to the transcript alone begins a turn"
+meant = "a_job_is_said_of_a_turn_that_is_over_and_of_none_that_is_open"
+runs = ["tem-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/replay.rs"
+find = '''
+        if record.transcript_only {
+            return Ok(());
+        }'''
+replace = ''
+
+[[plant]]
+name = "turn-end-min reader: a compaction's summary is a message to the member"
+meant = "the_summary_is_an_item_of_the_users_that_says_it_is_the_compactions_and_a_prompt_is_none"
+runs = ["tem-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/items.rs"
+find = '        entry.item.compaction = true;'
+replace = '        let _ = &mut entry;'
+
+[[plant]]
+name = "turn-end-min reader: the reading says no jobs pending"
+meant = "a_turn_that_ends_with_a_job_running_in_the_background_is_settled_and_the_reading_says_it_is_pending"
+runs = ["tem-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record.rs"
+find = '                jobs: self.jobs.running(),'
+replace = '                jobs: 0,'
+
+[[plant]]
+name = "turn-end-min reading: a reading is written with no word of its jobs"
+meant = "a_reading_is_written_as_node_wrote_one"
+runs = ["tem-reading"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/record/reading.rs"
+find = '    #[serde(rename = "jobsPending", skip_serializing_if = "is_none")]'
+replace = '    #[serde(skip)]'
+
+[[plant]]
+name = "turn-end-min: a turn that ends with its job running is its task's result, as dip-agentos's T-20 was"
+meant = "a_turn_that_ends_with_its_job_running_keeps_its_task_working_and_its_progress_is_no_result"
+runs = ["tem-engine-turn-end"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '''
+        let words = words_of(&answers.final_run);
+        if pending.total() > 0 {'''
+replace = '''
+        let words = words_of(&answers.final_run);
+        if pending.total() > 0 && false {'''
+
+[[plant]]
+name = "turn-end-min rig: a worker whose turn left its job running has its progress taken for its result"
+meant = "a_worker_that_left_a_job_running_goes_on_until_the_jobs_end_wakes_it_and_its_report_is_the_result"
+runs = ["tem-rig-still-going"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '''
+        let words = words_of(&answers.final_run);
+        if pending.total() > 0 {'''
+replace = '''
+        let words = words_of(&answers.final_run);
+        if pending.total() > 0 && false {'''
+
+[[plant]]
+name = "turn-end-min: agents pending hold no task"
+meant = "a_workers_turn_that_ends_with_agents_pending_keeps_its_task_working_and_the_requester_is_told_once"
+runs = ["tem-engine-pending"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '''
+        let words = words_of(&answers.final_run);
+        if pending.total() > 0 {'''
+replace = '''
+        let words = words_of(&answers.final_run);
+        if pending.jobs > 0 {'''
+
+[[plant]]
+name = "turn-end-min: the requester is told at every turn a held task's window ends"
+meant = "a_workers_turn_that_ends_with_agents_pending_keeps_its_task_working_and_the_requester_is_told_once"
+runs = ["tem-engine-pending"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '                held.told == Some(hold.task)'
+replace = '                false'
+
+[[plant]]
+name = "turn-end-min: the requester of a held task is never told it goes on"
+meant = "a_turn_that_ends_with_its_job_running_keeps_its_task_working_and_its_progress_is_no_result"
+runs = ["tem-engine-turn-end"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '                self.tell_it_goes_on(project, participant, &thread, pending, &words)?;'
+replace = '                let _ = (&thread, &words);'
+
+[[plant]]
+name = "turn-end-min: the note of a held task names no way out"
+meant = "a_workers_turn_that_ends_with_agents_pending_keeps_its_task_working_and_the_requester_is_told_once"
+runs = ["tem-engine-pending"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '"T-{number} goes on in the background: @{} ended its turn with {} running, which its harness wakes it for as each ends, and its result comes when a turn of its ends with none left. To take what it said last as the result now: cf task finish T-{number}, which does not end {what}. What it said:\n\n{words}",'
+replace = '"T-{number} goes on in the background: @{} ended its turn with {} running, which its harness wakes it for as each ends, and its result comes when a turn of its ends with none left; it does not end {what}. What it said:\n\n{words}",'
+
+[[plant]]
+name = "turn-end-min: a result says nothing of the jobs a relaunch retired"
+meant = "a_result_says_what_was_left_only_where_there_is_something_to_say"
+runs = ["tem-engine-lib"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '    if pending.retired > 0 {'
+replace = '    if pending.retired > usize::MAX - 1 {'
+
+[[plant]]
+name = "turn-end-min: the result is everything the member wrote in its turn, as Node gave it"
+meant = "the_final_answer_is_what_follows_the_last_tool_call_or_message_and_what_is_not_the_roles"
+runs = ["tem-engine-role-change-lib"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_change.rs"
+find = '            Role::Tool if !of_the_role => final_run.clear(),'
+replace = ''
+
+[[plant]]
+name = "turn-end-min: the result of a turn its job's end woke begins with the turn before"
+meant = "a_turn_that_was_woken_has_the_final_answer_of_its_last_turn_and_none_of_the_turn_before"
+runs = ["tem-engine-final"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_change.rs"
+find = '''
+                if !of_the_role {
+                    final_run.clear();
+                    last = None;
+                }'''
+replace = '''
+                if !of_the_role {
+                    last = None;
+                }'''
+
+[[plant]]
+name = "turn-end-min: an answer before the latest message answers it"
+meant = "a_message_to_the_member_after_its_answer_leaves_the_turn_unanswered_and_its_last_complete_answer_kept"
+runs = ["tem-engine-role-change-lib", "tem-engine-turn-end"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_change.rs"
+find = '''
+                    final_run.clear();
+                    last = None;'''
+replace = '                    final_run.clear();'
+
+[[plant]]
+name = "turn-end-min finish: a turn its job’s end woke leaves no complete answer to take"
+meant = "finish_takes_the_answer_before_a_turn_its_jobs_end_woke_that_has_written_nothing_yet"
+runs = ["tem-engine-turn-end"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_change.rs"
+find = '    (last.is_some() || complete_run.is_some()).then_some(Answers {'
+replace = '    last.is_some().then_some(Answers {'
+
+[[plant]]
+name = "turn-end-min: the task's latest message is found by any quotation of its header"
+meant = "the_result_is_what_follows_the_paste_its_arrival_was_proved_by_never_a_quotation_of_its_header"
+runs = ["tem-engine-turn-end"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '''
+        let receipt = latest.receipt.get("item").and_then(Value::as_str);
+        if let Some(found) = receipt.and_then(|item| {'''
+replace = '''
+        let receipt = latest.receipt.get("item").and_then(Value::as_str).filter(|_| false);
+        if let Some(found) = receipt.and_then(|item| {'''
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '            .position(|item| item.role == Role::User && item.text.contains(&marker)))'
+replace = '            .position(|item| item.text.contains(&marker)))'
+
+[[plant]]
+name = "turn-end-min: a turn the harness failed is a result"
+meant = "a_turn_that_ends_with_agents_pending_is_not_a_failure_and_a_failed_turn_is_whatever_it_left"
+runs = ["tem-engine-pending"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '''
+        if observed.failed {
+            let because = format!("@{}'s harness reported a failure", participant.handle);'''
+replace = '''
+        if observed.failed && false {
+            let because = format!("@{}'s harness reported a failure", participant.handle);'''
+
+[[plant]]
+name = "turn-end-min finish: a task whose reader says its turn is on is refused"
+meant = "finish_takes_the_last_complete_answer_of_a_task_whose_record_says_its_turn_is_still_on"
+runs = ["tem-engine-turn-end"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/finish.rs"
+find = '            .and_then(|answers| answers.complete_run)'
+replace = '''
+            .filter(|_| observed.settled)
+            .and_then(|answers| answers.complete_run)'''
+
+[[plant]]
+name = "turn-end-min finish: a held task is refused, as round 7 refused any not held"
+meant = "finish_takes_the_last_complete_answer_of_a_held_task_once_and_ends_nothing"
+runs = ["tem-engine-turn-end"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/finish.rs"
+find = '            .and_then(|answers| answers.complete_run)'
+replace = '''
+            .filter(|_| observed.pending().total() == 0)
+            .and_then(|answers| answers.complete_run)'''
+
+[[plant]]
+name = "turn-end-min finish: an answer before the task's latest message is taken"
+meant = "finish_is_refused_where_no_complete_answer_follows_the_latest_message_of_the_task"
+runs = ["tem-engine-turn-end"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/finish.rs"
+find = '        let run = answers_to_the_task(&items[start + 1..], &replacements)'
+replace = '''
+        let run = answers_to_the_task(&items[..start.min(0)], &replacements)
+            .or_else(|| answers_to_the_task(items, &replacements))'''
+
+[[plant]]
+name = "turn-end-min finish: a task that is no longer working is finished again"
+meant = "finish_takes_the_last_complete_answer_of_a_held_task_once_and_ends_nothing"
+runs = ["tem-engine-turn-end"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/finish.rs"
+find = '        if thread.task.state != "working" {'
+replace = '        if thread.task.state != "working" && thread.task.state != "done" {'
+
+[[plant]]
+name = "turn-end-min finish: the result says nothing of what still runs"
+meant = "finish_takes_the_last_complete_answer_of_a_held_task_once_and_ends_nothing"
+runs = ["tem-engine-turn-end"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/finish.rs"
+find = '            &leftovers(&participant.handle, pending, Some(by)),'
+replace = '            &leftovers(&participant.handle, pending, None),'
+
+[[plant]]
+name = "turn-end-min finish: the API answers before the engine reads the window"
+meant = "the_chief_asks_the_engine_to_finish_a_task_and_what_it_refuses_is_refused_in_its_words"
+runs = ["tem-daemon-routes-task"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/task.rs"
+find = '''
+        caller.participant.handle.clone(),
+    )
+    .await?;
+    (context.kick)();'''
+replace = '''
+        caller.participant.handle.clone(),
+    )
+    .await?;'''
+
+[[plant]]
+name = "turn-end-min finish: the API has no finish"
+meant = "a_task_route_is_the_task_and_the_word_after_it_whatever_the_method"
+runs = ["tem-daemon-routes"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/mod.rs"
+find = '''
+            "finish" => Self::Finish,
+'''
+replace = ''
+
+[[plant]]
+name = "turn-end-min finish: the page finishes nothing"
+meant = "a_lane_says_what_its_task_waits_on_while_it_does_and_finish_ends_the_wait"
+runs = ["tem-daemon-page-held"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/operations.rs"
+find = '        PageOperation::TaskFinish => tasks::finish(page, body).await,'
+replace = '        PageOperation::TaskFinish => tasks::resume(page, body).await,'
+
+[[plant]]
+name = "turn-end-min page: a lane never says what its task waits on"
+meant = "a_lane_says_what_its_task_waits_on_while_it_does_and_finish_ends_the_wait"
+runs = ["tem-daemon-page-held"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/page/board.rs"
+find = '''
+        if let Some(held) = page.engine.held(id) {
+            fields.insert("held".to_owned(), held);
+        }'''
+replace = ''
+
+[[plant]]
+name = "turn-end-min page: Finish is offered only for a task held for a background job, as round 7 offered it"
+meant = "offers Finish for any working task of a member, held or not, and for none that is not working"
+runs = ["tem-page-finish"]
+
+[[plant.edit]]
+file = "app/ui/core/board.js"
+find = '''    if (task.state === 'working' && task.assignee !== null && task.assignee !== 'chief') {'''
+replace = '''    if (this.#held !== null && task.state === 'working' && task.assignee !== null && task.assignee !== 'chief') {'''
+
+[[plant]]
+name = "turn-end-min cf: `cf task finish` is no command"
+meant = "finish_asks_the_board_to_finish_the_task_with_no_words_and_says_what_follows"
+runs = ["tem-cf-board-task"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/task.rs"
+find = '''
+const MOVES: [&str; 7] = [
+    "done", "accept", "cancel", "reopen", "pause", "resume", "finish",
+];'''
+replace = '''
+const MOVES: [&str; 7] = [
+    "done", "accept", "cancel", "reopen", "pause", "resume", "finished",
+];'''
+
+[[plant]]
+name = "turn-end-min cf: `cf task finish` says what still runs was ended"
+meant = "finish_promises_no_ending_and_says_the_jobs_and_agents_its_harness_counted_may_run_on"
+runs = ["tem-cf-board-task"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/task.rs"
+find = '''"T-{number} is finished: what @{who} said last is its result, which reaches your inbox. Finishing does not end what its turn left running ({left}): {they} may run on until its window closes, or past it where the host cannot tell what is the window's."'''
+replace = '"T-{number} is finished: what @{who} said last is its result, which reaches your inbox; what its turn left running ({left}) was ended{they:.0}."'
+
+[[plant]]
+name = "turn-end-min rig: the chief's `cf task finish` is refused for a task held by a job that never ends"
+meant = "the_chief_finishes_a_task_held_by_a_job_that_never_ends_with_its_workers_last_answer"
+runs = ["tem-rig-finish"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end/finish.rs"
+find = '            .and_then(|answers| answers.complete_run)'
+replace = '''
+            .filter(|_| observed.pending().total() == 0)
+            .and_then(|answers| answers.complete_run)'''
+
+[[plant]]
+name = "turn-end-min ownership: another task's message goes into a window a task's work runs in, as round 7's cancel let it"
+meant = "no_other_task_goes_into_a_window_an_earlier_task_left_work_in_whatever_released_it"
+runs = ["tem-engine-turn-end"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/ownership.rs"
+find = '        (owner != number).then_some(owner)'
+replace = '        (owner != number && false).then_some(owner)'
+
+[[plant]]
+name = "turn-end-min ownership: a window the human keeps open is closed for another task"
+meant = "a_window_the_human_keeps_open_keeps_the_next_task_waiting_and_what_wakes_in_it_is_no_ones_result"
+runs = ["tem-engine-turn-end"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/ownership.rs"
+find = '        } else if pinned && !hidden {'
+replace = '        } else if pinned && !hidden && false {'
+
+[[plant]]
+name = "turn-end-min ownership: a paused task's window is closed for another task, as round 7 closed it"
+meant = "a_paused_task_keeps_its_window_and_another_task_waits_for_it"
+runs = ["tem-engine-turn-end"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/ownership.rs"
+find = '            .filter(|thread| IN_HAND.contains(&thread.task.state.as_str()));'
+replace = '            .filter(|thread| IN_HAND.contains(&thread.task.state.as_str()) && thread.task.state != "paused");'
+
+[[plant]]
+name = "turn-end-min ownership: the requester of a task that waits for a window is told at every pass"
+meant = "a_window_the_human_keeps_open_keeps_the_next_task_waiting_and_what_wakes_in_it_is_no_ones_result"
+runs = ["tem-engine-turn-end"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/ownership.rs"
+find = '        if record.window.borrow().told_waiting == Some(number) {'
+replace = '        if record.window.borrow().told_waiting == Some(number) && false {'
+
+[[plant]]
+name = "turn-end-min ownership: the window's own task waits behind another task's message"
+meant = "a_paused_task_keeps_its_window_and_another_task_waits_for_it"
+runs = ["tem-engine-turn-end"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/role_change/prelude.rs"
+find = '''
+        let (Some(owner), Some(other)) = (owner, head.as_ref()) else {
+            return Ok(head);
+        };'''
+replace = '''
+        let (Some(owner), Some(other)) = (owner.filter(|_| false), head.as_ref()) else {
+            return Ok(head);
+        };'''
+
+[[plant]]
+name = "turn-end-min ownership: another task goes on in a conversation whose window's program was not proved gone"
+meant = "the_next_task_goes_on_in_a_new_conversation_where_the_window_before_closed_with_its_program_alive"
+runs = ["tem-engine-turn-end"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/ownership.rs"
+find = '''
+        if gone {
+            return Ok(Some(conversation));
+        }'''
+replace = '''
+        if gone || true {
+            return Ok(Some(conversation));
+        }'''
+
+[[plant]]
+name = "turn-end-min ownership: another task goes on in a conversation after a restart, which never saw its window close"
+meant = "after_a_restart_another_task_goes_on_in_a_new_conversation_and_the_same_task_in_its_own"
+runs = ["tem-engine-turn-end"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/ownership.rs"
+find = '''
+        let Some(before) = before else {
+            return Ok(found);
+        };'''
+replace = '''
+        let Some(before) = before.filter(|_| false) else {
+            return Ok(found);
+        };'''
+
+[[plant]]
+name = "turn-end-min ownership: a follow-up opens a new conversation though the window before was proved gone"
+meant = "continues_a_finished_tasks_session_with_after_the_same_window_comes_back_on_its_conversation"
+runs = ["tem-engine-sessions"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/ownership.rs"
+find = '''
+        if gone {
+            return Ok(Some(conversation));
+        }'''
+replace = '''
+        if gone && false {
+            return Ok(Some(conversation));
+        }'''
+
+[[plant]]
+name = "turn-end-min ownership: a session the human deleted forgets how its window ended"
+meant = "brings_a_deleted_session_back_when_a_follow_up_comes_with_after_its_window_opens_on_its_own_conversation_and_a_busy_session_still_refuses"
+runs = ["tem-engine-deleted"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''
+                    record.window.borrow_mut().last_exit =
+                        self.left_exits.borrow_mut().remove(&participant);'''
+replace = '                    let _ = self.left_exits.borrow_mut().remove(&participant);'
+
+[[plant]]
+name = "turn-end-min: a window that closes keeps what its task was held for"
+meant = "a_task_held_again_in_a_window_opened_again_is_told_again"
+runs = ["tem-engine-turn-end"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '        *record.held.borrow_mut() = HeldPart::default();'
+replace = '        let _ = HeldPart::default();'
+
+[[plant]]
+name = "turn-end-min ownership: a window knows no task of the message its launch began with"
+meant = "no_other_task_goes_into_a_window_an_earlier_task_left_work_in_whatever_released_it"
+runs = ["tem-engine-turn-end"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/windows.rs"
+find = '            part.owner = planned.owner;'
+replace = '            part.owner = planned.owner.filter(|_| false);'
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '            record.window.borrow_mut().owner.get_or_insert(number);'
+replace = '            let _ = number;'
+
+[[plant]]
+name = "turn-end-min ownership: the close of a window says what it ended to the newest task's requester"
+meant = "the_close_note_goes_to_whoever_gave_the_windows_task_not_to_a_task_queued_since"
+runs = ["tem-engine-background"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''
+                let given = match owner {
+                    Some(number) => self.seams.ledger.borrow().task(project.id, number)?,
+                    None => None,
+                };'''
+replace = '''
+                let _ = owner;
+                let given = self.seams.ledger.borrow().last_task(participant.id)?;'''

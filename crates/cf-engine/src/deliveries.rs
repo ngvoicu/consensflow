@@ -1,21 +1,20 @@
 //! What goes into a window and what comes back out: into a window, ready,
 //! `beginDelivery`, the hand-over; its arrival is watched for by `arrival`, and
 //! what it came to is settled here: tried again or failed. What was on its way
-//! when the daemon or the window went is `in_flight`'s. Out of a window, a
-//! worker's answer becomes its task's result. It owns the record's delivery
+//! when the daemon or the window went is `in_flight`'s; what a worker's answer
+//! comes to, out of a window, is `turn_end`'s. It owns the record's delivery
 //! part; the window's part it only reads.
 
 use std::rc::Rc;
 
-use cf_base::js;
-use cf_harness::contract::{Admission, Held, Observed, PaneHost, Readiness};
-use cf_ledger::{MessageView, NewNote, ParticipantView, ProjectView, TaskView};
+use cf_harness::contract::{Admission, Held, PaneHost, Readiness};
+use cf_ledger::{MessageView, NewNote, ProjectView, TaskView};
 use cf_proto::trace::WindowEvent;
 
-use crate::delivery_text::{delivery_text, marker_of};
+use crate::delivery_text::delivery_text;
 use crate::dispatcher::Dispatcher;
 use crate::record::Record;
-use crate::role_change::{answers_to_the_task, Prelude};
+use crate::role_change::Prelude;
 use crate::runtime::returning;
 use crate::seams::EngineError;
 
@@ -93,6 +92,14 @@ impl Dispatcher {
         if next.is_none_or(|next| next.id != message.id) {
             return Ok(());
         }
+        // Nor does another task's message go into a window that has a task's work
+        // (`ownership`): the step closes it first.
+        let participant = self.participant_of(record)?;
+        if let Some(participant) = &participant {
+            if self.barred(participant, record, &message).is_some() {
+                return Ok(());
+            }
+        }
         let held = match ready {
             Readiness::Ready => {
                 self.came_up(record);
@@ -128,6 +135,11 @@ impl Dispatcher {
         let begun = self.seams.ledger.borrow_mut().begin_delivery(message.id)?;
         if begun.message.kind == "task" {
             self.pay_with_words(record)?;
+        }
+        // A member's window that held no task's work holds this one's from now on.
+        let member = participant.is_some_and(|participant| participant.role != "chief");
+        if let Some(number) = begun.message.task_number.filter(|_| member) {
+            record.window.borrow_mut().owner.get_or_insert(number);
         }
         let text = delivery_text(&begun.message, &begun.carried);
         // A turn begins with this message: what the window's tree runs now came before it.
@@ -181,79 +193,6 @@ impl Dispatcher {
         record.delivery.borrow_mut().delivering = Some(delivering);
         self.changed();
         Ok(())
-    }
-
-    /// A worker's answer to its task's latest message finishes the task: the task
-    /// as it is once its result is recorded, where it was. Whatever the turn left
-    /// running is no part of it ([`Dispatcher::end_turn_work`]). An answer to the
-    /// note that says the worker its role is none of the task's
-    /// ([`answers_to_the_task`]): where nothing else answers, there is no result,
-    /// and nothing the turn left running is ended.
-    pub(crate) fn collect(
-        &self,
-        project: &ProjectView,
-        participant: &ParticipantView,
-        observed: &Observed,
-    ) -> Result<Option<TaskView>, EngineError> {
-        let task = self
-            .seams
-            .ledger
-            .borrow()
-            .active_task(participant.id, false)?;
-        let Some(thread) = task.filter(|thread| thread.task.state == "working") else {
-            return Ok(None);
-        };
-        // The last message pasted into the window (one that only rode in a
-        // paste, or that it read elsewhere, has no marker of its own).
-        let latest = self
-            .seams
-            .ledger
-            .borrow()
-            .last_pasted(participant.id, thread.task.id)?;
-        let Some(latest) = latest else {
-            return Ok(None);
-        };
-        let items = observed.items();
-        let marker = marker_of(latest.id);
-        let Some(start) = items.iter().position(|item| item.text.contains(&marker)) else {
-            return Ok(None);
-        };
-        if observed.failed {
-            let because = format!("@{}'s harness reported a failure", participant.handle);
-            self.fail_task(project, &thread.task, &because)?;
-            return Ok(None);
-        }
-        if !observed.settled {
-            return Ok(None);
-        }
-        // The turn is over once its last message is complete (one that
-        // ended in a tool call never is). The result is everything the
-        // member wrote in it, in order; a tool's output is not the member's
-        // words, and nor are the progress notes a harness marks as its
-        // commentary: its final answer is the report.
-        let replacements = self.seams.ledger.borrow().role_notes_to(participant.id)?;
-        let written = answers_to_the_task(&items[start + 1..], &replacements);
-        if !written.last().is_some_and(|item| item.complete) {
-            return Ok(None);
-        }
-        let words: Vec<&str> = written
-            .iter()
-            .filter(|item| !item.commentary)
-            .map(|item| js::trim(&item.text))
-            .filter(|text| !text.is_empty())
-            .collect();
-        let body = if words.is_empty() {
-            "(the agent ended its turn without a written answer)".to_owned()
-        } else {
-            words.join("\n\n")
-        };
-        let moved =
-            self.seams
-                .ledger
-                .borrow_mut()
-                .record_result(project.id, thread.task.number, &body)?;
-        self.changed();
-        Ok(Some(moved.task))
     }
 
     /// What a window was to receive goes back to its queue with its attempt:
@@ -344,7 +283,7 @@ impl Dispatcher {
         Ok(())
     }
 
-    fn fail_task(
+    pub(crate) fn fail_task(
         &self,
         project: &ProjectView,
         task: &TaskView,

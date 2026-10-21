@@ -25,6 +25,9 @@ impl Transcript {
         match record {
             Projected::Other => {}
             Projected::Hook(hook) => self.hook_context(hook, seq)?,
+            // Claude Code's notification brought into a turn under way: the jobs it says are
+            // over have ended. Queued, it ended none: a message a human typed is queued alike.
+            Projected::Notified(text, at) => self.jobs.ended_by(text, *at),
             Projected::Enqueue(content) => self.queues.enqueue(content.clone()?),
             Projected::Dequeue => self.queues.dequeue(),
             Projected::PopAll(content) => self.queues.pop_all(content.clone()?),
@@ -91,9 +94,12 @@ impl Transcript {
 
         for block in &record.blocks {
             match block {
-                Block::Use(id) => {
+                Block::Use(id, task_stop) => {
                     let call = self.keys.of(id.as_ref());
                     if call.truthy() {
+                        if *task_stop {
+                            self.task_stops.insert(call.clone());
+                        }
                         self.open_tools.insert(call);
                     }
                 }
@@ -160,11 +166,32 @@ impl Transcript {
     /// no model runs after (the long run of 2026-10-19, a chief at rest after
     /// a `/compact` read at work for 80 minutes). Departs from Node's reader,
     /// which read the output as a prompt too.
+    ///
+    /// A result that says its call started a job in the background (a command, a
+    /// monitor) starts it, and a TaskStop call's result that says it stopped one ends
+    /// it; a notification Claude Code takes as a turn of its own ends the jobs its head
+    /// says are over (`jobs`): its own, which the record says it is, and no message
+    /// that quotes one. One Claude Code wrote to the transcript alone
+    /// (`queueTranscriptOnly`) begins no turn and answers nothing: it is an item of the
+    /// harness's, so that the answer the turn ended with is still its last words. The
+    /// summary a compaction writes is marked so (`Item::compaction`): no message to the
+    /// agent, and no end of an answer.
     fn user(&mut self, record: &User, place: Option<usize>, seq: usize) -> Result<(), String> {
         let number = Value::from(seq);
         let at = record.at.as_ref().unwrap_or(&number);
         for result in &record.results {
             self.tool_result(result, at, seq)?;
+        }
+        if let Some(job) = &record.job {
+            self.jobs.started(Arc::clone(&job.id), job.expires_at);
+        }
+        if let Some((call, job)) = &record.stopped {
+            if self.task_stops.remove(&self.keys.of(call.as_ref())) {
+                self.jobs.stopped(job);
+            }
+        }
+        if record.notification {
+            self.jobs.ended_by(&record.text, record.at_ms);
         }
         if record.interrupt {
             let id = id_of(record.uuid.as_ref(), "claude user", seq)?;
@@ -186,7 +213,13 @@ impl Transcript {
             .as_deref()
             .is_some_and(|parent| self.follows_its_command(parent));
         let id = id_of(record.uuid.as_ref(), "claude user", seq)?;
-        self.items.push(id, Role::User, &record.text, at, seq);
+        if record.summary {
+            self.items.summary(id, &record.text, at, seq);
+        } else if record.transcript_only {
+            self.items.push(id, Role::Custom, &record.text, at, seq);
+        } else {
+            self.items.push(id, Role::User, &record.text, at, seq);
+        }
         if ends {
             self.ended_natively();
             return Ok(());
@@ -195,6 +228,11 @@ impl Transcript {
             return Ok(());
         }
         self.queues.consumed(&record.text, record.queued);
+        // Written to the transcript alone, it runs no turn: the turn is as it was (2.1.292
+        // writes the jobs a resumed session's last process left so, and waits at its prompt).
+        if record.transcript_only {
+            return Ok(());
+        }
         self.open_tools.clear();
         self.hooks.clear();
         self.active_assistant = None;
@@ -256,8 +294,8 @@ impl Transcript {
     }
 
     /// The boundary record that says a turn that answered is over, by its
-    /// uuid when that is text, and the agents it says are still running when it
-    /// says any. A boundary that says nothing of them (a stop hook's summary)
+    /// uuid when that is text, and how many agents it says are still running
+    /// when it says. A boundary that says nothing of them (a stop hook's summary)
     /// leaves what an earlier one of the same turn said.
     fn boundary(&mut self, boundary: &Boundary) {
         let Some(candidate) = &self.candidate else {
@@ -269,7 +307,10 @@ impl Transcript {
         self.turn_open = false;
         // A record of the turn that follows is the turn's own: the terminal is
         // none until its boundary, so what an earlier one said is this turn's.
-        let said = matches!(self.terminal, Some(Terminal::Derived { agents: true, .. }));
+        let said = match self.terminal {
+            Some(Terminal::Derived { agents, .. }) => agents,
+            _ => 0,
+        };
         self.terminal = Some(Terminal::Derived {
             item_id,
             uuid: boundary.uuid.clone(),

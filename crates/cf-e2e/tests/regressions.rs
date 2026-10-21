@@ -36,6 +36,8 @@ mod a_command_that_goes_on_reporting_held_a_devin_workers_result;
 mod a_command_that_never_exits_held_a_workers_result;
 #[path = "regressions/a_compact_typed_into_an_idle_chief_held_a_workers_result.rs"]
 mod a_compact_typed_into_an_idle_chief_held_a_workers_result;
+#[path = "regressions/a_job_that_still_ran_was_taken_for_ended.rs"]
+mod a_job_that_still_ran_was_taken_for_ended;
 #[path = "regressions/a_pause_a_hung_worker_ignored_stranded_its_task.rs"]
 mod a_pause_a_hung_worker_ignored_stranded_its_task;
 #[path = "regressions/a_result_delivered_twice_to_a_devin_chief.rs"]
@@ -46,6 +48,12 @@ mod a_result_pasted_again_after_its_window_went;
 mod a_resumed_devin_worker_skipped_every_call;
 #[path = "regressions/a_task_stuck_working_after_its_window_was_resumed.rs"]
 mod a_task_stuck_working_after_its_window_was_resumed;
+#[path = "regressions/a_task_waiting_on_a_job_that_never_ends_was_finished_by_the_chief.rs"]
+mod a_task_waiting_on_a_job_that_never_ends_was_finished_by_the_chief;
+#[path = "regressions/a_worker_that_waited_on_its_run_with_monitor_lost_it.rs"]
+mod a_worker_that_waited_on_its_run_with_monitor_lost_it;
+#[path = "regressions/a_workers_still_going_was_given_as_its_result.rs"]
+mod a_workers_still_going_was_given_as_its_result;
 // The stand-in's status line is a `bash`.
 #[cfg(unix)]
 #[path = "regressions/claude_status_line_taken_for_background_work.rs"]
@@ -75,6 +83,8 @@ mod idle_compaction_read_as_a_cut_turn;
 mod mcp_servers_held_a_workers_result;
 #[path = "regressions/opencode_updated_itself_to_2.rs"]
 mod opencode_updated_itself_to_2;
+#[path = "regressions/results_that_began_with_the_workers_progress.rs"]
+mod results_that_began_with_the_workers_progress;
 #[path = "regressions/resume_of_a_chief_with_no_turn.rs"]
 mod resume_of_a_chief_with_no_turn;
 #[path = "regressions/resume_of_a_turn_the_daemon_never_copied.rs"]

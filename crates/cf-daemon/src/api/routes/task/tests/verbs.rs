@@ -5,6 +5,7 @@
 //! what the real API answered the same request (the probe that printed those
 //! answers went with Node's API).
 
+use cf_base::refusal::Refusal;
 use hyper::Method;
 use serde_json::json;
 
@@ -20,7 +21,7 @@ async fn the_body_is_read_before_it_is_decided_who_may_do_what() {
     let number = working_task(&scene);
     let huge = "x".repeat(3 * 1024 * 1024);
     for verb in [
-        "done", "accept", "pause", "resume", "reopen", "cancel", "tell",
+        "done", "accept", "pause", "resume", "reopen", "cancel", "finish", "tell",
     ] {
         // zeus did not give the task and, but for `done`, is no one to move it.
         for (body, status, code) in [
@@ -43,7 +44,9 @@ async fn the_body_is_read_before_it_is_decided_who_may_do_what() {
 async fn a_window_that_is_no_coordinator_is_told_which_verb_it_may_not() {
     let scene = scene();
     let number = working_task(&scene);
-    for verb in ["accept", "pause", "resume", "reopen", "cancel", "tell"] {
+    for verb in [
+        "accept", "pause", "resume", "reopen", "cancel", "finish", "tell",
+    ] {
         let said = post(&scene, &scene.zeus, &format!("{number}/{verb}"), "{}").await;
         assert_eq!(
             refused(&said),
@@ -171,6 +174,55 @@ async fn the_chief_moves_a_task_with_the_verbs_and_each_wakes_the_dispatcher_onc
         )
     );
     assert_eq!(scene.kicks.get(), 3);
+}
+
+#[tokio::test]
+async fn the_chief_asks_the_engine_to_finish_a_task_and_what_it_refuses_is_refused_in_its_words() {
+    // Only the engine reads the window: it is asked, in the chief's name, and the route
+    // answers with the task done, the dispatcher woken for what follows.
+    let scene = scene();
+    let number = working_task(&scene);
+    let (status, said) = post(&scene, &scene.chief, &format!("{number}/finish"), "").await;
+    assert_eq!(status, 200, "{said}");
+    assert_eq!(
+        said.as_object().unwrap().keys().collect::<Vec<_>>(),
+        ["task", "jobs", "agents"]
+    );
+    assert_eq!(said["task"]["number"], number);
+    assert_eq!(said["task"]["state"], "done");
+    assert_eq!((&said["jobs"], &said["agents"]), (&json!(0), &json!(0)));
+    assert_eq!(
+        scene.finishings.asked.borrow().clone(),
+        [(scene.project.id, number, "chief".to_owned())]
+    );
+    assert_eq!(scene.kicks.get(), 1);
+
+    // What the engine refuses is said as it said it, with its status, and wakes nothing.
+    let words = format!(
+        "cannot finish T-{number}: @zeus has written no complete answer since its latest message about it; wait for one, or cancel it"
+    );
+    *scene.finishings.refusal.borrow_mut() =
+        Some(Refusal::with_status("no-answer", words.clone(), 409));
+    let said = post(&scene, &scene.chief, &format!("{number}/finish"), "{}").await;
+    assert_eq!(refused(&said), (409, "no-answer", words.as_str()));
+    assert_eq!(scene.kicks.get(), 1);
+
+    // A task there is none of is the route's to refuse, before the engine is asked.
+    let said = post(&scene, &scene.chief, "99/finish", "").await;
+    assert_eq!(said.1["error"], "unknown-task");
+    assert_eq!(scene.finishings.asked.borrow().len(), 2);
+
+    // The jobs and agents its harness still counted, which finishing ends none of, are
+    // counted, for `cf` to say.
+    *scene.finishings.refusal.borrow_mut() = None;
+    scene.finishings.jobs.set(1);
+    scene.finishings.agents.set(2);
+    let (status, said) = post(&scene, &scene.chief, &format!("{number}/finish"), "").await;
+    assert_eq!(
+        (status, &said["jobs"], &said["agents"]),
+        (200, &json!(1), &json!(2)),
+        "{said}"
+    );
 }
 
 #[tokio::test]

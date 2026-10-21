@@ -663,11 +663,22 @@ fn the_words_that_first_reach_a_window_for_a_task_paused_before_they_came_answer
     context.pass().unwrap();
     assert_eq!(context.host.inputs(), Vec::<Value>::new());
 
-    // The words that resume T-2 are the first it is given, a window at rest
-    // taking them: no turn of the window was ever for T-2's pause to stop.
+    // The words that resume T-2 do not go into T-1's window, which stays for T-1's
+    // resumption (`ownership`); once T-1 is given up, the window closes, and they are
+    // the first a window of T-2's own is given: no turn of it was ever for T-2's
+    // pause to stop.
     context.resume_task(project, 2, "Go on");
     context.pass().unwrap();
     context.pass().unwrap();
+    assert_eq!(context.task(project, 2).task.state, "queued");
+    context
+        .ledger
+        .borrow_mut()
+        .cancel_task(project, 1, "chief")
+        .unwrap();
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
     assert_eq!(context.task(project, 2).task.state, "working");
     context.pass().unwrap();
     assert_eq!(
@@ -687,11 +698,21 @@ fn a_stop_paid_for_one_task_the_window_held_never_hides_the_stop_of_the_task_it_
     context.pause_task(project, 1);
     context.adapter.answer("zeus", "Stopped");
     context.pass().unwrap();
-    // The words of T-2 go in, and the window works on it.
+    // The words of T-2 wait for a window of their own: T-1's stays for its resumption
+    // (`ownership`). T-1 is given up, its window closes, and T-2 is worked on in the
+    // window that opens.
     context.pass().unwrap();
-    context.pass().unwrap();
-    assert_eq!(context.task(project, 2).task.state, "working");
+    assert_eq!(context.task(project, 2).task.state, "queued");
     assert_eq!(context.task(project, 1).task.state, "paused");
+    context
+        .ledger
+        .borrow_mut()
+        .cancel_task(project, 1, "chief")
+        .unwrap();
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(context.task(project, 2).task.state, "working");
     assert_eq!(context.host.inputs(), Vec::<Value>::new());
 
     // T-2 is paused in its turn: its stop is owed, whatever was paid for T-1.

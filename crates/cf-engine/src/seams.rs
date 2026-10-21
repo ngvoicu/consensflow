@@ -13,7 +13,7 @@ use cf_base::refusal::Refusal;
 use cf_harness::contract::{Adapter, Agent, LaunchId, Pane, Records, Work};
 use cf_harness::seams::Time;
 use cf_ledger::{Ledger, LedgerError, ParticipantView, ProjectView};
-use cf_proto::panes::{Ending, Servers};
+use cf_proto::panes::Servers;
 use cf_proto::specs::AppSpecs;
 use cf_proto::trace::TraceLine;
 
@@ -205,8 +205,11 @@ impl Limits {
 
 /// What a worker's window started that outlives its turn, which only the pane
 /// host can see: it keeps each pane's processes, and the daemon tells it where
-/// a turn begins. It says nothing it cannot know: a host that does not answer
-/// has no background work to tell of.
+/// a turn begins, so that what a window's close and its program's exit say it left
+/// running is the turns' work and not the harness's. Nothing is asked to end: a
+/// turn's end ends nothing (`turn_end`), and a close ends the window's tree. It
+/// says nothing it cannot know: a host that does not answer has no background work
+/// to tell of.
 pub trait BackgroundWork {
     /// A turn is about to begin in `pane`: whatever its tree runs now came
     /// before it, and is no turn's work. `servers` says how the window's harness
@@ -214,14 +217,6 @@ pub trait BackgroundWork {
     /// is: what the host can tell is its own, and what that starts, is no turn's
     /// work either, however late it began.
     fn mark<'a>(&'a self, pane: &'a Pane, servers: Servers, harness: &'a str) -> Work<'a, ()>;
-    /// Ends what `pane`'s turn left running, the window staying open: the host
-    /// chooses what, once, from all of what it can prove the turn's, and ends it and
-    /// what it started meanwhile. It says what it ended and what of it it could not
-    /// end, and nothing of what it cannot tell the turn's from the harness's, which it
-    /// leaves alone; an older host, or one that has no such window, says nothing was
-    /// ended. None where it gave no answer: it may be ending still, which is no word
-    /// that it ended.
-    fn end<'a>(&'a self, pane: &'a Pane) -> Work<'a, Option<Ending>>;
 }
 
 /// Everything the engine is made with: each seam shared, so a second

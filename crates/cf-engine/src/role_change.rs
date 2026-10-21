@@ -391,24 +391,73 @@ fn body_of(instructions: &str) -> String {
     format!("{OPENING}\n\n{instructions}")
 }
 
-/// The assistant's items among `items`, a member's record after its brief, that
-/// answer the task: not those of a turn that answers a replacement of the role.
-/// A user's message that says a role begins a turn whose words are the window's
-/// word of its role and none of its task's, and the next user's message ends it.
-/// `replacements` are the ids of the replacements the ledger knows were written
-/// to the member; a message is one by the id of its header, and not by any words.
-pub(crate) fn answers_to_the_task<'a>(items: &'a [Item], replacements: &[i64]) -> Vec<&'a Item> {
+/// What a member wrote in answer to its task: where its answer ends, and its final
+/// answer.
+pub(crate) struct Answers<'a> {
+    /// The last assistant item that answers the task: the answer is over when it is
+    /// complete. None where a message to the member came after it (a notification of
+    /// its harness's that woke a turn), whose answer is still to come.
+    pub(crate) last: Option<&'a Item>,
+    /// What the member wrote after the last tool call or message it was given: its
+    /// final answer, in the items it was written in. What it wrote before is the
+    /// progress of its turn, which stays in the transcript, and so is all it wrote
+    /// of a turn that ended before, which a job's or an agent's end woke it to go on
+    /// after.
+    pub(crate) final_run: Vec<&'a Item>,
+    /// The final answer as it stood at the last complete item the member wrote: what
+    /// Finish takes where the turn after it is still under way (a call open, a
+    /// notification's turn begun). None where it wrote none complete.
+    pub(crate) complete_run: Option<Vec<&'a Item>>,
+}
+
+/// The answer to the task in `items`, a member's record after its latest message: what
+/// is of a turn that answers a replacement of the role is not, and none where nothing
+/// else answers. Where a message to the member came after its last words, what answers
+/// that is still to come (no `last`), and the last complete answer is kept all the
+/// same, for Finish to take. A user's message that says a role begins a turn whose words are the
+/// window's word of its role and none of its task's, and the next user's message ends
+/// it; it ends no answer that came before it, and a tool's output in it ends none
+/// either. `replacements` are the ids of the replacements the ledger knows were written
+/// to the member; a message is one by the id of its header, and not by any words. The
+/// summary a compaction writes in the user's place is no message to the member at all,
+/// and changes nothing of this: Claude Code compacts a conversation that is at rest,
+/// after the answer (Astra's review of round 1). What the harness wrote in the
+/// conversation itself (a hook's context, a notification it wrote to its record alone)
+/// is no message to the member and no answer.
+pub(crate) fn answers_to_the_task<'a>(
+    items: &'a [Item],
+    replacements: &[i64],
+) -> Option<Answers<'a>> {
     let mut of_the_role = false;
-    let mut answers = Vec::new();
-    for item in items {
+    let mut last = None;
+    let mut final_run = Vec::new();
+    let mut complete_run = None;
+    for item in items.iter().filter(|item| !item.compaction) {
         match item.role {
             Role::User => {
                 of_the_role =
                     header_id(&item.text).is_some_and(|message| replacements.contains(&message));
+                // A message to the member (its own, or its harness's notification) is
+                // answered by what follows it, if anything does.
+                if !of_the_role {
+                    final_run.clear();
+                    last = None;
+                }
             }
-            Role::Assistant if !of_the_role => answers.push(item),
+            Role::Tool if !of_the_role => final_run.clear(),
+            Role::Assistant if !of_the_role => {
+                last = Some(item);
+                final_run.push(item);
+                if item.complete {
+                    complete_run = Some(final_run.clone());
+                }
+            }
             _ => {}
         }
     }
-    answers
+    (last.is_some() || complete_run.is_some()).then_some(Answers {
+        last,
+        final_run,
+        complete_run,
+    })
 }

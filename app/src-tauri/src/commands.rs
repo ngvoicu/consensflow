@@ -220,6 +220,7 @@ const DAEMON_OPERATIONS: &[&str] = &[
     "task.cancel",
     "task.pause",
     "task.reassign",
+    "task.finish",
     "task.resume",
     "tasks.delete",
     "message.read",

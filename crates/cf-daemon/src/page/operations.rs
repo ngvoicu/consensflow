@@ -47,6 +47,7 @@ pub(super) async fn serve(page: &Page, operation: PageOperation, body: Value) ->
         PageOperation::TaskCancel => tasks::cancel(page, body).await,
         PageOperation::TaskPause => tasks::pause(page, body).await,
         PageOperation::TaskReassign => tasks::reassign(page, body).await,
+        PageOperation::TaskFinish => tasks::finish(page, body).await,
         PageOperation::TaskResume => tasks::resume(page, body).await,
         PageOperation::TasksDelete => tasks::delete(page, body).await,
         PageOperation::MessageRead => messages::read(page, body).await,

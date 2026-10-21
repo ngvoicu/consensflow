@@ -53,13 +53,57 @@ pub struct Record {
     pub failed: bool,
     pub quota: Option<Arc<Quota>>,
     pub settlement: Settlement,
-    /// The turn is settled and left background agents or workflows running,
-    /// which its harness says on the record that ends it (Claude Code's counts).
-    /// The window takes input between turns, and an agent's end wakes a turn of
-    /// its own: a task whose turn ended so is not done. Said only when true: no
-    /// reading Node wrote has it.
-    #[serde(skip_serializing_if = "std::ops::Not::not")]
-    pub agents_pending: bool,
+    /// What the settled turn left running that its harness wakes its agent for as
+    /// each ends: said only for what there is, and no reading Node wrote has it.
+    #[serde(flatten)]
+    pub pending: Pending,
+}
+
+/// What a settled turn left running that its harness wakes its agent for as each
+/// ends (Claude Code does). The window takes input between turns, and the end of one
+/// wakes a turn of its own: a task whose turn ended so is not done.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Pending {
+    /// The background agents and workflows, as the harness counts them on the record
+    /// that ends the turn, and again on the record of each turn after it: what it says
+    /// last is how many run. Said as `agentsPending: true` where there are any, as it
+    /// was before the count was kept.
+    #[serde(
+        rename = "agentsPending",
+        serialize_with = "any",
+        skip_serializing_if = "is_none"
+    )]
+    pub agents: usize,
+    /// The jobs a tool call started in the background (a command, a monitor) and the
+    /// harness has said no end of, as the reader counts them from the records that
+    /// start and end each (`claude::record::jobs`).
+    #[serde(rename = "jobsPending", skip_serializing_if = "is_none")]
+    pub jobs: usize,
+    /// The jobs of a process ConsensFlow saw gone before it opened the conversation
+    /// again, of which no end was said: no longer waited on, and not known to have
+    /// ended (a job its shell detached can outlive its window).
+    #[serde(rename = "jobsRetired", skip_serializing_if = "is_none")]
+    pub retired: usize,
+}
+
+impl Pending {
+    /// How many it waits on, of agents and jobs: what keeps a task working.
+    pub fn total(self) -> usize {
+        self.agents.saturating_add(self.jobs)
+    }
+}
+
+/// Whether a count is none, for a reading that leaves a count of none unsaid.
+#[allow(clippy::trivially_copy_pass_by_ref)]
+fn is_none(count: &usize) -> bool {
+    *count == 0
+}
+
+/// A count said as whether there are any.
+#[allow(clippy::trivially_copy_pass_by_ref)]
+fn any<S: Serializer>(count: &usize, serializer: S) -> Result<S::Ok, S::Error> {
+    serializer.serialize_bool(*count > 0)
 }
 
 impl Record {
@@ -72,7 +116,7 @@ impl Record {
             failed: false,
             quota: None,
             settlement: Settlement::Unknown,
-            agents_pending: false,
+            pending: Pending::default(),
         }
     }
 }
@@ -125,6 +169,10 @@ pub struct Item {
     pub at: Option<Value>,
     /// A progress note, as Codex marks one: said only when true.
     pub commentary: bool,
+    /// The summary a compaction writes in the user's place (Claude Code's
+    /// `isCompactSummary`): the harness's own, and no message of the user's. Never
+    /// said: a reading is the one Node wrote, which read it as the user's.
+    pub compaction: bool,
 }
 
 impl Serialize for Item {
@@ -210,6 +258,7 @@ mod tests {
             complete: true,
             at: Some(json!("2026-09-06T17:27:06.000Z")),
             commentary: false,
+            compaction: false,
         });
         record.items.push(Item {
             id: Arc::from("msg_2"),
@@ -218,11 +267,25 @@ mod tests {
             complete: false,
             at: None,
             commentary: true,
+            compaction: false,
         });
         record.settlement = Settlement::InFlight;
         assert_eq!(
             serde_json::to_string(&Reading::Known(record)).unwrap(),
             r#"{"items":[{"id":"msg_1","role":"assistant","text":"Done.","complete":true,"at":"2026-09-06T17:27:06.000Z"},{"id":"msg_2","role":"assistant","text":"Reading the diff","complete":false,"commentary":true}],"inFlight":false,"asking":false,"failed":false,"quota":null,"settlement":{"state":"in-flight"}}"#
+        );
+        // What a settled turn left running is said only where there is some: agents as
+        // they always were, the jobs and the retired jobs by their counts.
+        let mut pending = Record::new();
+        pending.pending = Pending {
+            agents: 2,
+            jobs: 1,
+            retired: 3,
+        };
+        let written = serde_json::to_string(&Reading::Known(pending)).unwrap();
+        assert!(
+            written.ends_with(r#""agentsPending":true,"jobsPending":1,"jobsRetired":3}"#),
+            "{written}"
         );
         assert_eq!(
             serde_json::to_string(&Reading::unreadable("no codex rollout for s")).unwrap(),

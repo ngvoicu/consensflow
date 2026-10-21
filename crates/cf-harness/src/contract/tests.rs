@@ -46,6 +46,7 @@ fn ending(settlement: Settlement, roles: &[Role]) -> Says {
             complete: true,
             at: None,
             commentary: false,
+            compaction: false,
         })
         .collect();
     Says(Reading::Known(record))
