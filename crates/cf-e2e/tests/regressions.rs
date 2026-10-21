@@ -44,6 +44,8 @@ mod a_result_delivered_twice_to_a_devin_chief;
 mod a_result_pasted_again_after_its_window_went;
 #[path = "regressions/a_resumed_devin_worker_skipped_every_call.rs"]
 mod a_resumed_devin_worker_skipped_every_call;
+#[path = "regressions/a_switched_chief_was_sent_to_answer_a_question_on_a_cancelled_task.rs"]
+mod a_switched_chief_was_sent_to_answer_a_question_on_a_cancelled_task;
 #[path = "regressions/a_task_stuck_working_after_its_window_was_resumed.rs"]
 mod a_task_stuck_working_after_its_window_was_resumed;
 #[path = "regressions/a_trust_question_after_git_init_stopped_every_launch.rs"]
