@@ -920,3 +920,31 @@ find = '''
 replace = '''
     std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o644);
 '''
+
+[[plant]]
+name = "failure reason: engine-ask takes every message of the thread for what was pasted"
+meant = "what_the_window_was_given_is_its_own_messages_not_the_threads_others"
+runs = ["failure-reason-ask"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/testing/ask.rs"
+find = '''
+        .filter(|message| message.get("recipient").and_then(Value::as_str) == Some(recipient))
+'''
+replace = '''
+        .filter(|_| !recipient.is_empty())
+'''
+
+[[plant]]
+name = "failure reason: a count that ends a model's id, or a list of codes, folds"
+meant = "a_model_whose_id_ends_in_a_count_is_another_failure"
+runs = ["failure-reason-told", "failure-reason-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown.rs"
+find = '''
+                r"\b(\d{1,3}(?:,\d{3})+)\s+(?:tokens?|chars?|characters|words?|lines?|bytes?)\b|(?:^|[^\w-])(\d+(?:\.\d+)?[kKM])\b",
+'''
+replace = '''
+                r"\b\d{1,3}(?:,\d{3})+\b|\b\d+(?:\.\d+)?[kKM]\b",
+'''

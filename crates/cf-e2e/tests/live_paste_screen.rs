@@ -358,7 +358,9 @@ fn look(members: &mut Members, harness: Harness, log: &Log) -> Result<(bool, See
             .as_array()
             .cloned()
             .unwrap_or_default();
-        seen.wrong = misread(&lines, &ask::ours(&lines, &pasted)?);
+        // The thread holds the worker's result to the chief too: the engine reads what
+        // went into the window by its recipient.
+        seen.wrong = misread(&lines, &ask::ours(&lines, &handle, &pasted)?);
     }
     let state = ended.unwrap_or_else(|| "not over".to_owned());
     log.say(format!("T-{number} is {state}; {}", seen.line()));

@@ -127,6 +127,19 @@ impl Shown {
     /// Where the newest paste's run is in view, only the window's lines after it
     /// are kept: they are what the window printed since the message its failed
     /// turn was on.
+    ///
+    /// Known limits (Calliope's re-check T-305):
+    /// - P3-3: a newest paste the window shows as a placeholder has no run, so the
+    ///   whole tail is read, older errors and all (no harness showed one after
+    ///   sending, T-298);
+    /// - P3-5: a window line that begins with the newest paste's header (a model
+    ///   echoing it at a line's start) becomes the cut, and hides what is above it;
+    /// - P3-1, filed as its own task: a paste still on its way (the harness queued
+    ///   it in the failing turn) is the newest and becomes the cut; the cut is to be
+    ///   bounded by the newest paste the window was given;
+    /// - P3-2, filed as its own task: the pastes are ordered by id, which is not the
+    ///   order a member's window took them in (a task's brief waits while the window
+    ///   holds a task, and a later note goes first).
     pub(crate) fn without_pastes(mut self, pastes: &[Paste]) -> Self {
         if let Some(tail) = self.tail.as_mut() {
             let owners = owners(tail, pastes);
@@ -275,7 +288,10 @@ fn outage_key(lines: &[String], keep: Keep) -> String {
 ///
 /// A footer's counters, which a harness redraws each turn, fold too: a share
 /// (`12%` of a context left), an amount of money (`$0.03`), and a count written
-/// short or with thousands (`1.2k`, `12,345` tokens). Claude Code, Codex, Pi and
+/// short or with thousands (`1.2k`, `12,345` tokens), but no count that ends a
+/// model's id (`gpt-4-32k`, `o3-mini-2k`) and no list of numbers (`500,502,503`):
+/// a thousands count only before a count's unit, a short one only where no `-`
+/// joins it to what comes before. Claude Code, Codex, Pi and
 /// OpenCode each draw some of them below the conversation; the probe of T-298
 /// recorded counts of the brief's lines only, so which line holds which is not
 /// shown there.
@@ -295,7 +311,9 @@ static CHANGING: LazyLock<[(Regex, &str); 7]> = LazyLock::new(|| {
         (pattern(r"\$\d+(?:\.\d+)?"), "#money"),
         (pattern(r"\b\d+(?:\.\d+)?%"), "#share"),
         (
-            pattern(r"\b\d{1,3}(?:,\d{3})+\b|\b\d+(?:\.\d+)?[kKM]\b"),
+            pattern(
+                r"\b(\d{1,3}(?:,\d{3})+)\s+(?:tokens?|chars?|characters|words?|lines?|bytes?)\b|(?:^|[^\w-])(\d+(?:\.\d+)?[kKM])\b",
+            ),
             "#count",
         ),
         (pattern(r"\b\d{1,2}:\d{2}(?::\d{2})?\b"), "#time"),
@@ -320,12 +338,21 @@ fn folded(text: &str) -> String {
     for (at, (changing, to)) in CHANGING.iter().enumerate() {
         text = changing
             .replace_all(&text, |found: &regex::Captures<'_>| {
-                let found = &found[0];
+                let whole = found.get(0).map_or("", |whole| whole.as_str());
                 // An id is one only with a digit in it: a long word is a word.
-                if at == 1 && !found.chars().any(|c| c.is_ascii_digit()) {
-                    found.to_owned()
-                } else {
-                    (*to).to_owned()
+                if at == 1 && !whole.chars().any(|c| c.is_ascii_digit()) {
+                    return whole.to_owned();
+                }
+                // A pattern that names what changes in a group of its own folds that
+                // alone, and keeps what it was told apart by.
+                let start = found.get(0).map_or(0, |whole| whole.start());
+                match (1..found.len()).find_map(|group| found.get(group)) {
+                    Some(part) => format!(
+                        "{}{to}{}",
+                        &whole[..part.start() - start],
+                        &whole[part.end() - start..]
+                    ),
+                    None => (*to).to_owned(),
                 }
             })
             .into_owned();

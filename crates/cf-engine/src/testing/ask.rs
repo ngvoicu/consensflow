@@ -8,7 +8,7 @@
 //! | `op` | the question | the answer |
 //! |---|---|---|
 //! | `cut_note` | `message` (its id), `tasks` (the numbers of the tasks a member had at work or waiting; none for the chief) | the note that tells a window the human's Resume brings back that its turn was cut, as the window is given it: its header, and the engine's words |
-//! | `ours` | `lines` (a screen's last lines), `messages` (the messages pasted into the window, each its `id`, `kind`, `sender`, `taskNumber` and `body`, as the board gives them) | for each line, whether it is ConsensFlow's, by the rule a failed turn's note reads the screen by (`shown::ours`) |
+//! | `ours` | `lines` (a screen's last lines), `recipient` (the window's handle), `messages` (messages as the board gives them, each its `id`, `kind`, `sender`, `recipient`, `taskNumber` and `body`: those to `recipient` are what was pasted into the window) | for each line, whether it is ConsensFlow's, by the rule a failed turn's note reads the screen by (`shown::ours`) |
 
 use cf_proto::ledger::MessageView;
 use serde_json::{json, Value};
@@ -73,8 +73,14 @@ fn cut_note(question: &Value) -> Result<Value, String> {
 }
 
 /// Which of a screen's `lines` are ConsensFlow's, of the `messages` pasted into
-/// its window: each as the window was given it, the newest first.
+/// its window: each as the window was given it, the newest first. Only messages to
+/// the window's `recipient` went into it, as the engine reads what was pasted
+/// (`last_pastes`): a task's thread holds its worker's result too.
 fn ours_of(question: &Value) -> Result<Value, String> {
+    let recipient = question
+        .get("recipient")
+        .and_then(Value::as_str)
+        .ok_or("the question names no recipient")?;
     let lines: Vec<String> = question
         .get("lines")
         .and_then(Value::as_array)
@@ -87,6 +93,7 @@ fn ours_of(question: &Value) -> Result<Value, String> {
         .and_then(Value::as_array)
         .ok_or("the question gives no messages")?
         .iter()
+        .filter(|message| message.get("recipient").and_then(Value::as_str) == Some(recipient))
         .map(pasted)
         .collect::<Result<_, _>>()?;
     messages.sort_by_key(|message| std::cmp::Reverse(message.id));
@@ -157,9 +164,30 @@ mod tests {
             "Error: provider unreachable"
         ]);
         let messages = json!([{
-            "id": 4, "kind": "task", "sender": "chief", "taskNumber": 1, "body": "Write the parser"
+            "id": 4, "kind": "task", "sender": "chief", "recipient": "zeus", "taskNumber": 1,
+            "body": "Write the parser"
         }]);
-        let said = answer(&json!({ "op": "ours", "lines": lines, "messages": messages })).unwrap();
+        let said = answer(
+            &json!({ "op": "ours", "recipient": "zeus", "lines": lines, "messages": messages }),
+        )
+        .unwrap();
         assert_eq!(said, json!([true, true, false]));
+    }
+
+    #[test]
+    fn what_the_window_was_given_is_its_own_messages_not_the_threads_others() {
+        // The task's thread holds the worker's result too, to the chief, newer than
+        // its brief: it went into no window of the worker's (Calliope's re-check T-305).
+        let messages = json!([
+            { "id": 4, "kind": "task", "sender": "chief", "recipient": "zeus", "taskNumber": 1, "body": "Write the parser" },
+            { "id": 5, "kind": "result", "sender": "zeus", "recipient": "chief", "taskNumber": 1, "body": "Done" }
+        ]);
+        let question = json!({
+            "op": "ours",
+            "recipient": "zeus",
+            "lines": ["Write the parser", "Done"],
+            "messages": messages
+        });
+        assert_eq!(answer(&question).unwrap(), json!([true, false]));
     }
 }

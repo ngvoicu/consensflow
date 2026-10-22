@@ -91,11 +91,14 @@ pub fn cut_note(message: i64, tasks: &[i64]) -> Result<String> {
         .ok_or_else(|| Error::Daemon(format!("engine-ask's note is no text: {answer}")))
 }
 
-/// Which of a screen's `lines` are ConsensFlow's, of the `messages` pasted into its
-/// window (as the board gives them): the engine's own rule for what a failed turn's
-/// note leaves out (`engine-ask`'s `ours`).
-pub fn ours(lines: &[String], messages: &[Value]) -> Result<Vec<bool>> {
-    let answer = engine_question(&json!({ "op": "ours", "lines": lines, "messages": messages }))?;
+/// Which of a screen's `lines` are ConsensFlow's, of the `messages` (as the board
+/// gives them) of which those to `recipient`, the window's handle, were pasted into
+/// it: the engine's own rule for what a failed turn's note leaves out (`engine-ask`'s
+/// `ours`).
+pub fn ours(lines: &[String], recipient: &str, messages: &[Value]) -> Result<Vec<bool>> {
+    let answer = engine_question(
+        &json!({ "op": "ours", "lines": lines, "recipient": recipient, "messages": messages }),
+    )?;
     answer
         .as_array()
         .map(|said| said.iter().map(|one| one == &Value::Bool(true)).collect())

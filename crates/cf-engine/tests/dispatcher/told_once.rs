@@ -653,3 +653,23 @@ fn an_outage_whose_errors_pile_up_on_the_screen_is_told_once() {
     let told = chief_failures(&tiers);
     assert_eq!(told.len(), 1, "{told:?}");
 }
+
+#[test]
+fn a_model_whose_id_ends_in_a_count_is_another_failure() {
+    assert_eq!(
+        told_of("model gpt-4-32k not found", "model gpt-4-8k not found"),
+        2
+    );
+    assert_eq!(
+        told_of("model o3-mini-2k not found", "model o3-mini-4k not found"),
+        2
+    );
+}
+
+#[test]
+fn a_list_of_codes_that_differs_is_another_failure() {
+    assert_eq!(
+        told_of("retried on 500,502,503", "retried on 500,502,504"),
+        2
+    );
+}

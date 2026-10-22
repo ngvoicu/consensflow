@@ -546,4 +546,18 @@ fn a_footers_counters_are_folded_and_keep_one_failure_one() {
         key("Error: x / 13,001 tokens")
     );
     assert_ne!(key("API Error: 500"), key("API Error: 502"));
+    // A count that ends a model's id, and a list of codes, are the failure's own.
+    assert_ne!(
+        key("model gpt-4-32k not found"),
+        key("model gpt-4-8k not found")
+    );
+    assert_ne!(
+        key("model o3-mini-2k not found"),
+        key("model o3-mini-4k not found")
+    );
+    assert_ne!(key("retried on 500,502,503"), key("retried on 500,502,504"));
+    assert_eq!(
+        key("1.2k tokens and 3k left"),
+        "#count tokens and #count left"
+    );
 }

@@ -154,7 +154,9 @@ pub(crate) fn last_given(store: &Store, participant_id: i64) -> Result<Option<i6
 /// The `limit` messages last pasted into a participant's window, newest first,
 /// each with the rows its paste carried: what its screen can show of
 /// ConsensFlow's own. A message on its way is pasted already (its record may
-/// show it later); one still queued is not. The rows a paste carried stay
+/// show it later); one still queued is not. Known limit (P3-2 of Calliope's
+/// re-check T-305, filed as its own task): newest by id, which is not the order a
+/// member's window took them in. The rows a paste carried stay
 /// `queued` while it is on its way (`begin_delivery` moves the carrier alone),
 /// and were typed with it all the same.
 pub(crate) fn last_pastes(
