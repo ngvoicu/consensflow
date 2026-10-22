@@ -140,12 +140,13 @@ pub struct Background {
 /// `null` too where a process of the window cannot be read (another user's, as a command
 /// that `exec`s `sudo` becomes), which may be a command: the answer says so then
 /// ([`CommandsAnswer`]). What ran at the rest the request
-/// names (`since`, a number `pane.rest` answered) is left out: a server or helper that
-/// left the window's group.
+/// names (`since`, a number `pane.rest` answered) is left out, and what began before the
+/// time it names (`after`): a server or helper that left the window's group.
 pub type Commands = Option<Background>;
 
-/// A `pane.commands` request: the pane, and the rest whose processes are no command
-/// (`since`), where the daemon names one.
+/// A `pane.commands` request: the pane, the rest whose processes are no command (`since`),
+/// where the daemon names one, and the time before which a process began is no command
+/// (`after`, milliseconds since the epoch), where it names one.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CommandsRequest {
@@ -153,6 +154,8 @@ pub struct CommandsRequest {
     pub generation: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub since: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub after: Option<i64>,
 }
 
 /// `pane.commands`' answer: the commands ([`Commands`]), and, where they are `null`

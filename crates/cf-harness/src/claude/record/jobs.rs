@@ -193,11 +193,12 @@ struct Job {
     notice: Option<Notice>,
 }
 
-/// A monitor as the call that armed it says it: what its agent called it, and what it
-/// watches ([`Source`]).
+/// A monitor as the call that armed it says it: what its agent called it, what it
+/// watches ([`Source`]), and when the call's record says it was made.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct Watch {
     pub description: Arc<str>,
+    pub called: Option<i64>,
     pub source: Source,
 }
 
@@ -299,6 +300,7 @@ impl Jobs {
                     id: Arc::clone(&job.id),
                     description: Arc::clone(&watch.description),
                     source: watch.source,
+                    called: watch.called,
                     notice: job.notice.clone(),
                 })
             })

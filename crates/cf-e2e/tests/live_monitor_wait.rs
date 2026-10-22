@@ -14,13 +14,16 @@
 //! `tests/fixtures/claude/monitor-wait.jsonl` is its record (`--fixture <file>` writes it,
 //! with the run's paths and ids of the machine taken out).
 //!
-//! One window, in a folder of its own, on Claude's cheap model, with one MCP server of the
-//! run's (`live::mcp_server`) and no other, no browser, none of the owner's settings read
+//! One window, in a folder of its own, on Claude's cheap model, with two MCP servers of the
+//! run's (`live::mcp_server`), one of which leaves the window's process group as it starts
+//! (`setsid`), as an owner's server or helper may, and no other, no browser, none of the
+//! owner's settings read
 //! (`--setting-sources local`) but a PostToolUse
 //! command hook on every tool (`*`, which prints `{}`), as an owner's hooks run in every
 //! window ConsensFlow opens (Calliope on c593fd49: the start's record is written after them),
 //! and none of a Claude session's own variables if the run is started from inside one (a
-//! child session keeps no transcript). Its first message has the agent start a command in the
+//! child session keeps no transcript). Its first message is on its command line, as a worker's
+//! task is (no rest comes before its first turn), and has the agent start a command in the
 //! background that writes three lines and ends, arm a Monitor on its output that expires
 //! before long, and end its turn; then answer each event with a word, the command's end
 //! with another, and the monitor's expiry with a third. Its second has it start a command
@@ -54,10 +57,24 @@
 //! - `noisy-stop` a monitor whose command writes more than Claude Code lets through is
 //!   stopped by Claude Code after half a minute, with its notice (`[Monitor stopped — too
 //!   much output …]`), no status and nothing after: the reader counts it noticed (2.1.306)
+//! - `first-turn-call` the server that left the window's group runs, and a look that names
+//!   nothing counts it; at the first message's expiry, a look that leaves out what began
+//!   before the monitor's call, less the margin, finds no command (T-301: what the engine
+//!   asks where no rest proves a monitor)
+//! - `call-margin` each monitor's command began no earlier than the earliest call of its
+//!   message's monitors less the margin, and the run says how long after it
+//!
+//! Every look at the window's commands but the first message's plain count leaves out what
+//! began before the first monitor's call, less the margin, as the engine's do in a worker's
+//! first turn: it leaves out no more than the engine's.
+//!
+//! The run is given a Claude config folder of its own where its caller made one
+//! (`--claude-config`, with a copy of the login in it): the owner's is then not touched.
 //!
 //! ```text
 //! cargo xtask live monitor-wait
 //! cargo xtask live monitor-wait --fixture /tmp/monitor-wait.jsonl
+//! cargo xtask live monitor-wait --claude-config /path/to/a/throwaway
 //! ```
 
 use std::fs;
@@ -65,8 +82,11 @@ use std::path::Path;
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
+use std::collections::BTreeMap;
+
 use cf_e2e::live::claude::{self, Entry};
 use cf_e2e::live::mcp_server::Server;
+use cf_e2e::live::members::{Machine, ThisMachine};
 use cf_e2e::live::report::{self, Check};
 use cf_e2e::live::window::{Open, Window};
 use cf_e2e::live::{self, ask, Harness, Log};
@@ -145,6 +165,19 @@ const NOISY: &str = "Do exactly this, using your tools. 1) Use Monitor to watch 
 const WORK: Duration = Duration::from_secs(240);
 const LOOK: Duration = Duration::from_millis(500);
 
+/// What the engine takes off a monitor's call for a process's start to be read against
+/// it (`cf-engine`'s `turn_end::CALL_MARGIN_MS`).
+const CALL_MARGIN_MS: i64 = 1_000;
+
+/// The monitors' commands whose starts the run reads against their calls: what each
+/// command line holds, and how the descriptions of its message's monitors begin.
+const MEASURED: [(&str, &str); 4] = [
+    ("tail -f", "ticks"),
+    ("sleep 2;", "run"),
+    ("sleep 600", "exp-"),
+    ("sleep 0.1", "noisy"),
+];
+
 /// One look at the window: its record as the daemon reads it, the last words of its
 /// agent, and Claude's status.
 #[derive(Debug, Clone, PartialEq)]
@@ -153,8 +186,11 @@ struct Look {
     jobs: u64,
     /// The monitors among the jobs whose notice of their end came.
     noticed: u64,
-    /// The commands of Claude's the pane host finds in the window, where it tells them.
+    /// The commands of Claude's the pane host finds in the window, where it tells them, less
+    /// what began before the first monitor's call less the margin, once there is one.
     commands: Option<u64>,
+    /// The same with nothing left out: the server that left the group among them.
+    plain: Option<u64>,
     last: String,
     status: String,
 }
@@ -162,20 +198,68 @@ struct Look {
 impl Look {
     fn line(&self) -> String {
         format!(
-            "{} jobs pending {} (noticed {}) · commands {} · last words {:?} · Claude's status {}",
+            "{} jobs pending {} (noticed {}) · commands {} ({} with nothing left out) · last words {:?} · Claude's status {}",
             if self.settled { "settled" } else { "in flight" },
             self.jobs,
             self.noticed,
-            self.commands
-                .map_or_else(|| "untold".to_owned(), |commands| commands.to_string()),
+            told(self.commands),
+            told(self.plain),
             self.last,
             self.status
         )
     }
 }
 
+/// The process group the process `pid` is in: none where it is gone, or the platform has
+/// no groups.
+#[cfg(unix)]
+fn group_of(pid: u32) -> Option<u32> {
+    cf_e2e::process::group_of(pid)
+}
+
+#[cfg(not(unix))]
+fn group_of(_pid: u32) -> Option<u32> {
+    None
+}
+
+/// A count of commands as a look says it.
+fn told(commands: Option<u64>) -> String {
+    commands.map_or_else(|| "untold".to_owned(), |commands| commands.to_string())
+}
+
+/// When the first Monitor call of `raw` was made, less the margin: what the run's looks
+/// leave out what began before.
+fn after_the_first_call(raw: &[Value]) -> Option<i64> {
+    calls(raw)
+        .iter()
+        .map(|(_, _, at)| *at)
+        .min()
+        .map(|at| at - CALL_MARGIN_MS)
+}
+
+/// How many commands the window runs, less what began before the first monitor's call
+/// less the margin, once there is one; the processes the host listed of them with nothing
+/// left out are kept in `starts`, each with its command line and when it began.
+fn commands_now(window: &Window, starts: &mut Starts) -> (Option<u64>, Option<u64>) {
+    let plain = window.commands_after(None);
+    for (pid, command) in plain.iter().flat_map(|(_, listed)| listed) {
+        if !starts.contains_key(pid) {
+            if let Ok(Some(identity)) = ThisMachine.identity(*pid) {
+                starts.insert(*pid, (command.clone(), identity.started));
+            }
+        }
+    }
+    let after = after_the_first_call(&raw_records(window));
+    let commands = window.commands_after(after).map(|(total, _)| total);
+    (commands, plain.map(|(total, _)| total))
+}
+
+/// The commands seen, by process: each one's command line and when it began, in
+/// microseconds since the epoch.
+type Starts = BTreeMap<u32, (String, u64)>;
+
 /// The window now.
-fn look(window: &Window) -> Option<Look> {
+fn look(window: &Window, starts: &mut Starts) -> Option<Look> {
     let record = window.record()?;
     let last = record
         .items
@@ -188,11 +272,13 @@ fn look(window: &Window) -> Option<Look> {
     let status = claude::status_of(&window.claude_config(), &session)
         .and_then(|status| status["status"].as_str().map(str::to_owned))
         .unwrap_or_else(|| "unsaid".to_owned());
+    let (commands, plain) = commands_now(window, starts);
     Some(Look {
         settled: record.settled,
         jobs: record.jobs_pending,
         noticed: record.monitors_noticed,
-        commands: window.commands(),
+        commands,
+        plain,
         last,
         status,
     })
@@ -200,15 +286,20 @@ fn look(window: &Window) -> Option<Look> {
 
 /// The looks at the window until it is settled with its agent's last words `until`, or
 /// [`WORK`] has passed: each that differs from the one before.
-fn watch(window: &Window, until: &str) -> Vec<Look> {
-    watch_timed(window, until, &mut Vec::new())
+fn watch(window: &Window, until: &str, starts: &mut Starts) -> Vec<Look> {
+    watch_timed(window, until, &mut Vec::new(), starts)
 }
 
 /// [`watch`], each look's time and the commands it found kept in `commands` too.
-fn watch_timed(window: &Window, until: &str, commands: &mut Vec<(i64, Option<u64>)>) -> Vec<Look> {
+fn watch_timed(
+    window: &Window,
+    until: &str,
+    commands: &mut Vec<(i64, Option<u64>)>,
+    starts: &mut Starts,
+) -> Vec<Look> {
     let (mut seen, started) = (Vec::<Look>::new(), Instant::now());
     while started.elapsed() < WORK && !window.closed() {
-        if let Some(now) = look(window) {
+        if let Some(now) = look(window, starts) {
             commands.push((jiff::Timestamp::now().as_millisecond(), now.commands));
             if seen.last() != Some(&now) {
                 seen.push(now.clone());
@@ -267,10 +358,10 @@ fn says_expired(text: &str) -> bool {
     text.contains("[Monitor expired after ") || text.contains("[Monitor timed out")
 }
 
-/// Every expiry of a monitor that `raw` holds the call, the start and the notice of.
-fn expiries(raw: &[Value]) -> Vec<Expiry> {
-    let calls: Vec<(String, String, i64)> = raw
-        .iter()
+/// The Monitor calls of `raw`: each one's id, its description, and when its record was
+/// written, in milliseconds since the epoch.
+fn calls(raw: &[Value]) -> Vec<(String, String, i64)> {
+    raw.iter()
         .flat_map(|record| {
             let at = written_at(record);
             record["message"]["content"]
@@ -286,7 +377,34 @@ fn expiries(raw: &[Value]) -> Vec<Expiry> {
                     ))
                 })
         })
-        .collect();
+        .collect()
+}
+
+/// How long after the earliest call of the monitors whose descriptions begin with `called`
+/// the first of the commands `starts` holds whose command line holds `command` began, in
+/// milliseconds: none where either is missing.
+fn began_after_the_call(
+    raw: &[Value],
+    starts: &Starts,
+    command: &str,
+    called: &str,
+) -> Option<i64> {
+    let call = calls(raw)
+        .into_iter()
+        .filter(|(_, description, _)| description.starts_with(called))
+        .map(|(_, _, at)| at)
+        .min()?;
+    let began = starts
+        .values()
+        .filter(|(line, _)| line.contains(command))
+        .map(|(_, began)| *began)
+        .min()?;
+    Some(i64::try_from(began / 1_000).ok()? - call)
+}
+
+/// Every expiry of a monitor that `raw` holds the call, the start and the notice of.
+fn expiries(raw: &[Value]) -> Vec<Expiry> {
+    let calls = calls(raw);
     let mut found = Vec::new();
     for start in raw {
         let (Some(task), Some(timeout), Some(started)) = (
@@ -552,25 +670,27 @@ fn a_background_command_and_a_monitor_on_it_are_pending_until_claude_code_says_e
     let made = Path::new(env!("CARGO_TARGET_TMPDIR")).join("live-monitor-wait");
     fs::create_dir_all(&made)
         .map_err(|error| Error::Daemon(format!("{}: {error}", made.display())))?;
-    let server = Server::write(&made, &python)?;
+    let server = Server::write_leaving_group(&made, &python)?;
+    // The first message is on the window's command line, as a worker's task is.
     let mut open = Open::new(&rig, &claude, FOLDER, FOLDER)
         .claude_alone_with_hooks(hooks())
-        .mcp_config(server.config());
+        .mcp_config(server.config())
+        .seed(&live::ask::window_text(ARM)?);
     for name in SESSION_IDENTITY {
         open = open.without(name);
     }
     let window = open.open_telling(&log, "claude")?;
+    // As the daemon marks a launched window where its first turn begins, as it opens: what
+    // the host tells of its commands rests on it.
+    window.mark_turn()?;
     window
         .ready()
         .map_err(|screen| Error::Daemon(format!("the window did not open: {screen}")))?;
-    // As the daemon marks a Claude window where its first turn begins: what the host tells
-    // of its commands rests on it.
-    window.mark_turn()?;
-    window.paste(&window.given(ARM)?)?;
     // The looks of the first message, timed: when its monitor's command was gone after its
     // notice is measured by them (Calliope on 472b1d96: not by the ten monitors' looks).
+    let mut starts = Starts::new();
     let mut first_commands = Vec::new();
-    let looks = watch_timed(&window, EXPIRED, &mut first_commands);
+    let looks = watch_timed(&window, EXPIRED, &mut first_commands, &mut starts);
     let raw = raw_records(&window);
     let told = notifications(&raw);
     let config = window.claude_config();
@@ -617,8 +737,31 @@ fn a_background_command_and_a_monitor_on_it_are_pending_until_claude_code_says_e
             "the monitor's own notice of its expiry woke a turn, after which the reader counted the monitor pending and noticed",
         ),
     ];
+    let detached = server.detached_pid();
+    let group = detached.and_then(group_of);
+    let left = detached.is_some() && group == detached;
+    log.say(format!(
+        "the server that leaves the window's group: {}",
+        match detached {
+            Some(pid) if left => format!("process {pid}, in a group of its own"),
+            Some(pid) => format!("process {pid}, in the group {group:?}"),
+            None => "not started".to_owned(),
+        }
+    ));
+    checks.push(Check::new(
+        "claude",
+        "first-turn-call",
+        left && looks.iter().any(|look| {
+            look.settled
+                && says(&look.last, EXPIRED)
+                && look.noticed == 1
+                && look.commands == Some(0)
+                && look.plain.is_some_and(|plain| plain >= 1)
+        }),
+        "at the first message's expiry, a look that left out what began before the monitor's call, less the margin, found no command, while the server that left the window's group ran and a look that left nothing out counted it",
+    ));
     window.paste(&window.given(STOP)?)?;
-    let stopping = watch(&window, STOPPED);
+    let stopping = watch(&window, STOPPED, &mut starts);
     let raw = raw_records(&window);
     let stopped = raw
         .iter()
@@ -638,7 +781,7 @@ fn a_background_command_and_a_monitor_on_it_are_pending_until_claude_code_says_e
         "a command the agent stopped with TaskStop was pending no more: the expired monitor alone was",
     ));
     window.paste(&window.given(EXITS)?)?;
-    let exits = watch(&window, RUN_OVER);
+    let exits = watch(&window, RUN_OVER, &mut starts);
     let raw = raw_records(&window);
     let told = notifications(&raw);
     let ended_by_status =
@@ -691,10 +834,11 @@ fn a_background_command_and_a_monitor_on_it_are_pending_until_claude_code_says_e
             break;
         }
         sleep(LOOK);
-        commands.push((jiff::Timestamp::now().as_millisecond(), window.commands()));
+        let (now, _) = commands_now(&window, &mut starts);
+        commands.push((jiff::Timestamp::now().as_millisecond(), now));
         raw = raw_records(&window);
     }
-    let ten = watch(&window, NOTED);
+    let ten = watch(&window, NOTED, &mut starts);
     let raw = raw_records(&window);
     let measured = expiries(&raw);
     // What c593fd49's rule would have held: a notice delivered before its start's record
@@ -779,7 +923,7 @@ fn a_background_command_and_a_monitor_on_it_are_pending_until_claude_code_says_e
         "the reader counted the ten pending and noticed, with the first monitor eleven, as the engine is told them",
     ));
     window.paste(&window.given(NOISY)?)?;
-    let noisy = watch(&window, QUIETED);
+    let noisy = watch(&window, QUIETED, &mut starts);
     let raw = raw_records(&window);
     let told = notifications(&raw);
     let stop_notice = told
@@ -814,6 +958,37 @@ fn a_background_command_and_a_monitor_on_it_are_pending_until_claude_code_says_e
                 .any(|look| look.settled && says(&look.last, QUIETED) && look.jobs == 12 && look.noticed == 12),
         "a monitor Claude Code stopped for too much output, with a notice no status or time tells from its command's output, stays counted, and noticed: what runs in the window decides",
     ));
+    // When each message's monitors' commands began, against the earliest of their calls.
+    let began: Vec<(&str, Option<i64>)> = MEASURED
+        .iter()
+        .map(|(command, called)| {
+            (
+                *called,
+                began_after_the_call(&raw, &starts, command, called),
+            )
+        })
+        .collect();
+    log.block(
+        "the monitors' commands, against the earliest call of their message's monitors (ms after it)",
+        &began
+            .iter()
+            .map(|(called, after)| {
+                format!(
+                    "{called}: {}",
+                    after.map_or_else(|| "not measured".to_owned(), |ms| format!("began {ms} after"))
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n"),
+    );
+    checks.push(Check::new(
+        "claude",
+        "call-margin",
+        began
+            .iter()
+            .all(|(_, after)| after.is_some_and(|after| after >= -CALL_MARGIN_MS)),
+        "each monitor's command began no earlier than the earliest call of its message's monitors, less the margin",
+    ));
     if let Some(file) = live::option("fixture") {
         let lines = fixture(&raw, &session, &folders(&window));
         fs::write(Path::new(&file), format!("{}\n", lines.join("\n")))
@@ -839,6 +1014,7 @@ mod tests {
             jobs,
             noticed: 0,
             commands: None,
+            plain: None,
             last: last.to_owned(),
             status: "idle".to_owned(),
         }
@@ -955,4 +1131,49 @@ fn the_fixtures_expiry_is_read_from_its_records() {
             delivered_at: written_at(&json!({ "timestamp": "2026-10-20T23:03:10.329Z" })).unwrap(),
         }]
     );
+}
+
+#[test]
+fn a_look_leaves_out_what_began_before_the_first_call_less_the_margin_and_a_start_is_read_against_its_call(
+) {
+    // The fixture's one Monitor call was made at 23:02:30.287.
+    let raw: Vec<Value> = include_str!("../../cf-harness/tests/fixtures/claude/monitor-wait.jsonl")
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    let called = written_at(&json!({ "timestamp": "2026-10-20T23:02:30.287Z" })).unwrap();
+    assert_eq!(after_the_first_call(&raw), Some(called - CALL_MARGIN_MS));
+    assert_eq!(after_the_first_call(&[]), None);
+    let micros = |ms: i64| u64::try_from(ms).unwrap() * 1_000;
+    let starts: Starts = [
+        (
+            41,
+            (
+                "zsh -c tail -f out | grep tick".to_owned(),
+                micros(called + 35),
+            ),
+        ),
+        (
+            42,
+            (
+                "zsh -c tail -f out | grep tick".to_owned(),
+                micros(called + 90),
+            ),
+        ),
+        (
+            11,
+            ("python3 quiet-server.py".to_owned(), micros(called - 9_000)),
+        ),
+    ]
+    .into_iter()
+    .collect();
+    assert_eq!(
+        began_after_the_call(&raw, &starts, "tail -f", "ticks"),
+        Some(35)
+    );
+    assert_eq!(
+        began_after_the_call(&raw, &starts, "sleep 600", "ticks"),
+        None
+    );
+    assert_eq!(began_after_the_call(&raw, &starts, "tail -f", "exp-"), None);
 }

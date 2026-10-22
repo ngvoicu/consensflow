@@ -525,7 +525,7 @@ fn in_group(member: Member, group: i32) -> Member {
 /// The numbers of the commands `baseline` tells in `tree`, or none where it cannot.
 fn commands(baseline: &Baseline, tree: &[Member]) -> Option<Vec<u32>> {
     baseline
-        .commands(tree, None)
+        .commands(tree, None, None)
         .map(|found| found.processes.iter().map(|process| process.pid).collect())
 }
 
@@ -624,7 +624,7 @@ fn what_ran_at_the_rest_a_look_names_is_no_command_and_what_began_after_it_is() 
 /// [`commands`], less what ran at the rest `since`.
 fn commands_since(baseline: &Baseline, tree: &[Member], since: Option<u64>) -> Option<Vec<u32>> {
     baseline
-        .commands(tree, since)
+        .commands(tree, since, None)
         .map(|found| found.processes.iter().map(|process| process.pid).collect())
 }
 
@@ -647,4 +647,48 @@ fn a_rest_a_monitor_names_is_kept_however_many_rests_come_after_it() {
         commands_since(&baseline, &resting, Some(rest)),
         Some(vec![])
     );
+}
+
+#[test]
+fn a_process_that_began_before_the_monitors_were_called_is_no_command() {
+    // The chief on T-301: a worker's first turn has no rest before it (its message is on
+    // the command line), and a monitor's command begins after its call. A server that left
+    // the group at launch began before the call; one begun after it may be a command, and
+    // counts; one whose start was not read counts, the safe way.
+    let baseline = marked(&[], Kept::of(Servers::InGroup, Some(10)), None);
+    let began = |member: Member, at: u64| Member {
+        key: ProcessKey {
+            pid: member.key.pid,
+            began: at,
+        },
+        ..member
+    };
+    // The call's record says 1_000_000 ms since the epoch.
+    let call_ms: i64 = 1_000_000;
+    let call_us: u64 = 1_000_000_000;
+    let tree = [
+        in_group(program(), 10),
+        began(
+            in_group(member(11, "python3 server.py", "Python", of(10)), 11),
+            call_us - 5_000_000,
+        ),
+        began(
+            in_group(member(41, "sleep 300", "sleep", of(10)), 41),
+            call_us + 40_000,
+        ),
+        began(
+            in_group(member(42, "python3 late.py", "Python", of(10)), 42),
+            call_us + 900_000,
+        ),
+        began(in_group(member(43, "unread", "", of(10)), 43), 0),
+    ];
+    let pids = |after: Option<i64>| {
+        baseline.commands(&tree, None, after).map(|found| {
+            let mut pids: Vec<u32> = found.processes.iter().map(|process| process.pid).collect();
+            pids.sort_unstable();
+            pids
+        })
+    };
+    assert_eq!(pids(None), Some(vec![11, 41, 42, 43]));
+    assert_eq!(pids(Some(call_ms)), Some(vec![41, 42, 43]));
 }

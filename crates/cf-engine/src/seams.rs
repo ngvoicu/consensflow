@@ -219,8 +219,14 @@ pub trait BackgroundWork {
     fn mark<'a>(&'a self, pane: &'a Pane, servers: Servers, harness: &'a str) -> Work<'a, ()>;
 
     /// How many commands of its harness `pane`'s tree runs now, less what ran at the rest
-    /// `since` (`pane.commands`), where the host can tell them ([`CommandsSeen`]).
-    fn commands<'a>(&'a self, pane: &'a Pane, since: Option<u64>) -> Work<'a, CommandsSeen>;
+    /// `since` and what began before `after` (`pane.commands`), where the host can tell
+    /// them ([`CommandsSeen`]).
+    fn commands<'a>(
+        &'a self,
+        pane: &'a Pane,
+        since: Option<u64>,
+        after: Option<i64>,
+    ) -> Work<'a, CommandsSeen>;
 
     /// `pane` is at rest: the host keeps what its tree runs now, under the number answered,
     /// for a look at its commands to leave out (`pane.rest`). None where it keeps none.

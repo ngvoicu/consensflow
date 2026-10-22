@@ -20,6 +20,9 @@ struct Marked {
     harness: String,
 }
 
+/// A look at a window's commands: the pane, the rest it named and the time.
+type Looked = (Pane, Option<u64>, Option<i64>);
+
 /// The pane host's side of the marks, which a test reads, and of its looks at the
 /// commands of a window's harness, which a test sets.
 #[derive(Default)]
@@ -30,7 +33,7 @@ pub struct FakeBackground {
     /// test says.
     commands: Cell<Option<CommandsSeen>>,
     /// The panes the engine looked at the commands of, in order, and the rest each named.
-    looked: RefCell<Vec<(Pane, Option<u64>)>>,
+    looked: RefCell<Vec<Looked>>,
     /// The rests the engine asked the host to keep, in order, with the earlier rests each
     /// asked kept: each is given the number of its place, from 0.
     rests: RefCell<Vec<(Pane, Vec<u64>)>>,
@@ -97,7 +100,17 @@ impl FakeBackground {
         self.looked
             .borrow()
             .iter()
-            .map(|(_, since)| *since)
+            .map(|(_, since, _)| *since)
+            .collect()
+    }
+
+    /// The time each look at a window's commands named, before which a process began is
+    /// no command, in order.
+    pub fn looked_after(&self) -> Vec<Option<i64>> {
+        self.looked
+            .borrow()
+            .iter()
+            .map(|(_, _, after)| *after)
             .collect()
     }
 
@@ -126,8 +139,13 @@ impl BackgroundWork for FakeBackground {
         Box::pin(async {})
     }
 
-    fn commands<'a>(&'a self, pane: &'a Pane, since: Option<u64>) -> Work<'a, CommandsSeen> {
-        self.looked.borrow_mut().push((pane.clone(), since));
+    fn commands<'a>(
+        &'a self,
+        pane: &'a Pane,
+        since: Option<u64>,
+        after: Option<i64>,
+    ) -> Work<'a, CommandsSeen> {
+        self.looked.borrow_mut().push((pane.clone(), since, after));
         let commands = self.commands.get().unwrap_or(CommandsSeen::Untold);
         Box::pin(async move { commands })
     }

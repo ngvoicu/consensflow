@@ -223,6 +223,7 @@ fn armed() -> Jobs {
 fn watch(source: Source) -> Watch {
     Watch {
         description: Arc::from("tick lines"),
+        called: Some(1_000),
         source,
     }
 }
@@ -273,6 +274,7 @@ fn no_notice_of_a_monitors_end_ends_it_for_a_line_of_its_command_could_say_it() 
                 id: Arc::from("byuz6ka89"),
                 description: Arc::from("tick lines"),
                 source: Source::Command,
+                called: Some(1_000),
                 notice: Some(Notice {
                     end,
                     at: Some(Arc::from("2026-10-21T23:03:10.329Z")),

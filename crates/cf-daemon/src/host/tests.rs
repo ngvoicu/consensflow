@@ -580,14 +580,26 @@ async fn a_look_at_a_windows_commands_is_asked_with_the_rest_it_names_and_its_an
             let host = host_over(&daemon);
             let at = pane("p1-zeus", 2);
             // So many run; the host cannot tell them (null); and what is no answer.
-            assert_eq!(host.commands(&at, Some(7)).await, CommandsSeen::Running(3));
-            assert_eq!(host.commands(&at, None).await, CommandsSeen::Untold);
-            assert_eq!(host.commands(&at, None).await, CommandsSeen::Unreadable);
-            assert_eq!(host.commands(&at, None).await, CommandsSeen::Unanswered);
-            assert_eq!(host.commands(&at, None).await, CommandsSeen::Unanswered);
+            assert_eq!(
+                host.commands(&at, Some(7), Some(1_000)).await,
+                CommandsSeen::Running(3)
+            );
+            assert_eq!(host.commands(&at, None, None).await, CommandsSeen::Untold);
+            assert_eq!(
+                host.commands(&at, None, None).await,
+                CommandsSeen::Unreadable
+            );
+            assert_eq!(
+                host.commands(&at, None, None).await,
+                CommandsSeen::Unanswered
+            );
+            assert_eq!(
+                host.commands(&at, None, None).await,
+                CommandsSeen::Unanswered
+            );
             assert_eq!(
                 serde_json::to_string(&seen.borrow()[0]).unwrap(),
-                r#"{"id":"p1-zeus","generation":2,"since":7}"#
+                r#"{"id":"p1-zeus","generation":2,"since":7,"after":1000}"#
             );
             assert_eq!(
                 serde_json::to_string(&seen.borrow()[1]).unwrap(),
@@ -617,7 +629,10 @@ async fn a_look_at_a_windows_commands_that_no_host_answers_is_unanswered_and_kee
             });
             let host = host_over(&daemon);
             let at = pane("p1-zeus", 2);
-            assert_eq!(host.commands(&at, None).await, CommandsSeen::Unanswered);
+            assert_eq!(
+                host.commands(&at, None, None).await,
+                CommandsSeen::Unanswered
+            );
             // A host that knows no `pane.rest` keeps none.
             assert_eq!(host.rest(&at, &[]).await, None);
         })

@@ -166,6 +166,11 @@ struct Told {
 /// tell, is not walked each second until Finish).
 const LOOKS_APART_MS: i64 = 60_000;
 
+/// What a look takes off the time of a monitor's call for the start of a process to be
+/// read against it: a monitor's command begins after its call, and its call's record is
+/// written as the call is made, by the wall clock a start is read by too.
+const CALL_MARGIN_MS: i64 = 1_000;
+
 /// What a pass makes of the monitors that said they ended ([`Dispatcher::watch_monitors`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Watching {
@@ -330,14 +335,19 @@ impl Dispatcher {
     /// every monitor of the turn it begins ([`Rests::pasted`]). The rests the monitors that
     /// run are left are kept by the host however many come after (Astraeus on 136a7158).
     ///
-    /// Limits. A window opened with its task's message (every worker's) has no rest before
-    /// its first turn, and a monitor of that turn names none: a server that left the
-    /// window's group counts, and the monitor waits for it, the safe way. And the proof
-    /// takes a record read at a look as no older than the rest taken before it: a record
-    /// read late by more than a pass would let a monitor's call written after the rest
-    /// pass for one written before (Calliope on 136a7158). A rest stamped with its time,
-    /// left out only where a monitor's call is later, would close it, by the wall clock a
-    /// record's time is, which can step (Astraeus on c593fd49): not done.
+    /// Where no rest proves them, as none does in the first turn of a window opened with its
+    /// task's message (every worker's), the look names the earliest of their calls' times,
+    /// less [`CALL_MARGIN_MS`]: what began before it is no command of theirs (the chief on
+    /// T-301, Calliope's timestamp proof on 136a7158). A call whose record says no time
+    /// names none, and nothing is left out.
+    ///
+    /// Limits. The rest proof takes a record read at a look as no older than the rest taken
+    /// before it: a record read late by more than a pass would let a monitor's call written
+    /// after the rest pass for one written before (Calliope on 136a7158). The time proof
+    /// reads a record's time and a process's start by the wall clock, which can step
+    /// (Astraeus on c593fd49): one set back by more than the margin between a monitor's call
+    /// and its command's start takes the command for what began before, and the monitor for
+    /// over while it runs. A rest, where one proves the monitors, is named alone.
     pub(crate) async fn watch_monitors(
         &self,
         participant: &ParticipantView,
@@ -379,7 +389,7 @@ impl Dispatcher {
             && noticed > 0
             && pending.total() == noticed
             && noticed_of(&monitors) == noticed;
-        let (seen, since) = {
+        let (seen, since, after) = {
             let mut held = record.held.borrow_mut();
             let seen = held.noticed;
             held.noticed = if decides { noticed } else { 0 };
@@ -395,7 +405,22 @@ impl Dispatcher {
                 .filter(|monitor| monitor.notice.is_some())
                 .map(|monitor| held.rests.since.get(&monitor.id).copied().flatten())
                 .try_fold(u64::MAX, |oldest, rest| rest.map(|rest| oldest.min(rest)));
-            (seen, since)
+            // Where no rest proves them, the earliest of their calls, less the margin: none
+            // where a call's record says no time.
+            let after = since
+                .is_none()
+                .then(|| {
+                    monitors
+                        .iter()
+                        .filter(|monitor| monitor.notice.is_some())
+                        .map(|monitor| monitor.called)
+                        .try_fold(i64::MAX, |earliest, called| {
+                            called.map(|called| earliest.min(called))
+                        })
+                })
+                .flatten()
+                .map(|earliest| earliest.saturating_sub(CALL_MARGIN_MS));
+            (seen, since, after)
         };
         if !decides {
             return Watching::Undecided;
@@ -414,7 +439,7 @@ impl Dispatcher {
         let Some(pane) = pane else {
             return Watching::Waiting;
         };
-        let looked = self.seams.background.commands(&pane, since).await;
+        let looked = self.seams.background.commands(&pane, since, after).await;
         let now = self.now();
         let mut held = record.held.borrow_mut();
         held.seen = Some(looked);

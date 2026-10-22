@@ -64,14 +64,17 @@ pub struct Record {
 }
 
 /// A monitor a turn armed that its harness has said no end of: its task's id, what its
-/// agent called it, what it watches, and the notice of its end that came with no word
-/// of how it ended, where one did.
+/// agent called it, what it watches, the time of the record of the call that armed it
+/// (milliseconds since the epoch, where the record says one), and the notice of its end
+/// that came with no word of how it ended, where one did.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Monitor {
     pub id: Arc<str>,
     pub description: Arc<str>,
     pub source: Source,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub called: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub notice: Option<Notice>,
 }
@@ -354,6 +357,7 @@ mod tests {
             id: Arc::from("b615qv2gd"),
             description: Arc::from("ticks"),
             source: Source::Command,
+            called: None,
             notice: Some(Notice {
                 end: End::Expired,
                 at: Some(Arc::from("2026-10-21T23:03:10.329Z")),

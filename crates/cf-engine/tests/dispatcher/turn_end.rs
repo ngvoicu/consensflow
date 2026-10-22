@@ -977,6 +977,7 @@ fn monitor(name: &str, source: Source, end: Option<End>) -> Monitor {
         id: name.into(),
         description: name.into(),
         source,
+        called: Some(CALLED),
         notice: end.map(|end| Notice {
             end,
             at: Some("2026-10-21T23:03:10.329Z".into()),
@@ -997,6 +998,13 @@ fn pending(jobs: usize, noticed: usize) -> Pending {
 fn told_last(tiers: &Tiers<'_>) -> String {
     tiers.notes("chief").last().cloned().unwrap_or_default()
 }
+
+/// When the record of each monitor's call says it was made: 2026-10-21T23:02:30.287Z.
+const CALLED: i64 = 1_792_623_750_287;
+
+/// What a look takes off a call's time for a process's start to be read against it
+/// (`turn_end`'s `CALL_MARGIN_MS`).
+const MARGIN: i64 = 1_000;
 
 /// zeus's turn ends with the monitor "ticks" of a command, which said its time ran out.
 fn ticks_ran_out(context: &Context, words: &str) {
@@ -1259,18 +1267,11 @@ fn a_look_leaves_out_what_ran_at_the_last_rest_proved_before_the_monitor_was_see
         Some(u64::try_from(rested - 1).unwrap()),
         "the latest rest taken before the last look at rest without the monitor"
     );
-}
-
-#[test]
-fn a_monitor_first_seen_with_no_look_at_rest_before_it_leaves_nothing_out() {
-    // Armed in the window's first turn: no rest was proved before it.
-    let context = Context::new();
-    let tiers = zeus_at_work(&context);
-    context.background.commands_run(Some(0));
-    ticks_ran_out(&context, "The watch ran out");
-    passes(&context, 2);
-    assert_eq!(tiers.task(1).task.state, "done");
-    assert_eq!(context.background.looked_since(), [None]);
+    assert_eq!(
+        context.background.looked_after(),
+        [None],
+        "where a rest proves it, the rest alone"
+    );
 }
 
 #[test]
@@ -1391,6 +1392,7 @@ fn a_monitor_of_the_turn_a_pasted_message_began_is_left_the_rest_before_the_past
         context.background.looked_since(),
         [Some(u64::try_from(rested - 1).unwrap())]
     );
+    assert_eq!(context.background.looked_after(), [None]);
 }
 
 #[test]
@@ -1510,4 +1512,48 @@ fn a_monitor_of_a_conversation_the_window_switched_to_is_proved_no_rest_of_the_o
     let since = context.background.looked_since();
     assert!(!since.is_empty(), "a look: {:?}", tiers.task(1).task.state);
     assert_eq!(since[0], None, "no rest of the other conversation");
+}
+
+#[test]
+fn a_monitor_of_a_workers_first_turn_is_looked_at_with_the_time_of_its_call() {
+    // The chief on T-301: a worker's first message is on its command line, so no rest comes
+    // before its first turn. The look names the time of the monitor's call, less the margin:
+    // what began before it is no command of the monitor's (a server Claude Code started at
+    // launch that left the window's group).
+    let context = Context::new();
+    let tiers = zeus_at_work(&context);
+    context.background.commands_run(Some(0));
+    ticks_ran_out(&context, "The watch ran out");
+    passes(&context, 2);
+    assert_eq!(context.background.looked_since(), vec![None]);
+    assert_eq!(
+        context.background.looked_after(),
+        vec![Some(CALLED - MARGIN)]
+    );
+    assert_eq!(tiers.task(1).task.state, "done");
+}
+
+#[test]
+fn a_look_names_the_earliest_call_of_its_monitors_and_none_where_a_call_has_no_time() {
+    for (second, after) in [
+        (Some(CALLED - 60_000), Some(CALLED - 60_000 - MARGIN)),
+        (Some(CALLED + 60_000), Some(CALLED - MARGIN)),
+        (None, None),
+    ] {
+        let context = Context::new();
+        let _tiers = zeus_at_work(&context);
+        context.background.commands_run(Some(1));
+        let other = Monitor {
+            called: second,
+            ..monitor("build", Source::Command, Some(End::Expired))
+        };
+        context.adapter.answer_leaving_monitors(
+            "zeus",
+            "Watching",
+            pending(2, 2),
+            vec![monitor("ticks", Source::Command, Some(End::Expired)), other],
+        );
+        passes(&context, 2);
+        assert_eq!(context.background.looked_after(), vec![after], "{second:?}");
+    }
 }

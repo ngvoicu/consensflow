@@ -263,7 +263,7 @@ pub fn register_pane_handlers(
         let request: CommandsRequest = parse_body(body)?;
         let key = pane_key(&request.id, request.generation)?;
         let answer = commands_panes
-            .commands(&key, request.since)
+            .commands(&key, request.since, request.after)
             .map_err(|error| error.to_string())?;
         let mut body = serde_json::to_value(&answer).map_err(|error| error.to_string())?;
         body["ok"] = json!(true);

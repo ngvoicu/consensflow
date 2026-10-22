@@ -205,16 +205,26 @@ impl Baseline {
     }
 
     /// The commands of the window's harness that run in `tree` now ([`harness::commands`]),
-    /// less what ran at the rest `since` where it is one kept: none where the host cannot
-    /// tell them (`cf_proto::panes::Commands`). A rest no longer kept, or never kept, leaves
-    /// nothing out.
-    pub fn commands(&self, tree: &[Member], since: Option<u64>) -> Option<Background> {
+    /// less what ran at the rest `since` where it is one kept, and what began before `after`
+    /// (milliseconds since the epoch): none where the host cannot tell them
+    /// (`cf_proto::panes::Commands`). A rest no longer kept, or never kept, leaves nothing
+    /// out. A start is read against `after` where the host tells commands, on a Mac, whose
+    /// starts are kept in microseconds since the epoch ([`ProcessKey`]).
+    pub fn commands(
+        &self,
+        tree: &[Member],
+        since: Option<u64>,
+        after: Option<i64>,
+    ) -> Option<Background> {
         let kept = self.commands_kept()?;
         let empty = HashSet::new();
         let rest = since
             .and_then(|since| self.rests.iter().find(|(number, _)| *number == since))
             .map_or(&empty, |(_, rest)| rest);
-        Some(listed(harness::commands(kept, tree, rest)))
+        let after = after
+            .and_then(|after| u64::try_from(after).ok())
+            .map(|after| after.saturating_mul(1_000));
+        Some(listed(harness::commands(kept, tree, rest, after)))
     }
 
     /// Whether a turn was ever said to begin: where it was not, the tree is

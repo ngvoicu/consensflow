@@ -118,11 +118,17 @@ impl BackgroundWork for BridgeHost {
         })
     }
 
-    fn commands<'a>(&'a self, pane: &'a Pane, since: Option<u64>) -> Work<'a, CommandsSeen> {
+    fn commands<'a>(
+        &'a self,
+        pane: &'a Pane,
+        since: Option<u64>,
+        after: Option<i64>,
+    ) -> Work<'a, CommandsSeen> {
         let request = CommandsRequest {
             id: pane.id.clone(),
             generation: pane.generation,
             since,
+            after,
         };
         let sent = serde_json::to_value(&request)
             .ok()

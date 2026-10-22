@@ -26,6 +26,10 @@
 [run]
 tem-panes-process-tree = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "process_tree::machine_tests"]
 tem-panes-native = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "process_tree::native::tests"]
+tem-panes-headless-commands = ["cargo", "test", "--offline", "-p", "cf-panes", "--test", "headless", "a_look_at_the_commands_over_the_wire"]
+tem-e2e-mcp = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::mcp_server::"]
+tem-e2e-machine = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::machine::"]
+tem-e2e-monitor-wait = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_monitor_wait"]
 tem-panes-commands = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "pty::turn::tests::commands"]
 tem-daemon-host = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "host::tests"]
 tem-panes-background = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "background::"]
@@ -1205,11 +1209,11 @@ file = "crates/cf-daemon/src/host.rs"
 find = '''
             generation: pane.generation,
             since,
-        };'''
+            after,'''
 replace = '''
             generation: pane.generation,
             since: since.and(None),
-        };'''
+            after,'''
 
 # Round 7 (T-301: Astraeus's T-250 and Calliope's T-251 on 136a7158).
 
@@ -1403,3 +1407,160 @@ runs = ["tem-panes-native"]
 file = "crates/cf-panes/src/process_tree/native.rs"
 find = '            Some(libc::ESRCH) => Looked::Ended,'
 replace = '            Some(libc::ESRCH) => Looked::Unreadable,'
+
+# Round 7, the timestamp proof (T-301, the chief's answer m-3260: a worker's first turn,
+# which no rest comes before).
+
+[[plant]]
+name = "turn-end-min host: what began before the time a look names counts"
+meant = "what_began_before_the_monitors_call_is_no_command_and_what_began_after_it_is"
+runs = ["tem-panes-commands"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/background/harness.rs"
+find = '            after.is_none_or(|after| member.key.began == 0 || member.key.began >= after)'
+replace = '            after.is_none_or(|after| member.key.began == 0 || after == 0)'
+
+[[plant]]
+name = "turn-end-min host: a process whose start was not read is left out"
+meant = "a_process_that_began_before_the_monitors_were_called_is_no_command"
+runs = ["tem-panes-background"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/background/harness.rs"
+find = '            after.is_none_or(|after| member.key.began == 0 || member.key.began >= after)'
+replace = '            after.is_none_or(|after| member.key.began >= after)'
+
+[[plant]]
+name = "turn-end-min host: the time a look names is read as microseconds"
+meant = "a_process_that_began_before_the_monitors_were_called_is_no_command"
+runs = ["tem-panes-background"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/background.rs"
+find = '            .map(|after| after.saturating_mul(1_000));'
+replace = '            .map(|after| after.saturating_mul(1));'
+
+[[plant]]
+name = "turn-end-min host: pane.commands drops the time it is asked with"
+meant = "a_look_at_the_commands_over_the_wire_leaves_out_the_rest_and_what_began_before_the_time_it_names"
+runs = ["tem-panes-headless-commands"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pane_handlers.rs"
+find = '            .commands(&key, request.since, request.after)'
+replace = '            .commands(&key, request.since, None)'
+
+[[plant]]
+name = "turn-end-min daemon: a look sends no time"
+meant = "a_look_at_a_windows_commands_is_asked_with_the_rest_it_names_and_its_answer_read"
+runs = ["tem-daemon-host"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/host.rs"
+find = '''
+            since,
+            after,
+        };'''
+replace = '''
+            since,
+            after: after.filter(|_| false),
+        };'''
+
+[[plant]]
+name = "turn-end-min engine: a look names the call's time with no margin"
+meant = "a_monitor_of_a_workers_first_turn_is_looked_at_with_the_time_of_its_call"
+runs = ["tem-engine-turn-end"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '                .map(|earliest| earliest.saturating_sub(CALL_MARGIN_MS));'
+replace = '                .map(|earliest| earliest.saturating_sub(CALL_MARGIN_MS * 0));'
+
+[[plant]]
+name = "turn-end-min engine: a look names a call's time where a rest proves the monitors"
+meant = "a_look_leaves_out_what_ran_at_the_last_rest_proved_before_the_monitor_was_seen"
+runs = ["tem-engine-turn-end"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '''
+            let after = since
+                .is_none()'''
+replace = '''
+            let after = since
+                .is_none_or(|_| true)'''
+
+[[plant]]
+name = "turn-end-min engine: a look names the latest call of its monitors"
+meant = "a_look_names_the_earliest_call_of_its_monitors_and_none_where_a_call_has_no_time"
+runs = ["tem-engine-turn-end"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '                            called.map(|called| earliest.min(called))'
+replace = '                            called.map(|called| earliest.min(called).max(called))'
+
+[[plant]]
+name = "turn-end-min engine: a call with no time is passed over"
+meant = "a_look_names_the_earliest_call_of_its_monitors_and_none_where_a_call_has_no_time"
+runs = ["tem-engine-turn-end"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '                            called.map(|called| earliest.min(called))'
+replace = '                            Some(called.map_or(earliest, |called| earliest.min(called)))'
+
+[[plant]]
+name = "turn-end-min reader: a monitor keeps no time of its call"
+meant = "a_real_monitors_notice_of_expiry_is_kept_for_it_with_what_its_call_says_it_watches"
+runs = ["tem-reader"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/project.rs"
+find = '            called: made,'
+replace = '            called: made.filter(|_| false),'
+
+[[plant]]
+name = "turn-end-min live kit: the server that should leave the group is not told to"
+meant = "the_server_that_leaves_the_group_is_told_so_beside_the_one_that_stays"
+runs = ["tem-e2e-mcp"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/mcp_server.rs"
+find = '            args.push(json!("leave-group"));'
+replace = '            args.push(json!("stay"));'
+
+[[plant]]
+name = "turn-end-min live kit: a run's own Claude config is not given to its windows"
+meant = "a_rig_given_a_claude_config_of_its_own_keeps_its_claude_windows_there"
+runs = ["tem-e2e-machine"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/machine.rs"
+find = '                Some(folder) => config.var("CLAUDE_CONFIG_DIR", folder.clone()),'
+replace = '                Some(_) => config.unset("CLAUDE_CONFIG_DIR"),'
+
+[[plant]]
+name = "turn-end-min live monitor-wait: its looks leave out what began before the first call itself"
+meant = "a_look_leaves_out_what_began_before_the_first_call_less_the_margin_and_a_start_is_read_against_its_call"
+runs = ["tem-e2e-monitor-wait"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_monitor_wait.rs"
+find = '        .map(|at| at - CALL_MARGIN_MS)'
+replace = '        .map(|at| at - CALL_MARGIN_MS * 0)'
+
+[[plant]]
+name = "turn-end-min live monitor-wait: a message's commands are read from the last that began"
+meant = "a_look_leaves_out_what_began_before_the_first_call_less_the_margin_and_a_start_is_read_against_its_call"
+runs = ["tem-e2e-monitor-wait"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_monitor_wait.rs"
+find = '''
+        .map(|(_, began)| *began)
+        .min()?;'''
+replace = '''
+        .map(|(_, began)| *began)
+        .max()?;'''

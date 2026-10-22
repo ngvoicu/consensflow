@@ -500,7 +500,7 @@ time.sleep(60)
         );
         let total = |since: Option<u64>| {
             table
-                .commands(&pane.key, since)
+                .commands(&pane.key, since, None)
                 .expect("a look at its commands")
                 .commands
                 .map(|commands| commands.total)
@@ -530,7 +530,7 @@ time.sleep(60)
         }
         assert!(
             table
-                .commands(&pane.key, Some(rest))
+                .commands(&pane.key, Some(rest), None)
                 .expect("a look at its commands")
                 .unreadable,
             "said unreadable, not untold"
@@ -545,5 +545,101 @@ time.sleep(60)
         for name in ["alone", "tool"] {
             kill(pid[name]);
         }
+    }
+
+    /// A worker's window, whose first message came on its command line: a server that left
+    /// the group (`setsid`) at launch; then, told to go on after the monitor's call, its
+    /// command, in a group of its own, and a helper that leaves the group.
+    const FIRST_TURN: &str = r#"
+import json, os, subprocess, sys, time
+
+alone = subprocess.Popen([sys.executable, "-c", "import os, time; os.setsid(); time.sleep(40)"])
+while os.getpgid(alone.pid) != alone.pid:
+    time.sleep(0.01)
+print("ready", flush=True)
+input()
+print("started " + json.dumps({"alone": alone.pid}), flush=True)
+input()
+tool = subprocess.Popen(["/bin/sleep", "40"], preexec_fn=os.setpgrp)
+late = subprocess.Popen([sys.executable, "-c", "import os, time; os.setsid(); time.sleep(40)"])
+while os.getpgid(late.pid) != late.pid:
+    time.sleep(0.01)
+print("more " + json.dumps({"tool": tool.pid, "late": late.pid}), flush=True)
+time.sleep(60)
+"#;
+
+    #[allow(clippy::disallowed_methods)] // The time of the monitor's call, as its record would say it.
+    #[test]
+    fn what_began_before_the_monitors_call_is_no_command_and_what_began_after_it_is() {
+        // The chief on T-301: no rest comes before a worker's first turn, and the monitor's
+        // command begins after its call.
+        let _serial = serial_pty_test();
+        let table = Arc::new(PaneTable::new());
+        let (pane, pid) = started(
+            &table,
+            FIRST_TURN,
+            Servers::InGroup,
+            Some("claude"),
+            &HashMap::new(),
+        );
+        let called = i64::try_from(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("after the epoch")
+                .as_millis(),
+        )
+        .expect("a time");
+        table.write(&pane.key, b"go\n").expect("tell it to go on");
+        let more: serde_json::Value = serde_json::from_str(&crate::pty::turn::support::until_line(
+            &pane.output,
+            "more ",
+        ))
+        .expect("the numbers it started");
+        let number =
+            |name: &str| i32::try_from(more[name].as_i64().expect("a number")).expect("a pid");
+        let (tool, late) = (number("tool"), number("late"));
+        for started in [tool, late] {
+            crate::process_tree::guard::register(started);
+        }
+        let total = |after: Option<i64>| {
+            table
+                .commands(&pane.key, None, after)
+                .expect("a look at its commands")
+                .commands
+                .map(|commands| commands.total)
+        };
+        assert_eq!(
+            total(None),
+            Some(3),
+            "the server, the command and the helper"
+        );
+        assert_eq!(
+            total(Some(called)),
+            Some(2),
+            "the server began before the call: the command and the helper"
+        );
+        kill(tool);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while total(Some(called)) != Some(1) && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        assert_eq!(
+            total(Some(called)),
+            Some(1),
+            "the helper begun after the call"
+        );
+        kill(late);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while total(Some(called)) != Some(0) && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        assert_eq!(
+            total(Some(called)),
+            Some(0),
+            "none, while the server runs on"
+        );
+        assert_eq!(total(None), Some(1), "the server");
+        table.kill(&pane.key).expect("close the pane");
+        kill(pid["alone"]);
     }
 }

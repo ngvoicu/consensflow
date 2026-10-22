@@ -244,11 +244,31 @@ impl Window<'_> {
     /// How many commands of its harness the window's tree runs now, as the pane host tells
     /// them (`pane.commands`): none where it cannot tell, or did not answer.
     pub fn commands(&self) -> Option<u64> {
-        let answer = self
-            .rig
-            .host("pane.commands", json!({ "id": self.id, "generation": 1 }))
-            .ok()?;
-        answer["commands"]["total"].as_u64()
+        self.commands_after(None).map(|(total, _)| total)
+    }
+
+    /// [`Window::commands`], less what began before `after` (milliseconds since the epoch),
+    /// as the daemon asks where no rest proves a monitor: how many, and the first of them
+    /// the host lists, each its number and command line.
+    pub fn commands_after(&self, after: Option<i64>) -> Option<(u64, Vec<(u32, String)>)> {
+        let mut asked = json!({ "id": self.id, "generation": 1 });
+        if let Some(after) = after {
+            asked["after"] = json!(after);
+        }
+        let answer = self.rig.host("pane.commands", asked).ok()?;
+        let total = answer["commands"]["total"].as_u64()?;
+        let listed = answer["commands"]["processes"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|process| {
+                Some((
+                    u32::try_from(process["pid"].as_u64()?).ok()?,
+                    process["command"].as_str()?.to_owned(),
+                ))
+            })
+            .collect();
+        Some((total, listed))
     }
 
     /// Pastes `body` as the daemon does (`pane.write_paste`: a bracketed paste,

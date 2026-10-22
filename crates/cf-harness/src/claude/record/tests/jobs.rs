@@ -1033,7 +1033,8 @@ fn read_to_the_expiry(change: impl Fn(&mut Value)) -> Record {
 fn a_real_monitors_notice_of_expiry_is_kept_for_it_with_what_its_call_says_it_watches() {
     // The live run of 2026-10-21: the notice delivered at 23:03:10.329, of the monitor
     // its call called `ticks` and armed on a command. It is pending still, noticed: what
-    // runs in the window decides (`jobs`; T-203).
+    // runs in the window decides (`jobs`; T-203). Its call's record says 23:02:30.287, which
+    // a look takes for the time before which no process is its command (T-301).
     let record = read_to_the_expiry(|_| {});
     assert_eq!((record.pending.jobs, record.pending.noticed), (1, 1));
     assert_eq!(
@@ -1042,6 +1043,7 @@ fn a_real_monitors_notice_of_expiry_is_kept_for_it_with_what_its_call_says_it_wa
             id: Arc::from("b615qv2gd"),
             description: Arc::from("ticks"),
             source: Source::Command,
+            called: Some(1_792_537_350_287),
             notice: Some(Notice {
                 end: End::Expired,
                 at: Some(Arc::from("2026-10-20T23:03:10.329Z")),

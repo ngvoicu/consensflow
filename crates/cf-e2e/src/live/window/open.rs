@@ -159,6 +159,8 @@ pub struct Open<'a> {
     claude_alone: Option<Value>,
     /// The MCP servers file a Claude window is given (`--mcp-config`), the only one it has.
     mcp_config: Option<PathBuf>,
+    /// The window's first message, on its command line ([`Open::seed`]).
+    seed: Option<String>,
 }
 
 impl<'a> Open<'a> {
@@ -179,7 +181,17 @@ impl<'a> Open<'a> {
             member: None,
             claude_alone: None,
             mcp_config: None,
+            seed: None,
         }
+    }
+
+    /// The window opens with `message` its first, on its command line, as the daemon
+    /// launches a member's window with its task: its first turn begins as it opens, with
+    /// no rest before it.
+    #[must_use]
+    pub fn seed(mut self, message: &str) -> Self {
+        self.seed = Some(message.to_owned());
+        self
     }
 
     /// A Claude window with none of the owner's own settings (their hooks among them:
@@ -298,7 +310,7 @@ impl<'a> Open<'a> {
         }
         let start = match &self.resume {
             Some(resumed) => ask::resume(agent, resumed)?,
-            None => ask::start(agent, session, None)?,
+            None => ask::start(agent, session, self.seed.as_deref())?,
         }
         .ok_or_else(|| {
             Error::Daemon(format!(

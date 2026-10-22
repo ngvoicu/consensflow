@@ -213,7 +213,12 @@ impl PaneTable {
     /// The commands of the window's harness that run in the pane's tree now
     /// ([`Baseline::commands`]): none where the host cannot tell them, and none, said
     /// unreadable, where a process of the window cannot be read.
-    pub fn commands(&self, key: &PaneKey, since: Option<u64>) -> Result<CommandsAnswer, PaneError> {
+    pub fn commands(
+        &self,
+        key: &PaneKey,
+        since: Option<u64>,
+        after: Option<i64>,
+    ) -> Result<CommandsAnswer, PaneError> {
         let (tree, baseline) = {
             let panes = self.lock_panes()?;
             let pane = panes
@@ -227,7 +232,7 @@ impl PaneTable {
         }
         Ok(match tree.readable_members()? {
             Some(members) => CommandsAnswer {
-                commands: baseline.commands(&members, since),
+                commands: baseline.commands(&members, since, after),
                 unreadable: false,
             },
             None => CommandsAnswer {

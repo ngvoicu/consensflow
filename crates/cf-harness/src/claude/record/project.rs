@@ -14,7 +14,7 @@
 use std::borrow::Cow;
 use std::sync::Arc;
 
-use cf_base::js;
+use cf_base::{js, time};
 use serde_json::{Map, Value};
 
 use super::jobs::Watch;
@@ -292,11 +292,15 @@ fn assistant(record: &Value, session: &str) -> Projected {
     let in_message = |name: &str| field(message, name);
     let content = in_message("content");
     let main = of_main_conversation(record, session);
+    let made = record
+        .get("timestamp")
+        .and_then(Value::as_str)
+        .and_then(time::parse);
     let blocks = blocks(content)
         .iter()
         .filter_map(|block| match kind(block) {
             Some("tool_use" | "server_tool_use") => {
-                Some(Block::Use(said(block.get("id")), call(block, main)))
+                Some(Block::Use(said(block.get("id")), call(block, main, made)))
             }
             Some("advisor_tool_result" | "tool_result") => Some(Block::Result(tool_result(block))),
             _ => None,
@@ -393,8 +397,8 @@ fn first_call(content: Option<&Value>) -> Option<Value> {
 
 /// What call of the main conversation (`main`) a `tool_use` block makes, by its tool's
 /// name: a Monitor's input says what it is called (`description`) and what it watches
-/// ([`source`]).
-fn call(block: &Value, main: bool) -> Call {
+/// ([`source`]), and its record when it was made (`made`, milliseconds since the epoch).
+fn call(block: &Value, main: bool, made: Option<i64>) -> Call {
     if !main || kind(block) != Some("tool_use") {
         return Call::Other;
     }
@@ -402,6 +406,7 @@ fn call(block: &Value, main: bool) -> Call {
     match block.get("name").and_then(Value::as_str) {
         Some("TaskStop") => Call::TaskStop,
         Some("Monitor") => Call::Monitor(Watch {
+            called: made,
             description: field(input, "description")
                 .and_then(Value::as_str)
                 .map_or_else(|| Arc::from(""), Arc::from),
