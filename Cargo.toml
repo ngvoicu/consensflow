@@ -69,6 +69,9 @@ nix = { version = "0.28", default-features = false }
 # in the build, through Tauri.
 plist = "1"
 portable-pty = "0.9"
+# The JUnit reports of the test runners the plants read (nextest's, Node's).
+# Already in the build, through plist.
+quick-xml = "0.41"
 regex = "1"
 # HTTPS for the harness feed (`cf-daemon`'s `screens::network`): rustls, so no
 # TLS library of the system's and nothing to build with OpenSSL on Windows.

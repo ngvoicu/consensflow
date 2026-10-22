@@ -59,7 +59,7 @@ pub const COMMANDS: &[Command] = &[
 
 /// A set of the tests of `cf-e2e`: which test files, which cases of them, and
 /// whether they are the ones `cargo test` ignores.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Suite {
     /// The test files, by name: `cargo test --test <name>` for each.
     tests: &'static [&'static str],
@@ -106,6 +106,20 @@ pub(crate) const SMOKE: Suite = Suite {
     filter: None,
     ignored: true,
 };
+
+/// The suite `cargo xtask test <name>` runs, by its name: the plants run its
+/// `cargo test` under nextest.
+pub(crate) fn named(name: &str) -> Option<Suite> {
+    match name {
+        "daemons" => Some(DAEMONS),
+        "integration" => Some(INTEGRATION),
+        "regressions" => Some(REGRESSIONS),
+        "clis" => Some(CLIS),
+        "agents" => Some(AGENTS),
+        "load" => Some(LOAD),
+        _ => None,
+    }
+}
 
 fn daemons(context: &Context, args: &[OsString], _: &mut Console) -> Result<i32, Failure> {
     run(context, DAEMONS, args)
@@ -201,6 +215,25 @@ mod tests {
                 "{words:?}"
             );
         }
+    }
+
+    #[test]
+    fn every_suite_is_named_by_its_command_s_word_and_no_other_word_names_one() {
+        let words: Vec<&str> = COMMANDS
+            .iter()
+            .filter_map(|command| match command.words {
+                ["test", name] => Some(*name),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(words.len(), COMMANDS.len());
+        let suites = [DAEMONS, INTEGRATION, REGRESSIONS, CLIS, AGENTS, LOAD];
+        assert_eq!(words.len(), suites.len());
+        for (word, suite) in words.iter().zip(suites) {
+            assert_eq!(named(word), Some(suite), "{word}");
+        }
+        assert_eq!(named("smoke"), None);
+        assert_eq!(named("daemon"), None);
     }
 
     #[test]

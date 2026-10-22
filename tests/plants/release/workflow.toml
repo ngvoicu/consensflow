@@ -16,7 +16,7 @@ replace = "    if: github.ref_type == 'tag'"
 
 [[plant]]
 name = "workflow: a hand run on a tag takes the group of the releases"
-meant = "is_the_push_of_a_tag_for_the_group_of_releases_that_go_out_one_at_a_time"
+meant = "is_the_push_of_a_tag_for_the_group_of_releases_that_go_out_one_at_a_time_too"
 runs = ["workflow"]
 
 [[plant.edit]]
@@ -26,7 +26,7 @@ replace = "group: ${{ github.ref_type == 'tag' && 'release' ||"
 
 [[plant]]
 name = "workflow: a hand run is failed by what a tag would be refused for, before the build"
-meant = "asks_the_old_feeds_before_the_build_a_tag_is_refused_a_hand_run_is_told"
+meant = "asks_the_old_feeds_before_the_build_a_tag_is_refused_a_hand_run_is_told_what_a_tag_would_be"
 runs = ["workflow"]
 
 [[plant.edit]]
@@ -38,7 +38,7 @@ replace = "app/src-tauri/target/release/cf-publish feeds prerequisites"
 
 [[plant]]
 name = "workflow: a hand run is failed by the plan of the feeds"
-meant = "plans_the_feeds_from_the_archive_a_tag_is_refused_for_a_release_before_the_bridge"
+meant = "plans_the_feeds_from_the_archive_a_tag_is_refused_for_a_release_before_the_bridge_a_hand_run_is_told"
 runs = ["workflow"]
 
 [[plant.edit]]
@@ -50,7 +50,7 @@ replace = "app/src-tauri/target/release/cf-publish feeds plan"
 
 [[plant]]
 name = "workflow: the Mac job asks the rule without having built it"
-meant = "builds_the_rule_in_the_mac_job_before_it_asks_it"
+meant = "builds_the_rule_in_the_mac_job_before_it_asks_it_in_a_step_that_holds_no_secret_and_calls_it_by_its_path"
 runs = ["workflow"]
 
 [[plant.edit]]
@@ -63,7 +63,7 @@ replace = ""
 
 [[plant]]
 name = "workflow: the Mac job builds the rule with a signing key in reach"
-meant = "builds_the_rule_in_the_mac_job_before_it_asks_it"
+meant = "builds_the_rule_in_the_mac_job_before_it_asks_it_in_a_step_that_holds_no_secret_and_calls_it_by_its_path"
 runs = ["workflow"]
 
 [[plant.edit]]
@@ -263,7 +263,7 @@ replace = '''
 
 [[plant]]
 name = "workflow: the step that publishes is given no repository"
-meant = "publishes_the_bridge_and_moves_its_feeds"
+meant = "publishes_the_bridge_and_moves_its_feeds_and_the_step_after_it_finds_them_right"
 runs = ["workflow"]
 
 [[plant.edit]]
@@ -284,7 +284,7 @@ replace = '''
 
 [[plant]]
 name = "workflow: the step that checks the feeds is gone"
-meant = "checks_the_feeds_after_it_publishes_them"
+meant = "checks_the_feeds_after_it_publishes_them_and_asks_the_old_feeds_before_it_builds"
 runs = ["workflow"]
 
 [[plant.edit]]
@@ -306,7 +306,7 @@ replace = '''
 
 [[plant]]
 name = "workflow: the publisher is given the tag without its v"
-meant = "publishes_the_bridge_and_moves_its_feeds"
+meant = "publishes_the_bridge_and_moves_its_feeds_and_the_step_after_it_finds_them_right"
 runs = ["workflow"]
 
 [[plant.edit]]
@@ -316,7 +316,7 @@ replace = '--dir . --tag "${GITHUB_REF_NAME#v}" \'
 
 [[plant]]
 name = "workflow: a step of the publisher job is not shell: a bracket is left open"
-meant = "every_workflow_is_valid_yaml"
+meant = "every_workflow_is_valid_yaml_with_jobs_that_have_steps_or_call_a_workflow"
 runs = ["workflow"]
 
 [[plant.edit]]

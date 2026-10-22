@@ -47,7 +47,7 @@ pub const SWEEP: &str = ".windows-sweep.ps1";
 /// the list of what went over ([`SYNCED`]) does not name is removed after the unpack,
 /// wherever it came from: a run of another tree left 87 files there no sync listed,
 /// which a test of the `cli` suite named (zeewin, 2026-10-16).
-pub const KEPT: [&str; 13] = [
+pub const KEPT: [&str; 14] = [
     // The run's own: the list of what went over and the sweep (the tarball holds them
     // beside the files, and the list names the files only), the lock taken before the
     // unpack, the command's batch file.
@@ -55,6 +55,9 @@ pub const KEPT: [&str; 13] = [
     SWEEP,
     RUNNING,
     COMMAND_FILE,
+    // The copy's own checkout of git's, whose one commit is what went over (the sweep
+    // makes it so): the plants' runner asks git what a run changed in the copy.
+    ".git",
     // The packages, which `npm ci` (the build's first two steps) takes away and installs
     // again from the tree's lockfiles.
     "node_modules",
@@ -272,11 +275,30 @@ pub fn remote_script(script: &Script) -> String {
 ///   run on zeewin, 2026-10-16), a file's read-only mark taken away first.
 /// - A folder [`KEPT`] names is not walked: the build folder holds hundreds of thousands
 ///   of files.
+///
+/// Then the copy is made a checkout of git's whose one commit is what went over, so
+/// that what a run changes in it can be told (the plants' runner asks git, and a copy
+/// git says nothing of told it nothing: every plant was UNSTABLE on zeewin, 2026-10-17):
+/// its repository made the first time and kept ([`KEPT`]), with git's line ends left as
+/// they are (`core.autocrlf false`, kept in it, so that what git says later of a file
+/// is of its bytes as they were added); its index emptied and given the files the list
+/// names, and no other file (a build's outputs are none of them), an ignored one too;
+/// committed. What [`KEPT`] names is left out of what git says of the copy
+/// (`.git/info/exclude`): the run's own files and the build's, which a run writes. A
+/// git that is not there, or fails, is said in `$failed`, which ends the run.
 pub fn sweep_script() -> String {
     let kept: Vec<String> = KEPT.iter().map(|name| quoted(name)).collect();
+    let excluded: Vec<String> = KEPT
+        .iter()
+        .map(|name| quoted(&format!("/{name}")))
+        .collect();
     fill(
         SWEEP_TEMPLATE,
-        &[("synced", SYNCED), ("kept", &kept.join(", "))],
+        &[
+            ("synced", SYNCED),
+            ("kept", &kept.join(", ")),
+            ("excluded", &excluded.join(", ")),
+        ],
     )
 }
 
@@ -395,6 +417,22 @@ $base = $root.FullName.TrimEnd('\').Length + 1
 $null = Clear-Stale $root
 foreach ($name in $removed) { Write-Output "== removed $name" }
 if ($failed.Count) { Write-Output "What left the tree could not be removed from the copy: $($failed -join '; ')" }
+function Save-Tree {
+  $ErrorActionPreference = 'Continue'
+  $as = @('-c', 'user.name=windows-run', '-c', 'user.email=windows-run@localhost', '-c', 'commit.gpgsign=false')
+  Push-Location -LiteralPath $dir
+  try {
+    foreach ($words in @(@('init', '-q'), @('config', 'core.autocrlf', 'false'), @('read-tree', '--empty'), @('--literal-pathspecs', 'add', '-f', '--pathspec-from-file=«synced»'), @('commit', '-q', '--allow-empty', '--no-verify', '-m', 'what-went-over'))) {
+      $said = & git @as @words 2>&1
+      if ($LASTEXITCODE -ne 0) { $failed.Add("git $($words -join ' '): $($said -join ' ')"); return }
+      if ($words[0] -eq 'init') { [IO.File]::WriteAllText((Join-Path $dir '.git\info\exclude'), (@(«excluded») -join "`n") + "`n") }
+    }
+  } finally { Pop-Location }
+}
+if (-not $failed.Count) {
+  if (Get-Command git -ErrorAction SilentlyContinue) { Save-Tree } else { $failed.Add('git is not on the PATH, so the copy cannot be made a checkout of what went over') }
+  if ($failed.Count) { Write-Output "The copy could not be made a checkout of what went over: $($failed -join '; ')" }
+}
 "##;
 
 /// The script that ends a run, with a mark where each part of it goes. It begins
