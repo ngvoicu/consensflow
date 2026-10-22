@@ -222,15 +222,20 @@ fn watch_timed(window: &Window, until: &str, commands: &mut Vec<(i64, Option<u64
     seen
 }
 
-/// The first look at rest after the agent's first words: the turn that armed the monitor
-/// is seldom seen at rest, as the monitor's first event is queued before it ends and
-/// begins the next turn at once (2.1.305), and the reader's tests hold that turn's end
-/// on the fixture this run writes.
-fn first_settled(looks: &[Look]) -> Option<&Look> {
-    looks
-        .iter()
-        .skip_while(|look| look.last.is_empty())
-        .find(|look| look.settled)
+/// The first look after the agent's first words: the turn that armed the monitor is
+/// seldom seen at rest, as the monitor's first event is queued before it ends and begins
+/// the next turn at once (2.1.305; 4 ms later in T-249's run on 2.1.308, where no look at
+/// rest came before the command's end), and the reader's tests hold that turn's end on the
+/// fixture this run writes. The reader counts the jobs of a turn under way too.
+fn first_said(looks: &[Look]) -> Option<&Look> {
+    looks.iter().find(|look| !look.last.is_empty())
+}
+
+/// Whether the agent's last words `last` end with `words` on a line of their own: two
+/// notifications Claude Code delivers in one turn are answered in one message (T-249's run:
+/// "NOTED", a blank line, "RUN-OVER").
+fn says(last: &str, words: &str) -> bool {
+    last.lines().last().is_some_and(|line| line.trim() == words)
 }
 
 /// When `record` was written, in milliseconds.
@@ -343,7 +348,7 @@ fn ended_after(notice: i64, looks: &[(i64, Option<u64>)]) -> Option<i64> {
 fn settled_at(looks: &[Look], words: &str, jobs: u64) -> bool {
     looks
         .iter()
-        .any(|look| look.settled && look.last == words && look.jobs == jobs)
+        .any(|look| look.settled && says(&look.last, words) && look.jobs == jobs)
 }
 
 /// The notifications Claude Code began a turn with (the user's records from the system,
@@ -587,13 +592,13 @@ fn a_background_command_and_a_monitor_on_it_are_pending_until_claude_code_says_e
         Check::new(
             "claude",
             "arming",
-            first_settled(&looks).is_some_and(|look| look.jobs == 2),
+            first_said(&looks).is_some_and(|look| look.last == ARMED && look.jobs == 2),
             "the first look at rest after the monitor was armed counted the command and the monitor pending",
         ),
         Check::new(
             "claude",
             "events",
-            event && looks.iter().any(|look| look.settled && look.last == NOTED && look.jobs >= 1),
+            event && looks.iter().any(|look| says(&look.last, NOTED) && look.jobs >= 1),
             "an event of the monitor, with no status, woke a turn, and the monitor was pending after it",
         ),
         Check::new(
@@ -608,7 +613,7 @@ fn a_background_command_and_a_monitor_on_it_are_pending_until_claude_code_says_e
             expiry
                 && looks
                     .iter()
-                    .any(|look| look.settled && look.last == EXPIRED && look.jobs == 1 && look.noticed == 1),
+                    .any(|look| look.settled && says(&look.last, EXPIRED) && look.jobs == 1 && look.noticed == 1),
             "the monitor's own notice of its expiry woke a turn, after which the reader counted the monitor pending and noticed",
         ),
     ];
@@ -653,7 +658,7 @@ fn a_background_command_and_a_monitor_on_it_are_pending_until_claude_code_says_e
     let at_rest = exits
         .iter()
         .rev()
-        .find(|look| look.settled && look.last == RUN_OVER);
+        .find(|look| look.settled && says(&look.last, RUN_OVER));
     log.say(format!(
         "the MCP server of the run: {}",
         if server.runs() { "runs" } else { "runs not" }
@@ -806,7 +811,7 @@ fn a_background_command_and_a_monitor_on_it_are_pending_until_claude_code_says_e
             && after.is_empty()
             && noisy
                 .iter()
-                .any(|look| look.settled && look.last == QUIETED && look.jobs == 12 && look.noticed == 12),
+                .any(|look| look.settled && says(&look.last, QUIETED) && look.jobs == 12 && look.noticed == 12),
         "a monitor Claude Code stopped for too much output, with a notice no status or time tells from its command's output, stays counted, and noticed: what runs in the window decides",
     ));
     if let Some(file) = live::option("fixture") {
@@ -870,13 +875,24 @@ mod tests {
         assert!(settled_at(&looks, REPORTED, 1));
         assert!(!settled_at(&looks, EXPIRED, 0));
         assert!(!settled_at(&[look(false, 2, ARMED)], ARMED, 2));
-        assert_eq!(first_settled(&looks), Some(&looks[1]));
+        // Two notifications answered in one message end with the last one's word.
+        assert!(settled_at(
+            &[look(true, 1, "NOTED\n\nRUN-OVER")],
+            RUN_OVER,
+            1
+        ));
+        assert!(!settled_at(
+            &[look(true, 1, "RUN-OVER, NOTED")],
+            RUN_OVER,
+            1
+        ));
+        assert_eq!(first_said(&looks), Some(&looks[1]));
         let busy_then_noted = [
             look(true, 0, ""),
-            look(false, 0, ARMED),
+            look(false, 2, ARMED),
             look(true, 2, NOTED),
         ];
-        assert_eq!(first_settled(&busy_then_noted), Some(&busy_then_noted[2]));
+        assert_eq!(first_said(&busy_then_noted), Some(&busy_then_noted[1]));
     }
 
     #[test]
