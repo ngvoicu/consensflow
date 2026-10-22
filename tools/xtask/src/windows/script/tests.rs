@@ -1,6 +1,7 @@
 //! What a run has the machine run is text, and nothing here reaches a machine:
 //! that the variables a run names get to its command, and no others, is read in
-//! the script.
+//! the run script; what the bootstrap does (the lock, the unpack, the tree said) in
+//! the bootstrap.
 
 mod golden;
 #[cfg(windows)]
@@ -17,9 +18,9 @@ const DIR: &str = "consensflow-build";
 const ID: &str = "0000abcd-12345678";
 const BUILD: [&str; 2] = ["npm ci --no-audit --no-fund", "npm run build:bridge"];
 
-/// The script of a run in the usual folder, in the copy's root.
+/// The run script of a run in the usual folder, in the copy's root: what it is asked for.
 fn script(steps: &[&str], command: &str, env: &[(String, String)]) -> String {
-    remote_script(&Script {
+    run_script(&Script {
         id: ID,
         dir: DIR,
         inside: ".",
@@ -31,6 +32,12 @@ fn script(steps: &[&str], command: &str, env: &[(String, String)]) -> String {
 
 fn plain(env: &[(String, String)]) -> String {
     script(&[], &command_line(&["npm", "run", "test:integration"]), env)
+}
+
+/// The bootstrap of a run in the usual folder, which does not depend on what the run is
+/// asked for.
+fn bootstrap() -> String {
+    script_of_run(ID)
 }
 
 /// The lines of a script that give the process a variable of its own, by name
@@ -230,11 +237,15 @@ fn the_line_that_ends_the_output_gives_the_status_the_command_ended_with() {
 
 #[test]
 fn every_way_out_of_the_script_goes_through_the_function_that_says_how_it_went() {
-    let text = script(&BUILD_STEPS, "cargo xtask test integration", &[]);
-    // `exit` is a word of the script in one line: the function that writes the
+    let (boot, run) = (
+        bootstrap(),
+        script(&BUILD_STEPS, "cargo xtask test integration", &[]),
+    );
+    // `exit` is a word of the scripts in one line: the function that writes the
     // line and exits, whose own words are the mark and the status.
-    let leaving: Vec<&str> = text
+    let leaving: Vec<&str> = boot
         .lines()
+        .chain(run.lines())
         .filter(|line| {
             line.split(|c: char| !c.is_ascii_alphanumeric())
                 .any(|word| word == "exit")
@@ -244,24 +255,31 @@ fn every_way_out_of_the_script_goes_through_the_function_that_says_how_it_went()
         leaving,
         [r#"function Exit-Run([int]$code) { Write-Output "`n== exit $code"; exit $code }"#]
     );
-    // And it is what the lock, the unpacking, the sweep, a step and the command leave by.
-    assert_eq!(text.matches("Exit-Run ").count(), 5, "{text}");
+    // And it is what the lock, the unpacking and the sweep leave by (the bootstrap), and
+    // a step and the command (the run script).
+    assert_eq!(boot.matches("Exit-Run ").count(), 3, "{boot}");
+    assert_eq!(run.matches("Exit-Run ").count(), 2, "{run}");
     assert!(
-        text.contains("if ($failed.Count) { Exit-Run 1 }\n"),
-        "{text}"
+        boot.contains("if ($failed.Count) { Exit-Run 1 }\n"),
+        "{boot}"
     );
     assert!(
-        text.contains(r#"$($other.Id))" }): one at a time."; Exit-Run 75 }"#),
-        "{text}"
+        boot.contains(r#"$($other.Id))" })$(if ($why) { " (the lock could not be opened: $why)" }): one at a time."; Exit-Run 75 }"#),
+        "{boot}"
     );
-    // The last of the script is what the command ended with, said, and what the run
-    // leaves taken away (its tarball, and its lock if it holds it), which says nothing
-    // (so the line is the last).
+    // The last of the run script is what the command ended with, said.
     assert!(
-        text.contains(
-            "cmd /c \"$run 2>&1\"\nExit-Run $LASTEXITCODE\n} finally {\n  Remove-Item -LiteralPath $tarball -Force -ErrorAction SilentlyContinue\n  if ($held) { Remove-Item -LiteralPath $running, $owner -Force -ErrorAction SilentlyContinue }\n  if ($lock) { $lock.Dispose() }\n}\n"
+        run.ends_with("cmd /c \"$run 2>&1\"\nExit-Run $LASTEXITCODE\n"),
+        "{run}"
+    );
+    // What the bootstrap does after it reads the run script takes away what the run leaves
+    // (its tarball, its records if they are its, its lock), which says nothing (so the
+    // line is the last).
+    assert!(
+        boot.contains(
+            "\n} finally {\n  Remove-Item -LiteralPath $tarball -Force -ErrorAction SilentlyContinue\n  if ($held) {\n    Remove-Item -LiteralPath $owner -Force -ErrorAction SilentlyContinue\n    if ((Get-Content $running -ErrorAction SilentlyContinue) -eq $PID) { Remove-Item -LiteralPath $running -Force -ErrorAction SilentlyContinue }\n  }\n  if ($lock) { $lock.Dispose() }\n}\n"
         ),
-        "{text}"
+        "{boot}"
     );
 }
 
@@ -276,7 +294,7 @@ fn powershell_says_how_it_went_in_its_last_line_from_every_place_the_script_leav
 
     use crate::process::{self, Invocation};
 
-    let text = script(&[], "x", &[]);
+    let text = bootstrap();
     let function = text
         .lines()
         .find(|line| line.starts_with("function Exit-Run"))
@@ -330,7 +348,7 @@ fn powershell_ends_the_line_a_command_left_unfinished_before_it_says_how_it_went
 
     use crate::process::{self, Invocation};
 
-    let text = script(&[], "x", &[]);
+    let text = bootstrap();
     let function = text
         .lines()
         .find(|line| line.starts_with("function Exit-Run"))
@@ -376,7 +394,8 @@ fn the_script_that_ends_a_run_there_ends_the_run_the_lock_names_and_takes_its_ta
          $dir = Join-Path $env:USERPROFILE 'consensflow-build'\n\
          $running = Join-Path $dir '.windows-run.pid'\n\
          $owner = Join-Path $dir '.windows-run.id'\n\
-         if ((Test-Path $running) -and (Test-Path $owner) -and (Get-Content $owner) -eq '0000abcd-12345678') { taskkill /PID (Get-Content $running) /T /F | Out-Null; Remove-Item -LiteralPath $running, $owner -Force }\n\
+         $of = @(Get-Content $owner -ErrorAction SilentlyContinue)\n\
+         if ($of[0] -eq '0000abcd-12345678') { taskkill /PID ($of[1]) /T /F | Out-Null; Remove-Item -LiteralPath $owner -Force; if ((Get-Content $running -ErrorAction SilentlyContinue) -eq $of[1]) { Remove-Item -LiteralPath $running -Force } }\n\
          Remove-Item -LiteralPath (Join-Path $env:USERPROFILE 'consensflow-build.0000abcd-12345678.tgz') -Force -ErrorAction SilentlyContinue\n"
     );
 }
@@ -455,13 +474,13 @@ fn a_run_names_the_tarball_it_unpacks_by_its_own_name_and_no_other_name_goes_in_
 
 #[test]
 fn a_run_removes_its_own_tarball_whichever_way_it_ends_and_the_lock_only_if_it_holds_it() {
-    let text = plain(&[]);
+    let text = bootstrap();
     let at = |what: &str| {
         text.find(what)
             .unwrap_or_else(|| panic!("{what} is not there: {text}"))
     };
     // The lock's refusal is inside the try that has the finally: a refused run takes
-    // away what it sent, and not the lock of the run that refused it.
+    // away what it sent, and not the records of the run that refused it.
     assert!(at("$held = $false\n") < at("try {\n"));
     assert!(at("try {\n") < at("Exit-Run 75"));
     assert!(at("Exit-Run 75") < at("} finally {\n"));
@@ -471,11 +490,14 @@ fn a_run_removes_its_own_tarball_whichever_way_it_ends_and_the_lock_only_if_it_h
             .contains("  Remove-Item -LiteralPath $tarball -Force -ErrorAction SilentlyContinue\n"),
         "{finally}"
     );
+    // The records are the run's own to take away only if it holds the lock, and the pid file
+    // only if it still holds this run's process: a script of the older form may have
+    // written its own over it.
     assert!(
-        finally.contains("  if ($held) { Remove-Item -LiteralPath $running, $owner -Force -ErrorAction SilentlyContinue }\n"),
+        finally.contains("  if ($held) {\n    Remove-Item -LiteralPath $owner -Force -ErrorAction SilentlyContinue\n    if ((Get-Content $running -ErrorAction SilentlyContinue) -eq $PID) { Remove-Item -LiteralPath $running -Force -ErrorAction SilentlyContinue }\n  }\n"),
         "{finally}"
     );
-    // Held from the line that writes the lock, and from none before it.
+    // Held from the line that writes the records, and from none before it.
     assert!(at("Set-Content -Path $running") < at("Set-Content -Path $owner"));
     assert!(at("Set-Content -Path $owner") < at("$held = $true\n"));
     assert!(at("$held = $true\n") < at("tar.exe -xmzf"));
@@ -484,20 +506,22 @@ fn a_run_removes_its_own_tarball_whichever_way_it_ends_and_the_lock_only_if_it_h
 
 #[test]
 fn the_lock_is_a_file_opened_for_the_run_alone_before_anything_else_is_done_in_the_folder() {
-    let text = plain(&[]);
+    let text = bootstrap();
     let at = |what: &str| {
         text.find(what)
             .unwrap_or_else(|| panic!("{what} is not there: {text}"))
     };
     // Opened in one act of the system that no other run can share, so that of two runs
     // that start within a millisecond one is refused: not looked at and then written.
-    let open = "try { $lock = [IO.File]::Open((Join-Path $dir '.windows-run.lock'), 'OpenOrCreate', 'ReadWrite', 'None') } catch [IO.IOException] {}\n";
+    let open = "try { $lock = [IO.File]::Open((Join-Path $dir '.windows-run.lock'), 'OpenOrCreate', 'ReadWrite', 'None') } catch [IO.IOException] {} catch { $why = $_.Exception.Message }\n";
     assert!(text.contains(open), "{text}");
     assert_eq!(text.matches("[IO.File]::Open(").count(), 1, "{text}");
-    // A run that cannot open it is refused, and so is one that can while a process of the older
-    // form of the lock is alive; both with the answer 75, and the process said where it is known.
+    // A run that cannot open it is refused, and so is one that can while a process of the
+    // older form of the lock is alive; both with the answer 75, the process said where it
+    // is known, and the reason where the open failed for any cause but the lock being open
+    // (a run that dies of that has no exit line, and the Mac answers 1 for a refusal).
     assert!(
-        text.contains("if (-not $lock -or $other) { Write-Output \"A run is still going on this machine$(if ($other) { \" (process $($other.Id))\" }): one at a time.\"; Exit-Run 75 }\n"),
+        text.contains("if (-not $lock -or $other) { Write-Output \"A run is still going on this machine$(if ($other) { \" (process $($other.Id))\" })$(if ($why) { \" (the lock could not be opened: $why)\" }): one at a time.\"; Exit-Run 75 }\n"),
         "{text}"
     );
     // Before the folder is touched by the run: the record, the owner, the unpack.
@@ -522,7 +546,7 @@ fn the_lock_is_a_file_opened_for_the_run_alone_before_anything_else_is_done_in_t
 #[test]
 fn the_process_is_still_written_and_read_as_every_version_reads_it_and_the_run_is_named_beside_it()
 {
-    let text = plain(&[]);
+    let text = bootstrap();
     // A script of an older form holds the process in the file and refuses a run that is
     // still going by looking at it: this one writes it, so that such a script refuses, and
     // reads it, so that it is refused by one.
@@ -530,20 +554,20 @@ fn the_process_is_still_written_and_read_as_every_version_reads_it_and_the_run_i
         text.contains("Set-Content -Path $running -Value $PID\n"),
         "{text}"
     );
+    // The file is read as nothing where it is gone or being written (no error, no process),
+    // and a process counts only if it is a PowerShell that was started before the file was
+    // written: a process id that a later program has taken is no run, and the lock decides.
     assert!(
-        text.contains("$holder = if (Test-Path $running) { Get-Content $running }\n"),
+        text.contains("$holder = Get-Content $running -ErrorAction SilentlyContinue\n"),
         "{text}"
     );
-    // A record that is empty (a run is writing it) is no process: it is not asked of Get-Process.
     assert!(
-        text.contains(
-            "$other = if ($holder) { Get-Process -Id $holder -ErrorAction SilentlyContinue }\n"
-        ),
+        text.contains("$other = if ($holder) { try { Get-Process -Id $holder -ErrorAction Stop | Where-Object { ($_.Name -in @('powershell', 'pwsh')) -and $_.StartTime -le (Get-Item $running).LastWriteTime } } catch {} }\n"),
         "{text}"
     );
-    // The run is named in the file beside it, which only a stop reads.
+    // The run is named in the file beside it, with its process, which only a stop reads.
     assert!(
-        text.contains("Set-Content -Path $owner -Value '0000abcd-12345678'\n"),
+        text.contains("Set-Content -Path $owner -Value @('0000abcd-12345678', $PID)\n"),
         "{text}"
     );
     assert_eq!(RUNNING, ".windows-run.pid");
@@ -561,7 +585,7 @@ fn a_command_whose_last_output_has_no_line_end_still_passes() {
     // it: `marker of tree A== exit 0`, which is no exit line, and a pass was answered as 1,
     // seen on zeewin 2026-10-22). The line the run ends by begins with a line feed, and
     // that is the only line of the script that is read back, so it is the only one that must.
-    let text = plain(&[]);
+    let text = bootstrap();
     assert!(
         text.contains(
             "function Exit-Run([int]$code) { Write-Output \"`n== exit $code\"; exit $code }\n"
@@ -588,7 +612,8 @@ fn a_command_whose_last_output_has_no_line_end_still_passes() {
 #[test]
 fn a_run_that_is_ended_there_ends_the_run_the_lock_names_and_never_another() {
     let text = stop_script(DIR, ID);
-    // The process is killed only where the owner file names this run, and only then is the lock taken away.
+    // The process is killed only where the owner file names this run, and it is the process
+    // the owner file names (the older file may have been written over by another script).
     let guarded: Vec<&str> = text
         .lines()
         .filter(|line| line.contains("taskkill"))
@@ -596,12 +621,18 @@ fn a_run_that_is_ended_there_ends_the_run_the_lock_names_and_never_another() {
     assert_eq!(guarded.len(), 1, "{text}");
     assert!(
         guarded[0].starts_with(
-            "if ((Test-Path $running) -and (Test-Path $owner) -and (Get-Content $owner) -eq '0000abcd-12345678') { taskkill /PID (Get-Content $running) /T /F | Out-Null; "
+            "if ($of[0] -eq '0000abcd-12345678') { taskkill /PID ($of[1]) /T /F | Out-Null; "
         ),
         "{text}"
     );
+    // Its records go with it: the owner file, and the older file only if it still holds the
+    // process that was ended.
     assert!(
-        guarded[0].contains("Remove-Item -LiteralPath $running, $owner -Force"),
+        guarded[0].contains("Remove-Item -LiteralPath $owner -Force; if ((Get-Content $running -ErrorAction SilentlyContinue) -eq $of[1]) { Remove-Item -LiteralPath $running -Force }"),
+        "{text}"
+    );
+    assert!(
+        text.contains("$of = @(Get-Content $owner -ErrorAction SilentlyContinue)\n"),
         "{text}"
     );
     // The run's own tarball goes whatever the lock says: it is the run's.
@@ -616,7 +647,7 @@ fn a_run_that_is_ended_there_ends_the_run_the_lock_names_and_never_another() {
 
 #[test]
 fn the_script_says_which_tree_it_unpacked_once_the_sweep_has_gone_and_before_anything_runs() {
-    let text = script(&BUILD, "x", &[]);
+    let text = bootstrap();
     let at = |what: &str| {
         text.find(what)
             .unwrap_or_else(|| panic!("{what} is not there: {text}"))
@@ -628,13 +659,69 @@ fn the_script_says_which_tree_it_unpacked_once_the_sweep_has_gone_and_before_any
         "{text}"
     );
     assert!(at("if ($failed.Count) { Exit-Run 1 }") < at("Write-Output \"== tree "));
-    assert!(at("Write-Output \"== tree ") < at("foreach ($step in"));
+    // And only then is the run script read: what the run is asked for runs on a tree that is said.
+    let read =
+        ". ([scriptblock]::Create([IO.File]::ReadAllText((Join-Path $dir '.windows-run.ps1'))))\n";
+    assert!(text.contains(read), "{text}");
+    assert!(at("Write-Output \"== tree ") < at(read));
+    assert!(at(read) < at("} finally {"));
+    assert!(!text.contains("foreach ($step in"), "{text}");
     assert!(TREE_MARK.starts_with("== ") && TREE_MARK.ends_with(' '));
+    assert_eq!(RUN, ".windows-run.ps1");
+    assert!(KEPT.contains(&RUN), "the sweep would remove the run script");
+}
+
+#[test]
+fn what_a_run_is_asked_for_is_in_the_run_script_and_the_bootstrap_does_not_depend_on_it() {
+    // The steps, the variables and the command go in the tarball; the command line of ssh
+    // holds the bootstrap only, which is the same for any run of one folder and one name.
+    let env = parse_env(&strings(&["CONSENSFLOW_TEST_DAEMON=native"])).unwrap();
+    fn asked<'a>(
+        steps: &'a [&'a str],
+        command: &'a str,
+        env: &'a [(String, String)],
+    ) -> Script<'a> {
+        Script {
+            id: ID,
+            dir: DIR,
+            inside: "app/src-tauri",
+            steps,
+            command,
+            env,
+        }
+    }
+    let (plain, heavy) = (
+        asked(&[], "x", &[]),
+        asked(&BUILD_STEPS, "cargo xtask eval --scenario y", &env),
+    );
+    assert_eq!(remote_script(&plain), remote_script(&heavy));
+    let (light, full) = (run_script(&plain), run_script(&heavy));
+    assert_ne!(light, full);
+    for what in [
+        "'npm ci --no-audit --no-fund'",
+        "$env:CONSENSFLOW_TEST_DAEMON = 'native'\n",
+        "'cargo xtask eval --scenario y'",
+        "Set-Location (Join-Path $dir 'app/src-tauri')\n",
+    ] {
+        assert!(
+            full.contains(what) && !remote_script(&heavy).contains(what),
+            "{what}"
+        );
+    }
+    // The run script begins as the command does: the program's search path, the steps in the
+    // copy, then the variables, then the command, which it ends the run with.
+    let at = |what: &str| full.find(what).unwrap_or_else(|| panic!("{what}: {full}"));
+    assert!(at("$env:Path = ") < at("Set-Location $dir\n"));
+    assert!(at("Set-Location $dir\n") < at("foreach ($step in"));
+    assert!(at("foreach ($step in") < at("$env:CONSENSFLOW_TEST_DAEMON ="));
+    assert!(at("$env:CONSENSFLOW_TEST_DAEMON =") < at("[IO.File]::WriteAllText"));
+    assert!(full.ends_with("cmd /c \"$run 2>&1\"\nExit-Run $LASTEXITCODE\n"));
 }
 
 /// The machine's own PowerShell, on a machine that has one: the `finally` that takes a
 /// run's tarball away runs when the script leaves by `exit` from inside the `try`, as
-/// every way out of it does; a run that does not hold the lock leaves the lock alone.
+/// every way out of it does; a run that does not hold the lock leaves the lock's records
+/// alone, and so does one whose older file has another run's process written over it.
 #[cfg(windows)]
 #[test]
 fn powershell_runs_the_finally_that_takes_the_tarball_away_when_the_script_leaves_by_exit() {
@@ -670,8 +757,13 @@ fn a_mark_in_a_value_is_only_text_and_no_template_has_a_mark_nothing_fills() {
     // What is written in is not read again.
     let text = script(&[], "echo «dir» «running»", &[]);
     assert!(text.contains("'echo «dir» «running»'"), "{text}");
-    // Every mark of the two templates is one the fills name: none is left in what is sent.
-    for text in [plain(&[]), stop_script(DIR, ID)] {
+    // Every mark of the templates is one the fills name: none is left in what is sent.
+    for text in [
+        bootstrap(),
+        plain(&[]),
+        stop_script(DIR, ID),
+        sweep_script(),
+    ] {
         let left: Vec<_> = text.matches('«').collect();
         assert!(left.is_empty(), "{text}");
     }
@@ -680,29 +772,43 @@ fn a_mark_in_a_value_is_only_text_and_no_template_has_a_mark_nothing_fills() {
     assert_eq!(fill("a «b» «c»", &[("b", "x")]), "a x «c»");
 }
 
-/// The longest run there is: the build, a command as long as an eval's.
-fn longest(env: &[&str]) -> String {
-    let command = command_line(&[
-        "cargo",
-        "xtask",
-        "eval",
-        "--scenario",
-        "question-trip",
-        "--chief",
-        "claude",
-        "--staff",
-        "devin",
-        "--timeout-min",
-        "30",
-        "--model",
-        "claude-sonnet-5",
-    ]);
-    script(&BUILD_STEPS, &command, &parse_env(&strings(env)).unwrap())
+/// The longest run there is: the build, and the matrix's longest eval line (a claude
+/// chief with a model, a staff with pi and its model, a chief switch), and as many
+/// variables as a run is likely to name.
+fn longest(env: &[&str]) -> Script<'static> {
+    use crate::windows::matrix::eval;
+    use crate::windows::options::{MatrixOptions, Pair};
+
+    let options = MatrixOptions {
+        host: "zeewin".into(),
+        build: true,
+        env: Vec::new(),
+        scenarios: vec!["chief-switch".into()],
+        pairs: Vec::new(),
+        claude_model: Some("claude-sonnet-5".into()),
+        pi_model: Some("openai/gpt-5.6-luna".into()),
+    };
+    let pair = Pair {
+        chief: "claude".into(),
+        staff: "devin,pi".into(),
+    };
+    let command: &'static str =
+        Box::leak(command_line(&eval(&options, "chief-switch", &pair)).into_boxed_str());
+    let env: &'static [(String, String)] =
+        Box::leak(parse_env(&strings(env)).unwrap().into_boxed_slice());
+    Script {
+        id: ID,
+        dir: DIR,
+        inside: ".",
+        steps: &BUILD_STEPS,
+        command,
+        env,
+    }
 }
 
 #[test]
 fn the_script_goes_encoded_as_powershell_reads_it_and_comes_back_as_it_was() {
-    let text = longest(&["CONSENSFLOW_TEST_DAEMON=native"]);
+    let text = remote_script(&longest(&["CONSENSFLOW_TEST_DAEMON=native"]));
     assert_eq!(script_of(&encode_script(&text).unwrap()), text);
     // A character past the first plane is two units, as PowerShell reads UTF-16.
     let two = encode_script("é😀").unwrap();
@@ -710,32 +816,66 @@ fn the_script_goes_encoded_as_powershell_reads_it_and_comes_back_as_it_was() {
 }
 
 #[test]
-fn the_build_and_the_variables_a_run_names_in_practice_go_with_room_to_spare() {
-    for env in [
+fn the_longest_run_there_is_leaves_the_command_line_a_margin_of_a_thousand_and_more() {
+    // The bootstrap is all that is on ssh's command line, and nothing a run is asked for
+    // changes it: the longest line of the matrix (the build, a chief switch with models,
+    // four variables) is as long as no line at all.
+    let bare = Script {
+        steps: &[],
+        command: "x",
+        env: &[],
+        ..longest(&[])
+    };
+    let sizes: Vec<usize> = [
         &[][..],
         &["CONSENSFLOW_TEST_DAEMON=native"],
         &[
             "CONSENSFLOW_TEST_DAEMON=native",
             "CONSENSFLOW_TEST_CLI=native",
+            "CONSENSFLOW_TEST_VARIABLE_ONE=a value that is long enough to count for something",
+            "CONSENSFLOW_TEST_VARIABLE_TWO=a value that is long enough to count for something",
         ],
-    ] {
-        let encoded = encode_script(&longest(env)).unwrap();
-        assert!(encoded.len() < ENCODED_LIMIT, "{env:?}: {}", encoded.len());
-    }
+    ]
+    .iter()
+    .map(|env| encode_script(&remote_script(&longest(env))).unwrap().len())
+    .collect();
+    let base = encode_script(&remote_script(&bare)).unwrap().len();
+    assert_eq!(sizes, [base, base, base]);
+    assert!(
+        ENCODED_LIMIT - base >= 1000,
+        "the bootstrap takes {base} of {ENCODED_LIMIT}"
+    );
+    // The stop script goes on the same line.
+    let stop = encode_script(&stop_script(DIR, ID)).unwrap().len();
+    assert!(ENCODED_LIMIT - stop >= 1000, "the stop takes {stop}");
+    // And the run script, in the tarball, has no limit: it holds what the line could not.
+    let run = run_script(&longest(&[
+        "CONSENSFLOW_TEST_VARIABLE_ONE=a value that is long enough to count for something",
+    ]));
+    assert!(
+        run.contains("--switch-to") && run.contains("--pi-staff-model"),
+        "{run}"
+    );
+    assert!(
+        encode_script(&run).unwrap().len() < ENCODED_LIMIT,
+        "the longest run script is no longer than the line was: not the margin it is for"
+    );
 }
 
 #[test]
-fn a_script_the_machines_shell_could_not_read_is_refused_saying_why() {
-    let many: Vec<String> = (0..12)
-        .map(|at| format!("CONSENSFLOW_TEST_VARIABLE_{at}={}", "x".repeat(40)))
-        .collect();
-    let env = parse_env(&many).unwrap();
-    let text = script(&BUILD_STEPS, "cargo xtask eval", &env);
+fn a_folder_with_a_name_too_long_for_the_command_line_is_refused_saying_why() {
+    // The folder's name is in the bootstrap twice (the folder, the tarball's name): it is
+    // what is left that can make the line too long.
+    let long = "d".repeat(900);
+    let text = remote_script(&Script {
+        dir: &long,
+        ..longest(&[])
+    });
     let said = encode_script(&text).unwrap_err().to_string();
     assert!(
         said.starts_with("the script for the machine is ")
             && said.ends_with(
-                " characters encoded, and its shell reads 8000 at most: name fewer variables with --env, or run a shorter command"
+                " characters encoded, and its shell reads 8000 at most: use a shorter --dir"
             ),
         "{said}"
     );

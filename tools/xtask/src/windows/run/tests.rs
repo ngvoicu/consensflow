@@ -16,7 +16,7 @@ use cf_base::env::Env;
 
 use super::*;
 use crate::windows::options::DEFAULT_DIR;
-use crate::windows::script::{SYNCED, TREE};
+use crate::windows::script::{RUN, SYNCED, TREE};
 use crate::windows::testing::script_of;
 
 /// The id of the run whose tree the first line of `log` (scp's) says was sent to
@@ -254,9 +254,28 @@ fn a_run_sends_the_tree_then_runs_the_script_there_and_answers_what_the_command_
     let identity = fs::read_to_string(there.path().join(TREE)).unwrap();
     assert!(identity.starts_with("none "), "{identity}");
     assert_eq!(identity.trim_end().len(), "none ".len() + 16, "{identity}");
+    // And what the run is asked for, as the script that reads it from there is: the steps (none),
+    // the variables, the command; none of it is on ssh's command line.
+    assert_eq!(
+        fs::read_to_string(there.path().join(RUN)).unwrap(),
+        run_script(&Script {
+            id: &id,
+            dir: DEFAULT_DIR,
+            inside: ".",
+            steps: &[],
+            command: &command,
+            env: &env,
+        })
+    );
+    assert!(
+        !decoded(ssh[2]).contains("integration"),
+        "{}",
+        decoded(ssh[2])
+    );
     // And what it was made in is gone, with the list it was made with.
-    assert!(!rig.checkout.path().join(SYNCED).exists());
-    assert!(!rig.checkout.path().join(TREE).exists());
+    for name in [SYNCED, TREE, RUN] {
+        assert!(!rig.checkout.path().join(name).exists(), "{name}");
+    }
 }
 
 #[test]
@@ -285,21 +304,22 @@ fn a_run_holds_the_machine_to_the_tree_it_sent_and_what_the_machine_says_of_it_i
 
 /// An ssh that says the tree it unpacked is not the one this run sent, and goes on until
 /// it is ended (the first time), then answers the second time it is asked (the run's end
-/// there) with 0: the pid of the first is written down.
-fn another_tree() -> String {
-    r#"printf 'ssh\t%s\t%s\t%s\n' "$1" "$2" "$$" >> "$CF_LOG"
-if [ -e "$CF_FIRST" ]; then exit 0; fi
+/// there) with `status`: the pid of the first is written down.
+fn another_tree(status: u8) -> String {
+    format!(
+        r#"printf 'ssh\t%s\t%s\t%s\n' "$1" "$2" "$$" >> "$CF_LOG"
+if [ -e "$CF_FIRST" ]; then exit {status}; fi
 : > "$CF_FIRST"
 echo "== tree 0123456789abcdef0123456789abcdef01234567 fedcba9876543210"
 exec sleep 120"#
-        .to_owned()
+    )
 }
 
 #[test]
 fn a_run_told_another_tree_than_it_sent_ends_there_and_fails_saying_both() {
     let rig = Rig::new();
     rig.program("scp", KEEPS);
-    rig.program("ssh", &another_tree());
+    rig.program("ssh", &another_tree(0));
     let (ended, out, _err) = run_it(&rig, &Interrupt::default());
     let said = ended.unwrap_err().to_string();
     // What the machine said is shown, and what was sent is said beside it.
@@ -557,16 +577,17 @@ fn what_cannot_be_sent_is_refused_before_anything_is_done() {
     let rig = Rig::new();
     rig.program("scp", KEEPS);
     rig.program("ssh", &machine(0));
+    // What a run is asked for has no limit but the shell's (it goes in the tarball); the
+    // folder's name is in the command line, and one that makes it too long is refused.
     let mut options = rig.options();
-    options.env = (0..12)
-        .map(|at| (format!("CONSENSFLOW_TEST_VARIABLE_{at}"), "x".repeat(40)))
-        .collect();
+    options.dir = "d".repeat(900);
     options.build = true;
     let refused = check(&options).unwrap_err().to_string();
     assert!(
         refused.starts_with("the script for the machine is "),
         "{refused}"
     );
+    assert!(refused.ends_with("use a shorter --dir"), "{refused}");
     let (mut out, mut err) = (Vec::new(), Vec::new());
     let ended = run(
         &rig.context,
@@ -579,6 +600,14 @@ fn what_cannot_be_sent_is_refused_before_anything_is_done() {
     );
     assert_eq!(ended.unwrap_err().to_string(), refused);
     assert!(rig.log().is_empty());
+    // And twenty variables of a hundred characters each, which the line could not hold, are
+    // sent: they ride in the tarball.
+    let mut options = rig.options();
+    options.env = (0..20)
+        .map(|at| (format!("CONSENSFLOW_TEST_VARIABLE_{at}"), "x".repeat(100)))
+        .collect();
+    options.build = true;
+    check(&options).unwrap();
 }
 
 /// What a tarball on the machine holds: the names of its members, one to a line.
@@ -717,4 +746,23 @@ fn of_two_runs_that_ask_for_the_lock_together_one_runs_and_the_other_ends_with_7
         .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
         .collect();
     assert_eq!(left, ["refused"], "{left:?}");
+}
+
+#[test]
+fn a_run_told_another_tree_whose_end_there_the_machine_could_not_be_asked_for_says_it_may_go_on() {
+    let rig = Rig::new();
+    rig.program("scp", KEEPS);
+    rig.program("ssh", &another_tree(5));
+    let (ended, _out, err) = run_it(&rig, &Interrupt::default());
+    let said = ended.unwrap_err().to_string();
+    // Not "ended there": the machine said it had not, and the lock may be held until the run ends.
+    assert!(!said.contains("the run was ended there"), "{said}");
+    assert!(
+        said.ends_with(
+            "the run may still be going on the machine: ssh ended with status 5 when asked to end it"
+        ),
+        "{said}"
+    );
+    // Said once, in the error, and not again on the error stream.
+    assert_eq!(err, "");
 }

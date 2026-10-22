@@ -22,22 +22,51 @@
 //! another before it holds the lock. Each run's tarball has a name of its own (this
 //! process's id and a random part, `script::run_id`), sent before the script is asked
 //! for, and that script unpacks that one and removes it however it ends, a refusal by
-//! the lock too; a run that is stopped here ends only the run whose name the lock holds,
-//! and takes its own tarball away. What a run left when it never got so far (this
-//! program killed, a connection lost) is taken away by the sweep of the next run that
-//! holds the lock, an hour after it was written. (Before, every run sent to the same
-//! name: a run whose script had not unpacked yet was handed the tree of the run that sent
-//! after it, and its result was another tree's, 2026-10-22.)
+//! the lock too; a run that is stopped here ends only the run whose name and process the
+//! lock's owner file holds, and takes its own tarball away. What a run left when it never
+//! got so far (this program killed, a connection lost) is taken away by the sweep of the
+//! next run that holds the lock: its own folder's an hour after it was written, which
+//! is safe for a folder in use (a run's tarball is written seconds before its script asks
+//! for the lock), and the uploads of a folder that is gone a day after. (Before, every
+//! run sent to the same name: a run whose script had not unpacked yet was handed the tree
+//! of the run that sent after it, and its result was another tree's, 2026-10-22.)
+//!
+//! The lock is a file opened for the run alone, as the script's first act in the folder:
+//! one act of the system, so of two runs that ask at once one is refused, and closed by
+//! the system whenever the run ends, however it ends, with nothing a run starts holding
+//! it (a handle is not inherited). The process id in the older file is kept for the
+//! scripts of the form before it, which refuse a run by it, and is read as a run only if
+//! it is a PowerShell started before the file was written. A lock is refused with 75,
+//! and with the reason where the system gives one that is not "it is open". **An orphaned
+//! run holds the lock**: when ssh dies without this program's stop reaching the machine
+//! (the Mac slept, the network dropped, this program was killed), the run goes on there to
+//! the end of its command and the lock with it, and every run after it is refused, naming
+//! its process, until it ends or someone ends that process on the machine.
+//!
+//! Two scripts are sent. The bootstrap goes on ssh's command line, which holds 8,000
+//! characters of it ([`script::ENCODED_LIMIT`]) and is the same for every run but for
+//! the folder and the run's name: it takes the lock, unpacks, sweeps, says the tree, and
+//! reads the run script from the tarball. That one holds what the run is asked for (the
+//! steps of `--build`, the variables of `--env`, the command), so that none of it has a
+//! limit but the shell's own on the program started.
 //!
 //! The machine says which tree it unpacked, in the line `== tree <commit> <hash>` after
 //! the unpack: the commit the checkout was at (`none` before its first) and the first 16
 //! hex digits of a SHA-256 over the files that went over (each as the length of its name,
-//! its name, its kind and its bytes), read from a file the tarball holds
-//! (`.windows-tree`). It is held to the one this run sent: another tree's line ends the run
-//! there and fails it, saying both; and a command that ended with 0 on a machine that said
-//! no tree is answered as 1, as a command whose end was not said is. A run that ended
-//! with another status needs none: the lock's refusal and an unpack that failed end before
-//! there is a tree to say.
+//! its name, its kind and, for a file, its bytes; a link or a folder is `other`), read
+//! from a file the tarball holds (`.windows-tree`). It is held to the one this run sent:
+//! another tree's line ends the run there and fails it, saying both and whether the run
+//! was ended; and a command that ended with 0 on a machine that said no tree is answered
+//! as 1, as a command whose end was not said is. A run that ended with another status needs
+//! none: the lock's refusal and an unpack that failed end before there is a tree to say.
+//! What the line proves is limited: it is the file the tarball held, an echo of what was
+//! sent. So the sweep, which rides in the tarball, makes the same hash of the files it
+//! has unpacked and listed, and a run whose files do not hash to the identity is refused
+//! (1, with both hashes) before it says a tree. The hash covers the files the tree
+//! lists and nothing else in the copy: what the copy keeps from run to run (`script::KEPT`:
+//! the packages, the build folder, `bin/cf.exe`, the staged resources) is the last tree's
+//! that made it, by design, and a link or a folder in the tree is known by its name
+//! alone.
 //!
 //! The status is said by the script, as the last line it writes (`== exit N`),
 //! and not taken from ssh, because what ssh answers is the machine's shell's.
@@ -139,6 +168,28 @@ pub const COMMANDS: &[Command] = &[
     },
 ];
 
+/// Whether a run that the machine was asked to end is ended there.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Ending {
+    /// The machine was asked, and said it had.
+    Ended,
+    /// The machine could not be asked, or said it had not (ssh ended with this status
+    /// when asked): the run may still be going on there, and holding its lock.
+    MayGoOn(i32),
+}
+
+impl std::fmt::Display for Ending {
+    fn fmt(&self, to: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Ended => write!(to, "the run was ended there"),
+            Self::MayGoOn(status) => write!(
+                to,
+                "the run may still be going on the machine: ssh ended with status {status} when asked to end it"
+            ),
+        }
+    }
+}
+
 /// The status of a run that was stopped, as a program ends that Ctrl-C stops.
 const STOPPED: i32 = 130;
 
@@ -172,10 +223,15 @@ pub enum Error {
     /// What the run says could not be written (the run was ended on the machine).
     #[error("could not write what the run says: {0}")]
     Output(io::Error),
-    /// The machine unpacked another tree than the one this run sent (the run was ended
-    /// on the machine): whatever it went on to say is no result of this tree's.
-    #[error("the machine ran another tree than the one this run sent, so nothing it said is this tree's: it said `{said}`, this run sent `{sent}`; the run was ended there")]
-    WrongTree { sent: String, said: String },
+    /// The machine unpacked another tree than the one this run sent (the run was asked to
+    /// end on the machine, and `ended` says whether it did): whatever it went on to say is
+    /// no result of this tree's.
+    #[error("the machine ran another tree than the one this run sent, so nothing it said is this tree's: it said `{said}`, this run sent `{sent}`; {ended}")]
+    WrongTree {
+        sent: String,
+        said: String,
+        ended: Ending,
+    },
     #[error("could not wait for ssh: {0}")]
     Wait(io::Error),
 }

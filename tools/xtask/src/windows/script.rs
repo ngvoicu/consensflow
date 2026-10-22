@@ -1,7 +1,12 @@
 //! What `cargo xtask windows` has the Windows machine run, as text: nothing here
-//! reaches a machine, so a test can read it. The one script is PowerShell, handed
-//! to ssh encoded; the command to run goes from a file there, so that nothing on
-//! its way (ssh, PowerShell) reads it again.
+//! reaches a machine, so a test can read it. There are two scripts, both PowerShell.
+//! The bootstrap ([`remote_script`]) is handed to ssh encoded, on a command line that
+//! holds 8,000 characters of it: it takes the lock, unpacks the run's tarball, sweeps,
+//! says the tree and reads the second script. That is the run script ([`run_script`]),
+//! which rides in the tarball as the sweep does and holds what a run is asked for (the
+//! steps, the variables, the command), so that none of it counts against the line; the
+//! command goes from a file there, so that nothing on its way (ssh, PowerShell) reads it
+//! again.
 //!
 //! The script says how the command ended, in the last line it writes: `== exit N`
 //! ([`EXIT_MARK`], which [`exit_said`] reads). Every way out of it goes through
@@ -46,8 +51,9 @@ pub const RUNNING: &str = ".windows-run.pid";
 /// lock and needs no looking at. It stays in the folder, empty, between runs.
 pub const LOCK: &str = ".windows-run.lock";
 
-/// The id of the run ([`run_id`]) that holds the lock, there, beside it: so that a run
-/// that is ended there ends its own and no other.
+/// The id of the run ([`run_id`]) that holds the lock and the process it is, there, beside
+/// it (two lines: the id, the process), so that a run that is ended there ends its own and
+/// no other, and that process and no other.
 pub const OWNER: &str = ".windows-run.id";
 
 /// The tree's identity ([`crate::windows::tree::identity`]), kept beside the files in the
@@ -66,19 +72,24 @@ const COMMAND_FILE: &str = ".windows-run.cmd";
 /// reaches the machine on a command line, which has no room for it.
 pub const SWEEP: &str = ".windows-sweep.ps1";
 
+/// The run script ([`run_script`]), which goes in the tarball beside the sweep, and which
+/// the bootstrap reads and runs in its own scope once the tree is unpacked and said.
+pub const RUN: &str = ".windows-run.ps1";
+
 /// What of the copy there is no file of the tree and stays from one run to the next,
 /// from its root, with `/` (a `*` stands for any characters, as PowerShell's `-like`
 /// reads it; a folder is kept whole and not looked into). Every other file there that
 /// the list of what went over ([`SYNCED`]) does not name is removed after the unpack,
 /// wherever it came from: a run of another tree left 87 files there no sync listed,
 /// which a test of the `cli` suite named (zeewin, 2026-10-16).
-pub const KEPT: [&str; 16] = [
+pub const KEPT: [&str; 17] = [
     // The run's own: the list of what went over, the tree's identity and the sweep (the
     // tarball holds them beside the files, and the list names the files only), the lock
     // taken before the unpack, the command's batch file.
     SYNCED,
     TREE,
     SWEEP,
+    RUN,
     RUNNING,
     OWNER,
     LOCK,
@@ -120,9 +131,11 @@ pub const BUILD_STEPS: [&str; 6] = [
 
 /// What the machine's shell reads of a command line: cmd.exe's 8191 characters,
 /// less what ssh puts before the script (`powershell -NoProfile -NonInteractive
-/// -EncodedCommand `) and a margin. A script with the build's steps takes about
-/// 6,600 of it, and each variable a run names about 300 more.
-const ENCODED_LIMIT: usize = 8000;
+/// -EncodedCommand `) and a margin. Only the bootstrap is on the line, and it is the
+/// same for every run but for the folder's name and the run's: about 5,600 of it, which
+/// leaves more than 2,000, so that what a run is asked for (steps, variables, command)
+/// has no limit but the shell's own on the program it starts.
+pub const ENCODED_LIMIT: usize = 8000;
 
 /// Why what a run was asked to do cannot be sent: what is wrong with the words,
 /// as the command says it.
@@ -134,7 +147,7 @@ pub enum Refusal {
     EnvNotAscii(String),
     #[error("--env {0} is given twice")]
     EnvTwice(String),
-    #[error("the script for the machine is {length} characters encoded, and its shell reads {ENCODED_LIMIT} at most: name fewer variables with --env, or run a shorter command")]
+    #[error("the script for the machine is {length} characters encoded, and its shell reads {ENCODED_LIMIT} at most: use a shorter --dir")]
     TooLong { length: usize },
 }
 
@@ -239,7 +252,7 @@ pub fn exit_said(line: &str) -> Option<i32> {
     number.parse().ok()
 }
 
-/// What a run is, for the script: which run it is, where its copy is, where in it
+/// What a run is, for the scripts: which run it is, where its copy is, where in it
 /// the command runs, what runs first, the command, and the variables it is given.
 #[derive(Debug, Clone, Copy)]
 pub struct Script<'a> {
@@ -257,17 +270,17 @@ pub struct Script<'a> {
     pub env: &'a [(String, String)],
 }
 
-/// The script: the run's own tarball ([`upload_name`]) unpacked into `dir` under the
+/// The bootstrap: the run's own tarball ([`upload_name`]) unpacked into `dir` under the
 /// user's profile (what left the tree since the last run removed), the tree it held
-/// said (`== tree <identity>`), then `steps` run there, then the variables `env` given
-/// to the process and said in the output, then `command` run from `inside`, a folder of
-/// the copy. The steps do not see the variables: they are the command's.
+/// said (`== tree <identity>`), then the run script ([`run_script`]) that was in it.
+/// Nothing of what the run is asked for is in it: its size does not depend on the steps,
+/// the variables or the command.
 ///
 /// The run's tarball is removed whichever way the script ends, a refusal by the lock
-/// too: the one thing it takes away is its own, and the lock only if it holds it (the
-/// `finally`). A tarball a run left there when it never got so far (this program killed,
-/// the connection lost, an upload cut short) is taken away by the sweep of the next run
-/// that holds the lock, once an hour has passed since it was written to.
+/// too: the one thing it takes away is its own, and the lock's records only if they are
+/// its (the `finally`). A tarball a run left there when it never got so far (this program
+/// killed, the connection lost, an upload cut short) is taken away by the sweep of the
+/// next run that holds the lock.
 ///
 /// The unpack is `tar.exe -xmzf`: each file is given the time of the unpack (`-m`,
 /// which GNU tar and bsdtar both take), not the one the tarball keeps of it, which
@@ -276,6 +289,30 @@ pub struct Script<'a> {
 /// changed before that build, there, would leave the file as it was built: a test
 /// that called a function the switch added did not compile against the old crate.
 pub fn remote_script(script: &Script) -> String {
+    fill(
+        REMOTE,
+        &[
+            ("dir", script.dir),
+            ("id", script.id),
+            ("tarball", &upload_name(script.dir, script.id)),
+            ("tree_mark", TREE_MARK),
+            ("tree_file", TREE),
+            ("running", RUNNING),
+            ("owner", OWNER),
+            ("lock", LOCK),
+            ("sweep", SWEEP),
+            ("run", RUN),
+            ("exit", EXIT_MARK),
+        ],
+    )
+}
+
+/// The run script ([`RUN`]), which the bootstrap runs in its own scope once the tree is
+/// unpacked and said: `steps` run in the copy, then the variables `env` given to the
+/// process and said in the output, then `command` run from `inside`, a folder of the
+/// copy. The steps do not see the variables: they are the command's. It ends the run
+/// (`Exit-Run`) with the command's status.
+pub fn run_script(script: &Script) -> String {
     let steps: Vec<String> = script
         .steps
         .iter()
@@ -292,24 +329,14 @@ pub fn remote_script(script: &Script) -> String {
         })
         .collect();
     fill(
-        REMOTE,
+        RUN_TEMPLATE,
         &[
-            ("dir", script.dir),
-            ("id", script.id),
-            ("tarball", &upload_name(script.dir, script.id)),
-            ("tree_mark", TREE_MARK),
-            ("tree_file", TREE),
-            ("running", RUNNING),
-            ("owner", OWNER),
-            ("lock", LOCK),
-            ("sweep", SWEEP),
             ("command_file", COMMAND_FILE),
             ("steps", &steps.join(", ")),
             ("given", &given),
             ("inside", script.inside),
             ("command", &script.command.replace('\'', "''")),
             ("crlf", "\r\n"),
-            ("exit", EXIT_MARK),
         ],
     )
 }
@@ -330,24 +357,39 @@ pub fn remote_script(script: &Script) -> String {
 ///   run on zeewin, 2026-10-16), a file's read-only mark taken away first.
 /// - A folder [`KEPT`] names is not walked: the build folder holds hundreds of thousands
 ///   of files.
-/// - Last, the tarballs runs left beside the copy (`<folder>.<id>.tgz`, [`upload_name`],
-///   and the `<folder>.tgz` the runs sent before each had its own) that were written to
-///   more than an hour ago: a run removes its own, so these are of runs that never got
-///   so far (this program killed, the connection lost, an upload cut short). It never
-///   fails the run, and it runs with the lock held, which no run is waiting on.
+/// - Then the files unpacked are held to the tree that was sent: a SHA-256 over the files
+///   the list names (in its order, each as the length of its name, its name, its kind and,
+///   for a file, its bytes; a link or a folder is `other`, with no bytes), its first 16 hex
+///   digits against the identity in [`TREE`] that the tarball held. A file missing, changed
+///   or added by another unpack at the same time makes them differ: said, and the run ends
+///   before it says a tree. (This is the same hash [`crate::windows::tree::identity`] makes.)
+/// - Last, the tarballs runs left beside the copy: this folder's own (`<folder>.<id>.tgz`,
+///   [`upload_name`], and the `<folder>.tgz` the runs sent before each had its own) that
+///   were written to more than an hour ago, and those of folders that are gone
+///   (`<gone>.<id>.tgz`, no folder of that name beside it) written to more than a day
+///   ago. A run removes its own, so these are of runs that never got so far (this
+///   program killed, the connection lost, an upload cut short). The hour is safe for a
+///   folder that is in use: a run's tarball is written seconds before its script asks
+///   for the lock. It never fails the run, and it runs with the lock held, which no run
+///   is waiting on.
 pub fn sweep_script() -> String {
     let kept: Vec<String> = KEPT.iter().map(|name| quoted(name)).collect();
     fill(
         SWEEP_TEMPLATE,
-        &[("synced", SYNCED), ("kept", &kept.join(", "))],
+        &[
+            ("synced", SYNCED),
+            ("tree_file", TREE),
+            ("kept", &kept.join(", ")),
+        ],
     )
 }
 
 /// What ends the run `id` that goes on there: its whole tree ended, its record taken
 /// away, and its tarball. Sent when the run is stopped here, which Windows' SSH server
-/// does not pass on. Only the run the lock's owner file ([`OWNER`]) names is ended: a run
-/// that was stopped before its script had the lock (or that the lock refused) must not
-/// end the one that holds it.
+/// does not pass on. Only the run the lock's owner file ([`OWNER`]) names is ended, and
+/// the process it names (not the one in the older file, which another script may have
+/// written over): a run that was stopped before its script had the lock (or that the
+/// lock refused) must not end the one that holds it.
 pub fn stop_script(dir: &str, id: &str) -> String {
     fill(
         STOP,
@@ -389,21 +431,25 @@ fn fill(template: &str, parts: &[(&str, &str)]) -> String {
     text
 }
 
-/// The script of a run, with a mark where each part of it goes. It begins and
-/// ends with a line feed, as the JavaScript's template did. `Exit-Run` is the one
-/// way out: the line that says how the run went, then the exit (the `finally`
-/// that takes the run's record away writes nothing, so the line is the last).
+/// The bootstrap, with a mark where each part of it goes. It begins and ends with a line
+/// feed, as the JavaScript's template did. `Exit-Run` is the one way out: the line that
+/// says how the run went, then the exit (the `finally` that takes the run's record away
+/// writes nothing, so the line is the last).
 ///
 /// - The command's output goes to the stream as the command writes it, not line by line
 ///   through PowerShell, so it may end in the middle of a line (`type` of a file that has
 ///   no final line end does): the exit line begins with a line feed, so that it is always
 ///   a line of its own and never glued to the command's last words.
 /// - What the command prints is UTF-8, and goes back as it came.
-/// - Codex's own PATH entry is a junction an SSH session may not cross ("an untrusted mount
-///   point"): its release folder is named outright.
 /// - The lock is opened before anything else is done in the folder, and a run that is
-///   refused closes it and leaves the folder as it found it. The process in
-///   [`RUNNING`] is looked at after it: a script of the form before [`LOCK`] holds only that.
+///   refused closes it and leaves the folder as it found it. Whatever the open says that
+///   is not "it is open" (`IOException`) is said as the reason, and the run is refused all
+///   the same, with its exit line: a run never ends without one for the lock.
+/// - The process in [`RUNNING`] is looked at after it, as a script of the form before
+///   [`LOCK`] holds only that: it counts only if the process is a PowerShell that was
+///   started before the file was written, so that a process id a later program has taken
+///   is no run, and the lock decides. The file is read as nothing if it is gone or is
+///   being written.
 const REMOTE: &str = r##"
 $ProgressPreference = 'SilentlyContinue'
 $ErrorActionPreference = 'Stop'
@@ -418,18 +464,33 @@ $held = $false
 $lock = $null
 try {
 New-Item -ItemType Directory -Force $dir | Out-Null
-try { $lock = [IO.File]::Open((Join-Path $dir '«lock»'), 'OpenOrCreate', 'ReadWrite', 'None') } catch [IO.IOException] {}
-$holder = if (Test-Path $running) { Get-Content $running }
-$other = if ($holder) { Get-Process -Id $holder -ErrorAction SilentlyContinue }
-if (-not $lock -or $other) { Write-Output "A run is still going on this machine$(if ($other) { " (process $($other.Id))" }): one at a time."; Exit-Run 75 }
+try { $lock = [IO.File]::Open((Join-Path $dir '«lock»'), 'OpenOrCreate', 'ReadWrite', 'None') } catch [IO.IOException] {} catch { $why = $_.Exception.Message }
+$holder = Get-Content $running -ErrorAction SilentlyContinue
+$other = if ($holder) { try { Get-Process -Id $holder -ErrorAction Stop | Where-Object { ($_.Name -in @('powershell', 'pwsh')) -and $_.StartTime -le (Get-Item $running).LastWriteTime } } catch {} }
+if (-not $lock -or $other) { Write-Output "A run is still going on this machine$(if ($other) { " (process $($other.Id))" })$(if ($why) { " (the lock could not be opened: $why)" }): one at a time."; Exit-Run 75 }
 Set-Content -Path $running -Value $PID
-Set-Content -Path $owner -Value '«id»'
+Set-Content -Path $owner -Value @('«id»', $PID)
 $held = $true
 tar.exe -xmzf $tarball -C $dir
 if ($LASTEXITCODE -ne 0) { Exit-Run $LASTEXITCODE }
 . ([scriptblock]::Create([IO.File]::ReadAllText((Join-Path $dir '«sweep»'))))
 if ($failed.Count) { Exit-Run 1 }
 Write-Output "«tree_mark»$(Get-Content -LiteralPath (Join-Path $dir '«tree_file»') -TotalCount 1)"
+. ([scriptblock]::Create([IO.File]::ReadAllText((Join-Path $dir '«run»'))))
+} finally {
+  Remove-Item -LiteralPath $tarball -Force -ErrorAction SilentlyContinue
+  if ($held) {
+    Remove-Item -LiteralPath $owner -Force -ErrorAction SilentlyContinue
+    if ((Get-Content $running -ErrorAction SilentlyContinue) -eq $PID) { Remove-Item -LiteralPath $running -Force -ErrorAction SilentlyContinue }
+  }
+  if ($lock) { $lock.Dispose() }
+}
+"##;
+
+/// The run script, with a mark where each part of it goes. It begins and ends with a line
+/// feed. Codex's own PATH entry is a junction an SSH session may not cross ("an
+/// untrusted mount point"): its release folder is named outright.
+const RUN_TEMPLATE: &str = r##"
 $env:Path = "C:\Program Files\nodejs;$env:USERPROFILE\.cargo\bin;" + $env:Path
 $codex = (Get-Item "$env:USERPROFILE\.codex\packages\standalone\current" -ErrorAction SilentlyContinue).Target
 if ($codex) { $env:Path = "$(@($codex)[0])\bin;" + $env:Path }
@@ -445,11 +506,6 @@ $run = Join-Path $dir '«command_file»'
 [IO.File]::WriteAllText($run, "@echo off«crlf»" + '«command»' + "«crlf»")
 cmd /c "$run 2>&1"
 Exit-Run $LASTEXITCODE
-} finally {
-  Remove-Item -LiteralPath $tarball -Force -ErrorAction SilentlyContinue
-  if ($held) { Remove-Item -LiteralPath $running, $owner -Force -ErrorAction SilentlyContinue }
-  if ($lock) { $lock.Dispose() }
-}
 "##;
 
 /// The sweep, with a mark where each part of it goes. `Clear-Stale` answers how many
@@ -486,8 +542,28 @@ $base = $root.FullName.TrimEnd('\').Length + 1
 $null = Clear-Stale $root
 foreach ($name in $removed) { Write-Output "== removed $name" }
 if ($failed.Count) { Write-Output "What left the tree could not be removed from the copy: $($failed -join '; ')" }
-$upload = '^' + [regex]::Escape($root.Name) + '(\.[0-9a-f]{8}-[0-9a-f]{8})?\.tgz$'
-try { Get-ChildItem -LiteralPath $root.Parent.FullName -File | Where-Object { $_.Name -match $upload -and $_.LastWriteTime -lt (Get-Date).AddHours(-1) } | Remove-Item -Force -ErrorAction SilentlyContinue } catch {}
+$sha = [Security.Cryptography.SHA256]::Create()
+$utf8 = [Text.UTF8Encoding]::new($false)
+foreach ($name in @(Get-Content -Encoding UTF8 (Join-Path $dir '«synced»'))) {
+  $bytes = $utf8.GetBytes($name)
+  $null = $sha.TransformBlock([BitConverter]::GetBytes([uint64]$bytes.Length), 0, 8, $null, 0)
+  $null = $sha.TransformBlock($bytes, 0, $bytes.Length, $null, 0)
+  $path = Join-Path $dir $name
+  $kind = 'missing'
+  try { $kind = if ([IO.File]::GetAttributes($path) -band 1040) { 'other' } else { 'file' } } catch {}
+  $bytes = $utf8.GetBytes($kind)
+  $null = $sha.TransformBlock($bytes, 0, $bytes.Length, $null, 0)
+  if ($kind -eq 'file') { $bytes = [IO.File]::ReadAllBytes($path); $null = $sha.TransformBlock($bytes, 0, $bytes.Length, $null, 0) }
+}
+$null = $sha.TransformFinalBlock([byte[]]::new(0), 0, 0)
+$sent = (Get-Content -LiteralPath (Join-Path $dir '«tree_file»') -TotalCount 1).Split(' ')[1]
+$unpacked = ($sha.Hash[0..7] | ForEach-Object { $_.ToString('x2') }) -join ''
+if ($unpacked -ne $sent) { Write-Output "The files unpacked are not the tree that was sent: they hash to $unpacked, and its identity says $sent."; $failed.Add('the files unpacked are not the tree that was sent') }
+$beside = $root.Parent.FullName
+$own = '^' + [regex]::Escape($root.Name) + '(\.[0-9a-f]{8}-[0-9a-f]{8})?\.tgz$'
+$left = '^(?<folder>.+)\.[0-9a-f]{8}-[0-9a-f]{8}\.tgz$'
+try { Get-ChildItem -LiteralPath $beside -File | Where-Object { $_.Name -match $own -and $_.LastWriteTime -lt (Get-Date).AddHours(-1) } | Remove-Item -Force -ErrorAction SilentlyContinue } catch {}
+try { Get-ChildItem -LiteralPath $beside -File | Where-Object { $_.Name -match $left -and -not (Test-Path -LiteralPath (Join-Path $beside $Matches.folder)) -and $_.LastWriteTime -lt (Get-Date).AddDays(-1) } | Remove-Item -Force -ErrorAction SilentlyContinue } catch {}
 "##;
 
 /// The script that ends a run, with a mark where each part of it goes. It begins
@@ -499,7 +575,8 @@ $ProgressPreference = 'SilentlyContinue'
 $dir = Join-Path $env:USERPROFILE '«dir»'
 $running = Join-Path $dir '«running»'
 $owner = Join-Path $dir '«owner»'
-if ((Test-Path $running) -and (Test-Path $owner) -and (Get-Content $owner) -eq '«id»') { taskkill /PID (Get-Content $running) /T /F | Out-Null; Remove-Item -LiteralPath $running, $owner -Force }
+$of = @(Get-Content $owner -ErrorAction SilentlyContinue)
+if ($of[0] -eq '«id»') { taskkill /PID ($of[1]) /T /F | Out-Null; Remove-Item -LiteralPath $owner -Force; if ((Get-Content $running -ErrorAction SilentlyContinue) -eq $of[1]) { Remove-Item -LiteralPath $running -Force } }
 Remove-Item -LiteralPath (Join-Path $env:USERPROFILE '«tarball»') -Force -ErrorAction SilentlyContinue
 "##;
 

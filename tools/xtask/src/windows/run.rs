@@ -17,11 +17,11 @@
 use super::interrupt::Interrupt;
 use super::options::Options;
 use super::script::{
-    command_line, encode_script, remote_script, run_id, stop_script, upload_name, Refusal, Script,
-    BUILD_STEPS, TREE_MARK,
+    command_line, encode_script, remote_script, run_id, run_script, stop_script, upload_name,
+    Refusal, Script, BUILD_STEPS, TREE_MARK,
 };
 use super::session::{self, Ended};
-use super::{tree, Error};
+use super::{tree, Ending, Error};
 use crate::context::Context;
 use crate::dispatch::Console;
 use crate::process::{self, Invocation};
@@ -35,10 +35,14 @@ pub enum Outcome {
     Stopped,
 }
 
-/// What ssh is given to run on the machine: PowerShell, the script encoded.
+/// What a run is made of: what ssh is given to run on the machine (PowerShell, the
+/// bootstrap encoded), what goes in the tarball for it to read, and what ends it.
 struct Plan {
-    /// The run itself.
+    /// The run itself: the bootstrap.
     run: String,
+    /// What the run is asked for (the steps, the variables, the command): the script the
+    /// bootstrap reads from the tarball.
+    script: String,
     /// What ends it.
     stop: String,
 }
@@ -48,16 +52,17 @@ impl Plan {
     fn new(options: &Options, id: &str) -> Result<Self, Refusal> {
         let command = command_line(&options.command);
         let steps: &[&str] = if options.build { &BUILD_STEPS } else { &[] };
-        let run = remote_script(&Script {
+        let script = Script {
             id,
             dir: &options.dir,
             inside: &options.inside,
             steps,
             command: &command,
             env: &options.env,
-        });
+        };
         Ok(Self {
-            run: powershell(&run)?,
+            run: powershell(&remote_script(&script))?,
+            script: run_script(&script),
             stop: powershell(&stop_script(&options.dir, id))?,
         })
     }
@@ -106,7 +111,7 @@ pub fn run(
         return Ok(Outcome::Stopped);
     }
     let identity = identity?;
-    let packed = tree::pack(context, &listed, &identity, scratch.path());
+    let packed = tree::pack(context, &listed, &identity, &plan.script, scratch.path());
     if stopped(interrupt, packed.is_err()) {
         return Ok(Outcome::Stopped);
     }
@@ -139,18 +144,19 @@ pub fn run(
     match session::stream(&run, &context.env, console, interrupt, &tree_said)? {
         Ended::Exited(status) => Ok(Outcome::Exited(status)),
         Ended::WrongTree(said) => {
-            end_there(context, options, &plan, console)?;
+            let ended = end_there(context, options, &plan)?;
             Err(Error::WrongTree {
                 sent: tree_said,
                 said,
+                ended,
             })
         }
         Ended::Stopped => {
-            end_there(context, options, &plan, console)?;
+            say_if_not_ended(end_there(context, options, &plan)?, console)?;
             Ok(Outcome::Stopped)
         }
         Ended::Unwritten(cause) => {
-            end_there(context, options, &plan, console)?;
+            say_if_not_ended(end_there(context, options, &plan)?, console)?;
             Err(Error::Output(cause))
         }
     }
@@ -167,21 +173,21 @@ fn stopped(interrupt: &Interrupt, failed: bool) -> bool {
     }
 }
 
-/// Ends the run on the machine: its whole tree, and its record.
-fn end_there(
-    context: &Context,
-    options: &Options,
-    plan: &Plan,
-    console: &mut Console,
-) -> Result<(), Error> {
+/// Ends the run on the machine: its whole tree, and its record. Whether the machine
+/// was asked and said it was done.
+fn end_there(context: &Context, options: &Options, plan: &Plan) -> Result<Ending, Error> {
     let stop = ssh(context, &options.host, &plan.stop);
-    match process::run(&stop, &context.env)? {
-        0 => Ok(()),
-        status => writeln!(
-            console.err,
-            "windows: the run may still be going on the machine: ssh ended with status {status} when asked to end it"
-        )
-        .map_err(Error::Output),
+    Ok(match process::run(&stop, &context.env)? {
+        0 => Ending::Ended,
+        status => Ending::MayGoOn(status),
+    })
+}
+
+/// Says on the error stream that the run may still be going on the machine.
+fn say_if_not_ended(ending: Ending, console: &mut Console) -> Result<(), Error> {
+    match ending {
+        Ending::Ended => Ok(()),
+        Ending::MayGoOn(_) => writeln!(console.err, "windows: {ending}").map_err(Error::Output),
     }
 }
 

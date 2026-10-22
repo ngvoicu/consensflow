@@ -12,37 +12,24 @@ $held = $false
 $lock = $null
 try {
 New-Item -ItemType Directory -Force $dir | Out-Null
-try { $lock = [IO.File]::Open((Join-Path $dir '.windows-run.lock'), 'OpenOrCreate', 'ReadWrite', 'None') } catch [IO.IOException] {}
-$holder = if (Test-Path $running) { Get-Content $running }
-$other = if ($holder) { Get-Process -Id $holder -ErrorAction SilentlyContinue }
-if (-not $lock -or $other) { Write-Output "A run is still going on this machine$(if ($other) { " (process $($other.Id))" }): one at a time."; Exit-Run 75 }
+try { $lock = [IO.File]::Open((Join-Path $dir '.windows-run.lock'), 'OpenOrCreate', 'ReadWrite', 'None') } catch [IO.IOException] {} catch { $why = $_.Exception.Message }
+$holder = Get-Content $running -ErrorAction SilentlyContinue
+$other = if ($holder) { try { Get-Process -Id $holder -ErrorAction Stop | Where-Object { ($_.Name -in @('powershell', 'pwsh')) -and $_.StartTime -le (Get-Item $running).LastWriteTime } } catch {} }
+if (-not $lock -or $other) { Write-Output "A run is still going on this machine$(if ($other) { " (process $($other.Id))" })$(if ($why) { " (the lock could not be opened: $why)" }): one at a time."; Exit-Run 75 }
 Set-Content -Path $running -Value $PID
-Set-Content -Path $owner -Value '0000abcd-12345678'
+Set-Content -Path $owner -Value @('0000abcd-12345678', $PID)
 $held = $true
 tar.exe -xmzf $tarball -C $dir
 if ($LASTEXITCODE -ne 0) { Exit-Run $LASTEXITCODE }
 . ([scriptblock]::Create([IO.File]::ReadAllText((Join-Path $dir '.windows-sweep.ps1'))))
 if ($failed.Count) { Exit-Run 1 }
 Write-Output "== tree $(Get-Content -LiteralPath (Join-Path $dir '.windows-tree') -TotalCount 1)"
-$env:Path = "C:\Program Files\nodejs;$env:USERPROFILE\.cargo\bin;" + $env:Path
-$codex = (Get-Item "$env:USERPROFILE\.codex\packages\standalone\current" -ErrorAction SilentlyContinue).Target
-if ($codex) { $env:Path = "$(@($codex)[0])\bin;" + $env:Path }
-Set-Location $dir
-$ErrorActionPreference = 'Continue'
-foreach ($step in @()) {
-  Write-Output "== $step"
-  cmd /c "$step 2>&1"
-  if ($LASTEXITCODE -ne 0) { Exit-Run $LASTEXITCODE }
-}
-Set-Location (Join-Path $dir '.')
-$run = Join-Path $dir '.windows-run.cmd'
-[IO.File]::WriteAllText($run, "@echo off␍
-" + 'node -e "console.log(\"it''s 100%%\")"' + "␍
-")
-cmd /c "$run 2>&1"
-Exit-Run $LASTEXITCODE
+. ([scriptblock]::Create([IO.File]::ReadAllText((Join-Path $dir '.windows-run.ps1'))))
 } finally {
   Remove-Item -LiteralPath $tarball -Force -ErrorAction SilentlyContinue
-  if ($held) { Remove-Item -LiteralPath $running, $owner -Force -ErrorAction SilentlyContinue }
+  if ($held) {
+    Remove-Item -LiteralPath $owner -Force -ErrorAction SilentlyContinue
+    if ((Get-Content $running -ErrorAction SilentlyContinue) -eq $PID) { Remove-Item -LiteralPath $running -Force -ErrorAction SilentlyContinue }
+  }
   if ($lock) { $lock.Dispose() }
 }

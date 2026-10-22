@@ -112,7 +112,14 @@ fn what_goes_over_is_packed_with_the_list_of_it_which_leaves_out_what_was_delete
     let scratch = tempfile::tempdir().unwrap();
 
     let listed = files(&context).unwrap();
-    let tarball = pack(&context, &listed, "none 0123456789abcdef", scratch.path()).unwrap();
+    let tarball = pack(
+        &context,
+        &listed,
+        "none 0123456789abcdef",
+        "the run script\n",
+        scratch.path(),
+    )
+    .unwrap();
 
     let there = unpacked(&context, &tarball);
     let held = |name: &str| fs::read_to_string(there.path().join(name)).ok();
@@ -129,10 +136,12 @@ fn what_goes_over_is_packed_with_the_list_of_it_which_leaves_out_what_was_delete
     assert!(list.ends_with('\n'));
     // Beside it, the sweep that removes from the copy what the list does not name.
     assert_eq!(held(SWEEP), Some(sweep_script()));
-    // And the tree's identity, which the machine says once it has unpacked the tarball.
+    // And the tree's identity, which the machine holds what it unpacked to and says.
     assert_eq!(held(TREE).as_deref(), Some("none 0123456789abcdef\n"));
-    // And none of the three is left in the checkout.
-    for name in [SYNCED, SWEEP, TREE] {
+    // And the run script, which is what the run is asked for.
+    assert_eq!(held(RUN).as_deref(), Some("the run script\n"));
+    // And none of the four is left in the checkout.
+    for name in [SYNCED, SWEEP, TREE, RUN] {
         assert!(!dir.path().join(name).exists(), "{name}");
     }
     assert!(git(&context, &["status", "--short"]).contains("new.txt"));
@@ -143,7 +152,14 @@ fn a_tarball_that_cannot_be_made_is_said_with_what_tar_said_and_leaves_no_list_b
     let (dir, context) = checkout(&[("keep.txt", "kept")]);
     let scratch = tempfile::tempdir().unwrap();
     // A name with nothing behind it is what the copy broke on before the tree was filtered.
-    let said = pack(&context, &["gone.txt".to_owned()], "none x", scratch.path()).unwrap_err();
+    let said = pack(
+        &context,
+        &["gone.txt".to_owned()],
+        "none x",
+        "",
+        scratch.path(),
+    )
+    .unwrap_err();
     let said = said.to_string();
     assert!(said.starts_with("`tar czf "), "{said}");
     // What tar says of it is its own, which differs by system (`gone.txt: Cannot
@@ -151,7 +167,7 @@ fn a_tarball_that_cannot_be_made_is_said_with_what_tar_said_and_leaves_no_list_b
     let (_, after) = said.split_once("` ended with status ").unwrap();
     let words = after.trim_start_matches(|c: char| c.is_ascii_digit());
     assert!(words.starts_with(": ") && words.len() > 2, "{said}");
-    for name in [SYNCED, SWEEP, TREE] {
+    for name in [SYNCED, SWEEP, TREE, RUN] {
         assert!(!dir.path().join(name).exists(), "{name}");
     }
 }
@@ -317,6 +333,7 @@ fn a_link_whose_target_is_gone_is_still_a_file_of_the_tree() {
         &context,
         &files(&context).unwrap(),
         "none x",
+        "",
         scratch.path(),
     )
     .unwrap();
@@ -473,17 +490,19 @@ fn the_same_files_at_another_commit_are_another_tree_by_the_commit_and_the_same_
 
 #[cfg(unix)]
 #[test]
-fn a_link_is_hashed_by_where_it_points_and_never_followed() {
+fn a_link_is_known_by_its_name_alone_and_never_followed_for_a_machine_makes_no_link_of_it() {
     let (dir, context) = checkout(&[("keep.txt", "kept")]);
+    // A link, whose target is gone, is part of the tree as it is a file of it; what a
+    // machine's file system makes of it is not what the Mac has, so it is `other`.
     std::os::unix::fs::symlink("nowhere", dir.path().join("link")).unwrap();
-    // A link whose target is gone is part of the tree, as it is a file of it.
     let one = identity_of(&context);
     fs::remove_file(dir.path().join("link")).unwrap();
     std::os::unix::fs::symlink("elsewhere", dir.path().join("link")).unwrap();
-    let two = identity_of(&context);
-    assert_ne!(words(&one).1, words(&two).1);
-    // Nor is a link to a folder read as a file.
+    assert_eq!(identity_of(&context), one);
+    // But it is there: without it the tree is another.
     fs::remove_file(dir.path().join("link")).unwrap();
+    assert_ne!(words(&identity_of(&context)).1, words(&one).1);
+    // Nor is a link to a folder read as a file.
     std::os::unix::fs::symlink(dir.path(), dir.path().join("link")).unwrap();
     identity(&context, &["keep.txt".to_owned(), "link".to_owned()]).unwrap();
 }

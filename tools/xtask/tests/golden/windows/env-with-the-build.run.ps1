@@ -1,0 +1,22 @@
+
+$env:Path = "C:\Program Files\nodejs;$env:USERPROFILE\.cargo\bin;" + $env:Path
+$codex = (Get-Item "$env:USERPROFILE\.codex\packages\standalone\current" -ErrorAction SilentlyContinue).Target
+if ($codex) { $env:Path = "$(@($codex)[0])\bin;" + $env:Path }
+Set-Location $dir
+$ErrorActionPreference = 'Continue'
+foreach ($step in @('npm ci --no-audit --no-fund', 'npm ci --prefix app --no-audit --no-fund', 'npm --prefix app run bundle:ui', 'cargo xtask stage', 'npm run build:bridge', 'cargo xtask conpty --into app/src-tauri/target/release')) {
+  Write-Output "== $step"
+  cmd /c "$step 2>&1"
+  if ($LASTEXITCODE -ne 0) { Exit-Run $LASTEXITCODE }
+}
+$env:CONSENSFLOW_TEST_DAEMON = 'native'
+Write-Output "== env CONSENSFLOW_TEST_DAEMON=$env:CONSENSFLOW_TEST_DAEMON"
+$env:CONSENSFLOW_NOTE = 'it''s 100% $x `y` "q" & |'
+Write-Output "== env CONSENSFLOW_NOTE=$env:CONSENSFLOW_NOTE"
+Set-Location (Join-Path $dir '.')
+$run = Join-Path $dir '.windows-run.cmd'
+[IO.File]::WriteAllText($run, "@echo off␍
+" + 'cargo xtask eval --scenario round-trip --chief devin' + "␍
+")
+cmd /c "$run 2>&1"
+Exit-Run $LASTEXITCODE
