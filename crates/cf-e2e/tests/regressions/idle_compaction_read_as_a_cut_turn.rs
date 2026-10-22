@@ -37,6 +37,20 @@ use crate::{config, secs, Outcome};
 /// the Claude configuration `config`: the boundary, whose chain starts afresh, and
 /// the summary under it.
 pub(crate) fn compacted_while_idle(config: &str, session: &str) -> std::io::Result<()> {
+    let file = Path::new(config)
+        .join("projects")
+        .join("integration")
+        .join(format!("{session}.jsonl"));
+    write_compaction(&mut OpenOptions::new().append(true).open(file)?, session)
+}
+
+/// The boundary and the summary of a compaction, to the record `out`, a line each
+/// and each in one write. `writeln!` of a value writes it a token at a time, and
+/// the stand-in that writes its own record meanwhile (the answer a case did not
+/// wait for) lands inside the line, which the reader takes for a malformed one
+/// for good (T-187; `fake_agent/records.rs` writes its lines whole for the same
+/// reason).
+pub(crate) fn write_compaction(out: &mut impl Write, session: &str) -> std::io::Result<()> {
     let boundary = json!({
         "type": "system", "subtype": "compact_boundary", "uuid": "compact-boundary",
         "parentUuid": null, "logicalParentUuid": "the-turn-before",
@@ -51,13 +65,31 @@ pub(crate) fn compacted_while_idle(config: &str, session: &str) -> std::io::Resu
         "sessionId": session, "isSidechain": false,
         "timestamp": "2026-10-14T16:43:55.176Z",
     });
-    let file = Path::new(config)
-        .join("projects")
-        .join("integration")
-        .join(format!("{session}.jsonl"));
-    let mut record = OpenOptions::new().append(true).open(file)?;
-    writeln!(record, "{boundary}")?;
-    writeln!(record, "{summary}")
+    for record in [boundary, summary] {
+        let mut line = record.to_string();
+        line.push('\n');
+        out.write_all(line.as_bytes())?;
+    }
+    Ok(())
+}
+
+/// The chief's turn on `said` to have ended in its record: the stand-in's stop
+/// hook closes it, after its answer. The words are in the record from the user's
+/// own line, so a wait for them alone returns while the answer is still to be
+/// written (T-187), and a compaction written then is no compaction while idle.
+pub(crate) fn wait_for_the_turn_to_end(rig: &Rig, session: &str, said: &str) -> cf_e2e::Result<()> {
+    rig.wait_for("the chief's turn to end in its record", secs(60), || {
+        let record = rig.transcript(session);
+        let lines: Vec<&str> = record.lines().collect();
+        Ok(lines
+            .iter()
+            .position(|line| line.contains(said))
+            .is_some_and(|said| {
+                lines[said..]
+                    .iter()
+                    .any(|line| line.contains(r#""subtype":"stop_hook_summary""#))
+            }))
+    })
 }
 
 #[test]
@@ -72,9 +104,7 @@ fn a_claude_chief_whose_conversation_was_compacted_while_idle_is_given_no_note_a
         .ok_or("the first window has no session")?
         .to_owned();
     rig.tell(project.id(), "Reply with exactly: HELLO")?;
-    rig.wait_for("the chief to answer", secs(60), || {
-        Ok(rig.transcript(&session).contains("HELLO"))
-    })?;
+    wait_for_the_turn_to_end(&rig, &session, "Reply with exactly: HELLO")?;
     wait_for_the_chief(&rig, &project)?;
     let claude = rig
         .var("CLAUDE_CONFIG_DIR")

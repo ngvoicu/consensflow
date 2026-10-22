@@ -22,7 +22,7 @@ use cf_e2e::files;
 use cf_e2e::rig::{Project, Rig};
 use serde_json::{json, Value};
 
-use crate::idle_compaction_read_as_a_cut_turn::compacted_while_idle;
+use crate::idle_compaction_read_as_a_cut_turn::{compacted_while_idle, wait_for_the_turn_to_end};
 use crate::resume_of_a_chief_with_no_turn::{after, wait_for_the_chief, windows_of};
 use crate::{config_with_codex, secs, Outcome};
 
@@ -87,9 +87,7 @@ fn the_history_reads_a_chief_s_conversations_whole_across_a_compaction_and_a_swi
 
     // The chief works, and Claude Code compacts its conversation while it is idle.
     rig.tell(project.id(), "Reply with exactly: BEFORE_THE_SWITCH")?;
-    rig.wait_for("the Claude chief to answer", secs(60), || {
-        Ok(rig.transcript(&session).contains("BEFORE_THE_SWITCH"))
-    })?;
+    wait_for_the_turn_to_end(&rig, &session, "Reply with exactly: BEFORE_THE_SWITCH")?;
     wait_for_the_chief(&rig, &project)?;
     let claude = rig
         .var("CLAUDE_CONFIG_DIR")

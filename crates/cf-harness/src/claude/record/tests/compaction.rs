@@ -74,3 +74,36 @@ fn the_summary_is_a_user_s_item_marked_as_the_compaction_s_and_no_other_item_is(
         ]
     );
 }
+
+/// T-187: a record that reaches the file in pieces (`writeln!` of a value writes
+/// it a token at a time) is read once it is whole, and no look between is
+/// unreadable: the last line, cut anywhere, waits for the rest.
+#[test]
+fn the_summary_a_compaction_writes_in_pieces_is_read_once_whole_and_no_look_between_fails() {
+    let tail = Stage::lines(&[compacted("c1", "d1"), compact_summary("s1", "c1")]);
+    for size in [1, 7, 97] {
+        let mut stage = Stage::new();
+        stage.write(&[hello(), answer("a1", "u1"), duration("d1", "a1")]);
+        assert!(!stage.look().starts_with("unknown"));
+        for piece in tail.as_bytes().chunks(size) {
+            let mut file = fs::OpenOptions::new()
+                .append(true)
+                .open(stage.file())
+                .unwrap();
+            std::io::Write::write_all(&mut file, piece).unwrap();
+            let seen = stage.look();
+            assert!(!seen.starts_with("unknown"), "cut by {size}: {seen}");
+        }
+        let Reading::Known(record) = &*stage.reader.look(&Options::default(), 0) else {
+            panic!("an unknown reading");
+        };
+        assert!(
+            record
+                .items
+                .iter()
+                .any(|item| &*item.id == "s1" && item.compaction),
+            "cut by {size}: no summary in {:?}",
+            record.items
+        );
+    }
+}
