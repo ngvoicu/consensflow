@@ -5,8 +5,9 @@
 //! Every command runs in Rust. A module holds the commands it owns as a table,
 //! and the tables are joined in `dispatch`. It depends on no crate of the
 //! product, only on `cf-base` for the environment (read once, in `main`), on
-//! `cf-process` to find a program on the PATH, on the release tool `cf-release`
-//! and on the crate `cf-portable` that writes and reads the portable exe, so it
+//! `cf-process` to find a program on the PATH, on the release tools `cf-release`
+//! and `cf-publish` (the order of releases, and what a feed names), and on the
+//! crate `cf-portable` that writes and reads the portable exe, so it
 //! builds with no staged resources and no GUI toolchain.
 //!
 //! The modules, by what they do:
@@ -22,6 +23,8 @@
 //! - the app as built, run as a user would: `smoke` (the packaged smoke, and
 //!   `smoke-updater`, which is `updater_smoke`);
 //! - the mutation tests: `plants`, with their data in `tests/plants`;
+//! - the releases: `release` (`release alpha`, and `release promote` of a tested
+//!   alpha to its plain version);
 //! - what spends real quota and is no part of the gate: `live` (one command for
 //!   every live test of `crates/cf-e2e`, whatever its name) and `evals` (`eval`,
 //!   `eval summary`, `eval long` and `watch`, which hand their words to
@@ -50,6 +53,7 @@ mod live;
 mod plants;
 mod portable;
 pub mod process;
+mod release;
 mod scrub_transcript;
 mod sidecar;
 mod smoke;

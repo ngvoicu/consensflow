@@ -23,16 +23,19 @@
 //! | `devin_took` | `env`, `session`, `pasted`, `atMs`: Devin's store, a window's conversation, the text the window was given as it was pasted and when | `{took, prompts}`: whether the TUI took that text, as the engine asks the window after a paste (a history row of the session, written since, that begins with it whole), and how many history rows the session has |
 //! | `devin_readiness` | `wire`, `session`, `pane` (`id`, `generation`), `withinMs`, `everyMs`: a Devin window that is open, asked whether it is ready as the engine asks it, until it is ready or unfit or the time is up; the pane host it asks is the asker's, a request a line of the output and its answer a line of the input (`readiness`) | `{answers, ready}`: what the looks answered, in order (`ready`, `held: …`, `unfit: …`, one that came again in a row said once), and whether the last was ready |
 //! | `devin_hooks` | `cf`, `member`: the hooks ConsensFlow adds to the owner's in a Devin launch (a member's, or the chief's), its session hook run by `cf` | `{event: [entry]}`: each event with the entries added, as the launch's config has them written |
+//! | `trust` | `kind`, `screen` (a window's last lines), and `directory` where asked: what the engine reads there of the harness's question about trusting the window's folder | `{key, prompt}`: the key it presses next toward a yes (`down`, `enter`), or null where the lines show no such question or the harness never asks one, and whether they are the harness's prompt; with `directory`, `trusts` too: `{folder, inside}`, what a yes trusts for a window opened in that project's folder |
 //!
-//! The last eight are the evals' and the live tests' own: the program a window
+//! The last nine are the evals' and the live tests' own: the program a window
 //! opens on, which the daemon asks `cf_process::pane_argv` for, the
 //! conversation a window of a harness that names its own opened, which only
 //! its store says, the Specmint skill a chief's window is given, which the
 //! live test of specs names the copy it was given by, the Devin window a
 //! member is given, whole, which `start` leaves bare (no config, no hooks, no
 //! first message), what the daemon's readiness makes of that window's
-//! permission mode, read and then done, and whether its TUI put a paste to its
-//! agent, as the engine reads it after the paste.
+//! permission mode, read and then done, whether its TUI took a paste, as the
+//! engine reads it after the paste, and the key the engine presses into a
+//! harness's question about trusting a window's folder, which the live test of
+//! folder trust holds against the real harnesses' screens.
 
 mod launch;
 mod readiness;
@@ -52,7 +55,7 @@ use crate::contract::{Agent, Interrupt, LaunchId, Skill};
 use crate::launch::adapter;
 use crate::records::{self, Options};
 use crate::shared::record_state::record_state;
-use crate::shared::window_args;
+use crate::shared::{trust, window_args};
 use crate::testing::Fakes;
 
 /// The answer to `question`, or why it cannot be answered.
@@ -72,8 +75,9 @@ pub fn answer(question: &Value) -> Result<Value, String> {
         "devin_took" => launch::devin_took(question),
         "devin_readiness" => readiness::devin_readiness(question),
         "devin_hooks" => launch::devin_hooks(question),
+        "trust" => trust(question),
         other => Err(format!(
-            "the question asks for {other}, which is none of records, start, window_text, console_text, claude_settings, interrupt, program, newest_session, specmint, devin_launch, devin_ready, devin_took, devin_readiness and devin_hooks"
+            "the question asks for {other}, which is none of records, start, window_text, console_text, claude_settings, interrupt, program, newest_session, specmint, devin_launch, devin_ready, devin_took, devin_readiness, devin_hooks and trust"
         )),
     }
 }
@@ -106,6 +110,34 @@ fn env(question: &Value) -> Result<Env, String> {
     Ok(Env::from_vars(variables.iter().filter_map(
         |(name, value)| value.as_str().map(|value| (name.as_str(), value)),
     )))
+}
+
+/// The key the engine presses next toward a yes to the harness's question about
+/// trusting a window's folder, read in the window's last lines as the engine reads
+/// them: null where they show none, or the harness never asks one.
+fn trust(question: &Value) -> Result<Value, String> {
+    let screen: Vec<String> = question
+        .get("screen")
+        .and_then(Value::as_array)
+        .ok_or("the question names no screen")?
+        .iter()
+        .filter_map(|line| line.as_str().map(str::to_owned))
+        .collect();
+    let (key, prompt) = match harness(text(question, "kind")?)? {
+        Harness::Claude => (
+            crate::claude::trust::toward_trust(&screen),
+            crate::claude::trust::shows_prompt(&screen),
+        ),
+        Harness::Codex | Harness::Pi | Harness::Opencode | Harness::Devin => (None, false),
+    };
+    let key = key.map(|key| if key == trust::ENTER { "enter" } else { "down" });
+    let mut answer = json!({ "key": key, "prompt": prompt });
+    // What a yes trusts, for a window opened in a project's folder `directory`.
+    if let Some(directory) = optional(question, "directory") {
+        let trust::Trusts { folder, inside } = trust::trusts(directory);
+        answer["trusts"] = json!({ "folder": folder, "inside": inside });
+    }
+    Ok(answer)
 }
 
 /// What the harness's own record of a conversation says, read whole once.

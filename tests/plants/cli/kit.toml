@@ -12,7 +12,7 @@
 
 run_limit_minutes = 10
 rebuild = ["cargo", "xtask", "build-cf", "--offline"]
-tables = ["parser", "verbs", "admin", "dispatch", "help", "flip", "deletion", "login-path", "rig", "tester", "off-node"]
+tables = ["parser", "verbs", "admin", "dispatch", "help", "flip", "deletion", "login-path", "rig", "tester", "off-node", "task-get"]
 
 [run]
 # The parser held to Node's `parseArgs` on three thousand lists of words.

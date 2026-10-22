@@ -534,7 +534,7 @@ replace = '''
 # What only the app shows: the packaged smoke, run on the app a build leaves
 [[plant]]
 name = "packaged smoke, on the app: the harness finds no system command on its PATH"
-meant = "the_built_app"
+meant = "the_built_app_opens_a_pane_renders_a_real_child_takes_input_and_exits_clean"
 runs = ["smoke-on-the-app"]
 requires = ["app/src-tauri/target/release/bundle/macos/ConsensFlow.app"]
 
@@ -545,7 +545,7 @@ replace = "if command -v no-such-command-of-the-system >/dev/null 2>&1; then"
 
 [[plant]]
 name = "packaged smoke, on the app: the daemon is held to the program of the app and not to its cf"
-meant = "the_built_app"
+meant = "the_built_app_opens_a_pane_renders_a_real_child_takes_input_and_exits_clean"
 runs = ["smoke-on-the-app"]
 requires = ["app/src-tauri/target/release/bundle/macos/ConsensFlow.app"]
 
@@ -556,7 +556,7 @@ replace = "let bundled = std::fs::canonicalize(&bundle.binary)?;"
 
 [[plant]]
 name = "packaged smoke, on the app: the second cf ui is held to a refusal the ledger does not give"
-meant = "the_built_app"
+meant = "the_built_app_opens_a_pane_renders_a_real_child_takes_input_and_exits_clean"
 runs = ["smoke-on-the-app"]
 requires = ["app/src-tauri/target/release/bundle/macos/ConsensFlow.app"]
 
@@ -567,7 +567,7 @@ replace = 'consensflow\.sqlite open$'
 
 [[plant]]
 name = "packaged smoke, on the app: the agents are proved on a home that is not the daemons"
-meant = "the_built_app"
+meant = "the_built_app_opens_a_pane_renders_a_real_child_takes_input_and_exits_clean"
 runs = ["smoke-on-the-app"]
 requires = ["app/src-tauri/target/release/bundle/macos/ConsensFlow.app"]
 

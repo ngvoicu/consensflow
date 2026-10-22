@@ -17,10 +17,10 @@ use cf_base::json::from_slice_lossy;
 use cf_base::text::utf16_len;
 use serde_json::{json, Map, Value};
 
-use super::directory::real_path;
 use super::{is_session_id, succeeded, url, Channel, Wires, OVERSIZED};
 use crate::seams::loopback::{BodyFailed, Method, Request, TERMINATED};
 use crate::seams::{arm, Armed};
+use crate::shared::directory::real_path;
 
 /// How long the server has to answer, and the task to be posted, from the
 /// first request, for a window (`seedSession`'s `timeoutMs`).

@@ -30,6 +30,7 @@ use crate::seams::{EngineError, SavedAgent};
 use crate::shown::Shown;
 use crate::specs::{ChiefSpecs, RoleText};
 use crate::stops::{Interrupted, Unstopped};
+use crate::trust::Trusting;
 use crate::unstarted::GivenUp;
 
 /// The key that interrupts a harness's current turn, and the gap of a double press.
@@ -158,6 +159,8 @@ pub(crate) struct WindowPart {
     pub(crate) drawn: bool,
     /// It named its first conversation.
     pub(crate) named: bool,
+    /// Where it stands with its harness's question about trusting its folder.
+    pub(crate) trust: Trusting,
     /// The last stop this window process paid: its task and the sequence. It
     /// dies with the window, and a window opened later owes nothing for the
     /// stops asked before it opened.
@@ -203,6 +206,7 @@ impl Default for WindowPart {
             starts_given_up: 0,
             drawn: false,
             named: false,
+            trust: Trusting::Past,
             stopped: None,
             interrupted: None,
             unstopped: None,
@@ -318,6 +322,7 @@ impl Dispatcher {
             window.interrupted = None;
             window.unstopped = None;
             window.activity = Activity::of(ActivityState::Closed);
+            window.trust = Trusting::Past;
             taken
         };
         if let Some(token) = token {
@@ -623,6 +628,9 @@ impl Dispatcher {
             Box::pin(self.exited(&pane, shown)).await?;
             return Ok(());
         }
+        // A harness that asks whether to trust the window's folder is answered, or
+        // the human told, as its window shows the question (`trust`).
+        self.watch_trust(record, project, participant, &pane).await;
         // The adapter's `started` is an `async` function, and `.catch(...)`
         // made a promise of its own to wait on.
         let started = match caught(planned.window.started()).await {

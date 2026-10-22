@@ -227,6 +227,15 @@ pub struct Prepared {
     pub window: Rc<dyn Window>,
 }
 
+/// What a yes to a harness's question about trusting a window's folder trusts: the
+/// folder, as the system names it, and whether it is the project's folder or one
+/// below it, which ConsensFlow answers for; one outside it is the human's.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Trusts {
+    pub folder: String,
+    pub inside: bool,
+}
+
 /// A window open on its harness.
 pub trait Window {
     /// Its pane opened, the window's own process `pid` when the host knew it.
@@ -246,6 +255,24 @@ pub trait Window {
     /// default): a window that came up in that last moment is kept.
     fn came_up(&self) -> Work<'_, Option<Option<String>>> {
         Box::pin(async { None })
+    }
+    /// What a yes to its harness's question about trusting the window's folder would
+    /// trust, where the harness may ask one before it starts (Claude Code does in a
+    /// git repository: the repository's root). None where it never asks (the
+    /// default).
+    fn trusts(&self) -> Option<&Trusts> {
+        None
+    }
+    /// The key a person presses next to answer yes to that question, where the
+    /// window's last screen lines `screen` show it (Down, or Enter once the choice
+    /// is on yes); none where they show no such question.
+    fn toward_trust(&self, _screen: &[String]) -> Option<&'static [u8]> {
+        None
+    }
+    /// Whether `screen` (the window's last lines) is its harness's prompt: the
+    /// window is past any question it asks as it starts.
+    fn shows_prompt(&self, _screen: &[String]) -> bool {
+        false
     }
     /// Whether a delivery may go in now, or why that could not be told.
     fn ready<'a>(

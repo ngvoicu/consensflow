@@ -178,7 +178,7 @@ impl<W: Write> Maker<W> {
         let session = &self.session;
         let _ = write!(
             self.line,
-            r#","userType":"external","entrypoint":"cli","cwd":"/Users/dev/Projects/synthetic","sessionId":"{session}","version":"2.1.263","gitBranch":"main"}}"#
+            r#","userType":"external","entrypoint":"cli","cwd":"/Users/dev/Projects/synthetic","sessionId":"{session}","version":"2.1.305","gitBranch":"main"}}"#
         );
     }
 

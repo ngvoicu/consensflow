@@ -89,6 +89,9 @@ jobs:
       # of that crate is its support and the stand-in agents' own tests. On
       # 2026-10-19 Windows' step, 19 to 21 minutes in the runs before, passed
       # 25 with no test failed or hung, in the ledger's replay: hence 40.
+      # nextest runs a plant's `cargo test` (tools/xtask's plants), and the plants'
+      # own tests run it: built once, then the cache's (~/.cargo/bin).
+      - run: cargo install cargo-nextest --version 0.9.148 --locked
       - run: cargo test --workspace --exclude app --exclude cf-e2e
         timeout-minutes: 40
       - run: cargo test -p cf-e2e --lib --bins

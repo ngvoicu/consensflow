@@ -6,7 +6,6 @@
 //! opens on is made before it, on a throwaway server of its own (`create`).
 
 mod create;
-mod directory;
 mod launch;
 mod seed;
 mod send;
@@ -31,7 +30,7 @@ pub(super) use state::{session_state, Shown};
 #[cfg(feature = "test-support")]
 pub use crate::shared::admission::Sent;
 #[cfg(feature = "test-support")]
-pub use directory::real_path;
+pub use crate::shared::directory::real_path;
 
 /// A launch's channel: its window's server, and the plugin's.
 #[derive(Debug, Clone)]

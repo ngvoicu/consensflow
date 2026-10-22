@@ -1,12 +1,11 @@
 //! The chief across a Switch chief: the switch itself, what it was switched
 //! from, and what a chief that takes over reads, its history and its open work.
 
-use cf_proto::ledger::{
-    ChiefConversation, ChiefOpenWork, HistoryItem, LastSwitch, ProjectView, SwitchedFrom,
-};
+use cf_proto::ledger::{ChiefConversation, ChiefOpenWork, LastSwitch, ProjectView, SwitchedFrom};
 use rusqlite::params;
 use serde_json::{json, Value};
 
+use super::transcripts::items_of;
 use crate::model::{self, LedgerError};
 use crate::projects::known_project;
 use crate::store::Store;
@@ -50,26 +49,12 @@ pub(crate) fn chief_history(
         )?
         .query_map([chief.id], conversation_view)?
         .collect::<rusqlite::Result<Vec<_>>>()?;
-    let mut items = store.db.prepare(
-        "SELECT item_id, role, text, complete, at FROM transcript WHERE conversation_id = ? ORDER BY seq",
-    )?;
     conversations
         .into_iter()
         .map(|conversation| {
-            let items = items
-                .query_map([conversation.id], |row| {
-                    Ok(HistoryItem {
-                        id: row.get("item_id")?,
-                        role: row.get("role")?,
-                        text: row.get("text")?,
-                        complete: row.get::<_, i64>("complete")? == 1,
-                        at: row.get("at")?,
-                    })
-                })?
-                .collect::<rusqlite::Result<Vec<_>>>()?;
             Ok(ChiefConversation {
+                items: items_of(store, conversation.id)?,
                 conversation,
-                items,
             })
         })
         .collect()

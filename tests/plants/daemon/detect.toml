@@ -294,3 +294,43 @@ runs = ["detect-unit"]
 file = "crates/cf-harness/src/detect.rs"
 find = '    Some(PathBuf::from(set(env, "APPDATA")?).join("npm"))'
 replace = '    Some(PathBuf::from(env.os("APPDATA")?).join("npm"))'
+
+# Pi's managed install (`~/.pi/agent/bin`, which Pi's own installers make), looked in last of all
+# the places, so that a place added never changes which CLI is found where one was.
+[[plant]]
+name = "detect: Pi's managed install is not looked in"
+meant = "a_managed_pi_is_found_in_its_agent_folder_when_path_lacks_it_and_a_window_opens_on_it"
+runs = ["detect-unit"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/detect.rs"
+find = '''
+        let folders = folders.chain(managed(harness, env));
+'''
+replace = ""
+
+[[plant]]
+name = "detect: Pi's managed install is looked in before npm's folder"
+meant = "it_is_looked_in_after_every_place_a_pi_was_looked_for_before_so_no_machine_finds_another"
+runs = ["detect-unit"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/detect.rs"
+find = "        let folders = homed(harness, env).into_iter().chain(npm_global(env));"
+replace = '''
+        let folders = homed(harness, env).into_iter().chain(managed(harness, env));
+        let folders = folders.chain(npm_global(env));'''
+
+[[plant]]
+name = "detect: every harness is looked for in Pi's managed install"
+meant = "the_launcher_the_unix_installer_writes_is_found_there_too_and_is_pis_alone"
+runs = ["detect-unit"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/detect.rs"
+find = '''
+    if harness != Harness::Pi {
+        return None;
+    }
+'''
+replace = ""

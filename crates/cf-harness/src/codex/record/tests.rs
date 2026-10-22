@@ -174,16 +174,96 @@ fn the_output_of_an_image_tool_is_a_line_naming_the_tool_the_call_made_never_the
         .all(|item| item.role == Role::Tool && item.complete));
 }
 
+// What Codex 0.163.0 writes is `aggregated_output`, `call_id`, `agent_thread_id`
+// and a part's `text`. Node's reader also took other names in their place
+// (`formatted_output`, `stdout` and `stderr`, `id`, `Text`); no Codex rollout
+// holds those, and they are not read.
+
+#[test]
+fn a_commands_output_is_its_aggregated_output_and_no_other_field() {
+    let command =
+        |item: Value| event(json!({ "type": "item_completed", "turn_id": "t1", "item": item }));
+    let read = read(&[
+        started(json!("t1")),
+        command(
+            json!({ "type": "CommandExecution", "id": "c1", "aggregated_output": "out",
+            "formatted_output": "formatted", "stdout": "so", "stderr": "se" }),
+        ),
+        command(
+            json!({ "type": "CommandExecution", "id": "c2", "formatted_output": "formatted",
+            "stdout": "so", "stderr": "se" }),
+        ),
+    ])
+    .unwrap();
+    let texts: Vec<&str> = read.items.iter().map(|item| &*item.text).collect();
+    assert_eq!(texts, ["out", ""]);
+}
+
+#[test]
+fn a_tool_call_is_named_by_its_call_id_and_no_other_field() {
+    let in_flight = |payload: Value| {
+        read(&[
+            started(json!("t1")),
+            response(payload),
+            aborted(json!("t1")),
+        ])
+        .unwrap()
+        .in_flight
+    };
+    for kind in ["function_call", "custom_tool_call"] {
+        assert!(
+            in_flight(json!({ "type": kind, "call_id": "c1" })),
+            "{kind}"
+        );
+        assert!(
+            !in_flight(json!({ "type": kind, "id": "c1" })),
+            "{kind} by its id"
+        );
+    }
+}
+
+#[test]
+fn a_sub_agent_is_named_by_its_agent_thread_id_and_no_other_field() {
+    let in_flight = |named: Value| {
+        let mut item = json!({ "type": "SubAgentActivity", "kind": "started" });
+        item.as_object_mut()
+            .unwrap()
+            .extend(named.as_object().unwrap().clone());
+        read(&[
+            started(json!("t1")),
+            event(json!({ "type": "item_started", "turn_id": "t1", "item": item })),
+            aborted(json!("t1")),
+        ])
+        .unwrap()
+        .in_flight
+    };
+    assert!(in_flight(json!({ "agent_thread_id": "a1" })));
+    assert!(!in_flight(json!({ "id": "a1" })));
+}
+
+#[test]
+fn a_messages_parts_are_read_by_their_text_and_no_other_key() {
+    let items = |part: Value| {
+        read(&[
+            started(json!("t1")),
+            response(
+                json!({ "type": "message", "role": "assistant", "id": "m1", "content": [part] }),
+            ),
+        ])
+        .unwrap()
+        .items
+        .len()
+    };
+    assert_eq!(items(json!({ "type": "output_text", "text": "hi" })), 1);
+    assert_eq!(items(json!({ "type": "output_text", "Text": "hi" })), 0);
+}
+
 #[test]
 fn a_command_output_javascript_cannot_make_text_fails_the_look() {
     let command = |native: Value| event(json!({ "type": "item_completed", "item": native }));
-    for native in [
-        json!({ "type": "CommandExecution", "id": "c", "aggregated_output": { "toString": null } }),
-        json!({ "type": "CommandExecution", "id": "c", "formatted_output": [{ "toString": 1 }] }),
-        json!({ "type": "CommandExecution", "id": "c", "stdout": "ok", "stderr": { "toString": "x" } }),
-    ] {
-        assert!(read(&[command(native.clone())]).is_err(), "{native}");
-    }
+    let native =
+        json!({ "type": "CommandExecution", "id": "c", "aggregated_output": { "toString": null } });
+    assert!(read(&[command(native.clone())]).is_err(), "{native}");
     let text = read(&[command(json!({ "type": "CommandExecution", "id": "c", "aggregated_output": [1, { "valueOf": 2 }] }))]).unwrap();
     assert_eq!(&*text.items[0].text, "1,[object Object]");
 }

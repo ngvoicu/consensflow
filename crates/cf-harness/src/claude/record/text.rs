@@ -83,8 +83,9 @@ pub(super) fn is_interrupt(record: &Value) -> bool {
 
 /// `sameQueuedContent`: whether a queue removal names the same queued
 /// message. Claude Code wraps cross-session messages in an envelope tag whose
-/// attributes differ between the enqueue and the remove record (2.1.275 adds
-/// `hop-chain` to one only), so the envelope's attributes are set aside after
+/// attributes differ between the enqueue and the remove record (the enqueue
+/// carries `hop-chain` and the remove does not: since 2.1.275, and still in
+/// 2.1.304, the newest seen), so the envelope's attributes are set aside after
 /// an exact match fails.
 pub(super) fn same_queued_content(queued: &str, removed: &str) -> bool {
     queued == removed || envelope(queued) == envelope(removed)
