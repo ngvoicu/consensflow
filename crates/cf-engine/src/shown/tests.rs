@@ -497,3 +497,53 @@ fn what_changes_by_itself_in_an_outage_is_folded_and_every_other_number_kept() {
         assert_eq!(key(one), key(other), "{one}");
     }
 }
+
+#[test]
+fn what_a_screen_says_is_the_windows_lines_after_the_newest_paste() {
+    // A long wake-up's tail and its error above a short wake-up's header, body and
+    // error (Calliope's re-check T-300, P2-R1): the newest paste's error alone.
+    let pastes = [
+        Paste {
+            id: 9,
+            text: "[ConsensFlow m-9 · note from ConsensFlow]\nWake up".to_owned(),
+        },
+        Paste {
+            id: 8,
+            text: "[ConsensFlow m-8 · note from ConsensFlow]\nitem 14 of the board\nitem 15 of the board"
+                .to_owned(),
+        },
+    ];
+    let screen = shown(
+        None,
+        None,
+        Some(&[
+            "item 14 of the board",
+            "item 15 of the board",
+            "Error: x",
+            "[ConsensFlow m-9 · note from ConsensFlow]",
+            "Wake up",
+            "Error: x",
+            "status: idle",
+        ]),
+    );
+    assert_eq!(
+        screen.without_pastes(&pastes).after("failed"),
+        "failed; its screen ended with: \"Error: x / status: idle\""
+    );
+}
+
+#[test]
+fn a_footers_counters_are_folded_and_keep_one_failure_one() {
+    let key = |words: &str| words_key(words);
+    assert_eq!(
+        key("Error: x / 12% context left"),
+        key("Error: x / 9% context left")
+    );
+    assert_eq!(key("Error: x / $0.03 spent"), key("Error: x / $0.11 spent"));
+    assert_eq!(key("Error: x / 1.2k tokens"), key("Error: x / 34k tokens"));
+    assert_eq!(
+        key("Error: x / 12,345 tokens"),
+        key("Error: x / 13,001 tokens")
+    );
+    assert_ne!(key("API Error: 500"), key("API Error: 502"));
+}

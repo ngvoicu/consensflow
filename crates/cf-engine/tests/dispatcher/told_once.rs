@@ -581,3 +581,75 @@ fn a_models_id_is_its_own_and_another_model_is_another_failure() {
         2
     );
 }
+
+/// The chief's screen as it shows message `id` taken in a turn: its header and
+/// `lines`, then `error`.
+fn pasted_then(context: &Context, id: i64, lines: &[&str], error: &str) -> Vec<String> {
+    let mut screen = vec![header(context, id)];
+    screen.extend(lines.iter().map(|line| (*line).to_owned()));
+    screen.push(error.to_owned());
+    screen
+}
+
+#[test]
+fn a_short_wake_up_after_a_long_ones_tail_is_the_same_outage() {
+    // Calliope's re-check T-300, P2-R1: a long wake-up fails on its last ten lines and
+    // the error; a short one then fails under the long one's last lines and error.
+    let context = Context::new();
+    let tiers = working(&context);
+    let error = "Error: provider unreachable";
+    let long: Vec<String> = (1..=15)
+        .map(|n| format!("Item {n}: look at task {n} of the board."))
+        .collect();
+    let mut screen: Vec<&str> = long[5..].iter().map(String::as_str).collect();
+    screen.push(error);
+    given(&context, &tiers, "chief", &long.join("\n"));
+    chief_screen(&context, &screen);
+    chief_fails_on_screen(&context);
+    context.pass().unwrap();
+    let short = context.note_from_consensflow(tiers.project.id, "chief", "Wake up");
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let mut screen: Vec<String> = long[12..].to_vec();
+    screen.push(error.to_owned());
+    screen.extend(pasted_then(&context, short.id, &["Wake up"], error));
+    let screen: Vec<&str> = screen.iter().map(String::as_str).collect();
+    chief_screen(&context, &screen);
+    chief_fails_on_screen(&context);
+    context.pass().unwrap();
+    context.pass().unwrap();
+
+    let told = chief_failures(&tiers);
+    assert_eq!(told.len(), 1, "{told:?}");
+    assert!(
+        told[0].ends_with(&format!("its screen ended with: \"{error}\".")),
+        "{told:?}"
+    );
+}
+
+#[test]
+fn an_outage_whose_errors_pile_up_on_the_screen_is_told_once() {
+    // Every harness keeps its transcript on the screen: each failed turn's error
+    // stays above the next wake-up's paste (Calliope's re-check T-300, beyond the diff).
+    let context = Context::new();
+    let tiers = working(&context);
+    let error = "Error: provider unreachable";
+    let mut screen = vec![error.to_owned()];
+    chief_screen(&context, &[error]);
+    chief_fails_on_screen(&context);
+    context.pass().unwrap();
+    for wake in ["Wake up", "Wake up again", "Still there?"] {
+        let note = context.note_from_consensflow(tiers.project.id, "chief", wake);
+        context.pass().unwrap();
+        context.pass().unwrap();
+        screen.extend(pasted_then(&context, note.id, &[wake], error));
+        let shown: Vec<&str> = screen.iter().map(String::as_str).collect();
+        chief_screen(&context, &shown);
+        chief_fails_on_screen(&context);
+        context.pass().unwrap();
+        context.pass().unwrap();
+    }
+
+    let told = chief_failures(&tiers);
+    assert_eq!(told.len(), 1, "{told:?}");
+}

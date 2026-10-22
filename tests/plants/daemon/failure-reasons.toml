@@ -19,6 +19,8 @@
 failure-reason-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "failure_reasons"]
 failure-reason-told = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "told_once"]
 failure-reason-shown = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "shown::"]
+failure-reason-ask = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "testing::ask"]
+failure-reason-live-suite = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_paste_screen"]
 failure-reason-claude = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::record"]
 failure-reason-codex = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "codex::record"]
 failure-reason-pi = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "pi::record"]
@@ -677,13 +679,16 @@ find = '''
             if !words.is_empty() {
                 run = None;
             }
-            false
+            Owner::Window
 '''
 replace = '''
             if !words.is_empty() {
                 run = None;
             }
-            !words.is_empty() && pasted.iter().any(|(_, text)| text.contains(&words))
+            if !words.is_empty() && pasted.iter().any(|(_, text)| text.contains(&words)) {
+                return Owner::Pasted;
+            }
+            Owner::Window
 '''
 
 [[plant]]
@@ -764,7 +769,7 @@ runs = ["failure-reason-told", "failure-reason-engine"]
 [[plant.edit]]
 file = "crates/cf-engine/src/shown/ours.rs"
 find = '''
-                run = pasted.first().map(|(_, newest)| newest.as_str());
+                run = pasted.first().map(|(_, newest)| (0, newest.as_str()));
 '''
 replace = '''
                 run = None;
@@ -778,11 +783,11 @@ runs = ["failure-reason-shown"]
 [[plant.edit]]
 file = "crates/cf-engine/src/shown/ours.rs"
 find = '''
-            if let Some(rest) = run.and_then(|rest| after(rest, &words)) {
+            if let Some((at, rest)) = run.and_then(|(at, rest)| Some((at, after(rest, &words)?))) {
 '''
 replace = '''
-            if let Some(rest) = run
-                .and_then(|rest| after(rest, &words))
+            if let Some((at, rest)) = run
+                .and_then(|(at, rest)| Some((at, after(rest, &words)?)))
                 .filter(|_| starts_with_header(unframed).is_none())
             {
 '''
@@ -827,4 +832,91 @@ find = '''
 '''
 replace = '''
         Some(edge) if false => edge.trim_end_matches(framed),
+'''
+
+[[plant]]
+name = "failure reason: a screen's reason is read from its whole tail, older pastes' errors and all"
+meant = "an_outage_whose_errors_pile_up_on_the_screen_is_told_once"
+runs = ["failure-reason-told", "failure-reason-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown.rs"
+find = '''
+                let kept = owners[at] == Owner::Window && since.is_none_or(|end| at > end);
+'''
+replace = '''
+                let kept = owners[at] == Owner::Window && since.is_none_or(|_| true);
+'''
+
+[[plant]]
+name = "failure reason: a placeholder keeps the run of the paste it stands for"
+meant = "a_placeholder_ends_the_run_it_stands_for"
+runs = ["failure-reason-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/ours.rs"
+find = '''
+                // A placeholder stands for a paste whose words are not on the screen.
+                run = None;
+                return Owner::Pasted;
+'''
+replace = '''
+                return Owner::Pasted;
+'''
+
+[[plant]]
+name = "failure reason: a footer's money counter makes every turn another failure"
+meant = "a_footers_counters_are_folded_and_keep_one_failure_one"
+runs = ["failure-reason-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown.rs"
+find = '''
+        (pattern(r"\$\d+(?:\.\d+)?"), "#money"),
+'''
+replace = '''
+        (pattern(r"\$never"), "#money"),
+'''
+
+[[plant]]
+name = "failure reason: engine-ask says every line of a screen is the window's"
+meant = "a_screen_is_told_line_by_line_whose_it_is"
+runs = ["failure-reason-ask"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/testing/ask.rs"
+find = '''
+    Ok(json!(ours(&lines, &pastes)))
+'''
+replace = '''
+    let _ = (&lines, &pastes, ours);
+    Ok(json!(vec![false; lines.len()]))
+'''
+
+[[plant]]
+name = "failure reason: the live suite takes a brief line read as the window's for right"
+meant = "a_screen_is_read_right_where_the_brief_is_consensflows_and_what_follows_the_windows"
+runs = ["failure-reason-live-suite"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_paste_screen.rs"
+find = '''
+        .find(|at| !ours.get(**at).copied().unwrap_or(false))
+'''
+replace = '''
+        .find(|at| !ours.get(**at).copied().unwrap_or(true) && false)
+'''
+
+[[plant]]
+name = "failure reason: the live suite's copy of Codex's login is readable by others"
+meant = "a_copy_of_a_login_is_readable_by_its_owner_alone"
+runs = ["failure-reason-live-suite"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_paste_screen.rs"
+find = '''
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+'''
+replace = '''
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o644);
 '''

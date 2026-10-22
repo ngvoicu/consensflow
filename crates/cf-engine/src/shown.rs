@@ -43,8 +43,10 @@ use regex::Regex;
 use serde_json::Value;
 
 use mask::mask;
-use ours::ours;
+#[cfg(any(test, feature = "test-support"))]
+pub(crate) use ours::ours;
 pub(crate) use ours::Paste;
+use ours::{owners, Owner};
 use secret::names_a_secret;
 
 /// The most lines of a screen a note quotes: the last ones.
@@ -121,12 +123,24 @@ impl Shown {
     }
 
     /// The window's screen without what ConsensFlow itself typed into it, of
-    /// the `pastes` it typed ([`ours`]): those lines are no reason of the window's.
+    /// the `pastes` it typed ([`owners`]): those lines are no reason of the window's.
+    /// Where the newest paste's run is in view, only the window's lines after it
+    /// are kept: they are what the window printed since the message its failed
+    /// turn was on.
     pub(crate) fn without_pastes(mut self, pastes: &[Paste]) -> Self {
         if let Some(tail) = self.tail.as_mut() {
+            let owners = owners(tail, pastes);
+            // What the window printed since the newest paste, where its run is in
+            // view: older pastes and the failures told of before it are not this
+            // turn's (Calliope's re-check T-300; the chief's decision, T-304).
+            let since = owners.iter().rposition(|owner| *owner == Owner::Paste(0));
             let before = tail.len();
-            let mut ours = ours(tail, pastes).into_iter();
-            tail.retain(|_| !ours.next().unwrap_or(false));
+            let mut at = 0;
+            tail.retain(|_| {
+                let kept = owners[at] == Owner::Window && since.is_none_or(|end| at > end);
+                at += 1;
+                kept
+            });
             self.pasted = tail.len() < before;
         }
         self
@@ -258,7 +272,18 @@ fn outage_key(lines: &[String], keep: Keep) -> String {
 /// joined by `-` (`claude-sonnet-5-5`, a dated one, `gpt-5-codex-high`), or a
 /// code's joined by `_` (`ERR_HTTP2_GOAWAY_SESSION`) is no id (the chief's
 /// decisions of 2026-10-22, T-286 and T-298).
-static CHANGING: LazyLock<[(Regex, &str); 4]> = LazyLock::new(|| {
+///
+/// A footer's counters, which a harness redraws each turn, fold too: a share
+/// (`12%` of a context left), an amount of money (`$0.03`), and a count written
+/// short or with thousands (`1.2k`, `12,345` tokens). Claude Code, Codex, Pi and
+/// OpenCode each draw some of them below the conversation; the probe of T-298
+/// recorded counts of the brief's lines only, so which line holds which is not
+/// shown there.
+///
+/// Known limit (Calliope's re-check T-300, P3-R6): a UUID joined to a word by
+/// `_` (`session_123e4567-…`) is not folded, as no word boundary holds between
+/// `_` and its first digit.
+static CHANGING: LazyLock<[(Regex, &str); 7]> = LazyLock::new(|| {
     [
         (
             pattern(
@@ -267,6 +292,12 @@ static CHANGING: LazyLock<[(Regex, &str); 4]> = LazyLock::new(|| {
             "#id",
         ),
         (pattern(r"[A-Za-z0-9]{16,}"), "#id"),
+        (pattern(r"\$\d+(?:\.\d+)?"), "#money"),
+        (pattern(r"\b\d+(?:\.\d+)?%"), "#share"),
+        (
+            pattern(r"\b\d{1,3}(?:,\d{3})+\b|\b\d+(?:\.\d+)?[kKM]\b"),
+            "#count",
+        ),
         (pattern(r"\b\d{1,2}:\d{2}(?::\d{2})?\b"), "#time"),
         (
             pattern(

@@ -129,3 +129,15 @@ fn a_box_drawn_in_ascii_is_its_frame() {
     ]);
     assert_eq!(ours(&screen, &pastes), [true, true, false]);
 }
+
+#[test]
+fn a_placeholder_ends_the_run_it_stands_for() {
+    // The paste's words are not on the screen: a line after its placeholder that
+    // they hold is the window's (Calliope's re-check T-300, P3-R2).
+    let pastes = [paste(
+        6,
+        "[ConsensFlow m-6 · note from ConsensFlow]\nSay OK when done.",
+    )];
+    let screen = lines(&["> [Pasted text #1 +1 lines]", "OK", "Error: x"]);
+    assert_eq!(ours(&screen, &pastes), [true, false, false]);
+}

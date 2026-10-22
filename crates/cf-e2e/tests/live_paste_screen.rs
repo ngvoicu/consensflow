@@ -23,10 +23,19 @@
 //! placeholder, and how many of the brief's numbered lines. It says counts, never what
 //! the screen said.
 //!
+//! It is a test as well: the screen at rest is held to the engine's own rule for what
+//! of it ConsensFlow typed (`engine-ask`'s `ours`, which is `shown::ours`). Every line
+//! that holds the brief must be ConsensFlow's, and the first line with a word after
+//! the last of them the window's: a harness whose screen shows a sent message in a
+//! shape the rule does not know fails the run.
+//!
 //! The windows run as the other live suites run them: on each harness's cheap model,
 //! Claude Code through the kit's wrapper that shuts the human's MCP servers,
-//! connectors and browser out (`--strict-mcp-config --no-chrome`), on the machine's
-//! own config, as nothing typed into it saves a setting. Codex runs in a home of the
+//! connectors and browser out (`--strict-mcp-config --no-chrome`). Live Claude runs
+//! wait for a throwaway config seeded with the login (T-302, Gabriel's decision of
+//! 2026-10-22): until the kit's rig has it, Claude is run only when asked. Known limit
+//! (Calliope's re-check T-300, P3-R7): the Claude leg of T-298's runs left two lines
+//! in the owner's Claude history, which T-302 keeps from happening again. Codex runs in a home of the
 //! run's own that holds a copy of the machine's `auth.json` and nothing else, so it
 //! has no MCP servers and never writes the machine's `~/.codex`; the run says whether
 //! that copy changed (a token Codex refreshed in it), which would leave the machine's
@@ -44,10 +53,10 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use cf_e2e::live::agents;
 use cf_e2e::live::members::{self, find, is_over, Members, Plan};
 use cf_e2e::live::report::{self, Check};
 use cf_e2e::live::{self, text, Harness, Log, Who};
+use cf_e2e::live::{agents, ask};
 use cf_e2e::{Error, Result};
 use serde_json::{json, Value};
 
@@ -153,6 +162,9 @@ struct Seen {
     turn_wide: Shows,
     rest: Option<(Shows, Shows)>,
     looks: usize,
+    /// What of the screen at rest the engine's rule took otherwise than the brief
+    /// was: none where it held.
+    wrong: Option<String>,
 }
 
 impl Seen {
@@ -227,7 +239,7 @@ impl CodexHome {
                 source,
             })?;
         let into = home.path().join("auth.json");
-        std::fs::write(&into, &copied).map_err(|source| Error::File {
+        write_private(&into, &copied).map_err(|source| Error::File {
             action: "write",
             path: into,
             source,
@@ -246,6 +258,17 @@ impl CodexHome {
     }
 }
 
+/// `bytes` written to `path` readable by its owner alone (mode 600 on Unix): a
+/// copy of a login.
+fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+    options.open(path)?.write_all(bytes)
+}
+
 /// One worker's run: the brief given, its window kept open and looked at through
 /// its turn and at rest after it.
 fn run(harness: Harness, log: &Log) -> Result<Check> {
@@ -257,6 +280,8 @@ fn run(harness: Harness, log: &Log) -> Result<Check> {
     let mut plan = Plan::new(&format!("paste-screen-{name}"), members::stand_in_chief())
         .with(members::member(harness));
     if let Some(codex) = &codex {
+        // Where the run's copy of the login is, should a killed run leave it behind.
+        log.say(format!("Codex's home of the run's own: {}", codex.path()));
         plan = plan.with_var("CODEX_HOME", codex.path());
     }
     let mut members = Members::open(&plan, Path::new(FAKE_AGENT), &log)?;
@@ -269,13 +294,16 @@ fn run(harness: Harness, log: &Log) -> Result<Check> {
     let (done, seen) = seen?;
     closed?;
     let mut detail = seen.line();
+    if let Some(wrong) = &seen.wrong {
+        detail.push_str(&format!("; {wrong}"));
+    }
     if changed {
         detail.push_str("; Codex's auth.json copy changed in the run");
     }
     Ok(Check::new(
         name,
         "what the screen shows of a long message once sent",
-        done && seen.rest.is_some(),
+        done && seen.rest.is_some() && seen.wrong.is_none(),
         detail,
     ))
 }
@@ -325,10 +353,49 @@ fn look(members: &mut Members, harness: Harness, log: &Log) -> Result<(bool, See
     );
     if members.rig().snapshot(&pane, 1).is_some() {
         seen.rest = Some(at_rest);
+        let lines = tail(members, &pane, LOOK_LINES);
+        let pasted: Vec<Value> = members.task(number)?["messages"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        seen.wrong = misread(&lines, &ask::ours(&lines, &pasted)?);
     }
     let state = ended.unwrap_or_else(|| "not over".to_owned());
     log.say(format!("T-{number} is {state}; {}", seen.line()));
     Ok((state == "done", seen))
+}
+
+/// Whether the brief's line `line` is: one of its numbered lines, or the sum it
+/// asks for.
+fn of_the_brief(line: &str) -> bool {
+    line.contains("PSL-") || line.contains("Reply with only the sum of")
+}
+
+/// What the engine's rule (`ours`, a line to each of `lines`) took otherwise than
+/// the screen was: a line of the brief taken for the window's, or the first line
+/// with a word after the brief taken for ConsensFlow's. Said by line numbers, never
+/// by the line. None where it held.
+fn misread(lines: &[String], ours: &[bool]) -> Option<String> {
+    let brief: Vec<usize> = (0..lines.len())
+        .filter(|at| of_the_brief(&lines[*at]))
+        .collect();
+    if let Some(at) = brief
+        .iter()
+        .find(|at| !ours.get(**at).copied().unwrap_or(false))
+    {
+        return Some(format!(
+            "line {} of the look holds the brief and was read as the window's",
+            at + 1
+        ));
+    }
+    let last = *brief.last()?;
+    let next = (last + 1..lines.len()).find(|at| lines[*at].chars().any(char::is_alphanumeric))?;
+    ours.get(next).copied().unwrap_or(false).then(|| {
+        format!(
+            "line {} of the look follows the brief and was read as ConsensFlow's",
+            next + 1
+        )
+    })
 }
 
 #[test]
@@ -406,6 +473,39 @@ mod tests {
             folded.most(shown).said(),
             "header yes, placeholder yes, brief lines 2/40"
         );
+    }
+
+    #[test]
+    fn a_screen_is_read_right_where_the_brief_is_consensflows_and_what_follows_the_windows() {
+        let screen = lines(&[
+            "PSL-39: line 39",
+            "PSL-40: line 40",
+            "Reply with only the sum of 2357 and 1113",
+            "3470",
+            "status bar",
+        ]);
+        assert_eq!(misread(&screen, &[true, true, true, false, false]), None);
+        assert_eq!(
+            misread(&screen, &[true, false, true, false, false]).as_deref(),
+            Some("line 2 of the look holds the brief and was read as the window's")
+        );
+        assert_eq!(
+            misread(&screen, &[true, true, true, true, false]).as_deref(),
+            Some("line 4 of the look follows the brief and was read as ConsensFlow's")
+        );
+        // A screen that holds none of the brief has nothing to hold to the rule.
+        assert_eq!(misread(&lines(&["3470"]), &[false]), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_copy_of_a_login_is_readable_by_its_owner_alone() {
+        use std::os::unix::fs::PermissionsExt;
+        let folder = tempfile::tempdir().unwrap();
+        let file = folder.path().join("auth.json");
+        write_private(&file, b"{}").unwrap();
+        let mode = std::fs::metadata(&file).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600);
     }
 
     #[test]

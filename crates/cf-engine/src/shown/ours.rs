@@ -47,18 +47,45 @@ pub(crate) struct Paste {
     pub(crate) text: String,
 }
 
+/// Whose a line of the screen is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Owner {
+    /// The window's own.
+    Window,
+    /// A run of the paste at this place of the pastes, the newest first.
+    Paste(usize),
+    /// ConsensFlow's, of no paste the pastes hold: a header of an older one, or a
+    /// placeholder a harness wrote for one.
+    Pasted,
+}
+
 /// Which of the screen's `lines` are ConsensFlow's, of the `pastes` it typed
-/// into the window, the newest first.
+/// into the window, the newest first: what the live suite holds a screen to.
+#[cfg(any(test, feature = "test-support"))]
 pub(crate) fn ours(lines: &[String], pastes: &[Paste]) -> Vec<bool> {
+    owners(lines, pastes)
+        .into_iter()
+        .map(|owner| owner != Owner::Window)
+        .collect()
+}
+
+/// Whose each of the screen's `lines` is, of the `pastes` ConsensFlow typed into
+/// the window, the newest first.
+///
+/// Known limit (Calliope's re-check T-300, P3-R3): a line of the paste's body that
+/// begins with another message's header counts as a header in view, so a newest
+/// paste whose own header scrolled off and whose visible body quotes one at a
+/// line's start is not run from the top line, and its lines are the window's.
+pub(crate) fn owners(lines: &[String], pastes: &[Paste]) -> Vec<Owner> {
     let pasted: Vec<(i64, String)> = pastes
         .iter()
         .map(|paste| (paste.id, compared(&paste.text)))
         .collect();
     let unframed: Vec<&str> = lines.iter().map(|line| unframed(line)).collect();
-    // What is left of the paste whose run the lines are in. Where no header is in
-    // view, the newest paste's may have scrolled off above its words: its run may
-    // begin at the first line with a word, and nowhere else.
-    let mut run: Option<&str> = None;
+    // The paste whose run the lines are in, and what is left of it. Where no header
+    // is in view, the newest paste's may have scrolled off above its words: its run
+    // may begin at the first line with a word, and nowhere else.
+    let mut run: Option<(usize, &str)> = None;
     let mut top = !unframed
         .iter()
         .any(|line| starts_with_header(line).is_some());
@@ -68,27 +95,27 @@ pub(crate) fn ours(lines: &[String], pastes: &[Paste]) -> Vec<bool> {
             let words = compared(unframed);
             if top && !words.is_empty() {
                 top = false;
-                run = pasted.first().map(|(_, newest)| newest.as_str());
+                run = pasted.first().map(|(_, newest)| (0, newest.as_str()));
             }
             // The next piece of the run is the run's, whatever it looks like.
-            if let Some(rest) = run.and_then(|rest| after(rest, &words)) {
-                run = Some(rest);
-                return true;
+            if let Some((at, rest)) = run.and_then(|(at, rest)| Some((at, after(rest, &words)?))) {
+                run = Some((at, rest));
+                return Owner::Paste(at);
             }
             if let Some(id) = starts_with_header(unframed) {
-                run = pasted
-                    .iter()
-                    .find(|(pasted, _)| *pasted == id)
-                    .map(|(_, text)| rest_after(text, &words));
-                return true;
+                let found = pasted.iter().position(|(pasted, _)| *pasted == id);
+                run = found.map(|at| (at, rest_after(&pasted[at].1, &words)));
+                return found.map_or(Owner::Pasted, Owner::Paste);
             }
             if PLACEHOLDERS.iter().any(|start| unframed.starts_with(start)) {
-                return true;
+                // A placeholder stands for a paste whose words are not on the screen.
+                run = None;
+                return Owner::Pasted;
             }
             if !words.is_empty() {
                 run = None;
             }
-            false
+            Owner::Window
         })
         .collect()
 }
