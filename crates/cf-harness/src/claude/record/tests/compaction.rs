@@ -77,11 +77,13 @@ fn the_summary_is_a_user_s_item_marked_as_the_compaction_s_and_no_other_item_is(
 
 /// T-187: a record that reaches the file in pieces (`writeln!` of a value writes
 /// it a token at a time) is read once it is whole, and no look between is
-/// unreadable: the last line, cut anywhere, waits for the rest.
+/// unreadable: the last line, cut anywhere, waits for the rest. The tail is
+/// written in pieces of 1, 2, 3, 5, 7, 16, 50, 97 and 300 bytes, a look after
+/// each, and read as the three items it holds, the summary once.
 #[test]
 fn the_summary_a_compaction_writes_in_pieces_is_read_once_whole_and_no_look_between_fails() {
     let tail = Stage::lines(&[compacted("c1", "d1"), compact_summary("s1", "c1")]);
-    for size in [1, 7, 97] {
+    for size in [1, 2, 3, 5, 7, 16, 50, 97, 300] {
         let mut stage = Stage::new();
         stage.write(&[hello(), answer("a1", "u1"), duration("d1", "a1")]);
         assert!(!stage.look().starts_with("unknown"));
@@ -97,13 +99,15 @@ fn the_summary_a_compaction_writes_in_pieces_is_read_once_whole_and_no_look_betw
         let Reading::Known(record) = &*stage.reader.look(&Options::default(), 0) else {
             panic!("an unknown reading");
         };
-        assert!(
-            record
-                .items
-                .iter()
-                .any(|item| &*item.id == "s1" && item.compaction),
-            "cut by {size}: no summary in {:?}",
-            record.items
+        let marked: Vec<(&str, bool)> = record
+            .items
+            .iter()
+            .map(|item| (&*item.id, item.compaction))
+            .collect();
+        assert_eq!(
+            marked,
+            [("u1", false), ("m1", false), ("s1", true)],
+            "cut by {size}"
         );
     }
 }

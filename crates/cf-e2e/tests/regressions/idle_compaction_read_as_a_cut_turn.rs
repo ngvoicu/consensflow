@@ -26,12 +26,15 @@ use std::io::Write;
 use std::path::Path;
 
 use cf_e2e::rig::{Project, Rig};
-use serde_json::json;
+use serde_json::{json, Value};
 
 use crate::resume_of_a_chief_with_no_turn::{
     after, closed_and_resumed, stays_open, wait_for_the_chief, windows_of,
 };
 use crate::{config, secs, Outcome};
+
+/// The words of the summary a compaction writes.
+pub(crate) const SUMMARY: &str = "This session is being continued from a previous conversation";
 
 /// What a compaction while idle writes at the end of the record of `session`, in
 /// the Claude configuration `config`: the boundary, whose chain starts afresh, and
@@ -73,10 +76,29 @@ pub(crate) fn write_compaction(out: &mut impl Write, session: &str) -> std::io::
     Ok(())
 }
 
+/// The chief told `said`, once it is idle: its window's session.
+pub(crate) fn told(
+    rig: &Rig,
+    project: &Project,
+    said: &str,
+) -> Result<String, Box<dyn std::error::Error>> {
+    wait_for_the_chief(rig, project)?;
+    let session = windows_of(rig, project)
+        .first()
+        .and_then(|first| after(first, "--session-id"))
+        .ok_or("the first window has no session")?
+        .to_owned();
+    rig.tell(project.id(), said)?;
+    Ok(session)
+}
+
 /// The chief's turn on `said` to have ended in its record: the stand-in's stop
 /// hook closes it, after its answer. The words are in the record from the user's
 /// own line, so a wait for them alone returns while the answer is still to be
 /// written (T-187), and a compaction written then is no compaction while idle.
+/// The hook's record is the turn's last for a window that started no agents,
+/// which every case that waits here has: a window that did writes a
+/// `turn_duration` after it (`fake_agent.rs`).
 pub(crate) fn wait_for_the_turn_to_end(rig: &Rig, session: &str, said: &str) -> cf_e2e::Result<()> {
     rig.wait_for("the chief's turn to end in its record", secs(60), || {
         let record = rig.transcript(session);
@@ -92,18 +114,49 @@ pub(crate) fn wait_for_the_turn_to_end(rig: &Rig, session: &str, said: &str) -> 
     })
 }
 
+/// The chief's whole history, the tools' outputs too, as the History button reads it.
+pub(crate) fn history(rig: &Rig, project: &Project) -> cf_e2e::Result<Value> {
+    let read = rig.page(
+        "history.get",
+        json!({ "project": project.id(), "handle": "chief", "tools": true }),
+    )?;
+    Ok(read["history"].clone())
+}
+
+/// Every item of every conversation of a page of the history.
+pub(crate) fn items(history: &Value) -> Vec<Value> {
+    history["conversations"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .flat_map(|conversation| {
+            conversation["items"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default()
+        })
+        .collect()
+}
+
+/// Whether an item is of `role` and its text holds `text`.
+pub(crate) fn is_said(item: &Value, role: &str, text: &str) -> bool {
+    item["role"] == role
+        && item["text"]
+            .as_str()
+            .is_some_and(|said| said.contains(text))
+}
+
+/// Whether some item of the history is of `role` and says `text`.
+pub(crate) fn says(history: &Value, role: &str, text: &str) -> bool {
+    items(history).iter().any(|item| is_said(item, role, text))
+}
+
 #[test]
 fn a_claude_chief_whose_conversation_was_compacted_while_idle_is_given_no_note_at_a_resume(
 ) -> Outcome {
     let rig = Rig::start(config())?;
     let project = Project::open(&rig, "chief", json!({}))?;
-    wait_for_the_chief(&rig, &project)?;
-    let session = windows_of(&rig, &project)
-        .first()
-        .and_then(|first| after(first, "--session-id"))
-        .ok_or("the first window has no session")?
-        .to_owned();
-    rig.tell(project.id(), "Reply with exactly: HELLO")?;
+    let session = told(&rig, &project, "Reply with exactly: HELLO")?;
     wait_for_the_turn_to_end(&rig, &session, "Reply with exactly: HELLO")?;
     wait_for_the_chief(&rig, &project)?;
     let claude = rig

@@ -22,47 +22,17 @@ use cf_e2e::files;
 use cf_e2e::rig::{Project, Rig};
 use serde_json::{json, Value};
 
-use crate::idle_compaction_read_as_a_cut_turn::{compacted_while_idle, wait_for_the_turn_to_end};
-use crate::resume_of_a_chief_with_no_turn::{after, wait_for_the_chief, windows_of};
+use crate::idle_compaction_read_as_a_cut_turn::{
+    compacted_while_idle, history, is_said, items, told, wait_for_the_turn_to_end, SUMMARY,
+};
+use crate::resume_of_a_chief_with_no_turn::{wait_for_the_chief, windows_of};
 use crate::{config_with_codex, secs, Outcome};
-
-/// The words of the summary the compaction writes.
-const SUMMARY: &str = "This session is being continued from a previous conversation";
-
-/// The chief's whole history, the tools' outputs too, as the History button reads it.
-fn history(rig: &Rig, project: &Project) -> cf_e2e::Result<Value> {
-    let read = rig.page(
-        "history.get",
-        json!({ "project": project.id(), "handle": "chief", "tools": true }),
-    )?;
-    Ok(read["history"].clone())
-}
-
-/// Every item of every conversation of a page of the history.
-fn items(history: &Value) -> Vec<Value> {
-    history["conversations"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .flat_map(|conversation| {
-            conversation["items"]
-                .as_array()
-                .cloned()
-                .unwrap_or_default()
-        })
-        .collect()
-}
 
 /// Whether a conversation holds an item of `role` whose text holds `text`.
 fn holds(conversation: &Value, role: &str, text: &str) -> bool {
-    conversation["items"].as_array().is_some_and(|items| {
-        items.iter().any(|item| {
-            item["role"] == role
-                && item["text"]
-                    .as_str()
-                    .is_some_and(|said| said.contains(text))
-        })
-    })
+    conversation["items"]
+        .as_array()
+        .is_some_and(|items| items.iter().any(|item| is_said(item, role, text)))
 }
 
 #[test]
@@ -78,15 +48,9 @@ fn the_history_reads_a_chief_s_conversations_whole_across_a_compaction_and_a_swi
     });
     files::write(&rig.home().join("agents.json"), format!("{roster}\n"))?;
     let project = Project::open(&rig, "chief", json!({}))?;
-    wait_for_the_chief(&rig, &project)?;
-    let session = windows_of(&rig, &project)
-        .first()
-        .and_then(|first| after(first, "--session-id"))
-        .ok_or("the first window has no session")?
-        .to_owned();
 
     // The chief works, and Claude Code compacts its conversation while it is idle.
-    rig.tell(project.id(), "Reply with exactly: BEFORE_THE_SWITCH")?;
+    let session = told(&rig, &project, "Reply with exactly: BEFORE_THE_SWITCH")?;
     wait_for_the_turn_to_end(&rig, &session, "Reply with exactly: BEFORE_THE_SWITCH")?;
     wait_for_the_chief(&rig, &project)?;
     let claude = rig
