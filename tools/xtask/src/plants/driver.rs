@@ -329,6 +329,11 @@ pub fn run(
         "copies of what is planted are kept in {}",
         saved.display()
     )?;
+    // The temp folder of every command of the run: what a plant makes fail on purpose
+    // leaves reports and homes there, which go with the run's folder.
+    let temp = saved.join("temp");
+    fs::create_dir_all(&temp).map_err(Error::files("make a temp folder for the runs in", &temp))?;
+    runner.temp_in(&temp);
     let limit = family.limit.as_secs();
     let mut built = false;
     let mut wrong = 0;

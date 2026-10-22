@@ -10,7 +10,9 @@
 //! (`Rig::expect_the_close_to_fail`), and a failure it holds to is no report either.
 //! The report of a rig built for the real harnesses (`live::rig`), whose windows
 //! show what a real harness drew with the person's login, is kept under the
-//! checkout's build folder instead, where no run uploads it and a clean takes it away.
+//! checkout's build folder instead, where a clean takes it away; CI uploads that folder's
+//! for a failed job, since ten cases of the rig suite build on `live::rig` with the
+//! stand-in, and no real harness runs there.
 //!
 //! No report is kept of a hang that a step's limit or the job's kills: the process
 //! that would drop the rig is ended with it, and a job that is cancelled is not
@@ -22,7 +24,12 @@
 //! ended without closing their rigs. The rig cannot tell a case that returned `Ok`
 //! and forgot the close from one that returned an error, so the cases are held to
 //! the close here, as they are written: each function that starts a rig, or calls a
-//! helper of its file that hands one on, closes it.
+//! helper of its file that hands one on, closes it. What that reads is text, and it
+//! does not see: a rig inside another type (`Members`, which the live members' cases
+//! close through `members.close()`, a close it counts but whose start it does not), a
+//! helper called as a method (a name after a dot is none of the helpers'), and a
+//! function whose head its pattern does not match (`async`, `const`, in a trait: the
+//! two folders have none). A case that goes outside these takes its own care.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -91,6 +98,15 @@ fn a_case_whose_close_fails(home: &mut Option<PathBuf>, expected: bool) -> Outco
     Ok(())
 }
 
+/// A case whose close times out: the daemon and the pane host are given no time to end,
+/// and the daemon, its input gone, may be there still when the rig is dropped.
+fn a_case_whose_close_times_out(home: &mut Option<PathBuf>) -> Outcome {
+    let rig = crate::rig()?;
+    *home = Some(home_of(&rig));
+    rig.close_within(Duration::ZERO)?;
+    Ok(())
+}
+
 /// A case whose check fails after it shut its rig down to look at what was left
 /// (`shut_down_within` keeps the rig, which is the case's still): it panics.
 fn a_case_whose_check_fails_after_a_shutdown(home: &mut Option<PathBuf>) {
@@ -149,6 +165,30 @@ fn a_rig_whose_close_fails_keeps_its_report() -> Outcome {
     let kept = fs::read_to_string(&report)?;
     assert!(kept.contains(HEADING), "{kept}");
     fs::remove_file(report)?;
+    Ok(())
+}
+
+#[test]
+fn a_report_of_a_rig_whose_close_was_tried_does_not_ask_the_daemon_what_it_says() -> Outcome {
+    let mut home = None;
+
+    let failed = a_case_whose_close_times_out(&mut home);
+
+    assert!(failed.is_err(), "a close given no time ended well");
+    let report = report_beside(&home.ok_or("the case never started its rig")?);
+    let kept = fs::read_to_string(&report)?;
+    fs::remove_file(report)?;
+    // Its input gone, the daemon is asked nothing (it would be waited on for ten
+    // seconds where it is there and answers nothing); where it is gone already, that is said.
+    let said = kept
+        .split("what the daemon says:\n")
+        .nth(1)
+        .and_then(|after| after.lines().next())
+        .unwrap_or_default();
+    assert!(
+        said.starts_with("  not asked: ") || said == "  the daemon is gone",
+        "{said:?}"
+    );
     Ok(())
 }
 
@@ -532,6 +572,15 @@ fn ci_steps() -> Result<Vec<Vec<String>>, Box<dyn std::error::Error>> {
     Ok(steps)
 }
 
+/// Every step of `steps` with a line that holds `needle`.
+fn steps_with<'a>(steps: &'a [Vec<String>], needle: &str) -> Vec<&'a [String]> {
+    steps
+        .iter()
+        .filter(|step| step.iter().any(|line| line.contains(needle)))
+        .map(Vec::as_slice)
+        .collect()
+}
+
 /// The step of `steps` with a line that holds `needle`.
 fn step_with<'a>(
     steps: &'a [Vec<String>],
@@ -558,16 +607,36 @@ fn finds(pattern: &str, path: &str) -> Result<bool, regex::Error> {
 /// says it is.
 const COLLECTED: &str = "path: ${{ env.RIG_TEMP }}/consensflow-integration-*-left.txt";
 
+/// The path the other upload collects from, relative to the workspace, which the action
+/// reads it against: where a rig built for the real harnesses keeps its report
+/// (`live::rig`), and where the cases CI runs on such a rig, with the stand-in, keep it.
+const COLLECTED_LIVE: &str =
+    "path: app/src-tauri/target/live-reports/consensflow-integration-*-left.txt";
+
 #[test]
 fn ci_uploads_for_a_failed_job_the_reports_a_failed_case_keeps_and_no_other_file() -> Outcome {
     let steps = ci_steps()?;
     let names = step_with(&steps, "RIG_TEMP=")?;
-    let upload = step_with(&steps, "uses: actions/upload-artifact@")?;
+    let uploads = steps_with(&steps, "uses: actions/upload-artifact@");
+    assert_eq!(
+        uploads.len(),
+        2,
+        "one upload for the temp folder's reports and one for the live rigs': {uploads:?}"
+    );
+    let upload_of = |path: &str| {
+        uploads
+            .iter()
+            .find(|step| step.iter().any(|line| line == path))
+            .copied()
+            .ok_or_else(|| format!("no upload has `{path}`: {uploads:?}"))
+    };
+    let (temp_upload, live_upload) = (upload_of(COLLECTED)?, upload_of(COLLECTED_LIVE)?);
 
     // Only for a failed job, a pinned action, a week, and nothing said where there is nothing.
     for (what, step) in [
         ("the step that names the folder", names),
-        ("the upload", upload),
+        ("the upload of the temp folder", temp_upload),
+        ("the upload of the live rigs' reports", live_upload),
     ] {
         assert!(
             step.iter().any(|line| line == "if: failure()"),
@@ -575,20 +644,20 @@ fn ci_uploads_for_a_failed_job_the_reports_a_failed_case_keeps_and_no_other_file
         );
     }
     let pinned = Regex::new(r"^uses: actions/upload-artifact@[0-9a-f]{40} # v\d+\.\d+\.\d+$")?;
-    assert!(
-        upload.iter().any(|line| pinned.is_match(line)),
-        "{upload:?}"
-    );
-    for line in [
-        "if-no-files-found: ignore",
-        "retention-days: 7",
-        "name: rig-reports-${{ matrix.os }}",
-        COLLECTED,
+    for (upload, name) in [
+        (temp_upload, "name: rig-reports-${{ matrix.os }}"),
+        (live_upload, "name: live-rig-reports-${{ matrix.os }}"),
     ] {
         assert!(
-            upload.iter().any(|have| have == line),
-            "no `{line}`: {upload:?}"
+            upload.iter().any(|line| pinned.is_match(line)),
+            "{upload:?}"
         );
+        for line in ["if-no-files-found: ignore", "retention-days: 7", name] {
+            assert!(
+                upload.iter().any(|have| have == line),
+                "no `{line}`: {upload:?}"
+            );
+        }
     }
 
     // The folder the step names is the one the rig keeps its reports in: Node's temp
@@ -635,7 +704,28 @@ fn ci_uploads_for_a_failed_job_the_reports_a_failed_case_keeps_and_no_other_file
     assert!(!finds(&collected, &home.to_string_lossy())?, "the home");
     let other = format!("{}.old", report.display());
     assert!(!finds(&collected, &other)?, "{other}");
+    // The other upload, which the workspace holds, finds none of the temp folder's.
+    let live = format!(
+        "{}/{}",
+        checkout::root().display(),
+        COLLECTED_LIVE.trim_start_matches("path: ")
+    );
+    assert!(!finds(&live, &report.to_string_lossy())?, "{live}");
     fs::remove_file(report)?;
+
+    // A rig built for the real harnesses keeps its report where that upload looks, and
+    // the first finds none of it: the ten cases CI runs on such a rig with the stand-in
+    // fail into it.
+    let mut home = None;
+    assert!(a_live_rigs_case_that_waits_for_what_never_comes(&mut home).is_err());
+    let home = home.ok_or("the case never started its rig")?;
+    let kept =
+        checkout::path(LIVE_REPORTS).join(report_beside(&home).file_name().unwrap_or_default());
+    let found = finds(&live, &kept.to_string_lossy())?;
+    let in_the_temp_pattern = finds(&collected, &kept.to_string_lossy())?;
+    let _ = fs::remove_file(&kept);
+    assert!(found, "`{live}` does not find {}", kept.display());
+    assert!(!in_the_temp_pattern, "{collected}");
     Ok(())
 }
 
@@ -658,6 +748,25 @@ fn the_reports_are_found_in_the_temp_folders_of_the_runners_of_both_platforms() 
         let home = format!("{temp}{slash}consensflow-integration-AbC123");
         assert!(!finds(&collected, &home)?, "{home}");
         let deeper = format!("{temp}{slash}other{slash}consensflow-integration-AbC123-left.txt");
+        assert!(!finds(&collected, &deeper)?, "{deeper}");
+    }
+    // And the workspaces the live rigs' reports are kept in, which the other upload reads
+    // its path against: the Mac's, and Windows' (another drive than its temp folder's,
+    // which is why that is an upload of its own).
+    for (workspace, slash) in [
+        ("/Users/runner/work/consensflow/consensflow", '/'),
+        (r"D:\a\consensflow\consensflow", '\\'),
+    ] {
+        let relative = COLLECTED_LIVE.trim_start_matches("path: ");
+        let collected = format!("{workspace}/{relative}");
+        let folder =
+            format!("{workspace}{slash}app{slash}src-tauri{slash}target{slash}live-reports");
+        let report = format!("{folder}{slash}consensflow-integration-AbC123-left.txt");
+        assert!(
+            finds(&collected, &report)?,
+            "`{collected}` does not find {report}"
+        );
+        let deeper = format!("{folder}{slash}other{slash}consensflow-integration-AbC123-left.txt");
         assert!(!finds(&collected, &deeper)?, "{deeper}");
     }
     Ok(())

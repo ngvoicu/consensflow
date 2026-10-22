@@ -40,7 +40,11 @@ impl Rig {
     pub fn start(config: Config) -> Result<Self> {
         let turn = serial::turn();
         // A home of its own, which goes if the rig never starts; or the one it is
-        // to resume on.
+        // to resume on. In the machine's temp folder for every rig, one for the real
+        // harnesses too: a home deep in a checkout is a long path where this folder's is
+        // short (a Unix socket's, Windows' limit), and what a real harness's windows
+        // hold there goes with the home when the rig ends, as its report does not.
+        // What a killed run leaves is swept by hand, the homes older than a day.
         let (root, scratch) = match &config.existing_root {
             Some(root) => (root.clone(), None),
             None => {

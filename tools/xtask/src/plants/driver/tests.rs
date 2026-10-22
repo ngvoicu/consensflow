@@ -16,6 +16,9 @@ struct Fake<A: FnMut(&[String]) -> Answer> {
     answer: A,
     ran: Vec<String>,
     stops: VecDeque<bool>,
+    /// The temp folder it was given, and for each command whether it was there.
+    temp: Option<PathBuf>,
+    temp_there: Vec<bool>,
 }
 
 impl<A: FnMut(&[String]) -> Answer> Fake<A> {
@@ -24,6 +27,8 @@ impl<A: FnMut(&[String]) -> Answer> Fake<A> {
             answer,
             ran: Vec::new(),
             stops: VecDeque::new(),
+            temp: None,
+            temp_there: Vec::new(),
         }
     }
 }
@@ -31,11 +36,17 @@ impl<A: FnMut(&[String]) -> Answer> Fake<A> {
 impl<A: FnMut(&[String]) -> Answer> Runner for Fake<A> {
     fn run(&mut self, command: &[String]) -> Answer {
         self.ran.push(command.join(" "));
+        self.temp_there
+            .push(self.temp.as_ref().is_some_and(|folder| folder.is_dir()));
         (self.answer)(command)
     }
 
     fn stopped(&mut self) -> bool {
         self.stops.pop_front().unwrap_or(false)
+    }
+
+    fn temp_in(&mut self, folder: &Path) {
+        self.temp = Some(folder.to_path_buf());
     }
 }
 
@@ -188,6 +199,29 @@ fn the_runs_of_a_plant_go_in_order_until_one_fails() {
     let (status, _) = go(&context, &family, &mut runner);
     assert_eq!(status.unwrap(), 0);
     assert_eq!(runner.ran, ["first", "second", "fourth"]);
+}
+
+#[test]
+fn the_commands_are_given_a_temp_folder_in_the_runs_own_folder_which_goes_with_it() {
+    let (_folder, context) = checkout();
+    let family = family(vec![upper(
+        "p: one",
+        &[("first", false), ("second", false)],
+    )]);
+    let mut runner = Fake::new(|command| match command[0].as_str() {
+        "first" => fails("m::the_test"),
+        _ => passes(),
+    });
+    let (status, said) = go(&context, &family, &mut runner);
+    assert_eq!(status.unwrap(), 0);
+    let given = runner.temp.clone().unwrap_or_default();
+    assert_eq!(
+        given.parent(),
+        Some(copies_folder(&said).as_path()),
+        "{given:?}"
+    );
+    assert_eq!(runner.temp_there, [true], "it was there for each command");
+    assert!(!given.exists(), "it went with the run's folder");
 }
 
 #[test]

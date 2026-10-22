@@ -18,6 +18,9 @@ reports-close-fails = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "
 reports-close-held = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "reports::a_rig_whose_case_holds"]
 reports-live = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "reports::a_live_rigs"]
 reports-lib = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "rig::report"]
+reports-asked = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "reports::a_report_of_a_rig_whose_close"]
+reports-xtask-driver = ["cargo", "test", "--offline", "-p", "xtask", "--lib", "plants::driver::tests::the_commands_are_given"]
+reports-xtask-runs = ["cargo", "test", "--offline", "-p", "xtask", "--lib", "plants::runs::tests::a_command_is_given"]
 reports-ci = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "reports::ci_uploads"]
 
 [[plant]]
@@ -123,9 +126,13 @@ runs = ["reports-ci"]
 file = ".github/workflows/ci.yml"
 find = '''
       - if: failure()
-        uses: actions/upload-artifact@'''
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: rig-reports-'''
 replace = '''
-      - uses: actions/upload-artifact@'''
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: rig-reports-'''
 
 [[plant]]
 name = "rig reports: CI fails a job that wrote no report, where it should say nothing"
@@ -134,8 +141,8 @@ runs = ["reports-ci"]
 
 [[plant.edit]]
 file = ".github/workflows/ci.yml"
-find = "          if-no-files-found: ignore\n"
-replace = "          if-no-files-found: error\n"
+find = "consensflow-integration-*-left.txt\n          if-no-files-found: ignore\n          retention-days: 7\n      - if: failure()"
+replace = "consensflow-integration-*-left.txt\n          if-no-files-found: error\n          retention-days: 7\n      - if: failure()"
 
 [[plant]]
 name = "rig reports: CI takes the action by a tag that can move, not a commit"
@@ -144,8 +151,8 @@ runs = ["reports-ci"]
 
 [[plant.edit]]
 file = ".github/workflows/ci.yml"
-find = "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2"
-replace = "actions/upload-artifact@v7"
+find = "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2\n        with:\n          name: rig-reports-"
+replace = "actions/upload-artifact@v7\n        with:\n          name: rig-reports-"
 
 [[plant]]
 name = "rig reports: CI looks for the reports in the runner's own folder, not where the rig writes them"
@@ -164,8 +171,8 @@ runs = ["reports-ci"]
 
 [[plant.edit]]
 file = ".github/workflows/ci.yml"
-find = "consensflow-integration-*-left.txt"
-replace = "consensflow-integration-*-kept.txt"
+find = "${{ env.RIG_TEMP }}/consensflow-integration-*-left.txt"
+replace = "${{ env.RIG_TEMP }}/consensflow-integration-*-kept.txt"
 
 # The round of T-174 (Calliope's review of T-171): a close that fails keeps the report, a case
 # that holds its close to fail says so, a case whose rig comes from a helper is held to the
@@ -274,3 +281,113 @@ runs = ["reports-live", "reports-lib"]
 file = "crates/cf-e2e/src/rig/report.rs"
 find = "        Some(folder) => folder.join(format!(\"{name}-left.txt\")),"
 replace = "        Some(_) => root.with_file_name(format!(\"{name}-left.txt\")),"
+
+# The round of T-191 (Calliope's check T-188): a second upload for the live rigs' reports, which
+# the ten cases CI runs on `live::rig` with the stand-in fail into; a close that was tried asks the
+# daemon nothing; the plant runner gives its commands a temp folder of the run's own.
+
+[[plant]]
+name = "rig reports: CI uploads nothing of the live rigs' reports"
+meant = "ci_uploads_for_a_failed_job_the_reports_a_failed_case_keeps_and_no_other_file"
+runs = ["reports-ci"]
+
+[[plant.edit]]
+file = ".github/workflows/ci.yml"
+find = '''
+      - if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: live-rig-reports-${{ matrix.os }}
+          path: app/src-tauri/target/live-reports/consensflow-integration-*-left.txt
+          if-no-files-found: ignore
+          retention-days: 7
+'''
+replace = ""
+
+[[plant]]
+name = "rig reports: CI uploads the live rigs' reports of a job that did not fail"
+meant = "ci_uploads_for_a_failed_job_the_reports_a_failed_case_keeps_and_no_other_file"
+runs = ["reports-ci"]
+
+[[plant.edit]]
+file = ".github/workflows/ci.yml"
+find = '''
+      - if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: live-rig-reports-'''
+replace = '''
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: live-rig-reports-'''
+
+[[plant]]
+name = "rig reports: CI looks for the live rigs' reports in a folder the rig never writes them in"
+meant = "ci_uploads_for_a_failed_job_the_reports_a_failed_case_keeps_and_no_other_file"
+runs = ["reports-ci"]
+
+[[plant.edit]]
+file = ".github/workflows/ci.yml"
+find = "path: app/src-tauri/target/live-reports/consensflow-integration-*-left.txt"
+replace = "path: app/src-tauri/target/live-report/consensflow-integration-*-left.txt"
+
+[[plant]]
+name = "rig reports: the live rigs' reports go in one upload with the temp folder's, across drives"
+meant = "ci_uploads_for_a_failed_job_the_reports_a_failed_case_keeps_and_no_other_file"
+runs = ["reports-ci"]
+
+[[plant.edit]]
+file = ".github/workflows/ci.yml"
+find = '''
+          path: ${{ env.RIG_TEMP }}/consensflow-integration-*-left.txt
+'''
+replace = '''
+          path: |
+            ${{ env.RIG_TEMP }}/consensflow-integration-*-left.txt
+            app/src-tauri/target/live-reports/consensflow-integration-*-left.txt
+'''
+
+[[plant]]
+name = "rig reports: a report of a rig whose close was tried asks the daemon what it says"
+meant = "a_report_of_a_rig_whose_close_was_tried_does_not_ask_the_daemon_what_it_says"
+runs = ["reports-asked"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/report.rs"
+find = '''
+    if rig.close_failed {
+        return "  not asked: the rig's close was tried, and the daemon's input is gone\n"
+            .to_owned();
+    }
+'''
+replace = ""
+
+[[plant]]
+name = "rig reports: the plant runner gives its commands the machine's own temp folder"
+meant = "the_commands_are_given_a_temp_folder_in_the_runs_own_folder_which_goes_with_it"
+runs = ["reports-xtask-driver"]
+
+[[plant.edit]]
+file = "tools/xtask/src/plants/driver.rs"
+find = "    runner.temp_in(&temp);\n"
+replace = ""
+
+[[plant]]
+name = "rig reports: the plant runner makes its commands' temp folder outside the run's own"
+meant = "the_commands_are_given_a_temp_folder_in_the_runs_own_folder_which_goes_with_it"
+runs = ["reports-xtask-driver"]
+
+[[plant.edit]]
+file = "tools/xtask/src/plants/driver.rs"
+find = 'let temp = saved.join("temp");'
+replace = 'let temp = std::env::temp_dir().join("cf-plants-temp");'
+
+[[plant]]
+name = "rig reports: the plant runner's commands are given no temp folder of the run's"
+meant = "a_command_is_given_the_temp_folder_its_run_made_for_it"
+runs = ["reports-xtask-runs"]
+
+[[plant.edit]]
+file = "tools/xtask/src/plants/runs.rs"
+find = "        self.env = Env::from_vars(kept.into_iter().chain(given));"
+replace = "        let _ = given;\n        self.env = Env::from_vars(kept);"

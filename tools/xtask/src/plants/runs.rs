@@ -43,6 +43,9 @@ const OUTPUT_LIMIT: usize = 64 * 1024 * 1024;
 /// The variable `node --test` sets for the ones it starts.
 const NODE_TEST_CONTEXT: &str = "NODE_TEST_CONTEXT";
 
+/// The variables a program is told its temp folder by: Unix's, and Windows' two.
+const TEMP_FOLDER: [&str; 3] = ["TMPDIR", "TMP", "TEMP"];
+
 /// What a command did.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Ran {
@@ -71,6 +74,13 @@ pub trait Runner {
     /// Whether this program was asked to stop since it was last asked: a stop that
     /// came with no command in hand is not lost.
     fn stopped(&mut self) -> bool;
+
+    /// Gives the commands it runs from now on `folder` as their temp folder. A plant
+    /// makes tests fail on purpose, and a rig of the integration suites keeps a report
+    /// of each case that fails (and leaves its home when its run was ended): in the
+    /// machine's own temp folder those stay for good, in the run's they go with it.
+    /// A runner that runs nothing has none to give.
+    fn temp_in(&mut self, _folder: &Path) {}
 }
 
 impl Ran {
@@ -235,6 +245,19 @@ impl Execute {
 }
 
 impl Runner for Execute {
+    fn temp_in(&mut self, folder: &Path) {
+        let kept = self
+            .env
+            .iter()
+            .filter(|(name, _)| !TEMP_FOLDER.iter().any(|temp| *name == OsStr::new(temp)))
+            .map(|(name, value)| (name.to_owned(), value.to_owned()))
+            .collect::<Vec<_>>();
+        let given = TEMP_FOLDER
+            .iter()
+            .map(|name| (OsString::from(name), folder.as_os_str().to_owned()));
+        self.env = Env::from_vars(kept.into_iter().chain(given));
+    }
+
     fn run(&mut self, command: &[String]) -> Result<Execution, Error> {
         let run = self.start(command)?;
         let Self {

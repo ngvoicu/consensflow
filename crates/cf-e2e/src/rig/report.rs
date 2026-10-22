@@ -207,10 +207,15 @@ fn message_line(message: &Value) -> String {
 /// What the daemon says of its projects, asked as the page asks: each lane, and
 /// the newest messages in the inbox of each participant, with the state of each;
 /// and what waits at the gate. Each text of an answer is told whole before any of
-/// it is cut.
+/// it is cut. Not asked once a close was tried: the daemon's input is gone then, and
+/// where it is there still it answers nothing (ten seconds waited for in each question).
 fn said_by_the_daemon(rig: &Rig, tell: &Tell) -> String {
     if !process::is_alive(rig.daemon.id()) {
         return "  the daemon is gone\n".to_owned();
+    }
+    if rig.close_failed {
+        return "  not asked: the rig's close was tried, and the daemon's input is gone\n"
+            .to_owned();
     }
     let page = |method: &str, body: Value| rig.page(method, body).map(|answer| tell.value(&answer));
     let Ok(listed) = page("projects.list", json!({})) else {

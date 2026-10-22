@@ -657,9 +657,11 @@ impl Rig {
 
     /// For a case that holds the close to fail (the rig's checks of what the pane host
     /// ended, of what a window left running): a close that fails keeps no report of
-    /// the rig, since the failure is what the case is about and it says it. A close
-    /// that fails in any other case does keep one, and so does a case that never
-    /// tries it.
+    /// the rig, since the failure is what the case is about and it says it. That is
+    /// the rig's whole report, so an error the case returns after the expected failure
+    /// (not a panic, which keeps one) keeps none either: the case says what it needs to
+    /// in the error. A close that fails in any other case does keep one, and so does a
+    /// case that never tries it.
     pub fn expect_the_close_to_fail(&self) {
         self.close_expected_to_fail.store(true, Ordering::Relaxed);
     }

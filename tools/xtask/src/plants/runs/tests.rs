@@ -173,6 +173,12 @@ fn helper_has_no_node_test_context() {
     assert!(std::env::var_os("NODE_TEST_CONTEXT").is_none());
 }
 
+#[test]
+#[ignore = "a program the tests of runs start"]
+fn helper_has_the_temp_folder_its_run_gave_it() {
+    assert!(std::env::temp_dir().ends_with("the-runs-temp"));
+}
+
 fn context() -> Context {
     Context::new(&Env::from_process()).unwrap()
 }
@@ -217,6 +223,19 @@ fn a_command_that_fails_a_test_says_which_in_the_words_of_cargo() {
         "{}",
         ran.output
     );
+}
+
+#[test]
+fn a_command_is_given_the_temp_folder_its_run_made_for_it() {
+    let mut runner = runner(Duration::from_secs(120));
+    runner.temp_in(&std::env::temp_dir().join("the-runs-temp"));
+    let ran = ended(
+        runner
+            .run(&helper("helper_has_the_temp_folder_its_run_gave_it"))
+            .unwrap(),
+    );
+    assert_eq!(ran.code, Some(0), "{}", ran.output);
+    assert!(ran.caught().is_empty(), "{}", ran.output);
 }
 
 #[test]

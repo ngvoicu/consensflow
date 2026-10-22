@@ -269,7 +269,8 @@ fn windows_environment(
 /// root: under its build folder, not in the machine's temp folder. The windows of such a
 /// rig show what a real harness drew with the person's login, which no masker is sure to
 /// hide, and the temp folder would keep it for good; a clean of the build folder takes
-/// this away, and no run uploads it.
+/// this away. CI uploads it for a failed job (ten cases of the rig suite build on this
+/// rig with the stand-in, and hold no real harness's output there).
 const REPORTS: &str = "app/src-tauri/target/live-reports";
 
 /// A rig whose windows run the stand-in `stand_in` for Claude and find every

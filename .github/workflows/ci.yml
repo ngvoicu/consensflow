@@ -114,7 +114,13 @@ jobs:
       # reports hold the stand-in agents' output and the daemon's log, from a
       # rig whose environment is its own (cf-e2e's rig/install.rs): no real
       # harness, home or token. The step that names the folder runs only for a
-      # failed job, and the upload, for one that wrote none, says nothing.
+      # failed job, and the upload, for one that wrote none, says nothing. A rig
+      # built for the real harnesses (cf-e2e's live::rig) keeps its report under the
+      # workspace's build folder instead, and ten cases of the rig suite build on it
+      # with the stand-in, so they fail into that folder: a second upload, not a second
+      # line of the first's path, since the action roots an artifact at the common
+      # ancestor of its paths and Windows' temp folder and workspace share none (C:, D:).
+      # On a runner no real harness runs, so that folder holds stand-in output only.
       - name: Where the rig keeps the reports of its failed cases
         if: failure()
         run: echo "RIG_TEMP=$(node -p "require('os').tmpdir()")" >> "$GITHUB_ENV"
@@ -123,5 +129,12 @@ jobs:
         with:
           name: rig-reports-${{ matrix.os }}
           path: ${{ env.RIG_TEMP }}/consensflow-integration-*-left.txt
+          if-no-files-found: ignore
+          retention-days: 7
+      - if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: live-rig-reports-${{ matrix.os }}
+          path: app/src-tauri/target/live-reports/consensflow-integration-*-left.txt
           if-no-files-found: ignore
           retention-days: 7
