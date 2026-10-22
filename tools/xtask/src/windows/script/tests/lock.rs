@@ -434,10 +434,18 @@ fn a_stop_ends_the_run_the_owner_file_names_by_its_process_whatever_the_older_fi
     )
     .unwrap();
     assert_eq!(stop.code, 0, "{}{}", stop.stdout, stop.stderr);
-    // The run is gone with what it started, and does not outlive the stop by a minute.
-    let started = Instant::now();
-    let _ = run.wait_with_output().unwrap();
-    assert!(started.elapsed() < Duration::from_secs(30));
+    // The run is gone: what the stop ends is the run, so it is the run's process that is waited
+    // for (a minute at most), not the end of its output, which stays open as long as any
+    // process that holds a copy of it lives, the run's own or another's.
+    let mut run = run;
+    let until = Instant::now() + Duration::from_secs(60);
+    while run.try_wait().unwrap().is_none() {
+        assert!(
+            Instant::now() < until,
+            "the run's process outlived its stop by a minute"
+        );
+        std::thread::sleep(Duration::from_millis(100));
+    }
     assert!(!case.copy().join(OWNER).exists());
     // The process in the older file is alive and its file is as it was written.
     let left = fs::read_to_string(case.copy().join(RUNNING)).unwrap();
