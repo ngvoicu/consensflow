@@ -39,38 +39,51 @@
 //!
 //! The case is the shape of the report: the human types to the chief and cancels at
 //! once, and the two notes are those of a cancel: the cancel's own, and the closing of
-//! the worker's window with a job still running. The daemon's arrival window is its
-//! own minute, so the notes' turns are 73 s: a note whose record waits for the turn
-//! before it shows later than the window. Without the fix the second note is pasted
-//! into the first's turn, which has said nothing yet, and its record is some 70 s late:
-//! the paste goes again, a minute on. With it, the window reads busy from the TUI's
-//! prompt, and the second note is pasted once the first's turn has ended; and were one
-//! pasted into a turn, only the window's rest counts towards the minute. What proves
+//! the worker's window with a job still running. The daemon's arrival window is 15 s
+//! here, not the minute it gives a person's ([`ARRIVAL_MS`]), so the notes' turns are
+//! 28 s: a note whose record waits for the turn before it shows later than the window.
+//! Without the fix the second note is pasted into the first's turn, which has said
+//! nothing yet, and its record is some 25 s late: the paste goes again, an arrival window
+//! on. With it, the window reads busy from the TUI's prompt, and the second note is
+//! pasted once the first's turn has ended; and were one pasted into a turn, only the
+//! window's rest counts towards the arrival window. What proves
 //! it is the daemon's own word for its pastes (`delivery.begun`, `delivery.retried`):
-//! the chief reads a second copy only after the turns before it, minutes on, and its
-//! store is read as it stands by the time both notes are in.
+//! the chief reads a second copy only after the turns before it, later than this looks,
+//! and its store is read as it stands by the time both notes are in.
 
-use std::path::{Path, PathBuf};
-use std::thread::sleep;
-use std::time::{Duration, Instant};
+use std::path::PathBuf;
 
 use cf_e2e::devin_store;
 use cf_e2e::files;
-use cf_e2e::rig::{Project, Rig};
+use cf_e2e::rig::{Config, Project, Rig};
 use cf_e2e::Error;
 use serde_json::{json, Value};
 
 use crate::{config, secs, Outcome, FAKE_DEVIN};
 
-/// How long the stand-in's agent takes to its first word, and how long it works on
-/// a turn after it, in milliseconds: a turn of 73 s, longer than the daemon's minute
-/// by more than a slow machine's passes take.
-const FIRST_WORD_MS: &str = "3000";
-const WORK_MS: &str = "70000";
+/// How long the daemon waits for the record of a paste to show it in the cases of a
+/// Devin that is late with it: the minute it gives a person's, cut to this by the
+/// variable it reads (`CONSENSFLOW_ARRIVAL_TIMEOUT_MS`), so that the turns which outlast
+/// it are seconds longer and no minute and a half. What a case asserts is that a record
+/// later than the window is no paste lost, whatever the window is; the stand-in's turns
+/// are sized against it, and the 30 s the daemon reads a Devin window busy from its prompt
+/// stays the 30 s it is.
+pub(crate) const ARRIVAL_MS: i64 = 15_000;
 
-/// How long the chief's store is to hold still before its messages are taken for all
-/// it was given: the daemon's passes are a second apart.
-const STILL: Duration = Duration::from_secs(15);
+/// `config`, with the daemon's arrival window [`ARRIVAL_MS`].
+pub(crate) fn arrival(config: Config) -> Config {
+    config.var("CONSENSFLOW_ARRIVAL_TIMEOUT_MS", ARRIVAL_MS.to_string())
+}
+
+/// How long the stand-in's agent works on a turn after its first word, in
+/// milliseconds: longer than the arrival window by more than a slow machine's passes
+/// take, which a turn that is late with its record has to be.
+pub(crate) fn work_ms() -> String {
+    (ARRIVAL_MS + 10_000).to_string()
+}
+
+/// How long the stand-in's agent takes to its first word, in milliseconds.
+const FIRST_WORD_MS: &str = "3000";
 
 /// The roster of the case: a Devin (the stand-in) is the chief, and the stand-in
 /// Claude is the worker.
@@ -117,37 +130,13 @@ fn delivered(project: &Project, id: i64) -> cf_e2e::Result<bool> {
         .any(|message| message["id"] == id && message["state"] == "delivered"))
 }
 
-/// Waits until the store has held as many messages for `still` as it holds now,
-/// for up to three minutes. A look the store does not answer (its writer has it a
-/// moment) is no change.
-pub(crate) fn until_still(store: &Path, still: Duration) -> cf_e2e::Result<()> {
-    let (mut held, mut since) = (0, Instant::now());
-    let begun = Instant::now();
-    loop {
-        let now = devin_store::messages(store).map_or(held, |found| found.len());
-        if now != held {
-            (held, since) = (now, Instant::now());
-        }
-        if since.elapsed() >= still {
-            return Ok(());
-        }
-        if begun.elapsed() >= secs(180) {
-            return Err(Error::Timeout(format!(
-                "the chief's messages went on for three minutes, holding {held}"
-            )));
-        }
-        sleep(Duration::from_millis(500));
-    }
-}
-
 #[test]
 fn two_notes_that_come_together_after_a_cancel_go_into_a_devin_chief_s_window_once_each() -> Outcome
 {
     let rig = Rig::start(
-        config()
-            .devin(FAKE_DEVIN)
+        arrival(config().devin(FAKE_DEVIN))
             .var("FAKE_DEVIN_FIRST_WORD_MS", FIRST_WORD_MS)
-            .var("FAKE_DEVIN_WORK_MS", WORK_MS),
+            .var("FAKE_DEVIN_WORK_MS", work_ms()),
     )?;
     write_roster(&rig)?;
     let project = Project::open(&rig, "chief", json!({}))?;
@@ -205,7 +194,6 @@ fn two_notes_that_come_together_after_a_cancel_go_into_a_devin_chief_s_window_on
         Ok(delivered(&project, notes[0].0)? && delivered(&project, notes[1].0)?)
     })?;
     let store = store_of(&rig);
-    until_still(&store, STILL)?;
 
     // What the daemon did: it pasted each note once, and never took a paste of either
     // for lost, though a note's turn took longer than its minute. Its own word is the

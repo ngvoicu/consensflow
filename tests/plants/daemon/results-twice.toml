@@ -8,12 +8,16 @@
 # - the first result's record is late (the human's turn is in front of it, its agent silent past the
 #   30 s the window reads busy from its prompt, so the result goes into that turn);
 # - the same, with the chief at work on a turn when the second result comes;
-# - the turn in front says nothing for two and a half minutes, as a Devin resumed after a cut sat at
-#   "Thinking" (B1 of the same report): more than the daemon's minute of the window's rest goes by
-#   before the record shows the first result (3.0.4 pasted it again);
-# - Devin's TUI dropped the first paste, and the daemon pastes it again after its minute at rest;
+# - the turn in front says nothing for as long as the window reads busy from its prompt and then for the
+#   arrival window and more, as a Devin resumed after a cut sat at "Thinking" for minutes (B1 of the same
+#   report): more than the daemon's arrival window of the window's rest goes by before the record shows
+#   the first result (3.0.4 pasted it again);
+# - Devin's TUI dropped the first paste, and the daemon pastes it again after its arrival window at rest;
 # - the same, and the human's words quote its header (the reviews of 2026-10-16): they are no paste of
-#   it, and it goes again after the human's turn and the daemon's minute.
+#   it, and it goes again after the human's turn and the daemon's arrival window.
+#
+# The daemon's arrival window in these cases is 15 s, not the minute it gives a person's (T-307, `arrival.toml`):
+# the cases' turns have to outlast it, and with the minute each was minutes long.
 #
 # What stands against a second paste there: the engine counts the arrival window in the window's
 # rest (`notes-twice.toml`), and a window whose harness says the paste went into a turn it is in still

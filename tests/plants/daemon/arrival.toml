@@ -1,0 +1,36 @@
+# The daemon's arrival window: how long a delivered message's header may take to show in its window's
+# record before the paste is taken for lost and made again. A person's daemon has its minute; the
+# environment can cut it (`CONSENSFLOW_ARRIVAL_TIMEOUT_MS`, `Limits::of` in `crates/cf-engine/src/seams.rs`,
+# the way it cuts the wait for a launch), and the Devin cases of `crates/cf-e2e/tests/regressions/`, whose
+# stand-in's turns have to outlast the window, give their daemon 15 s so that their turns are seconds longer
+# than it and no minute and a half (T-307: the regressions took 1,821 s of the daemons' 2,870 on the Mac,
+# six cases of them 970). What stands against a daemon that does not read it: the unit test of `Limits::of`,
+# and the case of a paste Devin's TUI dropped, which asserts the second paste came within three arrival windows
+# of the first, where a daemon on its minute pastes it again a minute on.
+#
+# Every name holds `arrival`, so `npm run plants:daemon -- "arrival"` runs them all.
+
+[run]
+engine-seams = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "seams::"]
+rig-regression-arrival-dropped = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_result_delivered_twice_to_a_devin_chief::two_results_for_a_devin_chief_whose_tui_dropped"]
+
+[[plant]]
+name = "arrival: the limits take no arrival window from the environment"
+meant = "the_arrival_wait_is_a_minute_unless_the_environment_names_a_number_of_milliseconds"
+runs = ["engine-seams"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/seams.rs"
+find = "            arrival_ms: named(ARRIVAL_MS_VARIABLE).unwrap_or(default.arrival_ms),\n"
+replace = ""
+
+[[plant]]
+name = "arrival: the daemon takes its minute whatever the environment says, and the paste Devin dropped goes again a minute on"
+meant = "two_results_for_a_devin_chief_whose_tui_dropped_the_first_paste_go_in_once_each_whole_and_apart"
+runs = ["rig-regression-arrival-dropped"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/seams.rs"
+find = "            arrival_ms: named(ARRIVAL_MS_VARIABLE).unwrap_or(default.arrival_ms),\n"
+replace = ""
