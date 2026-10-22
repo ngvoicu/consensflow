@@ -27,7 +27,9 @@
 //! is never given a second. The watch ends once the window is past the question: its harness's
 //! prompt on its screen, or its record grown since it opened (a window opened again
 //! on its conversation has that conversation in its record from the first look); a
-//! window that never asked is let go after [`ASKS_WITHIN_MS`]. A launch that is to
+//! window that never asked is let go after [`ASKS_WITHIN_MS`]. A look the host shows no
+//! screen for says nothing either way; a question whose choice the reader cannot place
+//! is pressed nothing, and the human is told once it stays so. A launch that is to
 //! say its role first never meets the question: only a harness that keeps the
 //! instructions its conversation began with is told its role so, and that is Codex,
 //! which never asks as ConsensFlow opens it.
@@ -37,7 +39,7 @@ use std::collections::HashSet;
 use std::rc::Rc;
 use std::time::Duration;
 
-use cf_harness::contract::{Pane, Trusts, Window};
+use cf_harness::contract::{Pane, Question, Trusts, Window};
 use cf_harness::records::Reading;
 use cf_ledger::{NewNote, ParticipantView, ProjectView};
 use cf_proto::panes::{SnapshotRequest, TAIL_LINES};
@@ -64,6 +66,11 @@ const PRESS_AGAIN_LOOKS: u32 = 10;
 /// prompt before it counts as past the question: 12 s, since a resumed window draws
 /// its conversation before its prompt, and a yes is banked only at the prompt.
 const GONE_LOOKS: u32 = 24;
+
+/// How many looks in a row the question may show its choice where the reader cannot
+/// place it (a redraw caught halfway) before the human is told ConsensFlow could not
+/// answer it: 5 s.
+const UNPLACED_LOOKS: u32 = 10;
 
 /// How many keys are pressed toward a yes before the question goes to the human:
 /// a screen that is not moved by them is one the engine does not read right.
@@ -98,12 +105,15 @@ pub(crate) struct TrustState {
 
 /// What one look at the window found.
 enum Seen {
-    /// The question, the key toward a yes, and the lines it was read in.
-    Asks(&'static [u8], Vec<String>),
+    /// The question, the key toward a yes where its choice could be placed, and the
+    /// lines it was read in.
+    Asks(Question, Vec<String>),
     /// The harness's prompt: the window is past any question.
     Prompt,
     /// A screen still drawing, or one that is neither.
     Other,
+    /// No screen: the host did not show it, which says nothing of the question.
+    Unread,
 }
 
 impl Dispatcher {
@@ -168,8 +178,10 @@ impl Dispatcher {
         // redraw is never given a second, or into one that stayed as it was for
         // [`PRESS_AGAIN_LOOKS`], whose window did not take the key.
         let mut pressed_on: Option<(Vec<String>, u32)> = None;
-        // How many looks in a row found the question gone with no prompt on the screen.
+        // How many looks in a row found the question gone with no prompt on the screen,
+        // and how many found it with its choice where the reader cannot place it.
         let mut gone = 0;
+        let mut unplaced = 0;
         let at_prompt = loop {
             if !self.shows(record, pane) {
                 return Ok(());
@@ -180,7 +192,7 @@ impl Dispatcher {
             }
             let grown = matches!((opened_with, length), (Some(from), Some(now)) if now > from);
             match self.trust_look(pane, &**window).await {
-                Seen::Asks(key, lines) => {
+                Seen::Asks(question, lines) => {
                     record.window.borrow_mut().trust = Trusting::Asked;
                     gone = 0;
                     self.changed();
@@ -191,25 +203,33 @@ impl Dispatcher {
                         .accepted
                         .borrow()
                         .contains(&(project.id, folder.clone()));
-                    if (inside || accepted) && keys < MOST_KEYS {
-                        if inside {
-                            self.tell_trust_once(project, &folder, true, || {
-                                format!(
-                                    "@{}'s window asked whether to trust {folder}; ConsensFlow answered yes, as the project's folder is trusted by choosing it.",
-                                    participant.handle
-                                )
-                            })?;
-                        }
-                        let press = match pressed_on.as_mut() {
-                            Some((on, looks)) if *on == lines => {
-                                *looks += 1;
-                                *looks >= PRESS_AGAIN_LOOKS
+                    // A choice the reader cannot place is pressed nothing; one it
+                    // cannot place for long is a screen it does not read right.
+                    unplaced = match question {
+                        Question::Toward(_) => 0,
+                        Question::Unplaced => unplaced + 1,
+                    };
+                    if (inside || accepted) && keys < MOST_KEYS && unplaced < UNPLACED_LOOKS {
+                        if let Question::Toward(key) = question {
+                            if inside {
+                                self.tell_trust_once(project, &folder, true, || {
+                                    format!(
+                                        "@{}'s window asked whether to trust {folder}; ConsensFlow answered yes, as the project's folder is trusted by choosing it.",
+                                        participant.handle
+                                    )
+                                })?;
                             }
-                            _ => true,
-                        };
-                        if press && self.press_toward_trust(pane, key).await {
-                            keys += 1;
-                            pressed_on = Some((lines, 0));
+                            let press = match pressed_on.as_mut() {
+                                Some((on, looks)) if *on == lines => {
+                                    *looks += 1;
+                                    *looks >= PRESS_AGAIN_LOOKS
+                                }
+                                _ => true,
+                            };
+                            if press && self.press_toward_trust(pane, key).await {
+                                keys += 1;
+                                pressed_on = Some((lines, 0));
+                            }
                         }
                     } else {
                         self.tell_trust_once(project, &folder, false, || {
@@ -243,6 +263,14 @@ impl Dispatcher {
                             break false;
                         }
                     } else if self.now() - began > ASKS_WITHIN_MS {
+                        break false;
+                    }
+                }
+                // Neither gone nor grown: a window that asked waits for a screen to
+                // read, and one that never did is let go after its time all the same.
+                Seen::Unread => {
+                    let asked = record.window.borrow().trust == Trusting::Asked;
+                    if !asked && self.now() - began > ASKS_WITHIN_MS {
                         break false;
                     }
                 }
@@ -287,18 +315,21 @@ impl Dispatcher {
             tail: Some(TAIL_LINES),
         };
         let Ok(body) = serde_json::to_value(&request) else {
-            return Seen::Other;
+            return Seen::Unread;
         };
         let Ok(answer) = returning(self.seams.host.request("pane.snapshot", body)).await else {
-            return Seen::Other;
+            return Seen::Unread;
         };
+        if answer.get("ok") != Some(&Value::Bool(true)) {
+            return Seen::Unread;
+        }
         let shown = Shown::from_snapshot(&answer);
         let lines = shown.lines();
         if window.shows_prompt(lines) {
             return Seen::Prompt;
         }
         match window.toward_trust(lines) {
-            Some(key) => Seen::Asks(key, lines.to_vec()),
+            Some(question) => Seen::Asks(question, lines.to_vec()),
             None => Seen::Other,
         }
     }

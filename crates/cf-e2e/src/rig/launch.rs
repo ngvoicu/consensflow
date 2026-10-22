@@ -185,10 +185,11 @@ fn route(
     };
     let shared = Arc::new(Shared::default());
     {
-        let (shared, to_host) = (Arc::clone(&shared), to_host.clone());
+        let (shared, to_host, to_daemon) =
+            (Arc::clone(&shared), to_host.clone(), to_daemon.clone());
         daemon.read_each(
             move |line| {
-                shared.route_daemon(&line, &to_host);
+                shared.route_daemon(&line, &to_host, &to_daemon);
                 true
             },
             || {},

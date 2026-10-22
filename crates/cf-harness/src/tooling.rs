@@ -49,7 +49,7 @@ use cf_proto::specs::Variant;
 use serde_json::{json, Value};
 
 use crate::claude::install;
-use crate::contract::{Agent, Interrupt, LaunchId, Skill};
+use crate::contract::{Agent, Interrupt, LaunchId, Question, Skill};
 use crate::launch::adapter;
 use crate::records::{self, Options};
 use crate::shared::record_state::record_state;
@@ -109,9 +109,9 @@ fn env(question: &Value) -> Result<Env, String> {
     )))
 }
 
-/// The key the engine presses next toward a yes to the harness's question about
-/// trusting a window's folder, read in the window's last lines as the engine reads
-/// them: null where they show none, or the harness never asks one.
+/// Whether the window's last lines show the harness's question about trusting its
+/// folder, as the engine reads them, and the key it presses next toward a yes: null
+/// where they show none, the harness never asks one, or its choice cannot be placed.
 fn trust(question: &Value) -> Result<Value, String> {
     let screen: Vec<String> = question
         .get("screen")
@@ -127,8 +127,11 @@ fn trust(question: &Value) -> Result<Value, String> {
         ),
         Harness::Codex | Harness::Pi | Harness::Opencode | Harness::Devin => (None, false),
     };
-    let key = key.map(|key| if key == trust::ENTER { "enter" } else { "down" });
-    let mut answer = json!({ "key": key, "prompt": prompt });
+    let pressed = match key {
+        Some(Question::Toward(key)) => Some(if key == trust::ENTER { "enter" } else { "down" }),
+        Some(Question::Unplaced) | None => None,
+    };
+    let mut answer = json!({ "asks": key.is_some(), "key": pressed, "prompt": prompt });
     // What a yes trusts, for a window opened in a project's folder `directory`.
     if let Some(directory) = optional(question, "directory") {
         let trust::Trusts { folder, inside } = trust::trusts(directory);

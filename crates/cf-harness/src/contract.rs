@@ -236,6 +236,18 @@ pub struct Trusts {
     pub inside: bool,
 }
 
+/// What a window's last lines show of its harness's question about trusting its
+/// folder, where they show it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Question {
+    /// The key a person presses next toward a yes: Down, or Enter once the choice is
+    /// on yes.
+    Toward(&'static [u8]),
+    /// The question, its choice drawn where the reader cannot place it (a cursor
+    /// drawn otherwise, or a redraw caught halfway): no key is known.
+    Unplaced,
+}
+
 /// A window open on its harness.
 pub trait Window {
     /// Its pane opened, the window's own process `pid` when the host knew it.
@@ -263,10 +275,11 @@ pub trait Window {
     fn trusts(&self) -> Option<&Trusts> {
         None
     }
-    /// The key a person presses next to answer yes to that question, where the
-    /// window's last screen lines `screen` show it (Down, or Enter once the choice
-    /// is on yes); none where they show no such question.
-    fn toward_trust(&self, _screen: &[String]) -> Option<&'static [u8]> {
+    /// That question, where the window's last screen lines `screen` show it: the
+    /// key a person presses next to answer yes (Down, or Enter once the choice is on
+    /// yes), or that the reader cannot place its choice; none where they show no such
+    /// question.
+    fn toward_trust(&self, _screen: &[String]) -> Option<Question> {
         None
     }
     /// Whether `screen` (the window's last lines) is its harness's prompt: the

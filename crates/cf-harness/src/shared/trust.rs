@@ -93,6 +93,17 @@ pub(crate) fn shows(screen: &[String], words: &str) -> bool {
     screen.iter().any(|line| line.contains(words))
 }
 
+/// Whether `screen` offers the choice `words`: a line that ends with them, with
+/// nothing but a cursor or a number before them, as a list of choices draws one; a
+/// line that quotes them among other words offers nothing.
+pub(crate) fn offers(screen: &[String], words: &str) -> bool {
+    screen.iter().any(|line| {
+        line.trim_end()
+            .strip_suffix(words)
+            .is_some_and(|before| !before.chars().any(char::is_alphabetic))
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -200,5 +211,14 @@ mod tests {
         assert_eq!(chosen(&screen[..2], '❯'), Some("Yes, I trust this folder"));
         assert_eq!(chosen(&screen[..1], '❯'), None);
         assert!(shows(&screen, "No, exit") && !shows(&screen, "Trust and continue"));
+    }
+
+    #[test]
+    fn a_choice_is_offered_on_a_line_of_its_own_with_a_cursor_or_a_number_before_it() {
+        let screen: Vec<String> = [" ❯ 1. Yes", "   > No ", "  it said \"Maybe\" twice: Maybe"]
+            .map(str::to_owned)
+            .to_vec();
+        assert!(offers(&screen, "Yes") && offers(&screen, "No"));
+        assert!(!offers(&screen, "Maybe") && !offers(&screen, "Later"));
     }
 }

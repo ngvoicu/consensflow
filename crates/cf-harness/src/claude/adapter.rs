@@ -65,8 +65,8 @@ use super::status::{self, State, Status};
 use super::stopped::{self, Pressed};
 use super::{install, paths};
 use crate::contract::{
-    Adapter, Admission, Held, Launch, Observed, Pane, PaneHost, Prepared, Readiness, Records,
-    Skill, Trusts, Waiting, Window, Work,
+    Adapter, Admission, Held, Launch, Observed, Pane, PaneHost, Prepared, Question, Readiness,
+    Records, Skill, Trusts, Waiting, Window, Work,
 };
 use crate::detect::executable;
 use crate::records::{Options, Reading, Settlement};
@@ -334,7 +334,7 @@ impl Window for ClaudeWindow {
         Some(&self.trusts)
     }
 
-    fn toward_trust(&self, screen: &[String]) -> Option<&'static [u8]> {
+    fn toward_trust(&self, screen: &[String]) -> Option<Question> {
         super::trust::toward_trust(screen)
     }
 

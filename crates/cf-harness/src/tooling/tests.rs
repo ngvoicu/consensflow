@@ -317,7 +317,19 @@ fn the_key_toward_a_yes_is_the_one_the_engine_reads_in_a_harnesss_question_about
     ];
     assert_eq!(
         read("claude-code", &claude),
-        json!({ "key": "down", "prompt": false })
+        json!({ "asks": true, "key": "down", "prompt": false })
+    );
+    // Its cursor drawn otherwise: asked, and no key known.
+    assert_eq!(
+        read(
+            "claude-code",
+            &[
+                " Quick safety check",
+                " > No, exit",
+                "   Yes, I trust this folder"
+            ]
+        ),
+        json!({ "asks": true, "key": null, "prompt": false })
     );
     let codex = [
         "  Trust this folder? Codex can read, edit, and run files here.",
@@ -326,7 +338,7 @@ fn the_key_toward_a_yes_is_the_one_the_engine_reads_in_a_harnesss_question_about
     ];
     // A harness that never asks as ConsensFlow opens it reads none, whatever the
     // screen shows: Codex's own question is its window's opened alone.
-    let none = json!({ "key": null, "prompt": false });
+    let none = json!({ "asks": false, "key": null, "prompt": false });
     assert_eq!(read("codex", &codex), none);
     for kind in ["pi", "opencode", "devin"] {
         assert_eq!(read(kind, &claude), none, "{kind}");
@@ -351,7 +363,7 @@ fn the_key_toward_a_yes_is_the_one_the_engine_reads_in_a_harnesss_question_about
     ];
     assert_eq!(
         read("claude-code", &prompt),
-        json!({ "key": null, "prompt": true })
+        json!({ "asks": false, "key": null, "prompt": true })
     );
 }
 

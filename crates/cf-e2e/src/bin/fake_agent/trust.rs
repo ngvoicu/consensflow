@@ -23,7 +23,9 @@
 //! given, as a window that did not take it; with `CF_TEST_RECORD_GROWS_ON_NO` set its
 //! record grows once as a No ends it, as a process before it the host could not end
 //! writes still; and with `CF_TEST_RECORD_AWAY_MS` set a record a case moved aside
-//! comes back that long after the window starts ([`bring_the_record_back`]).
+//! comes back that long after the window starts ([`bring_the_record_back`]). With
+//! `CF_TEST_TRUST_CURSOR` set it draws its cursor as those characters, not `❯`, as a
+//! Claude Code that changed its glyph would.
 
 use std::fs;
 use std::io::{self, Write};
@@ -149,12 +151,19 @@ fn trusted(config: &Path, root: &Path) -> bool {
         .is_ok_and(|text| text.lines().any(|line| Path::new(line) == root))
 }
 
-/// The question, the `❯` on the yes where `yes`.
+/// The question, its cursor (`❯`, or `CF_TEST_TRUST_CURSOR`) on the yes where `yes`.
 fn draw(folder: &Path, yes: bool) -> io::Result<()> {
+    let cursor = own_var("CF_TEST_TRUST_CURSOR").unwrap_or_else(|| "❯".to_owned());
     let (no_line, yes_line) = if yes {
-        ("   No, exit", " ❯ Yes, I trust this folder")
+        (
+            "   No, exit".to_owned(),
+            format!(" {cursor} Yes, I trust this folder"),
+        )
     } else {
-        (" ❯ No, exit", "   Yes, I trust this folder")
+        (
+            format!(" {cursor} No, exit"),
+            "   Yes, I trust this folder".to_owned(),
+        )
     };
     let mut out = io::stdout().lock();
     write!(

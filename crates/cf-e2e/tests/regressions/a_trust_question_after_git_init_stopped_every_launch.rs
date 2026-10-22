@@ -783,6 +783,27 @@ fn a_screen_that_quotes_the_question_asks_nothing() -> Outcome {
 }
 
 #[test]
+fn a_chief_whose_screen_quotes_the_question_takes_what_it_is_told() -> Outcome {
+    // A window that stays: a worker's goes once its task is done, which its command line
+    // gave it, whatever the engine read of its screen. What the human tells a chief whose
+    // screen names both choices among other words is pasted into it.
+    let rig = Rig::start(config().var("CF_TEST_TRUST", "chief").var(
+        "CF_TEST_SAYS_FIRST",
+        "Claude offers \"No, exit\" and \"Yes, I trust this folder\" there.",
+    ))?;
+    let project = Project::open(&rig, "chief", json!({}))?;
+    rig.tell(project.id(), "Reply with exactly: CHIEF_HEARD")?;
+    let chief = project.lane("chief")?;
+    assert_eq!(chief["activity"]["state"], "idle", "{chief}");
+    let notes = notes_of(&project, rig.workspace())?;
+    assert!(
+        notes.is_empty(),
+        "a quoted question was answered: {notes:?}"
+    );
+    Ok(())
+}
+
+#[test]
 fn a_record_that_grows_as_a_no_ends_the_window_is_no_yes() -> Outcome {
     // A window opened again on its conversation asks of a folder outside the project,
     // and so does a new window of the worker. The human says No in the first, and a
@@ -884,5 +905,110 @@ fn a_window_opened_again_whose_record_cannot_be_read_at_first_is_still_answered(
         Ok(state == "done")
     })?;
     assert_eq!(notes_of(&project, rig.workspace())?.len(), 1);
+    Ok(())
+}
+
+/// The human presses `keys` into `window`, a moment apart, as a person does.
+fn human_presses(rig: &Rig, window: &Value, keys: &[&[u8]]) -> Outcome {
+    for key in keys {
+        let pressed = rig.host(
+            "pane.input",
+            json!({ "id": window["id"], "generation": window["generation"], "bytes": key }),
+        )?;
+        assert_eq!(pressed["ok"], true, "{pressed}");
+        sleep(Duration::from_millis(600));
+    }
+    Ok(())
+}
+
+#[test]
+fn a_window_whose_screen_the_host_cannot_show_while_it_asks_is_still_held() -> Outcome {
+    // Calliope's review of round 3 (T-120): looks the host could not answer while the
+    // question was up read as the question gone, and once they had for 12 s the first
+    // message's Enter chose "No, exit". The worker's window asks of a folder outside the
+    // project, and the host shows none of its screens for longer than that.
+    let rig = Rig::start(asking())?;
+    let root = rig.workspace().to_path_buf();
+    git_init(&root)?;
+    let folder = root.join("app");
+    std::fs::create_dir(&folder)?;
+    let project = Project::open(&rig, "chief", json!({ "directory": folder }))?;
+    let added = project.add_member("worker")?;
+    let tier = added["member"]["tier"].as_str().unwrap_or_default();
+    rig.tell(
+        project.id(),
+        &format!("DISPATCH --tier {tier} Reply with exactly: UNREAD_DONE"),
+    )?;
+    rig.wait_for("the worker's window to ask", secs(60), || {
+        Ok(!notes_of(&project, &root)?.is_empty() && workers(&rig, &project).len() == 1)
+    })?;
+    rig.refuse_snapshots(true);
+    sleep(Duration::from_secs(16));
+    rig.refuse_snapshots(false);
+    sleep(Duration::from_secs(1));
+    let lane = project.lane("worker")?;
+    assert_eq!(
+        lane["activity"]["reason"], "the window asks whether to trust its folder",
+        "{lane}"
+    );
+    assert_eq!(
+        keys_given(&rig),
+        Vec::<String>::new(),
+        "a key went into the question"
+    );
+    // The human says yes in it, and its task goes on.
+    let window = workers(&rig, &project)[0].clone();
+    human_presses(&rig, &window, &[DOWN, ENTER])?;
+    rig.wait_for("T-1 to be done", secs(60), || {
+        let state = project.task(1)?["state"].clone();
+        assert_ne!(state, "failed", "T-1 failed after the yes");
+        Ok(state == "done")
+    })?;
+    assert_eq!(keys_given(&rig), ["down", "enter"]);
+    Ok(())
+}
+
+#[test]
+fn a_question_whose_cursor_is_drawn_otherwise_is_left_to_the_human_who_is_told() -> Outcome {
+    // Calliope's review of round 3 (T-120): a question whose cursor the reader could not
+    // place read as no question, and after 30 s the first message's Enter chose "No,
+    // exit". Its cursor here is drawn as a Claude Code that changed its glyph would draw it.
+    let rig = asking_with(&[("CF_TEST_TRUST_CURSOR", ">")])?;
+    git_init(rig.workspace())?;
+    let project = Project::open(&rig, "chief", json!({}))?;
+    let added = project.add_member("worker")?;
+    let tier = added["member"]["tier"].as_str().unwrap_or_default();
+    rig.tell(
+        project.id(),
+        &format!("DISPATCH --tier {tier} Reply with exactly: OTHERWISE_DONE"),
+    )?;
+    rig.wait_for(
+        "the human to be told ConsensFlow could not answer",
+        secs(60),
+        || {
+            let notes = notes_of(&project, rig.workspace())?;
+            Ok(notes.iter().any(|note| note.contains("could not answer")))
+        },
+    )?;
+    assert_eq!(
+        keys_given(&rig),
+        Vec::<String>::new(),
+        "a key went into the question"
+    );
+    let lane = project.lane("worker")?;
+    assert_eq!(
+        lane["activity"]["reason"], "the window asks whether to trust its folder",
+        "{lane}"
+    );
+    let window = workers(&rig, &project)[0].clone();
+    human_presses(&rig, &window, &[DOWN, ENTER])?;
+    rig.wait_for("T-1 to be done", secs(60), || {
+        let state = project.task(1)?["state"].clone();
+        assert_ne!(state, "failed", "T-1 failed after the yes");
+        Ok(state == "done")
+    })?;
+    assert_eq!(keys_given(&rig), ["down", "enter"]);
+    let notes = notes_of(&project, rig.workspace())?;
+    assert_eq!(notes.len(), 1, "the human is told once: {notes:?}");
     Ok(())
 }

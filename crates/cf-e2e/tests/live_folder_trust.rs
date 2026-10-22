@@ -47,7 +47,11 @@
 //! plain folder, which is then made a repository, and whose follow-up opens its window
 //! again on its conversation. The chief must come up idle, the tasks be done and the
 //! follow-up's window be a resumed one, and the human's notes must say that ConsensFlow
-//! answered yes once for Claude Code, and never for Codex.
+//! answered yes once for Claude Code, and never for Codex. **resumed**: a Claude window
+//! opened again on a long conversation of the run's own (a chief's after a restart), in a
+//! new repository nobody trusted; its question answered as the engine answers it, its
+//! screen must show neither the question nor its prompt for less than the 12 s the engine
+//! waits before it counts the window past the question.
 //!
 //! What Claude Code writes of a yes is taken back with `claude purge` at the end;
 //! the run says which folders it could not have it forget. Codex writes nothing here.
@@ -61,7 +65,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::thread::sleep;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use cf_e2e::live::cleanup::forget_in_claude;
 use cf_e2e::live::machine::live_folder_in;
@@ -93,7 +97,20 @@ const MOST_KEYS: usize = 6;
 const TAIL: usize = 12;
 
 /// The parts of the run.
-const PARTS: [&str; 2] = ["windows", "projects"];
+const PARTS: [&str; 3] = ["windows", "projects", "resumed"];
+
+/// How long the engine lets a window that asked show neither the question nor its
+/// prompt before it counts it past the question: its own (`GONE_LOOKS` looks of 500 ms).
+const GONE: Duration = Duration::from_secs(12);
+
+/// The conversations the resumed part opens a window again on: how many turns before
+/// its last compaction and after it, and how many kilobytes each turn's command printed.
+/// A chief's after days of work: 470 MB, 13,000 messages, compacted (this project's
+/// chief, 2026-10-20), four messages a turn here; and one a tenth as long.
+const RESUMED: [(&str, usize, usize, usize); 2] = [
+    ("a tenth of a chief's", 240, 85, 140),
+    ("a chief's", 2_400, 850, 140),
+];
 
 /// A folder a window is opened in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -195,8 +212,14 @@ fn engine_key(harness: Harness, screen: &[String]) -> Result<Option<Vec<u8>>> {
     })
 }
 
-/// What the engine reads in `screen`, a window of `harness`'s: the key it presses
-/// next, and whether the screen is the harness's prompt.
+/// Whether the engine reads the question in `screen`, a window of `harness`'s, whether
+/// or not it can place its choice.
+fn engine_asks(harness: Harness, screen: &[String]) -> Result<bool> {
+    Ok(engine_read(harness, screen)?["asks"] == true)
+}
+
+/// What the engine reads in `screen`, a window of `harness`'s: whether it shows the
+/// question, the key it presses next, and whether the screen is the harness's prompt.
 fn engine_read(harness: Harness, screen: &[String]) -> Result<serde_json::Value> {
     ask::question(&json!({ "op": "trust", "kind": harness.kind(), "screen": screen }))
 }
@@ -360,7 +383,7 @@ fn look(rig: &Rig, install: &Installed, base: &str, case: Case, log: &Log) -> Re
     let first = screen_of(rig, &window);
     let mut lines = vec![format!("drew: {drew}")];
     lines.extend(first.iter().map(|line| format!("  {line}")));
-    let asked = engine_key(harness, &first)?.is_some();
+    let asked = engine_asks(harness, &first)?;
     let mut keys = 0;
     let mut screen = first.clone();
     while let Some(key) = engine_key(harness, &screen)? {
@@ -373,7 +396,7 @@ fn look(rig: &Rig, install: &Installed, base: &str, case: Case, log: &Log) -> Re
         window.still(DRAWS);
         screen = screen_of(rig, &window);
     }
-    let answered = engine_key(harness, &screen)?.is_none();
+    let answered = !engine_asks(harness, &screen)?;
     let unread = speaks_of_trust(&first) && !asked;
     let at_prompt = drew && !window.closed() && answered && engine_reads_prompt(harness, &screen)?;
     if asked {
@@ -453,6 +476,247 @@ fn windows(
     for folder in made {
         let path = live_folder_in(&home, &format!("{base}/{folder}"))?;
         folders.push(path.to_string_lossy().into_owned());
+    }
+    Ok(checks)
+}
+
+/// The folder Claude Code keeps the transcripts of a window opened in `workspace` in,
+/// below its config folder `config`: the folder's path with every character that is
+/// no letter or digit a dash.
+fn claude_project_folder(config: &Path, workspace: &Path) -> PathBuf {
+    let named: String = workspace
+        .to_string_lossy()
+        .chars()
+        .map(|at| if at.is_ascii_alphanumeric() { at } else { '-' })
+        .collect();
+    config.join("projects").join(named)
+}
+
+/// Writes a conversation of `before` turns, a compaction, then `after` turns, in
+/// Claude Code's own record (2.1.29x's shape: `crates/cf-harness/tests/fixtures/claude`)
+/// for the session `session` in `workspace`, at `file`: each turn a message, a command
+/// that printed `printed` kilobytes, and an answer. Its size in bytes.
+fn write_conversation(
+    file: &Path,
+    session: &str,
+    workspace: &Path,
+    (before, after, printed): (usize, usize, usize),
+) -> Result<u64> {
+    use std::io::Write;
+    let cwd = workspace.to_string_lossy();
+    let output = "made 1 change in src/lib.rs\n".repeat(printed * 1024 / 28);
+    let written = |source| Error::File {
+        action: "write",
+        path: file.to_path_buf(),
+        source,
+    };
+    let mut out = std::io::BufWriter::new(fs::File::create(file).map_err(written)?);
+    let mut parent: Option<String> = None;
+    let mut line = |entry: serde_json::Value, parent: &mut Option<String>| -> Result {
+        let mut entry = entry;
+        let uuid = uuid::Uuid::new_v4().to_string();
+        let fields = json!({
+            "parentUuid": parent, "isSidechain": false, "uuid": uuid,
+            "timestamp": "2026-10-20T08:00:00.000Z", "userType": "external",
+            "entrypoint": "cli", "cwd": cwd, "sessionId": session,
+            "version": "2.1.296", "gitBranch": "main",
+        });
+        if let (Some(entry), Some(fields)) = (entry.as_object_mut(), fields.as_object()) {
+            for (name, value) in fields {
+                entry.entry(name.clone()).or_insert_with(|| value.clone());
+            }
+        }
+        *parent = Some(uuid);
+        writeln!(out, "{entry}").map_err(written)?;
+        Ok(())
+    };
+    let assistant = |content: serde_json::Value| {
+        json!({ "type": "assistant", "message": {
+            "id": uuid::Uuid::new_v4().to_string(), "model": "claude-sonnet-5-5", "role": "assistant",
+            "type": "message", "stop_reason": "end_turn", "stop_sequence": null,
+            "usage": { "input_tokens": 1200, "output_tokens": 300 }, "content": content,
+        }})
+    };
+    for turn in 0..before + after {
+        if turn == before {
+            let boundary = json!({
+                "parentUuid": null, "logicalParentUuid": parent, "type": "system",
+                "subtype": "compact_boundary", "content": "Conversation compacted", "level": "info",
+                "compactMetadata": { "trigger": "auto", "preTokens": 960_000 },
+            });
+            let mut none = None;
+            line(boundary, &mut none)?;
+            parent = none;
+            line(
+                json!({ "type": "user", "isCompactSummary": true, "message": {
+                    "role": "user", "content": "This session continues one that ran out of context. The work so far: the folder-trust rounds.",
+                }}),
+                &mut parent,
+            )?;
+        }
+        line(
+            json!({ "type": "user", "message": {
+                "role": "user", "content": format!("[ConsensFlow m-{turn} · T-{turn} · result from @worker]\nRound {turn} is done: the gate passed, the branch is pushed."),
+            }}),
+            &mut parent,
+        )?;
+        let call = format!("toolu_{turn:08}");
+        line(
+            assistant(json!([{ "type": "tool_use", "id": call, "name": "Bash",
+            "input": { "command": "cargo xtask check", "description": "Run the gate" } }])),
+            &mut parent,
+        )?;
+        line(
+            json!({ "type": "user", "message": { "role": "user", "content": [
+                { "type": "tool_result", "tool_use_id": call, "content": output, "is_error": false },
+            ]}}),
+            &mut parent,
+        )?;
+        line(
+            assistant(
+                json!([{ "type": "text", "text": format!("Round {turn} landed; the next task goes to the board.") }]),
+            ),
+            &mut parent,
+        )?;
+    }
+    out.flush().map_err(written)?;
+    drop(out);
+    Ok(fs::metadata(file).map_err(written)?.len())
+}
+
+/// The resumed part: a Claude window opened again on a long conversation, as the app
+/// opens a chief after a restart, in a new repository nobody trusted. Its question is
+/// answered as the engine answers it, and how long its screen shows neither the question
+/// nor its prompt as the engine reads them is measured: the engine lets [`GONE`] pass so
+/// before it counts a window that asked as past the question, and a yes is the human's
+/// only once at the prompt.
+fn resumed(
+    install: &Installed,
+    stamp: &str,
+    log: &Log,
+    folders: &mut Vec<String>,
+) -> Result<Vec<Check>> {
+    let rig = Rig::start(live::rig(std::slice::from_ref(install), FAKE_AGENT))?;
+    let home = PathBuf::from(rig.var("HOME").unwrap_or_default());
+    let mut checks = Vec::new();
+    for (index, (what, before, after, printed)) in RESUMED.into_iter().enumerate() {
+        let name = format!("{FOLDER}/{stamp}/claude/resumed-{index}");
+        let workspace = live_folder_in(&home, &name)?;
+        folders.push(workspace.to_string_lossy().into_owned());
+        git(&workspace, &["init", "-q"])?;
+        let session = uuid::Uuid::new_v4().to_string();
+        let real = fs::canonicalize(&workspace).unwrap_or_else(|_| workspace.clone());
+        let records = claude_project_folder(&install.home().join(".claude"), &real);
+        cf_e2e::files::make_dir(&records)?;
+        let size = write_conversation(
+            &records.join(format!("{session}.jsonl")),
+            &session,
+            &real,
+            (before, after, printed),
+        )?;
+        let id = format!("claude-resumed-{index}");
+        let window = Open::new(&rig, install, &name, &id)
+            .resume(&session)
+            .without_trust()
+            .open(log)?;
+        // A look every 200 ms (the engine's are 500 ms apart) until the prompt, for up to
+        // ten minutes: a key pressed as the engine presses one, into a screen that moved
+        // since the last key or stayed as it was for 5 s, and the screen's states timed.
+        let opened = Instant::now();
+        let mut timeline = Vec::new();
+        let mut state = String::new();
+        let mut keys = 0;
+        let mut pressed_on: Option<(Vec<String>, Instant)> = None;
+        let (mut asked, mut last_enter, mut at_prompt) = (false, None, None);
+        // How long the screen showed neither the question nor the prompt once it asked:
+        // what the engine waits [`GONE`] for.
+        let (mut neither_since, mut longest_neither) = (None::<Instant>, Duration::ZERO);
+        while opened.elapsed() < Duration::from_secs(600) && !window.closed() {
+            let screen = screen_of(&rig, &window);
+            let read = engine_read(Harness::Claude, &screen)?;
+            let key = engine_key(Harness::Claude, &screen)?;
+            let now = match (read["prompt"] == true, read["asks"] == true, key.as_deref()) {
+                (true, _, _) => "its prompt",
+                (_, true, Some(b"\r")) => "the question, its cursor on yes",
+                (_, true, Some(_)) => "the question, its cursor on no",
+                (_, true, None) => "the question, its cursor not placed",
+                _ if screen.iter().all(|line| line.trim().is_empty()) => "nothing drawn",
+                _ => "neither the question nor its prompt",
+            };
+            if now != state {
+                timeline.push(format!("{:>7} ms {now}", opened.elapsed().as_millis()));
+                now.clone_into(&mut state);
+            }
+            if read["prompt"] == true {
+                at_prompt = Some(Instant::now());
+                break;
+            }
+            if read["asks"] == true {
+                asked = true;
+                if let Some(since) = neither_since.take() {
+                    longest_neither = longest_neither.max(since.elapsed());
+                }
+                let press = match &pressed_on {
+                    Some((on, at)) if *on == screen => at.elapsed() >= Duration::from_secs(5),
+                    _ => true,
+                };
+                if let (Some(key), true, true) = (key, press, keys < MOST_KEYS) {
+                    window.press(&key)?;
+                    keys += 1;
+                    let enter = key == b"\r";
+                    timeline.push(format!(
+                        "{:>7} ms pressed {}",
+                        opened.elapsed().as_millis(),
+                        if enter { "Enter" } else { "Down" }
+                    ));
+                    if enter {
+                        last_enter = Some(Instant::now());
+                    }
+                    pressed_on = Some((screen, Instant::now()));
+                }
+            } else if asked {
+                neither_since.get_or_insert_with(Instant::now);
+            }
+            sleep(Duration::from_millis(200));
+        }
+        if let (Some(since), Some(prompt)) = (neither_since, at_prompt) {
+            longest_neither = longest_neither.max(prompt.duration_since(since));
+        }
+        let to_prompt = last_enter
+            .zip(at_prompt)
+            .map(|(enter, prompt)| prompt.duration_since(enter));
+        let mut lines = vec![format!(
+            "{what} conversation: {} MB; asked: {asked}; keys: {keys}; from the last Enter to the prompt: {}; the longest it showed neither once asked: {} ms",
+            size / 1_000_000,
+            to_prompt.map_or("never".to_owned(), |took| format!("{} ms", took.as_millis())),
+            longest_neither.as_millis()
+        )];
+        lines.extend(timeline);
+        lines.extend(
+            screen_of(&rig, &window)
+                .iter()
+                .map(|line| format!("  {line}")),
+        );
+        window.kill();
+        sleep(Duration::from_secs(1));
+        // The run's own record of the conversation goes with the folder.
+        let _ = fs::remove_dir_all(&records);
+        log.block(
+            &format!("== claude resumed on {what} conversation"),
+            &lines.join("\n"),
+        );
+        checks.push(Check::new(
+            "claude",
+            &format!("resumed on {what} conversation"),
+            asked && at_prompt.is_some() && longest_neither < GONE,
+            format!(
+                "{} MB; {keys} keys; at its prompt {} after the last Enter; neither question nor prompt for at most {} ms, of the engine's {} ms",
+                size / 1_000_000,
+                to_prompt.map_or("never".to_owned(), |took| format!("{} ms", took.as_millis())),
+                longest_neither.as_millis(),
+                GONE.as_millis()
+            ),
+        ));
     }
     Ok(checks)
 }
@@ -609,8 +873,14 @@ fn which_harness_asks_to_trust_a_folder_and_consensflow_answers_it_in_the_projec
     let stamp = jiff::Timestamp::now().as_second().to_string();
     let mut checks = Vec::new();
     let mut claude = None;
-    for harness in harnesses {
-        let install = log.found(harness)?;
+    // Every harness named is found before any window opens: one found missing after Claude's
+    // windows ended the run before Claude forgot their folders (T-156's first live run).
+    let installs = harnesses
+        .into_iter()
+        .map(|harness| log.found(harness))
+        .collect::<Result<Vec<_>>>()?;
+    for install in installs {
+        let harness = install.harness();
         let mut folders = Vec::new();
         // Codex's bare window is not the app's: its question is no window ConsensFlow opens.
         if parts.contains(&"windows") && harness != Harness::Codex {
@@ -620,6 +890,9 @@ fn which_harness_asks_to_trust_a_folder_and_consensflow_answers_it_in_the_projec
             for role in ROLES {
                 checks.push(project(harness, role, &stamp, &log, &mut folders));
             }
+        }
+        if parts.contains(&"resumed") && harness == Harness::Claude {
+            checks.extend(resumed(&install, &stamp, &log, &mut folders)?);
         }
         if harness == Harness::Claude {
             claude = Some((install, folders));

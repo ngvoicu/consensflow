@@ -8,7 +8,8 @@
 //! 2.1.287 the yes came first, numbered: the choice is read by its words. Its prompt,
 //! once it is past the question, is told by the line under its input box.
 
-use crate::shared::trust::{chosen, shows, DOWN, ENTER};
+use crate::contract::Question;
+use crate::shared::trust::{chosen, offers, shows, DOWN, ENTER};
 
 /// What Claude's prompt shows as ConsensFlow opens it, in full-permission mode.
 const PROMPT: &str = "bypass permissions on";
@@ -17,19 +18,20 @@ const PROMPT: &str = "bypass permissions on";
 const YES: &str = "Yes, I trust this folder";
 const NO: &str = "No, exit";
 
-/// The key toward a yes where `screen` shows the question: Enter once the `❯` is
-/// on the yes, Down while it is on the no. The question is its two choices with the
-/// `❯` on one of them: a screen that only names them (a message that quotes the
-/// question) asks nothing, and one drawn halfway is read again at the next look.
-pub(crate) fn toward_trust(screen: &[String]) -> Option<&'static [u8]> {
-    if !(shows(screen, YES) && shows(screen, NO)) {
+/// The question, where `screen` shows it, and the key toward a yes: Enter once the
+/// `❯` is on the yes, Down while it is on the no. The question is its two choices,
+/// each a line of its own: a screen that only names them (a message that quotes the
+/// question) asks nothing. Where the `❯` is on neither (a cursor drawn otherwise, or
+/// a redraw caught halfway), the question is there and its key unknown.
+pub(crate) fn toward_trust(screen: &[String]) -> Option<Question> {
+    if !(offers(screen, YES) && offers(screen, NO)) {
         return None;
     }
-    match chosen(screen, '❯') {
-        Some(choice) if choice.ends_with(YES) => Some(ENTER),
-        Some(choice) if choice.ends_with(NO) => Some(DOWN),
-        _ => None,
-    }
+    Some(match chosen(screen, '❯') {
+        Some(choice) if choice.ends_with(YES) => Question::Toward(ENTER),
+        Some(choice) if choice.ends_with(NO) => Question::Toward(DOWN),
+        _ => Question::Unplaced,
+    })
 }
 
 /// Whether `screen` is Claude's prompt, as ConsensFlow opens its windows: the
@@ -53,14 +55,14 @@ mod tests {
         let asked = lines(
             " Accessing workspace:\n /work/project\n Quick safety check: Is this a project you created or one you trust?\n Security guide\n ❯ No, exit\n   Yes, I trust this folder\n Enter to confirm · Esc to cancel",
         );
-        assert_eq!(toward_trust(&asked), Some(DOWN));
+        assert_eq!(toward_trust(&asked), Some(Question::Toward(DOWN)));
         let on_yes = lines(
             " Quick safety check: Is this a project you created or one you trust?\n   No, exit\n ❯ Yes, I trust this folder\n Enter to confirm · Esc to cancel",
         );
-        assert_eq!(toward_trust(&on_yes), Some(ENTER));
+        assert_eq!(toward_trust(&on_yes), Some(Question::Toward(ENTER)));
         // Before 2.1.287 the yes came first, numbered.
         let numbered = lines("❯ 1. Yes, I trust this folder\n  2. No, exit");
-        assert_eq!(toward_trust(&numbered), Some(ENTER));
+        assert_eq!(toward_trust(&numbered), Some(Question::Toward(ENTER)));
     }
 
     #[test]
@@ -79,9 +81,22 @@ mod tests {
         let quoted = lines(" ⏺ Claude asks whether you trust the folder: it offers \"No, exit\" and\n   \"Yes, I trust this folder\", the cursor on the first.\n ❯ \n   ⏵⏵ bypass permissions on (shift+tab to cycle)");
         assert_eq!(toward_trust(&quoted), None);
         assert!(shows_prompt(&quoted));
-        // The cursor on neither choice: drawn halfway, read again at the next look.
+    }
+
+    #[test]
+    fn a_question_whose_cursor_is_on_neither_choice_is_asked_with_no_key_known() {
+        // Its cursor drawn otherwise than Claude Code 2.1.305 draws it.
+        let otherwise = lines(" Quick safety check: Is this a project you created or one you trust?\n > No, exit\n   Yes, I trust this folder\n Enter to confirm · Esc to cancel");
+        assert_eq!(toward_trust(&otherwise), Some(Question::Unplaced));
+        assert!(!shows_prompt(&otherwise));
+        // Drawn halfway, its cursor not yet on a choice.
         let halfway = lines(" Quick safety check\n   No, exit\n   Yes, I trust this folder");
-        assert_eq!(toward_trust(&halfway), None);
+        assert_eq!(toward_trust(&halfway), Some(Question::Unplaced));
+        // Numbered, as before 2.1.287.
+        assert_eq!(
+            toward_trust(&lines("  1. Yes, I trust this folder\n  2. No, exit")),
+            Some(Question::Unplaced)
+        );
     }
 
     #[test]
