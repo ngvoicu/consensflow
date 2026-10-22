@@ -4,6 +4,10 @@
 //! does: a bracketed paste followed by Enter is one message. What it answers a
 //! message with is told in `reply`.
 //!
+//! A paste that has lines that are the paths of images it can read is made into
+//! attachments, as Claude's input box makes them: a `[Image #N]` for each at the head of
+//! the message, the lines gone, and a record of the paths after it (`images`).
+//!
 //! The window of the participant `CF_TEST_NO_LOGIN` names has no login: it
 //! prints that and stays, doing nothing else (`CF_TEST_NO_LOGIN_EXITS`: and
 //! ends with the code 3). A key pressed in a turn (the Escape that stops it) is
@@ -62,6 +66,8 @@ mod args;
 mod background;
 #[path = "fake_agent/build.rs"]
 mod build;
+#[path = "fake_agent/images.rs"]
+mod images;
 #[path = "fake_agent/records.rs"]
 mod records;
 #[path = "fake_agent/reply.rs"]
@@ -468,12 +474,11 @@ fn turn(records: &mut Records, pid: u32, window: &Window, text: &str) -> Result<
     if hooks.is_none() {
         records.status(pid, "busy").map_err(failed)?;
     }
-    records
-        .append(
-            pid,
-            json!({ "type": "user", "message": { "role": "user", "content": text } }),
-        )
-        .map_err(failed)?;
+    // The message as Claude's input box keeps it: a paste that names images is
+    // attached to it, with a record of their paths after it.
+    for record in images::user_records(text, || records.next_image()) {
+        records.append(pid, record).map_err(failed)?;
+    }
     // The harness starts its servers as it takes the first message, which now shows.
     if first {
         window.server.as_the_first_message_shows(&window.jobs);

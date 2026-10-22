@@ -1,8 +1,11 @@
 # What proves a paste arrived (the reviews of 2026-10-16, GPT-6-Astra and GPT-6.1-Sol, two rounds): an
 # item its message's header begins, as ConsensFlow pastes it, the lines of the window's text. So does
 # one the harness records the paste in: inside the wrapper Claude Code 2.1.296 puts a paste in
-# (`<pasted_content id="…">`, opened on a line of its own and closed the same), and, for a member's
-# fresh window, behind the exact paste of the brief it received, which its launch gives first, and
+# (`<pasted_content id="…">`, opened on a line of its own and closed the same), behind the
+# placeholders of the images Claude Code 2.1.308 attached to a paste that has their paths (`[Image
+# #4]`, a space between, the header at once or a blank line and the wrapper; the field bug T-215 of
+# 2026-10-21: an image designer's result pasted three times and failed), and, for a member's fresh
+# window, behind the exact paste of the brief it received, which its launch gives first, and
 # nowhere else. A header quoted in other words, the human's or a message's, proves nothing: a look, a
 # window's end and a start each took any item that held it for the paste, so a message whose paste
 # never showed was confirmed by a question about it; and the stricter rule that followed took every
@@ -10,9 +13,12 @@
 #
 # The cases are the engine's, `crates/cf-engine/tests/dispatcher/quoted_headers.rs` (a look, the record
 # read as the window ends, ConsensFlow's copy of it read so, a message that quotes the header after a
-# blank line) and `paste_shapes.rs` (Claude's wrapper, the brief a fresh window is given first, at a
-# look and at a start), and the rule's own, `delivery_text::tests` in
-# `crates/cf-engine/src/delivery_text.rs`.
+# blank line) and `paste_shapes.rs` (Claude's wrapper, its images' placeholders, the brief a fresh
+# window is given first, at a look and at a start), and the rule's own, `delivery_text::tests` in
+# `crates/cf-engine/src/delivery_text.rs`. The images' shape is shown on the rig by the case
+# `a_result_that_starts_with_an_image_path_was_pasted_three_times` (the stand-in Claude makes
+# attachments as Claude Code does: `images` in `fake_agent`), and on the real Claude Code by
+# `cargo xtask live image-paste`.
 #
 # Every name holds `quoted header`, so `npm run plants:daemon -- "quoted header"` runs them all.
 
@@ -20,6 +26,10 @@
 engine-dispatcher-quoted-headers = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "quoted_headers::"]
 engine-dispatcher-paste-shapes = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "paste_shapes::"]
 engine-lib-delivery-text = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "delivery_text::"]
+engine-lib-ask = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "testing::ask::"]
+fake-agent-images = ["cargo", "test", "--offline", "-p", "cf-e2e", "--features", "test-support", "--bin", "fake-agent", "images::"]
+fake-agent-designer = ["cargo", "test", "--offline", "-p", "cf-e2e", "--features", "test-support", "--bin", "fake-agent", "designer"]
+rig-image-paste = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_result_that_starts_with_an_image_path_was_pasted_three_times::"]
 
 [[plant]]
 name = "quoted header: a look takes a header quoted in the human's words for the paste, and the message is confirmed though it never arrived"
@@ -78,8 +88,8 @@ runs = ["engine-dispatcher-paste-shapes", "engine-lib-delivery-text"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/delivery_text.rs"
-find = "    let paste = unwrapped(text.trim_start());"
-replace = "    let paste = text.trim_start();"
+find = "        None => unwrapped(text),"
+replace = "        None => text,"
 
 [[plant]]
 name = "quoted header: any tag that opens a paste's line is taken for Claude's wrapper, closed or not"
@@ -126,3 +136,134 @@ runs = ["engine-dispatcher-paste-shapes"]
 file = "crates/cf-engine/src/in_flight.rs"
 find = "        let first = self.brief_given_first(message)?;"
 replace = "        let first = self.brief_given_first(message)?.filter(|_| false);"
+
+# The images Claude Code attached (T-215, 2026-10-21): the placeholders are ahead of the paste in
+# the record, and the paths are gone from it.
+
+[[plant]]
+name = "quoted header: a paste behind the placeholders of the images Claude Code attached is taken for none, and pasted again until it fails (T-215)"
+meant = "confirms_a_paste_claude_code_recorded_behind_the_placeholders_of_its_images_and_pastes_it_once"
+runs = ["engine-dispatcher-paste-shapes", "engine-lib-delivery-text"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/delivery_text.rs"
+find = "    let paste = match after_placeholders(text) {"
+replace = "    let paste = match after_placeholders(text).filter(|_| false) {"
+
+[[plant]]
+name = "quoted header: a start takes the record that shows a paste behind its images' placeholders for lacking it, and pastes it again (T-215)"
+meant = "a_start_confirms_a_paste_the_record_shows_behind_the_placeholders_of_its_images_and_never_pastes_it_again"
+runs = ["engine-dispatcher-paste-shapes"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/delivery_text.rs"
+find = "    let paste = match after_placeholders(text) {"
+replace = "    let paste = match after_placeholders(text).filter(|_| false) {"
+
+[[plant]]
+name = "quoted header: a paste Claude Code wrapped behind the placeholders of its images is taken for none (T-215)"
+meant = "a_paste_behind_the_placeholders_of_the_images_claude_attached_is_the_paste"
+runs = ["engine-lib-delivery-text"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/delivery_text.rs"
+find = '''        Some(head) => head.strip_prefix("\n\n").map_or(head, unwrapped),'''
+replace = '''        Some(head) => head,'''
+
+[[plant]]
+name = "quoted header: words between the placeholders and a header leave it a paste, as the header behind words is a quote"
+meant = "a_header_in_other_words_is_no_paste_for_the_placeholders_before_it"
+runs = ["engine-lib-delivery-text"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/delivery_text.rs"
+find = '''        Some(head) => head.strip_prefix("\n\n").map_or(head, unwrapped),'''
+replace = '''        Some(head) => head.find(&marker).map_or(head, |at| &head[at..]),'''
+
+[[plant]]
+name = "quoted header: any run of blanks, not one space, separates the placeholders of a paste's images"
+meant = "a_header_in_other_words_is_no_paste_for_the_placeholders_before_it"
+runs = ["engine-lib-delivery-text"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/delivery_text.rs"
+find = "            Some(more) if more.starts_with(IMAGE) => rest = more,"
+replace = "            Some(more) if more.trim_start().starts_with(IMAGE) => rest = more.trim_start(),"
+
+[[plant]]
+name = "quoted header: a placeholder with no number is one of Claude's"
+meant = "a_header_in_other_words_is_no_paste_for_the_placeholders_before_it"
+runs = ["engine-lib-delivery-text"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/delivery_text.rs"
+find = "        let Some(next) = after[digits..].strip_prefix(']').filter(|_| digits > 0) else {"
+replace = "        let Some(next) = after[digits..].strip_prefix(']').filter(|_| true) else {"
+
+[[plant]]
+name = "quoted header: the message an item of a record is, is found only where its header begins it, with the placeholders of its images ahead (T-215)"
+meant = "the_message_of_an_item_is_found_behind_its_placeholders_too"
+runs = ["engine-lib-delivery-text"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/delivery_text.rs"
+find = "    let after = &text[text.find(HEADER_START)? + HEADER_START.len()..];"
+replace = "    let after = text.strip_prefix(HEADER_START)?;"
+
+[[plant]]
+name = "quoted header: the engine answers a live test's question of a paste by any header it holds"
+meant = "an_item_is_a_paste_of_the_message_the_engine_takes_it_for"
+runs = ["engine-lib-ask"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/testing/ask.rs"
+find = "    Ok(json!(is_paste_of(text, id, None)))"
+replace = '''    Ok(json!(text.contains("[ConsensFlow m-")))'''
+
+# The stand-in Claude's input box (`fake_agent`'s `images`), which the rig case needs to make the
+# attachments Claude Code makes: a case that never met one holds nothing.
+
+[[plant]]
+name = "quoted header: the stand-in Claude attaches no image, and the rig case of the field bug holds nothing"
+meant = "a_result_that_starts_with_the_path_of_an_image_is_given_to_a_claude_chief_once_and_delivered"
+runs = ["rig-image-paste"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_agent/images.rs"
+find = '''    if files.is_empty() {
+        return None;
+    }'''
+replace = '''    if files.is_empty() || !files.is_empty() {
+        return None;
+    }'''
+
+[[plant]]
+name = "quoted header: the stand-in Claude puts no space between the placeholders of its images"
+meant = "a_result_that_starts_with_the_paths_of_its_pictures_is_kept_as_the_field_showed_it"
+runs = ["fake-agent-images"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_agent/images.rs"
+find = '''marks.join(" "), rest.join("\n")'''
+replace = '''marks.join(""), rest.join("\n")'''
+
+[[plant]]
+name = "quoted header: the stand-in Claude keeps the path of an image that could not be read in the words"
+meant = "an_image_that_could_not_be_read_is_gone_from_the_words_beside_one_that_could"
+runs = ["fake-agent-images"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_agent/images.rs"
+find = '''        .partition(|piece| image_path(piece).is_some());'''
+replace = '''        .partition(|piece| image_path(piece).is_some_and(|path| std::fs::metadata(path).is_ok()));'''
+
+[[plant]]
+name = "quoted header: the stand-in designer answers its words before the paths of its pictures"
+meant = "a_designer_saves_its_pictures_and_answers_their_paths_before_its_words"
+runs = ["fake-agent-designer"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_agent/reply.rs"
+find = '''        lines.push(path.display().to_string());'''
+replace = '''        lines.insert(0, path.display().to_string());'''

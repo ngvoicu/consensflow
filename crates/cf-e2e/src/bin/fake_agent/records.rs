@@ -39,6 +39,9 @@ pub struct Records {
     /// Something was said in the conversation since it began or was last
     /// compacted: a compaction has something to compact.
     said: bool,
+    /// How many images the window has taken: the number in the last placeholder
+    /// it wrote (`images`).
+    images: u32,
 }
 
 /// Whether the conversation `text` ends in a turn nothing answered: its last
@@ -75,7 +78,15 @@ impl Records {
             ordinal: 0,
             cut: ends_cut(&kept),
             said: !kept.trim().is_empty(),
+            images: 0,
         })
+    }
+
+    /// The number of the next image the window takes into a message, in its
+    /// `[Image #N]`.
+    pub fn next_image(&mut self) -> u32 {
+        self.images += 1;
+        self.images
     }
 
     /// Whether something was said in the conversation since it began or was

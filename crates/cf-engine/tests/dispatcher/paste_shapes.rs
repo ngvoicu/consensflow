@@ -1,10 +1,13 @@
 //! The shapes a harness's record keeps a paste in, each of which proves the paste
 //! arrived: as it was given, inside the wrapper Claude Code 2.1.296 puts a paste
-//! in, and, for a member's fresh window, behind the brief it received, which its
-//! launch gives first. Found on 2026-10-16 by the reviews of the stricter proof of
-//! that day, which took every paste a real Claude records for lacking: a Claude
-//! chief's result was pasted again. Held to no Node trace: Node's dispatcher took
-//! any item that held the header.
+//! in, behind the placeholders of the images Claude Code 2.1.308 attached to a paste
+//! that has their paths, and, for a member's fresh window, behind the brief it
+//! received, which its launch gives first. Found on 2026-10-16 by the reviews of the
+//! stricter proof of that day, which took every paste a real Claude records for
+//! lacking: a Claude chief's result was pasted again; and, for the images, on
+//! 2026-10-21 in the field (T-215: an image designer's result pasted three times,
+//! then failed). Held to no Node trace: Node's dispatcher took any item that held
+//! the header.
 
 use cf_engine::delivery_text::header_id;
 use cf_engine::testing::Context;
@@ -55,6 +58,78 @@ fn confirms_a_paste_claude_code_recorded_in_its_wrapper_and_pastes_it_once() {
         "the chief was given it once"
     );
     assert_eq!(context.message(note.id).state, "delivered");
+}
+
+/// A result as the designer's role asks it: the absolute path of each picture on a line of
+/// its own, then a line on what they show.
+const DESIGNER: &str = "/work/images/desk.png\n/work/images/hero.png\nWarm editorial desk scene.";
+
+#[test]
+fn confirms_a_paste_claude_code_recorded_behind_the_placeholders_of_its_images_and_pastes_it_once()
+{
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    context.pass().unwrap();
+    context.adapter.attaches_images.set(true);
+    let result = context.note(project.id, "zeus", "chief", DESIGNER);
+    context.pass().unwrap();
+    // As the field's record held it: the header behind the placeholders, no path in the
+    // words, and the sources as an item of their own after it.
+    let items: Vec<String> = context
+        .adapter
+        .agent("chief")
+        .items
+        .iter()
+        .map(|item| item.text.to_string())
+        .collect();
+    let at = items.len() - 2;
+    assert!(
+        items[at].starts_with(&format!(
+            "[Image #1] [Image #2][ConsensFlow m-{} ",
+            result.id
+        )),
+        "{items:?}"
+    );
+    assert!(!items[at].contains("desk.png"), "{items:?}");
+    assert_eq!(
+        items[at + 1],
+        "[Image: source: /work/images/desk.png]\n[Image: source: /work/images/hero.png]"
+    );
+    context.pass().unwrap();
+    // The chief answers, and its window is at rest past the arrival window.
+    context.adapter.answer("chief", "Noted");
+    context.advance(60_000);
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(
+        given_saying(&context, "Warm editorial"),
+        1,
+        "the chief was given it once"
+    );
+    assert_eq!(context.message(result.id).state, "delivered");
+}
+
+#[test]
+fn a_start_confirms_a_paste_the_record_shows_behind_the_placeholders_of_its_images_and_never_pastes_it_again(
+) {
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    context.pass().unwrap();
+    context.adapter.attaches_images.set(true);
+    let result = context.note(project.id, "zeus", "chief", DESIGNER);
+    context.pass().unwrap();
+    assert_eq!(context.message(result.id).state, "delivering");
+
+    // The daemon stops before a look confirms it, and starts again.
+    context.ledger.borrow_mut().suspend_for_restart().unwrap();
+    let after = context.make();
+    after.settle_after_restart().unwrap();
+    assert_eq!(
+        context.message(result.id).state,
+        "delivered",
+        "the record shows it behind the placeholders"
+    );
+    assert_eq!(given_saying(&context, "Warm editorial"), 1);
 }
 
 #[test]

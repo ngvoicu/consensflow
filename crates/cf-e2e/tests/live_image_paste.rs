@@ -1,0 +1,350 @@
+//! Live: what Claude Code's record holds of a paste that carries the path of an image, and
+//! whether the daemon confirms it. It is opt-in (`cargo xtask live image-paste`, `npm run
+//! live:image-paste`): it spends the machine's quota on Claude Code, and needs it installed
+//! and logged in, so it is ignored unless asked for and is no part of `check` or of CI.
+//!
+//! The field bug it answers (2026-10-21, ConsensFlow 3.0.5, `sites`, Claude Code 2.1.306,
+//! T-215): an image designer's result starts with the absolute path of each file it saved,
+//! and Claude turns a pasted path to an image into an attachment. The record's user item
+//! then began with `[Image #4]` and not with the message's header, and the paste was never
+//! confirmed: pasted again twice, then failed, the chief having had each result three times.
+//!
+//! Two tests:
+//!
+//! - **`claude_records_each_shape_of_a_paste_that_names_images_in_a_way_the_engine_takes_for_it`**
+//!   is the probe. Each shape of a paste (one, two and three image paths, at the start, in
+//!   the middle and on their own lines, a path to a file that is no image, one to an image that
+//!   is not there) goes into one Claude window the way the daemon pastes (`pane.write_paste`,
+//!   then Enter), one after another, and the record says what the window made of it: the items
+//!   the daemon reads, and the user records as Claude wrote them, each part by its kind. It
+//!   holds the record to one thing: the engine takes an item of it for the paste of the
+//!   message (`is_paste_of`, asked of the engine itself). What the shapes are is the report,
+//!   and where Claude moves a placeholder or a separator, the run says so first.
+//! - **`a_result_that_starts_with_an_image_path_is_delivered_to_a_claude_chief_once`** is the
+//!   field's shape (`daemon`): a real Claude as the chief of a project on the native daemon, the
+//!   stand-in as the designer, whose result starts with the paths of two pictures it saved. The
+//!   result is pasted once, confirmed, and in the chief's record once, with its pictures.
+//!
+//! ```text
+//! cargo xtask live image-paste                      both
+//! cargo xtask live image-paste -- --list            lists them
+//! cargo xtask live image-paste --keep               leaves the daemon run's home and project
+//! ```
+
+// The parts are in `live_image_paste/`: cargo looks for the modules of a test's root file
+// beside it, where each would be a suite of its own.
+#[path = "live_image_paste/daemon.rs"]
+mod daemon;
+
+use std::path::Path;
+use std::time::Duration;
+
+use cf_e2e::live::ask::{self, Item};
+use cf_e2e::live::claude;
+use cf_e2e::live::report::{self, Check};
+use cf_e2e::live::window::{Open, Window, ANSWER};
+use cf_e2e::live::{self, Harness, Installed, Log};
+use cf_e2e::rig::Rig;
+use cf_e2e::{files, Result};
+use serde_json::{json, Value};
+
+/// The stand-in for Claude, which the rig puts first on the `PATH` of its windows:
+/// no window of this test runs it (each is opened on the real harness's own
+/// path), but a rig has one.
+const FAKE_AGENT: &str = env!("CARGO_BIN_EXE_fake-agent");
+
+/// The files a shape names, in the folder of the window: three images, a text file,
+/// and an image that is not there.
+const IMAGES: [&str; 3] = ["desk.png", "hero.png", "icon.png"];
+const TEXT: &str = "notes.txt";
+const MISSING: &str = "gone.png";
+const SPACED: &str = "my images/desk art.png";
+
+/// A shape of a paste, and the sum its ask holds.
+struct Shape {
+    name: &'static str,
+    /// The words after the header, with `{1}` `{2}` `{3}` for the paths of the images,
+    /// `{text}` for the text file's, `{missing}` for the one that is not there and
+    /// `{spaced}` for an image in a folder with a space in its name.
+    body: &'static str,
+}
+
+/// The shapes: a designer's result, with the paths where a message may have them.
+const SHAPES: [Shape; 12] = [
+    Shape {
+        name: "one path, first line of the body",
+        body: "{1}\nWarm editorial desk scene.",
+    },
+    Shape {
+        name: "two paths, first lines of the body",
+        body: "{1}\n{2}\nWarm editorial desk scene, and its variant.",
+    },
+    Shape {
+        name: "three paths, first lines of the body",
+        body: "{1}\n{2}\n{3}\nWarm editorial desk scene, its variant and an icon.",
+    },
+    Shape {
+        name: "one path, mid body, its own line",
+        body: "Saved the picture:\n{1}\nWarm editorial desk scene.",
+    },
+    Shape {
+        name: "one path inside a sentence",
+        body: "Saved to {1} as asked. Warm editorial desk scene.",
+    },
+    Shape {
+        name: "two paths, mid body, text between",
+        body: "Saved the pictures:\n{1}\nthe desk, and\n{2}\nthe hero.",
+    },
+    Shape {
+        name: "two paths on one line",
+        body: "{1} {2}\nWarm editorial desk scene, and its variant.",
+    },
+    Shape {
+        name: "three paths, start, middle and end",
+        body: "{1}\nWarm editorial desk scene.\n{2}\nThe variant.\n{3}",
+    },
+    Shape {
+        name: "a path to a file that is no image",
+        body: "{text}\nNotes on the scene.",
+    },
+    Shape {
+        name: "a path to an image that is not there",
+        body: "{missing}\nWarm editorial desk scene.",
+    },
+    Shape {
+        name: "a path with a space in it",
+        body: "{spaced}\nWarm editorial desk scene.",
+    },
+    Shape {
+        name: "an image and a file that is no image",
+        body: "{1}\n{text}\nWarm editorial desk scene, and notes.",
+    },
+];
+
+/// What each message asks for: a sum the message does not hold.
+fn ask(sum: (u32, u32)) -> String {
+    format!(
+        "Reply with only the sum of {} and {}, in digits, and run no tools.",
+        sum.0, sum.1
+    )
+}
+
+/// The header of the message a shape is, with the id `id`.
+fn header(id: i64) -> String {
+    format!("[ConsensFlow m-{id} · T-1 · result from @pygmalion-jolly-brook]")
+}
+
+/// The files a shape names, written into `folder`: the images are whole PNGs.
+fn write_files(folder: &Path) -> Result {
+    for image in IMAGES {
+        files::write(&folder.join(image), cf_e2e::png::SMALL)?;
+    }
+    files::write(&folder.join(SPACED), cf_e2e::png::SMALL)?;
+    files::write(&folder.join(TEXT), "Notes on the desk scene.\n")
+}
+
+/// A shape's body, with the paths filled in from `folder`.
+fn body_of(shape: &Shape, folder: &Path) -> String {
+    let path = |name: &str| folder.join(name).display().to_string();
+    shape
+        .body
+        .replace("{1}", &path(IMAGES[0]))
+        .replace("{2}", &path(IMAGES[1]))
+        .replace("{3}", &path(IMAGES[2]))
+        .replace("{text}", &path(TEXT))
+        .replace("{missing}", &path(MISSING))
+        .replace("{spaced}", &path(SPACED))
+}
+
+/// A user record of Claude's as its line says it, the bytes of an image left out.
+fn shown(record: &Value) -> String {
+    let mut record = record.clone();
+    if let Some(parts) = record["message"]["content"].as_array_mut() {
+        for part in parts {
+            if part["type"] == "image" {
+                part["source"]["data"] = Value::String("(bytes)".to_owned());
+            }
+        }
+    }
+    record.to_string()
+}
+
+/// The user records of the window's transcript from the `from`th line on, as
+/// Claude wrote them.
+fn user_records(window: &Window, from: usize) -> (usize, Vec<String>) {
+    let Some(session) = window.session() else {
+        return (from, Vec::new());
+    };
+    let Some(file) = claude::transcript_file(&window.claude_config(), &session) else {
+        return (from, Vec::new());
+    };
+    let text = files::read_finished_lines(&file).unwrap_or_default();
+    let lines: Vec<&str> = text.lines().collect();
+    let records = lines
+        .iter()
+        .skip(from)
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .filter(|record| record["type"] == "user")
+        .map(|record| shown(&record))
+        .collect();
+    (lines.len(), records)
+}
+
+/// The user items the daemon reads, from the `from`th on.
+fn users(window: &Window, from: usize) -> Vec<Item> {
+    window
+        .recorded()
+        .into_iter()
+        .filter(|item| item.role == "user")
+        .skip(from)
+        .collect()
+}
+
+/// Whether the engine takes the item `text` of the record for the paste of the message `id`
+/// (`is_paste_of`, which the engine answers).
+fn is_paste_of(text: &str, id: i64) -> bool {
+    ask::engine_question(&json!({ "op": "is_paste_of", "text": text, "message": id }))
+        .is_ok_and(|answer| answer == true)
+}
+
+/// Sends each shape to the window of `install`, one after another, and says what
+/// the record made of it.
+fn checks_of(rig: &Rig, install: &Installed, log: &Log) -> Result<Vec<Check>> {
+    let name = install.harness().name();
+    let window = Open::new(rig, install, "image-paste", &format!("image-paste-{name}"))
+        .open_telling(log, name)?;
+    if let Err(screen) = window.ready() {
+        return Ok(vec![Check::failed(name, "opens", screen)]);
+    }
+    write_files(window.workspace())?;
+    let (mut lines, mut seen_items) = (0, 0);
+    let mut checks = Vec::new();
+    for (at, shape) in (1_i64..).zip(&SHAPES) {
+        let sum = (
+            1000 + u32::try_from(at).unwrap_or(0),
+            2000 + u32::try_from(at).unwrap_or(0),
+        );
+        let body = format!(
+            "{}\n{}\n{}",
+            header(at),
+            body_of(shape, window.workspace()),
+            ask(sum)
+        );
+        let body = window.given(&body)?;
+        log.say(format!("{name}: sends {}", shape.name));
+        let sent = window.send(&body, &(sum.0 + sum.1).to_string())?;
+        window.still(ANSWER);
+        let mut items = Vec::new();
+        let mut shown = false;
+        live::until(Duration::from_secs(10), Duration::from_millis(500), || {
+            items = users(&window, seen_items);
+            shown = items.iter().any(|item| is_paste_of(&item.text, at));
+            shown.then_some(())
+        });
+        let (end, records) = user_records(&window, lines);
+        (lines, seen_items) = (end, seen_items + items.len());
+        log.block(
+            &format!("{name}: {}", shape.name),
+            &format!(
+                "items the daemon reads: {:?}\nrecords: {}",
+                items.iter().map(|item| &item.text).collect::<Vec<_>>(),
+                records.join("\n")
+            ),
+        );
+        let detail = format!(
+            "answered: {}; items: {}; records: {}",
+            sent.shown,
+            items
+                .iter()
+                .map(|item| format!("{:?}", cut_text(&item.text)))
+                .collect::<Vec<_>>()
+                .join(" | "),
+            records.join(" | ")
+        );
+        checks.push(Check::new(name, shape.name, shown, detail));
+    }
+    Ok(checks)
+}
+
+/// The first 200 characters of `text`.
+fn cut_text(text: &str) -> String {
+    live::cut(text, 200)
+}
+
+#[test]
+#[ignore = "opt-in: spends the machine's quota on a window of Claude Code; cargo xtask live image-paste (npm run live:image-paste)"]
+fn claude_records_each_shape_of_a_paste_that_names_images_in_a_way_the_engine_takes_for_it(
+) -> Result {
+    let log = Log::begin("live image paste")?;
+    ask::prepare()?;
+    let installs = vec![log.found(Harness::Claude)?];
+    let rig = Rig::start(live::rig(&installs, FAKE_AGENT))?;
+    let mut checks = Vec::new();
+    for install in &installs {
+        checks.extend(checks_of(&rig, install, &log)?);
+    }
+    rig.close()?;
+    report::conclude(&log, "what the record made of each shape", &checks)
+}
+
+#[test]
+#[ignore = "opt-in: spends the machine's quota on a chief of Claude Code; cargo xtask live image-paste (npm run live:image-paste)"]
+fn a_result_that_starts_with_an_image_path_is_delivered_to_a_claude_chief_once() -> Result {
+    let log = Log::begin("live image paste (daemon)")?;
+    ask::prepare()?;
+    let checks = daemon::run(&log)?;
+    report::conclude(
+        &log,
+        "what the board and the chief's record made of the result",
+        &checks,
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_shape_is_a_name_of_its_own_and_asks_for_a_sum_its_message_does_not_hold() {
+        let folder = std::path::Path::new("/folder");
+        let mut names: Vec<&str> = SHAPES.iter().map(|shape| shape.name).collect();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(names.len(), SHAPES.len(), "a name twice");
+        for (at, shape) in (1_u32..).zip(&SHAPES) {
+            let sum = (1000 + at, 2000 + at);
+            let message = format!(
+                "{}\n{}\n{}",
+                header(i64::from(at)),
+                body_of(shape, folder),
+                ask(sum)
+            );
+            assert!(!message.contains('{'), "a path left unfilled: {message}");
+            assert!(!message.contains(&(sum.0 + sum.1).to_string()), "{message}");
+            assert!(
+                message.starts_with(&format!("[ConsensFlow m-{at} ")),
+                "{message}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_files_the_shapes_name_are_written_whole_but_for_the_image_that_is_not_there() {
+        let folder = tempfile::tempdir().unwrap();
+        write_files(folder.path()).unwrap();
+        for image in IMAGES.iter().chain(&[SPACED]) {
+            let bytes = std::fs::read(folder.path().join(image)).unwrap();
+            assert!(cf_e2e::png::inspect(&bytes).is_ok(), "{image}");
+        }
+        assert!(folder.path().join(TEXT).is_file());
+        assert!(!folder.path().join(MISSING).exists());
+    }
+
+    #[test]
+    fn the_header_of_a_shape_is_the_header_of_a_designer_s_result_in_the_field() {
+        assert_eq!(
+            header(2619),
+            "[ConsensFlow m-2619 · T-1 · result from @pygmalion-jolly-brook]"
+        );
+    }
+}
