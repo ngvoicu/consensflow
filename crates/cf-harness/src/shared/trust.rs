@@ -79,12 +79,12 @@ fn plain(path: &Path) -> String {
 }
 
 /// The choice `cursor` is on in `screen`: the words after it on the last line
-/// that begins with it.
+/// that begins with it, a box's edge before it aside.
 pub(crate) fn chosen(screen: &[String], cursor: char) -> Option<&str> {
     screen
         .iter()
         .rev()
-        .find_map(|line| line.trim_start().strip_prefix(cursor))
+        .find_map(|line| line.trim_start_matches(blank_or_edge).strip_prefix(cursor))
         .map(str::trim)
 }
 
@@ -93,15 +93,24 @@ pub(crate) fn shows(screen: &[String], words: &str) -> bool {
     screen.iter().any(|line| line.contains(words))
 }
 
-/// Whether `screen` offers the choice `words`: a line that ends with them, with
-/// nothing but a cursor or a number before them, as a list of choices draws one; a
-/// line that quotes them among other words offers nothing.
+/// Whether `screen` offers the choice `words`: a line that names it ([`names`]).
 pub(crate) fn offers(screen: &[String], words: &str) -> bool {
-    screen.iter().any(|line| {
-        line.trim_end()
-            .strip_suffix(words)
-            .is_some_and(|before| !before.chars().any(char::is_alphabetic))
-    })
+    screen.iter().any(|line| names(line, words))
+}
+
+/// Whether `line` is the choice `words` as a list of choices draws one: the words
+/// with nothing but a cursor or a number before them, and nothing but blanks and a
+/// box's edge (`│`, `┃`, `║`) after them. A line that quotes them among other words,
+/// or that other words follow, names nothing.
+pub(crate) fn names(line: &str, words: &str) -> bool {
+    line.trim_end_matches(blank_or_edge)
+        .strip_suffix(words)
+        .is_some_and(|before| !before.chars().any(char::is_alphabetic))
+}
+
+/// A blank, or a box's edge as a terminal draws one.
+fn blank_or_edge(at: char) -> bool {
+    at.is_whitespace() || matches!(at, '│' | '┃' | '║')
 }
 
 #[cfg(test)]
@@ -220,5 +229,30 @@ mod tests {
             .to_vec();
         assert!(offers(&screen, "Yes") && offers(&screen, "No"));
         assert!(!offers(&screen, "Maybe") && !offers(&screen, "Later"));
+    }
+
+    #[test]
+    fn a_choice_in_a_box_is_offered_and_one_followed_by_other_words_is_not() {
+        let boxed: Vec<String> = [
+            "│ ❯ No, exit                 │",
+            "┃   Yes, I trust this folder ┃",
+            "║ 2. Later ║",
+        ]
+        .map(str::to_owned)
+        .to_vec();
+        assert!(offers(&boxed, "No, exit") && offers(&boxed, "Yes, I trust this folder"));
+        assert!(offers(&boxed, "Later"));
+        // Ordinary prose that ends in other words, or in a stop, offers nothing.
+        let prose: Vec<String> = [
+            "  No, exit was what it chose",
+            "  - Yes, I trust this folder.",
+            "  No, exit │ then more",
+        ]
+        .map(str::to_owned)
+        .to_vec();
+        assert!(!offers(&prose, "No, exit") && !offers(&prose, "Yes, I trust this folder"));
+        // The cursor inside a box's edge is the choice it is on.
+        assert_eq!(chosen(&boxed, '❯'), Some("No, exit                 │"));
+        assert!(names("No, exit                 │", "No, exit"));
     }
 }

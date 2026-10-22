@@ -51,7 +51,14 @@
 //! opened again on a long conversation of the run's own (a chief's after a restart), in a
 //! new repository nobody trusted; its question answered as the engine answers it, its
 //! screen must show neither the question nor its prompt for less than the 12 s the engine
-//! waits before it counts the window past the question.
+//! waits before it counts the window past the question. Its conversations are written
+//! where the owner's Claude Code keeps its own (about 540 MB): a window given a config
+//! folder of its own opens on Claude Code's onboarding, its login kept for its own
+//! config folder, and never shows the question. They are taken away as each window ends,
+//! and an earlier run's at the start, by a folder name only this part gives.
+//!
+//! The run writes what it measured and its checks to `report.txt` beside its folders
+//! (it says where), besides its error output.
 //!
 //! What Claude Code writes of a yes is taken back with `claude purge` at the end;
 //! the run says which folders it could not have it forget. Codex writes nothing here.
@@ -98,6 +105,11 @@ const TAIL: usize = 12;
 
 /// The parts of the run.
 const PARTS: [&str; 3] = ["windows", "projects", "resumed"];
+
+/// The folders the resumed part opens its windows in end with this and a number: a
+/// name no other run gives its folders, by which Claude Code's records of them are
+/// found and taken away, an earlier run's too.
+const RESUMED_FOLDER: &str = "trust-resumed";
 
 /// How long the engine lets a window that asked show neither the question nor its
 /// prompt before it counts it past the question: its own (`GONE_LOOKS` looks of 500 ms).
@@ -492,6 +504,68 @@ fn claude_project_folder(config: &Path, workspace: &Path) -> PathBuf {
     config.join("projects").join(named)
 }
 
+/// Whether `name`, a folder of Claude Code's records (`<config>/projects`), is one the
+/// resumed part wrote: named after a folder of the run's that ends with
+/// [`RESUMED_FOLDER`] and a number.
+fn is_resumed_record(name: &str) -> bool {
+    name.contains(&format!("-{FOLDER}-"))
+        && name
+            .rsplit_once(&format!("-{RESUMED_FOLDER}-"))
+            .is_some_and(|(_, number)| {
+                !number.is_empty() && number.chars().all(|at| at.is_ascii_digit())
+            })
+}
+
+/// Takes away the records the resumed part wrote in Claude Code's config folder
+/// `config` (the owner's own: the rig's Claude windows read it) and an earlier run left,
+/// one stopped before it took them away: how many.
+fn forget_resumed_records(config: &Path) -> usize {
+    let Ok(entries) = fs::read_dir(config.join("projects")) else {
+        return 0;
+    };
+    entries
+        .filter_map(std::result::Result::ok)
+        .filter(|entry| is_resumed_record(&entry.file_name().to_string_lossy()))
+        .filter(|entry| fs::remove_dir_all(entry.path()).is_ok())
+        .count()
+}
+
+/// A folder of records the run wrote in the owner's Claude config folder, taken away
+/// when this goes, however the run goes on from there.
+struct Written(PathBuf);
+
+impl Drop for Written {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
+/// The run's report file, beside its folders: what the run measured and its checks,
+/// which stay when the error output scrolls away.
+fn report_file(stamp: &str) -> Result<PathBuf> {
+    Ok(live_folder_in(
+        &cf_e2e::live::machine::home()?,
+        &format!("{FOLDER}/{stamp}"),
+    )?
+    .join("report.txt"))
+}
+
+/// Adds `text` to the report file `report`.
+fn to_report(report: &Path, text: &str) -> Result {
+    use std::io::Write;
+    let written = |source| Error::File {
+        action: "write",
+        path: report.to_path_buf(),
+        source,
+    };
+    fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(report)
+        .and_then(|mut file| file.write_all(format!("{text}\n").as_bytes()))
+        .map_err(written)
+}
+
 /// Writes a conversation of `before` turns, a compaction, then `after` turns, in
 /// Claude Code's own record (2.1.29x's shape: `crates/cf-harness/tests/fixtures/claude`)
 /// for the session `session` in `workspace`, at `file`: each turn a message, a command
@@ -594,13 +668,14 @@ fn resumed(
     install: &Installed,
     stamp: &str,
     log: &Log,
+    report: &Path,
     folders: &mut Vec<String>,
 ) -> Result<Vec<Check>> {
     let rig = Rig::start(live::rig(std::slice::from_ref(install), FAKE_AGENT))?;
     let home = PathBuf::from(rig.var("HOME").unwrap_or_default());
     let mut checks = Vec::new();
     for (index, (what, before, after, printed)) in RESUMED.into_iter().enumerate() {
-        let name = format!("{FOLDER}/{stamp}/claude/resumed-{index}");
+        let name = format!("{FOLDER}/{stamp}/claude/{RESUMED_FOLDER}-{index}");
         let workspace = live_folder_in(&home, &name)?;
         folders.push(workspace.to_string_lossy().into_owned());
         git(&workspace, &["init", "-q"])?;
@@ -608,6 +683,8 @@ fn resumed(
         let real = fs::canonicalize(&workspace).unwrap_or_else(|_| workspace.clone());
         let records = claude_project_folder(&install.home().join(".claude"), &real);
         cf_e2e::files::make_dir(&records)?;
+        // Taken away at the end of this window's turn of the loop, or as the run unwinds.
+        let _written = Written(records.clone());
         let size = write_conversation(
             &records.join(format!("{session}.jsonl")),
             &session,
@@ -699,12 +776,9 @@ fn resumed(
         );
         window.kill();
         sleep(Duration::from_secs(1));
-        // The run's own record of the conversation goes with the folder.
-        let _ = fs::remove_dir_all(&records);
-        log.block(
-            &format!("== claude resumed on {what} conversation"),
-            &lines.join("\n"),
-        );
+        let title = format!("== claude resumed on {what} conversation");
+        log.block(&title, &lines.join("\n"));
+        to_report(report, &format!("{title}\n{}\n", lines.join("\n")))?;
         checks.push(Check::new(
             "claude",
             &format!("resumed on {what} conversation"),
@@ -871,6 +945,8 @@ fn which_harness_asks_to_trust_a_folder_and_consensflow_answers_it_in_the_projec
     )?;
     let parts = named(&live::list("part"), &PARTS, |part| part, "part", &PARTS)?;
     let stamp = jiff::Timestamp::now().as_second().to_string();
+    let report = report_file(&stamp)?;
+    log.say(format!("the run's report: {}", report.display()));
     let mut checks = Vec::new();
     let mut claude = None;
     // Every harness named is found before any window opens: one found missing after Claude's
@@ -879,6 +955,16 @@ fn which_harness_asks_to_trust_a_folder_and_consensflow_answers_it_in_the_projec
         .into_iter()
         .map(|harness| log.found(harness))
         .collect::<Result<Vec<_>>>()?;
+    // What an earlier run of the resumed part left in the owner's Claude config folder.
+    if let Some(claude) = installs
+        .iter()
+        .find(|install| install.harness() == Harness::Claude)
+    {
+        let left = forget_resumed_records(&claude.home().join(".claude"));
+        if left > 0 {
+            log.say(format!("took away the records an earlier run left: {left}"));
+        }
+    }
     for install in installs {
         let harness = install.harness();
         let mut folders = Vec::new();
@@ -892,7 +978,7 @@ fn which_harness_asks_to_trust_a_folder_and_consensflow_answers_it_in_the_projec
             }
         }
         if parts.contains(&"resumed") && harness == Harness::Claude {
-            checks.extend(resumed(&install, &stamp, &log, &mut folders)?);
+            checks.extend(resumed(&install, &stamp, &log, &report, &mut folders)?);
         }
         if harness == Harness::Claude {
             claude = Some((install, folders));
@@ -911,6 +997,7 @@ fn which_harness_asks_to_trust_a_folder_and_consensflow_answers_it_in_the_projec
             folders.len()
         ));
     }
+    to_report(&report, &report::table(&checks))?;
     report::conclude(&log, "which harness asks, and what came of it", &checks)
 }
 
@@ -959,6 +1046,36 @@ mod tests {
             "~/.consensflow-candidate/live/{FOLDER}/1/claude/fresh"
         ))));
         assert!(!speaks_of_trust(&lines("an untrusted folder")));
+    }
+
+    #[test]
+    fn a_record_of_the_resumed_part_is_known_by_its_folders_name_and_no_other() {
+        assert!(is_resumed_record(
+            "-Users-x--consensflow-candidate-live-asks-probe-1792625986-claude-trust-resumed-1"
+        ));
+        for other in [
+            "-Users-x-Projects-consensflow",
+            "-Users-x--consensflow-candidate-live-asks-probe-1792625986-claude-repository",
+            "-Users-x--consensflow-candidate-live-asks-probe-1-claude-trust-resumed-1-sub",
+            "-Users-x-notes-trust-resumed-1",
+        ] {
+            assert!(!is_resumed_record(other), "{other}");
+        }
+        let config = tempfile::tempdir().unwrap();
+        let projects = config.path().join("projects");
+        let left =
+            projects.join("-h--consensflow-candidate-live-asks-probe-7-claude-trust-resumed-0");
+        let kept = projects.join("-h-Projects-app");
+        fs::create_dir_all(&left).unwrap();
+        fs::create_dir_all(&kept).unwrap();
+        fs::write(left.join("s.jsonl"), "{}").unwrap();
+        assert_eq!(forget_resumed_records(config.path()), 1);
+        assert!(!left.exists() && kept.exists());
+        // What a window wrote goes with it, however its turn of the loop ends.
+        let written = projects.join("written");
+        fs::create_dir_all(&written).unwrap();
+        drop(Written(written.clone()));
+        assert!(!written.exists());
     }
 
     #[test]

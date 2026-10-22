@@ -59,14 +59,15 @@ fn git_init(folder: &Path) -> Outcome {
     Ok(())
 }
 
-/// The chief gives the worker two tasks at once.
-fn two_tasks(rig: &Rig, project: &Project) -> Outcome {
+/// The chief gives the worker two tasks at once, each with `work` before its words (a
+/// `SLEEP` that makes it take a while, or nothing).
+fn two_tasks(rig: &Rig, project: &Project, work: &str) -> Outcome {
     let added = project.add_member("worker")?;
     let tier = added["member"]["tier"].as_str().unwrap_or_default();
     for word in ["FIRST_DONE", "SECOND_DONE"] {
         rig.tell(
             project.id(),
-            &format!("DISPATCH --tier {tier} Reply with exactly: {word}"),
+            &format!("DISPATCH --tier {tier} {work}Reply with exactly: {word}"),
         )?;
     }
     Ok(())
@@ -125,7 +126,7 @@ fn a_worker_asked_to_trust_the_projects_new_repository_is_answered_yes_and_does_
     let rig = Rig::start(asking())?;
     git_init(rig.workspace())?;
     let project = Project::open(&rig, "chief", json!({}))?;
-    two_tasks(&rig, &project)?;
+    two_tasks(&rig, &project, "")?;
     rig.wait_for("T-1 and T-2 to be done", secs(90), || both_done(&project))?;
     // ConsensFlow said yes on the screen, once for the folder: the stand-in wrote it down.
     let folder = rig.workspace();
@@ -138,6 +139,7 @@ fn a_worker_asked_to_trust_the_projects_new_repository_is_answered_yes_and_does_
     let notes = notes_of(&project, folder)?;
     assert_eq!(notes.len(), 1, "the human is told once: {notes:?}");
     assert!(notes[0].contains("answered yes"), "{notes:?}");
+    rig.close()?;
     Ok(())
 }
 
@@ -157,6 +159,7 @@ fn a_chief_asked_to_trust_the_projects_new_repository_is_answered_yes_and_takes_
         notes[0].contains("@chief") && notes[0].contains("answered yes"),
         "{notes:?}"
     );
+    rig.close()?;
     Ok(())
 }
 
@@ -184,7 +187,10 @@ fn outside_answered_by_the_human(vars: &[(&str, &str)]) -> Outcome {
     let folder = root.join("app");
     std::fs::create_dir(&folder)?;
     let project = Project::open(&rig, "chief", json!({ "directory": folder }))?;
-    two_tasks(&rig, &project)?;
+    // Each task works 3 s, as a real one takes a while: one done at once has its window
+    // closed before a look under load reads its prompt, and the yes is not taken as the
+    // human's (round 5's plants, T-236).
+    two_tasks(&rig, &project, "SLEEP 3 ")?;
     rig.wait_for(
         "the human to be told of the folder outside",
         secs(60),
@@ -260,6 +266,7 @@ fn outside_answered_by_the_human(vars: &[(&str, &str)]) -> Outcome {
         || both_done(&project),
     )?;
     assert_eq!(notes_of(&project, &root)?.len(), 1, "told once");
+    rig.close()?;
     Ok(())
 }
 
@@ -301,6 +308,7 @@ fn a_worker_the_human_said_yes_in_that_starts_slowly_has_its_first_messages_whol
         assert_ne!(state, "failed", "T-1 failed after the yes");
         Ok(state == "done")
     })?;
+    rig.close()?;
     Ok(())
 }
 
@@ -370,6 +378,7 @@ fn a_worker_opened_again_on_its_conversation_after_git_init_is_answered_yes_and_
     let notes = notes_of(&project, rig.workspace())?;
     assert_eq!(notes.len(), 1, "the human is told once: {notes:?}");
     assert!(notes[0].contains("answered yes"), "{notes:?}");
+    rig.close()?;
     Ok(())
 }
 
@@ -387,6 +396,7 @@ fn a_worker_whose_first_frame_holds_still_before_the_question_is_still_answered(
         .to_owned();
     a_task(&rig, &project, &tier, 1, "STILL_DONE")?;
     assert_eq!(notes_of(&project, rig.workspace())?.len(), 1);
+    rig.close()?;
     Ok(())
 }
 
@@ -403,6 +413,7 @@ fn a_question_slow_to_redraw_is_given_one_key_at_a_time() -> Outcome {
         .to_owned();
     a_task(&rig, &project, &tier, 1, "SLOW_REDRAW_DONE")?;
     assert_eq!(keys_given(&rig), ["down", "enter"]);
+    rig.close()?;
     Ok(())
 }
 
@@ -429,6 +440,7 @@ fn a_window_that_asks_nothing_never_reads_as_asking() -> Outcome {
         );
         Ok(project.task(1)?["state"] == "done")
     })?;
+    rig.close()?;
     Ok(())
 }
 
@@ -441,7 +453,7 @@ fn a_humans_no_in_one_window_is_no_yes_for_the_others() -> Outcome {
     let folder = root.join("app");
     std::fs::create_dir(&folder)?;
     let project = Project::open(&rig, "chief", json!({ "directory": folder }))?;
-    two_tasks(&rig, &project)?;
+    two_tasks(&rig, &project, "")?;
     rig.wait_for("both of the worker's windows to ask", secs(60), || {
         Ok(!notes_of(&project, &root)?.is_empty() && workers(&rig, &project).len() == 2)
     })?;
@@ -459,6 +471,7 @@ fn a_humans_no_in_one_window_is_no_yes_for_the_others() -> Outcome {
         "a key toward yes went into the other window: {:?}",
         keys_given(&rig)
     );
+    rig.close()?;
     Ok(())
 }
 
@@ -512,6 +525,7 @@ fn a_project_on_a_linked_worktree_leaves_the_main_checkouts_trust_to_the_human()
         notes[0].contains("outside the project's folder"),
         "{notes:?}"
     );
+    rig.close()?;
     Ok(())
 }
 
@@ -543,6 +557,7 @@ fn a_link_in_the_projects_path_leaves_the_repository_it_leads_into_to_the_human(
     sleep(Duration::from_secs(4));
     assert!(keys_given(&rig).is_empty(), "{:?}", keys_given(&rig));
     assert_eq!(trusted(&rig), "");
+    rig.close()?;
     Ok(())
 }
 
@@ -598,6 +613,7 @@ fn a_window_opened_again_that_asks_is_given_nothing_until_the_human_has_answered
         assert_ne!(state, "failed", "T-2 failed");
         Ok(state == "done")
     })?;
+    rig.close()?;
     Ok(())
 }
 
@@ -716,6 +732,7 @@ fn chief_opened_again_at_rest_and_asking(plain: bool) -> Outcome {
     rig.wait_for("T-1's result to reach the chief", secs(60), || {
         Ok(result_for(&project, 1)?.is_some_and(|result| result["state"] == "delivered"))
     })?;
+    rig.close()?;
     Ok(())
 }
 
@@ -741,6 +758,7 @@ fn a_window_whose_prompt_is_drawn_otherwise_goes_on_after_the_yes() -> Outcome {
         .to_owned();
     a_task(&rig, &project, &tier, 1, "PLAIN_PROMPT_DONE")?;
     assert_eq!(keys_given(&rig), ["down", "enter"]);
+    rig.close()?;
     Ok(())
 }
 
@@ -756,6 +774,7 @@ fn a_window_that_did_not_take_a_key_is_given_it_again() -> Outcome {
         .to_owned();
     a_task(&rig, &project, &tier, 1, "AGAIN_DONE")?;
     assert_eq!(keys_given(&rig), ["dropped", "down", "enter"]);
+    rig.close()?;
     Ok(())
 }
 
@@ -779,17 +798,20 @@ fn a_screen_that_quotes_the_question_asks_nothing() -> Outcome {
         notes.is_empty(),
         "a quoted question was answered: {notes:?}"
     );
+    rig.close()?;
     Ok(())
 }
 
 #[test]
 fn a_chief_whose_screen_quotes_the_question_takes_what_it_is_told() -> Outcome {
-    // A window that stays: a worker's goes once its task is done, which its command line
-    // gave it, whatever the engine read of its screen. What the human tells a chief whose
-    // screen names both choices among other words is pasted into it.
+    // Calliope's check of round 4 (T-231): a chief at rest whose last lines list the two
+    // choices, each a line of its own, above its empty input box read as the question
+    // with its cursor unplaced, and was held for good. A window that stays: a worker's
+    // goes once its task is done, which its command line gave it, whatever the engine
+    // read of its screen. What the human tells the chief is pasted into it.
     let rig = Rig::start(config().var("CF_TEST_TRUST", "chief").var(
         "CF_TEST_SAYS_FIRST",
-        "Claude offers \"No, exit\" and \"Yes, I trust this folder\" there.",
+        " ⏺ The dialog offers:\r\n   - No, exit\r\n   - Yes, I trust this folder\r\n ❯ ",
     ))?;
     let project = Project::open(&rig, "chief", json!({}))?;
     rig.tell(project.id(), "Reply with exactly: CHIEF_HEARD")?;
@@ -800,6 +822,83 @@ fn a_chief_whose_screen_quotes_the_question_takes_what_it_is_told() -> Outcome {
         notes.is_empty(),
         "a quoted question was answered: {notes:?}"
     );
+    rig.close()?;
+    Ok(())
+}
+
+#[test]
+fn a_chief_whose_screen_quotes_the_question_in_words_and_draws_its_prompt_otherwise_is_not_asked(
+) -> Outcome {
+    // Both choices among other words, and no prompt the reader knows to end the watch:
+    // the window never asked, and after its time it takes what it is told.
+    let rig = Rig::start(
+        config()
+            .var("CF_TEST_TRUST", "chief")
+            .var("CF_TEST_PLAIN_PROMPT", "1")
+            .var(
+                "CF_TEST_SAYS_FIRST",
+                "Claude offers \"No, exit\" and \"Yes, I trust this folder\" there.",
+            ),
+    )?;
+    let project = Project::open(&rig, "chief", json!({}))?;
+    rig.tell(project.id(), "Reply with exactly: CHIEF_HEARD")?;
+    let notes = notes_of(&project, rig.workspace())?;
+    assert!(
+        notes.is_empty(),
+        "a quoted question was answered: {notes:?}"
+    );
+    rig.close()?;
+    Ok(())
+}
+
+#[test]
+fn a_chief_whose_conversation_quotes_the_question_before_its_prompt_says_no_yes_for_the_others(
+) -> Outcome {
+    // Calliope's check of round 4 (T-231): a window opened again draws its conversation
+    // before its prompt, and one that quoted the two choices read as the question, then
+    // its prompt as the human's yes, which answered the project's other windows. The
+    // chief's does so for 1.5 s; the worker's asks of the repository's root, outside the
+    // project's folder, which is the human's.
+    let rig = asking_with(&[("CF_TEST_QUOTES_BEFORE_PROMPT", "chief")])?;
+    let root = rig.workspace().to_path_buf();
+    git_init(&root)?;
+    let folder = root.join("app");
+    std::fs::create_dir(&folder)?;
+    let project = Project::open(&rig, "chief", json!({ "directory": folder }))?;
+    let added = project.add_member("worker")?;
+    let tier = added["member"]["tier"].as_str().unwrap_or_default();
+    rig.tell(
+        project.id(),
+        &format!("DISPATCH --tier {tier} Reply with exactly: QUOTED_TAIL_DONE"),
+    )?;
+    rig.wait_for(
+        "the human to be told of the worker's question",
+        secs(60),
+        || {
+            Ok(notes_of(&project, &root)?
+                .iter()
+                .any(|note| note.contains("@worker")))
+        },
+    )?;
+    let notes = notes_of(&project, &root)?;
+    assert!(
+        notes.iter().all(|note| !note.contains("@chief")),
+        "the chief's quote was told as a question: {notes:?}"
+    );
+    sleep(Duration::from_secs(3));
+    assert_eq!(
+        keys_given(&rig),
+        Vec::<String>::new(),
+        "the worker's question was answered for the human"
+    );
+    let window = workers(&rig, &project)[0].clone();
+    human_presses(&rig, &window, &[DOWN, ENTER])?;
+    rig.wait_for("T-1 to be done", secs(60), || {
+        let state = project.task(1)?["state"].clone();
+        assert_ne!(state, "failed", "T-1 failed after the yes");
+        Ok(state == "done")
+    })?;
+    rig.close()?;
     Ok(())
 }
 
@@ -858,6 +957,7 @@ fn a_record_that_grows_as_a_no_ends_the_window_is_no_yes() -> Outcome {
         "a key toward yes went into the other window: {:?}",
         keys_given(&rig)
     );
+    rig.close()?;
     Ok(())
 }
 
@@ -905,6 +1005,7 @@ fn a_window_opened_again_whose_record_cannot_be_read_at_first_is_still_answered(
         Ok(state == "done")
     })?;
     assert_eq!(notes_of(&project, rig.workspace())?.len(), 1);
+    rig.close()?;
     Ok(())
 }
 
@@ -965,6 +1066,7 @@ fn a_window_whose_screen_the_host_cannot_show_while_it_asks_is_still_held() -> O
         Ok(state == "done")
     })?;
     assert_eq!(keys_given(&rig), ["down", "enter"]);
+    rig.close()?;
     Ok(())
 }
 
@@ -1010,5 +1112,105 @@ fn a_question_whose_cursor_is_drawn_otherwise_is_left_to_the_human_who_is_told()
     assert_eq!(keys_given(&rig), ["down", "enter"]);
     let notes = notes_of(&project, rig.workspace())?;
     assert_eq!(notes.len(), 1, "the human is told once: {notes:?}");
+    rig.close()?;
+    Ok(())
+}
+
+/// The note that the window's screen could not be read.
+const UNREAD: &str = "could not be read";
+
+#[test]
+fn a_window_whose_screen_the_host_never_shows_while_it_asks_is_told_of_and_held_no_longer(
+) -> Outcome {
+    // Calliope's check of round 4 (T-231): a window that asked, whose host then showed
+    // none of its screens, was held for good, and nobody was told.
+    let rig = Rig::start(asking())?;
+    let root = rig.workspace().to_path_buf();
+    git_init(&root)?;
+    let folder = root.join("app");
+    std::fs::create_dir(&folder)?;
+    let project = Project::open(&rig, "chief", json!({ "directory": folder }))?;
+    let added = project.add_member("worker")?;
+    let tier = added["member"]["tier"].as_str().unwrap_or_default();
+    rig.tell(
+        project.id(),
+        &format!("DISPATCH --tier {tier} Reply with exactly: NEVER_SHOWN_DONE"),
+    )?;
+    rig.wait_for("the worker's window to ask", secs(60), || {
+        Ok(!notes_of(&project, &root)?.is_empty())
+    })?;
+    rig.refuse_snapshots(true);
+    let held_no_longer = rig
+        .wait_for(
+            "the human to be told the screen cannot be read",
+            secs(60),
+            || {
+                Ok(notes_of(&project, &root)?
+                    .iter()
+                    .any(|note| note.contains(UNREAD) && note.contains("30 s")))
+            },
+        )
+        .and_then(|()| {
+            rig.wait_for("the window to be held no longer", secs(5), || {
+                let lane = project.lane("worker")?;
+                Ok(lane["activity"]["reason"] != "the window asks whether to trust its folder")
+            })
+        });
+    rig.refuse_snapshots(false);
+    held_no_longer?;
+    assert_eq!(
+        keys_given(&rig),
+        Vec::<String>::new(),
+        "a key went into the question"
+    );
+    rig.close()?;
+    Ok(())
+}
+
+#[test]
+fn a_window_whose_screen_the_host_cannot_show_is_past_the_question_once_its_record_grows() -> Outcome
+{
+    // The human says No in a window opened again on its conversation while the host
+    // shows none of its screens, and a process before it writes to its record as it
+    // ends, 45 s later: its record grew, so it is past the question, with nothing to
+    // tell of its screen.
+    let rig = asking_with(&[
+        ("CF_TEST_TRUST_EXIT_MS", "45000"),
+        ("CF_TEST_RECORD_GROWS_ON_NO", "1"),
+    ])?;
+    let root = rig.workspace().to_path_buf();
+    let folder = root.join("app");
+    std::fs::create_dir(&folder)?;
+    let project = Project::open(&rig, "chief", json!({ "directory": folder }))?;
+    let added = project.add_member("worker")?;
+    let tier = added["member"]["tier"]
+        .as_str()
+        .unwrap_or_default()
+        .to_owned();
+    a_task(&rig, &project, &tier, 1, "FIRST_DONE")?;
+    git_init(&root)?;
+    rig.tell(
+        project.id(),
+        "CF task add --after T-1 :: Reply with exactly: SECOND_DONE",
+    )?;
+    rig.wait_for("the worker's window opened again to ask", secs(60), || {
+        Ok(!notes_of(&project, &root)?.is_empty())
+    })?;
+    let window = workers(&rig, &project)
+        .last()
+        .cloned()
+        .ok_or("the worker has no window")?;
+    rig.refuse_snapshots(true);
+    let pressed = human_presses(&rig, &window, &[ENTER]);
+    sleep(Duration::from_secs(36));
+    let notes = notes_of(&project, &root);
+    rig.refuse_snapshots(false);
+    pressed?;
+    let notes = notes?;
+    assert!(
+        notes.iter().all(|note| !note.contains(UNREAD)),
+        "a window past the question was held for its screen: {notes:?}"
+    );
+    rig.close()?;
     Ok(())
 }

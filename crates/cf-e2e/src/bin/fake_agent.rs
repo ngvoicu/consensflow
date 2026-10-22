@@ -46,7 +46,9 @@
 //! was never told to trust, asks whether to trust it first, as Claude Code does
 //! (`trust`); with `CF_TEST_SAYS_FIRST` it prints those words before its first line,
 //! and with `CF_TEST_PLAIN_PROMPT` its first line does not say it is in
-//! full-permission mode, as a prompt drawn otherwise.
+//! full-permission mode, as a prompt drawn otherwise. The window of a participant
+//! `CF_TEST_QUOTES_BEFORE_PROMPT` names draws a conversation that quotes the
+//! question's choices for 1.5 s before its first line, as a resumed window does.
 //!
 //! It is the program of the suites that stands in a window, so it reads the
 //! environment a window is given and runs `cf` as an agent does, both through
@@ -107,6 +109,12 @@ const NO_LOGIN: &str =
 
 /// What a window the provider refuses says, in the record Claude writes for it.
 const LIMIT: &str = "You've hit your limit. Resets in 2 hours.";
+
+/// A conversation that quotes the question's two choices, each a line of its own, with
+/// no input box below it yet, and how long it stands before the window's prompt.
+const QUOTES_THE_CHOICES: &str =
+    " ⏺ The dialog offers:\r\n   - No, exit\r\n   - Yes, I trust this folder\r\n";
+const QUOTED_BEFORE_PROMPT: std::time::Duration = std::time::Duration::from_millis(1_500);
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -224,6 +232,13 @@ fn run(
         if let Some(said) = own_var("CF_TEST_SAYS_FIRST") {
             say(&format!("{said}\n")).map_err(|failed| failed.to_string())?;
         }
+    }
+    // A resumed window draws its conversation before its prompt: here one that quotes
+    // the question's two choices, each a line of its own, for as long as Claude Code
+    // 2.1.307 took on a chief's conversation (`cargo xtask live folder-trust`).
+    if named("CF_TEST_QUOTES_BEFORE_PROMPT") {
+        say(QUOTES_THE_CHOICES).map_err(|failed| failed.to_string())?;
+        std::thread::sleep(QUOTED_BEFORE_PROMPT);
     }
     records
         .status(pid, "idle")

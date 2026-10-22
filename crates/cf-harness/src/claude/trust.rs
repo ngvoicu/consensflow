@@ -9,7 +9,7 @@
 //! once it is past the question, is told by the line under its input box.
 
 use crate::contract::Question;
-use crate::shared::trust::{chosen, offers, shows, DOWN, ENTER};
+use crate::shared::trust::{chosen, names, offers, shows, DOWN, ENTER};
 
 /// What Claude's prompt shows as ConsensFlow opens it, in full-permission mode.
 const PROMPT: &str = "bypass permissions on";
@@ -21,24 +21,29 @@ const NO: &str = "No, exit";
 /// The question, where `screen` shows it, and the key toward a yes: Enter once the
 /// `❯` is on the yes, Down while it is on the no. The question is its two choices,
 /// each a line of its own: a screen that only names them (a message that quotes the
-/// question) asks nothing. Where the `❯` is on neither (a cursor drawn otherwise, or
-/// a redraw caught halfway), the question is there and its key unknown.
+/// question) asks nothing. A `❯` on a line that is neither is Claude's input box
+/// (empty, or holding words that end with a choice), below a conversation that quotes
+/// them, each on a line of its own (a list in a message): no question. Where there is
+/// no `❯` at all (a cursor drawn otherwise, or a redraw caught halfway), the question
+/// is there and its key unknown.
 pub(crate) fn toward_trust(screen: &[String]) -> Option<Question> {
     if !(offers(screen, YES) && offers(screen, NO)) {
         return None;
     }
     Some(match chosen(screen, '❯') {
-        Some(choice) if choice.ends_with(YES) => Question::Toward(ENTER),
-        Some(choice) if choice.ends_with(NO) => Question::Toward(DOWN),
-        _ => Question::Unplaced,
+        Some(choice) if names(choice, YES) => Question::Toward(ENTER),
+        Some(choice) if names(choice, NO) => Question::Toward(DOWN),
+        Some(_) => return None,
+        None => Question::Unplaced,
     })
 }
 
 /// Whether `screen` is Claude's prompt, as ConsensFlow opens its windows: the
 /// line under its input box that says it is in full-permission mode ("⏵⏵ bypass
-/// permissions on", 2.1.305), and no question.
+/// permissions on", 2.1.305), and no question whose choice is placed: the question
+/// draws no such line, so one read with its choice unplaced beside it is quoted.
 pub(crate) fn shows_prompt(screen: &[String]) -> bool {
-    shows(screen, PROMPT) && toward_trust(screen).is_none()
+    shows(screen, PROMPT) && !matches!(toward_trust(screen), Some(Question::Toward(_)))
 }
 
 #[cfg(test)]
@@ -81,6 +86,8 @@ mod tests {
         let quoted = lines(" ⏺ Claude asks whether you trust the folder: it offers \"No, exit\" and\n   \"Yes, I trust this folder\", the cursor on the first.\n ❯ \n   ⏵⏵ bypass permissions on (shift+tab to cycle)");
         assert_eq!(toward_trust(&quoted), None);
         assert!(shows_prompt(&quoted));
+        // The same before its input box is drawn: no `❯` at all, and still no question.
+        assert_eq!(toward_trust(&quoted[..2]), None);
     }
 
     #[test]
@@ -97,6 +104,23 @@ mod tests {
             toward_trust(&lines("  1. Yes, I trust this folder\n  2. No, exit")),
             Some(Question::Unplaced)
         );
+    }
+
+    #[test]
+    fn a_conversation_that_lists_the_choices_above_the_input_box_asks_nothing() {
+        // Calliope's check of round 4 (T-231): a resumed chief at rest whose last lines
+        // quote the dialog, each choice a line of its own.
+        let listed = lines(" ⏺ The dialog offers:\n   - No, exit\n   - Yes, I trust this folder\n ❯ \n   ⏵⏵ bypass permissions on (shift+tab to cycle)");
+        assert_eq!(toward_trust(&listed), None);
+        assert!(shows_prompt(&listed));
+        // Its input box holding words that end with a choice is no cursor on it.
+        let typed = lines(" ⏺ The dialog offers:\n   - No, exit\n   - Yes, I trust this folder\n ❯ tell me more about No, exit\n   ⏵⏵ bypass permissions on (shift+tab to cycle)");
+        assert_eq!(toward_trust(&typed), None);
+        assert!(shows_prompt(&typed));
+        // The same with no input box drawn yet: unplaced, but the prompt's line wins.
+        let tail = lines(" ⏺ The dialog offers:\n   - No, exit\n   - Yes, I trust this folder\n   ⏵⏵ bypass permissions on");
+        assert_eq!(toward_trust(&tail), Some(Question::Unplaced));
+        assert!(shows_prompt(&tail));
     }
 
     #[test]

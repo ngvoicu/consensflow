@@ -25,6 +25,12 @@
 # question; the question is its two choices, each a line of its own, and one whose cursor the
 # reader cannot place is pressed nothing, the human told once it stays so.
 #
+# Round 5 (a check of round 4, T-231): a `❯` on a line that names no choice is an input box,
+# and the prompt wins over a question whose choice is unplaced; a choice may end with a box's
+# edge, and the cursor stand inside one; looks with no screen end once the record grows, or
+# after 30 s with the human told; a yes is banked after an unplaced question only once it was
+# read long enough to tell the human, who is told of it no sooner.
+#
 # The cases are `crates/cf-e2e/tests/regressions/a_trust_question_after_git_init_stopped_every_launch.rs`
 # (a stand-in that asks as Claude Code 2.1.305 does, the shape the live suite
 # `cargo xtask live folder-trust` found) and the readers' own tests. The rig's cases build the
@@ -44,7 +50,6 @@ folder-trust-rig-no = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "
 folder-trust-rig-first-frame = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_worker_whose_first_frame"]
 folder-trust-rig-plain = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_window_that_asks_nothing"]
 folder-trust-rig-redraw = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_question_slow_to_redraw"]
-folder-trust-rig-plain-prompt = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_window_whose_prompt_is_drawn_otherwise"]
 folder-trust-rig-dropped-key = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_window_that_did_not_take_a_key"]
 folder-trust-rig-quoted = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_screen_that_quotes_the_question"]
 folder-trust-rig-quoted-chief = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_chief_whose_screen_quotes"]
@@ -55,6 +60,10 @@ folder-trust-rig-reads-late = ["cargo", "test", "--offline", "-p", "cf-e2e", "--
 folder-trust-rig-unread = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_window_whose_screen_the_host_cannot_show"]
 folder-trust-rig-cursor = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_question_whose_cursor_is_drawn_otherwise"]
 folder-trust-rig-router = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "rig::route::tests::a_look_at_a_screen"]
+folder-trust-rig-quoted-words = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_chief_whose_screen_quotes_the_question_in_words"]
+folder-trust-rig-quoted-tail = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_chief_whose_conversation_quotes_the_question_before_its_prompt"]
+folder-trust-rig-unread-bound = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_window_whose_screen_the_host_never_shows"]
+folder-trust-rig-unread-grown = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_window_whose_screen_the_host_cannot_show_is_past_the_question"]
 folder-trust-stand-in = ["cargo", "test", "--offline", "-p", "cf-e2e", "--features", "test-support", "--bin", "fake-agent", "trust::"]
 folder-trust-rig-chief = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_chief"]
 
@@ -110,8 +119,8 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-engine/src/trust.rs"
-find = "if (inside || accepted) && keys < MOST_KEYS && unplaced < UNPLACED_LOOKS {"
-replace = "if (inside || accepted && false) && keys < MOST_KEYS && unplaced < UNPLACED_LOOKS {"
+find = "Question::Toward(key) if (inside || accepted) && keys < MOST_KEYS => {"
+replace = "Question::Toward(key) if (inside || accepted && false) && keys < MOST_KEYS => {"
 
 [[plant]]
 name = "folder trust: the human's yes is never written down"
@@ -121,8 +130,8 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-engine/src/trust.rs"
-find = "        if asked && keys == 0 && at_prompt {"
-replace = "        if asked && keys == usize::MAX && at_prompt {"
+find = "        if asked && sure && keys == 0 && at_prompt {"
+replace = "        if asked && sure && keys == usize::MAX && at_prompt {"
 
 [[plant]]
 name = "folder trust: every window that asks is told of again"
@@ -195,8 +204,8 @@ runs = ["folder-trust-readers"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/trust.rs"
-find = "        Some(choice) if choice.ends_with(YES) => Question::Toward(ENTER),"
-replace = "        Some(choice) if choice.ends_with(NO) => Question::Toward(ENTER),"
+find = "        Some(choice) if names(choice, YES) => Question::Toward(ENTER),"
+replace = "        Some(choice) if names(choice, NO) => Question::Toward(ENTER),"
 
 [[plant]]
 name = "folder trust: Claude's question is read from its yes alone"
@@ -353,13 +362,13 @@ runs = ["folder-trust-readers"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/trust.rs"
-find = "    shows(screen, PROMPT) && toward_trust(screen).is_none()"
-replace = "    shows(screen, PROMPT) && toward_trust(screen).is_none() && false"
+find = "    shows(screen, PROMPT) && !matches!(toward_trust(screen), Some(Question::Toward(_)))"
+replace = "    shows(screen, PROMPT) && false"
 
 [[plant]]
 name = "folder trust: an asking window whose prompt is drawn otherwise is never past the question (round 2)"
-meant = "a_window_whose_prompt_is_drawn_otherwise_goes_on_after_the_yes"
-runs = ["folder-trust-rig-plain-prompt", "folder-trust-rig-chief-plain"]
+meant = "a_chief_opened_again_at_rest_whose_prompt_is_drawn_otherwise_is_handed_its_result_after_the_yes"
+runs = ["folder-trust-rig-chief-plain"]
 builds = true
 
 [[plant.edit]]
@@ -376,9 +385,11 @@ builds = true
 [[plant.edit]]
 file = "crates/cf-engine/src/trust.rs"
 find = '''
+                    // answered it (or a process before it writing still).
                     if grown {
                         break false;'''
 replace = '''
+                    // answered it (or a process before it writing still).
                     if grown {
                         break true;'''
 
@@ -405,13 +416,13 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-engine/src/trust.rs"
-find = "        if asked && keys == 0 && at_prompt {"
-replace = "        if asked && keys == 0 {"
+find = "        if asked && sure && keys == 0 && at_prompt {"
+replace = "        if asked && sure && keys == 0 {"
 
 [[plant]]
 name = "folder trust: a screen that names both choices among other words reads as the question (round 2)"
-meant = "a_chief_whose_screen_quotes_the_question_takes_what_it_is_told"
-runs = ["folder-trust-rig-quoted", "folder-trust-rig-quoted-chief"]
+meant = "a_chief_whose_screen_quotes_the_question_in_words_and_draws_its_prompt_otherwise_is_not_asked"
+runs = ["folder-trust-rig-quoted", "folder-trust-rig-quoted-words"]
 builds = true
 
 [[plant.edit]]
@@ -489,8 +500,8 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/trust.rs"
-find = "        _ => Question::Unplaced,"
-replace = "        _ => return None,"
+find = "        None => Question::Unplaced,"
+replace = "        None => return None,"
 
 [[plant]]
 name = "folder trust: a question whose cursor the reader cannot place reads as no question"
@@ -499,8 +510,8 @@ runs = ["folder-trust-readers"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/trust.rs"
-find = "        _ => Question::Unplaced,"
-replace = "        _ => return None,"
+find = "        None => Question::Unplaced,"
+replace = "        None => return None,"
 
 [[plant]]
 name = "folder trust: a question whose cursor the reader cannot place is held in silence (round 3, T-120)"
@@ -510,8 +521,8 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-engine/src/trust.rs"
-find = "&& keys < MOST_KEYS && unplaced < UNPLACED_LOOKS {"
-replace = "&& keys < MOST_KEYS && unplaced < u32::MAX {"
+find = "Question::Toward(_)) || unplaced >= UNPLACED_LOOKS;"
+replace = "Question::Toward(_)) || unplaced >= u32::MAX;"
 
 [[plant]]
 name = "folder trust: a choice is offered by any line that ends with it"
@@ -520,8 +531,8 @@ runs = ["folder-trust-readers"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/shared/trust.rs"
-find = "            .is_some_and(|before| !before.chars().any(char::is_alphabetic))"
-replace = "            .is_some()"
+find = "        .is_some_and(|before| !before.chars().any(char::is_alphabetic))"
+replace = "        .is_some()"
 
 [[plant]]
 name = "folder trust: the rig passes on the looks it is told to refuse"
@@ -542,3 +553,118 @@ runs = ["folder-trust-tooling"]
 file = "crates/cf-harness/src/tooling.rs"
 find = '    let mut answer = json!({ "asks": key.is_some(), "key": pressed, "prompt": prompt });'
 replace = '    let mut answer = json!({ "asks": pressed.is_some(), "key": pressed, "prompt": prompt });'
+
+[[plant]]
+name = "folder trust: a cursor on a line that names no choice reads as the question with its cursor unplaced (round 4, T-231)"
+meant = "a_conversation_that_lists_the_choices_above_the_input_box_asks_nothing"
+runs = ["folder-trust-readers"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/trust.rs"
+find = "        Some(_) => return None,"
+replace = "        Some(_) => Question::Unplaced,"
+
+[[plant]]
+name = "folder trust: a question read with its choice unplaced hides the prompt beside it (round 4, T-231)"
+meant = "a_conversation_that_lists_the_choices_above_the_input_box_asks_nothing"
+runs = ["folder-trust-readers"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/trust.rs"
+find = "    shows(screen, PROMPT) && !matches!(toward_trust(screen), Some(Question::Toward(_)))"
+replace = "    shows(screen, PROMPT) && toward_trust(screen).is_none()"
+
+[[plant]]
+name = "folder trust: an input box whose words end with a choice reads as the cursor on it (round 4, T-231)"
+meant = "a_conversation_that_lists_the_choices_above_the_input_box_asks_nothing"
+runs = ["folder-trust-readers"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/trust.rs"
+find = "        Some(choice) if names(choice, NO) => Question::Toward(DOWN),"
+replace = "        Some(choice) if choice.ends_with(NO) => Question::Toward(DOWN),"
+
+[[plant]]
+name = "folder trust: a choice followed by a box's edge is offered by no line (round 4, T-231)"
+meant = "a_choice_in_a_box_is_offered_and_one_followed_by_other_words_is_not"
+runs = ["folder-trust-readers"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/trust.rs"
+find = "    line.trim_end_matches(blank_or_edge)"
+replace = "    line.trim_end()"
+
+[[plant]]
+name = "folder trust: a cursor inside a box's edge is on no choice (round 4, T-231)"
+meant = "a_choice_in_a_box_is_offered_and_one_followed_by_other_words_is_not"
+runs = ["folder-trust-readers"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/trust.rs"
+find = "        .find_map(|line| line.trim_start_matches(blank_or_edge).strip_prefix(cursor))"
+replace = "        .find_map(|line| line.trim_start().strip_prefix(cursor))"
+
+[[plant]]
+name = "folder trust: looks with no screen hold a window whose record grew (round 4, T-231)"
+meant = "a_window_whose_screen_the_host_cannot_show_is_past_the_question_once_its_record_grows"
+runs = ["folder-trust-rig-unread-grown"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/trust.rs"
+find = """
+                Seen::Unread => {
+                    if grown {
+                        break false;
+                    }"""
+replace = """
+                Seen::Unread => {"""
+
+[[plant]]
+name = "folder trust: looks with no screen hold a window that asked for good, and nobody is told (round 4, T-231)"
+meant = "a_window_whose_screen_the_host_never_shows_while_it_asks_is_told_of_and_held_no_longer"
+runs = ["folder-trust-rig-unread-bound"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/trust.rs"
+find = "                        if unread >= UNREAD_LOOKS {"
+replace = "                        if unread >= u32::MAX {"
+
+[[plant]]
+name = "folder trust: a conversation that quoted the choices before its prompt is banked as the human's yes (round 4, T-231)"
+meant = "a_chief_whose_conversation_quotes_the_question_before_its_prompt_says_no_yes_for_the_others"
+runs = ["folder-trust-rig-quoted-tail"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/trust.rs"
+find = "        if asked && sure && keys == 0 && at_prompt {"
+replace = "        if asked && keys == 0 && at_prompt {"
+
+[[plant]]
+name = "folder trust: a question read with its choice unplaced is told to the human at the first look (round 4, T-231)"
+meant = "a_chief_whose_conversation_quotes_the_question_before_its_prompt_says_no_yes_for_the_others"
+runs = ["folder-trust-rig-quoted-tail"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/trust.rs"
+find = "                    } else if for_sure {"
+replace = "                    } else {"
+
+[[plant]]
+name = "folder trust: a chief at rest whose conversation lists the choices above its input box is held as asking (round 4, T-231)"
+meant = "a_chief_whose_screen_quotes_the_question_takes_what_it_is_told"
+runs = ["folder-trust-rig-quoted-chief"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/trust.rs"
+find = "        Some(_) => return None,"
+replace = "        Some(_) => Question::Unplaced,"
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/trust.rs"
+find = "    shows(screen, PROMPT) && !matches!(toward_trust(screen), Some(Question::Toward(_)))"
+replace = "    shows(screen, PROMPT) && toward_trust(screen).is_none()"
