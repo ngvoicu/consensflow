@@ -385,12 +385,15 @@ mod shell {
     fn the_group_of_a_process_is_the_one_it_was_started_in_and_one_that_is_gone_has_none() {
         use std::os::unix::process::CommandExt;
 
-        let mut leader = Command::new("sleep")
-            .arg("30")
-            .process_group(0)
-            .spawn()
-            .unwrap();
-        let mut follower = Command::new("sleep").arg("30").spawn().unwrap();
+        // Both sleep beside the other tests: what they were left of theirs they would hold.
+        let sleep = || {
+            let mut sleep = Command::new("sleep");
+            sleep.arg("30");
+            cf_process::hold_only_the_streams(&mut sleep);
+            sleep
+        };
+        let mut leader = sleep().process_group(0).spawn().unwrap();
+        let mut follower = sleep().spawn().unwrap();
         assert_eq!(group_of(leader.id()), Some(leader.id()), "it leads its own");
         assert_eq!(
             group_of(follower.id()),

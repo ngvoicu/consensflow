@@ -1118,7 +1118,9 @@ fn a_paste_answers_whether_anything_reached_the_window() {
 
 #[test]
 fn helper_is_inert_when_stdin_is_not_a_pipe() {
-    let output = Command::new(env!("CARGO_BIN_EXE_consensflow-bridge"))
+    let mut helper = Command::new(env!("CARGO_BIN_EXE_consensflow-bridge"));
+    cf_process::hold_only_the_streams(&mut helper);
+    let output = helper
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
@@ -2548,7 +2550,9 @@ fn codex_programs() -> std::path::PathBuf {
     )
     .expect("the source of the harness's programs");
     let helper = dir.join("codex-code-mode-host");
-    let made = Command::new("cc")
+    let mut cc = Command::new("cc");
+    cf_process::hold_only_the_streams(&mut cc);
+    let made = cc
         .arg(&source)
         .arg("-o")
         .arg(&helper)

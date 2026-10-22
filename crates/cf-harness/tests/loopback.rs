@@ -66,12 +66,15 @@ struct Peer {
 impl Peer {
     fn start() -> Self {
         let program = std::env::var_os("CF_TEST_NODE").unwrap_or_else(|| "node".into());
-        let mut node = Command::new(program)
+        let mut command = Command::new(program);
+        command
             .args(["--input-type=module", "-e", SERVER])
             .stdout(Stdio::piped())
-            .stderr(Stdio::inherit())
-            .spawn()
-            .expect("node, to serve the test");
+            .stderr(Stdio::inherit());
+        // It serves until dropped, beside the other tests: what it was left of theirs it would
+        // hold.
+        cf_process::hold_only_the_streams(&mut command);
+        let mut node = command.spawn().expect("node, to serve the test");
         let mut line = String::new();
         BufReader::new(node.stdout.take().unwrap())
             .read_line(&mut line)
@@ -187,4 +190,41 @@ fn no_peer_is_fetch_failed_before_any_head() {
             .err()
     });
     assert_eq!(failed.as_deref(), Some("fetch failed"));
+}
+
+/// The server a test keeps holds nothing of the test's but its streams.
+#[cfg(target_os = "macos")]
+#[test]
+fn the_server_a_test_keeps_holds_nothing_of_the_tests_but_its_streams() {
+    use std::os::fd::AsRawFd;
+
+    let stray = stray();
+    let peer = Peer::start();
+    assert!(
+        !holds_null(peer.node.id(), stray.as_raw_fd()),
+        "the server holds it"
+    );
+}
+
+/// Whether the process `pid` holds `/dev/null` at `fd`, as `lsof` says.
+#[cfg(target_os = "macos")]
+fn holds_null(pid: u32, fd: i32) -> bool {
+    let held = Command::new("/usr/sbin/lsof")
+        .args(["-a", "-p", &pid.to_string(), "-d", &fd.to_string()])
+        .output()
+        .expect("lsof");
+    String::from_utf8_lossy(&held.stdout).contains("/dev/null")
+}
+
+/// A `/dev/null` this process holds, open and not close-on-exec, as std leaves a descriptor for
+/// a moment as it makes it: a program started then would hold it.
+#[cfg(target_os = "macos")]
+fn stray() -> std::fs::File {
+    use std::os::fd::AsRawFd;
+
+    use nix::fcntl::{fcntl, FcntlArg, FdFlag};
+
+    let stray = std::fs::File::open("/dev/null").expect("a file");
+    fcntl(stray.as_raw_fd(), FcntlArg::F_SETFD(FdFlag::empty())).expect("its flags");
+    stray
 }

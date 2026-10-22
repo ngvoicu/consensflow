@@ -6,12 +6,13 @@
 //! The case leaves the installed app two descriptors of its own, not close-on-exec, as a program
 //! that starts the app may (a pipe's writing end, and a file of the case's), and asks `lsof` what
 //! the old app holds once it is up and what the new one holds once it is. The new one holds
-//! neither of the two, nor any socket, pipe or other object of the system's that the old one
-//! held; and the pipe's reading end, which the case keeps, reaches its end once the old app has
-//! gone, so no process holds the writing end at all. A file the new app opened itself, at the
-//! number the old one had it at, is not told by `lsof` from one it was left (macOS shows no open
-//! file's own identity, only the file's): those are noted, not held against it, and the case's
-//! own file, which nothing else opens, stands for them.
+//! neither of the two, nor any socket or other object of the system's that the old one held (the
+//! same address and the same peer: the system reuses the address of an object that is gone); and
+//! the pipe's reading end, which the case keeps, reaches its end once the old app has gone, so no
+//! process holds the writing end at all, which stands for every pipe. A file the new app opened
+//! itself, at the number the old one had it at, is not told by `lsof` from one it was left (macOS
+//! shows no open file's own identity, only the file's): those are noted, not held against it, and
+//! the case's own file, which nothing else opens, stands for them.
 
 use std::collections::BTreeMap;
 use std::fs::File;
@@ -201,6 +202,19 @@ impl Left {
     }
 }
 
+/// Whether `was`, of the old app's, and `held`, of the new one's, are the one socket or other
+/// object of the system's: the same address, and the same peer or name. The system reuses an
+/// address it gave an object that is gone, so the address alone may be one the new app was given
+/// afresh; a socket it was left keeps its peer. A pipe is not looked at here: the pipe the case
+/// left proves pipes, by reaching its end ([`Left::closed_everywhere`]).
+fn same_object(was: &Held, held: &Held) -> bool {
+    held.kind != "PIPE"
+        && held.object.is_some()
+        && was.object == held.object
+        && was.kind == held.kind
+        && was.name == held.name
+}
+
 /// What the old app (`old`) and the new one (`new`) hold, against what the case left the old one:
 /// the faults (the old app was not left the two, or the new one holds what the old one did), and
 /// what is only noted (a file at the same number in both, which `lsof` cannot tell).
@@ -226,15 +240,15 @@ pub fn compare(old: &[Held], new: &[Held], left: &Left) -> (Vec<String>, Vec<Str
         ));
     }
     for held in new {
-        if let Some(object) = &held.object {
-            if let Some(was) = old.iter().find(|was| was.object.as_ref() == Some(object)) {
-                faults.push(format!(
-                    "the new app holds the old app's {} {object} ({}; the old app's {})",
-                    held.kind,
-                    held.said(),
-                    was.said()
-                ));
-            }
+        if let Some(was) = old.iter().find(|was| same_object(was, held)) {
+            faults.push(format!(
+                "the new app's fd {} is the old app's fd {}: {} {} {}",
+                held.fd,
+                was.fd,
+                held.kind,
+                held.object.as_deref().unwrap_or_default(),
+                held.name
+            ));
         }
         if held
             .file

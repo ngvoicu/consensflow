@@ -169,6 +169,8 @@ impl Daemon {
                 }
             }
         }
+        // It runs as long as the test, beside the others: what it was left of theirs it would hold.
+        cf_process::hold_only_the_streams(&mut command);
         let mut child = command.spawn().expect("cf ui starts");
         let errors = Arc::new(Mutex::new(String::new()));
         let mut stderr = child.stderr.take().expect("its error output");

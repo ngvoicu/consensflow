@@ -29,6 +29,10 @@ app-tests-descriptors = ["cargo", "xtask", "app", "test", "testing::tests::a_pro
 panes-tests-descriptors = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "testing::a_program_a_test_starts"]
 cf-tests-descriptors = ["cargo", "test", "--offline", "-p", "cf", "--test", "process"]
 harness-tests-descriptors = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "a_process_of_the_tests_own_holds_nothing"]
+cf-daemon-tests-descriptors = ["cargo", "test", "--offline", "-p", "cf", "--test", "daemon_stop", "the_daemon_a_test_keeps"]
+harness-loopback-descriptors = ["cargo", "test", "--offline", "-p", "cf-harness", "--test", "loopback", "the_server_a_test_keeps"]
+ledger-opening-descriptors = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "opening", "a_child_a_test_starts"]
+cf-goldens-descriptors = ["cargo", "test", "--offline", "-p", "cf", "--test", "cli_goldens", "the_command_a_case_starts"]
 sentinel-descriptors = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "a_sentinel_holds_nothing"]
 headless-descriptors = ["cargo", "test", "--offline", "-p", "cf-panes", "--test", "headless", "the_helper_a_test_starts"]
 daemon-runs-descriptors = ["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "api", "a_run_holds_nothing"]
@@ -384,5 +388,53 @@ runs = ["harness-tests-descriptors"]
 file = "crates/cf-harness/src/claude/status/tests.rs"
 find = """
         cf_process::hold_only_the_streams(&mut command);
+"""
+replace = ""
+
+[[plant]]
+name = "descriptors: the daemon a test of cf keeps does not ask for it"
+meant = "the_daemon_a_test_keeps_holds_nothing_of_the_tests_but_its_streams"
+runs = ["cf-daemon-tests-descriptors"]
+
+[[plant.edit]]
+file = "crates/cf/tests/daemon/mod.rs"
+find = """
+        cf_process::hold_only_the_streams(&mut command);
+"""
+replace = ""
+
+[[plant]]
+name = "descriptors: the server a loopback test keeps does not ask for it"
+meant = "the_server_a_test_keeps_holds_nothing_of_the_tests_but_its_streams"
+runs = ["harness-loopback-descriptors"]
+
+[[plant.edit]]
+file = "crates/cf-harness/tests/loopback.rs"
+find = """
+        cf_process::hold_only_the_streams(&mut command);
+"""
+replace = ""
+
+[[plant]]
+name = "descriptors: the child a ledger test starts does not ask for it"
+meant = "a_child_a_test_starts_holds_nothing_of_the_tests_but_its_streams"
+runs = ["ledger-opening-descriptors"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/tests/opening.rs"
+find = """
+    cf_process::hold_only_the_streams(&mut child);
+"""
+replace = ""
+
+[[plant]]
+name = "descriptors: the cf a golden case starts does not ask for it"
+meant = "the_command_a_case_starts_holds_nothing_of_the_tests_but_its_streams"
+runs = ["cf-goldens-descriptors"]
+
+[[plant.edit]]
+file = "crates/cf/tests/cli_goldens/main.rs"
+find = """
+    cf_process::hold_only_the_streams(&mut command);
 """
 replace = ""

@@ -15,6 +15,8 @@ use rustls::pki_types::{CertificateDer, ServerName};
 use rustls::{ClientConfig, ClientConnection, RootCertStore, StreamOwned};
 
 use super::bundle::{run, IDENTITY};
+#[cfg(unix)]
+use crate::process::{self, Invocation};
 
 /// What a fake bundle is made of.
 pub struct Fake {
@@ -165,4 +167,38 @@ pub fn fake_bundle(parent: &Path, fake: &Fake) -> PathBuf {
     )
     .unwrap();
     app
+}
+
+/// Set in a process [`alone`] started: a test run otherwise does nothing.
+#[cfg(unix)]
+const ALONE: &str = "CF_XTASK_TEST_ALONE";
+
+/// Runs the test `name` of this binary in a process of its own, where no other test runs: one
+/// whose pipe a program another test starts would hold (on macOS std makes a pipe close-on-exec
+/// in a second step, and xtask's own starts close nothing). It is an ignored test that does
+/// nothing unless [`is_alone`].
+#[cfg(unix)]
+pub fn alone(name: &str) {
+    #[allow(clippy::disallowed_methods)] // This test binary, run again as libtest runs one.
+    let test = std::env::current_exe().unwrap();
+    let again = Invocation::new(test, Path::new("."))
+        .args([
+            "--exact",
+            name,
+            "--ignored",
+            "--nocapture",
+            "--test-threads=1",
+        ])
+        .var(ALONE, "1");
+    let ran = process::capture(&again, &env()).unwrap();
+    let said = format!("{}{}", ran.stdout, ran.stderr);
+    assert_eq!(ran.code, 0, "{said}");
+    assert!(said.contains("1 passed"), "the test did not run: {said}");
+}
+
+/// Whether this process is one [`alone`] started.
+#[cfg(unix)]
+#[allow(clippy::disallowed_methods)] // Libtest has no other word for it.
+pub fn is_alone() -> bool {
+    std::env::var_os(ALONE).is_some()
 }

@@ -27,9 +27,15 @@ test-support = ["rusqlite/limits"]
 [dev-dependencies]
 base64.workspace = true
 cf-ledger = { path = ".", features = ["test-support"] }
+# The child a test starts holds only its streams.
+cf-process.workspace = true
 flate2.workspace = true
 sha2.workspace = true
 tempfile.workspace = true
+
+[target.'cfg(unix)'.dev-dependencies]
+# A descriptor left open and not close-on-exec, for a test of what the child holds.
+nix = { workspace = true, features = ["fs"] }
 
 [lints]
 workspace = true

@@ -19,6 +19,7 @@ use std::time::{Duration, Instant};
 
 use daemon::{Client, Daemon, Root};
 use serde_json::{json, Value};
+use std::process::Command;
 
 /// How a daemon is asked to stop.
 #[derive(Debug, Clone, Copy)]
@@ -407,7 +408,7 @@ fn cf_ui_is_the_daemon_in_a_home_the_flip_release_sent_to_node() {
 #[test]
 fn a_window_s_cf_ui_is_the_board_and_never_the_daemon() {
     let root = Root::new();
-    let ran = std::process::Command::new(env!("CARGO_BIN_EXE_cf"))
+    let ran = cf()
         .args(["ui", "--json", "--no-open"])
         .env_clear()
         .env("CONSENSFLOW_TOKEN", "a-windows-token")
@@ -427,7 +428,7 @@ fn a_daemon_that_cannot_start_says_why_in_cf_s_words_and_exits_1() {
     let root = Root::new();
     // A ledger that is held: a second daemon on the same home.
     let first = Daemon::start(&root);
-    let ran = std::process::Command::new(env!("CARGO_BIN_EXE_cf"))
+    let ran = cf()
         .args(["ui", "--json", "--no-open"])
         .env_clear()
         .env("CONSENSFLOW_HOME", root.home())
@@ -455,7 +456,7 @@ fn a_daemon_that_cannot_start_says_why_in_cf_s_words_and_exits_1() {
 
 #[test]
 fn an_option_cf_ui_does_not_know_is_refused_as_node_refuses_it() {
-    let ran = std::process::Command::new(env!("CARGO_BIN_EXE_cf"))
+    let ran = cf()
         .args(["ui", "--foo"])
         .env_clear()
         .env("CONSENSFLOW_TOOL_FOLDERS", "")
@@ -477,4 +478,52 @@ fn the_handle_line_is_json_for_the_app() {
         panic!("the handle line is an object");
     };
     assert_eq!(handle.keys().collect::<Vec<_>>(), ["url", "token"]);
+}
+
+/// `cf`, as a test of this file starts it to its end: holding nothing of the test's but its
+/// streams, as the daemon a test keeps does.
+fn cf() -> Command {
+    let mut cf = Command::new(env!("CARGO_BIN_EXE_cf"));
+    cf_process::hold_only_the_streams(&mut cf);
+    cf
+}
+
+/// The daemon a test keeps runs beside the other tests, which open sockets and pipes: it holds
+/// nothing of the test's but its streams.
+#[cfg(target_os = "macos")]
+#[test]
+fn the_daemon_a_test_keeps_holds_nothing_of_the_tests_but_its_streams() {
+    use std::os::fd::AsRawFd;
+
+    let root = Root::new();
+    let stray = stray();
+    let daemon = Daemon::start(&root);
+    assert!(
+        !holds_null(daemon.child.id(), stray.as_raw_fd()),
+        "the daemon holds it"
+    );
+    drop(daemon);
+}
+
+/// Whether the process `pid` holds `/dev/null` at `fd`, as `lsof` says.
+#[cfg(target_os = "macos")]
+fn holds_null(pid: u32, fd: i32) -> bool {
+    let held = Command::new("/usr/sbin/lsof")
+        .args(["-a", "-p", &pid.to_string(), "-d", &fd.to_string()])
+        .output()
+        .expect("lsof");
+    String::from_utf8_lossy(&held.stdout).contains("/dev/null")
+}
+
+/// A `/dev/null` this process holds, open and not close-on-exec, as std leaves a descriptor for
+/// a moment as it makes it: a program started then would hold it.
+#[cfg(target_os = "macos")]
+fn stray() -> std::fs::File {
+    use std::os::fd::AsRawFd;
+
+    use nix::fcntl::{fcntl, FcntlArg, FdFlag};
+
+    let stray = std::fs::File::open("/dev/null").expect("a file");
+    fcntl(stray.as_raw_fd(), FcntlArg::F_SETFD(FdFlag::empty())).expect("its flags");
+    stray
 }

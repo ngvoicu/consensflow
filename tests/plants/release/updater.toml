@@ -860,3 +860,29 @@ runs = ["xtask-process"]
 file = "tools/xtask/src/process.rs"
 find = "command.spawn().map_err(|cause| failure(invocation, cause))"
 replace = "command.spawn().map_err(|cause| Failure::Refused { program: String::new(), cause })"
+
+[[plant]]
+name = "updater evidence: a socket the new app was given at an address the old app's had is taken for the old app's"
+meant = "a_socket_at_an_address_the_old_app_had_with_another_peer_is_the_new_apps_own"
+runs = ["smoke-descriptors"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/descriptors.rs"
+find = "        && was.name == held.name"
+replace = ""
+
+[[plant]]
+name = "updater evidence: the new app holding the file the installed app was left is no fault"
+meant = "a_new_app_left_the_old_ones_descriptors_is_at_fault_for_each"
+runs = ["smoke-descriptors"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/descriptors.rs"
+find = """
+            .is_some_and(|(_, node)| *node == left.node)
+        {
+            faults.push("""
+replace = """
+            .is_some_and(|(_, node)| *node == left.node && false)
+        {
+            faults.push("""

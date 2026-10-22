@@ -1,4 +1,5 @@
 use super::*;
+use crate::updater_smoke::testing::{alone, is_alone};
 
 /// `lsof -F ftdDin` of a running ConsensFlow 3.0.5 on this Mac, cut down: its streams, a unix
 /// socket, a file a framework opened, a kqueue and a socket of the system's.
@@ -103,11 +104,72 @@ fn a_new_app_left_the_old_ones_descriptors_is_at_fault_for_each() {
     let said = faults.join("\n");
     assert!(said.contains("0xdcbcb4e125cc7e2f"), "{said}");
     assert!(said.contains("0x4728cfc0aca56d7a"), "{said}");
-    assert!(said.contains("0xaaaa"), "{said}");
+    // The pipe is the pipe's own check's ([`Left::closed_everywhere`]), not the comparison's.
+    assert!(!said.contains("0xaaaa"), "{said}");
     assert!(
         said.contains("the file the installed app was left"),
         "{said}"
     );
+}
+
+/// The system gave the new app's socket an address one of the old app's had (it reuses the
+/// address of an object that is gone): with another peer it is the new app's own (seen in the
+/// smoke's plant run, T-271).
+#[test]
+fn a_socket_at_an_address_the_old_app_had_with_another_peer_is_the_new_apps_own() {
+    let folder = tempfile::tempdir().unwrap();
+    let left = Left::make(folder.path()).unwrap();
+    let old = old_with(&left);
+    let new = vec![
+        held(
+            18,
+            "unix",
+            Some("0x4728cfc0aca56d7a"),
+            None,
+            "->0xa65099d04f5df15f",
+        ),
+        held(
+            20,
+            "unix",
+            Some("0x4728cfc0aca56d7a"),
+            None,
+            "->0xa65099d04f5df15f",
+        ),
+    ];
+    let (faults, _) = compare(&old, &new, &left);
+    assert_eq!(faults, Vec::<String>::new());
+}
+
+/// The same address and the same peer is the old app's socket, at whatever number the new app
+/// holds it: the fault says both numbers.
+#[test]
+fn a_socket_at_the_old_apps_address_with_its_peer_is_the_old_apps_and_both_numbers_are_said() {
+    let folder = tempfile::tempdir().unwrap();
+    let left = Left::make(folder.path()).unwrap();
+    let old = old_with(&left);
+    let new = vec![held(
+        18,
+        "unix",
+        Some("0x4728cfc0aca56d7a"),
+        None,
+        "->0x1e1b0426067da685",
+    )];
+    let (faults, _) = compare(&old, &new, &left);
+    assert_eq!(
+        faults,
+        ["the new app's fd 18 is the old app's fd 900: unix 0x4728cfc0aca56d7a ->0x1e1b0426067da685"]
+    );
+}
+
+/// A pipe of the old app's in the new one is the left pipe's check's: it does not reach its end.
+#[test]
+fn a_pipe_is_left_to_the_pipe_the_case_left() {
+    let folder = tempfile::tempdir().unwrap();
+    let left = Left::make(folder.path()).unwrap();
+    let old = old_with(&left);
+    let new = vec![held(left.pipe, "PIPE", Some("0xaaaa"), None, "->0xbbbb")];
+    let (faults, _) = compare(&old, &new, &left);
+    assert_eq!(faults, Vec::<String>::new());
 }
 
 #[test]
@@ -121,17 +183,32 @@ fn an_installed_app_that_was_not_left_the_two_makes_the_check_prove_nothing() {
         .all(|fault| fault.ends_with("the check proves nothing")));
 }
 
-/// Not left to any program (the tests beside this one start programs): only this process
-/// holds the writing end, and then none.
+/// Only this process holds the writing end, and then none. Run in a process of its own: the
+/// tests beside it start programs bare, and one started as the pipe is made (std makes it
+/// close-on-exec in a second step) holds the writing end for as long as it runs
+/// (`the_pipe_left_under_starts_as_it_is_left_now` shows it: a `sleep` held it).
 #[test]
 fn the_pipe_left_reaches_its_end_once_no_process_holds_it_and_not_before() {
+    alone("updater_smoke::descriptors::tests::the_pipe_left_alone");
+}
+
+#[test]
+#[ignore = "run alone, by the test above it"]
+fn the_pipe_left_alone() {
+    if !is_alone() {
+        return;
+    }
     let folder = tempfile::tempdir().unwrap();
     let mut left = Left::make(folder.path()).unwrap();
-    let waits = Waits::new(std::time::Duration::from_millis(300));
     let mut held = Left::make(folder.path()).unwrap();
-    assert!(held.closed_everywhere(&waits).is_err());
+    // A wait that must not end is held to a moment; the one that must, given seconds, ends at
+    // once when it is right.
+    assert!(held
+        .closed_everywhere(&Waits::new(std::time::Duration::from_millis(300)))
+        .is_err());
     left.given();
-    left.closed_everywhere(&waits).unwrap();
+    left.closed_everywhere(&Waits::new(std::time::Duration::from_secs(10)))
+        .unwrap();
 }
 
 #[test]
@@ -141,4 +218,128 @@ fn what_is_left_is_close_on_exec_until_it_is_left_to_the_app() {
     let flags = |fd: u32| fcntl(i32::try_from(fd).unwrap(), FcntlArg::F_GETFD).unwrap();
     assert_ne!(flags(left.pipe) & FdFlag::FD_CLOEXEC.bits(), 0);
     assert_ne!(flags(left.file_fd) & FdFlag::FD_CLOEXEC.bits(), 0);
+}
+
+/// What holds the writing end of the pipe whose reading end is `reader`, by `lsof` of the whole
+/// machine: the processes that hold the object the reading end is connected to.
+fn holders_of_the_writer(reader: i32) -> String {
+    let own = held_by(std::process::id()).unwrap();
+    let Some(peer) = own
+        .iter()
+        .find(|held| held.fd == reader.unsigned_abs())
+        .and_then(|held| held.name.strip_prefix("->"))
+        .map(str::to_owned)
+    else {
+        return "the reading end is not listed".to_owned();
+    };
+    let lsof = Invocation::new(LSOF, Path::new(".")).args(["-n", "-P"]);
+    let shown = process::capture(&lsof, &Env::default()).unwrap();
+    shown
+        .stdout
+        .lines()
+        .filter(|line| line.contains(&peer) && !line.contains(&format!("->{peer}")))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// How many times a reproduction runs the pipe's positive half.
+const ROUNDS: usize = 500;
+
+/// Sixteen threads that start `sleep 1` bare, as the tests beside these start programs, until
+/// dropped.
+struct BareStarts {
+    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    threads: Vec<std::thread::JoinHandle<()>>,
+}
+
+impl BareStarts {
+    #[allow(clippy::disallowed_methods)] // The starts are std's own, as a sibling test's are.
+    fn begin() -> Self {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+
+        let stop = Arc::new(AtomicBool::new(false));
+        let threads = (0..16)
+            .map(|_| {
+                let stop = Arc::clone(&stop);
+                std::thread::spawn(move || {
+                    let mut live = std::collections::VecDeque::new();
+                    while !stop.load(Ordering::Relaxed) {
+                        let mut sleep = std::process::Command::new("/bin/sleep");
+                        sleep
+                            .arg("1")
+                            .stdin(std::process::Stdio::null())
+                            .stdout(std::process::Stdio::null())
+                            .stderr(std::process::Stdio::null());
+                        live.push_back(sleep.spawn().unwrap());
+                        if live.len() >= 32 {
+                            live.pop_front().unwrap().wait().unwrap();
+                        }
+                    }
+                    for mut sleep in live {
+                        sleep.wait().unwrap();
+                    }
+                })
+            })
+            .collect();
+        Self { stop, threads }
+    }
+}
+
+impl Drop for BareStarts {
+    fn drop(&mut self) {
+        self.stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        for thread in self.threads.drain(..) {
+            let _ = thread.join();
+        }
+    }
+}
+
+/// The pipe's positive half [`ROUNDS`] times beside [`BareStarts`], in this process;
+/// `left_at_once` leaves the pipe to any program from the moment it is made, as round 5's first
+/// `Left::make` did. Says each run that did not reach the end, and who held the writing end then.
+fn pipe_under_starts(left_at_once: bool) -> usize {
+    let _starts = BareStarts::begin();
+    let folder = tempfile::tempdir().unwrap();
+    let mut missed = 0;
+    for run in 0..ROUNDS {
+        let mut left = Left::make(folder.path()).unwrap();
+        if left_at_once {
+            left.leave().unwrap();
+        }
+        let reader = left.reader.as_ref().unwrap().as_raw_fd();
+        left.given();
+        let waits = Waits::new(std::time::Duration::from_millis(300));
+        // A wait that misses leaves its reader reading: the reading end is still open to ask about.
+        if let Err(missed_end) = left.closed_everywhere(&waits) {
+            missed += 1;
+            eprintln!("run {run}: {missed_end}");
+            eprintln!("  holders: {}", holders_of_the_writer(reader));
+        }
+    }
+    eprintln!("{missed} of {ROUNDS} runs did not reach the end");
+    missed
+}
+
+#[test]
+#[ignore = "a reproduction, by hand: `cargo test -p xtask --lib -- --ignored --nocapture pipe_left_under_starts`"]
+fn the_pipe_left_under_starts_as_round_5_first_left_it() {
+    pipe_under_starts(true);
+}
+
+#[test]
+#[ignore = "a reproduction, by hand: `cargo test -p xtask --lib -- --ignored --nocapture pipe_left_under_starts`"]
+fn the_pipe_left_under_starts_as_it_is_left_now() {
+    pipe_under_starts(false);
+}
+
+/// The test as the gate runs it, in a process of its own, a hundred times beside
+/// [`BareStarts`] in this one: no start of this process can hold what the other made.
+#[test]
+#[ignore = "a stress, by hand: `cargo test -p xtask --lib -- --ignored --nocapture pipe_left_alone_under_starts`"]
+fn the_pipe_left_alone_under_starts() {
+    let _starts = BareStarts::begin();
+    for _ in 0..100 {
+        the_pipe_left_reaches_its_end_once_no_process_holds_it_and_not_before();
+    }
 }
