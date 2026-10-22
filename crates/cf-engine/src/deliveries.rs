@@ -21,10 +21,6 @@ use crate::runtime::returning;
 use crate::seams::EngineError;
 use crate::shown::{after_words, Shown};
 
-/// How many of a participant's newest messages are read to tell whether a
-/// failed turn was told already.
-const TOLD_LOOKBACK: i64 = 50;
-
 /// The one message on its way into a window.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Delivering {
@@ -67,6 +63,14 @@ pub(crate) struct DeliveryPart {
     /// ([`Dispatcher::owed`]). Each launch says it anew, and none that opened a
     /// window leaves it as it was.
     pub(crate) prelude: Option<Prelude>,
+    /// The failed turn whose note is settled: the message the window had last
+    /// been given, and to whom the failure was told or found told
+    /// ([`Dispatcher::untold_failure`]). The ledger says the same after a restart.
+    pub(crate) failure_settled: Option<(i64, String)>,
+    /// The words of the failure last told of the window, while no turn of it has
+    /// ended with an answer since: the same words are not told again, once an
+    /// outage however many turns it fails (the chief's decision of 2026-10-22, T-245).
+    pub(crate) failure_told: Option<String>,
 }
 
 impl Dispatcher {
@@ -317,10 +321,13 @@ impl Dispatcher {
             return Ok(());
         }
         let requester = &thread.task.requester;
-        if self.told_of_failure(project, participant, requester)? {
+        let Some(given) = self.untold_failure(project, participant, record, requester)? else {
+            return Ok(());
+        };
+        let because = self.why_it_failed(participant, record, observed).await;
+        if self.forgotten(record) || !self.settle_told(record, given, requester, &because) {
             return Ok(());
         }
-        let because = self.why_it_failed(participant, record, observed).await;
         // As the task is once the window was looked at.
         let task = self
             .seams
@@ -356,11 +363,11 @@ impl Dispatcher {
         record: &Rc<Record>,
         observed: &Observed,
     ) -> Result<(), EngineError> {
-        if self.told_of_failure(project, participant, "human")? {
+        let Some(given) = self.untold_failure(project, participant, record, "human")? else {
             return Ok(());
-        }
+        };
         let because = self.why_it_failed(participant, record, observed).await;
-        if self.forgotten(record) {
+        if self.forgotten(record) || !self.settle_told(record, given, "human", &because) {
             return Ok(());
         }
         self.seams.ledger.borrow_mut().note(
@@ -376,35 +383,71 @@ impl Dispatcher {
         Ok(())
     }
 
-    /// Whether `recipient` was told of a failed turn of `participant`'s since the
-    /// window was last given a message: a failed turn stays the window's last
-    /// word until the next message, look after look and across a restart, and is
-    /// told once. Each such note, and a task's failure, says the harness reported
-    /// a failure. One nobody can be told of counts as told.
-    fn told_of_failure(
+    /// The message the window was last given, where its failed turn is still to be
+    /// told `recipient`; none where it is told. A failed turn stays the window's
+    /// last word until its next message arrives (a message still on its way is
+    /// not given yet), look after look, and is told once: the record keeps which
+    /// message's turn is settled, and after a restart the ledger says so, by a
+    /// note to the recipient since that message that says the harness reported a
+    /// failure, as each such note and a task's failure does. Both are read by id,
+    /// whatever the number of messages since. One nobody can be told of counts as
+    /// told.
+    fn untold_failure(
         &self,
         project: &ProjectView,
         participant: &ParticipantView,
+        record: &Record,
         recipient: &str,
-    ) -> Result<bool, EngineError> {
+    ) -> Result<Option<i64>, EngineError> {
         let Some(to) = project.participants.iter().find(|p| p.handle == recipient) else {
-            return Ok(true);
+            return Ok(None);
         };
-        let ledger = self.seams.ledger.borrow();
-        let given = ledger
-            .inbox(participant.id, TOLD_LOOKBACK)?
-            .into_iter()
-            .filter(|message| matches!(message.state.as_str(), "delivering" | "delivered" | "read"))
-            .map(|message| message.id)
-            .max()
+        let given = self
+            .seams
+            .ledger
+            .borrow()
+            .last_given(participant.id)?
             .unwrap_or(0);
+        let settled = (given, recipient.to_owned());
+        if record.delivery.borrow().failure_settled.as_ref() == Some(&settled) {
+            return Ok(None);
+        }
         let said = format!("@{}'s harness reported a failure", participant.handle);
-        Ok(ledger.inbox(to.id, TOLD_LOOKBACK)?.iter().any(|message| {
-            message.id > given
-                && message.kind == "note"
-                && message.sender.is_none()
-                && message.body.contains(&said)
-        }))
+        let told = self.seams.ledger.borrow().note_since(to.id, given, &said)?;
+        if told.is_some() {
+            record.delivery.borrow_mut().failure_settled = Some(settled);
+            return Ok(None);
+        }
+        Ok(Some(given))
+    }
+
+    /// The failed turn of the window, after the message `given`, settled as told
+    /// `recipient` because of `because`. Says whether its note is to be written:
+    /// not where the failure last told of the window said the same, and no turn
+    /// of it has ended with an answer since (an outage, its wake-ups failing as
+    /// the first did).
+    fn settle_told(&self, record: &Record, given: i64, recipient: &str, because: &str) -> bool {
+        let mut part = record.delivery.borrow_mut();
+        part.failure_settled = Some((given, recipient.to_owned()));
+        if part.failure_told.as_deref() == Some(because) {
+            return false;
+        }
+        part.failure_told = Some(because.to_owned());
+        true
+    }
+
+    /// A look whose turn ended with the window's answer: the failure last told of
+    /// it is over, and the same words are news again.
+    pub(crate) fn answered_again(&self, record: &Record, observed: &Observed) {
+        let answered = observed.settled
+            && !observed.failed
+            && observed
+                .items()
+                .last()
+                .is_some_and(|item| item.role == Role::Assistant && item.complete);
+        if answered {
+            record.delivery.borrow_mut().failure_told = None;
+        }
     }
 
     /// Why a member's turn failed, as its note says it: in its harness's own
@@ -419,8 +462,12 @@ impl Dispatcher {
         observed: &Observed,
     ) -> String {
         let failed = format!("@{}'s harness reported a failure", participant.handle);
-        if let Some(words) = observed.failure() {
-            return after_words(&failed, words);
+        // Words with nothing of a word in them ("…") say nothing: the screen may.
+        if let Some(said) = observed
+            .failure()
+            .and_then(|words| after_words(&failed, words))
+        {
+            return said;
         }
         let pane = record.window.borrow().pane.clone();
         let shown = match pane {

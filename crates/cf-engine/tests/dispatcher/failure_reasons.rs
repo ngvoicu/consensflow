@@ -42,6 +42,8 @@ fn a_failed_turn_says_what_its_harness_said_of_it() {
         &context,
         Some("Selected model is at capacity. Please try a different model."),
     );
+    // The next look finds the failure told: it is not told again.
+    context.pass().unwrap();
 
     assert_eq!(tiers.task(1).task.state, "failed");
     assert_eq!(
@@ -330,6 +332,24 @@ fn a_chiefs_failed_turn_tells_the_human_once() {
         failures,
         [format!(
             "The chief's turn failed: @{chief}'s harness reported a failure; it said: \"API Error: 529 Overloaded\"."
+        )]
+    );
+}
+
+#[test]
+fn harness_words_with_nothing_of_a_word_leave_the_reason_to_the_screen() {
+    let context = Context::new();
+    let tiers = working(&context);
+    context
+        .host
+        .set_snapshot(json!({ "tail": ["Error: the agent stopped"] }));
+    fails(&context, Some("…"));
+
+    assert_eq!(
+        told(&tiers),
+        [failed(
+            &tiers,
+            "@zeus's harness reported a failure; its screen ended with: \"Error: the agent stopped\""
         )]
     );
 }

@@ -87,6 +87,7 @@ mod tasks;
 mod testers;
 mod the_dispatcher;
 mod throws_early;
+mod told_once;
 mod trace_untold;
 mod traces;
 mod turns_at_seams;

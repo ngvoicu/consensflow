@@ -184,13 +184,11 @@ impl Shown {
 /// name: an API's or an SDK's error names the key it lacks ("No API key found")
 /// and never holds one in prose, and the login class is the failure whose fix
 /// the note must say (the chief's decision of 2026-10-21, T-135). A screen can
-/// echo anything, and keeps the stricter rule ([`Shown::after_with`]).
-pub(crate) fn after_words(because: &str, words: &str) -> String {
+/// echo anything, and keeps the stricter rule ([`Shown::after_with`]). None where
+/// no line of the words has a letter or a digit.
+pub(crate) fn after_words(because: &str, words: &str) -> Option<String> {
     let lines: Vec<String> = words.lines().map(str::to_owned).collect();
-    match Quote::of(&lines, Keep::First) {
-        None => because.to_owned(),
-        Some(quote) => format!("{because}{}", quote.after("; it said")),
-    }
+    Quote::of(&lines, Keep::First).map(|quote| format!("{because}{}", quote.after("; it said")))
 }
 
 fn plural(count: usize) -> &'static str {

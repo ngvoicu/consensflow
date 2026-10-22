@@ -141,6 +141,16 @@ impl FakeHost {
         self.killed.borrow().clone()
     }
 
+    /// How many times a window was asked for its screen's last lines (a
+    /// `pane.snapshot` that asks for a tail).
+    pub fn tails_asked(&self) -> usize {
+        self.requests
+            .borrow()
+            .iter()
+            .filter(|(op, body)| op == "pane.snapshot" && body.get("tail").is_some())
+            .count()
+    }
+
     /// What was typed into panes, in order: the body of each `pane.input`.
     pub fn inputs(&self) -> Vec<Value> {
         self.requests

@@ -1036,6 +1036,8 @@ impl Dispatcher {
         if record.window.borrow().retiring {
             return Ok(());
         }
+        // A turn that ended with the window's answer ends the outage its last failure told of.
+        self.answered_again(record, &observed);
         if participant.role != "chief" {
             returning(self.settle_stop(project, participant, record, &observed, starting)).await?;
             if self.forgotten(record) {

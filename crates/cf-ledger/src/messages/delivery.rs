@@ -140,6 +140,33 @@ pub(crate) fn last_pasted(
     .next())
 }
 
+/// The newest message a participant's window was given and its record showed
+/// (`delivered`, or `read` since): none where it was given none. One still on
+/// its way (`delivering`) is not given yet.
+pub(crate) fn last_given(store: &Store, participant_id: i64) -> Result<Option<i64>, LedgerError> {
+    Ok(store.db.query_row(
+        "SELECT MAX(id) FROM message WHERE recipient_id = ? AND state IN ('delivered', 'read')",
+        [participant_id],
+        |row| row.get(0),
+    )?)
+}
+
+/// The newest note the engine wrote a participant after the message `after`
+/// whose words hold `words`, of whatever state.
+pub(crate) fn note_since(
+    store: &Store,
+    recipient_id: i64,
+    after: i64,
+    words: &str,
+) -> Result<Option<i64>, LedgerError> {
+    Ok(store.db.query_row(
+        "SELECT MAX(id) FROM message WHERE recipient_id = ? AND id > ? AND kind = 'note'
+       AND sender_id IS NULL AND instr(body, ?) > 0",
+        params![recipient_id, after, words],
+        |row| row.get(0),
+    )?)
+}
+
 /// The first task message a participant's window received about a task that
 /// was pasted on its own (the brief, most often), with what its paste
 /// carried. A window that starts afresh on the task begins from it.

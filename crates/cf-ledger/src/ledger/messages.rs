@@ -176,6 +176,23 @@ impl Ledger {
         messages::last_pasted(&self.store, participant_id, task_id)
     }
 
+    /// The id of the newest message a participant's window was given and its
+    /// record showed (`delivered` or `read`).
+    pub fn last_given(&self, participant_id: i64) -> Result<Option<i64>, LedgerError> {
+        messages::last_given(&self.store, participant_id)
+    }
+
+    /// The id of the newest note the engine wrote `recipient_id` after the
+    /// message `after` whose words hold `words`.
+    pub fn note_since(
+        &self,
+        recipient_id: i64,
+        after: i64,
+        words: &str,
+    ) -> Result<Option<i64>, LedgerError> {
+        messages::note_since(&self.store, recipient_id, after, words)
+    }
+
     /// The first task message a participant's window received about a task on
     /// its own, with what its paste carried.
     pub fn first_received(
