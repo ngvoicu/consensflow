@@ -159,8 +159,10 @@ runs = ["engine-slow-records"]
 file = "crates/cf-engine/src/arrival.rs"
 find = '''
             delivering.free_since = None;
+            delivering.turned = true;
             return Rest {'''
 replace = '''
+            delivering.turned = true;
             return Rest {'''
 
 [[plant]]
@@ -202,8 +204,10 @@ runs = ["engine-slow-records"]
 file = "crates/cf-engine/src/arrival.rs"
 find = '''
             delivering.rested_since = None;
+            delivering.turned = true;
             Rest {'''
 replace = '''
+            delivering.turned = true;
             Rest {'''
 
 [[plant]]
@@ -486,9 +490,11 @@ replace = "        let free = Some(since);"
 file = "crates/cf-engine/src/arrival.rs"
 find = '''
             delivering.free_since = None;
+            delivering.turned = true;
             return Rest {'''
 replace = '''
             delivering.free_since = Some(now);
+            delivering.turned = true;
             return Rest {'''
 
 [[plant]]
@@ -560,6 +566,7 @@ find = '''
         let Rest {
             rested,
             turned,
+            read_again,
             free,
         } = self.rested(record, observed, self.held(record));
         let at_rest = observed.settled && observed.waiting.is_none();
@@ -569,6 +576,7 @@ replace = '''
         let Rest {
             rested,
             turned,
+            read_again,
             free,
         } = self.rested(record, observed, held);
         let at_rest = observed.settled && observed.waiting.is_none();
@@ -580,9 +588,11 @@ find = '''
         if held {
             delivering.rested_since = None;
             delivering.free_since = None;
+            delivering.turned = true;
             return Rest {
                 rested: 0,
                 turned: true,
+                read_again: false,
                 free: None,
             };
         }
@@ -591,14 +601,17 @@ find = '''
             let since = *delivering.rested_since.get_or_insert(now);
             Rest {
                 rested: now - since,
-                turned: since != delivering.since,
+                turned: delivering.turned,
+                read_again: since != delivering.since,
                 free,
             }
         } else {
             delivering.rested_since = None;
+            delivering.turned = true;
             Rest {
                 rested: 0,
                 turned: true,
+                read_again: false,
                 free,
             }
         }'''
@@ -616,15 +629,18 @@ replace = '''
             let since = *delivering.rested_since.get_or_insert(now);
             Rest {
                 rested: now - since,
-                turned: since != delivering.since,
+                turned: delivering.turned,
+                read_again: since != delivering.since,
                 free: delivering.rest_after_hold,
             }
         } else {
             delivering.rested_since = None;
             delivering.rested_last = None;
+            delivering.turned = true;
             Rest {
                 rested: 0,
                 turned: true,
+                read_again: false,
                 free: delivering.rest_after_hold,
             }
         }'''
@@ -678,8 +694,10 @@ runs = ["engine-schedules"]
 file = "crates/cf-engine/src/arrival.rs"
 find = '''
             delivering.free_since = None;
+            delivering.turned = true;
             return Rest {'''
 replace = '''
+            delivering.turned = true;
             return Rest {'''
 
 [[plant]]
@@ -691,8 +709,10 @@ runs = ["engine-slow-records"]
 file = "crates/cf-engine/src/arrival.rs"
 find = '''
             delivering.free_since = None;
+            delivering.turned = true;
             return Rest {'''
 replace = '''
+            delivering.turned = true;
             return Rest {'''
 
 [[plant]]

@@ -23,7 +23,8 @@
 //! and the paste a window went with, which its harness's record may show it took
 //! (`window_went_with_a_paste`), and a header quoted in a window's words, which is
 //! no paste (`quoted_headers`), and the shapes a harness's record keeps a paste in
-//! (`paste_shapes`).
+//! (`paste_shapes`), and a read of a window that fails or comes too late, which is
+//! unknown, and a pass that leaves a window whose read hangs to it (`unknown_looks`).
 
 // The tests' own scaffolding: a failure in it is the test's.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
@@ -89,6 +90,7 @@ mod traces;
 mod turns_at_seams;
 mod undeliverable;
 mod unfit;
+mod unknown_looks;
 mod unreadable_agents;
 mod unsent;
 mod unstarted;

@@ -22,11 +22,13 @@
 //! where JavaScript called it, and what JavaScript did not await goes on
 //! apart. No record and no ledger borrow is held across a wait.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::future::Future;
+use std::pin::pin;
 use std::rc::Rc;
 use std::task::{Context, Poll, Waker};
+use std::time::Duration;
 
 use cf_base::time::iso;
 use cf_harness::contract::{Observed, Pane};
@@ -36,6 +38,8 @@ use cf_ledger::{
 };
 use cf_proto::panes::PaneExit;
 use cf_proto::trace::{TraceLine, Traced, WindowEvent};
+use futures_util::future::{select, Either};
+use futures_util::FutureExt;
 
 use crate::background::quote;
 use crate::chief_switch::SwitchTo;
@@ -58,6 +62,10 @@ pub enum SwitchWhen {
 }
 
 /// A closed project starts and changes no work, whatever asks: it is resumed first.
+/// How long a pass waits for its steps (`Dispatcher::pass`): a step answers in
+/// well under a second, and the slowest pass in a day of a busy board took three.
+pub const STEP_WAIT: Duration = Duration::from_millis(5_000);
+
 pub fn require_open(project: &ProjectView) -> Result<(), EngineError> {
     if project.state == "open" {
         Ok(())
@@ -584,6 +592,11 @@ impl Dispatcher {
     /// tasks it gives out is read again, so their sessions open this pass.
     /// It answers at the first step that fails, the others going on. The
     /// tasks whose windows are gone are told to their requesters together.
+    /// It waits [`STEP_WAIT`] at most: a step still waiting on its window then
+    /// (a pane host or a record that does not answer) goes on apart, holding
+    /// its participant, so the passes after this one step the other windows
+    /// and leave that one be until it ends; a failure it ends with is written
+    /// down.
     pub async fn pass(self: &Rc<Self>) -> Result<(), EngineError> {
         let _burst = self.stalls.begin_burst();
         self.resume_held()?;
@@ -597,6 +610,8 @@ impl Dispatcher {
             }
         }
         let mut steps: Vec<Begun<Result<(), EngineError>>> = Vec::new();
+        // Whether the pass went on without the steps still running.
+        let left = Rc::new(Cell::new(false));
         for project in projects {
             // One with no window and nothing on its way or in its hands is not stepped.
             let working = self.seams.ledger.borrow().with_work(project.id)?;
@@ -613,13 +628,32 @@ impl Dispatcher {
                 }
                 let record = self.record_of(participant.id);
                 let (this, at, who) = (Rc::clone(self), Rc::clone(&project), participant.clone());
+                let left = Rc::clone(&left);
                 // Boxed where it is made: a step holds every wait below it, and
                 // moved by value through the hold it filled the stack.
-                let step = Box::pin(async move { this.step(&at, &who).await });
+                let step = Box::pin(async move {
+                    let stepped = this.step(&at, &who).await;
+                    if let (Err(cause), true) = (&stepped, left.get()) {
+                        this.write_down(cause);
+                    }
+                    stepped
+                });
                 steps.extend(self.try_exclusive(&record, step).await);
             }
         }
-        all(steps).await?;
+        let mut stepped = pin!(all(steps));
+        // Most passes end at once: the wait is armed only for one that does not.
+        if let Some(stepped) = (&mut stepped).now_or_never() {
+            stepped?;
+            return Ok(());
+        }
+        let waited = self.seams.time.sleep(STEP_WAIT);
+        match select(stepped, waited).await {
+            Either::Left((stepped, _)) => {
+                stepped?;
+            }
+            Either::Right(((), _)) => left.set(true),
+        }
         Ok(())
     }
 
@@ -965,6 +999,8 @@ impl Dispatcher {
             Ok(observed) => observed,
             Err(reason) => {
                 if !self.forgotten(record) {
+                    // A look that failed says nothing of what is on its way in (`arrival`).
+                    self.unknown(record);
                     self.set_activity(record, Activity::because(ActivityState::Unknown, reason))?;
                 }
                 return Ok(());

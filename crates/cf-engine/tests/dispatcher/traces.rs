@@ -185,6 +185,10 @@ const HOLD_THEN_GOES_ON: &str = "the note that T-1 is held says the member may b
 /// has been told to its requester in a note not yet given.
 const STALL_LEFT: &str = "the human reassigns T-1 while the note that T-1 is paused is still queued for the chief: the note is withdrawn (`T-1 was taken back`), where Node pastes it into the chief's window";
 
+/// What the engine does before a paste its record never showed goes again: the
+/// window is read once more (`arrival`, T-269, 2026-10-22).
+const READ_ONCE_MORE: &str = "before the paste its record never showed goes again, the window is read once more: the pane host is asked what the window does now (`pane.snapshot`) and the record looked at again (`observe`), where Node pasted it again on the look that found it overdue";
+
 /// The tests the engine departs from Node's trace in on purpose, each with
 /// what the engine does that Node does not. Node never withdraws a note that
 /// told a requester a task was paused, so the notes the engine withdraws when
@@ -356,6 +360,10 @@ const DEPARTED: &[(&str, &str)] = &[
         "closes a window only once the paste its harness is taking is over, and that message goes again",
         "the human closes the project as the chief's harness takes a paste, which its record shows: the window closes once the harness has taken it, and the paste is confirmed (the name is Node's, which sent it again), where Node gave it back to its queue",
     ),
+    ("retries a delivery whose arrival never shows in the harness record", READ_ONCE_MORE),
+    ("pastes again, once its arrival window passes, when one more Enter did not bring it", READ_ONCE_MORE),
+    ("tries an uncertain handover again once its arrival window passes with no sign of it", READ_ONCE_MORE),
+    ("waits on a message a harness queued itself, and re-sends only a paste the record never showed", READ_ONCE_MORE),
 ];
 
 /// The variable that asks for the departures to be recorded again, which `npm

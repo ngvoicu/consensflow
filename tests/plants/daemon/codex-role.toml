@@ -1402,8 +1402,8 @@ file = "crates/cf-engine/src/arrival.rs"
 find = '''        if delivering.chief {
             return Ok(());
         }
-        record.delivery.borrow_mut().delivering = None;'''
-replace = '''        record.delivery.borrow_mut().delivering = None;'''
+        if !self.read_once_more('''
+replace = '''        if !self.read_once_more('''
 
 [[plant]]
 name = "codex role: what goes into a chief's window after its launch's role is not its first message"

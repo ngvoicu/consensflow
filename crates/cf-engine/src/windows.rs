@@ -443,6 +443,7 @@ impl Dispatcher {
             chief: participant.role == "chief",
             queued: false,
             free_since: None,
+            turned: false,
             entered_again: false,
         });
         // What fails with a launch that does not come up: its first message, or

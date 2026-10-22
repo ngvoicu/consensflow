@@ -85,6 +85,8 @@ pub struct FakeAgent {
     /// asked), it holds nothing (`Some(false)`: Codex's thread before its first
     /// turn), or the record cannot tell (none).
     pub resumable: Option<bool>,
+    /// Why its record cannot be read now: each look reads none (`Reading::Unknown`).
+    pub unreadable: Option<String>,
 }
 
 /// What a test makes `ready` answer, where it gives the adapter one.
@@ -578,6 +580,7 @@ impl Asked {
             took_back: false,
             cannot_tell_a_cut: false,
             resumable: Some(true),
+            unreadable: None,
         };
         if let Some(message) = launch
             .message

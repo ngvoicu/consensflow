@@ -34,6 +34,9 @@ pub(crate) struct Delivering {
     /// harness did not hold it then, else the first look that found it held no longer
     /// after the last that did. None while the harness holds it (`arrival`).
     pub(crate) free_since: Option<i64>,
+    /// A look found the window in a turn since the hand-over, or its harness holding
+    /// it (`arrival`): the rest counted is since then.
+    pub(crate) turned: bool,
     /// It is a launch's first message.
     pub(crate) launch: bool,
     /// It is the chief's first message, a handoff most often, or what a launch put
@@ -151,6 +154,7 @@ impl Dispatcher {
             since,
             rested_since: free,
             free_since: free,
+            turned: free.is_none(),
             launch: false,
             // What a chief's launch put ahead of its queue is its first messages.
             chief: self.begins(record, message.id),

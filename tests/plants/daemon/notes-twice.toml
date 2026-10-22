@@ -106,7 +106,7 @@ runs = ["engine-slow-records"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/arrival.rs"
-find = "                turned: since != delivering.since,"
+find = "                turned: delivering.turned,"
 replace = "                turned: false,"
 
 [[plant]]

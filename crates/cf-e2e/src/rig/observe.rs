@@ -26,6 +26,21 @@ impl Rig {
         self.shared.paste_caught()
     }
 
+    /// The pane host stalls at the daemon's next paste that holds `words`, for
+    /// `lasting`: that paste and every frame between the daemon and the host after it,
+    /// both ways, wait in the rig, and go on in the order they came once it has lasted,
+    /// as with a host that answered nothing for that long and gave its window nothing
+    /// (the Mac under a load of 100, 2026-10-22). The daemon's requests meanwhile meet
+    /// their deadlines. A stall set before and not yet begun is replaced.
+    pub fn stall_host_at_paste(&self, words: &str, lasting: Duration) {
+        self.shared.stall_at_paste(words, lasting);
+    }
+
+    /// Whether the stall set out held a paste and is over.
+    pub fn stall_over(&self) -> bool {
+        self.shared.stall_over()
+    }
+
     /// Everything the window `pane` printed so far, as the text on its screen:
     /// control sequences stripped, and Windows' console host's cursor moves left
     /// as the blanks and the line breaks they stand for, so that text reads the

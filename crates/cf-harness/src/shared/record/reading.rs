@@ -19,10 +19,26 @@ pub enum Reading {
     Known(Record),
 }
 
+/// How the reading of a record that is not there begins ([`Reading::missing`]).
+const MISSING: &str = "unreadable: no ";
+
 impl Reading {
     /// `unreadable`: a failure to read, said after `unreadable: `.
     pub(crate) fn unreadable(reason: &str) -> Self {
         Reading::Unknown(format!("unreadable: {reason}"))
+    }
+
+    /// The reading of a record that is not there (`no <what>`): a conversation its
+    /// harness has written nothing of yet. It is unknown, but it was read.
+    pub(crate) fn missing(what: &str) -> Self {
+        Reading::Unknown(format!("{MISSING}{what}"))
+    }
+
+    /// Whether the look could not read the record at all: it failed, or never
+    /// answered, so what the record holds is not known. A record that is not
+    /// there ([`Reading::missing`]) was read: it holds nothing yet.
+    pub fn read_failed(&self) -> bool {
+        matches!(self, Reading::Unknown(reason) if !reason.starts_with(MISSING))
     }
 }
 
@@ -244,6 +260,20 @@ mod tests {
             serde_json::to_string(&Reading::unreadable("no codex rollout for s")).unwrap(),
             r#"{"unknown":true,"reason":"unreadable: no codex rollout for s"}"#
         );
+    }
+
+    #[test]
+    fn a_record_that_is_not_there_was_read_and_one_that_could_not_be_read_failed() {
+        let missing = Reading::missing("claude transcript for s");
+        assert_eq!(
+            serde_json::to_string(&missing).unwrap(),
+            r#"{"unknown":true,"reason":"unreadable: no claude transcript for s"}"#,
+            "said as it was before it had a name of its own"
+        );
+        assert!(!missing.read_failed());
+        assert!(Reading::unreadable("the records thread ended").read_failed());
+        assert!(Reading::Unknown("missing session id".to_owned()).read_failed());
+        assert!(!Reading::Known(Record::new()).read_failed());
     }
 
     #[test]

@@ -200,7 +200,7 @@ impl<P: Parser + Answer> Look for TranscriptReader<P> {
             // A thread with no transcript yet is unknown: missing history alone proves nothing.
             Ok(None) => {
                 self.answer = None;
-                Arc::new(Reading::unreadable(&format!("no {}", self.missing)))
+                Arc::new(Reading::missing(&self.missing))
             }
             Ok(Some(read)) => {
                 if let (false, Some(answer)) = (read.changed, &self.answer) {

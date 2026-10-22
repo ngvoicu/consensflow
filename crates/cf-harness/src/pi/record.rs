@@ -91,10 +91,7 @@ impl Reader {
             Some(read) => read.state.result(&self.env, options, now_ms, &read.file),
             None => {
                 if !evidence::working(&self.session, &self.env, options)? {
-                    return Ok(Reading::unreadable(&format!(
-                        "no pi session {}",
-                        self.session
-                    )));
+                    return Ok(Reading::missing(&format!("pi session {}", self.session)));
                 }
                 let mut working = Record::new();
                 working.in_flight = true;

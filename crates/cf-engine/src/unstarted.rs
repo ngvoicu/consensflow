@@ -164,6 +164,7 @@ impl Dispatcher {
             chief: participant.role == "chief",
             queued: false,
             free_since: None,
+            turned: false,
             entered_again: false,
         };
         if participant.role == "chief" {

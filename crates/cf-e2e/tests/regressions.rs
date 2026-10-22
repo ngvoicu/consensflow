@@ -40,6 +40,8 @@ mod a_command_that_never_exits_held_a_workers_result;
 mod a_compact_typed_into_an_idle_chief_held_a_workers_result;
 #[path = "regressions/a_follow_up_could_not_be_queued_behind_its_windows_own_work.rs"]
 mod a_follow_up_could_not_be_queued_behind_its_windows_own_work;
+#[path = "regressions/a_message_the_chief_took_was_typed_in_again_under_load.rs"]
+mod a_message_the_chief_took_was_typed_in_again_under_load;
 #[path = "regressions/a_pause_a_hung_worker_ignored_stranded_its_task.rs"]
 mod a_pause_a_hung_worker_ignored_stranded_its_task;
 #[path = "regressions/a_result_delivered_twice_to_a_devin_chief.rs"]
