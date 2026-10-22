@@ -652,9 +652,9 @@ fn a_chief_opened_again_at_rest_whose_prompt_is_drawn_otherwise_is_handed_its_re
 fn a_chief_opened_again_at_rest_whose_screen_goes_unread_while_it_asks_is_handed_nothing_till_it_is_read(
 ) -> Outcome {
     // Calliope's re-check of round 5 (T-299): the host shows none of the chief's
-    // screens for 31 s while it asks, and a worker's result waits for it. Once the
+    // screens for over 30 s while it asks, and a worker's result waits for it. Once the
     // host showed them again, the paste went in, and its Enter chose "No, exit".
-    chief_opened_again_at_rest_and_asking(Shown::UnreadFor31Seconds)
+    chief_opened_again_at_rest_and_asking(Shown::UnreadTillTold)
 }
 
 /// How the chief's window is shown while it asks.
@@ -664,9 +664,9 @@ enum Shown {
     AsDrawn,
     /// Its prompt drawn otherwise than the reader knows.
     PlainPrompt,
-    /// None of its screens for 31 s once it asks, longer than ConsensFlow waits
-    /// before it tells the human.
-    UnreadFor31Seconds,
+    /// None of its screens once it asks, until the human is told so, which is after
+    /// ConsensFlow waited 30 s.
+    UnreadTillTold,
 }
 
 /// The chief opened again at rest after the app's restart asks of a folder outside the
@@ -734,30 +734,34 @@ fn chief_opened_again_at_rest_and_asking(shown: Shown) -> Outcome {
         .last()
         .cloned()
         .ok_or("no chief window")?;
-    let unread = shown == Shown::UnreadFor31Seconds;
+    let unread = shown == Shown::UnreadTillTold;
     rig.wait_for("the chief's window to be held as asking", secs(30), || {
         Ok(project.lane("chief")?["activity"]["reason"]
             == "the window asks whether to trust its folder")
     })?;
-    let refused = std::time::Instant::now();
     rig.refuse_snapshots(unread);
-    // The worker's result comes while the chief's window asks, and waits.
-    let waits = rig.wait_for("T-1's result for the chief", secs(90), || {
-        Ok(result_for(&project, 1)?.is_some())
-    });
-    if unread {
-        sleep(Duration::from_secs(31).saturating_sub(refused.elapsed()));
-    }
-    let notes = notes_of(&project, &root);
+    // The worker's result comes while the chief's window asks, and waits; where its
+    // screen goes unread, until the human is told so, past the 30 s ConsensFlow waits.
+    let waits = rig
+        .wait_for("T-1's result for the chief", secs(90), || {
+            Ok(result_for(&project, 1)?.is_some())
+        })
+        .and_then(|()| {
+            if !unread {
+                return Ok(());
+            }
+            rig.wait_for(
+                "the human to be told the chief's screen cannot be read",
+                secs(60),
+                || {
+                    Ok(notes_of(&project, &root)?
+                        .iter()
+                        .any(|note| note.contains(UNREAD)))
+                },
+            )
+        });
     rig.refuse_snapshots(false);
     waits?;
-    if unread {
-        let notes = notes?;
-        assert!(
-            notes.iter().any(|note| note.contains(UNREAD)),
-            "the human was not told the chief's screen could not be read: {notes:?}"
-        );
-    }
     // Long enough for a window whose screen can be read again to be drawn and ready.
     sleep(Duration::from_secs(if unread { 20 } else { 6 }));
     let gone = rig
@@ -1224,12 +1228,34 @@ fn a_question_whose_cursor_is_drawn_otherwise_is_left_to_the_human_who_is_told()
 /// The note that the window's screen could not be read.
 const UNREAD: &str = "could not be read";
 
+/// When the note that a window's screen could not be read was written, in
+/// milliseconds since the epoch.
+fn unread_note_written(project: &Project) -> cf_e2e::Result<Option<i64>> {
+    Ok(project
+        .inbox("human")?
+        .iter()
+        .find(|message| {
+            message["body"]
+                .as_str()
+                .is_some_and(|body| body.contains(UNREAD))
+        })
+        .and_then(|message| {
+            message["createdAt"]
+                .as_str()?
+                .parse::<jiff::Timestamp>()
+                .ok()
+        })
+        .map(jiff::Timestamp::as_millisecond))
+}
+
 #[test]
 fn a_window_whose_screen_the_host_never_shows_while_it_asks_is_told_of_and_held_till_it_is_read(
 ) -> Outcome {
     // Calliope's check of round 4 (T-231): a window that asked, whose host then showed
     // none of its screens, was held for good, and nobody was told. The human is told
-    // now, and it is held still: nothing may go into a question no look has read.
+    // now, and it is held still: nothing may go into a question no look has read. The
+    // page is told the board moved as the note is written (Calliope's last re-check,
+    // T-325): on a board where nothing else moves, it showed the note late.
     let rig = Rig::start(asking())?;
     let root = rig.workspace().to_path_buf();
     git_init(&root)?;
@@ -1257,9 +1283,18 @@ fn a_window_whose_screen_the_host_never_shows_while_it_asks_is_told_of_and_held_
     );
     sleep(Duration::from_secs(2));
     let lane = project.lane("worker");
+    let written = unread_note_written(&project);
+    let moves = rig.board_moves();
     rig.refuse_snapshots(false);
     told?;
     let lane = lane?;
+    let written = written?.ok_or("the note has no time it was written")?;
+    assert!(
+        moves
+            .iter()
+            .any(|&moved| (written..written + 1_000).contains(&moved)),
+        "the page was not told the board moved within 1 s of the note written at {written}: {moves:?}"
+    );
     assert_eq!(
         lane["activity"]["reason"], "the window asks whether to trust its folder",
         "{lane}"

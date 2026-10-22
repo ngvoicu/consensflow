@@ -97,6 +97,9 @@ pub(super) struct Seen {
     pub kills: Vec<Value>,
     /// Every key the daemon pressed into a window, in order.
     pub presses: Vec<Press>,
+    /// When the daemon told the page the board moved (`state.changed`, its reason
+    /// `core`), in milliseconds since the epoch, in order.
+    pub moves: Vec<i64>,
     /// Everything each pane printed, by the pane's id.
     pub printed: HashMap<String, Vec<u8>>,
     /// The body of each `pane.exit` the pane host told.
@@ -229,6 +232,12 @@ impl Shared {
             }
             if frame["kind"] == "req" && frame["op"] == "pane.kill" {
                 seen.kills.push(frame["body"].clone());
+            }
+            if frame["kind"] == "evt"
+                && frame["op"] == "state.changed"
+                && frame["body"]["reason"] == "core"
+            {
+                seen.moves.push(jiff::Timestamp::now().as_millisecond());
             }
             if frame["kind"] == "req" && frame["op"] == "pane.input" {
                 if let Some(bytes) = bytes_of(&frame["body"]["bytes"]) {
@@ -411,6 +420,29 @@ mod tests {
         let seen = shared.seen();
         assert_eq!(seen.daemon, 1);
         assert_eq!(seen.opened, [json!({"id": "p1-chief", "argv": ["x"]})]);
+    }
+
+    #[test]
+    fn a_word_to_the_page_that_the_board_moved_is_kept_with_its_time_and_passed_on() {
+        let shared = Shared::default();
+        let (host, host_lines, daemon, _daemon_lines) = sinks();
+        let before = jiff::Timestamp::now().as_millisecond();
+        let moved =
+            r#"{"v":1,"id":"e-1","kind":"evt","op":"state.changed","body":{"reason":"core"}}"#;
+        shared.route_daemon(moved, &host, &daemon);
+        // A window's work written is no move of the board.
+        let written = r#"{"v":1,"id":"e-2","kind":"evt","op":"state.changed","body":{"reason":"transcript"}}"#;
+        shared.route_daemon(written, &host, &daemon);
+        let moves = shared.seen().moves.clone();
+        assert!(moves.len() == 1 && moves[0] >= before, "{moves:?}");
+        assert_eq!(
+            host_lines.recv_timeout(Duration::from_secs(10)).unwrap(),
+            moved
+        );
+        assert_eq!(
+            host_lines.recv_timeout(Duration::from_secs(10)).unwrap(),
+            written
+        );
     }
 
     #[test]

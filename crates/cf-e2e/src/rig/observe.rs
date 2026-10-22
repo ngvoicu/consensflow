@@ -27,6 +27,12 @@ impl Rig {
         self.shared.refuse_snapshots(refused);
     }
 
+    /// When the daemon told the page the board moved, in milliseconds since the
+    /// epoch, oldest first: what the page reads the board again on.
+    pub fn board_moves(&self) -> Vec<i64> {
+        self.shared.seen().moves.clone()
+    }
+
     /// Whether the paste the case set out to catch was caught.
     pub fn paste_caught(&self) -> bool {
         self.shared.paste_caught()

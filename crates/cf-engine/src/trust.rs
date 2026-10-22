@@ -196,7 +196,8 @@ impl Dispatcher {
         let mut gone = 0;
         let mut asking = 0;
         // Since when the host has shown no screen of a window that asked, and whether
-        // the human was told so.
+        // the human was told so: once a watch, so a second time its screen goes unread
+        // in the same watch is told of to nobody.
         let mut unread_since = None;
         let mut told_unread = false;
         // Whether the question was read with its choice placed: only that is a question
@@ -239,6 +240,10 @@ impl Dispatcher {
                         }
                         _ => None,
                     };
+                    // A window inside the project's folder whose conversation quotes the
+                    // dialog, its cursor and all, before its prompt is read as asking
+                    // and given a key toward a yes, which goes into its input box,
+                    // and the human is told ConsensFlow answered (as since round 4).
                     if let Some(key) = pressing {
                         if inside {
                             self.tell_trust_once(project, &folder, true, || {
@@ -260,6 +265,10 @@ impl Dispatcher {
                             pressed_on = Some((lines, 0));
                         }
                     } else if asking >= TELL_LOOKS {
+                        // Once a project and folder: a conversation that quotes the
+                        // question for longer (under load) is told as asking, and a
+                        // real question of the same folder in another window then
+                        // gets no note of its own, only its lane.
                         self.tell_trust_once(project, &folder, false, || {
                             if inside {
                                 format!(
@@ -322,6 +331,7 @@ impl Dispatcher {
                                     ),
                                 },
                             )?;
+                            self.changed();
                         }
                     } else if self.now() - began > ASKS_WITHIN_MS {
                         break (false, false);
@@ -335,7 +345,9 @@ impl Dispatcher {
         // screen, and no key of ConsensFlow's answered it: the human said yes. Nothing
         // else says so: not the question's absence, which a No leaves on the way out,
         // nor the record's growth, which may be a process before the window's, nor a
-        // prompt below a conversation that quoted the choices.
+        // prompt below a conversation that quoted the choices. Only the last lines are
+        // read: a quote of the dialog, its cursor and all, that more of the conversation
+        // pushes out of them before the prompt is drawn still banks a yes nobody gave.
         if asked && keys == 0 && at_prompt && cleared {
             if sure {
                 // For every window of the project that asks of the folder.

@@ -39,6 +39,9 @@
 # told of again; a window whose screen goes unread is held until a look reads it; the live
 # suite's sweep of the owner's Claude records has its plants.
 #
+# Round 7 (Calliope's last re-check, T-325): the hint line counts only below the cursor's line,
+# and the note that a window's screen could not be read tells the page the board moved.
+#
 # The cases are `crates/cf-e2e/tests/regressions/a_trust_question_after_git_init_stopped_every_launch.rs`
 # (a stand-in that asks as Claude Code 2.1.305 does, the shape the live suite
 # `cargo xtask live folder-trust` found) and the readers' own tests. The rig's cases build the
@@ -46,6 +49,7 @@
 # `folder trust`, so `npm run plants:daemon -- "folder trust"` runs them all.
 
 [run]
+folder-trust-rig-unread-worker = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_window_whose_screen_the_host_never_shows"]
 folder-trust-rig-unread-chief = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_chief_opened_again_at_rest_whose_screen_goes_unread"]
 folder-trust-rig-quoted-cursor = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_chief_whose_conversation_quotes_the_dialog"]
 folder-trust-rig-cursor-again = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_question_whose_cursor_is_drawn_otherwise_is_told_of_again"]
@@ -72,6 +76,7 @@ folder-trust-rig-reads-late = ["cargo", "test", "--offline", "-p", "cf-e2e", "--
 folder-trust-rig-unread = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_window_whose_screen_the_host_cannot_show"]
 folder-trust-rig-cursor = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_question_whose_cursor_is_drawn_otherwise"]
 folder-trust-rig-router = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "rig::route::tests::a_look_at_a_screen"]
+folder-trust-rig-router-moves = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "rig::route::tests::a_word_to_the_page"]
 folder-trust-rig-quoted-words = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_chief_whose_screen_quotes_the_question_in_words"]
 folder-trust-rig-quoted-tail = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_chief_whose_conversation_quotes_the_question_before_its_prompt"]
 folder-trust-rig-unread-bound = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_trust_question_after_git_init_stopped_every_launch::a_window_whose_screen_the_host_never_shows"]
@@ -709,7 +714,7 @@ runs = ["folder-trust-readers"]
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/trust.rs"
 find = '''
-        Some(_) if shows(screen, HINT) => Question::Unplaced,
+        Some((at, _)) if shows(&screen[at + 1..], HINT) => Question::Unplaced,
         Some(_) => return None,'''
 replace = '''
         Some(_) => return None,'''
@@ -739,10 +744,12 @@ builds = true
 file = "crates/cf-engine/src/trust.rs"
 find = '''
                             )?;
+                            self.changed();
                         }
                     } else if self.now() - began > ASKS_WITHIN_MS {'''
 replace = '''
                             )?;
+                            self.changed();
                             break (false, false);
                         }
                     } else if self.now() - began > ASKS_WITHIN_MS {'''
@@ -836,3 +843,39 @@ find = '''
         let _ = fs::remove_dir_all(&self.0);'''
 replace = '''
         let _ = &self.0;'''
+
+[[plant]]
+name = "folder trust: the question's hint line counts anywhere on the screen (round 7, T-325)"
+meant = "a_conversation_that_lists_the_choices_above_the_input_box_asks_nothing"
+runs = ["folder-trust-readers"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/trust.rs"
+find = "        Some((at, _)) if shows(&screen[at + 1..], HINT) => Question::Unplaced,"
+replace = "        Some(_) if shows(screen, HINT) => Question::Unplaced,"
+
+[[plant]]
+name = "folder trust: the note that a window's screen could not be read moves no board (round 7, T-325)"
+meant = "a_window_whose_screen_the_host_never_shows_while_it_asks_is_told_of_and_held_till_it_is_read"
+runs = ["folder-trust-rig-unread-worker"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/trust.rs"
+find = """
+                            )?;
+                            self.changed();
+                        }"""
+replace = """
+                            )?;
+                        }"""
+
+[[plant]]
+name = "folder trust: the rig keeps no word to the page that the board moved (round 7, T-325)"
+meant = "a_word_to_the_page_that_the_board_moved_is_kept_with_its_time_and_passed_on"
+runs = ["folder-trust-rig-router-moves"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/route.rs"
+find = "                seen.moves.push(jiff::Timestamp::now().as_millisecond());"
+replace = "                let _ = &seen.moves;"

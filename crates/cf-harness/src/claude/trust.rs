@@ -19,6 +19,9 @@ const YES: &str = "Yes, I trust this folder";
 const NO: &str = "No, exit";
 
 /// The line the question draws below its choices (2.1.305), and no input box does.
+/// It is made of the key bindings, and reads otherwise while a Ctrl-C is pending
+/// ("Press Ctrl-C again to exit"): a cursor on a choice the reader does not know then
+/// reads as no question, as it did before round 6.
 const HINT: &str = "Enter to confirm";
 
 /// The question, where `screen` shows it, and the key toward a yes: Enter once the
@@ -27,9 +30,9 @@ const HINT: &str = "Enter to confirm";
 /// question) asks nothing. A `❯` with the prompt's line below it is Claude's input
 /// box, whatever it holds. A `❯` on a line that is neither choice is the question's
 /// cursor on a choice the reader does not know where the question's hint line is
-/// drawn; elsewhere it is the input box, or a past user turn (2.1.308 marks each with
-/// a `❯`), below a conversation that quotes the choices, each on a line of its own
-/// (a list in a message): no question. Where there is no `❯` at all (a cursor drawn
+/// drawn below it, as the question draws it; elsewhere it is the input box, or a past
+/// user turn (2.1.308 marks each with a `❯`), below a conversation that quotes the
+/// choices, each on a line of its own (a list in a message): no question. Where there is no `❯` at all (a cursor drawn
 /// otherwise, or a redraw caught halfway), the question is there and its key unknown.
 pub(crate) fn toward_trust(screen: &[String]) -> Option<Question> {
     if !names_choices(screen) {
@@ -39,7 +42,7 @@ pub(crate) fn toward_trust(screen: &[String]) -> Option<Question> {
         Some((at, _)) if shows(&screen[at + 1..], PROMPT) => return None,
         Some((_, choice)) if names(choice, YES) => Question::Toward(ENTER),
         Some((_, choice)) if names(choice, NO) => Question::Toward(DOWN),
-        Some(_) if shows(screen, HINT) => Question::Unplaced,
+        Some((at, _)) if shows(&screen[at + 1..], HINT) => Question::Unplaced,
         Some(_) => return None,
         None => Question::Unplaced,
     })
@@ -133,6 +136,10 @@ mod tests {
         assert!(shows_prompt(&typed));
         // The same where the prompt is drawn otherwise, with no line of its below.
         assert_eq!(toward_trust(&typed[..4]), None);
+        // Quoting the dialog's hint line too, above an empty input box with no prompt
+        // line below it (Calliope's last re-check, T-325).
+        let hint_quoted = lines(" ⏺ The dialog offers:\n   - No, exit\n   - Yes, I trust this folder\n   and says: Enter to confirm · Esc to cancel\n ❯ ");
+        assert_eq!(toward_trust(&hint_quoted), None);
         // Holding a choice's very words, the prompt's line below it.
         let typed_a_choice = lines(" ⏺ The dialog offers:\n   - No, exit\n   - Yes, I trust this folder\n ❯ No, exit\n   ⏵⏵ bypass permissions on (shift+tab to cycle)");
         assert_eq!(toward_trust(&typed_a_choice), None);
