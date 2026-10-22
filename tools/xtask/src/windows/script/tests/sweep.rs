@@ -20,6 +20,7 @@ fn the_copy_keeps_the_runs_own_files_and_the_builds_outputs_and_nothing_else() {
             ".windows-sweep.ps1",
             ".windows-run.pid",
             ".windows-run.cmd",
+            ".git",
             "node_modules",
             "app/node_modules",
             "app/src-tauri/target",
@@ -132,6 +133,143 @@ fn what_is_removed_is_removed_without_a_question_and_said_and_what_is_not_ends_t
     );
     // Before the build and the command: they see the tree and nothing else.
     assert!(run.find("Exit-Run 1").unwrap() < run.find("foreach ($step in").unwrap());
+}
+
+#[test]
+fn the_copy_is_made_a_checkout_whose_one_commit_is_what_went_over_and_nothing_else() {
+    // Every plant on zeewin was UNSTABLE: the copy held no checkout, and the plants'
+    // runner could not tell what a run changed in it (2026-10-17).
+    let text = sweep_script();
+    let steps = line_with(&text, "foreach ($words in @(");
+    // Made once and kept; git's line ends left as they are, in the repository's own
+    // config, which what the plants' runner asks of git reads; the index emptied, then
+    // given the files the list names, an ignored one too, each name as it is; committed.
+    for step in [
+        "@('init', '-q')",
+        "@('config', 'core.autocrlf', 'false')",
+        "@('read-tree', '--empty')",
+        "@('--literal-pathspecs', 'add', '-f', '--pathspec-from-file=.synced-files')",
+        "@('commit', '-q', '--allow-empty', '--no-verify', '-m', 'what-went-over')",
+    ] {
+        assert!(steps.contains(step), "{step}: {steps}");
+    }
+    assert!(
+        steps.find("read-tree").unwrap() < steps.find("'add'").unwrap()
+            && steps.find("'add'").unwrap() < steps.find("'commit'").unwrap(),
+        "{steps}"
+    );
+    assert!(!text.contains("add -A") && !text.contains("'-A'"), "{text}");
+    // Committed as no one, signed by nothing a machine's config asks for.
+    assert!(
+        text.contains(
+            "$as = @('-c', 'user.name=windows-run', '-c', 'user.email=windows-run@localhost', '-c', 'commit.gpgsign=false')"
+        ),
+        "{text}"
+    );
+    // What the run and the build write is left out of what git says of the copy.
+    let excluded: Vec<String> = KEPT.iter().map(|name| format!("'/{name}'")).collect();
+    assert!(
+        line_with(&text, ".git\\info\\exclude").contains(&format!("@({})", excluded.join(", "))),
+        "{text}"
+    );
+    // A git that is not there, or fails, ends the run, said; a copy the sweep could not
+    // make the tree's is not committed.
+    assert!(
+        text.contains(
+            "      $said = & git @as @words 2>&1\n      if ($LASTEXITCODE -ne 0) { $failed.Add(\"git $($words -join ' '): $($said -join ' ')\"); return }\n"
+        ),
+        "{text}"
+    );
+    assert!(text.contains("if (-not $failed.Count) {\n  if (Get-Command git -ErrorAction SilentlyContinue) { Save-Tree } else { $failed.Add('git is not on the PATH, so the copy cannot be made a checkout of what went over') }\n"), "{text}");
+    // git's words on its standard error are no error of PowerShell's.
+    assert!(
+        text.contains("function Save-Tree {\n  $ErrorActionPreference = 'Continue'\n"),
+        "{text}"
+    );
+}
+
+/// The sweep run by the machine's PowerShell and git on a copy made for it: once swept,
+/// the copy is a checkout whose one commit is what the list names (a file an ignore rule
+/// matches too) and of which git says nothing changed, though the build's folders and
+/// the run's files are there; a file a run writes is said; swept again after the tree
+/// changed, it is the new tree's.
+#[cfg(windows)]
+#[test]
+fn powershell_makes_the_copy_a_checkout_whose_one_commit_is_what_went_over() {
+    use std::fs;
+    use std::path::Path;
+
+    use cf_base::env::Env;
+
+    use crate::process::{self, Invocation};
+
+    fn write(root: &Path, name: &str) {
+        let path = root.join(name);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, name).unwrap();
+    }
+
+    let copy = tempfile::tempdir().unwrap();
+    let dir = copy.path();
+    for name in [
+        "src/lib.rs",
+        "notes.txt",
+        "keep.log",
+        "app/src-tauri/target/debug/out.rlib",
+        "node_modules/a/index.js",
+        ".windows-run.pid",
+        ".windows-run.cmd",
+    ] {
+        write(dir, name);
+    }
+    fs::write(dir.join(".gitignore"), "*.log\n").unwrap();
+    fs::write(dir.join(SWEEP), sweep_script()).unwrap();
+    let sweep = |listed: &str| {
+        fs::write(dir.join(SYNCED), listed).unwrap();
+        let script = format!(
+            "$ErrorActionPreference = 'Stop'\n$dir = '{}'\n. ([scriptblock]::Create([IO.File]::ReadAllText((Join-Path $dir '{SWEEP}'))))\nif ($failed.Count) {{ exit 1 }}\n",
+            dir.display()
+        );
+        process::capture(
+            &Invocation::new("powershell", ".")
+                .args(["-NoProfile", "-NonInteractive", "-EncodedCommand"])
+                .arg(encode_script(&script).unwrap()),
+            &Env::from_process(),
+        )
+        .unwrap()
+    };
+    let git = |words: &[&str]| {
+        let ran = process::capture(
+            &Invocation::new("git", dir).args(words.iter().copied()),
+            &Env::from_process(),
+        )
+        .unwrap();
+        assert_eq!(ran.code, 0, "git {words:?}: {}", ran.stderr);
+        ran.stdout
+    };
+    let status = || git(&["status", "--porcelain=v1", "--untracked-files=all"]);
+    let committed = || git(&["ls-tree", "-r", "--name-only", "HEAD"]);
+
+    let ran = sweep(".gitignore\nkeep.log\nnotes.txt\nsrc/lib.rs\n");
+    assert_eq!(ran.code, 0, "{}{}", ran.stdout, ran.stderr);
+    assert_eq!(
+        status(),
+        "",
+        "nothing changed, the build's and the run's files there too"
+    );
+    assert_eq!(committed(), ".gitignore\nkeep.log\nnotes.txt\nsrc/lib.rs\n");
+    // What a run writes is said.
+    write(dir, "src/new.rs");
+    assert_eq!(status(), "?? src/new.rs\n");
+    // The tree changed: a file left it, the new one is in it.
+    let ran = sweep(".gitignore\nkeep.log\nsrc/lib.rs\nsrc/new.rs\n");
+    assert_eq!(ran.code, 0, "{}{}", ran.stdout, ran.stderr);
+    assert!(!dir.join("notes.txt").exists());
+    assert_eq!(status(), "");
+    assert_eq!(
+        committed(),
+        ".gitignore\nkeep.log\nsrc/lib.rs\nsrc/new.rs\n"
+    );
 }
 
 #[test]

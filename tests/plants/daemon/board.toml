@@ -70,7 +70,7 @@ replace = ".filter((task) => task.requester === lane.participant.handle && task.
 
 [[plant]]
 name = "board: the eval counts as placed only the tasks waiting for a member"
-meant = "are_every_one_it_lists_one_no_lane_has_whatever_its_state_and_not_one_the_human_deleted"
+meant = "the_tasks_the_board_places_are_every_one_it_lists_one_no_lane_has_whatever_its_state_and_not_one_the_human_deleted"
 runs = ["evals-measure"]
 
 [[plant.edit]]
