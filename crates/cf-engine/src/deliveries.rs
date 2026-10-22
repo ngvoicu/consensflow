@@ -9,6 +9,7 @@ use std::rc::Rc;
 
 use cf_base::js;
 use cf_harness::contract::{Admission, Held, Observed, PaneHost, Readiness};
+use cf_harness::records::Role;
 use cf_ledger::{MessageView, NewNote, ParticipantView, ProjectView, TaskView};
 use cf_proto::trace::WindowEvent;
 
@@ -225,9 +226,18 @@ impl Dispatcher {
         };
         let items = observed.items();
         let marker = marker_of(latest.id);
-        let Some(start) = items.iter().position(|item| item.text.contains(&marker)) else {
+        let Some(pasted) = items.iter().position(|item| item.text.contains(&marker)) else {
             return Ok(None);
         };
+        // The task's turn is the last one after its latest paste, which the last
+        // user's words begin: a turn its window went on with by itself, after a
+        // refusal whose words are no part of the answer (`went_on_by_itself`), a
+        // word of the human's, a role told again. The answer is what the window
+        // wrote from there, as turn-end's final run is (T-96).
+        let turn = items[pasted + 1..]
+            .iter()
+            .rposition(|item| item.role == Role::User)
+            .map_or(pasted + 1, |at| pasted + 1 + at);
         if observed.failed {
             let because = self.why_it_failed(participant, record, observed).await;
             // The task may have moved on while the window was looked at.
@@ -251,7 +261,7 @@ impl Dispatcher {
         // words, and nor are the progress notes a harness marks as its
         // commentary: its final answer is the report.
         let replacements = self.seams.ledger.borrow().role_notes_to(participant.id)?;
-        let written = answers_to_the_task(&items[start + 1..], &replacements);
+        let written = answers_to_the_task(&items[turn..], &replacements);
         if !written.last().is_some_and(|item| item.complete) {
             return Ok(None);
         }

@@ -404,6 +404,35 @@ impl FakeAdapter {
         });
     }
 
+    /// The window begins a turn of its own, with words nobody pasted (Claude
+    /// Code's meta prompt once its limit resets, or what the human typed into
+    /// it), dated `at`: in it still.
+    pub fn begins_its_own_turn(&self, handle: &str, prompt: &str, at: &str) {
+        let mut said = self.item(Role::User, prompt);
+        said.at = Some(json!(at));
+        self.with(handle, |agent| {
+            agent.items.push(said);
+            agent.settled = false;
+            agent.agents_pending = false;
+            agent.failed = false;
+            agent.took_back = false;
+        });
+    }
+
+    /// The window's own turn gets through and ends with `text`, dated `at`: as a
+    /// harness reads a turn that got through, the refusal before it is no longer
+    /// its last word.
+    pub fn ends_its_own_turn(&self, handle: &str, text: &str, at: &str) {
+        let mut item = self.item(Role::Assistant, text);
+        item.at = Some(json!(at));
+        self.with(handle, |agent| {
+            agent.items.push(item);
+            agent.settled = true;
+            agent.failed = false;
+            agent.quota = None;
+        });
+    }
+
     /// A turn gets through: the record writes the agent's words, with their time.
     pub fn writes(&self, handle: &str, text: &str, at: &str) {
         let mut item = self.item(Role::Assistant, text);

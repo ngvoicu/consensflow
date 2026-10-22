@@ -42,6 +42,13 @@
 //! nothing said since the conversation began or was last compacted it compacts
 //! nothing, as 2.1.304 does, and says so as the system's record.
 //!
+//! A window refused for quota with `CF_TEST_AUTO_CONTINUE_MS` set continues by
+//! itself, as Claude Code 2.1.278 and later do: the refusal is followed by the
+//! notice that it continues automatically, and once its account has quota again
+//! (`CF_TEST_QUOTA_FILE` is gone) and that many milliseconds have passed, it says
+//! the limit was reset and takes a turn on the meta prompt Claude sends
+//! (`AUTO_CONTINUE`), queued behind any turn it is in, as Claude's timer is.
+//!
 //! It is the program of the suites that stands in a window, so it reads the
 //! environment a window is given and runs `cf` as an agent does, both through
 //! `cf_e2e::process`, the one place a program starts and the environment is read.
@@ -75,6 +82,7 @@ mod tool;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, OnceLock};
 use std::thread;
@@ -99,6 +107,19 @@ const NO_LOGIN: &str =
 
 /// What a window the provider refuses says, in the record Claude writes for it.
 const LIMIT: &str = "You've hit your limit. Resets in 2 hours.";
+
+/// The meta prompt Claude Code sends by itself once a refused account has quota
+/// again (2.1.278 and later; this Mac's transcripts).
+const AUTO_CONTINUE: &str =
+    "Your claude.ai usage limit has reset. Continue the task you were working on.";
+
+/// What the window's own timer queues as a turn when it continues by itself: no
+/// message anyone types.
+const AUTO_CONTINUE_MARK: &str = "\u{1}auto-continue";
+
+/// Whether the window's timer is set to continue by itself: once at a time, as
+/// Claude has one.
+static CONTINUING: AtomicBool = AtomicBool::new(false);
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -307,6 +328,11 @@ fn take_turn(records: &mut Records, pid: u32, window: &Window, text: &str) -> Re
     if text.trim() == COMPACT {
         return compact(records, pid);
     }
+    if text == AUTO_CONTINUE_MARK {
+        records
+            .append(pid, notice("Usage limit reset · continuing automatically"))
+            .map_err(|cause| cause.to_string())?;
+    }
     window.stop.begin();
     let done = turn(records, pid, window, text);
     window.stop.end();
@@ -419,12 +445,13 @@ fn turn(records: &mut Records, pid: u32, window: &Window, text: &str) -> Result<
     if hooks.is_none() {
         records.status(pid, "busy").map_err(failed)?;
     }
-    records
-        .append(
-            pid,
-            json!({ "type": "user", "message": { "role": "user", "content": text } }),
-        )
-        .map_err(failed)?;
+    let continuing = text == AUTO_CONTINUE_MARK;
+    let text = if continuing { AUTO_CONTINUE } else { text };
+    let mut said = json!({ "type": "user", "message": { "role": "user", "content": text } });
+    if continuing {
+        said["isMeta"] = json!(true);
+    }
+    records.append(pid, said).map_err(failed)?;
     // The harness starts its servers as it takes the first message, which now shows.
     if first {
         window.server.as_the_first_message_shows(&window.jobs);
@@ -477,6 +504,7 @@ fn turn(records: &mut Records, pid: u32, window: &Window, text: &str) -> Result<
                     }),
                 )
                 .map_err(failed)?;
+            continue_later(records, pid, window).map_err(failed)?;
         }
         Reply::Text(reply) => {
             // The work is done (a `cf` it ran has answered) and the answer is
@@ -532,6 +560,44 @@ fn turn(records: &mut Records, pid: u32, window: &Window, text: &str) -> Result<
         "idle"
     };
     records.status(pid, status).map_err(failed)
+}
+
+/// A notice of Claude Code's own, as the system's record.
+fn notice(content: &str) -> serde_json::Value {
+    json!({
+        "type": "system", "subtype": "informational", "level": "notice",
+        "isSidechain": false, "isMeta": false, "content": content,
+    })
+}
+
+/// After a refusal, a window told to (`CF_TEST_AUTO_CONTINUE_MS`) says it will
+/// continue by itself, and its timer queues the turn that does once the account
+/// has quota again and the milliseconds have passed.
+fn continue_later(records: &mut Records, pid: u32, window: &Window) -> io::Result<()> {
+    let Some(after) = own_var("CF_TEST_AUTO_CONTINUE_MS") else {
+        return Ok(());
+    };
+    records.append(
+        pid,
+        notice("Usage limit reached · continuing automatically at the reset · esc to cancel"),
+    )?;
+    if CONTINUING.swap(true, Ordering::SeqCst) {
+        return Ok(());
+    }
+    let wake = window.wake.clone();
+    thread::spawn(move || {
+        let account = own_var("CF_TEST_QUOTA_FILE");
+        while account
+            .as_deref()
+            .is_some_and(|file| Path::new(file).exists())
+        {
+            thread::sleep(Duration::from_millis(200));
+        }
+        thread::sleep(wait_of(Some(&after)));
+        CONTINUING.store(false, Ordering::SeqCst);
+        let _ = wake.send(AUTO_CONTINUE_MARK.to_owned());
+    });
+    Ok(())
 }
 
 #[cfg(test)]

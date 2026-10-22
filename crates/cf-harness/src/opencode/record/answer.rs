@@ -15,7 +15,7 @@ use jiff::tz::TimeZone;
 use serde_json::Value;
 
 use super::read::{optional, property, Read, Stored};
-use crate::shared::quota::{exhausted_quota, quota_status};
+use crate::shared::quota::{exhausted_quota, quota_status, refused_for_quota};
 use crate::shared::record::key::{Key, Keys};
 use crate::shared::record::reading::{visible_text, Item, Record, Role, Settlement};
 use crate::shared::record::sort::sort;
@@ -158,7 +158,9 @@ pub(super) fn answer(read: &Read, local: &TimeZone, keys: &mut Keys) -> Result<R
                 Some(said) => js::string(Some(said))?.into_owned(),
                 None => visible_text(error),
             };
-            if quota_status(js::to_number(optional(data, "statusCode"))?) {
+            if quota_status(js::to_number(optional(data, "statusCode"))?)
+                || refused_for_quota(&failure)
+            {
                 let at_ms = js::to_number(completed_at)?;
                 record.quota = Some(Arc::new(exhausted_quota(&failure, at_ms, local)?));
             }

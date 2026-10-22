@@ -40,7 +40,7 @@ use self::images::output_text;
 use self::inputs::{Inputs, Telling};
 use super::paths::transcript;
 use super::quota::codex_quota;
-use crate::shared::quota::Quota;
+use crate::shared::quota::{Level, Quota};
 use crate::shared::record::cache::Look;
 use crate::shared::record::followed::{Answer, Followed, Parser, TranscriptReader};
 use crate::shared::record::jsonl::Stop;
@@ -77,8 +77,10 @@ fn handed_out(item: &Item) -> Item {
     }
 }
 
-/// The `codex_error_info` of a turn Codex ended for its usage limit.
-const USAGE_LIMIT: &str = "usage_limit_exceeded";
+/// The `codex_error_info` of a turn Codex ended for a limit: its usage limit
+/// (as Codex 0.163 names a plan or balance that has no quota too), or a rate
+/// limit it gave up retrying. The chief's rule (T-95): wait on any limit.
+const LIMITS: [&str; 2] = ["usage_limit_exceeded", "rate_limit_exceeded"];
 
 /// What a rollout said so far.
 struct Rollout {
@@ -264,6 +266,7 @@ impl Rollout {
                     field(payload, "rate_limits").filter(|limits| js::truthy(Some(limits)))
                 {
                     self.quota = Some(Arc::new(codex_quota(limits).map_err(Stop::Failed)?));
+                    self.name_the_reset();
                 }
             }
             Some("task_started") => {
@@ -307,28 +310,47 @@ impl Rollout {
         (!said.trim().is_empty()).then(|| said.to_owned())
     }
 
-    /// The refusal a turn's `error` is, where it is Codex's usage limit: at the
+    /// The refusal a turn's `error` is, where it is one of Codex's limits: at the
     /// time of its record, until the reset the rate limits named, where that
-    /// comes after it.
+    /// comes after it (`reset_after`).
     fn refusal(&self, error: Option<&Value>, at: &Value) -> Option<Arc<Quota>> {
-        if field(error, "codex_error_info").and_then(Value::as_str) != Some(USAGE_LIMIT) {
+        let info = field(error, "codex_error_info").and_then(Value::as_str);
+        if !info.is_some_and(|info| LIMITS.contains(&info)) {
             return None;
         }
         let at = at.as_str().and_then(time::parse);
-        let resets_at = self
-            .quota
-            .as_deref()
-            .and_then(Quota::resets_at)
-            .filter(|reset| {
-                time::parse(reset)
-                    .zip(at)
-                    .is_some_and(|(reset, at)| reset > at)
-            })
-            .map(str::to_owned);
         Some(Arc::new(Quota::Exhausted {
             at: at.map(time::iso),
-            resets_at,
+            resets_at: reset_after(self.quota.as_deref(), at),
         }))
+    }
+
+    /// Rate limits Codex reports after the turn its limit cut name the reset its
+    /// refusal named none of: the latest turn's refusal takes it, where it comes
+    /// after the refusal.
+    fn name_the_reset(&mut self) {
+        let latest = self.latest_turn.clone();
+        let Some(Turn {
+            end:
+                Some(End::Failed {
+                    refusal: Some(refusal),
+                    ..
+                }),
+            ..
+        }) = self.turns.get_mut(&latest)
+        else {
+            return;
+        };
+        if refusal.resets_at().is_some() {
+            return;
+        }
+        let at = refusal.at().and_then(time::parse);
+        if let Some(resets_at) = reset_after(self.quota.as_deref(), at) {
+            *refusal = Arc::new(Quota::Exhausted {
+                at: at.map(time::iso),
+                resets_at: Some(resets_at),
+            });
+        }
     }
 
     /// The turn a turn's own event names: one that names none fails the
@@ -527,6 +549,23 @@ impl Rollout {
             })
         })
     }
+}
+
+/// The reset the rate limits `quota` names, where that window is spent (low or
+/// exhausted, past 95 percent) and it comes after `at` (ms). Codex names its
+/// fullest window in every snapshot, a weekly one days from its reset and mostly
+/// unspent on this Mac's account: a limit it is not is no wait of a week, and
+/// takes the hour a refusal that names no reset waits (T-96).
+fn reset_after(quota: Option<&Quota>, at: Option<i64>) -> Option<String> {
+    quota
+        .filter(|quota| quota.level() != Level::Ok)
+        .and_then(Quota::resets_at)
+        .filter(|reset| {
+            time::parse(reset)
+                .zip(at)
+                .is_some_and(|(reset, at)| reset > at)
+        })
+        .map(str::to_owned)
 }
 
 impl Parser for Rollout {

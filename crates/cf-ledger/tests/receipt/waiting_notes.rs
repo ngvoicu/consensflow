@@ -225,7 +225,8 @@ fn a_task_taken_back_withdraws_the_notes_of_the_wait_it_leaves_and_keeps_its_own
 }
 
 #[test]
-fn a_requester_given_the_note_that_a_task_is_held_is_told_when_the_daemon_resumes_it() {
+fn a_requester_given_the_note_that_a_task_is_held_is_told_when_its_resumed_turn_gets_through_not_when_the_daemon_resumes_it(
+) {
     let mut w = world();
     let (task, session) = with_zeus(&mut w);
     let hold = held(&mut w, task, &session);
@@ -238,6 +239,12 @@ fn a_requester_given_the_note_that_a_task_is_held_is_told_when_the_daemon_resume
     w.deliver(hold.id);
 
     w.daemon_resumes(task);
+    assert_eq!(
+        told_chief(&w).len(),
+        1,
+        "the words that resume it go in: nothing is said until a turn gets through"
+    );
+    w.went_on(task);
     let told = told_chief(&w);
     let correction = told.last().expect("the chief is told");
     assert_eq!(correction.body, GOES_ON);
@@ -266,6 +273,7 @@ fn a_requester_being_given_the_hold_note_is_told_too_but_one_not_given_it_is_tol
     // Being pasted into the chief's window as the daemon resumes the task.
     w.begin(hold.id);
     w.daemon_resumes(task);
+    w.went_on(task);
     assert_eq!(
         told_chief(&w).last().map(|note| note.body.as_str()),
         Some(GOES_ON),
@@ -277,6 +285,7 @@ fn a_requester_being_given_the_hold_note_is_told_too_but_one_not_given_it_is_tol
     let again = held(&mut w, task, &session);
     let before = told_chief(&w).len();
     w.daemon_resumes(task);
+    w.went_on(task);
     assert_eq!(
         fate(&w, again.id),
         ("cancelled".to_owned(), Some("T-1 resumed".to_owned()))
@@ -310,12 +319,14 @@ fn only_the_note_of_the_hold_the_task_is_in_counts() {
     let hold = held(&mut w, task, &session);
     w.deliver(hold.id);
     w.daemon_resumes(task);
+    w.went_on(task);
     assert_eq!(told_chief(&w).len(), 2);
 
     // The member runs into its limit again with no note told of it (a window
     // whose turn its quota cut short): the hold before it is not this one.
     w.hold(task);
     w.daemon_resumes(task);
+    w.went_on(task);
     assert_eq!(
         told_chief(&w).len(),
         2,
@@ -330,6 +341,7 @@ fn the_news_that_a_held_task_went_on_is_not_taken_back_by_a_hold_that_comes_afte
     let hold = held(&mut w, task, &session);
     w.deliver(hold.id);
     w.daemon_resumes(task);
+    w.went_on(task);
     let news = told_chief(&w).last().expect("the chief is told").id;
     assert_eq!(w.message(news).body, GOES_ON);
 
@@ -338,6 +350,7 @@ fn the_news_that_a_held_task_went_on_is_not_taken_back_by_a_hold_that_comes_afte
     // the news does not, or the chief would keep the promise it corrects.
     let again = held(&mut w, task, &session);
     w.daemon_resumes(task);
+    w.went_on(task);
     assert_eq!(
         fate(&w, again.id),
         ("cancelled".to_owned(), Some("T-1 resumed".to_owned()))
@@ -366,6 +379,7 @@ fn a_hold_note_of_an_older_build_counts_and_one_that_failed_or_is_not_one_does_n
     );
     w.deliver(old.id);
     w.daemon_resumes(task);
+    w.went_on(task);
     assert_eq!(
         told_chief(&w).last().map(|note| note.body.as_str()),
         Some(GOES_ON),
@@ -383,6 +397,7 @@ fn a_hold_note_of_an_older_build_counts_and_one_that_failed_or_is_not_one_does_n
     w.deliver(other.id);
     let before = told_chief(&w).len();
     w.daemon_resumes(task);
+    w.went_on(task);
     assert_eq!(told_chief(&w).len(), before, "none was given the chief");
 }
 

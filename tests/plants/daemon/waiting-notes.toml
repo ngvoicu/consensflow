@@ -124,54 +124,57 @@ runs = ["waiting-notes-engine"]
 [[plant.edit]]
 file = "crates/cf-engine/src/scheduler.rs"
 find = '''
-            self.seams.ledger.borrow_mut().note_hold(
-                project.id,
-                &task.requester,
-                task.number,
-                &participant.handle,
-                until,
-            )?;'''
+                self.seams.ledger.borrow_mut().note_hold(
+                    project.id,
+                    &task.requester,
+                    task.number,
+                    &participant.handle,
+                    until,
+                )?;'''
 replace = '''
-            self.seams.ledger.borrow_mut().note(
-                project.id,
-                &NewNote {
-                    from: None,
-                    to: task.requester.clone(),
-                    task: Some(task.number),
-                    body: format!(
-                        "T-{} waits with @{}: out of quota until {until}; it goes on by itself then.",
-                        task.number, participant.handle
-                    ),
-                },
-            )?;'''
+                self.seams.ledger.borrow_mut().note(
+                    project.id,
+                    &NewNote {
+                        from: None,
+                        to: task.requester.clone(),
+                        task: Some(task.number),
+                        body: format!(
+                            "T-{} waits with @{}: out of quota until {until}; it goes on by itself then.",
+                            task.number, participant.handle
+                        ),
+                    },
+                )?;'''
 
 [[plant]]
-name = "waiting notes: the daemon resumes a held task and tells its requester nothing"
-meant = "a_requester_given_the_note_that_a_task_is_held_is_told_when_the_daemon_resumes_it"
+name = "waiting notes: a held task goes on and tells its requester nothing"
+meant = "a_requester_given_the_note_that_a_task_is_held_is_told_when_its_resumed_turn_gets_through_not_when_the_daemon_resumes_it"
 runs = ["waiting-notes-ledger", "waiting-notes-engine", "ledger-replay"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/pausing.rs"
 find = '''
-        if by.is_none() {
-            tell_goes_on(store, &task)?;
-        }
+        let task = store.task_row(project_id, number)?;
+        tell_goes_on(store, &task)
 '''
-replace = ""
+replace = '''
+        let _ = store.task_row(project_id, number)?;
+        Ok(())
+'''
 
 [[plant]]
-name = "waiting notes: the chief resumes a held task and is told the daemon did"
+name = "waiting notes: any resume tells the requester the held task goes on, the chief's own, and the daemon's before a turn gets through"
 meant = "a_resume_of_the_chiefs_own_tells_nothing_more"
 runs = ["waiting-notes-ledger"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/pausing.rs"
 find = '''
-        if by.is_none() {
-            tell_goes_on(store, &task)?;
-        }
+            json!({ "by": by, "message": message_id }),
+        )?;
 '''
 replace = '''
+            json!({ "by": by, "message": message_id }),
+        )?;
         tell_goes_on(store, &task)?;
 '''
 
@@ -182,8 +185,8 @@ runs = ["waiting-notes-ledger", "waiting-notes-engine"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/holds.rs"
-find = '''             AND state IN ('delivering', 'delivered', 'read') AND created_at >= ?",'''
-replace = '''             AND state != 'failed' AND created_at >= ?",'''
+find = '''            && matches!(state.as_str(), "delivering" | "delivered" | "read")'''
+replace = '''            && state.as_str() != "failed"'''
 
 [[plant]]
 name = "waiting notes: a requester being given the hold note is not told it goes on"
@@ -192,31 +195,18 @@ runs = ["waiting-notes-ledger"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/holds.rs"
-find = '''             AND state IN ('delivering', 'delivered', 'read') AND created_at >= ?",'''
-replace = '''             AND state IN ('delivered', 'read') AND created_at >= ?",'''
+find = '''            && matches!(state.as_str(), "delivering" | "delivered" | "read")'''
+replace = '''            && matches!(state.as_str(), "delivered" | "read")'''
 
 [[plant]]
-name = "waiting notes: the hold note of an earlier hold counts"
+name = "waiting notes: the hold note of an earlier hold counts, though its requester was told the task goes on"
 meant = "only_the_note_of_the_hold_the_task_is_in_counts"
 runs = ["waiting-notes-ledger"]
 
 [[plant.edit]]
 file = "crates/cf-ledger/src/messages/holds.rs"
-find = '''             AND state IN ('delivering', 'delivered', 'read') AND created_at >= ?",'''
-replace = '''             AND state IN ('delivering', 'delivered', 'read')",'''
-
-[[plant.edit]]
-file = "crates/cf-ledger/src/messages/holds.rs"
-find = "        .query_map(params![task.id, task.requester_id, paused_at], |row| {"
-replace = "        .query_map(params![task.id, task.requester_id], |row| {"
-
-[[plant.edit]]
-file = "crates/cf-ledger/src/messages/holds.rs"
-find = '''
-    let Some(paused_at) = &task.paused_at else {
-        return Ok(());
-    };'''
-replace = ""
+find = "    if notes[given..].iter().any(|(body, _)| *body == told) {"
+replace = "    if false && notes[given..].iter().any(|(body, _)| *body == told) {"
 
 [[plant]]
 name = "waiting notes: a hold note of an older build is no hold note"

@@ -119,6 +119,88 @@ fn the_refusal_is_the_same_quota_look_after_look() {
 }
 
 #[test]
+fn a_turn_ended_for_a_rate_limit_codex_gave_up_on_is_a_refusal_for_quota_too() {
+    // The chief's rule (T-95): wait on any limit, as Claude's reader does with `rate_limit`.
+    let read = read(&[
+        started(json!("t1")),
+        failed("t1", "rate_limit_exceeded", AT),
+    ])
+    .unwrap();
+    assert!(read.failed);
+    assert_eq!(
+        read.quota.as_deref(),
+        Some(&Quota::Exhausted {
+            at: Some(AT.to_owned()),
+            resets_at: None,
+        })
+    );
+}
+
+#[test]
+fn a_reset_the_limits_name_after_the_refusal_is_its_reset() {
+    // Codex may report its rate limits after it ends the turn its limit cut.
+    let later = read(&[
+        started(json!("t1")),
+        failed("t1", "usage_limit_exceeded", AT),
+        limits(100.0, RESETS),
+    ])
+    .unwrap();
+    assert_eq!(
+        later.quota.as_deref(),
+        Some(&Quota::Exhausted {
+            at: Some(AT.to_owned()),
+            resets_at: Some(cf_base::time::iso(RESETS * 1000)),
+        })
+    );
+    // One that names a reset before the refusal leaves it with none.
+    let earlier = read(&[
+        started(json!("t1")),
+        failed("t1", "usage_limit_exceeded", AT),
+        limits(100.0, 1_792_300_000),
+    ])
+    .unwrap();
+    assert_eq!(earlier.quota.as_deref().and_then(Quota::resets_at), None);
+}
+
+#[test]
+fn a_limit_whose_window_is_far_from_spent_borrows_no_reset_from_it() {
+    // Codex names its weekly window in every snapshot, days from its reset and
+    // mostly unspent: a rate limit Codex gave up on is no wait of a week (T-96).
+    for info in ["rate_limit_exceeded", "usage_limit_exceeded"] {
+        let read = read(&[
+            limits(30.0, RESETS),
+            started(json!("t1")),
+            failed("t1", info, AT),
+        ])
+        .unwrap();
+        assert_eq!(
+            read.quota.as_deref(),
+            Some(&Quota::Exhausted {
+                at: Some(AT.to_owned()),
+                resets_at: None,
+            }),
+            "{info}"
+        );
+        let after_it = read_after_limits(info);
+        assert_eq!(
+            after_it.quota.as_deref().and_then(Quota::resets_at),
+            None,
+            "{info}"
+        );
+    }
+}
+
+/// A turn ended for `info`, its rate limits reported after it at 30 percent.
+fn read_after_limits(info: &str) -> Record {
+    read(&[
+        started(json!("t1")),
+        failed("t1", info, AT),
+        limits(30.0, RESETS),
+    ])
+    .unwrap()
+}
+
+#[test]
 fn a_failed_turn_keeps_the_words_of_its_error_and_the_next_turn_drops_them() {
     let mut end = failed("t1", "server_overloaded", AT);
     end["payload"]["error"]["message"] = json!("The model is busy, try another.");

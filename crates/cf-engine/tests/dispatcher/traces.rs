@@ -177,14 +177,18 @@ const CHIEF_FIRST_TAKEN: &str = "the human closes the project as the chief's han
 /// the reset.
 const HOLD_WORDS: &str = "the note that T-1 is held says the member may be back before its reset and the task then goes on by itself (`, or sooner if its account has quota again; it goes on by itself.`), where Node's says it goes on at the reset (`; it goes on by itself then.`)";
 
-/// The same, and what the engine does when the daemon resumes a task whose
-/// requester was given the hold note.
-const HOLD_THEN_GOES_ON: &str = "the note that T-1 is held says the member may be back before its reset and the task then goes on by itself, where Node's says it goes on at the reset; and when the daemon resumes T-1, the chief, who was given that note, is told `T-1 goes on: its account has quota again.`, where Node tells it nothing";
+/// The same, and what the engine does once a task whose requester was given
+/// the hold note goes on.
+const HOLD_THEN_GOES_ON: &str = "the note that T-1 is held says the member may be back before its reset and the task then goes on by itself, where Node's says it goes on at the reset; and the chief, who was given that note, is told `T-1 goes on: its account has quota again.` once a turn of the window gets through after the words that resumed T-1 (T-96), which these tests do not reach, so it is told nothing as the daemon resumes T-1, where Node tells it nothing either";
 
 /// What the engine does with the task of a member that runs out of quota while
 /// another of its tier is free (dip-agentos, 2026-10-19): it waits with its
 /// window, where its work is.
 const QUOTA_KEEPS_THE_WORK: &str = "zeus runs out of quota mid-task with diana free and its reset an hour or more away: T-1 is held with zeus's window until the reset (`hold_task`, the requester told it waits), where Node took it back to the board for diana (`ran out of quota after starting`)";
+
+/// The same, and what the engine says when the words that resumed the task at
+/// the reset are refused again (the review of the quota wait, T-88).
+const QUOTA_REFUSED_AGAIN: &str = "zeus runs out of quota mid-task with diana free and its reset an hour away: T-1 is held with zeus's window until the reset, where Node took it back to the board for diana; and when the words that resumed it at the reset are refused again, T-1 is held again and the human is told once that zeus's account may need them, where the requester would be told again that T-1 waits";
 
 /// What the engine does when the human reassigns a paused task whose stall
 /// has been told to its requester in a note not yet given.
@@ -227,7 +231,7 @@ const DEPARTED: &[(&str, &str)] = &[
     ),
     (
         "keeps a member out only until its reset, though its harness still shows the old refusal",
-        QUOTA_KEEPS_THE_WORK,
+        QUOTA_REFUSED_AGAIN,
     ),
     (
         "gives no new work to a member low on quota, keeps one out for an hour when its reset is unknown, and takes it again after",

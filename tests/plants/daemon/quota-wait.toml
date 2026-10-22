@@ -3,16 +3,28 @@
 # "failed: the harness reported a failure", their work left in their windows;
 # row 3 of `issues/field-reports-2026-10-19-dip-agentos.md` in consensflow-sme).
 # While a member is out its task waits with its window, whoever else of its tier
-# is free (`crates/cf-engine/src/scheduler.rs`, `hold_work`); what the window was
-# receiving arrived if its record shows it, else goes again with its attempt
-# (`crates/cf-engine/src/dispatcher.rs`, `out_of_quota`). Codex's turn its usage
-# limit cut (`usage_limit_exceeded`) is a refusal for quota
-# (`crates/cf-harness/src/codex/record.rs`), and so is Anthropic's spent extra
-# usage in Pi's words (`crates/cf-harness/src/shared/quota.rs`). The engine's
-# cases are `crates/cf-engine/tests/dispatcher/quota_waits.rs`; the rig's case,
-# whose stand-in Codex is refused mid-task in Codex's shape, is
-# `crates/cf-e2e/tests/regressions/a_quota_wait_ended_failed.rs`, and its run
-# builds the native `cf` from the sources as they are planted.
+# is free (`crates/cf-engine/src/scheduler.rs`, `hold_work`), and so does the work
+# of a window whose own refusal is dated before its member was marked out
+# (`refused_unhandled`, `crates/cf-engine/src/dispatcher.rs`, `while_out`); what
+# the window was receiving arrived if its record shows it, else goes again with
+# its attempt (`out_of_quota`). A refusal of the words that resumed a task holds
+# it again with no new note to its requester, and the human is told once that the
+# account may need them. Codex's turn a limit cut (`usage_limit_exceeded`,
+# `rate_limit_exceeded`) is a refusal for quota, with the reset its rate limits
+# name before or after it (`crates/cf-harness/src/codex/record.rs`), and so is
+# Anthropic's spent extra usage, a 400, in Pi's, Claude Code's and OpenCode's
+# words (`crates/cf-harness/src/shared/quota.rs`, `claude/record/project.rs`,
+# `opencode/record/answer.rs`). The engine's cases are
+# `crates/cf-engine/tests/dispatcher/quota_waits.rs`; the rig's are
+# `crates/cf-e2e/tests/regressions/a_quota_wait_ended_failed.rs`, whose stand-in
+# Codex is refused mid-task in Codex's shape, and
+# `claude_continues_by_itself_after_its_limit.rs`, whose stand-in Claude continues
+# by itself once its limit resets; their runs build the native `cf` from the
+# sources as they are planted. A held task's window that goes on with it by
+# itself, in a turn of its own that got through, is the task going on: it
+# resumes with no words, or the daemon's bare words that resume it are withdrawn
+# (`crates/cf-ledger/src/tasks/pausing.rs`, `go_on_in_window`), and its answer is
+# the result (`scheduler.rs`, `went_on_by_itself`; `deliveries.rs`, `collect`).
 #
 # Every name holds `quota wait`, so `cargo xtask plants daemon "quota wait"` runs
 # them all.
@@ -20,8 +32,11 @@
 [run]
 quota-wait-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "quota"]
 quota-wait-codex = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "codex::record"]
+quota-wait-claude = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::record"]
+quota-wait-opencode = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "opencode::record"]
 quota-wait-refusals = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "shared::quota"]
 quota-wait-rig = { command = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_quota_wait_ended_failed::"], builds = true }
+quota-wait-continues = { command = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "claude_continues_by_itself_after_its_limit::"], builds = true }
 
 [[plant]]
 name = "quota wait: Codex's turn its usage limit cut reads as failed for another reason, and the task waiting out its quota ends failed (the field's)"
@@ -31,16 +46,8 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-harness/src/codex/record.rs"
-find = '''
-        if field(error, "codex_error_info").and_then(Value::as_str) != Some(USAGE_LIMIT) {
-            return None;
-        }
-'''
-replace = '''
-        if field(error, "codex_error_info").is_some() {
-            return None;
-        }
-'''
+find = "        if !info.is_some_and(|info| LIMITS.contains(&info)) {"
+replace = "        if info.is_some() {"
 
 [[plant]]
 name = "quota wait: Codex's turn its usage limit cut reads as failed for another reason, in its reader"
@@ -49,16 +56,18 @@ runs = ["quota-wait-codex"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/codex/record.rs"
-find = '''
-        if field(error, "codex_error_info").and_then(Value::as_str) != Some(USAGE_LIMIT) {
-            return None;
-        }
-'''
-replace = '''
-        if field(error, "codex_error_info").is_some() {
-            return None;
-        }
-'''
+find = "        if !info.is_some_and(|info| LIMITS.contains(&info)) {"
+replace = "        if info.is_some() {"
+
+[[plant]]
+name = "quota wait: Codex's turn a rate limit cut, which Codex gave up retrying, is a failure"
+meant = "a_turn_ended_for_a_rate_limit_codex_gave_up_on_is_a_refusal_for_quota_too"
+runs = ["quota-wait-codex"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/record.rs"
+find = '''const LIMITS: [&str; 2] = ["usage_limit_exceeded", "rate_limit_exceeded"];'''
+replace = '''const LIMITS: [&str; 2] = ["usage_limit_exceeded", "usage_limit_exceeded"];'''
 
 [[plant]]
 name = "quota wait: Codex's refusal takes a reset the rate limits named before it for its own"
@@ -67,8 +76,20 @@ runs = ["quota-wait-codex"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/codex/record.rs"
-find = "                    .is_some_and(|(reset, at)| reset > at)"
-replace = "                    .is_some()"
+find = "                .is_some_and(|(reset, at)| reset > at)"
+replace = "                .is_some()"
+
+[[plant]]
+name = "quota wait: the rate limits Codex reports after the turn its limit cut name no reset of its refusal"
+meant = "a_reset_the_limits_name_after_the_refusal_is_its_reset"
+runs = ["quota-wait-codex"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/record.rs"
+find = '''
+                    self.name_the_reset();
+'''
+replace = "\n"
 
 [[plant]]
 name = "quota wait: a member out of quota gives its task to another of its tier when its reset is far, as Node did"
@@ -78,11 +99,13 @@ runs = ["quota-wait-engine"]
 [[plant.edit]]
 file = "crates/cf-engine/src/scheduler.rs"
 find = '''
-        for task in self.active_work(project, participant)? {
+                None => false,
+            };
             self.seams.ledger.borrow_mut().hold_task(
 '''
 replace = '''
-        for task in self.active_work(project, participant)? {
+                None => false,
+            };
             let far = time::parse(until).is_some_and(|until| until - self.now() > 30 * 60_000);
             let teammate = task.pool.is_some()
                 && self
@@ -92,10 +115,9 @@ replace = '''
                     .candidates(project.id, task.number)?
                     .iter()
                     .any(|member| {
-                        member.member.id != participant.member_id.unwrap_or(participant.id)
-                            && self.why_not_free(member).is_none()
+                        member.member.id != owner.id && self.why_not_free(member).is_none()
                     });
-            if far && teammate {
+            if far && teammate && !again {
                 self.seams.ledger.borrow_mut().release_task(
                     project.id,
                     task.number,
@@ -105,6 +127,40 @@ replace = '''
             }
             self.seams.ledger.borrow_mut().hold_task(
 '''
+
+[[plant]]
+name = "quota wait: a refusal of the words that resumed the task tells its requester again that it waits, every hour of a reset nobody named"
+meant = "a_refusal_of_the_words_that_resumed_the_task_holds_it_again_without_telling_the_requester_again_and_tells_the_human_once"
+runs = ["quota-wait-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = "                Some(at) => self.refused_its_resume(participant, &task, at)?,"
+replace = "                Some(at) => self.refused_its_resume(participant, &task, at)? && false,"
+
+[[plant]]
+name = "quota wait: the human is told at every refusal of a task's resume that its account may need them"
+meant = "a_refusal_of_the_words_that_resumed_the_task_holds_it_again_without_telling_the_requester_again_and_tells_the_human_once"
+runs = ["quota-wait-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+        if told {
+            return Ok(());
+        }
+'''
+replace = "\n"
+
+[[plant]]
+name = "quota wait: a window whose refusal is dated before its member was marked out keeps its task working"
+meant = "holds_the_work_of_a_second_window_whose_refusal_is_dated_before_its_member_was_marked_out"
+runs = ["quota-wait-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''        if participant.role != "chief" && self.refused_unhandled(record) {'''
+replace = '''        if participant.role != "chief" && self.refused_unhandled(record) && false {'''
 
 [[plant]]
 name = "quota wait: what the window took before its harness refused it goes into it again"
@@ -140,12 +196,37 @@ runs = ["quota-wait-refusals"]
 file = "crates/cf-harness/src/shared/quota.rs"
 find = '''
         .is_some_and(|found| quota_status(js::number(&found[1])))
-        || SPENT.is_match(text)
+        || spent_extra_usage(text)
 '''
 replace = '''
         .is_some_and(|found| quota_status(js::number(&found[1])))
-        || SPENT.is_match(text) && false
 '''
+
+[[plant]]
+name = "quota wait: Anthropic's spent extra usage, a 400 in Claude Code's words, is a failure"
+meant = "anthropics_400_for_spent_extra_usage_is_a_refusal_for_quota_that_names_no_reset"
+runs = ["quota-wait-claude"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/project.rs"
+find = '''
+            || record.get("error").and_then(Value::as_str) == Some("rate_limit")
+            || spent,
+'''
+replace = '''
+            || record.get("error").and_then(Value::as_str) == Some("rate_limit")
+            || spent && false,
+'''
+
+[[plant]]
+name = "quota wait: Anthropic's spent extra usage, a 400 in OpenCode's words, is a failure"
+meant = "anthropics_400_for_spent_extra_usage_is_a_refusal_for_quota_that_names_no_reset"
+runs = ["quota-wait-opencode"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/opencode/record/answer.rs"
+find = "                || refused_for_quota(&failure)"
+replace = "                || refused_for_quota(&failure) && false"
 
 [[plant]]
 name = "quota wait: the stand-in Codex answers the brief its usage limit was to cut"
@@ -156,3 +237,179 @@ runs = ["quota-wait-rig"]
 file = "crates/cf-e2e/src/bin/fake_codex/agent.rs"
 find = "    text.contains(\"QUOTA-OUT\")\n"
 replace = "    text.contains(\"QUOTA-OUT-NEVER\")\n"
+
+[[plant]]
+name = "quota wait: the stand-in Claude never continues by itself after its limit resets"
+meant = "claude_continuing_before_consensflow_resumes_the_task_its_report_is_the_result"
+runs = ["quota-wait-continues"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/bin/fake_agent.rs"
+find = '''
+    let Some(after) = own_var("CF_TEST_AUTO_CONTINUE_MS") else {
+        return Ok(());
+    };
+'''
+replace = '''
+    let Some(after) = own_var("CF_TEST_AUTO_CONTINUE_MS_NEVER") else {
+        return Ok(());
+    };
+'''
+
+[[plant]]
+name = "quota wait: a held task's window that goes on by itself is taken for nothing, and the words that resume it go in after its turn"
+meant = "a_held_tasks_window_that_goes_on_by_itself_is_the_task_going_on_and_its_answer_is_the_result"
+runs = ["quota-wait-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "            self.went_on_by_itself(project, participant, &observed)?;"
+replace = ""
+
+[[plant]]
+name = "quota wait: Claude's own turn after its limit resets reaches the chief in no result (the rig)"
+meant = "claude_continuing_before_consensflow_resumes_the_task_its_report_is_the_result"
+runs = ["quota-wait-continues"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "            self.went_on_by_itself(project, participant, &observed)?;"
+replace = ""
+
+[[plant]]
+name = "quota wait: the daemon's bare words that resume a task are pasted after the turn its window went on with by itself"
+meant = "the_words_that_resume_a_task_queued_while_its_window_goes_on_by_itself_are_withdrawn_and_never_pasted"
+runs = ["quota-wait-engine"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = """            "queued" => {"""
+replace = """            "queued-never" => {"""
+
+[[plant]]
+name = "quota wait: the task's turn is read from its latest paste, the refusal before the window's own turn with it, after a restart"
+meant = "a_held_tasks_own_turn_gives_its_answer_alone_though_the_daemon_restarted_in_it"
+runs = ["quota-wait-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = "            .map_or(pasted + 1, |at| pasted + 1 + at);"
+replace = "            .map_or(pasted + 1, |_| pasted + 1);"
+
+[[plant]]
+name = "quota wait: a held task goes on as soon as its window begins a turn of its own, answered or not"
+meant = "the_words_that_resume_a_task_queued_while_its_window_goes_on_by_itself_are_withdrawn_and_never_pasted"
+runs = ["quota-wait-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = "        if !answered {"
+replace = "        if false && !answered {"
+
+[[plant]]
+name = "quota wait: a held task goes on with a turn of its window's own that failed or was refused again"
+meant = "a_turn_of_the_windows_own_that_fails_while_the_words_that_resume_the_task_wait_neither_withdraws_them_nor_fails_the_task"
+runs = ["quota-wait-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = """        if participant.role == "chief" || observed.failed || refused {"""
+replace = """        if participant.role == "chief" {
+            let _ = refused;"""
+
+[[plant]]
+name = "quota wait: a tell answered while the words that resume the task wait is taken for a turn of the window's own"
+meant = "a_tell_answered_while_the_words_that_resume_the_task_wait_is_no_turn_of_the_windows_own"
+runs = ["quota-wait-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = "            .any(|item| item.role == Role::User && header_id(&item.text).is_some())"
+replace = "            .any(|item| item.role == Role::User && header_id(&item.text).is_some() && false)"
+
+[[plant]]
+name = "quota wait: Codex's refusal borrows the reset of a window far from spent, a week's wait for a minute's limit"
+meant = "a_limit_whose_window_is_far_from_spent_borrows_no_reset_from_it"
+runs = ["quota-wait-codex"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/codex/record.rs"
+find = "        .filter(|quota| quota.level() != Level::Ok)"
+replace = "        .filter(|quota| quota.level() != Level::Exhausted || true)"
+
+[[plant]]
+name = "quota wait: a refusal hours into the turn the words that resumed the task began is taken for refused as soon as it went on"
+meant = "a_refusal_hours_into_the_turn_the_words_that_resumed_it_began_is_a_new_wait_its_requester_is_told_of"
+runs = ["quota-wait-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = "                    .is_some_and(|delivered| refused_at - delivered <= AGAIN_MS)"
+replace = "                    .is_some_and(|delivered| refused_at - delivered <= AGAIN_MS || true)"
+
+[[plant]]
+name = "quota wait: a requester is never told a held task goes on when its resumed turn gets through"
+meant = "the_requester_hears_it_goes_on_when_the_resumed_turn_gets_through_not_when_its_words_go_in"
+runs = ["quota-wait-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = "            self.tell_it_went_on(project, participant, record, &observed)?;"
+replace = ""
+
+[[plant]]
+name = "quota wait: the words that resume a task tell its requester it goes on as they go in, before a turn gets through"
+meant = "the_requester_hears_it_goes_on_when_the_resumed_turn_gets_through_not_when_its_words_go_in"
+runs = ["quota-wait-engine"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = '''
+            json!({ "by": by, "message": message_id }),
+        )?;
+'''
+replace = '''
+            json!({ "by": by, "message": message_id }),
+        )?;
+        if by.is_none() {
+            tell_goes_on(store, &task)?;
+        }
+'''
+
+[[plant]]
+name = "quota wait: a requester is told a held task goes on at the resumed turn's first word, a fragment a refusal may follow"
+meant = "a_fragment_of_the_resumed_turn_refused_a_minute_later_tells_no_goes_on"
+runs = ["quota-wait-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = "        if !last.complete && !working {"
+replace = "        if false && !last.complete && !working {"
+
+[[plant]]
+name = "quota wait: a resumed turn at work past the time a refusal is the same wait tells nothing until its answer is complete"
+meant = "a_resumed_turn_still_at_work_past_the_time_a_refusal_is_the_same_wait_tells_it_goes_on"
+runs = ["quota-wait-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = "        if !last.complete && !working {"
+replace = "        if !last.complete {"
+
+[[plant]]
+name = "quota wait: the daemon's words withdrawn as its window goes on by itself, its requester is told nothing"
+meant = "the_words_that_resume_a_task_queued_while_its_window_goes_on_by_itself_are_withdrawn_and_never_pasted"
+runs = ["quota-wait-engine"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/tasks/pausing.rs"
+find = '''
+                tell_goes_on(store, &task)?;
+            }
+            _ => return Err(not_going_on(number)),
+'''
+replace = '''
+            }
+            _ => return Err(not_going_on(number)),
+'''

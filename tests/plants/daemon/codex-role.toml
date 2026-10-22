@@ -818,9 +818,9 @@ runs = ["engine-role-change"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
-find = '''        let written = answers_to_the_task(&items[start + 1..], &replacements);'''
+find = '''        let written = answers_to_the_task(&items[turn..], &replacements);'''
 replace = '''        let _ = &replacements;
-        let written: Vec<_> = items[start + 1..]
+        let written: Vec<_> = items[turn..]
             .iter()
             .filter(|item| item.role == cf_harness::records::Role::Assistant)
             .collect();'''

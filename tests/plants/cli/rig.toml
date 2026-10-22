@@ -51,7 +51,7 @@ find = '''
 replace = ""
 
 [[plant]]
-name = "rig: the daemon resumes a held task and the chief given the note is told nothing"
+name = "rig: a held task goes on and the chief given the note is told nothing"
 meant = "a_chief_given_the_note_that_a_task_is_held_is_told_it_goes_on_when_the_account_is_switched"
 runs = ["rig-waiting-notes"]
 builds = true
@@ -59,11 +59,13 @@ builds = true
 [[plant.edit]]
 file = "crates/cf-ledger/src/tasks/pausing.rs"
 find = '''
-        if by.is_none() {
-            tell_goes_on(store, &task)?;
-        }
+        let task = store.task_row(project_id, number)?;
+        tell_goes_on(store, &task)
 '''
-replace = ""
+replace = '''
+        let _ = store.task_row(project_id, number)?;
+        Ok(())
+'''
 
 # m-1542: `cf note --help` posted a note saying "--help".
 [[plant]]
