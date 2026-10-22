@@ -407,7 +407,21 @@ fn a_member_back_from_its_reset_brings_back_no_chief_out_until_a_later_one() {
     context.pass().unwrap();
     assert_eq!(tiers.out_until("zeus"), None);
     assert_eq!(tiers.out_until("chief"), Some(week.clone()));
-    // zeus works on: none of its turns undoes the chief's week.
+    // The human hears the chief stays out, as a /login in zeus's window brought back zeus alone.
+    let still_out = || -> Vec<String> {
+        tiers
+            .notes("human")
+            .into_iter()
+            .filter(|note| note.starts_with("@chief is still out of quota"))
+            .collect()
+    };
+    assert_eq!(
+        still_out(),
+        [format!(
+            "@chief is still out of quota until {week}, though @zeus is back on the same account: its limit resets later than @zeus's. If its account has quota again (another account, a bigger plan), press Try again now on @chief."
+        )]
+    );
+    // zeus works on: none of its turns undoes the chief's week, nor tells it again.
     context.pass().unwrap();
     context.pass().unwrap();
     assert_eq!(tiers.task(1).task.state, "working");
@@ -417,6 +431,7 @@ fn a_member_back_from_its_reset_brings_back_no_chief_out_until_a_later_one() {
         .writes(&session, "Tests pass.", &now(&context));
     context.pass().unwrap();
     assert_eq!(tiers.out_until("chief"), Some(week));
+    assert_eq!(still_out().len(), 1);
 }
 
 #[test]
@@ -541,5 +556,74 @@ fn a_chief_whose_reset_is_within_the_hour_of_its_members_is_back_with_it() {
         tiers.out_until("chief"),
         None,
         "the same limit, back with zeus"
+    );
+}
+
+#[test]
+fn a_chief_brought_back_by_its_members_return_and_refused_again_with_the_same_reset_stays_out() {
+    let context = Context::new();
+    let (tiers, session) = out_together(&context);
+    let resets_at = tiers.out_until("chief").unwrap();
+    context.advance(60_000);
+    goes_on(&context.adapter, &session, &now(&context));
+    context.pass().unwrap();
+    assert_eq!(tiers.out_until("chief"), None, "back with zeus");
+    // Its own limit after all: refused again with the same reset.
+    context.advance(60_000);
+    context
+        .adapter
+        .refuse("chief", exhausted(Some(&now(&context)), Some(&resets_at)));
+    context.pass().unwrap();
+    assert_eq!(tiers.out_until("chief"), Some(resets_at.clone()));
+    context.advance(60_000);
+    context
+        .adapter
+        .writes(&session, "Tests pass.", &now(&context));
+    context.pass().unwrap();
+    assert_eq!(
+        tiers.out_until("chief"),
+        Some(resets_at),
+        "once for each limit: zeus's turn is no news for it again"
+    );
+}
+
+#[test]
+fn a_chief_refused_again_with_no_reset_named_within_the_hour_is_not_brought_back_by_a_teammates_turn_again(
+) {
+    // A refusal that names no reset is out an hour from each refusal: a fresh time each.
+    let context = Context::new();
+    context.adapter.one_account.set(true);
+    let tiers = Tiers::new(&context, &["zeus"]);
+    tiers.open();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let session = tiers.assignee(1);
+    context
+        .adapter
+        .refuse("chief", exhausted(Some(&now(&context)), None));
+    context.pass().unwrap();
+    assert!(tiers.out_until("chief").is_some());
+    context.advance(60_000);
+    context
+        .adapter
+        .writes(&session, "Tests pass.", &now(&context));
+    context.pass().unwrap();
+    assert_eq!(tiers.out_until("chief"), None, "zeus's turn got through");
+    context.advance(5 * 60_000);
+    context
+        .adapter
+        .refuse("chief", exhausted(Some(&now(&context)), None));
+    context.pass().unwrap();
+    let again = tiers.out_until("chief");
+    assert!(again.is_some());
+    context.advance(60_000);
+    context
+        .adapter
+        .writes(&session, "Lint passes.", &now(&context));
+    context.pass().unwrap();
+    assert_eq!(
+        tiers.out_until("chief"),
+        again,
+        "the same limit within the hour: no news a teammate's turn undoes"
     );
 }

@@ -21,6 +21,7 @@
 
 [run]
 quota-accounts-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "quota_accounts::"]
+quota-accounts-words = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "scheduler::tests"]
 quota-accounts-rig = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "results_stay_queued_after_a_quota_pause::"]
 
 [[plant]]
@@ -115,15 +116,9 @@ runs = ["quota-accounts-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/scheduler.rs"
-find = '''
-                    } else {
-                        self.answered_since(&other, observed)
-                    }
+find = '''                        self.answered_since(&other, observed) && self.tried_anew(other.id, &until)
 '''
-replace = '''
-                    } else {
-                        true
-                    }
+replace = '''                        self.tried_anew(other.id, &until)
 '''
 
 [[plant]]
@@ -133,13 +128,8 @@ runs = ["quota-accounts-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/scheduler.rs"
-find = '''
-                    self.answered_since(&other, observed)
-                        && self.scheduler.tried.borrow_mut().insert((other.id, until))
-'''
-replace = '''
-                    self.scheduler.tried.borrow_mut().insert((other.id, until))
-'''
+find = '''                } => self.answered_since(&other, observed) && self.tried_anew(other.id, &until),'''
+replace = '''                } => self.tried_anew(other.id, &until),'''
 
 [[plant]]
 name = "quota-accounts: a member back from its reset brings back one out until a later reset"
@@ -158,12 +148,9 @@ runs = ["quota-accounts-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/scheduler.rs"
-find = '''
-                        self.scheduler.tried.borrow_mut().insert((other.id, until));
-                        false
+find = '''                        if self.tried_anew(other.id, &until) {
 '''
-replace = '''
-                        false
+replace = '''                        if until.is_empty() {
 '''
 
 [[plant]]
@@ -173,13 +160,8 @@ runs = ["quota-accounts-engine"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/scheduler.rs"
-find = '''
-                    self.answered_since(&other, observed)
-                        && self.scheduler.tried.borrow_mut().insert((other.id, until))
-'''
-replace = '''
-                    self.answered_since(&other, observed) && !until.is_empty()
-'''
+find = '''                } => self.answered_since(&other, observed) && self.tried_anew(other.id, &until),'''
+replace = '''                } => self.answered_since(&other, observed) && !until.is_empty(),'''
 
 [[plant]]
 name = "quota-accounts: Claude Code is taken for a harness whose windows may be on several accounts, and the chief at rest is never handed its worker's result"
@@ -246,13 +228,11 @@ replace = '''        let waiting = waiting;'''
 
 [[plant.edit]]
 file = "crates/cf-engine/src/scheduler.rs"
-find = '''
-                    waiting.id,
-                    what_it_is(&waiting),
+find = '''                    waiting.id,
+                    what_it_is(&waiting.kind, waiting.task_number),
 '''
-replace = '''
-                    waiting.as_ref().map_or(0, |waiting| waiting.id),
-                    waiting.as_ref().map_or_else(String::new, what_it_is),
+replace = '''                    waiting.as_ref().map_or(0, |waiting| waiting.id),
+                    waiting.as_ref().map_or_else(String::new, |waiting| what_it_is(&waiting.kind, waiting.task_number)),
 '''
 
 [[plant]]
@@ -285,3 +265,51 @@ runs = ["quota-accounts-engine"]
 file = "crates/cf-engine/src/scheduler.rs"
 find = "        .is_some_and(|(until, returned)| until - returned > SAME_LIMIT_MS)"
 replace = "        .is_some_and(|(until, returned)| until > returned)"
+
+[[plant]]
+name = "quota-accounts: a chief a member's return left out for a later limit is not said to the human"
+meant = "a_member_back_from_its_reset_brings_back_no_chief_out_until_a_later_one"
+runs = ["quota-accounts-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+                            self.tell_still_out(project, &other, owner, &until)?;
+'''
+replace = "\n"
+
+[[plant]]
+name = "quota-accounts: a member's own return brings one back without remembering its limit"
+meant = "a_chief_brought_back_by_its_members_return_and_refused_again_with_the_same_reset_stays_out"
+runs = ["quota-accounts-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+                        self.answered_since(&other, observed) && self.tried_anew(other.id, &until)
+'''
+replace = '''
+                        self.answered_since(&other, observed)
+'''
+
+[[plant]]
+name = "quota-accounts: a limit is remembered by its exact reset, and one that names none is brought back at every teammate's turn"
+meant = "a_chief_refused_again_with_no_reset_named_within_the_hour_is_not_brought_back_by_a_teammates_turn_again"
+runs = ["quota-accounts-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = "        .is_some_and(|(one, other)| (one - other).abs() <= SAME_LIMIT_MS)"
+replace = "        .is_some_and(|(one, other)| one == other)"
+
+[[plant]]
+name = "quota-accounts: the human is told of \"a answer\""
+meant = "what_waits_is_told_by_its_kind_and_task_with_the_article_it_takes"
+runs = ["quota-accounts-words"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''        "an"
+'''
+replace = '''        "a"
+'''
