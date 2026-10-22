@@ -43,7 +43,7 @@ use crate::record::Record;
 use crate::resume::Coming;
 use crate::resume::ResumeState;
 use crate::runtime::{all, begin, returning, Begun, LocalWork};
-use crate::scheduler::SchedulerState;
+use crate::scheduler::{News, SchedulerState};
 use crate::seams::{EngineError, Seams};
 use crate::shown::Shown;
 use crate::stalls::StallsState;
@@ -385,7 +385,7 @@ impl Dispatcher {
             .ledger
             .borrow_mut()
             .mark_back(member.id, "by @human")?;
-        self.back_on_its_account(&found, &member, |_| true)?;
+        self.back_on_its_account(project, &member, &News::Human)?;
         self.changed();
         Ok(back)
     }
@@ -1022,18 +1022,25 @@ impl Dispatcher {
                 .await;
         }
         let mut out = self.is_out(&owner);
+        let mut returned = None;
         // A window that got a turn through after its member was marked out says the quota is back.
         if out && self.answered_since(&owner, &observed) {
             self.seams
                 .ledger
                 .borrow_mut()
                 .mark_back(owner.id, &format!("@{} answered again", participant.handle))?;
-            // Its account has quota again: so do the others out on it since before that turn.
-            self.back_on_its_account(project, &owner, |other| {
-                self.answered_since(other, &observed)
-            })?;
+            returned.clone_from(&owner.out_until);
             self.changed();
             out = false;
+        }
+        // A turn that got through is its account's news: whoever else is out on it is back.
+        if !out {
+            let news = News::Turn {
+                record,
+                observed: &observed,
+                returned,
+            };
+            self.back_on_its_account(project.id, &owner, &news)?;
         }
         if out {
             return self

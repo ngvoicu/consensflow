@@ -12,7 +12,7 @@ use serde_json::json;
 use crate::fixtures::{after, assert_match, exhausted, now, participant, Tiers};
 
 /// The words that tell the human what waits for a window out of quota.
-const WAITS: &str = r"^@chief is out of quota until \S+, and m-(\d+) waits for it, as does whatever is sent to it until then\. If its account has quota again \(another account, a bigger plan\), press Try again now on @chief: what waits is typed in once it is back\.$";
+const WAITS: &str = r"^@chief is out of quota until \S+, and m-(\d+) \(the words of T-\d+\) waits for it, as does whatever is sent to it until then\. If its account has quota again \(another account, a bigger plan\), press Try again now on @chief: what waits is typed in once it is back\.$";
 
 /// zeus at work on T-1 on Claude Code, whose windows are on one account; then
 /// the account runs out, refusing zeus's window and the chief's alike, with a
@@ -55,12 +55,6 @@ fn to_chief(tiers: &Tiers<'_>, found: impl Fn(&MessageView) -> bool) -> Option<S
         .map(|message| message.state)
 }
 
-/// The state of the note that T-1 waits, sent to the chief.
-fn hold_note(tiers: &Tiers<'_>) -> String {
-    to_chief(tiers, |message| message.body.starts_with("T-1 waits with "))
-        .expect("the note that T-1 waits")
-}
-
 /// The window `session` of `fake` gets a turn through on the account that has
 /// quota again: its record's last word is no longer the refusal, which it no
 /// longer reads as a failed turn.
@@ -95,7 +89,6 @@ fn a_chief_out_on_its_members_account_is_back_once_a_window_of_the_member_gets_a
 ) {
     let context = Context::new();
     let (tiers, session) = out_together(&context);
-    assert_eq!(hold_note(&tiers), "queued");
     // The human logs into another account and goes on in zeus's window.
     context.advance(60_000);
     goes_on(&context.adapter, &session, &now(&context));
@@ -165,7 +158,6 @@ fn a_chief_stays_out_when_its_harness_may_log_windows_into_several_accounts() {
         tiers.out_until("chief").is_some(),
         "zeus's account may be another"
     );
-    assert_eq!(hold_note(&tiers), "queued");
 }
 
 #[test]
@@ -273,7 +265,14 @@ fn the_human_is_told_once_for_each_mark_what_waits_for_a_window_out_of_quota() {
     let said = told();
     assert_eq!(said.len(), 1, "{said:?}");
     assert_match(&said[0], WAITS);
-    assert!(said[0].contains(&format!("m-{} waits", first.id)));
+    assert!(
+        said[0].contains(&format!(
+            "m-{} (the words of T-{}) waits",
+            first.id,
+            first.task_number.unwrap()
+        )),
+        "{said:?}"
+    );
 
     // Back, and out again: a new mark is told anew.
     context.back_from_quota(tiers.project.id, "chief").unwrap();
@@ -282,4 +281,265 @@ fn the_human_is_told_once_for_each_mark_what_waits_for_a_window_out_of_quota() {
     context.pass().unwrap();
     context.pass().unwrap();
     assert_eq!(told().len(), 2, "{:?}", told());
+}
+
+/// zeus at work on T-1 on Claude Code, whose windows are on one account, and the
+/// chief refused alone, out two days: zeus's window was never out.
+fn chief_out_alone(context: &Context) -> (Tiers<'_>, String, String) {
+    context.adapter.one_account.set(true);
+    let tiers = Tiers::new(context, &["zeus"]);
+    tiers.open();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let session = tiers.assignee(1);
+    let resets_at = after(context, 48 * 3_600_000);
+    context
+        .adapter
+        .refuse("chief", exhausted(Some(&now(context)), Some(&resets_at)));
+    context.pass().unwrap();
+    assert_eq!(tiers.out_until("chief"), Some(resets_at.clone()));
+    assert_eq!(tiers.out_until("zeus"), None);
+    (tiers, session, resets_at)
+}
+
+#[test]
+fn a_chief_out_alone_is_back_once_a_turn_of_a_window_on_its_account_gets_through() {
+    let context = Context::new();
+    let (tiers, session, _) = chief_out_alone(&context);
+    context.advance(60_000);
+    context
+        .adapter
+        .writes(&session, "Tests pass.", &now(&context));
+    context.pass().unwrap();
+    assert_eq!(
+        tiers.out_until("chief"),
+        None,
+        "zeus's turn got through on the chief's account"
+    );
+}
+
+#[test]
+fn a_chief_refused_again_with_the_same_reset_is_not_brought_back_by_a_teammates_turn_again() {
+    let context = Context::new();
+    let (tiers, session, resets_at) = chief_out_alone(&context);
+    context.advance(60_000);
+    context
+        .adapter
+        .writes(&session, "Tests pass.", &now(&context));
+    context.pass().unwrap();
+    assert_eq!(tiers.out_until("chief"), None);
+    // Its own limit, not the account's: refused again with the same reset.
+    context.advance(60_000);
+    context
+        .adapter
+        .refuse("chief", exhausted(Some(&now(&context)), Some(&resets_at)));
+    context.pass().unwrap();
+    assert_eq!(tiers.out_until("chief"), Some(resets_at.clone()));
+    context.advance(60_000);
+    context
+        .adapter
+        .writes(&session, "Lint passes.", &now(&context));
+    context.pass().unwrap();
+    assert_eq!(
+        tiers.out_until("chief"),
+        Some(resets_at),
+        "the same reset again is no news a teammate's turn undoes"
+    );
+}
+
+#[test]
+fn a_chief_marked_out_in_the_same_pass_as_its_members_answer_is_back_with_the_members_next_turn() {
+    let context = Context::new();
+    context.adapter.one_account.set(true);
+    let tiers = Tiers::new(&context, &["zeus"]);
+    tiers.open();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let session = tiers.assignee(1);
+    let resets_at = after(&context, 48 * 3_600_000);
+    context
+        .adapter
+        .refuse(&session, exhausted(Some(&now(&context)), Some(&resets_at)));
+    context.pass().unwrap();
+    assert_eq!(tiers.out_until("zeus"), Some(resets_at.clone()));
+    // In one pass: zeus's window gets a turn through, and the chief is refused.
+    context.advance(60_000);
+    goes_on(&context.adapter, &session, &now(&context));
+    context
+        .adapter
+        .refuse("chief", exhausted(Some(&now(&context)), Some(&resets_at)));
+    context.pass().unwrap();
+    assert_eq!(tiers.out_until("zeus"), None);
+    assert_eq!(tiers.out_until("chief"), Some(resets_at));
+    // zeus works on: its next turn is the account's news for the chief.
+    context.advance(60_000);
+    context
+        .adapter
+        .writes(&session, "Tests pass.", &now(&context));
+    context.pass().unwrap();
+    assert_eq!(tiers.out_until("chief"), None);
+}
+
+#[test]
+fn a_member_back_from_its_reset_brings_back_no_chief_out_until_a_later_one() {
+    // A plan's weekly limit of one model: the chief out for a week, zeus for five hours.
+    let context = Context::new();
+    context.adapter.one_account.set(true);
+    let tiers = Tiers::new(&context, &["zeus"]);
+    tiers.open();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let session = tiers.assignee(1);
+    let hours = after(&context, 5 * 3_600_000);
+    let week = after(&context, 7 * 24 * 3_600_000);
+    context
+        .adapter
+        .refuse(&session, exhausted(Some(&now(&context)), Some(&hours)));
+    context
+        .adapter
+        .refuse("chief", exhausted(Some(&now(&context)), Some(&week)));
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(tiers.out_until("zeus"), Some(hours));
+    assert_eq!(tiers.out_until("chief"), Some(week.clone()));
+    context.advance(60_000);
+    goes_on(&context.adapter, &session, &now(&context));
+    context.pass().unwrap();
+    assert_eq!(tiers.out_until("zeus"), None);
+    assert_eq!(tiers.out_until("chief"), Some(week.clone()));
+    // zeus works on: none of its turns undoes the chief's week.
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(tiers.task(1).task.state, "working");
+    context.advance(60_000);
+    context
+        .adapter
+        .writes(&session, "Tests pass.", &now(&context));
+    context.pass().unwrap();
+    assert_eq!(tiers.out_until("chief"), Some(week));
+}
+
+#[test]
+fn a_members_held_task_goes_on_once_the_human_says_the_chief_is_back() {
+    let context = Context::new();
+    let (tiers, session) = out_together(&context);
+    context.back_from_quota(tiers.project.id, "chief").unwrap();
+    assert_eq!(tiers.out_until("zeus"), None, "zeus is back with it");
+    context.adapter.with(&session, |agent| {
+        agent.quota = None;
+        agent.failed = false;
+    });
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let task = tiers.task(1).task;
+    assert_eq!(
+        (task.state.as_str(), task.held_until),
+        ("working", None),
+        "T-1's hold is over and it goes on"
+    );
+}
+
+#[test]
+fn a_chief_stays_out_when_a_teammates_turn_that_got_through_before_its_refusal_is_read_after_it() {
+    let context = Context::new();
+    context.adapter.one_account.set(true);
+    let tiers = Tiers::new(&context, &["zeus"]);
+    tiers.open();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let session = tiers.assignee(1);
+    // zeus's window answered a minute before the chief was refused, but its record
+    // is read only after.
+    let through = now(&context);
+    context.advance(60_000);
+    let resets_at = after(&context, 48 * 3_600_000);
+    context
+        .adapter
+        .refuse("chief", exhausted(Some(&now(&context)), Some(&resets_at)));
+    context.pass().unwrap();
+    assert_eq!(tiers.out_until("chief"), Some(resets_at.clone()));
+    context.adapter.writes(&session, "Tests pass.", &through);
+    context.pass().unwrap();
+    assert_eq!(
+        tiers.out_until("chief"),
+        Some(resets_at),
+        "that turn got through before the chief was refused: no news for it"
+    );
+}
+
+#[test]
+fn the_human_is_told_what_waits_for_a_member_out_of_quota_whose_closed_window_opens_with_it() {
+    // A task given to zeus by name while it is out: its window, closed, opens with
+    // the task's words as its first message, which wait there for the quota.
+    let context = Context::new();
+    let tiers = Tiers::new(&context, &["zeus"]);
+    context.pass().unwrap();
+    context.adapter.answer("chief", "Ready.");
+    context.pass().unwrap();
+    let (zeus, until) = (tiers.id("zeus"), after(&context, 48 * 3_600_000));
+    context
+        .ledger
+        .borrow_mut()
+        .mark_out(zeus, &until, "out of quota")
+        .unwrap();
+    let words = context
+        .create_task(
+            tiers.project.id,
+            NewTask {
+                from: "chief".to_owned(),
+                to: Some("zeus".to_owned()),
+                body: "Write the parser".to_owned(),
+                ..NewTask::default()
+            },
+        )
+        .message
+        .unwrap();
+    for _ in 0..3 {
+        context.pass().unwrap();
+    }
+    assert_eq!(context.dispatcher.activity(zeus).state, ActivityState::Out);
+    let told: Vec<String> = tiers
+        .notes("human")
+        .into_iter()
+        .filter(|note| note.starts_with("@zeus is out of quota"))
+        .collect();
+    assert_eq!(told.len(), 1, "{told:?}");
+    assert!(
+        told[0].contains(&format!("m-{} (the words of T-1) waits for it", words.id)),
+        "{told:?}"
+    );
+}
+
+#[test]
+fn a_chief_whose_reset_is_within_the_hour_of_its_members_is_back_with_it() {
+    // One limit, its reset named an hour from each refusal: the chief refused a
+    // little after zeus.
+    let context = Context::new();
+    context.adapter.one_account.set(true);
+    let tiers = Tiers::new(&context, &["zeus"]);
+    tiers.open();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let session = tiers.assignee(1);
+    context.adapter.refuse(
+        &session,
+        exhausted(Some(&now(&context)), Some(&after(&context, 3_600_000))),
+    );
+    context.pass().unwrap();
+    context.advance(10 * 60_000);
+    let later = after(&context, 3_600_000);
+    context
+        .adapter
+        .refuse("chief", exhausted(Some(&now(&context)), Some(&later)));
+    context.pass().unwrap();
+    assert_eq!(tiers.out_until("chief"), Some(later));
+    context.advance(60_000);
+    goes_on(&context.adapter, &session, &now(&context));
+    context.pass().unwrap();
+    assert_eq!(tiers.out_until("zeus"), None);
+    assert_eq!(
+        tiers.out_until("chief"),
+        None,
+        "the same limit, back with zeus"
+    );
 }

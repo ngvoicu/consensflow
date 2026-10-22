@@ -268,23 +268,30 @@ fn a_worker_refused_by_its_provider_mid_task_loses_the_task_to_the_other_worker_
             .is_match(body),
         "{body}"
     );
-    // Quota is the member's: the member row says it is out, not a session.
+    // Quota is the member's: the member row was marked out, not a session. The
+    // other worker's turn on the same account brought it back since (Claude
+    // Code's windows share one account, T-295), and its row keeps when it was
+    // last marked.
     let board = p.board()?;
-    let out = board["lanes"]
-        .as_array()
-        .and_then(|lanes| {
-            lanes
-                .iter()
-                .find(|l| l["participant"]["handle"] == "worker")
-        })
-        .map_or(Value::Null, |lane| lane["participant"].clone());
-    let until = out["outUntil"]
-        .as_str()
-        .and_then(|at| at.parse::<jiff::Timestamp>().ok());
+    let row = |handle: &dyn Fn(&str) -> bool| {
+        board["lanes"]
+            .as_array()
+            .and_then(|lanes| {
+                lanes
+                    .iter()
+                    .find(|l| handle(l["participant"]["handle"].as_str().unwrap_or_default()))
+            })
+            .map_or(Value::Null, |lane| lane["participant"].clone())
+    };
+    let member = row(&|handle| handle == "worker");
     assert!(
-        until.is_some_and(|until| until > jiff::Timestamp::now()),
-        "the first worker is out: {}",
-        out["outUntil"]
+        member["outSince"].is_string(),
+        "the first worker was marked out: {member}"
+    );
+    let session = row(&|handle| handle.starts_with("worker-"));
+    assert!(
+        session["outSince"].is_null(),
+        "its session was not: {session}"
     );
     let taken_back = Regex::new(
         r"^T-1 was taken back from @worker-[a-z]+-[a-z]+ \(ran out of quota after starting\)",

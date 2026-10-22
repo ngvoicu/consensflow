@@ -187,7 +187,7 @@ const STALL_LEFT: &str = "the human reassigns T-1 while the note that T-1 is pau
 
 /// What waits for a chief out of quota is said to the human (the field report of
 /// 2026-10-22, T-254).
-const OUT_WITH_WORK_WAITING: &str = "the chief is out of quota with a task queued for it: the human is told once that it waits (`@chief is out of quota until …, and m-2 waits for it`), where Node says nothing and the task waits for the reset";
+const OUT_WITH_WORK_WAITING: &str = "the chief is out of quota with a task queued for it: the human is told once that it waits (`@chief is out of quota until …, and m-2 (the words of T-1) waits for it`), where Node says nothing and the task waits for the reset";
 
 /// The tests the engine departs from Node's trace in on purpose, each with
 /// what the engine does that Node does not. Node never withdraws a note that

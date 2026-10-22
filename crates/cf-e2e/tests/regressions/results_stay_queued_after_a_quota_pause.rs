@@ -22,13 +22,14 @@
 //! What should have been seen: once a window on the chief's harness gets a turn through
 //! (the human's new account answering), the chief is back too, as every window of that
 //! harness is logged into the one account, and what waits for it is typed in; and while
-//! it is out with something waiting for it, the human is told so once on the board.
+//! it is out with something waiting for it, the human is told so once on the board (held
+//! by the engine's tests, `quota_accounts`).
 //!
 //! The cases are that shape on the rig: the chief and its one worker share an account
 //! (`CF_TEST_QUOTA_SPENT`), spent while the worker is at work. The worker is refused, its
 //! task held, and the chief is refused on the note that says so. The human logs into
 //! another account and goes on in the worker's window, or presses Try again now on the
-//! worker; the task finishes, and its result must be typed into the chief.
+//! worker or on the chief; the task finishes, and its result must be typed into the chief.
 
 use std::path::PathBuf;
 
@@ -83,6 +84,8 @@ enum Back {
     InItsWindow,
     /// Presses Try again now on the worker.
     TryAgainNow,
+    /// Presses Try again now on the chief.
+    TryAgainNowOnChief,
 }
 
 #[test]
@@ -95,6 +98,12 @@ fn a_chief_out_of_quota_with_its_worker_is_handed_the_result_once_the_workers_wi
 fn a_chief_out_of_quota_with_its_worker_is_handed_the_result_once_the_human_says_the_worker_is_back(
 ) -> Outcome {
     handed_the_result_after_the_switch(Back::TryAgainNow)
+}
+
+#[test]
+fn a_chief_out_of_quota_with_its_worker_is_handed_the_result_once_the_human_says_the_chief_is_back(
+) -> Outcome {
+    handed_the_result_after_the_switch(Back::TryAgainNowOnChief)
 }
 
 /// The chief and its worker run out together; the human switches the account and brings
@@ -138,15 +147,6 @@ fn handed_the_result_after_the_switch(back: Back) -> Outcome {
         "the chief is sent the note that T-1 waits"
     );
 
-    // While it is out, the human is told once that what is sent to the chief waits
-    // behind its mark.
-    let told = Regex::new(r"^@chief is out of quota until \S+, and m-\d+ waits for it")?;
-    rig.wait_for(
-        "the human to be told what waits for the chief",
-        secs(30),
-        || Ok(notes_to(&p, "human", &told)?.len() == 1),
-    )?;
-
     // The human logs into another account and brings the worker back.
     account.switch();
     match back {
@@ -158,10 +158,15 @@ fn handed_the_result_after_the_switch(back: Back) -> Outcome {
             )?;
             assert_eq!(typed["ok"], true, "{typed}");
         }
-        Back::TryAgainNow => {
+        Back::TryAgainNow | Back::TryAgainNowOnChief => {
+            let pressed = if matches!(back, Back::TryAgainNow) {
+                "worker"
+            } else {
+                "chief"
+            };
             let said = rig.page(
                 "member.back",
-                json!({ "project": p.id(), "participant": "worker" }),
+                json!({ "project": p.id(), "participant": pressed }),
             )?;
             assert_eq!(said["ok"], true, "{said}");
         }
@@ -181,12 +186,6 @@ fn handed_the_result_after_the_switch(back: Back) -> Outcome {
             }))
         },
     )?;
-    assert_eq!(
-        notes_to(&p, "human", &told)?.len(),
-        1,
-        "the human was told once: {:?}",
-        p.inbox("human")?
-    );
     rig.close()?;
     Ok(())
 }
