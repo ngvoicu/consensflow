@@ -8,7 +8,7 @@
 
 use cf_engine::delivery_text::marker_of;
 use cf_engine::testing::Context;
-use cf_harness::records::{Pending, Role};
+use cf_harness::records::{End, Monitor, Notice, Pending, Role};
 use cf_ledger::NewTask;
 
 use crate::fixtures::{closed, Tiers};
@@ -22,11 +22,13 @@ const A_JOB: Pending = Pending {
     agents: 0,
     jobs: 1,
     retired: 0,
+    noticed: 0,
 };
 const A_JOB_AND_AN_AGENT: Pending = Pending {
     agents: 1,
     jobs: 1,
     retired: 0,
+    noticed: 0,
 };
 
 /// The results the chief was given or is to be given, of T-`number`.
@@ -180,7 +182,7 @@ fn a_human_whose_task_goes_on_in_the_background_is_told_of_the_drawers_finish_an
     let told = tiers.notes("human");
     assert_eq!(told.len(), 1, "{told:?}");
     assert!(
-        told[0].contains("To take what it said last as the result now: Finish in the task's drawer, which does not end it."),
+        told[0].contains("If its work is done, take what it said last as the result now: Finish in the task's drawer, which does not end it."),
         "{told:?}"
     );
     assert!(!told[0].contains("cf task finish"), "{told:?}");
@@ -314,6 +316,7 @@ fn finish_of_a_turn_still_under_way_names_the_jobs_its_record_counts_and_says_th
         agents: 0,
         jobs: 2,
         retired: 0,
+        noticed: 0,
     };
     let context = Context::new();
     let tiers = zeus_at_work(&context);
@@ -964,5 +967,204 @@ fn where_no_paste_proves_where_the_latest_message_arrived_there_is_no_result_and
             .to_string()
             .contains("the message is not in its window yet, or its record holds no paste of it; wait, send it a message about the task, or cancel it"),
         "{refused}"
+    );
+}
+
+/// A monitor of a command called `name`, whose notice of its end said `end` at 23:03:10.
+fn monitor(name: &str, command: bool, end: Option<End>) -> Monitor {
+    Monitor {
+        description: name.into(),
+        command,
+        notice: end.map(|end| Notice {
+            end,
+            at: Some("2026-10-21T23:03:10.329Z".into()),
+        }),
+    }
+}
+
+/// `jobs` pending, `noticed` of them monitors of a command whose notice of their end came.
+fn pending(jobs: usize, noticed: usize) -> Pending {
+    Pending {
+        jobs,
+        noticed,
+        ..Pending::default()
+    }
+}
+
+/// The note the chief was told last of T-1.
+fn told_last(tiers: &Tiers<'_>) -> String {
+    tiers.notes("chief").last().cloned().unwrap_or_default()
+}
+
+#[test]
+fn a_monitor_whose_time_ran_out_is_over_once_on_a_later_pass_no_command_of_the_harness_runs() {
+    // T-203: Claude Code kills a monitor's command as it writes the notice of its expiry;
+    // the pass that first sees the notice does not look, the next finds no command and
+    // takes the monitor for over, and the turn's answer is the result.
+    let context = Context::new();
+    let tiers = zeus_at_work(&context);
+    context.background.commands_run(Some(0));
+    context.adapter.answer_leaving_monitors(
+        "zeus",
+        "The watch ran out; the run had finished: 412 green",
+        pending(1, 1),
+        vec![monitor("ticks", true, Some(End::Expired))],
+    );
+    context.pass().unwrap();
+    assert_eq!(
+        context.background.looks(),
+        0,
+        "no look on the pass that saw it"
+    );
+    assert_eq!(tiers.task(1).task.state, "working");
+    let told = told_last(&tiers);
+    assert!(
+        told.starts_with("T-1 goes on in the background: @zeus ended its turn with 1 monitor that said it ended. Its monitors: \u{201c}ticks\u{201d}'s time ran out at 23:03:10 UTC. A monitor whose time ran out, or that Claude Code stopped, is taken for over once no command of @zeus's harness runs in its window."),
+        "{told}"
+    );
+    context.pass().unwrap();
+    assert_eq!(context.background.looks(), 1);
+    assert_eq!(tiers.task(1).task.state, "done");
+    assert_eq!(
+        results_of(&tiers, 1),
+        ["The watch ran out; the run had finished: 412 green"]
+    );
+}
+
+#[test]
+fn a_monitor_whose_time_ran_out_waits_while_a_command_runs_or_while_the_host_cannot_tell() {
+    // A command runs in the window: a background job's, another monitor's, or the
+    // monitor's own that printed the notice's words and runs on.
+    let context = Context::new();
+    let tiers = zeus_at_work(&context);
+    context.background.commands_run(Some(1));
+    context.adapter.answer_leaving_monitors(
+        "zeus",
+        "Watching",
+        pending(1, 1),
+        vec![monitor("ticks", true, Some(End::Expired))],
+    );
+    passes(&context, 4);
+    assert_eq!(tiers.task(1).task.state, "working");
+    assert_eq!(
+        context.background.looks(),
+        3,
+        "a look each pass after the first"
+    );
+    // The host cannot tell the window's commands (a Windows job has no groups).
+    context.background.commands_run(None);
+    passes(&context, 3);
+    assert_eq!(tiers.task(1).task.state, "working");
+    // The command ends: the next look finds none, and the answer is the result.
+    context.background.commands_run(Some(0));
+    context.pass().unwrap();
+    assert_eq!(tiers.task(1).task.state, "done");
+}
+
+#[test]
+fn a_monitor_whose_time_ran_out_is_not_looked_at_while_another_job_or_an_agent_is_pending() {
+    let context = Context::new();
+    let tiers = zeus_at_work(&context);
+    context.background.commands_run(Some(0));
+    context.adapter.answer_leaving_monitors(
+        "zeus",
+        "Watching the build",
+        pending(2, 1),
+        vec![
+            monitor("ticks", true, Some(End::Expired)),
+            monitor("build", true, None),
+        ],
+    );
+    passes(&context, 4);
+    assert_eq!(tiers.task(1).task.state, "working");
+    assert_eq!(context.background.looks(), 0);
+    let told = told_last(&tiers);
+    assert!(
+        told.contains("ended its turn with 1 background job running, which its harness wakes it for as each ends, and 1 monitor that said it ended. Its monitors: \u{201c}ticks\u{201d}'s time ran out at 23:03:10 UTC; \u{201c}build\u{201d} watches still."),
+        "{told}"
+    );
+    assert!(
+        told.contains("to wait for it, do nothing. If its work is done, take what it said last as the result now: cf task finish T-1, which does not end them."),
+        "{told}"
+    );
+}
+
+#[test]
+fn a_sockets_monitor_whose_notice_came_waits_for_its_own_word_or_finish() {
+    let context = Context::new();
+    let tiers = zeus_at_work(&context);
+    context.background.commands_run(Some(0));
+    context.adapter.answer_leaving_monitors(
+        "zeus",
+        "Watching the feed",
+        pending(1, 1),
+        vec![monitor("feed", false, Some(End::Closed))],
+    );
+    passes(&context, 4);
+    assert_eq!(tiers.task(1).task.state, "working");
+    assert_eq!(context.background.looks(), 0);
+    let told = told_last(&tiers);
+    assert!(
+        told.contains("\u{201c}feed\u{201d}'s socket closed at 23:03:10 UTC. A monitor of a socket has no command to look for: it waits for its own word of its end, or for Finish."),
+        "{told}"
+    );
+}
+
+#[test]
+fn a_held_task_whose_monitor_says_it_ended_later_is_told_again_with_what_the_window_runs() {
+    let context = Context::new();
+    let tiers = zeus_at_work(&context);
+    context.background.commands_run(Some(2));
+    context.adapter.answer_leaving_monitors(
+        "zeus",
+        "Watching",
+        pending(1, 0),
+        vec![monitor("ticks", true, None)],
+    );
+    context.pass().unwrap();
+    assert_eq!(tiers.notes("chief").len(), 1);
+    assert!(told_last(&tiers).contains("Its monitors: \u{201c}ticks\u{201d} watches still."));
+    // Claude Code stops it for too much output; its command, which a look finds, runs on.
+    context.adapter.wake("zeus", "<task-notification>");
+    context.pass().unwrap();
+    context.adapter.answer_leaving_monitors(
+        "zeus",
+        "Stopped for noise",
+        pending(1, 1),
+        vec![monitor("ticks", true, Some(End::Stopped))],
+    );
+    passes(&context, 3);
+    assert_eq!(tiers.task(1).task.state, "working");
+    let told = told_last(&tiers);
+    assert_eq!(tiers.notes("chief").len(), 2, "told again: {told}");
+    assert!(
+        told.contains("Claude Code stopped \u{201c}ticks\u{201d} at 23:03:10 UTC."),
+        "{told}"
+    );
+}
+
+#[test]
+fn finish_of_a_task_held_for_a_monitor_that_said_it_ended_says_so_apart_from_what_runs() {
+    let context = Context::new();
+    let tiers = zeus_at_work(&context);
+    context.background.commands_run(None);
+    context.adapter.answer_leaving_monitors(
+        "zeus",
+        "The watch ran out",
+        pending(2, 1),
+        vec![
+            monitor("ticks", true, Some(End::Expired)),
+            monitor("build", true, None),
+        ],
+    );
+    passes(&context, 2);
+    let finished = context
+        .finish_task(tiers.project.id, 1, "chief")
+        .expect("finished");
+    assert_eq!(finished.task.state, "done");
+    let results = results_of(&tiers, 1);
+    assert!(
+        results[0].contains("still counted 1 background job running, and 1 monitor that said it ended, which finishing ends none of"),
+        "{results:?}"
     );
 }

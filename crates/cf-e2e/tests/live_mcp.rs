@@ -42,8 +42,6 @@
 
 // The parts are in `live_mcp/`: cargo looks for the modules of a test's root file
 // beside it, where each would be a suite of its own.
-#[path = "live_mcp/server.rs"]
-mod server;
 #[path = "live_mcp/verdict.rs"]
 mod verdict;
 
@@ -59,7 +57,7 @@ use cf_e2e::rig::{Project, Rig, OPEN};
 use cf_e2e::{files, Error, Result};
 use serde_json::{json, Value};
 
-use server::Server;
+use cf_e2e::live::mcp_server::{self as server, Server};
 use verdict::{judge, Seen, ANSWER};
 
 /// The stand-in for the chief's window, built for these tests: the program the

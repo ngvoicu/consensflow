@@ -5,7 +5,7 @@
 //! Node's dispatcher never asked, and the traces hold the engine to what Node's asked.
 //! Nothing is ever asked to end (`turn_end`): the seam has no such call.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use cf_harness::contract::{Pane, Work};
@@ -20,11 +20,17 @@ struct Marked {
     harness: String,
 }
 
-/// The pane host's side of the marks, which a test reads.
+/// The pane host's side of the marks, which a test reads, and of its looks at the
+/// commands of a window's harness, which a test sets.
 #[derive(Default)]
 pub struct FakeBackground {
     /// What the engine told of each window a turn begins in, in order.
     marked: RefCell<Vec<Marked>>,
+    /// What a look at a window's commands answers: none (the host cannot tell) unless a
+    /// test says.
+    commands: Cell<Option<usize>>,
+    /// The panes the engine looked at the commands of, in order.
+    looked: RefCell<Vec<Pane>>,
 }
 
 impl FakeBackground {
@@ -51,6 +57,16 @@ impl FakeBackground {
             .collect()
     }
 
+    /// A look at a window's commands answers `commands` from now on.
+    pub fn commands_run(&self, commands: Option<usize>) {
+        self.commands.set(commands);
+    }
+
+    /// How many looks at a window's commands the engine made.
+    pub fn looks(&self) -> usize {
+        self.looked.borrow().len()
+    }
+
     /// What each of those marks said of which harness the window is.
     pub fn harness_said(&self) -> Vec<String> {
         self.marked
@@ -69,5 +85,11 @@ impl BackgroundWork for FakeBackground {
             harness: harness.to_owned(),
         });
         Box::pin(async {})
+    }
+
+    fn commands<'a>(&'a self, pane: &'a Pane) -> Work<'a, Option<usize>> {
+        self.looked.borrow_mut().push(pane.clone());
+        let commands = self.commands.get();
+        Box::pin(async move { commands })
     }
 }

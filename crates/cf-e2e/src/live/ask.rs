@@ -142,6 +142,8 @@ pub struct Record {
     pub agents_pending: bool,
     pub jobs_pending: u64,
     pub jobs_retired: u64,
+    /// How many of the jobs are monitors whose notice of their end came.
+    pub monitors_noticed: u64,
 }
 
 /// What the record of the conversation `session` of a harness of the kind
@@ -176,6 +178,7 @@ fn record_of(answer: &Value) -> Option<Record> {
         agents_pending: reading["agentsPending"] == true,
         jobs_pending: reading["jobsPending"].as_u64().unwrap_or_default(),
         jobs_retired: reading["jobsRetired"].as_u64().unwrap_or_default(),
+        monitors_noticed: reading["monitorsNoticed"].as_u64().unwrap_or_default(),
     })
 }
 

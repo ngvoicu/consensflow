@@ -41,6 +41,7 @@ fn reading(items: Vec<Item>, settlement: Settlement) -> Arc<Reading> {
         quota: None,
         settlement,
         pending: Default::default(),
+        monitors: Vec::new(),
     }))
 }
 

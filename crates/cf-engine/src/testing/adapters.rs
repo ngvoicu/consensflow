@@ -85,6 +85,7 @@ fn record_of(fake: &FakeAdapter, session: &str) -> Reading {
                 Settlement::InFlight
             },
             pending: Default::default(),
+            monitors: Vec::new(),
         }),
     }
 }

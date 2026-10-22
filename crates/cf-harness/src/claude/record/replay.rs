@@ -8,7 +8,7 @@ use cf_base::{js, time};
 use serde_json::Value;
 
 use super::patterns::QUIET_COMMAND;
-use super::project::{Assistant, Block, Boundary, Hook, Projected, ToolResult, User};
+use super::project::{Assistant, Block, Boundary, Call, Hook, Projected, ToolResult, User};
 use super::{Candidate, Terminal, Transcript};
 use crate::shared::quota::exhausted_quota;
 use crate::shared::record::reading::{native_id, Role};
@@ -27,7 +27,7 @@ impl Transcript {
             Projected::Hook(hook) => self.hook_context(hook, seq)?,
             // Claude Code's notification brought into a turn under way: the jobs it says are
             // over have ended. Queued, it ended none: a message a human typed is queued alike.
-            Projected::Notified(text) => self.jobs.ended_by(text),
+            Projected::Notified(text, at) => self.jobs.ended_by(text, at.as_deref()),
             Projected::Enqueue(content) => self.queues.enqueue(content.clone()?),
             Projected::Dequeue => self.queues.dequeue(),
             Projected::PopAll(content) => self.queues.pop_all(content.clone()?),
@@ -94,11 +94,17 @@ impl Transcript {
 
         for block in &record.blocks {
             match block {
-                Block::Use(id, task_stop) => {
+                Block::Use(id, made) => {
                     let call = self.keys.of(id.as_ref());
                     if call.truthy() {
-                        if *task_stop {
-                            self.task_stops.insert(call.clone());
+                        match made {
+                            Call::TaskStop => {
+                                self.task_stops.insert(call.clone());
+                            }
+                            Call::Monitor(watch) => {
+                                self.monitors.insert(call.clone(), watch.clone());
+                            }
+                            Call::Other => {}
                         }
                         self.open_tools.insert(call);
                     }
@@ -182,8 +188,9 @@ impl Transcript {
         for result in &record.results {
             self.tool_result(result, at, seq)?;
         }
-        if let Some(job) = &record.job {
-            self.jobs.started(Arc::clone(job));
+        if let Some((call, job)) = &record.job {
+            let watch = self.monitors.remove(&self.keys.of(call.as_ref()));
+            self.jobs.started(Arc::clone(job), watch);
         }
         if let Some((call, job)) = &record.stopped {
             if self.task_stops.remove(&self.keys.of(call.as_ref())) {
@@ -191,7 +198,8 @@ impl Transcript {
             }
         }
         if record.notification {
-            self.jobs.ended_by(&record.text);
+            self.jobs
+                .ended_by(&record.text, record.at.as_ref().and_then(Value::as_str));
         }
         if record.interrupt {
             let id = id_of(record.uuid.as_ref(), "claude user", seq)?;

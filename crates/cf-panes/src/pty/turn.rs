@@ -193,6 +193,19 @@ impl PaneTable {
         Ok(looked_at(&baseline, &tree)?)
     }
 
+    /// The commands of the window's harness that run in the pane's tree now
+    /// ([`Baseline::commands`]): none where the host cannot tell them.
+    pub fn commands(&self, key: &PaneKey) -> Result<Option<Background>, PaneError> {
+        let (tree, baseline) = {
+            let panes = self.lock_panes()?;
+            let pane = panes
+                .get(key)
+                .ok_or_else(|| PaneError::NotFound(key.clone()))?;
+            (pane.tree(), pane.baseline.clone())
+        };
+        Ok(baseline.commands(&tree.members()?))
+    }
+
     /// Ends what the pane's turn left running, and nothing of the pane's own, the
     /// window staying open: all of what the host tells for the turn's work with no
     /// doubt ([`Baseline::turn_work`]), at two looks [`SETTLE`] apart, and what it

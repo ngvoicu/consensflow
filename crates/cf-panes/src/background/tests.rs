@@ -513,3 +513,72 @@ fn a_command_line_is_held_to_one_line_and_to_the_bound() {
     assert!(cut.ends_with('…'));
     assert!(cut.starts_with("python3 xxx"));
 }
+
+/// `member` in the process group `group`.
+fn in_group(member: Member, group: i32) -> Member {
+    Member {
+        group: Some(group),
+        ..member
+    }
+}
+
+/// The numbers of the commands `baseline` tells in `tree`, or none where it cannot.
+fn commands(baseline: &Baseline, tree: &[Member]) -> Option<Vec<u32>> {
+    baseline
+        .commands(tree)
+        .map(|found| found.processes.iter().map(|process| process.pid).collect())
+}
+
+#[test]
+fn a_command_is_what_the_program_started_in_a_group_of_its_own_and_no_server_or_helper_is() {
+    // The shape of T-203's probe of Claude Code 2.1.307 in a pane: the program leads the
+    // window's group, where it keeps its MCP server and its `caffeinate`.
+    let baseline = marked(&[], Kept::of(Servers::InGroup, Some(10)), None);
+    let resting = [
+        in_group(program(), 10),
+        in_group(member(11, "python3 server.py", "Python", of(10)), 10),
+        in_group(member(12, "caffeinate -i -t 300", "caffeinate", of(10)), 10),
+    ];
+    assert_eq!(commands(&baseline, &resting), Some(vec![]));
+    let mut running = resting.to_vec();
+    running.extend([
+        // A Monitor's command that `exec`ed: its shell's group, its shell's place.
+        in_group(member(41, "sleep 300", "sleep", of(10)), 41),
+        // A Monitor's loop, and what it runs, in its group.
+        in_group(
+            member(42, "/bin/zsh -c source … && eval 'while true; do sleep 1; done' < /dev/null && pwd -P >| /tmp/claude-3f1a-cwd", "zsh", of(10)),
+            42,
+        ),
+        in_group(member(43, "sleep 1", "sleep", of(42)), 42),
+        // A browser an MCP server launched, in a group of its own: the server's.
+        in_group(member(44, "chrome --headless", "chrome", of(11)), 44),
+        // What a command left when its shell ended: in the command's group.
+        in_group(member(45, "python3 -m http.server", "python3", None), 42),
+        // A hook, for the moment it runs.
+        in_group(member(46, "/bin/sh -c printf '{}'", "sh", of(10)), 46),
+        // One whose group could not be read.
+        member(47, "sleep 9", "sleep", of(10)),
+        // A daemon a command left that leads a session of its own.
+        in_group(member(48, "dockerd", "dockerd", None), 48),
+    ]);
+    assert_eq!(
+        commands(&baseline, &running),
+        Some(vec![41, 42, 46, 47, 48])
+    );
+}
+
+#[test]
+fn the_commands_are_not_told_of_a_window_whose_servers_are_not_in_its_group() {
+    let tree = [
+        in_group(program(), 10),
+        in_group(member(41, "sleep 300", "sleep", of(10)), 41),
+    ];
+    for kept in [
+        None,
+        Kept::of(Servers::AtLaunch, Some(10)),
+        Kept::of(Servers::InGroup, None),
+    ] {
+        assert_eq!(commands(&marked(&[], kept, None), &tree), None, "{kept:?}");
+    }
+    assert_eq!(commands(&Baseline::default(), &tree), None);
+}

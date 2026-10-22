@@ -25,7 +25,7 @@ use std::sync::Arc;
 use cf_harness::contract::{
     Adapter, Admission, Interrupt, Launch, Prepared, Readiness, Skill, Waiting, Window, Work,
 };
-use cf_harness::records::{Item, Pending, Quota, Role};
+use cf_harness::records::{Item, Monitor, Pending, Quota, Role};
 use cf_proto::panes::Servers;
 use cf_proto::specs::Variant;
 use serde_json::{json, Value};
@@ -46,6 +46,8 @@ pub struct FakeAgent {
     pub settled: bool,
     /// The settled turn left background agents or jobs running (the reading says so).
     pub pending: Pending,
+    /// The monitors among those jobs, as the reading says them.
+    pub monitors: Vec<Monitor>,
     pub waiting: Option<Waiting>,
     pub quota: Option<Arc<Quota>>,
     /// Whether a delivery is taken.
@@ -327,6 +329,7 @@ impl FakeAdapter {
             agent.items.push(item);
             agent.settled = true;
             agent.pending = Pending::default();
+            agent.monitors.clear();
             agent.took_back = false;
         });
     }
@@ -336,6 +339,19 @@ impl FakeAdapter {
     pub fn answer_leaving(&self, handle: &str, text: &str, pending: Pending) {
         self.answer(handle, text);
         self.with(handle, |agent| agent.pending = pending);
+    }
+
+    /// The agent answers, and its turn ends with `pending` still running, `monitors` among
+    /// it as the reading says them.
+    pub fn answer_leaving_monitors(
+        &self,
+        handle: &str,
+        text: &str,
+        pending: Pending,
+        monitors: Vec<Monitor>,
+    ) {
+        self.answer_leaving(handle, text, pending);
+        self.with(handle, |agent| agent.monitors = monitors);
     }
 
     /// The agent answers, and its turn ends with a background agent still running.
@@ -372,6 +388,7 @@ impl FakeAdapter {
             agent.items.push(item);
             agent.settled = false;
             agent.pending = Pending::default();
+            agent.monitors.clear();
             agent.took_back = false;
         });
     }
@@ -381,6 +398,7 @@ impl FakeAdapter {
         self.with(handle, |agent| {
             agent.settled = false;
             agent.pending = Pending::default();
+            agent.monitors.clear();
             agent.took_back = false;
         });
     }
@@ -438,6 +456,7 @@ impl FakeAdapter {
             agent.failed = true;
             agent.settled = true;
             agent.pending = Pending::default();
+            agent.monitors.clear();
         });
     }
 
@@ -460,6 +479,7 @@ impl FakeAdapter {
             agent.shows = Some(native.to_owned());
             agent.settled = true;
             agent.pending = Pending::default();
+            agent.monitors.clear();
         });
     }
 
@@ -528,6 +548,7 @@ impl FakeAdapter {
                 agent.items.push(self.item(Role::User, &recorded));
                 agent.settled = false;
                 agent.pending = Pending::default();
+                agent.monitors.clear();
                 // A message that arrives starts a turn: the one before it ended as it did.
                 agent.failed = false;
                 agent.took_back = false;
@@ -599,6 +620,7 @@ impl Asked {
             items: resumed.unwrap_or_default(),
             settled: true,
             pending: Pending::default(),
+            monitors: Vec::new(),
             waiting: None,
             quota: None,
             admit: true,

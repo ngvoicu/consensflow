@@ -17,6 +17,7 @@ use std::sync::Arc;
 use cf_base::js;
 use serde_json::{Map, Value};
 
+use super::jobs::Watch;
 use super::patterns::OUTPUT;
 use super::text::{claude_text, claude_tool_text, is_interrupt};
 use super::{field, kind};
@@ -35,8 +36,8 @@ pub(super) enum Projected {
     Hook(Box<Hook>),
     /// Claude Code's own notification of a job's event or end, brought into a turn
     /// under way (an attachment, `queued_command` of
-    /// `"commandMode":"task-notification"`): its text.
-    Notified(String),
+    /// `"commandMode":"task-notification"`): its text, and the time its record says.
+    Notified(String, Option<Arc<str>>),
     /// An operation on Claude Code's queue of messages, with the content it
     /// names where it names one.
     Enqueue(Result<String, String>),
@@ -96,11 +97,20 @@ pub(super) struct Assistant {
 /// A block of an assistant's content that opens or closes a call.
 #[derive(Debug, PartialEq)]
 pub(super) enum Block {
-    /// A `tool_use` or `server_tool_use`, by the id it says, and whether it is a
-    /// TaskStop call of the main conversation, whose result names the job it stopped.
-    Use(Option<Value>, bool),
+    /// A `tool_use` or `server_tool_use`, by the id it says, and what call of the main
+    /// conversation it is, where the reader reads its result.
+    Use(Option<Value>, Call),
     /// A `tool_result` or `advisor_tool_result`.
     Result(ToolResult),
+}
+
+/// A call of the main conversation whose result the reader reads: a TaskStop's names the
+/// job it stopped, and a Monitor's the monitor it armed, which its input says.
+#[derive(Debug, PartialEq)]
+pub(super) enum Call {
+    TaskStop,
+    Monitor(Watch),
+    Other,
 }
 
 /// The result of a tool in a block: the call it answers, as the block says
@@ -140,8 +150,9 @@ pub(super) struct User {
     /// left, after which it waits at its prompt.
     pub(super) transcript_only: bool,
     /// The job a tool result of the record says it started (see [`job`]), where the record
-    /// is of the main conversation: a subagent's jobs are its own, and its end wakes it.
-    pub(super) job: Option<Arc<str>>,
+    /// is of the main conversation (a subagent's jobs are its own, and its end wakes it):
+    /// the call the record's first result answers, as the block says it, and the job.
+    pub(super) job: Option<(Option<Value>, Arc<str>)>,
     /// What a TaskStop result of the record says it stopped, of the main conversation:
     /// the call it answers, as the block says it, and the job's id.
     pub(super) stopped: Option<(Option<Value>, Arc<str>)>,
@@ -251,7 +262,11 @@ fn notified(record: &Value, session: &str) -> Option<Projected> {
         && says("type", "queued_command")
         && says("commandMode", "task-notification");
     let text = field(attachment, "prompt").and_then(Value::as_str)?;
-    ours.then(|| Projected::Notified(text.to_owned()))
+    let at = record
+        .get("timestamp")
+        .and_then(Value::as_str)
+        .map(Arc::from);
+    ours.then(|| Projected::Notified(text.to_owned(), at))
 }
 
 /// An operation on the queue. `String(record.content ?? '')` is what each
@@ -279,11 +294,9 @@ fn assistant(record: &Value, session: &str) -> Projected {
     let blocks = blocks(content)
         .iter()
         .filter_map(|block| match kind(block) {
-            Some("tool_use" | "server_tool_use") => Some(Block::Use(
-                said(block.get("id")),
-                main && kind(block) == Some("tool_use")
-                    && block.get("name").and_then(Value::as_str) == Some("TaskStop"),
-            )),
+            Some("tool_use" | "server_tool_use") => {
+                Some(Block::Use(said(block.get("id")), call(block, main)))
+            }
             Some("advisor_tool_result" | "tool_result") => Some(Block::Result(tool_result(block))),
             _ => None,
         })
@@ -339,7 +352,8 @@ fn user(record: &Value, session: &str) -> Projected {
         transcript_only: record.get("queueTranscriptOnly") == Some(&Value::Bool(true)),
         job: of_main_conversation(record, session)
             .then(|| job(record))
-            .flatten(),
+            .flatten()
+            .map(|job| (first_call(content), job)),
         stopped: of_main_conversation(record, session)
             .then(|| stopped(record, content))
             .flatten(),
@@ -366,6 +380,34 @@ fn job(record: &Value) -> Option<Arc<str>> {
     }
     field(result, "timeoutMs").and_then(Value::as_i64)?;
     text_id(field(result, "taskId"))
+}
+
+/// The call the first tool result of a user's `content` answers, as its block says it.
+fn first_call(content: Option<&Value>) -> Option<Value> {
+    blocks(content)
+        .iter()
+        .find(|block| kind(block) == Some("tool_result"))
+        .and_then(|block| said(block.get("tool_use_id")))
+}
+
+/// What call of the main conversation (`main`) a `tool_use` block makes, by its tool's
+/// name: a Monitor's input says what it is called (`description`) and whether it watches
+/// a command (`command`, where a socket's says `ws`).
+fn call(block: &Value, main: bool) -> Call {
+    if !main || kind(block) != Some("tool_use") {
+        return Call::Other;
+    }
+    let input = block.get("input");
+    match block.get("name").and_then(Value::as_str) {
+        Some("TaskStop") => Call::TaskStop,
+        Some("Monitor") => Call::Monitor(Watch {
+            description: field(input, "description")
+                .and_then(Value::as_str)
+                .map_or_else(|| Arc::from(""), Arc::from),
+            command: field(input, "command").is_some_and(Value::is_string),
+        }),
+        _ => Call::Other,
+    }
 }
 
 /// What a TaskStop call's result says it stopped: the call it answers and the job, where

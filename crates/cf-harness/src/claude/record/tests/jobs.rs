@@ -12,7 +12,7 @@
 
 use super::*;
 use crate::claude::record::jobs::Written;
-use crate::shared::record::reading::{Pending, Role};
+use crate::shared::record::reading::{End, Monitor, Notice, Pending, Record, Role};
 
 /// The id Claude Code gave the job.
 const JOB: &str = "bayehs8y4";
@@ -135,7 +135,8 @@ fn a_turn_that_ends_with_a_job_running_in_the_background_is_settled_and_the_read
         Pending {
             agents: 0,
             jobs: 1,
-            retired: 0
+            retired: 0,
+            noticed: 0
         }
     );
     let roles: Vec<(Role, bool)> = record
@@ -463,7 +464,8 @@ fn jobs_are_not_counted_by_the_turn_duration_and_say_themselves_where_it_says_no
         Pending {
             agents: 3,
             jobs: 1,
-            retired: 0
+            retired: 0,
+            noticed: 0
         }
     );
 
@@ -993,6 +995,71 @@ fn a_real_monitors_notice_of_expiry_ends_it_at_no_time() {
     ] {
         assert_eq!(expired_at(at), 1, "{said}");
     }
+}
+
+/// The reading of the real records to the end of the turn the monitor's expiry woke,
+/// each record first changed by `change`.
+fn read_to_the_expiry(change: impl Fn(&mut Value)) -> Record {
+    let records: Vec<Value> = monitor_wait()
+        .into_iter()
+        .map(|mut record| {
+            change(&mut record);
+            record
+        })
+        .collect();
+    let expired = records
+        .iter()
+        .position(|record| {
+            record["message"]["content"]
+                .as_array()
+                .is_some_and(|parts| parts.iter().any(|part| part["text"] == "ALL-DONE"))
+        })
+        .unwrap();
+    let ended = records[expired..]
+        .iter()
+        .position(|record| record["subtype"] == "turn_duration")
+        .unwrap()
+        + expired
+        + 1;
+    let mut stage = Stage::new();
+    stage.write(&records[..ended]);
+    let Reading::Known(record) = &*stage.reader.look(&Options::default(), 0) else {
+        panic!("a reading");
+    };
+    record.clone()
+}
+
+#[test]
+fn a_real_monitors_notice_of_expiry_is_kept_for_it_with_what_its_call_says_it_watches() {
+    // The live run of 2026-10-21: the notice delivered at 23:03:10.329, of the monitor
+    // its call called `ticks` and armed on a command. It is pending still, noticed: what
+    // runs in the window decides (`jobs`; T-203).
+    let record = read_to_the_expiry(|_| {});
+    assert_eq!((record.pending.jobs, record.pending.noticed), (1, 1));
+    assert_eq!(
+        record.monitors,
+        [Monitor {
+            description: Arc::from("ticks"),
+            command: true,
+            notice: Some(Notice {
+                end: End::Expired,
+                at: Some(Arc::from("2026-10-20T23:03:10.329Z")),
+            }),
+        }]
+    );
+    // The same monitor on a socket: noticed as well, and no process of the window runs it.
+    let record = read_to_the_expiry(|record| {
+        if let Some(parts) = record["message"]["content"].as_array_mut() {
+            for part in parts {
+                if part["name"] == "Monitor" {
+                    part["input"] = json!({ "ws": { "url": "wss://example.invalid/feed" }, "description": "ticks" });
+                }
+            }
+        }
+    });
+    assert_eq!((record.pending.jobs, record.pending.noticed), (1, 1));
+    assert!(!record.monitors[0].command);
+    assert!(record.monitors[0].notice.is_some());
 }
 
 #[test]

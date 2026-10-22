@@ -259,3 +259,13 @@ fn a_stop_hook_summary_ends_the_turn_when_it_did_not_prevent_continuation() {
     assert_eq!(summary_with("isSidechain", Some("true")), ended(true));
     assert_eq!(summary_with("sessionId", Some(r#""other""#)), ended(true));
 }
+
+#[test]
+fn an_answer_with_no_record_of_its_stop_hooks_after_it_is_in_flight() {
+    // Claude Code writes the answer that ends a turn, then runs its Stop hooks, then
+    // writes their summary: until that record the turn is in flight, so no lane reads
+    // idle and no result is taken while a hook may still run or prevent the turn's end
+    // (T-162's look at the lane, T-203).
+    assert_eq!(once(&[hello(), answer("a1", "u1")]), ended(false));
+    assert_eq!(then(summary("d1", "a1")), ended(true));
+}

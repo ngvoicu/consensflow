@@ -56,6 +56,7 @@ pub mod cleanup;
 pub mod codex;
 pub mod human;
 pub mod machine;
+pub mod mcp_server;
 pub mod members;
 pub mod report;
 pub mod trace;

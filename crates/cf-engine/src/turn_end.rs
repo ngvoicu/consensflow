@@ -27,9 +27,15 @@
 //! working, nothing is ended, and whoever gave the task is told once that it goes on in
 //! the background, with the words the turn ended with and how to end the wait
 //! ([`Dispatcher::finish_task`]). Only the harness's own word that each is over clears
-//! it (`cf-harness`' `claude::record::jobs`): no time that passes, and no look at the
-//! window's processes that finds none, releases a task held so. A job that never ends
-//! (a dev server) keeps its task working until the chief or the human finishes it.
+//! it (`cf-harness`' `claude::record::jobs`): no time that passes releases a task held so,
+//! and a look at the window's processes releases one thing alone. A monitor whose notice of
+//! its end came (Claude Code's words, which a line of its command's could say too) is
+//! taken for over once, on a pass after the one that saw the notice, the window's tree runs
+//! no command of its harness's at all (`pane.commands`, [`Dispatcher::monitors_over`]):
+//! Claude Code kills a monitor's command as it writes the notice, and a command that
+//! printed such a line runs still, or ended its monitor by its exit (T-203). A job that
+//! never ends (a dev server) keeps its task working until the chief or the human finishes
+//! it.
 //!
 //! **A turn's end ends nothing.** What a worker's turn left running, its harness's or
 //! not, goes on: a free worker's window closes after its result, as any does, and the
@@ -44,7 +50,7 @@
 
 use cf_base::js;
 use cf_harness::contract::Observed;
-use cf_harness::records::{Item, Pending, Role};
+use cf_harness::records::{End, Item, Monitor, Pending, Role};
 use cf_ledger::{NewNote, ParticipantView, ProjectView, TaskThread};
 use serde_json::Value;
 
@@ -83,9 +89,15 @@ pub struct Hold {
 pub(crate) struct HeldPart {
     /// What the task is held for, while it is.
     pub(crate) holding: Option<Hold>,
-    /// The task whose requester was told it goes on in the background: once for each
-    /// time it is held, whatever its turns say on the way.
-    told: Option<i64>,
+    /// The task whose requester was told it goes on in the background, and how many of
+    /// its monitors' notices of their end had come: once for each time it is held, and
+    /// again where another notice came, whatever its turns say on the way.
+    told: Option<(i64, usize)>,
+    /// How many monitors with a notice of their end the last pass found where only they
+    /// were pending ([`Dispatcher::monitors_over`]).
+    noticed: usize,
+    /// What the last look at the window's commands answered, where one was made for them.
+    commands: Option<Option<usize>>,
 }
 
 impl Dispatcher {
@@ -100,6 +112,7 @@ impl Dispatcher {
         participant: &ParticipantView,
         record: &Record,
         observed: &Observed,
+        over: usize,
     ) -> Result<Turn, EngineError> {
         let task = self
             .seams
@@ -128,7 +141,9 @@ impl Dispatcher {
         else {
             return Ok(Turn::Open);
         };
-        let pending = observed.pending();
+        let mut pending = observed.pending();
+        pending.jobs = pending.jobs.saturating_sub(over);
+        pending.noticed = pending.noticed.saturating_sub(over);
         let words = words_of(&answers.final_run);
         if pending.total() > 0 {
             let hold = Hold {
@@ -136,14 +151,24 @@ impl Dispatcher {
                 jobs: pending.jobs,
                 agents: pending.agents,
             };
-            let told = {
+            let noticed = observed
+                .monitors()
+                .iter()
+                .filter(|monitor| monitor.notice.is_some())
+                .count();
+            let (told, commands) = {
                 let mut held = record.held.borrow_mut();
                 held.holding = Some(hold);
-                held.told == Some(hold.task)
+                (held.told == Some((hold.task, noticed)), held.commands)
             };
             if !told {
-                self.tell_it_goes_on(project, participant, &thread, pending, &words)?;
-                record.held.borrow_mut().told = Some(hold.task);
+                let said = Held {
+                    pending,
+                    monitors: observed.monitors(),
+                    commands,
+                };
+                self.tell_it_goes_on(project, participant, &thread, &said, &words)?;
+                record.held.borrow_mut().told = Some((hold.task, noticed));
             }
             return Ok(Turn::Held);
         }
@@ -198,6 +223,51 @@ impl Dispatcher {
         }))
     }
 
+    /// How many of the monitors a worker's settled turn left are over by what runs in its
+    /// window: those whose notice of their end came, where nothing else is pending, once a
+    /// look at the window's commands, made on a pass after the one that saw the last of
+    /// those notices, finds none (see above). None else, and no look where it would decide
+    /// nothing: the task is held for the rest anyway. What the look found is kept for what
+    /// the requester is told ([`HeldPart::commands`]).
+    pub(crate) async fn monitors_over(
+        &self,
+        participant: &ParticipantView,
+        record: &Record,
+        observed: &Observed,
+    ) -> usize {
+        let pending = observed.pending();
+        let noticed = pending.noticed;
+        // A socket's monitor has no command to look for.
+        let decides = observed.settled
+            && noticed > 0
+            && pending.total() == noticed
+            && noticed_of(&observed.monitors()) == noticed;
+        let seen = {
+            let mut held = record.held.borrow_mut();
+            let seen = held.noticed;
+            held.noticed = if decides { noticed } else { 0 };
+            if !decides {
+                held.commands = None;
+            }
+            seen
+        };
+        // The pass that first sees a notice decides nothing: Claude Code kills the
+        // monitor's command after it writes it.
+        if !decides || noticed > seen {
+            return 0;
+        }
+        let Some(pane) = self.pane(participant.id) else {
+            return 0;
+        };
+        let commands = self.seams.background.commands(&pane).await;
+        record.held.borrow_mut().commands = Some(commands);
+        if commands == Some(0) {
+            noticed
+        } else {
+            0
+        }
+    }
+
     /// What the task of the participant's window is held for, while it is.
     pub fn held_for(&self, participant: i64) -> Option<Hold> {
         self.record(participant)
@@ -205,20 +275,22 @@ impl Dispatcher {
     }
 
     /// Whoever gave the task is told it goes on in the background, once for each time it is
-    /// held ([`HeldPart`]): what the worker ended its turn with, what it left running that
-    /// it is woken for, and how to take its last complete answer as the result instead
-    /// ([`Dispatcher::finish_task`]). What the engine keeps goes with the window and with
-    /// the daemon: a task held in a window opened again, or after a restart, is told again.
+    /// held, and again where another of its monitors' notices of their end came
+    /// ([`HeldPart`]): what the worker ended its turn with, what it left running that it is
+    /// woken for, its monitors and what came of each, and its requester's choices: to wait,
+    /// or to take its last complete answer as the result ([`Dispatcher::finish_task`]).
+    /// What the engine keeps goes with the window and with the daemon: a task held in a
+    /// window opened again, or after a restart, is told again.
     fn tell_it_goes_on(
         &self,
         project: &ProjectView,
         participant: &ParticipantView,
         thread: &TaskThread,
-        pending: Pending,
+        held: &Held,
         words: &str,
     ) -> Result<(), EngineError> {
         let number = thread.task.number;
-        let what = match pending.total() {
+        let what = match held.pending.total() {
             1 => "it",
             _ => "them",
         };
@@ -229,10 +301,11 @@ impl Dispatcher {
         } else {
             format!("cf task finish T-{number}")
         };
+        let handle = &participant.handle;
         let body = format!(
-            "T-{number} goes on in the background: @{} ended its turn with {} running, which its harness wakes it for as each ends, and its result comes when a turn of its ends with none left. To take what it said last as the result now: {way}, which does not end {what}. What it said:\n\n{words}",
-            participant.handle,
-            running(pending),
+            "T-{number} goes on in the background: @{handle} ended its turn with {}.{} Its result comes when a turn of its ends with none left: to wait for it, do nothing. If its work is done, take what it said last as the result now: {way}, which does not end {what}. What it said:\n\n{words}",
+            counted(held.pending, ", which its harness wakes it for as each ends"),
+            monitors_said(handle, held),
         );
         self.seams.ledger.borrow_mut().note(
             project.id,
@@ -246,6 +319,100 @@ impl Dispatcher {
         self.changed();
         Ok(())
     }
+}
+
+/// What a held task's requester is told it is held for: what its worker's turn left
+/// running that its harness wakes it for, the monitors among it, and what the last look
+/// at the window's commands found, where one was made ([`HeldPart::commands`]).
+pub(crate) struct Held {
+    pending: Pending,
+    monitors: Vec<Monitor>,
+    commands: Option<Option<usize>>,
+}
+
+/// How many of `monitors` watch a command and said they ended.
+fn noticed_of(monitors: &[Monitor]) -> usize {
+    monitors
+        .iter()
+        .filter(|monitor| monitor.command && monitor.notice.is_some())
+        .count()
+}
+
+/// What a note of a held task says of its monitors, after a sentence of its own: each by
+/// its name and what came of it, then what keeps those whose notice came, and where the
+/// window's commands were looked at, what was found. Nothing where there is none.
+fn monitors_said(handle: &str, held: &Held) -> String {
+    if held.monitors.is_empty() {
+        return String::new();
+    }
+    let each: Vec<String> = held
+        .monitors
+        .iter()
+        .map(|monitor| {
+            let name = format!("\u{201c}{}\u{201d}", monitor.description);
+            let Some(notice) = &monitor.notice else {
+                return format!("{name} watches still");
+            };
+            let at = notice
+                .at
+                .as_deref()
+                .and_then(|at| at.get(11..19))
+                .map(|time| format!(" at {time} UTC"))
+                .unwrap_or_default();
+            match notice.end {
+                End::Expired => format!("{name}'s time ran out{at}"),
+                End::Stopped => format!("Claude Code stopped {name}{at}"),
+                End::Closed => format!("{name}'s socket closed{at}"),
+            }
+        })
+        .collect();
+    let mut said = format!(" Its monitors: {}.", each.join("; "));
+    if noticed_of(&held.monitors) > 0 {
+        said.push_str(&format!(
+            " A monitor whose time ran out, or that Claude Code stopped, is taken for over once no command of @{handle}'s harness runs in its window"
+        ));
+        said.push_str(&match held.commands {
+            Some(Some(running)) if running > 0 => format!(
+                ", and {running} still {} there.",
+                if running == 1 { "runs" } else { "run" }
+            ),
+            Some(None) => {
+                ", which ConsensFlow cannot see on this machine: such a monitor waits for Finish."
+                    .to_owned()
+            }
+            _ => ".".to_owned(),
+        });
+    }
+    if held
+        .monitors
+        .iter()
+        .any(|monitor| !monitor.command && monitor.notice.is_some())
+    {
+        said.push_str(" A monitor of a socket has no command to look for: it waits for its own word of its end, or for Finish.");
+    }
+    said
+}
+
+/// What a reading counts of what a turn left, in the words of a note: what runs, with
+/// `woken` after it (what the harness does as each ends), and apart from it the monitors
+/// whose notice of their end came (`Pending::noticed`), which wake the agent no more.
+pub(crate) fn counted(pending: Pending, woken: &str) -> String {
+    let runs = Pending {
+        jobs: pending.jobs.saturating_sub(pending.noticed),
+        noticed: 0,
+        ..pending
+    };
+    let mut said = Vec::new();
+    if runs.total() > 0 {
+        said.push(format!("{} running{woken}", running(runs)));
+    }
+    if pending.noticed > 0 {
+        said.push(match pending.noticed {
+            1 => "1 monitor that said it ended".to_owned(),
+            count => format!("{count} monitors that said they ended"),
+        });
+    }
+    said.join(", and ")
 }
 
 /// What a turn left running, in the words of a note.
@@ -294,8 +461,8 @@ pub(crate) fn leftovers(
         if pending.total() > 0 {
             let what = if pending.total() == 1 { "it" } else { "them" };
             said.push(format!(
-                "Finished at {who}'s word while @{handle}'s harness still counted {} running, which finishing ends none of: {what} may run on until its window closes, or past it where the host cannot tell what is the window's.",
-                running(pending)
+                "Finished at {who}'s word while @{handle}'s harness still counted {}, which finishing ends none of: {what} may run on until its window closes, or past it where the host cannot tell what is the window's.",
+                counted(pending, "")
             ));
         } else {
             said.push(format!(

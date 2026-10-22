@@ -23,8 +23,9 @@
 //!   (`toolUseResult.task_id`): Claude Code writes no notification of a job or a
 //!   monitor its agent stopped so (2.1.305, the live run of 2026-10-21).
 //!
-//! **No notice of a monitor's ends it** (T-179, the chief's decision on Astraeus's and
-//! Calliope's reviews of c593fd49). Claude Code writes its own notices of a monitor, of its
+//! **A notice of a monitor's end ends it only with what runs in its window** (T-179, the
+//! chief's decision on Astraeus's and Calliope's reviews of c593fd49; T-203). Claude Code
+//! writes its own notices of a monitor, of its
 //! expiry (`[Monitor expired after 40s with 3 events delivered. …]`, or `[Monitor timed out
 //! — re-arm if needed.]` where its `tengu_breezy_crescent` is off) and of its other ends
 //! (`[Monitor stopped]`, of a socket's or an MCP server's monitor; `[Monitor stopped — too
@@ -45,15 +46,30 @@
 //!   of an idle agent's monitor before it (Calliope: a `*` hook of 10 ms against notices
 //!   delivered 12 to 15 ms after the timer).
 //!
-//! Nor do the window's processes tell it. A command's monitor runs its command in a shell
+//! Nor is a monitor told by its process. A command's monitor runs its command in a shell
 //! of its own, whose arguments carry the command and nothing of the monitor's task: two
 //! monitors of one command are the same processes, and a command that `exec`s (the shell
 //! becomes `sleep 47` for `exec sleep 47`), or a `CLAUDE_CODE_SHELL_PREFIX` that does not
 //! pass the command on, takes even the command's words out of every process while the
-//! monitor runs (T-179's probes, 2.1.307), so a look that finds none of them proves nothing.
-//! A task held for a monitor whose notice of its end came is held until Finish, or until a
-//! status or a TaskStop says the monitor is over: every monitor that expires costs its task
-//! a Finish. A monitor's status ends it as it ends any job: its command ended (`completed`,
+//! monitor runs (T-179's probes, 2.1.307). But every command Claude Code runs is a process
+//! its own started in a group of its own, which an `exec` keeps (`cf-panes`' `background`
+//! says how the host tells them), and it kills a monitor's command as it writes the notice
+//! of its expiry. So the notice is kept for the monitor ([`Notice`], the first of them), the
+//! monitor stays pending, and the monitors whose notice came are counted apart
+//! (`Pending::noticed`): the engine takes those on a command for over once, on a pass after
+//! the one that saw them, the window runs no command of its harness's at all
+//! (`cf-engine`'s `turn_end`). A command that printed such a line is running then, by its
+//! line; one that printed it and exited ended its monitor by its exit.
+//!
+//! **What ends a monitor after a real notice** (Calliope on f0bc0308). Claude Code's own
+//! notice comes as it ends the monitor in its registry: no status of it reaches the record
+//! after, and a TaskStop of it is refused ("Task … is not running", an error result,
+//! which ends nothing here). So a status or a TaskStop ends only a monitor whose "notice"
+//! was a line of its command's, while the monitor runs on. One whose notice was real is
+//! ended by the look above, where the host can tell the window's commands; elsewhere (a
+//! socket's monitor, which has no command, and every monitor where a Windows job has no
+//! groups) by Finish alone. A monitor's status ends it as it ends any job: its command
+//! ended (`completed`,
 //! "Monitor … stream ended", written as its shell exits, whatever the command left running:
 //! T-179's probe), or the human stopped a command's monitor from Claude Code's tasks
 //! (`killed`, "Task … was stopped by the user": `s_r` of 2.1.307, `Tmr` of 2.1.306, behind
@@ -111,6 +127,8 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
+use crate::shared::record::reading::{End, Monitor, Notice};
+
 /// The marker of 2.1.301's summary of the shells a previous process left (see above),
 /// before the kind of task it is of, and the marker of one it found still running,
 /// before that one's id.
@@ -134,6 +152,16 @@ const FIELDS: [&str; 7] = [
 ];
 const TASK_ID: usize = 0;
 const STATUS: usize = 4;
+const EVENT: usize = 6;
+
+/// How Claude Code's own notices of a monitor's end begin (2.1.305 to 2.1.307), and the
+/// end each says.
+const ENDS: [(&str, End); 4] = [
+    ("[Monitor expired after ", End::Expired),
+    ("[Monitor timed out", End::Expired),
+    ("[Monitor stopped", End::Stopped),
+    ("[WebSocket closed: ", End::Closed),
+];
 
 /// The statuses Claude Code writes of a job that is over: it ended by itself, well or not,
 /// it was ended, or the session it ran in ended before it did (`stopped`).
@@ -153,6 +181,18 @@ enum State {
 struct Job {
     id: Arc<str>,
     state: State,
+    /// What a monitor watches, where the job is one.
+    watch: Option<Watch>,
+    /// The first notice of its end a monitor's notifications said, with no status.
+    notice: Option<Notice>,
+}
+
+/// A monitor as the call that armed it says it: what its agent called it, and whether
+/// it watches a command (`command`), and not a socket (`ws`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct Watch {
+    pub description: Arc<str>,
+    pub command: bool,
 }
 
 /// The jobs started, each once, by their ids, in the order they started.
@@ -162,23 +202,33 @@ pub(super) struct Jobs {
 }
 
 impl Jobs {
-    /// The record of a tool result says the job `id` runs in the background.
-    pub(super) fn started(&mut self, id: Arc<str>) {
+    /// The record of a tool result says the job `id` runs in the background: a monitor
+    /// that `watch` says, where it is one.
+    pub(super) fn started(&mut self, id: Arc<str>, watch: Option<Watch>) {
         match self.started.iter_mut().find(|job| job.id == id) {
-            Some(job) => job.state = State::Running,
+            Some(job) => {
+                job.state = State::Running;
+                job.watch = watch;
+                job.notice = None;
+            }
             None => self.started.push(Job {
                 id,
                 state: State::Running,
+                watch,
+                notice: None,
             }),
         }
     }
 
-    /// `text` is Claude Code's own notification: each job its head says is over has ended,
-    /// but those a summary marks running. A job that was never started is named in vain: a
-    /// notification is no record of a start.
-    pub(super) fn ended_by(&mut self, text: &str) {
+    /// `text` is Claude Code's own notification, delivered at the time its record says
+    /// (`at`): each job its head says is over has ended, but those a summary marks
+    /// running. A notice of a monitor's end, with no status, of that monitor alone, is
+    /// kept for the monitor, which runs on (see above). A job that was never started is
+    /// named in vain: a notification is no record of a start.
+    pub(super) fn ended_by(&mut self, text: &str, at: Option<&str>) {
         let head = head(text);
         if !head.status.is_some_and(|status| OVER.contains(&status)) {
+            self.noticed(&head, at);
             return;
         }
         let live: HashSet<&str> = head
@@ -191,6 +241,61 @@ impl Jobs {
                 job.state = State::Ended;
             }
         }
+    }
+
+    /// The monitor `head` alone names, where it says the monitor ended in Claude Code's
+    /// words with no status, and nothing after them but the notification's close.
+    fn noticed(&mut self, head: &Head<'_>, at: Option<&str>) {
+        let [id] = head.ids.as_slice() else {
+            return;
+        };
+        let Some(event) = head
+            .event
+            .filter(|_| head.status.is_none() && head.closes_after_event)
+        else {
+            return;
+        };
+        let Some(end) = ENDS
+            .iter()
+            .find(|(said, _)| event.starts_with(said))
+            .map(|(_, end)| *end)
+        else {
+            return;
+        };
+        let monitor = self
+            .started
+            .iter_mut()
+            .find(|job| &&*job.id == id && job.state == State::Running && job.watch.is_some());
+        if let Some(job) = monitor {
+            job.notice.get_or_insert(Notice {
+                end,
+                at: at.map(Arc::from),
+            });
+        }
+    }
+
+    /// How many monitors that run said they ended, with no status.
+    pub(super) fn noticed_count(&self) -> usize {
+        self.started
+            .iter()
+            .filter(|job| job.state == State::Running && job.notice.is_some())
+            .count()
+    }
+
+    /// The monitors that run, in the order they started.
+    pub(super) fn monitors(&self) -> Vec<Monitor> {
+        self.started
+            .iter()
+            .filter(|job| job.state == State::Running)
+            .filter_map(|job| {
+                let watch = job.watch.as_ref()?;
+                Some(Monitor {
+                    description: Arc::clone(&watch.description),
+                    command: watch.command,
+                    notice: job.notice.clone(),
+                })
+            })
+            .collect()
     }
 
     /// A TaskStop call's result says it stopped the job `id`.
@@ -230,6 +335,12 @@ struct Head<'a> {
     /// The jobs it names, in order.
     ids: Vec<&'a str>,
     status: Option<&'a str>,
+    /// A monitor's event: the line the watched command wrote, or Claude Code's own.
+    event: Option<&'a str>,
+    /// The event is the last field, and only the line that closes the notification comes
+    /// after it: no line of a command's output, nor 2.1.306's word after a command's
+    /// event of how to tell the user of it.
+    closes_after_event: bool,
 }
 
 /// The head of the notification `text`: nothing where the text does not open with one.
@@ -244,8 +355,11 @@ fn head(text: &str) -> Head<'_> {
         return head;
     }
     let mut at = None;
-    for line in lines {
+    while let Some(line) = lines.next() {
         let Some((place, value)) = field(line) else {
+            head.closes_after_event = at == Some(EVENT)
+                && line == "</task-notification>"
+                && lines.all(|after| after.trim().is_empty());
             break;
         };
         // Each field once, in its order; only a job's id again.
@@ -256,6 +370,7 @@ fn head(text: &str) -> Head<'_> {
         match place {
             TASK_ID if !value.is_empty() => head.ids.push(value),
             STATUS => head.status = Some(value),
+            EVENT => head.event = Some(value),
             _ => {}
         }
     }
@@ -371,6 +486,21 @@ impl Written<'_> {
             task_id: id,
             summary: &summary,
             event,
+            ..Written::default()
+        }
+        .text()
+    }
+
+    /// A monitor's event of its command's output as 2.1.306 writes it where push
+    /// notifications are on (`H` of its bundle): the event, a line after it that says how
+    /// to tell the user of it, and the line that closes the notification.
+    pub(super) fn pushed(id: &str, description: &str, event: &str) -> String {
+        let summary = format!("Monitor event: \"{description}\"");
+        Written {
+            task_id: id,
+            summary: &summary,
+            event,
+            body: "\nIf this event is something the user would act on now, send a PushNotification. Routine or benign output doesn't need one.",
             ..Written::default()
         }
         .text()

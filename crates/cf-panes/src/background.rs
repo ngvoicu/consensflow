@@ -84,7 +84,9 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
-use cf_proto::panes::{Background, BackgroundProcess, Ending, BACKGROUND_PROCESSES, COMMAND_CHARS};
+use cf_proto::panes::{
+    Background, BackgroundProcess, Ending, Servers, BACKGROUND_PROCESSES, COMMAND_CHARS,
+};
 
 pub(crate) use harness::Kept;
 
@@ -160,6 +162,15 @@ impl Baseline {
         self.harness = harness;
         // What the harness has now is its own, whatever becomes of what started it.
         self.protected(tree);
+    }
+
+    /// The commands of the window's harness that run in `tree` now ([`harness::commands`]):
+    /// none where the host cannot tell them, a window whose harness does not keep its
+    /// servers in the window's group or that was never marked, or a platform with no
+    /// groups (`cf_proto::panes::Commands`).
+    pub fn commands(&self, tree: &[Member]) -> Option<Background> {
+        let kept = self.kept.filter(|kept| kept.servers == Servers::InGroup)?;
+        Some(listed(harness::commands(kept, tree)))
     }
 
     /// Whether a turn was ever said to begin: where it was not, the tree is

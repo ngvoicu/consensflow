@@ -229,6 +229,34 @@ fn monitor_armed() -> Vec<Value> {
     monitor_to("NOTED", 0)
 }
 
+/// To the turn the monitor's expiry woke.
+fn monitor_expired() -> Vec<Value> {
+    monitor_to("ALL-DONE", 0)
+}
+
+/// The place in [`monitor_expired`] of the Monitor call's record.
+fn monitor_called() -> usize {
+    place(monitor_expired, |record| {
+        record["message"]["content"]
+            .as_array()
+            .is_some_and(|parts| parts.iter().any(|part| part["name"] == "Monitor"))
+    })
+}
+
+/// The Monitor call's input changed by `change`.
+fn monitor_input(change: fn(&mut Value)) -> Change {
+    Box::new(move |mut record: Value| {
+        if let Some(parts) = record["message"]["content"].as_array_mut() {
+            for part in parts {
+                if part["name"] == "Monitor" {
+                    change(&mut part["input"]);
+                }
+            }
+        }
+        record
+    })
+}
+
 /// To the turn that stopped a command with TaskStop.
 fn command_stopped() -> Vec<Value> {
     monitor_to("STOPPED", 0)
@@ -580,6 +608,44 @@ fn read() -> Vec<Row> {
                 record["toolUseResult"]["taskId"].is_string()
             }),
             is("toolUseResult", json!({ "taskId": "b615qv2gd" })),
+        ),
+        (
+            "block.input.command, of a Monitor call",
+            monitor_expired,
+            monitor_called(),
+            monitor_input(|input| input["command"] = Value::Null),
+        ),
+        (
+            "block.input.description, of a Monitor call",
+            monitor_expired,
+            monitor_called(),
+            monitor_input(|input| input["description"] = json!("other")),
+        ),
+        (
+            "block.name, of a Monitor call",
+            monitor_expired,
+            monitor_called(),
+            Box::new(|mut record: Value| {
+                if let Some(parts) = record["message"]["content"].as_array_mut() {
+                    for part in parts {
+                        if part["name"] == "Monitor" {
+                            part["name"] = json!("Watch");
+                        }
+                    }
+                }
+                record
+            }),
+        ),
+        (
+            "timestamp, of a monitor's notice of its expiry",
+            monitor_expired,
+            place(monitor_expired, |record| {
+                record["turnOrigin"] == "task_notification"
+                    && record["message"]["content"]
+                        .as_str()
+                        .is_some_and(|text| text.contains("Monitor expired"))
+            }),
+            is("timestamp", json!("2026-10-20T23:04:00.000Z")),
         ),
         (
             "toolUseResult.task_id, of a TaskStop",

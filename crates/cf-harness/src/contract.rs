@@ -18,7 +18,7 @@ use cf_proto::panes::Servers;
 use cf_proto::specs::Variant;
 use serde_json::Value;
 
-use crate::records::{Item, Options, Pending, Quota, Reading, Record, Role, Settlement};
+use crate::records::{Item, Monitor, Options, Pending, Quota, Reading, Record, Role, Settlement};
 
 /// What waits, on the engine's one thread.
 pub type Work<'a, T> = Pin<Box<dyn Future<Output = T> + 'a>>;
@@ -416,6 +416,15 @@ impl Observed {
         match self.reading.as_deref() {
             Some(Reading::Known(record)) => record.pending,
             Some(Reading::Unknown(_)) | None => Pending::default(),
+        }
+    }
+
+    /// The monitors among what the conversation's turn left running, as its record says
+    /// them: none where it could not be read.
+    pub fn monitors(&self) -> Vec<Monitor> {
+        match self.reading.as_deref() {
+            Some(Reading::Known(record)) => record.monitors.clone(),
+            Some(Reading::Unknown(_)) | None => Vec::new(),
         }
     }
 

@@ -14,8 +14,9 @@
 //! `tests/fixtures/claude/monitor-wait.jsonl` is its record (`--fixture <file>` writes it,
 //! with the run's paths and ids of the machine taken out).
 //!
-//! One window, in a folder of its own, on Claude's cheap model, with no MCP server, no
-//! browser, none of the owner's settings read (`--setting-sources local`) but a PostToolUse
+//! One window, in a folder of its own, on Claude's cheap model, with one MCP server of the
+//! run's (`live::mcp_server`) and no other, no browser, none of the owner's settings read
+//! (`--setting-sources local`) but a PostToolUse
 //! command hook on every tool (`*`, which prints `{}`), as an owner's hooks run in every
 //! window ConsensFlow opens (Calliope on c593fd49: the start's record is written after them),
 //! and none of a Claude session's own variables if the run is started from inside one (a
@@ -32,21 +33,27 @@
 //!   the command and the monitor pending
 //! - `events`   a monitor's event wakes a turn, and is no end: the monitor is pending after it
 //! - `job-end`  the command's end wakes a turn, and ends it alone: the monitor is pending
-//! - `expiry`   the monitor's notice that it expired wakes a turn, and ends nothing: no
-//!   status or time tells it from a line of its command's, so the monitor stays pending,
-//!   and its task would wait for Finish (T-179)
+//! - `expiry`   the monitor's notice that it expired wakes a turn, and the reader counts the
+//!   monitor pending and noticed: no status or time tells the notice from a line of its
+//!   command's (T-179), and what runs in the window decides (T-203)
 //! - `stop`     a command the agent stopped with TaskStop is pending no more, though no
 //!   notification says so: the expired monitor alone is
 //! - `monitor-exit` a monitor whose watched command exits (T-442's own shape) is said over
 //!   by its status, and is pending no more
+//! - `mcp-not-a-command` with no command running, the pane host finds none in the window,
+//!   whose MCP server runs: Claude Code keeps its servers in the window's group
+//! - `commands-armed` with ten monitors armed, five of them on a command that `exec`s, the
+//!   pane host finds at least ten commands
 //! - `ten-expiries` ten monitors' own notices of their expiry come, and the run says, of
 //!   each expiry, how long after its start's record plus its time its notice was queued
 //!   and delivered (to an agent at rest, or into a turn under way), and after its call's
-//! - `expiries-held` none of the ten is ended by its notice: each stays pending
+//! - `expiries-end` each of the ten is over by the engine's rule: a look after its notice
+//!   finds no command of the harness's in the window, and the run says how long after it
+//! - `expiries-noticed` the reader counts the ten pending and noticed, as the engine is
+//!   told them
 //! - `noisy-stop` a monitor whose command writes more than Claude Code lets through is
 //!   stopped by Claude Code after half a minute, with its notice (`[Monitor stopped — too
-//!   much output …]`), no status and nothing after: the monitor stays counted, and its task
-//!   would wait for Finish (2.1.306)
+//!   much output …]`), no status and nothing after: the reader counts it noticed (2.1.306)
 //!
 //! ```text
 //! cargo xtask live monitor-wait
@@ -59,6 +66,7 @@ use std::thread::sleep;
 use std::time::{Duration, Instant};
 
 use cf_e2e::live::claude::{self, Entry};
+use cf_e2e::live::mcp_server::Server;
 use cf_e2e::live::report::{self, Check};
 use cf_e2e::live::window::{Open, Window};
 use cf_e2e::live::{self, ask, Harness, Log};
@@ -121,9 +129,10 @@ const STOP: &str = "Do exactly this, using your tools. 1) Use the Bash tool with
 /// over when the run's command exits, which Claude Code says by the monitor's status.
 const EXITS: &str = "Do exactly this, using your tools. 1) Use Monitor to watch the command: for i in 1 2 3; do echo tick $i; sleep 2; done , with timeout_ms 120000 and description 'run'. 2) End your turn at once, saying only WATCHING. Then, each time a notification wakes you: if it says the monitor or its command completed or ended, reply only RUN-OVER; otherwise reply only NOTED.";
 
-/// What it is asked fourth: ten monitors of no output whose time runs out, so that the run
-/// measures when Claude Code's notices of their expiry come.
-const TEN: &str = "Do exactly this, using your tools. 1) Use Monitor ten times, one after another, each to watch the command: sleep 600 , with timeout_ms 20000, and the descriptions exp-1, exp-2, exp-3, exp-4, exp-5, exp-6, exp-7, exp-8, exp-9 and exp-10. 2) End your turn at once, saying only ARMED. Then, each time a notification wakes you, reply only NOTED.";
+/// What it is asked fourth: ten monitors of no output whose time runs out, five of them on a
+/// command that `exec`s, so that the run measures when Claude Code's notices of their
+/// expiry come and when their commands are gone.
+const TEN: &str = "Do exactly this, using your tools. 1) Use Monitor five times, one after another, each to watch the command: exec sleep 600 , with timeout_ms 20000, and the descriptions exp-1, exp-2, exp-3, exp-4 and exp-5. 2) Use Monitor five times more, each to watch the command: sleep 600 , with timeout_ms 20000, and the descriptions exp-6, exp-7, exp-8, exp-9 and exp-10. 3) End your turn at once, saying only ARMED. Then, each time a notification wakes you, reply only NOTED.";
 
 /// What it is asked last: a monitor on a command that writes more than Claude Code lets
 /// through (2.1.306: ten events, then one each two seconds), which it stops after half a
@@ -142,6 +151,10 @@ const LOOK: Duration = Duration::from_millis(500);
 struct Look {
     settled: bool,
     jobs: u64,
+    /// The monitors among the jobs whose notice of their end came.
+    noticed: u64,
+    /// The commands of Claude's the pane host finds in the window, where it tells them.
+    commands: Option<u64>,
     last: String,
     status: String,
 }
@@ -149,9 +162,12 @@ struct Look {
 impl Look {
     fn line(&self) -> String {
         format!(
-            "{} jobs pending {} · last words {:?} · Claude's status {}",
+            "{} jobs pending {} (noticed {}) · commands {} · last words {:?} · Claude's status {}",
             if self.settled { "settled" } else { "in flight" },
             self.jobs,
+            self.noticed,
+            self.commands
+                .map_or_else(|| "untold".to_owned(), |commands| commands.to_string()),
             self.last,
             self.status
         )
@@ -175,6 +191,8 @@ fn look(window: &Window) -> Option<Look> {
     Some(Look {
         settled: record.settled,
         jobs: record.jobs_pending,
+        noticed: record.monitors_noticed,
+        commands: window.commands(),
         last,
         status,
     })
@@ -229,6 +247,8 @@ struct Expiry {
     delivered: i64,
     after_the_call: i64,
     at_rest: bool,
+    /// When it was delivered, in milliseconds since the epoch.
+    delivered_at: i64,
 }
 
 /// Whether `text` is Claude Code's notice of a monitor's expiry, in either of its words.
@@ -296,10 +316,21 @@ fn expiries(raw: &[Value]) -> Vec<Expiry> {
                 delivered: delivered - started - timeout,
                 after_the_call: queued - called - timeout,
                 at_rest,
+                delivered_at: delivered,
             });
         }
     }
     found
+}
+
+/// How long after `notice`, a time in milliseconds since the epoch, the first of `looks` at
+/// the window's commands (each its time and what the host told) found none: the engine
+/// takes a monitor whose notice came for over at such a look. None where none did.
+fn ended_after(notice: i64, looks: &[(i64, Option<u64>)]) -> Option<i64> {
+    looks
+        .iter()
+        .find(|(at, commands)| *at > notice && *commands == Some(0))
+        .map(|(at, _)| at - notice)
 }
 
 /// Whether some look was settled at the agent's words `words`, with `jobs` pending.
@@ -506,7 +537,14 @@ fn a_background_command_and_a_monitor_on_it_are_pending_until_claude_code_says_e
     ask::prepare()?;
     let claude = log.found(Harness::Claude)?;
     let rig = Rig::start(live::rig(std::slice::from_ref(&claude), FAKE_AGENT))?;
-    let mut open = Open::new(&rig, &claude, FOLDER, FOLDER).claude_alone_with_hooks(hooks());
+    let python = live::working_command("python3", &["--version"])?;
+    let made = Path::new(env!("CARGO_TARGET_TMPDIR")).join("live-monitor-wait");
+    fs::create_dir_all(&made)
+        .map_err(|error| Error::Daemon(format!("{}: {error}", made.display())))?;
+    let server = Server::write(&made, &python)?;
+    let mut open = Open::new(&rig, &claude, FOLDER, FOLDER)
+        .claude_alone_with_hooks(hooks())
+        .mcp_config(server.config());
     for name in SESSION_IDENTITY {
         open = open.without(name);
     }
@@ -514,6 +552,9 @@ fn a_background_command_and_a_monitor_on_it_are_pending_until_claude_code_says_e
     window
         .ready()
         .map_err(|screen| Error::Daemon(format!("the window did not open: {screen}")))?;
+    // As the daemon marks a Claude window where its first turn begins: what the host tells
+    // of its commands rests on it.
+    window.mark_turn()?;
     window.paste(&window.given(ARM)?)?;
     let looks = watch(&window, EXPIRED);
     let raw = raw_records(&window);
@@ -555,8 +596,11 @@ fn a_background_command_and_a_monitor_on_it_are_pending_until_claude_code_says_e
         Check::new(
             "claude",
             "expiry",
-            expiry && settled_at(&looks, EXPIRED, 1),
-            "the monitor's own notice of its expiry woke a turn and ended nothing: the monitor was pending after it",
+            expiry
+                && looks
+                    .iter()
+                    .any(|look| look.settled && look.last == EXPIRED && look.jobs == 1 && look.noticed == 1),
+            "the monitor's own notice of its expiry woke a turn, after which the reader counted the monitor pending and noticed",
         ),
     ];
     window.paste(&window.given(STOP)?)?;
@@ -597,20 +641,43 @@ fn a_background_command_and_a_monitor_on_it_are_pending_until_claude_code_says_e
         ended_by_status && settled_at(&exits, RUN_OVER, 1),
         "a monitor whose watched command exits is said over by its status, and is pending no more",
     ));
+    let at_rest = exits
+        .iter()
+        .rev()
+        .find(|look| look.settled && look.last == RUN_OVER);
+    log.say(format!(
+        "the MCP server of the run: {}",
+        if server.runs() { "runs" } else { "runs not" }
+    ));
+    checks.push(Check::new(
+        "claude",
+        "mcp-not-a-command",
+        server.runs() && at_rest.is_some_and(|look| look.commands == Some(0)),
+        "with no command running, the pane host found none in the window, whose MCP server ran",
+    ));
     // Ten monitors whose time runs out: how each real expiry falls against its start's
     // record plus its time, which a PostToolUse hook makes late (Calliope on c593fd49), and
     // that none of them is ended by its notice.
     window.paste(&window.given(TEN)?)?;
     let started = Instant::now();
     let mut raw = raw_records(&window);
-    while started.elapsed() < WORK
-        && expiries(&raw)
+    // The looks at the window's commands, each with its time: until the ten notices came
+    // and a look after the last found none, as the engine's passes look.
+    let mut commands: Vec<(i64, Option<u64>)> = Vec::new();
+    loop {
+        let ten: Vec<i64> = expiries(&raw)
             .iter()
             .filter(|expiry| expiry.description.starts_with("exp-"))
-            .count()
-            < 10
-    {
+            .map(|expiry| expiry.delivered_at)
+            .collect();
+        let last = ten.iter().max().copied();
+        let done =
+            ten.len() >= 10 && last.is_some_and(|last| ended_after(last, &commands).is_some());
+        if done || started.elapsed() >= WORK {
+            break;
+        }
         sleep(LOOK);
+        commands.push((jiff::Timestamp::now().as_millisecond(), window.commands()));
         raw = raw_records(&window);
     }
     let ten = watch(&window, NOTED);
@@ -631,17 +698,19 @@ fn a_background_command_and_a_monitor_on_it_are_pending_until_claude_code_says_e
             .count()
     };
     log.block(
-        "the expiries (ms after the start's record plus its time: queued, delivered, where; and after the call's)",
+        "the expiries (ms after the start's record plus its time: queued, delivered, where; after the call's; and ms from the notice to the first look with no command)",
         &measured
             .iter()
             .map(|expiry| {
                 format!(
-                    "{}: {}, {} {}; {}",
+                    "{}: {}, {} {}; {}; ended {}",
                     expiry.description,
                     expiry.queued,
                     expiry.delivered,
                     if expiry.at_rest { "at rest" } else { "in a turn" },
-                    expiry.after_the_call
+                    expiry.after_the_call,
+                    ended_after(expiry.delivered_at, &commands)
+                        .map_or_else(|| "never".to_owned(), |ms| format!("after {ms}"))
                 )
             })
             .chain([format!(
@@ -664,12 +733,29 @@ fn a_background_command_and_a_monitor_on_it_are_pending_until_claude_code_says_e
             >= 10,
         "ten monitors' own notices of their expiry came, and the records say when",
     ));
+    let ten_ended: Vec<Option<i64>> = measured
+        .iter()
+        .filter(|expiry| expiry.description.starts_with("exp-"))
+        .map(|expiry| ended_after(expiry.delivered_at, &commands))
+        .collect();
     checks.push(Check::new(
         "claude",
-        "expiries-held",
+        "commands-armed",
+        commands.iter().any(|(_, told)| told.is_some_and(|told| told >= 10)),
+        "with the ten monitors armed, five on a command that execs, the pane host found ten commands or more",
+    ));
+    checks.push(Check::new(
+        "claude",
+        "expiries-end",
+        ten_ended.len() >= 10 && ten_ended.iter().all(Option::is_some),
+        "each of the ten was over by the engine's rule: a look after its notice found no command in the window",
+    ));
+    checks.push(Check::new(
+        "claude",
+        "expiries-noticed",
         ten.last()
-            .is_some_and(|look| look.settled && look.jobs == 11),
-        "none of the ten was ended by its notice: with the first monitor, eleven were pending",
+            .is_some_and(|look| look.settled && look.jobs == 11 && look.noticed == 11),
+        "the reader counted the ten pending and noticed, with the first monitor eleven, as the engine is told them",
     ));
     window.paste(&window.given(NOISY)?)?;
     let noisy = watch(&window, QUIETED);
@@ -700,8 +786,12 @@ fn a_background_command_and_a_monitor_on_it_are_pending_until_claude_code_says_e
     checks.push(Check::new(
         "claude",
         "noisy-stop",
-        stop_notice.is_some() && after.is_empty() && settled_at(&noisy, QUIETED, 12),
-        "a monitor Claude Code stopped for too much output, with a notice no status or time tells from its command's output, stays counted: its task waits for Finish",
+        stop_notice.is_some()
+            && after.is_empty()
+            && noisy
+                .iter()
+                .any(|look| look.settled && look.last == QUIETED && look.jobs == 12 && look.noticed == 12),
+        "a monitor Claude Code stopped for too much output, with a notice no status or time tells from its command's output, stays counted, and noticed: what runs in the window decides",
     ));
     if let Some(file) = live::option("fixture") {
         let lines = fixture(&raw, &session, &folders(&window));
@@ -726,9 +816,29 @@ mod tests {
         Look {
             settled,
             jobs,
+            noticed: 0,
+            commands: None,
             last: last.to_owned(),
             status: "idle".to_owned(),
         }
+    }
+
+    #[test]
+    fn a_monitor_is_over_at_the_first_look_after_its_notice_that_finds_no_command() {
+        let looks = [
+            (100, Some(2)),
+            (150, Some(0)),
+            (200, Some(1)),
+            (250, Some(0)),
+            (300, None),
+        ];
+        assert_eq!(ended_after(120, &looks), Some(30));
+        assert_eq!(
+            ended_after(150, &looks),
+            Some(100),
+            "a look after it, not at it"
+        );
+        assert_eq!(ended_after(260, &looks), None, "none told none after it");
     }
 
     #[test]
@@ -810,6 +920,7 @@ fn the_fixtures_expiry_is_read_from_its_records() {
             delivered: 12,
             after_the_call: 30,
             at_rest: true,
+            delivered_at: written_at(&json!({ "timestamp": "2026-10-20T23:03:10.329Z" })).unwrap(),
         }]
     );
 }

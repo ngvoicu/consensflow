@@ -57,6 +57,46 @@ pub struct Record {
     /// each ends: said only for what there is, and no reading Node wrote has it.
     #[serde(flatten)]
     pub pending: Pending,
+    /// The monitors among the jobs pending, as the harness's record says them (Claude
+    /// Code's): said only where there are any, and no reading Node wrote has them.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub monitors: Vec<Monitor>,
+}
+
+/// A monitor a turn armed that its harness has said no end of: what its agent called
+/// it, whether it watches a command (and not a socket, which no process of the window
+/// runs), and the notice of its end that came with no word of how it ended, where one
+/// did.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Monitor {
+    pub description: Arc<str>,
+    pub command: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub notice: Option<Notice>,
+}
+
+/// A harness's notice of a monitor's end, which says no status (Claude Code's: the
+/// line in `<event>` that a line of the watched command's could say too), and the time
+/// its record says it came, where it says one.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Notice {
+    pub end: End,
+    pub at: Option<Arc<str>>,
+}
+
+/// How a monitor's notice says it ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum End {
+    /// Its time ran out (`[Monitor expired after …]`, `[Monitor timed out …]`).
+    Expired,
+    /// The harness stopped it (`[Monitor stopped]`, `[Monitor stopped — too much output
+    /// …]`).
+    Stopped,
+    /// Its socket closed (`[WebSocket closed: …]`).
+    Closed,
 }
 
 /// What a turn left running that its harness wakes its agent for as each ends (Claude
@@ -86,6 +126,12 @@ pub struct Pending {
     /// ended (a job its shell detached can outlive its window).
     #[serde(rename = "jobsRetired", skip_serializing_if = "is_none")]
     pub retired: usize,
+    /// The monitors among the jobs whose notice of their end came ([`Notice`]): pending all
+    /// the same, as a line of a watched command's could say it, but awake no more, as
+    /// where the notice is Claude Code's the monitor is over in Claude Code (T-181); what
+    /// runs in the window tells it of a command's ([`Record::monitors`] says which).
+    #[serde(rename = "monitorsNoticed", skip_serializing_if = "is_none")]
+    pub noticed: usize,
 }
 
 impl Pending {
@@ -118,6 +164,7 @@ impl Record {
             quota: None,
             settlement: Settlement::Unknown,
             pending: Pending::default(),
+            monitors: Vec::new(),
         }
     }
 }
@@ -276,16 +323,26 @@ mod tests {
             r#"{"items":[{"id":"msg_1","role":"assistant","text":"Done.","complete":true,"at":"2026-09-06T17:27:06.000Z"},{"id":"msg_2","role":"assistant","text":"Reading the diff","complete":false,"commentary":true}],"inFlight":false,"asking":false,"failed":false,"quota":null,"settlement":{"state":"in-flight"}}"#
         );
         // What a settled turn left running is said only where there is some: agents as
-        // they always were, the jobs and the retired jobs by their counts.
+        // they always were, the jobs, the retired jobs and the monitors noticed by their
+        // counts, and the monitors.
         let mut pending = Record::new();
         pending.pending = Pending {
             agents: 2,
             jobs: 1,
             retired: 3,
+            noticed: 1,
         };
+        pending.monitors = vec![Monitor {
+            description: Arc::from("ticks"),
+            command: true,
+            notice: Some(Notice {
+                end: End::Expired,
+                at: Some(Arc::from("2026-10-21T23:03:10.329Z")),
+            }),
+        }];
         let written = serde_json::to_string(&Reading::Known(pending)).unwrap();
         assert!(
-            written.ends_with(r#""agentsPending":true,"jobsPending":1,"jobsRetired":3}"#),
+            written.ends_with(r#""agentsPending":true,"jobsPending":1,"jobsRetired":3,"monitorsNoticed":1,"monitors":[{"description":"ticks","command":true,"notice":{"end":"expired","at":"2026-10-21T23:03:10.329Z"}}]}"#),
             "{written}"
         );
         assert_eq!(

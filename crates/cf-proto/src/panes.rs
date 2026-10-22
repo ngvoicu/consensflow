@@ -20,7 +20,8 @@
 //! harness's it leaves alone, and says nothing of; nor does it end what it cannot
 //! prove the turn's by a chain of processes that run to a shell the harness started.
 //! What it ends it chooses once, when the ending begins, and answers within
-//! [`ENDING_BOUND`].
+//! [`ENDING_BOUND`]. It says too which commands of the window's harness run in its tree
+//! now, where it can tell them (`pane.commands`, answered by [`Background`] or by nothing).
 
 use std::time::Duration;
 
@@ -126,6 +127,17 @@ pub struct Background {
     pub total: usize,
     pub processes: Vec<BackgroundProcess>,
 }
+
+/// `pane.commands`' answer, under `commands`: the commands of the window's harness that
+/// run in its tree now, listed as `pane.background` lists its answer, where the host can
+/// tell them; `null` where it cannot, which is not "none". A command is what the window's
+/// program started in a process group of its own: Claude Code runs each command of its
+/// agent so (a Bash call, a Monitor's, a background job's, in the foreground or not, and
+/// what one `exec`s keeps the group), and its hooks and status line, a moment each; its
+/// MCP servers and helpers stay in the window's group. The host tells them only of a
+/// window whose harness keeps its servers in the window's group ([`Servers::InGroup`]),
+/// on a platform with groups: nowhere else does a group say what a process is.
+pub type Commands = Option<Background>;
 
 /// A `pane.end_background` request: the pane's turn is over and the daemon has
 /// taken its answer for the task's result, so what the turn left running is

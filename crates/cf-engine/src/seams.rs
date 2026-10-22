@@ -217,6 +217,11 @@ pub trait BackgroundWork {
     /// is: what the host can tell is its own, and what that starts, is no turn's
     /// work either, however late it began.
     fn mark<'a>(&'a self, pane: &'a Pane, servers: Servers, harness: &'a str) -> Work<'a, ()>;
+
+    /// How many commands of its harness `pane`'s tree runs now, where the host can tell
+    /// them (`pane.commands`): none where it cannot, or does not answer, which is no
+    /// "none run".
+    fn commands<'a>(&'a self, pane: &'a Pane) -> Work<'a, Option<usize>>;
 }
 
 /// Everything the engine is made with: each seam shared, so a second

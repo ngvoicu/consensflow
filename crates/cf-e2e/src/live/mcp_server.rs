@@ -1,4 +1,5 @@
-//! The MCP server the real Claude Code of the run is given: a stdio server that
+//! The MCP server a live run gives the real Claude Code of its window (`live mcp`,
+//! `live monitor-wait`): a stdio server that
 //! speaks as much of the protocol as Claude needs to list it, offers no tool and
 //! asks for nothing, and writes its process id where the run looks. A program that
 //! only reads its input (`cat`) is marked failed by Claude, which waits for the
@@ -7,8 +8,8 @@
 
 use std::path::{Path, PathBuf};
 
-use cf_e2e::process::{is_alive, started};
-use cf_e2e::{files, Result};
+use crate::process::{is_alive, started};
+use crate::{files, Result};
 use serde_json::json;
 
 /// What the server's configuration calls it: the name Claude lists it by.

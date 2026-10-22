@@ -211,6 +211,7 @@ fn a_turn_that_left_a_job_and_agents_is_held_for_both_and_ends_neither() {
             agents: 1,
             jobs: 1,
             retired: 0,
+            noticed: 0,
         },
     );
     context.pass().unwrap();

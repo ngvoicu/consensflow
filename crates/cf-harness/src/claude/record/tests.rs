@@ -180,10 +180,17 @@ fn show(reading: &Reading) -> String {
         ("agents", record.pending.agents),
         ("jobs", record.pending.jobs),
         ("retired", record.pending.retired),
+        ("noticed", record.pending.noticed),
     ] {
         if count > 0 {
             pending.push_str(&format!(r#","{name}":{count}"#));
         }
+    }
+    if !record.monitors.is_empty() {
+        pending.push_str(&format!(
+            r#","monitors":{}"#,
+            serde_json::to_string(&record.monitors).unwrap()
+        ));
     }
     format!(
         r#"{{"items":{},"inFlight":{},"asking":{},"failed":{},"quota":{},"settlement":"{state}"{pending}}}"#,

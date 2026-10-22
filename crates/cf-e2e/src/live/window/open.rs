@@ -5,7 +5,7 @@
 //! first ([`super::trust_claude`]).
 
 use std::cell::{Cell, RefCell};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde_json::{json, Value};
 
@@ -157,6 +157,8 @@ pub struct Open<'a> {
     resume: Option<String>,
     member: Option<Member>,
     claude_alone: Option<Value>,
+    /// The MCP servers file a Claude window is given (`--mcp-config`), the only one it has.
+    mcp_config: Option<PathBuf>,
 }
 
 impl<'a> Open<'a> {
@@ -176,6 +178,7 @@ impl<'a> Open<'a> {
             resume: None,
             member: None,
             claude_alone: None,
+            mcp_config: None,
         }
     }
 
@@ -186,6 +189,14 @@ impl<'a> Open<'a> {
     #[must_use]
     pub fn claude_alone_with_hooks(mut self, hooks: Value) -> Self {
         self.claude_alone = Some(hooks);
+        self
+    }
+
+    /// A Claude window has the MCP servers the file `servers` names, and only those:
+    /// `--strict-mcp-config` shuts every other out.
+    #[must_use]
+    pub fn mcp_config(mut self, servers: &Path) -> Self {
+        self.mcp_config = Some(servers.to_owned());
         self
     }
 
@@ -353,6 +364,10 @@ impl<'a> Open<'a> {
                 None => argv.extend(settings),
             }
             argv.extend(ISOLATION.iter().chain(alone).map(|word| (*word).to_owned()));
+            if let Some(servers) = &self.mcp_config {
+                argv.push("--mcp-config".to_owned());
+                argv.push(servers.to_string_lossy().into_owned());
+            }
         }
         argv.extend(start.args);
         let argv = ask::program(&argv, &env).map_err(|failed| {

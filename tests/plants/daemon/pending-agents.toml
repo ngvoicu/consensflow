@@ -235,8 +235,8 @@ runs = ["engine-dispatcher-pending-agents"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end.rs"
-find = '                self.tell_it_goes_on(project, participant, &thread, pending, &words)?;'
-replace = '                let _ = (&thread, &words);'
+find = '                self.tell_it_goes_on(project, participant, &thread, &said, &words)?;'
+replace = '                let _ = (&thread, &words, &said);'
 
 [[plant]]
 name = "pending agents: the turn their end wakes is no more the result than the turn before it"
@@ -348,8 +348,8 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end.rs"
-find = '                self.tell_it_goes_on(project, participant, &thread, pending, &words)?;'
-replace = '                let _ = (&thread, &words);'
+find = '                self.tell_it_goes_on(project, participant, &thread, &said, &words)?;'
+replace = '                let _ = (&thread, &words, &said);'
 
 [[plant]]
 name = "pending agents rig: a switch after the chief’s turn ends its agents with its window"

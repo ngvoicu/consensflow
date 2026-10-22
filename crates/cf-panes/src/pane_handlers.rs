@@ -254,6 +254,18 @@ pub fn register_pane_handlers(
         Ok(json!({"ok":true,"total":background.total,"processes":background.processes}))
     });
 
+    // Which commands of the window's harness run in its tree now, where the host can tell
+    // them: `null` where it cannot.
+    let commands_panes = Arc::clone(&panes);
+    builder.on("pane.commands", move |_bridge, body| {
+        let request: PaneRequest = parse_body(body)?;
+        let key = pane_key(&request.id, request.generation)?;
+        let commands = commands_panes
+            .commands(&key)
+            .map_err(|error| error.to_string())?;
+        Ok(json!({"ok":true,"commands":commands}))
+    });
+
     // What the window's turn left running ends, the window staying open: it is
     // asked to end, and given the table's grace, as a close gives one. The host
     // chooses what, from all it can prove the turn's.

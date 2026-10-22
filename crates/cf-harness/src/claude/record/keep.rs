@@ -12,14 +12,19 @@
 
 use cf_base::json::Keep;
 
+/// What a call's input says that is read: a Monitor's, what it is called and whether it
+/// watches a command.
+static INPUT: Keep = Keep::Members(&[("command", &Keep::Scalar), ("description", &Keep::Scalar)]);
+
 /// A block of a message's content: its type, the text it says, the ids that
-/// open and close a call, the tool a call is of, whether a result is an error,
-/// and what a result holds (all of it: it is the item's text).
+/// open and close a call, the tool a call is of and what of its input is read, whether a
+/// result is an error, and what a result holds (all of it: it is the item's text).
 static BLOCK: Keep = Keep::Members(&[
     ("type", &Keep::Scalar),
     ("text", &Keep::Scalar),
     ("id", &Keep::Scalar),
     ("name", &Keep::Scalar),
+    ("input", &INPUT),
     ("tool_use_id", &Keep::Scalar),
     ("is_error", &Keep::Scalar),
     ("content", &Keep::All),

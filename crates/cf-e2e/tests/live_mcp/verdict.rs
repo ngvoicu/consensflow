@@ -3,7 +3,7 @@
 //! the chief was given and told. Every way the task fell short is said together, so
 //! that a run that fails says all that was wrong with it.
 
-use super::server::STEM as SERVER;
+use cf_e2e::live::mcp_server::STEM as SERVER;
 
 /// The sum the task asks for, which the worker's answer says.
 pub const ANSWER: &str = "5555";

@@ -63,7 +63,7 @@ mod replay;
 mod tests;
 mod text;
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
@@ -145,6 +145,9 @@ struct Transcript {
     /// The TaskStop calls made in the main conversation, by the id of the block that
     /// made each: the result of one says the job it stopped.
     task_stops: HashSet<Key>,
+    /// The Monitor calls made in the main conversation, by the id of the block that made
+    /// each, and what each watches: the result of one says the monitor it armed.
+    monitors: HashMap<Key, jobs::Watch>,
     queues: Queues,
     /// The jobs started in the background that Claude Code has said no end of.
     jobs: Jobs,
@@ -222,6 +225,7 @@ impl Transcript {
             items: Items::default(),
             open_tools: HashSet::new(),
             task_stops: HashSet::new(),
+            monitors: HashMap::new(),
             queues: Queues::default(),
             jobs: Jobs::default(),
             hooks: HashSet::new(),
@@ -381,7 +385,9 @@ impl Answer for Transcript {
             agents,
             jobs: self.jobs.running(),
             retired: self.jobs.retired(),
+            noticed: self.jobs.noticed_count(),
         };
+        record.monitors = self.jobs.monitors();
         Ok(record)
     }
 }

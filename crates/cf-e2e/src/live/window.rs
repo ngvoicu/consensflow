@@ -232,6 +232,25 @@ impl Window<'_> {
         self.record().map(|record| record.items).unwrap_or_default()
     }
 
+    /// Marks the window as the daemon does where a turn begins (`pane.mark`), its harness
+    /// keeping its servers in the window's group: what the pane host answered.
+    pub fn mark_turn(&self) -> Result<Value> {
+        self.rig.host(
+            "pane.mark",
+            json!({ "id": self.id, "generation": 1, "servers": "inGroup", "harness": self.harness.name() }),
+        )
+    }
+
+    /// How many commands of its harness the window's tree runs now, as the pane host tells
+    /// them (`pane.commands`): none where it cannot tell, or did not answer.
+    pub fn commands(&self) -> Option<u64> {
+        let answer = self
+            .rig
+            .host("pane.commands", json!({ "id": self.id, "generation": 1 }))
+            .ok()?;
+        answer["commands"]["total"].as_u64()
+    }
+
     /// Pastes `body` as the daemon does (`pane.write_paste`: a bracketed paste,
     /// then Enter once the window has drawn it): what the pane host answered.
     pub fn paste(&self, body: &str) -> Result<Value> {

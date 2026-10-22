@@ -434,6 +434,7 @@ fn reading(items: Vec<Item>, settlement: Settlement, quota: Option<Arc<Quota>>) 
         quota,
         settlement,
         pending: Default::default(),
+        monitors: Vec::new(),
     }))
 }
 

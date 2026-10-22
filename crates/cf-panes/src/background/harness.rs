@@ -109,6 +109,30 @@ fn descends_from_a_server(
     false
 }
 
+/// The commands of a window whose harness keeps its servers in the window's group
+/// ([`Servers::InGroup`], Claude Code): the processes of `tree` the window's program
+/// started that lead a process group of their own, and what is outside the window's
+/// group and was left with no parent in the tree that leads one. Claude Code runs every
+/// command so (a Bash call's shell, a Monitor's, a background job's, `/bin/zsh -c … eval
+/// '…'`, as a session of its own), and what a command `exec`s takes its place in its
+/// group; it runs its hooks and its status line so too, for the moment each runs. Its MCP
+/// servers and its own helpers (`caffeinate`) it starts in the window's group, and what a
+/// command starts stays in the command's group (T-203's probes of 2.1.307 in a pane's
+/// shape: a Monitor of `exec sleep 300`, one of a loop, a background `sleep 50`, a Python
+/// MCP server, a `*` PostToolUse hook, a Stop hook and a status line). A process whose
+/// group could not be read is not known to be outside the window's, nor in it: one the
+/// program started is counted.
+pub(super) fn commands(kept: Kept, tree: &[Member]) -> Vec<Member> {
+    tree.iter()
+        .filter(|member| member.group != Some(kept.group))
+        .filter(|member| match member.parent {
+            Some(parent) => i32::try_from(parent.pid) == Ok(kept.group),
+            None => member.group == i32::try_from(member.key.pid).ok(),
+        })
+        .cloned()
+        .collect()
+}
+
 /// Whether `member` is a server in the way the harness keeps them.
 fn is_server(kept: Kept, launch: &HashSet<ProcessKey>, member: &Member) -> bool {
     match kept.servers {

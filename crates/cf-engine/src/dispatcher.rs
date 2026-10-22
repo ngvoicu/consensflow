@@ -1072,7 +1072,8 @@ impl Dispatcher {
                 // Its answer is its result, recorded now, unless its harness says the turn
                 // left work running that wakes its agent: then the task goes on. Nothing the
                 // turn left is ended; the window closes below if it is free (`turn_end`).
-                self.collect(project, participant, record, &observed)?;
+                let over = self.monitors_over(participant, record, &observed).await;
+                self.collect(project, participant, record, &observed, over)?;
             }
             if self.close_if_free(record).await? {
                 return Ok(());

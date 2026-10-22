@@ -22,7 +22,7 @@ use cf_engine::runtime::LocalWork;
 use cf_engine::seams::BackgroundWork;
 use cf_harness::contract::{HostError, Pane, PaneHost, Work};
 use cf_proto::bridge::Role;
-use cf_proto::panes::{MarkRequest, PaneExit, Servers};
+use cf_proto::panes::{Commands, MarkRequest, PaneExit, Servers};
 use serde_json::{json, Map, Value};
 
 use crate::errors::contain_now;
@@ -113,6 +113,18 @@ impl BackgroundWork for BridgeHost {
             if let Some(sent) = sent {
                 let _ = sent.await;
             }
+        })
+    }
+
+    fn commands<'a>(&'a self, pane: &'a Pane) -> Work<'a, Option<usize>> {
+        let body = json!({ "id": pane.id, "generation": pane.generation });
+        let sent = self.bridge.request("pane.commands", body, None);
+        // A host that cannot tell them, does not answer or is older says nothing of them.
+        Box::pin(async move {
+            let answer = sent.await.ok()?;
+            let commands: Commands =
+                serde_json::from_value(answer.get("commands")?.clone()).ok()?;
+            commands.map(|commands| commands.total)
         })
     }
 }

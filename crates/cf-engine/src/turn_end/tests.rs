@@ -19,6 +19,7 @@ fn pending(jobs: usize, agents: usize, retired: usize) -> Pending {
         agents,
         jobs,
         retired,
+        noticed: 0,
     }
 }
 
