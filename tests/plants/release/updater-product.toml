@@ -17,6 +17,11 @@
 [run]
 smoke-flip-update = ["cargo", "xtask", "smoke-updater", "--from-app", "app/src-tauri/target/updater-smoke/flip/ConsensFlow.app", "--from-release", "flip", "--cache", "app/src-tauri/target/updater-smoke-plants", "--only", "the update installs and restarts", "--timeout", "60000"]
 smoke-bridge-refused = ["cargo", "xtask", "smoke-updater", "--from", "bridge", "--bridge", "app/src-tauri/target/updater-smoke/bridge-source", "--to-app", "app/src-tauri/target/updater-smoke/update/ConsensFlow.app", "--cache", "app/src-tauri/target/updater-smoke-plants", "--only", "refused", "--timeout", "60000"]
+# The installed app built from the planted sources, which performs the restart, updated to the
+# update the run of `cargo xtask smoke-updater --from flip --flip . --cache
+# app/src-tauri/target/updater-smoke-sweep` kept (built from this checkout, unplanted): the
+# restart is the planted build's. Nothing is exported, so the cache may be in the checkout.
+smoke-own-update = ["cargo", "xtask", "smoke-updater", "--from", "flip", "--flip", ".", "--to-app", "app/src-tauri/target/updater-smoke-sweep/update/ConsensFlow.app", "--cache", "app/src-tauri/target/updater-smoke-sweep-plants", "--only", "the update installs and restarts", "--timeout", "60000"]
 smoke-bridge-update = ["cargo", "xtask", "smoke-updater", "--from-app", "app/src-tauri/target/updater-smoke/bridge/ConsensFlow.app", "--from-release", "bridge", "--cache", "app/src-tauri/target/updater-smoke-plants", "--only", "the update installs and restarts", "--timeout", "60000"]
 
 # Readiness: what the smoke reads of an app that started its daemon.
@@ -171,3 +176,30 @@ requires = ["app/src-tauri/target/updater-smoke/flip/ConsensFlow.app"]
 file = "app/src-tauri/src/daemon_command.rs"
 find = "    let mut command = Command::new(cf);"
 replace = '    let mut command = Command::new("/usr/bin/true");'
+
+# The new app holds nothing of the old one's: Tauri's restart starts it with a bare `Command`, and
+# the old app marks every descriptor close-on-exec first, in its last code (`at_exit`), and before
+# a restart Tauri starts on the spot (`restart_swept`). The last code's sweep taken out and the
+# install's restart called bare, the new app holds the two descriptors the smoke left the
+# installed app (descriptors.rs of the smoke). The restart called bare with the last code's sweep
+# in place is no fault: the restart is still swept.
+[[plant]]
+name = "updater product: the app restarts holding every descriptor it was left"
+meant = "the update installs and restarts"
+runs = ["smoke-own-update"]
+builds = true
+requires = ["app/src-tauri/target/updater-smoke-sweep/update/ConsensFlow.app"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/lib.rs"
+find = """
+    #[cfg(target_os = "macos")]
+    if let Err(failed) = cf_process::close_all_on_exec() {
+        eprintln!("ConsensFlow ends holding descriptors it could not mark close-on-exec: {failed}");
+    }"""
+replace = ""
+
+[[plant.edit]]
+file = "app/src-tauri/src/updates.rs"
+find = "restart_swept(|| -> Value { app.restart() })"
+replace = "app.restart()"

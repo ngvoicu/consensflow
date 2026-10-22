@@ -167,7 +167,6 @@ mod tests {
     use super::*;
     use std::fs;
     use std::path::Path;
-    use std::process::Command;
 
     fn install_fixture(app: &Path, bytes: &[u8], version: &str) -> Result<(), String> {
         let home = tempfile::tempdir().unwrap();
@@ -186,7 +185,7 @@ mod tests {
     ];
 
     fn sign(app: &Path) {
-        assert!(Command::new("/usr/bin/codesign")
+        assert!(crate::testing::command("/usr/bin/codesign")
             .args(["--force", "--deep", "--sign", "-"])
             .arg(app)
             .output()
@@ -221,7 +220,7 @@ mod tests {
         // bundle around it is, as `cargo xtask build-cf` signs it.
         let cf = app.join("Contents/Resources/cli/bin/cf");
         fs::copy("/bin/echo", &cf).unwrap();
-        assert!(Command::new("/usr/bin/codesign")
+        assert!(crate::testing::command("/usr/bin/codesign")
             .args(["--force", "--sign", "-"])
             .arg(&cf)
             .status()
@@ -247,7 +246,7 @@ mod tests {
 
     fn archive(app: &Path) -> Vec<u8> {
         let target = app.parent().unwrap().join("update.tar.gz");
-        assert!(Command::new("/usr/bin/tar")
+        assert!(crate::testing::command("/usr/bin/tar")
             .args(["-czf"])
             .arg(&target)
             .arg("-C")
@@ -297,7 +296,7 @@ mod tests {
                 assert!(!app.join(file).exists(), "{file} is left: {installed}");
             }
             assert!(
-                Command::new("/usr/bin/codesign")
+                crate::testing::command("/usr/bin/codesign")
                     .args(["--verify", "--deep", "--strict"])
                     .arg(&app)
                     .status()

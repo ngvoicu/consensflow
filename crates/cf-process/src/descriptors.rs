@@ -16,14 +16,14 @@
 //! daemon command) is where this matters, and the app's other starts beside it: the login
 //! shell it asks for its PATH (a login file may start a program that runs on), the tools an
 //! update is checked with, and the page a release is downloaded from. The app an update
-//! installed is started by Tauri's restart, with a bare `Command` this crate does not reach:
-//! the app, about to end, first makes every descriptor it holds close-on-exec
-//! ([`close_all_on_exec`]), so the new app is left none of them. The daemon and the Codex
-//! supervisor start their programs on the one thread that opens their sockets and pipes, so no
-//! start of theirs falls between the two calls today; every program is started so all the
-//! same, for a second thread there would open the window with nothing to say so, and the app
-//! may start programs through this crate. So are the tests' and the rig's, whose cases run
-//! side by side.
+//! installed is started by Tauri's restart, with a bare `Command` this crate does not reach,
+//! on the main thread once the event loop has ended: the app's last code there makes every
+//! descriptor it holds close-on-exec ([`close_all_on_exec`]), so the new app is left none of
+//! them. The daemon and the Codex supervisor start their programs on the one thread that opens
+//! their sockets and pipes, so no start of theirs falls between the two calls today; every
+//! program is started so all the same, for a second thread there would open the window with
+//! nothing to say so, and the app may start programs through this crate. So are the tests' and
+//! the rig's, whose cases run side by side.
 //!
 //! So a program, in the moment between its start and its exec, closes every descriptor it
 //! holds above the standard streams that is not close-on-exec: the copy it was left, which
@@ -59,8 +59,10 @@
 //! here waits for that program to end. A check that something is closed, made at once, is made
 //! against all that: the tests ask the thing itself, or wait for it. The sweep before the
 //! app's restart leaves its own moment: a descriptor another thread makes between the sweep
-//! and Tauri's start of the new app is the new app's, for as long as it runs. Microseconds,
-//! with the daemon stopped and the panes drained by then.
+//! and Tauri's start of the new app is the new app's, for as long as it runs. The sweep is the
+//! app's last code on the main thread, where Tauri then starts the new app: a few calls of
+//! Tauri's between (its cleanup, a read of the bundle's Info.plist), microseconds, with the
+//! daemon stopped and the panes drained by then.
 //!
 //! Linux makes a socket or a pipe close-on-exec as it opens it, and Windows hands
 //! nothing over that is not asked: there this does nothing.

@@ -332,12 +332,14 @@ pub async fn update_install<R: Runtime>(app: AppHandle<R>) -> Value {
 }
 
 /// Starts the app an update installed, by `restart` (Tauri's, which starts it with a bare
-/// `Command` and never returns), once every descriptor of this app's is close-on-exec: a program
-/// started on another thread as a socket or a pipe was being made would otherwise leave the new
-/// app that descriptor for as long as it runs. The app is ending, and its own programs are
-/// started holding only their streams, so nothing here needs a descriptor passed on. What another
-/// thread opens between the sweep and the start is not swept: microseconds, with the daemon
-/// stopped and the panes drained.
+/// `Command` and never returns), once every descriptor of this app's is close-on-exec, which a
+/// descriptor left inheritable would otherwise be the new app's for as long as it runs. Called
+/// off the main thread, as the install is, Tauri's restart only asks the event loop to end, and
+/// starts the new app on the main thread after the app's last code, which marks them all again
+/// (`at_exit`, lib.rs): that is the sweep the restart relies on. This one is for the two ways
+/// Tauri starts the new app without that: a restart called on the main thread, and one whose
+/// request to end the loop failed. The app is ending, and its own programs are started holding
+/// only their streams, so nothing here needs a descriptor passed on.
 #[cfg(target_os = "macos")]
 fn restart_swept<T>(restart: impl FnOnce() -> T) -> T {
     if let Err(failed) = cf_process::close_all_on_exec() {
@@ -970,7 +972,7 @@ mod tests {
     fn real_updater_verifies_download_and_rejects_tampering_before_ready() {
         use std::io::{Read, Write};
         use std::net::TcpListener;
-        use std::process::{Command, Stdio};
+        use std::process::Stdio;
         use tauri_plugin_updater::UpdaterExt;
         let dir = tempfile::tempdir().unwrap();
         let key = dir.path().join("test.key");
@@ -978,7 +980,7 @@ mod tests {
         let bytes = b"signed test archive bytes";
         std::fs::write(&archive, bytes).unwrap();
         let signer = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../node_modules/.bin/tauri");
-        assert!(Command::new(&signer)
+        assert!(crate::testing::command(&signer)
             .args([
                 "signer",
                 "generate",
@@ -993,7 +995,7 @@ mod tests {
             .status()
             .unwrap()
             .success());
-        assert!(Command::new(&signer)
+        assert!(crate::testing::command(&signer)
             .args(["signer", "sign", "--password", "", "--private-key-path"])
             .arg(&key)
             .arg(&archive)
@@ -1101,7 +1103,7 @@ mod tests {
             assert_ne!(flags & libc::FD_CLOEXEC, 0, "left inheritable");
             return;
         }
-        let ran = std::process::Command::new(std::env::current_exe().expect("the test binary"))
+        let ran = crate::testing::command(std::env::current_exe().expect("the test binary"))
             .args([
                 "--exact",
                 "updates::tests::the_app_restarts_with_every_descriptor_close_on_exec",
