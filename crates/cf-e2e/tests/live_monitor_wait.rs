@@ -14,6 +14,10 @@
 //! `tests/fixtures/claude/monitor-wait.jsonl` is its record (`--fixture <file>` writes it,
 //! with the run's paths and ids of the machine taken out).
 //!
+//! On Haiku 5.5 the agent stops the noisy monitor itself with TaskStop before Claude Code
+//! does, as 2.1.309's notice of the events it holds back suggests (T-301's runs): run it on
+//! Sonnet (`--claude-model claude-sonnet-5-5`, the cheap model's default).
+//!
 //! One window, in a folder of its own, on Claude's cheap model, with two MCP servers of the
 //! run's (`live::mcp_server`), one of which leaves the window's process group as it starts
 //! (`setsid`), as an owner's server or helper may, and no other, no browser, none of the
@@ -496,6 +500,25 @@ fn notifications(raw: &[Value]) -> Vec<String> {
         .collect()
 }
 
+/// A notification's head as the run says it: its status, its summary and the opening of its
+/// event, each where it has one.
+fn head_of(text: &str) -> String {
+    let field = |tag: &str| {
+        text.lines()
+            .find_map(|line| line.strip_prefix(&format!("<{tag}>")))
+            .map(|rest| {
+                let rest = rest.split(&format!("</{tag}>")).next().unwrap_or(rest);
+                rest.chars().take(80).collect::<String>()
+            })
+    };
+    format!(
+        "  status {:?} · summary {:?} · event {:?}",
+        field("status"),
+        field("summary"),
+        field("event")
+    )
+}
+
 /// Whether a notification's head has the field `tag` (on a line of its own).
 fn has(text: &str, tag: &str) -> bool {
     text.lines()
@@ -683,14 +706,16 @@ fn a_background_command_and_a_monitor_on_it_are_pending_until_claude_code_says_e
     // As the daemon marks a launched window where its first turn begins, as it opens: what
     // the host tells of its commands rests on it.
     window.mark_turn()?;
-    window
-        .ready()
-        .map_err(|screen| Error::Daemon(format!("the window did not open: {screen}")))?;
     // The looks of the first message, timed: when its monitor's command was gone after its
     // notice is measured by them (Calliope on 472b1d96: not by the ten monitors' looks).
+    // They begin as the window opens, its first turn under way: a wait for its screen first
+    // let the turn that armed the monitor, and the next, go by unseen (T-301's first run).
     let mut starts = Starts::new();
     let mut first_commands = Vec::new();
     let looks = watch_timed(&window, EXPIRED, &mut first_commands, &mut starts);
+    window
+        .ready()
+        .map_err(|screen| Error::Daemon(format!("the window did not open: {screen}")))?;
     let raw = raw_records(&window);
     let told = notifications(&raw);
     let config = window.claude_config();
@@ -942,10 +967,17 @@ fn a_background_command_and_a_monitor_on_it_are_pending_until_claude_code_says_e
     log.block(
         "the fifth message",
         &format!(
-            "{}\nthe notice that stopped the monitor: {}\nnotifications with a status after it: {}",
+            "{}\nthe notice that stopped the monitor: {}\nnotifications with a status after it: {}\nthe last notifications' heads:\n{}",
             noisy.iter().map(Look::line).collect::<Vec<_>>().join("\n"),
             stop_notice.map_or("none".to_owned(), |at| told[at].replace('\n', " ")),
-            after.len()
+            after.len(),
+            told.iter()
+                .rev()
+                .take(4)
+                .rev()
+                .map(|text| head_of(text))
+                .collect::<Vec<_>>()
+                .join("\n")
         ),
     );
     checks.push(Check::new(

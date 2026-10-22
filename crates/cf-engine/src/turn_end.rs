@@ -168,7 +168,10 @@ const LOOKS_APART_MS: i64 = 60_000;
 
 /// What a look takes off the time of a monitor's call for the start of a process to be
 /// read against it: a monitor's command begins after its call, and its call's record is
-/// written as the call is made, by the wall clock a start is read by too.
+/// written as the call is made, by the wall clock a start is read by too. Measured by the
+/// live run (monitor-wait's `call-margin`, three runs on Claude Code 2.1.309, T-301): each
+/// message's monitors' commands began 7 to 21 ms after the earliest of their calls' records,
+/// none before.
 const CALL_MARGIN_MS: i64 = 1_000;
 
 /// What a pass makes of the monitors that said they ended ([`Dispatcher::watch_monitors`]).
