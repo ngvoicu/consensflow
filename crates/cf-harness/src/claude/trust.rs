@@ -9,7 +9,7 @@
 //! once it is past the question, is told by the line under its input box.
 
 use crate::contract::Question;
-use crate::shared::trust::{chosen, names, offers, shows, DOWN, ENTER};
+use crate::shared::trust::{chosen_at, names, offers, shows, DOWN, ENTER};
 
 /// What Claude's prompt shows as ConsensFlow opens it, in full-permission mode.
 const PROMPT: &str = "bypass permissions on";
@@ -18,24 +18,38 @@ const PROMPT: &str = "bypass permissions on";
 const YES: &str = "Yes, I trust this folder";
 const NO: &str = "No, exit";
 
+/// The line the question draws below its choices (2.1.305), and no input box does.
+const HINT: &str = "Enter to confirm";
+
 /// The question, where `screen` shows it, and the key toward a yes: Enter once the
 /// `❯` is on the yes, Down while it is on the no. The question is its two choices,
 /// each a line of its own: a screen that only names them (a message that quotes the
-/// question) asks nothing. A `❯` on a line that is neither is Claude's input box
-/// (empty, or holding words that end with a choice), below a conversation that quotes
-/// them, each on a line of its own (a list in a message): no question. Where there is
-/// no `❯` at all (a cursor drawn otherwise, or a redraw caught halfway), the question
-/// is there and its key unknown.
+/// question) asks nothing. A `❯` with the prompt's line below it is Claude's input
+/// box, whatever it holds. A `❯` on a line that is neither choice is the question's
+/// cursor on a choice the reader does not know where the question's hint line is
+/// drawn; elsewhere it is the input box, or a past user turn (2.1.308 marks each with
+/// a `❯`), below a conversation that quotes the choices, each on a line of its own
+/// (a list in a message): no question. Where there is no `❯` at all (a cursor drawn
+/// otherwise, or a redraw caught halfway), the question is there and its key unknown.
 pub(crate) fn toward_trust(screen: &[String]) -> Option<Question> {
-    if !(offers(screen, YES) && offers(screen, NO)) {
+    if !names_choices(screen) {
         return None;
     }
-    Some(match chosen(screen, '❯') {
-        Some(choice) if names(choice, YES) => Question::Toward(ENTER),
-        Some(choice) if names(choice, NO) => Question::Toward(DOWN),
+    Some(match chosen_at(screen, '❯') {
+        Some((at, _)) if shows(&screen[at + 1..], PROMPT) => return None,
+        Some((_, choice)) if names(choice, YES) => Question::Toward(ENTER),
+        Some((_, choice)) if names(choice, NO) => Question::Toward(DOWN),
+        Some(_) if shows(screen, HINT) => Question::Unplaced,
         Some(_) => return None,
         None => Question::Unplaced,
     })
+}
+
+/// Whether `screen` names both of the question's choices, each on a line of its own:
+/// the question does, and so may a conversation that quotes it; a screen past the
+/// question it was answered in does not.
+pub(crate) fn names_choices(screen: &[String]) -> bool {
+    offers(screen, YES) && offers(screen, NO)
 }
 
 /// Whether `screen` is Claude's prompt, as ConsensFlow opens its windows: the
@@ -117,10 +131,25 @@ mod tests {
         let typed = lines(" ⏺ The dialog offers:\n   - No, exit\n   - Yes, I trust this folder\n ❯ tell me more about No, exit\n   ⏵⏵ bypass permissions on (shift+tab to cycle)");
         assert_eq!(toward_trust(&typed), None);
         assert!(shows_prompt(&typed));
+        // The same where the prompt is drawn otherwise, with no line of its below.
+        assert_eq!(toward_trust(&typed[..4]), None);
+        // Holding a choice's very words, the prompt's line below it.
+        let typed_a_choice = lines(" ⏺ The dialog offers:\n   - No, exit\n   - Yes, I trust this folder\n ❯ No, exit\n   ⏵⏵ bypass permissions on (shift+tab to cycle)");
+        assert_eq!(toward_trust(&typed_a_choice), None);
+        assert!(shows_prompt(&typed_a_choice));
         // The same with no input box drawn yet: unplaced, but the prompt's line wins.
         let tail = lines(" ⏺ The dialog offers:\n   - No, exit\n   - Yes, I trust this folder\n   ⏵⏵ bypass permissions on");
         assert_eq!(toward_trust(&tail), Some(Question::Unplaced));
         assert!(shows_prompt(&tail));
+    }
+
+    #[test]
+    fn a_cursor_on_a_choice_the_reader_does_not_know_is_the_question_with_its_cursor_unplaced() {
+        // Calliope's re-check of round 5 (T-299): a third choice between the two, as a
+        // later Claude Code may draw, the dialog's hint line below it.
+        let third = lines(" Quick safety check: Is this a project you created or one you trust?\n   No, exit\n ❯ Yes, and remember this\n   Yes, I trust this folder\n\n Enter to confirm · Esc to cancel");
+        assert_eq!(toward_trust(&third), Some(Question::Unplaced));
+        assert!(!shows_prompt(&third));
     }
 
     #[test]

@@ -78,14 +78,14 @@ fn plain(path: &Path) -> String {
     real_path(&path.to_string_lossy()).unwrap_or_else(|_| path.to_string_lossy().into_owned())
 }
 
-/// The choice `cursor` is on in `screen`: the words after it on the last line
-/// that begins with it, a box's edge before it aside.
-pub(crate) fn chosen(screen: &[String], cursor: char) -> Option<&str> {
-    screen
-        .iter()
-        .rev()
-        .find_map(|line| line.trim_start_matches(blank_or_edge).strip_prefix(cursor))
-        .map(str::trim)
+/// The choice `cursor` is on in `screen`, and the line it is on: the words after it
+/// on the last line that begins with it, a box's edge before it aside.
+pub(crate) fn chosen_at(screen: &[String], cursor: char) -> Option<(usize, &str)> {
+    screen.iter().enumerate().rev().find_map(|(at, line)| {
+        line.trim_start_matches(blank_or_edge)
+            .strip_prefix(cursor)
+            .map(|choice| (at, choice.trim()))
+    })
 }
 
 /// Whether some line of `screen` holds `words`.
@@ -216,9 +216,12 @@ mod tests {
         let screen: Vec<String> = ["  No, exit", " ❯ Yes, I trust this folder", "❯ typed"]
             .map(str::to_owned)
             .to_vec();
-        assert_eq!(chosen(&screen, '❯'), Some("typed"));
-        assert_eq!(chosen(&screen[..2], '❯'), Some("Yes, I trust this folder"));
-        assert_eq!(chosen(&screen[..1], '❯'), None);
+        assert_eq!(chosen_at(&screen, '❯'), Some((2, "typed")));
+        assert_eq!(
+            chosen_at(&screen[..2], '❯'),
+            Some((1, "Yes, I trust this folder"))
+        );
+        assert_eq!(chosen_at(&screen[..1], '❯'), None);
         assert!(shows(&screen, "No, exit") && !shows(&screen, "Trust and continue"));
     }
 
@@ -252,7 +255,10 @@ mod tests {
         .to_vec();
         assert!(!offers(&prose, "No, exit") && !offers(&prose, "Yes, I trust this folder"));
         // The cursor inside a box's edge is the choice it is on.
-        assert_eq!(chosen(&boxed, '❯'), Some("No, exit                 │"));
+        assert_eq!(
+            chosen_at(&boxed, '❯').map(|(_, choice)| choice),
+            Some("No, exit                 │")
+        );
         assert!(names("No, exit                 │", "No, exit"));
     }
 }

@@ -11,9 +11,10 @@
 //! key at a time ([`cf_harness::contract::Window::toward_trust`]), and the notes
 //! say so once. A yes that would trust a folder outside it (the root of a
 //! repository the project's folder is below) is the human's: the notes say so
-//! once, and the window waits for their answer in it; once they said yes in one
-//! window, the project's other windows that ask of that folder are answered as
-//! they answered. Either way nothing goes into the window, and nothing gives its
+//! once the question has stayed [`TELL_LOOKS`], and the window waits for their answer
+//! in it; once they said yes in one window, the project's other windows that ask of
+//! that folder are answered as they answered, or, where no key of ConsensFlow's can
+//! answer them (a cursor the reader cannot place), told of again. Either way nothing goes into the window, and nothing gives its
 //! launch up, while the question is on its screen ([`Trusting`]); once it has gone
 //! the launch goes on as any other, its first message given its whole time from
 //! then. ConsensFlow writes none of the harness's own files: Claude Code rewrites
@@ -24,12 +25,14 @@
 //! (Claude Code shows the question after its launch has come up), a look every
 //! half second. A key is pressed only into a screen that moved since the last key,
 //! so that each press meets the question as the last look read it and a slow redraw
-//! is never given a second. The watch ends once the window is past the question: its harness's
-//! prompt on its screen, or its record grown since it opened (a window opened again
-//! on its conversation has that conversation in its record from the first look); a
-//! window that never asked is let go after [`ASKS_WITHIN_MS`]. A look the host shows no
-//! screen for says nothing either way; a question whose choice the reader cannot place
-//! is pressed nothing, and the human is told once it stays so. A launch that is to
+//! is never given a second. The watch ends once the window is past the question:
+//! its harness's prompt on its screen, or its record grown since it opened (a window
+//! opened again on its conversation has that conversation in its record from the
+//! first look); a window that never asked is let go after [`ASKS_WITHIN_MS`]. A look
+//! the host shows no screen for says nothing either way: a window that asked is held
+//! until one does, and the human is told once that lasts [`UNREAD_MS`]. A question
+//! whose choice the reader cannot place is pressed nothing, and the human is told of
+//! it as of one outside the project's folder. A launch that is to
 //! say its role first never meets the question: only a harness that keeps the
 //! instructions its conversation began with is told its role so, and that is Codex,
 //! which never asks as ConsensFlow opens it.
@@ -67,16 +70,18 @@ const PRESS_AGAIN_LOOKS: u32 = 10;
 /// its conversation before its prompt, and a yes is banked only at the prompt.
 const GONE_LOOKS: u32 = 24;
 
-/// How many looks in a row the question may show its choice where the reader cannot
-/// place it (a redraw caught halfway) before the human is told ConsensFlow could not
-/// answer it: 5 s.
-const UNPLACED_LOOKS: u32 = 10;
+/// How many looks in a row a question ConsensFlow does not answer stays before the
+/// human is told of it: 5 s. The question stays until it is answered; a conversation
+/// drawn before its prompt may quote it, its cursor and all, for a look or three (1.5 s
+/// on a chief's, `cargo xtask live folder-trust`), and a redraw caught halfway shows
+/// its choice where the reader cannot place it for a look.
+const TELL_LOOKS: u32 = 10;
 
-/// How many looks in a row the host may show no screen of a window that asked before
-/// the human is told its screen cannot be read and it is held no longer: 30 s, the time
-/// a window that never asked is watched for the question, longer than a host's passing
-/// trouble, and a hold with no end otherwise.
-const UNREAD_LOOKS: u32 = 60;
+/// How long the host may show no screen of a window that asked before the human is
+/// told: 30 s, the time a window that never asked is watched for the question, longer
+/// than a host's passing trouble. The window is held still: nothing goes into a
+/// question no look has read.
+const UNREAD_MS: i64 = 30_000;
 
 /// How many keys are pressed toward a yes before the question goes to the human:
 /// a screen that is not moved by them is one the engine does not read right.
@@ -114,8 +119,10 @@ enum Seen {
     /// The question, the key toward a yes where its choice could be placed, and the
     /// lines it was read in.
     Asks(Question, Vec<String>),
-    /// The harness's prompt: the window is past any question.
-    Prompt,
+    /// The harness's prompt: the window is past any question. Whether the question's
+    /// choices are gone from the screen: a conversation that quoted them before its
+    /// prompt still shows them, and a question answered does not.
+    Prompt { cleared: bool },
     /// A screen still drawing, or one that is neither.
     Other,
     /// No screen: the host did not show it, which says nothing of the question.
@@ -185,16 +192,18 @@ impl Dispatcher {
         // [`PRESS_AGAIN_LOOKS`], whose window did not take the key.
         let mut pressed_on: Option<(Vec<String>, u32)> = None;
         // How many looks in a row found the question gone with no prompt on the screen,
-        // and how many found it with its choice where the reader cannot place it.
+        // and how many found the question.
         let mut gone = 0;
-        let mut unplaced = 0;
-        // How many looks in a row the host showed no screen of a window that asked.
-        let mut unread = 0;
-        // Whether the question was read for sure: its choice placed once, or read
-        // unplaced long enough to tell the human. A resumed window's conversation,
-        // drawn before its prompt, may quote the choices for a look or three.
+        let mut asking = 0;
+        // Since when the host has shown no screen of a window that asked, and whether
+        // the human was told so.
+        let mut unread_since = None;
+        let mut told_unread = false;
+        // Whether the question was read with its choice placed: only that is a question
+        // whose yes is carried to the project's other windows, the only ones a key of
+        // ConsensFlow's can answer.
         let mut sure = false;
-        let at_prompt = loop {
+        let (at_prompt, cleared) = loop {
             if !self.shows(record, pane) {
                 return Ok(());
             }
@@ -205,7 +214,7 @@ impl Dispatcher {
             let grown = matches!((opened_with, length), (Some(from), Some(now)) if now > from);
             let seen = self.trust_look(pane, &**window).await;
             if !matches!(seen, Seen::Unread) {
-                unread = 0;
+                unread_since = None;
             }
             match seen {
                 Seen::Asks(question, lines) => {
@@ -219,17 +228,11 @@ impl Dispatcher {
                         .accepted
                         .borrow()
                         .contains(&(project.id, folder.clone()));
-                    // A choice the reader cannot place is pressed nothing, and said
-                    // nothing of until it has stayed so (a conversation drawn before
-                    // its prompt may quote the choices for a look or three); one it
-                    // cannot place for long is a screen it does not read right.
-                    unplaced = match question {
-                        Question::Toward(_) => 0,
-                        Question::Unplaced => unplaced + 1,
-                    };
-                    let for_sure =
-                        matches!(question, Question::Toward(_)) || unplaced >= UNPLACED_LOOKS;
-                    sure |= for_sure;
+                    // A choice the reader cannot place is pressed nothing. A question
+                    // not answered here is said nothing of until it has stayed so: a
+                    // conversation drawn before its prompt may quote it.
+                    asking += 1;
+                    sure |= matches!(question, Question::Toward(_));
                     let pressing = match question {
                         Question::Toward(key) if (inside || accepted) && keys < MOST_KEYS => {
                             Some(key)
@@ -256,7 +259,7 @@ impl Dispatcher {
                             keys += 1;
                             pressed_on = Some((lines, 0));
                         }
-                    } else if for_sure {
+                    } else if asking >= TELL_LOOKS {
                         self.tell_trust_once(project, &folder, false, || {
                             if inside {
                                 format!(
@@ -272,12 +275,13 @@ impl Dispatcher {
                         })?;
                     }
                 }
-                Seen::Prompt => break true,
+                Seen::Prompt { cleared } => break (true, cleared),
                 Seen::Other => {
+                    asking = 0;
                     // Its record grown past what it held: past the question, whoever
                     // answered it (or a process before it writing still).
                     if grown {
-                        break false;
+                        break (false, false);
                     }
                     let asked = record.window.borrow().trust == Trusting::Asked;
                     if asked {
@@ -285,23 +289,26 @@ impl Dispatcher {
                         // drawn otherwise than the harness's reader knows): past it.
                         gone += 1;
                         if gone >= GONE_LOOKS {
-                            break false;
+                            break (false, false);
                         }
                     } else if self.now() - began > ASKS_WITHIN_MS {
-                        break false;
+                        break (false, false);
                     }
                 }
-                // No screen says nothing of the question: a window that asked waits
-                // for one, as long as [`UNREAD_LOOKS`], and the human is told when it
-                // is held no longer; one that never did is let go after its time.
+                // No screen says nothing of the question: a window that asked is held
+                // until a look reads it past the question, and the human is told once it
+                // was not read for [`UNREAD_MS`]; one that never did is let go after its
+                // time.
                 Seen::Unread => {
                     if grown {
-                        break false;
+                        break (false, false);
                     }
                     let asked = record.window.borrow().trust == Trusting::Asked;
                     if asked {
-                        unread += 1;
-                        if unread >= UNREAD_LOOKS {
+                        let since = *unread_since.get_or_insert(self.now());
+                        let unseen = self.now() - since;
+                        if unseen >= UNREAD_MS && !told_unread {
+                            told_unread = true;
                             self.seams.ledger.borrow_mut().note(
                                 project.id,
                                 &NewNote {
@@ -309,32 +316,41 @@ impl Dispatcher {
                                     to: "human".to_owned(),
                                     task: None,
                                     body: format!(
-                                        "@{}'s window asked whether to trust {folder}, and its screen could not be read for {} s since: ConsensFlow holds it no longer. If it still asks, answer it in that window.",
+                                        "@{}'s window asked whether to trust {folder}, and its screen could not be read for {} s since. Nothing goes into it until its screen can be read and shows it past the question; if it still asks, answer it in that window.",
                                         participant.handle,
-                                        u128::from(UNREAD_LOOKS) * LOOK.as_millis() / 1_000
+                                        unseen / 1_000
                                     ),
                                 },
                             )?;
-                            break false;
                         }
                     } else if self.now() - began > ASKS_WITHIN_MS {
-                        break false;
+                        break (false, false);
                     }
                 }
             }
             self.seams.time.sleep(LOOK).await;
         };
         let asked = record.window.borrow().trust == Trusting::Asked;
-        // The question, read for sure, left a window now at its prompt, and no key of
-        // ConsensFlow's answered it: the human said yes, for every window of the
-        // project. Nothing else says so: not the question's absence, which a No leaves
-        // on the way out, nor the record's growth, which may be a process before the
-        // window's, nor a conversation that quoted the choices before its prompt.
-        if asked && sure && keys == 0 && at_prompt {
-            self.trust
-                .accepted
-                .borrow_mut()
-                .insert((project.id, folder.clone()));
+        // The question left a window now at its prompt, its choices gone from the
+        // screen, and no key of ConsensFlow's answered it: the human said yes. Nothing
+        // else says so: not the question's absence, which a No leaves on the way out,
+        // nor the record's growth, which may be a process before the window's, nor a
+        // prompt below a conversation that quoted the choices.
+        if asked && keys == 0 && at_prompt && cleared {
+            if sure {
+                // For every window of the project that asks of the folder.
+                self.trust
+                    .accepted
+                    .borrow_mut()
+                    .insert((project.id, folder.clone()));
+            } else {
+                // A question whose choice the reader could not place: no key of
+                // ConsensFlow's answers the others, and each is told of again.
+                self.trust
+                    .told
+                    .borrow_mut()
+                    .remove(&(project.id, folder.clone(), false));
+            }
         }
         if !self.shows(record, pane) {
             return Ok(());
@@ -374,7 +390,9 @@ impl Dispatcher {
         let shown = Shown::from_snapshot(&answer);
         let lines = shown.lines();
         if window.shows_prompt(lines) {
-            return Seen::Prompt;
+            return Seen::Prompt {
+                cleared: !window.names_trust_choices(lines),
+            };
         }
         match window.toward_trust(lines) {
             Some(question) => Seen::Asks(question, lines.to_vec()),

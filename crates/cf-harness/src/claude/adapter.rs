@@ -342,6 +342,10 @@ impl Window for ClaudeWindow {
         super::trust::shows_prompt(screen)
     }
 
+    fn names_trust_choices(&self, screen: &[String]) -> bool {
+        super::trust::names_choices(screen)
+    }
+
     /// A paste waits for the window to be readable, on its conversation,
     /// with no paste going in.
     fn ready<'a>(

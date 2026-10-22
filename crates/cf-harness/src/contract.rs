@@ -287,6 +287,12 @@ pub trait Window {
     fn shows_prompt(&self, _screen: &[String]) -> bool {
         false
     }
+    /// Whether `screen` (the window's last lines) names that question's choices, as
+    /// the question does and a conversation that quotes it may: a screen at its
+    /// prompt that still names them may never have shown the question itself.
+    fn names_trust_choices(&self, _screen: &[String]) -> bool {
+        false
+    }
     /// Whether a delivery may go in now, or why that could not be told.
     fn ready<'a>(
         &'a self,

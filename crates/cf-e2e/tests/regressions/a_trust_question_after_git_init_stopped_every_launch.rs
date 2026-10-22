@@ -637,7 +637,7 @@ fn result_for(project: &Project, number: i64) -> cf_e2e::Result<Option<Value>> {
 #[test]
 fn a_chief_opened_again_at_rest_that_asks_is_handed_nothing_until_the_human_has_answered() -> Outcome
 {
-    chief_opened_again_at_rest_and_asking(false)
+    chief_opened_again_at_rest_and_asking(Shown::AsDrawn)
 }
 
 #[test]
@@ -645,16 +645,37 @@ fn a_chief_opened_again_at_rest_whose_prompt_is_drawn_otherwise_is_handed_its_re
 ) -> Outcome {
     // Nothing goes into it before it is past the question, so its record cannot grow:
     // its prompt, drawn otherwise than the reader knows, is all there is to go by.
-    chief_opened_again_at_rest_and_asking(true)
+    chief_opened_again_at_rest_and_asking(Shown::PlainPrompt)
+}
+
+#[test]
+fn a_chief_opened_again_at_rest_whose_screen_goes_unread_while_it_asks_is_handed_nothing_till_it_is_read(
+) -> Outcome {
+    // Calliope's re-check of round 5 (T-299): the host shows none of the chief's
+    // screens for 31 s while it asks, and a worker's result waits for it. Once the
+    // host showed them again, the paste went in, and its Enter chose "No, exit".
+    chief_opened_again_at_rest_and_asking(Shown::UnreadFor31Seconds)
+}
+
+/// How the chief's window is shown while it asks.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Shown {
+    /// As the stand-in draws it.
+    AsDrawn,
+    /// Its prompt drawn otherwise than the reader knows.
+    PlainPrompt,
+    /// None of its screens for 31 s once it asks, longer than ConsensFlow waits
+    /// before it tells the human.
+    UnreadFor31Seconds,
 }
 
 /// The chief opened again at rest after the app's restart asks of a folder outside the
-/// project, its prompt drawn otherwise where `plain`; a worker's result comes for it
-/// meanwhile, and must reach it once the human has said yes.
-fn chief_opened_again_at_rest_and_asking(plain: bool) -> Outcome {
+/// project, shown as `shown` says; a worker's result comes for it meanwhile, and must
+/// reach it once the human has said yes, and not before.
+fn chief_opened_again_at_rest_and_asking(shown: Shown) -> Outcome {
     // A chief opened again on its conversation after the app's restart has nothing to
     // begin a turn with: what comes for it waits for its window to be ready, and a
-    // window that asks reads at rest from its record, so the gate is ConsensFlow's.
+    // window that asks may read at rest, so the gate is ConsensFlow's.
     let mut rig = Rig::start(config())?;
     let root = rig.workspace().to_path_buf();
     let folder = root.join("app");
@@ -689,8 +710,13 @@ fn chief_opened_again_at_rest_and_asking(plain: bool) -> Outcome {
     rig.kill_daemon();
     rig.wait_for_daemon_exit(secs(10))?;
     let kept = rig.close_keeping_the_root()?;
-    let restarted = config().var("CF_TEST_TRUST", "chief").existing_root(kept);
-    let rig = Rig::start(if plain {
+    // It says it is idle while it asks, so that only ConsensFlow's gate holds what
+    // waits for it.
+    let restarted = config()
+        .var("CF_TEST_TRUST", "chief")
+        .var("CF_TEST_TRUST_IDLE_WHILE_ASKING", "1")
+        .existing_root(kept);
+    let rig = Rig::start(if shown == Shown::PlainPrompt {
         restarted.var("CF_TEST_PLAIN_PROMPT", "1")
     } else {
         restarted
@@ -708,11 +734,32 @@ fn chief_opened_again_at_rest_and_asking(plain: bool) -> Outcome {
         .last()
         .cloned()
         .ok_or("no chief window")?;
-    // The worker's result comes while the chief's window asks, and waits.
-    rig.wait_for("T-1's result for the chief", secs(90), || {
-        Ok(result_for(&project, 1)?.is_some())
+    let unread = shown == Shown::UnreadFor31Seconds;
+    rig.wait_for("the chief's window to be held as asking", secs(30), || {
+        Ok(project.lane("chief")?["activity"]["reason"]
+            == "the window asks whether to trust its folder")
     })?;
-    sleep(Duration::from_secs(6));
+    let refused = std::time::Instant::now();
+    rig.refuse_snapshots(unread);
+    // The worker's result comes while the chief's window asks, and waits.
+    let waits = rig.wait_for("T-1's result for the chief", secs(90), || {
+        Ok(result_for(&project, 1)?.is_some())
+    });
+    if unread {
+        sleep(Duration::from_secs(31).saturating_sub(refused.elapsed()));
+    }
+    let notes = notes_of(&project, &root);
+    rig.refuse_snapshots(false);
+    waits?;
+    if unread {
+        let notes = notes?;
+        assert!(
+            notes.iter().any(|note| note.contains(UNREAD)),
+            "the human was not told the chief's screen could not be read: {notes:?}"
+        );
+    }
+    // Long enough for a window whose screen can be read again to be drawn and ready.
+    sleep(Duration::from_secs(if unread { 20 } else { 6 }));
     let gone = rig
         .exits()
         .iter()
@@ -720,6 +767,11 @@ fn chief_opened_again_at_rest_and_asking(plain: bool) -> Outcome {
     assert!(
         !gone,
         "the chief's window was handed the result while it asked, and ended"
+    );
+    assert_eq!(
+        keys_given(&rig),
+        Vec::<String>::new(),
+        "a key went into the chief's question"
     );
     for keys in [DOWN, ENTER] {
         let pressed = rig.host(
@@ -856,10 +908,24 @@ fn a_chief_whose_conversation_quotes_the_question_before_its_prompt_says_no_yes_
 ) -> Outcome {
     // Calliope's check of round 4 (T-231): a window opened again draws its conversation
     // before its prompt, and one that quoted the two choices read as the question, then
-    // its prompt as the human's yes, which answered the project's other windows. The
-    // chief's does so for 1.5 s; the worker's asks of the repository's root, outside the
-    // project's folder, which is the human's.
-    let rig = asking_with(&[("CF_TEST_QUOTES_BEFORE_PROMPT", "chief")])?;
+    // its prompt as the human's yes, which answered the project's other windows.
+    chief_quoting_before_its_prompt(&[])
+}
+
+#[test]
+fn a_chief_whose_conversation_quotes_the_dialog_cursor_and_all_says_no_yes_for_the_others(
+) -> Outcome {
+    // Calliope's re-check of round 5 (T-299): a quote as the dialog draws it, the `❯` on
+    // its first choice, read as the question with its choice placed: the human was told
+    // of the chief's question, and its prompt banked a yes nobody gave.
+    chief_quoting_before_its_prompt(&[("CF_TEST_QUOTES_THE_CURSOR", "1")])
+}
+
+/// The chief's conversation quotes the question's choices for 1.5 s before its prompt,
+/// its stand-in set by `vars` besides; the worker's window asks of the repository's
+/// root, outside the project's folder, which is the human's.
+fn chief_quoting_before_its_prompt(vars: &[(&str, &str)]) -> Outcome {
+    let rig = asking_with(&[&[("CF_TEST_QUOTES_BEFORE_PROMPT", "chief")], vars].concat())?;
     let root = rig.workspace().to_path_buf();
     git_init(&root)?;
     let folder = root.join("app");
@@ -1071,6 +1137,45 @@ fn a_window_whose_screen_the_host_cannot_show_while_it_asks_is_still_held() -> O
 }
 
 #[test]
+fn a_question_whose_cursor_is_drawn_otherwise_is_told_of_again_once_the_human_answered_another(
+) -> Outcome {
+    // Calliope's re-check of round 5 (T-299): two of the worker's windows ask of one
+    // folder outside the project, each with its cursor drawn otherwise, and the human
+    // is told once. Their yes in the first cannot be carried to the second, which no
+    // key of ConsensFlow's can answer: it was held, and nobody was told of it again.
+    let rig = asking_with(&[("CF_TEST_TRUST_CURSOR", ">")])?;
+    let root = rig.workspace().to_path_buf();
+    git_init(&root)?;
+    let folder = root.join("app");
+    std::fs::create_dir(&folder)?;
+    let project = Project::open(&rig, "chief", json!({ "directory": folder }))?;
+    two_tasks(&rig, &project, "SLEEP 3 ")?;
+    rig.wait_for("both windows to ask, and the human told", secs(60), || {
+        Ok(workers(&rig, &project).len() == 2 && notes_of(&project, &root)?.len() == 1)
+    })?;
+    let windows = workers(&rig, &project);
+    human_presses(&rig, &windows[0], &[DOWN, ENTER])?;
+    let other = windows[1]["id"]
+        .as_str()
+        .and_then(|id| id.split_once('-'))
+        .map(|(_, handle)| format!("@{handle}'s window"))
+        .ok_or("the other window has no id")?;
+    rig.wait_for("the human to be told of the other window", secs(60), || {
+        let notes = notes_of(&project, &root)?;
+        Ok(notes.len() == 2 && notes.iter().any(|note| note.contains(&other)))
+    })?;
+    assert_eq!(
+        keys_given(&rig),
+        ["down", "enter"],
+        "a key went into the other window"
+    );
+    human_presses(&rig, &windows[1], &[DOWN, ENTER])?;
+    rig.wait_for("T-1 and T-2 to be done", secs(60), || both_done(&project))?;
+    rig.close()?;
+    Ok(())
+}
+
+#[test]
 fn a_question_whose_cursor_is_drawn_otherwise_is_left_to_the_human_who_is_told() -> Outcome {
     // Calliope's review of round 3 (T-120): a question whose cursor the reader could not
     // place read as no question, and after 30 s the first message's Enter chose "No,
@@ -1120,10 +1225,11 @@ fn a_question_whose_cursor_is_drawn_otherwise_is_left_to_the_human_who_is_told()
 const UNREAD: &str = "could not be read";
 
 #[test]
-fn a_window_whose_screen_the_host_never_shows_while_it_asks_is_told_of_and_held_no_longer(
+fn a_window_whose_screen_the_host_never_shows_while_it_asks_is_told_of_and_held_till_it_is_read(
 ) -> Outcome {
     // Calliope's check of round 4 (T-231): a window that asked, whose host then showed
-    // none of its screens, was held for good, and nobody was told.
+    // none of its screens, was held for good, and nobody was told. The human is told
+    // now, and it is held still: nothing may go into a question no look has read.
     let rig = Rig::start(asking())?;
     let root = rig.workspace().to_path_buf();
     git_init(&root)?;
@@ -1140,29 +1246,36 @@ fn a_window_whose_screen_the_host_never_shows_while_it_asks_is_told_of_and_held_
         Ok(!notes_of(&project, &root)?.is_empty())
     })?;
     rig.refuse_snapshots(true);
-    let held_no_longer = rig
-        .wait_for(
-            "the human to be told the screen cannot be read",
-            secs(60),
-            || {
-                Ok(notes_of(&project, &root)?
-                    .iter()
-                    .any(|note| note.contains(UNREAD) && note.contains("30 s")))
-            },
-        )
-        .and_then(|()| {
-            rig.wait_for("the window to be held no longer", secs(5), || {
-                let lane = project.lane("worker")?;
-                Ok(lane["activity"]["reason"] != "the window asks whether to trust its folder")
-            })
-        });
+    let told = rig.wait_for(
+        "the human to be told the screen cannot be read",
+        secs(60),
+        || {
+            Ok(notes_of(&project, &root)?
+                .iter()
+                .any(|note| note.contains(UNREAD)))
+        },
+    );
+    sleep(Duration::from_secs(2));
+    let lane = project.lane("worker");
     rig.refuse_snapshots(false);
-    held_no_longer?;
+    told?;
+    let lane = lane?;
+    assert_eq!(
+        lane["activity"]["reason"], "the window asks whether to trust its folder",
+        "{lane}"
+    );
     assert_eq!(
         keys_given(&rig),
         Vec::<String>::new(),
         "a key went into the question"
     );
+    let window = workers(&rig, &project)[0].clone();
+    human_presses(&rig, &window, &[DOWN, ENTER])?;
+    rig.wait_for("T-1 to be done", secs(60), || {
+        let state = project.task(1)?["state"].clone();
+        assert_ne!(state, "failed", "T-1 failed after the yes");
+        Ok(state == "done")
+    })?;
     rig.close()?;
     Ok(())
 }
