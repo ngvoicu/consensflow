@@ -65,10 +65,35 @@ jobs:
       # rig's: the daemon and the pane host in real terminals, with
       # stand-in agents in the windows, and the regressions': a case for each
       # bug the owner hit in real use, on that rig.
-      # Windows' runner took 21 minutes here before B5 (2026-10-18), whose
-      # regressions ran it past 30 with nothing hung.
-      - run: npm run test:daemons
-        timeout-minutes: 50
+      # Two steps, a limit for each (`npm run test:daemons` still runs the three
+      # for a person and for `cargo xtask check`). It was one step with 50
+      # minutes, and the regressions grew past them: 26 cases on 2026-10-17, 73
+      # on 2026-10-22, 25 s a case on macOS on average and 32 on Windows, a rig at
+      # a time by design. The step took 21 minutes on Windows before (2026-10-18),
+      # then 44:46 on Windows and 48:55 on macOS at a8c2e3cf, 50:00 on macOS at
+      # 04bc9d66, and was cut at bcf8a1d0.
+      # Measured in the runs of 2026-10-18 to 22, macOS and Windows: the daemon's
+      # 15 cases 26 to 50 s and 33 to 71 s; the rig's 116 to 119 cases (100 to 103
+      # on Windows) 1,041 to 1,165 s and 900 to 962 s; the regressions' 42 cases
+      # in 1,331 s (27 in 1,211 s) at the start, and 70 to 73 cases (53 to 56) in
+      # 1,788 to 1,863 s and 1,658 to 1,781 s in the last three runs; and the
+      # tests' build, 16 s at most in a step. The slowest of each, added up on
+      # macOS, which is the slower:
+      #   daemon and rig: 16 + 50 + 1,165 = 1,231 s = 20.5 min
+      #   regressions:    16 + 1,863 = 1,879 s = 31.3 min
+      # The limit is 1.4 times that, to the next five minutes: 1.4 * 20.5 = 28.7,
+      # so 30; 1.4 * 31.3 = 43.8, so 45. The runs of one binary differ by 12 % at
+      # most (the rig's, above); the rest is room for the cases that land before
+      # the regressions are made faster. Both worsts are under 80 % of their
+      # limit (24 and 36 minutes), where `cargo xtask ci-times` fails a run. The
+      # regressions have 281 s left to that mark on macOS and 363 s on Windows
+      # (1,797 s there): 11 more cases at the averages above, and 32 before the
+      # cut (28 on Windows). The daemon and the rig go first: the build of
+      # cf-e2e is theirs.
+      - run: npm run test:daemon-and-rig
+        timeout-minutes: 30
+      - run: npm run test:regressions
+        timeout-minutes: 45
       # The CLI's suites against the native cf, which answers every verb.
       - run: npm run test:clis
         timeout-minutes: 15

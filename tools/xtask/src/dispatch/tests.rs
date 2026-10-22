@@ -37,6 +37,7 @@ fn every_command_of_the_plan_is_there_once() {
             "clippy-windows",
             "--as-archiver",
             "test daemons",
+            "test daemon-and-rig",
             "test integration",
             "test regressions",
             "test clis",
@@ -169,7 +170,7 @@ fn a_group_of_commands_has_its_help_and_wants_a_command_of_it() {
     assert_eq!(parsed("app"), "usage app takes a command: test, clippy");
     assert_eq!(
         parsed("test"),
-        "usage test takes a command: daemons, integration, regressions, clis, agents, load"
+        "usage test takes a command: daemons, daemon-and-rig, integration, regressions, clis, agents, load"
     );
     assert_eq!(parsed("app tests"), "usage unknown command: app tests");
     assert_eq!(
