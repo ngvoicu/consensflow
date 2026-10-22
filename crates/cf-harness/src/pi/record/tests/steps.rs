@@ -301,3 +301,29 @@ fn text_is_the_text_blocks_a_line_each_and_a_user_of_white_space_is_no_turn() {
         assert_eq!(!stage.at(0).items.is_empty(), is_a_turn, "{text:?}");
     }
 }
+
+#[test]
+fn a_record_whose_newline_a_short_write_dropped_keeps_its_place_and_its_time() {
+    // A message with no time of its own is at its place among the records; the
+    // next append, the newline before it lost, ran on from it (T-246).
+    let untimed = |id: &str, text: &str| {
+        let mut record = user(id, text);
+        record.as_object_mut().unwrap().remove("timestamp");
+        record
+    };
+    let mut stage = Stage::new();
+    stage.write_text(&format!("{}\n{}", header(), untimed("u1", "hello")));
+    let before = stage.at(0).items;
+    assert_eq!(before.len(), 1);
+    stage.write_text(&format!(
+        "{}\n{}{}\n",
+        header(),
+        untimed("u1", "hello"),
+        untimed("u2", "again")
+    ));
+    let after = stage.at(0);
+    assert_eq!(after.items.len(), 2);
+    assert_eq!(after.items[0], before[0], "the same id, at the same place");
+    assert_eq!(after.items[1].at, Some(json!(2)));
+    assert!(after.lost.is_empty());
+}

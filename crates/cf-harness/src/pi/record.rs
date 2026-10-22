@@ -88,7 +88,13 @@ impl Reader {
     /// What the session says now, or why it cannot be read.
     fn read(&mut self, options: &Options, now_ms: i64) -> Result<Reading, String> {
         match self.transcript.read(now_ms).map_err(|stop| stop.reason())? {
-            Some(read) => read.state.result(&self.env, options, now_ms, &read.file),
+            Some(read) => {
+                let mut reading = read.state.result(&self.env, options, now_ms, &read.file)?;
+                if let Reading::Known(record) = &mut reading {
+                    record.lost = read.lost;
+                }
+                Ok(reading)
+            }
             None => {
                 if !evidence::working(&self.session, &self.env, options)? {
                     return Ok(Reading::unreadable(&format!(

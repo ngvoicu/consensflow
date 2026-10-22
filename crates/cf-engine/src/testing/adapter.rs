@@ -46,6 +46,8 @@ pub struct FakeAgent {
     pub settled: bool,
     /// The settled turn left background agents running (the reading says so).
     pub agents_pending: bool,
+    /// The lines of its record torn and passed over, by their places (the reading says so).
+    pub lost: Vec<usize>,
     pub waiting: Option<Waiting>,
     pub quota: Option<Arc<Quota>>,
     /// Whether a delivery is taken.
@@ -338,6 +340,12 @@ impl FakeAdapter {
         self.with(handle, |agent| agent.agents_pending = true);
     }
 
+    /// A line of the agent's record is torn and passed over, where the record
+    /// `place` would be: its reading says so from now on.
+    pub fn loses_a_line(&self, handle: &str, place: usize) {
+        self.with(handle, |agent| agent.lost.push(place));
+    }
+
     /// The agent is at work on a turn.
     pub fn busy(&self, handle: &str) {
         self.with(handle, |agent| {
@@ -462,6 +470,17 @@ impl FakeAdapter {
     /// window's on it, none where no window had it, and whether the turn it
     /// ends in is over (an agent that was never answered is in one still, as a
     /// window the app's quit cut).
+    /// The lines the record of `session` lost, as its last window's reading had them.
+    fn lost_of(&self, session: &str) -> Vec<usize> {
+        let agents = self.agents.borrow();
+        agents
+            .iter()
+            .rev()
+            .find(|agent| agent.native == session)
+            .map(|agent| agent.lost.clone())
+            .unwrap_or_default()
+    }
+
     pub(super) fn record_of(&self, session: &str) -> Option<(Vec<Item>, bool)> {
         let agents = self.agents.borrow();
         agents
@@ -554,6 +573,11 @@ impl Asked {
             .filter(|_| fake.resumes_records.get())
             .and_then(|session| fake.record_of(session))
             .map(|(items, _)| items);
+        // A window opened again on a conversation reads its record again, lost lines and all.
+        let lost = launch
+            .resume
+            .map(|session| fake.lost_of(session))
+            .unwrap_or_default();
         let mut agent = FakeAgent {
             launch: id.clone(),
             handle: launch.handle.to_owned(),
@@ -561,6 +585,7 @@ impl Asked {
             items: resumed.unwrap_or_default(),
             settled: true,
             agents_pending: false,
+            lost,
             waiting: None,
             quota: None,
             admit: true,

@@ -30,6 +30,7 @@ pub(super) fn answer(chain: &Chain, wires: &Wires) -> Record {
     }
     let mut record = Record::new();
     record.asking = chain.asking;
+    record.lost = wires.lost();
     record.items = chain
         .entries
         .iter()

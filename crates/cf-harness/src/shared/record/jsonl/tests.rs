@@ -586,3 +586,97 @@ fn a_lone_surrogate_reads_as_the_replacement_character_and_two_halves_as_one_tex
         [(serde_json::json!({ "a": "\u{FFFD}", "b": "x\u{FFFD}" }), 0)]
     );
 }
+
+#[test]
+fn torn_lines_one_after_another_at_the_end_of_a_quiet_record_wait_together() {
+    // A full disk that came and went tore two lines, and the window went quiet.
+    let said = said();
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("t.jsonl");
+    fs::write(&file, format!("{{\"a\":0}}\n{CUT}{NEXT}{CUT}{NEXT}")).unwrap();
+    stamp(&file, 1_000);
+    let found = EPOCH_MS;
+    let (looked, _) = collect_at(&file, None, found, None);
+    let seen = read(looked);
+    let (looked, visited) = collect_at(&file, Some(&seen), found + TORN_WAIT_MS, None);
+    assert!(visited.is_empty());
+    let seen = read(looked);
+    let second = 8 + CUT.len() + NEXT.len();
+    assert_eq!(
+        seen.offset,
+        (2 * second - 8) as u64,
+        "both passed over in the one wait"
+    );
+    assert_eq!((seen.torn_since, seen.passed_over()), (None, &[1, 1][..]));
+    assert_eq!(
+        *said.lock().unwrap(),
+        [
+            passed_over(&file, 1, 8),
+            passed_over(&file, 1, second as u64)
+        ]
+    );
+}
+
+#[test]
+fn an_unfinished_last_line_that_does_not_grow_is_said_once_after_the_wait() {
+    // The harness was killed in its short write, and wrote nothing after it.
+    let said = said();
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("t.jsonl");
+    fs::write(&file, format!("{{\"a\":0}}\n{CUT}")).unwrap();
+    stamp(&file, 1_000);
+    let found = EPOCH_MS;
+    let (looked, _) = collect_at(&file, None, found, None);
+    let seen = read(looked);
+    // Growing, it is a line being written: its wait starts again.
+    append(&file, "and", 2_000);
+    let (looked, _) = collect_at(&file, Some(&seen), found + 3_000, None);
+    let seen = read(looked);
+    let (looked, _) = collect_at(&file, Some(&seen), found + TORN_WAIT_MS, None);
+    assert!(matches!(looked, Ok(Looked::Unchanged)));
+    assert!(said.lock().unwrap().is_empty());
+    let (looked, visited) = collect_at(&file, Some(&seen), found + 3_000 + TORN_WAIT_MS, None);
+    assert!(visited.is_empty(), "it waits for its newline still");
+    let seen = read(looked);
+    let line = format!("a line of {} is not finished at record 1", file.display());
+    assert_eq!(*said.lock().unwrap(), std::slice::from_ref(&line));
+    let (looked, _) = collect_at(&file, Some(&seen), found + 60_000, None);
+    assert!(matches!(looked, Ok(Looked::Unchanged)), "said once");
+    assert_eq!(*said.lock().unwrap(), [line]);
+}
+
+#[test]
+fn whole_records_run_together_in_one_line_are_each_read_in_their_place() {
+    // A short write dropped only a record's newline: the next append ran on from it.
+    let said = said();
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("t.jsonl");
+    fs::write(&file, "{\"a\":0}\n{\"a\":1}").unwrap();
+    stamp(&file, 1_000);
+    let (looked, visited) = collect(&file, None, None);
+    assert_eq!(visited.len(), 2, "the whole unterminated record is read");
+    let seen = read(looked);
+    append(&file, "{\"a\":2}\n{\"a\":3}\n", 2_000);
+    assert!(matches!(
+        collect(&file, Some(&seen), None).0,
+        Ok(Looked::NotTheFile)
+    ));
+    let (looked, visited) = collect(&file, None, None);
+    assert_eq!(
+        visited,
+        [
+            (serde_json::json!({ "a": 0 }), 0),
+            (serde_json::json!({ "a": 1 }), 1),
+            (serde_json::json!({ "a": 2 }), 2),
+            (serde_json::json!({ "a": 3 }), 3),
+        ],
+        "each in the place it would have had"
+    );
+    assert!(read(looked).passed_over().is_empty(), "nothing was lost");
+    // Whole records and then a torn rest: the records are read, the rest goes at once.
+    fs::write(&file, format!("{{\"a\":0}}\n{{\"a\":1}}{CUT}{NEXT}")).unwrap();
+    let (looked, visited) = collect(&file, None, None);
+    assert_eq!(visited.len(), 2);
+    assert_eq!(read(looked).passed_over(), [2]);
+    assert_eq!(*said.lock().unwrap(), [passed_over(&file, 2, 8)]);
+}

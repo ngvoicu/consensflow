@@ -69,6 +69,9 @@ pub(crate) struct Read<'a, P> {
     pub(crate) file: PathBuf,
     /// Whether the look read anything since the last.
     pub(crate) changed: bool,
+    /// The torn lines passed over so far, each by the place among the records
+    /// it stood at.
+    pub(crate) lost: Vec<usize>,
 }
 
 impl<P: Parser> Followed<P> {
@@ -129,10 +132,16 @@ impl<P: Parser> Followed<P> {
                     if let Looked::Held(seen) | Looked::Read(seen) = looked {
                         self.seen = Some(seen);
                     }
+                    let lost = self
+                        .seen
+                        .as_ref()
+                        .map(|seen| seen.passed_over().to_vec())
+                        .unwrap_or_default();
                     return Ok(Some(Read {
                         state: self.state.get_or_insert_with(|| (self.parse)()),
                         file,
                         changed,
+                        lost,
                     }));
                 }
                 // Another file, or a parser that wants every record again: the
@@ -207,7 +216,8 @@ impl<P: Parser + Answer> Look for TranscriptReader<P> {
                     return Arc::clone(answer);
                 }
                 match read.state.result() {
-                    Ok(record) => {
+                    Ok(mut record) => {
+                        record.lost = read.lost;
                         let answer = Arc::new(Reading::Known(record));
                         self.answer = Some(Arc::clone(&answer));
                         answer

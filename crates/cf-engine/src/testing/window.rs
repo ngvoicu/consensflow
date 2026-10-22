@@ -279,6 +279,7 @@ fn looked(agent: &FakeAgent, session: &str) -> Observed {
             quota: None,
             settlement: Settlement::Unknown,
             agents_pending: agent.agents_pending,
+            lost: agent.lost.clone(),
         })))
     };
     // A window that shows another conversation than its launch's: that

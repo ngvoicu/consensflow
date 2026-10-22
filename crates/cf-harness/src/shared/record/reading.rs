@@ -60,6 +60,11 @@ pub struct Record {
     /// reading Node wrote has it.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub agents_pending: bool,
+    /// The lines of the record that were torn and passed over, each by the
+    /// place among the records it stood at, in order: records lost, which the
+    /// items miss. Never said: no reading Node wrote has it.
+    #[serde(skip)]
+    pub lost: Vec<usize>,
 }
 
 impl Record {
@@ -73,6 +78,7 @@ impl Record {
             quota: None,
             settlement: Settlement::Unknown,
             agents_pending: false,
+            lost: Vec::new(),
         }
     }
 }

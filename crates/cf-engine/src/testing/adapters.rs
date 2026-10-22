@@ -85,6 +85,7 @@ fn record_of(fake: &FakeAdapter, session: &str) -> Reading {
                 Settlement::InFlight
             },
             agents_pending: false,
+            lost: Vec::new(),
         }),
     }
 }

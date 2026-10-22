@@ -91,6 +91,12 @@ impl Dispatcher {
             window.follow(session);
         }
         *record.copied.borrow_mut() = None;
+        // Another conversation's record: what the last one lost is not this one's.
+        {
+            let mut delivery = record.delivery.borrow_mut();
+            delivery.lost = 0;
+            delivery.lost_before = None;
+        }
         self.changed();
         Ok(())
     }

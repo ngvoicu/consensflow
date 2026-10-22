@@ -49,6 +49,7 @@ mod lanes;
 mod launch_stops;
 mod launch_wait;
 mod looks;
+mod lost_lines;
 mod no_adapter;
 mod not_ready;
 mod out_of_quota;

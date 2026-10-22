@@ -114,7 +114,7 @@ runs = ["engine-dispatcher-background"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
-find = '            } else if let Some(task) = self.collect(project, participant, &observed)? {'
+find = '            } else if let Some(task) = self.collect(project, participant, record, &observed)? {'
 replace = '''
             } else if let Some(task) = ({
                 // Held for the work the turn left, as before 2026-10-13: no result while any runs.
@@ -131,7 +131,7 @@ replace = '''
                 if left > 0 {
                     None
                 } else {
-                    self.collect(project, participant, &observed)?
+                    self.collect(project, participant, record, &observed)?
                 }
             }) {'''
 
@@ -142,7 +142,7 @@ runs = ["engine-dispatcher-background"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
-find = '            } else if let Some(task) = self.collect(project, participant, &observed)? {'
+find = '            } else if let Some(task) = self.collect(project, participant, record, &observed)? {'
 replace = '''
             } else if let Some(task) = ({
                 // Ended before the result is recorded, so that the result waits for it.
@@ -150,7 +150,7 @@ replace = '''
                 if let Some(pane) = pane {
                     self.seams.background.end(&pane).await;
                 }
-                self.collect(project, participant, &observed)?
+                self.collect(project, participant, record, &observed)?
             }) {'''
 
 [[plant]]
@@ -1752,7 +1752,7 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
-find = '            } else if let Some(task) = self.collect(project, participant, &observed)? {'
+find = '            } else if let Some(task) = self.collect(project, participant, record, &observed)? {'
 replace = '''
             } else if let Some(task) = ({
                 // Held for the work the turn left, as before 2026-10-13: no result while any runs.
@@ -1769,7 +1769,7 @@ replace = '''
                 if left > 0 {
                     None
                 } else {
-                    self.collect(project, participant, &observed)?
+                    self.collect(project, participant, record, &observed)?
                 }
             }) {'''
 
@@ -1916,7 +1916,7 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
-find = '            } else if let Some(task) = self.collect(project, participant, &observed)? {'
+find = '            } else if let Some(task) = self.collect(project, participant, record, &observed)? {'
 replace = '''
             } else if let Some(task) = ({
                 // Held for the work the turn left, as before 2026-10-13: no result while any runs.
@@ -1933,7 +1933,7 @@ replace = '''
                 if left > 0 {
                     None
                 } else {
-                    self.collect(project, participant, &observed)?
+                    self.collect(project, participant, record, &observed)?
                 }
             }) {'''
 
@@ -2258,7 +2258,7 @@ replace = '            None => return at.parent.is_none() || runs_a_shell(at),'
 
 [[plant.edit]]
 file = "crates/cf-engine/src/dispatcher.rs"
-find = '            } else if let Some(task) = self.collect(project, participant, &observed)? {'
+find = '            } else if let Some(task) = self.collect(project, participant, record, &observed)? {'
 replace = '''
             } else if let Some(task) = ({
                 // Held for the work the turn left, as before 2026-10-13: no result while any runs.
@@ -2275,7 +2275,7 @@ replace = '''
                 if left > 0 {
                     None
                 } else {
-                    self.collect(project, participant, &observed)?
+                    self.collect(project, participant, record, &observed)?
                 }
             }) {'''
 

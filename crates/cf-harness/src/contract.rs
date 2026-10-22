@@ -437,6 +437,16 @@ impl Observed {
         }
     }
 
+    /// The lines of the conversation's record that were torn and passed over,
+    /// each by the place among the records it stood at: none where its record
+    /// could not be read.
+    pub fn lost(&self) -> &[usize] {
+        match self.reading.as_deref() {
+            Some(Reading::Known(record)) => &record.lost,
+            Some(Reading::Unknown(_)) | None => &[],
+        }
+    }
+
     /// Whether the conversation's turn ended and left background agents or
     /// workflows running: the window takes input between turns, and its agent
     /// is woken when they end.

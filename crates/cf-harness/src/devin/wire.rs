@@ -14,7 +14,7 @@ use cf_base::json::from_slice_lossy;
 use serde_json::Value;
 
 /// A wire log that could not be read for the conversation it shows: not
-/// there, or a complete record in it that is no record.
+/// there, or a record in it that is JSON but not one of the log's.
 #[derive(Debug)]
 pub(crate) struct Unreadable;
 
@@ -84,7 +84,10 @@ pub(crate) fn mode_in<'a>(record: &'a Value, shown: Option<&str>) -> Option<&'a 
 /// The conversation the window shows, as the log has it so far: the last
 /// complete record that names one. The log is read a record at a time, as
 /// long a conversation's log grows; what follows its last newline is a
-/// record still being written, and is not read.
+/// record still being written, and is not read. A complete line that is not
+/// JSON is torn (a short write, which the next record's append completed) and
+/// says nothing, as the conversation's reader passes it over
+/// (`wire_log::follow`): Devin goes on past it, and so do the window's pastes.
 pub(crate) fn selected_session(file: &Path) -> Result<Option<String>, Unreadable> {
     let size = fs::metadata(file)?.len();
     let mut log = BufReader::new(File::open(file)?.take(size));
@@ -99,7 +102,9 @@ pub(crate) fn selected_session(file: &Path) -> Result<Option<String>, Unreadable
         if js::trim(&String::from_utf8_lossy(record)).is_empty() {
             continue;
         }
-        let record = from_slice_lossy(record).map_err(|_| Unreadable)?;
+        let Ok(record) = from_slice_lossy(record) else {
+            continue;
+        };
         if let Some(shown) = shown_in(&record)? {
             session = Some(shown.to_string());
         }
@@ -208,12 +213,39 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn a_complete_record_that_is_no_json_or_no_file_is_unreadable() {
+    fn a_torn_line_says_nothing_and_the_records_after_it_name_the_conversation() {
+        // A short write left half a record, and the next append made one line of it
+        // and itself: Devin went on past it.
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("wire.jsonl");
+        let half = &shows("native-a")[..20];
+        fs::write(
+            &file,
+            format!("{}{half}{}", shows("native-a"), shows("native-b")),
+        )
+        .unwrap();
+        assert_eq!(
+            selected_session(&file).unwrap(),
+            Some("native-a".to_owned())
+        );
+        fs::write(
+            &file,
+            format!("{}{{invalid}}\n{}", shows("native-a"), shows("native-b")),
+        )
+        .unwrap();
+        assert_eq!(
+            selected_session(&file).unwrap(),
+            Some("native-b".to_owned())
+        );
+    }
+
+    #[test]
+    fn a_record_that_is_json_but_none_of_the_logs_or_no_file_is_unreadable() {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("wire.jsonl");
         fs::write(
             &file,
-            format!("{}{{invalid}}\n{}", shows("native-a"), shows("native-b")),
+            format!("{}null\n{}", shows("native-a"), shows("native-b")),
         )
         .unwrap();
         assert!(selected_session(&file).is_err());

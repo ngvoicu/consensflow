@@ -61,6 +61,25 @@ pub(crate) struct DeliveryPart {
     /// ([`Dispatcher::owed`]). Each launch says it anew, and none that opened a
     /// window leaves it as it was.
     pub(crate) prelude: Option<Prelude>,
+    /// How many lines of the window's record were lost (torn, and passed
+    /// over) as its last look read it.
+    pub(crate) lost: usize,
+    /// The message last handed over to the window, and how many lines its
+    /// record had lost before it: one lost since is lost from that turn.
+    pub(crate) lost_before: Option<(i64, usize)>,
+}
+
+/// The first line of the window's record lost since the message last handed
+/// over to it, by the place among the records it stood at: since the record
+/// began where no hand-over is known (the daemon started since), so a result
+/// is marked rather than taken whole in silence.
+pub(crate) fn lost_in_turn(record: &Record, observed: &Observed) -> Option<usize> {
+    let before = record
+        .delivery
+        .borrow()
+        .lost_before
+        .map_or(0, |(_, lost)| lost);
+    observed.lost().get(before).copied()
 }
 
 impl Dispatcher {
@@ -126,6 +145,10 @@ impl Dispatcher {
         // What is pasted is what the ledger says it is when delivery begins: the
         // message, and the rows it carries still waiting, which are the set from now.
         let begun = self.seams.ledger.borrow_mut().begin_delivery(message.id)?;
+        {
+            let mut delivery = record.delivery.borrow_mut();
+            delivery.lost_before = Some((message.id, delivery.lost));
+        }
         if begun.message.kind == "task" {
             self.pay_with_words(record)?;
         }
@@ -193,6 +216,7 @@ impl Dispatcher {
         &self,
         project: &ProjectView,
         participant: &ParticipantView,
+        record: &Record,
         observed: &Observed,
     ) -> Result<Option<TaskView>, EngineError> {
         let task = self
@@ -242,11 +266,18 @@ impl Dispatcher {
             .map(|item| js::trim(&item.text))
             .filter(|text| !text.is_empty())
             .collect();
-        let body = if words.is_empty() {
+        let mut body = if words.is_empty() {
             "(the agent ended its turn without a written answer)".to_owned()
         } else {
             words.join("\n\n")
         };
+        // A line of the record torn and passed over in the turn: the result may have a hole.
+        if let Some(lost) = lost_in_turn(record, observed) {
+            body.push_str(&format!(
+                "\n\nA line of @{}'s record was lost (record {lost}); this result may miss part of the turn.",
+                participant.handle
+            ));
+        }
         let moved =
             self.seams
                 .ledger

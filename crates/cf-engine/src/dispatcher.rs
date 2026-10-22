@@ -39,6 +39,7 @@ use cf_proto::trace::{TraceLine, Traced, WindowEvent};
 
 use crate::background::quote;
 use crate::chief_switch::SwitchTo;
+use crate::deliveries::lost_in_turn;
 use crate::record::Record;
 use crate::resume::Coming;
 use crate::resume::ResumeState;
@@ -970,6 +971,7 @@ impl Dispatcher {
                 return Ok(());
             }
         };
+        record.delivery.borrow_mut().lost = observed.lost().len();
         // Quota belongs to the member: a session that runs out takes its member out.
         let owner = self.member_of(project, participant);
         // A window with nothing in its record may still be drawing its screen.
@@ -999,10 +1001,23 @@ impl Dispatcher {
                     state: ActivityState::Waiting,
                     reason: waiting.reason.clone(),
                 }
-            } else if observed.settled {
-                Activity::of(ActivityState::Idle)
             } else {
-                Activity::of(ActivityState::Working)
+                let state = if observed.settled {
+                    ActivityState::Idle
+                } else {
+                    ActivityState::Working
+                };
+                // A line of the record lost in the turn is said while the turn is the last.
+                match lost_in_turn(record, &observed) {
+                    Some(lost) => Activity::because(
+                        state,
+                        format!(
+                            "a line of @{}'s record was lost (record {lost})",
+                            participant.handle
+                        ),
+                    ),
+                    None => Activity::of(state),
+                }
             };
             self.set_activity(record, activity)?;
         }
@@ -1055,7 +1070,7 @@ impl Dispatcher {
             // A turn a refusal cut short, its member past it now, failed nothing: its task goes on.
             if self.cut_short(&observed) {
                 self.go_on(project, participant)?;
-            } else if let Some(task) = self.collect(project, participant, &observed)? {
+            } else if let Some(task) = self.collect(project, participant, record, &observed)? {
                 // Its answer is its result at once, whatever the turn left running.
                 // What it left is ended, whoever gave the task told and the window
                 // closed if it is free, as work of the window's own apart from this

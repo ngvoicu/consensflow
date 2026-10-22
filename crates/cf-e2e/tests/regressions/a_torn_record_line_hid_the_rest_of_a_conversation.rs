@@ -19,7 +19,9 @@
 //! The case is that shape on the rig: a Claude worker's turn tears its record as it
 //! works (the stand-in's `TORN`), and answers. The task is done with its answer; a
 //! follow-up goes to the same window, past the torn line, and is done with its own;
-//! the copy of the worker's conversation holds both answers.
+//! the copy of the worker's conversation holds both answers. T-1's result ends with
+//! a line that says a record of its turn was lost (T-248); T-2's, handed over after
+//! the line, does not.
 
 use cf_e2e::rig::{Project, Rig, OPEN};
 use cf_e2e::Error;
@@ -151,7 +153,18 @@ fn a_worker_whose_record_tore_a_line_is_read_past_it_its_results_taken_and_its_c
     rig.wait_for("both results to reach the chief", secs(30), || {
         Ok(results(&project)?.len() == 2)
     })?;
-    assert_eq!(results(&project)?, ["ONE", "TWO"]);
+    // T-1's turn lost a record, which its result says; T-2 was handed over after it.
+    let results = results(&project)?;
+    assert_eq!(results[1], "TWO");
+    let (answer, lost) = results[0]
+        .split_once("\n\n")
+        .ok_or("T-1's result says nothing of the line it lost")?;
+    assert_eq!(answer, "ONE");
+    assert!(
+        lost.starts_with(&format!("A line of @{worker}'s record was lost (record "))
+            && lost.ends_with("); this result may miss part of the turn."),
+        "{lost}"
+    );
 
     // The copy of the conversation went on past it.
     rig.wait_for("both answers to be copied", secs(30), || {

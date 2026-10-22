@@ -36,6 +36,7 @@ mod restart;
 mod scale;
 mod synthetic;
 mod texts;
+mod torn;
 
 use std::fs;
 use std::path::PathBuf;

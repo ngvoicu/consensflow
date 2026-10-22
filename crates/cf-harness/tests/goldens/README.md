@@ -268,3 +268,22 @@ its `error`), what still waits, and the calls it made, by program (`capture`), b
 harness (`latest`) and by address (`fetch`), each in its own order: which of two
 harnesses asks first is up to the runtime. A path under the folder is `$ROOT/…`,
 and the hash that names a bundle of an extension is `$HASH`.
+
+- **A torn line of a record or a wire log** (2026-10-22, T-223 and T-248, from
+  T-187's dry run and Calliope's reviews T-213 and T-246). A short write (a full
+  disk, a process killed in a large write) leaves part of a record, and the next
+  append makes one line of it and itself, which is not JSON for good. Node failed
+  every look at a record holding one (`malformed JSONL at record N`), and every read
+  of a Devin wire log holding one. The harnesses go on past such a line, and so does
+  Rust: `shared/record/jsonl.rs` passes it over once a record follows it or its wait
+  is over, and `devin/wire.rs` passes it over as `devin/wire_log.rs` did. `records/`
+  moved for it in 12 looks, which `tests/records/main.rs` holds to what Rust reads
+  instead. `launch/` moved for it in three steps of two scenarios, in both
+  platforms' recordings, which now carry a `kept` difference there: `devin: a wire
+  log with a line that is no JSON names no conversation, however many follow it`,
+  step 5 (whose `kept` names the operation it settles, `op` 3, the `started` the
+  minute's wait ends), where Node's answer is that Devin never said which session it
+  opened and Rust's the session the line after it names; and `devin: a message is
+  refused for a log that is not there, and for one that cannot be read`, steps 8 and
+  10, where Node refused the message as the conversation unavailable and Rust as
+  another conversation displayed, the torn line saying nothing.

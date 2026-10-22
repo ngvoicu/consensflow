@@ -71,6 +71,7 @@ fn look(items: Vec<Item>) -> Observed {
             quota: None,
             settlement: Settlement::Unknown,
             agents_pending: false,
+            lost: Vec::new(),
         }))),
         settled: true,
         waiting: None,

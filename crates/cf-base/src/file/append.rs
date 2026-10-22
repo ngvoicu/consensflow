@@ -5,6 +5,13 @@ use std::ffi::OsString;
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+
+/// Held across an append's look at the size, its move and its write: two
+/// threads that append to one file (the daemon's and the records' own, to the
+/// daemon's log) would both move it aside at its limit, and the second would
+/// move the first's new file over the previous one.
+static APPENDING: Mutex<()> = Mutex::new(());
 
 /// Appends `text` to `file`, made if it is not there. A file already past
 /// `limit` bytes is moved aside first, to `<file>.1`, which an earlier one
@@ -14,8 +21,12 @@ use std::path::{Path, PathBuf};
 /// the limit by at most one append.
 ///
 /// A failure of either step is the caller's to ignore or to say: nothing is
-/// appended after a failed move.
+/// appended after a failed move. The appends of a process take turns.
 pub fn append_rotating(file: &Path, text: &str, limit: u64) -> io::Result<()> {
+    // A thread that panicked holding it left nothing half done that matters here.
+    let _turn = APPENDING
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     // A file that cannot be looked at has no size: it is made, or fails below.
     let size = fs::metadata(file).map_or(0, |found| found.len());
     if size > limit {
@@ -66,6 +77,31 @@ mod tests {
         append_rotating(&file, "7", 5).unwrap();
         assert_eq!(read(&aside(&file)), "123456");
         assert_eq!(read(&file), "7");
+    }
+
+    #[test]
+    fn two_threads_that_append_at_the_limit_move_the_file_aside_once_and_lose_no_line() {
+        // The daemon's log is written by the engine's thread and by the records'.
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("daemon.log");
+        for round in 0..200 {
+            fs::write(&file, "x".repeat(11)).unwrap();
+            let _ = fs::remove_file(aside(&file));
+            let start = std::sync::Barrier::new(2);
+            std::thread::scope(|scope| {
+                for line in ["a\n", "b\n"] {
+                    let (file, start) = (&file, &start);
+                    scope.spawn(move || {
+                        start.wait();
+                        append_rotating(file, line, 10).unwrap();
+                    });
+                }
+            });
+            assert_eq!(read(&aside(&file)), "x".repeat(11), "round {round}");
+            let mut lines: Vec<String> = read(&file).lines().map(str::to_owned).collect();
+            lines.sort();
+            assert_eq!(lines, ["a", "b"], "round {round}");
+        }
     }
 
     #[test]
