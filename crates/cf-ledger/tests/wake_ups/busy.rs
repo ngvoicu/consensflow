@@ -210,15 +210,43 @@ fn a_task_open_behind_one_that_failed_or_was_called_off_is_the_chiefs_to_settle(
     let mut w = after_the_first();
     let first = w.give(&[]);
     w.start(&first);
-    let called_off = w.give(&[]);
+    // A task others wait for is not cancelled by itself; its member's removal
+    // still calls it off, and that is the one way left to such a need.
+    w.ledger
+        .add_member(
+            w.project.id,
+            &NewMember {
+                agent: "hermes".to_owned(),
+                harness: "claude-code".to_owned(),
+                designer: false,
+                roles: vec!["worker".to_owned()],
+                tier: "standard".to_owned(),
+            },
+        )
+        .expect("a second member");
+    let called_off = w
+        .ledger
+        .create_task(
+            w.project.id,
+            &NewTask {
+                from: "chief".to_owned(),
+                to: Some("hermes".to_owned()),
+                body: "Write the lexer".to_owned(),
+                ..NewTask::default()
+            },
+        )
+        .expect("hermes's task");
     let behind = w.give(&[first.task.number as u64, called_off.task.number as u64]);
     assert_eq!(w.state(behind.task.number), "open");
     w.ledger
         .fail_task(w.project.id, first.task.number, "the window died")
         .expect("failed");
-    w.ledger
-        .cancel_task(w.project.id, called_off.task.number, "chief")
-        .expect("called off");
+    let removed = w
+        .ledger
+        .remove_member(w.project.id, "hermes")
+        .expect("hermes leaves");
+    assert_eq!(removed.cancelled, [called_off.task.number]);
+    assert_eq!(w.state(behind.task.number), "open");
     w.advance(MINUTE);
     assert!(
         w.due().is_some(),

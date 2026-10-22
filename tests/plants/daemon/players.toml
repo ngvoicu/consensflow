@@ -72,6 +72,16 @@ find = "const POLL_WAIT: Duration = Duration::from_secs(20);"
 replace = "const POLL_WAIT: Duration = Duration::from_secs(21);"
 
 [[plant]]
+name = "players: cf asks for a transcript of ten items whatever it was asked for"
+meant = "a_transcript_is_asked_for_as_many_items_as_the_chief_wants"
+runs = ["cf-lib-board"]
+
+[[plant.edit]]
+file = "crates/cf/src/board/task.rs"
+find = 'let transcript = format!("/api/tasks/{number}/transcript?last={last}");'
+replace = 'let transcript = format!("/api/tasks/{number}/transcript?last=10");'
+
+[[plant]]
 name = "players: cf writes the body of a task with its text first"
 meant = "every_run_of_cf_against_the_api_prints_what_it_printed_against_node"
 runs = ["daemon-api"]

@@ -67,8 +67,8 @@ replace = '''"sleep 25; sleep {lives} & printf '%s %s\\n' \"$$\" \"$!\" > '{}'; 
 
 [[plant.edit]]
 file = "crates/cf-process/src/capture/tests/tree.rs"
-find = '"$p = Start-Process -PassThru'
-replace = '"Start-Sleep 25; $p = Start-Process -PassThru'
+find = '''"$p = Start-Process -PassThru -WindowStyle Hidden -FilePath 'C:\\Windows\\System32\\PING.EXE'''
+replace = '''"Start-Sleep 25; $p = Start-Process -PassThru -WindowStyle Hidden -FilePath 'C:\\Windows\\System32\\PING.EXE'''
 
 [[plant]]
 name = "start budget: a forced capture's 25 s to end count its tree's start"
@@ -104,8 +104,8 @@ replace = '''"sleep 30; sleep {lives} & printf '%s %s\\n' \"$$\" \"$!\" > '{}'; 
 
 [[plant.edit]]
 file = "crates/cf-process/src/capture/tests/tree.rs"
-find = '"$p = Start-Process -PassThru'
-replace = '"Start-Sleep 30; $p = Start-Process -PassThru'
+find = '''"$p = Start-Process -PassThru -WindowStyle Hidden -FilePath 'C:\\Windows\\System32\\PING.EXE'''
+replace = '''"Start-Sleep 30; $p = Start-Process -PassThru -WindowStyle Hidden -FilePath 'C:\\Windows\\System32\\PING.EXE'''
 
 # Both trees write their pids 45 s after they started their grandchildren, which had then 15 s
 # left of a minute when the stop came, and ended of themselves inside the test's 25 s.

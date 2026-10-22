@@ -8,6 +8,8 @@
 [run]
 # The scripts, as the files say them: each is held to the command it hands over to, and to being a command xtask has (asked for its help, which starts nothing).
 xtask-test-scripts = ["cargo", "test", "--offline", "--target-dir", "app/src-tauri/target/xtask-check", "-p", "xtask", "--test", "scripts"]
+# The suites, and the gate's steps that run them (the library's tests build no program, and name no folder).
+xtask-suites = ["cargo", "test", "--offline", "--no-fail-fast", "-p", "xtask", "--lib", "--", "suites::"]
 
 [[plant]]
 name = "wiring: a live script names a test of cf-e2e that is not there"
@@ -41,7 +43,7 @@ replace = '"eval:summary": "cargo xtask eval",'
 
 [[plant]]
 name = "wiring: the npm check is the lint alone"
-meant = "the_npm_check_is_the_lint_and_the_tests"
+meant = "the_npm_check_is_the_lint_and_the_tests_which_cargo_xtask_check_runs_as_two_steps"
 runs = ["xtask-test-scripts"]
 
 [[plant.edit]]
@@ -89,3 +91,48 @@ file = "app/src-tauri/tauri.candidate.conf.json"
 find = '"productName": "ConsensFlow Candidate",'
 replace = '''"productName": "ConsensFlow Candidate",
   "build": { "beforeBuildCommand": "npm run bundle:ui" },'''
+
+# The daemons' black-box suites run in two steps of the gate, a limit for each: the
+# daemon's and the rig's, and the regressions. Between them, each file once.
+[[plant]]
+name = "wiring: the gate leaves the regressions out of its steps"
+meant = "the_steps_of_the_gate_between_them_run_each_test_file_of_the_daemons_once"
+runs = ["xtask-suites"]
+
+[[plant.edit]]
+file = ".github/workflows/ci.yml"
+find = '''
+      - run: npm run test:regressions
+        timeout-minutes: 45
+'''
+replace = ""
+
+[[plant]]
+name = "wiring: the gate runs the whole of the daemons beside the regressions"
+meant = "the_steps_of_the_gate_between_them_run_each_test_file_of_the_daemons_once"
+runs = ["xtask-suites"]
+
+[[plant.edit]]
+file = ".github/workflows/ci.yml"
+find = "      - run: npm run test:daemon-and-rig"
+replace = "      - run: npm run test:daemons"
+
+[[plant]]
+name = "wiring: the daemon and rig suite runs the regressions too"
+meant = "the_daemon_suites_are_the_daemon_rig_and_regressions_tests_and_the_integration_suites_the_rigs"
+runs = ["xtask-suites"]
+
+[[plant.edit]]
+file = "tools/xtask/src/suites.rs"
+find = 'tests: &["daemon", "rig"],'
+replace = 'tests: &["daemon", "rig", "regressions"],'
+
+[[plant]]
+name = "wiring: the daemon and rig script hands over to the whole of the daemons"
+meant = "the_root_package_runs_each_driver_and_build_step_through_cargo_xtask"
+runs = ["xtask-test-scripts"]
+
+[[plant.edit]]
+file = "package.json"
+find = '"test:daemon-and-rig": "cargo xtask test daemon-and-rig",'
+replace = '"test:daemon-and-rig": "cargo xtask test daemons",'
