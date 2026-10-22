@@ -18,6 +18,9 @@
 # refusal names `cf task add --after`; `accept_task` shuts a door still open on its task
 # (`tasks/pausing.rs` `shut_doors`, the pause's own); the eval owes no tell on a cancelled or failed task.
 #
+# Round 4 (T-237): the words a closed door gives (`crates/cf-daemon/src/api/routes/door.rs`, `shut`) follow
+# the task's state: a task accepted since is not stopped and will not go on, so nothing waits on the question.
+#
 # The cases are the ledger's (`crates/cf-ledger/tests/chief_open_work.rs`) and the rig's, in the
 # field's shape (`crates/cf-e2e/tests/regressions/a_switched_chief_was_sent_to_answer_a_question_on_a_cancelled_task.rs`).
 # The rig's build the native `cf` from the sources as planted, so their plants say `builds`.
@@ -268,3 +271,35 @@ runs = ["handoff-evals"]
 file = "crates/cf-evals/src/measure/plumbing.rs"
 find = "t.state IN ('cancelled', 'failed')"
 replace = "t.state IN ('accepted', 'cancelled', 'failed')"
+
+# --- round 4: the words of a door the acceptance shut ---
+
+[[plant]]
+name = "handoff questions: a door the acceptance shut is told its task was stopped and will go on"
+meant = "a_door_the_acceptance_of_its_task_shut_is_told_nothing_waits_on_its_question_and_not_that_the_task_will_go_on"
+runs = ["daemon-lib-routes-door"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/door.rs"
+find = '.is_some_and(|thread| thread.task.state == "accepted"),'
+replace = '.is_some_and(|thread| thread.task.state == "accepted" && false),'
+
+[[plant]]
+name = "handoff questions: every door that is shut is told its task is accepted, a pause's too"
+meant = "a_door_a_pause_shut_is_refused_at_once_in_the_words_its_model_is_to_hear"
+runs = ["daemon-lib-routes-door"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/door.rs"
+find = "return Err(shut(&asked, accepted));"
+replace = "return Err(shut(&asked, accepted || asked.task_number.is_some()));"
+
+[[plant]]
+name = "handoff questions: a door a pause shut on a task accepted since is told it was stopped (the stop that shut it decides, not the state now)"
+meant = "a_door_a_pause_shut_on_a_task_accepted_since_is_told_the_task_is_accepted"
+runs = ["daemon-lib-routes-door"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/api/routes/door.rs"
+find = '.is_some_and(|thread| thread.task.state == "accepted"),'
+replace = '.is_some_and(|thread| thread.task.state == "accepted" && thread.task.paused_at.is_none()),'
