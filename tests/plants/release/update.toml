@@ -413,7 +413,7 @@ replace = ".filter(|_| true);"
 # The workflow's use of the tool.
 [[plant]]
 name = "update: the feed entry is made through cargo run"
-meant = "is_what_the_notes_step_runs_by_its_path"
+meant = "is_what_the_notes_step_runs_by_its_path_to_read_the_version_and_to_make_the_feeds_entry"
 runs = ["release-tool"]
 
 [[plant.edit]]
@@ -423,7 +423,7 @@ replace = 'cargo run --release --locked -p cf-release -- prepare-update --repo "
 
 [[plant]]
 name = "update: the version comes from node again"
-meant = "is_what_the_notes_step_runs_by_its_path"
+meant = "is_what_the_notes_step_runs_by_its_path_to_read_the_version_and_to_make_the_feeds_entry"
 runs = ["release-tool"]
 
 [[plant.edit]]

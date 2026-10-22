@@ -69,7 +69,13 @@ enum Outcome {
 /// decision it asked for; and the 7 that name `TAKEN_BEFORE_GIVEN`,
 /// `LEFT_THE_PAUSE`, `WAIT_NOTE_TAKEN` or `GOES_ON`, which the notes of a
 /// task's wait moved: Node leaves one queued when another member takes the
-/// task or it is taken back, and tells its requester nothing when a hold ends.
+/// task or it is taken back, and tells its requester nothing when a hold ends;
+/// and the 4 that name `WAITED_FOR`, which the refusal of a cancel moved: Node
+/// cancels a task that open tasks wait for, and they stay blocked for good;
+/// and the one that names `FOLLOW_UP_BEHIND_WORK`, which the follow-up queued
+/// behind a window's work moved: Node refuses it; and the one that names
+/// `REMOVAL_CANCELS_WAITING`, which the removal's cancel of the tasks waiting
+/// for a member moved.
 /// Departed traces that Node's suite recorded only off Windows: the test
 /// that wrote `home-copies-004` was skipped there, as Windows holds an open
 /// ledger's files. Elsewhere each must be there.
@@ -94,6 +100,7 @@ const DEPARTED: &[(&str, usize, &str)] = &[
     ("core-dispatcher-090", 93, DECIDED_BEFORE_PASTED),
     ("core-dispatcher-107", 122, KEPT_IN_BRIEF),
     ("core-page-014", 9, REASON_RELEASE),
+    ("core-page-023", 8, WAITED_FOR),
     ("evals-measure-001", 20, RESULT_ACCEPTED),
     ("evals-measure-015", 32, RESULT_ACCEPTED),
     ("home-copies-001", 34, KEPT_IN_BRIEF),
@@ -114,7 +121,7 @@ const DEPARTED: &[(&str, usize, &str)] = &[
     ("ledger-messages-015", 11, READ_AT_ONCE),
     ("ledger-messages-017", 10, DOOR_READ),
     ("ledger-messages-022", 12, DOOR_READ),
-    ("ledger-page-reads-009", 44, RESULT_ACCEPTED),
+    ("ledger-page-reads-009", 41, REMOVAL_CANCELS_WAITING),
     ("ledger-projects-002", 14, KEPT_IN_BRIEF),
     ("ledger-projects-011", 8, NO_MARK_TO_FORGET),
     ("ledger-schema-005", 15, KEPT_IN_BRIEF),
@@ -122,6 +129,7 @@ const DEPARTED: &[(&str, usize, &str)] = &[
     ("ledger-schema-007", 15, KEPT_IN_BRIEF),
     ("ledger-schema-010", 14, KEPT_IN_BRIEF),
     ("ledger-schema-011", 15, KEPT_IN_BRIEF),
+    ("ledger-schema-012", 1, WAITED_FOR),
     ("ledger-schema-013", 14, KEPT_IN_BRIEF),
     ("ledger-schema-014", 15, KEPT_IN_BRIEF),
     ("ledger-schema-016", 14, KEPT_IN_BRIEF),
@@ -134,7 +142,7 @@ const DEPARTED: &[(&str, usize, &str)] = &[
     ("ledger-schema-025", 15, KEPT_IN_BRIEF),
     ("ledger-schema-027", 14, KEPT_IN_BRIEF),
     ("ledger-staff-008", 13, KEPT_BY_PAUSE),
-    ("ledger-staff-015", 25, RESULT_ACCEPTED),
+    ("ledger-staff-015", 8, FOLLOW_UP_BEHIND_WORK),
     ("ledger-staff-016", 17, RESULT_ACCEPTED),
     ("ledger-staff-017", 20, RESULT_ACCEPTED),
     ("ledger-staff-018", 17, RESULT_SENT_BACK),
@@ -146,6 +154,7 @@ const DEPARTED: &[(&str, usize, &str)] = &[
     ("ledger-tasks-010", 15, RESULT_ACCEPTED),
     ("ledger-tasks-011", 17, RESULT_ACCEPTED),
     ("ledger-tasks-012", 20, RESULT_ACCEPTED),
+    ("ledger-tasks-015", 5, WAITED_FOR),
     ("ledger-tasks-016", 10, KEPT_BY_PAUSE),
     ("ledger-tasks-018", 16, KEPT_BY_PAUSE),
     ("ledger-tasks-020", 19, REASON_PAUSE),
@@ -153,10 +162,24 @@ const DEPARTED: &[(&str, usize, &str)] = &[
     ("ledger-tasks-024", 13, STOP_IN_EVENT),
     ("ledger-tasks-025", 12, RESULT_ACCEPTED),
     ("ledger-tasks-026", 29, STOP_IN_EVENT),
+    ("ledger-tasks-027", 6, WAITED_FOR),
     ("ledger-tiered-013", 13, KEPT_IN_BRIEF),
     ("ledger-tiered-014", 22, WINDOW_ENDED),
 ];
 
+/// A member's removal cancels the open task given to its lane or a session of it
+/// that waits on the board for what it needs, which Node's left as it was (it
+/// would be queued, once its needs were accepted, for a window nothing opens).
+const REMOVAL_CANCELS_WAITING: &str =
+    "the chief removes a member that a task given to it by name waits on the board for (`removeMember` with an open task bound to its lane): the task is cancelled with the member, where Node left it open; the trace's later departure (the chief accepting the task while its result is still queued for it, `RESULT_ACCEPTED`) is no longer reached";
+/// A follow-up of a task still on its work is taken, and waits on the board
+/// for that task to be accepted.
+const FOLLOW_UP_BEHIND_WORK: &str =
+    "the chief queues a follow-up (`--after T-1`) while T-1's window is still on T-1: it is taken, open and waiting for T-1 to be accepted, where Node refused it `session-busy`; the trace's later departure (the chief accepting the task while its result is still queued for it, `RESULT_ACCEPTED`) is no longer reached";
+/// A task that open tasks wait for is not cancelled: they are released when it
+/// is accepted, so they would be blocked for good.
+const WAITED_FOR: &str =
+    "the chief or the human cancels a task that an open task waits for: the cancel is refused (`waited-for`) until the waiters are cancelled, where Node cancels it and they stay blocked for good";
 /// A result the chief had not been given when it accepted the task is
 /// withdrawn, never pasted after the decision it asked for.
 const RESULT_ACCEPTED: &str =

@@ -104,7 +104,7 @@ replace = '''        if due {'''
 
 [[plant]]
 name = "devin resume: /bypass is never pasted again while the wire says the normal mode"
-meant = "while_the_wire_says_the_normal_mode_enter_goes_in_again_before_bypass_is_pasted_again"
+meant = "while_the_wire_says_the_normal_mode_enter_goes_in_again_before_bypass_is_pasted_again_and_a_paste_written_nowhere_is_no_paste"
 runs = ["harness-lib-devin"]
 
 [[plant.edit]]
@@ -116,7 +116,7 @@ replace = '''            .is_none();'''
 # the engine's Enter again for a delivery has it, or a missed Enter makes /bypass/bypass.
 [[plant]]
 name = "devin resume: /bypass is pasted again with no Enter before it"
-meant = "while_the_wire_says_the_normal_mode_enter_goes_in_again_before_bypass_is_pasted_again"
+meant = "while_the_wire_says_the_normal_mode_enter_goes_in_again_before_bypass_is_pasted_again_and_a_paste_written_nowhere_is_no_paste"
 runs = ["harness-lib-devin"]
 
 [[plant.edit]]
@@ -138,7 +138,7 @@ replace = '''                if pane::write_keys(host, pane, &[ENTER]).await.is_
 # meanwhile is what it is.
 [[plant]]
 name = "devin resume: the mode read before the look at the screen decides"
-meant = "what_the_human_did_while_the_screen_was_looked_at_is_what_the_window_is"
+meant = "what_the_human_did_while_the_screen_was_looked_at_is_what_the_window_is_and_nothing_goes_in_for_what_it_was"
 runs = ["harness-lib-devin"]
 
 [[plant.edit]]
@@ -148,7 +148,7 @@ replace = '''            if wants_bypass(said.mode.as_deref()) {'''
 
 [[plant]]
 name = "devin resume: a turn begun while the screen was looked at is given /bypass"
-meant = "what_the_human_did_while_the_screen_was_looked_at_is_what_the_window_is"
+meant = "what_the_human_did_while_the_screen_was_looked_at_is_what_the_window_is_and_nothing_goes_in_for_what_it_was"
 runs = ["harness-lib-devin"]
 
 [[plant.edit]]
@@ -170,7 +170,7 @@ replace = '''            let since = said.prompts;'''
 
 [[plant]]
 name = "devin resume: another conversation opened while the screen was looked at is not seen"
-meant = "what_the_human_did_while_the_screen_was_looked_at_is_what_the_window_is"
+meant = "what_the_human_did_while_the_screen_was_looked_at_is_what_the_window_is_and_nothing_goes_in_for_what_it_was"
 runs = ["harness-lib-devin"]
 
 [[plant.edit]]

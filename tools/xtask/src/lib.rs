@@ -18,8 +18,8 @@
 //! - the gate, and what runs a part of it or a suite beside it: `check` (the whole
 //!   gate), `app` and `clippy_windows` (the lint and the tests where the app or
 //!   the platform cannot be built as it ships), `suites` (`test daemons`,
-//!   `integration`, `clis`, `agents`, `load`: the black-box suites of
-//!   `crates/cf-e2e`), `departures` and `bench` (thin drivers of cargo);
+//!   `daemon-and-rig`, `integration`, `clis`, `agents`, `load`: the black-box
+//!   suites of `crates/cf-e2e`), `departures` and `bench` (thin drivers of cargo);
 //! - the app as built, run as a user would: `smoke` (the packaged smoke, and
 //!   `smoke-updater`, which is `updater_smoke`);
 //! - the mutation tests: `plants`, with their data in `tests/plants`;

@@ -21,6 +21,7 @@ reports-lib = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "rig::repo
 reports-asked = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "reports::a_report_of_a_rig_whose_close"]
 reports-xtask-driver = ["cargo", "test", "--offline", "-p", "xtask", "--lib", "plants::driver::tests::the_commands_are_given"]
 reports-xtask-runs = ["cargo", "test", "--offline", "-p", "xtask", "--lib", "plants::runs::tests::a_command_is_given"]
+reports-xtask-gitless = ["cargo", "test", "--offline", "-p", "xtask", "--lib", "plants::driver::tests::a_run_refused_for_a_checkout"]
 reports-xtask-socket = ["cargo", "test", "--offline", "-p", "xtask", "--lib", "plants::driver::tests::the_longest_socket"]
 reports-xtask-kept = ["cargo", "test", "--offline", "-p", "xtask", "--lib", "plants::driver::tests::a_run_with_a_plant"]
 reports-xtask-removed = ["cargo", "test", "--offline", "-p", "xtask", "--lib", "plants::driver::tests::a_plant_is_in_the_sources"]
@@ -395,8 +396,8 @@ runs = ["reports-xtask-runs"]
 
 [[plant.edit]]
 file = "tools/xtask/src/plants/runs.rs"
-find = "        self.env = Env::from_vars(kept.into_iter().chain(given));"
-replace = "        let _ = given;\n        self.env = Env::from_vars(kept);"
+find = "        self.checkout.env = Env::from_vars(kept.into_iter().chain(given));"
+replace = "        let _ = given;\n        self.checkout.env = Env::from_vars(kept);"
 
 # The round of T-226 (Calliope's check T-214): a plant run keeps its folder when a plant was not
 # caught; a live rig's home stays in the temp folder (no git repository); a rig that starts sweeps
@@ -560,3 +561,25 @@ runs = ["reports-xtask-socket"]
 file = "tools/xtask/src/plants/driver.rs"
 find = 'const RUN_PREFIX: &str = "cfp";'
 replace = 'const RUN_PREFIX: &str = "cf-plants-";'
+
+# The merge of main's plant runner (T-324): its refusal of a checkout git says nothing of comes
+# before the run's folder is made, so a refused run leaves none.
+
+[[plant]]
+name = "rig reports: a plant run makes its folder before it refuses a checkout git says nothing of"
+meant = "a_run_refused_for_a_checkout_git_says_nothing_of_makes_no_folder_and_runs_nothing"
+runs = ["reports-xtask-gitless"]
+
+[[plant.edit]]
+file = "tools/xtask/src/plants/driver.rs"
+find = '''    if let Some(root) = runner.gitless() {
+        return Err(Error::NoCheckout { root }.into());
+    }
+    let saved = run_folder()?;
+'''
+replace = '''    let saved = run_folder()?;
+    runner.temp_in(&saved);
+    if let Some(root) = runner.gitless() {
+        return Err(Error::NoCheckout { root }.into());
+    }
+'''
