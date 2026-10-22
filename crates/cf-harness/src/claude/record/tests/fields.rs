@@ -229,11 +229,6 @@ fn monitor_armed() -> Vec<Value> {
     monitor_to("NOTED", 0)
 }
 
-/// To the turn the monitor's expiry woke.
-fn monitor_expired() -> Vec<Value> {
-    monitor_to("ALL-DONE", 0)
-}
-
 /// To the turn that stopped a command with TaskStop.
 fn command_stopped() -> Vec<Value> {
     monitor_to("STOPPED", 0)
@@ -580,36 +575,11 @@ fn read() -> Vec<Row> {
         ),
         (
             "toolUseResult.timeoutMs, of a monitor armed",
-            monitor_expired,
-            place(monitor_expired, |record| {
+            monitor_armed,
+            place(monitor_armed, |record| {
                 record["toolUseResult"]["taskId"].is_string()
             }),
-            is(
-                "toolUseResult",
-                json!({ "taskId": "b615qv2gd", "timeoutMs": 600_000, "persistent": false }),
-            ),
-        ),
-        (
-            "toolUseResult.persistent, of a monitor armed",
-            monitor_expired,
-            place(monitor_expired, |record| {
-                record["toolUseResult"]["taskId"].is_string()
-            }),
-            is(
-                "toolUseResult",
-                json!({ "taskId": "b615qv2gd", "timeoutMs": 40_000, "persistent": true }),
-            ),
-        ),
-        (
-            "timestamp, of a monitor's notice of its expiry",
-            monitor_expired,
-            place(monitor_expired, |record| {
-                record["turnOrigin"] == "task_notification"
-                    && record["message"]["content"]
-                        .as_str()
-                        .is_some_and(|text| text.contains("Monitor expired"))
-            }),
-            is("timestamp", json!("2026-10-20T23:02:50.000Z")),
+            is("toolUseResult", json!({ "taskId": "b615qv2gd" })),
         ),
         (
             "toolUseResult.task_id, of a TaskStop",

@@ -27,7 +27,7 @@ impl Transcript {
             Projected::Hook(hook) => self.hook_context(hook, seq)?,
             // Claude Code's notification brought into a turn under way: the jobs it says are
             // over have ended. Queued, it ended none: a message a human typed is queued alike.
-            Projected::Notified(text, at) => self.jobs.ended_by(text, *at),
+            Projected::Notified(text) => self.jobs.ended_by(text),
             Projected::Enqueue(content) => self.queues.enqueue(content.clone()?),
             Projected::Dequeue => self.queues.dequeue(),
             Projected::PopAll(content) => self.queues.pop_all(content.clone()?),
@@ -183,13 +183,7 @@ impl Transcript {
             self.tool_result(result, at, seq)?;
         }
         if let Some(job) = &record.job {
-            // A monitor's time is out its time after its start's record, which Claude Code
-            // writes once the monitor's timer is armed (`jobs`).
-            let expires_at = job
-                .timeout
-                .zip(record.at_ms)
-                .map(|(timeout, started)| started.saturating_add(timeout));
-            self.jobs.started(Arc::clone(&job.id), expires_at);
+            self.jobs.started(Arc::clone(job));
         }
         if let Some((call, job)) = &record.stopped {
             if self.task_stops.remove(&self.keys.of(call.as_ref())) {
@@ -197,7 +191,7 @@ impl Transcript {
             }
         }
         if record.notification {
-            self.jobs.ended_by(&record.text, record.at_ms);
+            self.jobs.ended_by(&record.text);
         }
         if record.interrupt {
             let id = id_of(record.uuid.as_ref(), "claude user", seq)?;

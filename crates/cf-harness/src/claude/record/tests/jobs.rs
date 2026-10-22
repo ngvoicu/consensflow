@@ -924,44 +924,12 @@ fn a_real_monitor_and_its_command_are_pending_until_each_ends_and_events_end_nei
             settled(2, "NOTED"),
             // The command's end ended it alone.
             settled(1, "REPORT-READY"),
-            // The monitor's own notice of its expiry, at its time, ended it.
-            settled(0, "ALL-DONE"),
-            // A command stopped with TaskStop: no notification, and nothing pending.
-            settled(0, "STOPPED"),
+            // The monitor's notice of its expiry, at its time, ended nothing: a line of its
+            // command's could say it (`jobs`).
+            settled(1, "ALL-DONE"),
+            // A command stopped with TaskStop: no notification, and it is pending no more.
+            settled(1, "STOPPED"),
         ]
-    );
-}
-
-#[test]
-fn a_real_monitors_notice_of_expiry_before_its_time_ends_nothing() {
-    // The same records, the monitor armed with a timeout of ten minutes: the notice comes
-    // 40 s in, which no notice of Claude Code's own can, and is a line of the command's.
-    let records: Vec<Value> = monitor_wait()
-        .into_iter()
-        .map(|mut record| {
-            if record["toolUseResult"]["timeoutMs"] == 40_000 {
-                record["toolUseResult"]["timeoutMs"] = json!(600_000);
-            }
-            record
-        })
-        .collect();
-    let expired = records
-        .iter()
-        .position(|record| {
-            record["message"]["content"]
-                .as_array()
-                .is_some_and(|parts| parts.iter().any(|part| part["text"] == "ALL-DONE"))
-        })
-        .unwrap();
-    let ended = records[expired..]
-        .iter()
-        .position(|record| record["subtype"] == "turn_duration")
-        .unwrap()
-        + expired
-        + 1;
-    assert_eq!(
-        at(&records, ended),
-        (Settlement::Settled, 1, "ALL-DONE".to_owned())
     );
 }
 
@@ -1000,34 +968,31 @@ fn at_count(records: &[Value], count: usize) -> usize {
 }
 
 #[test]
-fn a_real_monitors_time_counts_from_its_starts_record_and_a_line_before_it_ends_nothing() {
+fn a_real_monitors_notice_of_expiry_ends_it_at_no_time() {
     // The live run of 2026-10-21: the Monitor call's record at 23:02:30.287, its start's
     // record at 30.317, a time of 40 s, and Claude Code's notice of expiry queued at
-    // 23:03:10.317. 2.1.306 arms the monitor's timer before it writes its start's record
-    // (`jobs`), so a notice from 40 s after that record on comes once the timer has fired,
-    // and one before it may be a line of the command's: between the call's time and the
-    // start's (Astraeus on 3968dcfb, where a slow start widens it), a line saying the
-    // monitor expired ends nothing.
-    assert_eq!(
-        expired_at("2026-10-20T23:03:10.317Z"),
-        0,
-        "the real notice, at its time"
-    );
-    assert_eq!(
-        expired_at("2026-10-20T23:03:10.316Z"),
-        1,
-        "a millisecond before"
-    );
-    assert_eq!(
-        expired_at("2026-10-20T23:03:10.300Z"),
-        1,
-        "inside the call's 30 ms"
-    );
-    assert_eq!(
-        expired_at("2026-10-20T23:03:10.287Z"),
-        1,
-        "at the call's time"
-    );
+    // 23:03:10.317. No time the records say proves the notice Claude Code's (`jobs`; T-179,
+    // on Astraeus's and Calliope's reviews of c593fd49): the monitor is pending after each,
+    // and its task waits for Finish, a status or a TaskStop. A WebSocket's monitor has the
+    // same records, and the reader reads no more of either.
+    for (at, said) in [
+        ("2026-10-20T23:03:10.317Z", "the real notice, at its time"),
+        (
+            "2026-10-20T23:03:10.318Z",
+            "a line of the command's when the timer's time has passed and it has not fired",
+        ),
+        (
+            "2026-10-20T23:05:10.317Z",
+            "a line of the command's after the clock was set two minutes forward",
+        ),
+        (
+            "2026-10-20T23:03:10.305Z",
+            "the real notice of a monitor whose start's record a PostToolUse hook made late",
+        ),
+        ("2026-10-20T23:03:10.287Z", "at the call's time"),
+    ] {
+        assert_eq!(expired_at(at), 1, "{said}");
+    }
 }
 
 #[test]
@@ -1049,7 +1014,7 @@ fn a_task_stop_whose_result_names_no_stop_call_or_is_an_error_ends_nothing() {
             }
         }
     }
-    assert_eq!(at(&renamed, end).1, 1);
+    assert_eq!(at(&renamed, end).1, 2);
     // The result is an error.
     let mut failed = records.clone();
     if let Some(parts) = failed[stop_result]["message"]["content"].as_array_mut() {
@@ -1057,6 +1022,7 @@ fn a_task_stop_whose_result_names_no_stop_call_or_is_an_error_ends_nothing() {
             part["is_error"] = json!(true);
         }
     }
-    assert_eq!(at(&failed, end).1, 1);
-    assert_eq!(at(&records, end).1, 0);
+    assert_eq!(at(&failed, end).1, 2);
+    // The monitor whose notice of its expiry came is pending still (`jobs`).
+    assert_eq!(at(&records, end).1, 1);
 }

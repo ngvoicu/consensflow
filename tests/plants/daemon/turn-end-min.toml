@@ -5,8 +5,9 @@
 # - Claude's reader counts the jobs a turn left that Claude Code wakes its agent for: a command run
 #   in the background (`backgroundTaskId`) and a monitor (`taskId`, `timeoutMs`), until Claude
 #   Code's own word that each is over: a delivered notification whose head says so by its status,
-#   a TaskStop result that names it, or a monitor's own notice of its expiry at its time; a relaunch
-#   ConsensFlow proved retires the old process's jobs, not ended
+#   or a TaskStop result that names it, and no notice of a monitor's (its expiry, its stop), which a
+#   line of its command's could say; a relaunch ConsensFlow proved retires the old process's jobs, not
+#   ended
 #   (`crates/cf-harness/src/claude/record/jobs.rs`, `project.rs`, `replay.rs`, `record.rs`).
 # - A worker's turn that ends with jobs or agents pending keeps its task working, its requester told
 #   once; the result is the final answer after the task's latest message, found by its receipt
@@ -65,8 +66,8 @@ runs = ["tem-reader"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/record/project.rs"
-find = '    let id = text_id(field(result, "taskId"))?;'
-replace = '    let id = text_id(field(result, "taskId")).filter(|_| false)?;'
+find = '    text_id(field(result, "taskId"))'
+replace = '    text_id(field(result, "taskId")).filter(|_| false)'
 
 [[plant]]
 name = "turn-end-min rig: a worker waiting with Monitor on its run has its task done at its turn end, as T-442 had"
@@ -76,8 +77,8 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/record/project.rs"
-find = '    let id = text_id(field(result, "taskId"))?;'
-replace = '    let id = text_id(field(result, "taskId")).filter(|_| false)?;'
+find = '    text_id(field(result, "taskId"))'
+replace = '    text_id(field(result, "taskId")).filter(|_| false)'
 
 [[plant]]
 name = "turn-end-min reader: a monitor's event ends it"
@@ -86,61 +87,48 @@ runs = ["tem-reader"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/record/jobs.rs"
-find = '        let over = head.status.is_some_and(|status| OVER.contains(&status));'
-replace = '        let over = head.status.is_some_and(|status| OVER.contains(&status)) || head.event.is_some();'
+find = '        if !head.status.is_some_and(|status| OVER.contains(&status)) {'
+replace = '        if !head.status.is_some_and(|status| OVER.contains(&status)) && !text.contains("\n<event>") {'
 
 [[plant]]
-name = "turn-end-min reader: a monitor's notice of its expiry ends it whenever it comes"
-meant = "a_monitors_own_notice_of_its_expiry_ends_it_at_its_time_and_the_same_words_before_it_end_nothing"
+name = "turn-end-min reader: a monitor's notice of its expiry ends it, as c593fd49's did at its start's record plus its time"
+meant = "a_real_monitors_notice_of_expiry_ends_it_at_no_time"
 runs = ["tem-reader"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/record/jobs.rs"
-find = '                    .is_some_and(|(expires, at)| at >= expires);'
-replace = '                    .is_some_and(|(expires, at)| at >= expires || true);'
+find = '        if !head.status.is_some_and(|status| OVER.contains(&status)) {'
+replace = '        if !head.status.is_some_and(|status| OVER.contains(&status)) && !text.contains("<event>[Monitor expired after ") {'
 
 [[plant]]
-name = "turn-end-min reader: a monitor's notice of its expiry ends it a second early, as 0eec91d2 did"
-meant = "a_monitors_own_notice_of_its_expiry_ends_it_at_its_time_and_the_same_words_before_it_end_nothing"
+name = "turn-end-min reader: a monitor's notice that it timed out ends it"
+meant = "no_notice_of_a_monitors_end_ends_it_for_a_line_of_its_command_could_say_it"
 runs = ["tem-reader"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/record/jobs.rs"
-find = '                    .is_some_and(|(expires, at)| at >= expires);'
-replace = '                    .is_some_and(|(expires, at)| at >= expires - 1_000);'
+find = '        if !head.status.is_some_and(|status| OVER.contains(&status)) {'
+replace = '        if !head.status.is_some_and(|status| OVER.contains(&status)) && !text.contains("<event>[Monitor timed out") {'
 
 [[plant]]
-name = "turn-end-min reader: a monitor's time counts from before its start's record, as the call's did on 3968dcfb"
-meant = "a_real_monitors_time_counts_from_its_starts_record_and_a_line_before_it_ends_nothing"
+name = "turn-end-min reader: a monitor's time says nothing of whether a tool's result started one"
+meant = "each_field_replay_reads_of_a_record_changes_the_reading"
 runs = ["tem-reader"]
 
 [[plant.edit]]
-file = "crates/cf-harness/src/claude/record/replay.rs"
-find = '                .map(|(timeout, started)| started.saturating_add(timeout));'
-replace = '                .map(|(timeout, started)| started.saturating_add(timeout).saturating_sub(30));'
-
-[[plant]]
-name = "turn-end-min reader: a command's line with a word after it is taken for Claude Code's own notice"
-meant = "a_monitors_own_notice_of_its_expiry_ends_it_at_its_time_and_the_same_words_before_it_end_nothing"
-runs = ["tem-reader"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/claude/record/jobs.rs"
-find = '''
-            head.closes_after_event = at == Some(EVENT)
-                && line == "</task-notification>"
-                && lines.all(|after| after.trim().is_empty());'''
-replace = '            head.closes_after_event = at == Some(EVENT);'
+file = "crates/cf-harness/src/claude/record/project.rs"
+find = '    field(result, "timeoutMs").and_then(Value::as_i64)?;'
+replace = ''
 
 [[plant]]
 name = "turn-end-min reader: a line saying a monitor stopped or its socket closed ends it, which a command could print"
-meant = "a_monitors_ends_that_no_time_proves_end_nothing_for_a_line_of_its_command_could_say_them"
+meant = "no_notice_of_a_monitors_end_ends_it_for_a_line_of_its_command_could_say_it"
 runs = ["tem-reader"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/record/jobs.rs"
-find = '            if (over && named) || its_expiry {'
-replace = '            if (over && named) || its_expiry || notice.is_some_and(|event| event.starts_with("[Monitor stopped") || event.starts_with("[WebSocket closed")) {'
+find = '        if !head.status.is_some_and(|status| OVER.contains(&status)) {'
+replace = '        if !head.status.is_some_and(|status| OVER.contains(&status)) && !text.contains("<event>[Monitor stopped") && !text.contains("<event>[WebSocket closed") {'
 
 [[plant]]
 name = "turn-end-min reader: a reading in flight says no job runs, as 0eec91d2 did"
@@ -163,24 +151,14 @@ find = '        if !settled {'
 replace = '        if !settled && false {'
 
 [[plant]]
-name = "turn-end-min reader: a monitor never expires"
-meant = "a_real_monitor_and_its_command_are_pending_until_each_ends_and_events_end_neither"
-runs = ["tem-reader"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/claude/record/jobs.rs"
-find = '            notice.is_some_and(|event| EXPIRED.iter().any(|said| event.starts_with(said)));'
-replace = '            false && notice.is_some_and(|event| EXPIRED.iter().any(|said| event.starts_with(said)));'
-
-[[plant]]
 name = "turn-end-min reader: a notification that a job waits for input ends it"
 meant = "a_notification_that_a_job_waits_for_input_ends_none_and_the_job_ends_when_its_end_comes"
 runs = ["tem-reader"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/record/jobs.rs"
-find = '        let over = head.status.is_some_and(|status| OVER.contains(&status));'
-replace = '        let over = head.status.is_none_or(|status| OVER.contains(&status));'
+find = '        if !head.status.is_some_and(|status| OVER.contains(&status)) {'
+replace = '        if !head.status.is_none_or(|status| OVER.contains(&status)) {'
 
 [[plant]]
 name = "turn-end-min rig: a job Claude Code says waits for input is taken for ended, its wake-up for the result"
@@ -190,8 +168,8 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/record/jobs.rs"
-find = '        let over = head.status.is_some_and(|status| OVER.contains(&status));'
-replace = '        let over = head.status.is_none_or(|status| OVER.contains(&status));'
+find = '        if !head.status.is_some_and(|status| OVER.contains(&status)) {'
+replace = '        if !head.status.is_none_or(|status| OVER.contains(&status)) {'
 
 [[plant]]
 name = "turn-end-min reader: a job its agent stopped with TaskStop runs on"
@@ -240,29 +218,23 @@ find = '            Projected::Enqueue(content) => self.queues.enqueue(content.c
 replace = '''
             Projected::Enqueue(content) => {
                 let content = content.clone()?;
-                self.jobs.ended_by(&content, None);
+                self.jobs.ended_by(&content);
                 self.queues.enqueue(content);
             }'''
 
 [[plant]]
 name = "turn-end-min reader: the whole text of a notification names its jobs, body and all"
-meant = "what_a_notification_quotes_after_its_close_or_in_its_body_ends_no_job"
+meant = "a_notification_is_read_by_its_head_alone_and_the_head_by_its_fields_in_their_order"
 runs = ["tem-reader"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/record/jobs.rs"
 find = '''
         let Some((place, value)) = field(line) else {
-            head.closes_after_event = at == Some(EVENT)
-                && line == "</task-notification>"
-                && lines.all(|after| after.trim().is_empty());
             break;
         };'''
 replace = '''
         let Some((place, value)) = field(line) else {
-            head.closes_after_event = at == Some(EVENT)
-                && line == "</task-notification>"
-                && lines.all(|after| after.trim().is_empty());
             continue;
         };'''
 
@@ -273,8 +245,8 @@ runs = ["tem-reader"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/record/jobs.rs"
-find = '            let named = head.ids.contains(&&*job.id) && !live.contains(&*job.id);'
-replace = '            let named = head.ids.contains(&&*job.id) || live.contains(&*job.id);'
+find = '            if head.ids.contains(&&*job.id) && !live.contains(&*job.id) {'
+replace = '            if head.ids.contains(&&*job.id) || live.contains(&*job.id) {'
 
 [[plant]]
 name = "turn-end-min reader: a relaunch keeps the old process's jobs running, and the reopened task is held for good"
@@ -333,7 +305,7 @@ replace = '''
 
 [[plant]]
 name = "turn-end-min reader: a human's message brought into a turn ends the jobs it quotes"
-meant = "a_real_notification_brought_into_a_turn_under_way_ends_its_job_and_its_queued_copy_ends_none"
+meant = "each_field_replay_reads_of_a_record_changes_the_reading"
 runs = ["tem-reader"]
 
 [[plant.edit]]
@@ -345,7 +317,7 @@ replace = '        && says("type", "queued_command");'
 
 [[plant]]
 name = "turn-end-min reader: a notification written to the transcript alone begins a turn"
-meant = "a_job_is_said_of_a_turn_that_is_over_and_of_none_that_is_open"
+meant = "a_real_notification_that_names_two_jobs_ends_both"
 runs = ["tem-reader"]
 
 [[plant.edit]]

@@ -21,43 +21,44 @@
 //!   for input, while the command runs on (GPT-6.1-Sol's review of round 4);
 //! - the result of a TaskStop call that names the job it stopped
 //!   (`toolUseResult.task_id`): Claude Code writes no notification of a job or a
-//!   monitor its agent stopped so (2.1.305, the live run of 2026-10-21);
-//! - a monitor's notice of its expiry, at or after the time it expires counted from its
-//!   start's record (`timeoutMs` from the record of the Monitor's result):
-//!   `[Monitor expired after 40s with 3 events delivered. …]`, or `[Monitor timed out —
-//!   re-arm if needed.]` where Claude Code's `tengu_breezy_crescent` is off (2.1.306).
-//!   Never earlier, and never with a line after the event (2.1.306 writes one after a
-//!   command's output where push notifications are on, and none after its own notices).
-//!   2.1.306 arms the monitor's timer before that record exists: its Monitor (`Oe`, and
-//!   `callWs` for a socket) awaits the shell's start and the task's registration, then
-//!   arms `setTimeout` and returns the result in the same step, with no wait between; the
-//!   tool's runner makes the result's record of what `call` resolved to, stamped then by
-//!   the clock it is given (`new Date().toISOString()`, the streaming executor's too). So
-//!   the start's record plus the time is never before the timer fires: a line the command
-//!   wrote before then is none of Claude Code's, and ends nothing (Astraeus on 3968dcfb:
-//!   the call's record, before a slow start, let such a line end a monitor that ran on).
-//!   A real notice written within a millisecond of the timer, before that instant, is held
-//!   the other way, and its task waits for Finish (the live runs of 2026-10-21 and -22:
-//!   the start's record plus the time came 0 to 1 ms before the notice).
+//!   monitor its agent stopped so (2.1.305, the live run of 2026-10-21).
 //!
-//!   **Claude Code's own notices of a monitor cannot be told from its command's output.**
-//!   2.1.306 writes both with one function (`TG` of its bundle): the same envelope, a
-//!   summary that names the monitor, the line in `<event>`, no status; what tells them
-//!   apart (`monitorEvent.kind`, `notice` or `output`) stays in its queue and never reaches
-//!   the record, and the line after a command's output comes only with push notifications
-//!   on (`agentPushNotifEnabled`, off unless set). So a notice is believed only where time
-//!   proves it: the expiry, which a monitor's real one never comes before (the live run of
-//!   2026-10-21: queued 40 000 ms after the start's record, 30 ms more after the call).
-//!   Its other ends have no time to prove them, and end nothing: `[Monitor stopped]` (a
-//!   socket's monitor the human stopped: `nb`, whose status goes to the SDK's stream and
-//!   not to the record), `[Monitor stopped — too much output (…)]` (2.1.306 stopped a
-//!   command that wrote more than it lets through for half a minute: `FIn`, which writes
-//!   nothing more of it, the live run of 2026-10-21) and `[WebSocket closed: …]`. A task
-//!   held for such a monitor is held until Finish. A monitor's status ends it as it ends any
-//!   job: its command ended, or the human stopped a command's monitor from Claude Code's
-//!   tasks (2.1.306 queues `killed`, "Task … was stopped by the user": `Tmr`, behind
-//!   `tengu_rosy_donut`, on by default); so does a TaskStop's result. A monitor whose start
-//!   says no time (`persistent`) ends by those alone.
+//! **No notice of a monitor's ends it** (T-179, the chief's decision on Astraeus's and
+//! Calliope's reviews of c593fd49). Claude Code writes its own notices of a monitor, of its
+//! expiry (`[Monitor expired after 40s with 3 events delivered. …]`, or `[Monitor timed out
+//! — re-arm if needed.]` where its `tengu_breezy_crescent` is off) and of its other ends
+//! (`[Monitor stopped]`, of a socket's or an MCP server's monitor; `[Monitor stopped — too
+//! much output (…)]`, of a command that wrote more than it lets through for half a minute;
+//! `[WebSocket closed: …]`), with the function that writes its command's output (`nz` of
+//! 2.1.307's bundle, `TG` of 2.1.306's): the same envelope, a summary that names the
+//! monitor, the line in `<event>`, no status. What tells them apart (`monitorEvent.kind`,
+//! `notice` or `output`) stays in its queue and never reaches the record, and the line it
+//! writes after a command's output comes only with push notifications on. So a command
+//! that prints one is not told from Claude Code by its words, and not by its time either:
+//! - the records are stamped by the wall clock (`new Date().toISOString()`), which can jump
+//!   forward (a clock set, a Mac that wakes) while the monitor's timer runs on a clock of
+//!   its own, and a timer whose time has passed has not always fired (Astraeus: a timer of
+//!   40 ms not yet run at 71 ms);
+//! - the start's record is written after the user's PostToolUse hooks have run (the tool's
+//!   runner awaits them, `mRr` of 2.1.307, before it makes the result's record, `gs`), so a
+//!   time counted from it comes after the timer by those hooks' time, and the real notice
+//!   of an idle agent's monitor before it (Calliope: a `*` hook of 10 ms against notices
+//!   delivered 12 to 15 ms after the timer).
+//!
+//! Nor do the window's processes tell it. A command's monitor runs its command in a shell
+//! of its own, whose arguments carry the command and nothing of the monitor's task: two
+//! monitors of one command are the same processes, and a command that `exec`s (the shell
+//! becomes `sleep 47` for `exec sleep 47`), or a `CLAUDE_CODE_SHELL_PREFIX` that does not
+//! pass the command on, takes even the command's words out of every process while the
+//! monitor runs (T-179's probes, 2.1.307), so a look that finds none of them proves nothing.
+//! A task held for a monitor whose notice of its end came is held until Finish, or until a
+//! status or a TaskStop says the monitor is over: every monitor that expires costs its task
+//! a Finish. A monitor's status ends it as it ends any job: its command ended (`completed`,
+//! "Monitor … stream ended", written as its shell exits, whatever the command left running:
+//! T-179's probe), or the human stopped a command's monitor from Claude Code's tasks
+//! (`killed`, "Task … was stopped by the user": `s_r` of 2.1.307, `Tmr` of 2.1.306, behind
+//! `tengu_rosy_donut`, on by default), which Claude Code queues passive, to be delivered
+//! with the next turn, in a record no live run has seen; so does a TaskStop's result.
 //!
 //! **Only Claude Code's own notification ends a job, never words that look like one**:
 //! a message the user wrote, or ConsensFlow pasted, may quote one whole, from its first
@@ -133,14 +134,10 @@ const FIELDS: [&str; 7] = [
 ];
 const TASK_ID: usize = 0;
 const STATUS: usize = 4;
-const EVENT: usize = 6;
 
 /// The statuses Claude Code writes of a job that is over: it ended by itself, well or not,
 /// it was ended, or the session it ran in ended before it did (`stopped`).
 const OVER: [&str; 4] = ["completed", "failed", "killed", "stopped"];
-
-/// How Claude Code's own events of a monitor that expired begin (2.1.305, 2.1.306).
-const EXPIRED: [&str; 2] = ["[Monitor expired after ", "[Monitor timed out"];
 
 /// A job, as its records say it goes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -156,8 +153,6 @@ enum State {
 struct Job {
     id: Arc<str>,
     state: State,
-    /// For a monitor whose start said when it expires: then, in milliseconds.
-    expires_at: Option<i64>,
 }
 
 /// The jobs started, each once, by their ids, in the order they started.
@@ -167,52 +162,32 @@ pub(super) struct Jobs {
 }
 
 impl Jobs {
-    /// The record of a tool result says the job `id` runs in the background; a monitor's
-    /// says when it expires (`expires_at`).
-    pub(super) fn started(&mut self, id: Arc<str>, expires_at: Option<i64>) {
+    /// The record of a tool result says the job `id` runs in the background.
+    pub(super) fn started(&mut self, id: Arc<str>) {
         match self.started.iter_mut().find(|job| job.id == id) {
-            Some(job) => {
-                job.state = State::Running;
-                job.expires_at = expires_at;
-            }
+            Some(job) => job.state = State::Running,
             None => self.started.push(Job {
                 id,
                 state: State::Running,
-                expires_at,
             }),
         }
     }
 
-    /// `text` is Claude Code's own notification, delivered at the time its record says
-    /// (`at_ms`, none where it says none): each job its head says is over has ended, but
-    /// those a summary marks running, and a monitor whose own notice of expiry it is. A
-    /// job that was never started is named in vain: a notification is no record of a
-    /// start.
-    pub(super) fn ended_by(&mut self, text: &str, at_ms: Option<i64>) {
+    /// `text` is Claude Code's own notification: each job its head says is over has ended,
+    /// but those a summary marks running. A job that was never started is named in vain: a
+    /// notification is no record of a start.
+    pub(super) fn ended_by(&mut self, text: &str) {
         let head = head(text);
-        let over = head.status.is_some_and(|status| OVER.contains(&status));
+        if !head.status.is_some_and(|status| OVER.contains(&status)) {
+            return;
+        }
         let live: HashSet<&str> = head
             .ids
             .iter()
             .filter_map(|id| id.strip_prefix(LIVE))
             .collect();
-        let notice = head
-            .event
-            .filter(|_| head.status.is_none() && head.closes_after_event);
-        let expired =
-            notice.is_some_and(|event| EXPIRED.iter().any(|said| event.starts_with(said)));
         for job in &mut self.started {
-            if job.state == State::Ended {
-                continue;
-            }
-            let named = head.ids.contains(&&*job.id) && !live.contains(&*job.id);
-            let its_expiry = expired
-                && head.ids.as_slice() == [&*job.id]
-                && job
-                    .expires_at
-                    .zip(at_ms)
-                    .is_some_and(|(expires, at)| at >= expires);
-            if (over && named) || its_expiry {
+            if head.ids.contains(&&*job.id) && !live.contains(&*job.id) {
                 job.state = State::Ended;
             }
         }
@@ -255,12 +230,6 @@ struct Head<'a> {
     /// The jobs it names, in order.
     ids: Vec<&'a str>,
     status: Option<&'a str>,
-    /// A monitor's event: the line the watched command wrote, or Claude Code's own.
-    event: Option<&'a str>,
-    /// The event is the last field, and only the line that closes the notification comes
-    /// after it: no line of a command's output, nor 2.1.306's word after a command's
-    /// event of how to tell the user of it.
-    closes_after_event: bool,
 }
 
 /// The head of the notification `text`: nothing where the text does not open with one.
@@ -275,11 +244,8 @@ fn head(text: &str) -> Head<'_> {
         return head;
     }
     let mut at = None;
-    while let Some(line) = lines.next() {
+    for line in lines {
         let Some((place, value)) = field(line) else {
-            head.closes_after_event = at == Some(EVENT)
-                && line == "</task-notification>"
-                && lines.all(|after| after.trim().is_empty());
             break;
         };
         // Each field once, in its order; only a job's id again.
@@ -290,7 +256,6 @@ fn head(text: &str) -> Head<'_> {
         match place {
             TASK_ID if !value.is_empty() => head.ids.push(value),
             STATUS => head.status = Some(value),
-            EVENT => head.event = Some(value),
             _ => {}
         }
     }
@@ -406,21 +371,6 @@ impl Written<'_> {
             task_id: id,
             summary: &summary,
             event,
-            ..Written::default()
-        }
-        .text()
-    }
-
-    /// A monitor's event of its command's output as 2.1.306 writes it where push
-    /// notifications are on (`H` of its bundle): the event, a line after it that says how
-    /// to tell the user of it, and the line that closes the notification.
-    pub(super) fn pushed(id: &str, description: &str, event: &str) -> String {
-        let summary = format!("Monitor event: \"{description}\"");
-        Written {
-            task_id: id,
-            summary: &summary,
-            event,
-            body: "\nIf this event is something the user would act on now, send a PushNotification. Routine or benign output doesn't need one.",
             ..Written::default()
         }
         .text()

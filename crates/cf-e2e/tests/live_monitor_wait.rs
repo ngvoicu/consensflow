@@ -15,9 +15,11 @@
 //! with the run's paths and ids of the machine taken out).
 //!
 //! One window, in a folder of its own, on Claude's cheap model, with no MCP server, no
-//! browser, none of the owner's settings read (`--setting-sources local`), and none of a
-//! Claude session's own variables if the run is started from inside one (a child session
-//! keeps no transcript). Its first message has the agent start a command in the
+//! browser, none of the owner's settings read (`--setting-sources local`) but a PostToolUse
+//! command hook on every tool (`*`, which prints `{}`), as an owner's hooks run in every
+//! window ConsensFlow opens (Calliope on c593fd49: the start's record is written after them),
+//! and none of a Claude session's own variables if the run is started from inside one (a
+//! child session keeps no transcript). Its first message has the agent start a command in the
 //! background that writes three lines and ends, arm a Monitor on its output that expires
 //! before long, and end its turn; then answer each event with a word, the command's end
 //! with another, and the monitor's expiry with a third. Its second has it start a command
@@ -30,21 +32,21 @@
 //!   the command and the monitor pending
 //! - `events`   a monitor's event wakes a turn, and is no end: the monitor is pending after it
 //! - `job-end`  the command's end wakes a turn, and ends it alone: the monitor is pending
-//! - `expiry`   the monitor's notice that it expired wakes a turn, and ends it: none pending
+//! - `expiry`   the monitor's notice that it expired wakes a turn, and ends nothing: no
+//!   status or time tells it from a line of its command's, so the monitor stays pending,
+//!   and its task would wait for Finish (T-179)
 //! - `stop`     a command the agent stopped with TaskStop is pending no more, though no
-//!   notification says so
-//! - `ten-expiries` ten monitors' own notices of their expiry come, and the run says, of
-//!   each expiry, how long after its start's record plus its time its notice was queued
-//!   and delivered, and after its call's
-//! - `expiry-time` every real expiry is delivered no earlier than its start's record plus
-//!   its time, which the reader takes it for no earlier than: none is held
+//!   notification says so: the expired monitor alone is
 //! - `monitor-exit` a monitor whose watched command exits (T-442's own shape) is said over
 //!   by its status, and is pending no more
+//! - `ten-expiries` ten monitors' own notices of their expiry come, and the run says, of
+//!   each expiry, how long after its start's record plus its time its notice was queued
+//!   and delivered (to an agent at rest, or into a turn under way), and after its call's
+//! - `expiries-held` none of the ten is ended by its notice: each stays pending
 //! - `noisy-stop` a monitor whose command writes more than Claude Code lets through is
 //!   stopped by Claude Code after half a minute, with its notice (`[Monitor stopped — too
-//!   much output …]`), no status and nothing after: as no status or time tells that notice
-//!   from a line of the command's, the monitor stays counted, and its task waits for
-//!   Finish (2.1.306)
+//!   much output …]`), no status and nothing after: the monitor stays counted, and its task
+//!   would wait for Finish (2.1.306)
 //!
 //! ```text
 //! cargo xtask live monitor-wait
@@ -100,6 +102,17 @@ const RUN_OVER: &str = "RUN-OVER";
 /// What the agent is asked first: T-442's shape, with a monitor that expires within the
 /// run.
 const ARM: &str = "Do exactly this, using your tools. 1) Use the Bash tool with run_in_background set to true to run: for i in 1 2 3; do echo tick $i; sleep 5; done; echo finished . 2) Use ToolSearch to load the Monitor tool (select:Monitor), then use Monitor to watch that run: its command is tail -f on the background command's output file piped through grep --line-buffered tick, with timeout_ms 40000 and description 'ticks'. 3) End your turn at once, saying only WAITING. Then, each time a notification wakes you: if it is a monitor event with a tick line, reply only NOTED; if it says the background command completed, reply only REPORT-READY; if it says the monitor expired, reply only ALL-DONE.";
+
+/// Claude's `hooks` setting of the window: a PostToolUse command hook on every tool, which
+/// prints an empty answer, as an owner's hook of any kind runs (Calliope on c593fd49).
+fn hooks() -> Value {
+    json!({
+        "PostToolUse": [{
+            "matcher": "*",
+            "hooks": [{ "type": "command", "command": "printf '{}'" }],
+        }],
+    })
+}
 
 /// What it is asked after.
 const STOP: &str = "Do exactly this, using your tools. 1) Use the Bash tool with run_in_background set to true to run: sleep 300 . 2) Use ToolSearch to load the TaskStop tool (select:TaskStop), then use TaskStop to stop that background command. 3) End your turn saying only STOPPED.";
@@ -205,15 +218,17 @@ fn written_at(record: &Value) -> Option<i64> {
         .map(|at| at.as_millisecond())
 }
 
-/// A monitor's expiry as the records say it: its description, and how many milliseconds
-/// after its start's record plus its time Claude Code queued its notice and delivered it
-/// (the record the reader dates it by), and after the call that armed it plus its time.
+/// A monitor's expiry as the records say it: its description, how many milliseconds after
+/// its start's record plus its time Claude Code queued its notice and delivered it, and
+/// after the call that armed it plus its time; and whether it was delivered to an agent at
+/// rest, as the turn it began, or into a turn under way.
 #[derive(Debug, PartialEq)]
 struct Expiry {
     description: String,
     queued: i64,
     delivered: i64,
     after_the_call: i64,
+    at_rest: bool,
 }
 
 /// Whether `text` is Claude Code's notice of a monitor's expiry, in either of its words.
@@ -272,14 +287,15 @@ fn expiries(raw: &[Value]) -> Vec<Expiry> {
         let delivered = notices
             .iter()
             .filter(|record| record["type"] == "user" || record["type"] == "attachment")
-            .filter_map(|record| written_at(record))
+            .filter_map(|record| Some((written_at(record)?, record["type"] == "user")))
             .min();
-        if let (Some(queued), Some(delivered)) = (queued, delivered) {
+        if let (Some(queued), Some((delivered, at_rest))) = (queued, delivered) {
             found.push(Expiry {
                 description: description.clone(),
                 queued: queued - started - timeout,
                 delivered: delivered - started - timeout,
                 after_the_call: queued - called - timeout,
+                at_rest,
             });
         }
     }
@@ -490,7 +506,7 @@ fn a_background_command_and_a_monitor_on_it_are_pending_until_claude_code_says_e
     ask::prepare()?;
     let claude = log.found(Harness::Claude)?;
     let rig = Rig::start(live::rig(std::slice::from_ref(&claude), FAKE_AGENT))?;
-    let mut open = Open::new(&rig, &claude, FOLDER, FOLDER).claude_alone_with_hooks(json!({}));
+    let mut open = Open::new(&rig, &claude, FOLDER, FOLDER).claude_alone_with_hooks(hooks());
     for name in SESSION_IDENTITY {
         open = open.without(name);
     }
@@ -539,8 +555,8 @@ fn a_background_command_and_a_monitor_on_it_are_pending_until_claude_code_says_e
         Check::new(
             "claude",
             "expiry",
-            expiry && settled_at(&looks, EXPIRED, 0),
-            "the monitor's own notice of its expiry woke a turn, after which none was pending",
+            expiry && settled_at(&looks, EXPIRED, 1),
+            "the monitor's own notice of its expiry woke a turn and ended nothing: the monitor was pending after it",
         ),
     ];
     window.paste(&window.given(STOP)?)?;
@@ -560,8 +576,8 @@ fn a_background_command_and_a_monitor_on_it_are_pending_until_claude_code_says_e
     checks.push(Check::new(
         "claude",
         "stop",
-        stopped && settled_at(&stopping, STOPPED, 0),
-        "a command the agent stopped with TaskStop was pending no more",
+        stopped && settled_at(&stopping, STOPPED, 1),
+        "a command the agent stopped with TaskStop was pending no more: the expired monitor alone was",
     ));
     window.paste(&window.given(EXITS)?)?;
     let exits = watch(&window, RUN_OVER);
@@ -578,11 +594,12 @@ fn a_background_command_and_a_monitor_on_it_are_pending_until_claude_code_says_e
     checks.push(Check::new(
         "claude",
         "monitor-exit",
-        ended_by_status && settled_at(&exits, RUN_OVER, 0),
+        ended_by_status && settled_at(&exits, RUN_OVER, 1),
         "a monitor whose watched command exits is said over by its status, and is pending no more",
     ));
     // Ten monitors whose time runs out: how each real expiry falls against its start's
-    // record plus its time, which the reader takes it for no earlier than.
+    // record plus its time, which a PostToolUse hook makes late (Calliope on c593fd49), and
+    // that none of them is ended by its notice.
     window.paste(&window.given(TEN)?)?;
     let started = Instant::now();
     let mut raw = raw_records(&window);
@@ -599,20 +616,41 @@ fn a_background_command_and_a_monitor_on_it_are_pending_until_claude_code_says_e
     let ten = watch(&window, NOTED);
     let raw = raw_records(&window);
     let measured = expiries(&raw);
-    let held: Vec<&Expiry> = measured
-        .iter()
-        .filter(|expiry| expiry.delivered < 0)
-        .collect();
+    // What c593fd49's rule would have held: a notice delivered before its start's record
+    // plus its time, at rest and in a turn under way apart.
+    let early = |at_rest: bool| {
+        measured
+            .iter()
+            .filter(|expiry| expiry.at_rest == at_rest && expiry.delivered < 0)
+            .count()
+    };
+    let delivered = |at_rest: bool| {
+        measured
+            .iter()
+            .filter(|expiry| expiry.at_rest == at_rest)
+            .count()
+    };
     log.block(
-        "the expiries (ms after the start's record plus its time: queued, delivered; and after the call's)",
+        "the expiries (ms after the start's record plus its time: queued, delivered, where; and after the call's)",
         &measured
             .iter()
             .map(|expiry| {
                 format!(
-                    "{}: {}, {}; {}",
-                    expiry.description, expiry.queued, expiry.delivered, expiry.after_the_call
+                    "{}: {}, {} {}; {}",
+                    expiry.description,
+                    expiry.queued,
+                    expiry.delivered,
+                    if expiry.at_rest { "at rest" } else { "in a turn" },
+                    expiry.after_the_call
                 )
             })
+            .chain([format!(
+                "delivered before the start's record plus its time: {} of {} at rest, {} of {} in a turn",
+                early(true),
+                delivered(true),
+                early(false),
+                delivered(false)
+            )])
             .collect::<Vec<_>>()
             .join("\n"),
     );
@@ -628,9 +666,10 @@ fn a_background_command_and_a_monitor_on_it_are_pending_until_claude_code_says_e
     ));
     checks.push(Check::new(
         "claude",
-        "expiry-time",
-        !measured.is_empty() && held.is_empty() && ten.last().is_some_and(|look| look.jobs == 0),
-        "every real expiry was delivered no earlier than its start's record plus its time, so none was held",
+        "expiries-held",
+        ten.last()
+            .is_some_and(|look| look.settled && look.jobs == 11),
+        "none of the ten was ended by its notice: with the first monitor, eleven were pending",
     ));
     window.paste(&window.given(NOISY)?)?;
     let noisy = watch(&window, QUIETED);
@@ -661,7 +700,7 @@ fn a_background_command_and_a_monitor_on_it_are_pending_until_claude_code_says_e
     checks.push(Check::new(
         "claude",
         "noisy-stop",
-        stop_notice.is_some() && after.is_empty() && settled_at(&noisy, QUIETED, 1),
+        stop_notice.is_some() && after.is_empty() && settled_at(&noisy, QUIETED, 12),
         "a monitor Claude Code stopped for too much output, with a notice no status or time tells from its command's output, stays counted: its task waits for Finish",
     ));
     if let Some(file) = live::option("fixture") {
@@ -770,6 +809,7 @@ fn the_fixtures_expiry_is_read_from_its_records() {
             queued: 0,
             delivered: 12,
             after_the_call: 30,
+            at_rest: true,
         }]
     );
 }

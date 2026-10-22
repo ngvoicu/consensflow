@@ -6,9 +6,10 @@
 //! that is not (T-442, dip-agentos's T-20): a job that runs for ever (a dev server, a
 //! headless browser the harness moved to the background) never wakes its agent, and its
 //! task stays working for as long as it runs; waiting is the default, and work has no time
-//! limit. So is a monitor Claude Code stopped by itself, for too much output, or a socket's
-//! monitor the human stopped from its tasks: its notice is told from no line of its
-//! command's, so the monitor stays counted, and its task held, until Finish
+//! limit. A monitor whose notice of its end came (it expired, or Claude Code stopped it
+//! for too much output, or the human stopped a socket's or an MCP server's monitor) is no
+//! different: no notice of Claude Code's is told from a line of its command's, so the monitor
+//! stays counted, and its task held, until Finish, a status or a TaskStop
 //! (`cf_harness::claude::record::jobs`). So it is for **any working task**, held or not,
 //! at rest or not: the chief's word overrides what the reader thinks. It takes the last
 //! complete answer the worker wrote after the task's latest message pasted into its window

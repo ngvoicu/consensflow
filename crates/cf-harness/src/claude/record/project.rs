@@ -14,7 +14,7 @@
 use std::borrow::Cow;
 use std::sync::Arc;
 
-use cf_base::{js, time};
+use cf_base::js;
 use serde_json::{Map, Value};
 
 use super::patterns::OUTPUT;
@@ -35,9 +35,8 @@ pub(super) enum Projected {
     Hook(Box<Hook>),
     /// Claude Code's own notification of a job's event or end, brought into a turn
     /// under way (an attachment, `queued_command` of
-    /// `"commandMode":"task-notification"`): its text, and the time of its record in
-    /// milliseconds where it says one.
-    Notified(String, Option<i64>),
+    /// `"commandMode":"task-notification"`): its text.
+    Notified(String),
     /// An operation on Claude Code's queue of messages, with the content it
     /// names where it names one.
     Enqueue(Result<String, String>),
@@ -77,8 +76,6 @@ pub(super) struct Hook {
 #[derive(Debug, PartialEq)]
 pub(super) struct Assistant {
     pub(super) at: Option<Value>,
-    /// When it was written, in milliseconds, where it says.
-    pub(super) at_ms: Option<i64>,
     pub(super) message_id: Option<Arc<str>>,
     pub(super) uuid: Option<Arc<str>>,
     /// The text of the message's content.
@@ -142,24 +139,12 @@ pub(super) struct User {
     /// turn for it: 2.1.292's notification of the jobs a resumed session's last process
     /// left, after which it waits at its prompt.
     pub(super) transcript_only: bool,
-    /// The job a tool result of the record says it started, where the record is of the
-    /// main conversation: a subagent's jobs are its own, and its end wakes it.
-    pub(super) job: Option<Job>,
+    /// The job a tool result of the record says it started (see [`job`]), where the record
+    /// is of the main conversation: a subagent's jobs are its own, and its end wakes it.
+    pub(super) job: Option<Arc<str>>,
     /// What a TaskStop result of the record says it stopped, of the main conversation:
     /// the call it answers, as the block says it, and the job's id.
     pub(super) stopped: Option<(Option<Value>, Arc<str>)>,
-    /// The record's time in milliseconds, where it says one that reads.
-    pub(super) at_ms: Option<i64>,
-}
-
-/// A job a tool's result says it started: a command run in the background
-/// (`backgroundTaskId`), or a monitor (`taskId`), with the time it runs for, in
-/// milliseconds, where its start says one (`timeoutMs`) and does not say it is
-/// `persistent`: counted from the start's own record (`jobs`).
-#[derive(Debug, PartialEq)]
-pub(super) struct Job {
-    pub(super) id: Arc<str>,
-    pub(super) timeout: Option<i64>,
 }
 
 /// The record `record` of the session `session`, as replay reads it.
@@ -255,7 +240,7 @@ fn hook(record: &Value, session: &str) -> Projected {
 
 /// The attachment that brings Claude Code's own notification of a job into a turn under
 /// way (2.1.277: the queued notification is taken back, `"reason": "absorbed_mid_turn"`,
-/// and the turn reads it as this), in the main conversation: its text and time. None for
+/// and the turn reads it as this), in the main conversation: its text. None for
 /// any other attachment, a human's message brought in so among them
 /// (`"commandMode":"prompt"`).
 fn notified(record: &Value, session: &str) -> Option<Projected> {
@@ -266,16 +251,7 @@ fn notified(record: &Value, session: &str) -> Option<Projected> {
         && says("type", "queued_command")
         && says("commandMode", "task-notification");
     let text = field(attachment, "prompt").and_then(Value::as_str)?;
-    ours.then(|| Projected::Notified(text.to_owned(), at_ms(record)))
-}
-
-/// The time a record says it was written, in milliseconds: none where it says none
-/// that reads.
-fn at_ms(record: &Value) -> Option<i64> {
-    record
-        .get("timestamp")
-        .and_then(Value::as_str)
-        .and_then(time::parse)
+    ours.then(|| Projected::Notified(text.to_owned()))
 }
 
 /// An operation on the queue. `String(record.content ?? '')` is what each
@@ -323,7 +299,6 @@ fn assistant(record: &Value, session: &str) -> Projected {
         && text == CUT_TURN_CLOSED;
     Projected::Assistant(Box::new(Assistant {
         at: timestamp(record),
-        at_ms: at_ms(record),
         message_id: text_id(in_message("id")),
         uuid: text_id(record.get("uuid")),
         text,
@@ -368,7 +343,6 @@ fn user(record: &Value, session: &str) -> Projected {
         stopped: of_main_conversation(record, session)
             .then(|| stopped(record, content))
             .flatten(),
-        at_ms: at_ms(record),
     }))
 }
 
@@ -382,21 +356,16 @@ fn is_notification(record: &Value) -> bool {
             || says(field(record.get("origin"), "kind"), "task-notification"))
 }
 
-/// The job a tool's result says it started (see [`Job`]).
-fn job(record: &Value) -> Option<Job> {
+/// The job a tool's result says it started, by its id: a command run in the background
+/// (`backgroundTaskId`), or a monitor, whose start says its task and its time (2.1.305:
+/// `taskId`, and `timeoutMs`, a number: 0 for one that is `persistent`).
+fn job(record: &Value) -> Option<Arc<str>> {
     let result = record.get("toolUseResult");
     if let Some(id) = text_id(field(result, "backgroundTaskId")) {
-        return Some(Job { id, timeout: None });
+        return Some(id);
     }
-    // A monitor's start says its task and its time (2.1.305: `taskId`, `timeoutMs`,
-    // `persistent`).
-    let id = text_id(field(result, "taskId"))?;
-    let timeout = field(result, "timeoutMs").and_then(Value::as_i64)?;
-    let persistent = field(result, "persistent") == Some(&Value::Bool(true));
-    Some(Job {
-        id,
-        timeout: (!persistent && timeout > 0).then_some(timeout),
-    })
+    field(result, "timeoutMs").and_then(Value::as_i64)?;
+    text_id(field(result, "taskId"))
 }
 
 /// What a TaskStop call's result says it stopped: the call it answers and the job, where

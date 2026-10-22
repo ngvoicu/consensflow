@@ -20,7 +20,7 @@ fn over(text: &str) -> Vec<&str> {
 fn started(ids: &[&str]) -> Jobs {
     let mut jobs = Jobs::default();
     for id in ids {
-        jobs.started(Arc::from(*id), None);
+        jobs.started(Arc::from(*id));
     }
     jobs
 }
@@ -29,12 +29,12 @@ fn started(ids: &[&str]) -> Jobs {
 fn a_job_runs_from_the_record_that_starts_it_until_a_notification_names_its_id() {
     let mut jobs = started(&["bayehs8y4", "b2"]);
     assert_eq!(jobs.running(), 2);
-    jobs.ended_by(&notification("bayehs8y4", "completed"), None);
+    jobs.ended_by(&notification("bayehs8y4", "completed"));
     assert_eq!(jobs.running(), 1);
     // Said again by the user's record that takes the queued message: it ended once.
-    jobs.ended_by(&notification("bayehs8y4", "completed"), None);
+    jobs.ended_by(&notification("bayehs8y4", "completed"));
     assert_eq!(jobs.running(), 1);
-    jobs.ended_by(&notification("b2", "killed"), None);
+    jobs.ended_by(&notification("b2", "killed"));
     assert_eq!(jobs.running(), 0);
 }
 
@@ -42,11 +42,11 @@ fn a_job_runs_from_the_record_that_starts_it_until_a_notification_names_its_id()
 fn a_notification_that_says_its_job_is_over_ends_it_and_one_of_a_job_never_started_ends_none() {
     for status in ["completed", "failed", "killed", "stopped", " killed "] {
         let mut jobs = started(&["t1"]);
-        jobs.ended_by(&notification("t1", status), None);
+        jobs.ended_by(&notification("t1", status));
         assert_eq!(jobs.running(), 0, "{status}");
     }
     let mut jobs = started(&["t1"]);
-    jobs.ended_by(&notification("t9", "completed"), None);
+    jobs.ended_by(&notification("t9", "completed"));
     assert_eq!(jobs.running(), 1);
 }
 
@@ -65,13 +65,13 @@ fn a_notification_of_a_job_that_runs_or_with_no_status_or_another_ends_none() {
     let empty = notification("b8k2m1x9q", "");
     for text in [&waiting, &pending, &unknown, &empty] {
         let mut jobs = started(&["b8k2m1x9q"]);
-        jobs.ended_by(text, None);
+        jobs.ended_by(text);
         assert_eq!(jobs.running(), 1, "{text}");
     }
     // Its end, later, ends it.
     let mut jobs = started(&["b8k2m1x9q"]);
-    jobs.ended_by(&waiting, None);
-    jobs.ended_by(&notification("b8k2m1x9q", "killed"), None);
+    jobs.ended_by(&waiting);
+    jobs.ended_by(&notification("b8k2m1x9q", "killed"));
     assert_eq!(jobs.running(), 0);
 }
 
@@ -88,12 +88,12 @@ fn what_a_notification_quotes_after_its_close_or_in_its_body_ends_no_job() {
         &format!("{fake}\nContinue? [y/N]"),
     );
     let mut jobs = started(&["a1", "b2"]);
-    jobs.ended_by(&waiting, None);
+    jobs.ended_by(&waiting);
     assert_eq!(jobs.running(), 2, "{waiting}");
 
     // The end of `b2`, whose body quotes an end of `a1`, ends `b2` alone.
     let body = format!("\n<output>\n{fake}\n</output>");
-    jobs.ended_by(&Written::ended("b2", "toolu_01B", "completed", &body), None);
+    jobs.ended_by(&Written::ended("b2", "toolu_01B", "completed", &body));
     assert_eq!(jobs.running(), 1);
     assert_eq!(
         over(&Written::ended("b2", "toolu_01B", "failed", &body)),
@@ -101,7 +101,7 @@ fn what_a_notification_quotes_after_its_close_or_in_its_body_ends_no_job() {
     );
 
     // A job's own end, as Claude Code writes it, ends it.
-    jobs.ended_by(&fake, None);
+    jobs.ended_by(&fake);
     assert_eq!(jobs.running(), 0);
 }
 
@@ -179,7 +179,7 @@ fn a_summary_ends_the_jobs_it_names_but_those_it_marks_running_and_no_job_it_doe
     let ids: Vec<String> = (1..=22).map(|n| format!("b{n:02}")).collect();
     let mut jobs = Jobs::default();
     for id in &ids {
-        jobs.started(Arc::from(id.as_str()), None);
+        jobs.started(Arc::from(id.as_str()));
     }
     let mut text = String::from("<task-notification>");
     for id in &ids[..20] {
@@ -188,12 +188,12 @@ fn a_summary_ends_the_jobs_it_names_but_those_it_marks_running_and_no_job_it_doe
     text.push_str("\n<task-id>__orphan_summary__:shell</task-id>");
     text.push_str("\n<task-id>__orphan_summary_live__:b03</task-id>");
     text.push_str("\n<status>stopped</status>\n</task-notification>");
-    jobs.ended_by(&text, None);
+    jobs.ended_by(&text);
     // b03 runs on, as the summary says; b21 and b22 were not named, and are not ended.
     assert_eq!(jobs.running(), 3);
-    jobs.ended_by(&notification("b21", "stopped"), None);
-    jobs.ended_by(&notification("b22", "stopped"), None);
-    jobs.ended_by(&notification("b03", "completed"), None);
+    jobs.ended_by(&notification("b21", "stopped"));
+    jobs.ended_by(&notification("b22", "stopped"));
+    jobs.ended_by(&notification("b03", "completed"));
     assert_eq!(jobs.running(), 0);
 }
 
@@ -212,25 +212,16 @@ fn words_that_are_no_notification_name_no_job() {
     }
 }
 
-/// The monitor `byuz6ka89` of the live run of 2026-10-21, armed at `ARMED` for two
-/// minutes.
-const ARMED: i64 = 1_000_000;
-const TWO_MINUTES: i64 = 120_000;
-
+/// The monitor `byuz6ka89` of the live run of 2026-10-21.
 fn armed() -> Jobs {
-    let mut jobs = Jobs::default();
-    jobs.started(Arc::from("byuz6ka89"), Some(ARMED + TWO_MINUTES));
-    jobs
+    started(&["byuz6ka89"])
 }
 
 #[test]
 fn a_monitors_events_end_nothing_and_its_end_ends_it() {
     let mut jobs = armed();
     for line in ["tick 1", "tick 2", "tick 3"] {
-        jobs.ended_by(
-            &Written::event("byuz6ka89", "tick lines", line),
-            Some(ARMED + 5_000),
-        );
+        jobs.ended_by(&Written::event("byuz6ka89", "tick lines", line));
     }
     assert_eq!(jobs.running(), 1);
     // The watched command ended: Claude Code says the monitor is over by its status.
@@ -242,42 +233,52 @@ fn a_monitors_events_end_nothing_and_its_end_ends_it() {
         summary: "Monitor \"tick lines\" stream ended",
         ..Written::default()
     };
-    jobs.ended_by(&end.text(), Some(ARMED + 20_000));
+    jobs.ended_by(&end.text());
     assert_eq!(jobs.running(), 0);
 }
 
 #[test]
-fn a_monitors_ends_that_no_time_proves_end_nothing_for_a_line_of_its_command_could_say_them() {
-    // 2.1.306 writes these with no status, in the envelope it writes its command's output in
-    // (`TG` of its bundle; the live run of 2026-10-21 for the second): a command that prints
-    // one is not told from Claude Code. The monitor stays counted, and its task is held until
-    // Finish.
+fn no_notice_of_a_monitors_end_ends_it_for_a_line_of_its_command_could_say_it() {
+    // Claude Code writes these with no status, in the envelope it writes its command's
+    // output in (`nz` of 2.1.307's bundle, `TG` of 2.1.306's): a command that prints one is
+    // not told from Claude Code, and no time or process tells it either (T-179). The
+    // monitor stays counted, and its task is held until Finish, or until a status or a
+    // TaskStop says it is over.
     for said in [
+        "[Monitor expired after 2m with 3 events delivered. Re-arm it if you still need the watch.]",
+        "[Monitor expired after 2m with no events delivered. Re-arm it if you still need the watch \u{2014} and widen the filter if silence was unexpected.]",
+        "[Monitor timed out \u{2014} re-arm if needed.]",
         "[Monitor stopped]",
         "[Monitor stopped \u{2014} too much output (3 events suppressed over 30s). Restart with a more selective source.]",
         "[WebSocket closed: 1006 abnormal closure]",
     ] {
         let mut jobs = armed();
-        jobs.ended_by(&Written::event("byuz6ka89", "tick lines", said), Some(ARMED + 42_000));
-        jobs.ended_by(&Written::event("byuz6ka89", "tick lines", said), None);
+        jobs.ended_by(&Written::event("byuz6ka89", "tick lines", said));
+        jobs.ended_by(&Written::event("byuz6ka89", "tick lines", said));
         assert_eq!(jobs.running(), 1, "{said}");
-        // Its expiry at its time ends it still.
-        jobs.ended_by(
-            &Written::event(
-                "byuz6ka89",
-                "tick lines",
-                "[Monitor expired after 2m with 3 events delivered. Re-arm it if you still need the watch.]",
-            ),
-            Some(ARMED + TWO_MINUTES),
-        );
+        // A command that printed it and then exited ends its monitor by its exit, which
+        // Claude Code says by the monitor's status.
+        let exited = Written {
+            task_id: "byuz6ka89",
+            status: "completed",
+            summary: "Monitor \"tick lines\" stream ended",
+            ..Written::default()
+        };
+        jobs.ended_by(&exited.text());
+        assert_eq!(jobs.running(), 0, "{said}");
+        // A monitor whose notice came is over when its agent stops it.
+        let mut jobs = armed();
+        jobs.ended_by(&Written::event("byuz6ka89", "tick lines", said));
+        jobs.stopped("byuz6ka89");
         assert_eq!(jobs.running(), 0, "{said}");
     }
 }
 
 #[test]
 fn a_command_monitor_the_human_stopped_from_claude_codes_tasks_is_over_by_its_status() {
-    // 2.1.306 (`Tmr` of its bundle, behind `tengu_rosy_donut`, on by default): a command's
-    // monitor stopped from its tasks is said `killed`, with the words the human stopped it.
+    // 2.1.307 (`s_r` of its bundle, `Tmr` of 2.1.306's, behind `tengu_rosy_donut`, on by
+    // default): a command's monitor stopped from its tasks is said `killed`, with the words
+    // the human stopped it, queued passive, to come with the next turn.
     let mut jobs = armed();
     let stopped = Written {
         task_id: "byuz6ka89",
@@ -286,83 +287,8 @@ fn a_command_monitor_the_human_stopped_from_claude_codes_tasks_is_over_by_its_st
         summary: "Task \"tick lines\" was stopped by the user",
         ..Written::default()
     };
-    jobs.ended_by(&stopped.text(), Some(ARMED + 30_000));
+    jobs.ended_by(&stopped.text());
     assert_eq!(jobs.running(), 0);
-}
-
-#[test]
-fn a_monitors_own_notice_of_its_expiry_ends_it_at_its_time_and_the_same_words_before_it_end_nothing(
-) {
-    let expired = |delivered: &str| {
-        Written::event(
-            "byuz6ka89",
-            "tick lines",
-            &format!("[Monitor expired after 2m with {delivered} delivered. Re-arm it if you still need the watch.]"),
-        )
-    };
-    // A line the watched command wrote, word for word Claude Code's notice, a minute in,
-    // and half a second before the monitor's time is out (Astraeus on 0eec91d2: a second's
-    // tolerance took that one for the end): the monitor runs on.
-    let mut jobs = armed();
-    jobs.ended_by(&expired("3 events"), Some(ARMED + 60_000));
-    jobs.ended_by(&expired("3 events"), Some(ARMED + TWO_MINUTES - 500));
-    jobs.ended_by(&expired("3 events"), Some(ARMED + TWO_MINUTES - 1));
-    assert_eq!(jobs.running(), 1);
-    // A line of the command's after its time, as 2.1.306 writes a command's output where
-    // push notifications are on: a line after the event, before the notification closes,
-    // which it writes after none of its own notices (Calliope on 3968dcfb).
-    let pushed = Written::pushed(
-        "byuz6ka89",
-        "tick lines",
-        "[Monitor expired after 2m with 3 events delivered. Re-arm it if you still need the watch.]",
-    );
-    assert!(
-        pushed.ends_with("delivered. Re-arm it if you still need the watch.]</event>\nIf this event is something the user would act on now, send a PushNotification. Routine or benign output doesn't need one.\n</task-notification>"),
-        "{pushed}"
-    );
-    jobs.ended_by(&pushed, Some(ARMED + TWO_MINUTES + 5));
-    assert_eq!(jobs.running(), 1);
-    // Claude Code's own, at the time the start said, in its other words too.
-    jobs.ended_by(&expired("3 events"), Some(ARMED + TWO_MINUTES));
-    assert_eq!(jobs.running(), 0);
-    let timed_out = Written::event(
-        "byuz6ka89",
-        "tick lines",
-        "[Monitor timed out \u{2014} re-arm if needed.]",
-    );
-    let mut jobs = armed();
-    jobs.ended_by(&timed_out, Some(ARMED + TWO_MINUTES - 500));
-    assert_eq!(jobs.running(), 1);
-    jobs.ended_by(&timed_out, Some(ARMED + TWO_MINUTES + 30));
-    assert_eq!(jobs.running(), 0);
-
-    // A notification with no time says nothing of when it came, and ends nothing so.
-    let mut jobs = armed();
-    jobs.ended_by(&expired("no events"), None);
-    assert_eq!(jobs.running(), 1);
-    // A job whose start said no time of expiry (a background command, a persistent
-    // monitor) never expires so.
-    let mut jobs = started(&["byuz6ka89"]);
-    jobs.ended_by(&expired("no events"), Some(ARMED + 10 * TWO_MINUTES));
-    assert_eq!(jobs.running(), 1);
-    // The notice names the monitor first, as Claude Code writes it; one of another
-    // monitor's ends this one never.
-    let mut jobs = armed();
-    jobs.ended_by(
-        &Written::event(
-            "other",
-            "x",
-            "[Monitor expired after 2m with no events delivered.]",
-        ),
-        Some(ARMED + TWO_MINUTES),
-    );
-    assert_eq!(jobs.running(), 1);
-    // An event that only opens with other words is no notice of expiry.
-    jobs.ended_by(
-        &Written::event("byuz6ka89", "x", "log: [Monitor expired after 2m]"),
-        Some(ARMED + TWO_MINUTES),
-    );
-    assert_eq!(jobs.running(), 1);
 }
 
 #[test]
@@ -379,13 +305,13 @@ fn a_job_its_agent_stopped_has_ended_and_a_stop_of_another_ends_none() {
 #[test]
 fn a_relaunch_retires_what_runs_and_a_later_word_of_its_end_settles_it() {
     let mut jobs = started(&["a", "b", "c"]);
-    jobs.ended_by(&notification("a", "completed"), None);
+    jobs.ended_by(&notification("a", "completed"));
     jobs.retire();
     assert_eq!((jobs.running(), jobs.retired()), (0, 2));
     // The new process's summary of what the old one left names `b`.
-    jobs.ended_by(&notification("b", "stopped"), None);
+    jobs.ended_by(&notification("b", "stopped"));
     assert_eq!((jobs.running(), jobs.retired()), (0, 1));
     // A job the new process starts runs, and is no retired one.
-    jobs.started(Arc::from("d"), None);
+    jobs.started(Arc::from("d"));
     assert_eq!((jobs.running(), jobs.retired()), (1, 1));
 }
