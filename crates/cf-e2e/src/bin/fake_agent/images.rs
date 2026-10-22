@@ -15,7 +15,9 @@
 //! each came from, `[Image: source: <path>]`. This stand-in knows PNGs only
 //! (`cf_e2e::png`), counts its placeholders from 1 in each window, and does not wrap
 //! a long paste in `<pasted_content>`, as Claude does from about four lines on: the
-//! shape the field showed was a short result.
+//! shape the field showed was a short result. Only a paste is made so: the first message
+//! of a launch, given as an argument of the program, is kept as it is (Claude Code 2.1.308,
+//! the live probe of 2026-10-22, T-265), and the window says so (`Window::seeded`).
 
 use serde_json::{json, Value};
 
@@ -112,12 +114,17 @@ fn attach(paste: &str, mut number: impl FnMut() -> u32) -> Option<Attached> {
     })
 }
 
+/// The user's record of a message with no attachment made of it: its words as they are.
+pub fn unattached(text: &str) -> Value {
+    json!({ "type": "user", "message": { "role": "user", "content": text } })
+}
+
 /// The user's records a message `paste` is written as: the message alone, or, where
 /// it names images the window can read, the message with its attachments and the
 /// companion that says where they came from. `number` numbers the placeholders.
 pub fn user_records(paste: &str, number: impl FnMut() -> u32) -> Vec<Value> {
     let Some(attached) = attach(paste, number) else {
-        return vec![json!({ "type": "user", "message": { "role": "user", "content": paste } })];
+        return vec![unattached(paste)];
     };
     let mut content = vec![json!({ "type": "text", "text": attached.text })];
     content.extend(attached.files.iter().map(|_| {
@@ -260,6 +267,16 @@ mod tests {
                 { "type": "text", "text": format!("[Image: source: {desk}]") },
                 { "type": "text", "text": format!("[Image: source: {hero}]") },
             ])
+        );
+    }
+
+    #[test]
+    fn a_message_with_no_attachment_made_of_it_is_the_record_of_its_words_as_they_are() {
+        let folder = folder();
+        let words = format!("Head\n{}\nTail", at(folder.path(), "desk.png"));
+        assert_eq!(
+            unattached(&words),
+            json!({ "type": "user", "message": { "role": "user", "content": words } })
         );
     }
 

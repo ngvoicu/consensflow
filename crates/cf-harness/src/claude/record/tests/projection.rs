@@ -190,6 +190,15 @@ fn made() -> Vec<Value> {
             json!([tool_result(json!("t1"), json!("out"))]),
         ),
         hook(json!(["context", "more"]), Some("h1")),
+        // The record beside a message, that says where its image came from.
+        having(
+            user(
+                "c2",
+                json!("u1"),
+                json!([text(json!("[Image: source: /pictures/desk.png]"))]),
+            ),
+            json!({ "isMeta": true, "turnCompanion": true }),
+        ),
         closed("c1", "u1"),
         attachment("at1", "u1"),
         queue("enqueue", json!("later")),

@@ -155,6 +155,7 @@ pub struct Open<'a> {
     drop_env: Vec<String>,
     trusting: bool,
     resume: Option<String>,
+    seed: Option<String>,
     member: Option<Member>,
     claude_alone: Option<Value>,
 }
@@ -174,6 +175,7 @@ impl<'a> Open<'a> {
             drop_env: Vec::new(),
             trusting: true,
             resume: None,
+            seed: None,
             member: None,
             claude_alone: None,
         }
@@ -186,6 +188,14 @@ impl<'a> Open<'a> {
     #[must_use]
     pub fn claude_alone_with_hooks(mut self, hooks: Value) -> Self {
         self.claude_alone = Some(hooks);
+        self
+    }
+
+    /// The window's first message is `message`, given with its launch as the harness takes
+    /// it (Claude's is an argument of the program), and no paste.
+    #[must_use]
+    pub fn seed(mut self, message: &str) -> Self {
+        self.seed = Some(message.to_owned());
         self
     }
 
@@ -287,7 +297,7 @@ impl<'a> Open<'a> {
         }
         let start = match &self.resume {
             Some(resumed) => ask::resume(agent, resumed)?,
-            None => ask::start(agent, session, None)?,
+            None => ask::start(agent, session, self.seed.as_deref())?,
         }
         .ok_or_else(|| {
             Error::Daemon(format!(

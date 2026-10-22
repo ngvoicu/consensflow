@@ -11,7 +11,8 @@
 //! the messages queued (`queues`) and a relaunch, which empties the queue
 //! (`restart`), the API's refusals (`refusals`), the output of a `/clear`
 //! (`clear`) and of the other commands typed at the prompt (`commands`), a
-//! compaction while idle (`compaction`), an interrupt (`interrupts`), and the
+//! compaction while idle (`compaction`), the record beside a message that says where
+//! its images came from (`companions`), an interrupt (`interrupts`), and the
 //! records read late
 //! (`ancestry`). What a record waits as, and the line it is
 //! built from, are held to what replay reads of a record: what nothing reads
@@ -25,6 +26,7 @@ mod boundaries;
 mod clear;
 mod commands;
 mod compaction;
+mod companions;
 mod fields;
 mod interrupts;
 mod items;

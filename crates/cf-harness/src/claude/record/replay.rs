@@ -39,8 +39,12 @@ impl Transcript {
         Ok(())
     }
 
-    /// An attachment that holds what a `UserPromptSubmit` hook added to the
-    /// prompt: an item of its own, not the assistant's.
+    /// The harness's own words: an attachment that holds what a `UserPromptSubmit`
+    /// hook added to the prompt, or the user's record that is the companion of a turn
+    /// (`turnCompanion`: the sources of the images Claude Code attached to the
+    /// message before it). An item of its own, neither the assistant's nor a message
+    /// of the user's, so the turn is still the message it follows and begins no turn
+    /// of its own.
     fn hook_context(&mut self, hook: &Hook, seq: usize) -> Result<(), String> {
         let number = Value::from(seq);
         // `record.timestamp ?? seq`.

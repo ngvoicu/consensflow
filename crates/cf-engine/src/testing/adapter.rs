@@ -500,7 +500,8 @@ impl FakeAdapter {
                 };
                 agent.items.push(self.item(Role::User, &recorded));
                 if let Some(sources) = sources {
-                    agent.items.push(self.item(Role::User, &sources));
+                    // The harness's own words, as the reader makes of the companion.
+                    agent.items.push(self.item(Role::Custom, &sources));
                 }
                 agent.settled = false;
                 agent.agents_pending = false;

@@ -95,6 +95,16 @@ fn confirms_a_paste_claude_code_recorded_behind_the_placeholders_of_its_images_a
         items[at + 1],
         "[Image: source: /work/images/desk.png]\n[Image: source: /work/images/hero.png]"
     );
+    // The sources are the harness's own words, as the reader makes of Claude Code's
+    // companion record, and no message of the user's.
+    let roles: Vec<Role> = context
+        .adapter
+        .agent("chief")
+        .items
+        .iter()
+        .map(|item| item.role)
+        .collect();
+    assert_eq!((roles[at], roles[at + 1]), (Role::User, Role::Custom));
     context.pass().unwrap();
     // The chief answers, and its window is at rest past the arrival window.
     context.adapter.answer("chief", "Noted");

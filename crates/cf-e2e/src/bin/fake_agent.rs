@@ -263,6 +263,7 @@ fn run(
         wake: turns.clone(),
         stop: Arc::clone(&stop),
         agents: Agents::default(),
+        seeded: launch.seed.is_some(),
     };
     // A server the harness starts with its window, before any turn, as an MCP
     // server may be (one that is late begins with the first message instead).
@@ -475,8 +476,14 @@ fn turn(records: &mut Records, pid: u32, window: &Window, text: &str) -> Result<
         records.status(pid, "busy").map_err(failed)?;
     }
     // The message as Claude's input box keeps it: a paste that names images is
-    // attached to it, with a record of their paths after it.
-    for record in images::user_records(text, || records.next_image()) {
+    // attached to it, with a record of their paths after it. The first message of a
+    // launch is no paste (Claude Code 2.1.308 keeps its paths as they are).
+    let written = if first && window.seeded {
+        vec![images::unattached(text)]
+    } else {
+        images::user_records(text, || records.next_image())
+    };
+    for record in written {
         records.append(pid, record).map_err(failed)?;
     }
     // The harness starts its servers as it takes the first message, which now shows.

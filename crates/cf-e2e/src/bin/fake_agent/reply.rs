@@ -114,6 +114,9 @@ pub struct Window {
     pub wake: Sender<String>,
     /// The Escape that stops the turn at work.
     pub stop: Arc<Stop>,
+    /// The window's first message came with its launch, as an argument of the program, and
+    /// was no paste: Claude Code makes no attachment of the paths of images in it.
+    pub seeded: bool,
 }
 
 /// What a turn answers.
@@ -487,6 +490,7 @@ mod tests {
             agents: Agents::default(),
             wake: std::sync::mpsc::channel().0,
             stop: Arc::new(Stop::default()),
+            seeded: false,
         }
     }
 

@@ -59,6 +59,7 @@ pub(super) static RECORD: Keep = Keep::Members(&[
     ("error", &Keep::Scalar),
     ("promptSource", &Keep::Scalar),
     ("isMeta", &Keep::Scalar),
+    ("turnCompanion", &Keep::Scalar),
     ("isCompactSummary", &Keep::Scalar),
     ("level", &Keep::Scalar),
     ("durationMs", &Keep::Scalar),

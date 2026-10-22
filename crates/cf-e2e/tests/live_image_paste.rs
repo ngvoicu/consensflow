@@ -17,9 +17,14 @@
 //!   is not there) goes into one Claude window the way the daemon pastes (`pane.write_paste`,
 //!   then Enter), one after another, and the record says what the window made of it: the items
 //!   the daemon reads, and the user records as Claude wrote them, each part by its kind. It
-//!   holds the record to one thing: the engine takes an item of it for the paste of the
-//!   message (`is_paste_of`, asked of the engine itself). What the shapes are is the report,
-//!   and where Claude moves a placeholder or a separator, the run says so first.
+//!   holds the record to two things: the engine takes an item of it for the paste of the
+//!   message (`is_paste_of`, asked of the engine itself), and Claude made as many attachments
+//!   of the paths as the shape names images it can read (the placeholders that begin the item:
+//!   what `WINDOWS_CONVERTS` answers where the machine is Windows, whose native paths, a
+//!   drive letter and backslashes, are the question of T-265). A last window is given a
+//!   message with an image path as the first message of its launch, an argument of the program,
+//!   which Claude makes no attachment of. What the shapes are is the report, and where Claude moves
+//!   a placeholder or a separator, the run says so first.
 //! - **`a_result_that_starts_with_an_image_path_is_delivered_to_a_claude_chief_once`** is the
 //!   field's shape (`daemon`): a real Claude as the chief of a project on the native daemon, the
 //!   stand-in as the designer, whose result starts with the paths of two pictures it saved. The
@@ -36,7 +41,7 @@
 #[path = "live_image_paste/daemon.rs"]
 mod daemon;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use cf_e2e::live::ask::{self, Item};
@@ -67,6 +72,9 @@ struct Shape {
     /// `{text}` for the text file's, `{missing}` for the one that is not there and
     /// `{spaced}` for an image in a folder with a space in its name.
     body: &'static str,
+    /// How many of the images it names Claude Code makes an attachment of: those it can
+    /// read, on a line of their own or at the end of one (Claude Code 2.1.308, on the Mac).
+    images: usize,
 }
 
 /// The shapes: a designer's result, with the paths where a message may have them.
@@ -74,50 +82,62 @@ const SHAPES: [Shape; 12] = [
     Shape {
         name: "one path, first line of the body",
         body: "{1}\nWarm editorial desk scene.",
+        images: 1,
     },
     Shape {
         name: "two paths, first lines of the body",
         body: "{1}\n{2}\nWarm editorial desk scene, and its variant.",
+        images: 2,
     },
     Shape {
         name: "three paths, first lines of the body",
         body: "{1}\n{2}\n{3}\nWarm editorial desk scene, its variant and an icon.",
+        images: 3,
     },
     Shape {
         name: "one path, mid body, its own line",
         body: "Saved the picture:\n{1}\nWarm editorial desk scene.",
+        images: 1,
     },
     Shape {
         name: "one path inside a sentence",
         body: "Saved to {1} as asked. Warm editorial desk scene.",
+        images: 0,
     },
     Shape {
         name: "two paths, mid body, text between",
         body: "Saved the pictures:\n{1}\nthe desk, and\n{2}\nthe hero.",
+        images: 2,
     },
     Shape {
         name: "two paths on one line",
         body: "{1} {2}\nWarm editorial desk scene, and its variant.",
+        images: 2,
     },
     Shape {
         name: "three paths, start, middle and end",
         body: "{1}\nWarm editorial desk scene.\n{2}\nThe variant.\n{3}",
+        images: 3,
     },
     Shape {
         name: "a path to a file that is no image",
         body: "{text}\nNotes on the scene.",
+        images: 0,
     },
     Shape {
         name: "a path to an image that is not there",
         body: "{missing}\nWarm editorial desk scene.",
+        images: 0,
     },
     Shape {
         name: "a path with a space in it",
         body: "{spaced}\nWarm editorial desk scene.",
+        images: 1,
     },
     Shape {
         name: "an image and a file that is no image",
         body: "{1}\n{text}\nWarm editorial desk scene, and notes.",
+        images: 1,
     },
 ];
 
@@ -129,23 +149,65 @@ fn ask(sum: (u32, u32)) -> String {
     )
 }
 
+/// Whether Claude Code makes attachments of the native paths of the machine's images where
+/// it is Windows, a drive letter and backslashes (`C:\Users\…\desk.png`). It does, in each
+/// of the shapes as on the Mac: the run on zeewin on 2026-10-22 (T-265), Claude Code 2.1.308,
+/// whose placeholders, wrapper and companion records were those of the Mac. A run that finds
+/// it does not is the answer changing, and says so in the shape's check.
+const WINDOWS_CONVERTS: bool = true;
+
+/// How many attachments Claude Code makes of the paths of `shape` on this machine.
+fn expected(shape: &Shape) -> usize {
+    if cfg!(windows) && !WINDOWS_CONVERTS {
+        0
+    } else {
+        shape.images
+    }
+}
+
+/// How many image placeholders (`[Image #4]`) begin `text`, as Claude Code writes them: a
+/// space between two, and nothing else.
+fn placeholders(text: &str) -> usize {
+    let mut rest = text;
+    let mut count = 0;
+    while let Some(after) = rest.strip_prefix("[Image #") {
+        let digits = after.bytes().take_while(u8::is_ascii_digit).count();
+        let Some(next) = after[digits..].strip_prefix(']').filter(|_| digits > 0) else {
+            break;
+        };
+        count += 1;
+        match next.strip_prefix(' ') {
+            Some(more) if more.starts_with("[Image #") => rest = more,
+            _ => break,
+        }
+    }
+    count
+}
+
 /// The header of the message a shape is, with the id `id`.
 fn header(id: i64) -> String {
     format!("[ConsensFlow m-{id} · T-1 · result from @pygmalion-jolly-brook]")
 }
 
+/// The file `name` of `folder`, a `/` in `name` between folders: the path as the machine
+/// writes it, a drive letter and backslashes on Windows.
+fn at_path(folder: &Path, name: &str) -> PathBuf {
+    name.split('/')
+        .fold(folder.to_path_buf(), |path, part| path.join(part))
+}
+
 /// The files a shape names, written into `folder`: the images are whole PNGs.
 fn write_files(folder: &Path) -> Result {
     for image in IMAGES {
-        files::write(&folder.join(image), cf_e2e::png::SMALL)?;
+        files::write(&at_path(folder, image), cf_e2e::png::SMALL)?;
     }
-    files::write(&folder.join(SPACED), cf_e2e::png::SMALL)?;
-    files::write(&folder.join(TEXT), "Notes on the desk scene.\n")
+    files::write(&at_path(folder, SPACED), cf_e2e::png::SMALL)?;
+    files::write(&at_path(folder, TEXT), "Notes on the desk scene.\n")
 }
 
 /// A shape's body, with the paths filled in from `folder`.
 fn body_of(shape: &Shape, folder: &Path) -> String {
-    let path = |name: &str| folder.join(name).display().to_string();
+    let path = |name: &str| at_path(folder, name).display().to_string();
     shape
         .body
         .replace("{1}", &path(IMAGES[0]))
@@ -243,6 +305,12 @@ fn checks_of(rig: &Rig, install: &Installed, log: &Log) -> Result<Vec<Check>> {
         });
         let (end, records) = user_records(&window, lines);
         (lines, seen_items) = (end, seen_items + items.len());
+        let message = items
+            .iter()
+            .find(|item| is_paste_of(&item.text, at))
+            .or(items.first());
+        let attached = message.map_or(0, |item| placeholders(&item.text));
+        let wanted = expected(shape);
         log.block(
             &format!("{name}: {}", shape.name),
             &format!(
@@ -252,7 +320,7 @@ fn checks_of(rig: &Rig, install: &Installed, log: &Log) -> Result<Vec<Check>> {
             ),
         );
         let detail = format!(
-            "answered: {}; items: {}; records: {}",
+            "attachments: {attached} (expected {wanted}); answered: {}; items: {}; records: {}",
             sent.shown,
             items
                 .iter()
@@ -261,9 +329,73 @@ fn checks_of(rig: &Rig, install: &Installed, log: &Log) -> Result<Vec<Check>> {
                 .join(" | "),
             records.join(" | ")
         );
-        checks.push(Check::new(name, shape.name, shown, detail));
+        checks.push(Check::new(
+            name,
+            shape.name,
+            shown && attached == wanted,
+            detail,
+        ));
     }
+    let folder = window.workspace().to_path_buf();
+    window.kill();
+    checks.push(launch_check(rig, install, log, &folder)?);
     Ok(checks)
+}
+
+/// The first message of a launch, given as an argument of the program and no paste, with the
+/// path of an image on a line of its own: Claude Code 2.1.308 makes no attachment of it
+/// (the probe of 2026-10-22, T-265), so the record holds the words as they were, in one item
+/// and with no companion after it. A window of the folder the shapes were sent in, whose
+/// files are there.
+fn launch_check(rig: &Rig, install: &Installed, log: &Log, folder: &Path) -> Result<Check> {
+    let name = install.harness().name();
+    let what = "the first message of a launch, an argument of the program";
+    let at = i64::try_from(SHAPES.len()).unwrap_or(0) + 1;
+    let sum = (1000 + u32::try_from(at).unwrap_or(0), 2000);
+    let picture = at_path(folder, IMAGES[0]).display().to_string();
+    let body = format!(
+        "{}\n{picture}\nWarm editorial desk scene.\n{}",
+        header(at),
+        ask(sum)
+    );
+    let seed = Open::new(
+        rig,
+        install,
+        "image-paste",
+        &format!("image-paste-launch-{name}"),
+    );
+    let window = seed.seed(&body).open_telling(log, name)?;
+    let mut items = Vec::new();
+    live::until(Duration::from_secs(120), Duration::from_millis(500), || {
+        items = window.recorded();
+        items
+            .iter()
+            .any(|item| item.role == "assistant" && item.complete)
+            .then_some(())
+    });
+    log.block(
+        &format!("{name}: {what}"),
+        &format!(
+            "items the daemon reads: {:?}",
+            items.iter().map(|item| &item.text).collect::<Vec<_>>()
+        ),
+    );
+    let users: Vec<&Item> = items.iter().filter(|item| item.role == "user").collect();
+    let kept = users.len() == 1
+        && placeholders(&users[0].text) == 0
+        && users[0].text.contains(&picture)
+        && is_paste_of(&users[0].text, at);
+    window.kill();
+    Ok(Check::new(
+        name,
+        what,
+        kept,
+        format!(
+            "user items: {}; attachments: {}",
+            users.len(),
+            users.first().map_or(0, |item| placeholders(&item.text))
+        ),
+    ))
 }
 
 /// The first 200 characters of `text`.
@@ -333,11 +465,47 @@ mod tests {
         let folder = tempfile::tempdir().unwrap();
         write_files(folder.path()).unwrap();
         for image in IMAGES.iter().chain(&[SPACED]) {
-            let bytes = std::fs::read(folder.path().join(image)).unwrap();
+            let bytes = std::fs::read(at_path(folder.path(), image)).unwrap();
             assert!(cf_e2e::png::inspect(&bytes).is_ok(), "{image}");
         }
-        assert!(folder.path().join(TEXT).is_file());
-        assert!(!folder.path().join(MISSING).exists());
+        assert!(at_path(folder.path(), TEXT).is_file());
+        assert!(!at_path(folder.path(), MISSING).exists());
+    }
+
+    #[test]
+    fn the_placeholders_that_begin_an_item_are_counted_as_claude_code_writes_them() {
+        assert_eq!(placeholders("[Image #1][ConsensFlow m-1 · T-1]"), 1);
+        assert_eq!(
+            placeholders("[Image #2] [Image #3]\n\n<pasted_content id=\"a\">"),
+            2
+        );
+        assert_eq!(placeholders("[Image #2][Image #3]x"), 1);
+        assert_eq!(placeholders("[Image #]x"), 0);
+        assert_eq!(placeholders("[ConsensFlow m-1 · T-1][Image #1]"), 0);
+        assert_eq!(placeholders(""), 0);
+    }
+
+    #[test]
+    fn a_shape_expects_as_many_attachments_as_it_names_readable_images_where_the_machine_converts()
+    {
+        let folder = std::path::Path::new("/folder");
+        for shape in &SHAPES {
+            let named = body_of(shape, folder).matches(".png").count();
+            assert!(shape.images <= named, "{}", shape.name);
+        }
+        assert_eq!(
+            SHAPES.iter().map(|shape| shape.images).sum::<usize>(),
+            16,
+            "the counts the Mac showed"
+        );
+        assert_eq!(
+            expected(&SHAPES[2]),
+            if cfg!(windows) && !WINDOWS_CONVERTS {
+                0
+            } else {
+                3
+            }
+        );
     }
 
     #[test]

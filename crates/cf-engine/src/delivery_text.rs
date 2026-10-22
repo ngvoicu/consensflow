@@ -204,24 +204,35 @@ fn after_placeholders(text: &str) -> Option<&str> {
     seen.then_some(rest)
 }
 
+/// What follows the opening of Claude Code's wrapper ([`PASTED`]) that begins `text`: the
+/// tag's attributes, and what is after its line; none where `text` does not begin with one.
+fn after_wrapper_opening(text: &str) -> Option<(&str, &str)> {
+    let rest = text.strip_prefix('<')?.strip_prefix(PASTED)?;
+    let (attributes, inner) = rest.split_once(">\n")?;
+    let whole =
+        (attributes.is_empty() || attributes.starts_with(' ')) && !attributes.contains(['>', '\n']);
+    whole.then_some((attributes, inner))
+}
+
 /// The paste `text` holds where Claude Code wrapped it ([`PASTED`]), else `text`.
 fn unwrapped(text: &str) -> &str {
-    let Some(rest) = text
-        .strip_prefix('<')
-        .and_then(|rest| rest.strip_prefix(PASTED))
-    else {
+    let Some((attributes, inner)) = after_wrapper_opening(text) else {
         return text;
     };
-    let Some((attributes, inner)) = rest.split_once(">\n") else {
-        return text;
-    };
-    if !(attributes.is_empty() || attributes.starts_with(' ')) || attributes.contains(['>', '\n']) {
-        return text;
-    }
     inner
         .trim_end()
         .strip_suffix(&format!("</{PASTED}{attributes}>"))
         .unwrap_or(text)
+}
+
+/// Whether `before`, the text ahead of the header of a delivery in a record's item, is
+/// only what Claude Code put there itself and no word of the human's: the placeholders
+/// of the images it attached ([`IMAGE`]) and, where it wrapped the paste ([`PASTED`]),
+/// the line that opens the wrapper, after a blank line when placeholders come first.
+pub fn put_there_by_claude(before: &str) -> bool {
+    let before = before.trim_start();
+    let after = after_placeholders(before).map_or(before, str::trim_start);
+    after.is_empty() || after_wrapper_opening(after).is_some_and(|(_, inner)| inner.is_empty())
 }
 
 /// The message a window's record item, text of what it was given, is: the one
@@ -536,6 +547,37 @@ mod tests {
         assert_eq!(header_id("[Image #2] [Image #3]\n\n<pasted_content id=\"f920\">\n[ConsensFlow m-6 · T-1 · result from @x]\nSaved.\n</pasted_content id=\"f920\">\n"), Some(6));
         // The attachments' sources hold no header.
         assert_eq!(header_id("[Image: source: /tmp/desk.png]"), None);
+    }
+
+    #[test]
+    fn what_claude_code_puts_ahead_of_a_paste_is_no_word_of_the_humans_and_nothing_else_is_that() {
+        let wrapper = "<pasted_content id=\"f920\">\n";
+        for ahead in [
+            "".to_owned(),
+            "[Image #4]".to_owned(),
+            "[Image #1] [Image #2]".to_owned(),
+            wrapper.to_owned(),
+            format!("\n\n{wrapper}"),
+            format!("[Image #7] [Image #8]\n\n{wrapper}"),
+            "<pasted_content>\n".to_owned(),
+        ] {
+            assert!(put_there_by_claude(&ahead), "{ahead:?}");
+        }
+        for ahead in [
+            "look".to_owned(),
+            "[Image #4]look".to_owned(),
+            "look [Image #4]".to_owned(),
+            "[Image #4] look".to_owned(),
+            "[Image #]".to_owned(),
+            "[Image #4][Image #5]".to_owned(),
+            "[Image #4]\n\nlook".to_owned(),
+            format!("[Image #4]\n\n{wrapper}look\n"),
+            format!("typed {wrapper}"),
+            "<pasted_content id=\"f\">look\n".to_owned(),
+            "<pasted_contentious>\n".to_owned(),
+        ] {
+            assert!(!put_there_by_claude(&ahead), "{ahead:?}");
+        }
     }
 
     #[test]
