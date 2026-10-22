@@ -482,3 +482,45 @@ fn a_turn_that_leaves_a_command_runs_it_once_the_model_has_spoken_and_the_agent_
     });
     assert!(gone, "the command ran its two seconds");
 }
+
+/// `/new`: the turns after it go into the conversation it opened, on the wire and in the
+/// store, and what ran before it stays in the one left.
+#[test]
+fn the_turns_after_a_new_conversation_go_into_it_and_the_ones_before_stay_in_the_one_left() {
+    let mut case = case();
+    case.window.take("Reply with exactly: BEFORE").unwrap();
+    let opened = Store::open(&case.folder.path().join("sessions.db"), "bright-dune").unwrap();
+    case.window.switch(opened, "bright-dune");
+    case.window.take("Reply with exactly: AFTER").unwrap();
+    let db = Connection::open(case.folder.path().join("sessions.db")).unwrap();
+    let said_in = |session: &str| -> Vec<String> {
+        db.prepare("SELECT chat_message FROM message_nodes WHERE session_id = ? ORDER BY row_id")
+            .unwrap()
+            .query_map([session], |row| row.get::<_, String>(0))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect()
+    };
+    let (left, new) = (said_in("calm-river"), said_in("bright-dune"));
+    assert!(
+        left.iter().any(|message| message.contains("BEFORE")),
+        "{left:?}"
+    );
+    assert!(
+        !left.iter().any(|message| message.contains("AFTER")),
+        "{left:?}"
+    );
+    assert!(
+        new.iter().any(|message| message.contains("AFTER")),
+        "{new:?}"
+    );
+    let wire = std::fs::read_to_string(case.folder.path().join("wire.jsonl")).unwrap();
+    let ended_in = |words: &str| {
+        wire.lines()
+            .filter(|line| line.contains("\"cause\""))
+            .nth(usize::from(words == "AFTER"))
+            .map(|line| serde_json::from_str::<Value>(line).unwrap()["sessionId"].clone())
+    };
+    assert_eq!(ended_in("BEFORE"), Some(Value::from("calm-river")));
+    assert_eq!(ended_in("AFTER"), Some(Value::from("bright-dune")));
+}

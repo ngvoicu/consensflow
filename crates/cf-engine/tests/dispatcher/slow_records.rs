@@ -1030,3 +1030,51 @@ fn a_restart_settles_a_paste_by_the_conversation_it_went_into_not_the_one_the_wi
     after.pass().unwrap();
     assert_eq!(pasted.get(), 1, "never pasted again");
 }
+
+/// Calliope's look at round 3 (T-275): Devin holds a paste queued behind a turn and writes
+/// it to its record only when the turn takes it in. A paste its TUI took, the human's
+/// `/new`, and the daemon stopped while the conversation left still worked: its record
+/// did not show the paste yet, the start gave it back, and it went into the new
+/// conversation as well as the old. Devin's store has the history row of what its TUI
+/// took, which the start reads with no window open, and the paste is delivered.
+#[test]
+fn a_restart_delivers_a_paste_its_harness_took_though_the_conversation_it_went_into_does_not_show_it_yet(
+) {
+    let context = Context::new();
+    let (project, note, pasted, left) = taken_then_switched(&context);
+    let text = delivery_text(&context.message(note.id), &[]);
+    context.adapter.with("chief", |agent| {
+        agent.records_settled.insert(left.clone(), false);
+        agent.stored.insert(left.clone(), vec![text]);
+    });
+    context.ledger.borrow_mut().suspend_for_restart().unwrap();
+    let after = context.make();
+    after.settle_after_restart().unwrap();
+    let settled = context.message(note.id);
+    assert_eq!(
+        (settled.state.as_str(), settled.attempts),
+        ("delivered", 1),
+        "its harness took it"
+    );
+    after.resume_project(project).unwrap();
+    after.pass().unwrap();
+    after.pass().unwrap();
+    assert_eq!(pasted.get(), 1, "never pasted again");
+}
+
+/// The same, with a store that has no row of the paste: its harness never took it, and
+/// it goes back to its queue as it always did.
+#[test]
+fn a_restart_gives_back_a_paste_its_harness_says_it_never_took() {
+    let context = Context::new();
+    let (_, note, _, left) = taken_then_switched(&context);
+    context.adapter.with("chief", |agent| {
+        agent
+            .stored
+            .insert(left.clone(), vec!["another prompt".to_owned()]);
+    });
+    context.ledger.borrow_mut().suspend_for_restart().unwrap();
+    context.make().settle_after_restart().unwrap();
+    let settled = context.message(note.id);
+    assert_eq!((settled.state.as_str(), settled.attempts), ("queued", 0));
+}

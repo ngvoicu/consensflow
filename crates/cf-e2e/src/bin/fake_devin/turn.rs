@@ -245,6 +245,13 @@ impl<W: Write> Window<W> {
         self
     }
 
+    /// The turns after this one go into `store`'s conversation, `session`, which the
+    /// human opened with `/new`: what was queued before it ran in the conversation left.
+    pub fn switch(&mut self, store: Store, session: &str) {
+        self.store = store;
+        self.wire.switch(session);
+    }
+
     /// Says `text` on the window's screen.
     fn say(&mut self, text: &str) -> io::Result<()> {
         self.screen.write_all(text.as_bytes())?;

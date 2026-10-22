@@ -137,12 +137,14 @@ runs = ["engine-resume"]
 [[plant.edit]]
 file = "crates/cf-engine/src/in_flight.rs"
 find = '''
-        let arrived = self.arrived(message, pasted.as_deref()).await?;
+                .then(|| json!({ "took": true })),
+        };
         let Some(message) = self.still_delivering(message.id)? else {
             return Ok(());
         };'''
 replace = '''
-        let arrived = self.arrived(message, pasted.as_deref()).await?;'''
+                .then(|| json!({ "took": true })),
+        };'''
 
 [[plant]]
 name = "start suspended: one message the start fails to settle ends the settle for the rest"

@@ -67,6 +67,10 @@ pub struct FakeAgent {
     /// Whether each of those records, read with no window open, reads at rest: as the
     /// window was when it switched away, unless the test says otherwise.
     pub records_settled: HashMap<String, bool>,
+    /// What the harness's own store says each conversation's window took, read with no
+    /// window open (`Records::took`, Devin's history rows): a conversation it holds no
+    /// list of cannot tell, as every harness but Devin.
+    pub stored: HashMap<String, Vec<String>>,
     /// Those of them that cannot be read: Devin's of a session its store holds no row of.
     pub records_unreadable: Vec<String>,
     /// Why the window has not said which conversation it shows yet.
@@ -452,6 +456,17 @@ impl FakeAdapter {
             .map(|agent| !agent.settled)
     }
 
+    /// Whether the store of `session` says its window took a paste that begins with
+    /// `pasted` (`Records::took`): none where the test gave it no store.
+    pub(super) fn took_of(&self, session: &str, pasted: &str) -> Option<bool> {
+        let agents = self.agents.borrow();
+        agents
+            .iter()
+            .rev()
+            .find_map(|agent| agent.stored.get(session))
+            .map(|rows| rows.iter().any(|row| row.starts_with(pasted)))
+    }
+
     /// What the harness says of going on with `session`: what the latest window
     /// that opened on it, or shows it now, is set to say, and that it holds it where
     /// no window had it, as every harness did before it was asked.
@@ -588,6 +603,7 @@ impl Asked {
             shows: None,
             records: HashMap::new(),
             records_settled: HashMap::new(),
+            stored: HashMap::new(),
             records_unreadable: Vec::new(),
             unnamed: None,
             interrupted: 0,

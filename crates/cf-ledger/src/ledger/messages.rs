@@ -259,6 +259,12 @@ impl Ledger {
         messages::pasted_into(&self.store, message_id)
     }
 
+    /// When the attempt of message `message_id` on its way now began, to the second, in
+    /// milliseconds: none where it is not on its way.
+    pub fn delivery_begun_ms(&self, message_id: i64) -> Result<Option<i64>, LedgerError> {
+        messages::delivery_begun_ms(&self.store, message_id)
+    }
+
     /// Every message on its way to a window, oldest first.
     pub fn in_flight(&self) -> Result<Vec<MessageView>, LedgerError> {
         messages::in_flight(&self.store)

@@ -6,15 +6,36 @@
 
 #![allow(clippy::expect_used)]
 
+use std::cell::Cell;
+use std::rc::Rc;
+
+use cf_base::time::Clock;
 use cf_ledger::{open_ledger, Ledger, NewChief, NewMember, NewNote, NewProject, Options};
 use serde_json::json;
+
+/// A clock that says what the test set it to.
+struct At(Rc<Cell<i64>>);
+
+impl Clock for At {
+    fn now_ms(&mut self) -> i64 {
+        self.0.get()
+    }
+}
 
 /// A project with apollo its chief and zeus its worker; the chief's window on
 /// `native-a`, and a note from zeus to the chief begun: the ledger, the note's id and
 /// the conversation.
 fn begun(dir: &std::path::Path) -> (Ledger, i64, i64, i64) {
-    let mut ledger =
-        open_ledger(&dir.join("consensflow.db"), Options::default()).expect("a ledger");
+    begun_at(dir, Rc::new(Cell::new(1_792_058_400_000)))
+}
+
+/// [`begun`], on a clock that says what `at` holds.
+fn begun_at(dir: &std::path::Path, at: Rc<Cell<i64>>) -> (Ledger, i64, i64, i64) {
+    let options = Options {
+        clock: Box::new(At(at)),
+        ..Options::default()
+    };
+    let mut ledger = open_ledger(&dir.join("consensflow.db"), options).expect("a ledger");
     let project = ledger
         .create_project(&NewProject {
             directory: "/work/app".into(),
@@ -114,4 +135,29 @@ fn whatever_takes_a_message_off_its_way_clears_the_conversation_it_went_into() {
     // A message that is not on its way is marked by nothing.
     ledger.paste_into(note, conversation).expect("asked");
     assert_eq!(column(&ledger), None);
+}
+
+/// A start asks a harness's store for its word of a paste on its way written since its
+/// attempt began (T-280): that attempt's second, never an earlier attempt's, and none for
+/// a message not on its way.
+#[test]
+fn a_message_on_its_way_says_the_second_its_attempt_began() {
+    let dir = tempfile::tempdir().expect("a folder");
+    let at = Rc::new(Cell::new(1_792_058_400_250));
+    let (mut ledger, note, _, _) = begun_at(dir.path(), Rc::clone(&at));
+    assert_eq!(
+        ledger.delivery_begun_ms(note).expect("read"),
+        Some(1_792_058_400_000)
+    );
+    ledger
+        .retry_delivery(note, "given back", true)
+        .expect("given back");
+    assert_eq!(ledger.delivery_begun_ms(note).expect("read"), None);
+    at.set(1_792_058_461_900);
+    ledger.begin_delivery(note).expect("begun again");
+    assert_eq!(
+        ledger.delivery_begun_ms(note).expect("read"),
+        Some(1_792_058_461_000),
+        "the second attempt's"
+    );
 }

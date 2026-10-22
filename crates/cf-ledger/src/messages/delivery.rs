@@ -509,6 +509,30 @@ pub(crate) fn pasted_into(store: &Store, message_id: i64) -> Result<Option<Strin
         .filter(|session| !session.is_empty()))
 }
 
+/// When the attempt of message `message_id` on its way now began (its latest
+/// `delivery.begun`: a start's give-back does not count the attempt, so its number comes
+/// again), to the second, in milliseconds of the ledger's clock: none where it is not on
+/// its way. A start asks a harness that keeps its own word of what its window took for
+/// one written since (Devin's history row): an earlier attempt's is no word of this one.
+pub(crate) fn delivery_begun_ms(
+    store: &Store,
+    message_id: i64,
+) -> Result<Option<i64>, LedgerError> {
+    Ok(store
+        .db
+        .query_row(
+            "SELECT CAST(strftime('%s', e.at) AS INTEGER) * 1000 FROM message m
+               JOIN event e ON e.project_id = m.project_id AND e.kind = 'delivery.begun'
+                AND json_extract(e.data, '$.message') = m.id
+              WHERE m.id = ? AND m.state = 'delivering'
+              ORDER BY e.id DESC LIMIT 1",
+            [message_id],
+            |row| row.get::<_, Option<i64>>(0),
+        )
+        .optional()?
+        .flatten())
+}
+
 /// Every message on its way to a window, oldest first. At start none of
 /// those windows is left (they died with the previous process), so each is
 /// settled before anything else is delivered.

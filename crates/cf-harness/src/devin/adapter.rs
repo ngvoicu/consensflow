@@ -20,9 +20,9 @@
 //! pasted into a turn that has just begun, and no longer, so that it holds back no
 //! message for good. Devin 3000.11.92 writes a prompt's history row at its Enter, a
 //! paste queued behind a turn at work too (`history`): the window says the TUI took the
-//! paste (`took`), which the engine then waits for until its record shows it, and holds
-//! it queued while the record does not (`held`); a prompt the human submits after the
-//! engine's look holds the window from a paste (`ready`). And the engine waits out a
+//! paste (`took`), which the engine then waits for until its record shows it, however
+//! long the turn ahead of it works; a prompt the human submits after the engine's look
+//! holds the window from a paste (`ready`). And the engine waits out a
 //! window's turns before it takes the record for lacking (`cf-engine`'s `arrival`). An
 //! older Devin writes the row only as the turn takes the paste in: its window says
 //! nothing of it, and the engine's rest-based wait alone stands.

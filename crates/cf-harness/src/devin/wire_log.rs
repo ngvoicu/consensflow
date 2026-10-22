@@ -9,9 +9,8 @@
 //! What the TUI puts to its agent is not in it: Devin 3000.6.14 to 3000.11.92 write
 //! none of the TUI's requests (no `session/prompt`), only what the agent says, and a
 //! few empty lines (`{}`) that stand for none of the asks (probed live, T-102,
-//! 2026-10-21). Whether Devin has a paste, or holds it queued, is read from its store
-//! (`adapter`'s `took` and `held`), and whether its window is in a turn from its
-//! record.
+//! 2026-10-21). Whether Devin's TUI took a paste is read from its store (`adapter`'s
+//! `took`), and whether its window is in a turn from its record.
 //!
 //! Kept from Node on purpose:
 //! - where V8 threw (a line that is JSON `null`, or a configuration that is

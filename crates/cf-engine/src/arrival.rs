@@ -49,7 +49,11 @@
 //! closes. A paste held in a turn that never ends waits with it, and the window's
 //! queue behind it, until the human stops the turn or closes the window. The one Enter is pressed whatever the
 //! window shows (a quiet dialog may take it), and the screen is looked at apart from
-//! the press, so a human's typing in between can meet it.
+//! the press, so a human's typing in between can meet it. What the daemon's stop leaves
+//! on its way is settled at the start by the record alone, but for Devin's store's word
+//! that its TUI took it (`in_flight`): a harness that keeps no such word and held the
+//! paste queued when the daemon stopped is pasted it again, and a Devin window that lost
+//! the paste it took as it ended is never given it again.
 //!
 //! What a hand-over is and how it fails are `deliveries`'; the wait is the part of
 //! the record's delivery part this owns.

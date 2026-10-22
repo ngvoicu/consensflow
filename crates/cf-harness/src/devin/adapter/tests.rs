@@ -623,6 +623,63 @@ fn the_live_tests_read_a_paste_taken_from_the_store_as_the_engine_does() {
     );
 }
 
+/// What a start asks of a paste on its way whose record does not show it, with no window
+/// open (T-280: a restart gave back a paste Devin held queued, and it went in twice):
+/// whether the TUI took it, by a history row of the session that begins with the
+/// message's marker, its space kept, written since the attempt began. No other harness
+/// keeps such a word, and a store that cannot be read cannot tell.
+#[test]
+fn a_start_reads_whether_the_tui_took_a_paste_from_the_store_with_no_window_open() {
+    use cf_proto::agents::Harness;
+    let store = Store::new(&[]);
+    let marker = "[ConsensFlow m-9 ";
+    let took =
+        |harness, session, at_ms| crate::records::took(harness, session, marker, at_ms, &store.env);
+    assert_eq!(took(Harness::Devin, "mild-coin", EPOCH_MS), Some(false));
+    store.submit(
+        "mild-coin",
+        "[ConsensFlow m-90 \u{b7} note]\nother",
+        EPOCH_MS,
+    );
+    store.submit(
+        "calm-reef",
+        "[ConsensFlow m-9 \u{b7} note]\nRun this.",
+        EPOCH_MS,
+    );
+    assert_eq!(
+        took(Harness::Devin, "mild-coin", EPOCH_MS),
+        Some(false),
+        "another message's row, and this one's in another session"
+    );
+    store.submit(
+        "mild-coin",
+        "[ConsensFlow m-9 \u{b7} note]\nRun this.",
+        EPOCH_MS,
+    );
+    assert_eq!(took(Harness::Devin, "mild-coin", EPOCH_MS), Some(true));
+    assert_eq!(
+        took(Harness::Devin, "mild-coin", EPOCH_MS + 5 * MINUTE_MS),
+        Some(false),
+        "an earlier attempt's row is no word of this one"
+    );
+    for harness in [
+        Harness::Claude,
+        Harness::Codex,
+        Harness::Pi,
+        Harness::Opencode,
+    ] {
+        assert_eq!(took(harness, "mild-coin", EPOCH_MS), None);
+    }
+    let missing = Env::from_vars([
+        ("XDG_DATA_HOME", "/nowhere/at/all"),
+        ("APPDATA", "/nowhere/at/all"),
+    ]);
+    assert_eq!(
+        crate::records::took(Harness::Devin, "mild-coin", marker, EPOCH_MS, &missing),
+        None
+    );
+}
+
 /// T-102 (Devin 3000.11.92, probed live): a paste at rest shows in the store at once, a
 /// message of the user's the agent has not answered, which the record reads at rest until
 /// the agent's first word; and the wire says nothing of the turn before then. The window

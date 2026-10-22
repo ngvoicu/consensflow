@@ -124,5 +124,17 @@ pub fn transcript_length(
     .transpose()
 }
 
+/// Whether `harness`'s own store says, with no window open, that the window of
+/// `session` took a paste that begins with `pasted`, handed over at `at_ms` or later:
+/// none where it cannot tell. Devin's says, by its history row of what its TUI
+/// submitted (`devin::history`); no other harness keeps such a word apart from its
+/// record.
+pub fn took(harness: Harness, session: &str, pasted: &str, at_ms: i64, env: &Env) -> Option<bool> {
+    match harness {
+        Harness::Devin => devin::took(env, session, pasted, at_ms),
+        Harness::Claude | Harness::Codex | Harness::Pi | Harness::Opencode => None,
+    }
+}
+
 #[cfg(test)]
 mod tests;

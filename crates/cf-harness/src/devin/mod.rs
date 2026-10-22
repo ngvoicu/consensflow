@@ -16,6 +16,7 @@ mod wire_log;
 // For the live tests' `tooling` alone, which ships with nothing.
 #[cfg(any(test, feature = "test-support"))]
 pub(crate) use adapter::{store_took, window_on, wire_readiness};
+pub(crate) use history::took;
 #[cfg(any(test, feature = "test-support"))]
 pub(crate) use install::added_hooks;
 pub(crate) use install::{minimum_version, supported_version};

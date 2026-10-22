@@ -483,6 +483,21 @@ pub trait Records {
         Box::pin(async { Ok(None) })
     }
 
+    /// Whether `harness`'s own store says, with no window open, that the window of
+    /// `session` took a paste that begins with `pasted`, handed over at `at_ms` or
+    /// later, though its record may not show it yet (Devin holds a paste queued behind
+    /// a turn, and writes it to the record when the turn takes it in): none where the
+    /// harness keeps no such word, as all but Devin.
+    fn took<'a>(
+        &'a self,
+        _harness: Harness,
+        _session: &'a str,
+        _pasted: &'a str,
+        _at_ms: i64,
+    ) -> Work<'a, Option<bool>> {
+        Box::pin(async { None })
+    }
+
     /// Whether `harness`'s record of `session`, read with no window open, ends in
     /// a turn with no end (the turn the app's quit cut, or a Close): yes, or no
     /// where it ends at rest, and none where the record cannot tell. Devin's

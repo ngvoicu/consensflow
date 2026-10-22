@@ -30,6 +30,9 @@ harness-devin = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "dev
 live-devin-resume-back = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_devin_resume", "back::tests::"]
 ledger-pasted-into = ["cargo", "test", "--offline", "-p", "cf-ledger", "--features", "test-support", "--test", "pasted_into"]
 engine-paste-shapes = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "paste_shapes::"]
+# The rig: a result Devin's chief held queued, the human's /new and the app's quit, and
+# the start after it (`a_paste_devin_held_pasted_again_after_a_switch_and_a_restart`).
+rig-paste-held = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_paste_devin_held_pasted_again_after_a_switch_and_a_restart::"]
 
 # 1. Devin's store: the TUI took the paste, or holds it queued.
 
@@ -296,8 +299,8 @@ runs = ["engine-slow-records"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/in_flight.rs"
-find = "        let arrived = self.arrived(message, pasted.as_deref()).await?;"
-replace = "        let arrived = self.arrived(message, None).await?;\n        let _ = pasted;"
+find = "        let receipt = match self.arrived(message, pasted.as_deref()).await? {"
+replace = "        let receipt = match self.arrived(message, None).await? {"
 
 [[plant]]
 name = "devin arrival: a paste into an open window leaves the ledger no word of its conversation"
@@ -307,7 +310,7 @@ runs = ["engine-slow-records"]
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
 find = "                .paste_into(message.id, conversation.id)?;"
-replace = "                .paste_into(message.id, -conversation.id)?;"
+replace = "                .paste_into(-message.id, conversation.id)?;"
 
 [[plant]]
 name = "devin arrival: the conversation a paste went into is kept after it settles"
@@ -329,3 +332,66 @@ file = "crates/cf-ledger/src/messages/delivery.rs"
 find = "            \"UPDATE message SET state = 'delivering', attempts = attempts + 1, reason = NULL\n         WHERE id = ?\","
 replace = "            \"UPDATE message SET state = 'delivering', attempts = attempts + 1, reason = NULL,\n           pasted_into = (SELECT id FROM conversation WHERE participant_id = message.recipient_id AND ended_at IS NULL)\n         WHERE id = ?\","
 
+# 5. Round 4 (Calliope's look at round 3, T-275): a start reads Devin's store, with no
+# window open, for its word that the TUI took a paste its record does not show yet
+# (`Records::took`, `in_flight`'s `took_with_no_window`), since the attempt began.
+
+[[plant]]
+name = "devin arrival: a start gives back a paste whose store says its TUI took it"
+meant = "a_restart_delivers_a_paste_its_harness_took_though_the_conversation_it_went_into_does_not_show_it_yet"
+runs = ["engine-slow-records"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/in_flight.rs"
+find = "                .then(|| json!({ \"took\": true })),"
+replace = "                .then(|| json!({ \"took\": true })).filter(|_| false),"
+
+[[plant]]
+name = "devin arrival: a start asks the store of the conversation the window shows now, not the one the paste went into"
+meant = "a_restart_delivers_a_paste_its_harness_took_though_the_conversation_it_went_into_does_not_show_it_yet"
+runs = ["engine-slow-records"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/in_flight.rs"
+find = "        let session = pasted.unwrap_or(&current);"
+replace = "        let session = current.as_str();"
+
+[[plant]]
+name = "devin arrival: a start takes a history row an earlier attempt left for the TUI's word"
+meant = "a_start_reads_whether_the_tui_took_a_paste_from_the_store_with_no_window_open"
+runs = ["harness-devin"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/devin/history.rs"
+find = "    let pasted = (!pasted.is_empty()).then(|| (pasted.to_owned(), from_second(at_ms)))?;"
+replace = "    let pasted = (!pasted.is_empty()).then(|| (pasted.to_owned(), 0))?;"
+
+[[plant]]
+name = "devin arrival: the attempt on its way says the second the first attempt began"
+meant = "a_message_on_its_way_says_the_second_its_attempt_began"
+runs = ["ledger-pasted-into"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = "              ORDER BY e.id DESC LIMIT 1\","
+replace = "              ORDER BY e.id LIMIT 1\","
+
+[[plant]]
+name = "devin arrival: the daemon's records never pass on the store's word that the TUI took a paste"
+meant = "a_result_devin_held_queued_in_the_conversation_left_goes_into_a_devin_chief_once"
+runs = ["rig-paste-held"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/seams/boundary.rs"
+find = "            .arrival(self.records.took(harness, session, pasted, at_ms))"
+replace = "            .arrival(self.records.took(harness, session, &pasted[pasted.len()..], at_ms))"
+
+[[plant]]
+name = "devin arrival: a start on the rig settles what was on its way by the conversation the window shows now"
+meant = "a_result_the_conversation_left_ran_while_the_app_was_down_goes_into_a_devin_chief_once"
+runs = ["rig-paste-held"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/in_flight.rs"
+find = "        let pasted = self.seams.ledger.borrow().pasted_into(message.id)?;"
+replace = "        let pasted: Option<String> = None;"

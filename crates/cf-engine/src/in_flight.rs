@@ -9,7 +9,15 @@
 //! Sent again, that paste was read twice when the conversation went on (found on
 //! 2026-10-16, after the field reports of the day before: windows that closed in the
 //! middle of their tasks, and a result a chief read twice). What the record does not
-//! show goes back to its queue, as it always did.
+//! show goes back to its queue, as it always did, unless, at a start, the harness's own
+//! store says its window took it: Devin holds a paste queued behind a turn, and writes
+//! it to its record only when the turn takes it in, so a paste it took and its record
+//! does not show yet is delivered, as the Stop's kept paste is (T-280: given back, it
+//! went into the conversation twice). Devin's word is that its TUI took the paste, not
+//! that it holds it still: one its window lost as it ended, before the turn took it in,
+//! is never pasted again. A harness that keeps no such word (all but Devin) cannot tell
+//! a paste it holds queued from one it never had, and what its record does not show at
+//! the start goes back to its queue, pasted again where it held it.
 //!
 //! And the turn a participant's record ends in, read the same way: whether the quit
 //! or a Close cut it.
@@ -62,11 +70,19 @@ impl Dispatcher {
     /// reads) is left as it is.
     async fn settle_one_in_flight(&self, message: &MessageView) -> Result<(), EngineError> {
         let pasted = self.seams.ledger.borrow().pasted_into(message.id)?;
-        let arrived = self.arrived(message, pasted.as_deref()).await?;
+        let receipt = match self.arrived(message, pasted.as_deref()).await? {
+            Some(item) => Some(json!({ "item": item })),
+            // One its harness took and holds queued, which its record shows only when the
+            // turn ahead of it takes it in (T-280).
+            None => self
+                .took_with_no_window(message, pasted.as_deref())
+                .await?
+                .then(|| json!({ "took": true })),
+        };
         let Some(message) = self.still_delivering(message.id)? else {
             return Ok(());
         };
-        match arrived {
+        match receipt {
             None => {
                 self.seams.ledger.borrow_mut().retry_delivery(
                     message.id,
@@ -74,11 +90,37 @@ impl Dispatcher {
                     true,
                 )?;
             }
-            Some(item) => {
-                self.confirm_delivered(&message, &json!({ "item": item }))?;
+            Some(receipt) => {
+                self.confirm_delivered(&message, &receipt)?;
             }
         }
         Ok(())
+    }
+
+    /// Whether the harness of `message`'s recipient says, with no window open, that its
+    /// window took the paste in the conversation it went into (`pasted`, else the
+    /// participant's current one) since this attempt began ([`Records::took`]): no
+    /// where it cannot tell.
+    ///
+    /// [`Records::took`]: cf_harness::contract::Records::took
+    async fn took_with_no_window(
+        &self,
+        message: &MessageView,
+        pasted: Option<&str>,
+    ) -> Result<bool, EngineError> {
+        let Some((harness, current)) = self.readable(message.recipient_id)? else {
+            return Ok(false);
+        };
+        let Some(begun) = self.seams.ledger.borrow().delivery_begun_ms(message.id)? else {
+            return Ok(false);
+        };
+        let session = pasted.unwrap_or(&current);
+        let took = self
+            .seams
+            .records
+            .took(harness, session, &marker_of(message.id), begun)
+            .await;
+        Ok(took == Some(true))
     }
 
     /// The paste `delivering` was on its way into a window that went: its program

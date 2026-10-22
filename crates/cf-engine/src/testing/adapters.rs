@@ -150,4 +150,21 @@ impl Records for FakeRecords {
             cut
         })
     }
+
+    /// What the store of `session` says its window took (`FakeAgent::stored`), and
+    /// none where the test gave it none. Asked where Node's dispatcher asked nothing,
+    /// so it is no call of the adapter in a trace.
+    fn took<'a>(
+        &'a self,
+        harness: Harness,
+        session: &'a str,
+        pasted: &'a str,
+        _at_ms: i64,
+    ) -> Work<'a, Option<bool>> {
+        let took = self
+            .adapters
+            .fake(harness.kind())
+            .and_then(|fake| fake.took_of(session, pasted));
+        Box::pin(async move { took })
+    }
 }

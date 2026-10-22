@@ -601,15 +601,11 @@ runs = ["engine-role-change"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/in_flight.rs"
-find = '''                self.confirm_delivered(&message, &json!({ "item": item }))?;
-            }
-'''
+find = '''                self.confirm_delivered(&message, &receipt)?;'''
 replace = '''                self.seams
                     .ledger
                     .borrow_mut()
-                    .confirm_delivery(message.id, Some(&json!({ "item": item })))?;
-            }
-'''
+                    .confirm_delivery(message.id, Some(&receipt))?;'''
 
 [[plant]]
 name = "codex role: every message that comes into the window is taken for a role told"

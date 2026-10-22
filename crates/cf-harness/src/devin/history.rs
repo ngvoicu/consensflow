@@ -50,7 +50,7 @@ impl History {
     /// window before.
     pub(super) fn expect(&self, text: &str, at_ms: i64) {
         let text = js::trim(text).to_owned();
-        *self.pasted.borrow_mut() = (!text.is_empty()).then(|| (text, at_ms.div_euclid(1000) - 1));
+        *self.pasted.borrow_mut() = (!text.is_empty()).then(|| (text, from_second(at_ms)));
         let seen = self.seen.get();
         self.seen.set(Seen {
             took: false,
@@ -73,6 +73,23 @@ impl History {
             Err(_) => self.seen.get(),
         }
     }
+}
+
+/// The second from which a history row of a paste handed over at `at_ms` is its own
+/// ([`History::expect`]).
+fn from_second(at_ms: i64) -> i64 {
+    at_ms.div_euclid(1000) - 1
+}
+
+/// Whether Devin's store of `env`, read with no window open, has a history row of
+/// `session` that begins with `pasted` as given (a message's marker, its last space
+/// kept), written since `at_ms`: the TUI took it. None where the store cannot be read,
+/// or `pasted` is empty. What a start asks of a paste whose record does not show it. An
+/// older Devin writes the row only as the turn takes the paste in, when its record
+/// shows it too.
+pub(crate) fn took(env: &Env, session: &str, pasted: &str, at_ms: i64) -> Option<bool> {
+    let pasted = (!pasted.is_empty()).then(|| (pasted.to_owned(), from_second(at_ms)))?;
+    read(env, session, Some(&pasted)).ok().map(|seen| seen.took)
 }
 
 /// What Devin's store of `env` says of `session`: how many history rows it has, and
