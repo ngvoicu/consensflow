@@ -56,6 +56,8 @@ viewer-ledger-long = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test",
 viewer-ledger-wake-ups = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "wake_ups", "moved::"]
 viewer-ledger-held-apart = ["cargo", "test", "--offline", "-p", "cf-ledger", "--features", "test-support", "--lib", "testing::compaction"]
 viewer-ledger-plan = ["cargo", "test", "--offline", "-p", "cf-ledger", "--lib", "conversations::history::"]
+# The by-hand test of a long history, which cargo test ignores unless asked.
+viewer-ledger-long-page = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "whole_history", "--", "--ignored", "a_page_of_a_long_history"]
 viewer-base-time = ["cargo", "test", "--offline", "-p", "cf-base", "--lib", "time::"]
 viewer-engine-restart = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "restart::"]
 viewer-engine-text = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "text"]
@@ -1083,6 +1085,46 @@ runs = ["viewer-daemon-page"]
 file = "crates/cf-ledger/src/conversations/history.rs"
 find = '''    opening.opening = opening_of(&store.db, c"message", c"body", id, MESSAGE_OPENING)?;'''
 replace = '''    opening.opening = store.db.query_row("SELECT substr(body, 1, 4096) FROM message WHERE id = ?", [id], |row| row.get(0))?;'''
+
+[[plant]]
+name = "session viewer: an opening is cut by substr, which loads the whole body, beside the counts of pages"
+meant = "a_read_takes_as_many_pages_beside_32_mib_ids_roles_names_and_bodies_as_beside_short_ones"
+runs = ["viewer-ledger-history"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/history.rs"
+find = '''    opening.opening = opening_of(&store.db, c"message", c"body", id, MESSAGE_OPENING)?;'''
+replace = '''    opening.opening = store.db.query_row("SELECT substr(body, 1, 4096) FROM message WHERE id = ?", [id], |row| row.get(0))?;'''
+
+[[plant]]
+name = "session viewer: an opening is cut by substr, which loads the whole body, beside the counts of a migrated ledger"
+meant = "a_migrated_ledger_s_reads_take_as_many_pages_beside_32_mib_ids_roles_names_and_bodies"
+runs = ["viewer-ledger-history"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/history.rs"
+find = '''    opening.opening = opening_of(&store.db, c"message", c"body", id, MESSAGE_OPENING)?;'''
+replace = '''    opening.opening = store.db.query_row("SELECT substr(body, 1, 4096) FROM message WHERE id = ?", [id], |row| row.get(0))?;'''
+
+[[plant]]
+name = "session viewer: history.part takes when an item was copied from its row, past the whole of its text"
+meant = "reading_a_24_mib_item_whole_a_part_at_a_time_reads_each_part_alone"
+runs = ["viewer-ledger-history"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/history.rs"
+find = '''const PART_HEAD: &str = "SELECT h.parts, h.revision FROM transcript_head h'''
+replace = '''const PART_HEAD: &str = "SELECT h.parts, h.revision + (SELECT length(t.copied_at) * 0 FROM transcript t WHERE t.rowid = h.item) FROM transcript_head h'''
+
+[[plant]]
+name = "session viewer: a read is bounded at a sixty-fourth of what it may go through"
+meant = "a_page_of_a_long_history_takes_what_a_page_takes"
+runs = ["viewer-ledger-long-page"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/history.rs"
+find = "        if moved && self.charged() + more > self.scan {"
+replace = "        if moved && self.charged() + more > self.scan / 64 {"
 
 [[plant]]
 name = "session viewer: a message's opening keeps a character it cut short"

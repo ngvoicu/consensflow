@@ -986,6 +986,11 @@ fn a_page_that_shows_a_24_mib_item_reads_what_one_that_shows_an_item_of_two_part
     ledger.limit_value_length(LOADED_AT_MOST).expect("held");
     let long = page_cost(&ledger, project, HistoryFrom::Newest);
     let two = page_cost(&ledger, project, two_parts);
+    // The long page takes 47 pages, the two-part page 49: it is the dearer by
+    // construction (its conversation is ended, so its heading reads what
+    // ended it from the log, and the read probes for an older conversation and
+    // finds none: 274 steps against 222). So the bound leaves the long page 4
+    // pages over the 47 it takes, the 2 the other is dearer by and SLACK.
     assert!(
         long <= two + SLACK,
         "a page of the 24 MiB item took {long} pages, of the two parts' {two}: a walk of its text is {}",

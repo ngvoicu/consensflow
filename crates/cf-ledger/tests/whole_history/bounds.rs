@@ -343,16 +343,28 @@ fn a_page_of_a_long_history_takes_what_a_page_takes() {
         );
         read
     };
+    // A read that fills its page is not cut short by what it may go through:
+    // that is a charge that grew, or a bound that fell, where the page was
+    // held to what it takes.
+    let fills = |what: &str, read: &HistoryRead| {
+        assert!(
+            !read.bounded,
+            "{what} stopped at what a read may go through"
+        );
+    };
     let first = time(
         "newest, tools off",
         ask(HistoryFrom::Newest, None, false, ROOM),
     );
-    time(
+    fills("newest, tools off", &first);
+    let tools = time(
         "newest, tools on",
         ask(HistoryFrom::Newest, None, true, ROOM),
     );
+    fills("newest, tools on", &tools);
     let middle = first.resume.expect("more");
-    time("older", ask(HistoryFrom::Before(middle), None, false, ROOM));
+    let older = time("older", ask(HistoryFrom::Before(middle), None, false, ROOM));
+    fills("older", &older);
     // The words of the 50,000 items, searched from before the 24 MiB one.
     let before_long = HistoryFrom::Before(first.entries[0].key());
     time(
@@ -381,10 +393,11 @@ fn a_page_of_a_long_history_takes_what_a_page_takes() {
         row: 0,
         part: 0,
     };
-    time(
+    let headings = time(
         "a page of the 10,000 conversations of tools' outputs, headings alone",
         ask(HistoryFrom::Before(oldest_big), None, false, ROOM),
     );
+    fills("headings alone", &headings);
     let long_row = first.entries[0].key().row;
     let started = Instant::now();
     let last = ledger
