@@ -7,8 +7,31 @@ use std::os::unix::ffi::OsStrExt;
 use std::path::{Component, Path};
 use std::process::Command;
 
-fn plist_value(app: &Path, field: &str) -> Result<String, String> {
-    let output = Command::new("/usr/bin/plutil")
+/// The system's programs a bundle is read and verified with: `plutil` and `codesign`.
+pub(crate) struct Tools<'a> {
+    pub(crate) plutil: &'a Path,
+    pub(crate) codesign: &'a Path,
+}
+
+impl Tools<'static> {
+    pub(crate) fn system() -> Self {
+        Self {
+            plutil: Path::new("/usr/bin/plutil"),
+            codesign: Path::new("/usr/bin/codesign"),
+        }
+    }
+}
+
+/// The command that runs `program`, one of the [`Tools`]. It is started while
+/// the app's other threads open sockets and pipes, and holds none of them.
+fn tool(program: &Path) -> Command {
+    let mut command = Command::new(program);
+    cf_process::hold_only_the_streams(&mut command);
+    command
+}
+
+pub(crate) fn plist_value(tools: &Tools, app: &Path, field: &str) -> Result<String, String> {
+    let output = tool(tools.plutil)
         .args(["-extract", field, "raw", "-o", "-"])
         .arg(app.join("Contents/Info.plist"))
         .output()
@@ -28,10 +51,10 @@ fn plist_value(app: &Path, field: &str) -> Result<String, String> {
 /// before this one did, and an app of any of them takes a bundle that ships
 /// none by this same check. `cli/package.json` is not read either: the plist
 /// names the version.
-fn validate_bundle(app: &Path, version: &str) -> Result<(), String> {
-    if plist_value(app, "CFBundleIdentifier")? != "dev.ngvoicu.consensflow"
-        || plist_value(app, "CFBundleShortVersionString")? != version
-        || plist_value(app, "CFBundleVersion")? != version
+fn validate_bundle(tools: &Tools, app: &Path, version: &str) -> Result<(), String> {
+    if plist_value(tools, app, "CFBundleIdentifier")? != "dev.ngvoicu.consensflow"
+        || plist_value(tools, app, "CFBundleShortVersionString")? != version
+        || plist_value(tools, app, "CFBundleVersion")? != version
     {
         return Err(
             "The archive's app identity or version does not match the offered release".into(),
@@ -40,7 +63,7 @@ fn validate_bundle(app: &Path, version: &str) -> Result<(), String> {
     if !app.join("Contents/Resources/cli/bin/cf").is_file() {
         return Err("The archive must include cf, the command a window runs".into());
     }
-    let signature = Command::new("/usr/bin/codesign")
+    let signature = tool(tools.codesign)
         .args(["--verify", "--deep", "--strict"])
         .arg(app)
         .output()
@@ -65,19 +88,21 @@ pub(crate) fn install_archive(
     version: &str,
     directory: &Path,
 ) -> Result<(), String> {
+    let tools = Tools::system();
     if app.extension().and_then(|s| s.to_str()) != Some("app")
         || fs::symlink_metadata(app)
             .map_err(|e| e.to_string())?
             .file_type()
             .is_symlink()
-        || plist_value(app, "CFBundleIdentifier")? != "dev.ngvoicu.consensflow"
+        || plist_value(&tools, app, "CFBundleIdentifier")? != "dev.ngvoicu.consensflow"
     {
         return Err(
             "Install a packaged ConsensFlow app in a writable folder before updating".into(),
         );
     }
-    let installed = semver::Version::parse(&plist_value(app, "CFBundleShortVersionString")?)
-        .map_err(|e| e.to_string())?;
+    let installed =
+        semver::Version::parse(&plist_value(&tools, app, "CFBundleShortVersionString")?)
+            .map_err(|e| e.to_string())?;
     if semver::Version::parse(version).map_err(|e| e.to_string())? <= installed {
         return Err("The update must be newer than the installed app".into());
     }
@@ -105,7 +130,7 @@ pub(crate) fn install_archive(
         }
     }
     let candidate = staging.path().join("ConsensFlow.app");
-    validate_bundle(&candidate, version)?;
+    validate_bundle(&tools, &candidate, version)?;
     let old = CString::new(app.as_os_str().as_bytes()).map_err(|e| e.to_string())?;
     let new = CString::new(candidate.as_os_str().as_bytes()).map_err(|e| e.to_string())?;
     // RENAME_SWAP is atomic on the same filesystem; cross-volume installs
@@ -264,7 +289,7 @@ mod tests {
             install_fixture(&app, &archive(&next), "3.0.0-alpha.36")
                 .unwrap_or_else(|error| panic!("{installed}: {error}"));
             assert_eq!(
-                plist_value(&app, "CFBundleShortVersionString").unwrap(),
+                plist_value(&Tools::system(), &app, "CFBundleShortVersionString").unwrap(),
                 "3.0.0-alpha.36",
                 "{installed}"
             );
@@ -320,7 +345,7 @@ mod tests {
         let error = install_fixture(&app, &archive(&next), "3.0.0-alpha.36").unwrap_err();
         assert!(error.contains("identity or version"), "{error}");
         assert_eq!(
-            plist_value(&app, "CFBundleShortVersionString").unwrap(),
+            plist_value(&Tools::system(), &app, "CFBundleShortVersionString").unwrap(),
             "3.0.0-alpha.35"
         );
     }
@@ -350,9 +375,71 @@ mod tests {
         let error = install_fixture(&app, &archive(&next), "3.0.0-alpha.36").unwrap_err();
         assert!(error.contains("must include cf"), "{error}");
         assert_eq!(
-            plist_value(&app, "CFBundleShortVersionString").unwrap(),
+            plist_value(&Tools::system(), &app, "CFBundleShortVersionString").unwrap(),
             "3.0.0-alpha.35"
         );
+    }
+
+    /// A program written a moment ago is started: a program started on another
+    /// thread meanwhile can hold it open for writing, and such a start is
+    /// refused, and tried again.
+    fn retried<T>(mut check: impl FnMut() -> Result<T, String>) -> Result<T, String> {
+        for _ in 0..50 {
+            match check() {
+                Err(refused) if refused.contains("Text file busy") => {
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                }
+                checked => return checked,
+            }
+        }
+        check()
+    }
+
+    /// The bundle is read and verified while the app's other threads open
+    /// sockets and pipes: stand-ins for `plutil` and `codesign` say, each time
+    /// they run, whether they hold a descriptor that was left open and not
+    /// close-on-exec as they started.
+    #[test]
+    fn the_programs_an_update_is_checked_with_hold_nothing_of_the_apps_but_their_streams() {
+        use std::os::fd::AsRawFd;
+        use std::os::unix::fs::PermissionsExt;
+
+        let folder = tempfile::tempdir().unwrap();
+        let said = folder.path().join("said");
+        let stray = fs::File::open("/dev/null").unwrap();
+        let fd = stray.as_raw_fd();
+        // SAFETY: `fcntl` is asked to clear the flags of a descriptor this test holds.
+        assert_eq!(unsafe { libc::fcntl(fd, libc::F_SETFD, 0) }, 0);
+        let stand_in = |name: &str, answer: &str| {
+            let program = folder.path().join(name);
+            fs::write(
+                &program,
+                format!(
+                    "#!/bin/sh\nif [ -e /dev/fd/{fd} ]; then held=held; else held=clear; fi\necho \"{name} $held\" >> '{}'\n{answer}\n",
+                    said.display()
+                ),
+            )
+            .unwrap();
+            fs::set_permissions(&program, fs::Permissions::from_mode(0o755)).unwrap();
+            program
+        };
+        let plutil = stand_in(
+            "plutil",
+            r#"case "$2" in CFBundleIdentifier) echo dev.ngvoicu.consensflow;; *) echo 3.0.6;; esac"#,
+        );
+        let codesign = stand_in("codesign", "true");
+        let app = folder.path().join("ConsensFlow.app");
+        fs::create_dir_all(app.join("Contents/Resources/cli/bin")).unwrap();
+        fs::write(app.join("Contents/Resources/cli/bin/cf"), "").unwrap();
+        let tools = Tools {
+            plutil: &plutil,
+            codesign: &codesign,
+        };
+        retried(|| validate_bundle(&tools, &app, "3.0.6")).unwrap();
+        let said = fs::read_to_string(&said).unwrap();
+        assert!(said.contains("plutil clear\n"), "{said}");
+        assert!(said.contains("codesign clear\n"), "{said}");
+        assert!(!said.contains("held"), "{said}");
     }
 
     /// The bundle's seal covers every file of it: `cf` changed after the
@@ -367,7 +454,7 @@ mod tests {
         let error = install_fixture(&app, &archive(&next), "3.0.0-alpha.36").unwrap_err();
         assert!(error.contains("code-signature"), "{error}");
         assert_eq!(
-            plist_value(&app, "CFBundleShortVersionString").unwrap(),
+            plist_value(&Tools::system(), &app, "CFBundleShortVersionString").unwrap(),
             "3.0.0-alpha.35"
         );
     }

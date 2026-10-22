@@ -476,6 +476,7 @@ name = "cf-e2e"
 version = "3.0.6-alpha.1"
 dependencies = [
  "cf-e2e",
+ "cf-process",
  "jiff",
  "nix",
  "regex",

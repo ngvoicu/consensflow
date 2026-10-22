@@ -314,8 +314,11 @@ pub async fn update_install<R: Runtime>(app: AppHandle<R>) -> Value {
         match installed {
             Ok(Ok(_permit)) => {
                 // Admission stays closed through restart. The daemon has exited;
-                // a stalled bridge drain cannot keep the old process alive.
-                app.restart();
+                // a stalled bridge drain cannot keep the old process alive. The app
+                // installed is started as this one ends (not by Tauri's restart, which
+                // would leave it what this one has open).
+                crate::relaunch::ask(&app);
+                publish(&app)
             }
             Ok(Err(error)) => command_error(&app, error),
             Err(error) => {

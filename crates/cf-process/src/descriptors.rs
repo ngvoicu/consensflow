@@ -13,25 +13,32 @@
 //! Where that is in the product is the app, which runs many threads: the pane host's make the
 //! windows' terminals, and the main thread starts the daemon, which runs as long as the app
 //! does and would hold a window's terminal past its close. The daemon's start (the app's
-//! daemon command) is where this matters, and the login shell the app asks for its PATH
-//! beside it, for a login file may start a program that runs on. The daemon and the Codex
-//! supervisor start their programs on the one thread that opens their sockets and pipes, so
-//! no start of theirs falls between the two calls today; every program is started so all the
-//! same, for a second thread there would open the window with nothing to say so, and the app
-//! may start programs through this crate.
+//! daemon command) is where this matters, and the app's other starts beside it: the login
+//! shell it asks for its PATH (a login file may start a program that runs on), the tools an
+//! update is checked with, the app an update installed, started as this one ends (it would
+//! hold what this one had for as long as the human keeps it open; Tauri's own restart starts
+//! it bare), and the page a release is downloaded from. The daemon and the Codex supervisor
+//! start their programs on the one thread that opens their sockets and pipes, so no start of
+//! theirs falls between the two calls today; every program is started so all the same, for a
+//! second thread there would open the window with nothing to say so, and the app may start
+//! programs through this crate. So are the test rig's, whose cases run side by side.
 //!
 //! So a program, in the moment between its start and its exec, closes every descriptor it
 //! holds above the standard streams that is not close-on-exec: the copy it was left, which
 //! whatever this process does to its own after is no matter to. (The close-on-exec ones are
-//! left to the exec, as std's own pipe that tells the start's failure must be.) The system
-//! lists them; a process with more than one listing holds has the rest asked for one by one,
-//! as far as its table goes, which the system says too. Not as far as its limit on
-//! descriptors: that is lowered as easily below one that is open as above it, the hard limit
-//! too. That is done in the new process, which is why it is started by fork and exec (std
-//! does, for a program that has something to run first). macOS offers
-//! `POSIX_SPAWN_CLOEXEC_DEFAULT` to the same end, through no call std makes: a start of this
-//! crate's own by `posix_spawn` would be a process outside tokio's, its wait, its streams and
-//! its end when dropped written again, at every place a program starts.
+//! left to the exec, as std's own pipe that tells the start's failure must be.) That is done
+//! in the new process, which is why it is started by fork and exec (std does, for a program
+//! that has something to run first). macOS offers `POSIX_SPAWN_CLOEXEC_DEFAULT` to the same
+//! end, through no call std makes: a start of this crate's own by `posix_spawn` would be a
+//! process outside tokio's, its wait, its streams and its end when dropped written again, at
+//! every place a program starts.
+//!
+//! The system lists them; a process with more than one listing holds has the rest asked for
+//! one by one, as far as its table goes, which the system says too. Not as far as its limit on
+//! descriptors, nor the system's on any process (`kern.maxfilesperproc`): each is lowered as
+//! easily below one that is open as above it. A program whose start the system will not tell
+//! these (a sandbox that denies `process-info`) is not started: it fails with the system's
+//! word, `EPERM`, rather than run holding what it may.
 //!
 //! What this does not do is the moment before. A program started by fork holds every
 //! descriptor of this process, close-on-exec or not, from the fork to the exec; one started by
@@ -57,7 +64,8 @@ use std::process::Command;
 
 /// Makes `command` start its program with no descriptor of this process's above the
 /// standard streams. Every program this crate starts is so; a command built by hand asks for
-/// it (the app's daemon and its login shell, Codex's server and TUI).
+/// it (the app's daemon, its login shell, the tools of its updates, the app it starts again and
+/// its page opener; Codex's server and TUI; the rig's programs).
 pub fn hold_only_the_streams(command: &mut Command) {
     #[cfg(target_os = "macos")]
     macos::hold_only_the_streams(command);
@@ -79,40 +87,17 @@ mod macos {
     const LISTED: usize = 4096;
 
     pub(super) fn hold_only_the_streams(command: &mut Command) {
-        let ceiling = ceiling();
         // SAFETY: the closure runs in the new process, between fork and exec, where only
         // functions that are safe to call from a signal handler may be called, and it
         // makes only those: `getpid`, `proc_pidinfo` (a system call), `fcntl` and `close`.
-        // It allocates nothing and takes no lock; its listing is on the stack, and the one
-        // thing it is given, `ceiling`, is a number read here, before the fork.
+        // It allocates nothing and takes no lock; its listing is on the stack.
         #[allow(unsafe_code)]
         unsafe {
-            command.pre_exec(move || close_on_exec_all_above_the_streams(ceiling));
+            command.pre_exec(close_on_exec_all_above_the_streams);
         }
     }
 
-    /// The most descriptors the system lets a process have, `kern.maxfilesperproc`: none
-    /// it was given is above it. Read here, for `sysctlbyname` is not a call the new
-    /// process may make; none when the system will not say.
-    fn ceiling() -> Option<c_int> {
-        let mut most: c_int = 0;
-        let mut size = size_of::<c_int>();
-        // SAFETY: the name is a C string, and the answer's room is one `c_int`, which
-        // `size` says.
-        #[allow(unsafe_code)]
-        let answered = unsafe {
-            libc::sysctlbyname(
-                c"kern.maxfilesperproc".as_ptr(),
-                (&raw mut most).cast::<c_void>(),
-                &raw mut size,
-                std::ptr::null_mut(),
-                0,
-            )
-        };
-        (answered == 0 && most > 0).then_some(most)
-    }
-
-    fn close_on_exec_all_above_the_streams(ceiling: Option<c_int>) -> io::Result<()> {
+    fn close_on_exec_all_above_the_streams() -> io::Result<()> {
         let mut listing = [proc_fdinfo {
             proc_fd: 0,
             proc_fdtype: 0,
@@ -145,11 +130,11 @@ mod macos {
             // A listing that is full may have left some out, above the last it names.
             highest + 1
         };
-        // As far as the table goes. Not the limit on descriptors: it is lowered as easily
-        // below one that is open as above it, the hard one too. When neither the table
-        // nor the ceiling is known, the program is not started, rather than started holding
+        // As far as the table goes. Not the limit on descriptors, nor the system's on any
+        // process's: each is lowered as easily below one that is open as above it. When the
+        // table's size is not known, the program is not started, rather than started holding
         // what it may.
-        let end = table().or(ceiling).ok_or_else(io::Error::last_os_error)?;
+        let end = table().ok_or_else(io::Error::last_os_error)?;
         scan(first, end);
         Ok(())
     }

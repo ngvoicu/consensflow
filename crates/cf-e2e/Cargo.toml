@@ -83,6 +83,8 @@ path = "src/bin/smoke_paste_reader.rs"
 required-features = ["test-support"]
 
 [dependencies]
+# What a program the rig starts is left of its descriptors: its streams alone.
+cf-process.workspace = true
 # The time the stand-in agent writes in its records.
 jiff.workspace = true
 # The patterns the support and the stand-ins read text by.
@@ -115,6 +117,11 @@ url.workspace = true
 # macOS's `proc_pidinfo`, which says when a process began to the microsecond.
 [target.'cfg(unix)'.dependencies]
 nix = { workspace = true, features = ["process", "signal", "term"] }
+
+# A descriptor left open and not close-on-exec, for a test of what the programs a case starts
+# hold.
+[target.'cfg(unix)'.dev-dependencies]
+nix = { workspace = true, features = ["fs"] }
 
 # The console's raw mode for the stand-in agent, which std does not give; and a handle
 # to a process a live check ends, on which its creation time is read and through which

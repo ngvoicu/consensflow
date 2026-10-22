@@ -130,9 +130,9 @@ fn says_why_codexs_server_could_not_start_with_what_it_wrote_and_leaves_nothing_
 
 /// Codex's server and TUI run for as long as the window does. On macOS std makes a new socket
 /// or pipe close-on-exec in a second step, and a program started on another thread between the
-/// two holds it for good: a listener closed here would go on answering. Here a descriptor is
-/// left in that moment, far above the shell's own, while the server starts, and the server says
-/// whether it has it.
+/// two holds it for good: a listener closed here would go on answering. Here a descriptor of the
+/// test's own is left in that moment while the server starts, and the server says whether it
+/// has it. Its number is the one the system gives (the shell's own are its streams and 255).
 #[cfg(target_os = "macos")]
 #[test]
 fn codexs_programs_hold_nothing_of_the_windows_but_their_streams() {
@@ -140,18 +140,16 @@ fn codexs_programs_hold_nothing_of_the_windows_but_their_streams() {
 
     use nix::fcntl::{fcntl, FcntlArg, FdFlag};
 
-    const STRAY: i32 = 300;
     let home = Home::new();
-    let null = fs::File::open("/dev/null").unwrap();
-    let stray = nix::unistd::dup2(null.as_raw_fd(), STRAY).unwrap();
-    fcntl(stray, FcntlArg::F_SETFD(FdFlag::empty())).unwrap();
+    let stray = fs::File::open("/dev/null").unwrap();
+    fcntl(stray.as_raw_fd(), FcntlArg::F_SETFD(FdFlag::empty())).unwrap();
     let held = home.dir.path().join("held");
     let codex = home.codex(&format!(
-        "if [ -e /dev/fd/{STRAY} ]; then echo held; else echo clear; fi > '{}'\nexit 1",
+        "if [ -e /dev/fd/{} ]; then echo held; else echo clear; fi > '{}'\nexit 1",
+        stray.as_raw_fd(),
         held.display()
     ));
     let failed = home.supervise(codex, &[], Duration::from_secs(5));
-    nix::unistd::close(stray).unwrap();
     assert!(failed.is_err());
     assert_eq!(fs::read_to_string(&held).unwrap(), "clear\n");
 }

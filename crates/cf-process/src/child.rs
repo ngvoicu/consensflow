@@ -68,8 +68,6 @@ pub fn spawn(run: &Run, cwd: Option<&Path>, env: &Env, streams: Streams) -> Resu
         command.current_dir(cwd);
     }
     crate::execute::hide_window(&mut command);
-    #[cfg(test)]
-    let starting = crate::testing::starting();
     let mut process = command.spawn().map_err(|failed| {
         format!(
             "spawn {} {}",
@@ -77,8 +75,6 @@ pub fn spawn(run: &Run, cwd: Option<&Path>, env: &Env, streams: Streams) -> Resu
             error_code(&failed)
         )
     })?;
-    #[cfg(test)]
-    drop(starting);
     crate::job::adopt(&process);
     // Read and let go while the child lives, whoever waits on it: one that
     // fills its error stream would otherwise stop, as Node's never does.

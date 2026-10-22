@@ -3,9 +3,7 @@
 //! system whether each is still there, and whatever a failing test left
 //! running is ended as the test goes, since nothing else would.
 
-use std::cell::Cell;
 use std::path::Path;
-use std::sync::{PoisonError, RwLock, RwLockReadGuard};
 use std::time::{Duration, Instant};
 
 use crate::{alive, terminate, Ending};
@@ -93,29 +91,50 @@ impl Drop for Survivors {
     }
 }
 
-/// The starts of this crate's programs in its tests: each holds it shared from before its
-/// fork to after its exec, and a test that may have no program of another test in flight
-/// takes it whole ([`alone`]). A program being started by fork holds every descriptor of this
-/// process until its exec, and a pipe a test closed is not closed while it does.
-static STARTING: RwLock<()> = RwLock::new(());
-
-thread_local! {
-    /// Whether this thread holds [`STARTING`] whole: its own starts go ahead.
-    static ALONE: Cell<bool> = const { Cell::new(false) };
-}
-
-/// Held while a program of this crate's is started, in its tests.
-pub(crate) fn starting() -> Option<RwLockReadGuard<'static, ()>> {
-    (!ALONE.get()).then(|| STARTING.read().unwrap_or_else(PoisonError::into_inner))
-}
-
-/// Runs `test` once every program of the other tests that is being started has been, and
-/// with none started until it ends.
+/// Set in a process [`alone`] started: a test run otherwise does nothing.
 #[cfg(unix)]
-pub(crate) fn alone<T>(test: impl FnOnce() -> T) -> T {
-    let _whole = STARTING.write().unwrap_or_else(PoisonError::into_inner);
-    ALONE.set(true);
-    let ran = test();
-    ALONE.set(false);
-    ran
+const ALONE: &str = "CF_PROCESS_ALONE";
+
+/// Runs the test `name` of this binary in a process of its own, started by `through` (a program
+/// and its words, such as `sandbox-exec` and its profile, or none): a test that no program of
+/// another test may hold anything of, or that sets up its process as no other test beside it
+/// would survive. It is an ignored test that does nothing unless [`is_alone`].
+#[cfg(unix)]
+#[allow(clippy::disallowed_methods)] // This test binary, run again as libtest runs one.
+pub(crate) fn alone(through: &[&str], name: &str) {
+    let test = std::env::current_exe().unwrap();
+    let mut command = match through {
+        [] => std::process::Command::new(&test),
+        [program, words @ ..] => {
+            let mut command = std::process::Command::new(program);
+            command.args(words).arg(&test);
+            command
+        }
+    };
+    let ran = command
+        .args([
+            "--exact",
+            name,
+            "--ignored",
+            "--nocapture",
+            "--test-threads=1",
+        ])
+        .env(ALONE, "1")
+        .stdin(std::process::Stdio::null())
+        .output()
+        .unwrap();
+    let said = format!(
+        "{}{}",
+        String::from_utf8_lossy(&ran.stdout),
+        String::from_utf8_lossy(&ran.stderr)
+    );
+    assert!(ran.status.success(), "{said}");
+    assert!(said.contains("1 passed"), "the test did not run: {said}");
+}
+
+/// Whether this process is one [`alone`] started.
+#[cfg(unix)]
+#[allow(clippy::disallowed_methods)] // Libtest has no other word for it.
+pub(crate) fn is_alone() -> bool {
+    std::env::var_os(ALONE).is_some()
 }

@@ -167,41 +167,12 @@ const FAR: i32 = 5000;
 /// What a crowded process's limit on its descriptors is lowered to once they are open.
 const LOWERED: u64 = 256;
 
-/// Runs the test `name` of this binary in a process of its own, for it crowds its
-/// descriptor table and lowers its limits, which no other test beside it would survive.
-#[allow(clippy::disallowed_methods)] // This test binary, run again as libtest runs one.
-fn alone(name: &str) {
-    let ran = std::process::Command::new(std::env::current_exe().unwrap())
-        .args([
-            "--exact",
-            name,
-            "--ignored",
-            "--nocapture",
-            "--test-threads=1",
-        ])
-        .env(CROWDED, "1")
-        .stdin(Stdio::null())
-        .output()
-        .unwrap();
-    let said = format!(
-        "{}{}",
-        String::from_utf8_lossy(&ran.stdout),
-        String::from_utf8_lossy(&ran.stderr)
-    );
-    assert!(ran.status.success(), "{said}");
-    assert!(said.contains("1 passed"), "the test did not run: {said}");
-}
-
-/// Set for the tests that [`alone`] runs: run otherwise, they do nothing.
-const CROWDED: &str = "CF_PROCESS_CROWDED";
-
 /// Opens [`CROWD`] descriptors from [`CROWD_FROM`] and one at [`FAR`], none close-on-exec,
 /// lowers the limit on descriptors to [`LOWERED`] (the hard one too when `hard`), and
 /// starts a program that lists the descriptors it holds: it holds none of them.
-#[allow(clippy::disallowed_methods)] // Whether [`alone`] runs it: libtest has no other word for it.
 fn crowded(hard: bool) {
     use nix::sys::resource::{getrlimit, setrlimit, Resource};
-    if std::env::var_os(CROWDED).is_none() {
+    if !crate::testing::is_alone() {
         return;
     }
     let (_, most) = getrlimit(Resource::RLIMIT_NOFILE).unwrap();
@@ -254,12 +225,15 @@ fn crowded(hard: bool) {
 
 #[test]
 fn a_program_holds_none_of_a_crowd_of_descriptors_whatever_the_limit_was_lowered_to() {
-    alone("descriptors::tests::crowded_with_the_limit_lowered");
+    crate::testing::alone(&[], "descriptors::tests::crowded_with_the_limit_lowered");
 }
 
 #[test]
 fn a_program_holds_none_of_a_crowd_of_descriptors_whatever_the_hard_limit_was_lowered_to() {
-    alone("descriptors::tests::crowded_with_the_hard_limit_lowered");
+    crate::testing::alone(
+        &[],
+        "descriptors::tests::crowded_with_the_hard_limit_lowered",
+    );
 }
 
 #[test]
@@ -421,6 +395,41 @@ fn a_listener_closed_here_is_not_held_by_a_program_started_while_it_was_made() {
         Duration::from_millis(150),
     );
     assert_eq!(found.held, 0);
+}
+
+/// A sandbox in which the system will not say what this process holds: neither the listing of
+/// its descriptors nor the size of its table. (A shell does not start in it with nothing in its
+/// environment; `echo` does.)
+const UNLISTED: &str = "(version 1)(allow default)(deny process-info*)";
+
+/// A program whose start cannot tell which descriptors it was left, nor how far to look for
+/// them, is not started: started, it might hold any of them.
+#[test]
+fn a_program_is_not_started_when_the_system_will_not_say_what_it_was_left() {
+    crate::testing::alone(
+        &["/usr/bin/sandbox-exec", "-p", UNLISTED],
+        "descriptors::tests::unlisted",
+    );
+}
+
+#[test]
+#[ignore = "run alone, in a sandbox, by the test above it"]
+fn unlisted() {
+    if !crate::testing::is_alone() {
+        return;
+    }
+    let (_open, _) = Open::not_yet_close_on_exec();
+    let runtime = runtime();
+    let _entered = runtime.enter();
+    let echo = Run {
+        program: PathBuf::from("/bin/echo"),
+        args: vec![OsString::from("started")],
+        verbatim: false,
+    };
+    let refused = spawn(&echo, None, &system_env(), Streams::Lines)
+        .err()
+        .expect("the program was started");
+    assert_eq!(refused, "spawn /bin/echo EPERM");
 }
 
 /// What a start by fork and exec costs against one by `posix_spawn`, the way std starts a

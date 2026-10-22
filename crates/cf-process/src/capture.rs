@@ -94,8 +94,6 @@ pub async fn capture(
     }
     hide_window(&mut command);
     lead(&mut command);
-    #[cfg(test)]
-    let starting = crate::testing::starting();
     let mut child = command.spawn().map_err(|failed| {
         CaptureFailed::unstarted(format!(
             "spawn {} {}",
@@ -103,8 +101,6 @@ pub async fn capture(
             error_code(&failed)
         ))
     })?;
-    #[cfg(test)]
-    drop(starting);
     crate::job::adopt(&child);
     // Declared after the child, so it is dropped before it: a capture dropped
     // ends the group while its leader is not yet reaped.

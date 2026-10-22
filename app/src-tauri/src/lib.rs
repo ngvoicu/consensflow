@@ -22,6 +22,8 @@ mod launcher;
 // Only the Windows app reads a runtime from its own exe; tested everywhere.
 #[cfg_attr(not(windows), allow(dead_code))]
 mod portable;
+#[cfg(target_os = "macos")]
+mod relaunch;
 pub mod runtime;
 #[cfg(test)]
 mod test_manifest;
@@ -469,6 +471,8 @@ pub fn run() {
     app.run(|handle, event| {
         if matches!(event, RunEvent::Exit) {
             handle.state::<AppRuntime>().shutdown();
+            #[cfg(target_os = "macos")]
+            relaunch::if_asked();
         }
     });
 }

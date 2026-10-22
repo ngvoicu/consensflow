@@ -249,9 +249,24 @@ mod tests {
         );
     }
 
+    /// The pipe is closed here, and only here: a program another test starts as the pipe is
+    /// made holds its end, a moment if it is started by fork, for as long as it runs if it is
+    /// started by `posix_spawn`, and the `echo` answered then goes into a pipe that is still read
+    /// from. What is tested is the order here, not that moment: the test runs in a process of
+    /// its own, where no other test starts anything.
     #[cfg(unix)]
     #[test]
     fn a_program_out_of_time_that_writes_once_asked_dies_of_its_closed_stream() {
+        crate::testing::alone(&[], "execute::tests::the_closed_stream_alone");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[ignore = "run alone, by the test above it"]
+    fn the_closed_stream_alone() {
+        if !crate::testing::is_alone() {
+            return;
+        }
         // Probed on Node v26.8.1: the streams are closed before the program is
         // asked to end, so the trap's `echo` meets a closed pipe (SIGPIPE).
         let run = shell("trap 'echo bye; exit 0' TERM; echo hi; while true; do sleep 0.05; done");
@@ -259,15 +274,62 @@ mod tests {
             timeout: Duration::from_millis(300),
             max_buffer: 1024,
         };
-        // The pipe is closed here, and only here: a program another test is starting by fork
-        // holds every descriptor of this process until its exec, this pipe's ends among them,
-        // and an `echo` answered then goes into a pipe that is still read from. What is tested
-        // is the order here, not that moment: no program of another test is in flight while
-        // this one runs.
-        let failed = crate::testing::alone(|| run_now(&run, &system_env(), limits)).unwrap_err();
+        let failed = run_now(&run, &system_env(), limits).unwrap_err();
         assert!(failed.killed);
         assert_eq!(failed.code, None);
         assert_eq!(failed.stdout, "hi\n");
+    }
+
+    /// The test above, run fifty times while sixteen threads start `sleep 1` without end, as
+    /// std starts a program, through no start of this crate's: one that starts as a pipe of the
+    /// test's is being made holds its end for the second the `sleep` runs, and the `echo` goes
+    /// into it. Run by hand, and by the plant that runs the test beside the others:
+    /// `cargo test -p cf-process --lib -- --ignored whatever_other_tests_start`.
+    #[cfg(unix)]
+    #[test]
+    #[ignore = "a stress of programs started without end, around fifty runs of a test"]
+    #[allow(clippy::disallowed_methods)] // The starts are std's own, as another test's are.
+    fn a_program_out_of_time_dies_of_its_closed_stream_whatever_other_tests_start() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+
+        let stop = Arc::new(AtomicBool::new(false));
+        let starting: Vec<_> = (0..16)
+            .map(|_| {
+                let stop = Arc::clone(&stop);
+                std::thread::spawn(move || {
+                    let mut live = std::collections::VecDeque::new();
+                    while !stop.load(Ordering::Relaxed) {
+                        let mut sleep = std::process::Command::new("/bin/sleep");
+                        sleep
+                            .arg("1")
+                            .stdin(std::process::Stdio::null())
+                            .stdout(std::process::Stdio::null())
+                            .stderr(std::process::Stdio::null());
+                        live.push_back(sleep.spawn().unwrap());
+                        if live.len() >= 64 {
+                            live.pop_front().unwrap().wait().unwrap();
+                        }
+                    }
+                    for mut sleep in live {
+                        sleep.wait().unwrap();
+                    }
+                })
+            })
+            .collect();
+        let failed = (0..50)
+            .filter(|_| {
+                std::panic::catch_unwind(
+                    a_program_out_of_time_that_writes_once_asked_dies_of_its_closed_stream,
+                )
+                .is_err()
+            })
+            .count();
+        stop.store(true, Ordering::Relaxed);
+        for thread in starting {
+            thread.join().unwrap();
+        }
+        assert_eq!(failed, 0, "{failed} of 50 runs met an open pipe");
     }
 
     #[cfg(unix)]
