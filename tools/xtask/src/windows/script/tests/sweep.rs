@@ -17,8 +17,10 @@ fn the_copy_keeps_the_runs_own_files_and_the_builds_outputs_and_nothing_else() {
         KEPT[..],
         [
             ".synced-files",
+            ".windows-tree",
             ".windows-sweep.ps1",
             ".windows-run.pid",
+            ".windows-run.id",
             ".windows-run.cmd",
             "node_modules",
             "app/node_modules",
@@ -98,7 +100,12 @@ fn a_folder_that_is_a_link_is_not_looked_into_and_one_left_empty_is_removed() {
 fn what_is_removed_is_removed_without_a_question_and_said_and_what_is_not_ends_the_run() {
     let text = sweep_script();
     // PowerShell's Remove-Item asks before it takes a folder, which a run cannot answer.
-    assert!(!text.contains("Remove-Item"), "{text}");
+    assert!(
+        !text
+            .lines()
+            .any(|line| line.starts_with("      ") && line.contains("Remove-Item")),
+        "{text}"
+    );
     assert!(
         text.contains(
             "      $item.Attributes = $item.Attributes -band -bnot [IO.FileAttributes]::ReadOnly\n      $item.Delete()\n      $removed.Add($name)\n"
@@ -132,6 +139,42 @@ fn what_is_removed_is_removed_without_a_question_and_said_and_what_is_not_ends_t
     );
     // Before the build and the command: they see the tree and nothing else.
     assert!(run.find("Exit-Run 1").unwrap() < run.find("foreach ($step in").unwrap());
+}
+
+#[test]
+fn the_tarballs_runs_left_beside_the_copy_are_taken_away_an_hour_after_they_were_written() {
+    let text = sweep_script();
+    let at = |what: &str| {
+        text.find(what)
+            .unwrap_or_else(|| panic!("{what} is not there: {text}"))
+    };
+    // Named by the copy's folder, with a dot in it a dot: the names `upload_name` makes,
+    // and the one the runs had before each had its own.
+    assert!(
+        text.contains(
+            r"$upload = '^' + [regex]::Escape($root.Name) + '(\.[0-9a-f]{8}-[0-9a-f]{8})?\.tgz$'"
+        ),
+        "{text}"
+    );
+    let line = line_with(&text, "Get-ChildItem");
+    assert!(
+        line.contains("-LiteralPath $root.Parent.FullName -File"),
+        "{line}"
+    );
+    assert!(
+        line.contains("$_.Name -match $upload -and $_.LastWriteTime -lt (Get-Date).AddHours(-1)"),
+        "{line}"
+    );
+    // It never fails the run, and it is the last thing the sweep does: what the copy is
+    // told of its files is said before it.
+    assert!(
+        line.starts_with("try { ") && line.ends_with(" } catch {}"),
+        "{line}"
+    );
+    assert!(at("== removed $name") < at("Get-ChildItem"));
+    assert!(at("$failed.Count") < at("Get-ChildItem"));
+    // And it only removes: no other name than a file of the folder the copy is in.
+    assert_eq!(text.matches("Remove-Item").count(), 1, "{text}");
 }
 
 #[test]
@@ -266,4 +309,82 @@ fn powershell_removes_from_the_copy_what_the_tree_has_not_and_says_what_it_could
     let again = run(dir);
     assert_eq!(again.code, 0, "{}{}", again.stdout, again.stderr);
     assert!(!again.stdout.contains("== removed"), "{}", again.stdout);
+}
+
+/// The sweep run by the machine's PowerShell beside tarballs that runs left: only those of
+/// the copy's folder (this run's own among them, which is an hour young), the ones the
+/// runs sent before each had its own, and only when they were written an hour ago.
+#[cfg(windows)]
+#[test]
+fn powershell_takes_away_the_tarballs_runs_left_an_hour_ago_and_no_other_file() {
+    use std::fs;
+    use std::time::{Duration, SystemTime};
+
+    use cf_base::env::Env;
+
+    use crate::process::{self, Invocation};
+
+    let profile = tempfile::tempdir().unwrap();
+    let dir = profile.path().join("consensflow-build");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join(SYNCED), "keep.txt\n").unwrap();
+    fs::write(dir.join("keep.txt"), "kept").unwrap();
+    // Written long ago (2001), or just now: the time of day is read in one place, and the
+    // case needs only a file that is far older than an hour and one that is not.
+    let old = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000_000);
+    let make = |name: &str, written: Option<SystemTime>| {
+        let path = profile.path().join(name);
+        fs::write(&path, name).unwrap();
+        if let Some(written) = written {
+            fs::File::options()
+                .write(true)
+                .open(&path)
+                .unwrap()
+                .set_modified(written)
+                .unwrap();
+        }
+    };
+    let (removed, stays) = (
+        [
+            "consensflow-build.0000abcd-12345678.tgz",
+            "consensflow-build.tgz",
+        ],
+        [
+            // A run's own tarball, written just now: it is being unpacked, or is on its way.
+            ("consensflow-build.0000abce-12345678.tgz", None),
+            // Not of this copy's folder, not a name a run gives, not a tarball.
+            ("other.0000abcd-12345678.tgz", Some(old)),
+            ("consensflow-build2.0000abcd-12345678.tgz", Some(old)),
+            ("consensflow-build.0000abcd-1234567.tgz", Some(old)),
+            ("consensflow-build.0000abcd-12345678.tgz.part", Some(old)),
+            ("consensflow-build.x.tgz", Some(old)),
+            ("consensflow-build.0000abcd-12345678.txt", Some(old)),
+        ],
+    );
+    for name in removed {
+        make(name, Some(old));
+    }
+    for (name, written) in stays {
+        make(name, written);
+    }
+    fs::write(dir.join(SWEEP), sweep_script()).unwrap();
+    let script = format!(
+        "$ErrorActionPreference = 'Stop'\n$dir = '{}'\n. ([scriptblock]::Create([IO.File]::ReadAllText((Join-Path $dir '{SWEEP}'))))\nif ($failed.Count) {{ exit 1 }}\n",
+        dir.display()
+    );
+    let ran = process::capture(
+        &Invocation::new("powershell", ".")
+            .args(["-NoProfile", "-NonInteractive", "-EncodedCommand"])
+            .arg(encode_script(&script).unwrap()),
+        &Env::from_process(),
+    )
+    .unwrap();
+    assert_eq!(ran.code, 0, "{}{}", ran.stdout, ran.stderr);
+    for name in removed {
+        assert!(!profile.path().join(name).exists(), "{name} stayed");
+    }
+    for (name, _) in stays {
+        assert!(profile.path().join(name).exists(), "{name} went");
+    }
+    assert!(dir.join("keep.txt").exists());
 }

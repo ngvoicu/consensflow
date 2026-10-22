@@ -121,6 +121,7 @@ const RECORDED: [Recorded; 7] = [
 fn sent(run: &Recorded) -> String {
     let env = parse_env(&strings(run.env)).unwrap();
     remote_script(&Script {
+        id: ID,
         dir: run.dir,
         inside: run.inside,
         steps: run.steps,

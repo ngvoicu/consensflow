@@ -1,8 +1,13 @@
 //! One run on the machine, from this checkout as it is now to the command's own
-//! status: the tree sent over as a tarball (`tree`), the script that unpacks it and
-//! runs the command there (`script`) handed to ssh, and what it says brought back
-//! as it comes (`session`). Nothing is asked of the machine before every word of
-//! the run has been read and the script it makes is known to fit.
+//! status: the tree sent over as a tarball (`tree`) of the run's own name, the script
+//! that unpacks that tarball and runs the command there (`script`) handed to ssh, and
+//! what it says brought back as it comes (`session`). Nothing is asked of the machine
+//! before every word of the run has been read and the script it makes is known to fit.
+//!
+//! The machine is one folder and one lock, and several runs from several trees queue
+//! for it: each run's tarball is named by the run ([`script::run_id`]) and the script
+//! unpacks that one, so that no run unpacks what another sent, and the machine says
+//! which tree it unpacked, which must be the one this run sent.
 //!
 //! A run that is stopped here is ended there: ssh is ended, and a second ssh ends
 //! the run's whole tree on the machine and takes its record away, which Windows'
@@ -12,7 +17,8 @@
 use super::interrupt::Interrupt;
 use super::options::Options;
 use super::script::{
-    command_line, encode_script, remote_script, stop_script, Refusal, Script, BUILD_STEPS,
+    command_line, encode_script, remote_script, run_id, stop_script, upload_name, Refusal, Script,
+    BUILD_STEPS, TREE_MARK,
 };
 use super::session::{self, Ended};
 use super::{tree, Error};
@@ -38,10 +44,12 @@ struct Plan {
 }
 
 impl Plan {
-    fn new(options: &Options) -> Result<Self, Refusal> {
+    /// The run `id` of `options`.
+    fn new(options: &Options, id: &str) -> Result<Self, Refusal> {
         let command = command_line(&options.command);
         let steps: &[&str] = if options.build { &BUILD_STEPS } else { &[] };
         let run = remote_script(&Script {
+            id,
             dir: &options.dir,
             inside: &options.inside,
             steps,
@@ -50,7 +58,7 @@ impl Plan {
         });
         Ok(Self {
             run: powershell(&run)?,
-            stop: powershell(&stop_script(&options.dir))?,
+            stop: powershell(&stop_script(&options.dir, id))?,
         })
     }
 }
@@ -65,7 +73,7 @@ fn powershell(script: &str) -> Result<String, Refusal> {
 
 /// Whether the script a run makes can be sent: the refusal that says why not, before a run starts.
 pub fn check(options: &Options) -> Result<(), Refusal> {
-    Plan::new(options).map(drop)
+    Plan::new(options, &run_id()).map(drop)
 }
 
 /// ssh to `host`, asked to run `line` there.
@@ -81,7 +89,8 @@ pub fn run(
     console: &mut Console,
     interrupt: &Interrupt,
 ) -> Result<Outcome, Error> {
-    let plan = Plan::new(options)?;
+    let id = run_id();
+    let plan = Plan::new(options, &id)?;
     let scratch = tempfile::tempdir().map_err(Error::Scratch)?;
 
     // A stop is looked for after each step, before what it says is: a Ctrl-C ends
@@ -91,7 +100,13 @@ pub fn run(
     if stopped(interrupt, listed.is_err()) {
         return Ok(Outcome::Stopped);
     }
-    let packed = tree::pack(context, &listed?, scratch.path());
+    let listed = listed?;
+    let identity = tree::identity(context, &listed);
+    if stopped(interrupt, identity.is_err()) {
+        return Ok(Outcome::Stopped);
+    }
+    let identity = identity?;
+    let packed = tree::pack(context, &listed, &identity, scratch.path());
     if stopped(interrupt, packed.is_err()) {
         return Ok(Outcome::Stopped);
     }
@@ -99,7 +114,11 @@ pub fn run(
     let scp = Invocation::new("scp", &context.root)
         .arg("-q")
         .arg(&tarball)
-        .arg(format!("{}:{}.tgz", options.host, options.dir));
+        .arg(format!(
+            "{}:{}",
+            options.host,
+            upload_name(&options.dir, &id)
+        ));
     let sent = process::capture(&scp, &context.env);
     if stopped(interrupt, !matches!(&sent, Ok(done) if done.code == 0)) {
         return Ok(Outcome::Stopped);
@@ -116,8 +135,16 @@ pub fn run(
     }
 
     let run = ssh(context, &options.host, &plan.run);
-    match session::stream(&run, &context.env, console, interrupt)? {
+    let tree_said = format!("{TREE_MARK}{identity}");
+    match session::stream(&run, &context.env, console, interrupt, &tree_said)? {
         Ended::Exited(status) => Ok(Outcome::Exited(status)),
+        Ended::WrongTree(said) => {
+            end_there(context, options, &plan, console)?;
+            Err(Error::WrongTree {
+                sent: tree_said,
+                said,
+            })
+        }
         Ended::Stopped => {
             end_there(context, options, &plan, console)?;
             Ok(Outcome::Stopped)

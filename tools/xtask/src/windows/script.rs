@@ -18,6 +18,9 @@
 //! PowerShell reads, so the script carries those two bytes where the template says
 //! `«crlf»`.
 
+use std::collections::hash_map::RandomState;
+use std::hash::{BuildHasher, Hasher};
+
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
 
@@ -30,8 +33,22 @@ pub const EXIT_MARK: &str = "== exit ";
 /// The list of what went over, kept beside it there, so the next run knows what left the tree.
 pub const SYNCED: &str = ".synced-files";
 
-/// The running script's process id, there, while a run goes on.
+/// The running script's process id, there, while a run goes on: the lock, in the form
+/// every version of the script reads (a script that has an older form refuses a run that
+/// is still going, and so does this one, whichever of them holds it).
 pub const RUNNING: &str = ".windows-run.pid";
+
+/// The id of the run ([`run_id`]) that holds the lock, there, beside it: so that a run
+/// that is ended there ends its own and no other.
+pub const OWNER: &str = ".windows-run.id";
+
+/// The tree's identity ([`crate::windows::tree::identity`]), kept beside the files in the
+/// tarball: the script says it once the tarball is unpacked, as the line `== tree <identity>`
+/// ([`TREE_MARK`]), and this program holds the machine to the tree it sent.
+pub const TREE: &str = ".windows-tree";
+
+/// What the line begins with that says which tree the machine unpacked.
+pub const TREE_MARK: &str = "== tree ";
 
 /// The batch file the command is written to, there.
 const COMMAND_FILE: &str = ".windows-run.cmd";
@@ -47,13 +64,15 @@ pub const SWEEP: &str = ".windows-sweep.ps1";
 /// the list of what went over ([`SYNCED`]) does not name is removed after the unpack,
 /// wherever it came from: a run of another tree left 87 files there no sync listed,
 /// which a test of the `cli` suite named (zeewin, 2026-10-16).
-pub const KEPT: [&str; 13] = [
-    // The run's own: the list of what went over and the sweep (the tarball holds them
-    // beside the files, and the list names the files only), the lock taken before the
-    // unpack, the command's batch file.
+pub const KEPT: [&str; 15] = [
+    // The run's own: the list of what went over, the tree's identity and the sweep (the
+    // tarball holds them beside the files, and the list names the files only), the lock
+    // taken before the unpack, the command's batch file.
     SYNCED,
+    TREE,
     SWEEP,
     RUNNING,
+    OWNER,
     COMMAND_FILE,
     // The packages, which `npm ci` (the build's first two steps) takes away and installs
     // again from the tree's lockfiles.
@@ -93,7 +112,7 @@ pub const BUILD_STEPS: [&str; 6] = [
 /// What the machine's shell reads of a command line: cmd.exe's 8191 characters,
 /// less what ssh puts before the script (`powershell -NoProfile -NonInteractive
 /// -EncodedCommand `) and a margin. A script with the build's steps takes about
-/// 6,100 of it, and each variable a run names about 300 more.
+/// 6,600 of it, and each variable a run names about 300 more.
 const ENCODED_LIMIT: usize = 8000;
 
 /// Why what a run was asked to do cannot be sent: what is wrong with the words,
@@ -108,6 +127,22 @@ pub enum Refusal {
     EnvTwice(String),
     #[error("the script for the machine is {length} characters encoded, and its shell reads {ENCODED_LIMIT} at most: name fewer variables with --env, or run a shorter command")]
     TooLong { length: usize },
+}
+
+/// A name for one run, which no other run on the machine has at the same time: this
+/// process's id and a random part, each as eight hex digits, so that it is always the
+/// same width (the script it goes into must fit the shell's line whatever it is).
+pub fn run_id() -> String {
+    let random = RandomState::new().build_hasher().finish();
+    format!("{:08x}-{:08x}", std::process::id(), random & 0xffff_ffff)
+}
+
+/// The tarball a run sends, as its folder under the profile there names it: a name
+/// of the run's own, never one another run's tarball has. The machine is one folder
+/// and one lock, and runs from several trees queue for it: a name they shared would
+/// let the run that sent last be the one every script there unpacks.
+pub fn upload_name(dir: &str, id: &str) -> String {
+    format!("{dir}.{id}.tgz")
 }
 
 /// The command as cmd.exe reads a line: an argument with a space or a quote in
@@ -195,10 +230,12 @@ pub fn exit_said(line: &str) -> Option<i32> {
     number.parse().ok()
 }
 
-/// What a run is, for the script: where its copy is, where in it the command
-/// runs, what runs first, the command, and the variables it is given.
+/// What a run is, for the script: which run it is, where its copy is, where in it
+/// the command runs, what runs first, the command, and the variables it is given.
 #[derive(Debug, Clone, Copy)]
 pub struct Script<'a> {
+    /// The run's own name ([`run_id`]), which its tarball is named by ([`upload_name`]).
+    pub id: &'a str,
     /// The folder of the copy, under the user's profile there.
     pub dir: &'a str,
     /// A folder of the copy the command runs in.
@@ -211,11 +248,17 @@ pub struct Script<'a> {
     pub env: &'a [(String, String)],
 }
 
-/// The script: the tarball unpacked into `dir` under the user's profile (what
-/// left the tree since the last run removed), then `steps` run there, then the
-/// variables `env` given to the process and said in the output, then `command`
-/// run from `inside`, a folder of the copy. The steps do not see the variables:
-/// they are the command's.
+/// The script: the run's own tarball ([`upload_name`]) unpacked into `dir` under the
+/// user's profile (what left the tree since the last run removed), the tree it held
+/// said (`== tree <identity>`), then `steps` run there, then the variables `env` given
+/// to the process and said in the output, then `command` run from `inside`, a folder of
+/// the copy. The steps do not see the variables: they are the command's.
+///
+/// The run's tarball is removed whichever way the script ends, a refusal by the lock
+/// too: the one thing it takes away is its own, and the lock only if it holds it (the
+/// `finally`). A tarball a run left there when it never got so far (this program killed,
+/// the connection lost, an upload cut short) is taken away by the sweep of the next run
+/// that holds the lock, once an hour has passed since it was written to.
 ///
 /// The unpack is `tar.exe -xmzf`: each file is given the time of the unpack (`-m`,
 /// which GNU tar and bsdtar both take), not the one the tarball keeps of it, which
@@ -243,7 +286,12 @@ pub fn remote_script(script: &Script) -> String {
         REMOTE,
         &[
             ("dir", script.dir),
+            ("id", script.id),
+            ("tarball", &upload_name(script.dir, script.id)),
+            ("tree_mark", TREE_MARK),
+            ("tree_file", TREE),
             ("running", RUNNING),
+            ("owner", OWNER),
             ("sweep", SWEEP),
             ("command_file", COMMAND_FILE),
             ("steps", &steps.join(", ")),
@@ -272,6 +320,11 @@ pub fn remote_script(script: &Script) -> String {
 ///   run on zeewin, 2026-10-16), a file's read-only mark taken away first.
 /// - A folder [`KEPT`] names is not walked: the build folder holds hundreds of thousands
 ///   of files.
+/// - Last, the tarballs runs left beside the copy (`<folder>.<id>.tgz`, [`upload_name`],
+///   and the `<folder>.tgz` the runs sent before each had its own) that were written to
+///   more than an hour ago: a run removes its own, so these are of runs that never got
+///   so far (this program killed, the connection lost, an upload cut short). It never
+///   fails the run, and it runs with the lock held, which no run is waiting on.
 pub fn sweep_script() -> String {
     let kept: Vec<String> = KEPT.iter().map(|name| quoted(name)).collect();
     fill(
@@ -280,11 +333,22 @@ pub fn sweep_script() -> String {
     )
 }
 
-/// What ends a run that goes on there: its whole tree ended, its record taken
-/// away. Sent when the run is stopped here, which Windows' SSH server does not
-/// pass on.
-pub fn stop_script(dir: &str) -> String {
-    fill(STOP, &[("dir", dir), ("running", RUNNING)])
+/// What ends the run `id` that goes on there: its whole tree ended, its record taken
+/// away, and its tarball. Sent when the run is stopped here, which Windows' SSH server
+/// does not pass on. Only the run the lock's owner file ([`OWNER`]) names is ended: a run
+/// that was stopped before its script had the lock (or that the lock refused) must not
+/// end the one that holds it.
+pub fn stop_script(dir: &str, id: &str) -> String {
+    fill(
+        STOP,
+        &[
+            ("dir", dir),
+            ("id", id),
+            ("tarball", &upload_name(dir, id)),
+            ("running", RUNNING),
+            ("owner", OWNER),
+        ],
+    )
 }
 
 /// `template` with each `«name»` written as the text `parts` gives it, in one
@@ -327,18 +391,24 @@ try { [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false) } catch {}
 $OutputEncoding = [Text.UTF8Encoding]::new($false)
 function Exit-Run([int]$code) { Write-Output "«exit»$code"; exit $code }
 $dir = Join-Path $env:USERPROFILE '«dir»'
-New-Item -ItemType Directory -Force $dir | Out-Null
+$tarball = Join-Path $env:USERPROFILE '«tarball»'
 $running = Join-Path $dir '«running»'
+$owner = Join-Path $dir '«owner»'
+$held = $false
+try {
+New-Item -ItemType Directory -Force $dir | Out-Null
 if (Test-Path $running) {
   $other = Get-Process -Id (Get-Content $running) -ErrorAction SilentlyContinue
   if ($other) { Write-Output "A run is still going on this machine (process $($other.Id)): one at a time."; Exit-Run 75 }
 }
 Set-Content -Path $running -Value $PID
-try {
-tar.exe -xmzf (Join-Path $env:USERPROFILE '«dir».tgz') -C $dir
+Set-Content -Path $owner -Value '«id»'
+$held = $true
+tar.exe -xmzf $tarball -C $dir
 if ($LASTEXITCODE -ne 0) { Exit-Run $LASTEXITCODE }
 . ([scriptblock]::Create([IO.File]::ReadAllText((Join-Path $dir '«sweep»'))))
 if ($failed.Count) { Exit-Run 1 }
+Write-Output "«tree_mark»$(Get-Content -LiteralPath (Join-Path $dir '«tree_file»') -TotalCount 1)"
 $env:Path = "C:\Program Files\nodejs;$env:USERPROFILE\.cargo\bin;" + $env:Path
 # Codex's own PATH entry is a junction an SSH session may not cross ("an
 # untrusted mount point"): its release folder, named outright.
@@ -357,7 +427,8 @@ $run = Join-Path $dir '«command_file»'
 cmd /c "$run 2>&1"
 Exit-Run $LASTEXITCODE
 } finally {
-  Remove-Item -LiteralPath $running -Force -ErrorAction SilentlyContinue
+  Remove-Item -LiteralPath $tarball -Force -ErrorAction SilentlyContinue
+  if ($held) { Remove-Item -LiteralPath $running, $owner -Force -ErrorAction SilentlyContinue }
 }
 "##;
 
@@ -395,6 +466,8 @@ $base = $root.FullName.TrimEnd('\').Length + 1
 $null = Clear-Stale $root
 foreach ($name in $removed) { Write-Output "== removed $name" }
 if ($failed.Count) { Write-Output "What left the tree could not be removed from the copy: $($failed -join '; ')" }
+$upload = '^' + [regex]::Escape($root.Name) + '(\.[0-9a-f]{8}-[0-9a-f]{8})?\.tgz$'
+try { Get-ChildItem -LiteralPath $root.Parent.FullName -File | Where-Object { $_.Name -match $upload -and $_.LastWriteTime -lt (Get-Date).AddHours(-1) } | Remove-Item -Force -ErrorAction SilentlyContinue } catch {}
 "##;
 
 /// The script that ends a run, with a mark where each part of it goes. It begins
@@ -403,8 +476,11 @@ if ($failed.Count) { Write-Output "What left the tree could not be removed from 
 /// JavaScript's did, and the person who stopped the run read.
 const STOP: &str = r##"
 $ProgressPreference = 'SilentlyContinue'
-$running = Join-Path (Join-Path $env:USERPROFILE '«dir»') '«running»'
-if (Test-Path $running) { taskkill /PID (Get-Content $running) /T /F | Out-Null; Remove-Item -LiteralPath $running -Force }
+$dir = Join-Path $env:USERPROFILE '«dir»'
+$running = Join-Path $dir '«running»'
+$owner = Join-Path $dir '«owner»'
+if ((Test-Path $running) -and (Test-Path $owner) -and (Get-Content $owner) -eq '«id»') { taskkill /PID (Get-Content $running) /T /F | Out-Null; Remove-Item -LiteralPath $running, $owner -Force }
+Remove-Item -LiteralPath (Join-Path $env:USERPROFILE '«tarball»') -Force -ErrorAction SilentlyContinue
 "##;
 
 #[cfg(test)]

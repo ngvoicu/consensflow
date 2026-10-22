@@ -12,6 +12,9 @@ use std::time::Instant;
 
 use super::*;
 
+/// The line the machine says of the tree it unpacked, as a run that sent this tree is told it.
+const TREE: &str = "== tree 0123456789abcdef0123456789abcdef01234567 89abcdef01234567";
+
 const SAYS: &str = "windows::session::tests::helper_speaks";
 const HOLDS: &str = "windows::session::tests::helper_holds";
 const EXITS: &str = "windows::session::tests::helper_exits";
@@ -165,9 +168,10 @@ fn with(vars: &[(&str, &OsStr)]) -> Env {
     Env::from_vars(env)
 }
 
-/// A run of the program that exits with `status` after saying `said`: what the
-/// run came to, and what it wrote on its error stream.
-fn exits(status: &str, said: &str) -> (Ended, String) {
+/// A run of the program that exits with `status` after saying `said` (lines apart by
+/// `|`), held to the tree line `tree`: what the run came to, what it wrote on its output
+/// stream and on its error stream.
+fn exits_held_to(status: &str, said: &str, tree: &str) -> (Ended, String, String) {
     let dir = tempfile::tempdir().unwrap();
     let flag = dir.path().join("flag");
     fs::write(&flag, "").unwrap();
@@ -185,9 +189,21 @@ fn exits(status: &str, said: &str) -> (Ended, String) {
             err: &mut err,
         },
         &Interrupt::default(),
+        tree,
     )
     .unwrap();
-    (ended, String::from_utf8(err).unwrap())
+    (
+        ended,
+        String::from_utf8(out).unwrap(),
+        String::from_utf8(err).unwrap(),
+    )
+}
+
+/// A run of the program that exits with `status` after saying the tree it was sent and
+/// then `said`: what the run came to, and what it wrote on its error stream.
+fn exits(status: &str, said: &str) -> (Ended, String) {
+    let (ended, _, err) = exits_held_to(status, &format!("{TREE}|{said}"), TREE);
+    (ended, err)
 }
 
 /// What a run came to, as text.
@@ -196,6 +212,7 @@ fn shown(ended: &Ended) -> String {
         Ended::Exited(status) => format!("exited {status}"),
         Ended::Stopped => "stopped".into(),
         Ended::Unwritten(cause) => format!("unwritten: {cause}"),
+        Ended::WrongTree(said) => format!("another tree: {said}"),
     }
 }
 
@@ -224,6 +241,7 @@ fn what_a_run_writes_is_written_as_it_comes_to_the_stream_it_came_on() {
             err: &mut err,
         },
         &Interrupt::default(),
+        TREE,
     )
     .unwrap();
     // It said nothing of how it ended, so ssh's status is the answer: and said so.
@@ -370,6 +388,7 @@ fn a_stop_ends_the_program_whole_and_is_said_and_what_it_had_written_is_kept() {
             err: &mut err,
         },
         &interrupt,
+        TREE,
     )
     .unwrap();
     assert!(matches!(ended, Ended::Stopped), "{ended:?}");
@@ -388,6 +407,7 @@ fn a_run_whose_output_cannot_be_written_is_ended_and_says_why() {
             err: &mut err,
         },
         &Interrupt::default(),
+        TREE,
     )
     .unwrap();
     let Ended::Unwritten(cause) = ended else {
@@ -401,7 +421,7 @@ fn a_status_a_stop_may_have_made_waits_a_moment_for_the_stop_and_another_does_no
     // With nothing said by the machine: what ssh ends with when the Ctrl-C ended
     // it (a signal, or its own 255), and the stop is heard a moment after: within
     // the grace, which here is long, for the wait ends when the stop is heard.
-    let answer = |code, interrupt: &Interrupt| shown(&exited(code, None, interrupt).0);
+    let answer = |code, interrupt: &Interrupt| shown(&exited(code, None, true, interrupt).0);
     let interrupt = Interrupt::graced(Duration::from_secs(60));
     let late = interrupt.clone();
     let telling = thread::spawn(move || {
@@ -427,7 +447,7 @@ fn what_ssh_did_when_the_machine_said_nothing_is_told_in_a_note_whatever_it_did(
     // may give (Windows'): neither is a status to answer, and both are told.
     let none = Interrupt::default();
     let told = |code| {
-        let (ended, note) = exited(code, None, &none);
+        let (ended, note) = exited(code, None, true, &none);
         (shown(&ended), note.unwrap())
     };
     let no_line = "no `== exit N` line ended the output";
@@ -464,12 +484,15 @@ fn what_the_machine_said_is_the_answer_before_ssh_or_a_stop_is_looked_at() {
     let heard = Interrupt::default();
     heard.raise();
     for code in [None, Some(255), Some(1), Some(0)] {
-        assert_eq!(shown(&exited(code, Some(7), &heard).0), "exited 7");
+        assert_eq!(shown(&exited(code, Some(7), true, &heard).0), "exited 7");
     }
     // Nor is a stop waited for, where it was not heard.
     let patient = Interrupt::graced(Duration::from_secs(60));
     let started = Instant::now();
-    assert_eq!(shown(&exited(Some(255), Some(0), &patient).0), "exited 0");
+    assert_eq!(
+        shown(&exited(Some(255), Some(0), true, &patient).0),
+        "exited 0"
+    );
     assert!(started.elapsed() < Duration::from_secs(30));
 }
 
@@ -485,10 +508,94 @@ fn a_program_that_is_not_there_is_said_and_starts_nothing() {
             err: &mut err,
         },
         &Interrupt::default(),
+        TREE,
     )
     .unwrap_err();
     assert!(
         matches!(said, Error::Process(process::Failure::NotFound { .. })),
         "{said}"
     );
+}
+
+#[test]
+fn a_machine_that_says_another_tree_than_the_one_sent_ends_the_run_and_what_it_said_is_shown() {
+    let other = "== tree 0123456789abcdef0123456789abcdef01234567 0000000000000000";
+    let (ended, out, err) = exits_held_to("0", &format!("{other}|== exit 0"), TREE);
+    assert_eq!(shown(&ended), format!("another tree: {other}"));
+    // Written as it came, before it was held to what was sent: a person can read it.
+    assert!(out.contains(other), "{out}");
+    assert_eq!(err, "");
+    // The commit alone, or the hash alone, is another tree as well.
+    for said in [
+        "== tree 0123456789abcdef0123456789abcdef01234567",
+        "== tree 89abcdef01234567",
+        "== tree ",
+        "== tree  0123456789abcdef0123456789abcdef01234567 89abcdef01234567",
+    ] {
+        let (ended, _, _) = exits_held_to("0", &format!("{said}|== exit 0"), TREE);
+        assert_eq!(shown(&ended), format!("another tree: {said}"), "{said:?}");
+    }
+}
+
+#[test]
+fn a_run_that_ended_with_0_without_saying_which_tree_it_ran_did_not_end_well() {
+    // 0 is a pass, and a pass of no one's tree is none.
+    let (ended, _, err) = exits_held_to("1", "== exit 0", TREE);
+    assert_eq!(shown(&ended), "exited 1");
+    assert_eq!(
+        err,
+        "windows: no `== tree …` line said which tree the machine ran, and a status 0 is not taken for a pass without it: answering 1\n"
+    );
+    // A failure needs no tree said: the lock's refusal and an unpack that failed
+    // end before there is one, and what they ended with is the answer.
+    for (status, line) in [("1", "== exit 75"), ("1", "== exit 7"), ("1", "== exit 1")] {
+        let (ended, _, err) = exits_held_to(status, line, TREE);
+        assert_eq!(
+            shown(&ended),
+            format!("exited {}", line.trim_start_matches("== exit "))
+        );
+        assert_eq!(err, "");
+    }
+}
+
+#[test]
+fn only_the_first_line_that_says_a_tree_counts_and_what_a_command_prints_later_is_its_own() {
+    let (ended, out, err) = exits_held_to(
+        "0",
+        &format!("{TREE}|== tree a command prints this too|== exit 0"),
+        TREE,
+    );
+    assert_eq!(shown(&ended), "exited 0");
+    assert!(out.contains("a command prints this too"), "{out}");
+    assert_eq!(err, "");
+    // And a line that only holds the words is not the line: it must begin with them.
+    let (ended, _, _) = exits_held_to("0", &format!("say == tree x|{TREE}|== exit 0"), TREE);
+    assert_eq!(shown(&ended), "exited 0");
+}
+
+#[test]
+fn a_tree_that_was_said_does_not_change_what_a_failed_run_answers() {
+    let (ended, err) = exits("1", "== exit 75");
+    assert_eq!(shown(&ended), "exited 75");
+    assert_eq!(err, "");
+    // No tree, and no exit line either: ssh's own status, as before, and said so.
+    let (ended, _, err) = exits_held_to("3", "", TREE);
+    assert_eq!(shown(&ended), "exited 3");
+    assert_eq!(
+        err,
+        "windows: no `== exit N` line ended the output, so ssh's own status is the answer: 3\n"
+    );
+}
+
+/// Known failure (seen on zeewin, 2026-10-22, T-219): a command whose last output has no
+/// line end (`type marker.txt` of a file with no final newline) has the script's `== exit N`
+/// written on the same line, so that is not the line the run ends by, and a command that
+/// passed is answered as 1 with "no `== exit N` line ended the output". The fix is the
+/// script's: a line end before the line it ends by.
+#[test]
+#[ignore = "known failure: issues/a-commands-last-output-without-a-line-end-hides-its-exit-line.md"]
+fn a_command_whose_last_output_has_no_line_end_still_passes() {
+    let (ended, err) = exits("0", "marker of tree A== exit 0");
+    assert_eq!(shown(&ended), "exited 0");
+    assert_eq!(err, "");
 }

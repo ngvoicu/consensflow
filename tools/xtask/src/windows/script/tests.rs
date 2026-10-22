@@ -10,11 +10,14 @@ use super::*;
 use crate::windows::testing::{script_of, strings};
 
 const DIR: &str = "consensflow-build";
+/// A run's name, as [`run_id`] makes them.
+const ID: &str = "0000abcd-12345678";
 const BUILD: [&str; 2] = ["npm ci --no-audit --no-fund", "npm run build:bridge"];
 
 /// The script of a run in the usual folder, in the copy's root.
 fn script(steps: &[&str], command: &str, env: &[(String, String)]) -> String {
     remote_script(&Script {
+        id: ID,
         dir: DIR,
         inside: ".",
         steps,
@@ -248,11 +251,12 @@ fn every_way_out_of_the_script_goes_through_the_function_that_says_how_it_went()
         text.contains(r#"$($other.Id)): one at a time."; Exit-Run 75 }"#),
         "{text}"
     );
-    // The last of the script is what the command ended with, said, and the record
-    // of the run taken away, which says nothing (so the line is the last).
+    // The last of the script is what the command ended with, said, and what the run
+    // leaves taken away (its tarball, and its lock if it holds it), which says nothing
+    // (so the line is the last).
     assert!(
         text.contains(
-            "cmd /c \"$run 2>&1\"\nExit-Run $LASTEXITCODE\n} finally {\n  Remove-Item -LiteralPath $running -Force -ErrorAction SilentlyContinue\n}\n"
+            "cmd /c \"$run 2>&1\"\nExit-Run $LASTEXITCODE\n} finally {\n  Remove-Item -LiteralPath $tarball -Force -ErrorAction SilentlyContinue\n  if ($held) { Remove-Item -LiteralPath $running, $owner -Force -ErrorAction SilentlyContinue }\n}\n"
         ),
         "{text}"
     );
@@ -314,13 +318,223 @@ fn powershell_says_how_it_went_in_its_last_line_from_every_place_the_script_leav
 }
 
 #[test]
-fn the_script_that_ends_a_run_there_is_the_one_the_javascript_sent_with_its_progress_left_unsaid() {
+fn the_script_that_ends_a_run_there_ends_the_run_the_lock_names_and_takes_its_tarball_away() {
     assert_eq!(
-        stop_script(DIR),
+        stop_script(DIR, ID),
         "\n$ProgressPreference = 'SilentlyContinue'\n\
-         $running = Join-Path (Join-Path $env:USERPROFILE 'consensflow-build') '.windows-run.pid'\n\
-         if (Test-Path $running) { taskkill /PID (Get-Content $running) /T /F | Out-Null; Remove-Item -LiteralPath $running -Force }\n"
+         $dir = Join-Path $env:USERPROFILE 'consensflow-build'\n\
+         $running = Join-Path $dir '.windows-run.pid'\n\
+         $owner = Join-Path $dir '.windows-run.id'\n\
+         if ((Test-Path $running) -and (Test-Path $owner) -and (Get-Content $owner) -eq '0000abcd-12345678') { taskkill /PID (Get-Content $running) /T /F | Out-Null; Remove-Item -LiteralPath $running, $owner -Force }\n\
+         Remove-Item -LiteralPath (Join-Path $env:USERPROFILE 'consensflow-build.0000abcd-12345678.tgz') -Force -ErrorAction SilentlyContinue\n"
     );
+}
+
+/// The script of a run named `id`, in the usual folder.
+fn script_of_run(id: &str) -> String {
+    remote_script(&Script {
+        id,
+        dir: DIR,
+        inside: ".",
+        steps: &[],
+        command: "x",
+        env: &[],
+    })
+}
+
+#[test]
+fn a_run_is_named_to_the_width_a_script_is_made_for_and_no_two_runs_are_named_alike() {
+    let ids: Vec<String> = (0..50).map(|_| run_id()).collect();
+    for id in &ids {
+        // Eight hex digits (this process's), a dash, eight more (random): always the
+        // same width, which the script's size is checked with before the run has one.
+        assert_eq!(id.len(), 17, "{id}");
+        assert!(
+            id.char_indices().all(|(at, c)| if at == 8 {
+                c == '-'
+            } else {
+                c.is_ascii_digit() || ('a'..='f').contains(&c)
+            }),
+            "{id}"
+        );
+    }
+    let mut sorted = ids.clone();
+    sorted.sort();
+    sorted.dedup();
+    assert_eq!(
+        sorted.len(),
+        ids.len(),
+        "two runs of one process named alike"
+    );
+    // The run's process is the first of its name.
+    assert!(ids[0].starts_with(&format!("{:08x}-", std::process::id())));
+    // The sweep that takes the tarballs of runs that never got so far away knows the shape.
+    assert!(
+        sweep_script().contains(r"(\.[0-9a-f]{8}-[0-9a-f]{8})?\.tgz$"),
+        "the sweep does not read the names runs are given"
+    );
+}
+
+#[test]
+fn a_run_names_the_tarball_it_unpacks_by_its_own_name_and_no_other_name_goes_in_the_script() {
+    // The machine is one profile folder, and runs from several trees send to it: a
+    // name they shared let the run that sent last be the one every script unpacked.
+    let (a, b) = ("0000abcd-12345678", "0000abce-9abcdef0");
+    assert_eq!(
+        upload_name(DIR, a),
+        "consensflow-build.0000abcd-12345678.tgz"
+    );
+    assert_ne!(upload_name(DIR, a), upload_name(DIR, b));
+    assert_ne!(upload_name("one", a), upload_name("two", a));
+    let (for_a, for_b) = (script_of_run(a), script_of_run(b));
+    for (text, own, other) in [(&for_a, a, b), (&for_b, b, a)] {
+        let tarball = format!("$tarball = Join-Path $env:USERPROFILE '{DIR}.{own}.tgz'\n");
+        assert!(text.contains(&tarball), "{text}");
+        assert!(!text.contains(other), "{text}");
+        // Its name is in the script once, and the unpack and the removal read the variable.
+        assert_eq!(
+            text.matches(&format!("{DIR}.{own}.tgz")).count(),
+            1,
+            "{text}"
+        );
+        assert_eq!(text.matches(".tgz'").count(), 1, "{text}");
+        assert!(text.contains("tar.exe -xmzf $tarball -C $dir\n"), "{text}");
+    }
+}
+
+#[test]
+fn a_run_removes_its_own_tarball_whichever_way_it_ends_and_the_lock_only_if_it_holds_it() {
+    let text = plain(&[]);
+    let at = |what: &str| {
+        text.find(what)
+            .unwrap_or_else(|| panic!("{what} is not there: {text}"))
+    };
+    // The lock's refusal is inside the try that has the finally: a refused run takes
+    // away what it sent, and not the lock of the run that refused it.
+    assert!(at("$held = $false\n") < at("try {\n"));
+    assert!(at("try {\n") < at("Exit-Run 75"));
+    assert!(at("Exit-Run 75") < at("} finally {\n"));
+    let finally = &text[at("} finally {\n")..];
+    assert!(
+        finally
+            .contains("  Remove-Item -LiteralPath $tarball -Force -ErrorAction SilentlyContinue\n"),
+        "{finally}"
+    );
+    assert!(
+        finally.contains("  if ($held) { Remove-Item -LiteralPath $running, $owner -Force -ErrorAction SilentlyContinue }\n"),
+        "{finally}"
+    );
+    // Held from the line that writes the lock, and from none before it.
+    assert!(at("Set-Content -Path $running") < at("Set-Content -Path $owner"));
+    assert!(at("Set-Content -Path $owner") < at("$held = $true\n"));
+    assert!(at("$held = $true\n") < at("tar.exe -xmzf"));
+    assert_eq!(text.matches("$held = $true").count(), 1, "{text}");
+}
+
+#[test]
+fn the_lock_is_the_process_as_every_version_reads_it_and_the_run_that_holds_it_is_named_beside_it()
+{
+    let text = plain(&[]);
+    // The lock is a file that holds the process, and nothing else, as it was: a script
+    // that is older reads it, and refuses a run that is still going, as this one does.
+    assert!(
+        text.contains("Set-Content -Path $running -Value $PID\n"),
+        "{text}"
+    );
+    assert!(
+        text.contains(
+            "$other = Get-Process -Id (Get-Content $running) -ErrorAction SilentlyContinue\n"
+        ),
+        "{text}"
+    );
+    // The run is named in the file beside it, which only a stop reads.
+    assert!(
+        text.contains("Set-Content -Path $owner -Value '0000abcd-12345678'\n"),
+        "{text}"
+    );
+    assert_eq!(RUNNING, ".windows-run.pid");
+    assert_eq!(OWNER, ".windows-run.id");
+    assert!(KEPT.contains(&OWNER) && KEPT.contains(&RUNNING));
+}
+
+#[test]
+fn a_run_that_is_ended_there_ends_the_run_the_lock_names_and_never_another() {
+    let text = stop_script(DIR, ID);
+    // The process is killed only where the owner file names this run, and only then is the lock taken away.
+    let guarded: Vec<&str> = text
+        .lines()
+        .filter(|line| line.contains("taskkill"))
+        .collect();
+    assert_eq!(guarded.len(), 1, "{text}");
+    assert!(
+        guarded[0].starts_with(
+            "if ((Test-Path $running) -and (Test-Path $owner) -and (Get-Content $owner) -eq '0000abcd-12345678') { taskkill /PID (Get-Content $running) /T /F | Out-Null; "
+        ),
+        "{text}"
+    );
+    assert!(
+        guarded[0].contains("Remove-Item -LiteralPath $running, $owner -Force"),
+        "{text}"
+    );
+    // The run's own tarball goes whatever the lock says: it is the run's.
+    let removal: Vec<&str> = text.lines().filter(|line| line.contains(".tgz")).collect();
+    assert_eq!(
+        removal,
+        ["Remove-Item -LiteralPath (Join-Path $env:USERPROFILE 'consensflow-build.0000abcd-12345678.tgz') -Force -ErrorAction SilentlyContinue"]
+    );
+    // Another run's stop names another run.
+    assert!(!stop_script(DIR, "0000abce-9abcdef0").contains(ID));
+}
+
+#[test]
+fn the_script_says_which_tree_it_unpacked_once_the_sweep_has_gone_and_before_anything_runs() {
+    let text = script(&BUILD, "x", &[]);
+    let at = |what: &str| {
+        text.find(what)
+            .unwrap_or_else(|| panic!("{what} is not there: {text}"))
+    };
+    assert!(
+        text.contains(
+            "Write-Output \"== tree $(Get-Content -LiteralPath (Join-Path $dir '.windows-tree') -TotalCount 1)\"\n"
+        ),
+        "{text}"
+    );
+    assert!(at("if ($failed.Count) { Exit-Run 1 }") < at("Write-Output \"== tree "));
+    assert!(at("Write-Output \"== tree ") < at("foreach ($step in"));
+    assert!(TREE_MARK.starts_with("== ") && TREE_MARK.ends_with(' '));
+}
+
+/// The machine's own PowerShell, on a machine that has one: the `finally` that takes a
+/// run's tarball away runs when the script leaves by `exit` from inside the `try`, as
+/// every way out of it does; a run that does not hold the lock leaves the lock alone.
+#[cfg(windows)]
+#[test]
+fn powershell_runs_the_finally_that_takes_the_tarball_away_when_the_script_leaves_by_exit() {
+    use cf_base::env::Env;
+
+    use crate::process::{self, Invocation};
+
+    for (held, lock_stays) in [("$true", false), ("$false", true)] {
+        let folder = tempfile::tempdir().unwrap();
+        let (tarball, lock) = (folder.path().join("a.tgz"), folder.path().join("lock"));
+        std::fs::write(&tarball, "x").unwrap();
+        std::fs::write(&lock, "x").unwrap();
+        let script = format!(
+            "$tarball = '{}'\n$running = '{}'\n$held = {held}\ntry {{ exit 75 }} finally {{\n  Remove-Item -LiteralPath $tarball -Force -ErrorAction SilentlyContinue\n  if ($held) {{ Remove-Item -LiteralPath $running -Force -ErrorAction SilentlyContinue }}\n}}\n",
+            tarball.display(),
+            lock.display(),
+        );
+        let ran = process::capture(
+            &Invocation::new("powershell", ".")
+                .args(["-NoProfile", "-NonInteractive", "-EncodedCommand"])
+                .arg(encode_script(&script).unwrap()),
+            &Env::from_process(),
+        )
+        .unwrap();
+        assert_eq!(ran.code, 75, "{}{}", ran.stdout, ran.stderr);
+        assert!(!tarball.exists(), "the tarball stayed: {held}");
+        assert_eq!(lock.exists(), lock_stays, "held {held}");
+    }
 }
 
 #[test]
@@ -329,7 +543,7 @@ fn a_mark_in_a_value_is_only_text_and_no_template_has_a_mark_nothing_fills() {
     let text = script(&[], "echo «dir» «running»", &[]);
     assert!(text.contains("'echo «dir» «running»'"), "{text}");
     // Every mark of the two templates is one the fills name: none is left in what is sent.
-    for text in [plain(&[]), stop_script(DIR)] {
+    for text in [plain(&[]), stop_script(DIR, ID)] {
         let left: Vec<_> = text.matches('«').collect();
         assert!(left.is_empty(), "{text}");
     }

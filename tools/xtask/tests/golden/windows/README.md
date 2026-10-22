@@ -1,7 +1,7 @@
 # The scripts `cargo xtask windows` sends, as recorded
 
 Seven runs, which `a_run_is_sent_the_script_that_was_recorded_for_it_byte_for_byte`
-(`tools/xtask/src/windows/script/tests.rs`) names: six that name no variable
+(`tools/xtask/src/windows/script/tests/golden.rs`) names: six that name no variable
 and one, `env-with-the-build`, that names two. A file is the whole script as ssh
 is handed it, before it is encoded.
 
@@ -13,7 +13,10 @@ the script goes through: see the module doc of `windows`), and the files were
 recorded again from the template in `script.rs`. The unpack has since gained `-m`
 (`tar.exe -xmzf`: each file has the time of the unpack, not the one the Mac kept of
 it, so that cargo there builds the file a switch of the checkout changed even where
-its time is older than the last build), and the files were recorded again. The
+its time is older than the last build), and the files were recorded again. It has since
+been given its tarball by the run (`<folder>.<id>.tgz`, which the tests name
+`0000abcd-12345678`; the lock holds the same name), a `finally` that removes it, and the
+line that says which tree it unpacked (`== tree …`), and the files were recorded again. The
 JavaScript is gone, so a
 golden is no longer a proof that the script is as it was: it holds what the
 script is, so that an edit nobody meant to it shows.

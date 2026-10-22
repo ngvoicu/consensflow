@@ -25,18 +25,11 @@ fn the_tree_is_unpacked_by_tar_with_each_file_given_the_time_of_the_unpack() {
     let text = plain(&[]);
     assert_eq!(
         unpacking(&text),
-        [
-            "tar.exe",
-            "-xmzf",
-            "(Join-Path",
-            "$env:USERPROFILE",
-            "'consensflow-build.tgz')",
-            "-C",
-            "$dir"
-        ]
+        ["tar.exe", "-xmzf", "$tarball", "-C", "$dir"]
     );
     // A folder with a space in its name is one word of the PowerShell, as it is of the others.
     let other = remote_script(&Script {
+        id: ID,
         dir: "build two",
         inside: ".",
         steps: &[],
@@ -44,9 +37,10 @@ fn the_tree_is_unpacked_by_tar_with_each_file_given_the_time_of_the_unpack() {
         env: &[],
     });
     assert!(
-        other.contains("-xmzf (Join-Path $env:USERPROFILE 'build two.tgz') -C $dir\n"),
+        other.contains("$tarball = Join-Path $env:USERPROFILE 'build two.0000abcd-12345678.tgz'\n"),
         "{other}"
     );
+    assert!(other.contains("-xmzf $tarball -C $dir\n"), "{other}");
 }
 
 /// What a file packed with a time long past has for a time once `tar` has unpacked
