@@ -222,6 +222,36 @@ mod tests {
 
     use super::*;
 
+    /// `/bin/sh`, a case's own program, holding only its streams: the cases run side by side,
+    /// and a shell (or the `sleep` it leaves) would hold what another closed.
+    #[allow(clippy::disallowed_methods)] // The case's own program.
+    fn sh() -> std::process::Command {
+        let mut command = std::process::Command::new("/bin/sh");
+        cf_process::hold_only_the_streams(&mut command);
+        command
+    }
+
+    /// The shell the cases of this file start holds nothing of theirs but its streams.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn the_shell_a_case_starts_holds_nothing_of_the_cases_but_its_streams() {
+        use std::os::fd::AsRawFd;
+
+        use nix::fcntl::{fcntl, FcntlArg, FdFlag};
+
+        let stray = std::fs::File::open("/dev/null").unwrap();
+        fcntl(stray.as_raw_fd(), FcntlArg::F_SETFD(FdFlag::empty())).unwrap();
+        let said = sh()
+            .arg("-c")
+            .arg(format!(
+                "if [ -e /dev/fd/{} ]; then echo held; else echo clear; fi",
+                stray.as_raw_fd()
+            ))
+            .output()
+            .unwrap();
+        assert_eq!(String::from_utf8_lossy(&said.stdout), "clear\n");
+    }
+
     /// A reader that is slow to read what is there to read, as the thread that reads a
     /// program's error output may be on a loaded machine: it takes its time over the first.
     struct Slow<R>(R, bool);
@@ -240,10 +270,9 @@ mod tests {
     /// waits for the status: a case that reads `errors()` when `wait` answers must find
     /// them, whatever the reader was doing when the program ended.
     #[test]
-    #[allow(clippy::disallowed_methods)] // The program is the case's own.
     fn what_a_program_said_on_its_error_output_is_all_there_once_it_has_ended_though_the_reader_is_slow(
     ) {
-        let mut child = std::process::Command::new("/bin/sh")
+        let mut child = sh()
             .args(["-c", "echo said >&2"])
             .stdin(Stdio::null())
             .stdout(Stdio::null())
@@ -260,11 +289,9 @@ mod tests {
     /// A process the program left holds its error output open: the wait for the words is
     /// not for ever.
     #[test]
-    #[allow(clippy::disallowed_methods)] // The program is the case's own.
     fn a_program_that_left_a_process_holding_its_error_output_has_ended_all_the_same() {
         let mut program = Spawned::new(
-            std::process::Command::new("/bin/sh")
-                .args(["-c", "echo said >&2; /bin/sleep 60 & exit 0"])
+            sh().args(["-c", "echo said >&2; /bin/sleep 60 & exit 0"])
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())
                 .stderr(Stdio::piped())

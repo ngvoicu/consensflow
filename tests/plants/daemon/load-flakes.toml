@@ -16,14 +16,16 @@
 #   (`tests/regressions/idle_compaction_read_as_a_cut_turn.rs`), and the line a `node` writes is
 #   waited for whole (`codex_in_homebrew_taken_for_not_installed.rs`);
 # - the windows of the headless host are given a minute to print (`cf-panes/tests/headless.rs`);
-# - a program asked to end with its streams closed meets a closed pipe once in ten tries: a copy of
-#   the pipe held for a moment by a program being started can make one try answer, never ten
-#   (`crates/cf-process/src/execute.rs`, held by `capture`'s order in `capture.rs`).
+# - a program asked to end with its streams closed meets a closed pipe: the test runs in a process
+#   of its own, where no program of another test can hold a copy of the pipe that would let the
+#   program answer (`crates/cf-process/src/execute.rs`, held by `capture`'s order in `capture.rs`;
+#   T-183, T-190).
 #
 # Every name holds `load flakes`, so `npm run plants:daemon -- "load flakes"` runs them all.
 
 [run]
 harness-seams = ["cargo", "test", "--offline", "-p", "cf-harness", "--features", "test-support", "--lib", "seams::"]
+process-closed-stream-stress = ["cargo", "test", "--offline", "-p", "cf-process", "--lib", "--", "--ignored", "whatever_other_tests_start"]
 rig-lib-spawned = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "process::spawned"]
 rig-lib-files = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "files::"]
 rig-lib-left = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "rig::left"]
@@ -190,3 +192,30 @@ runs = ["process-execute"]
 file = "crates/cf-process/src/capture.rs"
 find = "            drop((stdout, stderr));"
 replace = "            let _held = (&stdout, &stderr);"
+
+[[plant]]
+name = "load flakes: the closed-pipe test runs beside the other tests"
+meant = "a_program_out_of_time_dies_of_its_closed_stream_whatever_other_tests_start"
+runs = ["process-closed-stream-stress"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/execute.rs"
+find = '''
+        crate::testing::alone(&[], "execute::tests::the_closed_stream_alone");
+'''
+replace = '''
+        the_closed_stream_alone();
+'''
+
+[[plant.edit]]
+file = "crates/cf-process/src/execute.rs"
+find = '''
+        if !crate::testing::is_alone() {
+            return;
+        }
+        let _ran = crate::testing::Ran;
+        // Probed on Node v26.8.1: the streams are closed before the program is
+'''
+replace = '''
+        // Probed on Node v26.8.1: the streams are closed before the program is
+'''

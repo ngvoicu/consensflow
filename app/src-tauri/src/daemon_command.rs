@@ -291,6 +291,9 @@ pub(crate) fn login_path_in(
         std::hash::RandomState::new().hash_one(std::process::id())
     );
     let mut asked = Command::new(shell);
+    // A login file may start a program that runs on after the shell (an agent of ssh's, of
+    // gpg's), and the app opens sockets and pipes on its other threads as it asks.
+    cf_process::hold_only_the_streams(&mut asked);
     asked
         .args(["-lc", &format!("printf '{marker}%s{marker}' \"$PATH\"")])
         .stdin(Stdio::null())

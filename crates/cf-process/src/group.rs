@@ -97,9 +97,9 @@ mod tests {
 
     /// A sleep that leads a group of its own: a signal sent to the process or
     /// to its group ends it.
-    #[allow(clippy::disallowed_methods, clippy::unwrap_used)] // The test starts what it ends.
+    #[allow(clippy::unwrap_used)] // The test starts what it ends.
     fn sleeper() -> Child {
-        std::process::Command::new("/bin/sleep")
+        crate::testing::command("/bin/sleep")
             .arg("30")
             .process_group(0)
             .spawn()

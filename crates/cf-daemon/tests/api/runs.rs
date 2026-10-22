@@ -39,6 +39,7 @@ fn build() -> PathBuf {
         .arg("--message-format=json-render-diagnostics")
         .env("CARGO_TARGET_DIR", target)
         .stderr(Stdio::inherit());
+    cf_process::hold_only_the_streams(&mut command);
     if !cfg!(debug_assertions) {
         command.arg("--release");
     }
@@ -58,6 +59,24 @@ fn build() -> PathBuf {
         .expect("cargo built the cf program")
 }
 
+/// The command `program` (`cf`) runs with, as a window runs it: this process's environment less
+/// every `CONSENSFLOW_*`, `CF_*` and `CHISEL_*`, and nothing of this process's but its streams
+/// (the tests run side by side, and a run would hold what another closed).
+fn command(program: &Path) -> Command {
+    let mut command = Command::new(program);
+    for (name, _) in std::env::vars_os() {
+        let name = name.to_string_lossy();
+        if ["CONSENSFLOW_", "CF_", "CHISEL_"]
+            .iter()
+            .any(|prefix| name.starts_with(prefix))
+        {
+            command.env_remove(&*name);
+        }
+    }
+    cf_process::hold_only_the_streams(&mut command);
+    command
+}
+
 /// Starts `cf argv`, with `stdin` on its standard input and `env` added to
 /// its environment, and says what it came to once it has ended.
 pub fn start(
@@ -69,17 +88,7 @@ pub fn start(
     // The program is found before the thread is: a build is not a run's.
     let program = cf().to_owned();
     std::thread::spawn(move || {
-        let mut command = Command::new(program);
-        for (name, _) in std::env::vars_os() {
-            let name = name.to_string_lossy();
-            if ["CONSENSFLOW_", "CF_", "CHISEL_"]
-                .iter()
-                .any(|prefix| name.starts_with(prefix))
-            {
-                command.env_remove(&*name);
-            }
-        }
-        let mut child = command
+        let mut child = command(&program)
             .args(&argv)
             .envs(env)
             .stdin(Stdio::piped())
@@ -99,4 +108,28 @@ pub fn start(
         });
     });
     ran
+}
+
+/// A run holds nothing of the test's but its streams: a stand-in for `cf` says whether it has a
+/// descriptor that was left open and not close-on-exec as it started.
+#[cfg(target_os = "macos")]
+#[test]
+fn a_run_holds_nothing_of_the_tests_but_its_streams() {
+    use std::os::fd::AsRawFd;
+
+    use nix::fcntl::{fcntl, FcntlArg, FdFlag};
+
+    let stray = std::fs::File::open("/dev/null").expect("a file");
+    fcntl(stray.as_raw_fd(), FcntlArg::F_SETFD(FdFlag::empty())).expect("its flags");
+    let said = command(Path::new("/bin/sh"))
+        .args([
+            "-c".to_owned(),
+            format!(
+                "if [ -e /dev/fd/{} ]; then echo held; else echo clear; fi",
+                stray.as_raw_fd()
+            ),
+        ])
+        .output()
+        .expect("the stand-in runs");
+    assert_eq!(String::from_utf8_lossy(&said.stdout), "clear\n");
 }

@@ -105,14 +105,13 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::disallowed_methods)] // The test starts what it ends.
     fn a_group_is_ended_whole_and_a_process_alone_is_not() {
         let dir = tempfile::tempdir().unwrap();
         for (reach, left_behind) in [(Reach::Process, true), (Reach::Group, false)] {
             // A shell that leads a group, starts a sleep, and waits for it:
             // the sleep's pid is written down.
             let file = dir.path().join(format!("{reach:?}"));
-            let mut shell = std::process::Command::new("/bin/sh")
+            let mut shell = crate::testing::command("/bin/sh")
                 .arg("-c")
                 .arg("sleep 30 & echo $! > \"$0\"; wait")
                 .arg(&file)
@@ -130,32 +129,24 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::disallowed_methods)] // The test starts what it ends.
     fn ends_a_child_with_the_signal_asked_for() {
         for (how, signal) in [
             (Ending::Asked, libc::SIGTERM),
             (Ending::Forced, libc::SIGKILL),
         ] {
-            let mut child = std::process::Command::new("sleep")
-                .arg("30")
-                .spawn()
-                .unwrap();
+            let mut child = crate::testing::command("sleep").arg("30").spawn().unwrap();
             terminate(child.id(), how);
             assert_eq!(child.wait().unwrap().signal(), Some(signal), "{how:?}");
         }
     }
 
     #[test]
-    #[allow(clippy::disallowed_methods)] // The test starts what it ends.
     fn the_end_that_waits_for_nothing_ends_a_child_just_the_same() {
         for (how, signal) in [
             (Ending::Asked, libc::SIGTERM),
             (Ending::Forced, libc::SIGKILL),
         ] {
-            let mut child = std::process::Command::new("sleep")
-                .arg("30")
-                .spawn()
-                .unwrap();
+            let mut child = crate::testing::command("sleep").arg("30").spawn().unwrap();
             end(child.id(), how, Reach::Process, false);
             assert_eq!(child.wait().unwrap().signal(), Some(signal), "{how:?}");
         }
@@ -170,6 +161,7 @@ mod tests {
     #[test]
     #[allow(clippy::disallowed_methods)] // The test starts what it ends.
     fn the_end_that_waits_for_nothing_returns_before_the_child_is_gone() {
+        // Bare: a Windows test, and Windows hands a program no descriptor it is not asked to.
         let mut child = std::process::Command::new("ping")
             .args(["-n", "30", "127.0.0.1"])
             .stdout(std::process::Stdio::null())

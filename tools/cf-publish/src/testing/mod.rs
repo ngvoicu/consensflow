@@ -3,6 +3,15 @@
 //! own asks over HTTP, `fake-gh`), the files a built release holds, and the
 //! text of the workflow the steps are read off. Built only for tests, with the
 //! `test-support` feature: the binary the workflow runs has none of it.
+//!
+//! The programs these tests start (the binary under test, `tar`, `bash`, `ruby`) are started
+//! bare: on macOS each may be left a descriptor another test was making as it started (std makes
+//! a socket or a pipe close-on-exec in a second step), such as the listener of this crate's
+//! GitHub on the loopback. The rest of the repository's tests start theirs through
+//! `cf_process::hold_only_the_streams`, which closes them in the new program; this crate is built
+//! with its two dependencies and no other, dev-dependencies included (tests/closure.rs: the binary
+//! runs under the repository's write token), and the hook needs cf-process, or libc and unsafe
+//! code of this crate's own. Each start says so where it is made.
 
 mod built;
 mod http;
@@ -154,6 +163,7 @@ fn run_with(
     env: &[(&str, &str)],
     path: Option<std::ffi::OsString>,
 ) -> Ran {
+    // Bare, as this crate's tests start every program (see `testing`'s words: no dependency here).
     let mut command = Command::new(binary);
     command.args(args);
     for name in WORKFLOW_VARIABLES {

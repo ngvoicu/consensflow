@@ -161,6 +161,7 @@ fn a_junction_left_on_the_way_to_the_copies_is_refused_and_where_it_leads_is_lef
     old_file(&sentinel);
     fs::create_dir_all(home.path().join("tmp")).unwrap();
     let junction = root(home.path());
+    // Bare: a Windows test, and Windows hands a program no descriptor it is not asked to.
     let made = std::process::Command::new("cmd")
         .args(["/c", "mklink", "/J"])
         .arg(&junction)

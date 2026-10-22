@@ -42,6 +42,18 @@ impl Headless {
     }
 
     fn spawn_with_env(env: &[(&str, &str)]) -> Self {
+        Self::start(env, true)
+    }
+
+    /// The helper started as std starts a program, left whatever the test had open that was not
+    /// close-on-exec: the premise of the test of what a window is left, and no other's.
+    fn spawn_left_what_was_open() -> Self {
+        Self::start(&[], false)
+    }
+
+    /// The helper, holding only its streams when `streams_only` (as every test but one has it:
+    /// the tests run side by side, and one would hold what another closed).
+    fn start(env: &[(&str, &str)], streams_only: bool) -> Self {
         let mut command = Command::new(env!("CARGO_BIN_EXE_consensflow-bridge"));
         command
             .stdin(Stdio::piped())
@@ -49,6 +61,9 @@ impl Headless {
             .stderr(Stdio::inherit());
         for (name, value) in env {
             command.env(name, value);
+        }
+        if streams_only {
+            cf_process::hold_only_the_streams(&mut command);
         }
         let mut child = command.spawn().expect("spawn consensflow-bridge");
         let input = child.stdin.take().expect("piped helper stdin");
@@ -1103,7 +1118,9 @@ fn a_paste_answers_whether_anything_reached_the_window() {
 
 #[test]
 fn helper_is_inert_when_stdin_is_not_a_pipe() {
-    let output = Command::new(env!("CARGO_BIN_EXE_consensflow-bridge"))
+    let mut helper = Command::new(env!("CARGO_BIN_EXE_consensflow-bridge"));
+    cf_process::hold_only_the_streams(&mut helper);
+    let output = helper
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
@@ -1111,6 +1128,27 @@ fn helper_is_inert_when_stdin_is_not_a_pipe() {
         .expect("run helper with non-pipe stdin");
     assert!(output.status.success());
     assert!(output.stdout.is_empty());
+}
+
+/// The helper a test starts runs beside the other tests, which open sockets and pipes: on macOS
+/// std makes each close-on-exec in a second step, and the helper started between the two would
+/// hold it for as long as it runs. Here a descriptor is left open and not close-on-exec as it
+/// starts, and `lsof` says the helper does not have it.
+#[cfg(target_os = "macos")]
+#[test]
+fn the_helper_a_test_starts_holds_nothing_of_the_tests_but_its_streams() {
+    use std::os::fd::AsRawFd;
+
+    use cf_process::test_support::{holds_null, stray};
+
+    let _pty_guard = serial_headless_test();
+    let stray = stray();
+    let mut helper = Headless::spawn();
+    assert!(
+        !holds_null(helper.child.id(), stray.as_raw_fd()),
+        "the helper holds it"
+    );
+    helper.close_input_and_wait();
 }
 
 /// The host holds a descriptor it was left (the program that started it had one open that was
@@ -1132,7 +1170,7 @@ fn a_window_holds_nothing_of_the_hosts_but_its_terminal_whatever_the_host_was_le
     let fd = stray.as_raw_fd();
     // SAFETY: `fcntl` clears the flags of a descriptor this test holds.
     assert_eq!(unsafe { fcntl(fd, F_SETFD, 0) }, 0);
-    let mut helper = Headless::spawn();
+    let mut helper = Headless::spawn_left_what_was_open();
     let held = Command::new("/usr/sbin/lsof")
         .args([
             "-a",
@@ -2499,7 +2537,9 @@ fn codex_programs() -> std::path::PathBuf {
     )
     .expect("the source of the harness's programs");
     let helper = dir.join("codex-code-mode-host");
-    let made = Command::new("cc")
+    let mut cc = Command::new("cc");
+    cf_process::hold_only_the_streams(&mut cc);
+    let made = cc
         .arg(&source)
         .arg("-o")
         .arg(&helper)

@@ -87,7 +87,7 @@ pub(super) fn harness_programs() -> PathBuf {
     )
     .expect("the source of the harness's programs");
     let helper = dir.join("codex-code-mode-host");
-    let made = std::process::Command::new("cc")
+    let made = crate::testing::command("cc")
         .arg(&source)
         .arg("-o")
         .arg(&helper)

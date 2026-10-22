@@ -117,16 +117,45 @@ struct Other(std::process::Child);
 impl Other {
     #[allow(clippy::disallowed_methods)] // The test starts what it ends.
     fn start() -> Self {
-        let child = if cfg!(windows) {
-            std::process::Command::new("ping")
-                .args(["-n", "60", "127.0.0.1"])
-                .stdout(std::process::Stdio::null())
-                .spawn()
+        let mut command = if cfg!(windows) {
+            let mut ping = std::process::Command::new("ping");
+            ping.args(["-n", "60", "127.0.0.1"])
+                .stdout(std::process::Stdio::null());
+            ping
         } else {
-            std::process::Command::new("sleep").arg("60").spawn()
+            let mut sleep = std::process::Command::new("sleep");
+            sleep.arg("60");
+            sleep
         };
-        Self(child.unwrap())
+        // It lives beside the other tests, which open sockets and pipes: what it was left of
+        // theirs it would hold for its minute.
+        cf_process::hold_only_the_streams(&mut command);
+        Self(command.spawn().unwrap())
     }
+}
+
+/// The process of the test's own holds nothing of the test's but its streams: a descriptor left
+/// open and not close-on-exec as it starts is not among its own, as `lsof` says.
+#[cfg(target_os = "macos")]
+#[test]
+#[allow(clippy::disallowed_methods)] // `lsof`, asked what it holds.
+fn a_process_of_the_tests_own_holds_nothing_of_the_tests_but_its_streams() {
+    use std::os::fd::AsRawFd;
+
+    use nix::fcntl::{fcntl, FcntlArg, FdFlag};
+
+    let stray = fs::File::open("/dev/null").unwrap();
+    let fd = stray.as_raw_fd();
+    fcntl(fd, FcntlArg::F_SETFD(FdFlag::empty())).unwrap();
+    let other = Other::start();
+    let held = std::process::Command::new("/usr/sbin/lsof")
+        .args(["-a", "-p", &other.0.id().to_string(), "-d", &fd.to_string()])
+        .output()
+        .unwrap();
+    assert!(
+        !String::from_utf8_lossy(&held.stdout).contains("/dev/null"),
+        "it holds it"
+    );
 }
 
 impl Drop for Other {

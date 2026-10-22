@@ -87,6 +87,8 @@ mod build;
 pub(crate) mod bundle;
 mod case;
 mod cases;
+#[cfg(unix)]
+mod descriptors;
 mod evidence;
 mod feed;
 mod launchers;

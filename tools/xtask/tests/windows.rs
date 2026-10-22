@@ -10,7 +10,7 @@ mod common;
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::Output;
 
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
@@ -29,7 +29,7 @@ fn tree(files: &[(&str, &str)]) -> tempfile::TempDir {
         fs::write(file, text).unwrap();
     }
     for words in [&["init", "-q"][..], &["add", "-A"]] {
-        let ran = Command::new("git")
+        let ran = common::command("git")
             .args(words)
             .current_dir(dir.path())
             .env_remove("GIT_DIR")
@@ -432,7 +432,7 @@ fn a_run_that_is_stopped_ends_ssh_and_asks_the_machine_to_end_the_run_and_answer
     );
     let tree = tree(&[("keep.txt", "kept")]);
     let manifest = tree.path().join("tools").join("xtask");
-    let mut xtask = Command::new(env!("CARGO_BIN_EXE_xtask"))
+    let mut xtask = common::command(env!("CARGO_BIN_EXE_xtask"))
         .current_dir(tree.path())
         .env("PATH", path_with(fakes.path()))
         .env("CARGO_MANIFEST_DIR", manifest)

@@ -15,14 +15,18 @@ publish = false
 # test's own panics and is not sent). The app turns it on for its tests alone:
 # it must stay off in what ships.
 [features]
-test-support = []
+test-support = ["dep:cf-process"]
 
-# The helper's own tests (tests/headless.rs) start a sentinel too.
+# The helper's own tests (tests/headless.rs) start a sentinel too, and start the helper holding
+# only its streams.
 [dev-dependencies]
 cf-panes = { path = ".", features = ["test-support"] }
+cf-process = { workspace = true, features = ["test-support"] }
 
 [dependencies]
 cf-bridge.workspace = true
+# The sentinel holds only its streams (test-support alone).
+cf-process = { workspace = true, optional = true }
 cf-proto.workspace = true
 futures-channel.workspace = true
 futures-executor.workspace = true

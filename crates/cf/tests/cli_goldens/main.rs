@@ -184,12 +184,41 @@ struct Ran {
     stamped: BTreeSet<i64>,
 }
 
+/// The command a case starts `program` (the binary) with: no environment yet, and nothing of the
+/// test's but its streams (the cases run side by side, and one would hold what another closed).
+fn bare(program: impl AsRef<std::ffi::OsStr>) -> Command {
+    let mut command = Command::new(program);
+    command.env_clear();
+    cf_process::hold_only_the_streams(&mut command);
+    command
+}
+
+/// The command a case starts holds nothing of the test's but its streams.
+#[cfg(target_os = "macos")]
+#[test]
+fn the_command_a_case_starts_holds_nothing_of_the_tests_but_its_streams() {
+    use std::os::fd::AsRawFd;
+
+    use nix::fcntl::{fcntl, FcntlArg, FdFlag};
+
+    let stray = std::fs::File::open("/dev/null").unwrap();
+    fcntl(stray.as_raw_fd(), FcntlArg::F_SETFD(FdFlag::empty())).unwrap();
+    let said = bare("/bin/sh")
+        .arg("-c")
+        .arg(format!(
+            "if [ -e /dev/fd/{} ]; then echo held; else echo clear; fi",
+            stray.as_raw_fd()
+        ))
+        .output()
+        .unwrap();
+    assert_eq!(String::from_utf8_lossy(&said.stdout), "clear\n");
+}
+
 /// The binary run as the case says, in `root`: with exactly the environment the
 /// case gives, and no folder of the system's programs, which Node's never had.
 fn spawn(case: &Value, root: &Path, names: &Names) -> (Output, Option<String>) {
     let name = plain(&root.to_string_lossy());
-    let mut command = Command::new(&names.cf);
-    command.env_clear();
+    let mut command = bare(&names.cf);
     command.env("CONSENSFLOW_TOOL_FOLDERS", "");
     for (variable, value) in case["env"].as_object().unwrap() {
         command.env(variable, value.as_str().unwrap().replace("$ROOT", &name));

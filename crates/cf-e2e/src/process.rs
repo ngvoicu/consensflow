@@ -263,6 +263,9 @@ impl Run {
     /// The program's command, with everything but its streams.
     fn command(&self) -> Command {
         let mut command = Command::new(&self.program);
+        // Daemons, hosts and stand-ins run for a whole case while other cases open sockets and
+        // pipes: one left another's would hold it to its end.
+        cf_process::hold_only_the_streams(&mut command);
         if !self.inherit {
             command
                 .env_clear()
