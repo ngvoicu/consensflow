@@ -115,6 +115,61 @@ fn stop_in_its_log(log: &str) -> (i64, i64) {
     (stamp("info stop: "), stamp("info exit 0"))
 }
 
+/// How long a stop took, in the parts that a failure names: from the ask to the
+/// line of the daemon's log that says the stop began (the daemon reads the ask),
+/// the stop, and from the line that says it ended to the process gone (its exit:
+/// on Windows a console write to a pipe nobody reads is made there). The first
+/// two are the daemon's own count from its log; the whole is the test's, from
+/// the ask to the process found gone.
+struct Stopped {
+    how: How,
+    lead_in: i64,
+    stop: i64,
+    to_gone: i64,
+    took: Duration,
+}
+
+impl Stopped {
+    /// `asked_at` is when the ask was made (ms since the epoch), `took` how long
+    /// from it the process was found gone.
+    fn of(root: &Root, how: How, asked_at: i64, took: Duration) -> Self {
+        let (began, ended) = stop_in_its_log(&root.log());
+        let took_ms = i64::try_from(took.as_millis()).unwrap_or(i64::MAX);
+        Stopped {
+            how,
+            lead_in: began - asked_at,
+            stop: ended - began,
+            to_gone: took_ms - (ended - asked_at),
+            took,
+        }
+    }
+
+    fn phases(&self) -> String {
+        format!(
+            "{:?}: {} ms to begin, the stop {} ms, {} ms to be gone; {:?} in all",
+            self.how, self.lead_in, self.stop, self.to_gone, self.took
+        )
+    }
+
+    /// What every stop is held to, however much is open: the stop is one deadline of
+    /// a second and no more, the process is gone a moment after its last line (1-10 ms
+    /// where it was measured, on a Mac and on Windows: one that is not is slow to exit,
+    /// and the app's grace runs on until it is), and the whole of it, from the ask, is
+    /// inside the app's grace (`DAEMON_STOP_GRACE`, 2 s from closing the daemon's input
+    /// until the process is gone, which the app then kills).
+    ///
+    /// The parts are said as the test passes, for a run with `-- --nocapture`: that is how
+    /// they are measured on a machine, and no scratch test is needed.
+    #[allow(clippy::print_stdout)] // Said for a run with `--nocapture`: a helper is no test fn.
+    fn assert_within_a_deadline_and_the_apps_grace(&self) {
+        let phases = self.phases();
+        println!("{phases}");
+        assert!(self.stop < 1_600, "{phases}");
+        assert!(self.to_gone < 1_000, "slow to be gone: {phases}");
+        assert!(self.took < Duration::from_millis(2_000), "{phases}");
+    }
+}
+
 fn hows() -> Vec<How> {
     vec![
         How::InputEnded,
@@ -261,25 +316,15 @@ fn a_busy_daemon_is_stopped_within_one_deadline_whatever_is_open() {
         let asked = stop(&mut daemon, how);
         let (code, took) = daemon.exits(asked, Duration::from_secs(10));
         assert_eq!(code, Some(0), "{how:?}");
-        // The time of the stop is the daemon's own, from the lines of its log:
-        // from the ask to the line that says it began (the daemon reads the ask),
-        // the stop, and from the line that says it ended to the process gone
-        // (the system ends it). Each is bounded by what it is.
-        let (stop_began, stop_ended) = stop_in_its_log(&root.log());
-        let (lead_in, stop, to_gone) = (
-            stop_began - asked_at,
-            stop_ended - stop_began,
-            i64::try_from(took.as_millis()).unwrap_or(i64::MAX) - (stop_ended - asked_at),
-        );
-        let phases = format!(
-            "{how:?}: {lead_in} ms to begin, the stop {stop} ms, {to_gone} ms to be gone; {took:?} in all"
-        );
+        let stopped = Stopped::of(&root, how, asked_at, took);
         // One deadline of a second for all of it, which the body half sent
         // and the pass hold to the end.
-        assert!(stop >= 900, "the stop did not wait: {phases}");
-        assert!(stop < 1_600, "{phases}");
-        // The app ends the daemon 2 s after it asks: by then the stop is over.
-        assert!(stop_ended - asked_at < 2_000, "{phases}");
+        assert!(
+            stopped.stop >= 900,
+            "the stop did not wait: {}",
+            stopped.phases()
+        );
+        stopped.assert_within_a_deadline_and_the_apps_grace();
 
         let (answered, ended) = door.read_to_the_end();
         assert!(ended, "{how:?}: the door's connection ended");
@@ -386,12 +431,14 @@ fn a_program_the_daemon_is_waiting_for_is_ended_when_it_stops() {
             daemon.ping("r-last");
             std::thread::sleep(Duration::from_millis(300));
         }
+        let asked_at = SystemClock.now_ms();
         let at = stop(&mut daemon, how);
         let (code, took) = daemon.exits(at, Duration::from_secs(10));
         assert_eq!(code, Some(0), "{how:?}");
         // The request that waits for the program is open at the deadline, and
-        // is dropped there: one deadline, as the busy daemon takes.
-        assert!(took < Duration::from_millis(1_600), "{how:?}: {took:?}");
+        // is dropped there: one deadline, as the busy daemon takes, held to the
+        // same parts.
+        Stopped::of(&root, how, asked_at, took).assert_within_a_deadline_and_the_apps_grace();
         assert!(
             waited.ends_soon(),
             "{how:?}: the program the daemon waited for outlived it"

@@ -259,10 +259,13 @@ impl Daemon {
 
     /// SIGTERM, with its input left open: sent by this process, as the app
     /// sends it. (`kill` run as a program would put the start of a program in
-    /// the time a stop is counted from.)
+    /// the time a stop is counted from.) A signal that is not delivered is
+    /// said here, and not as a daemon that did not stop.
     #[cfg(unix)]
     pub fn terminate(&self) {
-        cf_process::terminate(self.child.id(), cf_process::Ending::Asked);
+        let pid = nix::unistd::Pid::from_raw(i32::try_from(self.child.id()).expect("a pid"));
+        nix::sys::signal::kill(pid, nix::sys::signal::Signal::SIGTERM)
+            .unwrap_or_else(|failed| panic!("SIGTERM was not delivered to {pid}: {failed}"));
     }
 
     /// Waits for it to exit: its code and how long it took from `since`.

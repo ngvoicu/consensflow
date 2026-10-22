@@ -351,6 +351,7 @@ dependencies = [
  "cf-process",
  "cf-proto",
  "form_urlencoded",
+ "nix",
  "serde",
  "serde_json",
  "tempfile",

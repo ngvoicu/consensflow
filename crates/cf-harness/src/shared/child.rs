@@ -67,7 +67,9 @@ mod tests {
         Rc::from(processes.spawn(program, Streams::Quiet).unwrap())
     }
 
-    /// A child that writes down how it is ended, and closes once forced.
+    /// A child that writes down how it is ended, and ends and closes once forced. It
+    /// ends and closes apart, as a program does that was left a copy of a stream: it can
+    /// have exited with its streams open.
     #[derive(Default)]
     struct Recording {
         asked: RefCell<Vec<Ending>>,
@@ -98,9 +100,20 @@ mod tests {
             }))
         }
 
+        fn ended(&self) -> Work<'_, ()> {
+            Box::pin(std::future::poll_fn(|_| {
+                if self.exited.get() {
+                    Poll::Ready(())
+                } else {
+                    Poll::Pending
+                }
+            }))
+        }
+
         fn terminate(&self, how: Ending) {
             self.asked.borrow_mut().push(how);
             if how == Ending::Forced {
+                self.exited.set(true);
                 self.closed.set(true);
             }
         }
@@ -170,29 +183,45 @@ mod tests {
         );
     }
 
+    /// What `closed()` waited for, and the stop's failure with it: the process is gone,
+    /// and a program that was left a copy of its error stream holds that open.
     #[test]
-    fn a_child_that_has_exited_is_not_asked_to_end_but_is_waited_for_until_it_closes() {
+    fn a_child_that_has_exited_is_not_asked_to_end_and_is_stopped_at_once_though_its_error_stream_is_open(
+    ) {
         let recording = Rc::new(Recording::default());
         recording.exited.set(true);
         let child: Rc<dyn Child> = Rc::clone(&recording) as Rc<dyn Child>;
         let time = Rc::new(ManualTime::new(0));
         let mut driver = Driver::default();
         begin(&mut driver, &time, &child, 0);
-        assert!(driver.run().is_empty());
-        assert_eq!(*recording.asked.borrow(), []);
-        assert!(time.fire_next(2000));
         assert_eq!(driver.run(), [(0, Ok(()))]);
-        assert_eq!(*recording.asked.borrow(), [Ending::Forced]);
+        assert_eq!(*recording.asked.borrow(), []);
+        assert!(!time.fire_next(10_000), "nothing is left to fire");
     }
 
     #[test]
-    fn a_child_that_closes_before_its_time_is_not_forced() {
+    fn a_child_that_exits_once_asked_is_not_forced_though_its_error_stream_stays_open() {
         let recording = Rc::new(Recording::default());
         let child: Rc<dyn Child> = Rc::clone(&recording) as Rc<dyn Child>;
         let time = Rc::new(ManualTime::new(0));
         let mut driver = Driver::default();
         begin(&mut driver, &time, &child, 0);
         assert!(driver.run().is_empty());
+        recording.exited.set(true);
+        assert_eq!(driver.run(), [(0, Ok(()))]);
+        assert_eq!(*recording.asked.borrow(), [Ending::Asked]);
+        assert!(!time.fire_next(10_000), "nothing is left to fire");
+    }
+
+    #[test]
+    fn a_child_that_ends_before_its_time_is_not_forced() {
+        let recording = Rc::new(Recording::default());
+        let child: Rc<dyn Child> = Rc::clone(&recording) as Rc<dyn Child>;
+        let time = Rc::new(ManualTime::new(0));
+        let mut driver = Driver::default();
+        begin(&mut driver, &time, &child, 0);
+        assert!(driver.run().is_empty());
+        recording.exited.set(true);
         recording.closed.set(true);
         assert_eq!(driver.run(), [(0, Ok(()))]);
         assert_eq!(*recording.asked.borrow(), [Ending::Asked]);
@@ -209,6 +238,7 @@ mod tests {
         assert!(driver.run().is_empty());
         assert!(time.fire_next(2000));
         assert_eq!(driver.run(), [(0, Ok(()))]);
+        recording.exited.set(false);
         recording.closed.set(false);
         begin(&mut driver, &time, &child, 1);
         assert!(driver.run().is_empty());

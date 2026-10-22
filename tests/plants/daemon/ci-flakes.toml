@@ -5,16 +5,21 @@
 #   error stream open (`crates/cf-harness/src/shared/child.rs`, `cf_process::Child::ended`);
 # - a stop waits for the pass it found running and for no longer than that, counted in the
 #   timers' own time (`crates/cf-daemon/src/stop.rs`);
-# - a daemon's stop is counted from the lines of its own log, and its limit is one deadline
-#   for the waiting and the app's two seconds from the ask (`crates/cf/tests/daemon_stop.rs`).
+# - a daemon's stop is counted from the lines of its own log, in three parts a failure names: the
+#   stop is one deadline for the waiting, the process is gone a moment after its last line, and
+#   the whole of it, from the ask, is inside the app's two seconds (`crates/cf/tests/daemon_stop.rs`);
+# - a stop does not wait for the error stream of a child that has exited, on any platform
+#   (`crates/cf-harness/src/shared/child.rs`, the unit tests on its `Recording` fake).
 #
 # Every name holds `ci flakes`, so `npm run plants:daemon -- "ci flakes"` runs them all.
 
 [run]
 harness-channels-create = ["cargo", "test", "--offline", "-p", "cf-harness", "--features", "test-support", "--test", "channels", "a_server_that_has_exited"]
+harness-shared-child = ["cargo", "test", "--offline", "-p", "cf-harness", "--features", "test-support", "--lib", "shared::child::"]
 process-child-ended = ["cargo", "test", "--offline", "-p", "cf-process", "--lib", "child::tests::a_program_is_ended"]
 daemon-lib-stop-pass = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "stop::tests::a_pass_that_ends"]
 daemon-lib-stop-stall = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "stop::tests::a_machine_that_stalls"]
+stop-program = ["cargo", "test", "--offline", "-p", "cf", "--test", "daemon_stop", "a_program_the_daemon_is_waiting_for"]
 stop-busy = ["cargo", "test", "--offline", "-p", "cf", "--test", "daemon_stop", "a_busy_daemon_is_stopped"]
 
 [[plant]]
@@ -40,6 +45,20 @@ find = '''
 replace = '''
     giving_up
         .bound(child.closed())
+'''
+
+[[plant]]
+name = "ci flakes: a stop waits for the error stream of a child that has exited (on every platform)"
+meant = "a_child_that_has_exited_is_not_asked_to_end_and_is_stopped_at_once_though_its_error_stream_is_open"
+runs = ["harness-shared-child"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/shared/child.rs"
+find = '''
+    if forcing.bound(child.ended()).await.is_some() {
+'''
+replace = '''
+    if forcing.bound(child.closed()).await.is_some() {
 '''
 
 [[plant]]
@@ -94,7 +113,7 @@ find = "            tokio::join!(passes, self.api.close());"
 replace = "            tokio::join!(passes, self.api.close(), tokio::time::sleep(DEADLINE));"
 
 [[plant]]
-name = "ci flakes: the stop's wait is told in the machine's clock"
+name = "ci flakes: the stalled tail's test is run in the machine's clock (plants the test, not the product)"
 meant = "a_machine_that_stalls_in_the_tail_changes_nothing_of_how_long_the_stop_waited"
 runs = ["daemon-lib-stop-stall"]
 
@@ -133,3 +152,37 @@ runs = ["stop-busy"]
 file = "crates/cf-daemon/src/stop.rs"
 find = "pub const DEADLINE: Duration = Duration::from_secs(1);"
 replace = "pub const DEADLINE: Duration = Duration::from_millis(300);"
+
+[[plant]]
+name = "ci flakes: a stop's process is slow to be gone once its last line is written"
+meant = "a_busy_daemon_is_stopped_within_one_deadline_whatever_is_open"
+runs = ["stop-busy"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/stop.rs"
+find = '''
+        self.errors.log().info("exit 0");
+        (self.exit)(0);
+'''
+replace = '''
+        self.errors.log().info("exit 0");
+        std::thread::sleep(Duration::from_millis(1_000));
+        (self.exit)(0);
+'''
+
+[[plant]]
+name = "ci flakes: a stop's process is slow to be gone, with a program being waited for"
+meant = "a_program_the_daemon_is_waiting_for_is_ended_when_it_stops"
+runs = ["stop-program"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/stop.rs"
+find = '''
+        self.errors.log().info("exit 0");
+        (self.exit)(0);
+'''
+replace = '''
+        self.errors.log().info("exit 0");
+        std::thread::sleep(Duration::from_millis(1_000));
+        (self.exit)(0);
+'''
