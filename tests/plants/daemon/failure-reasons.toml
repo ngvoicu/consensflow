@@ -741,3 +741,17 @@ find = '''
 replace = '''
             None if false => said.push_str("; its screen showed nothing of its own"),
 '''
+
+[[plant]]
+name = "failure reason: a paste's text leaves out the rows it carried, and their labels are quoted as the window's"
+meant = "the_rows_a_paste_carried_are_part_of_it_on_screen_and_the_error_after_them_is_the_windows"
+runs = ["failure-reason-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '''
+                text: delivery_text(&begun.message, &begun.carried),
+'''
+replace = '''
+                text: delivery_text(&begun.message, &[]),
+'''

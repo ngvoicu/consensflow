@@ -444,3 +444,50 @@ fn a_screen_of_nothing_but_what_consensflow_pasted_showed_nothing_of_its_own() {
         )]
     );
 }
+
+#[test]
+fn the_rows_a_paste_carried_are_part_of_it_on_screen_and_the_error_after_them_is_the_windows() {
+    // T-1 held and resumed: its words go in with what zeus's window kept for it,
+    // each under its "(kept for you: …)" label, and the turn after them fails.
+    let context = Context::new();
+    let (project, _, _, _) = crate::carriers::kept(&context);
+    context.hold_task(project, 1);
+    context.pass().unwrap();
+    context
+        .ledger
+        .borrow_mut()
+        .resume_task(project, 1, None, cf_ledger::RESUME_WORDS)
+        .unwrap();
+    context.pass().unwrap();
+    context.pass().unwrap();
+    let pasted = context
+        .adapter
+        .agent("zeus")
+        .items
+        .iter()
+        .rev()
+        .find(|item| item.text.contains("(kept for you: "))
+        .expect("the paste with the rows it carried")
+        .text
+        .to_string();
+    let error = "Error: provider unreachable";
+    let mut screen: Vec<&str> = pasted.lines().collect();
+    screen.extend(["", error]);
+    context.host.set_snapshot(json!({ "tail": screen }));
+    context.adapter.with("zeus", |agent| agent.failed = true);
+    context.adapter.answer("zeus", "Going on");
+    context.pass().unwrap();
+
+    let zeus = context.task(project, 1).task.assignee.unwrap();
+    assert_eq!(context.task(project, 1).task.state, "failed");
+    let told: Vec<String> = crate::fixtures::notes(&context, context.id(project, "chief"))
+        .into_iter()
+        .filter(|note| note.starts_with("T-1 failed"))
+        .collect();
+    assert_eq!(
+        told,
+        [format!(
+            "T-1 failed: @{zeus}'s harness reported a failure; its screen ended with: \"{error}\". Reopen it with: cf task reopen T-1 \"…\""
+        )]
+    );
+}

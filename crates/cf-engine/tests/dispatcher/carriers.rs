@@ -11,7 +11,7 @@ use crate::fixtures::assert_match;
 
 /// T-1 given to zeus, its brief received, a question asked and answered, and
 /// a note: the project, the question's id, the answer's and the note's.
-fn kept(context: &Context) -> (i64, i64, i64, i64) {
+pub(crate) fn kept(context: &Context) -> (i64, i64, i64, i64) {
     let project = context.with_staff(&["zeus"]);
     context.give(project.id, "zeus", "Parser");
     context.pass().unwrap();
