@@ -42,6 +42,11 @@ struct Rig {
 /// `claude` to be found on PATH and only it, and on Windows what finds and
 /// starts a `.cmd` there (`PATHEXT`, `SystemRoot`, `ComSpec`).
 fn environment(root: &Path) -> Env {
+    environment_with(root, &[])
+}
+
+/// [`environment`], and the variables `more` gives it.
+fn environment_with(root: &Path, more: &[(&str, &str)]) -> Env {
     let home = root.join("home");
     let bin = root.join("bin");
     std::fs::create_dir_all(&bin).unwrap();
@@ -75,7 +80,11 @@ fn environment(root: &Path) -> Env {
         ]
         .into_iter()
         .map(|(name, value)| (name.to_owned(), value))
-        .chain(windows),
+        .chain(windows)
+        .chain(
+            more.iter()
+                .map(|(name, value)| ((*name).to_owned(), (*value).to_owned())),
+        ),
     )
 }
 
@@ -106,9 +115,16 @@ fn options(
 }
 
 async fn started(root: &Path) -> Rig {
+    started_with(root, &[]).await
+}
+
+/// [`started`], on the environment and the variables `more` give it.
+async fn started_with(root: &Path, more: &[(&str, &str)]) -> Rig {
     let (said, exited, handles) = (Said::default(), Rc::default(), Rc::default());
     let (options, app) = options(root, &said, &exited, &handles);
-    let daemon = start(environment(root), options).await.expect("it starts");
+    let daemon = start(environment_with(root, more), options)
+        .await
+        .expect("it starts");
     let home = daemon.parts.home.clone();
     Rig {
         daemon,
@@ -202,6 +218,33 @@ async fn it_says_its_handle_line_logs_its_start_and_serves_its_api() {
             // The UI token opens none of the agents' routes.
             let (status, _) = get(&handle.url, "/api/whoami", Some(&handle.token)).await;
             assert_eq!(status, 401);
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn a_wait_the_environment_cut_is_in_the_log_at_the_start_and_one_it_left_is_not() {
+    LocalSet::new()
+        .run_until(async {
+            let root = tempfile::tempdir().unwrap();
+            let cut = started_with(
+                root.path(),
+                &[
+                    ("CONSENSFLOW_ARRIVAL_TIMEOUT_MS", "15000"),
+                    ("CONSENSFLOW_LAUNCH_TIMEOUT_MS", "8000"),
+                ],
+            )
+            .await;
+            let lines = log_lines(&cut.home);
+            assert_eq!(lines.len(), 2, "{lines:?}");
+            assert_eq!(
+                said_of(&lines[1]),
+                "info limits set by the environment: arrival wait 15000 ms, not 60000 (CONSENSFLOW_ARRIVAL_TIMEOUT_MS), launch wait 8000 ms, not 180000 (CONSENSFLOW_LAUNCH_TIMEOUT_MS)"
+            );
+            // A daemon of a person's, which the variables are not in, says nothing of them.
+            let root = tempfile::tempdir().unwrap();
+            let left = started(root.path()).await;
+            assert_eq!(log_lines(&left.home).len(), 1);
         })
         .await;
 }

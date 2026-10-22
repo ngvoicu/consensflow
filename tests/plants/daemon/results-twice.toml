@@ -59,7 +59,7 @@ live-devin-resume-turn = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test"
 # The cases of the rig, each a version's shape.
 
 [[plant]]
-name = "results twice: a paste into a Devin turn whose agent says nothing past the gap is not held, and is pasted again after the daemon's minute of rest (3.0.4)"
+name = "results twice: a paste into a Devin turn whose agent says nothing past the gap is not held, and is pasted again after the daemon's arrival window of rest (3.0.4)"
 meant = "two_results_for_a_devin_chief_whose_turn_says_nothing_for_minutes_go_in_once_each_whole_and_apart"
 runs = ["rig-regression-results-silent"]
 builds = true
@@ -839,6 +839,20 @@ find = '''
     } else {'''
 replace = '''
     } else {'''
+
+# The reason of a retry says whether a turn fell between the paste and it (T-319, P3): the quoted-header case
+# types to the chief after the paste Devin dropped, so its retry is one of "the window was at rest since its last
+# turn", and a daemon that tells a retry after a turn from one after none reads the bare words.
+[[plant]]
+name = "results twice: a retry after the human's turn is told as one after no turn"
+meant = "a_result_whose_paste_devins_tui_dropped_goes_again_after_the_humans_words_that_quote_its_header"
+runs = ["rig-regression-results-quoted"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/arrival.rs"
+find = "        } else if turned {"
+replace = "        } else if turned && false {"
 
 # The live suite's guard of the limit beside behind_bypass (GPT-6-Astra on B5): its
 # Opening::Note cases fail on the note as Devin's store has it, not as the daemon's reader,

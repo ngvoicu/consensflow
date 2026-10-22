@@ -19,8 +19,8 @@
 //! reads it once, whatever its record takes to show it.
 //!
 //! What the daemon did, and what Devin does. A paste is confirmed by the harness's
-//! record showing its header, and one the record had not shown a minute on was taken
-//! for lost and pasted again: with nothing failing, it is the one way left for a
+//! record showing its header, and one the record had not shown by the arrival window (a
+//! minute) was taken for lost and pasted again: with nothing failing, it is the one way left for a
 //! message the ledger holds once to be pasted twice. A Devin chief in a turn reads at
 //! rest in the first seconds of it (the wire shows none of its work until its agent's
 //! first word), so the daemon pasted into it; and what Devin is handed in a turn goes
@@ -78,8 +78,11 @@ pub(crate) fn arrival(config: Config) -> Config {
 /// How long the stand-in's agent works on a turn after its first word, in
 /// milliseconds: longer than the arrival window by more than a slow machine's passes
 /// take, which a turn that is late with its record has to be.
+pub(crate) const WORK_MS: i64 = ARRIVAL_MS + 10_000;
+
+/// [`WORK_MS`] as the stand-in is given it.
 pub(crate) fn work_ms() -> String {
-    (ARRIVAL_MS + 10_000).to_string()
+    WORK_MS.to_string()
 }
 
 /// How long the stand-in's agent takes to its first word, in milliseconds.
@@ -196,7 +199,7 @@ fn two_notes_that_come_together_after_a_cancel_go_into_a_devin_chief_s_window_on
     let store = store_of(&rig);
 
     // What the daemon did: it pasted each note once, and never took a paste of either
-    // for lost, though a note's turn took longer than its minute. Its own word is the
+    // for lost, though a note's turn took longer than its arrival window. Its own word is the
     // proof: the stand-in runs a message it is handed in a turn when that turn ends, so
     // a second copy of a note is read by the chief only after the turns before it,
     // later than this looks.

@@ -8,10 +8,14 @@
 # and the case of a paste Devin's TUI dropped, which asserts the second paste came within three arrival windows
 # of the first, where a daemon on its minute pastes it again a minute on.
 #
+# The daemon says in its log, at its start, a wait the environment cut (`Limits::cut_by_the_environment`), so that a variable
+# left in a shell is seen there.
+#
 # Every name holds `arrival`, so `npm run plants:daemon -- "arrival"` runs them all.
 
 [run]
 engine-seams = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "seams::"]
+daemon-start-limits = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "start::tests::a_wait_the_environment_cut"]
 rig-regression-arrival-dropped = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_result_delivered_twice_to_a_devin_chief::two_results_for_a_devin_chief_whose_tui_dropped"]
 
 [[plant]]
@@ -33,4 +37,17 @@ builds = true
 [[plant.edit]]
 file = "crates/cf-engine/src/seams.rs"
 find = "            arrival_ms: named(ARRIVAL_MS_VARIABLE).unwrap_or(default.arrival_ms),\n"
+replace = ""
+
+[[plant]]
+name = "arrival: the daemon says nothing in its log of a wait the environment cut"
+meant = "a_wait_the_environment_cut_is_in_the_log_at_the_start_and_one_it_left_is_not"
+runs = ["daemon-start-limits"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/start.rs"
+find = """    if let Some(cut) = limits.cut_by_the_environment() {
+        log.info(&cut);
+    }
+"""
 replace = ""

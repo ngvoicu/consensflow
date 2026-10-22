@@ -12,8 +12,8 @@
 //! came late, the daemon took the paste for lost and pasted it again, and Devin, holding
 //! both, gave the copy to its agent with what came next. If that machine ran 3.0.3, this
 //! is that bug. 3.0.4 left one shape of it, the third case below: a turn whose agent says
-//! nothing for longer than the 30 s the daemon reads it busy and the daemon's minute after
-//! them. A Devin resumed after a cut sat so in the live probe of B1 of the same report
+//! nothing for longer than the 30 s the daemon reads it busy and the daemon's arrival window
+//! (a minute) after them. A Devin resumed after a cut sat so in the live probe of B1 of the same report
 //! (the Mac, 3000.11.92), and the windows of that machine had closed in the middle of their
 //! tasks (B2).
 //!
@@ -33,10 +33,11 @@
 //!
 //! - The first result's record is late: the human's turn is in front of it.
 //! - The same, with the chief at work on a turn when the second result comes.
-//! - The same, the turn in front silent for a minute (`THINK`), as a Devin resumed after a
-//!   cut sat at "Thinking" for minutes: the window reads at rest for more than the daemon's
-//!   arrival window while Devin holds the first result. This one failed on 3.0.4: the daemon took the
-//!   paste for lost after its minute of the window's rest and pasted it again, into the
+//! - The same, the turn in front silent for the gap and the arrival window and more
+//!   (`THINK`), as a Devin resumed after a cut sat at "Thinking" for minutes: the window reads
+//!   at rest for more than the daemon's arrival window while Devin holds the first result.
+//!   This one failed on 3.0.4: the daemon took the
+//!   paste for lost after its arrival window of the window's rest and pasted it again, into the
 //!   queue that held the first. A paste made while the TUI's prompt is asked is now held
 //!   in that turn for as long as a prompt is (`Window::held`, from Devin's wire log): the
 //!   window counts no rest meanwhile, and the paste never goes again while it is held.
@@ -64,21 +65,38 @@ use cf_e2e::rig::{Config, Project, Rig};
 use cf_e2e::Error;
 use serde_json::{json, Value};
 
-use crate::devin_notes_twice::{arrival, store_of, work_ms, ARRIVAL_MS};
+use crate::devin_notes_twice::{arrival, store_of, work_ms, ARRIVAL_MS, WORK_MS};
 use crate::{config, secs, Outcome, FAKE_DEVIN};
 
-/// How long the stand-in's agent takes to its first word, in milliseconds: silent past the
-/// 30 s the daemon reads a Devin window busy from its prompt. Its work after it takes
-/// [`work_ms`], longer than the arrival window by more than a slow machine's passes take.
-const FIRST_WORD_MS: &str = "40000";
+/// How long the stand-in's agent takes to its first word, in seconds: silent past the
+/// gap the daemon reads a Devin window busy from its prompt for ([`GAP_SECONDS`]). Its work
+/// after it takes [`WORK_MS`], longer than the arrival window by more than a slow
+/// machine's passes take.
+const FIRST_WORD_SECONDS: u64 = 40;
+
+/// The 30 s the daemon reads a Devin window busy from a prompt of its TUI, which the
+/// stand-in's first word has to outlast (the adapter's `PROMPT_GAP_MS`, which no variable sets).
+const GAP_SECONDS: u64 = 30;
+
+/// What the second `cf task add` and its worker's launch add to the worker's sleep before
+/// its result is made, in seconds. Measured on 2026-10-22 (the Mac, under load) with a sleep
+/// of 45: the second result was made 16 s after the first paste and 19 s before the
+/// record showed that paste, the middle of the 35 s between them; the sleep is the
+/// middle of the turn less this.
+const SETUP_SECONDS: u64 = 2;
 
 /// How long the agent of the case whose turn says nothing for a long time is silent, in
 /// seconds: the 30 s the daemon reads the window busy from its prompt, then the arrival
 /// window at rest, and a margin for the paste to come late in it.
-const THINK_SECONDS: i64 = 30 + ARRIVAL_MS / 1_000 + 15;
+const THINK_SECONDS: i64 = GAP_SECONDS as i64 + ARRIVAL_MS / 1_000 + 15;
 
 /// Where every header of the daemon's begins.
 const HEADER: &str = "[ConsensFlow m-";
+
+/// How long the stand-in's agent takes to its first word, in milliseconds.
+fn first_word_ms() -> String {
+    (FIRST_WORD_SECONDS * 1_000).to_string()
+}
 
 /// The roster of the cases: a Devin (the stand-in) is the chief, and two workers of the
 /// stand-in Claude.
@@ -291,7 +309,7 @@ fn each_went_in_once_whole_and_apart(rig: &Rig, ids: [i64; 2], pasted: [usize; 2
 #[test]
 fn two_results_for_a_devin_chief_whose_record_of_the_first_is_late_go_in_once_each_whole_and_apart(
 ) -> Outcome {
-    let rig = Rig::start(a_rig(FIRST_WORD_MS, &work_ms()))?;
+    let rig = Rig::start(a_rig(&first_word_ms(), &work_ms()))?;
     let (project, tier) = a_project(&rig)?;
     // The human's turn is in front: the first result, made in it, is pasted in its
     // silence, and the second waits behind the first.
@@ -315,13 +333,22 @@ fn two_results_for_a_devin_chief_whose_record_of_the_first_is_late_go_in_once_ea
 #[test]
 fn two_results_for_a_devin_chief_at_work_when_the_second_comes_go_in_once_each_whole_and_apart(
 ) -> Outcome {
-    let rig = Rig::start(a_rig(FIRST_WORD_MS, &work_ms()))?;
+    let rig = Rig::start(a_rig(&first_word_ms(), &work_ms()))?;
     let (project, tier) = a_project(&rig)?;
     the_human_types_to_the_chief(&rig, &project)?;
     give(&rig, &project, &tier, FIRST, 2)?;
     // The second worker answers once the first result is in the chief's turn, and the
-    // chief at work.
-    give(&rig, &project, &tier, SECOND, 45)?;
+    // chief at work: half way between the first paste (the gap after the prompt) and the
+    // end of the turn (its first word and its work), where a slow runner has the most
+    // room on either side.
+    let turn = FIRST_WORD_SECONDS + WORK_MS as u64 / 1_000;
+    give(
+        &rig,
+        &project,
+        &tier,
+        SECOND,
+        (GAP_SECONDS + turn) / 2 - SETUP_SECONDS,
+    )?;
     let ids = until_both_are_in(&rig, &project, [1, 1])?;
 
     // What the case is about: the second result was made after the first was pasted and
@@ -367,13 +394,16 @@ fn two_results_for_a_devin_chief_whose_turn_says_nothing_for_minutes_go_in_once_
     give(&rig, &project, &tier, SECOND, 6)?;
     let ids = until_both_are_in(&rig, &project, [1, 1])?;
 
-    // What the case is about: the record showed the first result more than the daemon's
-    // arrival window after its paste, the window's rest being the turn's silence past the
-    // 30 s of the prompt.
+    // What the case is about: the window rested more than the daemon's arrival window
+    // while Devin held the first result, by half a window and more, as the case was
+    // written (a minute and a half for the minute). The record shows the result when the
+    // turn ends, so it is that late after the paste, less the gap the paste waited for.
+    // A turn silent for less would leave the held rule out of the shape.
     let late = how_late(&rig.events(), ids[0]);
     assert!(
-        late.is_some_and(|late| late > ARRIVAL_MS),
-        "the record of the first result was not late enough: {late:?} ms"
+        late.is_some_and(|late| late > ARRIVAL_MS + ARRIVAL_MS / 2),
+        "the record of the first result was not late enough: {late:?} ms, not more than {} ms",
+        ARRIVAL_MS + ARRIVAL_MS / 2
     );
     each_went_in_once_whole_and_apart(&rig, ids, [1, 1])?;
     rig.close()?;
@@ -469,10 +499,16 @@ fn a_result_whose_paste_devins_tui_dropped_goes_again_after_the_humans_words_tha
         (2, 1),
         "pasted twice, the dropped paste and once again: {retried:?}"
     );
-    assert!(
-        retried[0]["data"]["reason"]
-            .as_str()
-            .is_some_and(|reason| reason.starts_with("the harness record never showed it")),
+    // The human's words came between the paste and the retry, a turn of the chief's, and
+    // the daemon says so in the reason: the window was at rest the arrival window since its
+    // last turn (`arrival`). A retry with no turn between reads the bare words.
+    let turn_between = format!(
+        "the harness record never showed it in the {} s its window was at rest since its last turn",
+        ARRIVAL_MS / 1_000
+    );
+    assert_eq!(
+        retried[0]["data"]["reason"].as_str(),
+        Some(turn_between.as_str()),
         "{retried:?}"
     );
     let marker = format!("{HEADER}{first} ");
