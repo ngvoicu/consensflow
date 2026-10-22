@@ -30,7 +30,9 @@ struct Place {
     own: bool,
     /// The record is of the main conversation, not a sidechain.
     main: bool,
-    /// The record is an attachment.
+    /// The record is an attachment, or the companion of a turn (`turnCompanion`): what
+    /// Claude Code writes beside a user's record, between it and the answer, and that
+    /// neither begins a turn nor ends one.
     attachment: bool,
 }
 
@@ -70,7 +72,8 @@ impl Ancestry {
                 .map(Arc::from),
             own: record.get("sessionId").and_then(Value::as_str) == Some(session),
             main: record.get("isSidechain") == Some(&Value::Bool(false)),
-            attachment: kind(record) == Some("attachment"),
+            attachment: kind(record) == Some("attachment")
+                || record.get("turnCompanion") == Some(&Value::Bool(true)),
         });
         let claimed = self.parents.contains_key(&uuid);
         self.parents.insert(uuid, (!claimed).then_some(at));
@@ -91,7 +94,7 @@ impl Ancestry {
     /// `lateAncestor`, once the turn is known to have ended by a boundary
     /// record (`end`, by its uuid) after the answer `candidate`: whether
     /// `user` is an ancestor of that answer, the answer itself and
-    /// attachments the only records between, all of this session's main
+    /// attachments (and companions of the turn) the only records between, all of this session's main
     /// conversation, and the boundary record the answer's child.
     pub(super) fn is_late(
         &mut self,

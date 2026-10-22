@@ -15,11 +15,11 @@ use crate::claude::stopped::{last_user, Pressed};
 
 /// The words of the message in these tests, as Claude Code leaves them behind an attachment.
 const MESSAGE: &str = "[Image #1]Warm editorial desk scene.";
-const SOURCE: &str = "[Image: source: /pictures/desk.png]";
+pub(super) const SOURCE: &str = "[Image: source: /pictures/desk.png]";
 
 /// The companion of the message `parent`: one source line for the picture, flagged as
 /// Claude Code flags it.
-fn companion(uuid: &str, parent: &str) -> Value {
+pub(super) fn companion(uuid: &str, parent: &str) -> Value {
     having(
         user(uuid, json!(parent), json!([text(json!(SOURCE))])),
         json!({ "isMeta": true, "turnCompanion": true }),

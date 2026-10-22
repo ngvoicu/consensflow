@@ -22,9 +22,9 @@
 //! the code before the fix the case takes about four minutes to fail, three arrival windows
 //! of a minute.
 //!
-//! Claude Code on Windows is not known to read a `C:\` path as an image (its unescape of a
-//! pasted path drops the backslashes, read in the binary and not run there), so there is
-//! nothing to assert on Windows.
+//! Claude Code on Windows does read a `C:\` path as an image, in every shape the Mac has (the
+//! zeewin run of 2026-10-22, T-265, `WINDOWS_CONVERTS` of `tests/live_image_paste.rs`), so the
+//! stand-in does not unescape a path on Windows, and the case runs there too.
 
 use cf_e2e::rig::{Project, Rig};
 use serde_json::{json, Value};

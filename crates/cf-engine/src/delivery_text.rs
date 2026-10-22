@@ -154,7 +154,10 @@ const IMAGE: &str = "[Image #";
 ///   the result pasted again); the four others record the paste as it is given;
 /// - behind the placeholders of the images Claude Code attached ([`IMAGE`]: a result
 ///   that starts with the path of a picture, the field bug of 2026-10-21, pasted three
-///   times and failed), the header at once, or the wrapper after a blank line;
+///   times and failed), the header at once, or a blank line and then the wrapper (the
+///   shape Claude writes; the header after the blank line with no wrapper is taken for
+///   the paste too, as a wrapper is read where it is and none is needed, a shape Claude
+///   does not write and no wider than the limit below);
 /// - after `first`, the exact paste a member's fresh window is given ahead of its
 ///   first message ([`brief_first`]), there and nowhere else.
 ///
@@ -165,9 +168,10 @@ const IMAGE: &str = "[Image #";
 /// does are taken for one, and a paste Devin glued behind words the human typed and never
 /// sent (it pastes behind what its input box holds, a record of 2026-10-02) is none: the
 /// window waits for those words to be sent first (`Held::Unsent`), so only a typing
-/// between that look and the paste can make one. And a brief that `first` holds, with
-/// lines that are paths of images, is not what the record has behind its placeholders (those
-/// lines are gone from it), so a second message behind it is not found.
+/// between that look and the paste can make one. The brief `first` holds is never behind
+/// placeholders: Claude Code makes no attachment of the first message of a launch, which is an
+/// argument of the program and no paste (the probe of 2026-10-22, `launch_check` of
+/// `tests/live_image_paste.rs`).
 pub fn is_paste_of(text: &str, message_id: i64, first: Option<&str>) -> bool {
     let marker = marker_of(message_id);
     if !text.contains(&marker) {
@@ -175,8 +179,8 @@ pub fn is_paste_of(text: &str, message_id: i64, first: Option<&str>) -> bool {
     }
     let text = window_text(text);
     let text = text.trim_start();
-    // Behind the placeholders of the images Claude attached, the header at once or the
-    // wrapper after a blank line, as Claude writes them and no other way.
+    // Behind the placeholders of the images Claude attached, the header at once or a blank
+    // line and then the wrapper (or the header itself, which no wrapper is needed for).
     let paste = match after_placeholders(text) {
         Some(head) => head.strip_prefix("\n\n").map_or(head, unwrapped),
         None => unwrapped(text),
@@ -490,19 +494,11 @@ mod tests {
             3,
             None
         ));
-        // And behind the brief a fresh window was given first, the placeholders ahead of it.
-        let first = brief_first(&message(5, Some(3), "Write the parser".to_owned()), &[]);
-        let answer = delivery_text(&message(12, Some(3), "Use JSON".to_owned()), &[]);
-        assert!(is_paste_of(
-            &format!("[Image #1]{first}{answer}"),
-            12,
-            Some(&first)
-        ));
-        assert!(!is_paste_of(
-            &format!("[Image #1]{first}{answer}"),
-            12,
-            None
-        ));
+        // The header after a blank line with no wrapper is taken for the paste too: a shape
+        // Claude does not write (it wraps what it moves behind a blank line), and no wider
+        // than a header that begins words a paste does.
+        assert!(is_paste_of(&format!("[Image #5]\n\n{header}"), 3, None));
+        assert!(!is_paste_of(&format!("[Image #5]\n{header}"), 3, None));
     }
 
     #[test]

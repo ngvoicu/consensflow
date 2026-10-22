@@ -7,6 +7,7 @@
 //! `U`. Whether `U` begins a new turn, or is a late ancestor of `A` and
 //! leaves the turn settled, is decided from every record read.
 
+use super::companions::{companion, SOURCE};
 use super::*;
 
 fn prompt() -> Value {
@@ -98,6 +99,33 @@ fn a_user_read_after_its_attachments_is_a_late_ancestor_in_the_look_that_reads_i
         std::slice::from_ref(prompt),
     ]);
     assert_eq!(read, [answered(), reading(4, true)]);
+}
+
+#[test]
+fn a_companion_between_a_late_user_and_its_answer_is_no_break_in_the_chain() {
+    // The answer `A` is the child of the companion `C` of the user's message `U`
+    // (the sources of the images Claude Code attached to it): the harness's own
+    // record, written beside the message, as an attachment is.
+    let records = [
+        answer("A", "C"),
+        duration("D", "A"),
+        prompt(),
+        companion("C", "U"),
+    ];
+    let items = format!(
+        r#"[["m1","assistant","Hi",true,0],["U","user","Hello",true,2],["C","custom","{SOURCE}",true,3]]"#
+    );
+    assert_eq!(once(&records), settled(&items));
+    // Read in a look of its own, after the companion, the user is a late ancestor too.
+    let [answer, boundary, prompt, companion] = &records;
+    let read = looks(&[
+        &[answer.clone(), boundary.clone(), companion.clone()],
+        std::slice::from_ref(prompt),
+    ]);
+    let items = format!(
+        r#"[["m1","assistant","Hi",true,0],["C","custom","{SOURCE}",true,2],["U","user","Hello",true,3]]"#
+    );
+    assert_eq!(read[1], settled(&items));
 }
 
 #[test]

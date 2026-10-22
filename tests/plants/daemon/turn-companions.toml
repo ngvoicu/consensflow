@@ -12,9 +12,9 @@
 # The cases are the reader's, `claude::record::tests::companions` (and the field row of `fields`) in
 # `crates/cf-harness`, the engine's, `cancelled_task.rs` and `taken_back.rs` of the dispatcher's tests
 # and `tests/text/handoff.rs`, the rule's own, `delivery_text::tests`, and on the rig
-# `a_task_cancelled_after_images_were_attached_to_its_brief_had_no_escape_pressed` (the stand-in
-# Claude makes attachments of a paste as Claude Code does, and keeps a launch's first message as it
-# was).
+# `a_task_cancelled_after_images_were_attached_to_the_words_that_resumed_it_had_no_escape_pressed`
+# (the stand-in Claude makes attachments of a paste as Claude Code does, and keeps a launch's first
+# message as it was).
 #
 # Every name holds `turn companion`, so `npm run plants:daemon -- "turn companion"` runs them all.
 
@@ -25,7 +25,10 @@ engine-dispatcher-companions = ["cargo", "test", "--offline", "-p", "cf-engine",
 engine-dispatcher-paste-shapes = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "paste_shapes::"]
 engine-text-handoff = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "text", "names_what_claude_put_ahead"]
 engine-lib-delivery-text = ["cargo", "test", "--offline", "-p", "cf-engine", "--lib", "delivery_text::"]
-rig-companions = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_task_cancelled_after_images_were_attached_to_its_brief_had_no_escape_pressed::"]
+engine-text-viewer = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "text", "viewer::types_nothing_for_what_claude_put_ahead"]
+harness-ancestry = ["cargo", "test", "--offline", "-p", "cf-harness", "--lib", "claude::record::tests::ancestry::"]
+ledger-healing = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "whole_history", "healing::"]
+rig-companions = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_task_cancelled_after_images_were_attached_to_the_words_that_resumed_it_had_no_escape_pressed::"]
 
 [[plant]]
 name = "turn companion: the reader takes no record for a companion, and the sources of the images are the user's last message"
@@ -192,3 +195,85 @@ builds = true
 file = "crates/cf-e2e/src/bin/fake_agent.rs"
 find = '''    let written = if first && window.seeded {'''
 replace = '''    let written = if first && window.seeded && false {'''
+
+# Round 3 (T-296, Calliope's review of both rounds, T-289): the history viewer's page drew what
+# Claude put ahead of a delivery as the human's typing (P3-1); a copy of an item made before the
+# fix kept its role as it was (P3-2); the walk from a late user record to its answer stopped at a
+# companion (P3-5); and the pin of the blank-line shape behind the placeholders (P3-4).
+
+[[plant]]
+name = "turn companion: the viewer's page draws the placeholders ahead of a delivery as what the human typed with it"
+meant = "types_nothing_for_what_claude_put_ahead_of_a_delivery_and_keeps_the_words_a_human_typed"
+runs = ["engine-text-viewer"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/handoff/viewer.rs"
+find = '''            let at = if typed_before(&item.text, &header).is_empty() {
+                0
+            } else {
+                header.at
+            };'''
+replace = '''            let at = header.at;'''
+
+[[plant]]
+name = "turn companion: the viewer's page counts none of a human's own words as typed where placeholders come first"
+meant = "types_nothing_for_what_claude_put_ahead_of_a_delivery_and_keeps_the_words_a_human_typed"
+runs = ["engine-text-viewer"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/handoff/viewer.rs"
+find = '''            let at = if typed_before(&item.text, &header).is_empty() {'''
+replace = '''            let at = if !item.text.is_empty() {'''
+
+[[plant]]
+name = "turn companion: a copy again leaves an item's role as it was copied"
+meant = "an_item_copied_as_the_users_and_copied_again_as_the_harness_s_own_is_read_so_by_both_readers"
+runs = ["ledger-healing"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/transcripts.rs"
+find = '''         SET seq = excluded.seq, role = excluded.role, text = excluded.text,'''
+replace = '''         SET seq = excluded.seq, text = excluded.text,'''
+
+[[plant]]
+name = "turn companion: a copy again writes no item whose role alone changed"
+meant = "an_item_copied_as_the_users_and_copied_again_as_the_harness_s_own_is_read_so_by_both_readers"
+runs = ["ledger-healing"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/transcripts.rs"
+find = '''         WHERE transcript.text != excluded.text OR transcript.complete != excluded.complete
+            OR transcript.role != excluded.role'''
+replace = '''         WHERE transcript.text != excluded.text OR transcript.complete != excluded.complete'''
+
+[[plant]]
+name = "turn companion: the viewer's heads keep the role an item was first copied with"
+meant = "an_item_copied_as_the_users_and_copied_again_as_the_harness_s_own_is_read_so_by_both_readers"
+runs = ["ledger-healing"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/transcripts.rs"
+find = '''         SET role = excluded.role, bytes = excluded.bytes, parts = excluded.parts,'''
+replace = '''         SET bytes = excluded.bytes, parts = excluded.parts,'''
+
+[[plant]]
+name = "turn companion: a companion between a late user record and its answer breaks the walk"
+meant = "a_companion_between_a_late_user_and_its_answer_is_no_break_in_the_chain"
+runs = ["harness-ancestry"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/record/ancestry.rs"
+find = '''                || record.get("turnCompanion") == Some(&Value::Bool(true)),'''
+replace = '''                || record.get("turnCompanion") == Some(&Value::Bool(false)),'''
+
+[[plant]]
+name = "turn companion: the header after a blank line behind the placeholders is no paste, and the pin of it is lost"
+meant = "a_paste_behind_the_placeholders_of_the_images_claude_attached_is_the_paste"
+runs = ["engine-lib-delivery-text"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/delivery_text.rs"
+find = '''        Some(head) => head.strip_prefix("\n\n").map_or(head, unwrapped),'''
+replace = '''        Some(head) => head
+            .strip_prefix("\n\n")
+            .map_or(head, |rest| if rest.starts_with('<') { unwrapped(rest) } else { "" }),'''

@@ -76,6 +76,8 @@ fn a_task_cancelled_after_images_were_attached_to_the_words_that_resumed_it_has_
     cancelled_while_at_work(true)
 }
 
+// A task's `\n` is a line break, which a Windows path (`C:\Users\ngvoi\…`) has in it.
+#[cfg(unix)]
 #[test]
 fn the_brief_a_window_is_launched_with_is_no_paste_and_keeps_the_path_of_an_image_in_it() -> Outcome
 {

@@ -58,8 +58,14 @@ fn pieces(paste: &str) -> Vec<&str> {
 }
 
 /// `path` with a backslash and the character after it as that character alone, and
-/// two backslashes as one: how Claude reads a path a terminal escaped.
+/// two backslashes as one: how Claude reads a path a terminal escaped. Not on Windows,
+/// whose paths have backslashes between their folders: Claude Code 2.1.308 makes an
+/// attachment of `C:\Users\…\desk.png` there, as on the Mac (the zeewin run of
+/// 2026-10-22, T-265; what its binary does with a backslash is not what that shows).
 fn unescaped(path: &str) -> String {
+    if cfg!(windows) {
+        return path.to_owned();
+    }
     let mut chars = path.chars();
     let mut plain = String::new();
     while let Some(at) = chars.next() {
@@ -230,17 +236,42 @@ mod tests {
     }
 
     #[test]
-    fn a_quoted_path_and_a_path_with_an_escaped_space_name_their_files() {
+    fn a_quoted_path_names_its_file() {
+        let folder = folder();
+        let quoted = format!("'{}'", at(folder.path(), "my images/art.png"));
+        assert_eq!(
+            kept(&format!("Head\n{quoted}"), 1).unwrap(),
+            "[Image #1]Head"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_path_with_an_escaped_space_names_its_file() {
+        let folder = folder();
+        let escaped = at(folder.path(), "my images/art.png").replace(' ', "\\ ");
+        assert_eq!(
+            kept(&format!("Head\n{escaped}"), 1).unwrap(),
+            "[Image #1]Head"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_path_with_a_drive_letter_and_backslashes_names_its_file_whole() {
         let folder = folder();
         let spaced = at(folder.path(), "my images/art.png");
-        let quoted = format!("'{spaced}'");
-        let escaped = spaced.replace(' ', "\\ ");
-        for paste in [quoted, escaped] {
-            assert_eq!(
-                kept(&format!("Head\n{paste}"), 1).unwrap(),
-                "[Image #1]Head"
-            );
-        }
+        assert!(spaced.contains(":\\"), "{spaced}");
+        // Unquoted, with a space in a folder's name, alone on a line or at the end of one:
+        // the backslashes are the path's own.
+        assert_eq!(
+            kept(&format!("Head\n{spaced}"), 1).unwrap(),
+            "[Image #1]Head"
+        );
+        assert_eq!(
+            kept(&format!("Saved: {spaced}"), 1).unwrap(),
+            "[Image #1]Saved:"
+        );
     }
 
     #[test]

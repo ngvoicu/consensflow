@@ -30,7 +30,7 @@ use cf_ledger::{
 use serde::Serialize;
 
 use super::entries::{message_id, outcome_line};
-use super::text::delivered;
+use super::text::{delivered, typed_before};
 use super::Gist;
 
 /// How many bytes of items and headings a page holds: the frame, less what
@@ -232,9 +232,11 @@ fn head(conversation: &ParticipantConversation) -> ShownConversation {
     }
 }
 
-/// Where item `row` holds a delivery the page says in one line, its header's
-/// place in the text and the id the header names, as a line writes it and as
-/// the ledger holds one (none where no message could be it): what is neither a
+/// Where item `row` holds a delivery the page says in one line, where the
+/// delivery begins in the text (after what the human typed with it, none of it
+/// where only Claude's own placeholders and wrapper opening precede the header:
+/// `typed_before`) and the id the header names, as a line writes it and as the
+/// ledger holds one (none where no message could be it): what is neither a
 /// tool's output, an agent's words nor a compaction's summary, shown from its
 /// start, and holds a delivery's header.
 fn folded(row: &HistoryRow) -> Option<(usize, (String, Option<i64>))> {
@@ -243,7 +245,14 @@ fn folded(row: &HistoryRow) -> Option<(usize, (String, Option<i64>))> {
     let from_the_start = row.cut.is_none_or(|cut| cut.from == 0);
     delivered(&item.text)
         .filter(|_| !said && from_the_start)
-        .map(|header| (header.at, message_id(header.id)))
+        .map(|header| {
+            let at = if typed_before(&item.text, &header).is_empty() {
+                0
+            } else {
+                header.at
+            };
+            (at, message_id(header.id))
+        })
 }
 
 /// An item as a page shows it: a delivery this participant was sent or sent,

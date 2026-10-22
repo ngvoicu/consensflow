@@ -42,16 +42,12 @@ mod a_pause_a_hung_worker_ignored_stranded_its_task;
 mod a_result_delivered_twice_to_a_devin_chief;
 #[path = "regressions/a_result_pasted_again_after_its_window_went.rs"]
 mod a_result_pasted_again_after_its_window_went;
-// What Claude Code does with a `C:\` path is not known: see the case's doc.
-#[cfg(unix)]
 #[path = "regressions/a_result_that_starts_with_an_image_path_was_pasted_three_times.rs"]
 mod a_result_that_starts_with_an_image_path_was_pasted_three_times;
 #[path = "regressions/a_resumed_devin_worker_skipped_every_call.rs"]
 mod a_resumed_devin_worker_skipped_every_call;
-// Claude Code on Windows is not known to attach a `C:\` path: see the other case on images.
-#[cfg(unix)]
-#[path = "regressions/a_task_cancelled_after_images_were_attached_to_its_brief_had_no_escape_pressed.rs"]
-mod a_task_cancelled_after_images_were_attached_to_its_brief_had_no_escape_pressed;
+#[path = "regressions/a_task_cancelled_after_images_were_attached_to_the_words_that_resumed_it_had_no_escape_pressed.rs"]
+mod a_task_cancelled_after_images_were_attached_to_the_words_that_resumed_it_had_no_escape_pressed;
 #[path = "regressions/a_task_stuck_working_after_its_window_was_resumed.rs"]
 mod a_task_stuck_working_after_its_window_was_resumed;
 #[path = "regressions/a_trust_question_after_git_init_stopped_every_launch.rs"]
