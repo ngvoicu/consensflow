@@ -15,6 +15,21 @@
 //! Compared as Windows' console carries a paste to Devin (`console_text`: its
 //! `·` arrives as `|`, its dashes as `--`), and with blanks made one.
 //!
+//! A paste whose header has scrolled off the top of what a look reads (twelve
+//! lines) still holds its words: where no header is in view, the run of the
+//! newest paste may begin at the first line with a word, and only there, so a
+//! line lower down that repeats a paste's words is still the window's.
+//!
+//! What was pasted is the window's five last pastes, on their way or arrived,
+//! each with the rows it carried. A message taken back to its queue, or
+//! cancelled while it was typed, is left out, though its text was on the screen:
+//! it is told apart from a message never pasted by nothing the ledger keeps
+//! (its attempt is given back where the harness refused it), and a queue's
+//! backlog would crowd out what is shown. It meets a failed turn's look rarely:
+//! a message is taken back when its window refused it for quota or went, and a
+//! task cancelled mid-paste stops its window. Its header, where it shows, is
+//! still the paste's.
+//!
 //! A harness may show a paste as a placeholder: `[Pasted text #1 +42 lines]` in
 //! Claude Code 2.1.308 and Devin 3000.11.92, `[Pasted Content 1200 chars]` in
 //! Codex 0.163.0. Whatever pasted it, a placeholder is no reason.
@@ -33,55 +48,77 @@ pub(crate) struct Paste {
 }
 
 /// Which of the screen's `lines` are ConsensFlow's, of the `pastes` it typed
-/// into the window.
+/// into the window, the newest first.
 pub(crate) fn ours(lines: &[String], pastes: &[Paste]) -> Vec<bool> {
     let pasted: Vec<(i64, String)> = pastes
         .iter()
         .map(|paste| (paste.id, compared(&paste.text)))
         .collect();
-    // What is left of the paste whose run the lines are in.
+    let unframed: Vec<&str> = lines.iter().map(|line| unframed(line)).collect();
+    // What is left of the paste whose run the lines are in. Where no header is in
+    // view, the newest paste's may have scrolled off above its words: its run may
+    // begin at the first line with a word, and nowhere else.
     let mut run: Option<&str> = None;
-    lines
+    let mut top = !unframed
         .iter()
-        .map(|line| {
-            let unframed = unframed(line);
-            if let Some(id) = header_id(unframed) {
+        .any(|line| starts_with_header(line).is_some());
+    unframed
+        .iter()
+        .map(|&unframed| {
+            let words = compared(unframed);
+            if top && !words.is_empty() {
+                top = false;
+                run = pasted.first().map(|(_, newest)| newest.as_str());
+            }
+            // The next piece of the run is the run's, whatever it looks like.
+            if let Some(rest) = run.and_then(|rest| after(rest, &words)) {
+                run = Some(rest);
+                return true;
+            }
+            if let Some(id) = starts_with_header(unframed) {
                 run = pasted
                     .iter()
                     .find(|(pasted, _)| *pasted == id)
-                    .map(|(_, text)| rest_after(text, &compared(unframed)));
+                    .map(|(_, text)| rest_after(text, &words));
                 return true;
             }
             if PLACEHOLDERS.iter().any(|start| unframed.starts_with(start)) {
                 return true;
             }
-            let words = compared(unframed);
-            if words.is_empty() {
-                return false;
+            if !words.is_empty() {
+                run = None;
             }
-            match run.and_then(|rest| rest.find(&words).map(|at| &rest[at + words.len()..])) {
-                Some(rest) => {
-                    run = Some(rest);
-                    true
-                }
-                None => {
-                    run = None;
-                    false
-                }
-            }
+            false
         })
         .collect()
 }
 
-/// `line` without the frame a harness draws around a prompt: its marks before
-/// the first word or bracket, and after the last word.
-fn unframed(line: &str) -> &str {
-    line.trim_start_matches(|c: char| !(c.is_alphanumeric() || c == '[' || c == '('))
-        .trim_end_matches(|c: char| c.is_whitespace() || ('\u{2500}'..='\u{259F}').contains(&c))
+/// What of `rest` comes after `words` where they are a piece of it: none where
+/// they are not, or are no words.
+fn after<'a>(rest: &'a str, words: &str) -> Option<&'a str> {
+    if words.is_empty() {
+        return None;
+    }
+    rest.find(words).map(|at| &rest[at + words.len()..])
 }
 
-/// The id a line that begins with a paste's header names.
-fn header_id(line: &str) -> Option<i64> {
+/// `line` without the frame a harness draws around a prompt: its marks before
+/// the first word or bracket, and after the last word, a box's edge drawn in
+/// ASCII (` |`) among them.
+fn unframed(line: &str) -> &str {
+    let framed = |c: char| c.is_whitespace() || ('\u{2500}'..='\u{259F}').contains(&c);
+    let line = line
+        .trim_start_matches(|c: char| !(c.is_alphanumeric() || c == '[' || c == '('))
+        .trim_end_matches(framed);
+    match line.strip_suffix('|') {
+        Some(edge) if edge.ends_with(char::is_whitespace) => edge.trim_end_matches(framed),
+        _ => line,
+    }
+}
+
+/// The id a line that begins with a paste's header names (one that only holds
+/// a header elsewhere names none).
+fn starts_with_header(line: &str) -> Option<i64> {
     let digits: String = line
         .strip_prefix(HEADER_START)?
         .chars()

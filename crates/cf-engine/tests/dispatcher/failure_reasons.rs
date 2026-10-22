@@ -491,3 +491,90 @@ fn the_rows_a_paste_carried_are_part_of_it_on_screen_and_the_error_after_them_is
         )]
     );
 }
+
+/// What the chief was told of T-1's failure in `project`.
+fn told_of_t1(context: &Context, project: i64) -> Vec<String> {
+    crate::fixtures::notes(context, context.id(project, "chief"))
+        .into_iter()
+        .filter(|note| note.starts_with("T-1 failed"))
+        .collect()
+}
+
+#[test]
+fn the_rows_a_paste_carried_are_part_of_it_while_it_is_still_on_its_way() {
+    // As above, but the paste is still on its way (its record has not shown it
+    // yet) when the turn fails: the rows it carried are typed with it all the same.
+    let context = Context::new();
+    let (project, _, answer, note) = crate::carriers::kept(&context);
+    context.hold_task(project, 1);
+    context.pass().unwrap();
+    context
+        .ledger
+        .borrow_mut()
+        .resume_task(project, 1, None, cf_ledger::RESUME_WORDS)
+        .unwrap();
+    let carrier = context
+        .ledger
+        .borrow()
+        .inbox(context.id(project, "zeus"), 1)
+        .unwrap()[0]
+        .clone();
+    context.adapter.with("zeus", |agent| agent.arrive = false);
+    context.pass().unwrap();
+    assert_eq!(context.message(carrier.id).state, "delivering");
+    let pasted = cf_engine::delivery_text::delivery_text(
+        &context.message(carrier.id),
+        &[context.message(answer), context.message(note)],
+    );
+    assert!(pasted.contains("(kept for you: "), "{pasted}");
+    let error = "Error: provider unreachable";
+    let mut screen: Vec<&str> = pasted.lines().collect();
+    screen.extend(["", error]);
+    context.host.set_snapshot(json!({ "tail": screen }));
+    context.adapter.with("zeus", |agent| agent.failed = true);
+    context.adapter.answer("zeus", "Going on");
+    context.pass().unwrap();
+
+    // T-1 is queued while its words are on their way: its window's failed turn is told.
+    let zeus = context.task(project, 1).task.assignee.unwrap();
+    let told: Vec<String> = crate::fixtures::notes(&context, context.id(project, "chief"))
+        .into_iter()
+        .filter(|note| note.contains("failed"))
+        .collect();
+    assert_eq!(
+        told,
+        [format!(
+            "A turn of T-1's window failed while T-1 was queued, as it stays: @{zeus}'s harness reported a failure; its screen ended with: \"{error}\"."
+        )]
+    );
+}
+
+#[test]
+fn a_long_brief_whose_header_scrolled_off_is_still_no_reason() {
+    // A brief of fifteen lines: the look's twelve lines hold only its last ten, under
+    // them the error.
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    let brief: Vec<String> = (1..=15)
+        .map(|n| format!("Step {n}: write the part of the parser that reads clause {n}."))
+        .collect();
+    context.give(project.id, "zeus", &brief.join("\n"));
+    context.pass().unwrap();
+    context.pass().unwrap();
+    assert_eq!(context.task(project.id, 1).task.state, "working");
+    let error = "Error: model 'gpt-0-nonesuch' not found";
+    let mut screen: Vec<&str> = brief[5..].iter().map(String::as_str).collect();
+    screen.extend(["", error]);
+    context.host.set_snapshot(json!({ "tail": screen }));
+    context.adapter.with("zeus", |agent| agent.failed = true);
+    context.adapter.answer("zeus", "Starting");
+    context.pass().unwrap();
+
+    let zeus = context.task(project.id, 1).task.assignee.unwrap();
+    assert_eq!(
+        told_of_t1(&context, project.id),
+        [format!(
+            "T-1 failed: @{zeus}'s harness reported a failure; its screen ended with: \"{error}\". Reopen it with: cf task reopen T-1 \"…\""
+        )]
+    );
+}

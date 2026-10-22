@@ -39,6 +39,7 @@
     "bench:core": "cargo xtask live bench",
     "bench:records-memory": "cargo xtask bench records-memory",
     "live:paste": "cargo xtask live paste",
+    "live:paste-screen": "cargo xtask live paste-screen",
     "live:agent": "cargo xtask live agent",
     "live:interrupt": "cargo xtask live interrupt",
     "live:stops": "cargo xtask live stops",

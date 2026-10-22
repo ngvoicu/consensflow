@@ -154,7 +154,9 @@ pub(crate) fn last_given(store: &Store, participant_id: i64) -> Result<Option<i6
 /// The `limit` messages last pasted into a participant's window, newest first,
 /// each with the rows its paste carried: what its screen can show of
 /// ConsensFlow's own. A message on its way is pasted already (its record may
-/// show it later); one still queued is not.
+/// show it later); one still queued is not. The rows a paste carried stay
+/// `queued` while it is on its way (`begin_delivery` moves the carrier alone),
+/// and were typed with it all the same.
 pub(crate) fn last_pastes(
     store: &Store,
     participant_id: i64,
@@ -176,7 +178,7 @@ pub(crate) fn last_pastes(
                 store,
                 &format!(
                     "{MESSAGE_SELECT} WHERE m.recipient_id = ?
-                 AND m.state IN ('delivering', 'delivered', 'read') AND m.carried_by = ?
+                 AND m.state IN ('queued', 'delivering', 'delivered', 'read') AND m.carried_by = ?
                ORDER BY m.id"
                 ),
                 params![participant_id, message.id],

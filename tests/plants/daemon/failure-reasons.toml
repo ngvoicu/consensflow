@@ -674,16 +674,16 @@ runs = ["failure-reason-told"]
 [[plant.edit]]
 file = "crates/cf-engine/src/shown/ours.rs"
 find = '''
-                None => {
-                    run = None;
-                    false
-                }
+            if !words.is_empty() {
+                run = None;
+            }
+            false
 '''
 replace = '''
-                None => {
-                    run = None;
-                    pasted.iter().any(|(_, text)| text.contains(&words))
-                }
+            if !words.is_empty() {
+                run = None;
+            }
+            !words.is_empty() && pasted.iter().any(|(_, text)| text.contains(&words))
 '''
 
 [[plant]]
@@ -708,7 +708,7 @@ runs = ["failure-reason-told"]
 [[plant.edit]]
 file = "crates/cf-engine/src/shown.rs"
 find = '''
-        (pattern(r"[A-Za-z0-9_-]{16,}"), "#id"),
+        (pattern(r"[A-Za-z0-9]{16,}"), "#id"),
 '''
 replace = '''
         (pattern(r"\d+"), "#id"),
@@ -722,10 +722,10 @@ runs = ["failure-reason-told"]
 [[plant.edit]]
 file = "crates/cf-engine/src/shown.rs"
 find = '''
-        (pattern(r"[A-Za-z0-9_-]{16,}"), "#id"),
+        (pattern(r"[A-Za-z0-9]{16,}"), "#id"),
 '''
 replace = '''
-        (pattern(r"[A-Za-z0-9_-]{160,}"), "#id"),
+        (pattern(r"[A-Za-z0-9]{160,}"), "#id"),
 '''
 
 [[plant]]
@@ -754,4 +754,77 @@ find = '''
 '''
 replace = '''
                 text: delivery_text(&begun.message, &[]),
+'''
+
+[[plant]]
+name = "failure reason: a paste whose header scrolled off is the window's"
+meant = "long_wake_ups_whose_headers_scrolled_off_are_one_outage"
+runs = ["failure-reason-told", "failure-reason-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/ours.rs"
+find = '''
+                run = pasted.first().map(|(_, newest)| newest.as_str());
+'''
+replace = '''
+                run = None;
+'''
+
+[[plant]]
+name = "failure reason: a line of a paste that looks like a header ends its run"
+meant = "a_line_of_the_run_that_looks_like_a_header_is_the_runs"
+runs = ["failure-reason-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/ours.rs"
+find = '''
+            if let Some(rest) = run.and_then(|rest| after(rest, &words)) {
+'''
+replace = '''
+            if let Some(rest) = run
+                .and_then(|rest| after(rest, &words))
+                .filter(|_| starts_with_header(unframed).is_none())
+            {
+'''
+
+[[plant]]
+name = "failure reason: the rows a paste carried are left out while it is on its way"
+meant = "the_rows_a_paste_carried_are_part_of_it_while_it_is_still_on_its_way"
+runs = ["failure-reason-engine"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages/delivery.rs"
+find = '''
+                 AND m.state IN ('queued', 'delivering', 'delivered', 'read') AND m.carried_by = ?
+'''
+replace = '''
+                 AND m.state IN ('delivering', 'delivered', 'read') AND m.carried_by = ?
+'''
+
+[[plant]]
+name = "failure reason: a model's id joined by - folds as an id"
+meant = "a_models_id_is_its_own_and_another_model_is_another_failure"
+runs = ["failure-reason-told", "failure-reason-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown.rs"
+find = '''
+        (pattern(r"[A-Za-z0-9]{16,}"), "#id"),
+'''
+replace = '''
+        (pattern(r"[A-Za-z0-9_-]{16,}"), "#id"),
+'''
+
+[[plant]]
+name = "failure reason: a box drawn in ASCII keeps its right edge on each line"
+meant = "a_box_drawn_in_ascii_is_its_frame"
+runs = ["failure-reason-shown"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/shown/ours.rs"
+find = '''
+        Some(edge) if edge.ends_with(char::is_whitespace) => edge.trim_end_matches(framed),
+'''
+replace = '''
+        Some(edge) if false => edge.trim_end_matches(framed),
 '''

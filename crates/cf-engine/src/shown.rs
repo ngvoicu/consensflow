@@ -250,14 +250,23 @@ fn outage_key(lines: &[String], keep: Keep) -> String {
 }
 
 /// What changes by itself from one turn of an outage to the next, each with
-/// what it is folded to: an id-like token (16 letters, digits, `_` or `-` or
-/// more, a digit among them: a request's id), a clock time, and a duration (a
-/// number joined to a unit of time: a retry-after, a countdown). Every other
-/// number is the failure's own: `gpt-5` is not `gpt-6`, and a 500 is not a 502
-/// (the chief's decision of 2026-10-22, T-286).
-static CHANGING: LazyLock<[(Regex, &str); 3]> = LazyLock::new(|| {
+/// what it is folded to: a UUID, an id-like token (a run of 16 letters and
+/// digits or more with no separator, a digit among them: a request's id, a
+/// completion's), a clock time, and a duration (a number joined to a unit of
+/// time: a retry-after, a countdown). Every other number is the failure's own:
+/// `gpt-5` is not `gpt-6`, a 500 is not a 502, and a model's id, its parts
+/// joined by `-` (`claude-sonnet-5-5`, a dated one, `gpt-5-codex-high`), or a
+/// code's joined by `_` (`ERR_HTTP2_GOAWAY_SESSION`) is no id (the chief's
+/// decisions of 2026-10-22, T-286 and T-298).
+static CHANGING: LazyLock<[(Regex, &str); 4]> = LazyLock::new(|| {
     [
-        (pattern(r"[A-Za-z0-9_-]{16,}"), "#id"),
+        (
+            pattern(
+                r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b",
+            ),
+            "#id",
+        ),
+        (pattern(r"[A-Za-z0-9]{16,}"), "#id"),
         (pattern(r"\b\d{1,2}:\d{2}(?::\d{2})?\b"), "#time"),
         (
             pattern(
@@ -282,7 +291,7 @@ fn folded(text: &str) -> String {
             .replace_all(&text, |found: &regex::Captures<'_>| {
                 let found = &found[0];
                 // An id is one only with a digit in it: a long word is a word.
-                if at == 0 && !found.chars().any(|c| c.is_ascii_digit()) {
+                if at == 1 && !found.chars().any(|c| c.is_ascii_digit()) {
                     found.to_owned()
                 } else {
                     (*to).to_owned()

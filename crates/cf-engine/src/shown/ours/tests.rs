@@ -74,3 +74,58 @@ fn a_placeholder_for_a_paste_is_no_reason_and_a_header_of_a_paste_not_known_ends
     ]);
     assert_eq!(ours(&screen, &[]), [true, true, false]);
 }
+
+#[test]
+fn a_line_of_the_run_that_looks_like_a_header_is_the_runs() {
+    // A result that quotes another message's header as its screen showed it.
+    let pastes = [paste(
+        5,
+        "[ConsensFlow m-5 · T-2 · result from @zeus]\nIts window said:\n[ConsensFlow m-12 · T-3 · note from @hera]\nand went on.",
+    )];
+    let screen = lines(&[
+        "[ConsensFlow m-5 · T-2 · result from @zeus]",
+        "Its window said:",
+        "[ConsensFlow m-12 · T-3 · note from @hera]",
+        "and went on.",
+        "Error: provider unreachable",
+    ]);
+    assert_eq!(ours(&screen, &pastes), [true, true, true, true, false]);
+}
+
+#[test]
+fn the_newest_paste_whose_header_scrolled_off_runs_from_the_top_line_only() {
+    let pastes = [
+        paste(
+            9,
+            "[ConsensFlow m-9 · note from ConsensFlow]\nline one\nline two\nline three",
+        ),
+        paste(8, "[ConsensFlow m-8 · note from ConsensFlow]\nolder words"),
+    ];
+    // Its last two lines at the top, then the window's error.
+    let screen = lines(&["line two", "line three", "Error: x"]);
+    assert_eq!(ours(&screen, &pastes), [true, true, false]);
+    // An older paste's words at the top are not the newest's: the window's.
+    assert_eq!(
+        ours(&lines(&["older words", "Error: x"]), &pastes),
+        [false, false]
+    );
+    // Lower down, the newest's words after the window's own line are the window's.
+    assert_eq!(
+        ours(&lines(&["Error: x", "line three"]), &pastes),
+        [false, false]
+    );
+}
+
+#[test]
+fn a_box_drawn_in_ascii_is_its_frame() {
+    let pastes = [paste(
+        4,
+        "[ConsensFlow m-4 · note from ConsensFlow]\nGo on with it",
+    )];
+    let screen = lines(&[
+        "| [ConsensFlow m-4 · note from ConsensFlow] |",
+        "| Go on with it                             |",
+        "Error: x",
+    ]);
+    assert_eq!(ours(&screen, &pastes), [true, true, false]);
+}

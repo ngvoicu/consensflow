@@ -466,5 +466,34 @@ fn what_changes_by_itself_in_an_outage_is_folded_and_every_other_number_kept() {
     assert_eq!(
         key("rate_limit_exceeded_error"),
         "rate_limit_exceeded_error"
-    );
+    ); // A model's id, a dated one, and a code joined by `_` are the failure's own.
+    for kept in [
+        "model claude-sonnet-5-5 not found",
+        "model claude-sonnet-4-5-20250929 not found",
+        "model gpt-5-codex-high not found",
+        "ERR_HTTP2_GOAWAY_SESSION",
+    ] {
+        assert_eq!(key(kept), kept);
+    }
+    // A completion's, a response's, a hex and a UUID id change by themselves.
+    for (one, other) in [
+        (
+            "id chatcmpl-AbC123dEf456GhI789",
+            "id chatcmpl-ZyX987wVu654TsR321",
+        ),
+        (
+            "id resp_68af1c2d3e4f5a6b7c8d9e0f",
+            "id resp_11aa22bb33cc44dd55ee66ff",
+        ),
+        (
+            "trace 9f86d081884c7d659a2feaa0c55ad015",
+            "trace 2c26b46b68ffc68ff99b453c1d304134",
+        ),
+        (
+            "session 123e4567-e89b-12d3-a456-426614174000",
+            "session 9b2f1c3e-0d4a-4b5c-8e6f-7a8b9c0d1e2f",
+        ),
+    ] {
+        assert_eq!(key(one), key(other), "{one}");
+    }
 }

@@ -543,3 +543,41 @@ fn a_request_id_that_differs_each_turn_is_the_same_failure() {
         1
     );
 }
+
+#[test]
+fn long_wake_ups_whose_headers_scrolled_off_are_one_outage() {
+    // Each long message the chief takes in turn shows only its last lines above the
+    // same error: the error is the outage, the message's words are not.
+    let context = Context::new();
+    let tiers = working(&context);
+    let error = "Error: provider unreachable";
+    chief_screen(&context, &[error]);
+    chief_fails_on_screen(&context);
+    context.pass().unwrap();
+    for round in 1..=2 {
+        let lines: Vec<String> = (1..=15)
+            .map(|n| format!("Round {round}, item {n}: look at task {n} of the board."))
+            .collect();
+        given(&context, &tiers, "chief", &lines.join("\n"));
+        let mut screen: Vec<&str> = lines[5..].iter().map(String::as_str).collect();
+        screen.extend(["", error]);
+        chief_screen(&context, &screen);
+        chief_fails_on_screen(&context);
+        context.pass().unwrap();
+        context.pass().unwrap();
+    }
+
+    let told = chief_failures(&tiers);
+    assert_eq!(told.len(), 1, "{told:?}");
+}
+
+#[test]
+fn a_models_id_is_its_own_and_another_model_is_another_failure() {
+    assert_eq!(
+        told_of(
+            "model claude-sonnet-5-5 not found",
+            "model claude-haiku-5-5 not found"
+        ),
+        2
+    );
+}
