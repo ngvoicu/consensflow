@@ -190,8 +190,8 @@ pub(super) fn processes() -> io::Result<Vec<Process>> {
 }
 
 /// What the system says of the process `pid` now: one of ours that runs and a look reads
-/// ([`process`]), one that ended (a zombie, or none of that number), or one it will not
-/// say (another user's: `proc_pidinfo` fails, or names another owner).
+/// ([`process`]), one that ended (`proc_pidinfo` answers ESRCH for a zombie as for none of
+/// that number: probed on Darwin 27), or one it will not say (another user's).
 pub(super) fn looked(pid: i32) -> Looked {
     // SAFETY: proc_pidinfo writes a fixed-size native struct into this buffer.
     let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
@@ -212,9 +212,6 @@ pub(super) fn looked(pid: i32) -> Looked {
             Some(libc::ESRCH) => Looked::Ended,
             _ => Looked::Unreadable,
         };
-    }
-    if info.pbi_status == libc::SZOMB {
-        return Looked::Ended;
     }
     if process(pid).is_some() {
         Looked::Readable

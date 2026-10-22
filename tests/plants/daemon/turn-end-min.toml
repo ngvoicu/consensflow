@@ -25,6 +25,7 @@
 
 [run]
 tem-panes-process-tree = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "process_tree::machine_tests"]
+tem-panes-native = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "process_tree::native::tests"]
 tem-panes-commands = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "pty::turn::tests::commands"]
 tem-daemon-host = ["cargo", "test", "--offline", "-p", "cf-daemon", "--lib", "host::tests"]
 tem-panes-background = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "background::"]
@@ -1392,3 +1393,13 @@ runs = ["tem-engine-turn-end"]
 file = "crates/cf-engine/src/turn_end.rs"
 find = '            None => ", once nothing else of it is pending.".to_owned(),'
 replace = '            None => ", and nothing else of it is pending.".to_owned(),'
+
+[[plant]]
+name = "turn-end-min host: a process of no number is taken for one no look can read"
+meant = "a_process_is_read_while_it_runs_ended_once_it_exits_and_unreadable_where_another_users"
+runs = ["tem-panes-native"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/process_tree/native.rs"
+find = '            Some(libc::ESRCH) => Looked::Ended,'
+replace = '            Some(libc::ESRCH) => Looked::Unreadable,'

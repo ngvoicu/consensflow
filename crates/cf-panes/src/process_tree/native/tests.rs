@@ -44,3 +44,25 @@ fn the_marker_is_found_among_the_environment_and_not_among_the_arguments() {
     typed.extend_from_slice(b"\0\0");
     assert!(!environment_has_marker(&typed, "abc123"));
 }
+
+#[allow(clippy::disallowed_methods)] // A test's own program.
+#[test]
+fn a_process_is_read_while_it_runs_ended_once_it_exits_and_unreadable_where_another_users() {
+    let mut child = std::process::Command::new("/bin/sleep")
+        .arg("30")
+        .spawn()
+        .expect("sleep starts");
+    let pid = child.id() as i32;
+    assert_eq!(looked(pid), Looked::Readable);
+    // Killed and not yet reaped, it is a zombie: ended.
+    child.kill().expect("sleep is killed");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while looked(pid) != Looked::Ended && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert_eq!(looked(pid), Looked::Ended, "a zombie");
+    child.wait().expect("sleep is reaped");
+    assert_eq!(looked(pid), Looked::Ended, "none of that number");
+    // launchd is root's.
+    assert_eq!(looked(1), Looked::Unreadable);
+}
