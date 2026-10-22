@@ -502,11 +502,15 @@ time.sleep(60)
             table
                 .commands(&pane.key, since)
                 .expect("a look at its commands")
+                .commands
                 .map(|commands| commands.total)
         };
         // A rest taken now has the server that left the group and the command: the look
         // that names it leaves both out, and one that names none counts both.
-        let rest = table.rest(&pane.key).expect("a rest").expect("one kept");
+        let rest = table
+            .rest(&pane.key, &[])
+            .expect("a rest")
+            .expect("one kept");
         assert_eq!(total(Some(rest)), Some(0));
         assert_eq!(
             total(None),
@@ -524,6 +528,13 @@ time.sleep(60)
         while total(Some(rest)).is_some() && std::time::Instant::now() < deadline {
             std::thread::sleep(std::time::Duration::from_millis(50));
         }
+        assert!(
+            table
+                .commands(&pane.key, Some(rest))
+                .expect("a look at its commands")
+                .unreadable,
+            "said unreadable, not untold"
+        );
         assert_eq!(
             total(Some(rest)),
             None,

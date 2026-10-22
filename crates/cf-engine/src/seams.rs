@@ -224,7 +224,9 @@ pub trait BackgroundWork {
 
     /// `pane` is at rest: the host keeps what its tree runs now, under the number answered,
     /// for a look at its commands to leave out (`pane.rest`). None where it keeps none.
-    fn rest<'a>(&'a self, pane: &'a Pane) -> Work<'a, Option<u64>>;
+    /// The rests `keep` names, which monitors that run are left, are kept however many
+    /// come after them.
+    fn rest<'a>(&'a self, pane: &'a Pane, keep: &'a [u64]) -> Work<'a, Option<u64>>;
 }
 
 /// What a look at the commands of a window's harness found (`pane.commands`).
@@ -232,9 +234,12 @@ pub trait BackgroundWork {
 pub enum CommandsSeen {
     /// So many run in the window.
     Running(usize),
-    /// The host answered that it cannot tell them: a platform with no groups, a harness
-    /// that keeps its servers otherwise, or a process of the window it cannot read.
+    /// The host answered that it cannot tell them: a platform with no groups, or a harness
+    /// that keeps its servers otherwise.
     Untold,
+    /// The host answered that a process of the window cannot be read (another user's):
+    /// a later look may read them all.
+    Unreadable,
     /// The host did not answer, or answered what is no answer.
     Unanswered,
 }

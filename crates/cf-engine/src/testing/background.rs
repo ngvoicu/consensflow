@@ -31,9 +31,9 @@ pub struct FakeBackground {
     commands: Cell<Option<CommandsSeen>>,
     /// The panes the engine looked at the commands of, in order, and the rest each named.
     looked: RefCell<Vec<(Pane, Option<u64>)>>,
-    /// The rests the engine asked the host to keep, in order: each is given the number of
-    /// its place, from 0.
-    rests: RefCell<Vec<Pane>>,
+    /// The rests the engine asked the host to keep, in order, with the earlier rests each
+    /// asked kept: each is given the number of its place, from 0.
+    rests: RefCell<Vec<(Pane, Vec<u64>)>>,
 }
 
 impl FakeBackground {
@@ -66,6 +66,20 @@ impl FakeBackground {
         self.commands.set(Some(
             commands.map_or(CommandsSeen::Untold, CommandsSeen::Running),
         ));
+    }
+
+    /// A look at a window's commands is answered that a process of it cannot be read.
+    pub fn commands_unreadable(&self) {
+        self.commands.set(Some(CommandsSeen::Unreadable));
+    }
+
+    /// The earlier rests each rest asked the host to keep, in order.
+    pub fn kept(&self) -> Vec<Vec<u64>> {
+        self.rests
+            .borrow()
+            .iter()
+            .map(|(_, keep)| keep.clone())
+            .collect()
     }
 
     /// A look at a window's commands is answered with nothing from now on.
@@ -118,9 +132,9 @@ impl BackgroundWork for FakeBackground {
         Box::pin(async move { commands })
     }
 
-    fn rest<'a>(&'a self, pane: &'a Pane) -> Work<'a, Option<u64>> {
+    fn rest<'a>(&'a self, pane: &'a Pane, keep: &'a [u64]) -> Work<'a, Option<u64>> {
         let mut rests = self.rests.borrow_mut();
-        rests.push(pane.clone());
+        rests.push((pane.clone(), keep.to_vec()));
         let number = u64::try_from(rests.len() - 1).ok();
         Box::pin(async move { number })
     }

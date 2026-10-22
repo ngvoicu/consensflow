@@ -6,7 +6,7 @@
 //! process here.
 use std::io;
 
-use super::{Identity, Process, OWNER_ENV};
+use super::{Identity, Looked, Process, OWNER_ENV};
 
 // XNU proc_info_private.h declares this 56-byte structure as an API. The
 // original parent's unique ID survives reparenting; a reused PID cannot match.
@@ -187,6 +187,40 @@ pub(super) fn processes() -> io::Result<Vec<Process>> {
             .collect());
     }
     Err(io::Error::other("could not snapshot pane processes"))
+}
+
+/// What the system says of the process `pid` now: one of ours that runs and a look reads
+/// ([`process`]), one that ended (a zombie, or none of that number), or one it will not
+/// say (another user's: `proc_pidinfo` fails, or names another owner).
+pub(super) fn looked(pid: i32) -> Looked {
+    // SAFETY: proc_pidinfo writes a fixed-size native struct into this buffer.
+    let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
+    let size = std::mem::size_of_val(&info);
+    // SAFETY: the buffer is `info`, writable for the `size` bytes passed with it, and
+    // proc_pidinfo writes no more than that.
+    let read = unsafe {
+        libc::proc_pidinfo(
+            pid,
+            libc::PROC_PIDTBSDINFO,
+            0,
+            (&mut info as *mut libc::proc_bsdinfo).cast(),
+            size as i32,
+        )
+    };
+    if read != size as i32 {
+        return match io::Error::last_os_error().raw_os_error() {
+            Some(libc::ESRCH) => Looked::Ended,
+            _ => Looked::Unreadable,
+        };
+    }
+    if info.pbi_status == libc::SZOMB {
+        return Looked::Ended;
+    }
+    if process(pid).is_some() {
+        Looked::Readable
+    } else {
+        Looked::Unreadable
+    }
 }
 
 /// The numbers of the processes `pid` started that the system names now

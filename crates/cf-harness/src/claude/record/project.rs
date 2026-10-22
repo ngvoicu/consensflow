@@ -415,8 +415,8 @@ fn call(block: &Value, main: bool) -> Call {
 /// exactly one source that is truthy, and runs a socket where `ws` is one, whatever
 /// `command` says, `"command":""` among it: Astraeus on 472b1d96). A command only where
 /// `command` is a text that is not empty and nothing else is a source; a socket where `ws`
-/// is one; and where neither, a monitor with no process of the window to look for, as an
-/// MCP server's is.
+/// is one; and where neither, a monitor with no process of the window to look for, which no
+/// Claude Code this reader knows starts (`Source::Server`).
 fn source(input: Option<&Value>) -> Source {
     let truthy = |value: Option<&Value>| match value {
         None | Some(Value::Null | Value::Bool(false)) => false,

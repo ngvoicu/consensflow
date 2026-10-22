@@ -86,6 +86,30 @@ pub(crate) const OWNER_ENV: &str = "CF_PANE_PROCESS_OWNER";
 /// delivered at once, and the process is gone when its system call returns.
 const AFTER_KILL: Duration = Duration::from_secs(2);
 
+/// How many times a look that must read all of the tree is made where a process was born
+/// while it looked ([`ProcessTree::readable_members`]).
+const LOOKS: usize = 3;
+
+/// What a look that must read all of the tree found ([`ProcessTree::readable_members`]).
+#[derive(Debug, PartialEq)]
+pub(crate) enum Readable {
+    /// Every process of the tree, each read.
+    All(Vec<Member>),
+    /// A process of the tree the system will not say what it is, or no program.
+    Hidden,
+}
+
+/// What the system says of a process another named (`bound::System::looked`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Looked {
+    /// One of ours that runs, which a look reads.
+    Readable,
+    /// It ended (reaped or not), or is no process now.
+    Ended,
+    /// Another user's, or one the system will not say anything of.
+    Unreadable,
+}
+
 /// What a tree is asked to end, or ended.
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum Subject<'a> {
@@ -200,31 +224,43 @@ impl ProcessTree {
     }
 
     /// [`ProcessTree::members`], where every process the pane's program and each of them
-    /// started is one of them: none where one is not, which the system names and will not
-    /// say what it is (another user's, as a command that `exec`s `sudo` becomes; one that
-    /// ended and was not reaped yet), or where the tree has no program. A look that
-    /// must not take what it cannot read for nothing running (`pane.commands`) asks this.
-    pub fn readable_members(&self) -> io::Result<Option<Vec<Member>>> {
+    /// started is one of them ([`Readable`]): hidden where one is not and the system will
+    /// not say what it is (another user's, as a command that `exec`s `sudo` becomes), or
+    /// where the tree has no program. A look that must not take what it cannot read for
+    /// nothing running (`pane.commands`) asks this. A process the system names that ended
+    /// since (reaped or not) is none of it; one born since the table was read (Calliope on
+    /// 136a7158: a race, which would make the look say it cannot tell) has the look made
+    /// again, [`LOOKS`] times at most.
+    pub fn readable_members(&self) -> io::Result<Readable> {
         self.readable_members_by(&Native)
     }
 
-    fn readable_members_by(&self, system: &impl System) -> io::Result<Option<Vec<Member>>> {
+    fn readable_members_by(&self, system: &impl System) -> io::Result<Readable> {
         let Some(root) = self.root else {
-            return Ok(None);
+            return Ok(Readable::Hidden);
         };
-        let snapshot = system.processes()?;
-        self.bound.observe(&Table::of(&snapshot));
-        let tree = self.select(&snapshot, &HashMap::new());
-        for parent in std::iter::once(root.pid).chain(tree.keys().copied()) {
-            if system
-                .children(parent)?
-                .iter()
-                .any(|child| !tree.contains_key(child))
-            {
-                return Ok(None);
+        for _ in 0..LOOKS {
+            let snapshot = system.processes()?;
+            self.bound.observe(&Table::of(&snapshot));
+            let tree = self.select(&snapshot, &HashMap::new());
+            let mut born = false;
+            for parent in std::iter::once(root.pid).chain(tree.keys().copied()) {
+                for child in system.children(parent)? {
+                    if tree.contains_key(&child) {
+                        continue;
+                    }
+                    match system.looked(child) {
+                        Looked::Unreadable => return Ok(Readable::Hidden),
+                        Looked::Readable => born = true,
+                        Looked::Ended => {}
+                    }
+                }
+            }
+            if !born {
+                return Ok(Readable::All(self.members_in(&snapshot, &tree)));
             }
         }
-        Ok(Some(self.members_in(&snapshot, &tree)))
+        Ok(Readable::Hidden)
     }
 
     /// The turn's work as `baseline` proves it, chosen once: what an ending of the

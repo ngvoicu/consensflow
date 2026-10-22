@@ -138,7 +138,8 @@ pub struct Background {
 /// window whose harness keeps its servers in the window's group ([`Servers::InGroup`]),
 /// on a platform with groups: nowhere else does a group say what a process is. It is
 /// `null` too where a process of the window cannot be read (another user's, as a command
-/// that `exec`s `sudo` becomes), which may be a command. What ran at the rest the request
+/// that `exec`s `sudo` becomes), which may be a command: the answer says so then
+/// ([`CommandsAnswer`]). What ran at the rest the request
 /// names (`since`, a number `pane.rest` answered) is left out: a server or helper that
 /// left the window's group.
 pub type Commands = Option<Background>;
@@ -152,6 +153,28 @@ pub struct CommandsRequest {
     pub generation: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub since: Option<u64>,
+}
+
+/// `pane.commands`' answer: the commands ([`Commands`]), and, where they are `null`
+/// because a process of the window cannot be read, `unreadable` (Calliope on 136a7158: on a
+/// platform that tells them, that is no "cannot tell", and a later look may read them all).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommandsAnswer {
+    pub commands: Commands,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub unreadable: bool,
+}
+
+/// A `pane.rest` request: the pane, and the rests the daemon still names (`keep`), which
+/// the host keeps however many come after them (Astraeus on 136a7158).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RestRequest {
+    pub id: String,
+    pub generation: u64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub keep: Vec<u64>,
 }
 
 /// `pane.rest`'s answer, under `rest`: the number the host keeps the window's processes

@@ -591,7 +591,7 @@ fn what_ran_at_the_rest_a_look_names_is_no_command_and_what_began_after_it_is() 
     let mut baseline = marked(&[], Kept::of(Servers::InGroup, Some(10)), None);
     let server = in_group(member(11, "python3 server.py", "Python", of(10)), 11);
     let resting = [in_group(program(), 10), server.clone()];
-    let rest = baseline.rest(&resting).expect("a rest kept");
+    let rest = baseline.rest(&resting, &[]).expect("a rest kept");
     let mut running = resting.to_vec();
     running.push(in_group(member(41, "sleep 300", "sleep", of(10)), 41));
     assert_eq!(
@@ -609,7 +609,7 @@ fn what_ran_at_the_rest_a_look_names_is_no_command_and_what_began_after_it_is() 
     );
     // The last rests are kept, and the oldest let go.
     for _ in 0..RESTS {
-        baseline.rest(&resting);
+        baseline.rest(&resting, &[]);
     }
     assert_eq!(
         commands_since(&baseline, &running, Some(rest)),
@@ -617,7 +617,7 @@ fn what_ran_at_the_rest_a_look_names_is_no_command_and_what_began_after_it_is() 
     );
     // A window whose commands are not told keeps no rest.
     let mut untold = marked(&[], None, None);
-    assert_eq!(untold.rest(&resting), None);
+    assert_eq!(untold.rest(&resting, &[]), None);
     assert!(!untold.tells_commands());
 }
 
@@ -626,4 +626,25 @@ fn commands_since(baseline: &Baseline, tree: &[Member], since: Option<u64>) -> O
     baseline
         .commands(tree, since)
         .map(|found| found.processes.iter().map(|process| process.pid).collect())
+}
+
+#[test]
+fn a_rest_a_monitor_names_is_kept_however_many_rests_come_after_it() {
+    // Astraeus on 136a7158: a monitor whose task was woken more than sixteen times after it
+    // was armed named a rest no longer kept, and the server that left the group counted
+    // again, for good.
+    let mut baseline = marked(&[], Kept::of(Servers::InGroup, Some(10)), None);
+    let server = in_group(member(11, "python3 server.py", "Python", of(10)), 11);
+    let resting = [in_group(program(), 10), server.clone()];
+    let rest = baseline.rest(&resting, &[]).expect("a rest kept");
+    let mut running = resting.to_vec();
+    running.push(in_group(member(41, "sleep 300", "sleep", of(10)), 41));
+    for _ in 0..(RESTS + 4) {
+        baseline.rest(&running, &[rest]);
+    }
+    // The monitor's command is gone; the server runs on.
+    assert_eq!(
+        commands_since(&baseline, &resting, Some(rest)),
+        Some(vec![])
+    );
 }

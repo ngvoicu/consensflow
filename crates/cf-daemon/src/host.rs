@@ -22,7 +22,9 @@ use cf_engine::runtime::LocalWork;
 use cf_engine::seams::{BackgroundWork, CommandsSeen};
 use cf_harness::contract::{HostError, Pane, PaneHost, Work};
 use cf_proto::bridge::Role;
-use cf_proto::panes::{Commands, CommandsRequest, MarkRequest, PaneExit, Rest, Servers};
+use cf_proto::panes::{
+    CommandsAnswer, CommandsRequest, MarkRequest, PaneExit, Rest, RestRequest, Servers,
+};
 use serde_json::{json, Map, Value};
 
 use crate::errors::contain_now;
@@ -133,12 +135,18 @@ impl BackgroundWork for BridgeHost {
         })
     }
 
-    fn rest<'a>(&'a self, pane: &'a Pane) -> Work<'a, Option<u64>> {
-        let body = json!({ "id": pane.id, "generation": pane.generation });
-        let sent = self.bridge.request("pane.rest", body, None);
+    fn rest<'a>(&'a self, pane: &'a Pane, keep: &'a [u64]) -> Work<'a, Option<u64>> {
+        let request = RestRequest {
+            id: pane.id.clone(),
+            generation: pane.generation,
+            keep: keep.to_vec(),
+        };
+        let sent = serde_json::to_value(&request)
+            .ok()
+            .map(|body| self.bridge.request("pane.rest", body, None));
         // A host that keeps none, does not answer or is older keeps no rest.
         Box::pin(async move {
-            let answer = sent.await.ok()?;
+            let answer = sent?.await.ok()?;
             let rest: Rest = serde_json::from_value(answer.get("rest")?.clone()).ok()?;
             rest
         })
@@ -146,15 +154,23 @@ impl BackgroundWork for BridgeHost {
 }
 
 /// What `pane.commands`' answer says (none where no answer came): so many commands run,
-/// the host cannot tell them (`commands: null`), or nothing that is an answer (an older
-/// host's, which knows no such request, among it).
+/// the host cannot tell them (`commands: null`), a process of the window cannot be read
+/// (`null` and `unreadable`), or nothing that is an answer (an older host's, which knows
+/// no such request, among it).
 fn commands_seen(answer: Option<&Value>) -> CommandsSeen {
-    let Some(commands) = answer.and_then(|answer| answer.get("commands")) else {
+    let Some(answer) = answer.filter(|answer| answer.get("commands").is_some()) else {
         return CommandsSeen::Unanswered;
     };
-    match serde_json::from_value::<Commands>(commands.clone()) {
-        Ok(Some(commands)) => CommandsSeen::Running(commands.total),
-        Ok(None) => CommandsSeen::Untold,
+    match serde_json::from_value::<CommandsAnswer>(answer.clone()) {
+        Ok(CommandsAnswer {
+            commands: Some(commands),
+            ..
+        }) => CommandsSeen::Running(commands.total),
+        Ok(CommandsAnswer {
+            commands: None,
+            unreadable: true,
+        }) => CommandsSeen::Unreadable,
+        Ok(CommandsAnswer { commands: None, .. }) => CommandsSeen::Untold,
         Err(_) => CommandsSeen::Unanswered,
     }
 }

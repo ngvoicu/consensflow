@@ -85,7 +85,10 @@ pub enum Source {
     Command,
     /// A socket (`ws`), which no process of the window runs.
     Socket,
-    /// Neither, as an MCP server's monitor is: no process of the window to look for.
+    /// Neither: no process of the window to look for. Claude Code 2.1.308 refuses such a
+    /// call (its schema takes exactly one of `command` and `ws`), which starts no job, and
+    /// an MCP server's own monitor is armed by no Monitor call: it is the safe reading of a
+    /// call no version this reader knows writes (Calliope on 136a7158).
     Server,
 }
 

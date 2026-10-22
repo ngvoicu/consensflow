@@ -103,33 +103,62 @@ pub(crate) struct HeldPart {
     seen: Option<CommandsSeen>,
     next_look_ms: i64,
     wait_ms: i64,
-    /// The window's latest rest the host keeps (`BackgroundWork::rest`), the one that
-    /// was the latest when the window was last seen at rest (taken before that look, so
-    /// before any monitor the look did not show began), whether it was at rest at the last
-    /// pass, and for each monitor the rest proved before it was first seen.
+    /// How many looks in a row found a command still running: the first is told nothing
+    /// (Calliope on 136a7158: Claude Code's kill can take a second or more).
+    running_looks: u32,
+    /// The window's rests, which outlive the task's hold: they are the window's, and go
+    /// with it, or with the conversation it shows ([`HeldPart::reset`]).
+    pub(crate) rests: Rests,
+}
+
+/// What the engine keeps of a window's rests (`BackgroundWork::rest`): the latest the host
+/// keeps, the one that was the latest when the window was last seen at rest (taken before
+/// that look, so before any monitor the look did not show began), whether it was at rest
+/// at the last pass, and for each monitor the rest proved before it was first seen.
+#[derive(Debug, Default)]
+pub(crate) struct Rests {
     rest: Option<u64>,
     proved: Option<u64>,
     at_rest: bool,
     since: HashMap<Arc<str>, Option<u64>>,
 }
 
-/// What a held task's requester was told: the task, what was pending, and what the last
-/// look at its window's commands said, as far as a note says it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+impl HeldPart {
+    /// What a window keeps of its task's hold once no task of its is working: nothing of
+    /// the hold, and its rests, which a window idle between its result and its close does
+    /// not take again at every pass (Calliope on 136a7158).
+    pub(crate) fn reset(&mut self) {
+        let rests = std::mem::take(&mut self.rests);
+        *self = HeldPart {
+            rests,
+            ..HeldPart::default()
+        };
+    }
+}
+
+impl Rests {
+    /// A message is pasted into the window at rest: the rest taken then, or before, came
+    /// before the turn it begins, and so before every monitor of that turn (Calliope on
+    /// 136a7158). A window that took no rest proves none.
+    pub(crate) fn pasted(&mut self) {
+        if self.rest.is_some() {
+            self.proved = self.rest;
+        }
+    }
+}
+
+/// What a held task's requester was told: the task, what was pending, its monitors by
+/// their task, source and notice, and what the last look at its window's commands found
+/// (Astraeus on 136a7158: a count that fell, or a monitor replaced by another, with the
+/// same counts, was not told).
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct Told {
     task: i64,
     jobs: usize,
     agents: usize,
     noticed: usize,
-    seen: Option<Said>,
-}
-
-/// What a note says of a look at the window's commands.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Said {
-    Running,
-    Untold,
-    Unanswered,
+    monitors: Vec<Monitor>,
+    seen: Option<CommandsSeen>,
 }
 
 /// How long the engine waits, at most, between two looks at a window's commands that end
@@ -168,7 +197,7 @@ impl Dispatcher {
             .borrow()
             .active_task(participant.id, false)?;
         let Some(thread) = task.filter(|thread| thread.task.state == "working") else {
-            *record.held.borrow_mut() = HeldPart::default();
+            record.held.borrow_mut().reset();
             return Ok(Turn::Open);
         };
         let items = observed.items();
@@ -211,12 +240,13 @@ impl Dispatcher {
                 jobs: pending.jobs,
                 agents: pending.agents,
                 noticed: pending.noticed,
-                seen: seen.map(said_of),
+                monitors: observed.monitors(),
+                seen,
             };
             let told = {
                 let mut held = record.held.borrow_mut();
                 held.holding = Some(hold);
-                held.told == Some(now)
+                held.told.as_ref() == Some(&now)
             };
             // Where a look decides, the requester is told once it was made, and what it
             // found (Calliope on 472b1d96).
@@ -231,7 +261,7 @@ impl Dispatcher {
             }
             return Ok(Turn::Held);
         }
-        *record.held.borrow_mut() = HeldPart::default();
+        record.held.borrow_mut().reset();
         let body = with_leftovers(words, &leftovers(&participant.handle, pending, None, true));
         self.seams
             .ledger
@@ -296,6 +326,18 @@ impl Dispatcher {
     /// turn; it is proved for a monitor where a later look saw the window at rest without
     /// it: that monitor's call was not written then (no call is open at rest), and its
     /// command, which Claude Code starts after the call, began after the rest was taken.
+    /// A message pasted into the window at rest proves the rest taken then, or before, for
+    /// every monitor of the turn it begins ([`Rests::pasted`]). The rests the monitors that
+    /// run are left are kept by the host however many come after (Astraeus on 136a7158).
+    ///
+    /// Limits. A window opened with its task's message (every worker's) has no rest before
+    /// its first turn, and a monitor of that turn names none: a server that left the
+    /// window's group counts, and the monitor waits for it, the safe way. And the proof
+    /// takes a record read at a look as no older than the rest taken before it: a record
+    /// read late by more than a pass would let a monitor's call written after the rest
+    /// pass for one written before (Calliope on 136a7158). A rest stamped with its time,
+    /// left out only where a monitor's call is later, would close it, by the wall clock a
+    /// record's time is, which can step (Astraeus on c593fd49): not done.
     pub(crate) async fn watch_monitors(
         &self,
         participant: &ParticipantView,
@@ -306,25 +348,33 @@ impl Dispatcher {
         let monitors = observed.monitors();
         let take_rest = {
             let mut held = record.held.borrow_mut();
-            let proved = held.proved;
-            held.since
+            let rests = &mut held.rests;
+            let proved = rests.proved;
+            rests
+                .since
                 .retain(|id, _| monitors.iter().any(|monitor| monitor.id == *id));
             for monitor in &monitors {
-                held.since.entry(Arc::clone(&monitor.id)).or_insert(proved);
+                rests.since.entry(Arc::clone(&monitor.id)).or_insert(proved);
             }
-            let first = observed.settled && !held.at_rest;
+            let first = observed.settled && !rests.at_rest;
             if observed.settled {
-                held.proved = held.rest;
+                rests.proved = rests.rest;
             }
-            held.at_rest = observed.settled;
-            first
+            rests.at_rest = observed.settled;
+            // The rests the monitors that run are left, which the host keeps however many
+            // come after them (Astraeus on 136a7158).
+            let mut keep: Vec<u64> = rests.since.values().flatten().copied().collect();
+            keep.sort_unstable();
+            keep.dedup();
+            first.then_some(keep)
         };
-        if let Some(pane) = pane.as_ref().filter(|_| take_rest) {
-            let rest = self.seams.background.rest(pane).await;
-            record.held.borrow_mut().rest = rest;
+        if let (Some(pane), Some(keep)) = (pane.as_ref(), take_rest) {
+            let rest = self.seams.background.rest(pane, &keep).await;
+            record.held.borrow_mut().rests.rest = rest;
         }
         let pending = observed.pending();
         let noticed = pending.noticed;
+        // A socket's monitor has no command to look for.
         let decides = observed.settled
             && noticed > 0
             && pending.total() == noticed
@@ -337,28 +387,29 @@ impl Dispatcher {
                 held.seen = None;
                 held.wait_ms = 0;
                 held.next_look_ms = 0;
+                held.running_looks = 0;
             }
             // The oldest rest proved for any of them: none where one has none.
             let since = monitors
                 .iter()
                 .filter(|monitor| monitor.notice.is_some())
-                .map(|monitor| held.since.get(&monitor.id).copied().flatten())
+                .map(|monitor| held.rests.since.get(&monitor.id).copied().flatten())
                 .try_fold(u64::MAX, |oldest, rest| rest.map(|rest| oldest.min(rest)));
             (seen, since)
         };
         if !decides {
             return Watching::Undecided;
         }
-        let last = record.held.borrow().seen;
         if noticed > seen {
             // Another said it ended: the next pass looks, whatever the wait was.
             let mut held = record.held.borrow_mut();
             held.wait_ms = 0;
             held.next_look_ms = 0;
-            return last.map_or(Watching::Waiting, Watching::Seen);
+            held.running_looks = 0;
+            return watching_of(&held);
         }
         if self.now() < record.held.borrow().next_look_ms {
-            return last.map_or(Watching::Waiting, Watching::Seen);
+            return watching_of(&record.held.borrow());
         }
         let Some(pane) = pane else {
             return Watching::Waiting;
@@ -367,9 +418,13 @@ impl Dispatcher {
         let now = self.now();
         let mut held = record.held.borrow_mut();
         held.seen = Some(looked);
+        held.running_looks = match looked {
+            CommandsSeen::Running(running) if running > 0 => held.running_looks + 1,
+            _ => 0,
+        };
         held.wait_ms = (held.wait_ms * 2).clamp(1_000, LOOKS_APART_MS);
         held.next_look_ms = now + held.wait_ms;
-        Watching::Seen(looked)
+        watching_of(&held)
     }
 
     /// What the task of the participant's window is held for, while it is.
@@ -425,6 +480,19 @@ impl Dispatcher {
     }
 }
 
+/// What the latest look said, as a pass takes it: none yet is waiting, and so is a first
+/// look that found a command still running (one more is made before the requester is
+/// told of it).
+fn watching_of(held: &HeldPart) -> Watching {
+    match held.seen {
+        None => Watching::Waiting,
+        Some(CommandsSeen::Running(running)) if running > 0 && held.running_looks < 2 => {
+            Watching::Waiting
+        }
+        Some(seen) => Watching::Seen(seen),
+    }
+}
+
 /// What a held task's requester is told it is held for: what its worker's turn left
 /// running that its harness wakes it for, the monitors among it, and what the last look
 /// at the window's commands found, where one was made ([`HeldPart::seen`]).
@@ -440,15 +508,6 @@ fn noticed_of(monitors: &[Monitor]) -> usize {
         .iter()
         .filter(|monitor| monitor.source == Source::Command && monitor.notice.is_some())
         .count()
-}
-
-/// What a note says of what a look found.
-fn said_of(seen: CommandsSeen) -> Said {
-    match seen {
-        CommandsSeen::Running(_) => Said::Running,
-        CommandsSeen::Untold => Said::Untold,
-        CommandsSeen::Unanswered => Said::Unanswered,
-    }
 }
 
 /// What a note of a held task says of its monitors, after a sentence of its own: each by
@@ -494,26 +553,30 @@ fn monitors_said(handle: &str, held: &Held) -> String {
             Some(CommandsSeen::Untold) => {
                 ", which ConsensFlow cannot see on this machine: it waits for Finish.".to_owned()
             }
+            Some(CommandsSeen::Unreadable) => {
+                ", and a process of its window runs that ConsensFlow cannot read (another user's): it looks again."
+                    .to_owned()
+            }
             Some(CommandsSeen::Unanswered) => {
                 ", and the pane host did not answer when ConsensFlow looked: it looks again."
                     .to_owned()
             }
-            None => ", and nothing else of it is pending.".to_owned(),
+            None => ", once nothing else of it is pending.".to_owned(),
         });
     }
-    for (source, of) in [
-        (Source::Socket, "a socket"),
-        (Source::Server, "an MCP server"),
-    ] {
-        if held
-            .monitors
-            .iter()
-            .any(|monitor| monitor.source == source && monitor.notice.is_some())
-        {
-            said.push_str(&format!(
-                " A monitor of {of} that said it ended has no command in the window to look for: it ends by Finish alone."
-            ));
-        }
+    if held
+        .monitors
+        .iter()
+        .any(|monitor| monitor.source == Source::Socket && monitor.notice.is_some())
+    {
+        said.push_str(" A monitor of a socket that said it ended has no command in the window to look for: it ends by Finish alone.");
+    }
+    if held
+        .monitors
+        .iter()
+        .any(|monitor| monitor.source == Source::Server && monitor.notice.is_some())
+    {
+        said.push_str(" A monitor that said it ended and whose call named no command or socket ConsensFlow reads has nothing in the window to look for: it ends by Finish alone.");
     }
     said
 }

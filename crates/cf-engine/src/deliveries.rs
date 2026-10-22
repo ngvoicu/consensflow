@@ -142,8 +142,10 @@ impl Dispatcher {
             record.window.borrow_mut().owner.get_or_insert(number);
         }
         let text = delivery_text(&begun.message, &begun.carried);
-        // A turn begins with this message: what the window's tree runs now came before it.
+        // A turn begins with this message: what the window's tree runs now came before it,
+        // and so did the rest the window was seen at, as every monitor of the turn will.
         self.mark_turn(record, &pane).await;
+        record.held.borrow_mut().rests.pasted();
         let outcome = match returning(window.deliver(host, &pane, &text)).await {
             Ok(admission) => admission,
             // An adapter that failed never handed it over, and its error must show.

@@ -31,7 +31,7 @@ use std::time::Duration;
 #[cfg(target_os = "macos")]
 use std::time::Instant;
 
-use cf_proto::panes::{Background, BackgroundProcess, Ending, Servers};
+use cf_proto::panes::{Background, BackgroundProcess, CommandsAnswer, Ending, Servers};
 
 #[cfg(target_os = "macos")]
 use super::close;
@@ -58,7 +58,10 @@ impl Tree {
     fn readable_members(&self) -> io::Result<Option<Vec<Member>>> {
         #[cfg(target_os = "macos")]
         {
-            self.tree.readable_members()
+            Ok(match self.tree.readable_members()? {
+                crate::process_tree::Readable::All(members) => Some(members),
+                crate::process_tree::Readable::Hidden => None,
+            })
         }
         #[cfg(not(target_os = "macos"))]
         {
@@ -208,12 +211,9 @@ impl PaneTable {
     }
 
     /// The commands of the window's harness that run in the pane's tree now
-    /// ([`Baseline::commands`]): none where the host cannot tell them.
-    pub fn commands(
-        &self,
-        key: &PaneKey,
-        since: Option<u64>,
-    ) -> Result<Option<Background>, PaneError> {
+    /// ([`Baseline::commands`]): none where the host cannot tell them, and none, said
+    /// unreadable, where a process of the window cannot be read.
+    pub fn commands(&self, key: &PaneKey, since: Option<u64>) -> Result<CommandsAnswer, PaneError> {
         let (tree, baseline) = {
             let panes = self.lock_panes()?;
             let pane = panes
@@ -223,17 +223,24 @@ impl PaneTable {
         };
         // Where it cannot tell them the tree is not walked.
         if !baseline.tells_commands() {
-            return Ok(None);
+            return Ok(CommandsAnswer::default());
         }
-        Ok(tree
-            .readable_members()?
-            .and_then(|members| baseline.commands(&members, since)))
+        Ok(match tree.readable_members()? {
+            Some(members) => CommandsAnswer {
+                commands: baseline.commands(&members, since),
+                unreadable: false,
+            },
+            None => CommandsAnswer {
+                commands: None,
+                unreadable: true,
+            },
+        })
     }
 
     /// The pane is at rest, the daemon says: its tree now is kept, under the number
     /// answered, for a look at its commands to leave out ([`Baseline::rest`]). None where
     /// the host tells no commands of it, and its tree is not walked then.
-    pub fn rest(&self, key: &PaneKey) -> Result<Option<u64>, PaneError> {
+    pub fn rest(&self, key: &PaneKey, keep: &[u64]) -> Result<Option<u64>, PaneError> {
         let (tree, tells) = {
             let panes = self.lock_panes()?;
             let pane = panes
@@ -250,7 +257,7 @@ impl PaneTable {
             .get_mut(key)
             .ok_or_else(|| PaneError::NotFound(key.clone()))?
             .baseline
-            .rest(&members))
+            .rest(&members, keep))
     }
 
     /// Ends what the pane's turn left running, and nothing of the pane's own, the

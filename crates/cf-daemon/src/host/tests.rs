@@ -561,6 +561,7 @@ async fn a_look_at_a_windows_commands_is_asked_with_the_rest_it_names_and_its_an
             let answers = Rc::new(RefCell::new(vec![
                 json!({ "ok": true, "commands": { "total": 3, "processes": [] } }),
                 json!({ "ok": true, "commands": null }),
+                json!({ "ok": true, "commands": null, "unreadable": true }),
                 json!({ "ok": true }),
                 json!({ "ok": true, "commands": "three" }),
             ]));
@@ -570,14 +571,18 @@ async fn a_look_at_a_windows_commands_is_asked_with_the_rest_it_names_and_its_an
                 let answer = next.borrow_mut().remove(0);
                 async move { Ok(answer) }
             });
-            app.on("pane.rest", move |_, _| async {
-                Ok(json!({ "ok": true, "rest": 7 }))
+            let rested = Rc::new(RefCell::new(Vec::new()));
+            let asked = Rc::clone(&rested);
+            app.on("pane.rest", move |_, body| {
+                asked.borrow_mut().push(body);
+                async { Ok(json!({ "ok": true, "rest": 7 })) }
             });
             let host = host_over(&daemon);
             let at = pane("p1-zeus", 2);
             // So many run; the host cannot tell them (null); and what is no answer.
             assert_eq!(host.commands(&at, Some(7)).await, CommandsSeen::Running(3));
             assert_eq!(host.commands(&at, None).await, CommandsSeen::Untold);
+            assert_eq!(host.commands(&at, None).await, CommandsSeen::Unreadable);
             assert_eq!(host.commands(&at, None).await, CommandsSeen::Unanswered);
             assert_eq!(host.commands(&at, None).await, CommandsSeen::Unanswered);
             assert_eq!(
@@ -588,7 +593,16 @@ async fn a_look_at_a_windows_commands_is_asked_with_the_rest_it_names_and_its_an
                 serde_json::to_string(&seen.borrow()[1]).unwrap(),
                 r#"{"id":"p1-zeus","generation":2}"#
             );
-            assert_eq!(host.rest(&at).await, Some(7));
+            assert_eq!(host.rest(&at, &[2, 5]).await, Some(7));
+            assert_eq!(host.rest(&at, &[]).await, Some(7));
+            assert_eq!(
+                serde_json::to_string(&rested.borrow()[0]).unwrap(),
+                r#"{"id":"p1-zeus","generation":2,"keep":[2,5]}"#
+            );
+            assert_eq!(
+                serde_json::to_string(&rested.borrow()[1]).unwrap(),
+                r#"{"id":"p1-zeus","generation":2}"#
+            );
         })
         .await;
 }
@@ -605,7 +619,7 @@ async fn a_look_at_a_windows_commands_that_no_host_answers_is_unanswered_and_kee
             let at = pane("p1-zeus", 2);
             assert_eq!(host.commands(&at, None).await, CommandsSeen::Unanswered);
             // A host that knows no `pane.rest` keeps none.
-            assert_eq!(host.rest(&at).await, None);
+            assert_eq!(host.rest(&at, &[]).await, None);
         })
         .await;
 }

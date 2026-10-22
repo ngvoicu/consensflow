@@ -11,6 +11,7 @@ use serde_json::Value;
 use crate::dispatcher::Dispatcher;
 use crate::record::Record;
 use crate::seams::EngineError;
+use crate::turn_end::Rests;
 
 /// What the looks at a window copied: which conversation, and how many of
 /// its items.
@@ -93,6 +94,9 @@ impl Dispatcher {
             window.follow(session);
         }
         *record.copied.borrow_mut() = None;
+        // The rests were the other conversation's: a monitor of this one was never seen
+        // missing at them (Calliope on 136a7158).
+        record.held.borrow_mut().rests = Rests::default();
         self.changed();
         Ok(())
     }

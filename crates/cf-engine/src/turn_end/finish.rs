@@ -36,7 +36,7 @@ use std::rc::Rc;
 use cf_base::refusal::Refusal;
 use cf_ledger::{ParticipantView, TaskThread, TaskView};
 
-use super::{leftovers, with_leftovers, words_of, HeldPart};
+use super::{leftovers, with_leftovers, words_of};
 use crate::dispatcher::Dispatcher;
 use crate::record::Record;
 use crate::role_change::answers_to_the_task;
@@ -181,7 +181,7 @@ impl Dispatcher {
             .ledger
             .borrow_mut()
             .record_result(project, number, &body)?;
-        *record.held.borrow_mut() = HeldPart::default();
+        record.held.borrow_mut().reset();
         self.changed();
         Ok(Finished {
             task: moved.task,

@@ -186,16 +186,21 @@ impl Baseline {
 
     /// The window is at rest, its tree `tree`: kept, under the number answered, for a
     /// look at its commands to leave out ([`Baseline::commands`]). The last [`RESTS`] are
-    /// kept. None where the host cannot tell the commands.
-    pub fn rest(&mut self, tree: &[Member]) -> Option<u64> {
+    /// kept, and those `keep` names however many came after them: the daemon names those a
+    /// monitor that runs is left (Astraeus on 136a7158). None where the host cannot tell
+    /// the commands.
+    pub fn rest(&mut self, tree: &[Member], keep: &[u64]) -> Option<u64> {
         self.commands_kept()?;
         let number = self.next_rest;
         self.next_rest += 1;
         self.rests
             .push_back((number, tree.iter().map(|member| member.key).collect()));
-        while self.rests.len() > RESTS {
-            self.rests.pop_front();
-        }
+        let latest = self.rests.len().saturating_sub(RESTS);
+        let mut at = 0;
+        self.rests.retain(|(number, _)| {
+            at += 1;
+            at > latest || keep.contains(number)
+        });
         Some(number)
     }
 

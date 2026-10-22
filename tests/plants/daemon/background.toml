@@ -139,7 +139,7 @@ runs = ["engine-dispatcher-background"]
 [[plant.edit]]
 file = "crates/cf-engine/src/deliveries.rs"
 find = '''
-        // A turn begins with this message: what the window's tree runs now came before it.
+        // and so did the rest the window was seen at, as every monitor of the turn will.
         self.mark_turn(record, &pane).await;'''
 replace = ""
 

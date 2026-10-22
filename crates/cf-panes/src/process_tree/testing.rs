@@ -6,7 +6,7 @@ use std::cell::RefCell;
 use std::io;
 
 use super::bound::System;
-use super::{key_of, Identity, Process};
+use super::{key_of, Identity, Looked, Process};
 use crate::background::ProcessKey;
 
 /// A process of a table, started by the process whose identifier is `parent`, in a
@@ -106,6 +106,11 @@ pub(super) struct Machine {
     /// Processes it has that no look can read (another user's): each by the number of
     /// the process that started it, and its own.
     unreadable: Vec<(i32, i32)>,
+    /// Processes that ended and were not reaped, which their parent still names.
+    zombies: Vec<(i32, i32)>,
+    /// Processes born after its table was read, named by their parent once: the next look
+    /// finds them in it.
+    born: RefCell<Vec<(i32, i32)>>,
     sent: RefCell<Vec<(i32, i32)>>,
     sent_to_groups: RefCell<Vec<(i32, i32)>>,
 }
@@ -115,6 +120,8 @@ impl Machine {
         Self {
             processes,
             unreadable: Vec::new(),
+            zombies: Vec::new(),
+            born: RefCell::default(),
             sent: RefCell::default(),
             sent_to_groups: RefCell::default(),
         }
@@ -123,6 +130,18 @@ impl Machine {
     /// The machine, with a process `pid` that `parent` started and no look can read.
     pub fn with_unreadable(mut self, parent: i32, pid: i32) -> Self {
         self.unreadable.push((parent, pid));
+        self
+    }
+
+    /// The machine, with a process `pid` that `parent` started and that ended unreaped.
+    pub fn with_zombie(mut self, parent: i32, pid: i32) -> Self {
+        self.zombies.push((parent, pid));
+        self
+    }
+
+    /// The machine, with a process `pid` that `parent` started while a look read its table.
+    pub fn with_born(self, parent: i32, pid: i32) -> Self {
+        self.born.borrow_mut().push((parent, pid));
         self
     }
 
@@ -191,10 +210,33 @@ impl System for Machine {
             .chain(
                 self.unreadable
                     .iter()
+                    .chain(&self.zombies)
+                    .chain(self.born.borrow().iter())
                     .filter(|(parent, _)| *parent == pid)
                     .map(|(_, child)| *child),
             )
             .collect())
+    }
+
+    fn looked(&self, pid: i32) -> Looked {
+        let born = {
+            let mut born = self.born.borrow_mut();
+            let before = born.len();
+            born.retain(|(_, child)| *child != pid);
+            born.len() < before
+        };
+        if born
+            || self
+                .processes
+                .iter()
+                .any(|process| process.identity.pid == pid)
+        {
+            Looked::Readable
+        } else if self.unreadable.iter().any(|(_, child)| *child == pid) {
+            Looked::Unreadable
+        } else {
+            Looked::Ended
+        }
     }
 
     fn send(&self, to: Identity, signal: i32) -> io::Result<()> {

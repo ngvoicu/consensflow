@@ -418,7 +418,7 @@ runs = ["tem-engine-pending"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end.rs"
-find = '                held.told == Some(now)'
+find = '                held.told.as_ref() == Some(&now)'
 replace = '                false'
 
 [[plant]]
@@ -1013,8 +1013,8 @@ runs = ["tem-engine-turn-end"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end.rs"
-find = '                held.told == Some(now)'
-replace = '                held.told.map(|told| told.task) == Some(now.task)'
+find = '                held.told.as_ref() == Some(&now)'
+replace = '                held.told.as_ref().map(|told| told.task) == Some(now.task)'
 
 [[plant]]
 name = "turn-end-min engine: a note and Finish count a monitor that said it ended as one that runs"
@@ -1045,8 +1045,8 @@ runs = ["tem-panes-process-tree"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/process_tree.rs"
-find = '                .any(|child| !tree.contains_key(child))'
-replace = '                .any(|child| !tree.contains_key(child) && false)'
+find = '                        Looked::Unreadable => return Ok(Readable::Hidden),'
+replace = '                        Looked::Unreadable => {}'
 
 [[plant]]
 name = "turn-end-min host: a look at the commands reads only what it can, as 472b1d96's did"
@@ -1055,8 +1055,8 @@ runs = ["tem-panes-commands"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/pty/turn.rs"
-find = '            .readable_members()?'
-replace = '            .readable_members()?.or(Some(tree.members()?))'
+find = '                crate::process_tree::Readable::Hidden => None,'
+replace = '                crate::process_tree::Readable::Hidden => Some(self.tree.members()?),'
 
 [[plant]]
 name = "turn-end-min host: what ran at the rest a look names is a command"
@@ -1135,8 +1135,14 @@ runs = ["tem-engine-turn-end"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end.rs"
-find = '                seen: seen.map(said_of),'
-replace = '                seen: seen.map(|_| Said::Running),'
+find = '''
+                monitors: observed.monitors(),
+                seen,
+            };'''
+replace = '''
+                monitors: observed.monitors(),
+                seen: seen.map(|_| CommandsSeen::Untold),
+            };'''
 
 [[plant]]
 name = "turn-end-min engine: a look that ended nothing is made again at every pass"
@@ -1155,7 +1161,7 @@ runs = ["tem-engine-turn-end"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end.rs"
-find = '            let first = observed.settled && !held.at_rest;'
+find = '            let first = observed.settled && !rests.at_rest;'
 replace = '            let first = observed.settled;'
 
 [[plant]]
@@ -1165,18 +1171,18 @@ runs = ["tem-engine-turn-end"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end.rs"
-find = '                held.proved = held.rest;'
+find = '                rests.proved = rests.rest;'
 replace = ''
 
 [[plant]]
 name = "turn-end-min engine: a monitor of an MCP server is said a socket's"
-meant = "a_monitor_of_a_socket_or_of_an_mcp_server_that_said_it_ended_waits_for_finish"
+meant = "a_monitor_of_a_socket_or_of_no_source_read_that_said_it_ended_waits_for_finish"
 runs = ["tem-engine-turn-end"]
 
 [[plant.edit]]
 file = "crates/cf-engine/src/turn_end.rs"
-find = '(Source::Server, "an MCP server")'
-replace = '(Source::Server, "a socket")'
+find = '        .any(|monitor| monitor.source == Source::Server && monitor.notice.is_some())'
+replace = '        .any(|monitor| monitor.source == Source::Server && monitor.notice.is_some() && false)'
 
 [[plant]]
 name = "turn-end-min daemon: a host that cannot tell the commands is taken for one that did not answer"
@@ -1185,8 +1191,8 @@ runs = ["tem-daemon-host"]
 
 [[plant.edit]]
 file = "crates/cf-daemon/src/host.rs"
-find = '        Ok(None) => CommandsSeen::Untold,'
-replace = '        Ok(None) => CommandsSeen::Unanswered,'
+find = '        Ok(CommandsAnswer { commands: None, .. }) => CommandsSeen::Untold,'
+replace = '        Ok(CommandsAnswer { commands: None, .. }) => CommandsSeen::Unanswered,'
 
 [[plant]]
 name = "turn-end-min daemon: a look at the commands names no rest"
@@ -1203,3 +1209,186 @@ replace = '''
             generation: pane.generation,
             since: since.and(None),
         };'''
+
+# Round 7 (T-301: Astraeus's T-250 and Calliope's T-251 on 136a7158).
+
+[[plant]]
+name = "turn-end-min host: a rest a monitor names is let go of after sixteen more"
+meant = "a_rest_a_monitor_names_is_kept_however_many_rests_come_after_it"
+runs = ["tem-panes-background"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/background.rs"
+find = '            at > latest || keep.contains(number)'
+replace = '            at > latest || (keep.contains(number) && false)'
+
+[[plant]]
+name = "turn-end-min engine: no rest is asked to be kept"
+meant = "a_rest_a_monitor_that_runs_is_left_is_asked_to_be_kept"
+runs = ["tem-engine-turn-end"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '            first.then_some(keep)'
+replace = '            first.then_some(keep).map(|_| Vec::new())'
+
+[[plant]]
+name = "turn-end-min engine: a note is told once for a count of commands, whatever it falls to"
+meant = "a_held_task_is_told_again_when_fewer_commands_still_run"
+runs = ["tem-engine-turn-end"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '''
+                monitors: observed.monitors(),
+                seen,
+            };'''
+replace = '''
+                monitors: observed.monitors(),
+                seen: seen.map(|seen| match seen {
+                    CommandsSeen::Running(_) => CommandsSeen::Running(1),
+                    seen => seen,
+                }),
+            };'''
+
+[[plant]]
+name = "turn-end-min engine: a note is told once whatever monitors it names"
+meant = "a_held_task_whose_monitor_was_replaced_with_the_same_counts_is_told_again"
+runs = ["tem-engine-turn-end"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '''
+                monitors: observed.monitors(),
+                seen,
+            };'''
+replace = '''
+                monitors: Vec::new(),
+                seen,
+            };'''
+
+[[plant]]
+name = "turn-end-min engine: a paste proves no rest for the monitors of its turn"
+meant = "a_monitor_of_the_turn_a_pasted_message_began_is_left_the_rest_before_the_paste"
+runs = ["tem-engine-turn-end"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/deliveries.rs"
+find = '        record.held.borrow_mut().rests.pasted();'
+replace = ''
+
+[[plant]]
+name = "turn-end-min engine: a window idle after its result takes a rest at every pass"
+meant = "a_window_at_rest_after_its_result_takes_no_rest_at_every_pass"
+runs = ["tem-engine-turn-end"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '''
+        let rests = std::mem::take(&mut self.rests);
+        *self = HeldPart {
+            rests,
+            ..HeldPart::default()
+        };'''
+replace = '''
+        *self = HeldPart::default();'''
+
+[[plant]]
+name = "turn-end-min engine: a conversation switched to keeps the other's rests"
+meant = "a_monitor_of_a_conversation_the_window_switched_to_is_proved_no_rest_of_the_other"
+runs = ["tem-engine-turn-end"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/transcripts.rs"
+find = '        record.held.borrow_mut().rests = Rests::default();'
+replace = '        let _ = Rests::default();'
+
+[[plant]]
+name = "turn-end-min engine: a process no look can read is said a machine that cannot see"
+meant = "where_a_process_of_the_window_cannot_be_read_the_note_says_so_and_it_looks_again"
+runs = ["tem-engine-turn-end"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '''            Some(CommandsSeen::Unreadable) => {
+                ", and a process of its window runs that ConsensFlow cannot read (another user's): it looks again."'''
+replace = '''            Some(CommandsSeen::Unreadable) => {
+                ", which ConsensFlow cannot see on this machine: it waits for Finish."'''
+
+[[plant]]
+name = "turn-end-min daemon: a process no look can read is taken for a host that cannot tell"
+meant = "a_look_at_a_windows_commands_is_asked_with_the_rest_it_names_and_its_answer_read"
+runs = ["tem-daemon-host"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/host.rs"
+find = '''            unreadable: true,
+        }) => CommandsSeen::Unreadable,'''
+replace = '''            unreadable: true,
+        }) => CommandsSeen::Untold,'''
+
+[[plant]]
+name = "turn-end-min daemon: a rest asks to keep none"
+meant = "a_look_at_a_windows_commands_is_asked_with_the_rest_it_names_and_its_answer_read"
+runs = ["tem-daemon-host"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/src/host.rs"
+find = '            keep: keep.to_vec(),'
+replace = '            keep: Vec::new(),'
+
+[[plant]]
+name = "turn-end-min host: a process no look can read is said a host that cannot tell"
+meant = "what_ran_at_the_rest_is_no_command_and_a_process_no_look_can_read_leaves_them_untold"
+runs = ["tem-panes-commands"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/turn.rs"
+find = '''            None => CommandsAnswer {
+                commands: None,
+                unreadable: true,
+            },'''
+replace = '''            None => CommandsAnswer {
+                commands: None,
+                unreadable: false,
+            },'''
+
+[[plant]]
+name = "turn-end-min host: a process born while a look read the tree hides it, as 136a7158 did"
+meant = "a_process_born_or_ended_while_a_look_read_the_tree_hides_nothing"
+runs = ["tem-panes-process-tree"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/process_tree.rs"
+find = '                        Looked::Readable => born = true,'
+replace = '                        Looked::Readable => return Ok(Readable::Hidden),'
+
+[[plant]]
+name = "turn-end-min host: a process that ended while a look read the tree hides it, as 136a7158 did"
+meant = "a_process_born_or_ended_while_a_look_read_the_tree_hides_nothing"
+runs = ["tem-panes-process-tree"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/process_tree.rs"
+find = '                        Looked::Ended => {}'
+replace = '                        Looked::Ended => return Ok(Readable::Hidden),'
+
+[[plant]]
+name = "turn-end-min engine: the first look that finds a command running is told"
+meant = "the_first_look_that_finds_a_command_still_running_waits_for_a_second_before_it_is_told"
+runs = ["tem-engine-turn-end"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '        Some(CommandsSeen::Running(running)) if running > 0 && held.running_looks < 2 => {'
+replace = '        Some(CommandsSeen::Running(running)) if running > 0 && held.running_looks < 1 => {'
+
+[[plant]]
+name = "turn-end-min engine: the note says nothing else is pending as a fact"
+meant = "a_monitor_that_said_its_time_ran_out_is_not_looked_at_while_another_job_or_an_agent_is_pending"
+runs = ["tem-engine-turn-end"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/turn_end.rs"
+find = '            None => ", once nothing else of it is pending.".to_owned(),'
+replace = '            None => ", and nothing else of it is pending.".to_owned(),'

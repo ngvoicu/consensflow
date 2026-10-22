@@ -1055,10 +1055,10 @@ fn a_monitor_that_said_its_time_ran_out_waits_while_a_command_runs_and_the_note_
     passes(&context, 2);
     assert_eq!(tiers.task(1).task.state, "working");
     assert_eq!(context.background.looks(), 1);
-    let told = told_last(&tiers);
-    assert!(
-        told.starts_with("T-1 goes on in the background: @zeus ended its turn with 1 monitor that said it ended. Its monitors: \u{201c}ticks\u{201d} said its time ran out at 23:03:10 UTC. A monitor of a command that said it ended is over once no command of @zeus's harness runs in its window, and 2 still run there."),
-        "{told}"
+    assert_eq!(
+        tiers.notes("chief"),
+        Vec::<String>::new(),
+        "told at the second look"
     );
     // The looks back off: none in the second after one that ended nothing.
     passes(&context, 3);
@@ -1066,14 +1066,23 @@ fn a_monitor_that_said_its_time_ran_out_waits_while_a_command_runs_and_the_note_
     context.advance(1_000);
     context.pass().unwrap();
     assert_eq!(context.background.looks(), 2);
+    let told = told_last(&tiers);
+    assert!(
+        told.starts_with("T-1 goes on in the background: @zeus ended its turn with 1 monitor that said it ended. Its monitors: \u{201c}ticks\u{201d} said its time ran out at 23:03:10 UTC. A monitor of a command that said it ended is over once no command of @zeus's harness runs in its window, and 2 still run there."),
+        "{told}"
+    );
+    context.advance(2_000);
+    context.pass().unwrap();
+    assert_eq!(context.background.looks(), 3);
     assert_eq!(
         tiers.notes("chief").len(),
         1,
         "told once while it is the same"
     );
-    // The command ends: the next look finds none, and the answer is the result.
+    // The command ends: the next look, four seconds on, finds none, and the answer is
+    // the result.
     context.background.commands_run(Some(0));
-    context.advance(2_000);
+    context.advance(4_000);
     context.pass().unwrap();
     assert_eq!(tiers.task(1).task.state, "done");
 }
@@ -1142,7 +1151,7 @@ fn a_monitor_that_said_its_time_ran_out_is_not_looked_at_while_another_job_or_an
     assert_eq!(context.background.looks(), 0);
     let told = told_last(&tiers);
     assert!(
-        told.contains("ended its turn with 1 background job running, which its harness wakes it for as each ends, and 1 monitor that said it ended. Its monitors: \u{201c}ticks\u{201d} said its time ran out at 23:03:10 UTC; \u{201c}build\u{201d} watches still. A monitor of a command that said it ended is over once no command of @zeus's harness runs in its window, and nothing else of it is pending."),
+        told.contains("ended its turn with 1 background job running, which its harness wakes it for as each ends, and 1 monitor that said it ended. Its monitors: \u{201c}ticks\u{201d} said its time ran out at 23:03:10 UTC; \u{201c}build\u{201d} watches still. A monitor of a command that said it ended is over once no command of @zeus's harness runs in its window, once nothing else of it is pending."),
         "{told}"
     );
     assert!(
@@ -1152,19 +1161,17 @@ fn a_monitor_that_said_its_time_ran_out_is_not_looked_at_while_another_job_or_an
 }
 
 #[test]
-fn a_monitor_of_a_socket_or_of_an_mcp_server_that_said_it_ended_waits_for_finish() {
-    for (source, of, end, said) in [
+fn a_monitor_of_a_socket_or_of_no_source_read_that_said_it_ended_waits_for_finish() {
+    for (source, end, said) in [
         (
             Source::Socket,
-            "a socket",
             End::Closed,
-            "said its socket closed",
+            "said its socket closed at 23:03:10 UTC. A monitor of a socket that said it ended has no command in the window to look for: it ends by Finish alone.",
         ),
         (
             Source::Server,
-            "an MCP server",
             End::Stopped,
-            "said it was stopped",
+            "said it was stopped at 23:03:10 UTC. A monitor that said it ended and whose call named no command or socket ConsensFlow reads has nothing in the window to look for: it ends by Finish alone.",
         ),
     ] {
         let context = Context::new();
@@ -1181,7 +1188,7 @@ fn a_monitor_of_a_socket_or_of_an_mcp_server_that_said_it_ended_waits_for_finish
         assert_eq!(context.background.looks(), 0);
         let told = told_last(&tiers);
         assert!(
-            told.contains(&format!("\u{201c}feed\u{201d} {said} at 23:03:10 UTC. A monitor of {of} that said it ended has no command in the window to look for: it ends by Finish alone.")),
+            told.contains(&format!("\u{201c}feed\u{201d} {said}")),
             "{told}"
         );
     }
@@ -1211,6 +1218,8 @@ fn a_held_task_whose_monitor_says_it_ended_later_is_told_again_with_what_the_win
         vec![monitor("ticks", Source::Command, Some(End::Stopped))],
     );
     passes(&context, 3);
+    context.advance(1_000);
+    context.pass().unwrap();
     assert_eq!(tiers.task(1).task.state, "working");
     let told = told_last(&tiers);
     assert_eq!(tiers.notes("chief").len(), 2, "told again: {told}");
@@ -1288,4 +1297,217 @@ fn finish_of_a_task_held_for_a_monitor_that_said_it_ended_says_so_apart_from_wha
         results[0].contains("still counted 1 background job running, and 1 monitor that said it ended, which finishing ends none of"),
         "{results:?}"
     );
+}
+
+#[test]
+fn a_held_task_is_told_again_when_fewer_commands_still_run() {
+    // Astraeus on 136a7158: "2 still run there" stayed the requester's word after one
+    // ended.
+    let context = Context::new();
+    let tiers = zeus_at_work(&context);
+    context.background.commands_run(Some(2));
+    ticks_ran_out(&context, "Watching");
+    passes(&context, 2);
+    context.advance(1_000);
+    context.pass().unwrap();
+    assert!(
+        told_last(&tiers).contains("and 2 still run there."),
+        "{}",
+        told_last(&tiers)
+    );
+    let told = tiers.notes("chief").len();
+    context.background.commands_run(Some(1));
+    context.advance(2_000);
+    context.pass().unwrap();
+    assert_eq!(tiers.notes("chief").len(), told + 1, "told again");
+    assert!(
+        told_last(&tiers).contains("and 1 still runs there."),
+        "{}",
+        told_last(&tiers)
+    );
+}
+
+#[test]
+fn a_held_task_whose_monitor_was_replaced_with_the_same_counts_is_told_again() {
+    // Astraeus on 136a7158: A ended and B took its place between two looks at rest, the
+    // counts the same: the requester was left with A's name and notice.
+    let context = Context::new();
+    let tiers = zeus_at_work(&context);
+    context.background.commands_run(Some(0));
+    context.adapter.answer_leaving_monitors(
+        "zeus",
+        "Watching A",
+        pending(1, 0),
+        vec![monitor("watch-a", Source::Command, None)],
+    );
+    context.pass().unwrap();
+    let told = tiers.notes("chief").len();
+    assert!(told_last(&tiers).contains("\u{201c}watch-a\u{201d} watches still"));
+    context.adapter.wake("zeus", "<task-notification>");
+    context.pass().unwrap();
+    context.adapter.answer_leaving_monitors(
+        "zeus",
+        "Watching B",
+        pending(1, 0),
+        vec![monitor("watch-b", Source::Command, None)],
+    );
+    context.pass().unwrap();
+    assert_eq!(tiers.notes("chief").len(), told + 1, "told again");
+    assert!(told_last(&tiers).contains("\u{201c}watch-b\u{201d} watches still"));
+}
+
+#[test]
+fn a_monitor_of_the_turn_a_pasted_message_began_is_left_the_rest_before_the_paste() {
+    // Calliope on 136a7158: the rest taken as the window is first seen at rest comes
+    // before the paste the same pass makes, and so before every monitor of the turn the
+    // paste begins; no look at rest without the monitor comes after it.
+    let context = Context::new();
+    let tiers = zeus_at_work(&context);
+    // The turn ends held, and the chief asks zeus of its task: at the next pass the window
+    // is at rest, its rest is taken, and the question is pasted the same pass.
+    context
+        .adapter
+        .answer_leaving("zeus", "Started the run", A_JOB);
+    context.ask(
+        tiers.project.id,
+        "chief",
+        "zeus",
+        1,
+        "Watch the run and report",
+    );
+    context.pass().unwrap();
+    let rested = context.background.rests();
+    assert!(rested >= 1, "a rest before the paste");
+    context.background.commands_run(Some(0));
+    context.adapter.answer_leaving_monitors(
+        "zeus",
+        "The watch ran out",
+        pending(1, 1),
+        vec![monitor("ticks", Source::Command, Some(End::Expired))],
+    );
+    passes(&context, 2);
+    assert_eq!(tiers.task(1).task.state, "done");
+    assert_eq!(
+        context.background.looked_since(),
+        [Some(u64::try_from(rested - 1).unwrap())]
+    );
+}
+
+#[test]
+fn a_window_at_rest_after_its_result_takes_no_rest_at_every_pass() {
+    // Calliope on 136a7158: a window idle between its result and its close walked its
+    // tree at every pass.
+    let context = Context::new();
+    let (tiers, _session) = session_kept_open(&context);
+    context.adapter.answer("zeus", "Done: 412 green");
+    passes(&context, 2);
+    assert_eq!(tiers.task(1).task.state, "done");
+    let rested = context.background.rests();
+    passes(&context, 5);
+    assert_eq!(context.background.rests(), rested);
+}
+
+#[test]
+fn the_first_look_that_finds_a_command_still_running_waits_for_a_second_before_it_is_told() {
+    // Calliope on 136a7158: Claude Code's kill of a monitor's command can take a second or
+    // more; one more look spares the requester "1 still runs there" and then the result.
+    let context = Context::new();
+    let tiers = zeus_at_work(&context);
+    context.background.commands_run(Some(1));
+    ticks_ran_out(&context, "The watch ran out");
+    passes(&context, 2);
+    assert_eq!(context.background.looks(), 1);
+    assert_eq!(
+        tiers.notes("chief"),
+        Vec::<String>::new(),
+        "no note at the first look"
+    );
+    context.background.commands_run(Some(0));
+    context.advance(1_000);
+    context.pass().unwrap();
+    assert_eq!(tiers.task(1).task.state, "done");
+    assert_eq!(tiers.notes("chief"), Vec::<String>::new());
+}
+
+#[test]
+fn where_a_process_of_the_window_cannot_be_read_the_note_says_so_and_it_looks_again() {
+    // Calliope on 136a7158: on a Mac a process the host cannot read is no "cannot see on
+    // this machine": a later look may read them all.
+    let context = Context::new();
+    let tiers = zeus_at_work(&context);
+    context.background.commands_unreadable();
+    ticks_ran_out(&context, "Watching");
+    passes(&context, 2);
+    let told = told_last(&tiers);
+    assert!(
+        told.contains("is over once no command of @zeus's harness runs in its window, and a process of its window runs that ConsensFlow cannot read (another user's): it looks again."),
+        "{told}"
+    );
+    assert!(!told.contains("cannot see on this machine"), "{told}");
+    // The process ends; the next look reads them all, and finds no command.
+    context.background.commands_run(Some(0));
+    context.advance(1_000);
+    context.pass().unwrap();
+    assert_eq!(tiers.task(1).task.state, "done");
+}
+
+#[test]
+fn a_rest_a_monitor_that_runs_is_left_is_asked_to_be_kept() {
+    // Astraeus on 136a7158: the host let go of the rest a long-lived monitor named.
+    let context = Context::new();
+    let _tiers = zeus_at_work(&context);
+    context
+        .adapter
+        .answer_leaving("zeus", "Started the run", A_JOB);
+    passes(&context, 2);
+    // A turn arms the monitor, and the window comes to rest again, and again.
+    context.adapter.busy("zeus");
+    context.pass().unwrap();
+    context.adapter.answer_leaving_monitors(
+        "zeus",
+        "Watching",
+        pending(2, 0),
+        vec![monitor("ticks", Source::Command, None)],
+    );
+    context.pass().unwrap();
+    context.adapter.busy("zeus");
+    context.pass().unwrap();
+    context.adapter.answer_leaving_monitors(
+        "zeus",
+        "Still watching",
+        pending(2, 0),
+        vec![monitor("ticks", Source::Command, None)],
+    );
+    context.pass().unwrap();
+    let kept = context.background.kept();
+    assert_eq!(
+        kept.first(),
+        Some(&Vec::new()),
+        "nothing to keep at the first rest"
+    );
+    assert_eq!(
+        kept.last(),
+        Some(&vec![0]),
+        "the rest the monitor is left: {kept:?}"
+    );
+}
+
+#[test]
+fn a_monitor_of_a_conversation_the_window_switched_to_is_proved_no_rest_of_the_other() {
+    // Calliope on 136a7158: a monitor of the conversation switched to was armed before the
+    // rests of the other were taken, and was never seen missing at them.
+    let context = Context::new();
+    let tiers = zeus_at_work(&context);
+    context.background.commands_run(Some(0));
+    context
+        .adapter
+        .answer_leaving("zeus", "Started the run", A_JOB);
+    passes(&context, 2);
+    assert!(context.background.rests() >= 1);
+    context.adapter.switch_to("zeus", "native-other");
+    ticks_ran_out(&context, "The watch ran out");
+    passes(&context, 4);
+    let since = context.background.looked_since();
+    assert!(!since.is_empty(), "a look: {:?}", tiers.task(1).task.state);
+    assert_eq!(since[0], None, "no rest of the other conversation");
 }

@@ -22,7 +22,7 @@ use crate::screen::PaneScreen;
 use crate::validation::{pane_key, validate_input, validate_seq, validate_size, INVALID_BODY};
 use cf_bridge::{Bridge, BridgeBuilder};
 use cf_proto::panes::{
-    BackgroundProcess, Commands, CommandsRequest, EndRequest, MarkRequest, PaneExit, Rest,
+    BackgroundProcess, CommandsRequest, EndRequest, MarkRequest, PaneExit, Rest, RestRequest,
     SnapshotRequest, TAIL_LINES,
 };
 
@@ -256,24 +256,29 @@ pub fn register_pane_handlers(
     });
 
     // Which commands of the window's harness run in its tree now, less what ran at the
-    // rest the request names, where the host can tell them: `null` where it cannot.
+    // rest the request names, where the host can tell them: `null` where it cannot, said
+    // `unreadable` where a process of the window cannot be read.
     let commands_panes = Arc::clone(&panes);
     builder.on("pane.commands", move |_bridge, body| {
         let request: CommandsRequest = parse_body(body)?;
         let key = pane_key(&request.id, request.generation)?;
-        let commands: Commands = commands_panes
+        let answer = commands_panes
             .commands(&key, request.since)
             .map_err(|error| error.to_string())?;
-        Ok(json!({"ok":true,"commands":commands}))
+        let mut body = serde_json::to_value(&answer).map_err(|error| error.to_string())?;
+        body["ok"] = json!(true);
+        Ok(body)
     });
 
     // The window is at rest: what its tree runs now is kept, under the number answered,
     // for a look at its commands to leave out; `null` where the host tells none of them.
     let rest_panes = Arc::clone(&panes);
     builder.on("pane.rest", move |_bridge, body| {
-        let request: PaneRequest = parse_body(body)?;
+        let request: RestRequest = parse_body(body)?;
         let key = pane_key(&request.id, request.generation)?;
-        let rest: Rest = rest_panes.rest(&key).map_err(|error| error.to_string())?;
+        let rest: Rest = rest_panes
+            .rest(&key, &request.keep)
+            .map_err(|error| error.to_string())?;
         Ok(json!({"ok":true,"rest":rest}))
     });
 

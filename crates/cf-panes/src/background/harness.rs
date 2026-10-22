@@ -133,9 +133,11 @@ fn descends_from_a_server(
 /// that started it and does not lead one (a job a command's shell started and left), is
 /// none of them: the command it was started by has ended, which ended its monitor by its
 /// status. And a server or helper that left the window's group before the window's first
-/// rest, which is before its first message (Claude Code starts its servers as it takes
-/// that), is counted for as long as it runs: a monitor armed in the window's first turn
-/// waits for it, the safe way.
+/// rest is counted for as long as it runs: a window ConsensFlow opens with its task's
+/// message (every worker's, which Claude Code is given on its command line, and whose
+/// servers it starts as it takes that message) has no rest before its first turn, and a
+/// monitor armed in that turn waits for such a server, the safe way. A message pasted into
+/// a window at rest begins a turn after the rest taken then (`cf-engine`'s `turn_end`).
 pub(super) fn commands(kept: Kept, tree: &[Member], rest: &HashSet<ProcessKey>) -> Vec<Member> {
     tree.iter()
         .filter(|member| !rest.contains(&member.key))
