@@ -39,13 +39,17 @@
 //! is ever taken in a picker (no Enter there): `/model` with a choice saves the
 //! owner's settings.
 //!
-//! Isolation. Claude Code runs on a throwaway `CLAUDE_CONFIG_DIR` that holds a copy
-//! of the owner's login from the Keychain (`security find-generic-password`), never
-//! printed, refused where the token ends within three hours, compared with the copy
-//! afterwards (a refresh is said, as a failure) and deleted on every way out; the
-//! owner's `~/.claude/settings.json` and `~/.claude.json` must hash the same after
-//! the run, and `~/.claude/history.jsonl` hold as many lines. Claude's windows are
-//! shut out of MCP servers and the browser (`--strict-mcp-config --no-chrome`).
+//! Isolation. Claude Code runs on a throwaway `CLAUDE_CONFIG_DIR` (mode 700) that
+//! holds a copy of the owner's login, the `claudeAiOauth` of the Keychain item of the
+//! user's account (`security find-generic-password -a "$USER"`; the item with no
+//! account is a stale one), never printed, refused where its token ends within two
+//! hours, and a `.claude.json` that says onboarding is done (else Claude opens on its
+//! theme dialog). The copy is compared afterwards (a refresh is said, as a failure),
+//! and the folder deleted on every way out. The owner's `~/.claude/settings.json` must
+//! hash the same after the run, and `history.jsonl`, `projects/` and `.claude.json`'s
+//! projects gain nothing that names the run's folder (`.claude.json` changes by
+//! itself, and is not hashed). Claude's windows are shut out of MCP servers and the
+//! browser (`--strict-mcp-config --no-chrome`).
 //! Codex runs on a throwaway `CODEX_HOME` holding a copy of `auth.json` only,
 //! compared the same way, with every MCP server switched off.
 //!
@@ -114,7 +118,11 @@ const BOTTOM: usize = 40;
 
 /// The least time the Claude login copied must have before it ends: the run, and
 /// the margin the owner's own Claude needs to have refreshed it first.
-const LOGIN_LEFT: Duration = Duration::from_secs(3 * 60 * 60);
+const LOGIN_LEFT: Duration = Duration::from_secs(2 * 60 * 60);
+
+/// The word the delivery asks for: one no screen shows by itself, with no digits a
+/// model may write another way (`4,218`).
+const ANSWERED: &str = "PICKERLEFTOK";
 
 const ESCAPE: &[u8] = b"\x1b";
 const ENTER: &[u8] = b"\r";
@@ -379,9 +387,10 @@ fn delivered(window: &Window, left: &Read) -> Result<Check> {
             format!("the box read {read}: the delivery is held"),
         ));
     }
-    let (a, b) = (3172, 1046);
-    let body = window.given(&format!("What is {a} + {b}? Answer with the number alone."))?;
-    let sent = window.send_read_empty(&body, &(a + b).to_string(), left.typed)?;
+    let body = window.given(&format!(
+        "Reply with exactly the word {ANSWERED} and nothing else."
+    ))?;
+    let sent = window.send_read_empty(&body, ANSWERED, left.typed)?;
     Ok(if sent.written["ok"] != true {
         Check::failed(
             name,
@@ -393,8 +402,11 @@ fn delivered(window: &Window, left: &Read) -> Result<Check> {
             name,
             WHAT,
             format!(
-                "the paste went in and nothing answered it in {} s",
-                sent.seconds
+                "the paste went in and nothing answered it in {} s; its record holds {} items, the last {:?}; its screen ends: {}",
+                sent.seconds,
+                window.recorded().len(),
+                window.recorded().last().map(|item| (item.role.clone(), live::cut(&item.text, 80))),
+                window.tail()
             ),
         )
     } else {
@@ -406,8 +418,9 @@ fn delivered(window: &Window, left: &Read) -> Result<Check> {
     })
 }
 
-/// A throwaway config folder holding a copy of a login: removed with the value,
-/// however the run ends. `file` is the login's name in it.
+/// A throwaway config folder holding a copy of a login, readable by its owner
+/// alone: removed with the value, however the run ends. `file` is the login's name
+/// in it.
 struct Throwaway {
     folder: TempDir,
     file: &'static str,
@@ -415,20 +428,28 @@ struct Throwaway {
 }
 
 impl Throwaway {
-    /// A folder holding `login` as `file`, readable by its owner alone.
+    /// A folder (mode 700) holding `login` as `file` (mode 600).
     fn holding(file: &'static str, login: Vec<u8>) -> Result<Self> {
-        let folder = TempDir::new()
-            .map_err(|failed| Error::Daemon(format!("a throwaway folder: {failed}")))?;
+        let failed = |what: &str, cause: std::io::Error| Error::Daemon(format!("{what}: {cause}"));
+        let folder = TempDir::new().map_err(|cause| failed("a throwaway folder", cause))?;
+        fs::set_permissions(folder.path(), fs::Permissions::from_mode(0o700))
+            .map_err(|cause| failed("a throwaway folder", cause))?;
         let path = folder.path().join(file);
-        fs::write(&path, &login)
-            .map_err(|failed| Error::Daemon(format!("the login's copy: {failed}")))?;
+        fs::write(&path, &login).map_err(|cause| failed("the login's copy", cause))?;
         fs::set_permissions(&path, fs::Permissions::from_mode(0o600))
-            .map_err(|failed| Error::Daemon(format!("the login's copy: {failed}")))?;
+            .map_err(|cause| failed("the login's copy", cause))?;
         Ok(Self {
             folder,
             file,
             copy: login,
         })
+    }
+
+    /// The folder, `name` written in it as `text` too.
+    fn with(self, name: &str, text: &str) -> Result<Self> {
+        fs::write(self.folder.path().join(name), text)
+            .map_err(|cause| Error::Daemon(format!("{name} in the throwaway folder: {cause}")))?;
+        Ok(self)
     }
 
     fn path(&self) -> &Path {
@@ -452,14 +473,20 @@ impl Throwaway {
     }
 }
 
-/// The owner's Claude login, from the Keychain, as a config folder's
-/// `.credentials.json` takes it; refused where its token ends within [`LOGIN_LEFT`].
+/// The owner's Claude login, from the Keychain item of the user's account (the item
+/// with no account is a stale one), as a config folder's `.credentials.json` takes
+/// it: its `claudeAiOauth` alone, none of its servers' logins. Refused where its
+/// token ends within [`LOGIN_LEFT`]: the owner's own Claude refreshes it first.
 fn claude_login() -> Result<Vec<u8>> {
+    let user = cf_e2e::process::own_var("USER")
+        .ok_or_else(|| Error::Daemon("USER is not set: no Keychain account to read".to_owned()))?;
     let ran = Run::new("/usr/bin/security")
         .args([
             "find-generic-password",
             "-s",
             "Claude Code-credentials",
+            "-a",
+            &user,
             "-w",
         ])
         .limit(Duration::from_secs(120))
@@ -470,13 +497,11 @@ fn claude_login() -> Result<Vec<u8>> {
             ran.code
         )));
     }
-    let login = ran.stdout.trim().as_bytes().to_vec();
-    let read: Value = serde_json::from_slice(&login)
+    let read: Value = serde_json::from_str(ran.stdout.trim())
         .map_err(|_| Error::Daemon("the Claude login in the Keychain is no JSON".to_owned()))?;
-    let ends = read["claudeAiOauth"]["expiresAt"]
-        .as_i64()
-        .unwrap_or_default();
-    let left = ends - jiff::Timestamp::now().as_millisecond();
+    let oauth = &read["claudeAiOauth"];
+    let left =
+        oauth["expiresAt"].as_i64().unwrap_or_default() - jiff::Timestamp::now().as_millisecond();
     let least = i64::try_from(LOGIN_LEFT.as_millis()).unwrap_or(i64::MAX);
     if left < least {
         return Err(Error::Daemon(format!(
@@ -485,11 +510,13 @@ fn claude_login() -> Result<Vec<u8>> {
             least / 60_000
         )));
     }
-    Ok(login)
+    serde_json::to_vec(&json!({ "claudeAiOauth": oauth }))
+        .map_err(|failed| Error::Daemon(format!("the login's copy: {failed}")))
 }
 
-/// What the owner's Claude files are: `settings.json` and `.claude.json` by their
-/// hashes, `history.jsonl` by its lines.
+/// What the owner's Claude files say: `settings.json` by its hash, and how much of
+/// `history.jsonl`, `projects/` and `.claude.json`'s projects names the run's folder.
+/// `.claude.json` changes by itself, so it is not hashed.
 fn owners_claude(home: &Path) -> Vec<(String, String)> {
     let hash = |file: PathBuf| {
         fs::read(&file).map_or_else(
@@ -497,18 +524,41 @@ fn owners_claude(home: &Path) -> Vec<(String, String)> {
             |bytes| format!("{:x}", Sha256::digest(bytes)),
         )
     };
-    let lines = fs::read(home.join(".claude/history.jsonl")).map_or(0, |bytes| {
-        bytes.iter().filter(|byte| **byte == b'\n').count()
+    let history = fs::read_to_string(home.join(".claude/history.jsonl")).map_or(0, |text| {
+        text.lines().filter(|line| line.contains(FOLDER)).count()
+    });
+    let projects = fs::read_dir(home.join(".claude/projects")).map_or(0, |entries| {
+        entries
+            .filter_map(|entry| entry.ok())
+            .filter(|entry| entry.file_name().to_string_lossy().contains(FOLDER))
+            .count()
+    });
+    let record: Value = fs::read_to_string(home.join(".claude.json"))
+        .ok()
+        .and_then(|text| serde_json::from_str(&text).ok())
+        .unwrap_or_default();
+    let entries = record["projects"].as_object().map_or(0, |projects| {
+        projects
+            .keys()
+            .filter(|folder| folder.contains(FOLDER))
+            .count()
     });
     vec![
         (
             "~/.claude/settings.json".to_owned(),
             hash(home.join(".claude/settings.json")),
         ),
-        ("~/.claude.json".to_owned(), hash(home.join(".claude.json"))),
         (
-            "~/.claude/history.jsonl lines".to_owned(),
-            lines.to_string(),
+            "~/.claude/history.jsonl lines of the run".to_owned(),
+            history.to_string(),
+        ),
+        (
+            "~/.claude/projects of the run".to_owned(),
+            projects.to_string(),
+        ),
+        (
+            "~/.claude.json projects of the run".to_owned(),
+            entries.to_string(),
         ),
     ]
 }
@@ -662,7 +712,10 @@ fn keys_left_in_a_dialog_with_escape_hold_no_delivery_to_a_window_whose_box_is_e
     let claude = harnesses.contains(&Harness::Claude);
     let owners_before = claude.then(|| owners_claude(&home));
     let claude_config = claude
-        .then(|| Throwaway::holding(".credentials.json", claude_login()?))
+        .then(|| {
+            Throwaway::holding(".credentials.json", claude_login()?)?
+                .with(".claude.json", r#"{"hasCompletedOnboarding":true}"#)
+        })
         .transpose()?;
     let codex_home = harnesses
         .contains(&Harness::Codex)

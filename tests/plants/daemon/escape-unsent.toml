@@ -113,11 +113,11 @@ runs = ["escape-unsent-adapters"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/adapter.rs"
-find = '''                Unsent::ReadEmpty(typed) => {
-                    self.read_empty.set(Some(typed));
-                    Readiness::Ready
-                }'''
-replace = '''                Unsent::ReadEmpty(_) => Readiness::Held(Held::Unsent),'''
+find = '''                    Unsent::ReadEmpty(typed) => {
+                        self.read_empty.set(Some(typed));
+                        Readiness::Ready
+                    }'''
+replace = '''                    Unsent::ReadEmpty(_) => Readiness::Held(Held::Unsent),'''
 
 [[plant]]
 name = "escape-unsent: Claude's paste says nothing of the box it read empty"
@@ -181,11 +181,11 @@ builds = true
 
 [[plant.edit]]
 file = "crates/cf-harness/src/claude/adapter.rs"
-find = '''                Unsent::ReadEmpty(typed) => {
-                    self.read_empty.set(Some(typed));
-                    Readiness::Ready
-                }'''
-replace = '''                Unsent::ReadEmpty(_) => Readiness::Held(Held::Unsent),'''
+find = '''                    Unsent::ReadEmpty(typed) => {
+                        self.read_empty.set(Some(typed));
+                        Readiness::Ready
+                    }'''
+replace = '''                    Unsent::ReadEmpty(_) => Readiness::Held(Held::Unsent),'''
 
 [[plant]]
 name = "escape-unsent rig: the pane host sends no screen as drawn, and the chief's result is held"

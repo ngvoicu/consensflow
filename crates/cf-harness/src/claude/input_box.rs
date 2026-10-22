@@ -1,9 +1,11 @@
-//! Claude Code's input box, as its screen shows it (2.1.308): a rule across the
-//! screen, the box's lines, the first after its `❯`, and a rule again, with the
-//! line that says the permission mode under it. A dialog or picker draws its `❯`
-//! on a choice, with no rule right above it. An empty box in a new conversation
+//! Claude Code's input box, as its screen shows it (2.1.309, `cargo xtask live
+//! escape-unsent`): a rule across the screen, the box's lines, the first after its
+//! `❯`, and a rule again, with the line that says the permission mode under it. Its
+//! model picker draws its `❯` on a choice, between no rules, and takes no filter;
+//! left with Escape, it leaves the box bare (`❯`). One Escape keeps words typed in
+//! the box, two clear them. An empty box in a conversation with nothing said yet
 //! shows a suggestion after its `❯` (`Try "…"`), drawn faint, which the screen's
-//! text cannot tell from words typed: that box is not read.
+//! text cannot tell from words typed: that box is not read, and the count holds.
 
 use crate::shared::input_box::{boxed, InputBox};
 

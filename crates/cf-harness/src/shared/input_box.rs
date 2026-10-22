@@ -4,8 +4,9 @@
 //! picker and left there with Escape count, though the box is empty, and every
 //! delivery to the window waited for words that were never there (T-288). A
 //! harness whose box its adapter can read says whether it is empty; the count is
-//! the guess only where it cannot. Escape itself clears nothing: Claude Code
-//! keeps the text in its box at one Escape (`cargo xtask live escape-unsent`).
+//! the guess only where it cannot. Escape does not clear the count: every harness
+//! keeps words in its box at one Escape, and only Claude Code clears them at two
+//! (`cargo xtask live escape-unsent`, 2026-10-23).
 
 use cf_proto::agents::Harness;
 use serde_json::Value;
