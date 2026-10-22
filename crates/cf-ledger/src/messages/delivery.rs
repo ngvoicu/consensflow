@@ -6,7 +6,7 @@
 
 use cf_base::json::js_order;
 use cf_proto::ledger::{Begun, MessageView};
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
 use serde_json::{json, Value};
 
 use super::again::tell_failed_answer;
@@ -473,6 +473,40 @@ pub(crate) fn fail_delivery(
         }
         known_message(store, message_id)
     })
+}
+
+/// Message `message_id`, on its way, goes into the conversation `conversation_id` of an
+/// open window (`pasted_into`, which a trigger clears once it is on its way no more). A
+/// launch's first message is not: its window's conversation is made after it is begun.
+pub(crate) fn paste_into(
+    store: &mut Store,
+    message_id: i64,
+    conversation_id: i64,
+) -> Result<(), LedgerError> {
+    store.write(|store| {
+        store.db.execute(
+            "UPDATE message SET pasted_into = ? WHERE id = ? AND state = 'delivering'",
+            [conversation_id, message_id],
+        )?;
+        Ok(())
+    })
+}
+
+/// The native session of the conversation message `message_id` was pasted into, while
+/// it is on its way (the trigger clears it after) and that conversation has one: none
+/// otherwise.
+pub(crate) fn pasted_into(store: &Store, message_id: i64) -> Result<Option<String>, LedgerError> {
+    Ok(store
+        .db
+        .query_row(
+            "SELECT c.native_session FROM message m JOIN conversation c ON c.id = m.pasted_into
+              WHERE m.id = ?",
+            [message_id],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .optional()?
+        .flatten()
+        .filter(|session| !session.is_empty()))
 }
 
 /// Every message on its way to a window, oldest first. At start none of

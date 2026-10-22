@@ -11,6 +11,7 @@ use std::path::PathBuf;
 
 use cf_ledger::{
     migrate, open_ledger, HistoryEntry, HistoryFrom, Options, HISTORY_PART, MIGRATIONS,
+    SCHEMA_VERSION,
 };
 use rusqlite::{params, Connection};
 
@@ -215,7 +216,11 @@ fn a_ledger_3_0_5_wrote_migrates_to_the_viewer_s_0020_once_and_is_read_and_its_l
     drop(ledger);
     open_ledger(&file, Options::default()).expect("and open again");
     let db = Connection::open(&file).expect("the file");
-    assert_eq!(version(&db), 20);
+    assert_eq!(
+        version(&db),
+        SCHEMA_VERSION as i64,
+        "0020 and every one after it"
+    );
     assert_eq!(heads(&db).expect("the heads"), 3, "one head an item");
     let parts: i64 = db
         .query_row(
@@ -261,7 +266,10 @@ fn a_fresh_ledger_is_made_at_0020_after_b5_s_0019_with_the_viewer_s_tables() {
     let version: i64 = db
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .expect("a version");
-    assert_eq!(version, 20);
+    assert_eq!(
+        version, SCHEMA_VERSION as i64,
+        "0020 and every one after it"
+    );
     let tables: i64 = db
         .query_row(
             "SELECT COUNT(*) FROM sqlite_master

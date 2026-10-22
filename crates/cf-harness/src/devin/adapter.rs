@@ -83,6 +83,13 @@ use crate::shared::{pane, specmint, window_args};
 /// and its wire says nothing of the turn before the agent's first word (T-102). A turn
 /// that says nothing for longer is read as the record reads it, so that it holds back
 /// no message for good.
+///
+/// It counts from the message's own time, which Devin 3000.11.92 writes at the Enter: a
+/// message queued behind a turn longer than this reads at rest from its take-in until its
+/// agent's first word, and a note pasted then queues behind it (its history row says the
+/// TUI took it, and it runs once). The row's own time, the take-in, would not do: Devin
+/// 3000.11.3 writes every row of a turn in one second, so a message would read as begun
+/// for as long after its turn as the row was written late (the review of 6c8fc595).
 const TAKEN_IN_MS: i64 = 30_000;
 
 /// What a window that has not said yet which conversation it shows is held for.
@@ -151,9 +158,8 @@ pub(crate) fn wire_readiness(wire: &std::path::Path) -> Result<WireReadiness, St
 
 /// What Devin's store of `env` says of `pasted`, the text a window of `session` was
 /// given as it was pasted, handed over at `at_ms`: whether its TUI took it (a history
-/// row of it, written since), whether it holds it queued (taken, its record not showing
-/// it yet: `recorded`), and how many history rows the session has. What the engine asks
-/// a window after a paste (`Window::took`, `Window::held`). For the live tests
+/// row of it, written since), and how many history rows the session has. What the
+/// engine asks a window after a paste (`Window::took`). For the live tests
 /// (`tooling`), which paste into Devin's windows themselves.
 #[cfg(any(test, feature = "test-support"))]
 pub(crate) fn store_took(env: &Env, session: &str, pasted: &str, at_ms: i64) -> (bool, u64) {
@@ -374,8 +380,6 @@ struct DevinWindow {
     /// How many history rows its conversation had at the engine's last look at the
     /// window (`observe`), which found it at rest or not.
     looked: Cell<Option<u64>>,
-    /// Its record showed the paste last handed over at that look.
-    recorded: Cell<bool>,
 }
 
 impl DevinWindow {
@@ -399,7 +403,6 @@ impl DevinWindow {
             at_enter,
             history: History::default(),
             looked: Cell::default(),
-            recorded: Cell::default(),
         }
     }
 
@@ -592,9 +595,8 @@ impl Window for DevinWindow {
                 window_text(text)
             };
             // Its store's history row of the whole paste is the TUI's word that it took
-            // it (`took`, `held`).
+            // it (`took`).
             self.history.expect(&body, self.time.wall_ms());
-            self.recorded.set(false);
             let session = self.session.borrow().clone();
             let sent = channel::send(host, pane, self.wire.path(), session.as_deref(), &body).await;
             Ok(admission(&sent, "Devin refused the paste", false))
@@ -610,15 +612,10 @@ impl Window for DevinWindow {
     /// Its store has the paste's history row: the TUI submitted it, whether it runs it
     /// at once or queues it behind the turn at work. One the app's Stop cancels while
     /// queued is kept in the conversation, unanswered, and its agent reads it in the
-    /// next turn (T-102, 3 of 3 runs on 3000.11.92): taken all the same.
+    /// next turn (T-102, 3 of 3 runs on 3000.11.92): taken all the same. `held` is the
+    /// contract's own false: `took` reaches the engine first, and holds the paste for good.
     fn took(&self) -> bool {
         self.history().is_some_and(|seen| seen.took)
-    }
-
-    /// Taken, and its record did not show it at the engine's last look: queued in the
-    /// TUI behind the turn at work, which takes it in when it can.
-    fn held(&self) -> bool {
-        self.took() && !self.recorded.get()
     }
 
     fn observe(&self) -> Work<'_, Result<Observed, String>> {
@@ -648,8 +645,6 @@ impl Window for DevinWindow {
             let wire = wire?;
             self.looked.set(self.history().map(|seen| seen.prompts));
             let mut observed = record_state(reading);
-            self.recorded
-                .set(self.history.recorded_in(observed.items()));
             observed.waiting = dialog_waiting(observed.reading.as_deref());
             observed.quota = wire.quota;
             if self.begun_on_the_store(&observed) {

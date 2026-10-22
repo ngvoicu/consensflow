@@ -138,13 +138,16 @@ impl Dispatcher {
             self.pay_with_words(record)?;
         }
         let text = delivery_text(&begun.message, &begun.carried);
-        // The conversation the window shows as it is handed over, which the paste goes into.
-        let session = self
-            .seams
-            .ledger
-            .borrow()
-            .current_conversation(record.id)?
-            .and_then(|conversation| conversation.native_session);
+        // The conversation the window shows as it is handed over, which the paste goes
+        // into: the ledger keeps it, for a start that finds it on its way still.
+        let conversation = self.seams.ledger.borrow().current_conversation(record.id)?;
+        if let Some(conversation) = &conversation {
+            self.seams
+                .ledger
+                .borrow_mut()
+                .paste_into(message.id, conversation.id)?;
+        }
+        let session = conversation.and_then(|conversation| conversation.native_session);
         // A turn begins with this message: what the window's tree runs now came before it.
         self.mark_turn(record, &pane).await;
         let outcome = match returning(window.deliver(host, &pane, &text)).await {

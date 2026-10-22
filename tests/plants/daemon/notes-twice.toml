@@ -127,8 +127,8 @@ find = "&& waited <= self.seams.limits.arrival_ms"
 replace = ""
 
 [[plant]]
-name = "notes twice: Devin's window is read at rest in the turn its TUI began by a prompt to its agent"
-meant = "a_window_its_record_reads_at_rest_is_read_in_the_turn_its_tui_begins_by_a_prompt_for_the_gap"
+name = "notes twice: Devin's window is read at rest in the turn a message of the user's began, before its agent's first word"
+meant = "a_message_of_the_users_its_agent_has_not_answered_yet_is_a_turn_begun_for_a_while"
 runs = ["harness-devin"]
 
 [[plant.edit]]
@@ -145,16 +145,6 @@ runs = ["harness-devin"]
 file = "crates/cf-harness/src/devin/adapter.rs"
 find = "            self.history.expect(&body, self.time.wall_ms());"
 replace = ""
-
-[[plant]]
-name = "notes twice: Devin's window never says a paste is queued in its TUI"
-meant = "a_paste_its_store_took_is_held_until_its_record_shows_it"
-runs = ["harness-devin"]
-
-[[plant.edit]]
-file = "crates/cf-harness/src/devin/adapter.rs"
-find = "        self.took() && !self.recorded.get()"
-replace = "        false"
 
 [[plant]]
 name = "notes twice: a paste never shown waits for good while its window's rest is cut by short turns"

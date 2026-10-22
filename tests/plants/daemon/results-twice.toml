@@ -110,17 +110,6 @@ file = "crates/cf-harness/src/devin/history.rs"
 find = "                let took = seen.took || (pasted.is_some() && self.seen.get().took);"
 replace = "                let took = false;"
 
-[[plant]]
-name = "results twice: every paste is held, so a paste Devin's TUI dropped waits half an hour"
-meant = "two_results_for_a_devin_chief_whose_tui_dropped_the_first_paste_go_in_once_each_whole_and_apart"
-runs = ["rig-regression-results-dropped"]
-builds = true
-
-[[plant.edit]]
-file = "crates/cf-harness/src/devin/adapter.rs"
-find = "        self.took() && !self.recorded.get()"
-replace = "        true"
-
 # The engine's rule, on its fake windows.
 
 [[plant]]
@@ -572,7 +561,7 @@ replace = "        let overdue = at_rest && free.is_some() && waited > RECONCILE
 
 [[plant]]
 name = "results twice: Devin's window never says its TUI has the paste"
-meant = "a_paste_its_store_took_is_held_until_its_record_shows_it"
+meant = "a_paste_its_store_took_is_taken_whether_its_record_shows_it_yet_or_not"
 runs = ["harness-devin"]
 
 [[plant.edit]]

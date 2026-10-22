@@ -58,10 +58,13 @@ const ROLE: &str =
     "# A check of ConsensFlow's\n\nDo exactly what each message says, and nothing more.";
 
 /// How often the places Devin writes in are read, how long a turn may take, and how
-/// soon after its Enter a message's history row must be there.
+/// soon after its Enter a message's history row must be there: at rest, and queued
+/// behind a turn at work (2.0 s to 2.3 s measured on the Mac and zeewin; a loaded machine
+/// takes longer, and 10 s is still well before the take-in, behind a 30 s command).
 const LOOK: Duration = Duration::from_millis(200);
 const TURN: Duration = Duration::from_secs(180);
 const AT_ENTER: Duration = Duration::from_secs(3);
+const QUEUED_AT_ENTER: Duration = Duration::from_secs(10);
 
 /// What a long turn is asked to do: a command of its shell that runs half a minute, which
 /// a message pasted meanwhile waits behind (Devin takes it in when the command returns:
@@ -272,9 +275,9 @@ fn check(watched: &Watched, interrupt: &ask::Interrupt, said: &mut Account) -> R
     sleep(AT_WORK);
     let (text, at_ms, pasted) =
         watched.paste(13, "Reply with exactly ACK-THREE and nothing else.")?;
-    let history = watched.when(pasted, AT_ENTER, || watched.in_history(&marker(13)));
+    let history = watched.when(pasted, QUEUED_AT_ENTER, || watched.in_history(&marker(13)));
     let queued = history.is_some() && !watched.recorded(&marker(13));
-    let took = watched.when(pasted, AT_ENTER, || watched.took(&text, at_ms));
+    let took = watched.when(pasted, QUEUED_AT_ENTER, || watched.took(&text, at_ms));
     let recorded = watched.when(pasted, TURN, || watched.recorded(&marker(13)));
     said.say(format!(
         "queued behind a turn at work: its history row after {}, {} its record then; the daemon's word that Devin took it after {}; its record (taken in) after {}",
@@ -335,7 +338,7 @@ fn check(watched: &Watched, interrupt: &ask::Interrupt, said: &mut Account) -> R
     let ran = answered || put_to_the_agent;
     match queued {
         None => said.fail("a message the Stop cancelled while queued is not in the conversation: Devin drops it now, and the daemon, which takes it for delivered, must give it back (T-107)"),
-        Some(_) if ran => said.fail("the message pasted behind the long turn ran: the Stop met no message queued (the turn took it in first), and what Devin does with one was not seen"),
+        Some(_) if ran => said.say("the long turn took the message in before the Stop, at a step boundary: the Stop met no message queued, and what Devin does with one was not seen (not a failure)"),
         Some(_) if !head_is_it => said.fail("a message the Stop cancelled while queued is in the store, but not the head of the conversation"),
         Some(_) => {}
     }

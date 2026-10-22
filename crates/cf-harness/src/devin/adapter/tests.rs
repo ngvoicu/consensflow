@@ -49,7 +49,6 @@ fn devin_window(
         at_enter,
         history: History::default(),
         looked: Cell::default(),
-        recorded: Cell::default(),
     })
 }
 
@@ -397,8 +396,10 @@ fn the_tui_took_a_paste_once_its_store_has_a_row_of_it_whole_in_the_conversation
     assert!(!window.took());
 }
 
+/// The engine reads `held` only where `took` reads false: a paste Devin's store took is
+/// taken whether its record shows it yet or not, and `took` alone keeps it once.
 #[test]
-fn a_paste_its_store_took_is_held_until_its_record_shows_it() {
+fn a_paste_its_store_took_is_taken_whether_its_record_shows_it_yet_or_not() {
     let dir = tempfile::tempdir().unwrap();
     let wire = dir.path().join("wire.jsonl");
     fs::write(&wire, shows("mild-coin")).unwrap();
@@ -420,14 +421,11 @@ fn a_paste_its_store_took_is_held_until_its_record_shows_it() {
         true,
     );
     assert!(finished(behind.deliver(&host(), &pane(), text)).is_ok());
-    assert!(!behind.held(), "not taken yet");
+    assert!(!behind.took(), "not taken yet");
     store.submit("mild-coin", &pasted, EPOCH_MS);
     finished(behind.observe()).unwrap();
-    assert!(
-        behind.took() && behind.held(),
-        "taken, queued behind the turn at work"
-    );
-    // The turn takes it in: the record shows it, and nothing holds it any more.
+    assert!(behind.took(), "taken, queued behind the turn at work");
+    // The turn takes it in: the record shows it, and it is taken still.
     let taken = devin_window(
         store.env.clone(),
         Rc::new(Says(record_of(&["a message of the human's", &pasted]))),
@@ -438,7 +436,8 @@ fn a_paste_its_store_took_is_held_until_its_record_shows_it() {
     );
     assert!(finished(taken.deliver(&host(), &pane(), text)).is_ok());
     finished(taken.observe()).unwrap();
-    assert!(taken.took() && !taken.held());
+    assert!(taken.took());
+    assert!(!behind.held() && !taken.held(), "the contract's own false");
 }
 
 /// An older Devin writes the row only as the turn takes the paste in, as late as its
@@ -462,7 +461,7 @@ fn an_older_devins_window_says_nothing_of_its_stores_history() {
     assert!(finished(window.deliver(&host(), &pane(), text)).is_ok());
     store.submit("mild-coin", &window_text(text), EPOCH_MS);
     store.submit("mild-coin", &console_text(&window_text(text)), EPOCH_MS);
-    assert!(!window.took() && !window.held());
+    assert!(!window.took());
     assert!(history::at_enter("devin 3000.11.92 (7f4e64980e22)"));
     assert!(history::at_enter("devin 3000.12.0"));
     assert!(!history::at_enter("devin 3000.11.3 (abc)"));

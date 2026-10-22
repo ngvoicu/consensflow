@@ -12,10 +12,10 @@
 //! 3000.11.92 writes them (T-102): the window reads busy while its agent works, and a
 //! silent turn for [`TAKEN_IN_MS`] from its beginning (a message of the user's its agent
 //! has not answered), at rest after that; `took` is the paste's history row, which the
-//! store has from the paste's Enter, a paste the model drops excepted; and `held` is
-//! taken and not yet shown. The adapter is asked whether it holds the paste as it goes
-//! in, which it never does, the row a moment behind; and a turn the human begins as a
-//! paste goes in, after the readiness looked, is known only when a look reads it.
+//! store has from the paste's Enter, a paste the model drops excepted; and `held` is the
+//! contract's own false, as Devin's adapter answers it: `took` reaches the engine first.
+//! A turn the human begins as a paste goes in, after the readiness looked, is known only
+//! when a look reads it.
 //!
 //! The schedules. Each seed makes looks in stretches of the daemon's second and of slow
 //! passes of 5 to 30 s, over 20 to 80 min; the human's turns of a second to 20 min and
@@ -201,7 +201,6 @@ struct Seen {
     busy: bool,
     /// The store has the paste's history row (`Window::took`).
     sent: bool,
-    held: bool,
     shown: bool,
 }
 
@@ -269,7 +268,6 @@ impl Window {
         Seen {
             busy,
             sent: took,
-            held: took && !shown,
             shown,
         }
     }
@@ -365,12 +363,9 @@ fn run(schedule: &Schedule) -> Outcome {
     *context.adapter.deliver.borrow_mut() = Some(Rc::new(move |taking| {
         pasting.borrow_mut().paste(at.get());
         // The adapter's word on the paste as it goes in: its history row a moment behind,
-        // neither taken nor held yet.
+        // not taken yet.
         if let Some(adapter) = adapter.upgrade() {
-            adapter.with("chief", |agent| {
-                agent.held = false;
-                agent.took = false;
-            });
+            adapter.with("chief", |agent| agent.took = false);
         }
         Box::pin(async move { Ok(taking()) })
     }));
@@ -399,7 +394,6 @@ fn run(schedule: &Schedule) -> Outcome {
         context.adapter.with("chief", |agent| {
             agent.settled = !seen.busy;
             agent.took = seen.sent;
-            agent.held = seen.held;
             match &left {
                 // The paste runs in the conversation it went into, and its record shows it.
                 Some(left) => {
@@ -748,7 +742,7 @@ enum Meets {
 /// look, and the human's `/new` once the paste is taken or none; or dropped, followed by
 /// rest, one look a rest, or short turns. A turn begun as
 /// the paste went in that no look sees before it ends, a sleep from the hand-over, is the
-/// reviews' (2026-10-18): the look that wakes finds it ended (`released`).
+/// reviews' (2026-10-18): the look that wakes finds the paste taken (`took`).
 fn grid() -> Vec<Schedule> {
     let mut all = Vec::new();
     for meets in [Meets::Rest, Meets::Queued, Meets::Racing] {
@@ -960,12 +954,12 @@ fn twice(outcome: &Outcome) -> Option<Breach> {
     let again = *outcome.pastes.get(first + 1)?;
     let look = outcome.rows.iter().position(|row| row.at == again.at)?;
     let slept = look > 0 && again.at - outcome.rows[look - 1].at > SLEEP_MS;
-    let held_before = outcome.rows[..look]
+    let taken_before = outcome.rows[..look]
         .iter()
-        .any(|row| row.at > landed.at && row.seen.held);
-    let looks = match (slept, held_before) {
-        (true, false) => "a sleep from before any look found the paste held",
-        (true, true) => "a sleep after a look found the paste held",
+        .any(|row| row.at > landed.at && row.seen.sent);
+    let looks = match (slept, taken_before) {
+        (true, false) => "a sleep from before any look found the paste taken",
+        (true, true) => "a sleep after a look found the paste taken",
         (false, _) => "no sleep",
     };
     let turn = outcome.turns[landed.turn?];
@@ -1026,7 +1020,7 @@ fn for_good(outcome: &Outcome) -> Option<Breach> {
             .rows
             .iter()
             .filter(|row| row.at >= from && again.is_none_or(|again| row.at < again))
-            .filter(|row| !row.seen.busy && !row.seen.held)
+            .filter(|row| !row.seen.busy)
             .collect();
         let (mut start, mut last) = (from, from);
         for row in rests {
@@ -1043,7 +1037,7 @@ fn for_good(outcome: &Outcome) -> Option<Breach> {
                 .filter(|seen| seen.at >= start && seen.at <= row.at)
                 .collect();
             // The rest between two looks in a row that found the window at rest.
-            let rest = |row: &Row| !row.seen.busy && !row.seen.held;
+            let rest = |row: &Row| !row.seen.busy;
             let between: i64 = span
                 .windows(2)
                 .filter(|pair| rest(pair[0]) && rest(pair[1]))
@@ -1154,7 +1148,7 @@ fn timeline(outcome: &Outcome) -> String {
         let mut said = format!(
             "look: {}{}{}",
             if row.seen.busy { "busy" } else { "at rest" },
-            if row.seen.held { ", held" } else { "" },
+            if row.seen.sent { ", taken" } else { "" },
             if row.seen.shown { ", shown" } else { "" }
         );
         for (index, paste) in pastes

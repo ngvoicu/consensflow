@@ -177,6 +177,7 @@ fn a_note_that_rode_in_the_words_that_resume_a_task_goes_in_with_them_after_the_
     // the viewer's 0020).
     context.edit_ledger(|file| {
         let db = rusqlite::Connection::open(file).unwrap();
+        cf_ledger::testing::undo_migration_0023(&db).unwrap();
         cf_ledger::testing::undo_migration_0020(&db).unwrap();
         db.execute_batch("PRAGMA user_version = 18").unwrap();
     });

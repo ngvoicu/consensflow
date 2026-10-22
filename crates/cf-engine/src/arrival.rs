@@ -26,7 +26,8 @@
 //!   gives it back to its queue, with its attempt, once it has read at rest without it
 //!   for a whole arrival window (a record that cannot be read is at rest, as a look
 //!   reads one), or has read a turn at work, unchanged, for [`RECONCILE_MS`]: the
-//!   switch cut it. The harness's word on its queue was that conversation's.
+//!   switch cut it, unless its harness said it took the paste. The harness's word on
+//!   its queue was that conversation's.
 //!
 //! So a paste the window did not drop goes once: a turn that holds it ends, Devin
 //! runs it within seconds, and the first look after reads its prompt (taken), before
@@ -286,7 +287,10 @@ impl Dispatcher {
     /// of c2e29f2d: Devin reads a session it holds no row of as unknown, and a paste into
     /// a conversation the human left before it ran waited for good). One that reads a
     /// turn at work is waited for, but no longer than [`RECONCILE_MS`] of reading the
-    /// same: a turn the switch cut, which no end will close.
+    /// same: a turn the switch cut, which no end will close. Unless its harness said it
+    /// took the paste (`queued`): Devin's `/new` cuts no turn, and runs the paste queued
+    /// behind it in the conversation left once the turn ends, however long its step (the
+    /// review of 6c8fc595), so its record is waited for as on the window's own path.
     async fn watch_left(
         &self,
         record: &Record,
@@ -359,7 +363,7 @@ impl Dispatcher {
         };
         let because = if rested > self.seams.limits.arrival_ms {
             "its window was switched to another conversation, whose record never showed it"
-        } else if at_work > RECONCILE_MS {
+        } else if at_work > RECONCILE_MS && !delivering.queued {
             "its window was switched to another conversation, whose record read a turn at work, unchanged, and never showed it"
         } else {
             return Ok(());

@@ -39,6 +39,7 @@
 
 mod compaction;
 mod described;
+mod pasted_into;
 mod role_note;
 mod role_text;
 mod specs;
@@ -46,6 +47,7 @@ mod specs;
 use serde_json::{Map, Value};
 
 pub use compaction::undo_migration_0020;
+pub use pasted_into::undo_migration_0023;
 
 /// The last schema version Node's ledger had.
 const NODE_LAST_VERSION: i64 = 11;
@@ -108,6 +110,7 @@ pub fn hold_apart_what_node_never_writes(tables: &mut Map<String, Value>) {
         .chain(role_text::COLUMNS)
         .chain(role_note::COLUMNS)
         .chain(compaction::COLUMNS)
+        .chain(pasted_into::COLUMNS)
     {
         take_column_out(tables, table, column);
     }
@@ -169,6 +172,7 @@ pub fn hold_apart_what_node_never_had_in_its_schema(dump: &mut Value) {
             .chain(compaction::made("INDEX"))
             .any(|made| made == name)
     });
+    schema.retain(|entry| entry["name"] != pasted_into::TRIGGER);
     for entry in schema {
         let name = entry["name"].as_str().map(str::to_owned);
         let Some(Value::String(sql)) = entry.get_mut("sql") else {
@@ -193,6 +197,7 @@ pub fn hold_apart_what_node_never_had_in_its_schema(dump: &mut Value) {
             }
             Some("message") => {
                 *sql = sql.replace(role_note::COLUMN_LINES, "");
+                *sql = sql.replace(pasted_into::COLUMN_LINES, "");
             }
             Some("transcript") => {
                 *sql = sql.replace(compaction::COLUMN_LINES, "");

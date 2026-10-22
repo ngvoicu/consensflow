@@ -18,7 +18,6 @@ use cf_base::js;
 use cf_base::text::window_text;
 
 use super::paths;
-use crate::records::{Item, Role};
 use crate::shared::record::sqlite::{self, Cell as Value};
 
 /// The first Devin that writes a prompt's history row at its Enter.
@@ -57,18 +56,6 @@ impl History {
             took: false,
             ..seen
         });
-    }
-
-    /// Whether `items`, a record's, hold the paste: a user's item that begins with it.
-    pub(super) fn recorded_in(&self, items: &[Item]) -> bool {
-        self.pasted.borrow().as_ref().is_some_and(|(text, _)| {
-            items.iter().any(|item| {
-                item.role == Role::User
-                    && window_text(&item.text)
-                        .trim_start()
-                        .starts_with(text.as_str())
-            })
-        })
     }
 
     /// What the store of `env` says now of the paste, in `session`; where it cannot

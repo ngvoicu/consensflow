@@ -247,6 +247,18 @@ impl Ledger {
         messages::fail_delivery(&mut self.store, message_id, reason)
     }
 
+    /// Message `message_id`, on its way, goes into the conversation `conversation_id`
+    /// of an open window: what a start reads for it, where the window is switched away.
+    pub fn paste_into(&mut self, message_id: i64, conversation_id: i64) -> Result<(), LedgerError> {
+        messages::paste_into(&mut self.store, message_id, conversation_id)
+    }
+
+    /// The native session of the conversation message `message_id` was pasted into,
+    /// while it is on its way: the one its window may have been switched away from.
+    pub fn pasted_into(&self, message_id: i64) -> Result<Option<String>, LedgerError> {
+        messages::pasted_into(&self.store, message_id)
+    }
+
     /// Every message on its way to a window, oldest first.
     pub fn in_flight(&self) -> Result<Vec<MessageView>, LedgerError> {
         messages::in_flight(&self.store)

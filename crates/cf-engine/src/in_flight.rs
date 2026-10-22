@@ -54,11 +54,15 @@ impl Dispatcher {
         failed.map_or(Ok(()), Err)
     }
 
-    /// One message on its way at the start, settled by what showed of it. The message
-    /// is read again once the record is: one that is on its way no more (its task
-    /// cancelled meanwhile, as the human may while the start reads) is left as it is.
+    /// One message on its way at the start, settled by what showed of it, in the
+    /// conversation it was pasted into, which the ledger kept (the review of 6c8fc595:
+    /// a paste a conversation the human left had run was read for in the new one, given
+    /// back and pasted again). The message is read again once the record is: one that is
+    /// on its way no more (its task cancelled meanwhile, as the human may while the start
+    /// reads) is left as it is.
     async fn settle_one_in_flight(&self, message: &MessageView) -> Result<(), EngineError> {
-        let arrived = self.arrived(message, None).await?;
+        let pasted = self.seams.ledger.borrow().pasted_into(message.id)?;
+        let arrived = self.arrived(message, pasted.as_deref()).await?;
         let Some(message) = self.still_delivering(message.id)? else {
             return Ok(());
         };
@@ -149,13 +153,21 @@ impl Dispatcher {
     /// window is given first where it was its launch's first
     /// ([`Dispatcher::brief_given_first`]). None where neither shows it, or the record
     /// cannot be read.
-    /// `pasted`, where known, is the conversation it was pasted into: its record is read,
-    /// else the participant's current conversation's.
+    /// `pasted`, where known, is the conversation it was pasted into: its record is read
+    /// where it is another than the participant's current conversation, else the current
+    /// one's, as it always was.
     async fn arrived(
         &self,
         message: &MessageView,
         pasted: Option<&str>,
     ) -> Result<Option<String>, EngineError> {
+        let current = self
+            .seams
+            .ledger
+            .borrow()
+            .current_conversation(message.recipient_id)?
+            .and_then(|conversation| conversation.native_session);
+        let pasted = pasted.filter(|pasted| current.as_deref() != Some(*pasted));
         let first = self.brief_given_first(message)?;
         let copied = self
             .seams
