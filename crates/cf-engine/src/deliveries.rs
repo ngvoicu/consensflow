@@ -12,7 +12,7 @@ use cf_harness::contract::{Admission, Held, Observed, PaneHost, Readiness};
 use cf_ledger::{MessageView, NewNote, ParticipantView, ProjectView, TaskView};
 use cf_proto::trace::WindowEvent;
 
-use crate::delivery_text::{delivery_text, marker_of};
+use crate::delivery_text::marker_of;
 use crate::dispatcher::Dispatcher;
 use crate::record::Record;
 use crate::role_change::{answers_to_the_task, Prelude};
@@ -137,7 +137,7 @@ impl Dispatcher {
         if begun.message.kind == "task" {
             self.pay_with_words(record)?;
         }
-        let text = delivery_text(&begun.message, &begun.carried);
+        let text = self.delivery_text_of(&begun.message, &begun.carried)?;
         // The conversation the window shows as it is handed over, which the paste goes
         // into: the ledger keeps it, for a start that finds it on its way still.
         let conversation = self.seams.ledger.borrow().current_conversation(record.id)?;

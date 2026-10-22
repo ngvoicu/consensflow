@@ -9,15 +9,17 @@
 //! Sent again, that paste was read twice when the conversation went on (found on
 //! 2026-10-16, after the field reports of the day before: windows that closed in the
 //! middle of their tasks, and a result a chief read twice). What the record does not
-//! show goes back to its queue, as it always did, unless, at a start, the harness's own
-//! store says its window took it: Devin holds a paste queued behind a turn, and writes
-//! it to its record only when the turn takes it in, so a paste it took and its record
-//! does not show yet is delivered, as the Stop's kept paste is (T-280: given back, it
-//! went into the conversation twice). Devin's word is that its TUI took the paste, not
-//! that it holds it still: one its window lost as it ended, before the turn took it in,
-//! is never pasted again. A harness that keeps no such word (all but Devin) cannot tell
-//! a paste it holds queued from one it never had, and what its record does not show at
-//! the start goes back to its queue, pasted again where it held it.
+//! show goes back to its queue, as it always did. Where, at a start, the harness's own
+//! store says its window took it, it is sent again saying so in its header
+//! ([`SENT_AGAIN`]): Devin holds a paste queued behind a turn, and writes it to its record
+//! only when the turn takes it in, and its window died with the app's quit, most likely
+//! losing what its queue held. Its word is that the TUI took the paste, not that it
+//! holds it still, and a message confirmed and lost is a result nobody reads; one read
+//! twice is seen as such (the chief's call on T-280). A harness that keeps no such word
+//! (all but Devin) cannot tell a paste it held queued from one it never had: what its
+//! record does not show at the start is sent again with no word.
+//!
+//! [`SENT_AGAIN`]: crate::delivery_text::SENT_AGAIN
 //!
 //! And the turn a participant's record ends in, read the same way: whether the quit
 //! or a Close cut it.
@@ -31,13 +33,34 @@ use cf_proto::agents::Harness;
 use serde_json::json;
 
 use crate::deliveries::Delivering;
-use crate::delivery_text::{is_paste_of, marker_of};
+use crate::delivery_text::{delivery_text, delivery_text_sent_again, is_paste_of, marker_of};
 use crate::dispatcher::Dispatcher;
 use crate::record::Record;
 use crate::runtime::{caught, returning};
 use crate::seams::EngineError;
 
+/// Why a start gives back a paste whose record does not show it, though its window's
+/// harness said the window took it: it goes again saying so ([`Dispatcher::delivery_text_of`]).
+pub(crate) const TOOK_BEFORE_A_RESTART: &str =
+    "the daemon stopped before its record showed it, and its window took it";
+
 impl Dispatcher {
+    /// How `message` reads in its window, with the rows it `carried`: as it always does
+    /// ([`delivery_text`]), but for one a start last gave back though its window took it
+    /// ([`TOOK_BEFORE_A_RESTART`]), which says it is sent again ([`delivery_text_sent_again`]).
+    pub(crate) fn delivery_text_of(
+        &self,
+        message: &MessageView,
+        carried: &[MessageView],
+    ) -> Result<String, EngineError> {
+        let reason = self.seams.ledger.borrow().last_retry_reason(message.id)?;
+        Ok(if reason.as_deref() == Some(TOOK_BEFORE_A_RESTART) {
+            delivery_text_sent_again(message, carried)
+        } else {
+            delivery_text(message, carried)
+        })
+    }
+
     /// Once, at start: what was on its way to a window when the previous process
     /// ended. One that arrived ([`Dispatcher::arrived`]) is confirmed; any other goes
     /// back to its queue with its attempt, as does one whose record cannot be read.
@@ -70,28 +93,30 @@ impl Dispatcher {
     /// reads) is left as it is.
     async fn settle_one_in_flight(&self, message: &MessageView) -> Result<(), EngineError> {
         let pasted = self.seams.ledger.borrow().pasted_into(message.id)?;
-        let receipt = match self.arrived(message, pasted.as_deref()).await? {
-            Some(item) => Some(json!({ "item": item })),
-            // One its harness took and holds queued, which its record shows only when the
-            // turn ahead of it takes it in (T-280).
-            None => self
-                .took_with_no_window(message, pasted.as_deref())
-                .await?
-                .then(|| json!({ "took": true })),
+        let arrived = self.arrived(message, pasted.as_deref()).await?;
+        // One its harness took, which its record shows only once the turn ahead of it
+        // takes it in: its window, gone with the daemon's stop, most likely lost it.
+        let took = match arrived {
+            Some(_) => false,
+            None => self.took_with_no_window(message, pasted.as_deref()).await?,
         };
         let Some(message) = self.still_delivering(message.id)? else {
             return Ok(());
         };
-        match receipt {
+        match arrived {
             None => {
-                self.seams.ledger.borrow_mut().retry_delivery(
-                    message.id,
-                    "the daemon stopped before it arrived",
-                    true,
-                )?;
+                let reason = if took {
+                    TOOK_BEFORE_A_RESTART
+                } else {
+                    "the daemon stopped before it arrived"
+                };
+                self.seams
+                    .ledger
+                    .borrow_mut()
+                    .retry_delivery(message.id, reason, true)?;
             }
-            Some(receipt) => {
-                self.confirm_delivered(&message, &receipt)?;
+            Some(item) => {
+                self.confirm_delivered(&message, &json!({ "item": item }))?;
             }
         }
         Ok(())

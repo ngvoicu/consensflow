@@ -29,7 +29,7 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
-use cf_engine::delivery_text::{delivery_text, marker_of};
+use cf_engine::delivery_text::{delivery_text, delivery_text_sent_again, marker_of};
 use cf_engine::testing::Context;
 use cf_harness::contract::Waiting;
 use cf_harness::records::Role;
@@ -1031,17 +1031,19 @@ fn a_restart_settles_a_paste_by_the_conversation_it_went_into_not_the_one_the_wi
     assert_eq!(pasted.get(), 1, "never pasted again");
 }
 
-/// Calliope's look at round 3 (T-275): Devin holds a paste queued behind a turn and writes
-/// it to its record only when the turn takes it in. A paste its TUI took, the human's
-/// `/new`, and the daemon stopped while the conversation left still worked: its record
-/// did not show the paste yet, the start gave it back, and it went into the new
-/// conversation as well as the old. Devin's store has the history row of what its TUI
-/// took, which the start reads with no window open, and the paste is delivered.
+/// Calliope's look at round 3 (T-275), and the chief's call on it (T-280): Devin holds a
+/// paste queued behind a turn and writes it to its record only when the turn takes it
+/// in. A paste its TUI took, the human's `/new`, and the daemon stopped while the
+/// conversation left still worked: its record does not show the paste, and Devin's store
+/// says its TUI took it. Its window went with the daemon's stop, most likely with what
+/// its queue held, and a message confirmed and lost is a result nobody reads: the start
+/// gives it back, and it goes again saying in its header that it may be there already.
+/// Its record proves it as any paste's.
 #[test]
-fn a_restart_delivers_a_paste_its_harness_took_though_the_conversation_it_went_into_does_not_show_it_yet(
+fn a_restart_sends_again_saying_so_a_paste_its_harness_took_that_the_conversation_it_went_into_does_not_show(
 ) {
     let context = Context::new();
-    let (project, note, pasted, left) = taken_then_switched(&context);
+    let (project, note, _, left) = taken_then_switched(&context);
     let text = delivery_text(&context.message(note.id), &[]);
     context.adapter.with("chief", |agent| {
         agent.records_settled.insert(left.clone(), false);
@@ -1053,28 +1055,95 @@ fn a_restart_delivers_a_paste_its_harness_took_though_the_conversation_it_went_i
     let settled = context.message(note.id);
     assert_eq!(
         (settled.state.as_str(), settled.attempts),
-        ("delivered", 1),
-        "its harness took it"
+        ("queued", 0),
+        "given back"
     );
     after.resume_project(project).unwrap();
-    after.pass().unwrap();
-    after.pass().unwrap();
-    assert_eq!(pasted.get(), 1, "never pasted again");
+    for _ in 0..3 {
+        after.pass().unwrap();
+    }
+    assert_eq!(
+        given_after_the_restart(&context, note.id),
+        [delivery_text_sent_again(&context.message(note.id), &[])],
+        "sent again, saying so"
+    );
+    let delivered = context.message(note.id);
+    assert_eq!(
+        (delivered.state.as_str(), delivered.attempts),
+        ("delivered", 1),
+        "its record proves it"
+    );
+}
+
+/// What the chief's window opened after the restart was given of the message `id`.
+fn given_after_the_restart(context: &Context, id: i64) -> Vec<String> {
+    given_to(context, "chief", id)
+}
+
+/// What the window of `handle` was given of the message `id`.
+fn given_to(context: &Context, handle: &str, id: i64) -> Vec<String> {
+    context.adapter.with(handle, |agent| {
+        agent
+            .items
+            .iter()
+            .filter(|item| item.text.contains(&marker_of(id)))
+            .map(|item| item.text.to_string())
+            .collect()
+    })
 }
 
 /// The same, with a store that has no row of the paste: its harness never took it, and
-/// it goes back to its queue as it always did.
+/// it goes back to its queue and again as it always did, with no word: it was never
+/// there.
 #[test]
-fn a_restart_gives_back_a_paste_its_harness_says_it_never_took() {
+fn a_restart_gives_back_a_paste_its_harness_says_it_never_took_and_it_goes_again_with_no_word() {
     let context = Context::new();
-    let (_, note, _, left) = taken_then_switched(&context);
+    let (project, note, _, left) = taken_then_switched(&context);
     context.adapter.with("chief", |agent| {
         agent
             .stored
             .insert(left.clone(), vec!["another prompt".to_owned()]);
     });
     context.ledger.borrow_mut().suspend_for_restart().unwrap();
-    context.make().settle_after_restart().unwrap();
+    let after = context.make();
+    after.settle_after_restart().unwrap();
     let settled = context.message(note.id);
     assert_eq!((settled.state.as_str(), settled.attempts), ("queued", 0));
+    after.resume_project(project).unwrap();
+    for _ in 0..3 {
+        after.pass().unwrap();
+    }
+    assert_eq!(
+        given_after_the_restart(&context, note.id),
+        [delivery_text(&context.message(note.id), &[])]
+    );
+    assert_eq!(context.message(note.id).state, "delivered");
+}
+
+/// A message a start sent again after a restart says so wherever it goes in, the first
+/// message of a window opened for it too (`launch_text`): a worker's brief, here.
+#[test]
+fn a_window_opened_with_a_message_a_restart_sent_again_is_given_it_saying_so() {
+    let context = Context::new();
+    let project = context.with_staff(&["zeus"]);
+    let brief = context
+        .give(project.id, "zeus", "Write the parser")
+        .message
+        .expect("the brief");
+    {
+        let mut ledger = context.ledger.borrow_mut();
+        ledger.begin_delivery(brief.id).unwrap();
+        ledger
+            .retry_delivery(
+                brief.id,
+                "the daemon stopped before its record showed it, and its window took it",
+                true,
+            )
+            .unwrap();
+    }
+    context.pass().unwrap();
+    assert_eq!(
+        given_to(&context, "zeus", brief.id),
+        [delivery_text_sent_again(&context.message(brief.id), &[])]
+    );
 }

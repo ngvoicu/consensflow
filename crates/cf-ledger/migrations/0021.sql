@@ -7,8 +7,8 @@
 -- the message is on its way no more, whatever moves it (the trigger), so a row says
 -- it only while it is delivering. One column added in place, as 0020 added its own:
 -- nothing of the messages' rows moves. A migration that rebuilds the message table
--- drops the trigger with it, and must make it again. Numbered 0023: 0021 and 0022 are
--- Resume after Close's, which lands first.
+-- drops the trigger with it, and must make it again. 0021 here; renumbered to 0023 after
+-- resume-tasks' 0021 and 0022 when this branch merges main after T-82.
   ALTER TABLE message ADD COLUMN pasted_into INTEGER CONSTRAINT message_pasted_into_fk REFERENCES conversation (id) ON DELETE SET NULL;
   CREATE TRIGGER message_pasted_into_settled AFTER UPDATE OF state ON message
     WHEN NEW.state <> 'delivering' AND NEW.pasted_into IS NOT NULL

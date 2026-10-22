@@ -33,7 +33,7 @@ pub const MIGRATIONS: [&str; 21] = [
     include_str!("../migrations/0018.sql"),
     include_str!("../migrations/0019.sql"),
     include_str!("../migrations/0020.sql"),
-    include_str!("../migrations/0023.sql"),
+    include_str!("../migrations/0021.sql"),
 ];
 
 pub const SCHEMA_VERSION: usize = MIGRATIONS.len();
@@ -153,7 +153,7 @@ mod tests {
             "63715a099a8464bb97a304c1c7623cada58ade9effb5418625d6df27da26f2b1",
             "86c4416dc0bdbd3b84dbd1331bc547f7532a7dd07a3f01e216618f7973501c6f",
             "48abbcf53e6f7360c0fff369b95b8173117294918ecd069405f039ef4ca024ec",
-            "417cda4fbeaadf5233eca36857392206f19902b4f077a97a2f8883acb51331e8",
+            "6852f32986f14e9f532635f8424ae8dc35bd57e38fe0d0e184e12304512893d0",
         ];
         for (at, (sql, shipped)) in MIGRATIONS.iter().zip(SHIPPED).enumerate() {
             let hash: String = Sha256::digest(sql.as_bytes())

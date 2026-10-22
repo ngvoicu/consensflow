@@ -265,6 +265,12 @@ impl Ledger {
         messages::delivery_begun_ms(&self.store, message_id)
     }
 
+    /// Why message `message_id` was last given back to its queue: none where it never
+    /// was.
+    pub fn last_retry_reason(&self, message_id: i64) -> Result<Option<String>, LedgerError> {
+        messages::last_retry_reason(&self.store, message_id)
+    }
+
     /// Every message on its way to a window, oldest first.
     pub fn in_flight(&self) -> Result<Vec<MessageView>, LedgerError> {
         messages::in_flight(&self.store)

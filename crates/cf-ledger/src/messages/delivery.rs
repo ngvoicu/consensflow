@@ -533,6 +533,28 @@ pub(crate) fn delivery_begun_ms(
         .flatten())
 }
 
+/// Why message `message_id` was last given back to its queue (its latest
+/// `delivery.retried`): none where it never was. The engine words a paste by it: one a
+/// start gave back though its window took it is sent again saying so.
+pub(crate) fn last_retry_reason(
+    store: &Store,
+    message_id: i64,
+) -> Result<Option<String>, LedgerError> {
+    Ok(store
+        .db
+        .query_row(
+            "SELECT json_extract(e.data, '$.reason') FROM message m
+               JOIN event e ON e.project_id = m.project_id AND e.kind = 'delivery.retried'
+                AND json_extract(e.data, '$.message') = m.id
+              WHERE m.id = ?
+              ORDER BY e.id DESC LIMIT 1",
+            [message_id],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .optional()?
+        .flatten())
+}
+
 /// Every message on its way to a window, oldest first. At start none of
 /// those windows is left (they died with the previous process), so each is
 /// settled before anything else is delivered.

@@ -1,4 +1,4 @@
-//! The conversation a message on its way was pasted into (migration 0023): marked as
+//! The conversation a message on its way was pasted into (migration 0021): marked as
 //! a paste goes into an open window, read by a start while the message is on its way,
 //! and cleared by the ledger itself whatever takes it off its way. A start reads that
 //! conversation's record for it, though the window was switched to another since (the
@@ -159,5 +159,26 @@ fn a_message_on_its_way_says_the_second_its_attempt_began() {
         ledger.delivery_begun_ms(note).expect("read"),
         Some(1_792_058_461_000),
         "the second attempt's"
+    );
+}
+
+/// The engine words a paste by why it was last given back (T-280: a start that gave back
+/// a paste its window took sends it again saying so): the latest give-back's reason,
+/// none for a message never given back.
+#[test]
+fn a_message_says_why_it_was_last_given_back() {
+    let dir = tempfile::tempdir().expect("a folder");
+    let (mut ledger, note, _, _) = begun(dir.path());
+    assert_eq!(ledger.last_retry_reason(note).expect("read"), None);
+    ledger
+        .retry_delivery(note, "first reason", true)
+        .expect("given back");
+    ledger.begin_delivery(note).expect("begun again");
+    ledger
+        .retry_delivery(note, "second reason", true)
+        .expect("given back again");
+    assert_eq!(
+        ledger.last_retry_reason(note).expect("read").as_deref(),
+        Some("second reason")
     );
 }

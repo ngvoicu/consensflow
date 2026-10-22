@@ -12,10 +12,13 @@
 //! a record that did not show it either. It gave the result back, and pasted it again
 //! into the new conversation, while Devin's queue in the old one held it.
 //!
-//! What should have happened: the result goes into the chief's window once. The ledger
-//! keeps the conversation each paste went into, and the start reads that one's record;
-//! where its record does not show the paste, Devin's store says whether its TUI took it
-//! (its history row), and one it took is delivered.
+//! What should have happened: the ledger keeps the conversation each paste went into,
+//! and the start reads that one's record. A result it shows went in, and goes in no more.
+//! One it does not show, though Devin's store says its TUI took it (its history row), is
+//! sent again, its header saying it was sent again after a restart and may be there
+//! already: the window that held it queued died with the app's quit, most likely losing
+//! it, and a result confirmed and lost is one the chief never reads, where one read twice
+//! is seen as such (the chief's call on T-280).
 //!
 //! The chief is the stand-in Devin (`fake-devin`), whose `/new` shows the new conversation
 //! at once while the turn at work and its queue go on in the one left (Devin's waits for
@@ -31,8 +34,8 @@
 //!   store's history does.
 //!
 //! The app starts again on the same home, and the human resumes the project. What proves
-//! it is the daemon's own word for its pastes (`delivery.begun`), and the result
-//! delivered.
+//! it is the daemon's own word for its pastes (`delivery.begun`), the result delivered,
+//! and what the chief's store holds of it.
 
 use cf_e2e::devin_store;
 use cf_e2e::files;
@@ -45,6 +48,9 @@ use crate::{config, secs, Outcome, FAKE_DEVIN};
 
 /// What the worker answers its task with.
 const WORDS: &str = "RESULT_HELD";
+
+/// What the header of a result sent again after a restart says.
+const SENT_AGAIN: &str = "sent again after a restart, it may be there already";
 
 /// What the chief's conversation left did with the result before the app started again.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -176,9 +182,10 @@ fn pasted_switched_and_quit(mut rig: Rig) -> cf_e2e::Result<Quit> {
     })
 }
 
-/// The case: what the conversation left did is `left`; then the app starts again, the
-/// human resumes the project, and the result went in once.
-fn goes_in_once(ran: Left) -> Outcome {
+/// The case: what the conversation left did is `left`; then the app starts again, and
+/// the human resumes the project. A result the conversation left ran went in once; one
+/// it held queued goes in once more, saying it was sent again.
+fn after_the_restart(ran: Left) -> Outcome {
     let quit = pasted_switched_and_quit(Rig::start(a_rig())?)?;
     let id = quit.id;
     // Written before the daemon starts, which settles what was on its way at once.
@@ -209,10 +216,26 @@ fn goes_in_once(ran: Left) -> Outcome {
         .iter()
         .filter(|event| event["data"]["message"] == id)
         .collect();
+    let pastes = if ran == Left::Ran { 1 } else { 2 };
     assert_eq!(
         of_message(&events, "delivery.begun", id),
-        1,
-        "the result (m-{id}) was pasted again after the restart: {said:?}"
+        pastes,
+        "the result (m-{id}) was not pasted {pastes} times in all: {said:?}"
+    );
+    let marker = format!("[ConsensFlow m-{id} ");
+    let headers: Vec<String> = devin_store::messages(&quit.store)?
+        .into_iter()
+        .filter(|message| message.role == "user" && message.text.starts_with(&marker))
+        .filter_map(|message| message.text.lines().next().map(str::to_owned))
+        .collect();
+    let sent_again = headers
+        .iter()
+        .filter(|header| header.contains(SENT_AGAIN))
+        .count();
+    assert_eq!(
+        sent_again,
+        pastes - 1,
+        "the result (m-{id}) went again saying so only where the conversation left held it queued: {headers:?}"
     );
     rig.close()?;
     Ok(())
@@ -221,10 +244,11 @@ fn goes_in_once(ran: Left) -> Outcome {
 #[test]
 fn a_result_the_conversation_left_ran_while_the_app_was_down_goes_into_a_devin_chief_once(
 ) -> Outcome {
-    goes_in_once(Left::Ran)
+    after_the_restart(Left::Ran)
 }
 
 #[test]
-fn a_result_devin_held_queued_in_the_conversation_left_goes_into_a_devin_chief_once() -> Outcome {
-    goes_in_once(Left::Queued)
+fn a_result_devin_held_queued_in_the_conversation_left_goes_again_into_a_devin_chief_saying_so(
+) -> Outcome {
+    after_the_restart(Left::Queued)
 }

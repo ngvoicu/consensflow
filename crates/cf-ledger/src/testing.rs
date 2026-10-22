@@ -47,7 +47,7 @@ mod specs;
 use serde_json::{Map, Value};
 
 pub use compaction::undo_migration_0020;
-pub use pasted_into::undo_migration_0023;
+pub use pasted_into::undo_migration_0021;
 
 /// The last schema version Node's ledger had.
 const NODE_LAST_VERSION: i64 = 11;

@@ -20,7 +20,7 @@ use cf_proto::trace::WindowEvent;
 use serde_json::{json, Value};
 
 use crate::deliveries::Delivering;
-use crate::delivery_text::{brief_first, delivery_text};
+use crate::delivery_text::brief_first;
 use crate::dispatcher::Dispatcher;
 use crate::host::{EngineHost, Killed, OpenPane, Opened};
 use crate::record::Record;
@@ -928,7 +928,7 @@ impl Dispatcher {
     /// window received goes in first ([`Dispatcher::brief_given_first`]). A
     /// resumed conversation has it already.
     fn launch_text(&self, first: &Begun, resume: Option<&str>) -> Result<String, EngineError> {
-        let text = delivery_text(&first.message, &first.carried);
+        let text = self.delivery_text_of(&first.message, &first.carried)?;
         Ok(match self.brief_given_first(&first.message)? {
             Some(brief) if resume.is_none() => format!("{brief}{text}"),
             _ => text,

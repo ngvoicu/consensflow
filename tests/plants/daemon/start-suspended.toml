@@ -137,13 +137,13 @@ runs = ["engine-resume"]
 [[plant.edit]]
 file = "crates/cf-engine/src/in_flight.rs"
 find = '''
-                .then(|| json!({ "took": true })),
+            None => self.took_with_no_window(message, pasted.as_deref()).await?,
         };
         let Some(message) = self.still_delivering(message.id)? else {
             return Ok(());
         };'''
 replace = '''
-                .then(|| json!({ "took": true })),
+            None => self.took_with_no_window(message, pasted.as_deref()).await?,
         };'''
 
 [[plant]]

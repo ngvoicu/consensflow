@@ -37,8 +37,8 @@ pub(crate) use carrying::{
 };
 pub(crate) use delivery::{
     begin_delivery, cancel_message, confirm_delivery, confirm_delivery_telling, delivery_begun_ms,
-    fail_delivery, first_received, in_flight, last_pasted, next_delivery, next_delivery_of,
-    paste_into, pasted_into, retry_delivery, take_back, with_work,
+    fail_delivery, first_received, in_flight, last_pasted, last_retry_reason, next_delivery,
+    next_delivery_of, paste_into, pasted_into, retry_delivery, take_back, with_work,
 };
 pub(crate) use gate::{approve_message, decline_message, mark_read};
 pub(crate) use holds::{note_hold, tell_goes_on};
