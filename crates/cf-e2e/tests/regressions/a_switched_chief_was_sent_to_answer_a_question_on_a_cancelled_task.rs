@@ -7,7 +7,9 @@
 //! read `cancelled`. Four hours later the human switched the chief from Codex to
 //! Claude Code, and the handoff (m-2594) listed the question under "What waits on you
 //! now", with `cf inbox read m-2486, then cf answer m-2486`. The new chief was sent to
-//! answer a question nobody waited for. The report is T-157 on the board.
+//! answer a question nobody waited for. The report is
+//! `issues/a-switch-chief-note-lists-a-question-on-a-cancelled-task.md` in consensflow-sme
+//! (T-157 on the board).
 //!
 //! What the owner should have seen: the handoff lists what waits on the chief, and a
 //! question on a task that is over does not. A question on a task that still waits is

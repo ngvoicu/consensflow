@@ -24,7 +24,7 @@ use cf_proto::ledger::{MessageView, Question};
 use rusqlite::{params, OptionalExtension};
 use serde_json::{json, Value};
 
-use crate::model::{self, require_active, LedgerError, MAX_BODY};
+use crate::model::{self, require_active, LedgerError, FINISHED_TASK_STATES, MAX_BODY};
 use crate::questions::{render_choices, render_questions, require_choices, require_questions};
 use crate::queue::{queue, send, withdraw, Queued, Sent};
 use crate::store::Store;
@@ -180,8 +180,8 @@ pub(crate) fn ask(
 /// options is answered by choice (or by text, one line per question): that
 /// answer is read at once and never delivered, because the harness door
 /// that asked collects it and the tool call completes with it; the asker's
-/// task resumes here. A question on a cancelled task takes no answer, from
-/// either side: nobody waits for it. `from` is the answerer's participant
+/// task resumes here. A question on a task that is over (accepted, cancelled
+/// or failed) takes no answer, from either side: nobody waits for it. `from` is the answerer's participant
 /// id: handles repeat across projects (every chief is `chief`), ids never do.
 pub(crate) fn answer(
     store: &mut Store,
@@ -221,12 +221,8 @@ pub(crate) fn answer(
             ));
         }
         if let Some(task) = message_task(store, question_id)? {
-            if task.state == "cancelled" {
-                return Err(LedgerError::refused_with(
-                    "task-cancelled",
-                    format!("T-{} is cancelled: nobody waits for this answer", task.number),
-                    409,
-                ));
+            if FINISHED_TASK_STATES.contains(&task.state.as_str()) {
+                return Err(finished_task_takes_no_answer(&task));
             }
         }
         if answered(store, question_id)? {
@@ -285,6 +281,32 @@ pub(crate) fn answer(
         }
         Ok(answer)
     })
+}
+
+/// The refusal of an answer to a question on a task that is over (accepted,
+/// cancelled or failed): nobody waits for it, and a failed task is the one that
+/// can be gone on with, so it is told how.
+fn finished_task_takes_no_answer(task: &TaskRow) -> LedgerError {
+    let number = task.number;
+    let (code, words) = match task.state.as_str() {
+        "cancelled" => (
+            "task-cancelled",
+            format!("T-{number} is cancelled: nobody waits for this answer"),
+        ),
+        "accepted" => (
+            "task-accepted",
+            format!(
+                "T-{number} is accepted, so it is finished and nobody waits for this answer: give what is still wanted as a new task"
+            ),
+        ),
+        _ => (
+            "task-failed",
+            format!(
+                "T-{number} failed, so nobody waits for this answer: reopen T-{number} to go on with it (cf task reopen T-{number} \"…\")"
+            ),
+        ),
+    };
+    LedgerError::refused_with(code, words, 409)
 }
 
 /// Whether a question has an answer, on its way or still gated; one that was

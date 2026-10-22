@@ -6,6 +6,9 @@
 //! human switched the chief, and the handoff sent the new chief to answer the
 //! question: the list read an answer in no state but `gated` or `cancelled`
 //! as none, and never looked at the question's task.
+//!
+//! The answer's side is here too (T-192): a question on a task that is over takes
+//! no answer, whichever way the task ended, as the list says it is not open.
 
 #![allow(clippy::expect_used)]
 
@@ -304,5 +307,108 @@ fn only_the_question_on_the_ended_task_leaves_the_list() {
         .cancel_task(project, 1, "chief")
         .expect("T-1 cancels");
     assert_eq!(open(&ledger, project), [free]);
+    ledger.close().expect("the file is given up");
+}
+
+/// The code and the words of the refusal an answer to the question gets, and
+/// whether the question still has no answer on the board after it.
+fn refused_answer(ledger: &mut Ledger, project: i64, question: i64) -> (String, String) {
+    let chief = chief(ledger, project);
+    let refused = ledger
+        .answer(question, chief, Some(&json!("The new one")), None)
+        .expect_err("the answer is refused");
+    let answers = ledger
+        .inbox(
+            ledger
+                .project(project)
+                .expect("a project")
+                .and_then(|found| {
+                    found
+                        .participants
+                        .into_iter()
+                        .find(|p| p.handle == "zeus-amber-pine")
+                })
+                .expect("the session")
+                .id,
+            100,
+        )
+        .expect("an inbox")
+        .into_iter()
+        .filter(|message| message.kind == "answer")
+        .count();
+    assert_eq!(answers, 0, "nothing was put to the window");
+    (
+        refused.code().expect("a code").to_owned(),
+        refused.to_string(),
+    )
+}
+
+#[test]
+fn a_question_on_a_cancelled_task_takes_no_answer() {
+    let dir = tempfile::tempdir().expect("a folder");
+    let mut ledger = ledger_in(&dir);
+    let project = board(&mut ledger);
+    let question = asked(&mut ledger, project, Some(1));
+    ledger
+        .cancel_task(project, 1, "chief")
+        .expect("T-1 cancels");
+
+    let (code, words) = refused_answer(&mut ledger, project, question);
+    assert_eq!(code, "task-cancelled");
+    assert!(words.contains("T-1 is cancelled"), "{words}");
+    ledger.close().expect("the file is given up");
+}
+
+#[test]
+fn a_question_on_an_accepted_task_takes_no_answer() {
+    let dir = tempfile::tempdir().expect("a folder");
+    let mut ledger = ledger_in(&dir);
+    let project = board(&mut ledger);
+    let question = asked(&mut ledger, project, Some(1));
+    result_heard(&mut ledger, project);
+    ledger
+        .accept_task(project, 1, "chief")
+        .expect("T-1 accepted");
+
+    let (code, words) = refused_answer(&mut ledger, project, question);
+    assert_eq!(code, "task-accepted");
+    assert!(
+        words.contains("T-1 is accepted") && words.contains("finished"),
+        "{words}"
+    );
+    ledger.close().expect("the file is given up");
+}
+
+#[test]
+fn a_question_on_a_failed_task_takes_no_answer_and_says_to_reopen_the_task() {
+    let dir = tempfile::tempdir().expect("a folder");
+    let mut ledger = ledger_in(&dir);
+    let project = board(&mut ledger);
+    let question = asked(&mut ledger, project, Some(1));
+    ledger
+        .fail_task(project, 1, "its window died")
+        .expect("T-1 fails");
+
+    let (code, words) = refused_answer(&mut ledger, project, question);
+    assert_eq!(code, "task-failed");
+    assert!(
+        words.contains("reopen T-1 to go on with it"),
+        "the refusal says what to do instead: {words}"
+    );
+    ledger.close().expect("the file is given up");
+}
+
+#[test]
+fn a_question_on_a_task_that_is_done_but_not_accepted_still_takes_its_answer() {
+    let dir = tempfile::tempdir().expect("a folder");
+    let mut ledger = ledger_in(&dir);
+    let project = board(&mut ledger);
+    let question = asked(&mut ledger, project, Some(1));
+    result_heard(&mut ledger, project);
+
+    // The result is waiting for the chief's decision: an answer that is late may
+    // still be given (the acceptance takes back one that has not reached its window).
+    let answer = answered(&mut ledger, project, question);
+    assert!(answer > question);
     ledger.close().expect("the file is given up");
 }

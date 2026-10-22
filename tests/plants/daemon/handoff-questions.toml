@@ -8,6 +8,11 @@
 # on no task, is listed as it was; an answer cancelled for another reason (withdrawn while the
 # task goes on) leaves its question listed.
 #
+# Round 2 (T-192): `answer()` (`crates/cf-ledger/src/messages.rs`) refuses an answer to a question on
+# any task that is over, not only a cancelled one, and says to reopen a failed task; the chief eval's
+# plumbing (`crates/cf-evals/src/measure/plumbing.rs`) owes no answer to a question on a task that is
+# over unless one stands, as a result withdrawn with its task is not owed.
+#
 # The cases are the ledger's (`crates/cf-ledger/tests/chief_open_work.rs`) and the rig's, in the
 # field's shape (`crates/cf-e2e/tests/regressions/a_switched_chief_was_sent_to_answer_a_question_on_a_cancelled_task.rs`).
 # The rig's build the native `cf` from the sources as planted, so their plants say `builds`.
@@ -16,6 +21,7 @@
 
 [run]
 handoff-open-work = ["cargo", "test", "--offline", "-p", "cf-ledger", "--test", "chief_open_work"]
+handoff-evals = ["cargo", "test", "--offline", "-p", "cf-evals", "--test", "measure", "questions::"]
 handoff-rig-cancelled = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_switched_chief_was_sent_to_answer_a_question_on_a_cancelled_task::a_question_whose_answer"]
 handoff-rig-waiting = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "a_switched_chief_was_sent_to_answer_a_question_on_a_cancelled_task::a_question_on_a_task_that_still_waits"]
 
@@ -90,3 +96,75 @@ runs = ["handoff-open-work"]
 file = "crates/cf-ledger/src/conversations/chief.rs"
 find = "AND a.state NOT IN ('gated', 'cancelled')"
 replace = "AND a.state NOT IN ('gated')"
+
+# --- round 2: the answer, and the eval's counts ---
+
+[[plant]]
+name = "handoff questions: an accepted or failed task takes an answer, as only a cancelled one is refused"
+meant = "a_question_on_an_accepted_task_takes_no_answer"
+runs = ["handoff-open-work"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages.rs"
+find = "if FINISHED_TASK_STATES.contains(&task.state.as_str()) {"
+replace = 'if task.state == "cancelled" {'
+
+[[plant]]
+name = "handoff questions: the refusal of an answer on a failed task does not say to reopen it"
+meant = "a_question_on_a_failed_task_takes_no_answer_and_says_to_reopen_the_task"
+runs = ["handoff-open-work"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages.rs"
+find = "reopen T-{number} to go on with it"
+replace = "nothing more to do with it"
+
+[[plant]]
+name = "handoff questions: a task done and not yet decided on takes no answer either"
+meant = "a_question_on_a_task_that_is_done_but_not_accepted_still_takes_its_answer"
+runs = ["handoff-open-work"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/messages.rs"
+find = "if FINISHED_TASK_STATES.contains(&task.state.as_str()) {"
+replace = 'if FINISHED_TASK_STATES.contains(&task.state.as_str()) || task.state == "done" {'
+
+[[plant]]
+name = "handoff questions: the eval owes an answer to every question, whatever became of its task"
+meant = "does_not_count_a_question_on_a_finished_task_as_owed_an_answer_unless_it_was_answered_for_good"
+runs = ["handoff-evals"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/measure/plumbing.rs"
+find = 'const OWED: &str = "(EXISTS (SELECT 1 FROM message a'
+replace = 'const OWED: &str = "(1 OR EXISTS (SELECT 1 FROM message a'
+
+[[plant]]
+name = "handoff questions: the eval owes an answer to a question on a failed task"
+meant = "holds_the_plumbing_when_every_question_on_a_finished_task_was_answered_and_taken_back_or_never_answered"
+runs = ["handoff-evals"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/measure/plumbing.rs"
+find = "t.state IN ('accepted', 'cancelled', 'failed')"
+replace = "t.state IN ('accepted', 'cancelled')"
+
+[[plant]]
+name = "handoff questions: the eval owes an answer to a question on an accepted task"
+meant = "holds_the_plumbing_when_every_question_on_a_finished_task_was_answered_and_taken_back_or_never_answered"
+runs = ["handoff-evals"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/measure/plumbing.rs"
+find = "t.state IN ('accepted', 'cancelled', 'failed')"
+replace = "t.state IN ('cancelled', 'failed')"
+
+[[plant]]
+name = "handoff questions: any answer stands in the eval's count, one the cancel of a finished task took back too"
+meant = "does_not_count_a_question_on_a_finished_task_as_owed_an_answer_unless_it_was_answered_for_good"
+runs = ["handoff-evals"]
+
+[[plant.edit]]
+file = "crates/cf-evals/src/measure/plumbing.rs"
+find = "a.state != 'cancelled')\n                  OR NOT EXISTS"
+replace = "a.state IS NOT NULL)\n                  OR NOT EXISTS"

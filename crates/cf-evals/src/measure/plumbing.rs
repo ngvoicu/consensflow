@@ -10,6 +10,14 @@ use rusqlite::{Connection, Params};
 use super::metrics::{Check, MemberQuestions, Plumbing};
 use crate::Result;
 
+/// Whether a question `q` is owed an answer by the end of the run: it has one that
+/// stands, or its task is not over. A question on an accepted, cancelled or failed
+/// task is not open, the rule the chief's handoff lists by (`chief_open_work`).
+const OWED: &str = "(EXISTS (SELECT 1 FROM message a
+                              WHERE a.reply_to = q.id AND a.kind = 'answer' AND a.state != 'cancelled')
+                  OR NOT EXISTS (SELECT 1 FROM task t
+                                 WHERE t.id = q.task_id AND t.state IN ('accepted', 'cancelled', 'failed')))";
+
 /// How many rows `sql` counts (`COUNT(*)`), with its parameters.
 fn count(db: &Connection, sql: &str, params: impl Params) -> Result<i64> {
     Ok(db.query_row(sql, params, |row| row.get(0))?)
@@ -43,11 +51,17 @@ pub(super) fn plumbing(db: &Connection, chief: i64, human: i64) -> Result<Plumbi
             "SELECT COUNT(*) FROM message WHERE kind = 'result' AND recipient_id = ?1 AND state IN ('delivered', 'read')",
             [chief],
         )?,
+        // A question on a task that is over is not open (`chief_open_work`), so the chief
+        // is not owed to have answered it, unless it was answered for good: an answer the
+        // cancel of its task took back was rightly never delivered, as a result was not.
         member_questions: count(
             db,
-            "SELECT COUNT(*) FROM message
-             WHERE kind = 'question' AND recipient_id = ?1
-               AND sender_id IS NOT NULL AND sender_id != ?1 AND sender_id != ?2",
+            &format!(
+                "SELECT COUNT(*) FROM message q
+                 WHERE q.kind = 'question' AND q.recipient_id = ?1
+                   AND q.sender_id IS NOT NULL AND q.sender_id != ?1 AND q.sender_id != ?2
+                   AND {OWED}"
+            ),
             sent,
         )?,
         member_questions_answered: count(
@@ -116,21 +130,22 @@ pub(super) fn plumbing(db: &Connection, chief: i64, human: i64) -> Result<Plumbi
 }
 
 /// The questions members put to the chief, by the asker's role and harness: how
-/// many, how many the chief answered, how many answers reached the member's
-/// window, and the longest question in characters.
+/// many it was owed an answer to ([`OWED`]), how many the chief answered, how
+/// many answers reached the member's window, and the longest question in
+/// characters (of all of them).
 pub(super) fn member_questions_by(
     db: &Connection,
     chief: i64,
     human: i64,
 ) -> Result<Vec<MemberQuestions>> {
     let mut statement = db.prepare(
-        "SELECT p.role, p.harness, COUNT(*) AS asked,
+        &format!("SELECT p.role, p.harness, SUM({OWED}) AS asked,
            SUM(EXISTS (SELECT 1 FROM message a WHERE a.reply_to = q.id AND a.kind = 'answer' AND a.state != 'cancelled')) AS answered,
            SUM(EXISTS (SELECT 1 FROM message a WHERE a.reply_to = q.id AND a.kind = 'answer' AND a.state IN ('delivered', 'read'))) AS delivered,
            MAX(LENGTH(q.body)) AS longest
          FROM message q JOIN participant p ON p.id = q.sender_id
          WHERE q.kind = 'question' AND q.recipient_id = ?1 AND q.sender_id NOT IN (?1, ?2)
-         GROUP BY p.role, p.harness ORDER BY p.role, p.harness",
+         GROUP BY p.role, p.harness ORDER BY p.role, p.harness"),
     )?;
     let asked = statement
         .query_map([chief, human], |row| {
