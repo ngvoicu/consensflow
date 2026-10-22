@@ -25,11 +25,16 @@ const LONG: usize = 32 << 20;
 
 /// How many pages more a read may take where the fields are long: a tree laid
 /// out a little otherwise. One long value gone through is some 8,200.
-const SLACK: i32 = 2;
+pub(super) const SLACK: i32 = 2;
 
 /// The pages SQLite's cache gave the ledger's connection since this was last
-/// asked: those it held, and those it read from the file.
-fn pages(ledger: &Ledger) -> i32 {
+/// asked: those it held, and those it read from the file. A long value's pages
+/// that lie in the database file itself, not in the write-ahead log, can be
+/// read straight from it past the cache, and then count for nothing: a read of
+/// the whole 24 MiB text counted 9 pages so, 6,159 with its pages in the log
+/// (`reads.rs` keeps what it writes there). The value limit is the test of a
+/// read that loads one whole.
+pub(super) fn fetched(ledger: &Ledger) -> i32 {
     let counted = |what: c_int| {
         let (mut now, mut most) = (0, 0);
         // SAFETY: the handle is the ledger's open connection's, which outlives
@@ -60,9 +65,9 @@ struct Costs {
 fn costs(ledger: &Ledger, project: i64, conversation: i64, message: i64) -> Costs {
     let counted = |read: &dyn Fn()| {
         read();
-        pages(ledger);
+        fetched(ledger);
         read();
-        pages(ledger)
+        fetched(ledger)
     };
     let read = |find: Option<&'static str>, tools: bool| {
         move || {

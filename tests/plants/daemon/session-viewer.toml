@@ -527,6 +527,47 @@ replace = '''    if false && parts > 0 {
         let index'''
 
 [[plant]]
+name = "session viewer: a page measures an item by the length of its text, not by its head's bytes"
+meant = "a_page_that_shows_a_24_mib_item_reads_what_one_that_shows_an_item_of_two_parts_does"
+runs = ["viewer-ledger-history"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/history.rs"
+find = "SELECT item AS row_id, role, bytes, parts, id_shown"
+replace = "SELECT item AS row_id, role, length((SELECT text FROM transcript WHERE rowid = item)) AS bytes, parts, id_shown"
+
+[[plant]]
+name = "session viewer: a page reads the end of an item's text through a blob read to say how long it is"
+meant = "a_page_that_shows_a_24_mib_item_reads_what_one_that_shows_an_item_of_two_parts_does"
+runs = ["viewer-ledger-history"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/history.rs"
+find = '''        let first = self.part_bytes(&met, 0)?;
+        let reading = first.unwrap_or(met.bytes);'''
+replace = '''        let first = self.part_bytes(&met, 0)?;
+        let blob = self.store.db.blob_open(rusqlite::MAIN_DB, c"transcript", c"text", met.key.row, true)?;
+        blob.read_at(&mut [0_u8; 1], blob.len().saturating_sub(1))?;
+        let reading = first.unwrap_or(met.bytes);'''
+
+[[plant]]
+name = "session viewer: history.part goes through the parts before the one it reads"
+meant = "reading_a_24_mib_item_whole_a_part_at_a_time_reads_each_part_alone"
+runs = ["viewer-ledger-history"]
+
+[[plant.edit]]
+file = "crates/cf-ledger/src/conversations/history.rs"
+find = "        let index = (from / HISTORY_PART).min(parts - 1);"
+replace = '''        let index = (from / HISTORY_PART).min(parts - 1);
+        for earlier in 0..index {
+            let _: Option<String> = store
+                .db
+                .prepare_cached(PART_TEXT)?
+                .query_row(params![row, number(earlier)], |found| found.get(0))
+                .optional()?;
+        }'''
+
+[[plant]]
 name = "session viewer: a page reads an item's time from its row, past the whole of its id and its text"
 meant = "a_read_takes_as_many_pages_beside_32_mib_ids_roles_names_and_bodies_as_beside_short_ones"
 runs = ["viewer-ledger-history"]

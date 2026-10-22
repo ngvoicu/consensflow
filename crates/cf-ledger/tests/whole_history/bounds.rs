@@ -10,11 +10,11 @@ use std::time::Instant;
 
 use cf_ledger::{
     HistoryAsk, HistoryEntry, HistoryFrom, HistoryRead, Ledger, MessageOpening, NewMember, NewNote,
-    Scanned, MESSAGE_OPENING,
+    Scanned, HISTORY_SCAN_BYTES, MESSAGE_OPENING,
 };
 use serde_json::Value;
 
-use super::reads::{ask, ids, ROOM};
+use super::reads::{ask, ids, LOADED_AT_MOST, ROOM};
 use super::{id_of, item, ledger_in, project};
 
 /// The chief's history: `earlier` conversations of one tool's output each,
@@ -251,12 +251,19 @@ fn headings_fill_a_page_as_items_do_and_the_next_page_goes_on_past_them_each_onc
     );
 }
 
+/// The most steps SQLite's machine takes for each conversation, row and part a
+/// read comes to: 170 at the most (a conversation's heading, which reads the
+/// log), measured.
+const STEPS_A_ROW: usize = 200;
+
 /// What a page takes for a chief of 50,000 items and 200 MB of text in five
 /// conversations, two items in five tools' outputs, a 24 MiB item of an
 /// agent's in the newest, and 10,000 conversations of tools' outputs alone
 /// before them all. The daemon reads on its own thread (the ledger holds its
-/// file alone, one connection), so this is how long it waits for each. Run in
-/// release: `cargo test --release -p cf-ledger --test whole_history -- --ignored --nocapture`.
+/// file alone, one connection), so this is how long it waits for each, printed
+/// for whoever runs it; what it asserts is what each read went through (its
+/// charge, its steps, no long value loaded), which no machine's load moves.
+/// Run in release: `cargo test --release -p cf-ledger --test whole_history -- --ignored --nocapture`.
 #[test]
 #[ignore = "builds a 230 MB ledger; run by hand, in release"]
 fn a_page_of_a_long_history_takes_what_a_page_takes() {
@@ -303,6 +310,8 @@ fn a_page_of_a_long_history_takes_what_a_page_takes() {
         "built: 10,000 conversations, 50,000 items and a 24 MiB one in {:?}",
         started.elapsed()
     );
+    // A read that loaded a long item's text whole would fail, the value too long.
+    ledger.limit_value_length(LOADED_AT_MOST).expect("held");
     let time = |what: &str, ask: HistoryAsk<'_>| {
         let started = Instant::now();
         let read = ledger.read_history(project, "chief", &ask).expect("read");
@@ -319,7 +328,19 @@ fn a_page_of_a_long_history_takes_what_a_page_takes() {
             "{what}: {took:?}, {} entries; {conversations} conversations, {rows} rows, {parts} part lookups, {bytes} bytes of text and {fields} of fields, {steps} steps gone through",
             read.entries.len(),
         );
-        assert!(took.as_millis() < 1_000, "{what} took {took:?}");
+        // What the read went through is what it was let go through, and its
+        // steps are as many as the rows and parts it came to, whatever the
+        // history holds beside them: the same on any machine, as the time is
+        // not (in debug, or beside a build, it passes a second).
+        assert!(
+            read.charged <= HISTORY_SCAN_BYTES,
+            "{what} was charged {} bytes",
+            read.charged
+        );
+        assert!(
+            steps <= STEPS_A_ROW * (conversations + rows + parts).max(1),
+            "{what} took {steps} steps for {conversations} conversations, {rows} rows and {parts} parts"
+        );
         read
     };
     let first = time(
