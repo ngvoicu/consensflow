@@ -389,10 +389,16 @@ fn a_run_answers_the_status_the_machine_says_though_its_ssh_ends_with_1() {
         let fakes = tempfile::tempdir().unwrap();
         script(fakes.path(), "scp", "exit 0");
         let flattened = i32::from(said != 0);
+        // The first ask is the run; the next, for the reports it left, is a listing of none,
+        // which the machine's PowerShell ends with 0 whatever the run did.
         script(
             fakes.path(),
             "ssh",
-            &format!("echo \"in the run\"; echo \"== exit {said}\"; exit {flattened}"),
+            &format!(
+                "n=$(cat \"$0.count\" 2>/dev/null || echo 0); echo $((n+1)) > \"$0.count\"; \
+                 if [ \"$n\" -gt 0 ]; then exit 0; fi; \
+                 echo \"in the run\"; echo \"== exit {said}\"; exit {flattened}"
+            ),
         );
         let tree = tree(&[("keep.txt", "kept")]);
         let ran = on(

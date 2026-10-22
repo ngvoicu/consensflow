@@ -349,6 +349,49 @@ fn a_link_to_pis_managed_launcher_is_updated_as_pis_own_install() {
     assert_eq!(found.update, Some(vec![executable, "update".to_owned()]));
 }
 
+/// A managed install in an agent folder of any name is told by the file Pi's installer writes
+/// in it, `install/managed-install.json`, beside `bin`: the installer's own evidence, which holds
+/// where the app's environment names no `PI_CODING_AGENT_DIR` (a variable the shell that ran the
+/// installer had) and where a link in a folder of the PATH goes into it (T-141, P3-5).
+#[test]
+fn pis_managed_install_in_an_agent_folder_the_human_named_is_updated_as_its_installer_says() {
+    let root = tempfile::tempdir().unwrap();
+    let agent = root.path().join("work").join("pi-agent");
+    let launcher = agent.join("bin").join("pi");
+    let marker = agent.join("install").join("managed-install.json");
+    for file in [&launcher, &marker] {
+        fs::create_dir_all(file.parent().unwrap()).unwrap();
+        fs::write(file, "").unwrap();
+    }
+    let executable = launcher.to_string_lossy().into_owned();
+    let found = source(Harness::Pi, &executable, &Env::default());
+    assert_eq!(found.distribution.as_deref(), Some("Pi's installer"));
+    assert_eq!(
+        found.update,
+        Some(vec![executable.clone(), "update".into()])
+    );
+    // Without the file it is a `pi` in a folder called `bin`, which nothing says how to update.
+    fs::remove_file(&marker).unwrap();
+    let found = source(Harness::Pi, &executable, &Env::default());
+    assert_eq!((found.distribution, found.update), (None, None));
+    // The file beside another folder's `bin` is no proof of this one; nor is another harness's.
+    fs::write(&marker, "").unwrap();
+    let other = root
+        .path()
+        .join("work")
+        .join("other")
+        .join("bin")
+        .join("pi");
+    fs::create_dir_all(other.parent().unwrap()).unwrap();
+    fs::write(&other, "").unwrap();
+    let other = other.to_string_lossy().into_owned();
+    assert_eq!(source(Harness::Pi, &other, &Env::default()).update, None);
+    assert_eq!(
+        source(Harness::Codex, &executable, &Env::default()).update,
+        None
+    );
+}
+
 #[test]
 fn a_cli_found_where_nothing_is_recognized_is_the_humans_to_update() {
     let found = source(Harness::Codex, "/somewhere/else/codex", &Env::default());

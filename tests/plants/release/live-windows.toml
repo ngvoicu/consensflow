@@ -22,6 +22,7 @@ e2e-live-path = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::m
 e2e-live-command = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::members::command::"]
 e2e-stops-tool = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_stops", "midturn::tool::"]
 e2e-stops-stuck = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "live_stops", "stuck::"]
+e2e-descent = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "live::members::descent::"]
 
 # Which program on the PATH is taken.
 
@@ -233,3 +234,35 @@ runs = ["e2e-stops-stuck"]
 file = "crates/cf-e2e/tests/live_stops/stuck.rs"
 find = '''(?:"(?:[^"]*[\\/])?(?i:{name}(?:\.exe)?)"|(?:\S*[\\/])?(?i:{name}(?:\.exe)?))'''
 replace = '''(?:\S*[\\/])?(?i:{name}(?:\.exe)?)'''
+
+# Git Bash's own programs have the parent Git Bash says (T-141, P3-7): the sleep of the stuck script
+# has no parent that runs, for the sh that started it forked a copy of itself that has gone.
+[[plant]]
+name = "live windows: a cygwin program whose parent has gone is given none"
+meant = "a_cygwin_program_whose_parent_has_gone_is_given_the_parent_git_bash_says_it_has"
+runs = ["e2e-descent", "e2e-stops-stuck"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/descent.rs"
+find = "            process.ppid = parent;"
+replace = "            let _ = parent;"
+
+[[plant]]
+name = "live windows: a parent that began after the child is its parent"
+meant = "what_git_bash_does_not_vouch_for_is_listed_as_it_was"
+runs = ["e2e-descent"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/descent.rs"
+find = "                .is_some_and(|started| *started <= process.identity.started)"
+replace = "                .is_some_and(|_| true)"
+
+[[plant]]
+name = "live windows: Git Bash is asked of every process whose parent runs"
+meant = "a_cygwin_program_whose_parent_has_gone_is_given_the_parent_git_bash_says_it_has"
+runs = ["e2e-descent"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/descent.rs"
+find = "        if process.ppid == 0 || began.contains_key(&process.ppid) {"
+replace = "        if process.ppid == 0 {"

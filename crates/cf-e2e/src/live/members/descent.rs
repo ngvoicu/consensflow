@@ -276,6 +276,92 @@ pub(crate) fn refined_by_handle(
         .collect()
 }
 
+/// One row of Git Bash's `ps -W`: a process by its Cygwin number, its parent's, and its
+/// Windows number.
+#[derive(Debug, PartialEq, Eq)]
+struct CygwinRow {
+    pid: u32,
+    ppid: u32,
+    winpid: u32,
+}
+
+/// What Git Bash's `ps -W` says, read for the first four of its columns (`PID PPID PGID
+/// WINPID`) of each row: the header and any line that is no row say nothing.
+fn cygwin_table(listing: &str) -> Vec<CygwinRow> {
+    listing
+        .lines()
+        .filter_map(|line| {
+            let mut words = line.split_whitespace().map(|word| word.parse::<u32>().ok());
+            let (pid, ppid, _group, winpid) = (
+                words.next()??,
+                words.next()??,
+                words.next()??,
+                words.next()??,
+            );
+            Some(CygwinRow { pid, ppid, winpid })
+        })
+        .collect()
+}
+
+/// The folder the program of a command line is in: the first word, or the first in double
+/// quotes where a path holds a space, up to its last `\` or `/`; none where it names none.
+fn program_folder(command: &str) -> Option<String> {
+    let program = match command.strip_prefix('"') {
+        Some(rest) => rest.split('"').next()?,
+        None => command.split(' ').next()?,
+    };
+    program
+        .rsplit_once(['\\', '/'])
+        .map(|(folder, _)| folder.to_owned())
+}
+
+/// `listed` (Windows' table) with the parent Git Bash says for each Cygwin program whose own
+/// has gone. Git Bash's `sh` runs a program of its own kind from a script by forking a copy of
+/// itself, which starts the program and is gone by the time anyone looks (zeewin, 2026-10-21:
+/// the sleep of the `stuck` script, started by `sh ./script`, names a parent that no process
+/// has, and descends from nothing of the window's, whose script it is the child of). `ps -W` of
+/// the folder the program is in (`ps`, asked once for each folder: its text, or none where there
+/// is no `ps` there) says its Cygwin parent, and which Windows process that is. A parent is given
+/// only where Windows lists it and it began no later than the child: a number another process has
+/// taken since is none.
+pub fn with_cygwin_parents(
+    mut listed: Vec<Running>,
+    ps: impl Fn(&str) -> Option<String>,
+) -> Vec<Running> {
+    let began: std::collections::HashMap<u32, u64> = listed
+        .iter()
+        .map(|process| (process.identity.pid, process.identity.started))
+        .collect();
+    let mut tables: std::collections::HashMap<String, Vec<CygwinRow>> =
+        std::collections::HashMap::new();
+    for process in &mut listed {
+        if process.ppid == 0 || began.contains_key(&process.ppid) {
+            continue;
+        }
+        let Some(folder) = program_folder(&process.command) else {
+            continue;
+        };
+        let table = tables.entry(folder).or_insert_with_key(|folder| {
+            ps(folder)
+                .map(|text| cygwin_table(&text))
+                .unwrap_or_default()
+        });
+        let parent = table
+            .iter()
+            .find(|row| row.winpid == process.identity.pid)
+            .and_then(|own| table.iter().find(|row| row.pid == own.ppid))
+            .map(|row| row.winpid);
+        if let Some(parent) = parent.filter(|parent| {
+            began
+                .get(parent)
+                .is_some_and(|started| *started <= process.identity.started)
+        }) {
+            process.ppid = parent;
+        }
+    }
+    listed
+}
+
 /// What `ps` says of every process, or of the process `pid` alone, in the C locale so
 /// that its `lstart` is what [`ps_lines`] reads.
 #[cfg(unix)]

@@ -287,9 +287,11 @@ pub fn remote_script(script: &Script) -> String {
 /// - Then `evals/reports`, which is kept, is pruned by age ([`REPORTS_KEPT_DAYS`]): a file
 ///   last written before the cutoff goes, and a folder that was old itself and has nothing
 ///   left in it. Every folder is walked, whatever its own time: a folder's time is when an
-///   entry was last added to it, so a `long` or `windows` folder that a recent run wrote
-///   into would otherwise keep every old report in it for ever. What cannot be removed
-///   there is said and does not end the run: it is no file of the tree.
+///   entry was last added to it, so a `long` folder that a recent run wrote into would
+///   otherwise keep every old report in it for ever. A link is not walked, nor is the reports
+///   folder itself when it is one. What cannot be removed there is said and does not end
+///   the run: it is no file of the tree. (The matrix's `windows/` folders are written on the
+///   Mac, not here.)
 pub fn sweep_script() -> String {
     let kept: Vec<String> = KEPT.iter().map(|name| quoted(name)).collect();
     fill(
@@ -307,6 +309,14 @@ pub fn sweep_script() -> String {
 /// pass on.
 pub fn stop_script(dir: &str) -> String {
     fill(STOP, &[("dir", dir), ("running", RUNNING)])
+}
+
+/// What lists the reports a run left in `evals/reports` on the machine, to be brought back
+/// ([`super::fetch`]): each file under it as `<path from it, with />` and a tab and its size, but
+/// for what is under `windows/`, which the matrix writes here and not there. A folder that is
+/// not there lists nothing.
+pub fn reports_script(dir: &str) -> String {
+    fill(REPORTS, &[("dir", dir)])
 }
 
 /// `template` with each `«name»` written as the text `parts` gives it, in one
@@ -440,10 +450,27 @@ function Clear-Old([IO.DirectoryInfo]$folder) {
 $root = Get-Item -LiteralPath $dir
 $base = $root.FullName.TrimEnd('\').Length + 1
 $null = Clear-Stale $root
-if (Test-Path -LiteralPath (Join-Path $dir 'evals/reports') -PathType Container) { $null = Clear-Old (Get-Item -LiteralPath (Join-Path $dir 'evals/reports')) }
+$reports = Join-Path $dir 'evals/reports'
+if (Test-Path -LiteralPath $reports -PathType Container) {
+  $folder = Get-Item -LiteralPath $reports
+  if (-not ($folder.Attributes -band [IO.FileAttributes]::ReparsePoint)) { $null = Clear-Old $folder }
+}
 foreach ($name in $removed) { Write-Output "== removed $name" }
 if ($failed.Count) { Write-Output "What left the tree could not be removed from the copy: $($failed -join '; ')" }
 if ($unpruned.Count) { Write-Output "What the reports held past their age could not be removed: $($unpruned -join '; ')" }
+"##;
+
+/// The script that lists the reports, with a mark where the copy's folder goes.
+const REPORTS: &str = r##"
+$ProgressPreference = 'SilentlyContinue'
+$reports = Join-Path (Join-Path $env:USERPROFILE '«dir»') 'evals\reports'
+if (Test-Path -LiteralPath $reports -PathType Container) {
+  $base = (Get-Item -LiteralPath $reports).FullName.TrimEnd('\').Length + 1
+  foreach ($file in Get-ChildItem -LiteralPath $reports -Recurse -File -Force) {
+    $name = $file.FullName.Substring($base).Replace('\', '/')
+    if ($name -notlike 'windows/*') { "$name`t$($file.Length)" }
+  }
+}
 "##;
 
 /// The script that ends a run, with a mark where each part of it goes. It begins

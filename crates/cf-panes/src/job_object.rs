@@ -27,12 +27,18 @@
 //! turn's is. The whole of it is held to [`BUDGET`], inside what the daemon waits for
 //! ([`cf_proto::panes::ENDING_BOUND`]).
 //!
+//! A program of Git Bash's own kind that a script started (`sleep`, `grep`) names a parent that
+//! has gone, a forked copy of the shell: the parent `ps -W` of Git Bash says it has is given
+//! instead ([`repair_cygwin_parents`], [`crate::cygwin`]), so that the chain up from it to the
+//! shell the harness started is whole and a stop ends it with the script.
+//!
 //! The harness joins right after it starts (the PTY library starts it
 //! unsuspended); a child it starts in that first instant would escape, which a
 //! harness still loading its runtime does not do.
 use std::collections::{HashMap, HashSet};
 use std::io;
 use std::mem::{offset_of, size_of, size_of_val};
+use std::path::{Path, PathBuf};
 use std::ptr;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -226,11 +232,13 @@ impl JobObject {
     /// number the system lists may be another's by the time it is opened, and the
     /// handle is asked, not the number.
     fn hold(&self) -> io::Result<Vec<Held>> {
-        Ok(self
+        let mut held: Vec<Held> = self
             .process_ids()?
             .into_iter()
             .filter_map(|pid| self.hold_one(pid))
-            .collect())
+            .collect();
+        repair_cygwin_parents(&mut held);
+        Ok(held)
     }
 
     /// Holds what the job has now that `held` has not: a process that is held keeps
@@ -361,6 +369,70 @@ impl Held {
         !self.process.gone()
     }
 }
+
+/// A program of Git Bash's own kind that a script started names a parent that has gone (a
+/// forked copy of the shell, which started it): the parent Git Bash says it has, a shell of
+/// the job, is given instead, so that the chain from it to the shell the harness started is
+/// whole ([`crate::cygwin`]). `ps -W` is asked only where such a process is and a `ps` is in
+/// the folder of its program (Git Bash's); a process it says nothing of, or whose parent is
+/// no member, keeps the parent it named.
+fn repair_cygwin_parents(held: &mut [Held]) {
+    let members: HashSet<u32> = held.iter().map(|one| one.member.key.pid).collect();
+    let orphans: Vec<(u32, PathBuf)> = held
+        .iter()
+        .filter(|one| one.parent.is_some_and(|parent| !members.contains(&parent)))
+        .filter_map(|one| {
+            let folder = Path::new(&one.member.exe).parent()?;
+            Some((one.member.key.pid, folder.to_path_buf()))
+        })
+        .filter(|(_, folder)| folder.join("ps.exe").is_file())
+        .collect();
+    if orphans.is_empty() {
+        return;
+    }
+    for (pid, parent) in crate::cygwin::parents_of(&orphans, ps_w) {
+        if !members.contains(&parent) {
+            continue;
+        }
+        if let Some(one) = held.iter_mut().find(|one| one.member.key.pid == pid) {
+            one.parent = Some(parent);
+        }
+    }
+}
+
+/// What `ps -W` of the folder `folder` says (Git Bash's own, which lists the Cygwin parent of
+/// each of its programs): none where it did not answer in [`PS_TIME`]. It is started through
+/// cf-process, on a runtime of its own for the moment it takes, with this process's
+/// environment as it is: Git's `ps` needs the system's variables.
+fn ps_w(folder: &Path) -> Option<String> {
+    let run = cf_process::Run {
+        program: folder.join("ps.exe"),
+        args: vec!["-W".into()],
+        verbatim: false,
+    };
+    let limits = cf_process::Limits {
+        timeout: PS_TIME,
+        max_buffer: PS_BYTES,
+    };
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .ok()?;
+    runtime
+        .block_on(cf_process::execute(
+            &run,
+            None,
+            &cf_base::env::Env::from_process(),
+            limits,
+            |_| {},
+        ))
+        .ok()
+}
+
+/// How long a look waits for `ps -W`, and how much of it is read: a list of every process of the
+/// machine, a line each.
+const PS_TIME: Duration = Duration::from_secs(3);
+const PS_BYTES: usize = 8 * 1024 * 1024;
 
 /// The members of `held`, each with the process that started it where that is one
 /// of them and began first: a number a process took after its parent went is not its

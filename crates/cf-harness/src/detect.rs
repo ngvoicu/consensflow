@@ -20,6 +20,7 @@ use cf_base::env::Env;
 use cf_proto::agents::Harness;
 use serde::Serialize;
 
+use crate::pi::paths::agent_dir;
 use crate::shared::paths::{home, set};
 
 /// Every harness, in the order Node's harness list had them: the order
@@ -100,26 +101,33 @@ fn npm_global(env: &Env) -> Option<PathBuf> {
 /// may write in, and the launcher is there all the same.
 const MANAGED_PI: [&str; 3] = [".pi", "agent", "bin"];
 
-/// The variable both installers read for the agent folder: `install.ps1` when it
-/// holds something, `install.sh` as `${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}`, an
-/// empty one being none in both.
-const AGENT_DIR: &str = "PI_CODING_AGENT_DIR";
-
-/// The folders of `harness`'s managed install, which only Pi has: `bin` of the
-/// agent folder the human named, then of the default one under the home (an install
-/// made before the variable was set is still there). A relative folder is read
-/// against the working folder, where the installers read it against theirs; none
-/// where the environment names no folder and has no home.
+/// The folders of `harness`'s managed install, which only Pi has: `bin` of the agent
+/// folder as Pi reads it (`pi::paths::agent_dir`: `PI_CODING_AGENT_DIR`, which both
+/// installers read too, an empty one being none, else `~/.pi/agent`; `~`, `~/` and on
+/// Windows `~\` are the home), then of the default one under the home when that is
+/// another (an install made before the variable was set is still there). A relative
+/// folder is the home's: the installers read it against where they ran, which a
+/// terminal opens in the home, and this daemon's own working folder is no place of
+/// theirs. None where the environment names no folder and has no home.
 fn managed(harness: Harness, env: &Env) -> Vec<PathBuf> {
     if harness != Harness::Pi {
         return Vec::new();
     }
-    let named = set(env, AGENT_DIR).map(|agent| PathBuf::from(agent).join("bin"));
-    let default = home(env).ok().map(|home| {
+    let home = home(env).ok().map(PathBuf::from);
+    let named = agent_dir(env).ok().map(|agent| {
+        let agent = PathBuf::from(agent);
+        match &home {
+            Some(home) if agent.is_relative() => home.join(agent),
+            _ => agent,
+        }
+        .join("bin")
+    });
+    let default = home.map(|home| {
         MANAGED_PI
             .iter()
-            .fold(PathBuf::from(home), |folder, part| folder.join(part))
+            .fold(home, |folder, part| folder.join(part))
     });
+    let default = default.filter(|default| Some(default) != named.as_ref());
     named.into_iter().chain(default).collect()
 }
 

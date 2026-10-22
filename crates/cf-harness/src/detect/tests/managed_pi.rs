@@ -134,6 +134,56 @@ fn a_managed_pi_in_the_agent_folder_the_human_named_is_found_and_the_default_is_
     assert_eq!(harness_path(Harness::Claude, &env), None);
 }
 
+/// The agent folder is read as Pi reads it (`pi::paths::agent_dir`): `~` and `~/` are the home,
+/// and `~\` on Windows. A relative one is the home's: both installers read it against where
+/// they ran, which a terminal opens in the home (T-141, P3-4).
+#[test]
+fn the_agent_folder_the_human_named_is_read_as_pi_reads_it_a_tilde_and_a_relative_one_included() {
+    let machine = Machine::new();
+    let home = machine.home();
+    let found = |value: &str| {
+        let env = machine.env(&[("PI_CODING_AGENT_DIR", Some(value))]);
+        harness_path(Harness::Pi, &env)
+    };
+    let launcher = |folder: &Path| {
+        let shim = folder.join("bin").join("pi.cmd");
+        startable_with(&shim, MANAGED_CMD);
+        shim
+    };
+    for (value, folder) in [
+        ("~/work/pi-a", home.join("work").join("pi-a")),
+        // Nothing but the home itself: `~` is the home, whose `bin` is the folder.
+        ("~", home.clone()),
+        ("work/pi-b", home.join("work").join("pi-b")),
+    ] {
+        assert_eq!(found(value), None, "{value}");
+        let shim = launcher(&folder);
+        assert_eq!(found(value), Some(shim.clone()), "{value}");
+        fs::remove_file(shim).unwrap();
+    }
+    // An absolute one is as it is, and a `~` that is not first is no home.
+    let absolute = machine.root.path().join("elsewhere");
+    let shim = launcher(&absolute);
+    assert_eq!(found(&text(&absolute)), Some(shim));
+    assert_eq!(found("work/~/pi"), None);
+}
+
+/// Windows reads `~\` as the home too, which no other system does.
+#[cfg(windows)]
+#[test]
+fn a_tilde_and_a_backslash_is_the_home_on_windows() {
+    let machine = Machine::new();
+    let shim = machine
+        .home()
+        .join("work")
+        .join("pi-c")
+        .join("bin")
+        .join("pi.cmd");
+    startable_with(&shim, MANAGED_CMD);
+    let env = machine.env(&[("PI_CODING_AGENT_DIR", Some(r"~\work\pi-c"))]);
+    assert_eq!(harness_path(Harness::Pi, &env), Some(shim));
+}
+
 #[test]
 fn the_launcher_the_unix_installer_writes_is_found_there_too_and_is_pis_alone() {
     let root = tempfile::tempdir().unwrap();

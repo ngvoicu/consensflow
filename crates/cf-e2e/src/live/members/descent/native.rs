@@ -180,19 +180,32 @@ mod win {
         PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE, PROCESS_TERMINATE,
     };
 
-    use super::super::{refined_by_handle, Identity, Running};
+    use super::super::{refined_by_handle, with_cygwin_parents, Identity, Running};
+    use crate::process::Run;
     use crate::{Error, Result};
 
     /// Every process of Windows' table, each with its creation time as its own handle says
-    /// it ([`refined_by_handle`]).
+    /// it ([`refined_by_handle`]), and the parent Git Bash says for a Cygwin program whose
+    /// own has gone ([`with_cygwin_parents`]).
     pub(in super::super) fn processes() -> Result<Vec<Running>> {
-        Ok(refined_by_handle(super::super::table()?, |pid| match open(
-            pid,
-            PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SYNCHRONIZE,
-        )? {
-            Some(handle) => handle.created(),
-            None => Ok(None),
-        }))
+        let listed = refined_by_handle(super::super::table()?, |pid| {
+            match open(pid, PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SYNCHRONIZE)? {
+                Some(handle) => handle.created(),
+                None => Ok(None),
+            }
+        });
+        Ok(with_cygwin_parents(listed, cygwin_ps))
+    }
+
+    /// What `ps -W` of the folder `folder` says (Git Bash's own, which lists the Cygwin
+    /// parent of each of its programs): none where no `ps` is there or it did not answer.
+    fn cygwin_ps(folder: &str) -> Option<String> {
+        let ps = std::path::Path::new(folder).join("ps.exe");
+        if !ps.is_file() {
+            return None;
+        }
+        let ran = Run::new(ps).args(["-W"]).inheriting_env().run().ok()?;
+        (ran.code == Some(0)).then_some(ran.stdout)
     }
 
     /// Which process has the number `pid` now, read on a handle to it: none where none

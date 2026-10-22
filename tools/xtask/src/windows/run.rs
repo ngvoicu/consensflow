@@ -56,7 +56,7 @@ impl Plan {
 }
 
 /// The line ssh hands the machine's shell for `script`.
-fn powershell(script: &str) -> Result<String, Refusal> {
+pub(super) fn powershell(script: &str) -> Result<String, Refusal> {
     Ok(format!(
         "powershell -NoProfile -NonInteractive -EncodedCommand {}",
         encode_script(script)?
@@ -69,7 +69,7 @@ pub fn check(options: &Options) -> Result<(), Refusal> {
 }
 
 /// ssh to `host`, asked to run `line` there.
-fn ssh(context: &Context, host: &str, line: &str) -> Invocation {
+pub(super) fn ssh(context: &Context, host: &str, line: &str) -> Invocation {
     Invocation::new("ssh", &context.root).arg(host).arg(line)
 }
 

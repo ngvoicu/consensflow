@@ -193,7 +193,7 @@ runs = ["xtask-lib-windows"]
 
 [[plant.edit]]
 file = "tools/xtask/src/windows/script.rs"
-find = "if (Test-Path -LiteralPath (Join-Path $dir 'evals/reports') -PathType Container) { $null = Clear-Old (Get-Item -LiteralPath (Join-Path $dir 'evals/reports')) }\n"
+find = "  if (-not ($folder.Attributes -band [IO.FileAttributes]::ReparsePoint)) { $null = Clear-Old $folder }\n"
 replace = ""
 
 [[plant]]
@@ -259,3 +259,120 @@ runs = ["xtask-lib-windows"]
 file = "tools/xtask/src/windows/script.rs"
 find = '    if ($inside -or $written -ge $cutoff) {'
 replace = '    if ($written -ge $cutoff) {'
+
+# A reports folder that is itself a link is not walked (T-141, P3-8).
+[[plant]]
+name = "windows runner: a reports folder that is a link is pruned where it goes"
+meant = "a_folder_that_is_a_link_is_not_looked_into_and_one_left_empty_is_removed"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = "  if (-not ($folder.Attributes -band [IO.FileAttributes]::ReparsePoint)) { $null = Clear-Old $folder }\n"
+replace = "  $null = Clear-Old $folder\n"
+
+# What a run leaves in `evals/reports` there is brought back here (T-141, P3-3), the files this checkout
+# lacks and nothing it has, by names of a report's alone, whole; the runner and the matrix both do it.
+[[plant]]
+name = "windows runner: the reports a run left are not brought back"
+meant = "a_run_that_ended_there_with_a_status_brings_its_reports_back_and_answers_the_commands_status"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/fetch.rs"
+find = "        let _ = bring_back(context, options, console);\n"
+replace = ""
+
+[[plant]]
+name = "windows runner: the matrix's machine does not bring the reports back"
+meant = "the_matrixs_machine_brings_the_reports_back_too"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/matrix.rs"
+find = "        super::fetch::run_keeping(self.context, options, console, self.interrupt)"
+replace = "        super::run::run(self.context, options, console, self.interrupt)"
+
+[[plant]]
+name = "windows runner: a report this checkout has is replaced"
+meant = "the_reports_this_checkout_lacks_are_brought_back_and_the_ones_it_has_are_kept_as_they_are"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/fetch.rs"
+find = '''
+        if to.exists() {
+            continue;
+        }
+'''
+replace = ""
+
+[[plant]]
+name = "windows runner: what the matrix writes under windows is brought back"
+meant = "what_is_here_already_or_the_matrix_writes_is_not_asked_for_and_nothing_is_said_of_it"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/fetch.rs"
+find = '''
+        if name.starts_with("windows/") {
+            continue;
+        }
+'''
+replace = ""
+
+[[plant]]
+name = "windows runner: any name the machine lists is brought back"
+meant = "a_name_that_is_no_reports_is_said_and_is_never_copied_or_made_a_path"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/fetch.rs"
+find = "        if is_report_name(name) {"
+replace = "        if true {"
+
+[[plant]]
+name = "windows runner: a copy of any size is a report"
+meant = "a_copy_that_is_not_the_size_the_machine_listed_is_taken_back_and_said"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/fetch.rs"
+find = "            Ok(found) if found.len() == file.size => {"
+replace = "            Ok(_) => {"
+
+[[plant]]
+name = "windows runner: a copy is made under the report's own name"
+meant = "a_copy_that_is_not_the_size_the_machine_listed_is_taken_back_and_said"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/fetch.rs"
+find = "        .arg(&part);"
+replace = "        .arg(to);"
+
+[[plant]]
+name = "windows runner: a file that cannot be copied ends the bringing back"
+meant = "a_file_that_cannot_be_copied_is_said_and_the_others_are_still_brought"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/fetch.rs"
+find = '''
+            Err(said) => writeln!(
+                console.err,
+                "windows: the report {} could not be brought back: {said}",
+                file.name
+            )
+            .map_err(Error::Output)?,
+'''
+replace = '''
+            Err(said) => {
+                return writeln!(
+                    console.err,
+                    "windows: the report {} could not be brought back: {said}",
+                    file.name
+                )
+                .map_err(Error::Output)
+            }
+'''

@@ -67,6 +67,12 @@
 //! names another under it. Run one at a time: a live run's windows are the
 //! machine's.
 //!
+//! A run that ended there with a status then has what it left in `evals/reports` there
+//! brought back to the same folder here, the files this checkout lacks (a long run's report and
+//! ledger among them: the sweep of a later run removes what is older than two weeks from the
+//! machine's copy), and says so on the error stream; the status is the command's own either way
+//! ([`fetch`]).
+//!
 //! `windows-matrix` is the evals there: each `--scenario` for each `--pair
 //! chief:staff`, one run after another through the same run, with `--env` given
 //! to each, the output of each kept in `evals/reports/windows/` and one line per
@@ -75,8 +81,9 @@
 //! The modules: [`options`] (the words), [`script`] (the PowerShell that goes, as
 //! text, and the line it ends by), [`tree`] (the tarball), [`session`] (ssh, as it
 //! goes, and the answer), [`tail`] (the last line of what it said), [`interrupt`]
-//! (a stop), [`run`] (one run) and [`matrix`].
+//! (a stop), [`run`] (one run), [`fetch`] (the reports brought back) and [`matrix`].
 
+mod fetch;
 mod interrupt;
 mod matrix;
 mod options;
@@ -180,7 +187,7 @@ fn windows(context: &Context, args: &[OsString], console: &mut Console) -> Resul
     let options = Options::parse(args).map_err(Failure::Usage)?;
     run::check(&options).map_err(|refusal| Failure::Usage(refusal.to_string()))?;
     let interrupt = Interrupt::listen()?;
-    match run::run(context, &options, console, &interrupt) {
+    match fetch::run_keeping(context, &options, console, &interrupt) {
         Ok(Outcome::Exited(status)) => Ok(status),
         Ok(Outcome::Stopped) => Ok(STOPPED),
         Err(error) => {

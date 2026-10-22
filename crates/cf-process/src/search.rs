@@ -231,6 +231,10 @@ mod tests {
             .os("PATH")
             .is_some_and(|path| std::env::split_paths(path).any(|folder| folder == homebrew)));
         assert_eq!(on_path("codex", &running), Some(homebrew.join("codex")));
+        assert_eq!(
+            on_path_as_program("codex", &running),
+            Some(homebrew.join("codex"))
+        );
         assert_eq!(on_search_path("codex", &running), None);
     }
 

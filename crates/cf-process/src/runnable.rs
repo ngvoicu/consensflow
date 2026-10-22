@@ -88,7 +88,7 @@ pub fn runnable(executable: &Path, args: &[OsString], env: &Env) -> Result<Run, 
                 verbatim: false,
             });
         }
-        Shim::NeedsNode => return Err(needs_node(executable)),
+        Shim::NeedsNode { bare } => return Err(needs_node(executable, bare)),
         Shim::Opaque => {}
     }
     let line = std::iter::once(caret(&name))
@@ -126,7 +126,7 @@ pub fn pane_argv(argv: &[String], env: &Env) -> Result<Vec<String>, String> {
     }
     let (program, script) = match read_shim(Path::new(executable), env) {
         Shim::Runs { program, script } => (program, script),
-        Shim::NeedsNode => return Err(needs_node(Path::new(executable))),
+        Shim::NeedsNode { bare } => return Err(needs_node(Path::new(executable), bare)),
         Shim::Opaque => {
             return Err(format!(
                 "{executable} is not an npm shim, and only cmd.exe could run it in a window"
@@ -183,8 +183,10 @@ fn quoted(arg: &str) -> String {
 enum Shim {
     /// An npm-style shim, read: `program` runs `script`.
     Runs { program: PathBuf, script: PathBuf },
-    /// An npm-style shim that runs on a Node, and none is to be found for it.
-    NeedsNode,
+    /// An npm-style shim that runs on a Node, and none is to be found for it. `bare` says it
+    /// was Pi's own installer's, whose `node` is bare: its words name where Pi's installer
+    /// puts a Node of its own, and do not speak of npm.
+    NeedsNode { bare: bool },
     /// Not of the shape [`shim_target`] reads: only cmd.exe can run it.
     Opaque,
 }
@@ -194,9 +196,9 @@ enum Program {
     /// `%_prog%` or `%NODE_EXE%`, which npm's own shim sets to the node beside
     /// it, else to the one on the PATH.
     Node,
-    /// A bare `node`, which Pi's installer leaves to cmd.exe's search: found
-    /// as [`Program::Node`] is, and last in the folder that installer puts a
-    /// Node in for a machine that has none ([`pi_node`]).
+    /// A bare `node`, which Pi's installer leaves to cmd.exe's search: the Node beside the
+    /// shim, then the one that installer puts for a machine that has none or an older one
+    /// ([`pi_node`]), then the PATH's.
     BareNode,
     /// A program the shim names outright.
     Named(PathBuf),
@@ -208,48 +210,56 @@ fn read_shim(shim: &Path, env: &Env) -> Shim {
         None => Shim::Opaque,
         Some((Program::Named(program), script)) => Shim::Runs { program, script },
         Some((node, script)) => {
-            let found = node_for(shim, env).or_else(|| match node {
-                Program::BareNode => pi_node(env),
-                _ => None,
-            });
-            match found {
+            let bare = matches!(node, Program::BareNode);
+            match node_for(shim, env, || bare.then(|| pi_node(env)).flatten()) {
                 Some(program) => Shim::Runs { program, script },
-                None => Shim::NeedsNode,
+                None => Shim::NeedsNode { bare },
             }
         }
     }
 }
 
-/// The Node an npm shim runs on, as npm's own shim finds it: the `node.exe`
-/// beside it, else the node on `env`'s PATH, a program and not a script of
-/// that name. There is no other: ConsensFlow bundles none, and an environment
-/// variable names none.
-fn node_for(shim: &Path, env: &Env) -> Option<PathBuf> {
+/// The Node a shim runs on, as npm's own shim finds it: the `node.exe` beside it, else
+/// the node on `env`'s PATH, a program and not a script of that name. `own` is what a shim
+/// may have besides, between the two (Pi's installer's own Node). There is no other:
+/// ConsensFlow bundles none, and an environment variable names none.
+fn node_for(shim: &Path, env: &Env, own: impl FnOnce() -> Option<PathBuf>) -> Option<PathBuf> {
     let beside = shim.parent()?.join("node.exe");
     if beside.exists() {
         return Some(beside);
     }
-    on_path_as_program("node", env)
+    own().or_else(|| on_path_as_program("node", env))
 }
 
-/// The Node Pi's own Windows installer puts for a machine that has none,
-/// `%LOCALAPPDATA%\pi-node\current\node.exe`, which it also puts first on
-/// the user's PATH. An app started before it ran has the PATH it had, and the
-/// `pi.cmd` that installer wrote (found without the PATH, T-33) would be
-/// refused for want of a Node that is there. Looked for after the PATH, so a
-/// Node the app sees is the one, and for Pi's bare `node` alone: an npm shim
-/// asked for no such Node (T-34, P3-1).
+/// The Node Pi's own Windows installer puts for a machine whose own is missing or older
+/// than Pi needs (22.19), `%LOCALAPPDATA%\pi-node\current\node.exe`, which it also puts
+/// first on the user's PATH. An app started before it ran has the PATH it had, and the
+/// `pi.cmd` that installer wrote (found without the PATH, T-33) would be refused for want
+/// of a Node that is there. It is looked for before the PATH's: where it is, the PATH's
+/// Node is the one that was missing or too old, and a stale PATH holds that one still
+/// (T-141, P3-1). For Pi's bare `node` alone: an npm shim asked for no such Node.
 fn pi_node(env: &Env) -> Option<PathBuf> {
-    let local = env.path("LOCALAPPDATA")?;
     let node = ["pi-node", "current", "node.exe"]
         .iter()
-        .fold(local.to_path_buf(), |folder, part| folder.join(part));
-    (!local.as_os_str().is_empty() && node.is_file()).then_some(node)
+        .fold(env.path("LOCALAPPDATA")?.to_path_buf(), |folder, part| {
+            folder.join(part)
+        });
+    node.is_file().then_some(node)
 }
 
-/// What is said of an npm shim that runs on a Node when none is to be found,
-/// for whoever has to do something about it.
-fn needs_node(shim: &Path) -> String {
+/// What is said of a shim that runs on a Node when none is to be found, for whoever has to
+/// do something about it: of an npm shim in npm's words; of Pi's own installer's (`bare`)
+/// with the three places looked in, and what to do about it (T-141, P3-6).
+fn needs_node(shim: &Path, bare: bool) -> String {
+    if bare {
+        return format!(
+            "{} runs on Node, and ConsensFlow finds no Node for it: none is beside it, none is \
+             on the PATH ConsensFlow runs with, and none is in %LOCALAPPDATA%\\pi-node\\current, \
+             where Pi's installer puts one. Install Node 22.19 or newer, or run Pi's installer \
+             again.",
+            shim.display()
+        );
+    }
     format!(
         "{} is an npm shim that runs on Node, and ConsensFlow finds no Node for it: none is \
          beside it, and none is on the PATH ConsensFlow runs with. Make the harness's Node \
@@ -265,9 +275,10 @@ fn needs_node(shim: &Path) -> String {
 /// bare `node` before the one quoted script is a Node too, as Pi's own Windows
 /// installer writes its `pi.cmd` (`node "%~dp0pi-launcher.js" %*`); any other
 /// unquoted program is not read. The script's closing quote is followed by
-/// `%*` and nothing else: a word after the script is run by cmd.exe, and
-/// dropped by running the script alone. None when the shim is not of that
-/// shape, or names a script that is not there.
+/// `%*` and nothing else, and nothing but white space stands between the program's
+/// quotes and the script's: a word there or after the script is run by cmd.exe, and
+/// dropped by running the script alone. None when the shim is not of that shape, or
+/// names a script that is not there.
 fn shim_target(shim: &Path) -> Option<(Program, PathBuf)> {
     let text = String::from_utf8_lossy(&fs::read(shim).ok()?).into_owned();
     let line = text
@@ -280,8 +291,10 @@ fn shim_target(shim: &Path) -> Option<(Program, PathBuf)> {
         return None;
     }
     let (program, script) = match parts.as_slice() {
-        [.., program, script] => (Some(*program), *script),
-        [script] if begins_with_bare_node(line) => (None, *script),
+        [.., program, script] if script.before.trim().is_empty() => {
+            (Some(program.text), script.text)
+        }
+        [script] if is_bare_node(script.before) => (None, script.text),
         _ => return None,
     };
     let folder = shim.parent()?.to_string_lossy().into_owned();
@@ -325,18 +338,25 @@ fn shim_target(shim: &Path) -> Option<(Program, PathBuf)> {
     Some((program, PathBuf::from(script)))
 }
 
-/// Whether what a line holds before its first quote is a bare `node`, the
-/// program Pi's own installer's shim names unquoted: `node "%~dp0pi-launcher.js" %*`.
-fn begins_with_bare_node(line: &str) -> bool {
-    line.find('"')
-        .is_some_and(|quote| line[..quote].trim().eq_ignore_ascii_case("node"))
+/// Whether what a line holds before its first quote is a bare `node` and a space, the
+/// program Pi's own installer's shim names unquoted: `node "%~dp0pi-launcher.js" %*`. A
+/// `node` glued to the quote is one word with the script, which no shell reads as a program.
+fn is_bare_node(before: &str) -> bool {
+    before.trim().eq_ignore_ascii_case("node") && before.ends_with(char::is_whitespace)
+}
+
+/// A `"…"` of a line that holds something, and what stands between the one before it
+/// (the line's start for the first) and its opening quote.
+struct Quoted<'a> {
+    text: &'a str,
+    before: &'a str,
 }
 
 /// Each `"…"` of a line that holds something, found as JavaScript's
 /// `/"([^"]+)"/g` finds them: an empty `""` matches nothing, and its second
 /// quote may open the next. And what follows the last of them (the whole line
 /// where there is none).
-fn quoted_parts(line: &str) -> (Vec<&str>, &str) {
+fn quoted_parts(line: &str) -> (Vec<Quoted<'_>>, &str) {
     let mut parts = Vec::new();
     let mut at = 0;
     let mut after = 0;
@@ -344,7 +364,10 @@ fn quoted_parts(line: &str) -> (Vec<&str>, &str) {
         match line[open + 1..].find('"') {
             Some(0) => at = open + 1,
             Some(length) => {
-                parts.push(&line[open + 1..open + 1 + length]);
+                parts.push(Quoted {
+                    text: &line[open + 1..open + 1 + length],
+                    before: &line[after..open],
+                });
                 at = open + 2 + length;
                 after = at;
             }
@@ -421,14 +444,22 @@ mod tests {
 
     #[test]
     fn reads_a_shims_quoted_parts_as_the_javascript_regex_did() {
+        let said = |line| {
+            let (parts, after) = quoted_parts(line);
+            let parts: Vec<(&str, &str)> =
+                parts.iter().map(|part| (part.before, part.text)).collect();
+            (parts, after)
+        };
         assert_eq!(
-            quoted_parts(r#""%_prog%"  "%dp0%\x.js" %*"#),
-            (vec![r"%_prog%", r"%dp0%\x.js"], " %*")
+            said(r#"x & "%_prog%"  "%dp0%\x.js" %*"#),
+            (vec![("x & ", r"%_prog%"), ("  ", r"%dp0%\x.js")], " %*")
         );
-        assert_eq!(quoted_parts(r#""" "x" %*"#), (vec![" "], r#"x" %*"#));
+        // An empty `""` matches nothing, and its second quote opened the next part: the first is
+        // left standing before it.
+        assert_eq!(said(r#""" "x" %*"#), (vec![("\"", " ")], r#"x" %*"#));
         assert_eq!(
-            quoted_parts(r#"no quotes %*"#),
-            (Vec::<&str>::new(), "no quotes %*")
+            said(r#"no quotes %*"#),
+            (Vec::<(&str, &str)>::new(), "no quotes %*")
         );
     }
 
@@ -514,6 +545,18 @@ mod tests {
                 "{said} is an npm shim that runs on Node, and ConsensFlow finds no Node for it: none is \
                  beside it, and none is on the PATH ConsensFlow runs with. Make the harness's Node \
                  visible to ConsensFlow, or install the harness's own build instead of the npm one."
+            )
+        }
+
+        /// What Pi's own installer's shim is refused with when no Node is found for it: the three
+        /// places looked in, and what to do (T-141, P3-6).
+        fn pi_refusal(shim: &Path) -> String {
+            let said = shim.display();
+            format!(
+                "{said} runs on Node, and ConsensFlow finds no Node for it: none is beside it, \
+                 none is on the PATH ConsensFlow runs with, and none is in \
+                 %LOCALAPPDATA%\\pi-node\\current, where Pi's installer puts one. Install Node \
+                 22.19 or newer, or run Pi's installer again."
             )
         }
 
@@ -653,11 +696,11 @@ mod tests {
                 pane_argv(&argv[..1], &env).unwrap(),
                 [text(&bin.join("node.exe")), text(&launcher)]
             );
-            // And with none anywhere it is refused as an npm shim on Node is.
+            // And with none anywhere it is refused, in Pi's installer's words.
             fs::remove_file(bin.join("node.exe")).unwrap();
             let bare = Env::from_vars([("OS", "Windows_NT"), ("PATH", ""), ("PATHEXT", ".EXE")]);
-            assert_eq!(runnable(&shim, &[], &bare), Err(refusal(&shim)));
-            assert_eq!(pane_argv(&argv[..1], &bare), Err(refusal(&shim)));
+            assert_eq!(runnable(&shim, &[], &bare), Err(pi_refusal(&shim)));
+            assert_eq!(pane_argv(&argv[..1], &bare), Err(pi_refusal(&shim)));
         }
 
         /// An app started before Pi's installer put its own Node (`%LOCALAPPDATA%\pi-node\current`,
@@ -698,35 +741,43 @@ mod tests {
                 pane_argv(&[text(&shim)], &env).unwrap(),
                 [text(&installed), text(&launcher)]
             );
-            // A Node the app can see comes before it, and one beside the shim before both.
+            // A Node the app sees on its PATH does not come before it: the installer puts its own
+            // only where the machine's is missing or older than Pi needs (22.19), so a PATH
+            // that is stale holds the wrong one for Pi (T-141, P3-1).
             let seen = root.path().join("seen");
             fs::create_dir_all(&seen).unwrap();
             fs::write(seen.join("node.exe"), "").unwrap();
             startable(&seen.join("node.exe"));
+            let both = vars(seen.to_str().unwrap());
+            assert_eq!(runnable(&shim, &[], &both).unwrap().program, installed);
             assert_eq!(
-                runnable(&shim, &[], &vars(seen.to_str().unwrap()))
-                    .unwrap()
-                    .program,
-                seen.join("node.exe")
+                pane_argv(&[text(&shim)], &both).unwrap(),
+                [text(&installed), text(&launcher)]
             );
+            // One beside the shim comes before both.
             fs::write(bin.join("node.exe"), "").unwrap();
             assert_eq!(
-                runnable(&shim, &[], &env).unwrap().program,
+                runnable(&shim, &[], &both).unwrap().program,
                 bin.join("node.exe")
             );
             fs::remove_file(bin.join("node.exe")).unwrap();
-            // With no folder named for it, or none holding it, it is the refusal as before.
-            let unnamed = Env::from_vars([("OS", "Windows_NT"), ("PATH", ""), ("PATHEXT", ".EXE")]);
-            assert_eq!(runnable(&shim, &[], &unnamed), Err(refusal(&shim)));
+            // Where it put none, the PATH's is the one.
             fs::remove_file(&installed).unwrap();
-            assert_eq!(runnable(&shim, &[], &env), Err(refusal(&shim)));
-            assert_eq!(pane_argv(&[text(&shim)], &env), Err(refusal(&shim)));
+            assert_eq!(
+                runnable(&shim, &[], &both).unwrap().program,
+                seen.join("node.exe")
+            );
+            // And with none anywhere it is refused, in words that name the three places.
+            let unnamed = Env::from_vars([("OS", "Windows_NT"), ("PATH", ""), ("PATHEXT", ".EXE")]);
+            assert_eq!(runnable(&shim, &[], &unnamed), Err(pi_refusal(&shim)));
+            assert_eq!(runnable(&shim, &[], &env), Err(pi_refusal(&shim)));
+            assert_eq!(pane_argv(&[text(&shim)], &env), Err(pi_refusal(&shim)));
         }
 
         /// The installer's Node is Pi's, for Pi's bare `node` alone: an npm shim, whose Node is
         /// the one beside it or on the PATH, is not run on it.
         #[test]
-        fn the_node_pis_installer_put_is_for_a_bare_node_and_no_npm_shim_s() {
+        fn the_node_pis_installer_put_is_for_a_bare_node_and_never_an_npm_shims() {
             let root = tempfile::tempdir().unwrap();
             let (_, shim, _) = npm(root.path());
             let local = root.path().join("local");
@@ -791,6 +842,47 @@ mod tests {
                 let run = runnable(&shim, &[], &env).unwrap();
                 assert!(!run.verbatim, "{line}");
                 assert_eq!(run.program, bin.join("node.exe"), "{line}");
+            }
+        }
+
+        /// What stands between the program's quotes and the script's is the shim's own too: a
+        /// word there (cmd-shim writes a bin's shebang arguments there) is run by cmd.exe and
+        /// dropped by running the script alone, and a bare `node` glued to the script's quote is
+        /// no word of its own (T-141, P3-2). The spaces npm writes there, and a tab, are none.
+        #[test]
+        fn a_word_between_the_program_and_the_script_makes_a_line_no_shim_to_read() {
+            let root = tempfile::tempdir().unwrap();
+            let bin = root.path().join("bin");
+            fs::create_dir_all(&bin).unwrap();
+            fs::write(bin.join("x.js"), "").unwrap();
+            fs::write(bin.join("node.exe"), "").unwrap();
+            let env = Env::from_vars([("OS", "Windows_NT"), ("PATH", ""), ("PATHEXT", ".EXE")]);
+            let shim = bin.join("x.cmd");
+            let reads = |line: &str| {
+                fs::write(&shim, format!("@ECHO off\r\n{line}\r\n")).unwrap();
+                !runnable(&shim, &[], &env).unwrap().verbatim
+            };
+            for line in [
+                "\"%_prog%\" --flag \"%dp0%\\x.js\" %*",
+                "\"%_prog%\" -- \"%dp0%\\x.js\" %*",
+                "\"%NODE_EXE%\" --flag \"%~dp0x.js\" %*",
+                "\"%_prog%\"x \"%dp0%\\x.js\" %*",
+                "endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & \"%_prog%\" --flag \"%dp0%\\x.js\" %*",
+                "node\"%~dp0x.js\" %*",
+                "NODE\"%~dp0x.js\" %*",
+            ] {
+                assert!(!reads(line), "{line}");
+            }
+            for line in [
+                // npm's own, with its two spaces, and with one, and a tab.
+                "\"%_prog%\"  \"%dp0%\\x.js\" %*",
+                "\"%_prog%\" \"%dp0%\\x.js\" %*",
+                "\"%_prog%\"\t\"%dp0%\\x.js\" %*",
+                "endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & \"%_prog%\"  \"%dp0%\\x.js\" %*",
+                "node \"%~dp0x.js\" %*",
+                "  node\t\"%~dp0x.js\" %*",
+            ] {
+                assert!(reads(line), "{line}");
             }
         }
 

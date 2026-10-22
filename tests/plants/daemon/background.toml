@@ -61,6 +61,8 @@ panes-lib-tree = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "proc
 panes-lib-turn = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "turn"]
 # The pane host's tests of how a window closes.
 panes-lib-close = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "close"]
+# The parent Git Bash says for a program of its own kind whose parent has gone (T-142, P3-7).
+panes-lib-cygwin = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "cygwin"]
 # What the Windows tests of an ending read of a pane's job, held on a list of members.
 panes-lib-job = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "ending_tests::job"]
 # What Devin's wire log says of a window that is on a turn, held on logs staged as it writes them.
@@ -2288,3 +2290,48 @@ replace = '''
             left: baseline.left_running(&tree.members()?),
             ..Ending::default()
         })'''
+
+# A program of Git Bash's own kind that a script started names a parent that has gone (a forked
+# copy of the shell), so the chain from it to the shell the harness started is broken and a stop
+# leaves it (T-142, P3-7): the parent `ps -W` says is given instead (`crates/cf-panes/src/cygwin.rs`,
+# read where the job's members are, `job_object.rs`, which only Windows builds and the live
+# `stuck` case on Windows holds). One plant takes one rule out; a test of it fails.
+[[plant]]
+name = "background: a shell that has no Windows number is a program's parent"
+meant = "the_parent_of_a_program_is_the_shell_git_bash_says_by_the_number_windows_has_for_it"
+runs = ["panes-lib-cygwin"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/cygwin.rs"
+find = "    (parent.winpid != 0).then_some(parent.winpid)"
+replace = "    Some(parent.winpid)"
+
+[[plant]]
+name = "background: the parent of a program is its Cygwin number, not the shell's Windows one"
+meant = "the_parent_of_a_program_is_the_shell_git_bash_says_by_the_number_windows_has_for_it"
+runs = ["panes-lib-cygwin"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/cygwin.rs"
+find = "    (parent.winpid != 0).then_some(parent.winpid)"
+replace = "    (parent.pid != 0).then_some(parent.pid)"
+
+[[plant]]
+name = "background: ps is asked for every process and not once for each folder"
+meant = "ps_is_asked_once_for_each_folder_and_what_it_does_not_say_is_left_out"
+runs = ["panes-lib-cygwin"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/cygwin.rs"
+find = "        let rows = tables\n            .entry(folder.as_path())"
+replace = "        let rows = tables\n            .entry(Path::new(\"\"))"
+
+[[plant]]
+name = "background: a table's header or other lines are rows"
+meant = "the_table_is_read_for_its_numbers_and_the_header_and_other_lines_say_nothing"
+runs = ["panes-lib-cygwin"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/cygwin.rs"
+find = "            let mut words = line.split_whitespace().map(|word| word.parse::<u32>().ok());"
+replace = "            let mut words = line.split_whitespace().map(|word| Some(word.parse::<u32>().unwrap_or(0)));"

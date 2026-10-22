@@ -585,8 +585,10 @@ dependencies = [
 name = "cf-panes"
 version = "3.0.5"
 dependencies = [
+ "cf-base",
  "cf-bridge",
  "cf-panes",
+ "cf-process",
  "cf-proto",
  "futures-channel",
  "futures-executor",
@@ -594,6 +596,7 @@ dependencies = [
  "portable-pty",
  "serde",
  "serde_json",
+ "tokio",
  "windows-sys 0.61.2",
 ]
 
