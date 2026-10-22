@@ -126,9 +126,8 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    #[allow(clippy::disallowed_methods)] // The test starts what it waits for.
     fn a_child_reaped_is_gone() {
-        let mut child = std::process::Command::new("true").spawn().unwrap();
+        let mut child = crate::testing::command("true").spawn().unwrap();
         let pid = child.id();
         child.wait().unwrap();
         assert!(!alive(pid));

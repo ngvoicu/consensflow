@@ -100,13 +100,12 @@ const ALONE: &str = "CF_PROCESS_ALONE";
 /// another test may hold anything of, or that sets up its process as no other test beside it
 /// would survive. It is an ignored test that does nothing unless [`is_alone`].
 #[cfg(unix)]
-#[allow(clippy::disallowed_methods)] // This test binary, run again as libtest runs one.
 pub(crate) fn alone(through: &[&str], name: &str) {
     let test = std::env::current_exe().unwrap();
     let mut command = match through {
-        [] => std::process::Command::new(&test),
+        [] => command(&test),
         [program, words @ ..] => {
-            let mut command = std::process::Command::new(program);
+            let mut command = command(program);
             command.args(words).arg(&test);
             command
         }
@@ -137,4 +136,15 @@ pub(crate) fn alone(through: &[&str], name: &str) {
 #[allow(clippy::disallowed_methods)] // Libtest has no other word for it.
 pub(crate) fn is_alone() -> bool {
     std::env::var_os(ALONE).is_some()
+}
+
+/// The command a test starts `program` with: holding only its streams, as every program this
+/// crate starts does, for the tests run side by side and a program of one would hold what another
+/// closed. The tests that start a program bare say why: the window shown, a measurement, a stress.
+#[cfg(unix)]
+#[allow(clippy::disallowed_methods)] // The tests' own programs.
+pub(crate) fn command(program: impl AsRef<std::ffi::OsStr>) -> std::process::Command {
+    let mut command = std::process::Command::new(program);
+    crate::hold_only_the_streams(&mut command);
+    command
 }

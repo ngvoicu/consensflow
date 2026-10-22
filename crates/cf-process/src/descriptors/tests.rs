@@ -397,6 +397,75 @@ fn a_listener_closed_here_is_not_held_by_a_program_started_while_it_was_made() {
     assert_eq!(found.held, 0);
 }
 
+/// A process about to end that leaves its starting of the next to another (Tauri's restart of the
+/// app, a start that is not this crate's) first makes every descriptor it holds close-on-exec:
+/// a crowd of them, more than one listing holds, none close-on-exec, and std's own start after.
+#[test]
+fn every_descriptor_is_made_close_on_exec_and_a_program_started_after_by_any_start_holds_none() {
+    crate::testing::alone(&[], "descriptors::tests::swept");
+}
+
+#[test]
+#[ignore = "run alone, by the test above it"]
+#[allow(clippy::disallowed_methods)] // The start after is std's, not this crate's: the control.
+fn swept() {
+    use nix::sys::resource::{getrlimit, setrlimit, Resource};
+    if !crate::testing::is_alone() {
+        return;
+    }
+    let (_, most) = getrlimit(Resource::RLIMIT_NOFILE).unwrap();
+    setrlimit(Resource::RLIMIT_NOFILE, most.min(16_384), most).unwrap();
+    let null = File::open("/dev/null").unwrap();
+    let crowd: Vec<i32> = (CROWD_FROM..CROWD_FROM + CROWD)
+        .chain([FAR])
+        .map(|fd| nix::unistd::dup2(null.as_raw_fd(), fd).unwrap())
+        .collect();
+    crate::close_all_on_exec().unwrap();
+    let left: Vec<i32> = crowd
+        .iter()
+        .copied()
+        .filter(|&fd| {
+            !fcntl(fd, FcntlArg::F_GETFD)
+                .map(|flags| flags & libc::FD_CLOEXEC != 0)
+                .unwrap()
+        })
+        .collect();
+    assert!(
+        left.is_empty(),
+        "{} left as they were: {left:?}",
+        left.len()
+    );
+    let listed = std::process::Command::new("/bin/ls")
+        .arg("/dev/fd")
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    let held: Vec<i32> = String::from_utf8_lossy(&listed.stdout)
+        .split_whitespace()
+        .filter_map(|fd| fd.parse().ok())
+        .filter(|fd| *fd >= CROWD_FROM)
+        .collect();
+    assert!(
+        held.is_empty(),
+        "the program held {} of the crowd",
+        held.len()
+    );
+}
+
+/// The programs the tests start (and the tests [`crate::testing::alone`] runs again) hold
+/// nothing of the tests' but their streams: the tests run side by side.
+#[test]
+fn a_program_a_test_starts_holds_no_descriptor_that_was_open_when_it_started() {
+    let (_open, fds) = Open::not_yet_close_on_exec();
+    let tests = asking(&fds, "true").args[1].clone();
+    let said = crate::testing::command("/bin/sh")
+        .arg("-c")
+        .arg(tests)
+        .output()
+        .unwrap();
+    assert_eq!(String::from_utf8_lossy(&said.stdout), all_clear(&fds));
+}
+
 /// A sandbox in which the system will not say what this process holds: neither the listing of
 /// its descriptors nor the size of its table. (A shell does not start in it with nothing in its
 /// environment; `echo` does.)

@@ -7,8 +7,10 @@
 # close-on-exec, up to the end of the descriptor table, whatever the limits on descriptors were
 # lowered to (T-183), and refuses the start when the system will not say how big the table is
 # (T-190); every program cf-process starts has it (`spawn`, `hand_over`, `capture`), and the app's
-# daemon command, its login shell, the tools an update is checked with, the app an update started
-# again, the page opener, the Codex supervisor's two programs and the rig's programs ask for it. The window's programs are the pane host's, which portable-pty starts and cleans.
+# daemon command, its login shell, the tools an update is checked with, the page opener, the Codex
+# supervisor's two programs, the rig's programs and the tests' own ask for it. The app an update
+# installed is started by Tauri's restart, after the app made every descriptor close-on-exec
+# (`cf_process::close_all_on_exec`, T-211). The window's programs are the pane host's, which portable-pty starts and cleans.
 # One plant takes one rule out; a test fails.
 #
 # Every name holds `descriptors`, so `npm run plants:daemon -- "descriptors:"` runs them all.
@@ -18,7 +20,11 @@ process-descriptors = ["cargo", "test", "--offline", "-p", "cf-process", "--lib"
 app-daemon-descriptors = ["cargo", "xtask", "app", "test", "the_daemon_holds_nothing"]
 app-login-descriptors = ["cargo", "xtask", "app", "test", "the_login_shell_holds_nothing"]
 app-update-tools-descriptors = ["cargo", "xtask", "app", "test", "the_programs_an_update_is_checked_with"]
-app-relaunch-descriptors = ["cargo", "xtask", "app", "test", "relaunch::"]
+app-restart-descriptors = ["cargo", "xtask", "app", "test", "the_app_restarts_with"]
+sentinel-descriptors = ["cargo", "test", "--offline", "-p", "cf-panes", "--lib", "a_sentinel_holds_nothing"]
+headless-descriptors = ["cargo", "test", "--offline", "-p", "cf-panes", "--test", "headless", "the_helper_a_test_starts"]
+daemon-runs-descriptors = ["cargo", "test", "--offline", "-p", "cf-daemon", "--test", "api", "a_run_holds_nothing"]
+rig-shell-descriptors = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "the_shell_a_case_starts"]
 app-page-descriptors = ["cargo", "xtask", "app", "test", "the_opener_holds_nothing"]
 rig-descriptors = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "process::tests::a_program_a_case_starts"]
 codex-descriptors = ["cargo", "test", "--offline", "-p", "cf-codex-session", "--lib", "codexs_programs_hold_nothing"]
@@ -67,7 +73,7 @@ file = "crates/cf-process/src/descriptors.rs"
 find = '''
             for entry in &listing[..listed.min(LISTED)] {
                 highest = highest.max(entry.proc_fd);
-                let_go(entry.proc_fd);
+                act(entry.proc_fd);
             }
 '''
 replace = '''
@@ -121,8 +127,8 @@ runs = ["process-descriptors"]
 
 [[plant.edit]]
 file = "crates/cf-process/src/descriptors.rs"
-find = "        scan(first, end);"
-replace = "        scan(end + 1, end.max(first));"
+find = "        scan(first, end, act);"
+replace = "        scan(end + 1, end.max(first), act);"
 
 [[plant]]
 name = "descriptors: the table's bound is taken for the hard limit on descriptors"
@@ -142,8 +148,10 @@ replace = '''
         unsafe {
             libc::getrlimit(libc::RLIMIT_NOFILE, &raw mut limit);
         }
+        // The hard limit or the system's ceiling (`kern.maxfilesperproc`, 92,160 here),
+        // whichever is smaller: an unlimited hard limit would scan two billion numbers.
         let end = table()
-            .map(|_| c_int::try_from(limit.rlim_max).unwrap_or(c_int::MAX))
+            .map(|_| c_int::try_from(limit.rlim_max).unwrap_or(c_int::MAX).min(92_160))
             .ok_or_else(io::Error::last_os_error)?;
 '''
 
@@ -197,31 +205,6 @@ replace = '''
 '''
 
 [[plant]]
-name = "descriptors: the app an update installed is started again without asking for it"
-meant = "the_app_started_again_is_the_bundles_executable_and_holds_nothing_of_this_ones"
-runs = ["app-relaunch-descriptors"]
-
-[[plant.edit]]
-file = "app/src-tauri/src/relaunch.rs"
-find = '''
-    command.args(args);
-    cf_process::hold_only_the_streams(&mut command);
-'''
-replace = '''
-    command.args(args);
-'''
-
-[[plant]]
-name = "descriptors: the app is started again as the executable that ran, not the one its bundle names now"
-meant = "the_app_started_again_is_the_bundles_executable_and_holds_nothing_of_this_ones"
-runs = ["app-relaunch-descriptors"]
-
-[[plant.edit]]
-file = "app/src-tauri/src/relaunch.rs"
-find = "    let mut command = Command::new(bundled(exe).unwrap_or_else(|| exe.to_path_buf()));"
-replace = "    let mut command = Command::new(bundled(exe).map_or_else(|| exe.to_path_buf(), |_| exe.to_path_buf()));"
-
-[[plant]]
 name = "descriptors: the page opener does not ask for it"
 meant = "the_opener_holds_nothing_of_the_apps_but_its_streams"
 runs = ["app-page-descriptors"]
@@ -240,6 +223,93 @@ runs = ["rig-descriptors"]
 
 [[plant.edit]]
 file = "crates/cf-e2e/src/process.rs"
+find = '''
+        cf_process::hold_only_the_streams(&mut command);
+'''
+replace = ""
+
+[[plant]]
+name = "descriptors: the sweep before the app's restart is skipped"
+meant = "the_app_restarts_with_every_descriptor_close_on_exec"
+runs = ["app-restart-descriptors"]
+
+[[plant.edit]]
+file = "app/src-tauri/src/updates.rs"
+find = '''
+    if let Err(failed) = cf_process::close_all_on_exec() {
+'''
+replace = '''
+    if let Err(failed) = Ok::<(), std::io::Error>(()) {
+'''
+
+[[plant]]
+name = "descriptors: the sweep marks nothing close-on-exec"
+meant = "every_descriptor_is_made_close_on_exec_and_a_program_started_after_by_any_start_holds_none"
+runs = ["process-descriptors"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/descriptors.rs"
+find = "    return macos::each_above_the_streams(macos::mark);"
+replace = "    return macos::each_above_the_streams(|_| {});"
+
+[[plant]]
+name = "descriptors: the sentinel does not ask for it"
+meant = "a_sentinel_holds_nothing_of_the_tests_but_its_streams"
+runs = ["sentinel-descriptors"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/pty/sentinel.rs"
+find = '''
+        cf_process::hold_only_the_streams(&mut command);
+'''
+replace = ""
+
+[[plant]]
+name = "descriptors: the pane host's helper a test starts does not ask for it"
+meant = "the_helper_a_test_starts_holds_nothing_of_the_tests_but_its_streams"
+runs = ["headless-descriptors"]
+
+[[plant.edit]]
+file = "crates/cf-panes/tests/headless.rs"
+find = '''
+            cf_process::hold_only_the_streams(&mut command);
+'''
+replace = ""
+
+[[plant]]
+name = "descriptors: the daemon's tests run cf without asking for it"
+meant = "a_run_holds_nothing_of_the_tests_but_its_streams"
+runs = ["daemon-runs-descriptors"]
+
+[[plant.edit]]
+file = "crates/cf-daemon/tests/api/runs.rs"
+find = '''
+    cf_process::hold_only_the_streams(&mut command);
+    command
+'''
+replace = '''
+    command
+'''
+
+[[plant]]
+name = "descriptors: the programs cf-process's tests start do not ask for it"
+meant = "a_program_a_test_starts_holds_no_descriptor_that_was_open_when_it_started"
+runs = ["process-descriptors"]
+
+[[plant.edit]]
+file = "crates/cf-process/src/testing.rs"
+find = '''
+    crate::hold_only_the_streams(&mut command);
+'''
+replace = ""
+
+[[plant]]
+name = "descriptors: the shell the rig's own cases start does not ask for it"
+meant = "the_shell_a_case_starts_holds_nothing_of_the_cases_but_its_streams"
+runs = ["rig-shell-descriptors"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/process/spawned.rs"
 find = '''
         cf_process::hold_only_the_streams(&mut command);
 '''

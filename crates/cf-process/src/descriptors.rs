@@ -15,13 +15,15 @@
 //! does and would hold a window's terminal past its close. The daemon's start (the app's
 //! daemon command) is where this matters, and the app's other starts beside it: the login
 //! shell it asks for its PATH (a login file may start a program that runs on), the tools an
-//! update is checked with, the app an update installed, started as this one ends (it would
-//! hold what this one had for as long as the human keeps it open; Tauri's own restart starts
-//! it bare), and the page a release is downloaded from. The daemon and the Codex supervisor
-//! start their programs on the one thread that opens their sockets and pipes, so no start of
-//! theirs falls between the two calls today; every program is started so all the same, for a
-//! second thread there would open the window with nothing to say so, and the app may start
-//! programs through this crate. So are the test rig's, whose cases run side by side.
+//! update is checked with, and the page a release is downloaded from. The app an update
+//! installed is started by Tauri's restart, with a bare `Command` this crate does not reach:
+//! the app, about to end, first makes every descriptor it holds close-on-exec
+//! ([`close_all_on_exec`]), so the new app is left none of them. The daemon and the Codex
+//! supervisor start their programs on the one thread that opens their sockets and pipes, so no
+//! start of theirs falls between the two calls today; every program is started so all the
+//! same, for a second thread there would open the window with nothing to say so, and the app
+//! may start programs through this crate. So are the tests' and the rig's, whose cases run
+//! side by side.
 //!
 //! So a program, in the moment between its start and its exec, closes every descriptor it
 //! holds above the standard streams that is not close-on-exec: the copy it was left, which
@@ -55,7 +57,10 @@
 //! moment as it is made, and a program another thread starts in that moment by a start that
 //! does not close what it was left keeps the writing end for as long as it runs: the start
 //! here waits for that program to end. A check that something is closed, made at once, is made
-//! against all that: the tests ask the thing itself, or wait for it.
+//! against all that: the tests ask the thing itself, or wait for it. The sweep before the
+//! app's restart leaves its own moment: a descriptor another thread makes between the sweep
+//! and Tauri's start of the new app is the new app's, for as long as it runs. Microseconds,
+//! with the daemon stopped and the panes drained by then.
 //!
 //! Linux makes a socket or a pipe close-on-exec as it opens it, and Windows hands
 //! nothing over that is not asked: there this does nothing.
@@ -64,13 +69,24 @@ use std::process::Command;
 
 /// Makes `command` start its program with no descriptor of this process's above the
 /// standard streams. Every program this crate starts is so; a command built by hand asks for
-/// it (the app's daemon, its login shell, the tools of its updates, the app it starts again and
-/// its page opener; Codex's server and TUI; the rig's programs).
+/// it (the app's daemon, its login shell, the tools of its updates and its page opener; Codex's
+/// server and TUI; the rig's and the tests' programs).
 pub fn hold_only_the_streams(command: &mut Command) {
     #[cfg(target_os = "macos")]
     macos::hold_only_the_streams(command);
     #[cfg(not(target_os = "macos"))]
     let _ = command;
+}
+
+/// Makes every descriptor of this process above the standard streams close-on-exec, so that a
+/// program started after, by any start (one that is not this crate's: Tauri's restart of the
+/// app), is left none of them. For a process about to end: what it opens or is passed after is
+/// not made so, and a descriptor it means a program to have must be passed again.
+pub fn close_all_on_exec() -> std::io::Result<()> {
+    #[cfg(target_os = "macos")]
+    return macos::each_above_the_streams(macos::mark);
+    #[cfg(not(target_os = "macos"))]
+    Ok(())
 }
 
 #[cfg(target_os = "macos")]
@@ -93,11 +109,13 @@ mod macos {
         // It allocates nothing and takes no lock; its listing is on the stack.
         #[allow(unsafe_code)]
         unsafe {
-            command.pre_exec(close_on_exec_all_above_the_streams);
+            command.pre_exec(|| each_above_the_streams(let_go));
         }
     }
 
-    fn close_on_exec_all_above_the_streams() -> io::Result<()> {
+    /// Does `act` to every descriptor this process holds above the standard streams, and to
+    /// numbers that are none (it asks first). Safe to call between fork and exec when `act` is.
+    pub(super) fn each_above_the_streams(act: fn(c_int)) -> io::Result<()> {
         let mut listing = [proc_fdinfo {
             proc_fd: 0,
             proc_fdtype: 0,
@@ -122,7 +140,7 @@ mod macos {
             let mut highest = 2;
             for entry in &listing[..listed.min(LISTED)] {
                 highest = highest.max(entry.proc_fd);
-                let_go(entry.proc_fd);
+                act(entry.proc_fd);
             }
             if listed < LISTED {
                 return Ok(());
@@ -135,7 +153,7 @@ mod macos {
         // table's size is not known, the program is not started, rather than started holding
         // what it may.
         let end = table().ok_or_else(io::Error::last_os_error)?;
-        scan(first, end);
+        scan(first, end, act);
         Ok(())
     }
 
@@ -158,9 +176,26 @@ mod macos {
     }
 
     /// Every descriptor from `first` to below `end`, asked for one by one.
-    fn scan(first: c_int, end: c_int) {
+    fn scan(first: c_int, end: c_int, act: fn(c_int)) {
         for fd in first..end {
-            let_go(fd);
+            act(fd);
+        }
+    }
+
+    /// Makes the descriptor `fd` close-on-exec if it is open and is not one of the standard
+    /// streams.
+    pub(super) fn mark(fd: c_int) {
+        if fd <= 2 {
+            return;
+        }
+        // SAFETY: `fcntl` is asked about a number, and answers -1 for one that is not open;
+        // what it is told is to add close-on-exec to the flags it answered.
+        #[allow(unsafe_code)]
+        unsafe {
+            let flags = libc::fcntl(fd, libc::F_GETFD);
+            if flags >= 0 {
+                libc::fcntl(fd, libc::F_SETFD, flags | libc::FD_CLOEXEC);
+            }
         }
     }
 

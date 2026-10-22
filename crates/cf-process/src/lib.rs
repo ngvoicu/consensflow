@@ -26,7 +26,7 @@ mod testing;
 pub use alive::alive;
 pub use capture::{capture, CaptureFailed, Captured};
 pub use child::{spawn, Child, Ender, Streams};
-pub use descriptors::hold_only_the_streams;
+pub use descriptors::{close_all_on_exec, hold_only_the_streams};
 pub use execute::{execute, Failed, Limits};
 pub use hand_over::{hand_over, Handed};
 pub use job::with_required;
