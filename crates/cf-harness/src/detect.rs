@@ -108,19 +108,21 @@ const MANAGED_PI: [&str; 3] = [".pi", "agent", "bin"];
 /// another (an install made before the variable was set is still there). A relative
 /// folder is the home's: the installers read it against where they ran, which a
 /// terminal opens in the home, and this daemon's own working folder is no place of
-/// theirs. None where the environment names no folder and has no home.
+/// theirs: with no home there is nothing to read a relative folder against, and it is no place.
+/// None where the environment names no folder and has no home.
 fn managed(harness: Harness, env: &Env) -> Vec<PathBuf> {
     if harness != Harness::Pi {
         return Vec::new();
     }
     let home = home(env).ok().map(PathBuf::from);
-    let named = agent_dir(env).ok().map(|agent| {
+    let named = agent_dir(env).ok().and_then(|agent| {
         let agent = PathBuf::from(agent);
         match &home {
-            Some(home) if agent.is_relative() => home.join(agent),
-            _ => agent,
+            Some(home) if agent.is_relative() => Some(home.join(agent)),
+            None if agent.is_relative() => None,
+            _ => Some(agent),
         }
-        .join("bin")
+        .map(|folder| folder.join("bin"))
     });
     let default = home.map(|home| {
         MANAGED_PI

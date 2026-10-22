@@ -68,7 +68,7 @@
 //! machine's.
 //!
 //! A run that ended there with a status then has what it left in `evals/reports` there
-//! brought back to the same folder here, the files this checkout lacks (a long run's report and
+//! brought back to the main checkout's `evals/reports` here, the files it lacks (a long run's report and
 //! ledger among them: the sweep of a later run removes what is older than two weeks from the
 //! machine's copy), and says so on the error stream; the status is the command's own either way
 //! ([`fetch`]).

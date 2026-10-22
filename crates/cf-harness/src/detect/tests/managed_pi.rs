@@ -184,6 +184,20 @@ fn a_tilde_and_a_backslash_is_the_home_on_windows() {
     assert_eq!(harness_path(Harness::Pi, &env), Some(shim));
 }
 
+/// A relative agent folder is read against the home (the installers read it where they ran, a
+/// terminal's home); with no home there is nothing to read it against, and it is no place: the
+/// daemon's own working folder is none of the installers' (T-194, P3-7).
+#[test]
+fn a_relative_agent_folder_with_no_home_to_read_it_against_is_no_place_and_an_absolute_one_needs_none(
+) {
+    let root = tempfile::tempdir().unwrap();
+    let relative = Env::from_vars([("PI_CODING_AGENT_DIR", "work/pi"), ("PATH", "")]);
+    assert_eq!(managed(Harness::Pi, &relative), Vec::<PathBuf>::new());
+    let absolute = text(root.path());
+    let named = Env::from_vars([("PI_CODING_AGENT_DIR", absolute.as_str()), ("PATH", "")]);
+    assert_eq!(managed(Harness::Pi, &named), [root.path().join("bin")]);
+}
+
 #[test]
 fn the_launcher_the_unix_installer_writes_is_found_there_too_and_is_pis_alone() {
     let root = tempfile::tempdir().unwrap();

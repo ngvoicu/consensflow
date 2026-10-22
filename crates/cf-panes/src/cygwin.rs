@@ -26,21 +26,45 @@ pub(crate) struct Row {
 }
 
 /// What `ps -W` says, read for the first four of its columns (`PID PPID PGID WINPID`) of
-/// each row: the header and any line that is no row say nothing.
+/// each row: the header and any line that is no row say nothing. Cygwin's `ps` begins a row
+/// with a status letter (`S` stopped, `I` reading its terminal, `O` writing it) or a space,
+/// then the number in seven columns (`"%c %7d %7d %7d %10u …"`), so a first word of one letter
+/// is the status and the number is the next: a process that reads its terminal is a row all
+/// the same, and so is the shell above it (T-194, P3-1).
 pub(crate) fn table(listing: &str) -> Vec<Row> {
     listing
         .lines()
         .filter_map(|line| {
-            let mut words = line.split_whitespace().map(|word| word.parse::<u32>().ok());
+            let mut words = line.split_whitespace();
+            let first = words.next()?;
+            let first =
+                if first.len() == 1 && first.chars().all(|letter| letter.is_ascii_alphabetic()) {
+                    words.next()?
+                } else {
+                    first
+                };
+            let mut numbers = std::iter::once(first)
+                .chain(words)
+                .map(|word| word.parse::<u32>().ok());
             let (pid, ppid, _group, winpid) = (
-                words.next()??,
-                words.next()??,
-                words.next()??,
-                words.next()??,
+                numbers.next()??,
+                numbers.next()??,
+                numbers.next()??,
+                numbers.next()??,
             );
             Some(Row { pid, ppid, winpid })
         })
         .collect()
+}
+
+/// Whether `ps -W` is run from `folder`: a `ps.exe` is there and so is the Cygwin layer it
+/// runs on, `msys-2.0.dll` or `cygwin1.dll`, beside it (`exists` says what is there). A
+/// `ps.exe` without it is no Git Bash's, and is not run (T-194, P3-7).
+pub(crate) fn runs_ps_in(folder: &Path, exists: impl Fn(&Path) -> bool) -> bool {
+    exists(&folder.join("ps.exe"))
+        && ["msys-2.0.dll", "cygwin1.dll"]
+            .iter()
+            .any(|layer| exists(&folder.join(layer)))
 }
 
 /// The Windows number of the shell that `table` says started the process with the Windows

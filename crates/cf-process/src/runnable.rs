@@ -249,13 +249,14 @@ fn pi_node(env: &Env) -> Option<PathBuf> {
 
 /// What is said of a shim that runs on a Node when none is to be found, for whoever has to
 /// do something about it: of an npm shim in npm's words; of Pi's own installer's (`bare`)
-/// with the three places looked in, and what to do about it (T-141, P3-6).
+/// with the three places looked in, in the order they are (beside it, Pi's installer's folder,
+/// the PATH), and what to do about it (T-141, P3-6; T-194, P3-7).
 fn needs_node(shim: &Path, bare: bool) -> String {
     if bare {
         return format!(
             "{} runs on Node, and ConsensFlow finds no Node for it: none is beside it, none is \
-             on the PATH ConsensFlow runs with, and none is in %LOCALAPPDATA%\\pi-node\\current, \
-             where Pi's installer puts one. Install Node 22.19 or newer, or run Pi's installer \
+             in %LOCALAPPDATA%\\pi-node\\current, where Pi's installer puts one, and none is on \
+             the PATH ConsensFlow runs with. Install Node 22.19 or newer, or run Pi's installer \
              again.",
             shim.display()
         );
@@ -554,9 +555,9 @@ mod tests {
             let said = shim.display();
             format!(
                 "{said} runs on Node, and ConsensFlow finds no Node for it: none is beside it, \
-                 none is on the PATH ConsensFlow runs with, and none is in \
-                 %LOCALAPPDATA%\\pi-node\\current, where Pi's installer puts one. Install Node \
-                 22.19 or newer, or run Pi's installer again."
+                 none is in %LOCALAPPDATA%\\pi-node\\current, where Pi's installer puts one, \
+                 and none is on the PATH ConsensFlow runs with. Install Node 22.19 or newer, or \
+                 run Pi's installer again."
             )
         }
 

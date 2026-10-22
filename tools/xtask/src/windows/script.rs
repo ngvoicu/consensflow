@@ -314,7 +314,8 @@ pub fn stop_script(dir: &str) -> String {
 /// What lists the reports a run left in `evals/reports` on the machine, to be brought back
 /// ([`super::fetch`]): each file under it as `<path from it, with />` and a tab and its size, but
 /// for what is under `windows/`, which the matrix writes here and not there. A folder that is
-/// not there lists nothing.
+/// not there lists nothing, nor does one that is itself a link (the prune refuses it too: it
+/// would be walked to where it goes).
 pub fn reports_script(dir: &str) -> String {
     fill(REPORTS, &[("dir", dir)])
 }
@@ -465,10 +466,13 @@ const REPORTS: &str = r##"
 $ProgressPreference = 'SilentlyContinue'
 $reports = Join-Path (Join-Path $env:USERPROFILE '«dir»') 'evals\reports'
 if (Test-Path -LiteralPath $reports -PathType Container) {
-  $base = (Get-Item -LiteralPath $reports).FullName.TrimEnd('\').Length + 1
-  foreach ($file in Get-ChildItem -LiteralPath $reports -Recurse -File -Force) {
-    $name = $file.FullName.Substring($base).Replace('\', '/')
-    if ($name -notlike 'windows/*') { "$name`t$($file.Length)" }
+  $folder = Get-Item -LiteralPath $reports
+  if (-not ($folder.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+    $base = $folder.FullName.TrimEnd('\').Length + 1
+    foreach ($file in Get-ChildItem -LiteralPath $reports -Recurse -File -Force) {
+      $name = $file.FullName.Substring($base).Replace('\', '/')
+      if ($name -notlike 'windows/*') { "$name`t$($file.Length)" }
+    }
   }
 }
 "##;

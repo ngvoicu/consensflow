@@ -115,6 +115,39 @@ impl Rig {
         rig
     }
 
+    /// A rig whose run goes from a tree linked to the checkout (`git worktree add`): the
+    /// checkout is the main one, and the run's root is the other folder.
+    fn in_linked_tree() -> Self {
+        let mut rig = Self::new();
+        let tree = rig.bin.path().join("tree");
+        let git = |words: &[&str], more: Option<&Path>| {
+            let mut asked = Invocation::new("git", &rig.context.root).args(words);
+            if let Some(path) = more {
+                asked = asked.arg(path);
+            }
+            let answered = process::capture(&asked, &rig.context.env).unwrap();
+            assert_eq!(answered.code, 0, "{}", answered.stderr);
+        };
+        git(&["init", "-q"], None);
+        git(
+            &[
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@t",
+                "commit",
+                "-q",
+                "--allow-empty",
+                "-m",
+                "x",
+            ],
+            None,
+        );
+        git(&["worktree", "add", "-q", "-b", "linked"], Some(&tree));
+        rig.context.root = tree;
+        rig
+    }
+
     fn program(&self, name: &str, body: &str) {
         let path = self.bin.path().join(name);
         fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
@@ -367,11 +400,14 @@ fn a_listing_that_fails_is_said_and_nothing_is_asked_after_it() {
 fn many_files_are_counted_after_the_first_few() {
     let names: Vec<String> = (1..=6).map(|n| format!("long/{n}.md")).collect();
     assert_eq!(
-        told(&names).unwrap(),
+        told(&names, false).unwrap(),
         "brought back 6 of the machine's reports into evals/reports: \
          long/1.md, long/2.md, long/3.md, long/4.md and 2 more"
     );
-    assert_eq!(told(&[]), None);
+    assert!(told(&names, true)
+        .unwrap()
+        .contains("into the main checkout's evals/reports: long/1.md"));
+    assert_eq!(told(&[], false), None);
 }
 
 #[test]
@@ -494,4 +530,29 @@ fn a_run_that_could_not_be_sent_brings_nothing_back_and_asks_nothing() {
     );
     assert!(ended.is_err());
     assert!(rig.log().is_empty(), "{:?}", rig.log());
+}
+
+/// A worker's runs go from its tree, and the tree goes with its task: what lived only there would
+/// go with it. The reports come into the main checkout's folder, the parent of the repository's
+/// common git folder, which the tree's own `evals/reports` is not (T-194, P3-3).
+#[test]
+fn the_reports_come_into_the_main_checkouts_folder_when_the_run_goes_from_a_tree_linked_to_it() {
+    let rig = Rig::in_linked_tree();
+    rig.remote("long/run.md", "report");
+    rig.lists(&[("long/run.md", 6)]);
+    let (ended, said) = rig.bring();
+    ended.unwrap();
+    assert_eq!(rig.here("long/run.md").as_deref(), Some("report"));
+    assert!(
+        !rig.context.root.join("evals").exists(),
+        "nothing is kept in the tree"
+    );
+    assert_eq!(
+        said,
+        "windows: brought back 1 of the machine's reports into the main checkout's evals/reports: long/run.md\n"
+    );
+    // And what the main checkout has already is not asked for again.
+    let (ended, said) = rig.bring();
+    ended.unwrap();
+    assert_eq!(said, "");
 }

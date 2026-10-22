@@ -266,3 +266,35 @@ runs = ["e2e-descent"]
 file = "crates/cf-e2e/src/live/members/descent.rs"
 find = "        if process.ppid == 0 || began.contains_key(&process.ppid) {"
 replace = "        if process.ppid == 0 {"
+
+# T-194's P3-1 and P3-7: a row of `ps` with a status letter, the image path of an orphan, and the
+# case's account of a member that ran nothing.
+[[plant]]
+name = "live windows: a row of ps that begins with a status letter is no row"
+meant = "a_row_that_begins_with_a_status_letter_is_a_row_and_so_is_its_parents"
+runs = ["e2e-descent"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/descent.rs"
+find = "                if first.len() == 1 && first.chars().all(|letter| letter.is_ascii_alphabetic()) {"
+replace = "                if false {"
+
+[[plant]]
+name = "live windows: the folder of an orphan's image is not read"
+meant = "an_orphan_is_known_by_the_image_it_runs_and_not_by_how_its_command_line_spells_the_folder"
+runs = ["e2e-descent"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/members/descent.rs"
+find = "        let Some(folder) = process.exe.as_deref().and_then(image_folder) else {"
+replace = "        let Some(folder) = None::<String> else {"
+
+[[plant]]
+name = "live windows: a member with no window is said to have a blank screen"
+meant = "a_member_with_no_window_says_so_and_a_blank_screen_is_said_to_be_one"
+runs = ["e2e-stops-stuck"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/tests/live_stops/stuck.rs"
+find = '        None => "     it has no window".to_owned(),'
+replace = '        None => "     its screen: ".to_owned(),'

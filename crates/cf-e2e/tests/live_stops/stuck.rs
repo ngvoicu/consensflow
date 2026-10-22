@@ -157,6 +157,15 @@ fn said(found: &[Running]) -> String {
     shown(&processes).join("; ")
 }
 
+/// What is said of the screen of a member that ran nothing: "it has no window" where there is none, so
+/// that a blank screen (a window that drew nothing) is not read as no window.
+fn screen_line(screen: Option<String>) -> String {
+    match screen {
+        Some(screen) => format!("     its screen: {screen}"),
+        None => "     it has no window".to_owned(),
+    }
+}
+
 /// Whether the tree the host says holds the script's sleep: a process that runs `sleep` for
 /// [`STUCK_S`] seconds, by whichever path, as a word of its own.
 fn names_the_sleep(tree: &tree::Tree) -> bool {
@@ -258,12 +267,12 @@ fn drive(ctx: &Ctx, case: &mut Account, name: &str, chosen: &mut Vec<Running>) -
             WORK.as_secs()
         ));
         let window = members.window_of(ctx.agent)?;
-        case.say(format!(
-            "     its screen: {}",
-            members.tail(window.as_ref().map_or("", |window| window.id()))
+        case.say(screen_line(
+            window.as_ref().map(|window| members.tail(window.id())),
         ));
         // What else is known of a member that ran nothing: its lane, and what the host and the
-        // machine find under its window (a screen may be blank where the window is not).
+        // machine find under its window (a screen may be blank where the window is not), and
+        // what the daemon wrote of its task: whether a window was opened, and what became of it.
         case.say(format!(
             "     its lane: {}; what the pane host finds under its window: {}; what descends from its window's process: {}",
             state().unwrap_or_else(|failed| format!("(unread: {failed})")),
@@ -278,6 +287,7 @@ fn drive(ctx: &Ctx, case: &mut Account, name: &str, chosen: &mut Vec<Running>) -
                     |own| said(&descending_from(&ThisMachine.processes().unwrap_or_default(), own))
                 )
         ));
+        say_events(case, members, number);
         return Ok(());
     }
     let Some(window) = members.window_of(ctx.agent)? else {
@@ -444,6 +454,7 @@ mod tests {
             identity: Identity { pid, started },
             ppid,
             command: command.to_owned(),
+            exe: None,
         }
     }
 
@@ -593,12 +604,15 @@ mod tests {
                 18028,
                 r#""C:\Program Files\Git\usr\bin\sh.exe" ./ignore-signals-cf-stops-live.sh"#,
             ),
-            running(
-                25892,
-                14,
-                29604,
-                r#""C:\Program Files\Git\usr\bin\sleep.exe" 200"#,
-            ),
+            Running {
+                exe: Some(r"C:\Program Files\Git\usr\bin\sleep.exe".to_owned()),
+                ..running(
+                    25892,
+                    14,
+                    29604,
+                    r#""C:\Program Files\Git\usr\bin\sleep.exe" 200"#,
+                )
+            },
         ];
         let ps = "      PID    PPID    PGID     WINPID  TTY         UID    STIME COMMAND\n     1464       1    1464       9736  cons0     197609 18:25:26 /usr/bin/sh\n     1466    1464    1464      25892  cons0     197609 18:25:26 /usr/bin/sleep\n";
         // As Windows lists them: the script, and the sleep outside the window's tree.
@@ -619,6 +633,18 @@ mod tests {
         let seen = look(&mut chosen, &left, Some(window));
         assert!(seen.command.is_empty());
         assert_eq!(pids(&seen.orphans), [25892]);
+    }
+
+    #[test]
+    fn a_member_with_no_window_says_so_and_a_blank_screen_is_said_to_be_one() {
+        // A screen that is blank reads the same as no window, which a failure must tell apart
+        // (T-194, P3-4: the failed run's screen was blank for the whole 300 s).
+        assert_eq!(screen_line(None), "     it has no window");
+        assert_eq!(screen_line(Some(String::new())), "     its screen: ");
+        assert_eq!(
+            screen_line(Some("a prompt".to_owned())),
+            "     its screen: a prompt"
+        );
     }
 
     #[test]

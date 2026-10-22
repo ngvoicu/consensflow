@@ -2,9 +2,11 @@
 //! ended: a long run's report and ledger (`evals/reports/long/`), an eval's report, a stop's. The
 //! sweep of the next run there removes what is older than [`REPORTS_KEPT_DAYS`] from that
 //! folder, so a report that lived only there would be gone in two weeks (T-141, P3-3). The
-//! folder here is the checkout's own, `evals/reports` (ignored by git, and the privacy line
-//! holds: nothing of it goes anywhere but this machine), where the same runs made here leave
-//! theirs.
+//! folder here is the main checkout's `evals/reports` (the parent of the repository's common
+//! git folder), not that of the tree the run went from: a worker's tree goes with its task, and
+//! what lived only in it would go too (T-194, P3-3). It is ignored by git, and the privacy line
+//! holds: nothing of it goes anywhere but this machine. Where there is no repository to ask, it
+//! is the checkout's own.
 //!
 //! The machine lists what it holds ([`reports_script`]), each file with its size, and only a
 //! file this checkout does not have is copied (`scp`, one at a time, to a name of its own that is
@@ -122,7 +124,7 @@ fn bring_back(context: &Context, options: &Options, console: &mut Console) -> Re
         )
         .map_err(Error::Output)?;
     }
-    let here = context.root.join("evals").join("reports");
+    let (here, in_main) = reports_folder(context);
     let mut brought = Vec::new();
     for file in files {
         let to = here.join(file.name.replace('/', std::path::MAIN_SEPARATOR_STR));
@@ -139,22 +141,51 @@ fn bring_back(context: &Context, options: &Options, console: &mut Console) -> Re
             .map_err(Error::Output)?,
         }
     }
-    if let Some(told) = told(&brought) {
+    if let Some(told) = told(&brought, in_main) {
         writeln!(console.err, "windows: {told}").map_err(Error::Output)?;
     }
     Ok(())
 }
 
+/// Where the reports are kept here, and whether that is the main checkout's folder and not the
+/// tree's own: the main checkout's `evals/reports` (the parent of the repository's common git
+/// folder), for a run that goes from a tree linked to it goes with its task, and what lived only
+/// in the tree would go too (T-194, P3-3). The checkout itself is where there is no repository
+/// to ask, or its common folder is no `.git` (a bare repository's is not a checkout's).
+fn reports_folder(context: &Context) -> (PathBuf, bool) {
+    let own = context.root.join("evals").join("reports");
+    let asked = Invocation::new("git", &context.root).args(["rev-parse", "--git-common-dir"]);
+    let Ok(answered) = process::capture(&asked, &context.env) else {
+        return (own, false);
+    };
+    let common = answered.stdout.trim();
+    if answered.code != 0 || common.is_empty() {
+        return (own, false);
+    }
+    let common = context.root.join(common);
+    let main = (common.file_name().is_some_and(|name| name == ".git"))
+        .then(|| common.parent().map(Path::to_path_buf))
+        .flatten();
+    match main {
+        Some(main) if main.is_dir() => {
+            let differs = fs::canonicalize(&main).ok() != fs::canonicalize(&context.root).ok();
+            (main.join("evals").join("reports"), differs)
+        }
+        _ => (own, false),
+    }
+}
+
 /// What is said of the files brought back: how many, and the first of them; none where none was.
-fn told(brought: &[String]) -> Option<String> {
+fn told(brought: &[String], in_main: bool) -> Option<String> {
     if brought.is_empty() {
         return None;
     }
     let shown: Vec<&str> = brought.iter().take(SAID).map(String::as_str).collect();
     let more = brought.len().saturating_sub(SAID);
     Some(format!(
-        "brought back {} of the machine's reports into evals/reports: {}{}",
+        "brought back {} of the machine's reports into {}evals/reports: {}{}",
         brought.len(),
+        if in_main { "the main checkout's " } else { "" },
         shown.join(", "),
         if more > 0 {
             format!(" and {more} more")

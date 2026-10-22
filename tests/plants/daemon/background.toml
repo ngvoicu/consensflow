@@ -2333,5 +2333,31 @@ runs = ["panes-lib-cygwin"]
 
 [[plant.edit]]
 file = "crates/cf-panes/src/cygwin.rs"
-find = "            let mut words = line.split_whitespace().map(|word| word.parse::<u32>().ok());"
-replace = "            let mut words = line.split_whitespace().map(|word| Some(word.parse::<u32>().unwrap_or(0)));"
+find = "                .map(|word| word.parse::<u32>().ok());"
+replace = "                .map(|word| Some(word.parse::<u32>().unwrap_or(0)));"
+
+# What T-194 asked of the Cygwin reading (T-202): a row that begins with a status letter is a row,
+# and `ps` is run from a folder that has the layer it runs on.
+[[plant]]
+name = "background: a row of ps that begins with a status letter is no row"
+meant = "a_row_that_begins_with_a_status_letter_is_a_row_and_so_is_its_parent_s"
+runs = ["panes-lib-cygwin"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/cygwin.rs"
+find = "                if first.len() == 1 && first.chars().all(|letter| letter.is_ascii_alphabetic()) {"
+replace = "                if false {"
+
+[[plant]]
+name = "background: a ps.exe with no Cygwin layer beside it is run"
+meant = "ps_is_run_from_a_folder_that_has_it_and_the_layer_it_runs_on"
+runs = ["panes-lib-cygwin"]
+
+[[plant.edit]]
+file = "crates/cf-panes/src/cygwin.rs"
+find = '''
+        && ["msys-2.0.dll", "cygwin1.dll"]
+            .iter()
+            .any(|layer| exists(&folder.join(layer)))
+'''
+replace = ""

@@ -3,6 +3,7 @@
 //! the script.
 
 mod golden;
+mod reports;
 mod sweep;
 mod unpack;
 

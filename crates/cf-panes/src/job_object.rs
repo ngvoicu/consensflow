@@ -40,6 +40,7 @@ use std::io;
 use std::mem::{offset_of, size_of, size_of_val};
 use std::path::{Path, PathBuf};
 use std::ptr;
+use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -81,8 +82,12 @@ const BUDGET: Duration = Duration::from_secs(15);
 
 const _: () = assert!(BUDGET.as_secs() < ENDING_BOUND.as_secs());
 
+/// What says `ps -W` of a folder: [`ps_w`] but in a test, which counts what it is asked.
+type Ps = Arc<dyn Fn(&Path) -> Option<String> + Send + Sync>;
+
 pub(crate) struct JobObject {
     handle: HANDLE,
+    ps: Ps,
 }
 
 // SAFETY: a job handle is a kernel handle, usable from any thread.
@@ -98,7 +103,10 @@ impl JobObject {
         if handle.is_null() {
             return Err(io::Error::last_os_error());
         }
-        let job = Self { handle };
+        let job = Self {
+            handle,
+            ps: Arc::new(ps_w),
+        };
         let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
         limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
         // SAFETY: the structure is the one the information class names, at its size.
@@ -147,7 +155,7 @@ impl JobObject {
     /// that ended between the list and the look at it, or that cannot be looked at,
     /// is left out.
     pub fn members(&self) -> io::Result<Vec<Member>> {
-        Ok(members_of(self.hold()?.iter()))
+        Ok(members_of(self.hold_new(&HashMap::new())?.iter()))
     }
 
     /// Ends what `baseline` proves the turn's work, each process by itself and
@@ -231,20 +239,26 @@ impl JobObject {
     /// The processes of the job, each held open, and each the one the job holds: the
     /// number the system lists may be another's by the time it is opened, and the
     /// handle is asked, not the number.
-    fn hold(&self) -> io::Result<Vec<Held>> {
-        let mut held: Vec<Held> = self
+    ///
+    /// Only what `held` does not hold is opened: a process that is held keeps its number, so
+    /// the one the job lists under it is the one held, and what was read of it is read. The
+    /// parents of Git Bash's programs are mended for what is new alone ([`repair_cygwin_parents`]),
+    /// so an ending asks `ps -W` once for a process and not at every look it makes again
+    /// (T-194, P3-2: an ending looks up to eighteen times, a slow `ps` waits 3 s).
+    fn hold_new(&self, held: &HashMap<u32, Held>) -> io::Result<Vec<Held>> {
+        let mut fresh: Vec<Held> = self
             .process_ids()?
             .into_iter()
+            .filter(|pid| !held.contains_key(pid))
             .filter_map(|pid| self.hold_one(pid))
             .collect();
-        repair_cygwin_parents(&mut held);
-        Ok(held)
+        repair_cygwin_parents(&mut fresh, held, &*self.ps);
+        Ok(fresh)
     }
 
-    /// Holds what the job has now that `held` has not: a process that is held keeps
-    /// its number, so no number is held twice.
+    /// Holds what the job has now that `held` has not.
     fn hold_into(&self, held: &mut HashMap<u32, Held>) -> io::Result<()> {
-        for now in self.hold()? {
+        for now in self.hold_new(held)? {
             held.entry(now.member.key.pid).or_insert(now);
         }
         Ok(())
@@ -373,28 +387,38 @@ impl Held {
 /// A program of Git Bash's own kind that a script started names a parent that has gone (a
 /// forked copy of the shell, which started it): the parent Git Bash says it has, a shell of
 /// the job, is given instead, so that the chain from it to the shell the harness started is
-/// whole ([`crate::cygwin`]). `ps -W` is asked only where such a process is and a `ps` is in
-/// the folder of its program (Git Bash's); a process it says nothing of, or whose parent is
-/// no member, keeps the parent it named.
-fn repair_cygwin_parents(held: &mut [Held]) {
-    let members: HashSet<u32> = held.iter().map(|one| one.member.key.pid).collect();
-    let orphans: Vec<(u32, PathBuf)> = held
+/// whole ([`crate::cygwin`]). `fresh` is what a look has just held that was not held before,
+/// and `held` what was: a parent is a member of either. `ps -W` is asked (`ps`) only where a
+/// process of `fresh` is such and a `ps` is in the folder of its program with the Cygwin layer
+/// it runs on (Git Bash's); a process it says nothing of, or whose parent is no member, keeps
+/// the parent it named.
+fn repair_cygwin_parents(
+    fresh: &mut [Held],
+    held: &HashMap<u32, Held>,
+    ps: &dyn Fn(&Path) -> Option<String>,
+) {
+    let members: HashSet<u32> = fresh
+        .iter()
+        .map(|one| one.member.key.pid)
+        .chain(held.keys().copied())
+        .collect();
+    let orphans: Vec<(u32, PathBuf)> = fresh
         .iter()
         .filter(|one| one.parent.is_some_and(|parent| !members.contains(&parent)))
         .filter_map(|one| {
             let folder = Path::new(&one.member.exe).parent()?;
             Some((one.member.key.pid, folder.to_path_buf()))
         })
-        .filter(|(_, folder)| folder.join("ps.exe").is_file())
+        .filter(|(_, folder)| crate::cygwin::runs_ps_in(folder, Path::is_file))
         .collect();
     if orphans.is_empty() {
         return;
     }
-    for (pid, parent) in crate::cygwin::parents_of(&orphans, ps_w) {
+    for (pid, parent) in crate::cygwin::parents_of(&orphans, ps) {
         if !members.contains(&parent) {
             continue;
         }
-        if let Some(one) = held.iter_mut().find(|one| one.member.key.pid == pid) {
+        if let Some(one) = fresh.iter_mut().find(|one| one.member.key.pid == pid) {
             one.parent = Some(parent);
         }
     }
@@ -430,9 +454,14 @@ fn ps_w(folder: &Path) -> Option<String> {
 }
 
 /// How long a look waits for `ps -W`, and how much of it is read: a list of every process of the
-/// machine, a line each.
+/// machine, a line each. The wait was set against [`BUDGET`], which an ending shares with
+/// everything it does, and the bound the daemon waits by ([`ENDING_BOUND`]): an ending asks once for
+/// a process ([`JobObject::hold_new`]), so a `ps` that does not answer costs it this and no more,
+/// and four such waits would still be a part of the budget and not all of it.
 const PS_TIME: Duration = Duration::from_secs(3);
 const PS_BYTES: usize = 8 * 1024 * 1024;
+
+const _: () = assert!(PS_TIME.as_secs() * 4 <= BUDGET.as_secs());
 
 /// The members of `held`, each with the process that started it where that is one
 /// of them and began first: a number a process took after its parent went is not its
@@ -596,3 +625,6 @@ fn command_line(process: &Process) -> Option<String> {
     };
     Some(String::from_utf16_lossy(units))
 }
+
+#[cfg(test)]
+mod tests;

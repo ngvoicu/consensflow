@@ -200,8 +200,13 @@ mod win {
     /// What `ps -W` of the folder `folder` says (Git Bash's own, which lists the Cygwin
     /// parent of each of its programs): none where no `ps` is there or it did not answer.
     fn cygwin_ps(folder: &str) -> Option<String> {
-        let ps = std::path::Path::new(folder).join("ps.exe");
-        if !ps.is_file() {
+        let folder = std::path::Path::new(folder);
+        let ps = folder.join("ps.exe");
+        // Git Bash's `ps` runs on a Cygwin layer that sits beside it: one without is not run.
+        let layer = ["msys-2.0.dll", "cygwin1.dll"]
+            .iter()
+            .any(|dll| folder.join(dll).is_file());
+        if !ps.is_file() || !layer {
             return None;
         }
         let ran = Run::new(ps).args(["-W"]).inheriting_env().run().ok()?;

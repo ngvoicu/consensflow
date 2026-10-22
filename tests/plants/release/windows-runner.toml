@@ -376,3 +376,39 @@ replace = '''
                 .map_err(Error::Output)
             }
 '''
+
+# T-194's P3-3 and P3-6: the reports come into the main checkout's folder, and the listing does
+# not walk a reports folder that is itself a link.
+[[plant]]
+name = "windows runner: the reports come into the tree's own folder and go with the tree"
+meant = "the_reports_come_into_the_main_checkouts_folder_when_the_run_goes_from_a_tree_linked_to_it"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/fetch.rs"
+find = "        Some(main) if main.is_dir() => {"
+replace = "        Some(main) if false && main.is_dir() => {"
+
+[[plant]]
+name = "windows runner: the reports are said to be in the tree's folder when they are in the main checkout's"
+meant = "the_reports_come_into_the_main_checkouts_folder_when_the_run_goes_from_a_tree_linked_to_it"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/fetch.rs"
+find = "        if in_main { \"the main checkout's \" } else { \"\" },"
+replace = '        "",'
+
+[[plant]]
+name = "windows runner: the reports listing walks a reports folder that is a link"
+meant = "the_listing_does_not_walk_a_reports_folder_that_is_itself_a_link"
+runs = ["xtask-lib-windows"]
+
+[[plant.edit]]
+file = "tools/xtask/src/windows/script.rs"
+find = '''
+  if (-not ($folder.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+    $base'''
+replace = '''
+  if ($true) {
+    $base'''

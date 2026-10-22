@@ -357,10 +357,10 @@ runs = ["detect-unit"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/detect.rs"
-find = '    let named = agent_dir(env).ok().map(|agent| {'
+find = '    let named = agent_dir(env).ok().and_then(|agent| {'
 replace = '''
     let named: Option<PathBuf> = None;
-    let _ = agent_dir(env).ok().map(|agent| {'''
+    let _ = agent_dir(env).ok().and_then(|agent| {'''
 
 [[plant]]
 name = "detect: the default agent folder is looked in before the one the human named"
@@ -404,8 +404,8 @@ runs = ["detect-unit"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/detect.rs"
-find = '    let named = agent_dir(env).ok().map(|agent| {'
-replace = '    let named = set(env, "PI_CODING_AGENT_DIR").map(|agent| {'
+find = '    let named = agent_dir(env).ok().and_then(|agent| {'
+replace = '    let named = set(env, "PI_CODING_AGENT_DIR").and_then(|agent| {'
 
 [[plant]]
 name = "detect: a relative agent folder is the daemon's own working folder's"
@@ -414,8 +414,8 @@ runs = ["detect-unit"]
 
 [[plant.edit]]
 file = "crates/cf-harness/src/detect.rs"
-find = "            Some(home) if agent.is_relative() => home.join(agent),"
-replace = "            Some(home) if agent.is_relative() && false => home.join(agent),"
+find = "            Some(home) if agent.is_relative() => Some(home.join(agent)),"
+replace = "            Some(home) if agent.is_relative() && false => Some(home.join(agent)),"
 
 [[plant]]
 name = "detect: Pi's managed install in a folder of any name is told by nothing"
@@ -447,3 +447,14 @@ runs = ["process-search"]
 file = "crates/cf-process/src/search.rs"
 find = '    on(command, env.os("PATH"), env, &PROGRAMS)'
 replace = "    on(command, env.search_path(), env, &PROGRAMS)"
+
+# T-194's P3-7: a relative agent folder with no home to read it against is no place.
+[[plant]]
+name = "detect: a relative agent folder with no home is read against the daemon's working folder"
+meant = "a_relative_agent_folder_with_no_home_to_read_it_against_is_no_place_and_an_absolute_one_needs_none"
+runs = ["detect-unit"]
+
+[[plant.edit]]
+file = "crates/cf-harness/src/detect.rs"
+find = "            None if agent.is_relative() => None,\n"
+replace = ""

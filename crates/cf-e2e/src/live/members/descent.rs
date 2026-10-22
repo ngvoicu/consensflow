@@ -49,12 +49,14 @@ pub struct Identity {
 }
 
 /// A process of the machine as a check reads it: which it is, the number of the process
-/// that started it, and its command line.
+/// that started it, and its command line, and, where the system says it, the path of the
+/// image it runs (Windows' table does, and `ps` does not).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Running {
     pub identity: Identity,
     pub ppid: u32,
     pub command: String,
+    pub exe: Option<String>,
 }
 
 /// What a check reads of the machine's processes: the seam by which it finds what
@@ -286,32 +288,39 @@ struct CygwinRow {
 }
 
 /// What Git Bash's `ps -W` says, read for the first four of its columns (`PID PPID PGID
-/// WINPID`) of each row: the header and any line that is no row say nothing.
+/// WINPID`) of each row: the header and any line that is no row say nothing. Cygwin's `ps`
+/// begins a row with a status letter (`S` stopped, `I` reading its terminal, `O` writing it) or
+/// a space, then the number in seven columns, so a first word of one letter is the status and
+/// the number is the next: a process that reads its terminal is a row all the same.
 fn cygwin_table(listing: &str) -> Vec<CygwinRow> {
     listing
         .lines()
         .filter_map(|line| {
-            let mut words = line.split_whitespace().map(|word| word.parse::<u32>().ok());
+            let mut words = line.split_whitespace();
+            let first = words.next()?;
+            let first =
+                if first.len() == 1 && first.chars().all(|letter| letter.is_ascii_alphabetic()) {
+                    words.next()?
+                } else {
+                    first
+                };
+            let mut numbers = std::iter::once(first)
+                .chain(words)
+                .map(|word| word.parse::<u32>().ok());
             let (pid, ppid, _group, winpid) = (
-                words.next()??,
-                words.next()??,
-                words.next()??,
-                words.next()??,
+                numbers.next()??,
+                numbers.next()??,
+                numbers.next()??,
+                numbers.next()??,
             );
             Some(CygwinRow { pid, ppid, winpid })
         })
         .collect()
 }
 
-/// The folder the program of a command line is in: the first word, or the first in double
-/// quotes where a path holds a space, up to its last `\` or `/`; none where it names none.
-fn program_folder(command: &str) -> Option<String> {
-    let program = match command.strip_prefix('"') {
-        Some(rest) => rest.split('"').next()?,
-        None => command.split(' ').next()?,
-    };
-    program
-        .rsplit_once(['\\', '/'])
+/// The folder an image is in, up to its last `\` or `/`; none where its path names none.
+fn image_folder(exe: &str) -> Option<String> {
+    exe.rsplit_once(['\\', '/'])
         .map(|(folder, _)| folder.to_owned())
 }
 
@@ -320,10 +329,12 @@ fn program_folder(command: &str) -> Option<String> {
 /// itself, which starts the program and is gone by the time anyone looks (zeewin, 2026-10-21:
 /// the sleep of the `stuck` script, started by `sh ./script`, names a parent that no process
 /// has, and descends from nothing of the window's, whose script it is the child of). `ps -W` of
-/// the folder the program is in (`ps`, asked once for each folder: its text, or none where there
-/// is no `ps` there) says its Cygwin parent, and which Windows process that is. A parent is given
-/// only where Windows lists it and it began no later than the child: a number another process has
-/// taken since is none.
+/// the folder of the image the program runs (`ps`, asked once for each folder: its text, or none
+/// where there is no `ps` there) says its Cygwin parent, and which Windows process that is. The
+/// folder is the image's, which Windows' table gives plain, and not the command line's spelling of
+/// it (`Git\bin\..\usr\bin` and `Git\usr\bin` are one folder); a process whose image the table
+/// could not say is left as it was. A parent is given only where Windows lists it and it began no
+/// later than the child: a number another process has taken since is none.
 pub fn with_cygwin_parents(
     mut listed: Vec<Running>,
     ps: impl Fn(&str) -> Option<String>,
@@ -338,7 +349,7 @@ pub fn with_cygwin_parents(
         if process.ppid == 0 || began.contains_key(&process.ppid) {
             continue;
         }
-        let Some(folder) = program_folder(&process.command) else {
+        let Some(folder) = process.exe.as_deref().and_then(image_folder) else {
             continue;
         };
         let table = tables.entry(folder).or_insert_with_key(|folder| {
@@ -414,6 +425,7 @@ fn ps_lines(listing: &str) -> Vec<Running> {
                 },
                 ppid: words[1].parse().ok()?,
                 command: rest.to_owned(),
+                exe: None,
             })
         })
         .collect()
@@ -444,7 +456,7 @@ fn started(lstart: &[&str]) -> Option<u64> {
 #[cfg(any(windows, test))]
 fn table_script(which: &str) -> String {
     format!(
-        "[Console]::OutputEncoding = [Text.Encoding]::UTF8; Get-CimInstance Win32_Process{which} | ForEach-Object {{ [pscustomobject]@{{ pid = $_.ProcessId; ppid = $_.ParentProcessId; started = $(if ($_.CreationDate) {{ $_.CreationDate.ToFileTimeUtc() }} else {{ 0 }}); command = $_.CommandLine }} }} | ConvertTo-Json -Compress"
+        "[Console]::OutputEncoding = [Text.Encoding]::UTF8; Get-CimInstance Win32_Process{which} | ForEach-Object {{ [pscustomobject]@{{ pid = $_.ProcessId; ppid = $_.ParentProcessId; exe = $_.ExecutablePath; started = $(if ($_.CreationDate) {{ $_.CreationDate.ToFileTimeUtc() }} else {{ 0 }}); command = $_.CommandLine }} }} | ConvertTo-Json -Compress"
     )
 }
 
@@ -491,6 +503,10 @@ fn table_of(listing: &str) -> Result<Vec<Running>> {
                 },
                 ppid: u32::try_from(entry["ppid"].as_u64()?).ok()?,
                 command: entry["command"].as_str().unwrap_or_default().to_owned(),
+                exe: entry["exe"]
+                    .as_str()
+                    .filter(|exe| !exe.is_empty())
+                    .map(str::to_owned),
             })
         })
         .collect())
