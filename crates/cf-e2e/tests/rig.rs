@@ -91,6 +91,8 @@ mod described;
 mod devin_bypass_first;
 #[path = "rig/help.rs"]
 mod help;
+#[path = "rig/homes.rs"]
+mod homes;
 #[path = "rig/last_exits.rs"]
 mod last_exits;
 #[path = "rig/live_base.rs"]

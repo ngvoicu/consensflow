@@ -34,6 +34,7 @@ mod project;
 mod report;
 mod route;
 mod stranger;
+mod sweep;
 mod wait;
 
 use std::path::{Path, PathBuf};
@@ -97,6 +98,7 @@ pub struct Config {
     finder: bool,
     masker: Option<Masker>,
     reports: Option<PathBuf>,
+    homes: Option<PathBuf>,
 }
 
 /// What a rig passes what it says of itself through, where its owner gives it one
@@ -161,6 +163,7 @@ impl Config {
             finder: false,
             masker: None,
             reports: None,
+            homes: None,
         }
     }
 
@@ -186,6 +189,17 @@ impl Config {
     #[must_use]
     pub fn reports_in(mut self, folder: impl Into<PathBuf>) -> Self {
         self.reports = Some(folder.into());
+        self
+    }
+
+    /// With the rig's home made in `folder`, and not in the machine's temp folder: for a rig
+    /// built for the real harnesses, whose windows write what the person's login lets them
+    /// there, which the machine's temp folder would keep for good if the run were killed.
+    /// A rig that starts takes away the homes in that folder that a killed run left: those
+    /// older than a day that no process works in.
+    #[must_use]
+    pub fn homes_in(mut self, folder: impl Into<PathBuf>) -> Self {
+        self.homes = Some(folder.into());
         self
     }
 
@@ -587,7 +601,8 @@ impl Rig {
 
     /// Leaves the home where it is when the rig ends, however it ends (closed,
     /// or dropped by a case that failed), for a person to look at what the case
-    /// did: where it is.
+    /// did: where it is. A rig that starts a day later takes it away
+    /// ([`Config::homes_in`]) unless a process works in it.
     pub fn keep_home(&mut self) -> PathBuf {
         self.keep_root = true;
         self.root.clone()

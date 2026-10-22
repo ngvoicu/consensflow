@@ -273,6 +273,10 @@ fn windows_environment(
 /// rig with the stand-in, and hold no real harness's output there).
 const REPORTS: &str = "app/src-tauri/target/live-reports";
 
+/// Where the home of such a rig is, on Unix: under its build folder as its report is. On
+/// Windows it is in the temp folder, whose path is short where a checkout's is deep.
+const HOMES: &str = "app/src-tauri/target/live-homes";
+
 /// A rig whose windows run the stand-in `stand_in` for Claude and find every
 /// harness of `installs`, logged in as the machine is: each one's command's
 /// folder, and Node's where it is another, are on their `PATH` (in the order
@@ -287,6 +291,9 @@ pub fn rig(installs: &[Installed], stand_in: impl Into<PathBuf>) -> Config {
     let mut config = Config::new(stand_in)
         .var("LANG", "en_US.UTF-8")
         .reports_in(checkout::path(REPORTS));
+    if !cfg!(windows) {
+        config = config.homes_in(checkout::path(HOMES));
+    }
     for name in ["USER", "LOGNAME"] {
         if let Some(value) = machine(name) {
             config = config.var(name, value);

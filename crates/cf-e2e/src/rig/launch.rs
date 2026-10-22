@@ -40,20 +40,27 @@ impl Rig {
     pub fn start(config: Config) -> Result<Self> {
         let turn = serial::turn();
         // A home of its own, which goes if the rig never starts; or the one it is
-        // to resume on. In the machine's temp folder for every rig, one for the real
-        // harnesses too: a home deep in a checkout is a long path where this folder's is
-        // short (a Unix socket's, Windows' limit), and what a real harness's windows
-        // hold there goes with the home when the rig ends, as its report does not.
-        // What a killed run leaves is swept by hand, the homes older than a day.
+        // to resume on. In the machine's temp folder, but for a rig built for the real
+        // harnesses on Unix, whose home is under the checkout's build folder as its report
+        // is ([`Config::homes_in`]): what a real harness's windows write there, with the
+        // person's login, is not left in the temp folder if the run is killed. On Windows
+        // it stays in the temp folder: a checkout's deep path and a harness's own under it
+        // come near MAX_PATH. (A Unix socket is no reason either way: the Codex session
+        // falls back to the temp folder's when its home's path is too long.) The homes a
+        // killed run left in the folder, older than a day and worked in by no process, are
+        // taken away first, unread.
         let (root, scratch) = match &config.existing_root {
             Some(root) => (root.clone(), None),
             None => {
+                let folder = config.homes.clone().unwrap_or_else(std::env::temp_dir);
+                files::make_dir(&folder)?;
+                super::sweep::homes(&folder);
                 let scratch = tempfile::Builder::new()
                     .prefix("consensflow-integration-")
-                    .tempdir()
+                    .tempdir_in(&folder)
                     .map_err(|source| Error::File {
                         action: "make a folder in",
-                        path: std::env::temp_dir(),
+                        path: folder.clone(),
                         source,
                     })?;
                 (scratch.path().to_path_buf(), Some(scratch))

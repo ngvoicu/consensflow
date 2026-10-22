@@ -98,11 +98,22 @@ fn a_case_whose_close_fails(home: &mut Option<PathBuf>, expected: bool) -> Outco
     Ok(())
 }
 
-/// A case whose close times out: the daemon and the pane host are given no time to end,
-/// and the daemon, its input gone, may be there still when the rig is dropped.
+/// A case whose close times out: the daemon and the pane host are given no time to end.
+/// On Unix the daemon is stopped first (SIGSTOP), so that it is there, its input gone,
+/// when the rig is dropped and its report is made: a daemon left running may end of its
+/// input's end before that, and the report then has nothing to ask. The drop kills it.
 fn a_case_whose_close_times_out(home: &mut Option<PathBuf>) -> Outcome {
     let rig = crate::rig()?;
     *home = Some(home_of(&rig));
+    #[cfg(unix)]
+    {
+        use nix::sys::signal::{kill, Signal};
+        use nix::unistd::Pid;
+        kill(
+            Pid::from_raw(i32::try_from(rig.daemon_pid())?),
+            Signal::SIGSTOP,
+        )?;
+    }
     rig.close_within(Duration::ZERO)?;
     Ok(())
 }
@@ -179,14 +190,15 @@ fn a_report_of_a_rig_whose_close_was_tried_does_not_ask_the_daemon_what_it_says(
     let kept = fs::read_to_string(&report)?;
     fs::remove_file(report)?;
     // Its input gone, the daemon is asked nothing (it would be waited on for ten
-    // seconds where it is there and answers nothing); where it is gone already, that is said.
+    // seconds where it is there and answers nothing). On Unix it is there, stopped, and
+    // that is all the report may say; on Windows it may have ended of its input's end.
     let said = kept
         .split("what the daemon says:\n")
         .nth(1)
         .and_then(|after| after.lines().next())
         .unwrap_or_default();
     assert!(
-        said.starts_with("  not asked: ") || said == "  the daemon is gone",
+        said.starts_with("  not asked: ") || (cfg!(windows) && said == "  the daemon is gone"),
         "{said:?}"
     );
     Ok(())

@@ -21,6 +21,12 @@ reports-lib = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "rig::repo
 reports-asked = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "reports::a_report_of_a_rig_whose_close"]
 reports-xtask-driver = ["cargo", "test", "--offline", "-p", "xtask", "--lib", "plants::driver::tests::the_commands_are_given"]
 reports-xtask-runs = ["cargo", "test", "--offline", "-p", "xtask", "--lib", "plants::runs::tests::a_command_is_given"]
+reports-xtask-socket = ["cargo", "test", "--offline", "-p", "xtask", "--lib", "plants::driver::tests::the_longest_socket"]
+reports-xtask-kept = ["cargo", "test", "--offline", "-p", "xtask", "--lib", "plants::driver::tests::a_run_with_a_plant"]
+reports-xtask-removed = ["cargo", "test", "--offline", "-p", "xtask", "--lib", "plants::driver::tests::a_plant_is_in_the_sources"]
+reports-homes = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "homes::"]
+reports-sweep = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "rig::sweep"]
+reports-env = ["cargo", "test", "--offline", "-p", "cf-e2e", "--lib", "rig::install"]
 reports-ci = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "rig", "reports::ci_uploads"]
 
 [[plant]]
@@ -369,7 +375,7 @@ runs = ["reports-xtask-driver"]
 
 [[plant.edit]]
 file = "tools/xtask/src/plants/driver.rs"
-find = "    runner.temp_in(&temp);\n"
+find = "    runner.temp_in(&saved);\n"
 replace = ""
 
 [[plant]]
@@ -379,8 +385,8 @@ runs = ["reports-xtask-driver"]
 
 [[plant.edit]]
 file = "tools/xtask/src/plants/driver.rs"
-find = 'let temp = saved.join("temp");'
-replace = 'let temp = std::env::temp_dir().join("cf-plants-temp");'
+find = "    runner.temp_in(&saved);\n"
+replace = "    runner.temp_in(&std::env::temp_dir().join(\"cf-plants-temp\"));\n"
 
 [[plant]]
 name = "rig reports: the plant runner's commands are given no temp folder of the run's"
@@ -391,3 +397,166 @@ runs = ["reports-xtask-runs"]
 file = "tools/xtask/src/plants/runs.rs"
 find = "        self.env = Env::from_vars(kept.into_iter().chain(given));"
 replace = "        let _ = given;\n        self.env = Env::from_vars(kept);"
+
+# The round of T-226 (Calliope's check T-214): a plant run keeps its folder when a plant was not
+# caught; a live rig's home is under the checkout's build folder on Unix; a rig that starts sweeps
+# the stale homes of its folder; a rig's programs are told the temp folder on Unix too.
+
+[[plant]]
+name = "rig reports: a plant run removes its folder though a plant was not caught"
+meant = "a_run_with_a_plant_that_was_not_caught_keeps_its_folder_with_what_its_runs_left_in_it"
+runs = ["reports-xtask-kept"]
+
+[[plant.edit]]
+file = "tools/xtask/src/plants/driver.rs"
+find = "    if wrong == 0 {\n        let _ = fs::remove_dir_all(&saved);"
+replace = "    if true {\n        let _ = fs::remove_dir_all(&saved);"
+
+[[plant]]
+name = "rig reports: a plant run keeps its folder though every plant was caught"
+meant = "a_plant_is_in_the_sources_while_its_runs_go_and_back_as_it_was_once_one_has_failed"
+runs = ["reports-xtask-removed"]
+
+[[plant.edit]]
+file = "tools/xtask/src/plants/driver.rs"
+find = "    if wrong == 0 {\n        let _ = fs::remove_dir_all(&saved);"
+replace = "    if false {\n        let _ = fs::remove_dir_all(&saved);"
+
+[[plant]]
+name = "rig reports: a plant run that kept its folder does not say where"
+meant = "a_run_with_a_plant_that_was_not_caught_keeps_its_folder_with_what_its_runs_left_in_it"
+runs = ["reports-xtask-kept"]
+
+[[plant.edit]]
+file = "tools/xtask/src/plants/driver.rs"
+find = "            if wrong == 1 { \"its\" } else { \"their\" },\n            saved.display()"
+replace = "            if wrong == 1 { \"its\" } else { \"their\" },\n            \"somewhere\""
+
+[[plant]]
+name = "rig reports: a live rig's home is in the temp folder on Unix"
+meant = "a_live_rigs_home_is_under_the_checkouts_build_folder_on_unix_and_in_the_temp_folder_on_windows"
+runs = ["reports-homes"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/live/machine.rs"
+find = "    if !cfg!(windows) {\n        config = config.homes_in(checkout::path(HOMES));"
+replace = "    if false {\n        config = config.homes_in(checkout::path(HOMES));"
+
+[[plant]]
+name = "rig reports: a rig's home is in the temp folder whatever folder its case names"
+meant = "a_rig_is_given_its_home_in_the_folder_its_case_names"
+runs = ["reports-homes"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/launch.rs"
+find = "config.homes.clone().unwrap_or_else(std::env::temp_dir)"
+replace = "std::env::temp_dir()"
+
+[[plant]]
+name = "rig reports: a rig that starts sweeps nothing"
+meant = "a_rig_that_starts_sweeps_the_homes_older_than_a_day_that_no_process_works_in_and_nothing_else"
+runs = ["reports-homes"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/launch.rs"
+find = "                super::sweep::homes(&folder);\n"
+replace = ""
+
+[[plant]]
+name = "rig reports: the sweep takes the homes of any age"
+meant = "only_a_home_older_than_a_day_that_no_process_works_in_is_swept"
+runs = ["reports-sweep"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/sweep.rs"
+find = "(found.is_dir() && age > OLDER).then(|| entry.path())"
+replace = "found.is_dir().then(|| entry.path())"
+
+[[plant]]
+name = "rig reports: the sweep takes a home a process works in"
+meant = "only_a_home_older_than_a_day_that_no_process_works_in_is_swept"
+runs = ["reports-sweep"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/sweep.rs"
+find = "        .filter(|(_, busy)| !busy)\n"
+replace = ""
+
+[[plant]]
+name = "rig reports: the sweep follows a link that is named like a home"
+meant = "only_a_home_older_than_a_day_that_no_process_works_in_is_swept"
+runs = ["reports-sweep"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/sweep.rs"
+find = "fs::symlink_metadata(entry.path()).ok()?"
+replace = "fs::metadata(entry.path()).ok()?"
+
+[[plant]]
+name = "rig reports: the sweep takes the homes when the processes could not be listed"
+meant = "nothing_is_swept_where_the_processes_cannot_be_listed"
+runs = ["reports-sweep"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/sweep.rs"
+find = '''
+    let Some(busy) = worked_in(&stale) else {
+        return Vec::new();
+    };
+'''
+replace = '''
+    let busy = worked_in(&stale).unwrap_or_else(|| vec![false; stale.len()]);
+'''
+
+[[plant]]
+name = "rig reports: a home is not worked in by a process whose working folder is in it"
+meant = "a_process_works_in_a_home_by_its_working_folder_or_by_naming_it"
+runs = ["reports-sweep"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/sweep.rs"
+find = "working.iter().any(|cwd| Path::new(cwd).starts_with(name))"
+replace = "false"
+
+[[plant]]
+name = "rig reports: a home is not worked in by a process whose command line names it"
+meant = "a_process_works_in_a_home_by_its_working_folder_or_by_naming_it"
+runs = ["reports-sweep"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/sweep.rs"
+find = "|| commands.contains(name.to_string_lossy().as_ref())"
+replace = "|| false"
+
+[[plant]]
+name = "rig reports: a rig's programs are told no temp folder on Unix"
+meant = "the_programs_of_a_rig_are_told_the_temp_folder_of_the_test_that_runs_it"
+runs = ["reports-env"]
+
+[[plant.edit]]
+file = "crates/cf-e2e/src/rig/install.rs"
+find = '        env.push(("TMPDIR".to_owned(), text(&std::env::temp_dir())));'
+replace = "        let _ = &env;"
+
+# Review of T-226's answer (the chief, m-2935): a plant run's folder leaves a Codex session's socket
+# 20 bytes to spare on a Mac, and a test fails within 16.
+
+[[plant]]
+name = "rig reports: a plant run's folder is made in the system's temp folder, which a Mac's makes long"
+meant = "the_longest_socket_path_a_plant_run_can_make_is_not_within_16_bytes_of_the_limit"
+runs = ["reports-xtask-socket"]
+
+[[plant.edit]]
+file = "tools/xtask/src/plants/driver.rs"
+find = "    if cfg!(unix) {\n        if let Ok(folder) = make(Path::new(\"/tmp\")) {"
+replace = "    if false {\n        if let Ok(folder) = make(Path::new(\"/tmp\")) {"
+
+[[plant]]
+name = "rig reports: a plant run's folder is named at length"
+meant = "the_longest_socket_path_a_plant_run_can_make_is_not_within_16_bytes_of_the_limit"
+runs = ["reports-xtask-socket"]
+
+[[plant.edit]]
+file = "tools/xtask/src/plants/driver.rs"
+find = 'const RUN_PREFIX: &str = "cfp";'
+replace = 'const RUN_PREFIX: &str = "cf-plants-";'
