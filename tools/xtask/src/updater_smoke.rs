@@ -47,7 +47,10 @@
 //!   which the run says; not in the checkout, whose Cargo configuration a build there would also read).
 //!   One run holds a cache at a time: a second run of it is refused, saying so
 //! - `--reuse`: take the apps a run kept in the cache, and build only what is not there. A kept update
-//!   that was built from another commit or other changes than this checkout has is said so
+//!   that was built from another commit or other changes than this checkout has is said so. A kept
+//!   installed app was built with another run's updater key and takes this run's all the same: the
+//!   self-test hands it the public key to verify the update by (`CONSENSFLOW_SELFTEST_UPDATER_KEY`,
+//!   read by the bridge and the flip release alike), whatever key it carries
 //! - `--build-only`: build, say where, and run nothing
 //! - `--export-bridge`: export the bridge's source from its tag into the cache, say where, and stop
 //! - `--only <words>`: run the cases whose names hold a word (comma apart)

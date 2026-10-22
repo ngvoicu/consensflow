@@ -984,12 +984,12 @@ runs = ["smoke-cache"]
 [[plant.edit]]
 file = "tools/xtask/src/updater_smoke/cache.rs"
 find = '''
-    let state = State::of(root, env);
+    let state = State::of(root, cache_of(update), env);
     let built = build()?;
 '''
 replace = '''
     let built = build()?;
-    let state = State::of(root, env);
+    let state = State::of(root, cache_of(update), env);
 '''
 
 [[plant]]
@@ -1037,3 +1037,56 @@ runs = ["smoke-cache"]
 file = "tools/xtask/src/updater_smoke/cache.rs"
 find = '''&["diff", "HEAD", "--binary"]'''
 replace = '''&["diff", "--binary"]'''
+
+# A hold that is dropped at once holds nothing: `Hold` is `#[must_use]`, so that a bare
+# `cache::hold(&cache)?;` is a warning, and the gate's clippy denies warnings.
+[[plant]]
+name = "updater driver: the hold on the cache is a bare statement"
+meant = "unused_must_use"
+runs = ["smoke-lint"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke.rs"
+find = "    let _hold = cache::hold(&cache)?;"
+replace = "    cache::hold(&cache)?;"
+
+# A cache in the checkout that git does not ignore is not a change in the checkout.
+[[plant]]
+name = "updater cache: a cache in the checkout is a change in it"
+meant = "a_cache_in_the_checkout_that_git_does_not_ignore_is_no_change_in_the_checkout"
+runs = ["smoke-cache"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/cache.rs"
+find = ".is_some_and(|cache| physical.join(path).starts_with(cache))"
+replace = ".is_some_and(|cache| physical.join(path).starts_with(cache) && false)"
+
+[[plant]]
+name = "updater cache: the record of the update counts the cache in the checkout"
+meant = "a_cache_in_the_checkout_that_git_does_not_ignore_is_no_change_in_the_checkout"
+runs = ["smoke-cache"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/cache.rs"
+find = "    let state = State::of(root, cache_of(update), env);"
+replace = "    let state = State::of(root, None, env);"
+
+[[plant]]
+name = "updater cache: a reuse counts the cache in the checkout"
+meant = "a_cache_in_the_checkout_that_git_does_not_ignore_is_no_change_in_the_checkout"
+runs = ["smoke-cache"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/cache.rs"
+find = "    let now = match State::of(root, cache_of(update), env) {"
+replace = "    let now = match State::of(root, None, env) {"
+
+[[plant]]
+name = "updater cache: a file in no commit is told by its name and not by what it holds"
+meant = "the_state_of_a_checkout_is_its_commit_and_what_is_changed_in_it_staged_or_not"
+runs = ["smoke-cache"]
+
+[[plant.edit]]
+file = "tools/xtask/src/updater_smoke/cache.rs"
+find = "                    let _ = io::copy(&mut file, &mut digest);"
+replace = "                    let _ = &mut file;"

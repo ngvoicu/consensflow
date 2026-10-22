@@ -51,7 +51,7 @@ impl Repo {
     }
 
     fn state(&self) -> State {
-        State::of(self.path(), &Env::from_process()).unwrap()
+        State::of(self.path(), None, &Env::from_process()).unwrap()
     }
 
     fn older(&self, update: &Path) -> Option<String> {
@@ -167,7 +167,7 @@ fn a_cache_is_held_by_one_run_at_a_time_and_the_second_is_told_so() {
     let _other = hold(other.path()).unwrap();
     // A run that ended lets go of its cache.
     drop(first);
-    hold_when_free(cache.path());
+    let _again = hold_when_free(cache.path());
 }
 
 #[test]
@@ -213,7 +213,7 @@ fn the_state_of_a_checkout_is_its_commit_and_what_is_changed_in_it_staged_or_not
 #[test]
 fn a_folder_that_is_no_checkout_has_no_state() {
     let folder = tempfile::tempdir().unwrap();
-    let said = State::of(folder.path(), &Env::from_process())
+    let said = State::of(folder.path(), None, &Env::from_process())
         .unwrap_err()
         .to_string();
     assert!(said.starts_with("git rev-parse HEAD failed: "), "{said}");
@@ -333,6 +333,43 @@ fn keeps_the_update_with_what_the_checkout_was_when_the_build_started_to_read_it
     })
     .unwrap();
     assert_eq!(repo.older(&update), None);
+}
+
+#[test]
+#[cfg_attr(
+    not(target_os = "macos"),
+    ignore = "a bundle is copied as macOS's ditto copies it"
+)]
+fn a_cache_in_the_checkout_that_git_does_not_ignore_is_no_change_in_the_checkout() {
+    let repo = Repo::new();
+    // The cache is a folder of the checkout, and nothing ignores it.
+    let cache = repo.path().join("smoke-cache");
+    let update = cache.join("update").join("ConsensFlow.app");
+    fs::create_dir_all(cache.join("bridge-source")).unwrap();
+    fs::write(cache.join("bridge-source").join("exported"), "a release\n").unwrap();
+    let scratch = tempfile::tempdir().unwrap();
+    let built = fake_bundle(&scratch.path().join("built"), &Fake::default());
+
+    // The build adds to the cache (the update, the record of it, a run's folder).
+    keep_update(repo.path(), &update, &Env::from_process(), || {
+        fs::create_dir_all(cache.join("run-1")).unwrap();
+        fs::write(cache.join("run-1").join("key"), "a key\n").unwrap();
+        Ok(built.clone())
+    })
+    .unwrap();
+    // What it records is the checkout, with nothing changed in it, and it is the checkout still.
+    assert_eq!(
+        fs::read_to_string(cache.join("update").join(".built-from")).unwrap(),
+        format!(
+            "commit {}\nchanges none\n",
+            repo.git(&["rev-parse", "HEAD"]).trim()
+        )
+    );
+    assert_eq!(repo.older(&update), None);
+
+    // A file of the checkout's own beside the cache is a change, all the same.
+    repo.write("new", "x\n");
+    assert!(repo.older(&update).unwrap().contains("with changes "));
 }
 
 #[test]

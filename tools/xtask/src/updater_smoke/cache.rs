@@ -11,7 +11,7 @@
 //! the one it finds) and two trees' runs at once would build in one place.
 
 use std::fs::{self, File, OpenOptions, TryLockError};
-use std::io::Write;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 use cf_base::env::Env;
@@ -64,6 +64,7 @@ pub fn mark_checkout(cache: &Path, root: &Path) -> Result {
 
 /// A run's hold on a cache, until it is dropped (or the process ends: the system
 /// lets go of a lock with the process that held it, so none is left behind).
+#[must_use = "a hold that is dropped is let go of at once: bind it for as long as the run needs the cache"]
 #[derive(Debug)]
 pub struct Hold {
     _file: File,
@@ -117,8 +118,10 @@ struct State {
 }
 
 impl State {
-    /// The state of the checkout at `root`.
-    fn of(root: &Path, env: &Env) -> Result<Self> {
+    /// The state of the checkout at `root`. A cache in the checkout that git does not
+    /// ignore is not in it: what a build adds to the cache is not a change of the
+    /// checkout, and the update is kept there.
+    fn of(root: &Path, cache: Option<&Path>, env: &Env) -> Result<Self> {
         let commit = git(root, env, &["rev-parse", "HEAD"])?.trim().to_string();
         let diff = git(root, env, &["diff", "HEAD", "--binary"])?;
         let untracked = git(
@@ -126,9 +129,17 @@ impl State {
             env,
             &["ls-files", "--others", "--exclude-standard", "-z"],
         )?;
+        // A cache that is not there yet has nothing in it to leave out.
+        let cache = cache.and_then(|cache| fs::canonicalize(cache).ok());
+        let physical = fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
         let untracked: Vec<&str> = untracked
             .split('\0')
             .filter(|path| !path.is_empty())
+            .filter(|path| {
+                !cache
+                    .as_deref()
+                    .is_some_and(|cache| physical.join(path).starts_with(cache))
+            })
             .collect();
         let changes = (!diff.is_empty() || !untracked.is_empty()).then(|| {
             let mut digest = Sha256::new();
@@ -138,8 +149,8 @@ impl State {
                 digest.update(path.as_bytes());
                 digest.update(b"\0");
                 // A file that cannot be read is one that is there and nothing more.
-                if let Ok(bytes) = fs::read(root.join(path)) {
-                    digest.update(&bytes);
+                if let Ok(mut file) = File::open(root.join(path)) {
+                    let _ = io::copy(&mut file, &mut digest);
                 }
             }
             hex(&digest.finalize()[..6])
@@ -191,6 +202,11 @@ fn git(root: &Path, env: &Env, args: &[&str]) -> Result<String> {
     Ok(ran.stdout)
 }
 
+/// The cache an update is kept in: `<cache>/update/ConsensFlow.app`.
+fn cache_of(update: &Path) -> Option<&Path> {
+    update.parent()?.parent()
+}
+
 /// Keeps the update that `build` makes from the checkout at `root` at `update` (the
 /// kept app, `<cache>/update/ConsensFlow.app`), and writes beside it what the
 /// checkout was when the build started to read it. A state that cannot be read
@@ -201,7 +217,7 @@ pub fn keep_update(
     env: &Env,
     build: impl FnOnce() -> Result<PathBuf>,
 ) -> Result<PathBuf> {
-    let state = State::of(root, env);
+    let state = State::of(root, cache_of(update), env);
     let built = build()?;
     let mark = update.with_file_name(BUILT_FROM);
     remove_all(&mark)?;
@@ -229,7 +245,7 @@ pub fn older_update(update: &Path, root: &Path, env: &Env) -> Option<String> {
             mark.display()
         ));
     };
-    let now = match State::of(root, env) {
+    let now = match State::of(root, cache_of(update), env) {
         Ok(now) => now,
         Err(cause) => {
             return Some(format!(

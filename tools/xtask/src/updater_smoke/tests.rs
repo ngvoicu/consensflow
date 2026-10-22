@@ -194,7 +194,7 @@ fn lets_go_of_the_cache_when_the_run_ends() {
     let world = World::new();
     let (status, out, err) = world.smoke(&["--only", "no case has this word"]);
     assert_eq!(status.unwrap(), 0, "{err}\n{out}");
-    hold_when_free(&world.folder.path().join("cache"));
+    let _again = hold_when_free(&world.folder.path().join("cache"));
 }
 
 #[test]
