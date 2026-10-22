@@ -111,6 +111,7 @@ pub(crate) fn starting() -> Option<RwLockReadGuard<'static, ()>> {
 
 /// Runs `test` once every program of the other tests that is being started has been, and
 /// with none started until it ends.
+#[cfg(unix)]
 pub(crate) fn alone<T>(test: impl FnOnce() -> T) -> T {
     let _whole = STARTING.write().unwrap_or_else(PoisonError::into_inner);
     ALONE.set(true);
