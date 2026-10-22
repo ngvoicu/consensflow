@@ -7,7 +7,7 @@
 //! requesters were told they wait.
 
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use cf_base::refusal::Refusal;
@@ -43,10 +43,13 @@ pub(crate) struct QuotaPart {
 }
 
 /// What the scheduler keeps across records: the open tasks whose requester
-/// heard that they wait for a free member, each with its project.
+/// heard that they wait for a free member, each with its project; and the
+/// windows out of quota whose waiting messages the human heard of, each with
+/// the time its participant was marked out.
 #[derive(Debug, Default)]
 pub(crate) struct SchedulerState {
     waiting_noted: RefCell<HashMap<i64, i64>>,
+    out_noted: RefCell<HashSet<(i64, String)>>,
 }
 
 /// The same refusal: the one a record's reading gave, or one of the same time.
@@ -304,6 +307,85 @@ impl Dispatcher {
         quota
             .and_then(Quota::resets_at)
             .map_or_else(|| time::iso(self.now() + UNKNOWN_RESET_MS), str::to_owned)
+    }
+
+    /// A member back before its reset brings back the others out on its account.
+    /// Where every window of its harness is logged into the one account
+    /// (`Adapter::one_account`), the quota that came back is theirs too: each
+    /// other member out on that harness, and the chief, is back, where `since`
+    /// says the news came after it was marked out. A chief at rest takes no turn
+    /// of its own, so a `/login` that brought its members back left it out until
+    /// its reset, with everything sent to it queued (the field report of
+    /// 2026-10-22, T-254).
+    pub(crate) fn back_on_its_account(
+        &self,
+        project: &ProjectView,
+        owner: &ParticipantView,
+        since: impl Fn(&ParticipantView) -> bool,
+    ) -> Result<(), EngineError> {
+        let Some(harness) = owner.harness.as_deref() else {
+            return Ok(());
+        };
+        let one_account = self
+            .seams
+            .adapters
+            .adapter(harness)
+            .is_some_and(|adapter| adapter.one_account());
+        if !one_account {
+            return Ok(());
+        }
+        let because = format!("@{} has quota again on the same account", owner.handle);
+        for other in &project.participants {
+            let marked = other.role != "human" && other.member_id.is_none();
+            if marked
+                && other.id != owner.id
+                && other.harness.as_deref() == Some(harness)
+                && self.is_out(other)
+                && since(other)
+            {
+                self.seams
+                    .ledger
+                    .borrow_mut()
+                    .mark_back(other.id, &because)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// A window out of quota with a message waiting for it: nothing goes into it
+    /// before the reset unless its account has quota again, which ConsensFlow
+    /// learns only from a window whose turn gets through or from the human's Try
+    /// again now. So the human hears it, once for each time its participant is
+    /// marked out, rather than finding what was sent to it queued for days.
+    pub(crate) fn tell_what_waits(
+        &self,
+        project: &ProjectView,
+        participant: &ParticipantView,
+        record: &Record,
+        owner: &ParticipantView,
+    ) -> Result<(), EngineError> {
+        let Some(waiting) = self.next_in_line(record)? else {
+            return Ok(());
+        };
+        let mark = (participant.id, owner.out_since.clone().unwrap_or_default());
+        if !self.scheduler.out_noted.borrow_mut().insert(mark) {
+            return Ok(());
+        }
+        let until = owner.out_until.clone().unwrap_or_default();
+        self.seams.ledger.borrow_mut().note(
+            project.id,
+            &NewNote {
+                from: None,
+                to: "human".to_owned(),
+                task: None,
+                body: format!(
+                    "@{} is out of quota until {until}, and m-{} waits for it, as does whatever is sent to it until then. If its account has quota again (another account, a bigger plan), press Try again now on @{}: what waits is typed in once it is back.",
+                    participant.handle, waiting.id, owner.handle
+                ),
+            },
+        )?;
+        self.changed();
+        Ok(())
     }
 
     /// The work a window of a member out of quota until `until` holds, once

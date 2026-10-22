@@ -1,0 +1,153 @@
+# Results stayed queued after a quota pause (the field report of 2026-10-22, 3.0.5, T-254): the
+# chief ran on the account its members ran on and ran out with them, so ConsensFlow marked it out
+# until the reset two days on. A `/login` brought the members back, their windows answering again,
+# but a chief at rest takes no turn of its own, so it stayed out and every result sent to it stayed
+# queued, and the board told the human nothing of it.
+#
+# The rules: a member back before its reset (a window of it got a turn through, or the human's Try
+# again now) brings back every other participant out on its harness, the chief among them, where
+# that harness logs every window into one account (`Adapter::one_account`, Claude Code's) and the
+# news came after the other was marked out (`crates/cf-engine/src/scheduler.rs`,
+# `back_on_its_account`, called in `dispatcher.rs`'s step and `back_from_quota`); and a window out of
+# quota with a message waiting for it is said to the human once for each mark (`tell_what_waits`,
+# called in `while_out`). The engine's tests are `crates/cf-engine/tests/dispatcher/quota_accounts.rs`;
+# the case is `crates/cf-e2e/tests/regressions/results_stay_queued_after_a_quota_pause.rs`, whose
+# stand-in chief and worker share an account that runs out (`CF_TEST_QUOTA_SPENT`).
+#
+# The case builds the native `cf` from the sources as they are planted, so its plants say `builds`.
+# Every name holds `quota-accounts`, so `npm run plants:daemon -- "quota-accounts"` runs them all.
+
+[run]
+quota-accounts-engine = ["cargo", "test", "--offline", "-p", "cf-engine", "--test", "dispatcher", "quota_accounts::"]
+quota-accounts-rig = ["cargo", "test", "--offline", "-p", "cf-e2e", "--test", "regressions", "results_stay_queued_after_a_quota_pause::"]
+
+[[plant]]
+name = "quota-accounts: a member's window that gets a turn through brings back only its member, and the chief at rest is never handed its worker's result"
+meant = "a_chief_out_of_quota_with_its_worker_is_handed_the_result_once_the_workers_window_answers_on_the_new_account"
+runs = ["quota-accounts-rig"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''
+            self.back_on_its_account(project, &owner, |other| {
+                self.answered_since(other, &observed)
+            })?;
+'''
+replace = "\n"
+
+[[plant]]
+name = "quota-accounts: the human's Try again now on a member brings back only that member"
+meant = "a_chief_out_on_its_members_account_is_back_once_the_human_says_the_member_is_back"
+runs = ["quota-accounts-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''
+        self.back_on_its_account(&found, &member, |_| true)?;
+'''
+replace = "\n"
+
+[[plant]]
+name = "quota-accounts: a member back brings back the others on its harness whether or not its windows share one account"
+meant = "a_chief_stays_out_when_its_harness_may_log_windows_into_several_accounts"
+runs = ["quota-accounts-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''            .is_some_and(|adapter| adapter.one_account());'''
+replace = '''            .is_some();'''
+
+[[plant]]
+name = "quota-accounts: a member back brings back those out on any harness"
+meant = "a_chief_stays_out_when_the_member_that_came_back_runs_on_another_harness"
+runs = ["quota-accounts-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+                && other.harness.as_deref() == Some(harness)
+'''
+replace = "\n"
+
+[[plant]]
+name = "quota-accounts: a turn that got through before another was marked out brings it back"
+meant = "a_chief_marked_out_after_the_turn_that_got_through_stays_out"
+runs = ["quota-accounts-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''
+                && since(other)
+'''
+replace = '''
+                && (since(other) || other.out_since.is_some())
+'''
+
+[[plant]]
+name = "quota-accounts: Claude Code is taken for a harness whose windows may be on several accounts, and the chief at rest is never handed its worker's result"
+meant = "a_chief_out_of_quota_with_its_worker_is_handed_the_result_once_the_human_says_the_worker_is_back"
+runs = ["quota-accounts-rig"]
+builds = true
+
+[[plant.edit]]
+file = "crates/cf-harness/src/claude/adapter.rs"
+find = '''
+    fn one_account(&self) -> bool {
+        true
+    }
+'''
+replace = '''
+    fn one_account(&self) -> bool {
+        false
+    }
+'''
+
+[[plant]]
+name = "quota-accounts: what waits for a window out of quota is never said to the human"
+meant = "the_human_is_told_once_for_each_mark_what_waits_for_a_window_out_of_quota"
+runs = ["quota-accounts-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/dispatcher.rs"
+find = '''
+        self.tell_what_waits(project, participant, record, owner)?;
+'''
+replace = "\n"
+
+[[plant]]
+name = "quota-accounts: what waits for a window out of quota is said to the human at every look"
+meant = "the_human_is_told_once_for_each_mark_what_waits_for_a_window_out_of_quota"
+runs = ["quota-accounts-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''        if !self.scheduler.out_noted.borrow_mut().insert(mark) {'''
+replace = '''        if !self.scheduler.out_noted.borrow_mut().insert(mark) && participant.id < 0 {'''
+
+[[plant]]
+name = "quota-accounts: what waits for a window out of quota is said to the human once ever, not once for each mark"
+meant = "the_human_is_told_once_for_each_mark_what_waits_for_a_window_out_of_quota"
+runs = ["quota-accounts-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''        let mark = (participant.id, owner.out_since.clone().unwrap_or_default());'''
+replace = '''        let mark = (participant.id, String::new());'''
+
+[[plant]]
+name = "quota-accounts: a window out of quota with nothing waiting for it is said to the human"
+meant = "the_human_is_told_once_for_each_mark_what_waits_for_a_window_out_of_quota"
+runs = ["quota-accounts-engine"]
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''        let Some(waiting) = self.next_in_line(record)? else {
+            return Ok(());
+        };'''
+replace = '''        let waiting = self.next_in_line(record)?;'''
+
+[[plant.edit]]
+file = "crates/cf-engine/src/scheduler.rs"
+find = '''                    participant.handle, waiting.id, owner.handle'''
+replace = '''                    participant.handle, waiting.map_or(0, |waiting| waiting.id), owner.handle'''

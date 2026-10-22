@@ -185,6 +185,10 @@ const HOLD_THEN_GOES_ON: &str = "the note that T-1 is held says the member may b
 /// has been told to its requester in a note not yet given.
 const STALL_LEFT: &str = "the human reassigns T-1 while the note that T-1 is paused is still queued for the chief: the note is withdrawn (`T-1 was taken back`), where Node pastes it into the chief's window";
 
+/// What waits for a chief out of quota is said to the human (the field report of
+/// 2026-10-22, T-254).
+const OUT_WITH_WORK_WAITING: &str = "the chief is out of quota with a task queued for it: the human is told once that it waits (`@chief is out of quota until …, and m-2 waits for it`), where Node says nothing and the task waits for the reset";
+
 /// The tests the engine departs from Node's trace in on purpose, each with
 /// what the engine does that Node does not. Node never withdraws a note that
 /// told a requester a task was paused, so the notes the engine withdraws when
@@ -194,8 +198,13 @@ const STALL_LEFT: &str = "the human reassigns T-1 while the note that T-1 is pau
 /// task's result when the chief accepts or sends back the task before it is
 /// given the result, so Node pastes it after the decision it asked for. Node's
 /// hold note names the reset as the time the task goes on and never tells the
-/// requester it did.
+/// requester it did. Node says nothing to the human of what waits for a window
+/// out of quota.
 const DEPARTED: &[(&str, &str)] = &[
+    (
+        "reaches the chief again once the human says it is back before its reset",
+        OUT_WITH_WORK_WAITING,
+    ),
     (
         "closes the project when its chief window closes by itself, as Close does: every window goes and the work in them pauses",
         "the chief's window closes by itself and the worker's goes with the project: the note that T-1 is paused says so (`@zeus-amber-pine's window closed with the project when @chief's window closed`), where Node's says `@zeus-amber-pine's window closed`, as a worker's own crash does (the report of 2026-10-15, B2)",

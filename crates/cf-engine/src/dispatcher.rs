@@ -385,6 +385,7 @@ impl Dispatcher {
             .ledger
             .borrow_mut()
             .mark_back(member.id, "by @human")?;
+        self.back_on_its_account(&found, &member, |_| true)?;
         self.changed();
         Ok(back)
     }
@@ -1027,6 +1028,10 @@ impl Dispatcher {
                 .ledger
                 .borrow_mut()
                 .mark_back(owner.id, &format!("@{} answered again", participant.handle))?;
+            // Its account has quota again: so do the others out on it since before that turn.
+            self.back_on_its_account(project, &owner, |other| {
+                self.answered_since(other, &observed)
+            })?;
             self.changed();
             out = false;
         }
@@ -1129,6 +1134,7 @@ impl Dispatcher {
             record,
             Activity::because(ActivityState::Out, format!("out of quota until {until}")),
         )?;
+        self.tell_what_waits(project, participant, record, owner)?;
         // The time a launch waits while its member is out is no slowness of its
         // window: the role it was to say first is told when the quota is back.
         if let Some(prelude) = record.delivery.borrow_mut().prelude.as_mut() {

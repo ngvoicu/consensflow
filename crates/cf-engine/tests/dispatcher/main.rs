@@ -23,7 +23,8 @@
 //! and the paste a window went with, which its harness's record may show it took
 //! (`window_went_with_a_paste`), and a header quoted in a window's words, which is
 //! no paste (`quoted_headers`), and the shapes a harness's record keeps a paste in
-//! (`paste_shapes`).
+//! (`paste_shapes`), and an account's quota as every window's on it, and what
+//! waits for a window out of quota said to the human (`quota_accounts`).
 
 // The tests' own scaffolding: a failure in it is the test's.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
@@ -57,6 +58,7 @@ mod paste_shapes;
 mod pause_notes;
 mod pending_agents;
 mod quota;
+mod quota_accounts;
 mod quoted_headers;
 mod receipts;
 mod restart;

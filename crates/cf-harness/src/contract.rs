@@ -90,6 +90,17 @@ pub trait Adapter {
         false
     }
 
+    /// Whether every window of this harness is logged into the one account, so
+    /// that a window whose turn gets through after a refusal for quota says the
+    /// quota is back for every other window of it: a login in one is a login in
+    /// all, and a spent quota is spent for all. Not, where nobody has looked: Pi
+    /// and OpenCode log into a provider for each model, so two of their windows
+    /// may be on two accounts, and Codex and Devin have not been probed for a
+    /// login changed under a window that is open.
+    fn one_account(&self) -> bool {
+        false
+    }
+
     /// Where the window of a chief given specs finds the Specmint skill of
     /// `variant`, asked before the window is prepared, as its role text names
     /// the file. The copy the human installed where this harness looks for
